@@ -114,6 +114,7 @@ from .backends.registry import CompilerFn, lookup_backend
 from .code_context import code_context
 from .exc import (
     CondOpArgsMismatchError,
+    RecompileError,
     ShortenTraceback,
     UncapturedHigherOrderOpError,
     Unsupported,
@@ -232,6 +233,8 @@ class DynamoStance:
 
 
 _stance = DynamoStance()
+_stance_lock = threading.RLock()
+_fail_on_recompile_override_depth = 0
 _force_eager_nested_compile = threading.local()
 
 
@@ -260,12 +263,35 @@ def _set_stance(stance: DynamoStance) -> DynamoStance:
     if callback is not False and callback is not None:
         raise RuntimeError("attempted to set_stance in a torch.compile region")
 
-    prior = _stance
-    _stance = stance
-    return prior
+    with _stance_lock:
+        prior = _stance
+        _stance = stance
+        return prior
 
 
 _set_stance._dynamo_forbidden = True  # type: ignore[attr-defined]
+
+
+def _get_effective_stance() -> DynamoStance:
+    with _stance_lock:
+        if _fail_on_recompile_override_depth:
+            return DynamoStance("fail_on_recompile")
+        return _stance
+
+
+def _enter_fail_on_recompile_override() -> None:
+    global _fail_on_recompile_override_depth
+    with _stance_lock:
+        _fail_on_recompile_override_depth += 1
+
+
+def _exit_fail_on_recompile_override() -> None:
+    global _fail_on_recompile_override_depth
+    with _stance_lock:
+        if _fail_on_recompile_override_depth <= 0:
+            raise AssertionError("fail_on_recompile override is not active")
+        _fail_on_recompile_override_depth -= 1
+
 
 _EXAMPLE_INPUTS: dict[str, list[Any]] | None = None
 
@@ -303,27 +329,28 @@ def _is_in_optimized_module() -> bool:
 
 
 def _callback_from_stance(callback: DynamoCallback) -> DynamoCallback:
-    if _stance.stance == "default":
+    stance = _get_effective_stance()
+    if stance.stance == "default":
         # force_backend
-        if _stance.backend is not None and callback not in (False, None):
-            callback = _create_wrapped_callback(get_compiler_fn(_stance.backend))
+        if stance.backend is not None and callback not in (False, None):
+            callback = _create_wrapped_callback(get_compiler_fn(stance.backend))
 
         return callback
-    elif _stance.stance == "eager_then_compile":
+    elif stance.stance == "eager_then_compile":
         if callback not in (False, None):
-            return _create_delayed_compile_callback(callback, _stance.stance)
+            return _create_delayed_compile_callback(callback, stance.stance)
         return callback
-    elif _stance.stance == "aot_eager_then_compile":
+    elif stance.stance == "aot_eager_then_compile":
         if callback not in (False, None):
-            return _create_delayed_compile_callback(callback, _stance.stance)
+            return _create_delayed_compile_callback(callback, stance.stance)
         return callback
-    elif _stance.stance == "force_eager":
+    elif stance.stance == "force_eager":
         # disable
         return None
-    elif _stance.stance == "eager_on_recompile":
+    elif stance.stance == "eager_on_recompile":
         # run mode
         return False
-    elif _stance.stance == "fail_on_recompile":
+    elif stance.stance == "fail_on_recompile":
         if callback in (False, None):
             return callback
 
@@ -366,7 +393,7 @@ def _callback_from_stance(callback: DynamoCallback) -> DynamoCallback:
                 message += "\nFailed on the following precompiled guards: "
                 for entry in precompile_entries:
                     message += f"\n{entry.guard_manager}{entry.guard_manager.check_verbose(frame.f_locals)}"  # type: ignore[attr-defined]
-            raise RuntimeError(message)
+            raise RecompileError(message)
 
         # to prevent cache miss due to different backend
         fail_callback._torchdynamo_orig_backend = callback  # type: ignore[attr-defined]
@@ -374,7 +401,7 @@ def _callback_from_stance(callback: DynamoCallback) -> DynamoCallback:
 
         return fail_callback
     else:
-        raise RuntimeError(f"invalid torch.compile stance '{_stance}'")
+        raise RuntimeError(f"invalid torch.compile stance '{stance}'")
 
 
 def _create_wrapped_callback(
@@ -430,7 +457,7 @@ def _create_delayed_compile_callback(
 
 
 def _is_skip_guard_eval_unsafe_stance() -> bool:
-    return _stance.skip_guard_eval_unsafe
+    return _get_effective_stance().skip_guard_eval_unsafe
 
 
 def _reset_guarded_backend_cache() -> None:
@@ -1321,7 +1348,10 @@ class _TorchDynamoContext:
                         set_eval_frame(None)
                         if fullgraph_count_enabled and call_succeeded:
                             count = set_fullgraph_compiled_frame_count(-1)
-                            if count == 0 and _stance.stance == "default":
+                            if (
+                                count == 0
+                                and _get_effective_stance().stance == "default"
+                            ):
                                 skip_reasons = get_skip_reasons()
                                 msg = "torch.compile with fullgraph=True found no compiled frames."
                                 if skip_reasons:

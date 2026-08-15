@@ -282,8 +282,10 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
    a lower ambient accumulated-recompile limit. The filter controls the serialized copy only;
    live runtime guards remain intact, and no-op branches compile into guarded empty variants.
 
-   Loading mutates process-global compiler state for the affected code objects. Load one
-   artifact per callable/class at a time, and treat the artifact file as trusted input;
+   Loading writes compiled and resume functions into module globals, but guarded dispatch
+   is scoped to the returned callable's isolated compile region. Multiple loaded artifacts
+   may share code objects without evicting each other; call each returned object to select
+   its artifact, and unload it when finished. Treat the artifact file as trusted input;
    ``load_package`` warns before unpickling it.
 
 .. py:method:: precompile.serving()
@@ -302,4 +304,18 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
            out = compiled(runtime_input)
 
 .. autoexception:: torch.compiler.PrecompileError
+
+.. autoclass:: torch.compiler.PrecompileSession
+   :members:
+
+.. autoclass:: torch.compiler.PrecompiledCallable
+   :members:
+
+.. autoclass:: torch.compiler.PrecompileSummary
+   :members:
+
+.. autoclass:: torch.compiler.FrameInvariants
+
+.. autoclass:: torch.compiler.GuardFact
+   :members:
 ```

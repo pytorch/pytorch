@@ -56,23 +56,12 @@ if TYPE_CHECKING:
 
 _CODE_CACHE = WeakIdKeyDictionary()
 
-# code object -> the live CompilePackages that installed entries on it, and the
-# live CompilePackages that skip_code()d it. Weak on both sides: a package
-# dropped without unloading must not block a later one. A serving process can
-# load and unload from several threads, so the complete operations and registry
-# mutations are serialized.
-_PRECOMPILE_INSTALLERS: WeakIdKeyDictionary = WeakIdKeyDictionary()
+# code object -> the live CompilePackages that skip_code()d it. Weak on both
+# sides: a package dropped without unloading must not block a later one.
 _SKIP_INSTALLERS: WeakIdKeyDictionary = WeakIdKeyDictionary()
 # When both are needed, acquire the operation lock before the registry lock.
 _PACKAGE_INSTALL_LOCK = threading.RLock()
 _INSTALLER_REGISTRY_LOCK = threading.Lock()
-
-
-def _register_installer(
-    registry: WeakIdKeyDictionary, code: types.CodeType, package: "CompilePackage"
-) -> None:
-    with _INSTALLER_REGISTRY_LOCK:
-        registry.setdefault(code, weakref.WeakSet()).add(package)
 
 
 @dataclasses.dataclass
@@ -567,7 +556,11 @@ class SystemInfo:
         )
 
     def check_compatibility(
-        self, other: "SystemInfo", device_type: str = "cpu"
+        self,
+        other: "SystemInfo",
+        device_type: str = "cpu",
+        *,
+        check_codegen: bool = True,
     ) -> None:
         """
         Check if this SystemInfo is compatible with another SystemInfo.
@@ -582,12 +575,16 @@ class SystemInfo:
             raise RuntimeError(
                 f"Compile package was created with a different PyTorch version: {self.torch_version}"
             )
-        if device_type == "cpu" and self.cpu_codegen_target != other.cpu_codegen_target:
+        if (
+            check_codegen
+            and device_type == "cpu"
+            and self.cpu_codegen_target != other.cpu_codegen_target
+        ):
             raise RuntimeError(
                 "Compile package was created with a different CPU codegen target: "
                 f"cached={self.cpu_codegen_target}, current={other.cpu_codegen_target}"
             )
-        if device_type in self.CHECK_GPUS:
+        if check_codegen and device_type in self.CHECK_GPUS:
             if not getattr(torch, device_type).is_available():
                 raise RuntimeError(f"{device_type} is not available")
 
@@ -618,6 +615,8 @@ class _DynamoCacheEntry:
     source_info: SourceInfo
     device_type: str
     system_info: SystemInfo = dataclasses.field(default_factory=SystemInfo.current)
+    device_types: frozenset[str] | None = None
+    requires_native_backend_compatibility: bool = True
     fn_name: str | None = None
     fn_first_lineno: int | None = None
 
@@ -628,7 +627,16 @@ class _DynamoCacheEntry:
     def check_versions(self) -> None:
         """Check if the current system is compatible with the system used to create this cache entry."""
         current_system_info = SystemInfo.current()
-        self.system_info.check_compatibility(current_system_info, self.device_type)
+        device_types = getattr(self, "device_types", None) or frozenset(
+            (self.device_type,)
+        )
+        check_codegen = getattr(self, "requires_native_backend_compatibility", True)
+        for device_type in device_types:
+            self.system_info.check_compatibility(
+                current_system_info,
+                device_type,
+                check_codegen=check_codegen,
+            )
 
     def debug_info(self) -> dict[str, Any]:
         if len(self.codes) == 0:
@@ -638,6 +646,9 @@ class _DynamoCacheEntry:
             "fn_name": self.fn_name,
             "fn_first_lineno": self.fn_first_lineno,
             "device_type": self.device_type,
+            "device_types": sorted(
+                getattr(self, "device_types", None) or frozenset((self.device_type,))
+            ),
             "backend_ids": list(self.backend_ids),
         }
 
@@ -777,6 +788,7 @@ class CompilePackage:
         ignore_inlined_sources: bool = False,
         serialization_guard_filter_fn: Callable[[Sequence[Any]], Sequence[bool]]
         | None = None,
+        requires_native_backend_compatibility: bool = True,
     ) -> None:
         self._innermost_fn = None
         self._codes: dict[types.CodeType, _DynamoCodeCacheEntry] = {}
@@ -787,7 +799,9 @@ class CompilePackage:
         # clear all of them. install() covers resume functions and any frame
         # reached through code_source, not just the entry frame.
         self._installed_precompile_codes: list[types.CodeType] = []
+        self._installed_precompile_region_id = -1
         self._skipped_codes: list[types.CodeType] = []
+        self._region_skipped_codes: list[types.CodeType] = []
         # Frames whose capture was cut short by the recompile limit. Deliberately
         # runtime-only and NOT serialized: it describes this capture session, not
         # the artifact, and it must not affect what install() serves.
@@ -796,8 +810,14 @@ class CompilePackage:
         # variant (for example, an unsupported or empty resume path). Keep that
         # distinct from resume code that was generated but never executed.
         self._uncovered_frames: set[str] = set()
-        # device_type that model compiled with.
-        self._device_type = "cpu"
+        self._device_types: set[str] = set()
+        self._system_info: SystemInfo | None = None
+        self._default_requires_native_backend_compatibility = (
+            requires_native_backend_compatibility
+        )
+        self._requires_native_backend_compatibility = (
+            self._default_requires_native_backend_compatibility
+        )
 
         # For debugging/testing purpose only.
         self._cached_backends: dict[_BackendId, Any] = {}
@@ -809,7 +829,6 @@ class CompilePackage:
         self._initialized = False
         if fn is not None:
             self.initialize(fn, dynamo, ignore_inlined_sources)
-            self.uninstall()
             self.validate()
 
     def is_initialized(self) -> bool:
@@ -831,7 +850,11 @@ class CompilePackage:
         # hold its __init__ value.
         self._source_info = SourceInfo(inlined_sources=set())
         self._codes = {}
-        self._device_type = "cpu"
+        self._device_types = set()
+        self._system_info = None
+        self._requires_native_backend_compatibility = (
+            self._default_requires_native_backend_compatibility
+        )
         self._cached_backends = {}
         self._resume_codes = set()
         self._truncated_frames = set()
@@ -858,14 +881,16 @@ class CompilePackage:
             self._codes = {self._innermost_fn.__code__: main}
             for code in codes:
                 self._codes[SerializedCode.to_code_object(code.python_code)] = code
-            # Restore what the artifact was captured with. Recomputing it from
-            # whatever this process happens to recompile lets a load, one cpu
-            # recompile and a re-save downgrade a cuda artifact to "cpu", which
-            # silently disables every GPU check for whoever loads it next.
-            # Written last, after every raise above: update_device_type only
-            # widens cpu -> accelerator, so a value a FAILED load left here
-            # could never be corrected and would be re-saved as this capture's.
-            self._device_type = dynamo.device_type
+            # Restore the complete device coverage and compile-time system
+            # requirements recorded by the artifact. Written last so a failed
+            # load cannot leak them into a cold-cache fallback on this object.
+            self._device_types = set(
+                getattr(dynamo, "device_types", None) or (dynamo.device_type,)
+            )
+            self._system_info = dynamo.system_info
+            self._requires_native_backend_compatibility = getattr(
+                dynamo, "requires_native_backend_compatibility", True
+            )
         else:
             module_name = (
                 _defining_module_name(self._innermost_fn.__code__)
@@ -983,13 +1008,21 @@ class CompilePackage:
             self._source_info.add_code(code)
 
     def update_device_type(self, graph: torch.fx.Graph | None) -> None:
-        # One package holds every graph Dynamo compiles for this callable and
-        # this single field gates all of the GPU checks in
-        # SystemInfo.check_compatibility, so a cpu graph -- the scalar epilogue
-        # after an .item() break, say -- must not erase an accelerator that an
-        # earlier graph recorded.
-        if self._device_type == "cpu":
-            self._device_type = _graph_device_type(graph)
+        device_type = _graph_device_type(graph)
+        current = SystemInfo.current()
+        if self._system_info is None:
+            self._system_info = current
+        elif (
+            self._requires_native_backend_compatibility
+            and device_type == "cpu"
+            and self._system_info.cpu_codegen_target != current.cpu_codegen_target
+        ):
+            raise RuntimeError(
+                "CPU codegen target changed during precompile capture: "
+                f"first={self._system_info.cpu_codegen_target}, "
+                f"current={current.cpu_codegen_target}"
+            )
+        self._device_types.add(device_type)
 
     def has_current_entry(self) -> bool:
         return self._current_entry is not None
@@ -1098,10 +1131,7 @@ class CompilePackage:
             self._uninstall()
 
     def _uninstall(self) -> None:
-        from torch._C._dynamo.eval_frame import (
-            _debug_get_precompile_entries,
-            _reset_precompile_entries,
-        )
+        from torch._C._dynamo.eval_frame import _reset_precompile_entries_for_region
 
         if self._innermost_fn is None:
             raise AssertionError("_innermost_fn is not set in uninstall")
@@ -1143,58 +1173,53 @@ class CompilePackage:
                 )
         self._skipped_codes = []
 
-        # _reset_precompile_entries clears every entry on a code object and there
-        # is no per-entry removal, so this also drops any other live package's
-        # entries for the same frame. It runs on the entry code object even when
-        # this package installed nothing on it, because __init__ calls uninstall()
-        # to start from a clean slate -- which is what loading a second artifact
-        # for another instance of the same class does, so that path has to warn
-        # too. Warn rather than raise: refusing would deadlock two packages that
-        # share a frame, since neither could ever go first.
-        for code in dict.fromkeys(
-            [self._innermost_fn.__code__, *self._installed_precompile_codes]
-        ):
-            with _INSTALLER_REGISTRY_LOCK:
-                others = [
-                    p for p in _PRECOMPILE_INSTALLERS.get(code, ()) if p is not self
-                ]
-            if others and _debug_get_precompile_entries(code):
-                logger.warning(
-                    "Clearing the precompile entries on code object %s (%s:%d), "
-                    "which %d other loaded package(s) also installed on. Entries "
-                    "can only be cleared en masse, so those packages stop serving "
-                    "this frame. Their callers then fall through to whatever "
-                    "entries remain: if a surviving package's guards accept the "
-                    "call, it is served THAT package's graph, silently and with "
-                    "no error, which is what happens when the guard that told "
-                    "the two apart was an identity guard precompile had to drop. "
-                    "Only a call no remaining entry matches recompiles, or "
-                    "raises under fail_on_recompile. Loading a second artifact "
-                    "for the same function, or for another instance of the same "
-                    "class, lands here.",
-                    code.co_name,
-                    code.co_filename,
-                    code.co_firstlineno,
-                    len(others),
-                )
-            _reset_precompile_entries(code)
-            with _INSTALLER_REGISTRY_LOCK:
-                installers = _PRECOMPILE_INSTALLERS.get(code)
-                if installers is not None:
-                    installers.discard(self)
-        self._installed_precompile_codes = []
+        if self._region_skipped_codes:
+            from torch._C._dynamo.eval_frame import set_code_region_exec_strategy
 
-    def install(self, backends: dict[_BackendId, Any]) -> None:
+            default_strategy = FrameExecStrategy(
+                FrameAction.DEFAULT, FrameAction.DEFAULT
+            )
+            for code in self._region_skipped_codes:
+                set_code_region_exec_strategy(
+                    code, self._installed_precompile_region_id, default_strategy
+                )
+        self._region_skipped_codes = []
+
+        for code in self._installed_precompile_codes:
+            _reset_precompile_entries_for_region(
+                code, self._installed_precompile_region_id
+            )
+        self._installed_precompile_codes = []
+        self._installed_precompile_region_id = -1
+
+    @staticmethod
+    def _deserialize_backends(
+        backends: dict[_BackendId, Any],
+    ) -> dict[_BackendId, Any]:
+        deserialized = {}
+        for backend_id, artifact in backends.items():
+            with dynamo_timed("after_deserialization", phase_name="backend_compile"):
+                deserialized[backend_id] = artifact.after_deserialization()
+        return deserialized
+
+    def install(
+        self,
+        backends: dict[_BackendId, Any],
+        *,
+        isolate_recompiles_id: int = -1,
+    ) -> None:
         """
         Sync the package states to the compiled function. This includes the following actions:
           1. Clean up the previously installed states.
           2. Install the compiled functions to global scopes.
           3. Install the precompiled cache entries to ExtraStates on the code object.
         """
+        deserialized_backends = self._deserialize_backends(backends)
         with _PACKAGE_INSTALL_LOCK:
             self._uninstall()
+            self._installed_precompile_region_id = isolate_recompiles_id
             try:
-                self._install_codes(backends)
+                self._install_codes(deserialized_backends)
             except BaseException:
                 # A half-installed package is worse than an unloaded one: some
                 # frames serve precompiled code and some do not, and because
@@ -1214,12 +1239,16 @@ class CompilePackage:
                 self._installed_globals
                 or self._installed_precompile_codes
                 or self._skipped_codes
+                or self._region_skipped_codes
             ):
                 raise AssertionError("failed install left package state installed")
             self._initialized = False
 
     def _install_codes(self, backends: dict[_BackendId, Any]) -> None:
-        from torch._C._dynamo.eval_frame import _load_precompile_entry
+        from torch._C._dynamo.eval_frame import (
+            _load_precompile_entry,
+            _reset_precompile_entries_for_region,
+        )
 
         from .convert_frame import input_codes
         from .output_graph import get_builtins_dict
@@ -1280,20 +1309,21 @@ class CompilePackage:
                     continue
 
                 input_codes.add(target_code)
+                if target_code not in self._installed_precompile_codes:
+                    _reset_precompile_entries_for_region(
+                        target_code, self._installed_precompile_region_id
+                    )
+                    self._installed_precompile_codes.append(target_code)
                 for backend_id in entry.backend_ids:
                     if backend_id not in backends:
                         raise RuntimeError(
                             f"Backend {backend_id} is not found in the given backends"
                         )
-                    with dynamo_timed(
-                        "after_deserialization", phase_name="backend_compile"
-                    ):
-                        backend = backends[backend_id].after_deserialization()
-                        self._install_global(
-                            module,
-                            backend_id,
-                            torch._dynamo.disable(backend),
-                        )
+                    self._install_global(
+                        module,
+                        backend_id,
+                        torch._dynamo.disable(backends[backend_id]),
+                    )
 
                 if len(entry.guarded_codes) == 0:
                     # Legacy and transparent-cache artifacts can contain a frame
@@ -1302,6 +1332,18 @@ class CompilePackage:
                     # Remember it, and register as one of the packages holding
                     # the skip, so uninstall() can restore the frame without
                     # un-skipping it under another package that still needs it.
+                    if self._installed_precompile_region_id >= 0:
+                        from torch._C._dynamo.eval_frame import (
+                            set_code_region_exec_strategy,
+                        )
+
+                        self._region_skipped_codes.append(target_code)
+                        set_code_region_exec_strategy(
+                            target_code,
+                            self._installed_precompile_region_id,
+                            _PACKAGE_SKIP_STRATEGY,
+                        )
+                        continue
                     self._skipped_codes.append(target_code)
                     with _INSTALLER_REGISTRY_LOCK:
                         state = _SKIP_INSTALLERS.get(target_code)
@@ -1376,9 +1418,6 @@ class CompilePackage:
                         guard_manager = load_guard_manager(
                             guards_state, target_code, runtime_global_scope
                         )
-                    if target_code not in self._installed_precompile_codes:
-                        self._installed_precompile_codes.append(target_code)
-                    _register_installer(_PRECOMPILE_INSTALLERS, target_code, self)
                     _load_precompile_entry(
                         target_code,
                         guard_manager,
@@ -1386,16 +1425,27 @@ class CompilePackage:
                             SerializedCode.to_code_object(guarded_code.dynamo_code),
                             resume_renames,
                         ),
+                        self._installed_precompile_region_id,
                     )
 
     def cache_entry(self) -> _DynamoCacheEntry:
         self.validate()
         if self._innermost_fn is None:
             raise AssertionError("_innermost_fn is not set in cache_entry")
+        device_types = frozenset(self._device_types or ("cpu",))
+        device_type = next(
+            (device for device in sorted(device_types) if device != "cpu"),
+            "cpu",
+        )
         return _DynamoCacheEntry(
             codes=list(self._codes.values()),
             source_info=self._source_info,
-            device_type=self._device_type,
+            device_type=device_type,
+            device_types=device_types,
+            system_info=self._system_info or SystemInfo.current(),
+            requires_native_backend_compatibility=(
+                self._requires_native_backend_compatibility
+            ),
             fn_name=self._innermost_fn.__qualname__,
             fn_first_lineno=self._innermost_fn.__code__.co_firstlineno,
         )

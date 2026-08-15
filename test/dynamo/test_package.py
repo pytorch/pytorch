@@ -392,6 +392,40 @@ class ModelTwo(torch.nn.Module):
 """
 
 
+_SHARED_FRAME_SRC = """\
+import torch
+
+
+class SharedBlock(torch.nn.Module):
+    def __init__(self, scale):
+        super().__init__()
+        self.scale = scale
+
+    def forward(self, x):
+        y = x * 2
+        marker = y.sum().item()
+        return y * self.scale + marker * 0.0
+
+
+class ModelOne(torch.nn.Module):
+    def __init__(self, scale):
+        super().__init__()
+        self.block = SharedBlock(scale)
+
+    def forward(self, x):
+        return self.block(x).sum()
+
+
+class ModelTwo(torch.nn.Module):
+    def __init__(self, scale):
+        super().__init__()
+        self.block = SharedBlock(scale)
+
+    def forward(self, x):
+        return self.block(x).sum() + 0.0
+"""
+
+
 class PrecompileEmptyGraph(torch.nn.Module):
     """Used to construct a legacy package with no guarded code in skip tests."""
 
@@ -2638,9 +2672,8 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertIn("value-pinned", str(summary))
 
     def test_two_packages_on_a_shared_frame_can_both_unload(self):
-        # Two instances of one class share a forward code object. Refusing to
-        # uninstall while another package is installed would deadlock them,
-        # since neither could go first.
+        # Each loaded callable owns one region on the shared code object, so
+        # unloading either package must leave the other's entries alone.
         paths = []
         for act in (torch.relu, torch.sigmoid):
             torch._dynamo.reset()
@@ -2661,12 +2694,8 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         second = precompile_load(
             PrecompileSelfAct(torch.sigmoid), paths[1], backend="eager", dynamic=False
         )
-        # The registry is what makes the clobber visible; without it the second
-        # package silently stops serving this frame with nothing said.
-        with self.assertLogs("torch._dynamo.package", level="WARNING") as logs:
+        with self.assertNoLogs("torch._dynamo.package", level="WARNING"):
             first.unload()
-        self.assertTrue(any("other loaded package" in m for m in logs.output))
-        # first is out of the registry now, so the last one out has nothing to say.
         with self.assertNoLogs("torch._dynamo.package", level="WARNING"):
             second.unload()
 
@@ -2725,29 +2754,81 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         with self.assertRaisesRegex(RuntimeError, "different CPU codegen target"):
             captured.check_compatibility(serving, "cpu")
 
+    def test_eager_artifact_accepts_cpu_codegen_target_skew(self):
+        model = PrecompileEmptyGraph()
+        x = torch.randn(4)
+        session = torch.compiler.precompile(
+            model,
+            backend="eager",
+            dynamic=False,
+            example_inputs=[(x,)],
+        )
+        session.save(self.path())
+        captured = SystemInfo.current()
+        serving_info = dataclasses.replace(
+            captured,
+            cpu_codegen_target=(
+                "different-arch",
+                "different-capability",
+                None,
+                "different-isa",
+                None,
+                None,
+            ),
+        )
+
+        torch._dynamo.reset()
+        with mock.patch.object(SystemInfo, "current", return_value=serving_info):
+            loaded = torch.compiler.precompile.load_package(
+                model, self.path(), backend="eager", dynamic=False
+            )
+        with loaded, torch.no_grad(), torch.compiler.precompile.serving():
+            self.assertEqual(loaded(x), model(x))
+
+    def test_inductor_artifact_records_compile_time_cpu_target(self):
+        model = PrecompileEmptyGraph()
+        x = torch.randn(16)
+        with torch._inductor.config.patch({"cpp.simdlen": 256}):
+            session = torch.compiler.precompile(
+                model,
+                backend="inductor",
+                dynamic=False,
+                example_inputs=[(x,)],
+            )
+            capture_target = session._session._package.cache_entry().system_info
+        session.save(self.path())
+        saved = _SingleFileStore().read(self.path()).dynamo.system_info
+
+        self.assertEqual(capture_target.cpu_codegen_target[4], 256)
+        self.assertEqual(saved.cpu_codegen_target, capture_target.cpu_codegen_target)
+
     def test_two_artifacts_sharing_an_inner_frame_both_serve(self):
-        # Two DIFFERENT models containing the same library block share that
-        # block's frame and its resume function. Unlike two artifacts for one
-        # class, which collide on the entry frame and evict each other, these
-        # coexist: precompile entries accumulate on the shared code object and
-        # the guards pick the right one. Pin that, because the alternative --
-        # the second load evicting the first -- is silent here, the eviction
-        # warning covering entry frames only.
+        # The shared entry frame has no scale guard; scale is checked only by
+        # its resume. Region-scoped dispatch must keep each entry paired with
+        # the continuation from the same artifact instead of taking the first
+        # globally matching entry.
+        shared = self._import_module(
+            self._write_module("shared_frame", "shared_frame", _SHARED_FRAME_SRC),
+            "shared_frame",
+        )
         x = torch.ones(3, 4)
         paths = []
-        for cls, scale in ((PrecompileSharedUserA, 3.0), (PrecompileSharedUserB, 7.0)):
+        for cls, scale in ((shared.ModelOne, 3.0), (shared.ModelTwo, 7.0)):
             torch._dynamo.reset()
-            session = precompile_capture(cls(scale), backend="eager", dynamic=False)
-            with session as compiled, torch.no_grad():
-                compiled(x)
-            # No opt-out: a float attribute is a serializable guard.
+            session = torch.compiler.precompile(
+                cls(scale),
+                backend="eager",
+                dynamic=False,
+                example_inputs=[(x,)],
+            )
+            self.assertTrue(session.summary().complete)
             self.assertEqual(session.summary().risky_dropped_guards, ())
             path = self.path(f"shared_{cls.__name__}.pt")
-            session.save(path, require_complete=False)
+            session.save(path, require_no_dropped_guards=False)
             paths.append(path)
 
         torch._dynamo.reset()
-        model_a, model_b = PrecompileSharedUserA(3.0), PrecompileSharedUserB(7.0)
+        model_a, model_b = shared.ModelOne(3.0), shared.ModelTwo(7.0)
         with torch.no_grad():
             want_a, want_b = model_a(x), model_b(x)
         with (
@@ -2756,12 +2837,8 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             torch.no_grad(),
             serving(),
         ):
-            # The surviving artifact still serves its own model correctly.
-            self.assertEqual(b(x), want_b)
-            # The evicted one must not be served the survivor's graph. Its
-            # entries are gone, so this is a miss, and fail_on_recompile makes
-            # the miss loud instead of letting it recompile.
             self.assertEqual(a(x), want_a)
+            self.assertEqual(b(x), want_b)
 
     @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_concurrent_unload_does_not_clear_a_later_package(self):
@@ -2788,7 +2865,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         loaded_a = precompile_load(model_a, paths[0], backend="eager", dynamic=False)
 
         eval_frame = torch._C._dynamo.eval_frame
-        real_reset = eval_frame._reset_precompile_entries
+        real_reset = eval_frame._reset_precompile_entries_for_region
         shared_code = shared.SharedBlock.forward.__code__
         self.assertIn(shared_code, loaded_a._package._installed_precompile_codes)
         at_shared_reset = threading.Event()
@@ -2813,12 +2890,12 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             def __exit__(self, *exc):
                 self.lock.release()
 
-        def delayed_reset(code):
+        def delayed_reset(code, isolate_recompiles_id):
             if code is shared_code and threading.current_thread() is unload_thread:
                 at_shared_reset.set()
                 if not allow_reset.wait(10):
                     raise RuntimeError("timed out waiting to reset precompile entries")
-            real_reset(code)
+            real_reset(code, isolate_recompiles_id)
 
         def unload_a():
             try:
@@ -2838,7 +2915,9 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         observed_lock = ObservedLock(dynamo_package._PACKAGE_INSTALL_LOCK)
         with (
             mock.patch.object(dynamo_package, "_PACKAGE_INSTALL_LOCK", observed_lock),
-            mock.patch.object(eval_frame, "_reset_precompile_entries", delayed_reset),
+            mock.patch.object(
+                eval_frame, "_reset_precompile_entries_for_region", delayed_reset
+            ),
         ):
             unload_thread = threading.Thread(target=unload_a)
             unload_thread.start()
@@ -3752,6 +3831,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         package.update_device_type(graph_on("cuda"))
         package.update_device_type(graph_on("cpu"))
         self.assertEqual(package.cache_entry().device_type, "cuda")
+        self.assertEqual(package.cache_entry().device_types, frozenset(("cpu", "cuda")))
 
         # A load, a cpu recompile and a re-save must not downgrade it either.
         # Loading a "cuda" entry runs check_versions and so needs a GPU; the
@@ -3858,12 +3938,9 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertEqual(len(entry.codes), 2)
         self.assertEqual(entry.device_type, "cuda")
 
-    def test_second_artifact_for_a_shared_frame_warns_before_evicting(self):
-        # Two instances of one class share a forward code object, and precompile
-        # entries can only be cleared en masse. __init__ calls uninstall() to
-        # start from a clean slate, before this package has installed anything,
-        # so loading a second artifact took the first one's entries with it
-        # without a word.
+    def test_second_artifact_for_a_shared_frame_does_not_evict(self):
+        # Two instances of one class share a forward code object, but each
+        # loaded callable dispatches only through its own compile region.
         x = torch.randn(3, 4)
         paths = []
         for act in (torch.relu, torch.sigmoid):
@@ -3879,38 +3956,30 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
 
         torch._dynamo.reset()
         relu_model = PrecompileSelfAct(torch.relu)
+        sigmoid_model = PrecompileSelfAct(torch.sigmoid)
         with torch.no_grad():
-            expected = relu_model(x)
+            expected_relu = relu_model(x)
+            expected_sigmoid = sigmoid_model(x)
         first = precompile_load(relu_model, paths[0], backend="eager", dynamic=False)
         with torch.no_grad(), serving():
-            self.assertEqual(first(x), expected)
+            self.assertEqual(first(x), expected_relu)
 
-        with self.assertLogs("torch._dynamo.package", level="WARNING") as logs:
+        with self.assertNoLogs("torch._dynamo.package", level="WARNING"):
             second = precompile_load(
-                PrecompileSelfAct(torch.sigmoid),
+                sigmoid_model,
                 paths[1],
                 backend="eager",
                 dynamic=False,
             )
-        self.assertTrue(any("also installed on" in m for m in logs.output))
-        # Regression guard on the wording: what follows is a silent
-        # substitution, not the recompile the warning used to promise.
-        self.assertTrue(any("silently" in m for m in logs.output))
-        # The eviction itself is not preventable, so the first artifact now
-        # dispatches into the second's graph -- the identity guard that told
-        # them apart is not serializable. The warning is what makes it visible.
         with torch.no_grad(), serving():
-            self.assertNotEqual(first(x), expected)
+            self.assertEqual(first(x), expected_relu)
+            self.assertEqual(second(x), expected_sigmoid)
         second.unload()
         first.unload()
 
-    def test_eviction_warns_once_and_not_when_nothing_is_left_to_evict(self):
-        # precompile_load runs uninstall() twice on the shared frame -- once from
-        # CompilePackage.__init__ and once from install() -- and only the first
-        # evicts anything. A warning per call cries wolf about an eviction that
-        # already happened, and cries at all after torch._dynamo.reset() has
-        # cleared the entries out from under the neighbour, when there is
-        # nothing left to take. Both make the real one easy to tune out.
+    def test_shared_frame_artifacts_use_distinct_regions(self):
+        from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
+
         x = torch.randn(3, 4)
         paths = []
         for act in (torch.relu, torch.sigmoid):
@@ -3931,18 +4000,16 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
 
         torch._dynamo.reset()
         first = load(paths[0], torch.relu)
-        with self.assertLogs("torch._dynamo.package", level="WARNING") as logs:
-            second = load(paths[1], torch.sigmoid)
-        evicted = [r for r in logs.output if "also installed on" in r]
-        self.assertEqual(len(evicted), 1, logs.output)
-        second.unload()
-        first.unload()
-
-        torch._dynamo.reset()
-        first = load(paths[0], torch.relu)
-        torch._dynamo.reset()
         with self.assertNoLogs("torch._dynamo.package", level="WARNING"):
             second = load(paths[1], torch.sigmoid)
+        entries = _debug_get_precompile_entries(PrecompileSelfAct.forward.__code__)
+        self.assertEqual(
+            {entry.isolate_recompiles_id for entry in entries},
+            {
+                first._isolate_recompiles_id,
+                second._isolate_recompiles_id,
+            },
+        )
         second.unload()
         first.unload()
 
@@ -3974,9 +4041,9 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertEqual(summary.guarded_codes, 0)
 
     def test_unload_keeps_a_skip_another_package_still_holds(self):
-        # Legacy packages can contain a frame with no guarded codes. Two loaded
-        # packages share ownership of the skip installed for that frame.
-        from torch._C._dynamo.eval_frame import get_code_exec_strategy
+        # Legacy packages can contain a frame with no guarded codes. Each
+        # loaded callable gets an independent region-local skip.
+        from torch._C._dynamo.eval_frame import get_code_region_exec_strategy
         from torch._dynamo.types import FrameAction
 
         self._save_legacy_empty_graph_package()
@@ -3987,15 +4054,27 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         code = PrecompileEmptyGraph.forward.__code__
 
         first.unload()
-        self.assertEqual(get_code_exec_strategy(code).cur_action, FrameAction.SKIP)
+        self.assertEqual(
+            get_code_region_exec_strategy(
+                code, second._isolate_recompiles_id
+            ).cur_action,
+            FrameAction.SKIP,
+        )
 
         second.unload()
-        self.assertEqual(get_code_exec_strategy(code).cur_action, FrameAction.DEFAULT)
+        self.assertEqual(
+            get_code_region_exec_strategy(
+                code, second._isolate_recompiles_id
+            ).cur_action,
+            FrameAction.DEFAULT,
+        )
 
     def test_unload_restores_a_skipped_frame(self):
-        # A legacy package's empty frame installs a process-global skip. Once
-        # the last owner unloads, the prior default strategy is restored.
-        from torch._C._dynamo.eval_frame import get_code_exec_strategy
+        # A legacy package's empty frame installs a skip only in its region.
+        from torch._C._dynamo.eval_frame import (
+            get_code_exec_strategy,
+            get_code_region_exec_strategy,
+        )
         from torch._dynamo.types import FrameAction
 
         self._save_legacy_empty_graph_package()
@@ -4003,11 +4082,17 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         torch._dynamo.reset()
         loaded = precompile_load(PrecompileEmptyGraph(), self.path(), backend="eager")
         code = PrecompileEmptyGraph.forward.__code__
-        self.assertIn(code, loaded._package._skipped_codes)
-        self.assertEqual(get_code_exec_strategy(code).cur_action, FrameAction.SKIP)
+        self.assertIn(code, loaded._package._region_skipped_codes)
+        self.assertEqual(get_code_exec_strategy(code).cur_action, FrameAction.DEFAULT)
+        self.assertEqual(
+            get_code_region_exec_strategy(
+                code, loaded._isolate_recompiles_id
+            ).cur_action,
+            FrameAction.SKIP,
+        )
 
         loaded.unload()
-        self.assertEqual(loaded._package._skipped_codes, [])
+        self.assertEqual(loaded._package._region_skipped_codes, [])
         self.assertEqual(get_code_exec_strategy(code).cur_action, FrameAction.DEFAULT)
 
     def test_unload_preserves_a_preexisting_skip_strategy(self):
@@ -4021,7 +4106,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         torch._dynamo.eval_frame.skip_code(code)
 
         loaded = precompile_load(PrecompileEmptyGraph(), self.path(), backend="eager")
-        self.assertIn(code, loaded._package._skipped_codes)
+        self.assertIn(code, loaded._package._region_skipped_codes)
         loaded.unload()
         self.assertEqual(get_code_exec_strategy(code).cur_action, FrameAction.SKIP)
 
@@ -4054,8 +4139,11 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertEqual(restored.cur_action, FrameAction.RUN_ONLY)
         self.assertEqual(restored.recursive_action, FrameAction.RUN_ONLY)
 
-    def test_racing_strategy_write_invalidates_skip_ownership(self):
-        from torch._C._dynamo.eval_frame import get_code_exec_strategy_token
+    def test_concurrent_compile_does_not_change_region_skip(self):
+        from torch._C._dynamo.eval_frame import (
+            get_code_exec_strategy,
+            get_code_region_exec_strategy,
+        )
         from torch._dynamo.types import FrameAction
 
         self._save_legacy_empty_graph_package()
@@ -4086,24 +4174,32 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             self.assertTrue(entered.wait(20))
             loaded = precompile_load(model, self.path(), backend="eager")
             code = PrecompileEmptyGraph.forward.__code__
-            strategy, generation = get_code_exec_strategy_token(code)
-            self.assertEqual(strategy.cur_action, FrameAction.SKIP)
+            self.assertEqual(
+                get_code_region_exec_strategy(
+                    code, loaded._isolate_recompiles_id
+                ).cur_action,
+                FrameAction.SKIP,
+            )
         finally:
             release.set()
         thread.join(20)
         self.assertFalse(thread.is_alive())
         self.assertEqual(errors, [])
-        strategy, next_generation = get_code_exec_strategy_token(code)
-        self.assertNotEqual(next_generation, generation)
+        self.assertEqual(
+            get_code_region_exec_strategy(
+                code, loaded._isolate_recompiles_id
+            ).cur_action,
+            FrameAction.SKIP,
+        )
+        strategy = get_code_exec_strategy(code)
 
         loaded.unload()
-        after_unload, final_generation = get_code_exec_strategy_token(code)
+        after_unload = get_code_exec_strategy(code)
         self.assertEqual(after_unload.cur_action, strategy.cur_action)
         self.assertEqual(after_unload.recursive_action, strategy.recursive_action)
-        self.assertEqual(final_generation, next_generation)
 
     def test_stale_skip_owner_does_not_block_a_later_load(self):
-        from torch._C._dynamo.eval_frame import get_code_exec_strategy
+        from torch._C._dynamo.eval_frame import get_code_region_exec_strategy
         from torch._dynamo.types import FrameAction
 
         self._save_legacy_empty_graph_package()
@@ -4118,9 +4214,19 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
 
         torch._dynamo.reset()
         second = precompile_load(PrecompileEmptyGraph(), self.path(), backend="eager")
-        self.assertEqual(get_code_exec_strategy(code).cur_action, FrameAction.SKIP)
+        self.assertEqual(
+            get_code_region_exec_strategy(
+                code, second._isolate_recompiles_id
+            ).cur_action,
+            FrameAction.SKIP,
+        )
         second.unload()
-        self.assertEqual(get_code_exec_strategy(code).cur_action, FrameAction.DEFAULT)
+        self.assertEqual(
+            get_code_region_exec_strategy(
+                code, second._isolate_recompiles_id
+            ).cur_action,
+            FrameAction.DEFAULT,
+        )
 
     def test_load_rejects_artifact_recorded_on_a_different_torch(self):
         # Capture on one machine, serve on another: the version check is only
@@ -4496,6 +4602,40 @@ def staged(x):
         self.assertEqual(
             _debug_get_precompile_entries(staged_with_graph_breaks.__code__), []
         )
+
+    def test_backend_deserialization_does_not_hold_install_lock(self):
+        model = PrecompileEmptyGraph()
+        session = precompile_capture(model, backend="eager", dynamic=False)
+        with session as compiled, torch.no_grad():
+            compiled(torch.randn(4))
+        session.save(self.path())
+
+        torch._dynamo.reset()
+        cache_entry = _SingleFileStore().load_cache_entry(self.path())
+        package = CompilePackage(model.forward, cache_entry.dynamo)
+        backend_id = next(iter(cache_entry.backends))
+        artifact = cache_entry.backends[backend_id]
+
+        class _UnloadsFromWorker:
+            def after_deserialization(self):
+                finished = threading.Event()
+
+                def unload():
+                    package.uninstall()
+                    finished.set()
+
+                worker = threading.Thread(target=unload)
+                worker.start()
+                if not finished.wait(10):
+                    raise AssertionError(
+                        "after_deserialization ran while holding the install lock"
+                    )
+                worker.join()
+                return artifact.after_deserialization()
+
+        cache_entry.backends[backend_id] = _UnloadsFromWorker()
+        package.install(cache_entry.backends)
+        package.uninstall()
 
     def test_unload_leaves_a_global_a_later_package_rebound(self):
         # A serving process loads one artifact per model instance, so two

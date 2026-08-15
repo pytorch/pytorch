@@ -481,7 +481,9 @@ void initDynamoBindings(PyObject* torch) {
           &CacheEntry::update_diff_guard_root_manager);
 
   py::class_<PrecompileEntry>(m, "_PrecompileEntry")
-      .def_readonly("guard_manager", &PrecompileEntry::guard_manager);
+      .def_readonly("guard_manager", &PrecompileEntry::guard_manager)
+      .def_readonly(
+          "isolate_recompiles_id", &PrecompileEntry::isolate_recompiles_id);
 
   py::class_<ExtraState>(m, "_ExtraState")
       .def("invalidate", &ExtraState::invalidate);
@@ -511,6 +513,37 @@ void initDynamoBindings(PyObject* torch) {
         ? FrameExecStrategy{FrameAction::DEFAULT, FrameAction::DEFAULT}
         : extra_state_get_exec_strategy(extra);
   });
+
+  m.def(
+      "get_code_region_exec_strategy",
+      [](py::handle code, int64_t isolate_recompiles_id) {
+        if (!PyCode_Check(code.ptr())) {
+          throw py::type_error("expected a code object");
+        }
+        ExtraState* extra =
+            get_extra_state(reinterpret_cast<PyCodeObject*>(code.ptr()));
+        return extra == nullptr
+            ? FrameExecStrategy{FrameAction::DEFAULT, FrameAction::DEFAULT}
+            : extra_state_get_region_exec_strategy(
+                  extra, isolate_recompiles_id);
+      });
+
+  m.def(
+      "set_code_region_exec_strategy",
+      [](py::handle code,
+         int64_t isolate_recompiles_id,
+         FrameExecStrategy strategy) {
+        if (!PyCode_Check(code.ptr())) {
+          throw py::type_error("expected a code object");
+        }
+        PyCodeObject* code_obj = reinterpret_cast<PyCodeObject*>(code.ptr());
+        ExtraState* extra = get_extra_state(code_obj);
+        if (extra == nullptr) {
+          extra = init_and_set_extra_state(code_obj);
+        }
+        extra_state_set_region_exec_strategy(
+            extra, isolate_recompiles_id, strategy);
+      });
 
   m.def("get_code_exec_strategy_token", [](py::handle code) -> py::tuple {
     if (!PyCode_Check(code.ptr())) {
@@ -590,7 +623,16 @@ void initDynamoBindings(PyObject* torch) {
   m.def("_clear_cache_entries_for_region", &_clear_cache_entries_for_region);
   m.def("_get_total_cache_entry_count", &_get_total_cache_entry_count);
   m.def("_reset_precompile_entries", &_reset_precompile_entries);
-  m.def("_load_precompile_entry", &_load_precompile_entry);
+  m.def(
+      "_reset_precompile_entries_for_region",
+      &_reset_precompile_entries_for_region);
+  m.def(
+      "_load_precompile_entry",
+      &_load_precompile_entry,
+      py::arg("code_obj"),
+      py::arg("guard_manager"),
+      py::arg("dynamo_code"),
+      py::arg("isolate_recompiles_id") = -1);
   m.def("_debug_get_precompile_entries", &_debug_get_precompile_entries);
   m.def("_set_lru_cache", &_set_lru_cache);
   m.def(

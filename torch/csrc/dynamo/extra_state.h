@@ -59,8 +59,9 @@ typedef struct VISIBILITY_HIDDEN PrecompileEntry {
   py::object guard_manager;
   py::object code;
   void* root_mgr;
+  int64_t isolate_recompiles_id;
 
-  PrecompileEntry(py::object gm, py::object c);
+  PrecompileEntry(py::object gm, py::object c, int64_t region_id);
 } PrecompileEntry;
 
 typedef struct VISIBILITY_HIDDEN ExtraState {
@@ -75,6 +76,7 @@ typedef struct VISIBILITY_HIDDEN ExtraState {
   // Total cache entries across all compile scopes (for O(1)
   // has_any_cache_entries)
   size_t total_cache_entry_count{0};
+  mutable std::recursive_mutex cache_mutex;
   // Frame state to detect dynamic shape dims in the default compile scope.
   py::dict frame_state;
   // Isolated compile scopes must not teach the default scope which dimensions
@@ -94,6 +96,7 @@ typedef struct VISIBILITY_HIDDEN ExtraState {
   ExtraState(PyCodeObject* orig_code_arg);
   std::list<CacheEntry>& cache_entry_list(int64_t isolate_recompiles_id);
   bool has_any_cache_entries() const;
+  bool has_relevant_entries(int64_t isolate_recompiles_id) const;
   void move_to_front(CacheEntry* cache_entry, std::list<CacheEntry>& entries);
   void move_to_back(CacheEntry* cache_entry);
   void invalidate(CacheEntry* cache_entry, py::object deleted_guard_manager);
@@ -277,10 +280,14 @@ void _clear_cache_entries_for_region(
     int64_t isolate_recompiles_id);
 size_t _get_total_cache_entry_count(const py::handle& code_obj);
 void _reset_precompile_entries(const py::handle& code_obj);
+void _reset_precompile_entries_for_region(
+    const py::handle& code_obj,
+    int64_t isolate_recompiles_id);
 void _load_precompile_entry(
     const py::handle& code_obj,
     py::object guard_manager,
-    py::object dynamo_code);
+    py::object dynamo_code,
+    int64_t isolate_recompiles_id);
 py::list _debug_get_precompile_entries(const py::handle& code_obj);
 void _set_lru_cache(const py::object& boolean);
 

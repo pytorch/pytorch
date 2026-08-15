@@ -19,8 +19,13 @@ from torch._higher_order_ops.invoke_subgraph import NestedCompileRegionOptions
 # conventional ``except torch.compiler.PrecompileError`` works; its ``__module__`` is already
 # forced to "torch.compiler" in the impl module, matching this public location.
 from torch._precompile import (
+    FrameInvariants as FrameInvariants,
+    GuardFact as GuardFact,
     precompile as precompile,
+    PrecompiledCallable as PrecompiledCallable,
     PrecompileError as PrecompileError,
+    PrecompileSession as PrecompileSession,
+    PrecompileSummary as PrecompileSummary,
 )
 
 from . import config
@@ -49,7 +54,12 @@ __all__ = [
     "cudagraph_mark_warmup_incomplete",
     "load_compiled_function",
     "precompile",
+    "PrecompiledCallable",
     "PrecompileError",
+    "PrecompileSession",
+    "PrecompileSummary",
+    "FrameInvariants",
+    "GuardFact",
     "wrap_numpy",
     "is_compiling",
     "is_dynamo_compiling",

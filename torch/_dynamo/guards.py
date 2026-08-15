@@ -4247,10 +4247,7 @@ class GuardsStatePickler(pickle.Pickler):
     ) -> types.FunctionType:
         module_globals = importlib.import_module(module).__dict__
         if snapshot_globals:
-            f_globals = {
-                "__builtins__": module_globals["__builtins__"],
-                "__name__": module_globals["__name__"],
-            }
+            f_globals = {}
             if guarded_globals:
                 f_globals.update(guarded_globals)
         else:
@@ -4274,13 +4271,59 @@ class GuardsStatePickler(pickle.Pickler):
         snapshot_globals = id(obj.__globals__) in self.guard_tree_values
         guarded_globals = (
             {
-                name: value
+                name: (
+                    value
+                    if id(value) in self.guard_tree_values
+                    else _Missing("unguarded function global")
+                )
                 for name, value in obj.__globals__.items()
-                if id(value) in self.guard_tree_values
             }
             if snapshot_globals
             else None
         )
+
+        defaults = obj.__defaults__
+        if defaults is not None:
+            keep_defaults = id(defaults) in self.guard_tree_values or any(
+                id(value) in self.guard_tree_values for value in defaults
+            )
+            defaults = (
+                tuple(
+                    value
+                    if id(value) in self.guard_tree_values
+                    else _Missing("unguarded function default")
+                    for value in defaults
+                )
+                if keep_defaults
+                else None
+            )
+
+        kwdefaults = obj.__kwdefaults__
+        if kwdefaults is not None:
+            keep_kwdefaults = id(kwdefaults) in self.guard_tree_values
+            kwdefaults = {
+                name: (
+                    value
+                    if id(value) in self.guard_tree_values
+                    else _Missing("unguarded function keyword default")
+                )
+                for name, value in kwdefaults.items()
+                if keep_kwdefaults or id(value) in self.guard_tree_values
+            }
+            if not kwdefaults and not keep_kwdefaults:
+                kwdefaults = None
+
+        closure = obj.__closure__
+        if closure is not None:
+            closure = tuple(
+                type(self)._unpickle_cell(
+                    cell.cell_contents
+                    if id(cell) in self.guard_tree_values
+                    or id(cell.cell_contents) in self.guard_tree_values
+                    else _Missing("unguarded function closure")
+                )
+                for cell in closure
+            )
         attributes = (
             dict(obj.__dict__)
             if id(obj.__dict__) in self.guard_tree_values
@@ -4294,9 +4337,9 @@ class GuardsStatePickler(pickle.Pickler):
             obj.__code__,
             obj.__module__,
             obj.__qualname__,
-            obj.__defaults__,
-            obj.__closure__,
-            obj.__kwdefaults__,
+            defaults,
+            closure,
+            kwdefaults,
             obj.__name__,
             attributes,
             guarded_globals,
@@ -4583,7 +4626,9 @@ def pickle_guards_state(
 
     try:
         pickler.dump(state)
-    except AttributeError as e:
+    except torch._dynamo.exc.PackageError:
+        raise
+    except Exception as e:
         raise torch._dynamo.exc.PackageError(str(e)) from e
     return buf.getvalue()
 

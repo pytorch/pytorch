@@ -46,6 +46,7 @@ class _CacheEntry:
 
 class _PrecompileEntry:
     guard_manager: GuardManagerWrapper
+    isolate_recompiles_id: int
 
 class _ExtraState:
     def invalidate(
@@ -67,6 +68,15 @@ class _FrameExecStrategy:
     def __init__(
         self, cur_action: _FrameAction, recursive_action: _FrameAction
     ) -> None: ...
+
+def get_code_region_exec_strategy(
+    code: types.CodeType, isolate_recompiles_id: int
+) -> _FrameExecStrategy: ...
+def set_code_region_exec_strategy(
+    code: types.CodeType,
+    isolate_recompiles_id: int,
+    strategy: _FrameExecStrategy,
+) -> None: ...
 
 # This is an object that encapsulates the Python FrameType, and exposes
 # properties Dynamo cares about for a frame.
@@ -110,8 +120,12 @@ def _load_precompile_entry(
     code: types.CodeType,
     guard_manager: GuardManagerWrapper,
     dynamo_code: types.CodeType,
+    isolate_recompiles_id: int = -1,
 ) -> None: ...
 def _reset_precompile_entries(code: types.CodeType) -> None: ...
+def _reset_precompile_entries_for_region(
+    code: types.CodeType, isolate_recompiles_id: int
+) -> None: ...
 def _debug_get_precompile_entries(code: types.CodeType) -> list[_PrecompileEntry]: ...
 def set_fullgraph_compiled_frame_count(value: int) -> int: ...
 def set_fullgraph_error_on_nested_compile(value: bool) -> bool: ...

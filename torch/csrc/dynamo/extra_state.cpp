@@ -35,7 +35,14 @@ std::list<CacheEntry>& ExtraState::cache_entry_list(
 }
 
 bool ExtraState::has_any_cache_entries() const {
+  std::lock_guard<std::recursive_mutex> lock(this->cache_mutex);
   return this->total_cache_entry_count > 0;
+}
+
+bool ExtraState::has_relevant_entries(int64_t isolate_recompiles_id) const {
+  std::lock_guard<std::recursive_mutex> lock(this->cache_mutex);
+  return this->cache_entry_map.count(isolate_recompiles_id) > 0 ||
+      (isolate_recompiles_id >= 0 && this->cache_entry_map.count(-1) > 0);
 }
 
 void ExtraState::move_to_front(
@@ -56,6 +63,7 @@ void ExtraState::move_to_back(CacheEntry* cache_entry) {
 void ExtraState::invalidate(
     CacheEntry* cache_entry,
     py::object deleted_guard_manager) {
+  std::lock_guard<std::recursive_mutex> lock(this->cache_mutex);
   // Sometimes setting the cache_entry->code to None causes the orig_code to be
   // freed. This calls destroy_extra_state, which deletes the extra_state and
   // all the cache_entries. This causes the `this` pointer to be a dangling
@@ -79,6 +87,7 @@ CacheEntry* extract_cache_entry(
   if (extra_state == nullptr) {
     return nullptr;
   }
+  std::lock_guard<std::recursive_mutex> lock(extra_state->cache_mutex);
   // Search own bucket first, then fall back to default bucket (-1),
   // matching lookup() behavior.
   int64_t ids_to_search[] = {isolate_recompiles_id, -1};
@@ -102,12 +111,13 @@ FrameState* extract_frame_state(
   PyObject* frame_state = nullptr;
   if (isolate_recompiles_id < 0) {
     frame_state = extra_state->frame_state.ptr();
+    Py_INCREF(frame_state);
   } else {
     std::lock_guard<std::mutex> lock(extra_state->region_frame_state_mutex);
     frame_state =
         extra_state->region_frame_state_map[isolate_recompiles_id].ptr();
+    Py_INCREF(frame_state);
   }
-  Py_INCREF(frame_state);
   return frame_state;
 }
 
@@ -334,11 +344,13 @@ void lookup(
     PyObject** maybe_cached_code,
     const char** trace_annotation,
     bool is_skip_guard_eval_unsafe) {
+  std::lock_guard<std::recursive_mutex> lock(extra_state->cache_mutex);
   CacheEntry* found = nullptr;
   bool guard_error = false;
 
   for (const auto& entry : extra_state->precompile_entries) {
-    if (torch::dynamo::run_root_guard_manager(entry.root_mgr, f_locals)) {
+    if (entry.isolate_recompiles_id == isolate_recompiles_id &&
+        torch::dynamo::run_root_guard_manager(entry.root_mgr, f_locals)) {
       *maybe_cached_code = entry.code.ptr();
       return;
     }
@@ -389,13 +401,21 @@ bool try_lookup_without_guard_eval(
     PyObject** maybe_cached_code,
     const char** trace_annotation,
     bool is_skip_guard_eval_unsafe) {
-  if (!extra_state->precompile_entries.empty()) {
+  std::lock_guard<std::recursive_mutex> lock(extra_state->cache_mutex);
+  const PrecompileEntry* first_precompile_entry = nullptr;
+  for (const auto& entry : extra_state->precompile_entries) {
+    if (entry.isolate_recompiles_id == isolate_recompiles_id) {
+      first_precompile_entry = &entry;
+      break;
+    }
+  }
+  if (first_precompile_entry != nullptr) {
     // Only the first precompile entry can be safely fast-pathed: a later
     // guardless entry must not preempt an earlier guarded entry whose guards
     // may pass.
-    const auto& entry = extra_state->precompile_entries.front();
-    if (torch::dynamo::root_guard_manager_has_no_guards(entry.root_mgr)) {
-      *maybe_cached_code = entry.code.ptr();
+    if (torch::dynamo::root_guard_manager_has_no_guards(
+            first_precompile_entry->root_mgr)) {
+      *maybe_cached_code = first_precompile_entry->code.ptr();
       return true;
     }
     return false;
@@ -436,6 +456,7 @@ CacheEntry* create_cache_entry(
     ExtraState* extra_state,
     PyObject* guarded_code,
     PyObject* backend) {
+  std::lock_guard<std::recursive_mutex> lock(extra_state->cache_mutex);
   int64_t id = get_current_isolate_recompiles_id();
   auto& entries = extra_state->cache_entry_list(id);
   std::list<CacheEntry>::iterator new_iter;
@@ -468,6 +489,7 @@ py::list _debug_get_cache_entry_list(const py::handle& code_obj) {
   ExtraState* extra = get_extra_state(code);
   py::list result;
   if (extra != nullptr) {
+    std::lock_guard<std::recursive_mutex> lock(extra->cache_mutex);
     // Sort by isolate_recompiles_id for deterministic iteration order.
     std::vector<int64_t> ids;
     ids.reserve(extra->cache_entry_map.size());
@@ -494,6 +516,7 @@ py::list _get_cache_entries_for_region(
   ExtraState* extra = get_extra_state(code);
   py::list result;
   if (extra != nullptr) {
+    std::lock_guard<std::recursive_mutex> lock(extra->cache_mutex);
     auto it = extra->cache_entry_map.find(isolate_recompiles_id);
     if (it != extra->cache_entry_map.end()) {
       for (CacheEntry& e : it->second) {
@@ -517,11 +540,14 @@ void _clear_cache_entries_for_region(
   if (extra == nullptr) {
     return;
   }
-  auto it = extra->cache_entry_map.find(isolate_recompiles_id);
-  if (it != extra->cache_entry_map.end()) {
-    TORCH_CHECK(extra->total_cache_entry_count >= it->second.size());
-    extra->total_cache_entry_count -= it->second.size();
-    extra->cache_entry_map.erase(it);
+  {
+    std::lock_guard<std::recursive_mutex> lock(extra->cache_mutex);
+    auto it = extra->cache_entry_map.find(isolate_recompiles_id);
+    if (it != extra->cache_entry_map.end()) {
+      TORCH_CHECK(extra->total_cache_entry_count >= it->second.size());
+      extra->total_cache_entry_count -= it->second.size();
+      extra->cache_entry_map.erase(it);
+    }
   }
   {
     std::lock_guard<std::mutex> lock(strategy_mutex);
@@ -542,11 +568,14 @@ size_t _get_total_cache_entry_count(const py::handle& code_obj) {
   if (extra == nullptr) {
     return 0;
   }
+  std::lock_guard<std::recursive_mutex> lock(extra->cache_mutex);
   return extra->total_cache_entry_count;
 }
 
-PrecompileEntry::PrecompileEntry(py::object gm, py::object c)
-    : guard_manager(std::move(gm)), code(std::move(c)) {
+PrecompileEntry::PrecompileEntry(py::object gm, py::object c, int64_t region_id)
+    : guard_manager(std::move(gm)),
+      code(std::move(c)),
+      isolate_recompiles_id(region_id) {
   TORCH_CHECK(
       PyCode_Check(code.ptr()), "Expecting CodeType from PrecompileEntry.");
   root_mgr =
@@ -559,27 +588,45 @@ void _reset_precompile_entries(const py::handle& code_obj) {
       "expected a code object!");
   PyCodeObject* code = (PyCodeObject*)code_obj.ptr();
   ExtraState* extra = get_extra_state(code);
-  py::list result;
   if (extra != nullptr) {
+    std::lock_guard<std::recursive_mutex> lock(extra->cache_mutex);
     extra->precompile_entries.clear();
+  }
+}
+
+void _reset_precompile_entries_for_region(
+    const py::handle& code_obj,
+    int64_t isolate_recompiles_id) {
+  TORCH_CHECK_TYPE(
+      py::isinstance(code_obj, py::module::import("types").attr("CodeType")),
+      "expected a code object!");
+  PyCodeObject* code = (PyCodeObject*)code_obj.ptr();
+  ExtraState* extra = get_extra_state(code);
+  if (extra != nullptr) {
+    std::lock_guard<std::recursive_mutex> lock(extra->cache_mutex);
+    extra->precompile_entries.remove_if(
+        [isolate_recompiles_id](const PrecompileEntry& entry) {
+          return entry.isolate_recompiles_id == isolate_recompiles_id;
+        });
   }
 }
 
 void _load_precompile_entry(
     const py::handle& code_obj,
     py::object guard_manager,
-    py::object dynamo_code) {
+    py::object dynamo_code,
+    int64_t isolate_recompiles_id) {
   TORCH_CHECK_TYPE(
       py::isinstance(code_obj, py::module::import("types").attr("CodeType")),
       "expected a code object!");
   PyCodeObject* code = (PyCodeObject*)code_obj.ptr();
   ExtraState* extra = get_extra_state(code);
-  py::list result;
   if (extra == nullptr) {
     extra = init_and_set_extra_state(code);
   }
-  auto entry =
-      PrecompileEntry(std::move(guard_manager), std::move(dynamo_code));
+  std::lock_guard<std::recursive_mutex> lock(extra->cache_mutex);
+  auto entry = PrecompileEntry(
+      std::move(guard_manager), std::move(dynamo_code), isolate_recompiles_id);
   extra->precompile_entries.push_back(std::move(entry));
 }
 
@@ -599,6 +646,7 @@ py::list _debug_get_precompile_entries(const py::handle& code_obj) {
   ExtraState* extra = get_extra_state(code);
   py::list result;
   if (extra != nullptr) {
+    std::lock_guard<std::recursive_mutex> lock(extra->cache_mutex);
     for (PrecompileEntry& e : extra->precompile_entries) {
       result.append(py::cast(e, py::return_value_policy::reference));
     }

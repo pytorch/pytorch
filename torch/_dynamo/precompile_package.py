@@ -104,22 +104,12 @@ Know these before relying on an artifact in production:
   is byte-identical to base and which plain ``caching_precompile`` also raises.
 * The model must live in an importable module. Source is checksummed, so a
   class defined in ``__main__`` or a REPL cannot be loaded elsewhere.
-* ``install()`` patches code objects process-globally, so an artifact is not
-  scoped to the object it was loaded onto: other instances of the same class
-  are served from it too, and ``torch._dynamo.reset()`` stops it serving,
-  though the globals install() wrote stay in the module until ``unload()``. Two
-  artifacts for ONE CLASS cannot be loaded at once: they collide on the entry
-  frame, whose entries clear en masse, so the second load evicts the first,
-  with a warning. Load one artifact per class per process.
-
-  Two artifacts for DIFFERENT models that merely share an inner frame -- two
-  models containing the same library block -- do coexist: entries accumulate
-  on the shared code object and guards pick the right one. That holds only as
-  long as the guards can still tell the two apart. Ship an artifact that
-  dropped the discriminating guard -- possible only after explicitly opting out
-  of the public all-drops refusal -- and dispatch becomes ambiguous: the first
-  matching entry wins and one model is silently served the other's graph. Nothing
-  warns, because the eviction warning covers entry frames only.
+* ``install()`` writes compiled and resume functions into module globals, but
+  guarded dispatch is scoped to the isolated compile region owned by the
+  returned callable. Call the returned object rather than another instance of
+  the same class. Multiple loaded artifacts can share entry, inner, and resume
+  code objects without taking each other's entries; ``unload()`` removes only
+  its own region and the globals it still owns.
 This wraps CompilePackage, which is the low-level component and is not meant to
 be used directly.
 
@@ -135,7 +125,6 @@ artifacts transparently without an explicit capture block.
 
 from __future__ import annotations
 
-import collections
 import contextlib
 import dataclasses
 import functools
@@ -155,6 +144,11 @@ from typing_extensions import Self
 import torch
 import torch._functorch.config as functorch_config
 from torch._guards import ChainedSource, Source
+from torch.compiler._precompile_types import (
+    FrameInvariants,
+    GuardFact as _GuardFact,
+    PrecompileSummary,
+)
 from torch.utils._pytree import tree_leaves
 
 from .exc import PackageError
@@ -173,15 +167,11 @@ from .source import AttrSource, DictGetItemSource, GlobalSource
 if TYPE_CHECKING:
     import traceback
 
-    from .eval_frame import DynamoStance
     from .types import GuardFilterEntry
 
 
 log = logging.getLogger(__name__)
 
-_SERVING_LOCK = threading.Lock()
-_SERVING_DEPTH = 0
-_SERVING_PRIOR_STANCE: DynamoStance | None = None
 _CAPTURE_CONFIG_STATE: ContextVar[tuple[int, tuple[bool, bool] | None]] = ContextVar(
     "precompile_capture_config_state", default=(0, None)
 )
@@ -271,122 +261,6 @@ class ExampleInput:
 
     args: tuple[object, ...] = ()
     kwargs: dict[str, object] = dataclasses.field(default_factory=dict)
-
-
-@dataclasses.dataclass(frozen=True)
-class _GuardFact:
-    """
-    One guard as it appeared in one compilation.
-
-    Identity is every field: type, source, normalized code, value fingerprint
-    and whether the guard was enforced. The fingerprint carries what the code
-    does not -- a TENSOR_MATCH's shape lives in the C++ leaf, an identity
-    guard's object behind a normalized id -- so the same guard specialized two
-    ways is two facts, which is what makes them fall out of the intersection
-    instead of collapsing into it. See ``_value_fingerprint``.
-    """
-
-    guard_type: str
-    source: str
-    code: tuple[str, ...]
-    value: str
-    enforced: bool
-
-    def render(self) -> str:
-        # A fingerprint exists only when the code does not already say what the
-        # guard checks, so print it whenever there is one: an identity guard
-        # does render code, but the id in it has been normalized away.
-        body = " ; ".join(self.code) if self.code else f"<{self.guard_type}>"
-        if self.value:
-            body = f"{body} {self.value}"
-        where = f" on {self.source}" if self.source else ""
-        return f"[{'enforced' if self.enforced else 'dropped '}] {body}{where}"
-
-
-@dataclasses.dataclass(frozen=True)
-class FrameInvariants:
-    """What held in every compiled variant of one frame, and what did not."""
-
-    frame: str
-    filename: str
-    lineno: int
-    variants: int
-    invariant: tuple[_GuardFact, ...]
-    varying: tuple[_GuardFact, ...]
-    # Guards this module cannot compare between variants. Not "they held" and
-    # not "they differed" -- we do not know, and saying either would be a claim
-    # we cannot support.
-    undetermined: tuple[_GuardFact, ...]
-
-
-@dataclasses.dataclass(frozen=True)
-class PrecompileSummary:
-    """What an observed capture produced; it cannot describe unexecuted paths."""
-
-    frames: int
-    resume_functions: int
-    guarded_codes: int
-    backend_graphs: int
-    bypassed: tuple[str, ...]
-    # Frames that hit recompile_limit. A LOWER BOUND: the limit also puts every
-    # frame called beneath the offender into run-only mode, and those never
-    # re-enter Dynamo, so they go short without being named here.
-    truncated: tuple[str, ...] = ()
-    # Frames with at least one exercised compile attempt that produced no
-    # guarded code. That path is absent from the artifact; if the frame has no
-    # guarded variants at all, install() skips it and it runs eager.
-    uncovered_frames: tuple[str, ...] = ()
-    # Sources pinned to an exact value by an equality guard -- see
-    # ``_pins_a_value``. These make the artifact serve only the calls it was
-    # captured with.
-    wont_generalize: tuple[str, ...] = ()
-    # (guard_type, source_name) for every guard the filter discarded / retained.
-    dropped_guards: tuple[tuple[str, str], ...] = ()
-    kept_guards: tuple[tuple[str, str], ...] = ()
-    # Subset of dropped_guards whose loss can plausibly change results, plus
-    # every dropped guard observed to distinguish captured variants.
-    risky_dropped_guards: tuple[tuple[str, str], ...] = ()
-    # Exceptions raised by automatic examples or the capture block. A partial
-    # capture remains inspectable, but is never complete.
-    capture_errors: tuple[str, ...] = ()
-
-    @property
-    def complete(self) -> bool:
-        return (
-            not self.bypassed
-            and not self.truncated
-            and not self.uncovered_frames
-            and not self.capture_errors
-            and self.guarded_codes > 0
-        )
-
-    def dropped_guard_types(self) -> dict[str, int]:
-        return _count_types(self.dropped_guards)
-
-    def kept_guard_types(self) -> dict[str, int]:
-        return _count_types(self.kept_guards)
-
-    def __str__(self) -> str:
-        base = (
-            f"{self.frames} frames ({self.resume_functions} from graph breaks), "
-            f"{self.guarded_codes} guarded codes, "
-            f"{self.backend_graphs} backend graphs"
-        )
-        if self.dropped_guards:
-            base += f", dropped guards {self.dropped_guard_types()}"
-        if self.risky_dropped_guards:
-            base += f", RISKY drops {[n for _, n in self.risky_dropped_guards]}"
-        if self.uncovered_frames:
-            base += f", {len(self.uncovered_frames)} UNCOVERED: {list(self.uncovered_frames)}"
-        if self.wont_generalize:
-            base += f", {len(self.wont_generalize)} value-pinned guards"
-        if self.truncated:
-            base += f", >={len(self.truncated)} TRUNCATED: {list(self.truncated)}"
-        if self.bypassed:
-            base += f", {len(self.bypassed)} BYPASSED: {list(self.bypassed)}"
-        if self.capture_errors:
-            base += f", {len(self.capture_errors)} CAPTURE ERROR(S)"
-        return base
 
 
 def _owning_module(value: object) -> str | None:
@@ -989,13 +863,6 @@ def _example_call(
     )
 
 
-def _count_types(pairs: Sequence[tuple[str, str]]) -> dict[str, int]:
-    counts: collections.Counter[str] = collections.Counter()
-    for guard_type, _ in pairs:
-        counts[guard_type] += 1
-    return dict(counts)
-
-
 def _summarize(
     entry: _DynamoCacheEntry,
     dropped: set[tuple[str, str]],
@@ -1062,6 +929,7 @@ class PrecompileSession:
         self._package = CompilePackage(
             self._entry_fn,
             serialization_guard_filter_fn=self._guard_filter_fn,
+            requires_native_backend_compatibility=backend != "eager",
         )
         self._backend_artifacts: dict[_BackendId, Any] = {}
         self._stack: contextlib.ExitStack | None = None
@@ -1234,8 +1102,13 @@ class PrecompileSession:
             self._record_capture_error(exc[1])
         with self._state:
             self._closing = True
-            while self._active_calls:
-                self._state.wait()
+            try:
+                while self._active_calls:
+                    self._state.wait()
+            except BaseException:
+                self._closing = False
+                self._state.notify_all()
+                raise
             stack = self._stack
             self._stack = None
             self._compiled = None
@@ -1696,10 +1569,10 @@ def precompile_load(
         isolate_recompiles=True,
     )
     compiled = optimize_ctx(fn)
-    package.install(backends)
     isolate_recompiles_id = getattr(optimize_ctx, "_isolate_recompiles_id", None)
     if not isinstance(isolate_recompiles_id, int):
         raise AssertionError("missing isolate_recompiles_id")
+    package.install(backends, isolate_recompiles_id=isolate_recompiles_id)
     return PrecompiledCallable(compiled, package, isolate_recompiles_id)
 
 
@@ -1768,8 +1641,13 @@ class PrecompiledCallable:
             if not self._loaded:
                 return
             self._unloading = True
-            while self._active_calls:
-                self._state.wait()
+            try:
+                while self._active_calls:
+                    self._state.wait()
+            except BaseException:
+                self._unloading = False
+                self._state.notify_all()
+                raise
             self._loaded = False
         try:
             self._package.uninstall()
@@ -1794,25 +1672,16 @@ def serving() -> Iterator[None]:
     Forbid compilation, so a call the artifact does not cover raises instead of
     quietly recompiling. This is process-wide, not a property of the artifact.
     """
-    global _SERVING_DEPTH, _SERVING_PRIOR_STANCE
+    from .eval_frame import (
+        _enter_fail_on_recompile_override,
+        _exit_fail_on_recompile_override,
+    )
 
-    from .eval_frame import _set_stance, DynamoStance
-
-    with _SERVING_LOCK:
-        if _SERVING_DEPTH == 0:
-            _SERVING_PRIOR_STANCE = _set_stance(DynamoStance("fail_on_recompile"))
-        _SERVING_DEPTH += 1
+    _enter_fail_on_recompile_override()
     try:
         yield
     finally:
-        with _SERVING_LOCK:
-            _SERVING_DEPTH -= 1
-            if _SERVING_DEPTH == 0:
-                prior = _SERVING_PRIOR_STANCE
-                _SERVING_PRIOR_STANCE = None
-                if prior is None:
-                    raise AssertionError("serving stance was not initialized")
-                _set_stance(prior)
+        _exit_fail_on_recompile_override()
 
 
 def _check_artifact_matches(

@@ -331,6 +331,11 @@ from typing_extensions import Self
 import torch
 import torch.utils._pytree as pytree
 from torch import Tensor
+from torch.compiler._precompile_types import (
+    FrameInvariants,
+    GuardFact,
+    PrecompileSummary,
+)
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn.utils import stateless
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -393,16 +398,18 @@ class PrecompileError(RuntimeError):
     """
 
 
-class _PrecompiledCallable:
+class PrecompiledCallable:
+    """Callable handle for one loaded multi-graph precompile artifact."""
+
     def __init__(self, compiled: Any) -> None:
         self._compiled = compiled
 
     def _call(self, method: Callable[..., Any], *args: object, **kwargs: object) -> Any:
-        from torch._dynamo.exc import PackageError
+        from torch._dynamo.exc import PackageError, RecompileError
 
         try:
             return method(*args, **kwargs)
-        except PackageError as e:
+        except (PackageError, RecompileError) as e:
             raise PrecompileError(str(e)) from e
 
     def __call__(self, *args: object, **kwargs: object) -> object:
@@ -423,18 +430,18 @@ class _PrecompiledCallable:
         return self._compiled._package
 
 
-class _PrecompileSession:
+class PrecompileSession:
     r"""Execution-driven multi-graph capture returned by :func:`precompile`."""
 
     def __init__(self, session: Any) -> None:
         self._session = session
 
     def _call(self, method: Callable[..., Any], *args: object, **kwargs: object) -> Any:
-        from torch._dynamo.exc import PackageError
+        from torch._dynamo.exc import PackageError, RecompileError
 
         try:
             return method(*args, **kwargs)
-        except PackageError as e:
+        except (PackageError, RecompileError) as e:
             raise PrecompileError(str(e)) from e
 
     def __enter__(self) -> Callable[..., object]:
@@ -448,7 +455,7 @@ class _PrecompileSession:
     def __exit__(self, *exc: object) -> None:
         self._call(self._session.__exit__, *exc)
 
-    def invariants(self) -> tuple[Any, ...]:
+    def invariants(self) -> tuple[FrameInvariants, ...]:
         r"""invariants() -> tuple
 
         Return the guards that held across every captured variant of each frame.
@@ -465,7 +472,7 @@ class _PrecompileSession:
         """
         self._call(self._session.write_invariants, path)
 
-    def summary(self) -> Any:
+    def summary(self) -> PrecompileSummary:
         r"""summary() -> PrecompileSummary
 
         Return observed capture coverage, recompilation, failure, and guard information.
@@ -482,7 +489,7 @@ class _PrecompileSession:
         require_complete: bool = True,
         require_no_risky_drops: bool = True,
         require_no_dropped_guards: bool = True,
-    ) -> Any:
+    ) -> PrecompileSummary:
         r"""save(path, *, require_complete=True, require_no_risky_drops=True, require_no_dropped_guards=True) -> PrecompileSummary
 
         Write the captured package to ``path`` and return its summary.
@@ -1936,7 +1943,13 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
         if not isinstance(target, ast.Name):
             continue
         if target.id in wanted:
-            found[target.id] = ast.literal_eval(node.value)
+            try:
+                found[target.id] = ast.literal_eval(node.value)
+            except (ValueError, SyntaxError) as e:
+                raise PrecompileError(
+                    f"python_code {target.id!r} calling-convention metadata is "
+                    f"malformed; it must be a Python literal."
+                ) from e
         else:
             # Not a metadata name we consume (the driver section emits only
             # function defs today, but a future artifact revision could add a
@@ -2708,6 +2721,8 @@ class _PrecompileApi:
     # The error type raised by precompile, reachable as
     # ``torch.compiler.precompile.PrecompileError``.
     PrecompileError = PrecompileError
+    PrecompileSession = PrecompileSession
+    PrecompiledCallable = PrecompiledCallable
 
     def __reduce__(self) -> str:
         # torch.compiler.precompile is a process-wide singleton; pickle/deepcopy must
@@ -2731,7 +2746,7 @@ class _PrecompileApi:
         recompile_limit: int = 256,
         dynamic: bool | None = None,
         invariants: str | None = None,
-    ) -> tuple[str, bytes] | _PrecompileSession:
+    ) -> tuple[str, bytes] | PrecompileSession:
         """Ahead-of-time precompile ``fn`` against example inputs.
 
         Passing positional example arguments keeps the self-contained source-artifact
@@ -2973,8 +2988,8 @@ class _PrecompileApi:
         dynamic: bool | None = None,
         example_inputs: Sequence[tuple[object, ...]] | None = None,
         invariants: str | None = None,
-    ) -> _PrecompileSession:
-        r"""capture(fn, *, backend="inductor", guard_filter_fn=None, recompile_limit=256, dynamic=None, example_inputs=None, invariants=None) -> _PrecompileSession
+    ) -> PrecompileSession:
+        r"""capture(fn, *, backend="inductor", guard_filter_fn=None, recompile_limit=256, dynamic=None, example_inputs=None, invariants=None) -> PrecompileSession
 
         Begin an execution-driven multi-graph precompile capture.
 
@@ -3016,7 +3031,7 @@ class _PrecompileApi:
               successful capture. Default: ``None``.
 
         Returns:
-            _PrecompileSession: session whose context manager yields the callable to
+            PrecompileSession: session whose context manager yields the callable to
             exercise and whose ``save()`` method writes the artifact.
         """
         from torch._dynamo.exc import PackageError
@@ -3034,7 +3049,7 @@ class _PrecompileApi:
             )
         except PackageError as e:
             raise PrecompileError(str(e)) from e
-        return _PrecompileSession(session)
+        return PrecompileSession(session)
 
     def load_package(
         self,
@@ -3045,15 +3060,16 @@ class _PrecompileApi:
         guard_filter_fn: Callable[[Sequence[Any]], Sequence[bool]] | None = None,
         recompile_limit: int = 256,
         dynamic: bool | None = None,
-    ) -> _PrecompiledCallable:
+    ) -> PrecompiledCallable:
         r"""load_package(fn, path, *, backend="inductor", guard_filter_fn=None, recompile_limit=256, dynamic=None) -> Callable
 
         Load a multi-graph artifact saved by :meth:`capture`.
 
-        Loading installs guarded bytecode and compiled backends process-wide on the
-        callable's code objects. The returned callable is therefore also a context manager;
-        exiting it, or calling ``unload()``, removes those installed entries and globals.
-        The artifact is executable pickle data; only load a package you trust.
+        Loading installs compiled backends and resume globals, while guarded dispatch is
+        scoped to the returned callable's isolated compile region. The result is therefore
+        also a context manager; exiting it, or calling ``unload()``, removes that region
+        and its owned globals. The artifact is executable pickle data; only load a package
+        you trust.
 
         Args:
             fn (Callable): callable that the artifact was captured from.
@@ -3079,7 +3095,7 @@ class _PrecompileApi:
             "trust."
         )
         try:
-            return _PrecompiledCallable(
+            return PrecompiledCallable(
                 precompile_load(
                     fn,
                     path,
@@ -3248,6 +3264,11 @@ precompile.__doc__ = _PrecompileApi.__call__.__doc__
 # underlying functions.
 PrecompileError.__module__ = "torch.compiler"
 PrecompileError.__qualname__ = "precompile.PrecompileError"
+PrecompileSession.__module__ = "torch.compiler"
+PrecompiledCallable.__module__ = "torch.compiler"
+_PrecompileApi.FrameInvariants = FrameInvariants
+_PrecompileApi.GuardFact = GuardFact
+_PrecompileApi.PrecompileSummary = PrecompileSummary
 _PrecompileApi.load.__module__ = "torch.compiler"
 _PrecompileApi.load.__qualname__ = "precompile.load"
 _PrecompileApi.capture.__module__ = "torch.compiler"
