@@ -6696,7 +6696,7 @@ class ShapeEnv:
                 if any(
                     is_dim(source)
                     for s in expr.free_symbols
-                    for source in symbol_to_source[s]
+                    for source in symbol_to_source.get(s, ())
                 ):
                     if self.dim_constraints is None:
                         raise AssertionError("dim_constraints must not be None")
@@ -6713,7 +6713,14 @@ class ShapeEnv:
                 # a constraint
                 if not is_trivial and len(expr.free_symbols) == 1:
                     symbol = next(iter(expr.free_symbols))
-                    source = symbol_to_source[symbol][0]
+                    # Subclasses opting out of outer size/stride tracking leave their
+                    # outer dims out of symbol_to_source; fall back as _print_Symbol does.
+                    sources = symbol_to_source.get(symbol) or self.var_to_sources.get(
+                        symbol
+                    )
+                    if not sources:
+                        return
+                    source = sources[0]
                     constraints = symbol_to_constraints[symbol]
                     for c in constraints:
                         if isinstance(c, StrictMinMaxConstraint):
