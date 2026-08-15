@@ -112,6 +112,21 @@ def keep_name(func):
     return wrapper
 
 
+def keep_renamed_name(func):
+    # __name__ reassigned away from co_name, so a reconstruction that falls back
+    # to code.co_name reads "forward" where the real function says otherwise.
+    # keep_name alone cannot catch that: there the two agree.
+    func.__name__ = "renamed_forward"
+
+    @functools.wraps(func)
+    def wrapper(self, x):
+        if func.__name__ == "renamed_forward":
+            x = x + 1
+        return func(self, x)
+
+    return wrapper
+
+
 FQN_MISMATCH_GLOBAL = 2
 
 
@@ -171,6 +186,12 @@ class DecoratedAttributeForwardModule(torch.nn.Module):
 
 class DecoratedNameForwardModule(torch.nn.Module):
     @keep_name
+    def forward(self, x):
+        return x * 2
+
+
+class DecoratedRenamedNameForwardModule(torch.nn.Module):
+    @keep_renamed_name
     def forward(self, x):
         return x * 2
 
@@ -637,6 +658,17 @@ class TestGuardSerialization(TestGuardSerializationBase):
         mod = DecoratedNameForwardModule()
         ref, loaded = self._test_serialization("EQUALS_MATCH", mod, torch.randn(3))
         inner = type(mod).forward.__wrapped__
+        self._test_check_fn(
+            ref, loaded, {"self": mod, "x": torch.randn(3), "func": inner}, True
+        )
+
+    def test_fqn_mismatched_function_preserves_a_renamed_name(self):
+        # keep_name's __name__ happens to equal co_name, so it passes even if
+        # reconstruction falls back to co_name. This one does not.
+        mod = DecoratedRenamedNameForwardModule()
+        ref, loaded = self._test_serialization("EQUALS_MATCH", mod, torch.randn(3))
+        inner = type(mod).forward.__wrapped__
+        self.assertNotEqual(inner.__name__, inner.__code__.co_name)
         self._test_check_fn(
             ref, loaded, {"self": mod, "x": torch.randn(3), "func": inner}, True
         )

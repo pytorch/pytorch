@@ -501,7 +501,7 @@ def _build_dynamo_forward():
 
     import torch
 
-    def forward(*args):
+    def forward(*args, **kwargs):
         # Training capture: the baked backward ACCUMULATES into each param's .grad in
         # place (p.grad.add_(new)), matching eager .backward(). That needs the tensor to
         # exist, so materialize a zero one wherever the runtime model left .grad at None
@@ -510,9 +510,22 @@ def _build_dynamo_forward():
         # accumulates into are listed, so a frozen or non-contributing param keeps
         # .grad = None as eager leaves it.
         for _pos, _name in GRAD_ACCUM_PARAMS:
+            # Recorded positionally at capture, so the model has to arrive
+            # positionally too. Say so rather than letting an IndexError or an
+            # AttributeError on the wrong object stand in for it.
+            if _pos >= len(args) or not isinstance(args[_pos], torch.nn.Module):
+                from torch._precompile import PrecompileError as _PrecompileError
+
+                raise _PrecompileError(
+                    f"precompile: this training artifact accumulates gradients into "
+                    f"argument {_pos}, which capture saw as an nn.Module. This call "
+                    f"passed {len(args)} positional argument(s) and did not put a "
+                    f"module there. Pass the model positionally, in the same position "
+                    f"it occupied at capture."
+                )
             _p = args[_pos].get_parameter(_name)
             if _p.grad is None:
                 _p.grad = torch.zeros_like(_p)
-        return fn(*args)
+        return fn(*args, **kwargs)
 
     return forward
