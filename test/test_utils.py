@@ -960,7 +960,7 @@ class TestDeviceUtilsAccelerator(TestCase):
             torch.set_default_device(None)
 
 
-class TestDeviceUtilsCPU(TestCase):
+class TestDeviceModeOps(TestCase):
     hw_classification = HardwareClassification.CPU
 
     @onlyCPU
@@ -994,7 +994,7 @@ class TestDeviceUtilsCPU(TestCase):
 
 
 instantiate_device_type_tests(TestDeviceUtilsAccelerator, globals())
-instantiate_device_type_tests(TestDeviceUtilsCPU, globals(), only_for=("cpu",))
+instantiate_device_type_tests(TestDeviceModeOps, globals(), only_for=("cpu",))
 
 
 class TestCppExtensionUtils(TestCase):
