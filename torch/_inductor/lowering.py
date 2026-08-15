@@ -7295,6 +7295,10 @@ def _make_reduction_inner(
     ):
         if isinstance(x.data, PermuteView):
             should_compute_logical_index = True
+        elif isinstance(x.data, ir.StorageBox) and isinstance(
+            x.data.data, ir.Pointwise
+        ):
+            should_compute_logical_index = True
         elif isinstance(x.data, ir.ReinterpretView) or (
             isinstance(x.data, ir.StorageBox) and isinstance(x.data.data, ir.Buffer)
         ):
