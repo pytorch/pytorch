@@ -50,7 +50,10 @@ class _PrecompileEntry:
 
 class _ExtraState:
     def invalidate(
-        self, cache_entry: _CacheEntry, guard_manager: GuardManagerWrapper
+        self,
+        cache_entry: _CacheEntry,
+        guard_manager: GuardManagerWrapper,
+        live_guard_manager: GuardManagerWrapper,
     ) -> None: ...
 
 class _FrameAction(enum.IntEnum):

@@ -103,7 +103,13 @@ typedef struct VISIBILITY_HIDDEN ExtraState {
   bool has_relevant_entries(int64_t isolate_recompiles_id) const;
   void move_to_front(CacheEntry* cache_entry, std::list<CacheEntry>& entries);
   void move_to_back(CacheEntry* cache_entry);
-  void invalidate(CacheEntry* cache_entry, py::object deleted_guard_manager);
+  // live_guard_manager is the wrapper that OWNS cache_entry (CacheEntry's own
+  // guard_manager). It is what establishes, under the lock, that the raw
+  // cache_entry read before the lock is still the entry it was.
+  void invalidate(
+      CacheEntry* cache_entry,
+      py::object deleted_guard_manager,
+      py::object live_guard_manager);
 } ExtraState;
 
 #else

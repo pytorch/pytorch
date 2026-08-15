@@ -710,6 +710,32 @@ _IDENTITY_GUARD_TYPES = frozenset(
 )
 
 
+_STABLE_CONST_TYPES = (str, int, float, complex, bytes, bool, type(None))
+
+
+def _stable_consts(consts: tuple[object, ...]) -> tuple[object, ...]:
+    """
+    co_consts reduced to the part that reprs the same in every process.
+
+    A nested code object reprs with its ADDRESS, so it cannot go into a digest
+    that ends up in a file meant to be committed and diffed. Containers are
+    filtered recursively rather than dropped whole: two lambdas differing only
+    in a tuple or frozenset constant -- ``x * (1, 2)`` against ``x * (1, 3)`` --
+    are genuinely different variants, and dropping the container is what let
+    them collide.
+    """
+    out: list[object] = []
+    for c in consts:
+        if isinstance(c, _STABLE_CONST_TYPES):
+            out.append(c)
+        elif isinstance(c, tuple):
+            out.append(_stable_consts(c))
+        elif isinstance(c, frozenset):
+            # Sorted by repr so the digest does not inherit set iteration order.
+            out.append(tuple(sorted(_stable_consts(tuple(c)), key=repr)))
+    return tuple(out)
+
+
 def _code_fingerprint(code: types.CodeType) -> str:
     """
     Name a code object by its body, for callables a definition site cannot tell
@@ -717,16 +743,20 @@ def _code_fingerprint(code: types.CodeType) -> str:
     agree on file AND lineno.
 
     Everything hashed is derived from the source, so the digest is identical in
-    another process. co_consts is filtered to primitives on purpose: a nested
-    code object reprs with its address, which would put a per-process value into
-    a report that is meant to be committed and diffed.
+    another process. It is NOT stable across Python versions, since co_code is
+    version-specific bytecode: a committed invariants file churns wholesale on
+    an interpreter upgrade even with unchanged source.
     """
-    primitives = tuple(
-        c
-        for c in code.co_consts
-        if isinstance(c, (str, int, float, bool, bytes, type(None)))
+    return _hash_text(
+        repr(
+            (
+                code.co_code,
+                code.co_names,
+                code.co_varnames,
+                _stable_consts(code.co_consts),
+            )
+        )
     )
-    return _hash_text(repr((code.co_code, code.co_names, code.co_varnames, primitives)))
 
 
 def _object_identity(value: object) -> str:
@@ -741,21 +771,27 @@ def _object_identity(value: object) -> str:
     table, whose entries are all ``<lambda>`` in one module. Two of those then
     render identically, the CLOSURE_MATCH that split the compilations lands in
     the intersection, and the report calls the one thing that varies an
-    invariant of both. So a callable is also named by where it is DEFINED,
-    which is source-derived and therefore still stable across processes; the
-    file is reduced to its basename so the report does not carry a checkout
-    path.
+    invariant of both. So a callable is also named by where it is DEFINED and by
+    a digest of its body, both source-derived and so still stable across
+    processes; the file is reduced to its basename so the report does not carry
+    a checkout path.
+
+    The discriminating part goes FIRST. Truncation is what bounds this string,
+    and a qualname alone can exceed the limit on real models -- a transformers
+    lambda nested in a long module path -- so a digest appended at the end is
+    cut off exactly on the names that need it most, re-colliding what it was
+    added to separate.
     """
     if isinstance(value, types.ModuleType):
         return f"is module {value.__name__}"
     name = getattr(value, "__qualname__", None) or getattr(value, "__name__", None)
     if isinstance(name, str):
-        rendered = f"is {_owning_module(value) or '?'}.{name}"
         code = getattr(value, "__code__", None)
-        if code is not None:
-            site = os.path.basename(getattr(code, "co_filename", "") or "?")
-            rendered += f" @{site}:{code.co_firstlineno}#{_code_fingerprint(code)}"
-        return _normalize(rendered)[:160]
+        where = ""
+        if isinstance(code, types.CodeType):
+            site = os.path.basename(code.co_filename or "?")
+            where = f"@{site}:{code.co_firstlineno}#{_code_fingerprint(code)} "
+        return _normalize(f"is {where}{_owning_module(value) or '?'}.{name}")[:160]
     return f"is a {type(value).__module__}.{type(value).__qualname__}"[:160]
 
 

@@ -254,10 +254,11 @@ def _scan_sys_modules_for_file(filename: str) -> str | None:
     Length is an ABA check, not a version: equal-size churn between two calls
     keeps a stale miss, and ``del sys.modules[m]; import m`` -- the ordinary
     force-reimport idiom -- is exactly that. sys.modules exposes no mutation
-    counter to use instead. The consequence is bounded and matches a plain
-    miss: this file's checksum is left out of the artifact, so a later edit to
-    it is not caught at load. Worth knowing when hunting a checksum that should
-    have fired.
+    counter to use instead. A stale MISS costs this file's checksum, so a later
+    edit to it is not caught at load. A stale HIT is never revalidated at all
+    and is worse: delete the module without re-importing and ``add_code``
+    raises KeyError on the dead name. Both predate the memo; worth knowing when
+    hunting a checksum that should have fired.
     """
     generation = len(sys.modules)
     cached = _MODULE_KEY_BY_FILE.get(filename)
@@ -600,8 +601,8 @@ class SystemInfo:
             )
         # None means the artifact predates this field, not "no vector ISA".
         # Only a build with a stable torch_version reaches here with None at
-        # all -- a dev build embeds the git hash, so the version check two above
-        # fires first -- but for a release build it is every artifact already on
+        # all -- a dev build embeds the git hash, so the torch_version check
+        # just above fires first -- but for a release build it is every artifact already on
         # disk, rejected over a target they never recorded. New artifacts always
         # carry a tuple, so the skip does not widen over time.
         if (
@@ -1761,16 +1762,25 @@ class DiskDynamoCache(DiskDynamoStore):
         counters["dynamo_cache"]["dynamo_cache_miss"] += 1
         return None
 
-    def load_and_install_package(self, fn: Callable[..., Any]) -> CompilePackage | None:
+    def load_and_install_package(
+        self, fn: Callable[..., Any], isolate_recompiles_id: int = -1
+    ) -> CompilePackage | None:
         """
-        Load directly into a package and install backends
+        Load directly into a package and install backends.
+
+        ``isolate_recompiles_id`` must be the region the caller will look up in:
+        precompile entries match their own region only, so installing into the
+        default bucket for an isolated caller loads the artifact and then serves
+        nothing from it.
         """
         results = self.load(fn)
         if results is None:
             return None
         else:
             package = CompilePackage(fn, results.dynamo)
-            package.install(results.backends)
+            package.install(
+                results.backends, isolate_recompiles_id=isolate_recompiles_id
+            )
             return package
 
     def path_prefix(self) -> str:

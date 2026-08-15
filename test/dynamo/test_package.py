@@ -30,7 +30,7 @@ import torch._inductor.test_case
 import torch.nn.functional as F
 import torch.onnx.operators
 import torch.utils.cpp_extension
-from torch._dynamo.exc import PackageError
+from torch._dynamo.exc import PackageError, RecompileError
 from torch._dynamo.package import (
     _defining_module_name,
     CompilePackage,
@@ -4077,6 +4077,55 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
                 "a guard that differs between variants was called invariant",
             )
 
+    def test_precompile_entries_are_region_scoped_in_both_directions(self):
+        # Two rails that pull against each other, so neither can be "fixed" by
+        # loosening the other. A precompile entry installed for the DEFAULT
+        # region must not be served to an isolated one -- the identity guards
+        # that would tell two artifacts of one model apart are exactly the ones
+        # precompile drops, so a fallback serves the wrong graph. And the
+        # caching_precompile loader must therefore install into the region its
+        # own context looks up in, or it loads an artifact and serves nothing.
+        from torch._dynamo.precompile_package import _SingleFileStore
+
+        x = torch.randn(3, 4)
+        model = PrecompileSelfAct(torch.relu)
+        session = precompile_capture(model, backend="eager", dynamic=False)
+        with session as compiled, torch.no_grad():
+            compiled(x)
+        session.save(self.path(), require_no_risky_drops=False)
+
+        # Rail 1: default-region install is NOT visible from an isolated region.
+        torch._dynamo.reset()
+        cache_entry = _SingleFileStore().load_cache_entry(self.path())
+        package = CompilePackage(model.forward, cache_entry.dynamo)
+        package.install(cache_entry.backends)  # default region
+        try:
+            isolated = torch._dynamo.optimize(
+                "eager", dynamic=False, isolate_recompiles=True
+            )(model)
+            with torch.no_grad(), serving(), self.assertRaises(RecompileError):
+                isolated(x)
+        finally:
+            package.uninstall()
+
+        # Rail 2: installing into the region the context uses does serve.
+        torch._dynamo.reset()
+        cache_entry = _SingleFileStore().load_cache_entry(self.path())
+        package = CompilePackage(model.forward, cache_entry.dynamo)
+        optimize_ctx = torch._dynamo.optimize(
+            "eager", dynamic=False, isolate_recompiles=True
+        )
+        isolated = optimize_ctx(model)
+        package.install(
+            cache_entry.backends,
+            isolate_recompiles_id=optimize_ctx._isolate_recompiles_id,
+        )
+        try:
+            with torch.no_grad(), serving():
+                self.assertEqual(isolated(x), model(x))
+        finally:
+            package.uninstall()
+
     def test_concurrent_calls_do_not_deadlock_on_the_cache_lock(self):
         # lookup() holds the ExtraState cache lock across guard evaluation,
         # which runs Python and so can drop the GIL at any bytecode boundary. A
@@ -4084,10 +4133,12 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         # the first one forever, so the lock has to release the GIL before it
         # waits. A short switch interval makes the handoff frequent.
         #
-        # The wedged thread holds the GIL, so no assertion on this thread can
-        # run to report it -- join() would simply never return. A watchdog
-        # thread (which needs no GIL to sleep) dumps every stack and kills the
-        # process, turning the hang into output a CI log can be read from.
+        # The wedged thread holds the GIL, so nothing written in Python can
+        # report this: join() never returns, and a watchdog THREAD does not help
+        # either -- Event.wait releases the GIL while blocked but must reacquire
+        # it to run its next bytecode, which is exactly what it cannot get.
+        # faulthandler's timeout runs on a C thread and needs no GIL, so it is
+        # the only thing here that still fires.
         x = torch.randn(3, 4)
         model = PrecompileSelfAct(torch.relu)
         session = precompile_capture(model, backend="eager", dynamic=False)
@@ -4098,7 +4149,6 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         torch._dynamo.reset()
         loaded = precompile_load(model, self.path(), backend="eager", dynamic=False)
         errors = queue.SimpleQueue()
-        finished = threading.Event()
 
         def hammer():
             try:
@@ -4108,29 +4158,17 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             except BaseException as e:
                 errors.put(e)
 
-        def watchdog():
-            if finished.wait(300):
-                return
-            sys.stderr.write(
-                "test_concurrent_calls_do_not_deadlock_on_the_cache_lock: "
-                "no progress in 300s, the cache lock deadlocked\n"
-            )
-            sys.stderr.flush()
-            faulthandler.dump_traceback()
-            os._exit(1)
-
         threads = [threading.Thread(target=hammer, daemon=True) for _ in range(4)]
-        guard = threading.Thread(target=watchdog, daemon=True)
         prior_interval = sys.getswitchinterval()
         sys.setswitchinterval(1e-6)
-        guard.start()
+        faulthandler.dump_traceback_later(300, exit=True)
         try:
             for thread in threads:
                 thread.start()
             for thread in threads:
                 thread.join()
         finally:
-            finished.set()
+            faulthandler.cancel_dump_traceback_later()
             sys.setswitchinterval(prior_interval)
         raised = []
         while not errors.empty():

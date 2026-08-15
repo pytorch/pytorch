@@ -102,7 +102,8 @@ void ExtraState::move_to_back(CacheEntry* cache_entry) {
 
 void ExtraState::invalidate(
     CacheEntry* cache_entry,
-    py::object deleted_guard_manager) {
+    py::object deleted_guard_manager,
+    py::object live_guard_manager) {
   // Sometimes setting the cache_entry->code to None causes the orig_code to be
   // freed. This calls destroy_extra_state, which deletes the extra_state and
   // all the cache_entries. This causes the `this` pointer to be a dangling
@@ -117,23 +118,27 @@ void ExtraState::invalidate(
     // wait above can release the GIL, so another thread holding both the GIL
     // and this lock -- _clear_cache_entries_for_region, reached from
     // PrecompiledCallable.unload() -- can destroy the entry while we block.
-    // Re-establish that it is still linked here by ADDRESS, before any
-    // dereference: comparing against the live nodes never touches the freed
-    // one, whereas cache_entry->_owner would.
-    bool still_linked = false;
+    //
+    // Locate the entry by the IDENTITY of the guard manager that owns it, never
+    // by the address we were handed: a std::list node is recycled, so a fresh
+    // entry allocated at the same address would pass an address check and then
+    // be wrongly invalidated, killing a valid compilation. Only live nodes are
+    // dereferenced here, so a freed cache_entry is never touched.
+    CacheEntry* live_entry = nullptr;
     for (auto& [id, entries] : this->cache_entry_map) {
       (void)id;
       for (CacheEntry& live : entries) {
-        if (&live == cache_entry) {
-          still_linked = true;
+        if (live.guard_manager.ptr() == live_guard_manager.ptr()) {
+          live_entry = &live;
           break;
         }
       }
-      if (still_linked) {
+      if (live_entry != nullptr) {
         break;
       }
     }
-    if (still_linked) {
+    if (live_entry != nullptr) {
+      CHECK(live_entry == cache_entry);
       CHECK(cache_entry->_owner == this);
       CHECK(cache_entry == &*cache_entry->_owner_loc);
       cache_entry->invalidate(std::move(deleted_guard_manager));
@@ -416,13 +421,15 @@ void lookup(
   bool guard_error = false;
 
   // Precompile entries match their OWN region only, deliberately unlike the
-  // cache-entry fallback below. That fallback is safe because lookup_in_list
-  // also requires backend_match, so an isolated compile only reuses a default
-  // bucket entry its own backend produced. A precompile entry carries no such
-  // check, and the identity guards that would tell two artifacts of one model
-  // apart are exactly the ones precompile has to drop -- so falling back here
-  // serves another artifact's graph for a call this region does not cover,
-  // instead of the miss that serving() turns into a loud error.
+  // cache-entry fallback below. The identity guards that would tell two
+  // artifacts of one model apart are exactly the ones precompile has to drop,
+  // so a fallback here serves another artifact's graph for a call this region
+  // does not cover, instead of the miss that serving() turns into a loud error.
+  // The cache-entry fallback is narrower than it looks but is not a precedent:
+  // lookup_in_list also requires backend_match, though note that short-circuits
+  // when the backend is Py_False, which is every frame under run-only. Callers
+  // that install for an isolated region must pass its id (see
+  // CompilePackage.install) rather than rely on the default bucket.
   for (const auto& entry : extra_state->precompile_entries) {
     if (entry.isolate_recompiles_id == isolate_recompiles_id &&
         torch::dynamo::run_root_guard_manager(entry.root_mgr, f_locals)) {
