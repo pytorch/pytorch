@@ -510,33 +510,35 @@ def _build_dynamo_forward():
         # accumulates into are listed, so a frozen or non-contributing param keeps
         # .grad = None as eager leaves it.
         for _pos, _name in GRAD_ACCUM_PARAMS:
-            # Recorded positionally at capture, so the model has to arrive
-            # positionally too. Say so rather than letting an IndexError or an
-            # AttributeError on the wrong object stand in for it.
-            if _pos >= len(args) or not isinstance(args[_pos], torch.nn.Module):
+            # Positions are over the args this forward receives, which for a
+            # bound-method or nn.Module fn includes the bound self at 0. A
+            # container arg is searched one level down, matching how capture
+            # recorded it.
+            _slot = args[_pos] if _pos < len(args) else None
+            _candidates = [_slot]
+            if isinstance(_slot, (list, tuple)):
+                _candidates = list(_slot)
+            elif isinstance(_slot, dict):
+                _candidates = list(_slot.values())
+            _p = None
+            for _c in _candidates:
+                if isinstance(_c, torch.nn.Module):
+                    try:
+                        _p = _c.get_parameter(_name)
+                        break
+                    except AttributeError:
+                        continue
+            if _p is None:
                 from torch._precompile import PrecompileError as _PrecompileError
 
                 raise _PrecompileError(
-                    f"precompile: this training artifact accumulates gradients into "
-                    f"positional argument {_pos} (0-based), which capture saw as an "
-                    f"nn.Module. This call passed {len(args)} positional argument(s) "
-                    f"and did not put a module there. Pass the model positionally, in "
-                    f"the same position it occupied at capture."
+                    f"precompile: this training artifact accumulates a gradient into "
+                    f"parameter {_name!r} of the model at positional argument {_pos} "
+                    f"(0-based, counting the bound self for a method or nn.Module fn). "
+                    f"This call passed {len(args)} positional argument(s) and no module "
+                    f"there has that parameter. Pass the model positionally, in the same "
+                    f"position and with the same parameter structure as at capture."
                 )
-            try:
-                _p = args[_pos].get_parameter(_name)
-            except AttributeError as e:
-                # Right kind of object, wrong module: the structural contract
-                # (invariant 2) is what failed, so say that rather than letting
-                # get_parameter's raw AttributeError stand in for it.
-                from torch._precompile import PrecompileError as _PrecompileError
-
-                raise _PrecompileError(
-                    f"precompile: the model passed as positional argument {_pos} has "
-                    f"no parameter {_name!r}, which this training artifact accumulates "
-                    f"a gradient into. The runtime model must match the example "
-                    f"model's parameter structure. Underlying: {e}"
-                ) from e
             if _p.grad is None:
                 _p.grad = torch.zeros_like(_p)
         return fn(*args, **kwargs)
