@@ -110,11 +110,13 @@ from .base import (
     Method,
     MutationType,
     NO_SUCH_SUBOBJ,
+    ValueMutationExisting,
     ValueMutationNew,
     VariableTracker,
 )
 from .dicts import ConstDictVariable, OrderedDictVariable, pydict_check
 from .hashable import HashableTracker
+from .lists import ListVariable
 from .object_protocol import (
     _resolve_descriptor_get,
     generic_is_true,
@@ -178,11 +180,10 @@ def _safe_c_tp_hash_funcs() -> OrderedSet[object]:
 
 if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
-    from torch._dynamo.side_effects import SideEffects
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
     from torch._dynamo.variables.constant import ConstantVariable
 
-    from .lists import ListVariable, TupleVariable
+    from .lists import TupleVariable
 
 
 def is_standard_setattr(val: object) -> bool:
@@ -1822,11 +1823,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.value_type.__name__})"
-
-    def is_base_vt_modified(self, side_effects: "SideEffects") -> bool:
-        if self._base_vt is not None:
-            return side_effects.is_modified(self._base_vt)
-        return False
 
     def reconstruct_pycode(self, codegen):
         if self.source:
@@ -5063,32 +5059,42 @@ class UserDefinedSetVariable(UserDefinedObjectVariable):
         return self._base_vt.items  # pyrefly: ignore[missing-attribute]
 
 
-class UserDefinedListVariable(UserDefinedObjectVariable):
+class UserDefinedListVariable(UserDefinedObjectVariable, ListVariable):
     """
     Represents user defined objects that are subclasses of lists.
-
-    Internally, it uses a ListVariable to represent the list part of the
-    variable tracker. For everything else, it falls back to
-    UserDefinedObjectVariable.
     """
 
-    def __init__(
-        self, value: object, list_vt: Union["ListVariable", None] = None, **kwargs: Any
-    ) -> None:
-        from .lists import ListVariable
+    _nonvar_fields = {
+        *UserDefinedObjectVariable._nonvar_fields,
+        *ListVariable._nonvar_fields,
+    }
 
-        super().__init__(value, **kwargs)
-        if list_vt is None:
-            if self.source is not None:
-                raise AssertionError(
-                    "list_vt must be constructed by builder.py when source is present"
-                )
-            self._base_vt = ListVariable([], mutation_type=ValueMutationNew())
-        else:
-            self._base_vt = list_vt
+    def __init__(
+        self,
+        value: object,
+        items: list[VariableTracker] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(value, items=items if items is not None else [], **kwargs)
         self._base_methods = list_methods
-        if self._base_vt is None:
-            raise AssertionError("_base_vt must not be None after initialization")
+
+    @property
+    def _base_vt(self) -> VariableTracker:  # type: ignore[bad-override]
+        # The composite mutation_type (ValueAndAttributeMutation*) is shared with
+        # this view so content mutations recorded here flow through the object's
+        # own mutation_type.  source must agree with the New/Existing kind (see
+        # VariableTracker.__init__); self.source is assigned late for new objects,
+        # so derive it from the mutation_type rather than reading it directly.
+        source = (
+            self.source
+            if isinstance(self.mutation_type, ValueMutationExisting)
+            else None
+        )
+        return ListVariable(
+            self.items,
+            mutation_type=self.mutation_type,
+            source=source,
+        )
 
 
 class UserDefinedDequeVariable(UserDefinedObjectVariable):
