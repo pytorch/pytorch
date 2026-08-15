@@ -6887,7 +6887,7 @@ Example::
 
     >>> csr = torch.eye(5,5).to_sparse_csr()
     >>> csr.crow_indices()
-    tensor([0, 1, 2, 3, 4, 5], dtype=torch.int32)
+    tensor([0, 1, 2, 3, 4, 5])
 
 """,
 )
@@ -6908,7 +6908,7 @@ Example::
 
     >>> csr = torch.eye(5,5).to_sparse_csr()
     >>> csr.col_indices()
-    tensor([0, 1, 2, 3, 4], dtype=torch.int32)
+    tensor([0, 1, 2, 3, 4])
 
 """,
 )
