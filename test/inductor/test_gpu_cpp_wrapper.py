@@ -311,7 +311,7 @@ class TestGpuWrapper(InductorTestCase):
             self.assertEqual(res, expected)
 
     def test_many_args_fold_expression_nesting(self, device):
-        if device == "xpu":
+        if torch.device(device).type == "xpu":
             self.skipTest("ocloc backend compiler crashes with too many kernel args")
 
         num_params = 130
