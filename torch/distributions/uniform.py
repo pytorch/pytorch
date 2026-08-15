@@ -96,7 +96,7 @@ class Uniform(Distribution):
 
     def cdf(self, value):
         if self._validate_args:
-            self._validate_sample(value)
+            self._validate_sample(value, check_support=False)
         result = (value - self.low) / (self.high - self.low)
         return result.clamp(min=0, max=1)
 

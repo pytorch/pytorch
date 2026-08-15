@@ -195,7 +195,7 @@ class ContinuousBernoulli(ExponentialFamily):
 
     def cdf(self, value):
         if self._validate_args:
-            self._validate_sample(value)
+            self._validate_sample(value, check_support=False)
         cut_probs = self._cut_probs()
         cdfs = (
             torch.pow(cut_probs, value) * torch.pow(1.0 - cut_probs, 1.0 - value)

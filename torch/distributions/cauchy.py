@@ -89,7 +89,7 @@ class Cauchy(Distribution):
 
     def cdf(self, value):
         if self._validate_args:
-            self._validate_sample(value)
+            self._validate_sample(value, check_support=False)
         return torch.atan((value - self.loc) / self.scale) / math.pi + 0.5
 
     def icdf(self, value):

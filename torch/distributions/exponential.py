@@ -76,8 +76,9 @@ class Exponential(ExponentialFamily):
 
     def cdf(self, value):
         if self._validate_args:
-            self._validate_sample(value)
-        return 1 - torch.exp(-self.rate * value)
+            self._validate_sample(value, check_support=False)
+        # saturates to 0 below the support, where the raw formula goes negative
+        return (1 - torch.exp(-self.rate * value)).clamp(min=0, max=1)
 
     def icdf(self, value):
         return -torch.log1p(-value) / self.rate

@@ -91,7 +91,7 @@ class Laplace(Distribution):
 
     def cdf(self, value):
         if self._validate_args:
-            self._validate_sample(value)
+            self._validate_sample(value, check_support=False)
         return 0.5 - 0.5 * (value - self.loc).sign() * torch.expm1(
             -(value - self.loc).abs() / self.scale
         )
