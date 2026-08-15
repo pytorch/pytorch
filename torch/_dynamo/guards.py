@@ -4242,8 +4242,19 @@ class GuardsStatePickler(pickle.Pickler):
         kwdefaults: dict[str, object] | None = None,
         name: str | None = None,
         attributes: dict[str, object] | None = None,
+        guarded_globals: dict[str, object] | None = None,
+        snapshot_globals: bool = False,
     ) -> types.FunctionType:
-        f_globals = importlib.import_module(module).__dict__
+        module_globals = importlib.import_module(module).__dict__
+        if snapshot_globals:
+            f_globals = {
+                "__builtins__": module_globals["__builtins__"],
+                "__name__": module_globals["__name__"],
+            }
+            if guarded_globals:
+                f_globals.update(guarded_globals)
+        else:
+            f_globals = module_globals
         fn = types.FunctionType(
             code,
             f_globals,
@@ -4260,6 +4271,16 @@ class GuardsStatePickler(pickle.Pickler):
     def _reduce_nested_function(
         self, obj: types.FunctionType
     ) -> tuple[Callable[..., Any], tuple[Any, ...]]:
+        snapshot_globals = id(obj.__globals__) in self.guard_tree_values
+        guarded_globals = (
+            {
+                name: value
+                for name, value in obj.__globals__.items()
+                if id(value) in self.guard_tree_values
+            }
+            if snapshot_globals
+            else None
+        )
         attributes = (
             dict(obj.__dict__)
             if id(obj.__dict__) in self.guard_tree_values
@@ -4278,6 +4299,8 @@ class GuardsStatePickler(pickle.Pickler):
             obj.__kwdefaults__,
             obj.__name__,
             attributes,
+            guarded_globals,
+            snapshot_globals,
         )
 
     # pyrefly: ignore [bad-override]
@@ -4440,16 +4463,6 @@ class GuardsStatePickler(pickle.Pickler):
                 if f is not obj:
                     if id(obj) not in self.guard_tree_values:
                         return _Missing, ("fqn mismatch",)
-                    # A guard manager node exists for this function, so the
-                    # reloaded scope must be able to evaluate sources rooted at
-                    # it; _Missing raises AttributeError there instead.
-                    # NB the reconstruction takes __globals__ from the LOADING
-                    # process, so a guard resolving through it is re-derived
-                    # there rather than compared against the captured value:
-                    # over-strict when the module differs, and blind to a
-                    # global rebound between capture and load. Both predate
-                    # this branch -- the <locals> path above does the same --
-                    # but this widens the set of functions that reach it.
                     return self._reduce_nested_function(obj)
         elif inspect.ismethod(obj):
             func = obj.__func__
