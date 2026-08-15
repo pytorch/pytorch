@@ -320,6 +320,11 @@ uint64_t MPSProfiler::beginProfileKernel(const void* handle,
   return opInfo.profileId;
 }
 
+uint64_t MPSProfiler::beginProfileKernel(const void* handle, const std::string& strKey, bool isGraph) {
+  TORCH_WARN_DEPRECATION("beginProfileKernel() called without a stream, may end up profiling the wrong stream");
+  return beginProfileKernel(handle, strKey, isGraph, getCurrentMPSStream());
+}
+
 uint64_t MPSProfiler::beginProfileKernel(const void* handle,
                                          const std::string& kernelName,
                                          const TensorList& tensors,
@@ -330,6 +335,11 @@ uint64_t MPSProfiler::beginProfileKernel(const void* handle,
     return beginProfileKernel(handle, profilerStrKey, false, stream);
   }
   return 0;
+}
+
+uint64_t MPSProfiler::beginProfileKernel(const void* handle, const std::string& kernelName, const TensorList& tensors) {
+  TORCH_WARN_DEPRECATION("beginProfileKernel() called without a stream, may end up profiling the wrong stream");
+  return beginProfileKernel(handle, kernelName, tensors, getCurrentMPSStream());
 }
 
 void MPSProfiler::beginProfileGPUInterval(const void* handle, MPSStream* stream) {
@@ -346,6 +356,11 @@ void MPSProfiler::beginProfileGPUInterval(const void* handle, MPSStream* stream)
   addProfilerScheduledHandler(opInfo, stream);
 }
 
+void MPSProfiler::beginProfileGPUInterval(const void* handle) {
+  TORCH_WARN_DEPRECATION("beginProfileGPUInterval() called without a stream, may end up profiling the wrong stream");
+  beginProfileGPUInterval(handle, getCurrentMPSStream());
+}
+
 void MPSProfiler::endProfileKernel(const void* handle, MPSStream* stream, SyncType syncType) {
   // only do profiling if operation execution profiling or logging are enabled
   if (!isOperationProfilingEnabled()) {
@@ -354,6 +369,10 @@ void MPSProfiler::endProfileKernel(const void* handle, MPSStream* stream, SyncTy
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(m_op_info_list.count(uintptr_t(handle)), "Failed to get operation information!");
   auto& opInfo = *m_op_info_list[uintptr_t(handle)];
   addProfilerCompletedHandler(opInfo, syncType, stream);
+}
+
+void MPSProfiler::endProfileKernel(const void* handle, SyncType syncType) {
+  endProfileKernel(handle, getCurrentMPSStream(), syncType);
 }
 
 uint64_t MPSProfiler::beginProfileCPUFallback(const std::string& opName, const TensorList& tensors) {
@@ -421,6 +440,18 @@ uint64_t MPSProfiler::beginProfileCopy(const void* srcBuffer,
   return profileId;
 }
 
+uint64_t MPSProfiler::beginProfileCopy(const void* srcBuffer,
+                                       const void* dstBuffer,
+                                       const OptionalTensorRef srcTensor,
+                                       const OptionalTensorRef dstTensor,
+                                       size_t length,
+                                       bool isNonBlocking,
+                                       bool usesBlitter) {
+  TORCH_WARN_DEPRECATION("beginProfileCopy() called without a stream, may end up profiling the wrong stream");
+  return beginProfileCopy(
+      srcBuffer, dstBuffer, srcTensor, dstTensor, length, getCurrentMPSStream(), isNonBlocking, usesBlitter);
+}
+
 void MPSProfiler::endProfileCopy(uint64_t profileId, SyncType syncType, MPSStream* stream) {
   // this is just an identifier, and not used to access memory
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(m_copy_info_list.count(profileId), "Failed to get copy information!");
@@ -431,6 +462,10 @@ void MPSProfiler::endProfileCopy(uint64_t profileId, SyncType syncType, MPSStrea
     double cpuTime = double(BaseInfo::getTime() - copyInfo.startTime) * 1e-6;
     endProfileExecution(copyInfo, copyInfo.eventSignpostId, copyInfo.intervalSignpostId, 0, cpuTime);
   }
+}
+
+void MPSProfiler::endProfileCopy(uint64_t profileId, SyncType syncType) {
+  endProfileCopy(profileId, syncType, getCurrentMPSStream());
 }
 
 void MPSProfiler::addProfilerScheduledHandler(BaseInfo& info, MPSStream* stream) {
