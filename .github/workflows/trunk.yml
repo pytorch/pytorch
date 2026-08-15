@@ -112,12 +112,12 @@ jobs:
           { config: "distributed", shard: 2, num_shards: 3, runner: "linux.g4dn.12xlarge.nvidia.gpu" },
           { config: "distributed", shard: 3, num_shards: 3, runner: "linux.g4dn.12xlarge.nvidia.gpu" },
           { config: "pr_time_benchmarks", shard: 1, num_shards: 1, runner: "linux.g4dn.metal.nvidia.gpu" },
-        ]}
-      use-arc: false
+         ]}
       python-version: "3.10"
       compiler: gcc11
       cuda-version: "13.0"
     secrets: inherit
+
 
   linux-jammy-cuda13_0-py3_10-gcc11-test:
     if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-cuda13.0-py3.10-gcc11 ') }}
@@ -134,7 +134,6 @@ jobs:
       docker-image: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-build.outputs.test-matrix }}
       tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
-      use-arc: false
       python-version: "3.10"
       compiler: gcc11
       cuda-version: "13.0"

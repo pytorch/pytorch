@@ -29,7 +29,6 @@ from torch.multiprocessing import current_process, get_context
 from torch.testing._internal.common_utils import (
     get_report_path,
     IS_CI,
-    IS_MACOS,
     IS_WINDOWS,
     isRocmArchAnyOf,
     retry_shell,
@@ -1621,7 +1620,7 @@ def parse_args():
         "--enable-td",
         action="store_true",
         help="Enables removing tests based on TD",
-        default=False
+        default=False,
     )
     parser.add_argument(
         "--shard",
