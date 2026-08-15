@@ -33,6 +33,7 @@ class FlexGemmEpilogueLocalReduceConfig:
     """Template-time local-reduce metadata for output and/or feed-main consumers."""
 
     geometry: FlexGemmLocalReduceGeometry
+    physical_span: int = 1
     out_index: int | None = None
     output_layout: FlexGemmOutputLayout | None = None
     feeds_main: bool = False
@@ -63,6 +64,7 @@ class FlexGemmEpilogueLocalReduceConfig:
             return None
         return FlexGemmEpilogueLocalReduceConfig(
             local_reduce.match.geometry,
+            local_reduce.match.physical_span,
             out_index,
             (None if local_reduce.store is None else local_reduce.store.output_layout),
             local_reduce.feeds_main,
@@ -204,6 +206,8 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
     ) -> str:
         """Render one structural local-reduce plan for runtime dispatch."""
         plan = f"FlexGemmEpiModLocalReducePlan({local_reduce.geometry!r}"
+        if local_reduce.physical_span != 1:
+            plan += f", physical_span={local_reduce.physical_span}"
         if local_reduce.out_index is not None:
             plan += f", out={input_args[local_reduce.out_index]}"
         if local_reduce.output_layout is not None:

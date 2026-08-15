@@ -4,3 +4,4 @@
 0004-carrier-stride-validation.patch
 0005-exact-typed-row-gathers.patch
 0006-generic-multi-plane-state.patch
+0007-nested-fragment-tensorssa-composition.patch
