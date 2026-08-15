@@ -82,8 +82,8 @@ def vt_identity_compare(
 
     # Objects created during tracing: VT identity = Python identity.
     from .dicts import ConstDictVariable
+    from .exception import TracebackVariable
     from .lists import ListVariable
-    from .misc import TracebackVariable
     from .sets import SetVariable
 
     if isinstance(

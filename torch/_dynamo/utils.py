@@ -1319,7 +1319,11 @@ def _unpack_fast_types() -> tuple[type, ...]:
 def unpack_iterable(
     tx: InstructionTranslatorBase, iterable: VariableTracker
 ) -> list[VariableTracker]:
-    if isinstance(iterable, _unpack_fast_types()):
+    # Realize first: istype is exact, so a lazy wrapper would otherwise miss
+    # the fast path (and a subclass VT stays excluded since its exact type is
+    # not in _unpack_fast_types).
+    iterable = iterable.realize()
+    if istype(iterable, _unpack_fast_types()):
         # unpack_var_sequence returns a fresh list, so hand it back directly:
         # no generator, no per-element callback, single allocation.
         return iterable.unpack_var_sequence(tx)
@@ -1342,7 +1346,8 @@ def lazily_unpack(
     from .exc import handle_observed_exception, ObservedUserStopIteration
     from .variables.object_protocol import generic_getiter, pyiter_next
 
-    if isinstance(iterable, _unpack_fast_types()):
+    iterable = iterable.realize()
+    if istype(iterable, _unpack_fast_types()):
         yield from iterable.unpack_var_sequence(tx)
         return
 
