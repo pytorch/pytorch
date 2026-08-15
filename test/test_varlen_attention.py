@@ -89,6 +89,24 @@ def _check_cudnn_varlen_supported(device):
         )
 
 
+def _make_causal_varlen_inputs(
+    device: str | torch.device, *, requires_grad: bool = False
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    seq_len = 256
+    q = torch.randn(
+        seq_len,
+        2,
+        64,
+        device=device,
+        dtype=torch.bfloat16,
+        requires_grad=requires_grad,
+    )
+    k = torch.randn_like(q, requires_grad=requires_grad)
+    v = torch.randn_like(q, requires_grad=requires_grad)
+    cu_seq = torch.tensor([0, seq_len], device=device, dtype=torch.int32)
+    return q, k, v, cu_seq
+
+
 @contextmanager
 def _use_cudnn_varlen(_should_use_cudnn, device):
     if _should_use_cudnn:
@@ -832,7 +850,7 @@ class TestVarlenAttention(NNTestCase):
     @skipIfRocm
     @setSdpaBackendsToDefaultFinally
     @parametrize("dtype", [torch.bfloat16, torch.float16])
-    @parametrize("window_size", [(-1, -1), (-1, 0)])
+    @parametrize("window_size", [(-1, -1), (-1, 0), [-1, 0]])
     @parametrize("_should_use_cudnn", [True])
     def test_cudnn_attention_varlen(
         self, device, dtype, window_size, _should_use_cudnn
@@ -846,6 +864,124 @@ class TestVarlenAttention(NNTestCase):
             enable_gqa=False,
             _should_use_cudnn=_should_use_cudnn,
         )
+
+    @skipIfRocm
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
+    )
+    @parametrize("scale", [0.0, -0.125])
+    @parametrize("backend", [SDPBackend.FLASH_ATTENTION, SDPBackend.CUDNN_ATTENTION])
+    def test_varlen_nonpositive_scale(self, device, scale, backend):
+        if backend == SDPBackend.CUDNN_ATTENTION:
+            _check_cudnn_varlen_supported(device)
+        q, k, v, cu_seq = _make_causal_varlen_inputs(device, requires_grad=True)
+        seq_len = q.size(0)
+        grad_out = torch.randn_like(q)
+
+        with sdpa_kernel(SDPBackend.MATH):
+            expected = (
+                F.scaled_dot_product_attention(
+                    q.transpose(0, 1).unsqueeze(0),
+                    k.transpose(0, 1).unsqueeze(0),
+                    v.transpose(0, 1).unsqueeze(0),
+                    is_causal=True,
+                    scale=scale,
+                )
+                .squeeze(0)
+                .transpose(0, 1)
+            )
+        expected_grads = torch.autograd.grad(
+            expected, (q, k, v), grad_out, retain_graph=True
+        )
+
+        with sdpa_kernel(backend):
+            actual = varlen_attn(
+                q,
+                k,
+                v,
+                cu_seq,
+                cu_seq,
+                seq_len,
+                seq_len,
+                scale=scale,
+                window_size=(-1, 0),
+            )
+        actual_grads = torch.autograd.grad(actual, (q, k, v), grad_out)
+
+        self.assertEqual(actual, expected, atol=1e-2, rtol=1e-2)
+        for actual_grad, expected_grad in zip(actual_grads, expected_grads):
+            self.assertEqual(actual_grad, expected_grad, atol=1e-2, rtol=1e-2)
+
+        if backend == SDPBackend.FLASH_ATTENTION:
+            out = torch.empty_like(actual)
+            with sdpa_kernel(backend):
+                varlen_attn_out(
+                    out,
+                    q.detach(),
+                    k.detach(),
+                    v.detach(),
+                    cu_seq,
+                    cu_seq,
+                    seq_len,
+                    seq_len,
+                    scale=scale,
+                    window_size=(-1, 0),
+                )
+            self.assertEqual(out, expected, atol=1e-2, rtol=1e-2)
+
+    @skipIfRocm
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
+    )
+    @parametrize("backend", [SDPBackend.FLASH_ATTENTION, SDPBackend.CUDNN_ATTENTION])
+    def test_varlen_nan_scale(self, device, backend):
+        if backend == SDPBackend.CUDNN_ATTENTION:
+            _check_cudnn_varlen_supported(device)
+        q, k, v, cu_seq = _make_causal_varlen_inputs(device)
+        seq_len = q.size(0)
+
+        with sdpa_kernel(backend):
+            actual = varlen_attn(
+                q,
+                k,
+                v,
+                cu_seq,
+                cu_seq,
+                seq_len,
+                seq_len,
+                scale=float("nan"),
+                window_size=(-1, 0),
+            )
+
+        self.assertTrue(actual.isnan().all())
+
+    @skipIfRocm
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
+    )
+    @parametrize("backend", [SDPBackend.FLASH_ATTENTION, SDPBackend.CUDNN_ATTENTION])
+    def test_varlen_lse_is_not_differentiable(self, device, backend):
+        if backend == SDPBackend.CUDNN_ATTENTION:
+            _check_cudnn_varlen_supported(device)
+        q, k, v, cu_seq = _make_causal_varlen_inputs(device, requires_grad=True)
+        seq_len = q.size(0)
+
+        with sdpa_kernel(backend):
+            out, lse = varlen_attn(
+                q,
+                k,
+                v,
+                cu_seq,
+                cu_seq,
+                seq_len,
+                seq_len,
+                window_size=(-1, 0),
+                return_aux=AuxRequest(lse=True),
+            )
+
+        self.assertTrue(out.requires_grad)
+        self.assertFalse(lse.requires_grad)
+        torch.autograd.grad(out.sum(), (q, k, v))
 
     @skipIfRocm
     @unittest.skipIf(
