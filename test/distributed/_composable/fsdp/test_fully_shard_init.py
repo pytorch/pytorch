@@ -1471,9 +1471,15 @@ class TestFullyShardMixedDtypeParam(FSDPTestMultiThread):
 class TestFullyShardNonFloatParam(FSDPTest):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    # `DeviceTypeTestBase.precision`/`rel_tol` are thread-local, but some
-    # asserts run in autograd worker threads (the all-gather/reduce-scatter
-    # callbacks); override with the plain `TestCase` defaults.
+    # `instantiate_device_type_tests` injects `DeviceTypeTestBase`, whose
+    # `precision`/`rel_tol` are thread-local properties populated only on the
+    # thread that imports the module. The all-gather/reduce-scatter callbacks
+    # in `test_non_float_param` run `assertEqual` from an autograd worker
+    # thread during backward; since `assertEqual` always reads `self.rel_tol`,
+    # that worker thread's empty thread-local raises `AttributeError`. Override
+    # with the plain `TestCase` defaults (0 = no tolerance override) to shadow
+    # the thread-local properties; this is safe because this test sets no
+    # custom tolerance.
     precision = TestCase._precision
     rel_tol = TestCase._rel_tol
 
