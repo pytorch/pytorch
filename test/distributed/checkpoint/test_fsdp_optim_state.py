@@ -9,8 +9,10 @@ from torch.distributed.checkpoint.optimizer import load_sharded_optimizer_state_
 from torch.distributed.checkpoint.state_dict import get_state_dict, set_state_dict
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.fully_sharded_data_parallel import StateDictType
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -23,6 +25,8 @@ from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 
 
 class FsdpOptimStateCheckpoint(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _create_model(self):
         # make weight tensor dim_0 as large as the world size for scaling test
         layer1_weight_dim = self.world_size
@@ -186,5 +190,13 @@ class FsdpOptimStateCheckpoint(DTensorTestBase):
 
 
 instantiate_parametrized_tests(FsdpOptimStateCheckpoint)
+instantiate_device_type_tests(
+    FsdpOptimStateCheckpoint,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+
+
 if __name__ == "__main__":
     run_tests()
