@@ -430,7 +430,8 @@ class TestKernelBenchmark(TestCase):
         max_autotune=True, max_autotune_gemm_backends="TRITON", force_shape_pad=True
     )
     def test_slice_mm_bandwidth_computation(self, device):
-        if device == "xpu" and not torch._inductor.utils.is_big_gpu():
+        device_type = torch.device(device).type
+        if device_type == "xpu" and not torch._inductor.utils.is_big_gpu():
             raise unittest.SkipTest("unsupported device")
 
         M, N, K = 1000, 2000, 3000
