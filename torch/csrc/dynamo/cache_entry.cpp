@@ -66,9 +66,19 @@ PyObject* CacheEntry_to_obj(CacheEntry* e) {
   return py::cast(e, py::return_value_policy::reference).release().ptr();
 }
 
+// Returns a BORROWED reference, kept alive by the callback chain it was read
+// off. Both attributes below must therefore be plain stored attributes, not
+// properties or __getattr__ results, or the object dies with the temporary
+// py::object this returns the pointer of.
 PyObject* get_backend(PyObject* callback) {
   py::handle handle = py::handle(callback);
-  while (py::hasattr(handle, "_torchdynamo_orig_backend")) {
+  while (true) {
+    if (py::hasattr(handle, "_torchdynamo_cache_key")) {
+      return handle.attr("_torchdynamo_cache_key").ptr();
+    }
+    if (!py::hasattr(handle, "_torchdynamo_orig_backend")) {
+      break;
+    }
     handle = handle.attr("_torchdynamo_orig_backend");
   }
   return handle.ptr();
