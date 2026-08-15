@@ -435,6 +435,16 @@ static PyObject* pyobject_dispatch_normalize_result(
     const c10::FunctionSchema& schema,
     PyObject* result) {
   const auto& returns = schema.returns();
+  if (returns.empty()) {
+    py::object out = py::reinterpret_steal<py::object>(result);
+    TORCH_CHECK_VALUE(
+        out.is_none(),
+        "Expected Python kernel for ",
+        schema.operator_name(),
+        " to return None but it returned something else instead.");
+    return out.release().ptr();
+  }
+
   bool needs_normalization = false;
   for (const auto& ret : returns) {
     if (ret.real_type()->kind() != c10::TypeKind::TensorType) {
@@ -443,6 +453,9 @@ static PyObject* pyobject_dispatch_normalize_result(
     }
   }
   if (!needs_normalization) {
+    // Tensor-only schemas were already eligible for PyObject dispatch before
+    // result normalization was added. Preserve their zero-copy return path:
+    // converting through IValues would reintroduce the cost this path avoids.
     return result;
   }
 
