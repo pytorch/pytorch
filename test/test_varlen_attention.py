@@ -830,7 +830,7 @@ class TestVarlenAttention(NNTestCase):
     @skipIfRocm
     @setSdpaBackendsToDefaultFinally
     @parametrize("dtype", [torch.bfloat16, torch.float16])
-    @parametrize("window_size", [(-1, -1), (-1, 0)])
+    @parametrize("window_size", [(-1, -1), (-1, 0), [-1, 0]])
     @parametrize("_should_use_cudnn", [True])
     def test_cudnn_attention_varlen(
         self, device, dtype, window_size, _should_use_cudnn
