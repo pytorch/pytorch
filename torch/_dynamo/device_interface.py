@@ -659,6 +659,7 @@ def get_registered_device_interfaces() -> Iterable[tuple[str, type[DeviceInterfa
         init_device_reg()
     return device_interfaces.items()
 
+
 def _register_interface_for_privateuse1() -> None:
     backend = torch._C._get_privateuse1_backend_name()
     if not backend or backend == "privateuseone":
