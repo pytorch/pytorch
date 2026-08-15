@@ -344,6 +344,7 @@ def _callback_from_stance(callback: DynamoCallback) -> DynamoCallback:
 
         # to prevent cache miss due to different backend
         fail_callback._torchdynamo_orig_backend = callback  # type: ignore[attr-defined]
+        fail_callback._torchdynamo_force_callback_on_cache_miss = True  # type: ignore[attr-defined]
 
         return fail_callback
     else:
@@ -453,6 +454,17 @@ def _get_cache_entries_for_region(
     if callable(code):
         code = code.__code__
     return torch._C._dynamo.eval_frame._get_cache_entries_for_region(
+        code, isolate_recompiles_id
+    )
+
+
+def _clear_cache_entries_for_region(
+    code: types.CodeType | Callable[..., Any],
+    isolate_recompiles_id: int,
+) -> None:
+    if callable(code):
+        code = code.__code__
+    torch._C._dynamo.eval_frame._clear_cache_entries_for_region(
         code, isolate_recompiles_id
     )
 
@@ -1003,6 +1015,8 @@ class _TorchDynamoContext:
                         log.warning(
                             "Failed to load entry from dynamo cache", exc_info=True
                         )
+                        if self._package.is_initialized():
+                            self._package.reset_after_failed_install()
                         self._package.initialize(
                             fn_key, None, ignore_inlined_sources=False
                         )

@@ -185,7 +185,8 @@ import sys
 import threading
 import types
 from collections.abc import Callable, Iterator, Sequence
-from typing import TYPE_CHECKING
+from contextvars import ContextVar
+from typing import Any, TYPE_CHECKING
 from typing_extensions import Self
 
 import torch
@@ -196,6 +197,7 @@ from torch.utils._pytree import tree_leaves
 from .exc import PackageError
 from .guards import CheckFunctionManager
 from .package import (
+    _BackendId,
     _DynamoCacheEntry,
     CompilePackage,
     DynamoStore,
@@ -216,6 +218,9 @@ log = logging.getLogger(__name__)
 _SERVING_LOCK = threading.Lock()
 _SERVING_DEPTH = 0
 _SERVING_PRIOR_STANCE: DynamoStance | None = None
+_CAPTURE_CONFIG_STATE: ContextVar[tuple[int, tuple[bool, bool] | None]] = ContextVar(
+    "precompile_capture_config_state", default=(0, None)
+)
 
 # Not a public surface -- see the module docstring. This exists so `from ...
 # import *` in a debugging session pulls the entry points rather than every
@@ -230,6 +235,40 @@ __all__ = [
     "precompile_load",
     "serving",
 ]
+
+
+@contextlib.contextmanager
+def _capture_config() -> Iterator[None]:
+    depth, prior = _CAPTURE_CONFIG_STATE.get()
+    dynamo_config: Any = torch._dynamo.config
+    if depth == 0:
+        prior = (
+            functorch_config.bundled_autograd_cache,
+            dynamo_config.allow_empty_graphs,
+        )
+        functorch_config.bundled_autograd_cache = True
+        dynamo_config.allow_empty_graphs = True
+    _CAPTURE_CONFIG_STATE.set((depth + 1, prior))
+    try:
+        yield
+    finally:
+        depth, prior = _CAPTURE_CONFIG_STATE.get()
+        if depth <= 0 or prior is None:
+            raise AssertionError("precompile capture config is not active")
+        depth -= 1
+        if depth == 0:
+            functorch_config.bundled_autograd_cache = prior[0]
+            dynamo_config.allow_empty_graphs = prior[1]
+            _CAPTURE_CONFIG_STATE.set((0, None))
+        else:
+            _CAPTURE_CONFIG_STATE.set((depth, prior))
+
+
+def _clear_package_region(package: CompilePackage, isolate_recompiles_id: int) -> None:
+    from .eval_frame import _clear_cache_entries_for_region
+
+    for code in package.code_objects():
+        _clear_cache_entries_for_region(code, isolate_recompiles_id)
 
 
 def default_guard_filter_fn(
@@ -329,8 +368,9 @@ class PrecompileSummary:
     # frame called beneath the offender into run-only mode, and those never
     # re-enter Dynamo, so they go short without being named here.
     truncated: tuple[str, ...] = ()
-    # Frames Dynamo produced but compiled nothing for. The entry frame landing
-    # here means the model runs eager despite the artifact existing.
+    # Frames with at least one exercised compile attempt that produced no
+    # guarded code. That path is absent from the artifact; if the frame has no
+    # guarded variants at all, install() skips it and it runs eager.
     uncovered_frames: tuple[str, ...] = ()
     # Sources pinned to an exact value by an equality guard -- see
     # ``_pins_a_value``. These make the artifact serve only the calls it was
@@ -730,8 +770,51 @@ class _SingleFileStore(DynamoStore):
     above them is the shared DynamoStore.
     """
 
+    def __init__(self, backend_artifacts: dict[_BackendId, Any] | None = None) -> None:
+        self._backend_artifacts = {} if backend_artifacts is None else backend_artifacts
+
     def clear(self) -> None:
-        pass
+        self._backend_artifacts.clear()
+
+    def record_eager_backend(self, backend_id: _BackendId, backend: Any) -> None:
+        from torch._dynamo.precompile_context import EagerCacheArtifact
+
+        self._backend_artifacts[backend_id] = EagerCacheArtifact(
+            key=backend_id, content=backend
+        )
+
+    def save_cache_entry(self, cache_entry: _DynamoCacheEntry, key: str) -> None:
+        from torch._dynamo.precompile_context import (
+            BackendCacheArtifact,
+            PrecompileContext,
+        )
+
+        for backend_id in cache_entry.backend_ids:
+            if backend_id not in self._backend_artifacts:
+                artifact = PrecompileContext.take_artifact(backend_id)
+                if artifact is not None:
+                    self._backend_artifacts[backend_id] = artifact
+        missing = [
+            backend_id
+            for backend_id in cache_entry.backend_ids
+            if backend_id not in self._backend_artifacts
+        ]
+        if missing:
+            raise RuntimeError(
+                f"Backend {missing[0]} is not found in the given backends"
+            )
+        backends = {
+            backend_id: self._backend_artifacts[backend_id]
+            for backend_id in cache_entry.backend_ids
+        }
+        if not all(
+            isinstance(artifact, BackendCacheArtifact) for artifact in backends.values()
+        ):
+            raise AssertionError("Expected BackendCacheArtifact")
+        self.write(PrecompileCacheEntry(cache_entry, backends), key)
+
+    def load_cache_entry(self, key: str) -> PrecompileCacheEntry:
+        return self.read(key)
 
     def write(self, cache_entry: PrecompileCacheEntry, path: str) -> None:
         from torch._inductor.codecache import write_atomic
@@ -761,6 +844,25 @@ class _SingleFileStore(DynamoStore):
         if not isinstance(entry, PrecompileCacheEntry):
             raise PackageError(f"{path} does not hold a precompile artifact")
         return entry
+
+
+class _PrecompileBackend:
+    """Give one explicit session its own Dynamo cache identity."""
+
+    def __init__(self, backend: str) -> None:
+        inner = torch._dynamo.lookup_backend(backend)
+        self._torchdynamo_orig_backend = inner
+        self._torchdynamo_cache_key = object()
+        self.backend_ctx_ctor = getattr(
+            inner, "backend_ctx_ctor", contextlib.nullcontext
+        )
+
+    def __call__(self, gm: torch.fx.GraphModule, inputs: list[torch.Tensor]) -> Any:
+        return self._torchdynamo_orig_backend(gm, inputs)
+
+    def get_compiler_config(self) -> Any:
+        getter = getattr(self._torchdynamo_orig_backend, "get_compiler_config", None)
+        return None if getter is None else getter()
 
 
 # Guards whose check IS object identity, directly or through a derived guard,
@@ -936,16 +1038,9 @@ def _summarize(
     kept: set[tuple[str, str]],
     risky: set[tuple[str, str]],
     truncated: frozenset[str],
+    uncovered: frozenset[str],
     capture_errors: Sequence[str],
 ) -> PrecompileSummary:
-    # An entry with no guarded codes is skip_code()'d at install time, so that
-    # frame runs eager forever. Resume frames legitimately have none when the
-    # continuation was folded into a parent, so only flag the entry frame.
-    uncovered = tuple(
-        c.python_code.co_name
-        for c in entry.codes[:1]
-        if c.has_compile_id and not c.guarded_codes and not c.bypassed
-    )
     wont_generalize = tuple(sorted({n for t, n in kept if _pins_a_value(t, n)}))
     return PrecompileSummary(
         frames=len(entry.codes),
@@ -954,7 +1049,7 @@ def _summarize(
         backend_graphs=len(entry.backend_ids),
         bypassed=tuple(c.python_code.co_name for c in entry.codes if c.bypassed),
         truncated=tuple(sorted(truncated)),
-        uncovered_frames=uncovered,
+        uncovered_frames=tuple(sorted(uncovered)),
         wont_generalize=wont_generalize,
         dropped_guards=tuple(sorted(dropped)),
         kept_guards=tuple(sorted(kept)),
@@ -966,7 +1061,7 @@ def _summarize(
 class PrecompileSession:
     """
     A capture in progress. Use as a context manager to get the callable to
-    exercise, then ``save()``.
+    exercise, then ``save()``. A session is one-shot and cannot be re-entered.
     """
 
     def __init__(
@@ -1004,8 +1099,23 @@ class PrecompileSession:
             self._entry_fn,
             serialization_guard_filter_fn=self._guard_filter_fn,
         )
+        self._backend_artifacts: dict[_BackendId, Any] = {}
         self._stack: contextlib.ExitStack | None = None
+        self._optimized: Callable[..., object] | None = None
         self._compiled: Callable[..., object] | None = None
+        self._isolate_recompiles_id: int | None = None
+        from .pgo import _new_code_state
+
+        self._pgo_state = _new_code_state()
+        self._finished = False
+
+    def _take_backend_artifacts(self) -> None:
+        from torch._dynamo.precompile_context import PrecompileContext
+
+        for backend_id in self._package.cache_entry().backend_ids:
+            artifact = PrecompileContext.take_artifact(backend_id)
+            if artifact is not None:
+                self._backend_artifacts[backend_id] = artifact
 
     def _record_capture_error(self, error: BaseException) -> None:
         message = str(error)
@@ -1015,30 +1125,84 @@ class PrecompileSession:
         self._recorded_exception_keys.add(key)
         self._capture_errors.append(f"{type(error).__name__}: {message}")
 
+    @staticmethod
+    def _check_module_state(module: torch.nn.Module) -> None:
+        state = (
+            ("parameter", module.named_parameters()),
+            ("buffer", module.named_buffers()),
+        )
+        for kind, tensors in state:
+            for name, tensor in tensors:
+                if torch.is_inference(tensor):
+                    raise PackageError(
+                        f"automatic example capture found inference tensor {kind} "
+                        f"{name!r} on {type(module).__name__}. Automatic examples "
+                        "capture ordinary torch.no_grad() semantics, but leaving "
+                        "inference_mode does not turn existing tensors into ordinary "
+                        "tensors. Create the module outside torch.inference_mode(), or "
+                        "use capture() manually and serve under the matching inference "
+                        "mode."
+                    )
+
+    def _clear_runtime_cache(self) -> None:
+        if self._isolate_recompiles_id is None:
+            return
+        try:
+            _clear_package_region(self._package, self._isolate_recompiles_id)
+        finally:
+            self._isolate_recompiles_id = None
+            self._optimized = None
+            if self._backend != "eager":
+                self._package.cached_backends.clear()
+            self._pgo_state.clear()
+
     def _call(self, *args: object, **kwargs: object) -> object:
         if self._compiled is None:
             raise RuntimeError("PrecompileSession is not active")
+        from .pgo import _use_code_state
+
         try:
-            return self._compiled(*args, **kwargs)
+            with _capture_config(), _use_code_state(self._pgo_state):
+                return self._compiled(*args, **kwargs)
         except BaseException as e:
             self._record_capture_error(e)
             raise
 
     def __enter__(self) -> Callable[..., object]:
+        if self._finished:
+            raise RuntimeError("PrecompileSession cannot be re-entered")
         if self._stack is not None:
             raise RuntimeError("PrecompileSession is already active")
         stack = contextlib.ExitStack()
         # Backends must serialize into the artifact rather than into the
         # process-local inductor cache.
-        stack.enter_context(functorch_config.patch("bundled_autograd_cache", True))
+        stack.enter_context(_capture_config())
         self._stack = stack
         try:
-            self._compiled = torch._dynamo.optimize(
-                self._backend,
-                package=self._package,
-                recompile_limit=self._recompile_limit,
-                dynamic=self._dynamic,
-            )(self._fn)
+            if self._example_inputs:
+                module = (
+                    self._fn
+                    if isinstance(self._fn, torch.nn.Module)
+                    else getattr(self._fn, "__self__", None)
+                )
+                if isinstance(module, torch.nn.Module):
+                    self._check_module_state(module)
+            if self._optimized is None:
+                optimize_ctx = torch._dynamo.optimize(
+                    _PrecompileBackend(self._backend),
+                    package=self._package,
+                    recompile_limit=self._recompile_limit,
+                    dynamic=self._dynamic,
+                    isolate_recompiles=True,
+                )
+                isolate_recompiles_id = getattr(
+                    optimize_ctx, "_isolate_recompiles_id", None
+                )
+                if not isinstance(isolate_recompiles_id, int):
+                    raise AssertionError("missing isolate_recompiles_id")
+                self._isolate_recompiles_id = isolate_recompiles_id
+                self._optimized = optimize_ctx(self._fn)
+            self._compiled = self._optimized
             # Automatic examples are the ordinary no_grad inference path.
             # inference_mode is a distinct guarded state and is disabled here
             # even when the caller entered it before starting capture.
@@ -1056,6 +1220,9 @@ class PrecompileSession:
                         "outside torch.inference_mode(), or use capture() manually "
                         "and serve under the matching inference mode."
                     )
+                for value in tree_leaves((args, kwargs)):
+                    if isinstance(value, torch.nn.Module):
+                        self._check_module_state(value)
                 with torch.inference_mode(False), torch.no_grad():
                     self._call(*args, **kwargs)
         except BaseException as e:
@@ -1065,7 +1232,14 @@ class PrecompileSession:
             # the session is wedged: save() reports the block as still open.
             self._stack = None
             self._compiled = None
-            stack.close()
+            try:
+                stack.close()
+            finally:
+                try:
+                    self._take_backend_artifacts()
+                finally:
+                    self._clear_runtime_cache()
+                    self._finished = True
             raise
         finally:
             # Guard/backend state is already in the package. Do not retain the
@@ -1085,6 +1259,12 @@ class PrecompileSession:
             except BaseException as e:
                 self._record_capture_error(e)
                 raise
+            finally:
+                try:
+                    self._take_backend_artifacts()
+                finally:
+                    self._clear_runtime_cache()
+                    self._finished = True
         self._recorded_exception_keys.clear()
         if self._invariants_path is None:
             return
@@ -1282,6 +1462,7 @@ class PrecompileSession:
             self._kept_guards,
             risky,
             self._package.truncated_frames,
+            self._package.uncovered_frames,
             self._capture_errors,
         )
 
@@ -1366,8 +1547,8 @@ class PrecompileSession:
                 raise PackageError(
                     "Precompilation captured no compiled code. Capture happens by "
                     "execution, so the callable must actually be run inside the "
-                    "capture block; a callable Dynamo traced to an empty graph also "
-                    "lands here and cannot be precompiled."
+                    "capture block. A call Dynamo could not turn into guarded code "
+                    "is reported separately as an uncovered frame."
                 )
             if summary.truncated:
                 raise PackageError(
@@ -1384,14 +1565,14 @@ class PrecompileSession:
                 )
             if summary.uncovered_frames:
                 raise PackageError(
-                    f"Precompilation produced no compiled code for entry frame(s) "
-                    f"{list(summary.uncovered_frames)}, so install() will skip them "
-                    f"and they will run eager -- and because a skipped frame never "
-                    f"compiles, serving() cannot report the gap either. This is "
-                    f"expected when the frame only dispatches to submodules that ARE "
-                    f"covered; it also looks exactly like a frame Dynamo gave up on "
-                    f"(check TORCH_LOGS=graph_breaks for gb0124). Pass "
-                    f"require_complete=False once you have confirmed which."
+                    f"Precompilation exercised frame(s) without producing guarded "
+                    f"code for at least one attempt: {list(summary.uncovered_frames)}. "
+                    f"Those paths are absent from the artifact. A frame with no guarded "
+                    f"variants at all is skipped at install and runs eager, so serving() "
+                    f"cannot report that gap. This is expected for a frame that only "
+                    f"dispatches to covered submodules; it also looks exactly like a "
+                    f"frame Dynamo gave up on (check TORCH_LOGS=graph_breaks for gb0124). "
+                    f"Pass require_complete=False once you have confirmed which."
                 )
             if summary.bypassed:
                 raise PackageError(
@@ -1408,7 +1589,8 @@ class PrecompileSession:
                 len(summary.wont_generalize),
                 list(summary.wont_generalize),
             )
-        store = _SingleFileStore()
+        self._take_backend_artifacts()
+        store = _SingleFileStore(self._backend_artifacts)
         if self._backend == "eager":
             # Eager "backends" are fx graphs with no compiled artifact of their
             # own, so they have to be handed to the store explicitly.
@@ -1452,14 +1634,17 @@ def precompile_capture(
 
     ``recompile_limit`` defaults well above Dynamo's usual 8 because a
     precompile deliberately wants one compiled variant per condition, whereas
-    the normal limit exists to catch runaway recompilation.
+    the normal limit exists to catch runaway recompilation. It also raises a
+    lower ambient ``accumulated_recompile_limit`` for this capture so that the
+    explicit API limit is the effective one.
 
     ``example_inputs`` are run on ``__enter__``, under ``torch.no_grad()``, so
     the ``with`` body is optional for an inference capture; calls you make in
-    the body run in the ambient grad mode instead. Existing inference tensors
-    are rejected because disabling inference mode does not make them ordinary
-    tensors. ``invariants`` names a file written when the block exits without an
-    exception.
+    the body run in the ambient grad mode instead. Existing inference tensors in
+    the inputs or an ``nn.Module``'s parameters and buffers are rejected because
+    disabling inference mode does not make them ordinary tensors. ``invariants``
+    names a file written when the block exits without an exception. A session is
+    one-shot; create another capture instead of re-entering it.
 
     Runtime guards remain intact during capture. ``guard_filter_fn`` applies
     only to the serialized guard state, so every supplied example observes the
@@ -1515,31 +1700,70 @@ def precompile_load(
         ),
         cache_entry.backends,
     )
-    compiled = torch._dynamo.optimize(
-        backend,
+    optimize_ctx = torch._dynamo.optimize(
+        _PrecompileBackend(backend),
         package=package,
         recompile_limit=recompile_limit,
         dynamic=dynamic,
-    )(fn)
+        isolate_recompiles=True,
+    )
+    compiled = optimize_ctx(fn)
     package.install(backends)
-    return PrecompiledCallable(compiled, package)
+    isolate_recompiles_id = getattr(optimize_ctx, "_isolate_recompiles_id", None)
+    if not isinstance(isolate_recompiles_id, int):
+        raise AssertionError("missing isolate_recompiles_id")
+    return PrecompiledCallable(compiled, package, isolate_recompiles_id)
 
 
 class PrecompiledCallable:
     """A loaded artifact. Call it, or use it as a context manager to scope it."""
 
     def __init__(
-        self, compiled: Callable[..., object], package: CompilePackage
+        self,
+        compiled: Callable[..., object],
+        package: CompilePackage,
+        isolate_recompiles_id: int,
     ) -> None:
-        self._compiled = compiled
+        self._compiled: Callable[..., object] | None = compiled
         self._package = package
-        self._unload_lock = threading.Lock()
+        self._isolate_recompiles_id = isolate_recompiles_id
+        from .pgo import _new_code_state
+
+        self._pgo_state = _new_code_state()
+        self._state = threading.Condition()
+        self._active_calls = 0
+        self._unloading = False
         self._loaded = True
 
     def __call__(self, *args: object, **kwargs: object) -> object:
-        return self._compiled(*args, **kwargs)
+        with self._state:
+            if not self._loaded or self._unloading:
+                raise RuntimeError("PrecompiledCallable has been unloaded")
+            compiled = self._compiled
+            if compiled is None:
+                raise AssertionError("loaded callable is missing")
+            self._active_calls += 1
+        # An uncovered no-op branch must become a guarded variant rather than
+        # Dynamo's ordinary eager-only SkipFrame. Otherwise one fallback call
+        # permanently skips that frame and later serving() cannot detect it.
+        try:
+            from .pgo import _use_code_state
+
+            with (
+                torch._dynamo.config.patch(allow_empty_graphs=True),
+                _use_code_state(self._pgo_state),
+            ):
+                return compiled(*args, **kwargs)
+        finally:
+            with self._state:
+                self._active_calls -= 1
+                if self._active_calls == 0:
+                    self._state.notify_all()
 
     def __enter__(self) -> Self:
+        with self._state:
+            if not self._loaded or self._unloading:
+                raise RuntimeError("PrecompiledCallable has been unloaded")
         return self
 
     def __exit__(self, *exc: object) -> None:
@@ -1547,11 +1771,27 @@ class PrecompiledCallable:
 
     def unload(self) -> None:
         """Remove installed globals and precompile entries from the code objects."""
-        with self._unload_lock:
+        with self._state:
+            while self._unloading:
+                self._state.wait()
             if not self._loaded:
                 return
-            self._package.uninstall()
+            self._unloading = True
+            while self._active_calls:
+                self._state.wait()
             self._loaded = False
+        try:
+            self._package.uninstall()
+        finally:
+            try:
+                _clear_package_region(self._package, self._isolate_recompiles_id)
+            finally:
+                with self._state:
+                    self._unloading = False
+                    self._compiled = None
+                    self._package.cached_backends.clear()
+                    self._pgo_state.clear()
+                    self._state.notify_all()
 
 
 @contextlib.contextmanager

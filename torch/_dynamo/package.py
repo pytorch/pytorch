@@ -74,6 +74,16 @@ def _register_installer(
         registry.setdefault(code, weakref.WeakSet()).add(package)
 
 
+@dataclasses.dataclass
+class _SkipInstallerState:
+    owners: weakref.WeakSet["CompilePackage"]
+    prior_strategy: FrameExecStrategy
+    generation: int
+
+
+_PACKAGE_SKIP_STRATEGY = FrameExecStrategy(FrameAction.SKIP, FrameAction.DEFAULT)
+
+
 # Distinguishes "the name is unbound" from "it is bound to None", so uninstall()
 # can tell whether the binding it wrote is still the one there.
 _ABSENT_GLOBAL = object()
@@ -763,6 +773,10 @@ class CompilePackage:
         # runtime-only and NOT serialized: it describes this capture session, not
         # the artifact, and it must not affect what install() serves.
         self._truncated_frames: set[str] = set()
+        # A frame can enter Dynamo yet produce no guarded code for one exercised
+        # variant (for example, an unsupported or empty resume path). Keep that
+        # distinct from resume code that was generated but never executed.
+        self._uncovered_frames: set[str] = set()
         # device_type that model compiled with.
         self._device_type = "cpu"
 
@@ -799,6 +813,10 @@ class CompilePackage:
         self._source_info = SourceInfo(inlined_sources=set())
         self._codes = {}
         self._device_type = "cpu"
+        self._cached_backends = {}
+        self._resume_codes = set()
+        self._truncated_frames = set()
+        self._uncovered_frames = set()
         self._innermost_fn = innermost_fn(fn)  # type: ignore[assignment]
         if self._innermost_fn is None:
             raise AssertionError("innermost_fn returned None")
@@ -906,11 +924,14 @@ class CompilePackage:
             self._add_user_function(code)
 
         entry = self._codes[code]
+        guarded_codes_before = len(entry.guarded_codes)
         self._current_entry = entry
         try:
             yield
         finally:
             entry.has_compile_id = True
+            if len(entry.guarded_codes) == guarded_codes_before and not entry.bypassed:
+                self._uncovered_frames.add(code.co_name)
             self._current_entry = None
 
     def add_guarded_code(
@@ -976,6 +997,17 @@ class CompilePackage:
     @property
     def truncated_frames(self) -> frozenset[str]:
         return frozenset(self._truncated_frames)
+
+    @property
+    def uncovered_frames(self) -> frozenset[str]:
+        return frozenset(self._uncovered_frames)
+
+    def guarded_code_count(self, code: types.CodeType) -> int:
+        entry = self._codes.get(code)
+        return 0 if entry is None else len(entry.guarded_codes)
+
+    def code_objects(self) -> tuple[types.CodeType, ...]:
+        return tuple(self._codes)
 
     def bypass_current_entry(self) -> None:
         if self._current_entry is None:
@@ -1071,19 +1103,22 @@ class CompilePackage:
 
         self._installed_globals = {}
 
+        from torch._C._dynamo.eval_frame import compare_and_set_code_exec_strategy
+
         for code in self._skipped_codes:
             with _INSTALLER_REGISTRY_LOCK:
-                owners = _SKIP_INSTALLERS.get(code)
-                if owners is not None:
-                    owners.discard(self)
-                still_skipped = bool(owners)
-            # Only revoke a skip once we are the last package holding it. The
-            # strategy a frame had before install() skipped it cannot be read
-            # back, so restoring unconditionally un-skips frames another live
-            # package still needs skipped.
-            if not still_skipped:
-                torch._dynamo.eval_frame.set_code_exec_strategy(
-                    code, FrameExecStrategy(FrameAction.DEFAULT, FrameAction.DEFAULT)
+                state = _SKIP_INSTALLERS.get(code)
+                if state is None:
+                    continue
+                state.owners.discard(self)
+                if state.owners:
+                    continue
+                del _SKIP_INSTALLERS[code]
+                # The generation check and write happen in one C++ call. A
+                # same-valued skip or a different strategy installed after us
+                # therefore wins, including a write racing with this unload.
+                compare_and_set_code_exec_strategy(
+                    code, state.generation, state.prior_strategy
                 )
         self._skipped_codes = []
 
@@ -1147,6 +1182,17 @@ class CompilePackage:
                 # artifact on a serving host that does not match the capture host.
                 self._uninstall()
                 raise
+
+    def reset_after_failed_install(self) -> None:
+        """Make an install-clean package reusable for a cold-cache fallback."""
+        with _PACKAGE_INSTALL_LOCK:
+            if (
+                self._installed_globals
+                or self._installed_precompile_codes
+                or self._skipped_codes
+            ):
+                raise AssertionError("failed install left package state installed")
+            self._initialized = False
 
     def _install_codes(self, backends: dict[_BackendId, Any]) -> None:
         from torch._C._dynamo.eval_frame import _load_precompile_entry
@@ -1226,14 +1272,43 @@ class CompilePackage:
                         )
 
                 if len(entry.guarded_codes) == 0:
-                    # Dynamo generates empty graph for trivial functions, should just skip them
-                    # in these cases.
+                    # Legacy and transparent-cache artifacts can contain a frame
+                    # with no guarded code. It must run eager so covered child
+                    # frames can still dispatch.
                     # Remember it, and register as one of the packages holding
                     # the skip, so uninstall() can restore the frame without
                     # un-skipping it under another package that still needs it.
-                    torch._dynamo.eval_frame.skip_code(target_code)
                     self._skipped_codes.append(target_code)
-                    _register_installer(_SKIP_INSTALLERS, target_code, self)
+                    with _INSTALLER_REGISTRY_LOCK:
+                        state = _SKIP_INSTALLERS.get(target_code)
+                        current_generation = None
+                        if state is not None:
+                            from torch._C._dynamo.eval_frame import (
+                                get_code_exec_strategy_token,
+                            )
+
+                            _, current_generation = get_code_exec_strategy_token(
+                                target_code
+                            )
+                        if state is None or current_generation != state.generation:
+                            from torch._C._dynamo.eval_frame import (
+                                set_code_exec_strategy_with_token,
+                            )
+
+                            prior_strategy, generation = (
+                                set_code_exec_strategy_with_token(
+                                    target_code, _PACKAGE_SKIP_STRATEGY
+                                )
+                            )
+                            state = _SkipInstallerState(
+                                owners=(
+                                    weakref.WeakSet() if state is None else state.owners
+                                ),
+                                prior_strategy=prior_strategy,
+                                generation=generation,
+                            )
+                            _SKIP_INSTALLERS[target_code] = state
+                        state.owners.add(self)
 
                 for guarded_code in entry.guarded_codes:
                     with dynamo_timed("precompile_load_guards"):

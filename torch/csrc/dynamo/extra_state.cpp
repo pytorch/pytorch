@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <mutex>
 #include <vector>
 
 #include <c10/util/Exception.h>
@@ -19,6 +20,8 @@
 namespace {
 // Short-term fix for: https://github.com/pytorch/pytorch/issues/166926
 bool use_lru = true;
+uint64_t next_strategy_generation = 0;
+std::mutex strategy_mutex;
 } // namespace
 
 Py_ssize_t extra_index = -1;
@@ -90,21 +93,66 @@ CacheEntry* extract_cache_entry(
   return nullptr;
 }
 
-FrameState* extract_frame_state(ExtraState* extra_state) {
+FrameState* extract_frame_state(
+    ExtraState* extra_state,
+    int64_t isolate_recompiles_id) {
   if (extra_state == nullptr) {
     return nullptr;
   }
-  return (FrameState*)extra_state->frame_state.ptr();
+  if (isolate_recompiles_id < 0) {
+    return (FrameState*)extra_state->frame_state.ptr();
+  }
+  std::lock_guard<std::mutex> lock(extra_state->region_frame_state_mutex);
+  return (FrameState*)extra_state->region_frame_state_map[isolate_recompiles_id]
+      .ptr();
 }
 
 FrameExecStrategy extra_state_get_exec_strategy(ExtraState* extra_state) {
   return extra_state->strategy;
 }
 
-void extra_state_set_exec_strategy(
+uint64_t extra_state_get_exec_strategy_token(
+    ExtraState* extra_state,
+    FrameExecStrategy* strategy) {
+  std::lock_guard<std::mutex> lock(strategy_mutex);
+  *strategy = extra_state->strategy;
+  return extra_state->strategy_generation;
+}
+
+static void set_exec_strategy_unlocked(
     ExtraState* extra_state,
     FrameExecStrategy strategy) {
   extra_state->strategy = strategy;
+  extra_state->strategy_generation = ++next_strategy_generation;
+}
+
+void extra_state_set_exec_strategy(
+    ExtraState* extra_state,
+    FrameExecStrategy strategy) {
+  std::lock_guard<std::mutex> lock(strategy_mutex);
+  set_exec_strategy_unlocked(extra_state, strategy);
+}
+
+uint64_t extra_state_set_exec_strategy_with_token(
+    ExtraState* extra_state,
+    FrameExecStrategy strategy,
+    FrameExecStrategy* prior_strategy) {
+  std::lock_guard<std::mutex> lock(strategy_mutex);
+  *prior_strategy = extra_state->strategy;
+  set_exec_strategy_unlocked(extra_state, strategy);
+  return extra_state->strategy_generation;
+}
+
+bool extra_state_compare_and_set_exec_strategy(
+    ExtraState* extra_state,
+    uint64_t expected_generation,
+    FrameExecStrategy strategy) {
+  std::lock_guard<std::mutex> lock(strategy_mutex);
+  if (extra_state->strategy_generation != expected_generation) {
+    return false;
+  }
+  set_exec_strategy_unlocked(extra_state, strategy);
+  return true;
 }
 
 FrameExecStrategy extra_state_get_region_exec_strategy(
@@ -138,7 +186,7 @@ void extra_state_set_region_exec_strategy(
     int64_t isolate_recompiles_id,
     FrameExecStrategy strategy) {
   if (isolate_recompiles_id < 0) {
-    extra_state->strategy = strategy;
+    extra_state_set_exec_strategy(extra_state, strategy);
   } else {
     extra_state->region_strategy_map[isolate_recompiles_id] = strategy;
   }
@@ -449,6 +497,32 @@ py::list _get_cache_entries_for_region(
   return result;
 }
 
+void _clear_cache_entries_for_region(
+    const py::handle& code_obj,
+    int64_t isolate_recompiles_id) {
+  TORCH_CHECK_TYPE(
+      py::isinstance(code_obj, py::module::import("types").attr("CodeType")),
+      "expected a code object!");
+  TORCH_CHECK_VALUE(
+      isolate_recompiles_id >= 0, "cannot clear the default cache region");
+  PyCodeObject* code = (PyCodeObject*)code_obj.ptr();
+  ExtraState* extra = get_extra_state(code);
+  if (extra == nullptr) {
+    return;
+  }
+  auto it = extra->cache_entry_map.find(isolate_recompiles_id);
+  if (it != extra->cache_entry_map.end()) {
+    TORCH_CHECK(extra->total_cache_entry_count >= it->second.size());
+    extra->total_cache_entry_count -= it->second.size();
+    extra->cache_entry_map.erase(it);
+  }
+  extra->region_strategy_map.erase(isolate_recompiles_id);
+  {
+    std::lock_guard<std::mutex> lock(extra->region_frame_state_mutex);
+    extra->region_frame_state_map.erase(isolate_recompiles_id);
+  }
+}
+
 size_t _get_total_cache_entry_count(const py::handle& code_obj) {
   TORCH_CHECK(
       py::isinstance(code_obj, py::module::import("types").attr("CodeType")),
@@ -499,7 +573,7 @@ void _load_precompile_entry(
   extra->precompile_entries.push_back(std::move(entry));
 }
 
-void _set_lru_cache(py::object boolean) {
+void _set_lru_cache(const py::object& boolean) {
   if (py::cast<bool>(boolean)) {
     use_lru = true;
   } else {

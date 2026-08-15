@@ -593,8 +593,16 @@ def get_compile_id(
     if not isinstance(frame_id, int):
         raise AssertionError(f"frame_id must be an int, got {type(frame_id)}")
 
-    frame_compile_id = FRAME_COMPILE_COUNTER[frame_id]
-    FRAME_COMPILE_COUNTER[frame_id] += 1
+    if get_eval_frame_isolate_recompiles_id() >= 0:
+        frame_compile_id = frame_state.get("_compile_id", 0)
+        if not isinstance(frame_compile_id, int):
+            raise AssertionError(
+                f"frame compile id must be an int, got {type(frame_compile_id)}"
+            )
+        frame_state["_compile_id"] = frame_compile_id + 1
+    else:
+        frame_compile_id = FRAME_COMPILE_COUNTER[frame_id]
+        FRAME_COMPILE_COUNTER[frame_id] += 1
 
     compiled_autograd_id = None
     if prior := CompileContext.current_compile_id():
@@ -659,7 +667,16 @@ class ConvertFrameAssert:
             )
         else:
             cache_entries_for_reasons = cache_entries
-        total_count = _get_total_cache_entry_count(code)
+        package = self._package
+        explicit_package = (
+            package is not None and package.serialization_guard_filter_fn is not None
+        )
+        if explicit_package:
+            if package is None:
+                raise AssertionError("explicit package must not be None")
+            total_count = package.guarded_code_count(code)
+        else:
+            total_count = _get_total_cache_entry_count(code)
         cache_size = compute_cache_size(frame, cache_entries, total_count)
         input_codes.add(code)
         if code in output_codes:
@@ -775,9 +792,21 @@ class ConvertFrameAssert:
         try:
             compile_ctx = compile_context(CompileContext(compile_id))
             # When recompile_limit is set, temporarily override the global
-            # config so the existing exceeds_recompile_limit check uses it.
+            # config so the existing exceeds_recompile_limit check uses it. An
+            # explicit package also raises a lower accumulated cap; ordinary
+            # torch.compile keeps the ambient global safety limit.
             recompile_ctx = (
-                config.patch(recompile_limit=self._recompile_limit)
+                config.patch(
+                    recompile_limit=self._recompile_limit,
+                    accumulated_recompile_limit=(
+                        max(
+                            config.accumulated_recompile_limit,
+                            self._recompile_limit,
+                        )
+                        if explicit_package
+                        else config.accumulated_recompile_limit
+                    ),
+                )
                 if self._recompile_limit is not None
                 else contextlib.nullcontext()
             )
@@ -808,7 +837,11 @@ class ConvertFrameAssert:
             # Restore the previous initial_global_state for nested compilation handling
             initial_global_state = prev_initial_global_state
 
-        if config.caching_precompile and self._package is not None:
+        if (
+            config.caching_precompile
+            and self._package is not None
+            and self._package.serialization_guard_filter_fn is None
+        ):
             from .package import DynamoCache
 
             # Record that the dynamo package has changed
@@ -1936,6 +1969,10 @@ def _compile(
                     package.serialization_guard_filter_fn
                     if package is not None
                     else None
+                ),
+                strict_error=(
+                    package is not None
+                    and package.serialization_guard_filter_fn is not None
                 ),
             )
 

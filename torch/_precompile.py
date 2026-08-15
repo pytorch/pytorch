@@ -35,7 +35,7 @@ serialized copy. ``save()`` refuses known coverage gaps, failed captures, and ev
 guard by default. Coverage remains execution-driven: a complete summary describes the calls
 that ran, not every possible input or unexecuted branch. Automatic examples run under
 ordinary ``torch.no_grad()``, so serve that inference artifact under the same grad mode;
-automatic inputs created as inference tensors are rejected.
+automatic inputs and module parameters/buffers created as inference tensors are rejected.
 
 The positional form returns a self-contained, executable ``python_code`` string plus a
 companion integrity-tagged ``cache``. With ``backend="inductor"`` (the default) the
@@ -325,7 +325,7 @@ import types
 from collections.abc import Callable, Mapping, Sequence  # noqa: TC003
 from contextlib import AbstractContextManager  # noqa: TC003
 from types import MappingProxyType
-from typing import Any, cast, NewType, Protocol, TYPE_CHECKING
+from typing import Any, cast, NewType, TYPE_CHECKING
 from typing_extensions import Self
 
 import torch
@@ -393,14 +393,34 @@ class PrecompileError(RuntimeError):
     """
 
 
-class _PrecompiledCallable(Protocol):
-    def __call__(self, *args: object, **kwargs: object) -> object: ...
+class _PrecompiledCallable:
+    def __init__(self, compiled: Any) -> None:
+        self._compiled = compiled
 
-    def __enter__(self) -> Self: ...
+    def _call(self, method: Callable[..., Any], *args: object, **kwargs: object) -> Any:
+        from torch._dynamo.exc import PackageError
 
-    def __exit__(self, *exc: object) -> None: ...
+        try:
+            return method(*args, **kwargs)
+        except PackageError as e:
+            raise PrecompileError(str(e)) from e
 
-    def unload(self) -> None: ...
+    def __call__(self, *args: object, **kwargs: object) -> object:
+        return self._call(self._compiled, *args, **kwargs)
+
+    def __enter__(self) -> Self:
+        self._call(self._compiled.__enter__)
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self._call(self._compiled.__exit__, *exc)
+
+    def unload(self) -> None:
+        self._call(self._compiled.unload)
+
+    @property
+    def _package(self) -> Any:
+        return self._compiled._package
 
 
 class _PrecompileSession:
@@ -418,7 +438,12 @@ class _PrecompileSession:
             raise PrecompileError(str(e)) from e
 
     def __enter__(self) -> Callable[..., object]:
-        return self._call(self._session.__enter__)
+        compiled = self._call(self._session.__enter__)
+
+        def call(*args: object, **kwargs: object) -> object:
+            return self._call(compiled, *args, **kwargs)
+
+        return call
 
     def __exit__(self, *exc: object) -> None:
         self._call(self._session.__exit__, *exc)
@@ -2717,9 +2742,10 @@ class _PrecompileApi:
         Live capture keeps all guards so one example cannot silently reuse another's graph;
         ``guard_filter_fn`` applies only to the serialized artifact. Automatic calls run
         under ordinary ``torch.no_grad()`` even when the caller is in inference mode;
-        serve the resulting artifact under that same grad mode. Automatic inputs created
-        inside inference mode are rejected because they remain inference tensors after the
-        ambient mode is disabled. Inspect ``summary()`` and call ``save(path)`` on the result.
+        serve the resulting artifact under that same grad mode. Automatic inputs and module
+        parameters/buffers created inside inference mode are rejected because they remain
+        inference tensors after the ambient mode is disabled. Inspect ``summary()`` and call
+        ``save(path)`` on the result. Capture sessions are one-shot and cannot be re-entered.
 
         Capture is execution-driven, not an exhaustive analysis of ``fn``. A complete
         summary covers the calls that ran successfully; unexecuted paths and values are not
@@ -2956,15 +2982,15 @@ class _PrecompileApi:
         ``precompile(fn, example_inputs=[...])`` form runs known inference examples for you.
         Both preserve Dynamo graph breaks, resume continuations, and every recompiled
         variant exercised by the supplied calls. The yielded callable is valid only inside
-        the capture block.
+        the capture block, and the session cannot be re-entered after that block exits.
 
         Capture is by execution: call the yielded function on every path and specialization
         the artifact must serve. ``example_inputs`` can make positional-only inference
         calls automatically under ordinary ``torch.no_grad()``; calls in the block use the
         ambient grad mode, so wrap forward-only inference calls in ``torch.no_grad()``.
-        Automatic inputs must not themselves be inference tensors. Live capture
-        retains all guards. The filter controls only which guards are serialized, and
-        ``save()`` rejects every dropped guard by default. A complete
+        Automatic inputs and an ``nn.Module``'s parameters/buffers must not be inference
+        tensors. Live capture retains all guards. The filter controls only which guards are
+        serialized, and ``save()`` rejects every dropped guard by default. A complete
         summary covers only successful calls that actually ran; unexercised paths remain
         absent. Any captured call that raises marks the session incomplete, even when the
         exception is caught inside the block.
@@ -2979,7 +3005,8 @@ class _PrecompileApi:
               requirement is relaxed, every custom-filter drop is still treated as risky.
               Default: ``None``.
             recompile_limit (int, optional): maximum variants captured per frame. Default:
-              ``256``.
+              ``256``. This overrides a lower ambient accumulated-recompile limit for the
+              capture.
             dynamic (bool, optional): dynamic-shape policy forwarded to ``torch.compile``.
               Default: ``None``.
             example_inputs (Sequence[tuple], optional): positional-argument tuples run
@@ -3036,7 +3063,7 @@ class _PrecompileApi:
               allowed to compile outside :meth:`serving`; it returns one boolean per guard
               entry. Runtime guards remain intact. Default: ``None``.
             recompile_limit (int, optional): recompilation limit outside :meth:`serving`.
-              Default: ``256``.
+              Default: ``256``. This overrides a lower ambient accumulated-recompile limit.
             dynamic (bool, optional): dynamic-shape policy forwarded to ``torch.compile``.
               Default: ``None``.
 
@@ -3052,13 +3079,15 @@ class _PrecompileApi:
             "trust."
         )
         try:
-            return precompile_load(
-                fn,
-                path,
-                backend=backend,
-                guard_filter_fn=guard_filter_fn,
-                recompile_limit=recompile_limit,
-                dynamic=dynamic,
+            return _PrecompiledCallable(
+                precompile_load(
+                    fn,
+                    path,
+                    backend=backend,
+                    guard_filter_fn=guard_filter_fn,
+                    recompile_limit=recompile_limit,
+                    dynamic=dynamic,
+                )
             )
         except PrecompileError:
             raise

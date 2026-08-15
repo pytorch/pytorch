@@ -135,7 +135,8 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
    :param guard_filter_fn: Multi-graph serialization filter; returns one boolean per guard
        entry. Live capture retains all guards so later examples trigger their recompiles.
        Every dropped guard is rejected by default when saving.
-   :param recompile_limit: Maximum multi-graph variants captured per frame; defaults to 256.
+   :param recompile_limit: Maximum multi-graph variants captured per frame; defaults to 256
+       and overrides a lower ambient accumulated-recompile limit for this capture.
    :param dynamic: Multi-graph dynamic-shape policy forwarded to ``torch.compile``.
    :param invariants: Optional path receiving the multi-graph invariant report.
    :returns: For positional input, ``(python_code, cache)`` -- a self-contained Python
@@ -205,7 +206,7 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
    frame, resume continuations after graph breaks, and every guarded recompiled variant.
    Capture every path and specialization the artifact must serve, then call ``save(path)``
    on the returned session after the block exits. The yielded callable is valid only inside
-   the block.
+   the block, and a capture session is one-shot rather than re-enterable.
 
    When every call is known up front, the shorter equivalent is
    ``precompile(fn, example_inputs=[(x1,), (x2,)])``; use ``capture`` when calls must be
@@ -214,10 +215,14 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
    ``example_inputs`` may be a sequence of positional-argument tuples. Those calls run
    automatically under ordinary ``torch.no_grad()`` when the capture begins, even if the
    caller is in inference mode; calls made explicitly in the block use the ambient grad
-   mode. Automatic inputs themselves must not be inference tensors; create them outside
-   inference mode, or use manual capture and serve under the matching mode.
+   mode. Automatic inputs and module parameters/buffers must not be inference tensors;
+   create them outside inference mode, or use manual capture and serve under the matching
+   mode.
    ``recompile_limit`` defaults to 256 because an ahead-of-time capture intentionally
-   collects variants rather than treating them as a runaway recompilation.
+   collects variants rather than treating them as a runaway recompilation. It overrides a
+   lower ambient ``accumulated_recompile_limit`` for this capture. Exercised branches with no
+   tensor operations are still recorded as guarded empty variants rather than eager-only
+   skips.
 
    Live capture retains all runtime guards so supplied calls cannot silently reuse the
    wrong variant. ``guard_filter_fn`` applies only to the serialized copy: it receives a
@@ -273,8 +278,9 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
    the installed entries and globals.
 
    ``guard_filter_fn``, ``recompile_limit``, and ``dynamic`` configure any uncovered call
-   that is allowed to compile outside ``precompile.serving()``. The filter controls the
-   serialized copy only; live runtime guards remain intact.
+   that is allowed to compile outside ``precompile.serving()``. The explicit limit overrides
+   a lower ambient accumulated-recompile limit. The filter controls the serialized copy only;
+   live runtime guards remain intact, and no-op branches compile into guarded empty variants.
 
    Loading mutates process-global compiler state for the affected code objects. Load one
    artifact per callable/class at a time, and treat the artifact file as trusted input;

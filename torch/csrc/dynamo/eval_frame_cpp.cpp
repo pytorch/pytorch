@@ -34,15 +34,20 @@ struct DebugContextGuard {
     ctx.attr("__enter__")();
   }
 
-  ~DebugContextGuard() {
+  // NOLINTNEXTLINE(bugprone-exception-escape)
+  ~DebugContextGuard() noexcept {
     // Save any pending Python exception (e.g. KeyboardInterrupt from the
     // debugger's 'q' command) so calling __exit__ doesn't clobber it.
-    PyObject *exc_type, *exc_value, *exc_tb;
+    PyObject* exc_type = nullptr;
+    PyObject* exc_value = nullptr;
+    PyObject* exc_tb = nullptr;
     PyErr_Fetch(&exc_type, &exc_value, &exc_tb);
     try {
       ctx.attr("__exit__")(py::none(), py::none(), py::none());
     } catch (py::error_already_set& e) {
       e.restore();
+      PyErr_Clear();
+    } catch (...) {
       PyErr_Clear();
     }
     if (exc_type != nullptr) {
@@ -52,11 +57,13 @@ struct DebugContextGuard {
 
   DebugContextGuard(const DebugContextGuard&) = delete;
   DebugContextGuard& operator=(const DebugContextGuard&) = delete;
+  DebugContextGuard(DebugContextGuard&&) = delete;
+  DebugContextGuard& operator=(DebugContextGuard&&) = delete;
 };
 
 } // namespace
 
-void set_bytecode_debugger_callback(py::object callback) {
+void set_bytecode_debugger_callback(const py::object& callback) {
   if (callback.is_none()) {
     Py_XSETREF(bytecode_debugger_callback_obj, nullptr);
   } else {
@@ -514,8 +521,17 @@ PyObject* dynamo__custom_eval_frame(
   FrameExecStrategy strategy =
       extra_state_get_region_exec_strategy(extra, isolate_recompiles_id);
 
-  recursive_callback =
-      _callback_from_action(recursive_callback, strategy.recursive_action);
+  bool force_callback_on_cache_miss = false;
+  if (strategy.cur_action == FrameAction::RUN_ONLY ||
+      strategy.recursive_action == FrameAction::RUN_ONLY) {
+    force_callback_on_cache_miss =
+        py::hasattr(callback, "_torchdynamo_force_callback_on_cache_miss");
+  }
+  if (!force_callback_on_cache_miss ||
+      strategy.recursive_action != FrameAction::RUN_ONLY) {
+    recursive_callback =
+        _callback_from_action(recursive_callback, strategy.recursive_action);
+  }
 
   if (strategy.cur_action == FrameAction::SKIP) {
     DEBUG_TRACE("skip %s", get_frame_name(frame));
@@ -558,7 +574,8 @@ PyObject* dynamo__custom_eval_frame(
 
   // A callback of Py_False indicates "run only" mode, the cache is checked,
   // but we never compile.
-  bool run_only = strategy.cur_action == FrameAction::RUN_ONLY ||
+  bool run_only = (strategy.cur_action == FrameAction::RUN_ONLY &&
+                   !force_callback_on_cache_miss) ||
       callback.is(py::bool_(false));
   if (run_only) {
     DEBUG_TRACE("In run only mode %s", get_frame_name(frame));
@@ -616,7 +633,7 @@ PyObject* dynamo__custom_eval_frame(
     locals = std::make_unique<FrameLocalsMapping>(frame);
   }
   CacheEntry* cache_entry = extract_cache_entry(extra, isolate_recompiles_id);
-  FrameState* frame_state = extract_frame_state(extra);
+  FrameState* frame_state = extract_frame_state(extra, isolate_recompiles_id);
   py::object callback_result;
   FrameExecStrategy new_strategy;
   bool apply_to_code = false;

@@ -17,6 +17,7 @@ import sys
 import tempfile
 import threading
 import unittest
+import weakref
 from unittest import mock
 
 import torch
@@ -46,7 +47,7 @@ from torch._dynamo.precompile_package import (
     serving,
 )
 from torch._dynamo.testing import reduce_to_scalar_loss
-from torch._dynamo.utils import CleanupManager, counters
+from torch._dynamo.utils import CleanupManager
 from torch._functorch import config as functorch_config
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch.testing._internal.common_utils import (
@@ -391,10 +392,10 @@ class ModelTwo(torch.nn.Module):
 
 
 class PrecompileEmptyGraph(torch.nn.Module):
-    """Dynamo traces this to an empty graph, so install() skip_code()s it."""
+    """Used to construct a legacy package with no guarded code in skip tests."""
 
     def forward(self, x):
-        return x
+        return x.sin()
 
 
 class PrecompileValuePinned(torch.nn.Module):
@@ -2169,14 +2170,14 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
                 compiled(x)
         summary = session.summary()
         self.assertEqual(summary.truncated, ())
-        self.assertEqual(summary.guarded_codes, n * len(inputs))
-        # The top-level forward only dispatches to submodules, so Dynamo keeps
-        # no graph for it and install() will skip it. That is reported rather
-        # than counted as complete, because it is indistinguishable from a frame
-        # Dynamo gave up on.
+        # Explicit precompile enables empty graphs, so each no-op resume after a
+        # block's graph break is guarded alongside every block variant.
+        self.assertEqual(summary.guarded_codes, (n + 1) * len(inputs))
+        # The top-level forward only dispatches to submodules and still has no
+        # guarded code of its own.
         self.assertEqual(summary.uncovered_frames, ("forward",))
         self.assertFalse(summary.complete)
-        with self.assertRaisesRegex(PackageError, "no compiled code for entry frame"):
+        with self.assertRaisesRegex(PackageError, "without producing guarded code"):
             session.save(self.path())
         session.save(self.path(), require_complete=False)
 
@@ -3802,6 +3803,34 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             with self.assertRaisesRegex(RuntimeError, "different GPU"):
                 entry.system_info.check_compatibility(other_host, entry.device_type)
 
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_failed_cache_install_cold_falls_back_on_same_package(self):
+        from torch._dynamo.precompile_context import EagerCacheArtifact
+
+        x = torch.randn(4, 8)
+        session = precompile_capture(
+            staged_with_graph_breaks, backend="eager", dynamic=False
+        )
+        with session as compiled:
+            compiled(x)
+        session.save(self.path())
+        entry = _SingleFileStore().read(self.path())
+
+        torch._dynamo.reset()
+        with (
+            mock.patch.object(DynamoCache, "load", return_value=entry),
+            mock.patch.object(
+                EagerCacheArtifact,
+                "after_deserialization",
+                side_effect=RuntimeError("cache install failed"),
+            ),
+            self.assertLogs("torch._dynamo.eval_frame", level="WARNING"),
+        ):
+            compiled = torch.compile(
+                staged_with_graph_breaks, backend="eager", dynamic=False
+            )
+        self.assertEqual(compiled(x), staged_with_graph_breaks(x))
+
     @unittest.skipIf(not HAS_CUDA_AND_TRITON, "Requires CUDA/Triton")
     def test_device_type_of_a_cuda_capture_with_a_cpu_epilogue(self):
         from torch._dynamo.precompile_package import default_guard_filter_fn
@@ -3924,60 +3953,165 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         with second, torch.no_grad(), serving():
             self.assertEqual(second(x), model(x))
 
-    def test_unload_keeps_a_skip_another_package_still_holds(self):
-        # install() skip_code()s a frame with no guarded codes, and the strategy
-        # it had before cannot be read back, so restoring it unconditionally
-        # un-skips a frame a second loaded package still needs skipped.
+    def _save_legacy_empty_graph_package(self):
         session = precompile_capture(PrecompileEmptyGraph(), backend="eager")
         with session as compiled, torch.no_grad():
             compiled(torch.randn(3, 4))
+        entry = session._package.cache_entry().codes[0]
+        entry.guarded_codes.clear()
+        entry.backend_ids.clear()
+        session._package.cached_backends.clear()
         summary = session.save(self.path(), require_complete=False)
         self.assertEqual(summary.guarded_codes, 0)
+
+    def test_unload_keeps_a_skip_another_package_still_holds(self):
+        # Legacy packages can contain a frame with no guarded codes. Two loaded
+        # packages share ownership of the skip installed for that frame.
+        from torch._C._dynamo.eval_frame import get_code_exec_strategy
+        from torch._dynamo.types import FrameAction
+
+        self._save_legacy_empty_graph_package()
 
         torch._dynamo.reset()
         first = precompile_load(PrecompileEmptyGraph(), self.path(), backend="eager")
         second = precompile_load(PrecompileEmptyGraph(), self.path(), backend="eager")
+        code = PrecompileEmptyGraph.forward.__code__
 
         first.unload()
-        counters.clear()
-        torch.compile(PrecompileEmptyGraph(), backend="eager")(torch.randn(3, 4))
-        self.assertEqual(counters["frames"]["total"], 0)
+        self.assertEqual(get_code_exec_strategy(code).cur_action, FrameAction.SKIP)
 
         second.unload()
-        counters.clear()
-        torch.compile(PrecompileEmptyGraph(), backend="eager")(torch.randn(3, 4))
-        self.assertEqual(counters["frames"]["total"], 1)
+        self.assertEqual(get_code_exec_strategy(code).cur_action, FrameAction.DEFAULT)
 
     def test_unload_restores_a_skipped_frame(self):
-        # install() skip_code()s a frame it has no compiled code for, which is
-        # global state on the code object. Without a restore the frame stays
-        # unskippable for the rest of the process, so anything else that shares
-        # it silently runs eager.
-        model = PrecompileStack(5)
-        x = torch.randn(4, 8)
-        session = precompile_capture(model, backend="eager", dynamic=False)
-        with session as compiled, torch.no_grad():
-            compiled(x)
-        self.assertEqual(session.summary().uncovered_frames, ("forward",))
-        session.save(self.path(), require_complete=False)
+        # A legacy package's empty frame installs a process-global skip. Once
+        # the last owner unloads, the prior default strategy is restored.
+        from torch._C._dynamo.eval_frame import get_code_exec_strategy
+        from torch._dynamo.types import FrameAction
+
+        self._save_legacy_empty_graph_package()
 
         torch._dynamo.reset()
-        loaded = precompile_load(model, self.path(), backend="eager", dynamic=False)
-        self.assertIn(PrecompileStack.forward.__code__, loaded._package._skipped_codes)
+        loaded = precompile_load(PrecompileEmptyGraph(), self.path(), backend="eager")
+        code = PrecompileEmptyGraph.forward.__code__
+        self.assertIn(code, loaded._package._skipped_codes)
+        self.assertEqual(get_code_exec_strategy(code).cur_action, FrameAction.SKIP)
 
-        # Same code object, no blocks: it compiles a graph unless it is skipped.
-        def frames_for_empty_stack():
-            counter = torch._dynamo.testing.CompileCounter()
-            out = torch.compile(
-                PrecompileStack.forward, backend=counter, dynamic=False
-            )(PrecompileStack(0), x)
-            self.assertEqual(out, x.sum())
-            return counter.frame_count
-
-        self.assertEqual(frames_for_empty_stack(), 0)
         loaded.unload()
         self.assertEqual(loaded._package._skipped_codes, [])
-        self.assertEqual(frames_for_empty_stack(), 1)
+        self.assertEqual(get_code_exec_strategy(code).cur_action, FrameAction.DEFAULT)
+
+    def test_unload_preserves_a_preexisting_skip_strategy(self):
+        from torch._C._dynamo.eval_frame import get_code_exec_strategy
+        from torch._dynamo.types import FrameAction
+
+        self._save_legacy_empty_graph_package()
+
+        torch._dynamo.reset()
+        code = PrecompileEmptyGraph.forward.__code__
+        torch._dynamo.eval_frame.skip_code(code)
+
+        loaded = precompile_load(PrecompileEmptyGraph(), self.path(), backend="eager")
+        self.assertIn(code, loaded._package._skipped_codes)
+        loaded.unload()
+        self.assertEqual(get_code_exec_strategy(code).cur_action, FrameAction.SKIP)
+
+    def test_unload_preserves_a_skip_installed_after_load(self):
+        from torch._C._dynamo.eval_frame import get_code_exec_strategy
+        from torch._dynamo.types import FrameAction
+
+        self._save_legacy_empty_graph_package()
+
+        torch._dynamo.reset()
+        code = PrecompileEmptyGraph.forward.__code__
+        loaded = precompile_load(PrecompileEmptyGraph(), self.path(), backend="eager")
+        torch._dynamo.eval_frame.skip_code(code)
+        loaded.unload()
+        self.assertEqual(get_code_exec_strategy(code).cur_action, FrameAction.SKIP)
+
+    def test_unload_preserves_a_new_run_only_strategy(self):
+        from torch._C._dynamo.eval_frame import get_code_exec_strategy
+        from torch._dynamo.types import FrameAction, FrameExecStrategy
+
+        self._save_legacy_empty_graph_package()
+
+        torch._dynamo.reset()
+        code = PrecompileEmptyGraph.forward.__code__
+        loaded = precompile_load(PrecompileEmptyGraph(), self.path(), backend="eager")
+        strategy = FrameExecStrategy(FrameAction.RUN_ONLY, FrameAction.RUN_ONLY)
+        torch._dynamo.eval_frame.set_code_exec_strategy(code, strategy)
+        loaded.unload()
+        restored = get_code_exec_strategy(code)
+        self.assertEqual(restored.cur_action, FrameAction.RUN_ONLY)
+        self.assertEqual(restored.recursive_action, FrameAction.RUN_ONLY)
+
+    def test_racing_strategy_write_invalidates_skip_ownership(self):
+        from torch._C._dynamo.eval_frame import get_code_exec_strategy_token
+        from torch._dynamo.types import FrameAction
+
+        self._save_legacy_empty_graph_package()
+        torch._dynamo.reset()
+
+        entered = threading.Event()
+        release = threading.Event()
+        errors = []
+
+        def backend(gm, example_inputs):
+            entered.set()
+            if not release.wait(20):
+                raise AssertionError("timed out waiting to release backend")
+            return gm.forward
+
+        model = PrecompileEmptyGraph()
+        compiled = torch.compile(model, backend=backend, dynamic=False)
+
+        def run_compile():
+            try:
+                compiled(torch.randn(3, 4))
+            except BaseException as e:
+                errors.append(e)
+
+        thread = threading.Thread(target=run_compile)
+        thread.start()
+        try:
+            self.assertTrue(entered.wait(20))
+            loaded = precompile_load(model, self.path(), backend="eager")
+            code = PrecompileEmptyGraph.forward.__code__
+            strategy, generation = get_code_exec_strategy_token(code)
+            self.assertEqual(strategy.cur_action, FrameAction.SKIP)
+        finally:
+            release.set()
+        thread.join(20)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(errors, [])
+        strategy, next_generation = get_code_exec_strategy_token(code)
+        self.assertNotEqual(next_generation, generation)
+
+        loaded.unload()
+        after_unload, final_generation = get_code_exec_strategy_token(code)
+        self.assertEqual(after_unload.cur_action, strategy.cur_action)
+        self.assertEqual(after_unload.recursive_action, strategy.recursive_action)
+        self.assertEqual(final_generation, next_generation)
+
+    def test_stale_skip_owner_does_not_block_a_later_load(self):
+        from torch._C._dynamo.eval_frame import get_code_exec_strategy
+        from torch._dynamo.types import FrameAction
+
+        self._save_legacy_empty_graph_package()
+
+        torch._dynamo.reset()
+        code = PrecompileEmptyGraph.forward.__code__
+        loaded = precompile_load(PrecompileEmptyGraph(), self.path(), backend="eager")
+        package_ref = weakref.ref(loaded._package)
+        del loaded
+        gc.collect()
+        self.assertIsNone(package_ref())
+
+        torch._dynamo.reset()
+        second = precompile_load(PrecompileEmptyGraph(), self.path(), backend="eager")
+        self.assertEqual(get_code_exec_strategy(code).cur_action, FrameAction.SKIP)
+        second.unload()
+        self.assertEqual(get_code_exec_strategy(code).cur_action, FrameAction.DEFAULT)
 
     def test_load_rejects_artifact_recorded_on_a_different_torch(self):
         # Capture on one machine, serve on another: the version check is only

@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import threading
 import typing
 import unittest
 import weakref
@@ -17,6 +18,7 @@ import weakref
 import torch
 import torch.utils._pytree as _pytree
 from torch._dynamo.decorators import mark_dynamic, mark_unbacked
+from torch._dynamo.precompile_context import PrecompileContext
 from torch._precompile import PrecompileError
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import TEST_CUDA
@@ -56,6 +58,26 @@ def _precompile_multi_graph_callable(x, op):
     x = x + 1
     torch._dynamo.graph_break()
     return op(x)
+
+
+def _precompile_empty_resume(x, flag):
+    y = x + 1
+    torch._dynamo.graph_break()
+    if flag:
+        return y
+    return y.cos() * 100
+
+
+def _precompile_single_graph(x):
+    return x.sin()
+
+
+def _precompile_identity(x):
+    return x
+
+
+def _precompile_module_arg(module, x):
+    return module(x)
 
 
 def _precompile_raises_on_flag(x, fail):
@@ -1413,6 +1435,24 @@ class TestPrecompile(TestCase):
         self.assertEqual(session.summary().guarded_codes, 3)
 
     @torch._dynamo.config.patch(caching_precompile=True)
+    def test_multi_graph_cache_flush_does_not_mutate_explicit_session(self):
+        PrecompileContext.clear()
+        try:
+            x = torch.randn(2, 8)
+            session = torch.compiler.precompile.capture(
+                _precompile_multi_graph, backend="eager", dynamic=False
+            )
+            with session as compiled:
+                compiled(x)
+
+            before = session.summary()
+            self.assertTrue(before.complete)
+            torch.compiler.save_cache_artifacts()
+            self.assertEqual(session.summary(), before)
+        finally:
+            PrecompileContext.clear()
+
+    @torch._dynamo.config.patch(caching_precompile=True)
     def test_multi_graph_load_fallback_keeps_runtime_guards(self):
         captured = torch.linspace(-1, 1, 4)
         runtime = torch.linspace(-1, 1, 5)
@@ -1495,6 +1535,34 @@ class TestPrecompile(TestCase):
                     example_inputs=[(x,)],
                 )
 
+    def test_multi_graph_automatic_examples_reject_inference_module_state(self):
+        x = torch.randn(4, 8)
+        with torch.inference_mode():
+            model = torch.nn.Linear(8, 4)
+        with self.assertRaisesRegex(
+            PrecompileError, "inference tensor parameter 'weight'"
+        ):
+            torch.compiler.precompile(
+                model,
+                backend="eager",
+                dynamic=False,
+                example_inputs=[(x,)],
+            )
+
+    def test_multi_graph_automatic_examples_reject_inference_module_argument(self):
+        x = torch.randn(4, 8)
+        with torch.inference_mode():
+            model = torch.nn.Linear(8, 4)
+        with self.assertRaisesRegex(
+            PrecompileError, "inference tensor parameter 'weight'"
+        ):
+            torch.compiler.precompile(
+                _precompile_module_arg,
+                backend="eager",
+                dynamic=False,
+                example_inputs=[(model, x)],
+            )
+
     def test_multi_graph_setup_failure_cleans_up_session(self):
         import torch._functorch.config as functorch_config
 
@@ -1515,6 +1583,50 @@ class TestPrecompile(TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaisesRegex(PrecompileError, "capture raised"):
                 session.save(os.path.join(tmp, "artifact.pt"))
+
+    def test_multi_graph_overlapping_sessions_restore_capture_config(self):
+        import torch._functorch.config as functorch_config
+
+        with (
+            functorch_config.patch("bundled_autograd_cache", False),
+            torch._dynamo.config.patch(allow_empty_graphs=False),
+        ):
+            first = torch.compiler.precompile.capture(
+                _precompile_multi_graph, backend="eager"
+            )
+            second = torch.compiler.precompile.capture(
+                _precompile_multi_graph, backend="eager"
+            )
+            first.__enter__()
+            second.__enter__()
+            first.__exit__(None, None, None)
+            self.assertTrue(functorch_config.bundled_autograd_cache)
+            self.assertTrue(torch._dynamo.config.allow_empty_graphs)
+            second.__exit__(None, None, None)
+            self.assertFalse(functorch_config.bundled_autograd_cache)
+            self.assertFalse(torch._dynamo.config.allow_empty_graphs)
+
+    def test_multi_graph_worker_thread_inherits_capture_behavior(self):
+        session = torch.compiler.precompile.capture(
+            _precompile_identity, backend="eager", dynamic=False
+        )
+        errors = []
+        with session as compiled:
+            x = torch.randn(2)
+
+            def run():
+                try:
+                    self.assertEqual(compiled(x), x)
+                except BaseException as e:
+                    errors.append(e)
+
+            thread = threading.Thread(target=run)
+            thread.start()
+            thread.join(20)
+            self.assertFalse(thread.is_alive())
+        self.assertEqual(errors, [])
+        self.assertTrue(session.summary().complete)
+        self.assertEqual(session.summary().guarded_codes, 1)
 
     def test_multi_graph_caught_call_failure_is_incomplete(self):
         x = torch.randn(4)
@@ -1629,6 +1741,312 @@ class TestPrecompile(TestCase):
                         os.path.join(tmp, "missing.pt"),
                         backend="eager",
                     )
+
+    def test_multi_graph_keep_all_filter_reports_unserializable_guard(self):
+        with self.assertRaisesRegex(PrecompileError, "guard cannot be serialized"):
+            torch.compiler.precompile(
+                _precompile_multi_graph,
+                backend="eager",
+                dynamic=False,
+                example_inputs=[(torch.randn(2, 8),)],
+                guard_filter_fn=lambda entries: [True] * len(entries),
+            )
+
+    def test_multi_graph_manual_keep_all_filter_uses_public_error(self):
+        session = torch.compiler.precompile.capture(
+            _precompile_multi_graph,
+            backend="eager",
+            dynamic=False,
+            guard_filter_fn=lambda entries: [True] * len(entries),
+        )
+        with self.assertRaisesRegex(PrecompileError, "guard cannot be serialized"):
+            with session as compiled:
+                compiled(torch.randn(2, 8))
+
+    def test_multi_graph_load_fallback_keep_all_filter_uses_public_error(self):
+        x = torch.randn(2, 8)
+        session = torch.compiler.precompile(
+            _precompile_multi_graph,
+            backend="eager",
+            dynamic=False,
+            example_inputs=[(x,)],
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "artifact.pt")
+            session.save(path, require_no_dropped_guards=False)
+            torch._dynamo.reset()
+            with self.assertLogs("torch._precompile", level="WARNING"):
+                loaded = torch.compiler.precompile.load_package(
+                    _precompile_multi_graph,
+                    path,
+                    backend="eager",
+                    dynamic=False,
+                    guard_filter_fn=lambda entries: [True] * len(entries),
+                )
+            try:
+                with self.assertRaisesRegex(
+                    PrecompileError, "guard cannot be serialized"
+                ):
+                    loaded(torch.randn(3, 8))
+            finally:
+                loaded.unload()
+
+    @torch._dynamo.config.patch(accumulated_recompile_limit=2)
+    def test_multi_graph_recompile_limit_overrides_accumulated_limit(self):
+        inputs = [torch.randn(n, 8) for n in (2, 3, 4)]
+        session = torch.compiler.precompile.capture(
+            _precompile_multi_graph,
+            backend="eager",
+            dynamic=False,
+            recompile_limit=20,
+        )
+        with session as compiled:
+            for x in inputs:
+                self.assertEqual(compiled(x), _precompile_multi_graph(x))
+
+        summary = session.summary()
+        self.assertTrue(summary.complete)
+        self.assertEqual(summary.truncated, ())
+        self.assertEqual(summary.guarded_codes, 3 * len(inputs))
+
+    def test_multi_graph_capture_isolated_from_existing_compile_entries(self):
+        warm = torch.compile(_precompile_multi_graph, backend="eager", dynamic=False)
+        for n in (2, 3):
+            x = torch.randn(n, 8)
+            self.assertEqual(warm(x), _precompile_multi_graph(x))
+
+        x = torch.randn(4, 8)
+        session = torch.compiler.precompile.capture(
+            _precompile_multi_graph,
+            backend="eager",
+            dynamic=False,
+            recompile_limit=2,
+        )
+        with session as compiled:
+            self.assertEqual(compiled(x), _precompile_multi_graph(x))
+
+        summary = session.summary()
+        self.assertTrue(summary.complete)
+        self.assertEqual(summary.truncated, ())
+        self.assertEqual(summary.uncovered_frames, ())
+        self.assertEqual(summary.guarded_codes, 3)
+
+    def test_multi_graph_session_is_one_shot(self):
+        session = torch.compiler.precompile.capture(
+            _precompile_single_graph,
+            backend="eager",
+            dynamic=False,
+            recompile_limit=2,
+        )
+        x = torch.randn(2)
+        with session as compiled:
+            self.assertEqual(compiled(x), _precompile_single_graph(x))
+        with self.assertRaisesRegex(RuntimeError, "cannot be re-entered"):
+            with session:
+                pass
+
+    @torch._dynamo.config.patch(accumulated_recompile_limit=2)
+    def test_multi_graph_finished_capture_releases_isolated_cache(self):
+        from torch._dynamo.eval_frame import _get_total_cache_entry_count
+
+        torch._dynamo.reset()
+        code = _precompile_single_graph.__code__
+        before = _get_total_cache_entry_count(code)
+        for n in (2, 3):
+            session = torch.compiler.precompile(
+                _precompile_single_graph,
+                backend="eager",
+                dynamic=False,
+                example_inputs=[(torch.randn(n),)],
+            )
+            self.assertTrue(session.summary().complete)
+            self.assertEqual(_get_total_cache_entry_count(code), before)
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(
+            _precompile_single_graph, backend=counter, dynamic=False
+        )
+        x = torch.randn(4)
+        self.assertEqual(compiled(x), _precompile_single_graph(x))
+        self.assertEqual(counter.frame_count, 1)
+
+    @torch._dynamo.config.patch(
+        automatic_dynamic_shapes=True, assume_static_by_default=True
+    )
+    def test_multi_graph_capture_does_not_leak_auto_dynamic_state(self):
+        def ordinary_frame_count():
+            counter = torch._dynamo.testing.CompileCounter()
+            compiled = torch.compile(
+                _precompile_single_graph, backend=counter, dynamic=None
+            )
+            for n in (4, 5):
+                x = torch.randn(n)
+                self.assertEqual(compiled(x), _precompile_single_graph(x))
+            return counter.frame_count
+
+        torch._dynamo.reset()
+        self.assertEqual(ordinary_frame_count(), 2)
+        torch._dynamo.reset()
+
+        session = torch.compiler.precompile.capture(
+            _precompile_single_graph, backend="eager", dynamic=None
+        )
+        with session as compiled:
+            for n in (2, 3):
+                x = torch.randn(n)
+                self.assertEqual(compiled(x), _precompile_single_graph(x))
+
+        self.assertEqual(ordinary_frame_count(), 2)
+
+    @parametrize("backend", ["eager", "inductor"])
+    def test_multi_graph_round_trip_exercised_empty_resume(self, backend):
+        x = torch.arange(3.0)
+        expected = [_precompile_empty_resume(x, flag) for flag in (False, True)]
+        session = torch.compiler.precompile(
+            _precompile_empty_resume,
+            backend=backend,
+            dynamic=False,
+            example_inputs=[(x, False), (x, True)],
+        )
+        self.assertTrue(session.summary().complete)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "artifact.pt")
+            session.save(path, require_no_dropped_guards=False)
+            torch._dynamo.reset()
+            with self.assertLogs("torch._precompile", level="WARNING"):
+                loaded = torch.compiler.precompile.load_package(
+                    _precompile_empty_resume,
+                    path,
+                    backend=backend,
+                    dynamic=False,
+                )
+            with loaded, torch.no_grad(), torch.compiler.precompile.serving():
+                for flag, want in zip((False, True), expected):
+                    self.assertEqual(loaded(x, flag), want)
+
+    @parametrize("backend", ["eager", "inductor"])
+    def test_multi_graph_explicit_artifact_does_not_retain_global_backends(
+        self, backend
+    ):
+        PrecompileContext.clear()
+        try:
+            x = torch.randn(2, 8)
+            session = torch.compiler.precompile(
+                _precompile_multi_graph,
+                backend=backend,
+                dynamic=False,
+                example_inputs=[(x,)],
+            )
+            self.assertEqual(PrecompileContext._backend_artifacts_by_key, {})
+            with tempfile.TemporaryDirectory() as tmp:
+                path = os.path.join(tmp, "artifact.pt")
+                session.save(path, require_no_dropped_guards=False)
+                self.assertEqual(PrecompileContext._backend_artifacts_by_key, {})
+
+                torch._dynamo.reset()
+                with self.assertLogs("torch._precompile", level="WARNING"):
+                    loaded = torch.compiler.precompile.load_package(
+                        _precompile_multi_graph,
+                        path,
+                        backend=backend,
+                        dynamic=False,
+                    )
+                self.assertEqual(PrecompileContext._backend_artifacts_by_key, {})
+                loaded.unload()
+                self.assertEqual(PrecompileContext._backend_artifacts_by_key, {})
+        finally:
+            PrecompileContext.clear()
+
+    def test_multi_graph_load_fallback_captures_empty_resume(self):
+        from torch._dynamo.eval_frame import _get_total_cache_entry_count
+
+        x = torch.arange(3.0)
+        session = torch.compiler.precompile(
+            _precompile_empty_resume,
+            backend="eager",
+            dynamic=False,
+            example_inputs=[(x, False)],
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "artifact.pt")
+            session.save(path, require_no_dropped_guards=False)
+            torch._dynamo.reset()
+            with self.assertLogs("torch._precompile", level="WARNING"):
+                loaded = torch.compiler.precompile.load_package(
+                    _precompile_empty_resume,
+                    path,
+                    backend="eager",
+                    dynamic=False,
+                )
+
+            with torch.no_grad():
+                self.assertEqual(loaded(x, True), _precompile_empty_resume(x, True))
+            codes = loaded._package.code_objects()
+            self.assertGreater(
+                sum(_get_total_cache_entry_count(code) for code in codes), 0
+            )
+            backend = next(iter(loaded._package.cached_backends.values()))
+            backend_ref = weakref.ref(getattr(backend, "__self__", backend))
+            del backend
+            resumes = [
+                code
+                for code in loaded._package.cache_entry().codes
+                if code.install_to_global
+            ]
+            self.assertEqual(len(resumes), 1)
+            self.assertEqual(len(resumes[0].guarded_codes), 2)
+            with loaded, torch.no_grad(), torch.compiler.precompile.serving():
+                self.assertEqual(loaded(x, True), _precompile_empty_resume(x, True))
+            self.assertEqual(
+                sum(_get_total_cache_entry_count(code) for code in codes), 0
+            )
+            self.assertEqual(loaded._package.cached_backends, {})
+            gc.collect()
+            self.assertIsNone(backend_ref())
+            with self.assertRaisesRegex(RuntimeError, "has been unloaded"):
+                loaded(x, True)
+            self.assertEqual(
+                sum(_get_total_cache_entry_count(code) for code in codes), 0
+            )
+
+    def test_multi_graph_fallback_limit_still_fails_in_serving(self):
+        session = torch.compiler.precompile(
+            _precompile_single_graph,
+            backend="eager",
+            dynamic=False,
+            example_inputs=[(torch.randn(2),)],
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "artifact.pt")
+            session.save(path, require_no_dropped_guards=False)
+            torch._dynamo.reset()
+            with self.assertLogs("torch._precompile", level="WARNING"):
+                loaded = torch.compiler.precompile.load_package(
+                    _precompile_single_graph,
+                    path,
+                    backend="eager",
+                    dynamic=False,
+                    recompile_limit=2,
+                )
+            try:
+                with torch.no_grad():
+                    x = torch.randn(3)
+                    self.assertEqual(loaded(x), _precompile_single_graph(x))
+                    x = torch.randn(4)
+                    self.assertEqual(loaded(x), _precompile_single_graph(x))
+                    x = torch.randn(5)
+                    self.assertEqual(loaded(x), _precompile_single_graph(x))
+                    self.assertTrue(loaded._package.truncated_frames)
+                    x = torch.randn(6)
+                    self.assertEqual(loaded(x), _precompile_single_graph(x))
+                    with (
+                        torch.compiler.precompile.serving(),
+                        self.assertRaisesRegex(RuntimeError, "fail_on_recompile"),
+                    ):
+                        loaded(torch.randn(7))
+            finally:
+                loaded.unload()
 
     @parametrize("backend", ["inductor", "eager"])
     def test_tracer_dynamo_mark_unbacked_runs_across_sizes(self, backend):

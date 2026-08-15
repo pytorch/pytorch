@@ -2,6 +2,12 @@
 
 #include <Python.h>
 
+#ifdef __cplusplus
+#include <cstdint>
+#else
+#include <stdint.h>
+#endif
+
 #include <torch/csrc/dynamo/framelocals_mapping.h>
 
 #ifdef __cplusplus
@@ -9,6 +15,7 @@
 #include <torch/csrc/dynamo/utils.h>
 #include <torch/csrc/utils/pybind.h>
 #include <list>
+#include <mutex>
 #include <unordered_map>
 
 namespace py = pybind11;
@@ -68,10 +75,18 @@ typedef struct VISIBILITY_HIDDEN ExtraState {
   // Total cache entries across all compile scopes (for O(1)
   // has_any_cache_entries)
   size_t total_cache_entry_count{0};
-  // Frame state to detect dynamic shape dims
+  // Frame state to detect dynamic shape dims in the default compile scope.
   py::dict frame_state;
+  // Isolated compile scopes must not teach the default scope which dimensions
+  // to generalize.
+  std::unordered_map<int64_t, py::dict> region_frame_state_map;
+  std::mutex region_frame_state_mutex;
   // Actions to apply to all frames with this code object (non-isolated)
   FrameExecStrategy strategy{DEFAULT, DEFAULT};
+  // Monotonic token for the last global strategy write. Tokens come from a
+  // process-wide counter, so resetting a code object's ExtraState cannot make
+  // a stale owner appear current again.
+  uint64_t strategy_generation{0};
   // Per-region strategies for isolated compiles. When an isolated region
   // hits its recompile limit, only that region goes RUN_ONLY.
   std::unordered_map<int64_t, FrameExecStrategy> region_strategy_map;
@@ -102,19 +117,37 @@ CacheEntry* extract_cache_entry(
     ExtraState* extra_state,
     int64_t isolate_recompiles_id);
 
-// Returns either the previously stored frame state or an empty dict.
+// Returns either the previously stored frame state for this compile scope or an
+// empty dict.
 // Ownership contract
 // args
 //  - extra_state: Borrowed
+//  - isolate_recompiles_id: Compile scope (-1 = default)
 // return
-//  - extra_state->frame_state: Borrowed.
-FrameState* extract_frame_state(ExtraState* extra_state);
+//  - frame state: Borrowed.
+FrameState* extract_frame_state(
+    ExtraState* extra_state,
+    int64_t isolate_recompiles_id);
 
 // Returns the FrameExecStrategy stored in extra_state.
 // Ownership contract
 // args
 //  - extra_state: Borrowed
 FrameExecStrategy extra_state_get_exec_strategy(ExtraState* extra_state);
+
+uint64_t extra_state_get_exec_strategy_token(
+    ExtraState* extra_state,
+    FrameExecStrategy* strategy);
+
+uint64_t extra_state_set_exec_strategy_with_token(
+    ExtraState* extra_state,
+    FrameExecStrategy strategy,
+    FrameExecStrategy* prior_strategy);
+
+bool extra_state_compare_and_set_exec_strategy(
+    ExtraState* extra_state,
+    uint64_t expected_generation,
+    FrameExecStrategy strategy);
 
 // Set the FrameExecStrategy to be done to all frames with code object
 // corresponding to this extra_state. Ownership contract
@@ -239,6 +272,9 @@ py::list _debug_get_cache_entry_list(const py::handle& code_obj);
 py::list _get_cache_entries_for_region(
     const py::handle& code_obj,
     int64_t isolate_recompiles_id);
+void _clear_cache_entries_for_region(
+    const py::handle& code_obj,
+    int64_t isolate_recompiles_id);
 size_t _get_total_cache_entry_count(const py::handle& code_obj);
 void _reset_precompile_entries(const py::handle& code_obj);
 void _load_precompile_entry(
@@ -246,6 +282,6 @@ void _load_precompile_entry(
     py::object guard_manager,
     py::object dynamo_code);
 py::list _debug_get_precompile_entries(const py::handle& code_obj);
-void _set_lru_cache(py::object boolean);
+void _set_lru_cache(const py::object& boolean);
 
 #endif
