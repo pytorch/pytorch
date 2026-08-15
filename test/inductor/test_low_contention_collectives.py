@@ -8,8 +8,11 @@ from torch._inductor import config
 from torch._inductor.fx_passes.low_contention_collectives import (
     replace_collectives_with_low_contention,
 )
-from torch.distributed._symmetric_memory import _test_mode
 from torch.testing._internal.common_utils import run_tests, TestCase
+
+
+if dist.is_available():
+    from torch.distributed._symmetric_memory import _test_mode
 
 
 @unittest.skipIf(not dist.is_available(), "requires distributed")
