@@ -1612,7 +1612,8 @@ def _codegen_list_mutation(ctx: SideEffectReplayContext) -> None:
 
 @register_side_effect_replay_handler(
     name="deque_mutation",
-    matcher=lambda ctx: isinstance(ctx.var, variables.lists.DequeVariable),
+    matcher=lambda ctx: isinstance(ctx.var, variables.lists.DequeVariable)
+    and not isinstance(ctx.var, variables.UserDefinedObjectVariable),
     priority=80,
 )
 def _codegen_deque_mutation(ctx: SideEffectReplayContext) -> None:
