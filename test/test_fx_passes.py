@@ -2,20 +2,33 @@
 # ruff: noqa: F841
 
 from dataclasses import dataclass
+import html
 import operator
 import logging
+import shutil
 import sys
+import unittest
 
 import torch
 from torch.fx._symbolic_trace import symbolic_trace
 
+from torch.fx.passes.graph_drawer import _escape_dot_label, FxGraphDrawer
 from torch.fx.passes.infra.partitioner import CapabilityBasedPartitioner
 from torch.fx.passes.operator_support import OperatorSupport
 from torch.fx.passes.utils.fuser_utils import fuse_by_partitions, topo_sort
 from torch.fx.passes.utils.matcher_utils import SubgraphMatcher
 
-from torch.testing._internal.common_utils import run_tests, parametrize, instantiate_parametrized_tests
+from torch.testing._internal.common_utils import run_tests, parametrize, instantiate_parametrized_tests, subtest
 from torch.testing._internal.jit_utils import JitTestCase
+
+try:
+    import pydot  # noqa: F401
+
+    HAS_PYDOT = True
+except ImportError:
+    HAS_PYDOT = False
+
+HAS_DOT = shutil.which("dot") is not None
 
 logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
@@ -1194,6 +1207,96 @@ class TestFXMatcherUtils(JitTestCase):
         tearDown = getattr(test_model, "tearDown", None)
         if callable(setup):
             tearDown()
+
+
+@instantiate_parametrized_tests
+class TestFXGraphDrawer(JitTestCase):
+    """Graph content must not be able to break the dot record label it is placed in."""
+
+    def _node_label(self, drawer, node_name):
+        labels = [
+            node.get("label")
+            for node in drawer.get_dot_graph().get_nodes()
+            if node.get_name() == node_name
+        ]
+        self.assertEqual(len(labels), 1)
+        return labels[0]
+
+    @parametrize("text,expected", [
+        subtest(("a,a->a", r"a,a-\>a"), name="einsum_equation"),
+        subtest(("{'a': 1}", r"\{'a': 1\}"), name="dict_repr"),
+        subtest(("<stdin>", r"\<stdin\>"), name="pseudo_filename"),
+        subtest(("a|b", r"a\|b"), name="field_separator"),
+        subtest(("torch.functional.einsum", "torch.functional.einsum"), name="nothing_to_escape"),
+    ])
+    def test_escape_dot_label(self, text, expected):
+        self.assertEqual(_escape_dot_label(text), expected)
+
+    @unittest.skipIf(not HAS_PYDOT, "requires pydot")
+    def test_escapes_str_arg(self):
+        # https://github.com/pytorch/pytorch/issues/147884
+        class Einsum(torch.nn.Module):
+            def forward(self, x):
+                return torch.einsum("a,a->a", x)
+
+        drawer = FxGraphDrawer(symbolic_trace(Einsum()), "einsum")
+        self.assertIn(r"a,a-\>a", self._node_label(drawer, "einsum"))
+
+    @unittest.skipIf(not HAS_PYDOT, "requires pydot")
+    def test_escapes_module_constants(self):
+        class Leaf(torch.nn.Module):
+            __constants__ = ["cfg"]
+
+            def __init__(self):
+                super().__init__()
+                self.cfg = {"a": 1}
+
+            def forward(self, x):
+                return x
+
+        class Net(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.leaf = Leaf()
+
+            def forward(self, x):
+                return self.leaf(x)
+
+        class LeafTracer(torch.fx.Tracer):
+            def is_leaf_module(self, m, qualname):
+                return isinstance(m, Leaf) or super().is_leaf_module(m, qualname)
+
+        net = Net()
+        drawer = FxGraphDrawer(torch.fx.GraphModule(net, LeafTracer().trace(net)), "constants")
+        self.assertIn(r"cfg: \{'a': 1\}", self._node_label(drawer, "leaf"))
+
+    @unittest.skipIf(not HAS_PYDOT, "requires pydot")
+    def test_escapes_stack_trace(self):
+        class Add(torch.nn.Module):
+            def forward(self, x):
+                return torch.add(x, 1)
+
+        gm = symbolic_trace(Add())
+        for node in gm.graph.nodes:
+            if node.op == "call_function":
+                node.stack_trace = 'File "<stdin>", line 1, in forward\n    return x if x.sum() > 0 else x\n'
+
+        drawer = FxGraphDrawer(gm, "stack_trace", parse_stack_trace=True)
+        label = self._node_label(drawer, "add")
+        self.assertIn(r"\<stdin\>", label)
+        self.assertIn(r"x.sum() \> 0", label)
+
+    @unittest.skipIf(not (HAS_PYDOT and HAS_DOT), "requires pydot and the graphviz dot binary")
+    def test_dot_renders_str_arg(self):
+        class Einsum(torch.nn.Module):
+            def forward(self, x):
+                return torch.einsum("a,a->a", x)
+
+        drawer = FxGraphDrawer(symbolic_trace(Einsum()), "einsum")
+        # create_svg() raises if dot rejects the label, so reaching the
+        # assertion at all is most of the test.
+        svg = html.unescape(drawer.get_dot_graph().create_svg().decode())
+        self.assertIn("args=(a,a->a,)", svg)
 
 
 if __name__ == "__main__":

@@ -62,6 +62,17 @@ _WEIGHT_TEMPLATE = {
     "fontcolor": "#000000",
 }
 
+
+def _escape_dot_label(s: str) -> str:
+    # dot builds a "record" label out of these characters, so any of them coming
+    # from graph content (op targets, arg reprs, source lines) has to be escaped
+    # or dot rejects the whole label with `Error: bad label format`, e.g.
+    # https://gist.github.com/SungMinCho/1a017aab662c75d805c5954d62c5aabc
+    for char in "{}|<>":
+        s = s.replace(char, "\\" + char)
+    return s
+
+
 if HAS_PYDOT:
 
     @compatibility(is_backward_compatible=False)
@@ -204,10 +215,7 @@ if HAS_PYDOT:
             else:
                 ret = _get_qualified_name(target)
 
-            # Escape "{" and "}" to prevent dot files like:
-            # https://gist.github.com/SungMinCho/1a017aab662c75d805c5954d62c5aabc
-            # which triggers `Error: bad label format (...)` from dot
-            return ret.replace("{", r"\{").replace("}", r"\}")
+            return _escape_dot_label(ret)
 
         # shorten path to avoid drawing long boxes
         # for full path = '/home/weif/pytorch/test.py'
@@ -234,7 +242,7 @@ if HAS_PYDOT:
                     prefix, suffix = r"|args=(\l", r",\n)\l"
                     arg_strs_list = [_format_arg(a, max_list_len=8) for a in arg]
                 elif isinstance(arg, dict):
-                    prefix, suffix = r"|kwargs={\l", r",\n}\l"
+                    prefix, suffix = r"|kwargs=\{\l", r",\n\}\l"
                     arg_strs_list = [
                         f"{k}: {_format_arg(v, max_list_len=8)}" for k, v in arg.items()
                     ]
@@ -246,10 +254,11 @@ if HAS_PYDOT:
                     arg_strs_list = [a for a in arg_strs_list if "%" not in a]
                 if len(arg_strs_list) == 0:
                     return ""
-                arg_strs = prefix + r",\n".join(arg_strs_list) + suffix
-                if len(arg_strs_list) == 1:
+                escaped = [_escape_dot_label(a) for a in arg_strs_list]
+                arg_strs = prefix + r",\n".join(escaped) + suffix
+                if len(escaped) == 1:
                     arg_strs = arg_strs.replace(r"\l", "").replace(r"\n", "")
-                return arg_strs.replace("{", r"\{").replace("}", r"\}")
+                return arg_strs
 
             label = "{" + f"name=%{node.name}|op_code={node.op}\n"
 
@@ -260,7 +269,7 @@ if HAS_PYDOT:
                 if hasattr(leaf_module, "__constants__"):
                     extra = r"\n".join(
                         [
-                            f"{c}: {getattr(leaf_module, c)}"
+                            _escape_dot_label(f"{c}: {getattr(leaf_module, c)}")
                             for c in leaf_module.__constants__  # type: ignore[union-attr]
                         ]  # type: ignore[union-attr]
                     )
@@ -302,11 +311,11 @@ if HAS_PYDOT:
             if parse_stack_trace and node.stack_trace is not None:
                 parsed_stack_trace = _parse_stack_trace(node.stack_trace)
                 if parsed_stack_trace is not None:
-                    fname = self._shorten_file_name(parsed_stack_trace.file)
-                    label += (
-                        f"|file={fname}:{parsed_stack_trace.lineno} {parsed_stack_trace.code}"
-                        + r"\n"
+                    fname = _escape_dot_label(
+                        self._shorten_file_name(parsed_stack_trace.file)
                     )
+                    code = _escape_dot_label(parsed_stack_trace.code)
+                    label += f"|file={fname}:{parsed_stack_trace.lineno} {code}" + r"\n"
 
             return label + "}"
 
