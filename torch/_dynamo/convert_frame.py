@@ -152,7 +152,13 @@ from .symbolic_convert import (
     SpeculationLog,
 )
 from .trace_rules import is_numpy
-from .types import ConvertFrameReturn, FrameAction, FrameExecStrategy, wrap_guarded_code
+from .types import (
+    ConvertFrameReturn,
+    FrameAction,
+    FrameExecStrategy,
+    GuardFilterEntry,
+    wrap_guarded_code,
+)
 from .utils import (
     _get_error_on_graph_break,
     chromium_event_timed,
@@ -1007,6 +1013,11 @@ class DynamoOutput:
         save: bool = False,
         cache_entries: list[CacheEntry] | None = None,
         strict_error: bool = False,
+        serialization_guard_filter_fn: collections.abc.Callable[
+            [collections.abc.Sequence[GuardFilterEntry]],
+            collections.abc.Sequence[bool],
+        ]
+        | None = None,
     ) -> CheckFunctionManager:
         output_graph = self.tracer_output.output_graph
         if output_graph is None:
@@ -1017,6 +1028,7 @@ class DynamoOutput:
             cache_entries,
             hooks.guard_fail_fn if hooks else None,
             hooks.guard_filter_fn if hooks else None,
+            serialization_guard_filter_fn=serialization_guard_filter_fn,
             save_guards=save,
             strict_error=strict_error,
         )
@@ -1920,6 +1932,11 @@ def _compile(
                 hooks=hooks,
                 save=package is not None,
                 cache_entries=cache_entries,
+                serialization_guard_filter_fn=(
+                    package.serialization_guard_filter_fn
+                    if package is not None
+                    else None
+                ),
             )
 
         if package is not None:

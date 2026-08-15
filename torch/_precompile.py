@@ -30,6 +30,13 @@ available when the calls must be made manually, such as a training capture. The 
 form above remains the self-contained source-artifact path and requires one full Dynamo
 graph.
 
+Multi-graph capture keeps all live guards while running examples, then filters only the
+serialized copy. ``save()`` refuses known coverage gaps, failed captures, and every dropped
+guard by default. Coverage remains execution-driven: a complete summary describes the calls
+that ran, not every possible input or unexecuted branch. Automatic examples run under
+ordinary ``torch.no_grad()``, so serve that inference artifact under the same grad mode;
+automatic inputs created as inference tensors are rejected.
+
 The positional form returns a self-contained, executable ``python_code`` string plus a
 companion integrity-tagged ``cache``. With ``backend="inductor"`` (the default) the
 captured graph is lowered through the AOT backend contract
@@ -436,7 +443,10 @@ class _PrecompileSession:
     def summary(self) -> Any:
         r"""summary() -> PrecompileSummary
 
-        Return capture coverage, recompilation, and serialized-guard information.
+        Return observed capture coverage, recompilation, failure, and guard information.
+
+        ``complete`` covers only calls that ran during capture; it cannot account for an
+        unexecuted path through the callable.
         """
         return self._call(self._session.summary)
 
@@ -445,29 +455,30 @@ class _PrecompileSession:
         path: str,
         *,
         require_complete: bool = True,
-        require_no_risky_drops: bool = False,
-        require_no_dropped_guards: bool = False,
+        require_no_risky_drops: bool = True,
+        require_no_dropped_guards: bool = True,
     ) -> Any:
-        r"""save(path, *, require_complete=True, require_no_risky_drops=False, require_no_dropped_guards=False) -> PrecompileSummary
+        r"""save(path, *, require_complete=True, require_no_risky_drops=True, require_no_dropped_guards=True) -> PrecompileSummary
 
         Write the captured package to ``path`` and return its summary.
 
         Args:
             path (str): destination artifact file.
             require_complete (bool, optional): reject uncovered, bypassed, or truncated
-              frames. Default: ``True``.
-            require_no_risky_drops (bool, optional): reject dropped identity guards on
-              slots whose values deployment configuration can change. Default: ``False``.
-            require_no_dropped_guards (bool, optional): reject every guard that could not
-              be serialized. Default: ``False``.
+              frames and captures that raised. Default: ``True``.
+            require_no_risky_drops (bool, optional): reject dropped guards from a custom
+              filter, guards observed to distinguish variants, and identity guards on
+              configurable slots. Default: ``True``.
+            require_no_dropped_guards (bool, optional): reject every guard omitted from
+              the serialized artifact. Default: ``True``. Set this to ``False`` only to
+              select the relaxed risky-drop policy above.
 
         Returns:
             PrecompileSummary: capture coverage and guard information.
 
         .. warning::
-            Both dropped-guard requirements default to ``False``. Inspect
-            :meth:`summary` and enable the appropriate requirement before deploying an
-            artifact when rebinding a dropped source could change its result.
+            The strict default rejects every dropped guard because the risky subset is a
+            lint, not a proof. Relax either requirement only after auditing :meth:`summary`.
         """
         return self._call(
             self._session.save,
@@ -2702,13 +2713,23 @@ class _PrecompileApi:
         path and returns ``(python_code, cache)``. Passing ``example_inputs`` as a
         sequence of positional-argument tuples instead runs an execution-driven
         multi-graph capture and returns a completed session. That form records graph-break
-        continuations and every guarded recompilation exercised by the supplied calls,
-        which run under ``torch.no_grad()``; inspect ``summary()`` and call ``save(path)``
-        on the result.
+        continuations and every guarded recompilation exercised by the supplied calls.
+        Live capture keeps all guards so one example cannot silently reuse another's graph;
+        ``guard_filter_fn`` applies only to the serialized artifact. Automatic calls run
+        under ordinary ``torch.no_grad()`` even when the caller is in inference mode;
+        serve the resulting artifact under that same grad mode. Automatic inputs created
+        inside inference mode are rejected because they remain inference tensors after the
+        ambient mode is disabled. Inspect ``summary()`` and call ``save(path)`` on the result.
+
+        Capture is execution-driven, not an exhaustive analysis of ``fn``. A complete
+        summary covers the calls that ran successfully; unexecuted paths and values are not
+        present. ``save()`` refuses known gaps and every dropped guard by default, and
+        :meth:`serving` turns an uncovered runtime call into an error.
 
         Do not combine the two input forms. ``tracer`` and ``decompositions`` apply only
         to the positional source-artifact path; the multi-graph path uses Dynamo and
         accepts ``guard_filter_fn``, ``recompile_limit``, ``dynamic``, and ``invariants``.
+        The guard filter controls serialization only; runtime capture guards are retained.
 
         .. note::
 
@@ -2927,33 +2948,43 @@ class _PrecompileApi:
         example_inputs: Sequence[tuple[object, ...]] | None = None,
         invariants: str | None = None,
     ) -> _PrecompileSession:
-        """Begin an execution-driven multi-graph precompile capture.
+        r"""capture(fn, *, backend="inductor", guard_filter_fn=None, recompile_limit=256, dynamic=None, example_inputs=None, invariants=None) -> _PrecompileSession
 
-        Unlike calling ``precompile`` directly, this path preserves Dynamo graph breaks,
-        resume continuations, guards, and every recompiled variant exercised inside the
-        capture block. Save the returned session to a file, then reload it with
-        :meth:`load_package`.
+        Begin an execution-driven multi-graph precompile capture.
+
+        Use this form when calls must be made manually. The shorter
+        ``precompile(fn, example_inputs=[...])`` form runs known inference examples for you.
+        Both preserve Dynamo graph breaks, resume continuations, and every recompiled
+        variant exercised by the supplied calls. The yielded callable is valid only inside
+        the capture block.
 
         Capture is by execution: call the yielded function on every path and specialization
         the artifact must serve. ``example_inputs`` can make positional-only inference
-        calls automatically under ``torch.no_grad()``; calls in the block use the ambient
-        grad mode, so wrap forward-only inference calls in ``torch.no_grad()``. Inspect
-        ``summary()`` before saving: identity guards cannot be serialized and are dropped
-        by default, while unexercised paths are absent from the artifact.
+        calls automatically under ordinary ``torch.no_grad()``; calls in the block use the
+        ambient grad mode, so wrap forward-only inference calls in ``torch.no_grad()``.
+        Automatic inputs must not themselves be inference tensors. Live capture
+        retains all guards. The filter controls only which guards are serialized, and
+        ``save()`` rejects every dropped guard by default. A complete
+        summary covers only successful calls that actually ran; unexercised paths remain
+        absent. Any captured call that raises marks the session incomplete, even when the
+        exception is caught inside the block.
 
         Args:
             fn (Callable): callable to capture.
             backend (str, optional): ``torch.compile`` backend. Default: ``"inductor"``.
             guard_filter_fn (Callable, optional): receives a sequence of guard entries and
-              returns one boolean per entry, where ``True`` keeps the guard. The default
-              drops identity guards that cannot be serialized; keeping one makes capture
-              fail. Default: ``None``.
+              returns one boolean per entry, where ``True`` serializes the guard. Live
+              capture always retains it. The default drops identity guards that cannot be
+              serialized. ``save()`` refuses every dropped guard by default; if that strict
+              requirement is relaxed, every custom-filter drop is still treated as risky.
+              Default: ``None``.
             recompile_limit (int, optional): maximum variants captured per frame. Default:
               ``256``.
             dynamic (bool, optional): dynamic-shape policy forwarded to ``torch.compile``.
               Default: ``None``.
             example_inputs (Sequence[tuple], optional): positional-argument tuples run
-              automatically under ``torch.no_grad()``. Default: ``None``.
+              automatically under ``torch.no_grad()``. Inference tensors are rejected;
+              create automatic inputs outside inference mode. Default: ``None``.
             invariants (str, optional): file receiving the invariant report after a
               successful capture. Default: ``None``.
 
@@ -2988,7 +3019,9 @@ class _PrecompileApi:
         recompile_limit: int = 256,
         dynamic: bool | None = None,
     ) -> _PrecompiledCallable:
-        """Load a multi-graph artifact saved by :meth:`capture`.
+        r"""load_package(fn, path, *, backend="inductor", guard_filter_fn=None, recompile_limit=256, dynamic=None) -> Callable
+
+        Load a multi-graph artifact saved by :meth:`capture`.
 
         Loading installs guarded bytecode and compiled backends process-wide on the
         callable's code objects. The returned callable is therefore also a context manager;
@@ -2999,9 +3032,9 @@ class _PrecompileApi:
             fn (Callable): callable that the artifact was captured from.
             path (str): artifact file written by :meth:`capture`.
             backend (str, optional): ``torch.compile`` backend. Default: ``"inductor"``.
-            guard_filter_fn (Callable, optional): guard filter used if an uncovered call is
+            guard_filter_fn (Callable, optional): serialization filter for an uncovered call
               allowed to compile outside :meth:`serving`; it returns one boolean per guard
-              entry. Default: ``None``.
+              entry. Runtime guards remain intact. Default: ``None``.
             recompile_limit (int, optional): recompilation limit outside :meth:`serving`.
               Default: ``256``.
             dynamic (bool, optional): dynamic-shape policy forwarded to ``torch.compile``.

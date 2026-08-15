@@ -1957,7 +1957,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertEqual(summary.resume_functions, 2)
         self.assertEqual(summary.guarded_codes, 3 * len(shapes))
         self.assertTrue(summary.complete)
-        session.save(self.path())
+        session.save(self.path(), require_no_dropped_guards=False)
 
         torch._dynamo.reset()
         with (
@@ -2109,7 +2109,11 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertIn("DICT_CONTAINS", kept)
         self.assertNotIn("DICT_KEYS_MATCH", summary.dropped_guard_types())
         self.assertNotIn("DICT_CONTAINS", summary.dropped_guard_types())
-        session.save(self.path())
+        session.save(
+            self.path(),
+            require_no_risky_drops=False,
+            require_no_dropped_guards=False,
+        )
 
         torch._dynamo.reset()
         with (
@@ -2203,22 +2207,25 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         # Guards on the torch module itself are dropped too but are not risky.
         self.assertNotIn("G['torch']", risky)
         with self.assertRaisesRegex(PackageError, "PRECOMPILE_ACTIVATION"):
-            session.save(self.path(), require_no_risky_drops=True)
+            session.save(self.path(), require_no_dropped_guards=False)
         # The risk is acknowledgeable, not a hard block.
-        session.save(self.path(), require_no_risky_drops=False)
+        session.save(
+            self.path(),
+            require_no_risky_drops=False,
+            require_no_dropped_guards=False,
+        )
 
-    def test_a_risky_drop_is_reported_and_still_saves_by_default(self):
-        # The lint is advisory, so on a default save() the WARNING is the only
-        # thing said about a slot nothing checks at load. Pin the report
-        # itself: a flip back to refusing, or a warning that quietly stops
-        # firing, otherwise shows up on a serving machine rather than here.
+    def test_strict_and_risky_drop_requirements_fail_closed(self):
+        # Strict save rejects every drop. Relaxing that still keeps the risky
+        # lint as a second gate unless the caller acknowledges it separately.
         clean = precompile_capture(
             PrecompileNoDispatchSlot(), backend="eager", dynamic=False
         )
         with clean as compiled, torch.no_grad():
             compiled(torch.randn(3, 4))
-        with self.assertNoLogs("torch._dynamo.precompile_package", "WARNING"):
-            clean.save(self.path())
+        clean.save(self.path())
+        with self.assertRaisesRegex(PackageError, "not serialized"):
+            clean.save(self.path(), require_no_dropped_guards=True)
 
         torch._dynamo.reset()
         session = precompile_capture(
@@ -2226,18 +2233,21 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         )
         with session as compiled:
             compiled(torch.randn(4, 8))
-        with self.assertLogs("torch._dynamo.precompile_package", "WARNING") as logs:
-            session.save(self.path())
-        reported = [m for m in logs.output if "dropped identity guard" in m]
-        self.assertEqual(len(reported), 1, logs.output)
-        self.assertIn("PRECOMPILE_ACTIVATION", reported[0])
-        self.assertIn("require_no_risky_drops=True", reported[0])
-        # Enforcing raises instead of reporting, rather than doing both.
         with (
             self.assertNoLogs("torch._dynamo.precompile_package", "WARNING"),
             self.assertRaisesRegex(PackageError, "PRECOMPILE_ACTIVATION"),
         ):
-            session.save(self.path(), require_no_risky_drops=True)
+            session.save(self.path(), require_no_dropped_guards=False)
+        with self.assertLogs("torch._dynamo.precompile_package", "WARNING") as logs:
+            session.save(
+                self.path(),
+                require_no_risky_drops=False,
+                require_no_dropped_guards=False,
+            )
+        reported = [m for m in logs.output if "dropped guard" in m]
+        self.assertEqual(len(reported), 1, logs.output)
+        self.assertIn("PRECOMPILE_ACTIVATION", reported[0])
+        self.assertIn("require_no_risky_drops=False", logs.output[0])
 
     @parametrize("owner", ("user", "torch", "torch_functional", "builtin"))
     def test_risky_drop_detected_through_a_module_attribute(self, owner):
@@ -2263,15 +2273,14 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         risky = [name for _, name in session.summary().risky_dropped_guards]
         self.assertIn("self.act", risky)
         with self.assertRaisesRegex(PackageError, "self.act"):
-            session.save(self.path(), require_no_risky_drops=True)
+            session.save(self.path(), require_no_dropped_guards=False)
 
-    def test_library_and_def_site_drops_are_not_risky(self):
+    def test_library_and_def_site_drops_need_relaxed_save(self):
         # Ordinary code with no dispatch slot still drops identity guards: on
         # torch internals, on stdlib modules and their attributes, and on a
-        # global bound to a def of its own name -- which only a source edit can
-        # repoint, and edits are caught by the inlined-source checksum. If those
-        # counted as risky, a model like this one would warn on every save and
-        # the report would stop being read.
+        # global bound to a def of its own name. The relaxed lint waives these
+        # common shapes to stay usable, even though runtime rebinding can still
+        # invalidate them; the strict all-drops default is the sound gate.
         session = precompile_capture(
             PrecompileNoDispatchSlot(), backend="eager", dynamic=False
         )
@@ -2284,6 +2293,8 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertIn("G['_precompile_scale']", dropped)
         self.assertEqual(summary.risky_dropped_guards, ())
         session.save(self.path())
+        with self.assertRaisesRegex(PackageError, "not serialized"):
+            session.save(self.path(), require_no_dropped_guards=True)
 
     def test_a_builtin_read_the_ordinary_way_is_not_a_risky_drop(self):
         # The other side of the "builtin" case above. len() and sorted() are
@@ -2303,6 +2314,8 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertTrue(any(n.endswith("['sorted']") for n in dropped), dropped)
         self.assertEqual(summary.risky_dropped_guards, ())
         session.save(self.path())
+        with self.assertRaisesRegex(PackageError, "not serialized"):
+            session.save(self.path(), require_no_dropped_guards=True)
 
     def test_a_builtin_shaped_read_that_is_still_a_slot_is_risky(self):
         # Both halves of that exemption carry weight, so neither can be dropped
@@ -2591,17 +2604,23 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         session = self._capture_corpus_shape(*build(self))
         risky = [name for _, name in session.summary().risky_dropped_guards]
         self.assertIn(expected, risky)
-        # Reporting is the default; enforcement is opt-in, because real models
-        # trip the predicate on library internals. Assert both halves.
-        session.save(self.path())
+        # Enforcement is the default; the corpus opts out only to prove that
+        # every risky shape remains serializable when explicitly acknowledged.
         with self.assertRaisesRegex(PackageError, re.escape(expected)):
-            session.save(self.path(), require_no_risky_drops=True)
+            session.save(self.path(), require_no_dropped_guards=False)
+        session.save(
+            self.path(),
+            require_no_risky_drops=False,
+            require_no_dropped_guards=False,
+        )
 
     @parametrize("shape", sorted(_BENIGN_DROP_CORPUS))
     def test_benign_drop_corpus_is_not_flagged(self, shape):
         session = self._capture_corpus_shape(*_BENIGN_DROP_CORPUS[shape](self))
         self.assertEqual(session.summary().risky_dropped_guards, ())
         session.save(self.path())
+        with self.assertRaisesRegex(PackageError, "not serialized"):
+            session.save(self.path(), require_no_dropped_guards=True)
 
     def test_summary_reports_value_pinned_guards(self):
         # A value crossing a graph break is guarded by equality, so the artifact
@@ -3343,7 +3362,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             with session:
                 pass
         self.assertEqual(functorch_config.bundled_autograd_cache, before)
-        with self.assertRaisesRegex(PackageError, "captured no compiled code"):
+        with self.assertRaisesRegex(PackageError, "capture raised"):
             session.save(self.path())
 
     def test_repeated_guard_facts_are_stored_once_per_session(self):
