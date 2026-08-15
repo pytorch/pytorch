@@ -59,10 +59,6 @@ class CacheLock {
   CacheLock& operator=(CacheLock&&) = delete;
   ~CacheLock() = default;
 
-  void unlock() {
-    lock_.unlock();
-  }
-
  private:
   std::unique_lock<std::recursive_mutex> lock_;
 };
@@ -116,12 +112,35 @@ void ExtraState::invalidate(
   Py_INCREF(this->orig_code);
   {
     CacheLock lock(this->cache_mutex);
-    CHECK(cache_entry->_owner == this);
-    CHECK(cache_entry == &*cache_entry->_owner_loc);
-    cache_entry->invalidate(std::move(deleted_guard_manager));
-    // Move the cache entry to the end of the list because these will always
-    // return False.
-    cache_entry->_owner->move_to_back(cache_entry);
+    // cache_entry arrives as a non-owning raw pointer, read off the guard
+    // manager before the lock was taken (CheckFunctionManager.invalidate). The
+    // wait above can release the GIL, so another thread holding both the GIL
+    // and this lock -- _clear_cache_entries_for_region, reached from
+    // PrecompiledCallable.unload() -- can destroy the entry while we block.
+    // Re-establish that it is still linked here by ADDRESS, before any
+    // dereference: comparing against the live nodes never touches the freed
+    // one, whereas cache_entry->_owner would.
+    bool still_linked = false;
+    for (auto& [id, entries] : this->cache_entry_map) {
+      (void)id;
+      for (CacheEntry& live : entries) {
+        if (&live == cache_entry) {
+          still_linked = true;
+          break;
+        }
+      }
+      if (still_linked) {
+        break;
+      }
+    }
+    if (still_linked) {
+      CHECK(cache_entry->_owner == this);
+      CHECK(cache_entry == &*cache_entry->_owner_loc);
+      cache_entry->invalidate(std::move(deleted_guard_manager));
+      // Move the cache entry to the end of the list because these will always
+      // return False.
+      cache_entry->_owner->move_to_back(cache_entry);
+    }
   }
   // The lock must be released BEFORE the decref: if this drops the last
   // reference, destroy_extra_state deletes `this` along with cache_mutex, and
@@ -396,26 +415,28 @@ void lookup(
   CacheEntry* found = nullptr;
   bool guard_error = false;
 
+  // Precompile entries match their OWN region only, deliberately unlike the
+  // cache-entry fallback below. That fallback is safe because lookup_in_list
+  // also requires backend_match, so an isolated compile only reuses a default
+  // bucket entry its own backend produced. A precompile entry carries no such
+  // check, and the identity guards that would tell two artifacts of one model
+  // apart are exactly the ones precompile has to drop -- so falling back here
+  // serves another artifact's graph for a call this region does not cover,
+  // instead of the miss that serving() turns into a loud error.
+  for (const auto& entry : extra_state->precompile_entries) {
+    if (entry.isolate_recompiles_id == isolate_recompiles_id &&
+        torch::dynamo::run_root_guard_manager(entry.root_mgr, f_locals)) {
+      *maybe_cached_code = entry.code.ptr();
+      return;
+    }
+  }
+
   // Search own bucket first, then fall back to default bucket (-1).
   // This lets isolated compiles reuse compilations from non-isolated
   // torch.compile() calls (BC friendly). New entries are still written
   // to the isolated bucket.
   int64_t ids_to_search[] = {isolate_recompiles_id, -1};
   int num_ids = (isolate_recompiles_id >= 0) ? 2 : 1;
-
-  // Precompile entries follow the same bucket order, so an isolated region
-  // still serves entries a non-isolated caller (caching_precompile,
-  // aot_compile) installed into the default bucket.
-  for (int i = 0; i < num_ids; i++) {
-    for (const auto& entry : extra_state->precompile_entries) {
-      if (entry.isolate_recompiles_id == ids_to_search[i] &&
-          torch::dynamo::run_root_guard_manager(entry.root_mgr, f_locals)) {
-        *maybe_cached_code = entry.code.ptr();
-        return;
-      }
-    }
-  }
-
   std::list<CacheEntry>* found_list = nullptr;
 
   for (int i = 0; i < num_ids && found == nullptr; i++) {
@@ -456,18 +477,16 @@ bool try_lookup_without_guard_eval(
     const char** trace_annotation,
     bool is_skip_guard_eval_unsafe) {
   CacheLock lock(extra_state->cache_mutex);
-  // Same bucket order as lookup(): own region first, then the default one.
-  int64_t ids_to_search[] = {isolate_recompiles_id, -1};
-  int num_ids = (isolate_recompiles_id >= 0) ? 2 : 1;
+  // Own region only, matching lookup().
   const PrecompileEntry* first_precompile_entry = nullptr;
-  for (int i = 0; i < num_ids && first_precompile_entry == nullptr; i++) {
-    for (const auto& entry : extra_state->precompile_entries) {
-      if (entry.isolate_recompiles_id == ids_to_search[i]) {
-        first_precompile_entry = &entry;
-        break;
-      }
+  for (const auto& entry : extra_state->precompile_entries) {
+    if (entry.isolate_recompiles_id == isolate_recompiles_id) {
+      first_precompile_entry = &entry;
+      break;
     }
   }
+  int64_t ids_to_search[] = {isolate_recompiles_id, -1};
+  int num_ids = (isolate_recompiles_id >= 0) ? 2 : 1;
   if (first_precompile_entry != nullptr) {
     // Only the first precompile entry can be safely fast-pathed: a later
     // guardless entry must not preempt an earlier guarded entry whose guards

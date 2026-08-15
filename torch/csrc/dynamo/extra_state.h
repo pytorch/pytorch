@@ -88,7 +88,7 @@ typedef struct VISIBILITY_HIDDEN ExtraState {
   // rather than process-wide: two threads running different functions must not
   // serialize against each other here.
   FrameExecStrategy strategy{DEFAULT, DEFAULT};
-  mutable std::mutex strategy_mutex;
+  std::mutex strategy_mutex;
   // Monotonic token for the last global strategy write. Tokens come from a
   // process-wide counter, so resetting a code object's ExtraState cannot make
   // a stale owner appear current again.

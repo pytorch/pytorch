@@ -250,6 +250,14 @@ def _scan_sys_modules_for_file(filename: str) -> str | None:
     been imported yet -- caching that permanently, which functools.cache would,
     silently drops the source checksum for every lazily imported file for the
     rest of the process.
+
+    Length is an ABA check, not a version: equal-size churn between two calls
+    keeps a stale miss, and ``del sys.modules[m]; import m`` -- the ordinary
+    force-reimport idiom -- is exactly that. sys.modules exposes no mutation
+    counter to use instead. The consequence is bounded and matches a plain
+    miss: this file's checksum is left out of the artifact, so a later edit to
+    it is not caught at load. Worth knowing when hunting a checksum that should
+    have fired.
     """
     generation = len(sys.modules)
     cached = _MODULE_KEY_BY_FILE.get(filename)
@@ -590,9 +598,12 @@ class SystemInfo:
             raise RuntimeError(
                 f"Compile package was created with a different PyTorch version: {self.torch_version}"
             )
-        # None means the artifact predates this field, not "no vector ISA":
-        # rejecting those would invalidate every artifact already on disk over a
-        # target they never recorded. New artifacts always carry a tuple.
+        # None means the artifact predates this field, not "no vector ISA".
+        # Only a build with a stable torch_version reaches here with None at
+        # all -- a dev build embeds the git hash, so the version check two above
+        # fires first -- but for a release build it is every artifact already on
+        # disk, rejected over a target they never recorded. New artifacts always
+        # carry a tuple, so the skip does not widen over time.
         if (
             check_codegen
             and device_type == "cpu"

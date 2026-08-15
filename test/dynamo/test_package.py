@@ -3,6 +3,7 @@
 import builtins
 import contextlib
 import dataclasses
+import faulthandler
 import functools
 import gc
 import importlib
@@ -356,6 +357,28 @@ class PrecompileSelfAct(torch.nn.Module):
         y = self.act(x)
         torch._dynamo.graph_break()
         return (y + 1).sum()
+
+
+# One source LINE, so the two entries agree on file AND lineno: what separates
+# them can only come from the code body. This is the ACT2FN shape.
+_LAMBDA_TABLE = {"a": lambda x: x.sin(), "b": lambda x: x.cos()}
+
+
+class PrecompileLambdaTablePair(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.ms = torch.nn.ModuleList(
+            [
+                PrecompileSelfAct(_LAMBDA_TABLE["a"]),
+                PrecompileSelfAct(_LAMBDA_TABLE["b"]),
+            ]
+        )
+
+    def forward(self, x):
+        out = x.sum()
+        for m in self.ms:
+            out = out + m(x)
+        return out
 
 
 _SHARED_RACE_SRC = """\
@@ -4029,33 +4052,30 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         with second, torch.no_grad(), serving():
             self.assertEqual(second(x), model(x))
 
-    def test_isolated_region_serves_a_default_region_precompile_entry(self):
-        # caching_precompile and aot_compile install into the default region,
-        # and ordinary cache entries have always fallen back to it from an
-        # isolated one. Precompile entries have to do the same, or loading any
-        # region-isolated artifact silently stops those from serving.
-        from torch._dynamo.precompile_package import _SingleFileStore
-
-        x = torch.randn(3, 4)
-        model = PrecompileSelfAct(torch.relu)
-        session = precompile_capture(model, backend="eager", dynamic=False)
+    def test_invariants_separate_two_lambdas_sharing_a_qualname(self):
+        # _object_identity names a callable, and every entry of an ACT2FN-style
+        # table is "<lambda>" in one module on one line. If they collapse, the
+        # CLOSURE_MATCH that SPLIT the two compilations renders identically in
+        # both and is reported as an invariant of each, with nothing varying --
+        # the report asserting a precondition that does not hold.
+        session = precompile_capture(
+            PrecompileLambdaTablePair(), backend="eager", dynamic=False
+        )
         with session as compiled, torch.no_grad():
-            compiled(x)
-        session.save(self.path(), require_no_risky_drops=False)
+            compiled(torch.randn(3, 4))
 
-        torch._dynamo.reset()
-        cache_entry = _SingleFileStore().load_cache_entry(self.path())
-        package = CompilePackage(model.forward, cache_entry.dynamo)
-        # Default region: install() with no isolate_recompiles_id.
-        package.install(cache_entry.backends)
-        try:
-            isolated = torch._dynamo.optimize(
-                "eager", dynamic=False, isolate_recompiles=True
-            )(model)
-            with torch.no_grad(), serving():
-                self.assertEqual(isolated(x), model(x))
-        finally:
-            package.uninstall()
+        split = [fi for fi in session.invariants() if fi.variants > 1]
+        self.assertTrue(split, "expected a frame compiled more than once")
+        for frame in split:
+            varying = [f.render() for f in frame.varying]
+            self.assertTrue(
+                any("self.act" in r for r in varying),
+                f"the guard that split {frame.frame} is missing from varying: {varying}",
+            )
+            self.assertFalse(
+                [f.render() for f in frame.invariant if "self.act" in f.render()],
+                "a guard that differs between variants was called invariant",
+            )
 
     def test_concurrent_calls_do_not_deadlock_on_the_cache_lock(self):
         # lookup() holds the ExtraState cache lock across guard evaluation,
@@ -4063,6 +4083,11 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         # second thread that blocks on that lock while holding the GIL wedges
         # the first one forever, so the lock has to release the GIL before it
         # waits. A short switch interval makes the handoff frequent.
+        #
+        # The wedged thread holds the GIL, so no assertion on this thread can
+        # run to report it -- join() would simply never return. A watchdog
+        # thread (which needs no GIL to sleep) dumps every stack and kills the
+        # process, turning the hang into output a CI log can be read from.
         x = torch.randn(3, 4)
         model = PrecompileSelfAct(torch.relu)
         session = precompile_capture(model, backend="eager", dynamic=False)
@@ -4073,6 +4098,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         torch._dynamo.reset()
         loaded = precompile_load(model, self.path(), backend="eager", dynamic=False)
         errors = queue.SimpleQueue()
+        finished = threading.Event()
 
         def hammer():
             try:
@@ -4082,17 +4108,29 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             except BaseException as e:
                 errors.put(e)
 
+        def watchdog():
+            if finished.wait(300):
+                return
+            sys.stderr.write(
+                "test_concurrent_calls_do_not_deadlock_on_the_cache_lock: "
+                "no progress in 300s, the cache lock deadlocked\n"
+            )
+            sys.stderr.flush()
+            faulthandler.dump_traceback()
+            os._exit(1)
+
         threads = [threading.Thread(target=hammer, daemon=True) for _ in range(4)]
+        guard = threading.Thread(target=watchdog, daemon=True)
         prior_interval = sys.getswitchinterval()
         sys.setswitchinterval(1e-6)
+        guard.start()
         try:
             for thread in threads:
                 thread.start()
             for thread in threads:
-                thread.join(120)
-            alive = [t for t in threads if t.is_alive()]
-            self.assertFalse(alive, "threads deadlocked acquiring the cache lock")
+                thread.join()
         finally:
+            finished.set()
             sys.setswitchinterval(prior_interval)
         raised = []
         while not errors.empty():

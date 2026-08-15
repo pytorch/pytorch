@@ -710,20 +710,52 @@ _IDENTITY_GUARD_TYPES = frozenset(
 )
 
 
+def _code_fingerprint(code: types.CodeType) -> str:
+    """
+    Name a code object by its body, for callables a definition site cannot tell
+    apart -- an ACT2FN table written on one source line makes every lambda in it
+    agree on file AND lineno.
+
+    Everything hashed is derived from the source, so the digest is identical in
+    another process. co_consts is filtered to primitives on purpose: a nested
+    code object reprs with its address, which would put a per-process value into
+    a report that is meant to be committed and diffed.
+    """
+    primitives = tuple(
+        c
+        for c in code.co_consts
+        if isinstance(c, (str, int, float, bool, bytes, type(None)))
+    )
+    return _hash_text(repr((code.co_code, code.co_names, code.co_varnames, primitives)))
+
+
 def _object_identity(value: object) -> str:
     """
     A stable stand-in for the id ``_normalize`` stripped.
 
     A name rather than an address, so the file still diffs clean across runs.
     Two objects of one type still collapse -- two Linear instances are
-    indistinguishable here -- but the case that matters separates: one slot
-    holding a different callable in different variants.
+    indistinguishable here -- but the case that matters must separate: one slot
+    holding a different callable in different variants. A qualname alone does
+    NOT achieve that, because the shape this exists for is an ACT2FN-style
+    table, whose entries are all ``<lambda>`` in one module. Two of those then
+    render identically, the CLOSURE_MATCH that split the compilations lands in
+    the intersection, and the report calls the one thing that varies an
+    invariant of both. So a callable is also named by where it is DEFINED,
+    which is source-derived and therefore still stable across processes; the
+    file is reduced to its basename so the report does not carry a checkout
+    path.
     """
     if isinstance(value, types.ModuleType):
         return f"is module {value.__name__}"
     name = getattr(value, "__qualname__", None) or getattr(value, "__name__", None)
     if isinstance(name, str):
-        return _normalize(f"is {_owning_module(value) or '?'}.{name}")[:160]
+        rendered = f"is {_owning_module(value) or '?'}.{name}"
+        code = getattr(value, "__code__", None)
+        if code is not None:
+            site = os.path.basename(getattr(code, "co_filename", "") or "?")
+            rendered += f" @{site}:{code.co_firstlineno}#{_code_fingerprint(code)}"
+        return _normalize(rendered)[:160]
     return f"is a {type(value).__module__}.{type(value).__qualname__}"[:160]
 
 
@@ -1213,10 +1245,12 @@ class PrecompileSession:
         anything.
 
         GLOBAL_STATE, TORCH_FUNCTION_STATE and DETERMINISTIC_ALGORITHMS carry
-        no value of their own, so two variants that differ only in, say,
-        autocast render identically and report as invariant with nothing
-        varying. GRAD_MODE is fingerprinted because the capture path itself
-        produces that split.
+        no value of their own, so nothing here can say whether two variants
+        agreed on, say, autocast. They are listed as UNDETERMINED rather than
+        compared -- see _UNMODELLED_GUARD_TYPES, and note that calling them
+        equal is precisely how the report would assert a precondition that does
+        not hold. GRAD_MODE is fingerprinted instead, because the capture path
+        itself produces that split and the fingerprint can model it.
         """
         out = []
         for (name, filename, lineno), sets in sorted(self._guard_sets.items()):

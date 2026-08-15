@@ -2739,7 +2739,10 @@ class _PrecompileApi:
         fn: Callable[..., object],
         *example_args: object,
         backend: str = "inductor",
-        tracer: str = "make_fx",
+        # Sentinel rather than "make_fx": the multi-graph path below has to
+        # REJECT an explicit tracer=, and its real default is a valid value, so
+        # "was it passed" cannot be recovered from the value alone.
+        tracer: str | None = None,
         decompositions: dict | None = None,
         example_inputs: Sequence[tuple[object, ...]] | None = None,
         guard_filter_fn: Callable[[Sequence[Any]], Sequence[bool]] | None = None,
@@ -2931,7 +2934,7 @@ class _PrecompileApi:
             raise ValueError(
                 f"precompile backend must be 'inductor' or 'eager', got {backend!r}."
             )
-        if tracer not in ("make_fx", "dynamo"):
+        if tracer is not None and tracer not in ("make_fx", "dynamo"):
             raise ValueError(
                 f"precompile tracer must be 'make_fx' or 'dynamo', got {tracer!r}."
             )
@@ -2945,6 +2948,12 @@ class _PrecompileApi:
                 raise ValueError(
                     "example_inputs=[...] selects multi-graph Dynamo capture; "
                     "decompositions apply only to the positional source-artifact path"
+                )
+            if tracer is not None:
+                raise ValueError(
+                    "example_inputs=[...] selects multi-graph Dynamo capture, which "
+                    f"has no tracer choice; drop tracer={tracer!r}. It applies only to "
+                    "the positional source-artifact path."
                 )
             session = self.capture(
                 fn,
@@ -2969,7 +2978,10 @@ class _PrecompileApi:
                 "example_inputs=[...]"
             )
         compiled = PrecompiledModule(
-            fn, backend=backend, tracer=tracer, decompositions=decompositions
+            fn,
+            backend=backend,
+            tracer="make_fx" if tracer is None else tracer,
+            decompositions=decompositions,
         )
         compiled._compile(example_args)
         # Build the (expensive) python_code ONCE and thread it into to_cache_bytes so
