@@ -1142,6 +1142,11 @@ from user code:
         # A registered forward hook makes get_traced_fn(model) return
         # Module._wrapped_call_impl, whose globals are torch/nn/modules/module.py.
         # The guard scope has to come from what was actually traced, model.forward.
+        #
+        # The hook is deliberately the identity: aot_compile_module traces
+        # model.forward directly and never runs hooks, so a hook with an effect
+        # would simply be dropped from the compiled result. This pins the guard
+        # SCOPE resolution on a hooked module, not hook support.
         mod = GlobalConfigModule()
         mod.register_forward_hook(lambda m, i, o: o)
         model = torch.compile(

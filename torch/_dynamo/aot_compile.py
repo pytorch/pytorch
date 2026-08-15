@@ -566,8 +566,17 @@ class AOTCompiledModel:
         # Passing the model instead would go through get_traced_fn's nn.Module
         # branch and, whenever a forward hook is registered, hand back
         # Module._wrapped_call_impl and torch/nn/modules/module.py's namespace.
-        traced_fn, _ = convert_frame.get_traced_fn(model.forward)
-        guard_globals = traced_fn.__globals__
+        # Only needed when a global guard survived the filter, which requires a
+        # caller-supplied guard_filter_fn. get_traced_fn refuses anything that
+        # is not a function or bound method -- a forward rebound to a partial,
+        # a callable object -- so failing here would stop such a model loading
+        # an artifact that has no global guards at all. Fall back to the old
+        # behaviour for those instead: no scope, guards resolve as before.
+        try:
+            traced_fn, _ = convert_frame.get_traced_fn(model.forward)
+            guard_globals = traced_fn.__globals__
+        except RuntimeError:
+            guard_globals = None
 
         results: list[bytes] = pickle.loads(data)
         compiled_results = []
