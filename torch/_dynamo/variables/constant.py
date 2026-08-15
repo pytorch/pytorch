@@ -114,7 +114,7 @@ class ConstantVariable(VariableTracker):
 
         return ConstantVariable(value, **kwargs)
 
-    def __init__(self, value: Any, **kwargs: Any) -> None:
+    def __init__(self, value: Any = None, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         if not ConstantVariable.is_base_literal(value):
             raise AssertionError(
