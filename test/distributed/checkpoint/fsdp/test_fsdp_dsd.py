@@ -25,9 +25,13 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
     RowwiseParallel,
 )
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, MLP
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+)
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 from torch.utils._pytree import tree_all_only
 
@@ -36,6 +40,8 @@ device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else 
 
 
 class TestFullyShardWithDistributedStateDict(FSDPTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return min(4, torch.accelerator.device_count())
@@ -600,6 +606,14 @@ class TestFullyShardWithDistributedStateDict(FSDPTest):
                 self.assertEqual(base_osd, tp_full_osd)
                 self.assertEqual(fsdp2_tp_full_msd, tp_full_msd)
                 self.assertEqual(fsdp2_tp_full_osd, tp_full_osd)
+
+
+instantiate_device_type_tests(
+    TestFullyShardWithDistributedStateDict,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":
