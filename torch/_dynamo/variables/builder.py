@@ -2222,12 +2222,11 @@ class VariableBuilder:
                 )
                 for i in range(list.__len__(value))
             ]
-            list_vt = ListVariable(
-                output,  # type: ignore[arg-type]
+            result = UserDefinedListVariable(
+                value,
+                items=output,  # type: ignore[arg-type]
                 source=self.source,
-                mutation_type=ValueMutationExisting(),
             )
-            result = UserDefinedListVariable(value, list_vt=list_vt, source=self.source)
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif isinstance(value, collections.deque):
             self.install_guards(GuardBuilder.TYPE_MATCH)
