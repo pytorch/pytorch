@@ -21,6 +21,14 @@ from torch.utils._ordered_set import OrderedSet
 
 
 @dataclasses.dataclass(frozen=True)
+class FlexGemmEpilogueIndexedOutputConfig:
+    """Template input positions for one row-indexed auxiliary output."""
+
+    out_index: int
+    indices_index: int
+
+
+@dataclasses.dataclass(frozen=True)
 class FlexGemmEpilogueLocalReduceConfig:
     """Template-time local-reduce metadata for output and/or feed-main consumers."""
 
@@ -78,6 +86,7 @@ class FlexGemmEpilogueConfig:
         epilogue_arg_indices: Template input indices for read-only epilogue captures.
         epilogue_arg_kinds: Broadcast kind for each captured epilogue tensor.
         aux_out_indices: Template input indices for same-shape aux outputs.
+        indexed_output: Runtime input positions for one indexed auxiliary output.
         local_reduce: Concrete local-reduce consumer rendered into runtime kwargs.
         fragmentwise: Whether the generated function consumes a complete TensorSSA fragment.
         tuned: Whether QuACK should autotune this call.
@@ -94,6 +103,7 @@ class FlexGemmEpilogueConfig:
     epilogue_arg_indices: tuple[int, ...]
     epilogue_arg_kinds: tuple[str, ...]
     aux_out_indices: tuple[int, ...]
+    indexed_output: FlexGemmEpilogueIndexedOutputConfig | None
     local_reduce: FlexGemmEpilogueLocalReduceConfig | None
     main_transform: FlexGemmGroupedMainOutputTransform | None
     fragmentwise: bool
@@ -148,6 +158,7 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
                 output_layout as flex_gemm_output_layout,
             )
             from torch._inductor.kernel.flex_gemm.runtime import (
+                FlexGemmEpiModIndexedOutputPlan,
                 FlexGemmEpiModLocalReducePlan,
                 gemm_epimod as flex_gemm_runtime,
             )
@@ -243,6 +254,12 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
         if config.aux_out_indices:
             aux_outs = ", ".join(input_args[index] for index in config.aux_out_indices)
             kwargs.append(f", aux_outs=({aux_outs},)")
+        if config.indexed_output is not None:
+            kwargs.append(
+                ", indexed_output=FlexGemmEpiModIndexedOutputPlan("
+                f"out={input_args[config.indexed_output.out_index]}, "
+                f"indices={input_args[config.indexed_output.indices_index]})"
+            )
         if config.local_reduce is not None:
             kwargs.append(
                 self._local_reduce_kwargs(
