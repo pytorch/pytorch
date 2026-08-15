@@ -353,7 +353,14 @@ Tensor& do_metal_mm(const Tensor& self, const Tensor& other, Tensor& output) {
 
 Tensor& int_mm_out_mps_impl(const Tensor& self, const Tensor& mat2, Tensor& result) {
   static constexpr std::string_view func_name = "int_mm_out_mps";
-  check_mm_shapes(self, mat2, "_int_mm");
+  TORCH_CHECK(self.dim() == 2, func_name, ": Expected self to be of dimension 2 but got ", self.dim());
+  TORCH_CHECK(mat2.dim() == 2, func_name, ": Expected mat2 to be of dimension 2 but got ", mat2.dim());
+  TORCH_CHECK(self.size(1) == mat2.size(0),
+              func_name,
+              ": self.size(1) needs to match mat2.size(0) but got ",
+              self.size(1),
+              " and ",
+              mat2.size(0));
   TORCH_CHECK(self.dtype() == at::kChar || self.dtype() == at::kByte,
               func_name,
               ": Expected self dtype to be int8 or uint8 but got ",
