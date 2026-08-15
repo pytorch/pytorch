@@ -189,7 +189,6 @@ class FsdpOptimStateCheckpoint(DTensorTestBase):
                     self.assertEqual(state, state2)
 
 
-instantiate_parametrized_tests(FsdpOptimStateCheckpoint)
 instantiate_device_type_tests(
     FsdpOptimStateCheckpoint,
     globals(),
