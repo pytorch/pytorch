@@ -360,15 +360,16 @@ function install_flex_gemm_quack() {
 
 function install_flash_attn_cute() {
   echo "Installing FlashAttention 4 from PyPI..."
-  # b17 adds aux_scalars; CUDA 13 wheels are behind the cu13 extra.
+  local flash_attn_package=flash-attn-4==4.0.0b17
   if [[ "${DESIRED_CUDA:-}" == 13.* || "${CUDA_VERSION:-}" == 13.* || "${BUILD_ENVIRONMENT:-}" == *cuda13* ]]; then
-    pip_install "flash-attn-4[cu13]==4.0.0b17"
-  else
-    pip_install flash-attn-4==4.0.0b17
+    flash_attn_package="flash-attn-4[cu13]==4.0.0b17"
   fi
-  # flash-attn-4 pulls quack unpinned. Reconstruct the full external package
-  # used by FlexGEMM from a public upstream base plus the in-tree patch series;
-  # the RMSNorm-only torch._vendor.quack pin remains independent.
+  # QuACK 0.6.4 pins the CuTeDSL version accepted by torch._native.
+  pip_install \
+    "$flash_attn_package" \
+    quack-kernels==0.6.4 \
+    apache-tvm-ffi==0.1.11
+  # Replace released QuACK with the patched external package used by FlexGEMM.
   install_flex_gemm_quack
   echo "FlashAttention 4 installation complete."
 }
