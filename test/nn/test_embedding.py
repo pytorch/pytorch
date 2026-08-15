@@ -1,7 +1,6 @@
 # Owner(s): ["module: nn"]
 import itertools
 import random
-import unittest
 from itertools import product
 
 import torch
@@ -13,6 +12,7 @@ from torch.testing._internal.common_device_type import (
     dtypesIfXPU,
     instantiate_device_type_tests,
     largeTensorTest,
+    onlyAccelerator,
     onlyNativeDeviceTypes,
     onlyOn,
     skipCUDAIf,
@@ -25,14 +25,13 @@ from torch.testing._internal.common_utils import (
     _assertGradAndGradgradChecks,
     DeterministicGuard,
     dtype2prec_DONTUSE,
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_JETSON,
     parametrize as parametrize_test,
     run_tests,
     set_default_dtype,
     skipIfTorchDynamo,
-    TEST_CUDA,
-    TEST_XPU,
 )
 
 
@@ -42,24 +41,9 @@ device_type = (
 
 
 class TestEmbeddingNN(NNTestCase):
+    hw_classification = HardwareClassification.GENERIC
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
-
-    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "CUDA/XPU unavailable")
-    def test_embedding_max_norm_unsorted_repeating_indices(self):
-        def create_embedding(device):
-            # Seed RNG so we get the same Embedding each time
-            torch.manual_seed(0)
-            return torch.nn.Embedding(
-                num_embeddings=20, embedding_dim=64, max_norm=1.0
-            ).to(device)
-
-        ix = torch.arange(2, device="cpu", dtype=torch.long).repeat(2000)
-        out_cpu = create_embedding("cpu")(ix)
-
-        ix = ix.to(device_type)
-        out = create_embedding(device_type)(ix)
-        self.assertEqual(out.cpu(), out_cpu)
 
     def test_embedding_sparse_basic(self):
         embedding = nn.Embedding(10, 20, sparse=True)
@@ -190,16 +174,6 @@ class TestEmbeddingNN(NNTestCase):
 
         self.assertEqual(res_old, res_F)
 
-    # https://github.com/pytorch/pytorch/issues/130806
-    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "CUDA/XPU not available")
-    @largeTensorTest("40GB", device=device_type)
-    def test_large_tensors(self):
-        input = torch.randint(low=0, high=16032, size=[131072], device=device_type)
-        w = torch.randn([16032, 16384], device=device_type)
-        out = torch.nn.functional.embedding(input, w)
-        self.assertEqual(out.dim(), 2)
-        self.assertEqual(out.numel(), 2147483648)
-
     def test_embedding_bag_functional(self):
         a = torch.tensor([[1, 3, 2], [0, 2, 1]], dtype=torch.long)
         embeddings = torch.rand(4, 3, requires_grad=True)
@@ -296,6 +270,8 @@ class TestEmbeddingNN(NNTestCase):
 
 
 class TestEmbeddingNNDeviceType(NNTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_embedding_dense_grad(self, device):
         with set_default_dtype(torch.double):
             embd = nn.Embedding(20, 20).to(device)
@@ -355,6 +331,31 @@ class TestEmbeddingNNDeviceType(NNTestCase):
             compiled = torch.compile(model, backend=backend, fullgraph=True)
             with self.assertRaisesRegex(RuntimeError, error_msg):
                 compiled(x, float_indices)
+
+    @onlyAccelerator
+    def test_embedding_max_norm_unsorted_repeating_indices(self, device):
+        def create_embedding(dev):
+            torch.manual_seed(0)
+            return torch.nn.Embedding(
+                num_embeddings=20, embedding_dim=64, max_norm=1.0
+            ).to(dev)
+
+        ix = torch.arange(2, device="cpu", dtype=torch.long).repeat(2000)
+        out_cpu = create_embedding("cpu")(ix)
+
+        ix = ix.to(device)
+        out = create_embedding(device)(ix)
+        self.assertEqual(out.cpu(), out_cpu)
+
+    # https://github.com/pytorch/pytorch/issues/130806
+    @onlyOn(["cuda", "xpu"])
+    @largeTensorTest("40GB")
+    def test_large_tensors(self, device):
+        input = torch.randint(low=0, high=16032, size=[131072], device=device)
+        w = torch.randn([16032, 16384], device=device)
+        out = torch.nn.functional.embedding(input, w)
+        self.assertEqual(out.dim(), 2)
+        self.assertEqual(out.numel(), 2147483648)
 
     @dtypesIfCUDA(torch.float16, torch.float64)
     @dtypesIfXPU(torch.float16, torch.float64)
