@@ -3050,7 +3050,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             from .. import compiled_autograd, config
             from .builder import wrap_fx_proxy
             from .constant import ConstantVariable
-            from .dicts import ConstDictVariable, OrderedItemsDictVariable
+            from .dicts import ConstDictVariable, OrderedDictVariable
             from .lists import BaseListVariable
             from .tensor import TensorVariable
 
@@ -3288,12 +3288,12 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         strict=True,
                     )
                 )
-                # `OrderedItemsDictVariable.reconstruct()` emits
+                # `OrderedDictVariable.reconstruct()` emits
                 # `OrderedDict(...)`, so it round-trips an OrderedDict result.
                 # Wrapping in `OrderedDictVariable` requires a class source we
                 # lack here.
-                if isinstance(inputs_var, OrderedItemsDictVariable):
-                    return OrderedItemsDictVariable(items)
+                if isinstance(inputs_var, OrderedDictVariable):
+                    return OrderedDictVariable(items)
                 return ConstDictVariable(items)
             return result
 
