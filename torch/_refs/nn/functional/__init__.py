@@ -1056,6 +1056,10 @@ def _hardtanh(
     if utils.is_integer_dtype(a.dtype):
         min_val = int(min_val)  # type: ignore[arg-type]
         max_val = int(max_val)  # type: ignore[arg-type]
+        if not (a.dtype != torch.uint8 or (min_val >= 0 and max_val >= 0)):
+            raise RuntimeError(
+                "Cannot do hardtanh on an unsigned type with negative limits"
+            )
 
     if check_bounds and min_val > max_val:  # type: ignore[operator]
         raise ValueError("min_val cannot be greater than max_val")
