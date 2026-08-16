@@ -3783,6 +3783,7 @@ class TestRandomTensorCreationCpuOnly(TestCase):
 
 # Class for testing *like ops, like torch.ones_like
 class TestLikeTensorCreation(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
     exact_dtype = True
 
     # TODO: this test should be updated
@@ -3796,16 +3797,6 @@ class TestLikeTensorCreation(TestCase):
         expected = torch.tensor([True, True], device=device, dtype=torch.bool)
         res1 = torch.ones_like(expected)
         self.assertEqual(res1, expected)
-
-    # TODO: this test should be updated
-    @onlyCPU
-    def test_empty_like(self, device):
-        x = torch.autograd.Variable(torch.tensor([]))
-        y = torch.autograd.Variable(torch.randn(4, 4))
-        z = torch.autograd.Variable(torch.IntTensor([1, 2, 3]))
-        for a in (x, y, z):
-            self.assertEqual(torch.empty_like(a).shape, a.shape)
-            self.assertEqualTypeString(torch.empty_like(a), a)
 
     def test_zeros_like(self, device):
         expected = torch.zeros((100, 100,), device=device)
@@ -3980,7 +3971,23 @@ def may_require_grad(dtype):
 def get_dtype_size(dtype):
     return int(torch.empty((), dtype=dtype).element_size())
 
+
+class TestLikeTensorCreationCpuOnly(TestCase):
+    hw_classification = HardwareClassification.CPU
+
+    # TODO: this test should be updated
+    def test_empty_like(self, device):
+        x = torch.autograd.Variable(torch.tensor([]))
+        y = torch.autograd.Variable(torch.randn(4, 4))
+        z = torch.autograd.Variable(torch.IntTensor([1, 2, 3]))
+        for a in (x, y, z):
+            self.assertEqual(torch.empty_like(a).shape, a.shape)
+            self.assertEqualTypeString(torch.empty_like(a), a)
+
+
 class TestBufferProtocol(TestCase):
+    hw_classification = HardwareClassification.CPU
+
     def _run_test(self, shape, dtype, count=-1, first=0, offset=None, **kwargs):
         numpy_dtype = torch_to_numpy_dtype_dict[dtype]
 
@@ -4136,6 +4143,8 @@ class TestBufferProtocol(TestCase):
         self.assertSequenceEqual(tensor, [255, 255])
 
 class TestFromBlob(TestCase):
+    hw_classification = HardwareClassification.CPU
+
     def _make_data(self, dtype, numel):
         numpy_dtype = torch_to_numpy_dtype_dict[dtype]
         arr = np.arange(1, numel + 1, dtype=numpy_dtype)
@@ -4538,6 +4547,7 @@ instantiate_device_type_tests(TestRandomTensorCreation, globals())
 instantiate_device_type_tests(TestRandomTensorCreationCudaOnly, globals(), only_for="cuda")
 instantiate_device_type_tests(TestRandomTensorCreationCpuOnly, globals(), only_for="cpu")
 instantiate_device_type_tests(TestLikeTensorCreation, globals())
+instantiate_device_type_tests(TestLikeTensorCreationCpuOnly, globals(), only_for="cpu")
 instantiate_device_type_tests(TestBufferProtocol, globals(), only_for="cpu")
 instantiate_device_type_tests(TestFromBlob, globals(), only_for="cpu")
 instantiate_device_type_tests(TestAsArray, globals())
