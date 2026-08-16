@@ -1709,6 +1709,43 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
 
     # ===== Debug / introspection =====
 
+    def test_has_precompile_entries_is_region_exact(self):
+        """_has_precompile_entries answers for one region only. lookup() never
+        serves a precompile entry from another region, so an entry belonging to
+        a second artifact installed on the same code object is not coverage for
+        the first. It exists so that a caller can ask that question without
+        building the list of wrappers _debug_get_precompile_entries returns."""
+        from torch._C._dynamo.eval_frame import (
+            _debug_get_cache_entry_list,
+            _has_precompile_entries,
+            _load_precompile_entry,
+            _reset_precompile_entries_for_region,
+        )
+
+        def never_compiled(x):
+            return x + 1
+
+        self.assertFalse(_has_precompile_entries(never_compiled.__code__, -1))
+        with self.assertRaisesRegex(TypeError, "expected a code object"):
+            _has_precompile_entries(never_compiled, -1)
+
+        def f(x):
+            return x.sin()
+
+        torch.compile(f, backend="eager", dynamic=False)(torch.randn(3))
+        code = f.__code__
+        self.assertFalse(_has_precompile_entries(code, 7))
+
+        guard_manager = _debug_get_cache_entry_list(code)[0].guard_manager
+        _load_precompile_entry(code, guard_manager, code, 7)
+        try:
+            self.assertTrue(_has_precompile_entries(code, 7))
+            self.assertFalse(_has_precompile_entries(code, 9))
+            self.assertFalse(_has_precompile_entries(code, -1))
+        finally:
+            _reset_precompile_entries_for_region(code, 7)
+        self.assertFalse(_has_precompile_entries(code, 7))
+
     def test_isolate_recompiles_debug_cache_entry_list_deterministic_order(self):
         """_debug_get_cache_entry_list returns entries sorted by
         isolate_recompiles_id for deterministic output."""
