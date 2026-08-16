@@ -1,5 +1,6 @@
 #include <torch/csrc/python_headers.h>
 
+#include <ATen/NodeCreationHooks.h>
 #include <ATen/PythonTorchFunctionTLS.h>
 #include <ATen/SavedTensorHooks.h>
 #include <ATen/SequenceNumber.h>
@@ -334,6 +335,15 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
                 static_cast<libkineto::ActivityType>(e.activityType()));
           })
       .def("extra_meta", [](const KinetoEvent& e) { return e.extraMeta(); })
+      .def(
+          "typed_metadata",
+          [](const KinetoEvent& e) {
+            py::dict metadata;
+            for (const auto& [key, value] : e.typedMetadata()) {
+              metadata[py::str(key)] = torch::jit::toPyObject(value);
+            }
+            return metadata;
+          })
       // Like shapes/strides, but also contains TensorList input shapes.
       .def(
           "structured_input_shapes",
@@ -610,6 +620,14 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
 
   );
 
+  m.def("_push_node_creation_hook", [](py::function& hook) {
+    at::impl::NodeCreationHooks::push_hook(
+        c10::SafePyObject(hook.release().ptr(), getPyInterpreter()));
+  });
+  m.def("_pop_node_creation_hook", []() {
+    at::impl::NodeCreationHooks::pop_hook();
+  });
+
   m.def("_get_creation_meta", [](const at::Tensor& t) {
     auto* meta = torch::autograd::impl::get_view_autograd_meta(t);
     TORCH_CHECK(meta != nullptr);
@@ -766,7 +784,7 @@ static PyObject* set_autocast_enabled(
   ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   // Set at::kCUDA as default value to prevent BC-breaking changes.
-  at::DeviceType device_type = at::kCUDA;
+  auto device_type = at::accelerator::getAccelerator(false).value_or(at::kCUDA);
   int enabled_id = 0;
   if (r.idx == 0) {
     device_type = at::Device(r.string(0)).type();
@@ -789,7 +807,7 @@ static PyObject* is_autocast_enabled(
   ParsedArgs<1> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   // Set at::kCUDA as default value to prevent BC-breaking changes.
-  at::DeviceType device_type = at::kCUDA;
+  auto device_type = at::accelerator::getAccelerator(false).value_or(at::kCUDA);
   if (r.idx == 0) {
     device_type = at::Device(r.string(0)).type();
   }
@@ -1251,7 +1269,7 @@ static PyObject* any_output_is_alias_to_input_or_output(
     if (!cp) {
       return false;
     }
-    if (s.find(cp) != s.end()) {
+    if (s.contains(cp)) {
       ret = true;
       return true;
     }

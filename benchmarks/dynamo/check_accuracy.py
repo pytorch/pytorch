@@ -25,6 +25,24 @@ flaky_models = {
 }
 
 
+def get_eager_nondeterministic_models(expected_filename: str) -> set[str]:
+    expected_filename = expected_filename.replace(os.sep, "/")
+    if expected_filename.endswith("ci_expected_accuracy/inductor_timm_training.csv"):
+        return {
+            "mobilenetv2_100",
+            "tf_efficientnet_b0",
+        }
+    if expected_filename.endswith(
+        "ci_expected_accuracy/inductor_torchbench_training.csv"
+    ):
+        return {
+            "mnasnet1_0",
+            "mobilenet_v2",
+            "shufflenet_v2_x1_0",
+        }
+    return set()
+
+
 def get_field(csv, model_name: str, field: str):
     try:
         return csv.loc[csv["name"] == model_name][field].item()
@@ -35,6 +53,7 @@ def get_field(csv, model_name: str, field: str):
 def check_accuracy(actual_csv, expected_csv, expected_filename):
     failed = []
     improved = []
+    eager_nondeterministic_models = get_eager_nondeterministic_models(expected_filename)
 
     if "rocm" in expected_filename:
         flaky_models.update(
@@ -57,6 +76,14 @@ def check_accuracy(actual_csv, expected_csv, expected_filename):
                 # Discovered on gfx950 CI after ROCm 7.2 upgrade, eager mode non determinism
                 "alexnet",
                 "demucs",
+                # Same class of eager non determinism, surfaced on gfx950 by the
+                # ROCm 7.2 -> 7.14 upgrade in #188429. Each of these was observed
+                # both passing and failing across consecutive runs of the same
+                # commit, so a pinned expected value goes red on whichever
+                # outcome it did not predict. See #192862.
+                "convnextv2_nano.fcmae_ft_in22k_in1k",
+                "vit_base_patch14_dinov2.lvd142m",
+                "torch_multimodal_clip",
             }
         )
 
@@ -74,6 +101,12 @@ def check_accuracy(actual_csv, expected_csv, expected_filename):
             status = "PASS" if expected_accuracy == "pass" else "XFAIL"
             print(f"{model:34}  {status}")
             continue
+        elif (
+            expected_accuracy == "pass"
+            and accuracy == "eager_two_runs_differ"
+            and model in eager_nondeterministic_models
+        ):
+            status = "EAGER_NONDETERMINISTIC:"
         elif model in flaky_models:
             if accuracy == "pass":
                 # model passed but marked xfailed

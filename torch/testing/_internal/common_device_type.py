@@ -55,6 +55,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_UBSAN,
     TEST_XPU,
     TestCase,
+    validate_test_name,
 )
 
 
@@ -717,6 +718,7 @@ class DeviceTypeTestBase(TestCase):
             test_name = (
                 f"{name}{test_suffix}{device_suffix}{_dtype_test_suffix(dtype_kwarg)}"
             )
+            validate_test_name(test_name)
 
             instantiate_test_helper(
                 cls=cls,
@@ -1652,33 +1654,48 @@ def _has_sufficient_memory(device, size):
 
     if psutil.virtual_memory().available < effective_size:
         gc.collect()
+        # Sync and cleanup MPS memory before checking available memory
+        if device_type == "mps":
+            torch.mps.synchronize()
+            torch.mps.empty_cache()
+
     return psutil.virtual_memory().available >= effective_size
+
+
+def _parse_size(size):
+    if isinstance(size, str):
+        if not size.endswith(("GB", "gb")):
+            raise AssertionError(f"only bytes or GB supported, got {size!r}")
+        return 1024**3 * int(size[:-2])
+    return size
+
+
+def _test_device(self, device):
+    if device is not None:
+        return device
+    if hasattr(self, "get_primary_device"):
+        return self.get_primary_device()
+    return self.device
 
 
 def largeTensorTest(size, device=None, inductor=TEST_WITH_TORCHINDUCTOR):
     """Skip test if the device has insufficient memory to run the test
 
-    size may be a number of bytes, a string of the form "N GB", or a callable
+    size is the test's total memory footprint, and may be a number of bytes, a
+    string of the form "N GB", or a callable. It is not a per-allocation limit;
+    for that see `largeMPSBufferTest`.
 
     If the test is a device generic test, available memory on the primary device will be checked.
     It can also be overridden by the optional `device=` argument.
     In other tests, the `device=` argument needs to be specified.
     """
-    if isinstance(size, str):
-        if not size.endswith(("GB", "gb")):
-            raise AssertionError(f"only bytes or GB supported, got {size!r}")
-        size = 1024**3 * int(size[:-2])
+    size = _parse_size(size)
 
     def inner(fn):
         @wraps(fn)
         def dep_fn(self, *args, **kwargs):
             size_bytes: int = size(self, *args, **kwargs) if callable(size) else size
-            _device = device
-            if _device is None:
-                if hasattr(self, "get_primary_device"):
-                    _device = self.get_primary_device()
-                else:
-                    _device = self.device
+            _device = _test_device(self, device)
 
             # If this is running with GPU cpp_wrapper, the autotuning step will generate
             # an additional array of the same size as the input.
@@ -1686,6 +1703,36 @@ def largeTensorTest(size, device=None, inductor=TEST_WITH_TORCHINDUCTOR):
                 size_bytes *= 2
             if not _has_sufficient_memory(_device, size_bytes):
                 raise unittest.SkipTest(f"Insufficient {_device} memory")
+
+            return fn(self, *args, **kwargs)
+
+        return dep_fn
+
+    return inner
+
+
+def largeMPSBufferTest(size, device=None):
+    """Skip test if MPS cannot allocate a single buffer of the given size
+
+    Unlike `largeTensorTest`, size is the largest *individual* allocation the
+    test makes, checked against the device's maxBufferLength (a hard cap the
+    MPS allocator enforces regardless of how much memory is free). Tests that
+    need both a large footprint and a large single buffer should use both
+    decorators. This is a no-op on non-MPS devices.
+    """
+    size = _parse_size(size)
+
+    def inner(fn):
+        @wraps(fn)
+        def dep_fn(self, *args, **kwargs):
+            _device = _test_device(self, device)
+            if torch.device(_device).type == "mps":
+                size_bytes = size(self, *args, **kwargs) if callable(size) else size
+                # The allocator's check is strict, so match it with >=.
+                if size_bytes >= torch._C._mps_maxBufferLength():
+                    raise unittest.SkipTest(
+                        f"Needs MPS maxBufferLength > {size_bytes} bytes"
+                    )
 
             return fn(self, *args, **kwargs)
 
@@ -2040,6 +2087,10 @@ def expectedFailureCPU(fn):
 
 def expectedFailureCUDA(fn):
     return expectedFailure("cuda")(fn)
+
+
+def expectedFailureIfRocm(fn):
+    return expectedFailure("cuda")(fn) if TEST_WITH_ROCM else fn
 
 
 def expectedFailureXPU(fn):
