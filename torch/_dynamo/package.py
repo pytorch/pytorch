@@ -1304,7 +1304,8 @@ class CompilePackage:
         """
         if self._installed_precompile_region_id < 0:
             return
-        module = sys.modules.get(scope.get("__name__"))
+        module_name = scope.get("__name__")
+        module = sys.modules.get(module_name) if isinstance(module_name, str) else None
         if module is None or module.__dict__ is not scope:
             return
         with _PACKAGE_INSTALL_LOCK:
