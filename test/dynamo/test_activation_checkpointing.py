@@ -2721,13 +2721,19 @@ class ActivationCheckpointingSharedModuleTests(torch._dynamo.test_case.TestCase)
 
         model = Model()
         cnt = CompileCounterWithBackend("aot_eager")
+        # dynamic=True is what unspecializes self.eps (via wrap_symfloat)
+        # rather than specializing it to a constant; it also happens to
+        # cover the two different sequence lengths below with one compile.
         compiled_model = torch.compile(model, backend=cnt, dynamic=True, fullgraph=True)
 
         for seq_len in (8, 16):
-            x = torch.randn(2, seq_len)
+            x = torch.randn(2, seq_len, requires_grad=True)
             expected = model(x)
             result = compiled_model(x)
             self.assertEqual(result, expected)
+            # Exercise the AC joint-graph/recompute boundary, where this
+            # issue was originally reported.
+            result.sum().backward()
 
         # Confirms dynamic shapes were actually exercised: one compile
         # covering both sequence lengths, not a silent recompile.
