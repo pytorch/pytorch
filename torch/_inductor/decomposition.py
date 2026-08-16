@@ -1127,6 +1127,17 @@ def _foreach_lerp_scalarlist(
     )
 
 
+@register_decomposition(aten.divmod.Tensor)
+def divmod_tensor(
+    self: torch.Tensor,
+    other: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    return (
+        aten.floor_divide(self, other),
+        aten.remainder(self, other),
+    )
+
+
 @aten.miopen_batch_norm.default.py_impl(torch._C.DispatchKey.Autograd)
 @register_decomposition(aten.miopen_batch_norm)
 def miopen_batch_norm(
