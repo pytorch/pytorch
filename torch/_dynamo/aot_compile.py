@@ -579,7 +579,9 @@ class AOTCompiledModel:
             # Log rather than swallow: if this model DOES carry a surviving
             # global guard, it now resolves against self.fn.__globals__ -- the
             # bug this change exists to fix -- and that should be visible.
-            log.warning(
+            # info, not warning: the overwhelmingly common case is a model with
+            # no surviving global guard at all, where this is harmless.
+            log.info(
                 "Could not resolve a guard scope from %s.forward; global guards "
                 "will resolve against the reconstructed scope instead",
                 type(model).__name__,

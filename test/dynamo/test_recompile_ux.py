@@ -1,5 +1,9 @@
 # Owner(s): ["module: dynamo"]
+import faulthandler
 import operator
+import queue
+import sys
+import threading
 import unittest
 import weakref
 from functools import cache
@@ -497,6 +501,57 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         return len(torch._dynamo.eval_frame._debug_get_cache_entry_list(code))
 
     # ===== Basic isolation: independent caches per compile call =====
+
+    def test_concurrent_calls_do_not_deadlock_on_the_cache_lock(self):
+        """lookup() holds the ExtraState cache lock across guard evaluation,
+        and guard evaluation runs Python -- a LAMBDA_GUARD calls straight back
+        into the interpreter, so the GIL can drop mid-iteration. A thread that
+        blocks on that lock while HOLDING the GIL wedges the owner, who needs
+        the GIL to finish. The lock therefore has to release the GIL before it
+        waits. A short switch interval makes the handoff frequent.
+
+        The wedged thread holds the GIL, so nothing written in Python can
+        report this -- join() never returns, and a watchdog thread cannot help
+        either, since Event.wait must reacquire the GIL to run its next
+        bytecode. faulthandler's timeout runs on a C thread and needs no GIL,
+        so it is the only thing here that still fires. file= is required
+        because pytest's --capture=sys leaves sys.stderr without a fileno.
+        """
+
+        def f(x):
+            return x.sin() + x.cos()
+
+        opt = torch.compile(f, backend="eager", dynamic=False)
+        args = [torch.randn(n) for n in (3, 4, 5)]
+        for arg in args:
+            opt(arg)
+
+        errors = queue.SimpleQueue()
+
+        def hammer():
+            try:
+                for _ in range(200):
+                    for arg in args:
+                        opt(arg)
+            except BaseException as e:
+                errors.put(e)
+
+        threads = [threading.Thread(target=hammer, daemon=True) for _ in range(4)]
+        prior_interval = sys.getswitchinterval()
+        sys.setswitchinterval(1e-6)
+        faulthandler.dump_traceback_later(300, exit=True, file=sys.__stderr__)
+        try:
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+        finally:
+            faulthandler.cancel_dump_traceback_later()
+            sys.setswitchinterval(prior_interval)
+        raised = []
+        while not errors.empty():
+            raised.append(errors.get_nowait())
+        self.assertEqual(raised, [])
 
     @torch._dynamo.config.patch(
         recompile_limit=1,

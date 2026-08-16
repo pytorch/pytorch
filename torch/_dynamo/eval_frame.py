@@ -293,7 +293,13 @@ def _get_effective_stance() -> DynamoStance:
     which is the failure serving() exists to make loud.
     """
     if _fail_on_recompile_depth():
-        return dataclasses.replace(_stance, stance="fail_on_recompile")
+        # skip_guard_eval_unsafe is dropped deliberately: kept, an uncovered
+        # call raises a bare RuntimeError from the skip-guard path instead of
+        # the RecompileError serving() documents, so `except RecompileError`
+        # around a served call would stop catching it.
+        return dataclasses.replace(
+            _stance, stance="fail_on_recompile", skip_guard_eval_unsafe=False
+        )
     return _stance
 
 

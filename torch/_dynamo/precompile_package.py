@@ -1502,13 +1502,14 @@ class PrecompileSession:
                 )
             if summary.uncovered_frames:
                 raise PackageError(
-                    f"Precompilation exercised frame(s) without producing guarded "
-                    f"code for at least one attempt: {list(summary.uncovered_frames)}. "
-                    f"Those paths are absent from the artifact. A frame with no guarded "
-                    f"variants at all is skipped at install and runs eager, so serving() "
-                    f"cannot report that gap. This is expected for a frame that only "
-                    f"dispatches to covered submodules; it also looks exactly like a "
-                    f"frame Dynamo gave up on (check TORCH_LOGS=graph_breaks for gb0124). "
+                    f"Precompilation exercised frame(s) that produced NO guarded code "
+                    f"at all: {list(summary.uncovered_frames)}. Those paths are absent "
+                    f"from the artifact, and such a frame is skipped at install and runs "
+                    f"eager, so serving() cannot report that gap. This is expected for a "
+                    f"frame that only dispatches to covered submodules; it also looks "
+                    f"exactly like a frame Dynamo gave up on (check "
+                    f"TORCH_LOGS=graph_breaks for gb0124). A frame that hit the recompile "
+                    f"limit has working variants and is reported as truncated instead. "
                     f"Pass require_complete=False once you have confirmed which."
                 )
             if summary.bypassed:
@@ -1746,7 +1747,17 @@ class PrecompiledCallable:
 def serving() -> Iterator[None]:
     """
     Forbid compilation, so a call the artifact does not cover raises instead of
-    quietly recompiling. This is process-wide, not a property of the artifact.
+    quietly recompiling.
+
+    Scoped to the CALLING THREAD, not the process: a serving process is
+    multi-threaded by definition, and a process-wide switch made one request
+    handler's block reject a concurrent handler's legitimate recompile. The
+    corollary is that work handed to other threads is NOT covered --
+    ``with serving(): pool.map(model, batches)`` leaves the workers free to
+    recompile.
+
+    It is not a property of the artifact either: it applies to every call made
+    on this thread while it is active.
     """
     from .eval_frame import (
         _enter_fail_on_recompile_override,

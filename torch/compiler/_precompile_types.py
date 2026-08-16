@@ -61,7 +61,11 @@ class PrecompileSummary:
 
     @property
     def complete(self) -> bool:
-        """Whether every exercised capture produced installable guarded code."""
+        """Whether the capture covers everything it exercised.
+
+        False if any frame produced NO guarded code at all, if any frame hit the
+        recompile limit, if any was bypassed, or if a capture call raised.
+        """
         return (
             not self.bypassed
             and not self.truncated

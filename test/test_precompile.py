@@ -1362,18 +1362,36 @@ class TestPrecompile(TestCase):
         # put a module there has to say so, rather than surfacing as an IndexError
         # or an AttributeError on whatever else landed in the slot.
         forward, _train_step, fresh, x, t = self._exec_dynamo_training_artifact()
-        with self.assertRaisesRegex(PrecompileError, "Pass the model positionally"):
+        with self.assertRaisesRegex(
+            PrecompileError, "Pass the model in the same position"
+        ):
             forward(model=fresh(), xx=x, tt=t)
-        with self.assertRaisesRegex(PrecompileError, "Pass the model positionally"):
+        with self.assertRaisesRegex(
+            PrecompileError, "Pass the model in the same position"
+        ):
             forward(x, fresh(), t)
 
-    @parametrize("shape", ["module_fn", "positional", "in_a_list", "bound_method"])
+    @parametrize(
+        "shape",
+        [
+            "module_fn",
+            "positional",
+            "in_a_list",
+            "bound_method",
+            "in_a_holder",
+            "two_in_a_list",
+        ],
+    )
     def test_tracer_dynamo_training_accumulates_whatever_holds_the_params(self, shape):
-        # GRAD_ACCUM_PARAMS positions are over the FRAME args, which prepend the
-        # bound self. Scanning the caller's args instead missed the module
-        # entirely for an nn.Module fn (baking the ASSIGN form: step 0 matches
-        # eager and nothing after does) and shifted every position by one for a
-        # bound method.
+        # GRAD_ACCUM_PARAMS records the FRAME arg index and the PATH from it to
+        # the owning module. Frame args prepend the bound self, so scanning the
+        # caller's args missed the module entirely for an nn.Module fn (baking
+        # the ASSIGN form: step 0 matches eager and nothing after does) and
+        # shifted every position by one for a bound method. A one-level
+        # container scan then still missed a plain object holding the model,
+        # and re-searching by parameter name could not tell two same-shaped
+        # modules in one container apart -- it stamped the first one twice and
+        # left the second at .grad = None.
         x, t = torch.randn(5, 4), torch.randn(5, 3)
 
         def fresh():
@@ -1427,7 +1445,7 @@ class TestPrecompile(TestCase):
                 fresh,
                 lambda r: step_list([r], x, t),
             )
-        else:
+        elif shape == "bound_method":
             fn, cap, call, mk, eager = (
                 trainer.step,
                 (fresh(), x, t),
@@ -1435,6 +1453,49 @@ class TestPrecompile(TestCase):
                 fresh,
                 lambda r: trainer.step(r, x, t),
             )
+        elif shape == "in_a_holder":
+            # A plain (non-Module) object holding the model -- the commonest
+            # training shape, and one a container-only search missed silently.
+            class Holder:
+                def __init__(self, model):
+                    self.model = model
+
+                def step(self, xx, tt):
+                    torch.nn.functional.mse_loss(self.model(xx), tt).backward()
+
+            holders = {}
+
+            def mk_holder():
+                h = Holder(fresh())
+                holders[id(h.model)] = h
+                return h.model
+
+            fn = Holder(fresh()).step
+            cap = (x, t)
+            mk = mk_holder
+            call = lambda r: (holders[id(r)], x, t)  # noqa: E731
+            eager = lambda r: holders[id(r)].step(x, t)  # noqa: E731
+        else:
+            # Two same-shaped modules in ONE container: indistinguishable by
+            # parameter name, so a name search stamps the first one twice and
+            # leaves the second with .grad = None.
+            def step_two(models, xx, tt):
+                loss = torch.nn.functional.mse_loss(models[0](xx), tt)
+                loss = loss + torch.nn.functional.mse_loss(models[1](xx), tt)
+                loss.backward()
+
+            pairs = {}
+
+            def mk_pair():
+                a, b = fresh(), torch.nn.Linear(4, 3)
+                pairs[id(a)] = [a, b]
+                return a
+
+            fn = step_two
+            cap = ([fresh(), torch.nn.Linear(4, 3)], x, t)
+            mk = mk_pair
+            call = lambda r: (pairs[id(r)], x, t)  # noqa: E731
+            eager = lambda r: step_two(pairs[id(r)], x, t)  # noqa: E731
 
         code, cache = torch.compiler.precompile(
             fn, *cap, tracer="dynamo", backend="eager"
@@ -1457,6 +1518,26 @@ class TestPrecompile(TestCase):
         exec(compile(src, mod.__file__, "exec"), mod.__dict__)
         sys.modules[name] = mod
         return mod
+
+    def test_tracer_dynamo_training_refuses_an_unreachable_model(self):
+        # Enumerating the shapes that can hold a model is a losing game, and
+        # every miss is SILENT: the artifact bakes Dynamo's assign form and
+        # overwrites from the second step. So a capture whose bytecode writes a
+        # .grad precompile could not attribute is refused outright.
+        x, t = torch.randn(5, 4), torch.randn(5, 3)
+
+        def make_step():
+            m = torch.nn.Linear(4, 3)  # reachable only through the closure
+
+            def step(xx, tt):
+                torch.nn.functional.mse_loss(m(xx), tt).backward()
+
+            return step
+
+        with self.assertRaisesRegex(PrecompileError, "could not find the nn.Module"):
+            torch.compiler.precompile(
+                make_step(), x, t, tracer="dynamo", backend="eager"
+            )
 
     def test_tracer_dynamo_module_global_round_trips_by_sys_modules_key(self):
         # A module GLOBAL is by-reference state: recording it in IMPORT_SOURCES

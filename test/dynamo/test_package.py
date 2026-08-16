@@ -2264,7 +2264,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         # guarded code of its own.
         self.assertEqual(summary.uncovered_frames, ("forward",))
         self.assertFalse(summary.complete)
-        with self.assertRaisesRegex(PackageError, "without producing guarded code"):
+        with self.assertRaisesRegex(PackageError, "produced NO guarded code at all"):
             session.save(self.path())
         session.save(self.path(), require_complete=False)
 
