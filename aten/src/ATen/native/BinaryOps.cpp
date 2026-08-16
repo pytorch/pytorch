@@ -41,6 +41,7 @@
 #include <ATen/ops/div_native.h>
 #include <ATen/ops/div_ops.h>
 #include <ATen/ops/divide_native.h>
+#include <ATen/ops/divmod.h>
 #include <ATen/ops/divmod_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/eq_native.h>
@@ -1401,11 +1402,11 @@ Tensor bitwise_right_shift(const Scalar& self, const Tensor& other) {
 }
 
 std::tuple<Tensor, Tensor> divmod(const Scalar& self, const Tensor& other) {
-  return divmod(wrapped_scalar_tensor(self), other);
+  return at::divmod(wrapped_scalar_tensor(self), other);
 }
 
 std::tuple<Tensor, Tensor> divmod(const Tensor& self, const Scalar& other) {
-  return divmod(self, wrapped_scalar_tensor(other));
+  return at::divmod(self, wrapped_scalar_tensor(other));
 }
 
 std::tuple<Tensor, Tensor> divmod(const Tensor& self, const Tensor& other) {
