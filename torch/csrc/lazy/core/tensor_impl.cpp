@@ -53,7 +53,7 @@ struct LTCGuardImpl : public c10::impl::DeviceGuardImplInterface {
 
   c10::DeviceIndex deviceCount() const noexcept override {
     // This will get called when autograd initializes its device pool
-    // regardless whether we have a backend registered aforehand.
+    // regardless whether we have a backend registered beforehand.
     if (!hasBackend()) {
       return 0;
     }

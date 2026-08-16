@@ -1,5 +1,6 @@
 #include <torch/csrc/python_headers.h>
 
+#include <ATen/NodeCreationHooks.h>
 #include <ATen/PythonTorchFunctionTLS.h>
 #include <ATen/SavedTensorHooks.h>
 #include <ATen/SequenceNumber.h>
@@ -334,6 +335,15 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
                 static_cast<libkineto::ActivityType>(e.activityType()));
           })
       .def("extra_meta", [](const KinetoEvent& e) { return e.extraMeta(); })
+      .def(
+          "typed_metadata",
+          [](const KinetoEvent& e) {
+            py::dict metadata;
+            for (const auto& [key, value] : e.typedMetadata()) {
+              metadata[py::str(key)] = torch::jit::toPyObject(value);
+            }
+            return metadata;
+          })
       // Like shapes/strides, but also contains TensorList input shapes.
       .def(
           "structured_input_shapes",
@@ -439,7 +449,10 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       py::arg("config"),
       py::arg("activities"),
       py::arg("scopes") = std::unordered_set<at::RecordScope>());
-  m.def("_disable_profiler", disableProfiler);
+  m.def(
+      "_disable_profiler",
+      disableProfiler,
+      py::call_guard<py::gil_scoped_release>());
   m.def(
       "_prepare_profiler",
       prepareProfiler,
@@ -607,6 +620,14 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
 
   );
 
+  m.def("_push_node_creation_hook", [](py::function& hook) {
+    at::impl::NodeCreationHooks::push_hook(
+        c10::SafePyObject(hook.release().ptr(), getPyInterpreter()));
+  });
+  m.def("_pop_node_creation_hook", []() {
+    at::impl::NodeCreationHooks::pop_hook();
+  });
+
   m.def("_get_creation_meta", [](const at::Tensor& t) {
     auto* meta = torch::autograd::impl::get_view_autograd_meta(t);
     TORCH_CHECK(meta != nullptr);
@@ -763,7 +784,7 @@ static PyObject* set_autocast_enabled(
   ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   // Set at::kCUDA as default value to prevent BC-breaking changes.
-  at::DeviceType device_type = at::kCUDA;
+  auto device_type = at::accelerator::getAccelerator(false).value_or(at::kCUDA);
   int enabled_id = 0;
   if (r.idx == 0) {
     device_type = at::Device(r.string(0)).type();
@@ -786,7 +807,7 @@ static PyObject* is_autocast_enabled(
   ParsedArgs<1> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   // Set at::kCUDA as default value to prevent BC-breaking changes.
-  at::DeviceType device_type = at::kCUDA;
+  auto device_type = at::accelerator::getAccelerator(false).value_or(at::kCUDA);
   if (r.idx == 0) {
     device_type = at::Device(r.string(0)).type();
   }
@@ -1248,7 +1269,7 @@ static PyObject* any_output_is_alias_to_input_or_output(
     if (!cp) {
       return false;
     }
-    if (s.find(cp) != s.end()) {
+    if (s.contains(cp)) {
       ret = true;
       return true;
     }
@@ -1259,104 +1280,6 @@ static PyObject* any_output_is_alias_to_input_or_output(
     Py_RETURN_TRUE;
   }
   Py_RETURN_FALSE;
-  END_HANDLE_TH_ERRORS
-}
-
-// Consolidated fast-path eligibility check for custom_op.
-//
-// Computes a combined DispatchKeySet (TLS + per-tensor keys) and checks
-// that it only contains keys the fast path can handle (dense backend
-// and autograd keys, with or without grad). This mirrors what the C++
-// dispatcher does (DispatchKeyExtractor / key_extractor), but as a
-// single go/no-go check.
-//
-// Arg: a tuple of positional args to the custom op.
-// Non-Tensor args are skipped; Tensor[] args are NOT unpacked, so ops
-// with tensor-list parameters must be excluded by the caller
-// (_install_fast_path checks has_tensorlist).
-// Returns None when any guard fails (caller should fall back).
-// Otherwise returns (device_type: str, keyset_raw: int) where keyset_raw
-// is the full resolved dispatch keyset ((tensor_keys | tls.included) &
-// ~tls.excluded) that the caller should pass to autograd_impl.
-static PyObject* custom_op_fast_path_check(
-    PyObject* _unused,
-    PyObject* py_args) {
-  HANDLE_TH_ERRORS
-
-  // The set of dispatch keys that a plain dense eager tensor can have:
-  // dense functionality + backend bits + autograd + BackendSelect +
-  // ADInplaceOrView. Anything outside this (e.g. Sparse, NestedTensor,
-  // Python, FuncTorchBatched, autocast) means the fast path is ineligible.
-  static constexpr c10::DispatchKeySet fast_path_allowed_ks =
-      c10::DispatchKeySet({
-          c10::DispatchKey::Dense,
-          c10::DispatchKey::BackendSelect,
-          c10::DispatchKey::ADInplaceOrView,
-      }) |
-      c10::autograd_dispatch_keyset |
-      c10::DispatchKeySet(c10::DispatchKeySet::RAW, c10::full_backend_mask);
-
-  TORCH_CHECK(PyTuple_Check(py_args), "arg must be a tuple");
-
-  if (at::impl::torch_function_mode_enabled()) {
-    Py_RETURN_NONE;
-  }
-
-  // Accumulate dispatch keys from TLS and all tensor args, then check
-  // that the active keyset is a subset of fast_path_allowed_ks.
-  auto tls = c10::impl::tls_local_dispatch_key_set();
-  c10::DispatchKeySet ks = tls.included_;
-
-  Py_ssize_t n = PyTuple_GET_SIZE(py_args);
-  if (n == 0) {
-    Py_RETURN_NONE;
-  }
-
-  c10::DeviceType first_device = c10::DeviceType::CPU;
-  bool seen_tensor = false;
-
-  for (Py_ssize_t i = 0; i < n; i++) {
-    PyObject* obj = PyTuple_GET_ITEM(py_args, i);
-    if (!THPVariable_Check(obj))
-      continue;
-    // __torch_function__ subclasses have normal dispatch keys, so the
-    // keyset check below won't catch them. Exact type check is needed.
-    if (Py_TYPE(obj) != (PyTypeObject*)THPVariableClass) {
-      Py_RETURN_NONE;
-    }
-    const auto& t = THPVariable_Unpack(obj);
-    ks = ks | t.key_set();
-    auto dev = t.device().type();
-    if (!seen_tensor) {
-      first_device = dev;
-      seen_tensor = true;
-    } else if (dev != first_device) {
-      Py_RETURN_NONE;
-    }
-  }
-
-  if (!seen_tensor) {
-    Py_RETURN_NONE;
-  }
-
-  // Mask out excluded keys (e.g. autocast keys are excluded by default)
-  // then verify the active keyset contains only:
-  // 1) an autograd dispatch key, 2) ADInplaceOrView, 3) a backend key.
-  uint64_t active = (ks.raw_repr() & ~tls.excluded_.raw_repr());
-  if ((active & ~fast_path_allowed_ks.raw_repr()) != 0) {
-    Py_RETURN_NONE;
-  }
-
-  // inference_mode excludes autograd keys; the fast path currently always
-  // calls autograd_impl so bail when no autograd key is active.
-  if ((active & c10::autograd_dispatch_keyset.raw_repr()) == 0) {
-    Py_RETURN_NONE;
-  }
-
-  std::string device_name =
-      c10::DeviceTypeName(first_device, /*lower_case=*/true);
-  return Py_BuildValue(
-      "(sK)", device_name.c_str(), static_cast<unsigned long long>(active));
   END_HANDLE_TH_ERRORS
 }
 
@@ -1933,7 +1856,6 @@ static PyMethodDef methods[] = {
      len_torch_dispatch_stack,
      METH_NOARGS,
      nullptr},
-    {"_custom_op_fast_path_check", custom_op_fast_path_check, METH_O, nullptr},
     {"_set_dispatch_mode", set_dispatch_mode, METH_O, nullptr},
     {"_get_dispatch_mode", get_dispatch_mode, METH_O, nullptr},
     {"_unset_dispatch_mode", unset_dispatch_mode, METH_O, nullptr},

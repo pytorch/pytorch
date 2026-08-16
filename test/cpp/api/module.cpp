@@ -1033,7 +1033,7 @@ TEST_F(ModuleTest, PrettyPrint) {
     TestModule(int x, float y) : x_(x), y_(y) {}
 
     void pretty_print(std::ostream& stream) const override {
-      stream << "TestModule(x=" << x_ << ", y=" << y_ << ")";
+      stream << "TestModule(x=" << x_ << ", y=" << y_ << ')';
     }
 
     int x_;

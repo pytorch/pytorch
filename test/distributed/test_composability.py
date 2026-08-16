@@ -465,14 +465,14 @@ class ComposabilityTest(MultiProcContinuousTest):
                 self.assertEqual(
                     unsharded_count,
                     total_fsdp_params,
-                    f"Expected all {total_fsdp_params} FSDP parameters to be unsharded, "
+                    lambda msg: f"{msg}\nExpected all {total_fsdp_params} FSDP parameters to be unsharded, "
                     f"but only {unsharded_count} are unsharded",
                 )
             else:
                 self.assertEqual(
                     unsharded_count,
                     0,
-                    f"Expected all FSDP parameters to be sharded, "
+                    lambda msg: f"{msg}\nExpected all FSDP parameters to be sharded, "
                     f"but {unsharded_count} out of {total_fsdp_params} are unsharded",
                 )
 

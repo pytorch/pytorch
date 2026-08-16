@@ -121,11 +121,13 @@ def _create_graph(
             export=aot_config.is_export,
             # Allow token discovery for joint fn tracing as tokens can be used in backward.
             _allow_token_discovery=True,
+            _keep_input_mutations=aot_config.keep_inference_input_mutations,
         )
 
     with (
         enable_python_dispatcher(),
         ctx,
+        torch._dynamo.eval_frame._use_eager_on_nested_compile(),
     ):
         fx_g = make_fx(
             inner_f,
@@ -328,23 +330,29 @@ def aot_dispatch_base_graph(
     # We track buffer assignments when exporting in non-strict mode.
     # (In contrast, strict mode errors on any attribute assignment.)
     mod_when_exporting_non_strict = root_module_when_exporting_non_strict(flat_fn)
+    assigned_buffers: dict[str, str] = {}
+    hook = None
     if aot_config.is_export and mod_when_exporting_non_strict is not None:
         # For any buffer that is assigned, we want to associate it to the final proxy node
         # that it is assigned to. This node can then be added as a buffer mutation output.
-        assigned_buffers: dict[str, str] = {}
         hook = register_buffer_assignment_hook(
             mod_when_exporting_non_strict, assigned_buffers
         )
 
-    (
-        fw_module,
-        saved_updated_flat_args_subclasses_desugared,
-    ) = _create_graph_and_save_traced_inputs(
-        fn_to_trace,
-        updated_flat_args_subclasses_desugared,
-        updated_flat_args_subclasses_desugared_descs,
-        aot_config=aot_config,
-    )
+    try:
+        (
+            fw_module,
+            saved_updated_flat_args_subclasses_desugared,
+        ) = _create_graph_and_save_traced_inputs(
+            fn_to_trace,
+            updated_flat_args_subclasses_desugared,
+            updated_flat_args_subclasses_desugared_descs,
+            aot_config=aot_config,
+        )
+    finally:
+        if hook is not None:
+            hook.remove()
+            hook = None
     saved_updated_flat_args_subclasses_desugared_descs = (
         updated_flat_args_subclasses_desugared_descs
     )
@@ -353,7 +361,7 @@ def aot_dispatch_base_graph(
         # We update metadata to consider any assigned buffers as buffer mutations.
         i = len(dict(mod_when_exporting_non_strict.named_parameters()))
         for name, _ in mod_when_exporting_non_strict.named_buffers():
-            if name in assigned_buffers and not fw_metadata.input_info[i].mutates_data:  # type: ignore[possibly-undefined]
+            if name in assigned_buffers and not fw_metadata.input_info[i].mutates_data:
                 fw_metadata.input_info[i] = dataclasses.replace(
                     fw_metadata.input_info[i], mutates_data=True
                 )
@@ -363,14 +371,12 @@ def aot_dispatch_base_graph(
         # We add nodes corresponding to buffer assignments as output nodes in the graph.
         add_nodes = []
         output_node = list(fw_module.graph.nodes)[-1]
-        for name in assigned_buffers.values():  # type: ignore[possibly-undefined]
+        for name in assigned_buffers.values():
             for node in fw_module.graph.nodes:
                 if node.name == name:
                     add_nodes.append(node)
                     node.users[output_node] = None
         output_node.args = ((*add_nodes, *output_node.args[0]),)
-
-        hook.remove()  # type: ignore[possibly-undefined]
 
     # As long as we opted to remove input mutations, then
     # there should be *NO* mutating ops in the graph at this point.
