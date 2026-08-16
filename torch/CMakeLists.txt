@@ -547,6 +547,14 @@ add_dependencies(torch_python gen_torch_version)
 # via Python package collection. Install it explicitly via cmake instead.
 install(FILES "${TORCH_SRC_DIR}/version.py" DESTINATION ".")
 
+# _rocm_init.py is gitignored (injected by ROCm build scripts to bootstrap
+# torch/__init__.py). See https://github.com/ROCm/TheRock/blob/main/docs/packaging/python_packaging.md
+# scikit-build-core won't include it via Python package collection. Install it
+# explicitly via cmake instead.
+if(USE_ROCM AND EXISTS "${TORCH_SRC_DIR}/_rocm_init.py")
+  install(FILES "${TORCH_SRC_DIR}/_rocm_init.py" DESTINATION ".")
+endif()
+
 # Skip building this library under MacOS, since it is currently failing to build on Mac
 # Github issue #61930
 if(NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")

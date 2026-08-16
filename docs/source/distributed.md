@@ -434,6 +434,14 @@ check whether the process group has already been initialized use {func}`torch.di
 .. autofunction:: set_timeout
 ```
 
+### Fault-tolerant reconfiguration
+
+```{eval-rst}
+.. autofunction:: torch.distributed.distributed_c10d._supports_reconfigure
+.. autofunction:: torch.distributed.distributed_c10d._get_reconfigure_handle
+.. autofunction:: torch.distributed.distributed_c10d._reconfigure
+```
+
 ## Shutdown
 
 It is important to clean up resources on exit by calling {func}`destroy_process_group`.
@@ -653,7 +661,7 @@ if rank == 0:
 ```
 
 ```{eval-rst}
-.. autofunction:: gather_into_tensor
+.. autofunction:: gather_single
 ```
 
 ```{eval-rst}

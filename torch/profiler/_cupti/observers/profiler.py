@@ -101,6 +101,10 @@ PROFILER_FIELDS: dict[ActivityKind, set[Field]] = {
         Memcpy.SRC_KIND,
         Memcpy.DST_KIND,
         Memcpy.FLAGS,
+        # Copies run on their own channel (CUPTI_CHANNEL_TYPE_ASYNC_MEMCPY), distinct from the
+        # compute channel kernels use -- select it like the kernel path does.
+        Memcpy.CHANNEL_ID,
+        Memcpy.CHANNEL_TYPE,
     },
     # Peer-to-peer / cross-device copies (e.g. tensor.to(other_gpu), pipeline sends). CUPTI
     # records these under MEMCPY2, NOT MEMCPY, so without this they never appear as GPU spans
@@ -120,6 +124,8 @@ PROFILER_FIELDS: dict[ActivityKind, set[Field]] = {
         Memcpy2.SRC_KIND,
         Memcpy2.DST_KIND,
         Memcpy2.FLAGS,
+        Memcpy2.CHANNEL_ID,
+        Memcpy2.CHANNEL_TYPE,
     },
     ActivityKind.MEMSET: {
         Memset.START,
@@ -134,6 +140,8 @@ PROFILER_FIELDS: dict[ActivityKind, set[Field]] = {
         Memset.VALUE,
         Memset.MEMORY_KIND,
         Memset.FLAGS,
+        Memset.CHANNEL_ID,
+        Memset.CHANNEL_TYPE,
     },
     ActivityKind.RUNTIME: {
         Api.CBID,
@@ -203,6 +211,7 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
         defer_export: bool = True,
         enable_pm_sampling: bool = False,
         pm_metrics: Iterable[str] | None = None,
+        enable_graph_dependencies: bool = False,
     ) -> None:
         self._lock = threading.Lock()
         # Decoded activity kept COLUMNAR (frames of named numpy columns, not per-record
@@ -236,6 +245,10 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
             selection,
             annotations=ObserverAnnotationSettings(
                 graph_annotation_resolver=default_graph_annotation_resolver,
+                # Node->node dependency arrows are opt-in at the monitor level (extra work at
+                # graph instantiate + arrow rendering): the observer records the topology into
+                # its own map and draws the arrows only when this is set.
+                record_graph_dependencies=enable_graph_dependencies,
             ),
         )
         if self.available:
@@ -496,6 +509,7 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
         # Attach the per-collective blob as a "metadata" column on the GPU-op kinds (these
         # columns are this thread's now, no lock). No-op without comms metadata.
         _attach_metadata(columns, meta, self._metadata_resolver)
+        graph_deps = _window_graph_deps(self._dependency_resolver, columns)
         with self._lock:
             w = self._windows.get(window_id)
             if w is None:
@@ -505,6 +519,7 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
                 "user_annotations": w["annotations"],
                 "thread_resource_map": w["thread_map"],
                 "start_ns": start,
+                "graph_deps": graph_deps,
             }
 
     def _maybe_write(self, window_id: int) -> None:
@@ -605,6 +620,29 @@ def _attach_metadata(
         c["metadata"] = meta
 
 
+def _window_graph_deps(
+    resolver: Any, columns: dict[str, dict[str, Any]]
+) -> dict[int, list[int]]:
+    """Resolve the graph node->node dependency edges for the graph_node_ids present in this
+    window, so the pftrace export can draw node->node arrows. Calls ``resolver`` per present
+    graph_node_id (memoized by the observer, see CuptiMonitorObserver._dependency_resolver) and
+    keeps only nodes with a nonempty predecessor list. Empty when there is no resolver, no
+    graphed ops, or no recorded dependencies."""
+    if resolver is None:
+        return {}
+    present: set[int] = set()
+    for kind_str in ("kernel", "gpu_memcpy", "gpu_memset"):
+        c = columns.get(kind_str)
+        if c is not None and "graph_node_id" in c:
+            present.update(int(g) for g in np.unique(c["graph_node_id"]) if g)
+    deps: dict[int, list[int]] = {}
+    for g in present:
+        preds = resolver(g)
+        if preds:
+            deps[g] = preds
+    return deps
+
+
 def _demangle_column(names: Any) -> Any:
     out = np.empty(len(names), dtype=object)
     for i, raw in enumerate(names.tolist()):
@@ -696,6 +734,8 @@ def _memcpy_columns(cols, convert, resolver):
         "src_kind": cols[Memcpy.SRC_KIND.id].astype(np.int64),
         "dst_kind": cols[Memcpy.DST_KIND.id].astype(np.int64),
         "flags": cols[Memcpy.FLAGS.id].astype(np.int64),
+        "channel": cols[Memcpy.CHANNEL_ID.id].astype(np.int64),
+        "channel_type": cols[Memcpy.CHANNEL_TYPE.id].astype(np.int64),
     }
 
 
@@ -721,6 +761,8 @@ def _memcpy2_columns(cols, convert, resolver):
         "src_kind": cols[Memcpy2.SRC_KIND.id].astype(np.int64),
         "dst_kind": cols[Memcpy2.DST_KIND.id].astype(np.int64),
         "flags": cols[Memcpy2.FLAGS.id].astype(np.int64),
+        "channel": cols[Memcpy2.CHANNEL_ID.id].astype(np.int64),
+        "channel_type": cols[Memcpy2.CHANNEL_TYPE.id].astype(np.int64),
     }
 
 
@@ -741,6 +783,8 @@ def _memset_columns(cols, convert, resolver):
         "value": cols[Memset.VALUE.id].astype(np.int64),
         "memory_kind": cols[Memset.MEMORY_KIND.id].astype(np.int64),
         "flags": cols[Memset.FLAGS.id].astype(np.int64),
+        "channel": cols[Memset.CHANNEL_ID.id].astype(np.int64),
+        "channel_type": cols[Memset.CHANNEL_TYPE.id].astype(np.int64),
     }
 
 

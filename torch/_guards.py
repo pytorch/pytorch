@@ -1004,7 +1004,19 @@ class HopDispatchSetCache:
         return self.hop_cache_map[op]  # type: ignore[index]
 
 
-_TLS = threading.local()
+class _TLSStorage(threading.local):
+    # Default the hot-path attributes to None per thread so that
+    # TracingContext.try_get() / CompileContext.try_get() -- called on every
+    # torch.compile'd call -- hit a present attribute instead of paying for an
+    # AttributeError raise+catch inside getattr(). Without this, a thread that
+    # never ran compilation itself (e.g. a worker thread executing compiled code
+    # compiled on another thread) takes the slow getattr-miss path on every call.
+    def __init__(self) -> None:
+        self.tracing_context: TracingContext | None = None
+        self.compile_context: CompileContext | None = None
+
+
+_TLS = _TLSStorage()
 
 """
 TracingContext is the source of truth for all currently accumulated information

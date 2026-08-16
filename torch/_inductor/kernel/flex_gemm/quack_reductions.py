@@ -7,11 +7,11 @@ or N, then reduces only that grouped dimension. N-axis groups up to one 32-lane
 fragment lower as ordinary in-fragment TensorSSA reductions; larger N groups
 produce TensorSSA partials that QuACK combines physically.
 M-axis groups currently always use QuACK's physical row-lane/warp combine path,
-even when the group is small enough to fit in one fragment. Inductor owns the
-FX pattern matching and output contracts; these helpers describe the supported
+even when the group is small enough to fit in one fragment. Inductor owns FX
+normalization and output contracts; these helpers describe the supported
 TensorSSA shapes and generated combine/finalize expressions QuACK needs.
 
-The main caller is ``materialize_flex_gemm_epilogue`` in ``epilogue.py``.
+The main caller is ``materialize_flex_gemm_epilogue`` in ``fx_cutedsl_codegen.py``.
 FlexGEMM lowering first calls ``analyze_flex_gemm_epilogue``, which uses this
 module's layout and reduction-recognition helpers. Materialization then routes
 FX nodes through ``lower_view_or_reshape``, ``lower_prepare_softmax_online``,
@@ -20,11 +20,9 @@ and ``lower_tensorssa_reduce`` to emit CuTeDSL source.
 
 import dataclasses
 import math
-import operator
 from typing import Any, cast
 
 import torch
-from torch._inductor import inductor_prims
 from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
     CuteDSLOpOverrides,
     tensorssa_reduction,
@@ -35,8 +33,17 @@ from torch._inductor.kernel.flex_gemm.constraints import (
     LOCAL_REDUCE_INNERMOST_GROUPED_DIM_ERROR,
     local_reduce_needs_physical_callbacks,
     LOCAL_REDUCE_PARTIAL_OUTPUT_CONTRACT_ERROR,
-    statically_known_equal,
 )
+from torch._inductor.kernel.gemm_epilogue import (
+    GemmReductionGeometry,
+    iter_fx_node_inputs,
+    NormalizedGetItem,
+    NormalizedPrepareSoftmax,
+    NormalizedReduction,
+    NormalizedSqueeze,
+    NormalizedView,
+)
+from torch._inductor.kernel.gemm_epilogue_utils import statically_known_equal
 from torch._inductor.ops_handler import ReductionType
 from torch._inductor.shape_propagation import get_broadcasted_shape
 from torch._inductor.virtualized import V
@@ -48,25 +55,13 @@ def normalize_shape(shape: Any) -> Any:
 
 
 @dataclasses.dataclass(frozen=True)
-class GroupedTensorSSALayout:
+class GroupedTensorSSALayout(GemmReductionGeometry):
     """Describe a grouped M/N TensorSSA view inside the generated epilogue.
 
     Attributes:
         axis: GEMM output dimension being grouped: 0 for M, 1 for N.
         group_size: Number of contiguous output elements reduced as one group.
     """
-
-    axis: int
-    group_size: int
-
-    @property
-    def reduce_dims(self) -> tuple[int, ...]:
-        return (-1, 2) if self.axis == 1 else (-2, 1)
-
-    def matches_reduction_dim(self, dim: Any) -> bool:
-        """Return whether an FX reduction selects this layout's grouped dimension."""
-        dims = tuple(dim) if isinstance(dim, (list, tuple)) else (dim,)
-        return len(dims) == 1 and dims[0] in self.reduce_dims
 
     def fragment_group_size_expr(self, source: Any) -> str:
         """Return the local group size available in this epilogue fragment."""
@@ -110,9 +105,9 @@ def _syntactic_grouped_tensor_layout(
     if len(shape) not in (3, 4):
         return None
     if isinstance(shape[-1], int) and shape[-1] > 0 and shape[-2] == -1:
-        return GroupedTensorSSALayout(axis=1, group_size=shape[-1])
+        return GroupedTensorSSALayout(group=shape[-1], axis=1)
     if shape[-3] == -1 and isinstance(shape[-2], int) and shape[-2] > 0:
-        return GroupedTensorSSALayout(axis=0, group_size=shape[-2])
+        return GroupedTensorSSALayout(group=shape[-2], axis=0)
     return None
 
 
@@ -166,10 +161,10 @@ def grouped_tensor_layout(
             candidates = []
             match shape:
                 case (*_, int(group)) if group > 0:
-                    candidates.append(GroupedTensorSSALayout(axis=1, group_size=group))
+                    candidates.append(GroupedTensorSSALayout(group=group, axis=1))
             match shape:
                 case (*_, int(group), _) if group > 0:
-                    candidates.append(GroupedTensorSSALayout(axis=0, group_size=group))
+                    candidates.append(GroupedTensorSSALayout(group=group, axis=0))
             for layout in candidates:
                 if _grouped_layout_matches_source_shape(shape, source_shape, layout):
                     return layout
@@ -334,40 +329,9 @@ def is_shape_preserving_pointwise_node(node: torch.fx.Node) -> bool:
     return is_pointwise_node(node) and node_preserves_tensor_shapes(node)
 
 
-def iter_fx_node_inputs(value: Any):
-    """Yield FX node inputs nested in args/kwargs-style containers."""
-    result: list[torch.fx.Node] = []
-    torch.fx.map_arg(value, lambda node: result.append(node))
-    yield from result
-
-
-def view_or_reshape_args(node: torch.fx.Node) -> tuple[Any, tuple[Any, ...]] | None:
-    if node.op == "call_function" and node.target in (
-        torch.ops.aten.view.default,
-        torch.ops.aten.reshape.default,
-    ):
-        shape = node.args[1]
-        if isinstance(shape, (tuple, list, torch.Size)):
-            return node.args[0], tuple(
-                arg.meta.get("val", arg) if isinstance(arg, torch.fx.Node) else arg
-                for arg in shape
-            )
-    return None
-
-
-def squeeze_source_node(node: torch.fx.Node) -> torch.fx.Node | None:
-    if node.op != "call_function" or node.target not in (
-        torch.ops.aten.squeeze.dim,
-        torch.ops.aten.squeeze.dims,
-        torch.ops.aten.squeeze.default,
-    ):
-        return None
-    source_node = node.args[0]
-    return source_node if isinstance(source_node, torch.fx.Node) else None
-
-
 def lower_view_or_reshape(
     node: torch.fx.Node,
+    normalized: NormalizedView,
     env: dict[torch.fx.Node, Any],
     kernel: Any,
     grouped_tensors: dict[torch.fx.Node, GroupedTensorSSALayout],
@@ -375,13 +339,8 @@ def lower_view_or_reshape(
     local_reduce_store_sources: dict[torch.fx.Node, Any],
     preserve_value_layout: bool = False,
 ) -> Any | None:
-    """Emit a view using grouped provenance from the shared FX analysis."""
-    view_args = view_or_reshape_args(node)
-    if view_args is None:
-        return None
-    source_node, _ = view_args
-    if not isinstance(source_node, torch.fx.Node):
-        return None
+    """Emit an analyzed view using grouped provenance."""
+    source_node = normalized.source
     if source_node in local_reduce_store_sources:
         local_reduce_store_sources[node] = local_reduce_store_sources[source_node]
         return _cute_arg(source_node, env)
@@ -400,49 +359,6 @@ def lower_view_or_reshape(
     return None
 
 
-FUNCTION_REDUCTION_TYPES = {
-    torch.ops.aten.sum.dim_IntList: ("sum", True),
-    torch.ops.aten.mean.dim: ("mean", True),
-    torch.ops.aten.prod.dim_int: ("prod", True),
-    torch.ops.aten.amax.default: ("max", False),
-    torch.ops.aten.amin.default: ("min", False),
-}
-
-FUNCTION_UNSUPPORTED_REDUCTIONS = frozenset(
-    (
-        torch.ops.aten.all.dim,
-        torch.ops.aten.all.dims,
-        torch.ops.aten.all.default,
-        torch.ops.aten.any.dim,
-        torch.ops.aten.any.dims,
-        torch.ops.aten.any.default,
-        torch.ops.aten.argmax.default,
-        torch.ops.aten.argmin.default,
-        torch.ops.aten.std.correction,
-        torch.ops.aten.std.dim,
-        torch.ops.aten.var.correction,
-        torch.ops.aten.var.dim,
-    )
-)
-
-
-def reduction_from_node(node: torch.fx.Node) -> tuple[Any, Any, Any, Any, str] | None:
-    if node.op != "call_function" or node.target not in FUNCTION_REDUCTION_TYPES:
-        return None
-    reduction_type, has_dtype = FUNCTION_REDUCTION_TYPES[node.target]
-    input_node = node.args[0]
-    dim = node.args[1] if len(node.args) > 1 else node.kwargs.get("dim")
-    keepdim = node.args[2] if len(node.args) > 2 else node.kwargs.get("keepdim", False)
-    dtype = node.args[3] if len(node.args) > 3 else node.kwargs.get("dtype")
-    return input_node, dim, keepdim, dtype if has_dtype else None, reduction_type
-
-
-def unsupported_reduction_from_node(node: torch.fx.Node) -> str | None:
-    if node.op != "call_function" or node.target not in FUNCTION_UNSUPPORTED_REDUCTIONS:
-        return None
-    return str(node.target)
-
-
 def lower_full_scalar(node: torch.fx.Node) -> Any | None:
     if node.op != "call_function" or node.target is not torch.ops.aten.full.default:
         return None
@@ -455,11 +371,13 @@ def lower_full_scalar(node: torch.fx.Node) -> Any | None:
 
 def lower_squeeze(
     node: torch.fx.Node,
+    normalized: NormalizedSqueeze,
     env: dict[torch.fx.Node, Any],
     local_reduce_store_sources: dict[torch.fx.Node, Any],
 ) -> Any | None:
-    source_node = squeeze_source_node(node)
-    if source_node is None or source_node not in env:
+    """Forward an analyzed squeeze alias."""
+    source_node = normalized.source
+    if source_node not in env:
         return None
     if source_node in local_reduce_store_sources:
         local_reduce_store_sources[node] = local_reduce_store_sources[source_node]
@@ -468,14 +386,12 @@ def lower_squeeze(
 
 def lower_getitem(
     node: torch.fx.Node,
+    normalized: NormalizedGetItem,
     env: dict[torch.fx.Node, Any],
     local_reduce_store_sources: dict[torch.fx.Node, Any],
 ) -> Any | None:
-    if node.op != "call_function" or node.target is not operator.getitem:
-        return None
-    source_node, index = node.args
-    if not isinstance(source_node, torch.fx.Node) or not isinstance(index, int):
-        return None
+    """Index an analyzed aggregate value."""
+    source_node, index = normalized.source, normalized.index
     source = _cute_arg(source_node, env)
     if not isinstance(source, (tuple, list)) or not -len(source) <= index < len(source):
         return None
@@ -488,20 +404,14 @@ def lower_getitem(
 
 def lower_prepare_softmax_online(
     node: torch.fx.Node,
+    normalized: NormalizedPrepareSoftmax,
     env: dict[torch.fx.Node, Any],
     kernel: Any,
     grouped_tensors: dict[torch.fx.Node, GroupedTensorSSALayout],
     local_reduce_store_sources: dict[torch.fx.Node, Any],
-) -> Any | None:
-    if (
-        node.op != "call_function"
-        or node.target is not inductor_prims.prepare_softmax_online
-    ):
-        return None
-    input_node = node.args[0]
-    dim = node.args[1] if len(node.args) > 1 else node.kwargs.get("dim")
-    if not isinstance(input_node, torch.fx.Node):
-        return None
+) -> Any:
+    """Lower analyzed online-softmax preparation."""
+    input_node, dim = normalized.source, normalized.dim
     if input_node not in grouped_tensors:
         raise NotImplementedError(LOCAL_REDUCE_PARTIAL_OUTPUT_CONTRACT_ERROR)
     layout = grouped_tensors[input_node]
@@ -536,21 +446,21 @@ def lower_prepare_softmax_online(
 
 def lower_tensorssa_reduce(
     node: torch.fx.Node,
+    normalized: NormalizedReduction,
     env: dict[torch.fx.Node, Any],
     kernel: Any,
     grouped_tensors: dict[torch.fx.Node, GroupedTensorSSALayout],
     local_reduce_store_sources: dict[torch.fx.Node, Any],
     local_reduce_physical_reductions: dict[torch.fx.Node, FlexGemmPhysicalReduction],
-) -> Any | None:
-    """Lower value reductions while deferring cross-fragment finalization to QuACK."""
-    reduction = reduction_from_node(node)
-    if reduction is None:
-        return None
-    input_node, dim, keepdim, dtype, reduction_type = reduction
+) -> Any:
+    """Lower an analyzed reduction while deferring physical finalization."""
+    input_node = normalized.source
+    dim = normalized.dim
+    keepdim = normalized.keepdim
+    dtype = normalized.dtype
+    reduction_type = normalized.reduction_type
     if dtype is not None:
         raise NotImplementedError(LOCAL_REDUCE_EXPLICIT_DTYPE_ERROR)
-    if not isinstance(input_node, torch.fx.Node):
-        return None
     if input_node not in grouped_tensors:
         raise NotImplementedError(LOCAL_REDUCE_PARTIAL_OUTPUT_CONTRACT_ERROR)
     layout = grouped_tensors[input_node]

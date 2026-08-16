@@ -42,6 +42,7 @@
 #include <ATen/ops/_addmm_activation_native.h>
 #include <ATen/ops/_efficientzerotensor.h>
 #include <ATen/ops/_grouped_mm_native.h>
+#include <ATen/ops/_scaled_grouped_mm_v2_native.h>
 #include <ATen/ops/_scaled_mm_native.h>
 #include <ATen/ops/_unsafe_view_native.h>
 #include <ATen/ops/abs.h>
@@ -625,70 +626,52 @@ std::array<ScaleKernelDispatchEntry, 4> scale_grouped_kernel_dispatch = {{
 
 } // anonymous namespace
 
-Tensor
-_scaled_grouped_mm_cuda_v2(
+// V2: Grouped scaled matrix multiply. Shape inference + output allocation and
+// recipe-independent input validation run in TORCH_META_FUNC(_scaled_grouped_mm_v2);
+// this impl handles strides/dtype validation that needs device context, the
+// per-recipe scale-shape checks, and kernel dispatch.
+TORCH_IMPL_FUNC(_scaled_grouped_mm_cuda_v2_out)(
           const Tensor& mat_a, const Tensor& mat_b,
-          ArrayRef<Tensor> scale_a,
+          const at::ITensorListRef& scale_a_list,
           IntArrayRef scale_recipe_a,
           IntArrayRef swizzle_a,
-          ArrayRef<Tensor> scale_b,
+          const at::ITensorListRef& scale_b_list,
           IntArrayRef scale_recipe_b,
           IntArrayRef swizzle_b,
-          const std::optional<Tensor>& offs,
-          const std::optional<Tensor>& bias,
-          const std::optional<c10::ScalarType> out_dtype,
+          at::OptionalTensorRef offs,
+          at::OptionalTensorRef bias,
+          std::optional<c10::ScalarType> out_dtype,
           IntArrayRef contraction_dim,
-          bool use_fast_accum) {
+          bool use_fast_accum,
+          const Tensor& out) {
   bool allowed_device = _scaled_mm_allowed_device(/*sm90_only*/true, /*sm100_only*/true);
   TORCH_CHECK_VALUE(allowed_device, "torch._scaled_grouped_mm is only supported on CUDA devices with compute capability = [9.0, 10.0], or ROCm MI300+");
 
   TORCH_CHECK_VALUE(!check_valid_strides_and_return_transposed(mat_a), "Expected mat1 to not be transposed");
   TORCH_CHECK_VALUE(check_valid_strides_and_return_transposed(mat_b), "Expected mat2 to be transposed");
-  TORCH_CHECK_VALUE(mat_a.dim() == 2 || mat_a.dim() == 3, "mat_a has to be 2 or 3d");
-  TORCH_CHECK_VALUE(mat_b.dim() == 2 || mat_b.dim() == 3, "mat_b has to be 2 or 3d");
-  const bool a_is_2d = mat_a.dim() == 2;
-  const bool b_is_2d = mat_b.dim() == 2;
 
-  // NOTE(slayton): For sub-1B formats want contraction_dim argument?
-  if (!a_is_2d || !b_is_2d) {
-    if (!contraction_dim.empty()) {
-      const int dim_a = contraction_dim[0], dim_b = mat_b.size(contraction_dim[1]);
-      TORCH_CHECK_VALUE(mat_a.size(dim_a) == mat_b.size(dim_b),
-          "Contraction dimensions (", dim_a, ",", dim_b, ") of mat_a and mat_b must match, got: ", mat_a.size(dim_a), " and ",
-          mat_b.size(dim_b));
-      // Note: only (-1, -2) is currently supported
-      TORCH_CHECK_VALUE(dim_a == -1 && dim_b == -2, "Currently contraction dims must be (-1, -2) only");
-    } else {
-      TORCH_CHECK_VALUE(mat_a.size(-1) == mat_b.size(-2), "contraction dimension of mat_a and mat_b must match");
-    }
+  // Materialize the scale lists so the existing acceptance helpers (which take
+  // ArrayRef<Tensor>) work unchanged.
+  std::vector<Tensor> scale_a(scale_a_list.begin(), scale_a_list.end());
+  std::vector<Tensor> scale_b(scale_b_list.begin(), scale_b_list.end());
+  ArrayRef<Tensor> scale_a_ref(scale_a);
+  ArrayRef<Tensor> scale_b_ref(scale_b);
+
+  // Bridge the optional refs to std::optional<Tensor> for the lower-level kernels.
+  std::optional<Tensor> offs_opt =
+      offs.has_value() ? std::optional<Tensor>{*offs} : std::nullopt;
+  std::optional<Tensor> bias_opt =
+      bias.has_value() ? std::optional<Tensor>{*bias} : std::nullopt;
+
+  // The output has already been sized by the structured-op meta function.
+  Tensor& out_mut = const_cast<Tensor&>(out);
+#ifdef USE_ROCM
+  // Preserve the previous `at::zeros` semantics for the 2d-2d case: the CK
+  // kernel may not write the whole output region for K=0 / small-K groups.
+  if (mat_a.dim() == 2 && mat_b.dim() == 2) {
+    out_mut.zero_();
   }
-  TORCH_CHECK_VALUE(
-    mat_a.size(-1) % 16 == 0,
-    "Expected trailing dimension of mat_a to be divisible by 16 ",
-    "but got mat1 shape: (",
-    mat_a.sizes(),
-    ").");
-  TORCH_CHECK_VALUE(mat_b.size(-2) % 16 == 0 && mat_b.size(-1) % 16 == 0,
-    "Expected mat_b shape to be divisible by 16 ",
-    "but got mat_b shape: (",
-    mat_b.sizes(),
-    ").");
-
-  TORCH_CHECK_VALUE(!bias.has_value(), "Bias not supported yet");
-  TORCH_CHECK_VALUE(offs.has_value() ==  (a_is_2d || b_is_2d), "Have to provide offsets if there is a 2d matrix");
-
-  // NOTE: mxfp8 x mxfp8 requires (and asserts later) that offsets is present.
-  //       for rowwise, no offsets implies 3d-3d and is handled by lower-level
-  //       routines
-  if (offs.has_value()) {
-    TORCH_CHECK_VALUE(offs->dim() == 1, "offs has to be 1D");
-    TORCH_CHECK_VALUE(offs->dtype() == at::kInt, "Offsets have to be int32");
-  }
-
-  const auto out_dtype_ = out_dtype.value_or(kBFloat16);
-  TORCH_CHECK_VALUE(out_dtype_ == kBFloat16, "Only bf16 high precision output types are supported for grouped gemm");
-
-  Tensor out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype_);
+#endif
 
   // Conversion of implicitly-defined enums to explicit
   auto scale_recipe_a_enum = convert_int_to_enum<ScalingType>(scale_recipe_a);
@@ -704,10 +687,10 @@ _scaled_grouped_mm_cuda_v2(
       scale_grouped_kernel_dispatch,
       mat_a.scalar_type(),
       scale_recipe_a_enum,
-      scale_a,
+      scale_a_ref,
       mat_b.scalar_type(),
       scale_recipe_b_enum,
-      scale_b);
+      scale_b_ref);
   TORCH_CHECK_VALUE(gemm_impl != ScaledGemmImplementation::NONE,
       "No gemm implementation was found");
 
@@ -716,15 +699,16 @@ _scaled_grouped_mm_cuda_v2(
       const int scale_multiplier = (mat_a.dim() == 2 && mat_b.dim() == 2) ? offs->size(0) : 1;
       _check_scales_fp8_rowwise(mat_a, scale_a[0], 0 /* dim */ , 0 /* arg_idx */, scale_multiplier);
       _check_scales_fp8_rowwise(mat_b, scale_b[0], 1 /* dim */ , 1 /* arg_idx */, scale_multiplier);
-      return _f8_f8_bf16_rowwise_grouped_mm(
+      _f8_f8_bf16_rowwise_grouped_mm(
           mat_a,
           mat_b,
           scale_a[0],
           scale_b[0],
-          offs,
-          bias,
+          offs_opt,
+          bias_opt,
           use_fast_accum,
-          out);
+          out_mut);
+      return;
     }
     case ScaledGemmImplementation::MXFP8_MXFP8: {
       // scale shape checks
@@ -732,45 +716,48 @@ _scaled_grouped_mm_cuda_v2(
       _check_scales_blocked(mat_b, scale_b[0], 1 /* dim */, 1 /* arg_idx */);
       // swizze checks
       TORCH_CHECK_VALUE(swizzle_a_enum.size() == 1 && swizzle_b_enum.size() == 1, "Expected single swizzle argument");
-      return _mx8_mx8_bf16_grouped_mm_mslk(
+      _mx8_mx8_bf16_grouped_mm_mslk(
           mat_a,
           mat_b,
           scale_a[0],
           swizzle_a_enum[0],
           scale_b[0],
           swizzle_b_enum[0],
-          offs.value(),
-          out);
+          offs_opt,
+          out_mut);
+      return;
     }
     case ScaledGemmImplementation::MXFP4_MXFP4: {
       // scale shape checks
       _check_scales_blocked(mat_a, scale_a[0], 0 /* dim */, 0 /* arg_idx */);
       _check_scales_blocked(mat_b, scale_b[0], 1 /* dim */, 1 /* arg_idx */);
-      return _f4_f4_bf16_grouped_mm_mslk(
+      _f4_f4_bf16_grouped_mm_mslk(
           mat_a,
           mat_b,
           scale_a[0], /* block-scale A */
           std::nullopt, /* global-scale A */
           scale_b[0], /* block-scale B */
           std::nullopt, /* global-scale B */
-          offs.value(),
+          offs_opt,
           std::nullopt, /* bias */
-          out);
+          out_mut);
+      return;
     }
     case ScaledGemmImplementation::NVFP4_NVFP4: {
       // scale shape checks
       _check_scales_blocked(mat_a, scale_a[0], 0 /* dim */, 0 /* arg_idx */);
       _check_scales_blocked(mat_b, scale_b[0], 1 /* dim */, 1 /* arg_idx */);
-      return _f4_f4_bf16_grouped_mm_mslk(
+      _f4_f4_bf16_grouped_mm_mslk(
           mat_a,
           mat_b,
           scale_a[0], /* block-scale A */
           scale_a[1], /* global-scale A */
           scale_b[0], /* block-scale B */
           scale_b[1], /* global-scale B */
-          offs.value(),
+          offs_opt,
           std::nullopt, /* bias */
-          out);
+          out_mut);
+      return;
     }
     default:
       TORCH_CHECK_NOT_IMPLEMENTED(false,

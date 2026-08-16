@@ -199,4 +199,20 @@ void validate_scaled_mm_v2_inputs(
     ArrayRef<ScalingType> recipe_b,
     ArrayRef<SwizzleType> swizzle_b);
 
+/**
+ * Validate the basic (recipe-independent) inputs of `_scaled_grouped_mm_v2`.
+ * Centralized here so it can be called from TORCH_META_FUNC, which runs both
+ * in eager (before the structured kernel) and during `torch.compile` tracing.
+ * Per-recipe scale-shape checks and the device-capability gate deliberately
+ * stay in the CUDA kernel (they depend on layout/arch and the offset values).
+ */
+TORCH_API
+void validate_scaled_grouped_mm_v2_inputs(
+    const Tensor& mat_a,
+    const Tensor& mat_b,
+    at::OptionalTensorRef offs,
+    at::OptionalTensorRef bias,
+    ArrayRef<int64_t> contraction_dim,
+    std::optional<c10::ScalarType> out_dtype);
+
 } // namespace at::scaled

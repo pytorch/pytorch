@@ -35,7 +35,7 @@ class NCCLBootstrap {
 
   ncclComm_t createNcclComm(
       const std::string& name,
-      const std::unordered_map<std::string, std::string>& hints = {});
+      const ncclConfig_t& config);
 
   int getRank() {
     return rank_;

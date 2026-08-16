@@ -18,7 +18,7 @@ from torch._inductor.codegen.simd import SIMDScheduling
 from torch._inductor.codegen.triton import TritonScheduling
 from torch._inductor.graph import GraphLowering
 from torch._inductor.invert_expr_analysis import generate_inverse_formula
-from torch._inductor.scheduler import _LoopMutationTracker, SchedulerNode
+from torch._inductor.scheduler import _LoopMutationTracker, Scheduler, SchedulerNode
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.test_operators import realize
 from torch._inductor.utils import is_big_gpu, run_and_get_code, sympy_index_symbol
@@ -813,7 +813,13 @@ class LoopOrderingTest(TestCase):
             return y.view(2, 16, 4, 8).transpose(1, 2).contiguous()
 
         x = torch.randn(2, 16, 32, device=self.device)
-        self.do_acc_test(f, x)
+        with mock.patch(
+            "torch._inductor.invert_expr_analysis.generate_inverse_formula",
+            wraps=generate_inverse_formula,
+        ) as inverse:
+            self.do_acc_test(f, x)
+
+        self.assertEqual(inverse.call_count, 1)
         self.assertEqual(metrics.generated_kernel_count, 1)
 
     def test_reindex_block_scale_swizzle_with_epilogue(self):
@@ -1668,6 +1674,25 @@ class MemoryCoalescingTest(MockSchedulerTest):
             result = tiling_utils.solve_for_tiling(expr)
             self.assertEqual(result, expected)
 
+    def test_solve_for_tiling_nested_modularindexing(self):
+        from torch._inductor import tiling_utils
+
+        n0 = sympy.Symbol("n0", integer=True, nonnegative=True)
+        inner = ModularIndexing(n0 - 252252, 1, 50)
+        for expr in (
+            inner,
+            ModularIndexing(inner, 1, 50),
+            ModularIndexing(ModularIndexing(inner, 1, 50), 1, 50),
+        ):
+            # must not raise, and nested forms solve identically to the flat form
+            self.assertEqual(tiling_utils.solve_for_tiling(expr), sympy.Integer(252253))
+
+        # mixed nesting has no tiling solution, but must not raise either
+        mixed = FloorDiv(
+            ModularIndexing(5 * FloorDiv(ModularIndexing(n0 + 8, 1, 6), 5), 1, 36), 8
+        )
+        self.assertEqual(tiling_utils.solve_for_tiling(mixed), None)
+
     @parametrize("dynamic", (False, True))
     def test_induced_fused_tiling(self, dynamic):
         def fn(nodes):
@@ -2266,6 +2291,57 @@ class TestIndexInversion(TestCase):
         )
         self.assertIsNone(generate_inverse_formula(blockwise_expr, p, 15))
         self.assertIsNotNone(generate_inverse_formula(blockwise_expr, p, 100))
+
+    def test_flattened_read_inverse_is_cached(self):
+        scheduler = object.__new__(Scheduler)
+        i0, i1 = sympy.symbols("i0 i1", integer=True, nonnegative=True)
+        args = (
+            2 * i1 + i0,
+            (i0, i1),
+            (sympy.Integer(2), sympy.Integer(4)),
+            sympy.Integer(8),
+        )
+
+        with mock.patch(
+            "torch._inductor.invert_expr_analysis.generate_inverse_formula",
+            wraps=generate_inverse_formula,
+        ) as inverse:
+            self.assertIsNotNone(scheduler._get_flattened_read_inverse(*args))
+            self.assertIsNotNone(scheduler._get_flattened_read_inverse(*args))
+
+        self.assertEqual(inverse.call_count, 1)
+
+    def test_failed_flattened_read_inverse_is_cached(self):
+        scheduler = object.__new__(Scheduler)
+        i0, i1 = sympy.symbols("i0 i1", integer=True, nonnegative=True)
+        args = (
+            2 * i1 + i0,
+            (i0, i1),
+            (sympy.Integer(2), sympy.Integer(4)),
+            sympy.Integer(8),
+        )
+
+        with mock.patch(
+            "torch._inductor.invert_expr_analysis.generate_inverse_formula",
+            return_value=None,
+        ) as inverse:
+            self.assertIsNone(scheduler._get_flattened_read_inverse(*args))
+            self.assertIsNone(scheduler._get_flattened_read_inverse(*args))
+
+        self.assertEqual(inverse.call_count, 1)
+
+    def test_zero_numel_flattened_read_is_rejected(self):
+        scheduler = object.__new__(Scheduler)
+        i0, i1 = sympy.symbols("i0 i1", integer=True, nonnegative=True)
+
+        self.assertIsNone(
+            scheduler._get_flattened_read_inverse(
+                i0 + i1,
+                (i0, i1),
+                (sympy.Integer(2), sympy.S.Zero),
+                sympy.S.Zero,
+            )
+        )
 
 
 if __name__ == "__main__":

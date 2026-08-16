@@ -505,6 +505,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     std::optional<uint64_t> trace_id_;
     std::optional<uint64_t> trace_reset_epoch_;
     DebugLevel distDebugLevel_;
+    std::string logPrefix_;
     friend class ProcessGroupNCCL;
   };
 
@@ -929,7 +930,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       std::vector<at::Tensor>& inputTensors,
       const GatherOptions& opts = GatherOptions()) override;
 
-  c10::intrusive_ptr<Work> gather_into_tensor(
+  c10::intrusive_ptr<Work> gather_single(
       at::Tensor& outputTensor,
       at::Tensor& inputTensor,
       const GatherOptions& opts = GatherOptions()) override;

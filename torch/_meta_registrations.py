@@ -2248,10 +2248,10 @@ def _pad2d_common(input, padding, *, is_reflection):
         )
 
     torch._check(
-        output_w >= 1 or output_h >= 1,
+        sym_and(output_w >= 1, output_h >= 1),
         lambda: (
-            f"input (H: {input_h} W: {input_w}) is too small. "
-            f"Calculated output H: {output_h} W: {output_w}"
+            f"Calculated output H: {output_h} W: {output_w} must be >= 1 "
+            f"in every dimension (input H: {input_h}, W: {input_w})"
         ),
     )
 
@@ -2383,13 +2383,11 @@ def _pad3d_common(input, padding, *, is_reflection):
             ),
         )
 
-    from torch.fx.experimental.symbolic_shapes import sym_or
-
     torch._check(
-        sym_or(output_w >= 1, output_h >= 1, output_d >= 1),
+        sym_and(output_w >= 1, output_h >= 1, output_d >= 1),
         lambda: (
-            f"input (D: {input_d} H: {input_h} W: {input_w}) is too small. "
-            f"Calculated output D: {output_d} H: {output_h} W: {output_w}"
+            f"Calculated output D: {output_d} H: {output_h} W: {output_w} must be >= 1 "
+            f"in every dimension (input D: {input_d}, H: {input_h}, W: {input_w})"
         ),
     )
 
@@ -4617,6 +4615,9 @@ def _get_reduction_dtype(input, dtype, promote_int_to_long=True):
 @out_wrapper()
 def meta_nansum(input, dims=None, keepdim=False, *, dtype=None):
     output_dtype = _get_reduction_dtype(input, dtype, promote_int_to_long=True)
+    # reduces over all dimensions if dims=() is passed
+    if dims == () or dims == []:
+        dims = None
     dims = utils.reduction_dims(input.shape, dims)
     output_shape = _compute_reduction_shape(input, dims, keepdim)
     return input.new_empty(output_shape, dtype=output_dtype)
@@ -6666,7 +6667,9 @@ def meta__scaled_dot_product_efficient_backward(
     scale: float | None = None,
 ):
     batch_size = query.size(0)
-    num_heads = query.size(1)
+    num_heads_q = query.size(1)
+    num_heads_k = key.size(1)
+    num_heads_v = value.size(1)
     max_q = query.size(2)
     head_dim = query.size(3)
     head_dim_v = value.size(3)
@@ -6674,19 +6677,19 @@ def meta__scaled_dot_product_efficient_backward(
     max_k = key.size(2)
 
     grad_q = torch.empty_permuted(
-        (batch_size, num_heads, max_q, head_dim),
+        (batch_size, num_heads_q, max_q, head_dim),
         (0, 2, 1, 3),
         dtype=query.dtype,
         device=query.device,
     )
     grad_k = torch.empty_permuted(
-        (batch_size, num_heads, max_k, head_dim),
+        (batch_size, num_heads_k, max_k, head_dim),
         (0, 2, 1, 3),
         dtype=key.dtype,
         device=key.device,
     )
     grad_v = torch.empty_permuted(
-        (batch_size, num_heads, max_k, head_dim_v),
+        (batch_size, num_heads_v, max_k, head_dim_v),
         (0, 2, 1, 3),
         dtype=value.dtype,
         device=value.device,
@@ -7027,6 +7030,10 @@ def meta__efficient_attention_backward(
         torch._check(
             query.shape[3] == key.shape[3],
             lambda: "embedding dim must match for `shared_storage_dqdkdv",
+        )
+        torch._check(
+            query.shape[2] == key.shape[2],
+            lambda: "num heads must match for `shared_storage_dqdkdv",
         )
         chunk = torch.empty(
             (*query.shape[0:-2], 3, query.shape[-2], query.shape[-1]),
@@ -8691,6 +8698,29 @@ def meta_scaled_grouped_mm(
         out_dtype=out_dtype,
         use_fast_accum=use_fast_accum,
     )
+
+
+@register_meta([aten._scaled_grouped_mm_v2.default])
+def meta_scaled_grouped_mm_v2(
+    mat_a: torch.Tensor,
+    mat_b: torch.Tensor,
+    scale_a: list[torch.Tensor],
+    scale_recipe_a: list[int],
+    swizzle_a: list[int],
+    scale_b: list[torch.Tensor],
+    scale_recipe_b: list[int],
+    swizzle_b: list[int],
+    offs: torch.Tensor | None = None,
+    bias: torch.Tensor | None = None,
+    out_dtype: torch.dtype | None = None,
+    contraction_dim: list[int] | None = None,
+    use_fast_accum: bool = False,
+):
+    """Shape inference only, since the structured C++ meta doesn't support
+    dynamic shapes. Input validation lives there; same pattern as meta_mm.
+    """
+    _out_dtype = out_dtype or torch.bfloat16
+    return _create_grouped_mm_output_tensor(mat_a, mat_b, offs, _out_dtype)
 
 
 @register_meta(aten._foreach_norm.Scalar)

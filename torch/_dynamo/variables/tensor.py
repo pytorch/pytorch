@@ -52,6 +52,8 @@ from .._trace_wrapped_higher_order_op import trace_wrapped
 from ..exc import (
     ObservedAttributeError,
     raise_observed_exception,
+    raise_type_error,
+    raise_value_error,
     TorchRuntimeError,
     unimplemented,
     UnknownPropertiesDuringBackwardTrace,
@@ -60,7 +62,7 @@ from ..exc import (
 )
 from ..external_utils import call_hook_from_backward_state
 from ..guards import GuardBuilder, install_guard
-from ..source import AttrSource
+from ..source import AttrSource, TypeSource
 from ..utils import (
     cmp_name_to_op_mapping,
     fqn,
@@ -75,7 +77,7 @@ from ..utils import (
     set_example_value,
     tensortype_to_dtype,
 )
-from .base import AttributeMutationNew, ValueMutationNew, VariableTracker
+from .base import AttributeMutationNew, GetSet, ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 from .lists import ListIteratorVariable, SizeVariable
 from .script_object import CustomClassObjectVariable
@@ -144,6 +146,15 @@ def is_bound_tensor_method(value: object) -> bool:
 # operation, because the second arg takes priority in or operation when there
 # are common keys.
 all_tensor_attrs = torch._C.TensorBase.__dict__ | torch.Tensor.__dict__
+
+# Tensor attributes that are plain views of the tensor. Each maps to the aten op
+# that the C++ getter dispatches to, see native_functions.yaml.
+_VIEW_ATTR_TO_ATEN_OP = {
+    "T": torch.ops.aten.numpy_T,
+    "mT": torch.ops.aten.mT,
+    "H": torch.ops.aten.matrix_H,
+    "mH": torch.ops.aten.mH,
+}
 
 
 def _is_sym_arith_operand(vt: VariableTracker) -> bool:
@@ -516,6 +527,32 @@ class TensorVariable(VariableTracker):
         )
         return VariableTracker.build(tx, real_value, attr_source)
 
+    def _view_attr(self, tx: "InstructionTranslatorBase", name: str) -> VariableTracker:
+        """Trace a view attribute as a call to the aten op behind the C++ getter.
+
+        Going through the op keeps the node on the current tracer. Reading the
+        attribute off the base proxy instead puts the node in whichever graph
+        owns the base, so inside a higher order op it lands in the parent graph
+        and then has to be lifted back in as a subgraph input.
+        """
+        from .torch import TorchInGraphFunctionVariable
+
+        return TorchInGraphFunctionVariable(_VIEW_ATTR_TO_ATEN_OP[name]).call_function(
+            tx, [self], {}
+        )
+
+    def method_attr_T(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return self._view_attr(tx, "T")
+
+    def method_attr_mT(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return self._view_attr(tx, "mT")
+
+    def method_attr_H(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return self._view_attr(tx, "H")
+
+    def method_attr_mH(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return self._view_attr(tx, "mH")
+
     def method_attr_ndim(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         if self.ndim is not None:
             return VariableTracker.build(tx, self.ndim)
@@ -697,7 +734,13 @@ class TensorVariable(VariableTracker):
                 )
 
         if name == "__class__":
-            return VariableTracker.build(tx, self.python_type())
+            # Carry provenance on the class, mirroring BuiltinVariable.call_type.
+            # A sourced class self-guards when observed downstream (e.g.
+            # `w.__class__ is SomeType`), which keeps type observation sound even
+            # when the input's own class guard is relaxed (see
+            # VariableBuilder.wrap_tensor and ACT input polymorphism).
+            source = self.source and TypeSource(self.source)
+            return VariableTracker.build(tx, self.python_type(), source)
 
         handler = getattr(self, f"method_attr_{name}", None)
         result = handler(tx) if handler is not None else None
@@ -709,6 +752,10 @@ class TensorVariable(VariableTracker):
             result is not None
             and self.source
             and self.source.subguards_allowed()
+            # A view attribute is the output of an op we just traced, like any
+            # other view. An AttrSource would instead make Dynamo drop it from
+            # the graph outputs and rebuild it in bytecode from the base.
+            and name not in _VIEW_ATTR_TO_ATEN_OP
             and not (
                 name not in ("grad", "requires_grad") and result.is_python_constant()
             )
@@ -746,7 +793,6 @@ class TensorVariable(VariableTracker):
 
             def try_generic_attr_handling() -> VariableTracker | None:
                 from .builder import wrap_fx_proxy
-                from .misc import GetAttrVariable
 
                 static_attr = all_tensor_attrs.get(name, None)
                 if static_attr is None:
@@ -761,7 +807,13 @@ class TensorVariable(VariableTracker):
                 if type(static_attr) is not types.GetSetDescriptorType:
                     return None
 
-                proxy = GetAttrVariable.create_getattr_proxy(self.as_proxy(), name)
+                # Create the node on the current tracer, not on the tracer that
+                # owns the base proxy. Otherwise, inside a higher order op, the
+                # node lands in the parent graph and has to be lifted back in as
+                # a subgraph input.
+                proxy = tx.output.current_tracer.create_proxy(
+                    "call_function", getattr, (self.as_proxy(), name), {}
+                )
                 if self.source is not None:
                     return wrap_fx_proxy(
                         tx=tx, proxy=proxy, source=AttrSource(self.source, name)
@@ -1867,6 +1919,16 @@ class TensorVariable(VariableTracker):
             result = fma_var.call_function(tx, [product, value, self], {})
             return self.call_method(tx, "copy_", [result], {})
         return None
+
+    def mp_ass_subscript_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        key: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        if value is None:
+            raise_type_error(tx, "Tensor does not support deleting items")
+        return self.method___setitem__(tx, key, value)
 
     def method___setitem__(
         self,
@@ -3098,17 +3160,46 @@ class NumpyNdarrayVariable(TensorVariable):
         )
         return NumpyNdarrayVariable.create(tx, proxy)
 
+    # NB: ndim/itemsize are ALWAYS specialized constants (numpy exposes them via
+    # PyGetSetDef on ndarray), unlike size/shape which may carry free symbols.
+    def _get_ndim(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        example_value = self.as_proxy().node.meta["example_value"]
+        return VariableTracker.build(tx, tnp.ndarray(example_value).ndim)
+
+    def _get_itemsize(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        example_value = self.as_proxy().node.meta["example_value"]
+        return VariableTracker.build(tx, tnp.ndarray(example_value).itemsize)
+
+    def _get_numpy_attr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        from ..utils import numpy_attr_wrapper
+
+        proxy = tx.output.create_proxy(
+            "call_function", numpy_attr_wrapper, (self.as_proxy(), name), {}
+        )
+        return NumpyNdarrayVariable.create(tx, proxy)
+
+    tp_getset = {
+        "ndim": GetSet(_get_ndim, None),
+        "itemsize": GetSet(_get_itemsize, None),
+        "T": GetSet(lambda s, tx: s._get_numpy_attr(tx, "T")),
+        "real": GetSet(lambda s, tx: s._get_numpy_attr(tx, "real")),
+        "imag": GetSet(lambda s, tx: s._get_numpy_attr(tx, "imag")),
+        "flat": GetSet(lambda s, tx: s._get_numpy_attr(tx, "flat")),
+    }
+
     def getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         # NB: This INTENTIONALLY does not call super(), because there is
         # no intrinsic reason ndarray properties are related to Tensor
         # properties.  The inheritance here is for implementation sharing.
-
+        # tp_getset (ndim/itemsize/T/real/imag/flat) is resolved by
+        # generic_getattr before this method is reached, so it is not
+        # consulted here.
         from ..utils import numpy_attr_wrapper
         from .builder import wrap_fx_proxy
-
-        result = None
 
         example_value = self.as_proxy().node.meta["example_value"]
         example_ndarray = tnp.ndarray(example_value)
@@ -3120,15 +3211,6 @@ class NumpyNdarrayVariable(TensorVariable):
                     "call_function", numpy_attr_wrapper, (self.as_proxy(), name), {}
                 ),
             )
-
-        if name in ["T", "real", "imag", "flat"]:
-            proxy = tx.output.create_proxy(
-                "call_function",
-                numpy_attr_wrapper,
-                (self.as_proxy(), name),
-                {},
-            )
-            result = NumpyNdarrayVariable.create(tx, proxy)
 
         # These are awkward to implement.  The standard playbook for torch._numpy
         # interop is to trace a call into the torch._numpy wrapper which works for
@@ -3143,9 +3225,7 @@ class NumpyNdarrayVariable(TensorVariable):
         #
         # NB: only ALWAYS specialized attributes can go here; notably,
         # size/shape not allowed!
-        elif name in ("ndim", "itemsize"):
-            return VariableTracker.build(tx, getattr(example_ndarray, name))
-        elif name in ("shape", "stride"):
+        if name in ("shape", "stride"):
             if not has_free_symbols(r := getattr(example_ndarray, name)):
                 return VariableTracker.build(tx, tuple(int(r) for r in r))
             return insert_into_graph()
@@ -3167,9 +3247,7 @@ class NumpyNdarrayVariable(TensorVariable):
                 explanation=f"Dynamo currently does not support tracing `ndarray.{name}`.",
                 hints=[],
             )
-        if result is None:
-            raise NotImplementedError
-        return result
+        raise NotImplementedError
 
     @staticmethod
     def patch_args(
@@ -3237,6 +3315,16 @@ class NumpyNdarrayVariable(TensorVariable):
             return np.ndarray
         else:
             return NoneType
+
+    def mp_ass_subscript_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        key: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        if value is None:
+            raise_value_error(tx, "cannot delete array elements")
+        return self.call_method(tx, "__setitem__", [key, value], {})
 
 
 class UnspecializedPythonVariable(TensorVariable):

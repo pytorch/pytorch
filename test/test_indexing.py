@@ -1615,6 +1615,22 @@ class TestIndexing(TestCase):
         ):
             torch.unravel_index(torch.tensor(0, device=device), (2, -3))
 
+        with self.assertRaisesRegex(
+            ValueError,
+            r"'shape' cannot have zero dimensions when 'indices' is non-empty, but got \(2, 0, 3, 1\)",
+        ):
+            torch.unravel_index(
+                torch.tensor([[0, 0, 0], [0, 0, 0]], device=device, dtype=torch.uint8),
+                (2, 0, 3, 1),
+            )
+
+        res = torch.unravel_index(
+            torch.tensor([], device=device, dtype=torch.int64), (2, 0, 3, 1)
+        )
+        self.assertEqual(len(res), 4)
+        for r in res:
+            self.assertEqual(r.numel(), 0)
+
     def test_invalid_index(self, device):
         x = torch.arange(0, 16, device=device).view(4, 4)
         self.assertRaisesRegex(TypeError, "slice indices", lambda: x["0":"1"])

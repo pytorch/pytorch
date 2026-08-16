@@ -83,6 +83,7 @@ from torch.testing._internal.common_utils import (
     MI350_ARCH,
     parametrize,
     recover_orig_fp32_precision,
+    requires_cuda_python_bindings,
     run_tests,
     serialTest,
     setBlasBackendsToDefaultFinally,
@@ -96,7 +97,6 @@ from torch.testing._internal.common_utils import (
     TemporaryFileName,
     TEST_CUDA,
     TEST_CUDA_GRAPH,
-    TEST_CUDA_PYTHON_BINDINGS,
     TEST_NUMPY,
     TEST_WITH_ROCM,
     TEST_WITH_SLOW,
@@ -2884,6 +2884,145 @@ torch.cuda.synchronize()
         finally:
             torch.autograd.graph.set_override_stale_capture_stream(False)
 
+    class _NoWgrad(torch.autograd.Function):
+        """Uses the weight in forward but returns an undefined grad for it
+        (delayed-wgrad pattern: the real wgrad is computed out of band)."""
+
+        @staticmethod
+        def forward(ctx, x, w):
+            ctx.save_for_backward(w)
+            return x @ w.t()
+
+        @staticmethod
+        def backward(ctx, gy):
+            (w,) = ctx.saved_tensors
+            return gy @ w, None
+
+    def _warmup_no_wgrad(self):
+        """Warmup on the default stream so the weight's AccumulateGrad caches
+        a stale (default) stream, then return (x, w, keepalive).
+
+        AccumulateGrad nodes are cached weakly: `keepalive` retains the warmup
+        graph so the stale node survives until capture (as DDP/FSDP do by
+        stashing grad accumulators)."""
+        w = torch.nn.Parameter(torch.randn(16, 16, device="cuda"))
+        x = torch.randn(4, 16, device="cuda")
+        for _ in range(3):
+            y = self._NoWgrad.apply(x, w)
+            y.sum().backward(retain_graph=True)
+        torch.cuda.synchronize()
+        return x, w, y
+
+    @skipIfRocm(msg="hipBLASLt lazy handle initialization fails during graph capture")
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    def test_graph_capture_undefined_grad_stale_leaf_error(self):
+        """A leaf whose incoming grads are all undefined short-circuits out
+        of the input buffer before stream reconciliation, so the override
+        cannot fix its stale stream; the end-of-backward leaf sync must raise
+        a clear error instead of invalidating the capture."""
+        x, w, keepalive = self._warmup_no_wgrad()
+
+        s = torch.cuda.Stream()
+        with torch.cuda.stream(s):
+            g = torch.cuda.CUDAGraph()
+            g.capture_begin(capture_error_mode="relaxed")
+            try:
+                with self.assertRaisesRegex(
+                    RuntimeError, "across the capture boundary"
+                ):
+                    self._NoWgrad.apply(x, w).sum().backward()
+            finally:
+                g.capture_end()
+        torch.cuda.synchronize()
+
+    @skipIfRocm(msg="hipBLASLt lazy handle initialization fails during graph capture")
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    def test_graph_capture_undefined_grad_stale_leaf_override(self):
+        """With the override enabled, the meaningless sync with the stale
+        undefined-grad leaf is skipped and capture + replay succeed."""
+        x, w, keepalive = self._warmup_no_wgrad()
+
+        torch.autograd.graph.set_override_stale_capture_stream(True)
+        try:
+            s = torch.cuda.Stream()
+            with torch.cuda.stream(s):
+                g = torch.cuda.CUDAGraph()
+                g.capture_begin()
+                self._NoWgrad.apply(x, w).sum().backward()
+                g.capture_end()
+            torch.cuda.current_stream().wait_stream(s)
+            g.replay()
+            torch.cuda.synchronize()
+            self.assertIsNone(w.grad)
+        finally:
+            torch.autograd.graph.set_override_stale_capture_stream(False)
+
+    class _CpuComputeCudaWeight(torch.autograd.Function):
+        """CPU compute that references a CUDA weight: its AccumulateGrad is
+        created where apply() runs, and the weight's grad is undefined."""
+
+        @staticmethod
+        def forward(ctx, x_cpu, w_cuda):
+            return x_cpu * 2
+
+        @staticmethod
+        def backward(ctx, g):
+            return g * 2, None
+
+    def _capture_reverse_leaf(self):
+        """Build the reverse crossing: the weight's AccumulateGrad is created
+        inside the capture (its metadata stream is the capturing stream), and
+        backward() runs with the non-capturing default stream current. The
+        CPU root and CPU intermediate nodes produce no other stream syncs, so
+        the end-of-backward leaf sync is the only capture crossing."""
+        w = torch.nn.Parameter(torch.randn(8, device="cuda"))
+        x = torch.randn(8)  # CPU
+
+        s = torch.cuda.Stream()
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.stream(s):
+            g.capture_begin(capture_error_mode="relaxed")
+            torch.ones(4, device="cuda").mul_(2)  # non-empty capture
+            loss = self._CpuComputeCudaWeight.apply(x, w).sum()
+        return g, s, loss
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    def test_graph_capture_capturing_leaf_noncapturing_caller_error(self):
+        """Reverse direction of the leaf-sync guard: leaf stream capturing,
+        caller stream not."""
+        g, s, loss = self._capture_reverse_leaf()
+        try:
+            with self.assertRaisesRegex(RuntimeError, "across the capture boundary"):
+                loss.backward()
+        finally:
+            with torch.cuda.stream(s):
+                g.capture_end()
+        torch.cuda.synchronize()
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    def test_graph_capture_capturing_leaf_noncapturing_caller_override(self):
+        """Reverse direction with the override: the sync is skipped and the
+        capture completes and replays."""
+        torch.autograd.graph.set_override_stale_capture_stream(True)
+        try:
+            g, s, loss = self._capture_reverse_leaf()
+            loss.backward()
+            with torch.cuda.stream(s):
+                g.capture_end()
+            torch.cuda.current_stream().wait_stream(s)
+            g.replay()
+            torch.cuda.synchronize()
+        finally:
+            torch.autograd.graph.set_override_stale_capture_stream(False)
+
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
@@ -2956,6 +3095,140 @@ torch.cuda.synchronize()
             self.assertEqual(offset, graph_offset)
             # Compare the states generated outside and inside the graph
             self.assertEqual(random_values, graphed_random_values)
+
+    def test_philox_state_eager(self):
+        g = torch.Generator(device="cuda")
+        g.manual_seed(123)
+        seed_t, off_t, intra_t = g.philox_state(8)
+        self.assertEqual(seed_t.item(), g.initial_seed())
+        self.assertEqual(off_t.item(), 0)
+        self.assertEqual(intra_t.item(), 0)
+        # Outside capture all three are CPU tensors (PhiloxCudaState's
+        # HostState); during capture seed/offset are CUDA (DevState).
+        for t in (seed_t, off_t, intra_t):
+            self.assertEqual(t.dtype, torch.int64)
+            self.assertEqual(t.shape, (1,))
+            self.assertEqual(t.device.type, "cpu")
+        self.assertEqual(g.get_offset(), 8)
+        _, off_t, _ = g.philox_state(8)
+        self.assertEqual(off_t.item(), 8)
+        self.assertEqual(g.get_offset(), 16)
+
+    def test_philox_state_rounds_increment_to_multiple_of_4(self):
+        g = torch.Generator(device="cuda")
+        g.manual_seed(0)
+        g.philox_state(1)
+        self.assertEqual(g.get_offset(), 4)
+        g.philox_state(5)
+        self.assertEqual(g.get_offset(), 12)
+
+    def test_philox_state_large_seed_reinterpreted_as_int64(self):
+        # Seeds >= 2**63 come back reinterpreted as negative int64.
+        g = torch.Generator(device="cuda")
+        seed = (1 << 64) - 3
+        g.manual_seed(seed)
+        seed_t, _, _ = g.philox_state(4)
+        self.assertEqual(seed_t.item() & ((1 << 64) - 1), seed)
+
+    def test_philox_state_offset_overflows_int64(self):
+        # The C++ offset is uint64. The returned tensor carries its exact
+        # bits in int64, so offsets >= 2**63 read back negative via .item()
+        # and are recovered with `& (2**64 - 1)`. Advancement wraps modulo
+        # 2**64 in uint64 space: from 2**64 - 4, reserving 4 lands on 0.
+        g = torch.Generator(device="cuda")
+        g.manual_seed(0)
+        big = (1 << 64) - 4
+        g.set_offset(big)
+        _, off_t, _ = g.philox_state(4)
+        self.assertEqual(off_t.item() & ((1 << 64) - 1), big)
+        self.assertEqual(g.get_offset(), 0)
+
+    def test_philox_state_composes_with_eager_ops(self):
+        # A reservation must consume the same Philox stream positions an
+        # eager kernel would, so subsequent eager ops are reproducible via
+        # set_offset.
+        g = torch.Generator(device="cuda")
+        g.manual_seed(0)
+        torch.rand(1000, device="cuda", generator=g)
+        off = g.get_offset()
+        g.philox_state(4)
+        b = torch.rand(1000, device="cuda", generator=g)
+        g.manual_seed(0)
+        g.set_offset(off + 4)
+        self.assertEqual(torch.rand(1000, device="cuda", generator=g), b)
+
+    def test_philox_state_advances_default_generator(self):
+        # Reserving through the default generator advances the global state
+        # that generator-less ops consume, by exactly the reserved amount.
+        g = torch.cuda.default_generators[0]
+        g.manual_seed(0)
+        ref = torch.rand(1000, device="cuda")
+        g.manual_seed(0)
+        _, off_t, _ = g.philox_state(4)
+        self.assertEqual(off_t.item(), 0)
+        shifted = torch.rand(1000, device="cuda")
+        self.assertNotEqual(shifted, ref)
+        g.manual_seed(0)
+        g.set_offset(4)
+        self.assertEqual(torch.rand(1000, device="cuda"), shifted, atol=0, rtol=0)
+
+    def test_philox_state_errors(self):
+        cpu_gen = torch.Generator()
+        with self.assertRaisesRegex(NotImplementedError, "philox_state"):
+            cpu_gen.philox_state(4)
+        g = torch.Generator(device="cuda")
+        with self.assertRaisesRegex(OverflowError, "negative"):
+            g.philox_state(-1)
+        with self.assertRaisesRegex(RuntimeError, "expected an int"):
+            g.philox_state(1.5)
+
+    def test_philox_state_graphsafe_shared_state(self):
+        g = torch.Generator(device="cuda")
+        g.manual_seed(0)
+        new_state = g.clone_state()
+        g.graphsafe_set_state(new_state)
+        g.philox_state(8)
+        self.assertEqual(new_state.get_offset(), 8)
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    def test_philox_state_graph_capture(self):
+        torch.rand(1, device="cuda")
+        g = torch.cuda.default_generators[0]
+        g.manual_seed(0)
+        graph = torch.cuda.CUDAGraph()
+        s = torch.cuda.Stream()
+        x = torch.zeros(1, device="cuda")
+        with torch.cuda.stream(s):
+            graph.capture_begin()
+            seed_t, off_t, intra_t0 = g.philox_state(4)
+            x += 1
+            _, _, intra_t1 = g.philox_state(4)
+            graph.capture_end()
+        torch.cuda.current_stream().wait_stream(s)
+
+        self.assertEqual(seed_t.device.type, "cuda")
+        self.assertEqual(off_t.device.type, "cuda")
+        self.assertEqual(intra_t0.item(), 0)
+        self.assertEqual(intra_t1.item(), 4)
+
+        # Each replay refills the extragraph tensors with the generator's
+        # current (seed, offset) and advances the offset by the whole-graph
+        # increment.
+        for _ in range(2):
+            offset_before = g.get_offset()
+            graph.replay()
+            self.assertEqual(seed_t.item(), g.initial_seed())
+            self.assertEqual(off_t.item(), offset_before)
+            self.assertEqual(g.get_offset(), offset_before + 8)
+
+        # The returned aliases must not allow reallocating the capture
+        # state's storage out from under the captured graph.
+        data_ptr = seed_t.data_ptr()
+        with self.assertRaisesRegex(RuntimeError, "not resizable"):
+            seed_t.resize_(64)
+        self.assertEqual(seed_t.data_ptr(), data_ptr)
 
     @skipIfRocmVersionLessThan((7, 14))
     @xfailCUDAIfSM89OrLaterOnWindows
@@ -3300,11 +3573,10 @@ torch.cuda.synchronize()
         g.reset()
         del g
 
-    @unittest.skipIf(
-        not TEST_CUDA_GRAPH or not TEST_CUDA_PYTHON_BINDINGS,
-        "CUDA >= 11.0 or ROCM >= 5.3 required for graphs; "
-        "cuda-bindings required for debug_dump",
+    @unittest.skipUnless(
+        TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs; "
     )
+    @requires_cuda_python_bindings  # required for debug_dump
     def test_graph_debugdump(self):
         torch.cuda.empty_cache()
         x = torch.randn(1024, device="cuda")
@@ -5021,10 +5293,11 @@ exit(2)
         ):
             raw_pointer = graph.raw_cuda_graph()
 
-    @unittest.skipIf(
-        not TEST_CUDA_GRAPH or not TEST_CUDA_PYTHON_BINDINGS,
-        "CUDA >= 11.0 or ROCM >= 5.3 required for graphs, cuda-bindings must be installed",
+    @unittest.skipUnless(
+        TEST_CUDA_GRAPH,
+        "CUDA >= 11.0 or ROCM >= 5.3 required for graphs",
     )
+    @requires_cuda_python_bindings
     def test_cuda_graph_raw_graph(self):
         import cuda.bindings.runtime as cudart
 
@@ -5048,10 +5321,11 @@ exit(2)
 
         graph.replay()
 
-    @unittest.skipIf(
-        not TEST_CUDA_GRAPH or not TEST_CUDA_PYTHON_BINDINGS,
-        "CUDA >= 11.0 or ROCM >= 5.3 required for graphs, cuda-bindings must be installed",
+    @unittest.skipUnless(
+        TEST_CUDA_GRAPH,
+        "CUDA >= 11.0 or ROCM >= 5.3 required for graphs",
     )
+    @requires_cuda_python_bindings
     @parametrize("keep_graph", [True, False])
     def test_cuda_graph_raw_graph_exec(self, keep_graph):
         import cuda.bindings.runtime as cudart
@@ -5334,7 +5608,7 @@ with torch.cuda.graph(g):
         VISIBLE_DEVICES = (
             "HIP_VISIBLE_DEVICES" if TEST_WITH_ROCM else "CUDA_VISIBLE_DEVICES"
         )
-        test_script = f"import os; import torch;os.environ['{VISIBLE_DEVICES}']='32';torch.get_device_module().device_count();print(torch.cuda.device_count())"
+        test_script = f"import os; import torch;os.environ['{VISIBLE_DEVICES}']='32';print(torch.cuda.device_count())"
         rc = check_output(test_script)
         self.assertEqual(rc, "0")
         if not TEST_WITH_ROCM:
@@ -5434,8 +5708,13 @@ import multiprocessing
 
 
 def fork_and_check_is_pinned():
+    # Explicitly use the fork context: this test relies on fork semantics
+    # (a forked child inherits the parent's CUDA context state), and Python
+    # 3.14 changed the default start method on non-macOS POSIX to forkserver,
+    # which would try to pickle the local `worker` function below and fail.
+    mp_ctx = multiprocessing.get_context("fork")
     # Create a pipe to communicate between parent and child processes
-    parent_conn, child_conn = multiprocessing.Pipe()
+    parent_conn, child_conn = mp_ctx.Pipe()
 
     def worker(conn):
         try:
@@ -5449,7 +5728,7 @@ def fork_and_check_is_pinned():
         finally:
             conn.close()
     # Fork a new process
-    p = multiprocessing.Process(target=worker, args=(child_conn,))
+    p = mp_ctx.Process(target=worker, args=(child_conn,))
     p.start()
     # Receive the result from the child process
     result = parent_conn.recv()
@@ -9011,6 +9290,7 @@ class TestMemPool(TestCase):
         self.assertTrue((ptrs_round_1 == ptrs_round_2).all().item())
 
     @unittest.skipIf(TEST_WITH_ROCM, "not enabled by default on rocm")
+    @requires_cuda_python_bindings
     @serialTest()
     def test_nccl_mem_alloc_addresses_in_random_order(self):
         """
@@ -9374,9 +9654,7 @@ class TestMemPool(TestCase):
             )
 
     @skipIfRocm(msg="cudaMallocManaged (UVM) is not supported on ROCm")
-    @unittest.skipIf(
-        not TEST_CUDA_PYTHON_BINDINGS, "requires cuda-python (cuda.bindings)"
-    )
+    @requires_cuda_python_bindings
     def test_use_uvm(self):
         with torch.cuda._use_uvm():
             x = torch.randn(256, 256, device="cuda")
@@ -9386,9 +9664,7 @@ class TestMemPool(TestCase):
         self.assertTrue(z.is_cuda)
 
     @skipIfRocm(msg="cudaMallocManaged (UVM) is not supported on ROCm")
-    @unittest.skipIf(
-        not TEST_CUDA_PYTHON_BINDINGS, "requires cuda-python (cuda.bindings)"
-    )
+    @requires_cuda_python_bindings
     def test_use_uvm_numerics(self):
         torch.manual_seed(42)
         with torch.cuda._use_uvm():
@@ -9398,9 +9674,7 @@ class TestMemPool(TestCase):
         self.assertEqual(a_uvm, a_reg)
 
     @skipIfRocm(msg="cudaMallocManaged (UVM) is not supported on ROCm")
-    @unittest.skipIf(
-        not TEST_CUDA_PYTHON_BINDINGS, "requires cuda-python (cuda.bindings)"
-    )
+    @requires_cuda_python_bindings
     def test_use_uvm_backward(self):
         with torch.cuda._use_uvm():
             with torch.autograd.set_multithreading_enabled(False):
@@ -9411,9 +9685,7 @@ class TestMemPool(TestCase):
         self.assertEqual(model.weight.grad.shape, (512, 512))
 
     @skipIfRocm(msg="cudaMallocManaged (UVM) is not supported on ROCm")
-    @unittest.skipIf(
-        not TEST_CUDA_PYTHON_BINDINGS, "requires cuda-python (cuda.bindings)"
-    )
+    @requires_cuda_python_bindings
     def test_use_uvm_tensor_outlives_context(self):
         # Regression test: a tensor allocated inside _use_uvm() can outlive the
         # context, leaving its block cached in the PrivatePool until a later global

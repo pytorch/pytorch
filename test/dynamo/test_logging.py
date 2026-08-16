@@ -1060,6 +1060,18 @@ Mutating object of type dict (source name: L['mod']._buffers)
 
         self.assertTrue(found_funcname)
 
+    def test_flex_gemm_log_levels(self):
+        from torch._logging._internal import _parse_log_settings
+
+        log_name = "torch._inductor.kernel.flex_gemm.debug"
+        concise = _parse_log_settings("flex_gemm")
+        verbose = _parse_log_settings("+flex_gemm")
+
+        self.assertEqual(concise.log_qname_to_level[log_name], logging.INFO)
+        self.assertEqual(verbose.log_qname_to_level[log_name], logging.DEBUG)
+        self.assertEqual(concise.artifact_names, set())
+        self.assertEqual(verbose.artifact_names, set())
+
     def test_invalid_artifact_flag(self):
         with self.assertRaises(ValueError):
             torch._logging.set_logs(aot_graphs=5)
@@ -1571,6 +1583,34 @@ TorchDynamo attempted to trace the following frames: [
         )
 
 
+class PartitionedScatterLoggingTests(LoggingTestCase):
+    """
+    Dedicated tests for the partitioned_scatter TORCH_LOGS artifact.
+    """
+
+    @make_logging_test(partitioned_scatter=True)
+    def test_partitioned_scatter(self, records):
+        from torch._inductor import config as inductor_config
+
+        N, n = 8192, 8
+
+        def f(out, idx, vals):
+            return out.index_put([idx], vals, accumulate=True)
+
+        with inductor_config.patch(
+            partitioned_scatter_enabled=True,
+            partitioned_scatter_force=True,
+        ):
+            fn_opt = torch.compile(f, backend="inductor", fullgraph=True)
+            out = torch.zeros(n)
+            idx = torch.randint(0, 4, (N,), dtype=torch.int64)
+            vals = torch.randn(N)
+            fn_opt(out, idx, vals)
+
+        # At least one debug record should be emitted (APPLY or SKIP decision).
+        self.assertGreater(len(records), 0)
+
+
 # non single record tests
 exclusions = {
     "bytecode",
@@ -1626,6 +1666,7 @@ exclusions = {
     "node_runtime_estimation",
     "caching",
     "overlap_scheduling",
+    "partitioned_scatter",
 }
 for name in torch._logging._internal.log_registry.artifact_names:
     if name not in exclusions:

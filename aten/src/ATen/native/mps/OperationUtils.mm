@@ -955,7 +955,9 @@ class BundledShaderLibrary : public MetalShaderLibrary {
       auto device = MPSDevice::getInstance()->device();
       NSError* error = nil;
 #ifdef CAN_BUILD_METAL_4
-      const auto section_name = is_macos_at_least(MacOSVersion::MACOS_26_0) ? "metal_40" : "metal_basic";
+      // kernels_40.metallib is built with -mmacos-version-min=26.2 (MPP
+      // cooperative-tensor ABI), so only load it on 26.2+.
+      const auto section_name = is_macos_at_least(MacOSVersion::MACOS_26_2) ? "metal_40" : "metal_basic";
 #else
       const auto section_name = "metal_basic";
 #endif

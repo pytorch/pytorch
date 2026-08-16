@@ -74,7 +74,7 @@ export PYTORCH_BUILD_NUMBER=1
 TRITON_VERSION=$(cat $PYTORCH_ROOT/.ci/docker/triton_version.txt)
 TRITON_CONSTRAINT="platform_system == 'Linux' and python_version < '3.15'"
 
-if [[ "$PACKAGE_TYPE" =~ .*wheel.* &&  -n "${PYTORCH_EXTRA_INSTALL_REQUIREMENTS:-}" && ! "$PYTORCH_BUILD_VERSION" =~ .*xpu.* ]]; then
+if [[ "$PACKAGE_TYPE" =~ .*wheel.* &&  -n "${PYTORCH_EXTRA_INSTALL_REQUIREMENTS:-}" && ! "$PYTORCH_BUILD_VERSION" =~ .*xpu.* && ! "$PYTORCH_BUILD_VERSION" =~ .*rocm.* ]]; then
   TRITON_REQUIREMENT="triton~=${TRITON_VERSION}; ${TRITON_CONSTRAINT}"
   if [[ -n "$PYTORCH_BUILD_VERSION" && "$PYTORCH_BUILD_VERSION" =~ .*dev.* ]]; then
       TRITON_SHORTHASH=$(cut -c1-8 $PYTORCH_ROOT/.ci/docker/ci_commit_pins/triton.txt)

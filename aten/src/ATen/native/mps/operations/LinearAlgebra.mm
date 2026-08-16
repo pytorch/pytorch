@@ -61,6 +61,7 @@
 #include <c10/util/env.h>
 #include <algorithm>
 #include <string>
+#include <string_view>
 #include <unordered_set>
 
 namespace at::native {
@@ -116,6 +117,95 @@ ResolvedMatrix resolve_matrix(const Tensor& matrix) {
   return {matrix, row_stride, col_stride, false};
 }
 
+struct GemvLaunch {
+  std::string kernel;
+  MTLComputePipelineState_t pso;
+  NSUInteger threads_per_tg;
+  int64_t num_groups;
+};
+
+std::optional<GemvConfig> normalize_gemv_config(GemvConfig config,
+                                                c10::ScalarType dt,
+                                                bool use_t,
+                                                bool matrix_contiguous,
+                                                int64_t align) {
+  if (config.kernel == GemvKernel::T2D) {
+    const int t2d_vec = static_cast<int>(16 / c10::elementSize(dt));
+    if (!use_t || !matrix_contiguous || (align & (t2d_vec - 1))) {
+      return std::nullopt;
+    }
+    return config;
+  }
+  return GemvPolicy::clamp_vec(config, align);
+}
+
+std::string gemv_kernel_name(c10::ScalarType dt,
+                             GemvConfig config,
+                             GemmEpilogue epi,
+                             bool use_t,
+                             bool matrix_contiguous,
+                             bool idx64,
+                             int64_t vec_xs,
+                             int64_t vec_offset) {
+  using namespace std::string_view_literals;
+
+  const auto dt_str = scalarToMetalTypeString(dt);
+  const bool use_t2d = use_t && config.kernel == GemvKernel::T2D;
+  // Vectorized x loads need x unit-stride and VEC-aligned (nt only).
+  const bool xc = !use_t && config.vec > 1 && vec_xs == 1 && (vec_offset % config.vec) == 0;
+  const auto epi_str = epi == GemmEpilogue::Bias ? "ab" : "none";
+  const auto matrix_str = matrix_contiguous ? "" : "_strided";
+  const auto idx_str = idx64 ? "_i64" : "";
+  const auto x_str = xc ? "xc"sv : "xs"sv;
+  if (use_t2d) {
+    return fmt::format("gemv_t2d_{}_{}_{}_{}", dt_str, config.nsimd, config.kq, epi_str);
+  }
+  if (use_t) {
+    return fmt::format("gemv_t_{}_{}_{}_{}{}{}", dt_str, config.nsimd, config.vec, epi_str, matrix_str, idx_str);
+  }
+  return fmt::format(
+      "gemv_nt_{}_{}_{}_{}_{}{}{}", dt_str, config.nsimd, config.vec, epi_str, x_str, matrix_str, idx_str);
+}
+
+GemvLaunch prepare_gemv_launch(c10::ScalarType dt,
+                               GemvConfig config,
+                               GemmEpilogue epi,
+                               bool use_t,
+                               bool matrix_contiguous,
+                               bool idx64,
+                               int64_t outlen,
+                               int64_t vec_xs,
+                               int64_t vec_offset) {
+  const bool use_t2d = use_t && config.kernel == GemvKernel::T2D;
+  auto kernel = gemv_kernel_name(dt, config, epi, use_t, matrix_contiguous, idx64, vec_xs, vec_offset);
+  const int t2d_vec = static_cast<int>(16 / c10::elementSize(dt));
+  const int64_t rows_per_tg = use_t2d ? (c10::metal::simdgroup_size / config.kq) * t2d_vec
+      : use_t                         ? c10::metal::simdgroup_size * config.vec
+                                      : config.nsimd;
+  auto pso = lib.getPipelineStateForFunc(kernel);
+  return {std::move(kernel),
+          pso,
+          static_cast<NSUInteger>(config.nsimd * c10::metal::simdgroup_size),
+          at::ceil_div(outlen, rows_per_tg)};
+}
+
+void encode_gemv_launch(at::mps::MPSStream* stream,
+                        const GemvLaunch& launch,
+                        const Tensor& mat,
+                        const Tensor& vec,
+                        const Tensor& out,
+                        const GemvDims& dims,
+                        const Tensor& bias,
+                        const std::array<float, 2>& alpha_beta) {
+  getMPSProfiler().beginProfileKernel(launch.pso, "gemm_gemv/" + launch.kernel, {mat, vec});
+  auto enc = stream->commandEncoder();
+  [enc setComputePipelineState:launch.pso];
+  mtl_setArgs(enc, mat, vec, out, dims, bias, alpha_beta);
+  [enc dispatchThreadgroups:MTLSizeMake(launch.num_groups, 1, 1)
+      threadsPerThreadgroup:MTLSizeMake(launch.threads_per_tg, 1, 1)];
+  getMPSProfiler().endProfileKernel(launch.pso);
+}
+
 // Rank-1 GEMV launch. Matrix orientation selects gemv_t vs gemv_nt; one
 // GemvDims packing handles all four mat/vec layouts.
 void dispatch_gemv(const Tensor& A,
@@ -131,7 +221,6 @@ void dispatch_gemv(const Tensor& A,
                    int64_t outlen,
                    bool idx64) {
   const auto dt = out.scalar_type();
-  const std::string dt_str = scalarToMetalTypeString(out);
   constexpr int64_t r = 0, c = 1;
   const auto K = A.size(1);
 
@@ -139,29 +228,9 @@ void dispatch_gemv(const Tensor& A,
   const bool gemv_use_t = m_is_one ? !matrix.transposed : matrix.transposed;
   const bool matrix_contiguous = matrix.stride == 1;
   const int64_t align = matrix_contiguous ? matrix.ld | matrix.tensor.storage_offset() : 0;
-  GemvConfig cfg;
-  if (idx64) {
-    // Offsets overflow int32: such operands are DRAM-bound, so skip the
-    // policy and use the fixed configs the _i64 variants are built at.
-    cfg = gemv_use_t ? GemvConfig{16, 2} : GemvConfig{8, dt == at::kFloat ? 4 : 8};
-    cfg = GemvPolicy::clamp_vec(cfg, align);
-  } else {
-    cfg = gemv_use_t ? policy.pick_t(dt, outlen, K, align) : policy.pick_nt(dt, outlen, K, align);
-  }
-  // T2D loads a full 16 bytes per lane; misaligned matrices fall back to the
-  // scalar-column standard kernel.
-  const int t2d_vec = static_cast<int>(16 / c10::elementSize(dt));
-  if (cfg.kernel == GemvKernel::T2D && (!matrix_contiguous || (align & (t2d_vec - 1)))) {
-    cfg.kernel = GemvKernel::Standard;
-    cfg.vec = matrix_contiguous ? 1 : 2;
-  }
-  const GemvConfig launch_cfg = cfg;
-  const bool gemv_t2d = gemv_use_t && launch_cfg.kernel == GemvKernel::T2D;
-
   const auto vvec = m_is_one ? A : B;
   const auto vec_xs = m_is_one ? A.stride(c) : B.stride(r);
-  // Vectorized x loads need x unit-stride and VEC-aligned (nt only).
-  const bool xc = !gemv_use_t && launch_cfg.vec > 1 && vec_xs == 1 && (vvec.storage_offset() % launch_cfg.vec) == 0;
+  const auto vec_offset = vvec.storage_offset();
 
   Tensor expanded_bias;
   int64_t out_stride = 0;
@@ -182,43 +251,32 @@ void dispatch_gemv(const Tensor& A,
   dims.xs = vec_xs;
   dims.bias_r = gemv_use_t ? 0 : out_stride;
   dims.bias_c = gemv_use_t ? out_stride : 0;
+  const std::array<float, 2> alpha_beta = {static_cast<float>(alpha.toDouble()), static_cast<float>(beta.toDouble())};
 
-  const auto epi_str = epi == GemmEpilogue::Bias ? "ab" : "none";
-  const auto matrix_str = matrix_contiguous ? "" : "_strided";
-  const auto idx_str = idx64 ? "_i64" : "";
-  std::string fname;
-  if (gemv_t2d) {
-    fname = fmt::format("gemv_t2d_{}_{}_{}_{}", dt_str, launch_cfg.nsimd, launch_cfg.kq, epi_str);
-  } else if (gemv_use_t) {
-    fname =
-        fmt::format("gemv_t_{}_{}_{}_{}{}{}", dt_str, launch_cfg.nsimd, launch_cfg.vec, epi_str, matrix_str, idx_str);
+  GemvConfig config;
+  if (idx64) {
+    // Offsets overflow int32: such operands are DRAM-bound, so skip the
+    // policy and use the fixed configs the _i64 variants are built at.
+    config = gemv_use_t ? GemvConfig{16, 2} : GemvConfig{8, dt == at::kFloat ? 4 : 8};
   } else {
-    fname = fmt::format("gemv_nt_{}_{}_{}_{}_{}{}{}",
-                        dt_str,
-                        launch_cfg.nsimd,
-                        launch_cfg.vec,
-                        epi_str,
-                        xc ? "xc" : "xs",
-                        matrix_str,
-                        idx_str);
+    config = gemv_use_t ? policy.pick_t(dt, outlen, K, align) : policy.pick_nt(dt, outlen, K, align);
   }
-  auto pso = lib.getPipelineStateForFunc(fname);
-  const NSUInteger threads_per_tg = static_cast<NSUInteger>(launch_cfg.nsimd * c10::metal::simdgroup_size);
-  const int64_t rows_per_tg = gemv_t2d ? (c10::metal::simdgroup_size / launch_cfg.kq) * t2d_vec
-      : gemv_use_t                     ? c10::metal::simdgroup_size * launch_cfg.vec
-                                       : launch_cfg.nsimd;
-  const int64_t num_groups = (outlen + rows_per_tg - 1) / rows_per_tg;
-  const std::array<float, 2> ab = {static_cast<float>(alpha.toDouble()), static_cast<float>(beta.toDouble())};
+  // T2D loads a full 16 bytes per lane; misaligned matrices fall back to the
+  // scalar-column standard kernel.
+  auto normalized = normalize_gemv_config(config, dt, gemv_use_t, matrix_contiguous, align);
+  if (normalized.has_value()) {
+    config = *normalized;
+  } else {
+    config.kernel = GemvKernel::Standard;
+    config.vec = matrix_contiguous ? 1 : 2;
+  }
 
   auto stream = getCurrentMPSStream();
+  const auto launch =
+      prepare_gemv_launch(dt, config, epi, gemv_use_t, matrix_contiguous, idx64, outlen, vec_xs, vec_offset);
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
-      getMPSProfiler().beginProfileKernel(pso, "gemm_gemv", {matrix.tensor, vvec});
-      auto enc = stream->commandEncoder();
-      [enc setComputePipelineState:pso];
-      mtl_setArgs(enc, matrix.tensor, vvec, out, dims, expanded_bias, ab);
-      [enc dispatchThreadgroups:MTLSizeMake(num_groups, 1, 1) threadsPerThreadgroup:MTLSizeMake(threads_per_tg, 1, 1)];
-      getMPSProfiler().endProfileKernel(pso);
+      encode_gemv_launch(stream, launch, matrix.tensor, vvec, out, dims, expanded_bias, alpha_beta);
     }
   });
 }
@@ -1653,6 +1711,9 @@ static void cholesky_panel_impl(const Tensor& out, const Tensor& info_, int64_t 
 }
 
 static void cholesky_stub_impl(const Tensor& out, const Tensor& info, bool upper) {
+  TORCH_CHECK(out.scalar_type() == kFloat || out.scalar_type() == kComplexFloat,
+              "linalg.cholesky: MPS supports float32 and complex64, but got ",
+              out.scalar_type());
   auto input_sizes = out.sizes();
 
   int64_t ndim = out.dim();
@@ -1663,14 +1724,16 @@ static void cholesky_stub_impl(const Tensor& out, const Tensor& info, bool upper
   auto device = MPSDevice::getInstance()->device();
   auto info_ = info.dim() >= 2 ? info.view({B}) : info;
   auto info_sizes = info.sizes();
-  if (has_mpp()) {
+  if (has_mpp() && !isComplexType(out.scalar_type())) {
     return cholesky_panel_impl(out, info_, N, B, upper);
   }
   info_.fill_(0);
 
-  auto factorDiagonalPSO = lib.getPipelineStateForFunc(upper ? "factorDiagonalBlockU" : "factorDiagonalBlockL");
-  auto applyTRSMPSO = lib.getPipelineStateForFunc(upper ? "applyTRSMU" : "applyTRSML");
-  auto applySYRKPSO = lib.getPipelineStateForFunc(upper ? "applySYRKU" : "applySYRKL");
+  const auto dtypeStr = scalarToMetalTypeString(out);
+  auto factorDiagonalPSO =
+      lib.getPipelineStateForFunc(fmt::format("factorDiagonalBlock{}_{}", upper ? 'U' : 'L', dtypeStr));
+  auto applyTRSMPSO = lib.getPipelineStateForFunc(fmt::format("applyTRSM{}_{}", upper ? 'U' : 'L', dtypeStr));
+  auto applySYRKPSO = lib.getPipelineStateForFunc(fmt::format("applySYRK{}_{}", upper ? 'U' : 'L', dtypeStr));
 
   int64_t NB = std::min<int64_t>(32, N);
   int64_t numBlocks = (N + NB - 1) / NB;

@@ -24,27 +24,75 @@ from torch.cuda.graph_annotations import (
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    requires_cuda,
+    requires_cuda_python_bindings,
     run_tests,
     skipIfRocm,
     TestCase,
 )
 
 
-TEST_CUDA = torch.cuda.is_available()
+# Nested graphs (child-graph and conditional nodes) have no torch API, so the tests
+# below build them through cuda.bindings the way a library embedding one would.
+# cuda.bindings is imported lazily so this module still imports without it.
+def _memset_params(dst: torch.Tensor):
+    from cuda.bindings import runtime as cuda_runtime
 
-try:
-    import cuda.bindings.runtime  # noqa: F401
+    params = cuda_runtime.cudaMemsetParams()
+    params.dst = dst.data_ptr()
+    params.elementSize = 4
+    params.width = dst.numel()
+    params.height = 1
+    params.pitch = 0
+    params.value = 0
+    return params
 
-    TEST_CUDA_BINDINGS = True
-except ImportError:
-    TEST_CUDA_BINDINGS = False
+
+def _add_child_graph_node(graph, deps, dst):
+    from cuda.bindings import runtime as cuda_runtime
+
+    body = _check_cuda_bindings(cuda_runtime.cudaGraphCreate(0))
+    _check_cuda_bindings(
+        cuda_runtime.cudaGraphAddMemsetNode(body, [], 0, _memset_params(dst))
+    )
+    return _check_cuda_bindings(
+        cuda_runtime.cudaGraphAddChildGraphNode(graph, deps, len(deps), body)
+    )
+
+
+def _add_conditional_node(graph, deps, dst):
+    from cuda.bindings import driver, runtime as cuda_runtime
+
+    handle = _check_cuda_bindings(
+        cuda_runtime.cudaGraphConditionalHandleCreate(graph, 1, 1)
+    )
+    params = cuda_runtime.cudaGraphNodeParams()
+    params.type = cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeConditional
+    params.conditional.handle = handle
+    params.conditional.type = driver.CUgraphConditionalNodeType.CU_GRAPH_COND_TYPE_IF
+    params.conditional.size = 1
+    node = _check_cuda_bindings(
+        cuda_runtime.cudaGraphAddNode(graph, deps, None, len(deps), params)
+    )
+    _check_cuda_bindings(
+        cuda_runtime.cudaGraphAddMemsetNode(
+            params.conditional.phGraph_out[0], [], 0, _memset_params(dst)
+        )
+    )
+    return node
+
+
+_NESTED_NODE_ADDERS = {
+    "child_graph": _add_child_graph_node,
+    "conditional": _add_conditional_node,
+}
 
 
 # cuda.bindings is NVIDIA-only; graph annotation APIs have no ROCm equivalent.
 @instantiate_parametrized_tests
 @skipIfRocm
-@unittest.skipUnless(TEST_CUDA, "CUDA not available")
-@unittest.skipUnless(TEST_CUDA_BINDINGS, "cuda.bindings not available")
+@requires_cuda
+@requires_cuda_python_bindings
 @unittest.skipIf(
     _is_tools_id_unavailable(),
     "cudaGraphNodeGetToolsId not available (needs cuda-compat >= 13.1)",
@@ -650,11 +698,80 @@ class TestMarkKernels(TestCase):
         for anns in annotations.values():
             self.assertEqual(anns, [{"name": "tagged"}])
 
+    def test_scope_inside_conditional_body_records_nothing(self):
+        """A scope inside a torch.cond body warns and records no annotations.
+
+        begin_capture_to_if_node captures into a separate cudaGraph_t, so node ids
+        there are in the body graph's id space; remap_to_exec_graph only rekeys the
+        top-level capture id, so anything recorded would be a key matching nothing.
+        """
+        from torch._higher_order_ops.cudagraph_conditional_nodes import _if_body
+
+        x = torch.ones([2000], device="cuda")
+        pred = torch.tensor(True, device="cuda")
+        g = torch.cuda.CUDAGraph(keep_graph=True)
+
+        with torch.cuda.graph(g, enable_annotations=True):
+            with mark_kernels("outer_region"):
+                z = x + 1
+            with self.assertWarnsRegex(UserWarning, "conditional-node body"):
+                with _if_body(pred):
+                    with mark_kernels("inside_body"):
+                        _ = z * 2
+        g.instantiate()
+
+        # Only the top-level scope is recorded, and its key matches the exec graph.
+        annotations = get_kernel_annotations()
+        self.assertEqual(
+            [a for anns in annotations.values() for a in anns],
+            [{"name": "outer_region"}],
+        )
+        with self.assertWarns(UserWarning):  # the graph has a conditional node
+            exec_graph_id = g.get_graph_data()["exec_graph_id"]
+        for tools_id in annotations:
+            self.assertEqual(tools_id >> 32, exec_graph_id)
+
+    @parametrize("kind", ["child_graph", "conditional"])
+    def test_nested_graph_node_in_scope_warns(self, kind):
+        """A scope containing a nested graph node warns; the rest is annotated.
+
+        The dependent-edge walk stops at such a node, so the work in its body is
+        left unannotated (and its ids, being in the body graph's id space, would
+        never be rekeyed by remap_to_exec_graph). What is recorded stays correct.
+        """
+        from cuda.bindings import runtime as cuda_runtime
+
+        dst = torch.zeros(64, device="cuda")
+        x = torch.zeros([2000], device="cuda")
+        g = torch.cuda.CUDAGraph(keep_graph=True)
+
+        with self.assertWarnsRegex(UserWarning, "left unannotated"):
+            with torch.cuda.graph(
+                g, enable_annotations=True, capture_error_mode="relaxed"
+            ):
+                with mark_kernels("region"):
+                    y = x + 1
+                    stream = cuda_runtime.cudaStream_t(
+                        init_value=torch.cuda.current_stream().cuda_stream
+                    )
+                    _s, _i, cap_graph, deps, _e, num = _check_cuda_bindings(
+                        cuda_runtime.cudaStreamGetCaptureInfo(stream)
+                    )
+                    _NESTED_NODE_ADDERS[kind](cap_graph, list(deps[:num]), dst)
+                    _ = y * 2
+
+        # The two elementwise kernels in the scope are still annotated correctly.
+        annotations = get_kernel_annotations()
+        self.assertEqual(len(annotations), 2)
+        for anns in annotations.values():
+            self.assertEqual(anns, [{"name": "region"}])
+
 
 # cuda.bindings is NVIDIA-only; get_graph_data has no ROCm equivalent.
+@instantiate_parametrized_tests
 @skipIfRocm
-@unittest.skipUnless(TEST_CUDA, "CUDA not available")
-@unittest.skipUnless(TEST_CUDA_BINDINGS, "cuda.bindings not available")
+@requires_cuda
+@requires_cuda_python_bindings
 @unittest.skipIf(
     _is_tools_id_unavailable(),
     "cudaGraphNodeGetToolsId not available (needs cuda-compat >= 13.1)",
@@ -753,6 +870,56 @@ class TestGetGraphData(TestCase):
             for dep_idx in node["dependents"]:
                 self.assertIn(node["index"], nodes[dep_idx]["dependencies"])
 
+    def test_cached_across_instantiate_hooks(self):
+        # Within one instantiate(), every post-instantiate hook that calls
+        # get_graph_data() shares a single query (same object); the cache is
+        # dropped afterwards so a later call recomputes a fresh dict.
+        g = torch.cuda.CUDAGraph(keep_graph=True)
+        x = torch.zeros([2000], device="cuda")
+        with torch.cuda.graph(g, capture_error_mode="relaxed"):
+            _ = (x + 1).relu()
+
+        seen = []
+        g.register_post_instantiate_hook(lambda cg: seen.append(cg.get_graph_data()))
+        g.register_post_instantiate_hook(lambda cg: seen.append(cg.get_graph_data()))
+        g.instantiate()
+
+        self.assertEqual(len(seen), 2)
+        self.assertIs(seen[0], seen[1])
+
+        after = g.get_graph_data()
+        self.assertIsNot(after, seen[0])
+        self.assertEqual(after, seen[0])
+
+    @parametrize("kind", ["child_graph", "conditional"])
+    def test_nested_graph_node_warns_but_reports_top_level(self, kind):
+        """A nested cudaGraph_t warns; the top-level nodes are still reported.
+
+        cudaGraphGetNodes does not descend into a child graph or a conditional
+        body, so that work is missing from the result -- but the ids that are
+        reported stay valid, since the exec graph preserves top-level node ids.
+        """
+        dst = torch.zeros(64, device="cuda")
+        x = torch.zeros([2000], device="cuda")
+        g = torch.cuda.CUDAGraph(keep_graph=True)
+        with torch.cuda.graph(g, capture_error_mode="relaxed"):
+            _ = x + 1
+        _NESTED_NODE_ADDERS[kind](g.raw_cuda_graph(), [], dst)
+        g.instantiate()
+
+        with self.assertWarnsRegex(UserWarning, kind):
+            data = g.get_graph_data()
+
+        # The nested node itself is reported, its body is not: exactly one memset
+        # lives in the body, and it must not appear among the returned nodes.
+        self.assertEqual(len([n for n in data["nodes"] if n["node_type"] == kind]), 1)
+        self.assertEqual(
+            len([n for n in data["nodes"] if n["node_type"] == "memset"]), 0
+        )
+        exec_graph_id = data["exec_graph_id"]
+        for node in data["nodes"]:
+            self.assertEqual(node["tools_id"], (exec_graph_id << 32) | node["node_id"])
+
     def test_keep_graph_false_raises(self):
         g = torch.cuda.CUDAGraph(keep_graph=False)
         x = torch.zeros([2000], device="cuda")
@@ -807,6 +974,192 @@ class TestIsAvailable(TestCase):
     def test_matches_private_gate(self):
         expected = torch.cuda.is_available() and not _is_tools_id_unavailable()
         self.assertEqual(is_available(), expected)
+
+
+# Host-side test of the graph-instantiate hook registry: consumers register hooks that a
+# CUDAGraph fans out to via run_graph_instantiate_hooks at the end of instantiate(). The
+# registry just passes the graph through, so a sentinel stands in for it. No CUDA needed.
+class TestGraphInstantiateHooks(TestCase):
+    def tearDown(self):
+        import torch.cuda.graphs as cg
+
+        cg._global_instantiate_hooks.clear()
+        super().tearDown()
+
+    def test_register_run_unregister(self):
+        import torch.cuda.graphs as cg
+
+        seen = []
+        graph = object()
+        handle = cg.register_graph_instantiate_hook(lambda g: seen.append(g))
+        cg.run_graph_instantiate_hooks(graph)
+        self.assertEqual(seen, [graph])
+        handle.remove()
+        cg.run_graph_instantiate_hooks(graph)  # unregistered: not called again
+        self.assertEqual(seen, [graph])
+
+    def test_multiple_hooks_all_run(self):
+        import torch.cuda.graphs as cg
+
+        seen_a, seen_b = [], []
+        cg.register_graph_instantiate_hook(lambda g: seen_a.append(g))
+        cg.register_graph_instantiate_hook(lambda g: seen_b.append(g))
+        graph = object()
+        cg.run_graph_instantiate_hooks(graph)
+        self.assertEqual((seen_a, seen_b), ([graph], [graph]))
+
+    def test_run_swallows_hook_errors(self):
+        import torch.cuda.graphs as cg
+
+        seen = []
+
+        def boom(g):
+            raise RuntimeError("boom")
+
+        cg.register_graph_instantiate_hook(boom)
+        cg.register_graph_instantiate_hook(lambda g: seen.append(g))
+        graph = object()
+        cg.run_graph_instantiate_hooks(graph)  # first raises, second still runs
+        self.assertEqual(seen, [graph])
+
+    @requires_cuda
+    def test_fires_once_on_real_graph_instantiate(self):
+        import torch.cuda.graphs as cg
+
+        seen = []
+        handle = cg.register_graph_instantiate_hook(lambda gr: seen.append(gr))
+        self.addCleanup(handle.remove)
+
+        x = torch.zeros(4, device="cuda")
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g):
+            _ = x + 1
+
+        # instantiate() ran once at capture_end and fired the hook with this graph.
+        self.assertEqual(seen, [g])
+        for _ in range(3):
+            g.replay()
+        torch.cuda.synchronize()
+        # replay does not re-instantiate, so the hook is not called again.
+        self.assertEqual(seen, [g])
+        g.reset()
+
+
+# Host-side test of the graph-destroy hook registry: consumers register per-resolver
+# cleanup hooks that a CUDAGraph invokes (gated on graph_destroy_hooks_active) via
+# run_graph_destroy_hooks when a CUDA graph is destroyed. No CUDA needed.
+class TestGraphDestroyHooks(TestCase):
+    def tearDown(self):
+        import torch.cuda.graphs as cg
+
+        cg._global_destroy_hooks.clear()
+        super().tearDown()
+
+    def test_register_run_unregister(self):
+        import torch.cuda.graphs as cg
+
+        seen = []
+        self.assertFalse(cg.graph_destroy_hooks_active())
+        handle = cg.register_graph_destroy_hook(lambda ids: seen.append(set(ids)))
+        self.assertTrue(cg.graph_destroy_hooks_active())
+        cg.run_graph_destroy_hooks({7})
+        self.assertEqual(seen, [{7}])
+        handle.remove()
+        self.assertFalse(cg.graph_destroy_hooks_active())
+        cg.run_graph_destroy_hooks({8})  # unregistered: not called again
+        self.assertEqual(seen, [{7}])
+
+    def test_multiple_hooks_all_run(self):
+        import torch.cuda.graphs as cg
+
+        seen_a, seen_b = [], []
+        cg.register_graph_destroy_hook(lambda ids: seen_a.append(set(ids)))
+        cg.register_graph_destroy_hook(lambda ids: seen_b.append(set(ids)))
+        cg.run_graph_destroy_hooks({5})
+        self.assertEqual((seen_a, seen_b), ([{5}], [{5}]))
+
+    def test_run_swallows_hook_errors(self):
+        import torch.cuda.graphs as cg
+
+        seen = []
+
+        def boom(ids):
+            raise RuntimeError("boom")
+
+        cg.register_graph_destroy_hook(boom)
+        cg.register_graph_destroy_hook(lambda ids: seen.append(set(ids)))
+        cg.run_graph_destroy_hooks({1})  # first raises, second still runs
+        self.assertEqual(seen, [{1}])
+
+    @requires_cuda
+    def test_fires_with_recorded_exec_ids_on_teardown(self):
+        import torch.cuda.graphs as cg
+
+        exec_id = 0xABCD
+        seen = []
+        # Stand in for a consumer that records per-graph state at instantiate: stamp a
+        # known exec id onto the graph so teardown has something to hand the destroy hook.
+        inst = cg.register_graph_instantiate_hook(
+            lambda gr: gr._recorded_exec_ids.add(exec_id)
+        )
+        dh = cg.register_graph_destroy_hook(lambda ids: seen.append(set(ids)))
+        self.addCleanup(inst.remove)
+        self.addCleanup(dh.remove)
+
+        x = torch.zeros(4, device="cuda")
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g):
+            _ = x + 1
+        for _ in range(3):
+            g.replay()
+        torch.cuda.synchronize()
+
+        self.assertEqual(seen, [])  # not torn down yet
+        # reset() tears down this capture cycle and fires the armed destroy callback,
+        # handing the destroy hook the exec ids recorded on the graph.
+        g.reset()
+        self.assertEqual(seen, [{exec_id}])
+
+
+# Pure registry-lifecycle logic, no CUDA needed. Seeds the module-level kernel
+# annotation map directly and checks that remove_kernel_annotations purges only the
+# requested exec graph ids (tools_id >> 32). (The graph dependency map lives on the
+# profiler observer, not the module, and is exercised in the CUPTI monitor suite.)
+class TestRemoveKernelAnnotations(TestCase):
+    @staticmethod
+    def _tools_id(graph_id, node_id):
+        return (graph_id << 32) | node_id
+
+    def tearDown(self):
+        import torch.cuda._graph_annotations as ga
+
+        ga.clear_kernel_annotations()
+        super().tearDown()
+
+    def test_removes_only_requested_exec_id(self):
+        import torch.cuda._graph_annotations as ga
+
+        exec_a, exec_b = 1, 2
+        ga.clear_kernel_annotations()
+        ann = ga.get_kernel_annotations()
+        ann[self._tools_id(exec_a, 10)] = ["a"]
+        ann[self._tools_id(exec_b, 10)] = ["b"]
+
+        ga.remove_kernel_annotations([exec_a])
+
+        self.assertEqual(
+            ga.get_kernel_annotations(), {self._tools_id(exec_b, 10): ["b"]}
+        )
+
+    def test_missing_and_empty_ids_are_noops(self):
+        import torch.cuda._graph_annotations as ga
+
+        ga.clear_kernel_annotations()
+        ann = ga.get_kernel_annotations()
+        ann[self._tools_id(2, 10)] = ["b"]
+        ga.remove_kernel_annotations([])  # empty: no-op
+        ga.remove_kernel_annotations([99])  # unknown exec id: no-op
+        self.assertEqual(ga.get_kernel_annotations(), {self._tools_id(2, 10): ["b"]})
 
 
 # Pure trace-JSON logic, no CUDA needed. Pins the canonical annotation key
