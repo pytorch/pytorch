@@ -398,8 +398,9 @@ force_fuse_int_mm_with_mul = False
 # (may improve perf at the cost of accuracy for some models).
 keep_addmm_fused_for_half_dtypes = True
 
-# DEPRECATED. This setting is ignored.
-use_mixed_mm = True
+use_mixed_mm = Config(
+    default=True, deprecated=True, deprecation_message="does not do anything"
+)
 
 # enable runtime numeric check for pre/post grad fx passes
 # floating point provides limited accuracy (about 7 decimal digits for single precision
@@ -413,8 +414,9 @@ fx_passes_numeric_check: dict[str, Any] = {
     "requires_optimizer": True,
 }
 
-# DEPRECATED. This setting is ignored.
-mixed_mm_choice: Literal["default", "triton", "aten", "heuristic"] = "heuristic"
+mixed_mm_choice: Literal["default", "triton", "aten", "heuristic"] = Config(
+    default="heuristic", deprecated=True, deprecation_message="does not do anything"
+)
 
 # enable reordering pass for increasing overlap between compute and communication
 reorder_for_compute_comm_overlap = False
@@ -816,7 +818,7 @@ def _parse_autoheuristic_collect_env():
 
 
 def _parse_autoheuristic_use_env():
-    use_env = os.environ.get("TORCHINDUCTOR_AUTOHEURISTIC_USE", "mixed_mm").split(",")
+    use_env = os.environ.get("TORCHINDUCTOR_AUTOHEURISTIC_USE", "").split(",")
     return use_env
 
 
@@ -826,7 +828,6 @@ class autoheuristic_collect:
     """
 
     pad_mm = "pad_mm" in _parse_autoheuristic_collect_env()
-    mixed_mm = "mixed_mm" in _parse_autoheuristic_collect_env()
 
 
 class autoheuristic_use:
@@ -835,7 +836,6 @@ class autoheuristic_use:
     """
 
     pad_mm = True if "pad_mm" in _parse_autoheuristic_use_env() else None
-    mixed_mm = True if "mixed_mm" in _parse_autoheuristic_use_env() else None
 
 
 # If set to 1, will run a JIT post compile hook if one is set.
