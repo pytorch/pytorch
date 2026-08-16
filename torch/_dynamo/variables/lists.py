@@ -1499,7 +1499,7 @@ class DequeVariable(CommonListMethodsVariable):
         # nb_index_impl).  deque has no mp_subscript, so this is the real path.
         index = key.as_python_constant()
         try:
-            return self.items[index]
+            return note_element_read(tx, self.items[index])
         except IndexError:
             raise_observed_exception(IndexError, tx, args=["deque index out of range"])
 

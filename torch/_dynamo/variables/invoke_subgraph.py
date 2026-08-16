@@ -56,6 +56,7 @@ from torch.utils._ordered_set import OrderedSet
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
     from torch._dynamo.variables.higher_order_ops import SubgraphTracingInfo
+    from torch._dynamo.variables.lazy import LazyConstantVariable
 
 log = logging.getLogger(__name__)
 hc_log = torch._logging.getArtifactLogger(__name__, "hierarchical_compile")
@@ -521,8 +522,9 @@ class open_index_parameterized_region:
     def __exit__(self, *exc_info: Any) -> None:
         self.tx.output.deferred_index_regions.pop()
         if exc_info[0] is not None or not self.records:
-            # The region unwound (graph break, restart): it produced no entry,
-            # so specializing the frame on indexes it read would be gratuitous.
+            # Either the region unwound (graph break, restart), which produces
+            # no entry, or it deferred nothing, so there is nothing to settle.
+            # Specializing the frame on indexes it read would be gratuitous.
             return
         self.reindexable = resolve_reindexable(
             self.tx, self.records, self.literal_elements
@@ -601,7 +603,7 @@ def subscript_without_realizing_index(
     return item
 
 
-def realized_to_non_constant(index_vt: Any) -> bool:
+def realized_to_non_constant(index_vt: "LazyConstantVariable") -> bool:
     """Whether ``index_vt`` realized to something other than a ConstantVariable.
 
     An int can realize to a SymNodeVariable rather than a ConstantVariable, and
@@ -1508,11 +1510,14 @@ def stamp_out_subgraph(
             vt = VariableBuilder(tx, new_source)(value)
             new_lifted_args.append(vt.as_proxy())
 
-    for _, index_source in cached.reindex_nodes:
-        # The stamped-out call reads the element this index selects, but never
-        # the index itself, so pin it the way the traced region would have.
-        # After the args resolve, so a stamp out that gives up partway does not
-        # leave the frame specialized on a call it did not serve.
+    # The stamped-out call reads the element each index selects, but never the
+    # index itself, so pin it the way the traced region would have. After the
+    # args resolve, so a stamp out that gives up partway does not leave the
+    # frame specialized on a call it did not serve. OrderedSet since several
+    # elements can share one index source (e.g. a K/V cache pair).
+    for index_source in OrderedSet(
+        index_source for _, index_source in cached.reindex_nodes
+    ):
         install_guard(
             index_source.clone(replacement_fn).make_guard(GuardBuilder.CONSTANT_MATCH)
         )
