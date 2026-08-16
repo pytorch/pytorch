@@ -1,3 +1,48 @@
+# PyTorch build overview
+#
+# This file is the entry point of the native build. It is normally driven by
+# scikit-build-core through `pip install -e . -v --no-build-isolation`
+# (`spin develop`) rather than by invoking cmake directly; the exception is the
+# standalone libtorch build in tools/build_libtorch.py. The stages below appear
+# in the order they are executed in this file.
+#
+# 1. Bootstrap: forward the toolchain env vars needed before project() (cross
+#    compilation), call project() with the version from version.txt, then
+#    cmake/EnvVarForwarding.cmake turns the remaining build env vars into CMake
+#    cache variables. That module is the reference for the environment
+#    variables that configure the build: look there first for an env var to
+#    set, and document new ones there. The exceptions are third-party locations
+#    such as MKLROOT or ROCM_PATH and a handful of niche flags, which are read
+#    directly where they are used.
+# 2. Pre-build (cmake/PreBuildSteps.cmake): initialize and verify the git
+#    submodules, and fetch the pinned NCCL for distributed CUDA builds.
+# 3. Options: declare every build knob (USE_*, BUILD_*). An option added here
+#    must also be added to cmake/Summary.cmake.
+# 4. Dependencies (cmake/Dependencies.cmake): find or build the third-party
+#    libraries and set up the accelerator toolchains (CUDA/ROCm/XPU). The
+#    global compile and link flags are resolved inline right after.
+# 5. Code generation, all driven from caffe2/CMakeLists.txt: cmake/Codegen.cmake
+#    runs torchgen over native_functions.yaml to emit the ATen operator headers
+#    and sources, and tools/setup_helpers/generate_code.py emits the autograd
+#    and Python binding sources. The .pyi stubs are generated later, in
+#    torch/CMakeLists.txt.
+# 6. Main build: add_subdirectory() of torch/headeronly, c10 and caffe2 (which
+#    in turn adds torch/). This builds c10, torch_cpu, the per-accelerator
+#    torch_cuda/torch_hip/torch_xpu, the umbrella torch library and
+#    torch_python, plus the C++ tests; those subdirectories also carry the
+#    install rules for the headers and libraries.
+# 7. Export and extras: generate the Caffe2Config.cmake / Caffe2Targets.cmake
+#    files that downstream C++ projects consume, then the optional binaries/
+#    and JNI bindings, which link against the libraries built above.
+# 8. Python packaging: cmake/FileMirroring.cmake copies sources into
+#    torchgen/packaged and into the torch/ subpackages that need files vendored
+#    out of third_party/, cmake/PackageData.cmake installs the non-Python
+#    package data (stubs, headers, templates) into torch/, and
+#    cmake/PostBuildSteps.cmake merges compile_commands.json and registers the
+#    install-time fixups (TORCH_STABLE_ONLY header wrapping, Windows runtime
+#    DLL and macOS OpenMP bundling).
+# 9. Summary (cmake/Summary.cmake): print the resolved configuration.
+
 cmake_minimum_required(VERSION 3.27 FATAL_ERROR)
 
 cmake_policy(SET CMP0126 OLD)
