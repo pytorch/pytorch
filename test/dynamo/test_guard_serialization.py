@@ -215,31 +215,36 @@ class DecoratedUnpicklableDefaultForwardModule(torch.nn.Module):
         return x * 2
 
 
-# --- self-referential / cyclic module globals ------------------------------
+# --- module-scope wrappers that reach themselves through their own globals ---
 # `wrapped = deco(base)` at module scope: the wrapper is reachable from its own
-# __globals__, so its reduce args contain itself. pickle memoizes only AFTER
-# saving args, so this recursed forever before the cycle break.
-def keep_globals_len_selfref(func):
+# __globals__, so a globals snapshot passed as a reduce ARG contains the very
+# object being reduced. pickle memoizes only after saving args, so that recursed
+# forever; two wrappers referencing each other do it across the pair.
+MODULE_SCOPE_CONST = 2
+
+
+def module_scope_wrapper(func):
     @functools.wraps(func)
-    def wrapper(self, x):
-        return func(self, x) + len(func.__globals__)
+    def wrapper(x):
+        # Roots a guard at func.__globals__, which forces the snapshot -- and
+        # the snapshot contains the wrappers themselves.
+        if func.__globals__["MODULE_SCOPE_CONST"] == 2:
+            x = x + 1
+        return func(x)
 
     return wrapper
 
 
-def _self_ref_base(self, x):
+def _module_scope_base_a(x):
     return x * 2
 
 
-# Bound at MODULE scope, then installed as the class's forward, so the guarded
-# wrapper is reachable from its own __globals__ -- the `wrapped = deco(base)`
-# shape. Decorating inside the class body would not do it: the wrapper would
-# only be a class attribute.
-SELF_REF_WRAPPED = keep_globals_len_selfref(_self_ref_base)
+def _module_scope_base_b(x):
+    return x * 3
 
 
-class DecoratedSelfRefForwardModule(torch.nn.Module):
-    forward = SELF_REF_WRAPPED
+MODULE_SCOPE_WRAPPED_A = module_scope_wrapper(_module_scope_base_a)
+MODULE_SCOPE_WRAPPED_B = module_scope_wrapper(_module_scope_base_b)
 
 
 # --- an empty closure cell -------------------------------------------------
@@ -698,19 +703,36 @@ class TestGuardSerialization(TestGuardSerializationBase):
 
         self._test_serialization("TENSOR_MATCH", fn, torch.randn(3), foo)
 
-    def test_reduce_breaks_a_cycle_through_a_function_s_own_globals(self):
-        # `wrapped = deco(base)` at module scope: the wrapper is reachable from
-        # its own __globals__, so its reduce ARGS contain itself, and pickle
-        # memoizes only after saving args -- this recursed forever. Driven at
-        # the pickler directly because it takes a guard rooted at both the
-        # function and its globals dict, which no capture in this file produces.
+    def test_guard_rooted_at_module_scope_wrappers_that_reach_themselves(self):
+        # Driven through a real capture, not the pickler: two functools.wraps
+        # helpers bound at module scope and called from one compiled frame is
+        # ordinary code, and the globals snapshot each one carries contains
+        # both of them. Passing that snapshot as a reduce ARG recursed until
+        # RecursionError; it goes in reduce STATE, which pickle applies after
+        # memoizing, so the references resolve to the functions it already
+        # built.
+        def fn(x):
+            return MODULE_SCOPE_WRAPPED_A(x) + MODULE_SCOPE_WRAPPED_B(x)
+
+        x = torch.randn(3)
+        ref, loaded = self._test_serialization("EQUALS_MATCH", fn, x)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3)}, True)
+
+    def test_reducer_handles_an_empty_cell_reached_directly(self):
+        # _reduce_cell only covers cells it builds for a reconstructed
+        # function. A cell reached directly -- a guarded __closure__ tuple, or
+        # the cell itself -- goes through reducer_override's CellType branch,
+        # which read cell_contents unguarded and raised ValueError out of the
+        # pickler, i.e. a package bypass. Pickler-level because a guard cannot
+        # root at a raw cell through a capture: CLOSURE_MATCH is dropped.
         from torch._dynamo.guards import GuardsStatePickler
 
-        wrapped = SELF_REF_WRAPPED
-        self.assertIn(wrapped, wrapped.__globals__.values())
-        gtv = {id(wrapped): wrapped, id(wrapped.__globals__): wrapped.__globals__}
+        empty = [
+            c for c in EMPTY_CELL_WRAPPED.__closure__ if not self._cell_has_contents(c)
+        ]
+        self.assertEqual(len(empty), 1)
         buf = io.BytesIO()
-        GuardsStatePickler(gtv, {}, {}, buf).dump({"fn": wrapped})
+        GuardsStatePickler({}, {}, {}, buf).dump({"cell": empty[0]})
         self.assertGreater(len(buf.getvalue()), 0)
 
     def test_reduce_handles_an_empty_closure_cell(self):
