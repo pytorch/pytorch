@@ -195,6 +195,9 @@ class KernelSideTable:
         self.id_to_kernel = {}
         self.kernel_to_id = {}
         self.constant_args = {}
+        # Keyed on kernel source, so a test that swaps kernels out from under
+        # us must not be served an answer worked out for the previous ones.
+        _ttir_mutation_analysis_cache.clear()
 
 
 kernel_side_table = KernelSideTable()
@@ -1199,6 +1202,13 @@ def analyze_kernel_access(
 _TTIRMutationAnalysisKey = tuple[object, ...]
 
 # key -> (names of written args, whether an epilogue may be fused)
+#
+# Process-wide rather than per-compile: the key covers everything the answer
+# depends on, and none of it is compilation state, so an entry stays valid for
+# the life of the process and is worth sharing across compiles. Bounded anyway,
+# so a process generating many distinct kernel variants cannot grow it without
+# limit; entries hold only strings, no kernels or tensors.
+_TTIR_MUTATION_ANALYSIS_CACHE_MAXSIZE = 4096
 _ttir_mutation_analysis_cache: dict[
     _TTIRMutationAnalysisKey, tuple[tuple[str, ...], bool]
 ] = {}
@@ -1739,6 +1749,8 @@ def ttir_mutation_analysis(
         accesses.can_fuse_epilogue,
     )
     if key is not None:
+        if len(_ttir_mutation_analysis_cache) >= _TTIR_MUTATION_ANALYSIS_CACHE_MAXSIZE:
+            _ttir_mutation_analysis_cache.clear()
         _ttir_mutation_analysis_cache[key] = result
     return result
 
