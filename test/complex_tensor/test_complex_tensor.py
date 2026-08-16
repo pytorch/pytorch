@@ -32,7 +32,11 @@ from torch.testing._internal.common_device_type import (
     OpDTypes,
     ops,
 )
-from torch.testing._internal.common_utils import run_tests, unMarkDynamoStrictTest
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    unMarkDynamoStrictTest,
+)
 
 
 if TYPE_CHECKING:
@@ -128,6 +132,7 @@ EXTRA_KWARGS = {
 
 
 class TestComplexTensor(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
     _default_dtype_check_enabled = True
 
     @ops(
@@ -141,6 +146,11 @@ class TestComplexTensor(TestCase):
     @ops(force_test_op_db, allowed_dtypes=list(COMPLEX_DTYPES))
     def test_maybe_error(self, device, dtype, op: OpInfo):
         self.check_consistency(device, dtype, op, Variant.Op)
+
+
+class TestComplexTensorGeneric(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+    _default_dtype_check_enabled = True
 
     def test_get_set_components(self):
         from torch._subclasses.complex_tensor import ComplexTensor
@@ -157,9 +167,32 @@ class TestComplexTensor(TestCase):
         self.assertEqual(c.imag, torch.tensor([7, 8], dtype=torch.float32))
         self.assertEqual(c, torch.tensor([5 + 7j, 6 + 8j], dtype=torch.complex64))
 
+    def test_mul_inplace_complex(self):
+        from torch._subclasses.complex_tensor import ComplexTensor
+
+        a = torch.tensor([1 + 2j, 3 + 4j], dtype=torch.complex64)
+        b = torch.tensor([7 - 8j, -9 + 1j], dtype=torch.complex64)
+        expected = a * b
+
+        xa = ComplexTensor.from_interleaved(a)
+        result = xa.mul_(ComplexTensor.from_interleaved(b))
+
+        self.assertIs(result, xa)
+        self.assertEqual(xa.as_interleaved(), expected)
+
+    def test_ne_real_operand(self):
+        from torch._subclasses.complex_tensor import ComplexTensor
+
+        r = torch.tensor([1.0, 3.0, 5.0])
+        c = torch.tensor([1 + 2j, 3 + 0j, 0 + 4j], dtype=torch.complex64)
+        xc = ComplexTensor.from_interleaved(c)
+
+        self.assertEqual(torch.ne(r, xc), torch.ne(r, c))
+
 
 @unMarkDynamoStrictTest
 class TestComplexBwdGradients(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
     _default_dtype_check_enabled = True
 
     @ops(
@@ -180,6 +213,8 @@ if dist.is_available():
 
     @unMarkDynamoStrictTest
     class TestComplexDistributed(TestCase, MultiProcessTestCase):
+        hw_classification = HardwareClassification.ACCELERATOR
+
         @ops(implemented_op_db, allowed_dtypes=list(COMPLEX_DTYPES))
         def test_distributed(self, device, dtype, op: OpInfo):
             self.check_consistency(device, dtype, op, Variant.Distributed)

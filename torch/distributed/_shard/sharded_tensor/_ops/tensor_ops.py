@@ -34,7 +34,7 @@ _register_default_op(torch.Tensor.grad_fn.__get__, _sharded_op_impl)  # type: ig
 _register_default_op(torch.Tensor.is_leaf.__get__, _sharded_op_impl)  # type: ignore[attr-defined]
 
 
-# device property is ambiguous as from a global prospective,
+# device property is ambiguous as from a global perspective,
 # ShardedTensor.device consists of multiple devices (might even across hosts)
 # We choose to return the current device of the local tensor to represent
 # the device property on each rank
