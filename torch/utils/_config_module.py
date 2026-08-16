@@ -11,7 +11,7 @@ import tokenize
 import unittest
 from collections.abc import Callable
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import FunctionType, ModuleType
 from typing import Any, Generic, NoReturn, Optional, TYPE_CHECKING, TypeVar
 from typing_extensions import deprecated
@@ -333,8 +333,11 @@ class _ConfigEntry:
     hide: bool = False
     alias: str | None = None
     # Memoized (container, attr_name) resolution of ``alias``. ``None`` means
-    # not resolved yet; resolution is stable for the process lifetime.
-    _resolved_alias: "tuple[ModuleType | SubConfigProxy, str] | None" = None
+    # not resolved yet; resolution is stable for the process lifetime. Excluded
+    # from repr/eq so caching a live module doesn't pollute either.
+    _resolved_alias: "tuple[ModuleType | SubConfigProxy, str] | None" = field(
+        default=None, repr=False, compare=False
+    )
     # Deprecation support
     deprecated: bool = False
     deprecation_message: str | None = None
@@ -515,23 +518,31 @@ class ConfigModule(ModuleType):
         # sub-config field of torch._inductor.config). Import the longest
         # importable module prefix, then walk the remaining attributes.
         parts = alias.split(".")
+        last_error: ModuleNotFoundError | None = None
         for i in range(len(parts) - 1, 0, -1):
             module_name = ".".join(parts[:i])
             module = sys.modules.get(module_name)
             if module is None:
                 try:
                     module = importlib.import_module(module_name)
-                except ModuleNotFoundError:
-                    # This prefix is not a module; try a shorter one. Genuine
-                    # import failures of an existing module propagate.
-                    continue
+                except ModuleNotFoundError as e:
+                    # Only swallow the case where this prefix itself isn't a
+                    # module; a shorter prefix may still resolve. A genuine
+                    # import failure *inside* an existing module (some deeper
+                    # missing dependency) must propagate rather than be masked.
+                    if e.name is not None and (
+                        module_name == e.name or module_name.startswith(e.name + ".")
+                    ):
+                        last_error = e
+                        continue
+                    raise
             container: ModuleType | SubConfigProxy = module
             for attr in parts[i:-1]:
                 container = getattr(container, attr)
             resolved = (container, parts[-1])
             entry._resolved_alias = resolved
             return resolved
-        raise AttributeError(f"config alias {alias} does not exist")
+        raise AttributeError(f"config alias {alias} does not exist") from last_error
 
     def _get_alias_target_entry(
         self, entry: _ConfigEntry
@@ -549,7 +560,7 @@ class ConfigModule(ModuleType):
         if isinstance(container, SubConfigProxy):
             owner = container._config
             key = container._prefix + name
-        elif isinstance(container, ModuleType) and hasattr(container, "_config"):
+        elif isinstance(container, ConfigModule):
             owner = container
             key = name
         else:
@@ -1063,17 +1074,6 @@ def get_tristate_env(name: str, default: Any = None) -> bool | None:
     return default
 
 
-def inherit_fields_from(parent_cls):
-    def wrapper(child_cls):
-        for k, v in parent_cls.__dict__.items():
-            # copy fields that are not private and not overridden
-            if not k.startswith("_") and k not in child_cls.__dict__:
-                setattr(child_cls, k, v)
-        return child_cls
-
-    return wrapper
-
-
 def alias_fields_from(parent_cls: type) -> Callable[[type], type]:
     """Class decorator adding an alias for every public field of ``parent_cls``
     that the decorated class does not override.
@@ -1088,7 +1088,6 @@ def alias_fields_from(parent_cls: type) -> Callable[[type], type]:
     other. For mutable defaults (lists, dicts) the child and parent share the
     same object, so in-place mutation is visible through either name.
     """
-    prefix = f"{parent_cls.__module__}.{parent_cls.__qualname__}"
     # Subconfig classes are required to be defined in the config module, so
     # ``__qualname__`` is a bare name and the derived alias resolves. Guard the
     # assumption here so a nested/relocated parent fails at decoration time
@@ -1097,13 +1096,23 @@ def alias_fields_from(parent_cls: type) -> Callable[[type], type]:
         raise AssertionError(
             f"alias_fields_from expects a top-level config class, got {parent_cls.__qualname__}"
         )
+    prefix = f"{parent_cls.__module__}.{parent_cls.__qualname__}"
     annotations = inspect.get_annotations(parent_cls)
 
     def wrapper(child_cls: type) -> type:
         for k, v in parent_cls.__dict__.items():
             if k.startswith("_") or k in child_cls.__dict__:
                 continue
-            value_type = annotations.get(k, type(v))
+            # Only alias actual config fields. Nested classes, functions, and
+            # other non-field members of the parent must not become entries.
+            if not isinstance(v, (*CONFIG_TYPES, _Config)):
+                continue
+            if isinstance(v, _Config):
+                # ``type(v)`` would be ``_Config`` itself; recover the real
+                # value type from the field's declared type or its default.
+                value_type = v.value_type or type(v.default)
+            else:
+                value_type = annotations.get(k, type(v))
             setattr(child_cls, k, Config(alias=f"{prefix}.{k}", value_type=value_type))
         return child_cls
 
