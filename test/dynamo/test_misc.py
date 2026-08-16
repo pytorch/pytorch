@@ -99,7 +99,6 @@ from torch.testing._internal.common_utils import (
     recover_orig_fp32_precision,
     scoped_load_inline,
     set_default_dtype,
-    skipCUDAMemoryLeakCheckIf,
     skipIfHpu,
     skipIfNNModuleInlined,
     skipIfWindows,
@@ -2211,6 +2210,25 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         f(torch.tensor([3]))
         f(torch.tensor([4]))
         self.assertEqual(cnts.frame_count, 1)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_torch_check_symbool_python_not(self):
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+
+        @torch.compile(backend=backend, fullgraph=True)
+        def f(x):
+            c = x.item()
+            torch._check(not (c * 2 == 0))
+            return torch.ones(c * 2)
+
+        out = f(torch.tensor(3, dtype=torch.int64))
+        self.assertEqual(out.shape, (6,))
+        self.assertEqual(len(backend.graphs), 1)
+
+        targets = [node.target for node in backend.graphs[0].graph.nodes]
+        self.assertIn(torch.sym_not, targets)
+        self.assertIn(torch.ops.aten._assert_scalar.default, targets)
+        self.assertNotIn(operator.not_, targets)
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_torch_check_symbolic_shape_rel(self):
@@ -18101,15 +18119,20 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
             res = opt_func(a)
             self.assertIsInstance(res, torch.Tensor)
 
-    # Known CUDA memory leak: under propagate_real_tensors, a data-dependent
-    # .tolist() retains the real input tensor (via FakeTensor.real_tensor held by
-    # a TrackedFake) past torch._dynamo.reset(). See #190093.
-    @skipCUDAMemoryLeakCheckIf(True)
     @torch._dynamo.config.patch(
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
     )
     @torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True)
     def test_interpolate_propagate_real_tensors(self, device):
+        real_tensor_refs = []
+        from_tensor = torch._subclasses.FakeTensorMode.from_tensor
+
+        def record_real_tensor(mode, tensor, **kwargs):
+            fake = from_tensor(mode, tensor, **kwargs)
+            if mode.propagate_real_tensors and fake.real_tensor is not None:
+                real_tensor_refs.append(weakref.ref(fake.real_tensor))
+            return fake
+
         @torch.compile(backend="eager", fullgraph=True)
         def f(mask, box):
             # u0, u1 = mask.tolist()
@@ -18119,7 +18142,18 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
                 mask, (h, w), mode="bilinear", align_corners=False
             )
 
-        f(torch.tensor([30, 30], device=device), torch.tensor([68, 32], device=device))
+        with mock.patch.object(
+            torch._subclasses.FakeTensorMode, "from_tensor", record_real_tensor
+        ):
+            f(
+                torch.tensor([30, 30], device=device),
+                torch.tensor([68, 32], device=device),
+            )
+
+        self.assertTrue(real_tensor_refs)
+        torch._dynamo.reset()
+        gc.collect()
+        self.assertTrue(all(ref() is None for ref in real_tensor_refs))
 
     def test_scalar_isin_decomposition(self):
         def f():

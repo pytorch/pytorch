@@ -3177,6 +3177,14 @@ class BuiltinVariable(BaseBuiltinVariable):
         self, tx: "InstructionTranslatorBase", a: VariableTracker
     ) -> VariableTracker | None:
         if isinstance(a, SymNodeVariable):
+            if a.python_type() is bool:
+                return SymNodeVariable.create(
+                    tx,
+                    tx.output.create_proxy(
+                        "call_function", torch.sym_not, *proxy_args_kwargs([a], {})
+                    ),
+                    sym_num=None,
+                )
             return SymNodeVariable.create(
                 tx,
                 tx.output.create_proxy(
@@ -3833,14 +3841,18 @@ class ListBuiltinVariable(BaseBuiltinVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if name == "__new__":
-            if len(args) == 1 and not kwargs:
+            if args and not kwargs:
+                # list.__new__ (PyType_GenericNew) ignores extra args -- only
+                # the first arg (the type) matters. Pass init_args=[] so
+                # reconstruction emits base_cls.__new__(cls) without extras.
+                # https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c
                 list_vt = ListVariable([], mutation_type=ValueMutationNew())
                 if isinstance(args[0], ListBuiltinVariable):
                     return list_vt
                 return tx.output.side_effects.track_new_user_defined_object(
                     self,
                     args[0],
-                    args[1:],
+                    [],
                     tx=tx,
                 )
 
