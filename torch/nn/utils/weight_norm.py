@@ -132,6 +132,7 @@ def weight_norm(module: T_module, name: str = "weight", dim: int = 0) -> T_modul
 
     Example::
 
+        >>> warnings.filterwarnings("ignore", message=".*torch.nn.utils.weight_norm")  # docs: hide
         >>> m = weight_norm(nn.Linear(20, 40), name='weight')
         >>> m
         Linear(in_features=20, out_features=40, bias=True)
@@ -153,6 +154,9 @@ def remove_weight_norm(module: T_module, name: str = "weight") -> T_module:
         name (str, optional): name of weight parameter
 
     Example:
+        >>> warnings.filterwarnings(
+        ...     "ignore", message=".*torch.nn.utils.weight_norm"
+        ... )  # docs: hide
         >>> m = weight_norm(nn.Linear(20, 40))
         >>> remove_weight_norm(m)
     """

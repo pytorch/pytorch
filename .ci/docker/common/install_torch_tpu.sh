@@ -209,4 +209,4 @@ export LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:${TORCH_LIB_PATH}"
 echo "Updated LD_LIBRARY_PATH to include: ${TORCH_LIB_PATH}"
 
 # Verify installation
-python -c "import torch; from torch_tpu import api; print(f'Success! Device: {api.tpu_device()}')"
+python -c "import torch; print(f'Success! Device: {torch.device(\"tpu\")}')"

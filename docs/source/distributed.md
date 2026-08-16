@@ -403,6 +403,10 @@ check whether the process group has already been initialized use {func}`torch.di
 ```
 
 ```{eval-rst}
+.. autofunction:: get_backend_impl
+```
+
+```{eval-rst}
 .. autofunction:: get_backend_config
 ```
 
@@ -424,6 +428,27 @@ check whether the process group has already been initialized use {func}`torch.di
 
 ```{eval-rst}
 .. autofunction:: get_pg_count
+```
+
+```{eval-rst}
+.. autofunction:: set_timeout
+```
+
+### Experimental collective time estimation
+
+The context manager and the backend's `_supports_time_estimate` capability probe are
+experimental and may change without notice.
+
+```{eval-rst}
+.. autofunction:: torch.distributed.distributed_c10d._time_estimator
+```
+
+### Fault-tolerant reconfiguration
+
+```{eval-rst}
+.. autofunction:: torch.distributed.distributed_c10d._supports_reconfigure
+.. autofunction:: torch.distributed.distributed_c10d._get_reconfigure_handle
+.. autofunction:: torch.distributed.distributed_c10d._reconfigure
 ```
 
 ## Shutdown
@@ -629,7 +654,7 @@ if rank == 0:
 ```
 
 ```{eval-rst}
-.. autofunction:: all_gather_into_tensor
+.. autofunction:: all_gather_single
 ```
 
 ```{eval-rst}
@@ -642,6 +667,10 @@ if rank == 0:
 
 ```{eval-rst}
 .. autofunction:: gather
+```
+
+```{eval-rst}
+.. autofunction:: gather_single
 ```
 
 ```{eval-rst}
@@ -661,7 +690,7 @@ if rank == 0:
 ```
 
 ```{eval-rst}
-.. autofunction:: reduce_scatter_tensor
+.. autofunction:: reduce_scatter_single
 ```
 
 ```{eval-rst}
@@ -761,6 +790,20 @@ Please refer to the [profiler documentation](https://pytorch.org/docs/main/profi
 ```
 
 ## Optimization with Symmetric Memory
+
+### NCCL Symmetric Kernels
+
+NCCL 2.27 and later ship device kernels written specifically for symmetric,
+window-registered buffers, using low-latency, multimem/NVLS, and TMA algorithms
+rather than the generic ring/tree path. ``all_reduce``, ``all_gather_into_tensor``
+and ``reduce_scatter_tensor`` dispatch to them automatically once their buffers
+are registered — the call site does not change. When the buffers are not
+registered, or the op/dtype combination has no symmetric implementation, NCCL
+silently falls back to the regular path.
+
+For how to register buffers, the supported op/dtype matrix, and how to confirm
+the symmetric kernels actually ran, see
+[NCCL Symmetric Kernels](nccl-symmetric-kernels) in the Symmetric Memory documentation.
 
 ### Copy Engine Collectives
 
@@ -1265,6 +1308,39 @@ If you are running single node training, it may be convenient to interactively b
 .. autofunction:: torch.distributed.breakpoint
 ```
 
+## Watchdog (Experimental)
+
+The ``torch.distributed._watchdog`` module provides a pure-Python watchdog for
+detecting hung operations in Python-based distributed backends and related
+distributed primitives. It monitors both CPU-side hangs (e.g., a stuck
+rendezvous) and GPU-side hangs (e.g., a kernel that never completes) by running
+an asyncio event loop on a background daemon thread. By default, timeouts dump
+all thread stack traces and abort the process.
+
+:::{warning}
+This module is experimental and subject to change.
+:::
+
+```{eval-rst}
+.. currentmodule:: torch.distributed._watchdog
+```
+
+```{eval-rst}
+.. autofunction:: shutdown
+```
+
+```{eval-rst}
+.. autofunction:: stream_timeout
+```
+
+```{eval-rst}
+.. autofunction:: cpu_timeout
+```
+
+```{eval-rst}
+.. autofunction:: op_timeout
+```
+
 % Distributed modules that are missing specific entries.
 
 % Adding them here for tracking purposes until they are more permanently fixed.
@@ -1731,10 +1807,4 @@ If you are running single node training, it may be convenient to interactively b
 
 ```{eval-rst}
 .. py:module:: torch.distributed.checkpoint.state_dict
-```
-
-```{toctree}
-:hidden:
-
-distributed._dist2
 ```

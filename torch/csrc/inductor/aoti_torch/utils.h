@@ -3,11 +3,6 @@
 #include <ATen/Generator.h>
 #include <ATen/Tensor.h>
 #include <ATen/core/List.h>
-#ifndef AT_PER_OPERATOR_HEADERS
-#include <ATen/Functions.h>
-#else
-#include <ATen/ops/zeros.h>
-#endif
 #include <c10/core/DeviceType.h>
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/util/ArrayRef.h>
@@ -57,13 +52,6 @@ inline AtenTensorHandle tensor_pointer_to_tensor_handle(at::Tensor* tensor) {
 
 inline at::Tensor resolve_tensor_dispatch_flags(AtenTensorHandle handle) {
   at::Tensor* tensor{tensor_handle_to_tensor_pointer(handle)};
-  if (tensor->_is_zerotensor()) {
-    // ZeroTensors have null storage and rely on the ZeroTensor boxed fallback
-    // to materialize themselves before reaching a native ATen function.  Since
-    // the C-shim calls the native function directly, that fallback never runs,
-    // so we materialize here exactly as it does (see ZeroTensorFallback.cpp).
-    return at::zeros({}, tensor->options()).expand(tensor->sizes());
-  }
   if (tensor->is_conj() || tensor->is_neg()) {
     // If the conjugation or negation dispatch flags are set, runtime dispatch
     // handles them by cloning the tensor before passing them to the native ATen
@@ -281,7 +269,13 @@ struct OwnedOptionalArrayRef {
   std::optional<std::vector<T>> storage;
 
   /* implicit */ operator c10::OptionalArrayRef<T>() const {
-    return storage ? c10::OptionalArrayRef<T>(c10::ArrayRef<T>(*storage))
+    // Build the OptionalArrayRef from a std::optional<ArrayRef<T>> (whose
+    // constructor is not lifetimebound) rather than from a temporary ArrayRef:
+    // the view points into the owned `storage` vector, which outlives the
+    // wrapper's enclosing call, so binding it to the temporary ArrayRef would
+    // be a spurious -Wreturn-stack-address error under C10_LIFETIMEBOUND.
+    return storage ? c10::OptionalArrayRef<T>(
+                         std::make_optional(c10::ArrayRef<T>(*storage)))
                    : c10::OptionalArrayRef<T>(std::nullopt);
   }
   /* implicit */ operator std::optional<c10::ArrayRef<T>>() const {
