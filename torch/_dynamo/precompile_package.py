@@ -222,10 +222,12 @@ def _capture_config() -> Iterator[None]:
             _CAPTURE_CONFIG_STATE.set((depth, prior))
 
 
-def _clear_package_region(package: CompilePackage, isolate_recompiles_id: int) -> None:
+def _clear_package_region(
+    codes: Sequence[types.CodeType], isolate_recompiles_id: int
+) -> None:
     from .eval_frame import _clear_cache_entries_for_region
 
-    for code in package.code_objects():
+    for code in codes:
         _clear_cache_entries_for_region(code, isolate_recompiles_id)
 
 
@@ -1219,7 +1221,7 @@ class PrecompileSession:
 
         isolate_recompiles_id = self._isolate_recompiles_id
         try:
-            _clear_package_region(self._package, isolate_recompiles_id)
+            _clear_package_region(self._package.region_codes(), isolate_recompiles_id)
         finally:
             _unregister_explicit_compile_region(isolate_recompiles_id)
             self._isolate_recompiles_id = None
@@ -1895,11 +1897,16 @@ class PrecompiledCallable:
                 self._state.notify_all()
                 raise
             self._loaded = False
+        # uninstall() forgets which code objects it installed onto, and a frame
+        # reached through code_source was installed onto the live code the
+        # running program resolves rather than the reconstructed twin the
+        # package holds, so the set to clear has to be taken first.
+        codes = self._package.region_codes()
         try:
             self._package.uninstall()
         finally:
             try:
-                _clear_package_region(self._package, self._isolate_recompiles_id)
+                _clear_package_region(codes, self._isolate_recompiles_id)
             finally:
                 from .eval_frame import _unregister_explicit_compile_region
 

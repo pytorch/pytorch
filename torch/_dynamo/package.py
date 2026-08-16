@@ -26,6 +26,7 @@ import shutil
 import sys
 import threading
 import types
+import uuid
 import weakref
 from collections.abc import Callable, Generator, Iterable, Iterator, Sequence
 from contextlib import nullcontext
@@ -356,11 +357,12 @@ class _DynamoCodeCacheEntry:
 
 
 def _resume_global_renames(
-    entries: Iterable[_DynamoCodeCacheEntry],
+    entries: Iterable[_DynamoCodeCacheEntry], install_token: str
 ) -> dict[str, str]:
     """
     Pick a global name for every resume function that is unique to the code it
-    names, rather than to the process that captured it.
+    names and to the package installing it, rather than to the process that
+    captured it.
 
     ``__resume_at_<offset>_<n>`` comes from a counter that restarts in every
     capture process, so two artifacts captured separately both claim, say,
@@ -368,6 +370,13 @@ def _resume_global_renames(
     dict: the second one wins and the first model silently runs the second's
     continuation. Unlike ``__compiled_fn`` names, which carry a uuid, these
     names carry nothing that distinguishes the artifact.
+
+    The digest alone does not settle it: the shape that mints the same name
+    usually mints the same code with it -- one script captured in two
+    processes, or one artifact loaded twice to serve two model instances --
+    and both then hash to a single name. The token, unique to the loaded
+    package, is what separates those; the digest stays so the name still says
+    which code it belongs to.
     """
     renames: dict[str, str] = {}
     for entry in entries:
@@ -375,7 +384,7 @@ def _resume_global_renames(
             continue
         digest = hashlib.sha256(pickle.dumps(entry.python_code)).hexdigest()[:16]
         for name in entry.function_names:
-            renames[name] = f"{name}_{digest}"
+            renames[name] = f"{name}_{digest}_{install_token}"
     return renames
 
 
@@ -887,6 +896,12 @@ class CompilePackage:
     ) -> None:
         self._innermost_fn = None
         self._codes: dict[types.CodeType, _DynamoCodeCacheEntry] = {}
+        # Resume functions install under a global name carrying this token, so
+        # two packages holding byte-identical resume code -- two loads of one
+        # artifact, or two artifacts of one script captured in separate
+        # processes -- do not take each other's name. See
+        # _resume_global_renames.
+        self._install_token = uuid.uuid4().hex
 
         self._current_entry: _DynamoCodeCacheEntry | None = None
         self._installed_globals: dict[types.ModuleType, list[_InstalledGlobal]] = {}
@@ -1175,6 +1190,21 @@ class CompilePackage:
     def code_objects(self) -> tuple[types.CodeType, ...]:
         return tuple(self._codes)
 
+    def region_codes(self) -> tuple[types.CodeType, ...]:
+        """
+        Every live code object an isolated region of this package can hold
+        state on.
+
+        A frame reached through code_source is installed onto the code the
+        RUNNING program resolves that name to, not onto the reconstructed twin
+        in _codes, and the two compare EQUAL, so this is deliberately not
+        deduplicated: any set or dict keyed by value collapses the pair and
+        drops exactly the live code. Call it before uninstall(), which forgets
+        what it installed onto. _region_skipped_codes is a strict subset of
+        _installed_precompile_codes, so it needs no separate entry here.
+        """
+        return (*self._codes, *self._installed_precompile_codes)
+
     def bypass_current_entry(self) -> None:
         if self._current_entry is None:
             raise AssertionError("_current_entry is not set in bypass_current_entry")
@@ -1405,11 +1435,19 @@ class CompilePackage:
         torch._dynamo.reset() clears every code object install() touched -- they
         all go through convert_frame.input_codes -- while leaving the installed
         globals behind, so the next call recompiles instead of serving.
+
+        Scoped to the region install() used rather than to the code object as a
+        whole: lookup() never serves a precompile entry across regions, so a
+        second artifact loaded onto the same function after the reset is not
+        coverage for this one. A served call runs this every time, so it asks
+        C++ a yes/no question instead of materializing a wrapper per entry.
         """
-        from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
+        from torch._C._dynamo.eval_frame import _has_precompile_entries
 
         probe = self._installed_precompile_probe
-        return probe is not None and not _debug_get_precompile_entries(probe)
+        return probe is not None and not _has_precompile_entries(
+            probe, self._installed_precompile_region_id
+        )
 
     def reset_after_failed_install(self) -> None:
         """Make an install-clean package reusable for a cold-cache fallback."""
@@ -1432,10 +1470,11 @@ class CompilePackage:
         from .convert_frame import input_codes
         from .output_graph import get_builtins_dict
 
-        # Resume functions are bound under a name unique to their code, not
-        # under the name the capture process happened to mint. Every reference
-        # to them lives in some frame's dynamo bytecode, remapped below.
-        resume_renames = _resume_global_renames(self._codes.values())
+        # Resume functions are bound under a name unique to their code and to
+        # this package, not under the name the capture process happened to
+        # mint. Every reference to them lives in some frame's dynamo bytecode,
+        # remapped below.
+        renames = _resume_global_renames(self._codes.values(), self._install_token)
         for code, entry in self._codes.items():
             context = (
                 _compile_frame_context(code)
@@ -1455,7 +1494,7 @@ class CompilePackage:
                 target_code = code
                 if entry.install_to_global:
                     for function_name in entry.function_names:
-                        installed_name = resume_renames[function_name]
+                        installed_name = renames[function_name]
                         if code.co_freevars:
                             # Resume functions with freevars need a factory
                             # that takes a closure tuple, matching
@@ -1576,18 +1615,31 @@ class CompilePackage:
                         # module), so it must not delete it once collected.
                         CleanupHook.disown(runtime_global_scope, builtin_dict_name)
                         builtins_dict = get_builtins_dict(runtime_global_scope)
-                        if builtin_dict_name in runtime_global_scope:
-                            if (
-                                runtime_global_scope[builtin_dict_name]
-                                is not builtins_dict
-                            ):
-                                raise AssertionError(
-                                    f"Builtins dict mismatch for key '{builtin_dict_name}'"
+                        bound = runtime_global_scope.get(
+                            builtin_dict_name, _ABSENT_GLOBAL
+                        )
+                        if bound is not _ABSENT_GLOBAL and bound is not builtins_dict:
+                            raise AssertionError(
+                                f"Builtins dict mismatch for key '{builtin_dict_name}'"
+                            )
+                        with _INSTALLER_REGISTRY_LOCK:
+                            owned_by_a_package = any(
+                                binding.value is builtins_dict and binding.owners
+                                for binding in (_GLOBAL_BINDINGS.get(module) or {}).get(
+                                    builtin_dict_name, ()
                                 )
-                        else:
-                            # Recorded, so uninstall() takes it back out. The
-                            # artifact's counter was reserved above, so local
-                            # compiles cannot mint the same name while loaded.
+                            )
+                        # Recorded, so uninstall() takes it back out. The
+                        # artifact's counter was reserved above, so local
+                        # compiles cannot mint the same name while loaded.
+                        # Joining a set another package already owns matters as
+                        # much as creating the binding: two loads of one
+                        # artifact record the same name, and the first unload
+                        # would otherwise delete a key the other one's bytecode
+                        # reads. A name a PLAIN compile minted has no owner to
+                        # join and is left alone, since claiming it would make
+                        # our unload delete what that compile reads.
+                        if bound is _ABSENT_GLOBAL or owned_by_a_package:
                             self._install_global(
                                 module, builtin_dict_name, builtins_dict
                             )
@@ -1604,7 +1656,7 @@ class CompilePackage:
                         guard_manager,
                         _rename_globals(
                             SerializedCode.to_code_object(guarded_code.dynamo_code),
-                            resume_renames,
+                            renames,
                         ),
                         self._installed_precompile_region_id,
                     )
