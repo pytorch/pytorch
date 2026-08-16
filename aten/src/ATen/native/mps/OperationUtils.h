@@ -634,10 +634,6 @@ static inline void mtl_dispatch2DJob(id<MTLComputeCommandEncoder> encoder,
   [encoder dispatchThreads:size threadsPerThreadgroup:threadGroupSize];
 }
 
-id<MTLBuffer> generateKernelDataOffsets(id<MTLComputeCommandEncoder> commandEncoder,
-                                        const TensorIteratorBase& iter,
-                                        bool use_64bit_index = false);
-
 inline NSDictionary* dictionaryFromPlaceholders(Placeholder& p1) {
   return @{p1.getMPSGraphTensor() : p1.getMPSGraphTensorData()};
 }
