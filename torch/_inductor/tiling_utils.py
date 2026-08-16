@@ -890,3 +890,86 @@ def _analyze_memory_coalescing(
         norm_read_writes=norm_read_writes,
         suggested_split=VarTiling(best_tiling[0], best_tiling[1], best_tiling_score),
     )
+
+
+# Minimum size for a pointwise dim to be worth making the innermost/dense loop.
+COALESCE_REORDER_MIN_BLOCK = 8
+# The dominant coalescing var must beat the current innermost var's coalescing
+# score by at least this factor before we reorder. Keeps the pass conservative:
+# we only move a var inner when doing so is a clear win.
+COALESCE_REORDER_DOMINANCE_MARGIN = 4
+
+
+def get_coalescing_pointwise_reorder(
+    coalesce_analysis: "CoalesceVarAnalysis",
+) -> list[int] | None:
+    """
+    Given a coalescing analysis, return a permutation of the pointwise iteration
+    loops that makes the *dominant* coalescing var the innermost (dense) loop, or
+    ``None`` if no reorder is warranted.
+
+    Motivation: the tiling / codegen path (``_split_iteration_ranges``) places the
+    *last* pointwise iteration dim on the dense (vectorized) tile. When the memory
+    accesses coalesce on a non-innermost ("middle") iteration digit, no tiling
+    candidate can move that digit onto the dense dim -- the iteration order itself
+    must change. This computes such a reorder from ``coalesced_by_var``.
+
+    The returned list follows the ``same_reorder`` convention used by
+    ``LoopBody.reorder_iter_loops``: ``new_sizes[i] = old_sizes[new_order[i]]``.
+    For pointwise order ``[b, h, s]`` where ``h`` dominates, this returns
+    ``[0, 2, 1]`` (i.e. ``[b, s, h]``, with ``h`` innermost).
+
+    All guards must hold or ``None`` is returned:
+    - there are no uncoalesced accesses (never trade a coalesced access for an
+      uncoalesced one -- that case is handled by ``suggested_split`` tiling);
+    - the dominant coalescing var is a pointwise var and is not already innermost;
+    - the dominant var's score beats the current innermost var's score by
+      ``COALESCE_REORDER_DOMINANCE_MARGIN``;
+    - the dominant var's range is statically known and at least
+      ``COALESCE_REORDER_MIN_BLOCK`` (a sensible dense width).
+    """
+    # If any access is uncoalesced, defer to the tiling (`suggested_split`) path.
+    if coalesce_analysis.uncoalesced_addrs:
+        return None
+
+    norm_read_writes = coalesce_analysis.norm_read_writes
+    index_vars = list(norm_read_writes.index_vars)
+    if len(index_vars) < 2:
+        return None
+
+    var_ranges = norm_read_writes.var_ranges
+    coalesced_by_var = coalesce_analysis.coalesced_by_var
+
+    innermost_var = index_vars[-1]
+
+    # Pick the dominant *pointwise* coalescing var (reduction vars are never
+    # reordered here -- a pointwise reorder cannot touch the reduction loop).
+    dominant_var = max(index_vars, key=lambda v: coalesced_by_var.get(v, 0))
+    if dominant_var is innermost_var:
+        return None
+
+    dominant_score = coalesced_by_var.get(dominant_var, 0)
+    innermost_score = coalesced_by_var.get(innermost_var, 0)
+    if dominant_score <= 0:
+        return None
+    if dominant_score < COALESCE_REORDER_DOMINANCE_MARGIN * innermost_score:
+        return None
+
+    # The dominant var must be a sensible dense dimension: statically known
+    # (skip dynamic shapes) and not tiny. (Note: we intentionally do not require
+    # CandidateTiling.is_good_size, whose >= 32 heuristic would reject a natural
+    # 16-wide lane dim.)
+    dominant_range = var_ranges.get(dominant_var)
+    if dominant_range is None:
+        return None
+    dominant_range = sympy.sympify(dominant_range)
+    if not dominant_range.is_number:
+        return None
+    if int(dominant_range) < COALESCE_REORDER_MIN_BLOCK:
+        return None
+
+    dominant_idx = index_vars.index(dominant_var)
+    # Move `dominant_idx` to the last (innermost) slot, preserving relative order.
+    new_order = [i for i in range(len(index_vars)) if i != dominant_idx]
+    new_order.append(dominant_idx)
+    return new_order

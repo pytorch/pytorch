@@ -1301,6 +1301,15 @@ class BaseSchedulerNode:
     ) -> bool:
         return False
 
+    def reorder_pointwise_loops_for_coalescing(self) -> bool:
+        """
+        Reorder the pointwise iteration loops so the dominant coalescing var
+        becomes the innermost (dense) loop. Returns True if a reorder happened.
+        Base implementation is a no-op; overridden by SchedulerNode /
+        FusedSchedulerNode.
+        """
+        return False
+
     def update_mutated_names(self, renames: dict[str, str]) -> None:
         self.mutation_renames = {
             name: renames[name]
@@ -2449,6 +2458,37 @@ class SchedulerNode(BaseSchedulerNode):
             )
             return False
 
+    def reorder_pointwise_loops_for_coalescing(self) -> bool:
+        from .tiling_utils import get_coalescing_pointwise_reorder
+
+        # Template buffers have no `_body` to analyze or reorder.
+        if self.is_template() or not isinstance(self.node, ir.ComputedBuffer):
+            return False
+
+        coalesce_analysis = self.get_coalesce_analysis()
+        if coalesce_analysis is None:
+            return False
+
+        new_order = get_coalescing_pointwise_reorder(coalesce_analysis)
+        if not new_order:
+            return False
+
+        # The reorder is expressed over the (normalized) pointwise iteration
+        # vars. Only apply it when those map 1:1 onto this node's pointwise loop
+        # dims, so the permutation indices line up with `_body.sizes[0]`.
+        if len(new_order) != len(self._sizes[0]):
+            return False
+
+        # pyrefly: ignore [bad-assignment]
+        metrics.num_loop_reordering += 1
+        loop_ordering_log.debug(
+            "Reorder pointwise loops for coalescing on %s with order %s",
+            self.get_name(),
+            new_order,
+        )
+        self.apply_new_loop_order(new_order)
+        return True
+
     def debug_str_extra(self) -> str:
         name = self.get_name()
         lines = [
@@ -2765,6 +2805,160 @@ class FusedSchedulerNode(BaseSchedulerNode):
             if not isinstance(snode, SchedulerNode):
                 raise AssertionError("expected snode to be a SchedulerNode")
             snode.apply_new_loop_order(new_order)
+
+        refresh_group_node_dependencies(self)
+        return True
+
+    def _plan_coalescing_reindex(
+        self, norm_pw_sizes: list[sympy.Expr]
+    ) -> dict[SchedulerNode, list[sympy.Expr]] | None:
+        """
+        Children of a fused node may have their pointwise dimensions merged
+        (e.g. b*h*s collapsed to a single 36864 range), which hides the
+        coalescing var inside a merged dim where a permutation cannot reach it.
+        Plan a re-factorization of each such child onto the fused node's
+        normalized pointwise ranges, keeping any trailing dims (which map to the
+        reduction group) intact.
+
+        Fused children share a single flat pointwise enumeration (that is what
+        makes them fusable), so re-factorizing each of them onto the same
+        normalized ranges keeps them mutually consistent.
+
+        Returns None if any child cannot be expressed that way.
+        """
+
+        def static_int(expr: sympy.Expr) -> int | None:
+            """The integer value of `expr`, or None if it is not statically known."""
+            sym_expr = sympy.sympify(expr)
+            return int(sym_expr) if sym_expr.is_number else None
+
+        # The re-factorization target itself must be fully static, not just its
+        # product, since it becomes the child's new iteration ranges.
+        if any(static_int(size) is None for size in norm_pw_sizes):
+            return None
+        norm_numel = static_int(sympy_product(norm_pw_sizes))
+        if norm_numel is None:
+            return None
+
+        plan: dict[SchedulerNode, list[sympy.Expr]] = {}
+        for snode in self.snodes:
+            if not isinstance(snode, SchedulerNode):
+                return None
+            pw_sizes = list(snode._sizes[0])
+            if len(pw_sizes) == len(norm_pw_sizes) and all(
+                V.graph.sizevars.statically_known_equals(a, b)
+                for a, b in zip(pw_sizes, norm_pw_sizes)
+            ):
+                # already matches the normalized pointwise ranges
+                continue
+
+            # Re-factorizing rewrites the flat index, so every dim taking part must
+            # be statically known -- a size hint is not a guarantee, and being wrong
+            # here would miscompile rather than merely deoptimize.
+            static_sizes: list[int] = []
+            for size in pw_sizes:
+                static_size = static_int(size)
+                if static_size is None:
+                    return None
+                static_sizes.append(static_size)
+            pw_numel = math.prod(static_sizes)
+
+            # Split off the suffix of dims beyond the normalized pointwise numel;
+            # those belong to the reduction group and must be left alone.
+            target_trailing, rem = divmod(pw_numel, norm_numel)
+            if rem:
+                return None
+
+            trailing: list[sympy.Expr] = []
+            trailing_prod = 1
+            for size, static_size in zip(reversed(pw_sizes), reversed(static_sizes)):
+                if trailing_prod == target_trailing:
+                    break
+                trailing_prod *= static_size
+                trailing.insert(0, size)
+            if trailing_prod != target_trailing:
+                # no dim boundary lines up with the reduction group
+                return None
+
+            plan[snode] = list(norm_pw_sizes) + trailing
+
+        return plan
+
+    def reorder_pointwise_loops_for_coalescing(self) -> bool:
+        from .tiling_utils import get_coalescing_pointwise_reorder
+
+        if self.is_template():
+            return False
+
+        # Every child must be an analyzable/reorderable pointwise-or-reduction node:
+        # `get_coalesce_analysis` below walks each child's `_body`, and the reorder
+        # rewrites it.
+        children: list[SchedulerNode] = []
+        for snode in self.snodes:
+            if not isinstance(snode, SchedulerNode) or not isinstance(
+                snode.node, ir.ComputedBuffer
+            ):
+                return False
+            children.append(snode)
+
+        coalesce_analysis = self.get_coalesce_analysis()
+        if coalesce_analysis is None:
+            return False
+
+        new_order = get_coalescing_pointwise_reorder(coalesce_analysis)
+        if not new_order:
+            return False
+
+        norm_read_writes = coalesce_analysis.norm_read_writes
+        norm_pw_sizes = [
+            norm_read_writes.var_ranges[v] for v in norm_read_writes.index_vars
+        ]
+        if len(new_order) != len(norm_pw_sizes):
+            return False
+
+        # Un-merge any child whose pointwise dims hide the coalescing var, so the
+        # permutation below can reach it. Bail out entirely if that is not possible
+        # for some child -- a partial reorder would leave the fused children on
+        # inconsistent iteration spaces.
+        reindex_plan = self._plan_coalescing_reindex(norm_pw_sizes)
+        if reindex_plan is None:
+            return False
+
+        # The permutation is identity-extended over each child's trailing dims, so
+        # every child needs at least `len(new_order)` dims once reindexed. Check all
+        # of them before mutating any, so we never leave the children of a fused
+        # node on inconsistent iteration spaces.
+        for snode in children:
+            final_sizes = reindex_plan.get(snode, list(snode._sizes[0]))
+            if len(final_sizes) < len(new_order):
+                loop_ordering_log.debug(
+                    "Don't reorder fused node %s: child %s has %s pointwise dims, "
+                    "fewer than the %s being permuted",
+                    self.get_name(),
+                    snode.get_name(),
+                    len(final_sizes),
+                    len(new_order),
+                )
+                return False
+
+        for snode in children:
+            if snode in reindex_plan:
+                snode.apply_loop_reindexing(reindex_plan[snode])
+
+            # identity-extend the permutation over the trailing dims
+            num_dims = len(snode._sizes[0])
+            order = list(new_order) + list(range(len(new_order), num_dims))
+            snode.apply_new_loop_order(order)
+
+        # pyrefly: ignore [bad-assignment]
+        metrics.num_loop_reordering += 1
+        loop_ordering_log.debug(
+            "Reorder pointwise loops for coalescing on fused node %s with order %s "
+            "(reindexed %s children)",
+            self.get_name(),
+            new_order,
+            len(reindex_plan),
+        )
 
         refresh_group_node_dependencies(self)
         return True
@@ -4245,6 +4439,8 @@ class Scheduler:
         if config._post_fusion_custom_pass is not None:
             self.nodes = config._post_fusion_custom_pass(self.nodes)
 
+        self.reorder_loops_for_coalescing()
+
         if any(
             isinstance(node, FusedExternTritonKernelSchedulerNode)
             for node in self.nodes
@@ -5096,6 +5292,28 @@ class Scheduler:
             name_to_max_distance[node.get_name()] = max_dist
             node.min_input_distance = min_dist
             node.max_input_distance = max_dist
+
+    def reorder_loops_for_coalescing(self) -> None:
+        """
+        After fusion, reorder each node's pointwise loops so the dominant
+        coalescing var becomes the innermost (dense) loop. This complements the
+        pairwise loop reordering done during fusion (`reorder_loops_by_dep_pair`),
+        which aligns a node to a fusion partner but never consults the coalescing
+        analysis and bails on reductions. Here we can move a dominant "middle"
+        pointwise digit onto the dense dim even for reduction kernels, which the
+        tiling / codegen path (`_split_iteration_ranges`) cannot do on its own.
+        """
+        if not (
+            config.triton.coalesce_tiling_analysis and config.loop_ordering_after_fusion
+        ):
+            return
+
+        for node in self.nodes:
+            if not isinstance(node, (SchedulerNode, FusedSchedulerNode)):
+                continue
+            if not node.is_gpu():
+                continue
+            node.reorder_pointwise_loops_for_coalescing()
 
     def merge_loops(self) -> None:
         if not config.loop_ordering_after_fusion:

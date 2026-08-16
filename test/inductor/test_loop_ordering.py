@@ -3,7 +3,7 @@
 import contextlib
 import os
 import unittest
-from unittest import skipUnless
+from unittest import mock, skipUnless
 
 import numpy as np
 import sympy
@@ -1467,6 +1467,261 @@ class MemoryCoalescingTest(MockSchedulerTest):
             # Assert that we captured code, before checking it.
             self.assertTrue(code)
             FileCheck().check("YBLOCK").check("XBLOCK").run(code[0])
+
+    def test_get_coalescing_pointwise_reorder(self):
+        """Unit test for the reorder-decision helper (no codegen / GPU needed)."""
+        from torch._inductor import tiling_utils
+        from torch._inductor.tiling_utils import (
+            CoalesceVarAnalysis,
+            FusedNormalizedReadsWrites,
+        )
+
+        b, h, s, k = sympy.symbols("b h s k", integer=True)
+
+        def make_analysis(
+            index_vars, reduce_vars, var_ranges, coalesced_by_var, uncoalesced=None
+        ):
+            norm = FusedNormalizedReadsWrites(
+                index_vars=OrderedSet(index_vars),
+                reduce_vars=OrderedSet(reduce_vars),
+                reads={},
+                writes={},
+                var_ranges=var_ranges,
+            )
+            return CoalesceVarAnalysis(
+                coalesced_by_var=coalesced_by_var,
+                uncoalesced_addrs=uncoalesced or {},
+                norm_read_writes=norm,
+            )
+
+        reorder = tiling_utils.get_coalescing_pointwise_reorder
+
+        # Dominant *middle* var (head) is moved to innermost:
+        # [b, h, s] -> [b, s, h] == same_reorder [0, 2, 1].
+        ca = make_analysis(
+            [b, h, s],
+            [k],
+            {b: 4, h: 16, s: 576, k: 576},
+            {h: 169869376, s: 294912, k: 169869312},
+        )
+        self.assertEqual(reorder(ca), [0, 2, 1])
+
+        # Near-tie: dominance margin not met -> no reorder.
+        ca = make_analysis(
+            [b, h, s], [k], {b: 4, h: 16, s: 576, k: 576}, {h: 100, s: 90}
+        )
+        self.assertIsNone(reorder(ca))
+
+        # Dominant var range too small to be a good dense dim -> no reorder.
+        ca = make_analysis(
+            [b, h, s], [k], {b: 4, h: 4, s: 576, k: 576}, {h: 169869376, s: 294912}
+        )
+        self.assertIsNone(reorder(ca))
+
+        # Dominant var already innermost -> no reorder.
+        ca = make_analysis(
+            [b, h, s], [k], {b: 4, h: 16, s: 576, k: 576}, {s: 169869376, h: 294912}
+        )
+        self.assertIsNone(reorder(ca))
+
+        # Any uncoalesced access -> defer to the suggested_split tiling path.
+        ca = make_analysis(
+            [b, h, s],
+            [k],
+            {b: 4, h: 16, s: 576, k: 576},
+            {h: 169869376, s: 294912},
+            uncoalesced={b + s: 1000},
+        )
+        self.assertIsNone(reorder(ca))
+
+    def test_plan_coalescing_reindex(self):
+        """
+        Unit test for the re-factorization plan of a fused node. Children whose
+        pointwise dims are merged differently from the fused node's normalized
+        ranges are re-factorized onto those ranges plus the leftover trailing
+        dims; anything that does not line up exactly must bail out, since the
+        plan rewrites the flat index.
+        """
+
+        def fused(*sizes):
+            snodes = [
+                self._create_scheduler_node(self._create_buffer(f"buf{i}", size))
+                for i, size in enumerate(sizes)
+            ]
+            return torch._inductor.scheduler.FusedSchedulerNode.fuse(*snodes)
+
+        norm_pw_sizes = [sympy.Integer(n) for n in (2, 4, 8)]
+
+        # (64, 8) has [2, 4, 8] merged into 64, with 8 left over: re-factorize.
+        # (2, 4, 8) already matches the normalized ranges: nothing to do.
+        node = fused((64, 8), (2, 4, 8))
+        plan = node._plan_coalescing_reindex(norm_pw_sizes)
+        self.assertIsNotNone(plan)
+        self.assertEqual([list(sizes) for sizes in plan.values()], [[2, 4, 8, 8]])
+
+        # Pointwise numel is not a multiple of the normalized numel.
+        node = fused((5, 7), (2, 4, 8))
+        self.assertIsNone(node._plan_coalescing_reindex(norm_pw_sizes))
+
+        # Divisible (64 * 3), but no dim boundary lines up with the leftover 3.
+        node = fused((192,), (2, 4, 8))
+        self.assertIsNone(node._plan_coalescing_reindex(norm_pw_sizes))
+
+        # A symbolic target range is not a valid re-factorization target.
+        node = fused((64, 8), (2, 4, 8))
+        dynamic_sizes = [
+            sympy.Symbol("s0", integer=True, positive=True)
+        ] + norm_pw_sizes
+        self.assertIsNone(node._plan_coalescing_reindex(dynamic_sizes))
+
+    def test_reorder_dominant_middle_var_for_coalescing(self):
+        """
+        End-to-end: a softmax-backward pattern
+        (https://github.com/intel/intel-xpu-backend-for-triton/issues/7610)
+        places the only contiguous axis (head, size 16) as a *middle* pointwise
+        digit. Verify the
+        analysis identifies head as the dominant coalescing var (yet the tiling
+        path yields no `suggested_split`), and that
+        `reorder_pointwise_loops_for_coalescing` moves head to the innermost loop.
+        """
+        B, H, S, K = 4, 16, 576, 576
+
+        def f(dy, lg, bias, mx, sm):
+            dyv = dy.view(B, S, K, H)
+            lgv = lg.view(B, S, K, H)
+            mx2 = mx.squeeze(-1).permute(0, 2, 1).unsqueeze(2)
+            sm2 = sm.squeeze(-1).permute(0, 2, 1).unsqueeze(2)
+            y = torch.exp(lgv + bias - mx2) / sm2
+            # head-second contiguous layout forces the pathology
+            p = (dyv * y).permute(0, 3, 1, 2).contiguous()
+            yp = y.permute(0, 3, 1, 2)
+            acc = p.sum(dim=-1, keepdim=True)
+            return p - yp * acc
+
+        def dominant_and_innermost(ca):
+            ivars = list(ca.norm_read_writes.index_vars)
+            dom = max(ivars, key=lambda v: ca.coalesced_by_var.get(v, 0))
+            return dom, ivars[-1], ca.norm_read_writes.var_ranges
+
+        def fn(nodes):
+            self.assertEqual(len(nodes), 1)
+            node = nodes[0]
+
+            ca = node.get_coalesce_analysis()
+            self.assertIsNotNone(ca)
+            # Every access coalesces on *some* var, so there is no uncoalesced
+            # tiling opportunity: this is the exact trigger for the reorder pass.
+            self.assertEqual(len(ca.uncoalesced_addrs), 0)
+            self.assertIsNone(ca.suggested_split)
+
+            dom, innermost, ranges = dominant_and_innermost(ca)
+            # head (size 16) dominates coalescing but is NOT the innermost loop.
+            self.assertEqual(ranges[dom], H)
+            self.assertNotEqual(dom, innermost)
+
+            # Apply the pass directly (deterministic); the scheduler-driven call
+            # that runs right after this hook then becomes a no-op.
+            self.assertTrue(node.reorder_pointwise_loops_for_coalescing())
+
+            ca2 = node.get_coalesce_analysis()
+            dom2, innermost2, ranges2 = dominant_and_innermost(ca2)
+            # After the reorder, the dominant (head) var IS the innermost loop.
+            self.assertEqual(dom2, innermost2)
+            self.assertEqual(ranges2[innermost2], H)
+
+            return nodes
+
+        # Scaled down: the reduction sums S*K terms, so at unit scale the fp32
+        # reduction-order noise alone exceeds any useful tolerance (true for
+        # eager and for stock inductor as well, not just the reordered kernel).
+        scale = 0.05
+        dy = torch.randn(B * S * K, H, device=GPU_TYPE) * scale
+        lg = torch.randn(B * S * K, H, device=GPU_TYPE) * scale
+        bias = torch.randn(H, device=GPU_TYPE) * scale
+        mx = torch.randn(B, H, S, 1, device=GPU_TYPE) * scale
+        sm = torch.rand(B, H, S, 1, device=GPU_TYPE) + 0.5
+
+        with torch._inductor.config.patch(_post_fusion_custom_pass=fn), torch.no_grad():
+            out, code = run_and_get_code(torch.compile(f), dy, lg, bias, mx, sm)
+
+        self.assertTrue(code)
+        # The payoff: head is the dense dimension, so consecutive lanes read
+        # consecutive addresses. Before the reorder head was an interior digit
+        # (`(xindex // 576) % 16`) and every read was a strided scalar load. Accept
+        # either shape the tiling may take -- head as the low digit of a 1-D index,
+        # or head as its own innermost tile -- since which one is picked depends on
+        # the device's tiling heuristics, while "head is dense" is the invariant.
+        kernel = code[0]
+        self.assertTrue(
+            "xindex % 16" in kernel or "xnumel = 16" in kernel,
+            f"expected head (16) as the dense dim, got:\n{kernel}",
+        )
+        self.assertEqual(out, f(dy, lg, bias, mx, sm), atol=1e-3, rtol=1e-3)
+
+    def test_reorder_for_coalescing_dynamic_shapes(self):
+        """
+        The reorder rewrites the flat index (it re-factorizes merged dims), so a
+        size hint is not good enough -- being wrong would miscompile rather than
+        merely deoptimize. With a dynamic pointwise range the decision helper must
+        therefore decline, leaving the loop order untouched. Same pattern as
+        `test_reorder_dominant_middle_var_for_coalescing`, but with a symbolic
+        batch dim.
+        """
+        from torch._inductor import tiling_utils
+
+        B, H, S, K = 4, 16, 576, 576
+
+        def f(dy, lg, bias, mx, sm):
+            # `-1` keeps the batch dim symbolic under dynamic=True
+            dyv = dy.view(-1, S, K, H)
+            lgv = lg.view(-1, S, K, H)
+            mx2 = mx.squeeze(-1).permute(0, 2, 1).unsqueeze(2)
+            sm2 = sm.squeeze(-1).permute(0, 2, 1).unsqueeze(2)
+            y = torch.exp(lgv + bias - mx2) / sm2
+            p = (dyv * y).permute(0, 3, 1, 2).contiguous()
+            yp = y.permute(0, 3, 1, 2)
+            return p - yp * p.sum(dim=-1, keepdim=True)
+
+        scale = 0.05
+        dy = torch.randn(B * S * K, H, device=GPU_TYPE) * scale
+        lg = torch.randn(B * S * K, H, device=GPU_TYPE) * scale
+        bias = torch.randn(H, device=GPU_TYPE) * scale
+        mx = torch.randn(B, H, S, 1, device=GPU_TYPE) * scale
+        sm = torch.rand(B, H, S, 1, device=GPU_TYPE) + 0.5
+        ref = f(dy, lg, bias, mx, sm)
+
+        orig = tiling_utils.get_coalescing_pointwise_reorder
+        decisions = []
+
+        def spy(coalesce_analysis):
+            new_order = orig(coalesce_analysis)
+            decisions.append(new_order)
+            return new_order
+
+        for dynamic in (False, True):
+            torch._dynamo.reset()
+            decisions.clear()
+            with (
+                mock.patch.object(
+                    tiling_utils, "get_coalescing_pointwise_reorder", spy
+                ),
+                torch.no_grad(),
+            ):
+                out = torch.compile(f, dynamic=dynamic)(dy, lg, bias, mx, sm)
+
+            self.assertTrue(decisions, "reorder decision helper was never consulted")
+            if dynamic:
+                # symbolic pointwise ranges -> stay on the conservative path
+                self.assertTrue(
+                    all(order is None for order in decisions),
+                    f"dynamic shapes must not be reordered, got {decisions}",
+                )
+            else:
+                self.assertTrue(
+                    any(order is not None for order in decisions),
+                    "static shapes should still be reordered",
+                )
+            self.assertEqual(out, ref, atol=1e-3, rtol=1e-3)
 
 
 layouts = ("cont", "NHWC", "T")
