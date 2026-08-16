@@ -151,6 +151,19 @@ class FakeTensorTest(TestCase):
             self.assertEqual(z.device, torch.device("cpu"))
             self.assertTrue(is_fake_tensor(z))
 
+    def test_nansum_nanmean_empty_dim(self):
+        # nansum/nanmean reduce over all dimensions when dim=() or dim=[] is
+        # passed, matching eager. The meta kernel used to preserve the input
+        # shape instead. See https://github.com/pytorch/pytorch/issues/191188
+        x = torch.randn(2, 3)
+        for op in (torch.nansum, torch.nanmean):
+            for dim in ((), []):
+                for keepdim in (False, True):
+                    eager = op(x, dim=dim, keepdim=keepdim)
+                    with FakeTensorMode() as mode:
+                        fake = op(mode.from_tensor(x), dim=dim, keepdim=keepdim)
+                    self.assertEqual(fake.shape, eager.shape)
+
     def test_inplace_non_broadcastable_raises(self):
         # Ops decomposed via _make_inplace used to silently resize the fake
         # self tensor to the broadcast shape instead of raising like eager.
@@ -1580,6 +1593,37 @@ class FakeTensorTest(TestCase):
                 self.assertEqual(h_n.shape, (D * num_layers, N, H_out))
                 self.assertEqual(c_n.shape, (D * num_layers, N, hidden_size))
 
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_cuda_gru(self):
+        with torch.backends.cudnn.flags(enabled=False):
+            fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=False)
+            with fake_tensor_mode:
+                N = 5
+                L = 4
+                H_in = 2
+                hidden_size = 3
+                num_layers = 2
+                bidir = False
+                D = 2 if bidir else 1
+
+                gru = torch.nn.GRU(
+                    input_size=H_in,
+                    hidden_size=hidden_size,
+                    num_layers=num_layers,
+                    batch_first=False,
+                    bias=True,
+                    bidirectional=bidir,
+                    device="cuda",
+                )
+
+                h_0 = torch.randn((num_layers * D, N, hidden_size), device="cuda")
+                inp = torch.randn((L, N, H_in), device="cuda")
+                output, h_n = gru(inp, h_0)
+                output.sum().backward()
+
+                self.assertEqual(output.shape, (L, N, D * hidden_size))
+                self.assertEqual(h_n.shape, (D * num_layers, N, hidden_size))
+
     def test_data_dependent_operator(self):
         with FakeTensorMode(allow_fallback_kernels=False):
             x = torch.rand([10, 10])
@@ -2739,6 +2783,7 @@ class FakeTensorConverterTest(TestCase):
         y_conv = converter.from_real_tensor(mode, y)
         self.assertIs(x_conv_storage, y_conv.untyped_storage())
 
+    @xfailIfTorchDynamo
     def test_dead_key(self):
         x = torch.rand(2, 2, 2)
         mode = FakeTensorMode()

@@ -853,6 +853,16 @@ def optim_inputs_func_lbfgs(device, dtype=None):
             kwargs={"line_search_fn": "strong_wolfe"},
             desc="strong_wolfe",
         ),
+        OptimizerInput(
+            params=None,
+            kwargs={"maximize": True},
+            desc="maximize",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={"maximize": True, "line_search_fn": "strong_wolfe"},
+            desc="maximize_strong_wolfe",
+        ),
     ]
 
 
