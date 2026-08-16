@@ -1931,7 +1931,7 @@ from math import nan
 from torch import device
 import torch
 import torch.fx._pytree as fx_pytree
-import torch.utils._pytree as pytree
+import torch.utils.pytree.python as pytree
 
 
 def forward(self, x : _torch_Tensor_) -> _torch_Tensor_:
