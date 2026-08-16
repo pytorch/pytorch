@@ -224,6 +224,9 @@ using detail::CuBlasLtMatmulDescriptor;
 using detail::CuBlasLtMatrixLayout;
 using detail::CuBlasLtMatmulPreference;
 using detail::CublasLtWorkspace;
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13030
+using detail::CuBlasLtGroupedMatrixLayout;
+#endif
 
 /* LEVEL 3 BLAS FUNCTIONS */
 
@@ -1504,7 +1507,13 @@ bool gemm_and_bias(
     const Dtype* bias,
     C_Dtype* result_ptr,
     int64_t result_ld,
-    GEMMAndBiasActivationEpilogue activation) {
+    GEMMAndBiasActivationEpilogue activation,
+    const C_Dtype* c_ptr,
+    int64_t c_ld,
+    at::opmath_type<Dtype> beta) {
+  TORCH_INTERNAL_ASSERT(
+      !(bias && c_ptr),
+      "gemm_and_bias: bias and a distinct C operand are mutually exclusive");
 
   if (std::is_same_v<C_Dtype, float> && std::is_same_v<Dtype, at::BFloat16>) {
     #ifdef USE_ROCM
@@ -1519,7 +1528,8 @@ bool gemm_and_bias(
   }
 
   using opmath_t = at::opmath_type<Dtype>;
-  opmath_t beta_val = bias ? 0 : 1; // bias is added in epilogue unless nullptr
+  // bias is added in the epilogue, which accumulates with beta == 0
+  opmath_t beta_val = bias ? opmath_t(0) : beta;
 
   const auto type_info = detail::getCublasLtTypeInfo<Dtype, C_Dtype>();
   const cudaDataType_t abType = type_info.ab_type;
@@ -1603,7 +1613,15 @@ bool gemm_and_bias(
 
   CuBlasLtMatrixLayout Adesc(abType, m, k, mat1_ld, transpose_mat1);
   CuBlasLtMatrixLayout Bdesc(abType, k, n, mat2_ld, transpose_mat2);
-  CuBlasLtMatrixLayout Cdesc(cType, m, n, result_ld);
+  CuBlasLtMatrixLayout Cdesc(cType, m, n, c_ptr ? c_ld : result_ld);
+  // When c_ptr is null, C aliases D and the layouts are identical, so reuse
+  // Cdesc rather than paying for a second cublasLtMatrixLayoutCreate on what is
+  // the hot nn.Linear path.
+  std::optional<CuBlasLtMatrixLayout> Ddesc;
+  if (c_ptr) {
+    Ddesc.emplace(cType, m, n, result_ld);
+  }
+  const auto Ddesc_raw = c_ptr ? Ddesc->descriptor() : Cdesc.descriptor();
 
   auto ltworkspace = CublasLtWorkspace();
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, ltworkspace.size);
@@ -1611,8 +1629,9 @@ bool gemm_and_bias(
 #ifndef USE_ROCM
   uint32_t a_alignment = detail::getAlignment(reinterpret_cast<uintptr_t>(mat1_ptr));
   uint32_t b_alignment = detail::getAlignment(reinterpret_cast<uintptr_t>(mat2_ptr));
-  uint32_t c_alignment = detail::getAlignment(reinterpret_cast<uintptr_t>(result_ptr));
-  uint32_t d_alignment = detail::getAlignment(reinterpret_cast<uintptr_t>(bias));
+  uint32_t c_alignment =
+      detail::getAlignment(reinterpret_cast<uintptr_t>(c_ptr ? c_ptr : result_ptr));
+  uint32_t d_alignment = detail::getAlignment(reinterpret_cast<uintptr_t>(result_ptr));
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_A_BYTES, a_alignment);
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_B_BYTES, b_alignment);
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_C_BYTES, c_alignment);
@@ -1628,7 +1647,7 @@ bool gemm_and_bias(
       Adesc.descriptor(),
       Bdesc.descriptor(),
       Cdesc.descriptor(),
-      Cdesc.descriptor(),
+      Ddesc_raw,
       preference.descriptor(),
       1,
       &heuristicResult,
@@ -1647,10 +1666,10 @@ bool gemm_and_bias(
       mat2_ptr,
       Bdesc.descriptor(),
       beta_ptr,
-      result_ptr,
+      c_ptr ? c_ptr : result_ptr,
       Cdesc.descriptor(),
       result_ptr,
-      Cdesc.descriptor(),
+      Ddesc_raw,
       &heuristicResult.algo,
       ltworkspace.ptr,
       ltworkspace.size,
@@ -1709,7 +1728,10 @@ template bool gemm_and_bias(
     const double* bias,
     double* result_ptr,
     int64_t result_ld,
-    GEMMAndBiasActivationEpilogue activation);
+    GEMMAndBiasActivationEpilogue activation,
+    const double* c_ptr,
+    int64_t c_ld,
+    at::opmath_type<double> beta);
 
 template bool gemm_and_bias(
     bool transpose_mat1,
@@ -1725,7 +1747,10 @@ template bool gemm_and_bias(
     const float* bias,
     float* result_ptr,
     int64_t result_ld,
-    GEMMAndBiasActivationEpilogue activation);
+    GEMMAndBiasActivationEpilogue activation,
+    const float* c_ptr,
+    int64_t c_ld,
+    at::opmath_type<float> beta);
 
 template bool gemm_and_bias(
     bool transpose_mat1,
@@ -1741,7 +1766,10 @@ template bool gemm_and_bias(
     const at::Half* bias,
     at::Half* result_ptr,
     int64_t result_ld,
-    GEMMAndBiasActivationEpilogue activation);
+    GEMMAndBiasActivationEpilogue activation,
+    const at::Half* c_ptr,
+    int64_t c_ld,
+    at::opmath_type<at::Half> beta);
 
 template bool gemm_and_bias(
     bool transpose_mat1,
@@ -1757,7 +1785,10 @@ template bool gemm_and_bias(
     const at::Half* bias,
     float* result_ptr,
     int64_t result_ld,
-    GEMMAndBiasActivationEpilogue activation);
+    GEMMAndBiasActivationEpilogue activation,
+    const float* c_ptr,
+    int64_t c_ld,
+    at::opmath_type<at::Half> beta);
 
 template bool gemm_and_bias(
     bool transpose_mat1,
@@ -1773,7 +1804,10 @@ template bool gemm_and_bias(
     const at::BFloat16* bias,
     at::BFloat16* result_ptr,
     int64_t result_ld,
-    GEMMAndBiasActivationEpilogue activation);
+    GEMMAndBiasActivationEpilogue activation,
+    const at::BFloat16* c_ptr,
+    int64_t c_ld,
+    at::opmath_type<at::BFloat16> beta);
 
 template bool gemm_and_bias(
     bool transpose_mat1,
@@ -1789,7 +1823,10 @@ template bool gemm_and_bias(
     const at::BFloat16* bias,
     float* result_ptr,
     int64_t result_ld,
-    GEMMAndBiasActivationEpilogue activation);
+    GEMMAndBiasActivationEpilogue activation,
+    const float* c_ptr,
+    int64_t c_ld,
+    at::opmath_type<at::BFloat16> beta);
 
 using at::blas::ScalingType;
 
@@ -1906,26 +1943,18 @@ void scaled_gemm(
   }
 
   // Handle user-passed alpha
-  float *alpha_ptr = &alpha_val;
-  float *beta_ptr = &beta_val;
+  const float* alpha_ptr = &alpha_val;
+  const float* beta_ptr = &beta_val;
 
   if (alpha.has_value()) {
     auto& a = alpha.value();
 
     // if device-tensor
     if (a.is_cuda()) {
-      // NOTE: there are lifetime requirements on device-side pointers for alpha/beta -- the value must be
-      //       valid & correct until the cublas call finishes (not is scheduled like host-side values). Thus
-      //       we need to use allocations for alpha/beta that have some guarantees on lifetime - a statically
-      //       managed 4B buffer for alpha that we'll copy the passed alpha value into, and constant memory
-      //       for beta respectively.
-      float *user_alpha_ptr = at::cuda::detail::get_user_alpha_ptr();
-      at::Tensor user_alpha = at::from_blob(user_alpha_ptr, {1}, TensorOptions().device(kCUDA).dtype(kFloat));
-      user_alpha.copy_(a);
       // Tell cublasLt we're using device-side pointers for alpha/beta
       auto pointer_mode = CUBLASLT_POINTER_MODE_DEVICE;
       computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_POINTER_MODE, pointer_mode);
-      alpha_ptr = user_alpha.data_ptr<float>();
+      alpha_ptr = a.const_data_ptr<float>();
       beta_ptr = at::cuda::detail::get_cublas_device_zero();
     } else {
       alpha_val = a.item<float>();
@@ -2194,6 +2223,118 @@ void int8_gemm(
     _syncCurrentWithCarveoutStream(stream, false);
   }
 #endif
+}
+
+void grouped_gemm(
+    char transa,
+    char transb,
+    const void *mArrayDev,
+    int64_t avgM,
+    const void *nArrayDev,
+    int64_t avgN,
+    const void *kArrayDev,
+    int64_t avgK,
+    const int64_t *alphaArrayDev,
+    const float *alphaScalar,
+    ScalarType input_dtype,
+    const int64_t *APtrArrayDev,
+    const void *ldaArrayDev,
+    const int64_t *BPtrArrayDev,
+    const void *ldbArrayDev,
+    const int64_t *betaArrayDev,
+    const float *betaScalar,
+    ScalarType result_dtype,
+    const int64_t *CPtrArrayDev,
+    const void *ldcArrayDev,
+    int64_t *DPtrArrayDev,
+    const void *lddArrayDev,
+    int batchCount,
+    bool use_int64_dims) {
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13030
+  cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+  const bool sm90 = prop->major == 9;
+  TORCH_CHECK(prop->major >= 9 && prop->major < 12, "grouped cublasLtMatmul requires SM 9.0-11.0");
+
+  const auto computeType = CUBLAS_COMPUTE_32F;
+  const auto scaleType = CUDA_R_32F;
+  const auto pointer_mode = CUBLASLT_POINTER_MODE_DEVICE;
+  const int64_t alphaBatchStride = sm90 ? 0 : 1;
+  const int64_t betaBatchStride = sm90 ? 0 : 1;
+
+  cublasOperation_t opa = detail::cublasOpFromChar(transa);
+  cublasOperation_t opb = detail::cublasOpFromChar(transb);
+
+  CuBlasLtMatmulDescriptor computeDesc(computeType, scaleType);
+  computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSA, opa);
+  computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSB, opb);
+  computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_POINTER_MODE, pointer_mode);
+  computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_ALPHA_BATCH_STRIDE, alphaBatchStride);
+  computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BETA_BATCH_STRIDE, betaBatchStride);
+
+  CuBlasLtGroupedMatrixLayout Adesc(ScalarTypeToCudaDataType(input_dtype), batchCount, mArrayDev, kArrayDev, ldaArrayDev, opa != CUBLAS_OP_N, use_int64_dims);
+  CuBlasLtGroupedMatrixLayout Bdesc(ScalarTypeToCudaDataType(input_dtype), batchCount, kArrayDev, nArrayDev, ldbArrayDev, opb != CUBLAS_OP_N, use_int64_dims);
+  CuBlasLtGroupedMatrixLayout Cdesc(ScalarTypeToCudaDataType(result_dtype), batchCount, mArrayDev, nArrayDev, ldcArrayDev, false, use_int64_dims);
+  CuBlasLtGroupedMatrixLayout Ddesc(ScalarTypeToCudaDataType(result_dtype), batchCount, mArrayDev, nArrayDev, lddArrayDev, false, use_int64_dims);
+
+  CuBlasLtMatmulPreference preference;
+  auto ltworkspace = CublasLtWorkspace();
+  auto stream = at::cuda::getCurrentCUDAStream();
+  preference.setAttribute(CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, ltworkspace.size);
+  preference.setAttribute(CUBLASLT_MATMUL_PREF_GROUPED_DESC_D_AVERAGE_ROWS, avgM);
+  preference.setAttribute(CUBLASLT_MATMUL_PREF_GROUPED_DESC_D_AVERAGE_COLS, avgN);
+  preference.setAttribute(CUBLASLT_MATMUL_PREF_GROUPED_AVERAGE_REDUCTION_DIM, avgK);
+
+  cublasLtMatmulHeuristicResult_t heuristicResult = {};
+  int returnedResult = 0;
+  cublasLtHandle_t ltHandle = at::cuda::getCurrentCUDABlasLtHandle();
+
+  TORCH_CUDABLAS_CHECK(cublasLtMatmulAlgoGetHeuristic(
+      ltHandle,
+      computeDesc.descriptor(),
+      Adesc.descriptor(),
+      Bdesc.descriptor(),
+      Cdesc.descriptor(),
+      Ddesc.descriptor(),
+      preference.descriptor(),
+      1,
+      &heuristicResult,
+      &returnedResult));
+  if (returnedResult == 0) {
+    TORCH_CUDABLAS_CHECK(CUBLAS_STATUS_NOT_SUPPORTED);
+  }
+
+  // When alphaBatchStride=0 (SM 9.0), alpha/beta are single device scalars.
+  // When alphaBatchStride=1 (SM 10.0+), alpha/beta are per-group pointer arrays.
+  const void* alpha = alphaBatchStride ? static_cast<const void*>(alphaArrayDev) : static_cast<const void*>(alphaScalar);
+  const void* beta = betaBatchStride ? static_cast<const void*>(betaArrayDev) : static_cast<const void*>(betaScalar);
+
+  cublasStatus_t cublasStatus = cublasLtMatmul(
+    ltHandle,
+    computeDesc.descriptor(),
+    alpha,
+    APtrArrayDev,
+    Adesc.descriptor(),
+    BPtrArrayDev,
+    Bdesc.descriptor(),
+    beta,
+    CPtrArrayDev,
+    Cdesc.descriptor(),
+    DPtrArrayDev,
+    Ddesc.descriptor(),
+    &heuristicResult.algo,
+    ltworkspace.ptr,
+    ltworkspace.size,
+    stream);
+
+  TORCH_CHECK(
+      cublasStatus == CUBLAS_STATUS_SUCCESS,
+      "CUDA error: ",
+      at::cuda::blas::_cublasGetErrorEnum(cublasStatus),
+      " when calling grouped cublasLtMatmul");
+  return;
+#else
+  TORCH_CHECK(false, "grouped cublasLtMatmul requires CUDA >= 13.3 and is not supported on ROCm. Current build does not meet these requirements.");
+#endif // !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13030
 }
 
 template <>

@@ -204,7 +204,7 @@ def _maybe_remove_batch_dim(
     return _remove_batch_dim(batched_output, vmap_level, batch_size, out_dim)
 
 
-# Undos the batching (and any batch dimensions) associated with the `vmap_level`.
+# Undoes the batching (and any batch dimensions) associated with the `vmap_level`.
 def _unwrap_batched(
     batched_outputs: Tensor | tuple[Tensor, ...],
     out_dims: out_dims_t,
