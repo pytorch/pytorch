@@ -9228,6 +9228,26 @@ class TestMPS(TestCaseMPS):
 
         self.assertEqual(do_arange(device='mps'), do_arange(device='cpu'))
 
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_arange_correctly_rounded(self, dtype):
+        """Each element is start + i * step rounded once, not accumulated in float32."""
+        ranges = [(0.0, 100.0, 0.1), (0.0, 1000.0, 0.001), (1e6, 1e6 + 100.0, 0.001),
+                  (0.0, 1e5, 0.3), (-50.0, 50.0, 0.7), (10.0, -10.0, -0.3)]
+        for start, end, step in ranges:
+            out = torch.arange(start, end, step, device='mps', dtype=dtype)
+            i = torch.arange(out.numel(), dtype=torch.float64)
+            # The kernel keeps the intermediate in double-float and rounds it to
+            # float32, so the reference rounds through float32 as well.
+            ref = (start + i * step).to(torch.float32).to(dtype)
+            self.assertEqual(out.cpu(), ref, atol=0, rtol=0,
+                             msg=f"arange({start}, {end}, {step}) mismatch for {dtype}")
+
+        # Non-contiguous out goes through the strided kernel
+        buf = torch.empty(2000, device='mps', dtype=dtype)
+        out = torch.arange(0.0, 100.0, 0.1, out=buf[::2])
+        i = torch.arange(out.numel(), dtype=torch.float64)
+        self.assertEqual(out.cpu(), (i * 0.1).to(torch.float32).to(dtype), atol=0, rtol=0)
+
     def test_arange_empty(self):
         out_mps = torch.tensor([], device="mps")
         out_cpu = torch.tensor([], device="cpu")

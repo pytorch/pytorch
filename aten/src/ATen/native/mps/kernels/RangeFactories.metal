@@ -1,3 +1,4 @@
+#include <c10/metal/double_float.h>
 #include <c10/metal/indexing.h>
 #include <metal_stdlib>
 using namespace metal;
@@ -131,6 +132,42 @@ kernel void logspace_strided(
   out[off] = c10::metal::cast_to<T>(val);
 }
 
+// se = {start hi, start lo, step hi, step lo}. Evaluating start + i * step in
+// float32 is off by an ulp over perfectly ordinary ranges, because start and
+// step are rounded before the multiply and the product is rounded again.
+// Double-float carries enough significand that rounding its result to the
+// output dtype gives the correctly rounded value.
+inline float arange_fp_value(constant array<float, 4>& se, uint index) {
+  const c10::metal::df32 start{se[0], se[1]};
+  const c10::metal::df32 step{se[2], se[3]};
+  const auto i = c10::metal::df_from_long(static_cast<long>(index));
+  return c10::metal::df_add(start, c10::metal::df_mul(step, i)).hi;
+}
+
+template <typename T, typename I>
+kernel void arange_fp(
+    device T* out [[buffer(0)]],
+    constant array<float, 4>& se [[buffer(1)]],
+    constant I& stride [[buffer(2)]],
+    uint index [[thread_position_in_grid]]) {
+  const float val = arange_fp_value(se, index);
+  out[static_cast<I>(index) * stride] = c10::metal::cast_to<T>(val);
+}
+
+template <typename T>
+kernel void arange_fp_strided(
+    device T* out [[buffer(0)]],
+    constant array<float, 4>& se [[buffer(1)]],
+    constant int& ndim [[buffer(2)]],
+    constant long* sizes [[buffer(3)]],
+    constant long* strides [[buffer(4)]],
+    uint index [[thread_position_in_grid]]) {
+  const float val = arange_fp_value(se, index);
+  const long off =
+      c10::metal::offset_from_thread_index(index, sizes, strides, ndim);
+  out[off] = c10::metal::cast_to<T>(val);
+}
+
 template <typename T, typename C, typename I>
 kernel void arange(
     device T* out [[buffer(0)]],
@@ -224,6 +261,28 @@ kernel void arange_strided(
       constant long* strides [[buffer(5)]],                      \
       uint index [[thread_position_in_grid]]);
 
+#define REGISTER_ARANGE_FP_OP(DTYPE)                           \
+  template [[host_name("arange_" #DTYPE "_i32")]] kernel void  \
+  arange_fp<DTYPE, int>(                                       \
+      device DTYPE * out [[buffer(0)]],                        \
+      constant array<float, 4> & se [[buffer(1)]],             \
+      constant int& stride [[buffer(2)]],                      \
+      uint index [[thread_position_in_grid]]);                 \
+  template [[host_name("arange_" #DTYPE "_i64")]] kernel void  \
+  arange_fp<DTYPE, long>(                                      \
+      device DTYPE * out [[buffer(0)]],                        \
+      constant array<float, 4> & se [[buffer(1)]],             \
+      constant long& stride [[buffer(2)]],                     \
+      uint index [[thread_position_in_grid]]);                 \
+  template [[host_name("arange_strided_" #DTYPE)]] kernel void \
+  arange_fp_strided<DTYPE>(                                    \
+      device DTYPE * out [[buffer(0)]],                        \
+      constant array<float, 4> & se [[buffer(1)]],             \
+      constant int& ndim [[buffer(2)]],                        \
+      constant long* sizes [[buffer(3)]],                      \
+      constant long* strides [[buffer(4)]],                    \
+      uint index [[thread_position_in_grid]]);
+
 #define REGISTER_ARANGE_OP(DTYPE, CTYPE)                       \
   template [[host_name("arange_" #DTYPE "_i32")]] kernel void  \
   arange<DTYPE, CTYPE, int>(                                   \
@@ -270,9 +329,9 @@ REGISTER_LOGSPACE_OP(char);
 REGISTER_LOGSPACE_OP(uchar);
 REGISTER_LOGSPACE_OP(bool);
 
-REGISTER_ARANGE_OP(float, float);
-REGISTER_ARANGE_OP(half, float);
-REGISTER_ARANGE_OP(bfloat, float);
+REGISTER_ARANGE_FP_OP(float);
+REGISTER_ARANGE_FP_OP(half);
+REGISTER_ARANGE_FP_OP(bfloat);
 REGISTER_ARANGE_OP(long, long);
 REGISTER_ARANGE_OP(int, long);
 REGISTER_ARANGE_OP(short, long);
