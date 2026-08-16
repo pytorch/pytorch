@@ -1922,6 +1922,34 @@ class TestPrecompile(TestCase):
         sys.modules[name] = mod
         return mod
 
+    @parametrize("tracer", ["dynamo", "make_fx"])
+    @parametrize("backend", ["eager", "inductor"])
+    def test_capture_under_a_torch_function_mode_applies_it_once(self, tracer, backend):
+        # Capture clears the caller's torch_function modes so Dynamo can apply them
+        # SYMBOLICALLY while tracing. The captured graph is torch-level Python, so
+        # lowering it with the modes restored re-traces through every one of them a
+        # second time and bakes a doubly-transformed kernel. Nothing catches that:
+        # the artifact needs no mode at all to reproduce the wrong number, so there
+        # is no guard to drop and no error to raise -- it is simply wrong forever.
+        class PlusOne(torch.overrides.TorchFunctionMode):
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                kwargs = kwargs or {}
+                if func is torch.add and not isinstance(args[1], torch.Tensor):
+                    return func(args[0], args[1] + 1, **kwargs)
+                return func(*args, **kwargs)
+
+        def fn(xx):
+            return torch.add(xx, 1.0)
+
+        x = torch.zeros(3)
+        with PlusOne():
+            expected = fn(x).clone()
+            code, cache = torch.compiler.precompile(
+                fn, x, tracer=tracer, backend=backend
+            )
+        # Served with NO mode: the artifact must already carry the one application.
+        self.assertEqual(torch.compiler.precompile.load(code, cache)(x), expected)
+
     def test_tracer_dynamo_module_global_round_trips_by_sys_modules_key(self):
         # A module GLOBAL is by-reference state: recording it in IMPORT_SOURCES
         # rather than pickling it is what lets a bare module reference next to a
