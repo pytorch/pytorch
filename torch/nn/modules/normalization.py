@@ -53,6 +53,12 @@ class LocalResponseNorm(Module):
         self, size: int, alpha: float = 1e-4, beta: float = 0.75, k: float = 1.0
     ) -> None:
         super().__init__()
+        if k <= 0 and alpha <= 0 and beta != 0:
+            raise ValueError(
+                f"k ({k}) and alpha ({alpha}) cannot both be non-positive "
+                f"when beta ({beta}) is non-zero, "
+                "as this would make the normalization denominator zero"
+            )
         self.size = size
         self.alpha = alpha
         self.beta = beta
