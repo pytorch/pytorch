@@ -905,9 +905,10 @@ class CompilePackage:
 
         self._current_entry: _DynamoCodeCacheEntry | None = None
         self._installed_globals: dict[types.ModuleType, list[_InstalledGlobal]] = {}
-        # Code objects we registered precompile entries on, so uninstall() can
+        # Code objects holding this package's region state, so uninstall() can
         # clear all of them. install() covers resume functions and any frame
-        # reached through code_source, not just the entry frame.
+        # reached through code_source, not just the entry frame; code_context()
+        # adds the live frames an uncovered call compiled inside the region.
         self._installed_precompile_codes: list[types.CodeType] = []
         # One of those codes that actually received entries, used to notice a
         # torch._dynamo.reset() wiping the install out from under us. A frame
@@ -1083,6 +1084,17 @@ class CompilePackage:
         # being compiled. We should record these as when they are actually invoked.
         if code not in self._codes:
             self._add_user_function(code)
+
+        # A call the artifact does not cover compiles INSIDE the installed
+        # region and leaves its cache entries on the LIVE code object, which for
+        # a resume function is not the reconstructed twin _codes is keyed by.
+        # The two compare EQUAL, so match on identity: otherwise uninstall()
+        # clears the twin and the live frame keeps one entry per load forever,
+        # until accumulated_recompile_limit refuses to compile it ever again.
+        if self._installed_precompile_region_id >= 0 and not any(
+            installed is code for installed in self._installed_precompile_codes
+        ):
+            self._installed_precompile_codes.append(code)
 
         entry = self._codes[code]
         self._current_entry = entry
@@ -1264,6 +1276,9 @@ class CompilePackage:
         # so that hook must not delete it once its code object is collected.
         CleanupHook.disown(module.__dict__, name)
         module.__dict__[name] = value
+        self._claim_global(module, name, value)
+
+    def _claim_global(self, module: types.ModuleType, name: str, value: Any) -> None:
         self._installed_globals.setdefault(module, []).append(
             _InstalledGlobal(name, value)
         )
@@ -1273,6 +1288,27 @@ class CompilePackage:
             if not stack or stack[-1].value is not value:
                 stack.append(_GlobalBinding(value=value, owners=weakref.WeakSet()))
             stack[-1].owners.add(self)
+
+    def claim_region_global(self, scope: dict[str, Any], name: str, value: Any) -> None:
+        """
+        Take over a global a compile inside this package's installed region just
+        wrote, so uninstall() removes it with the rest.
+
+        A call the artifact does not cover falls back to an ordinary Dynamo
+        compile inside the region. OutputGraph installs that compile's globals
+        and anchors them to a CleanupHook on the transformed code object, which
+        the package never sees and which does not fire when the region goes
+        away, so unclaimed they stay in the served module for the life of the
+        process. Only while installed: the same path runs during capture, for
+        globals the capture session's own compiled callable still reads.
+        """
+        if self._installed_precompile_region_id < 0:
+            return
+        module = sys.modules.get(scope.get("__name__"))
+        if module is None or module.__dict__ is not scope:
+            return
+        with _PACKAGE_INSTALL_LOCK:
+            self._claim_global(module, name, value)
 
     def uninstall(self) -> None:
         with _PACKAGE_INSTALL_LOCK:

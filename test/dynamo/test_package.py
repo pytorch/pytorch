@@ -502,6 +502,19 @@ class PrecompileIntArg(torch.nn.Module):
         return (y + k).sum()
 
 
+class PrecompileBreakOnlyWhenFalse(torch.nn.Module):
+    """The uncovered branch breaks AGAIN, so a fallback compile mints new globals."""
+
+    def forward(self, x, flag):
+        y = x * 2
+        torch._dynamo.graph_break()
+        if flag:
+            return y + 1
+        z = y - 1
+        torch._dynamo.graph_break()
+        return z * 3
+
+
 class PrecompileKeysArg(torch.nn.Module):
     """A dict_keys argument is pinned by EQUALS_MATCH, not CONSTANT_MATCH."""
 
@@ -4025,6 +4038,41 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             loaded.unload()
             self.assertEqual(_get_total_cache_entry_count(inner), 0)
 
+    @torch._dynamo.config.patch(accumulated_recompile_limit=4)
+    def test_unload_clears_fallback_entries_on_a_live_resume_frame(self):
+        # A fallback compile mints its OWN resume code object and binds it to
+        # its own global, while the package holds only the artifact's twin,
+        # which compares EQUAL to it, so the value-keyed _codes keeps the twin
+        # and unload cleared a region nothing runs in. The live frame then kept
+        # one entry per load until accumulated_recompile_limit refused to
+        # compile that continuation again, for plain torch.compile too.
+        from torch._dynamo.eval_frame import _get_total_cache_entry_count
+        from torch._dynamo.resume_execution import ContinueExecutionCache
+
+        model = PrecompileResumingStack(1)
+        session = precompile_capture(model, backend="eager", dynamic=False)
+        with session as compiled:
+            compiled(torch.randn(4, 8))
+        session.save(self.path(), require_complete=False)
+
+        torch._dynamo.reset()
+        inner = PrecompileResumingBlock.forward.__code__
+        for n in range(5, 10):
+            loaded = precompile_load(model, self.path(), backend="eager", dynamic=False)
+            loaded(torch.randn(n, 8))
+            loaded.unload()
+
+        resumes = list(ContinueExecutionCache.cache.get(inner, {}).values())
+        self.assertTrue(resumes, "expected a live fallback resume frame")
+        for code in resumes:
+            self.assertEqual(_get_total_cache_entry_count(code), 0)
+
+        counter = torch._dynamo.testing.CompileCounter()
+        x = torch.randn(11, 8)
+        ordinary = torch.compile(model, backend=counter, dynamic=False)
+        self.assertEqual(ordinary(x), model(x))
+        self.assertEqual(counter.frame_count, 2)
+
     def test_unload_leaves_another_packages_region_entries_on_a_shared_frame(self):
         # The clear above reaches the LIVE code object, which every package
         # loaded for another instance of the same class installed onto too.
@@ -5414,6 +5462,43 @@ def staged(x):
         loaded.unload()
         # Import aliases are the one thing install() is expected to leave:
         # plain torch.compile installs them permanently too.
+        leftover = sorted(
+            name for name in set(scope) - before if not name.startswith("__import_")
+        )
+        self.assertEqual(leftover, [])
+
+    def test_unload_removes_globals_an_uncovered_call_installed(self):
+        # A call the artifact does not cover falls back to an ordinary Dynamo
+        # compile inside the loaded region, and that compile installs globals of
+        # its own: a compiled backend, a resume function, a builtins dict.
+        # OutputGraph writes them, so the package never sees them, and the
+        # CleanupHook anchoring them to the transformed code does not fire when
+        # the region goes away -- unclaimed, they stay in the served module for
+        # the life of the process, four more on every load.
+        model = PrecompileBreakOnlyWhenFalse()
+        x = torch.randn(3, 4)
+        with torch.no_grad():
+            expected = [model(x, flag) for flag in (True, False)]
+        session = precompile_capture(model, backend="eager", dynamic=False)
+        with session as compiled, torch.no_grad():
+            compiled(x, True)
+        session.save(self.path())
+
+        torch._dynamo.reset()
+        scope = PrecompileBreakOnlyWhenFalse.forward.__globals__
+        before = set(scope)
+        for _ in range(2):
+            loaded = precompile_load(model, self.path(), backend="eager", dynamic=False)
+            with torch.no_grad():
+                self.assertEqual(loaded(x, True), expected[0])
+                covered = set(scope)
+                self.assertEqual(loaded(x, False), expected[1])
+            # The uncovered branch breaks at a line the artifact never captured,
+            # so the fallback compile has to mint globals of its own.
+            self.assertTrue(set(scope) - covered)
+            loaded.unload()
+        # Import aliases are the one thing a load is expected to leave, exactly
+        # as in test_unload_removes_the_builtins_key_install_added above.
         leftover = sorted(
             name for name in set(scope) - before if not name.startswith("__import_")
         )
