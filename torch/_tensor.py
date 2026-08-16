@@ -39,7 +39,7 @@ def _handle_torch_function_and_wrap_type_error_to_not_implemented(
                 return handle_torch_function(wrapped, sargs, self, *args, **kwargs)
             return f(self, *args, **kwargs)
         except TypeError:
-            return NotImplemented   # type: ignore[return-value]
+            return NotImplemented  # type: ignore[return-value]
 
     return wrapped
 
