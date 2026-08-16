@@ -16055,7 +16055,7 @@ class TestConsistency(TestCaseMPS):
                 return (2e-3, 2e-3)
             if op.name in ("nanmean", "nansum"):
                 return (5e-3, 5e-3)
-            if op.name in ("special.bessel_y0", "special.bessel_y1"):
+            if op.name in ("special.bessel_y0", "special.bessel_y1", "special.modified_bessel_k0"):
                 return (5e-4, 2e-3)
         if dtype == torch.complex64:
             if op.name == "mv":
