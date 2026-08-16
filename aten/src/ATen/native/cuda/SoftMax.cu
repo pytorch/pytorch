@@ -158,15 +158,27 @@ void SpatialSoftMax_getLaunchSizes(
   // report it reliably on every backend (seen on gfx950). Probe the occupancy
   // with progressively smaller blocks until the driver accepts the config.
   int max_active_blocks = 0;
-  cudaError_t occupancy_err;
-  while ((occupancy_err = cudaOccupancyMaxActiveBlocksPerMultiprocessor(
-              &max_active_blocks, k, block_threads, smem_size)) != cudaSuccess) {
+  while (true) {
+    cudaError_t err = C10_CUDA_ERROR_HANDLED(cudaOccupancyMaxActiveBlocksPerMultiprocessor(
+        &max_active_blocks, k, block_threads, smem_size));
+    // gfx950 answers an oversized block with success + 0 resident blocks, so
+    // "accepted" means both no error and at least one resident block.
+    if (err == cudaSuccess && max_active_blocks > 0) {
+      break;
+    }
+    if (block.x == 1 && block.y == 1) {
+      // Out of room to shrink: report the driver's own error if it gave one.
+      AT_CUDA_CHECK(err);
+      TORCH_CHECK(false, "softmax: no launch configuration for this kernel is "
+                         "resident on the current device");
+    }
+    if (err != cudaSuccess) {
+      C10_CUDA_CLEAR_ERROR();
+    }
     if (block.y > 1) {
-      block.y = std::max(1u, block.y / 2);
-    } else if (block.x > 1) {
-      block.x = std::max(1u, block.x / 2);
+      block.y /= 2;
     } else {
-      AT_CUDA_CHECK(occupancy_err);
+      block.x /= 2;
     }
     block_threads = block.x * block.y;
     smem_size = block.x == 1 ? 0 : block_threads * sizeof(accscalar_t);
