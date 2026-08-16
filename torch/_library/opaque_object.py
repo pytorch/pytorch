@@ -65,7 +65,8 @@ class MemberType(Enum):
 
     # Reads/calls the member at trace time with the real object and bakes the result as a constant
     USE_REAL = "use_real"
-    # Inlines/traces the member
+    # Inlines/traces methods with a FakeScriptObject receiver. The receiver can
+    # only read registered members and does not support assignment to self.
     INLINED = "inlined"
 
 
@@ -186,7 +187,9 @@ def register_custom_class(
             how they are handled during torch.compile tracing:
             - MemberType.USE_REAL: Evaluates with the real object at compile time and
               bakes the result as a constant
-            - MemberType.INLINED: Inlines the method call into the trace
+            - MemberType.INLINED: Inlines the method call into the trace with a
+              FakeScriptObject receiver. The receiver can only read registered
+              members and does not support assignment to self.
     """
     import torch.utils._pytree as pytree
 

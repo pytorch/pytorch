@@ -242,6 +242,7 @@ else:
         _thread_id: int | None
         # Record flatten mesh name to its flattened mesh in root mesh.
         _flatten_mapping: dict[str, "DeviceMesh"]
+        _dim_group_names: list[str]
         # Registry mapping group names to ProcessGroup objects (to avoid C++ lookup)
         _pg_registry: dict[str, ProcessGroup]
 
