@@ -40,8 +40,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta, instantiate_device_type_tests, deviceCountAtLeast,
-    largeTensorTest, precisionOverride, dtypes, onlyCPU, onlyCUDA,
-    skipCPUIf, dtypesIfCUDA, dtypesIfCPU, skipMeta, onlyAccelerator)
+    largeTensorTest, precisionOverride, dtypes, skipCPUIf, dtypesIfCUDA, dtypesIfCPU, skipMeta, onlyAccelerator)
 from torch.testing._internal.common_dtype import (
     all_types_and_complex, all_types_and_complex_and, all_types_and, floating_and_complex_types, complex_types,
     floating_types, floating_and_complex_types_and, integral_types, integral_types_and, get_all_dtypes,
@@ -4227,7 +4226,7 @@ def to_numpy(tensor):
 def to_memview(tensor):
     return memoryview(to_numpy(tensor))
 
-class TestAsArray(TestCase):
+class _TestAsArrayBase(TestCase):
     def _check(self, original, cvt=lambda t: t, is_alias=True, same_dtype=True, same_device=True, **kwargs):
         """Check the output of 'asarray', given its input and assertion information.
 
@@ -4292,30 +4291,6 @@ class TestAsArray(TestCase):
         check(device=device, dtype=dtype)
         check(device=device, dtype=dtype, copy=False)
 
-    # Skipping 'meta' devices, since there's no point in comparing their
-    # data pointer (which is basically the point here), since they all
-    # return 0.
-    @skipMeta
-    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
-    def test_alias_from_tensor(self, device, dtype):
-        self._test_alias_with_cvt(identity, device, dtype)
-
-    @onlyCPU
-    @dtypes(*set(numpy_to_torch_dtype_dict.values()))
-    def test_alias_from_numpy(self, device, dtype):
-        self._test_alias_with_cvt(to_numpy, device, dtype)
-
-    # Skipping 'meta', since 'to_dlpack' does not work for them.
-    @skipMeta
-    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16))
-    def test_alias_from_dlpack(self, device, dtype):
-        self._test_alias_with_cvt(to_dlpack, device, dtype)
-
-    @onlyCPU
-    @dtypes(*set(numpy_to_torch_dtype_dict.values()))
-    def test_alias_from_buffer(self, device, dtype):
-        self._test_alias_with_cvt(to_memview, device, dtype, shape=(5,), only_with_dtype=True)
-
     def _test_copy_with_cvt(self, cvt, device, dtype, shape=(5, 5), only_with_dtype=False):
         original = make_tensor(shape, dtype=dtype, device=device)
 
@@ -4352,25 +4327,32 @@ class TestAsArray(TestCase):
                     check(same_dtype=False, dtype=other)
                     check(same_dtype=False, dtype=other, copy=True)
 
+class TestAsArray(_TestAsArrayBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    # Skipping 'meta' devices, since there's no point in comparing their
+    # data pointer (which is basically the point here), since they all
+    # return 0.
+    @skipMeta
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    def test_alias_from_tensor(self, device, dtype):
+        self._test_alias_with_cvt(identity, device, dtype)
+
+    # Skipping 'meta', since 'to_dlpack' does not work for them.
+    @skipMeta
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16))
+    def test_alias_from_dlpack(self, device, dtype):
+        self._test_alias_with_cvt(to_dlpack, device, dtype)
+
     @skipMeta
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_copy_tensor(self, device, dtype):
         self._test_copy_with_cvt(identity, device, dtype)
 
-    @onlyCPU
-    @dtypes(*set(numpy_to_torch_dtype_dict.values()))
-    def test_copy_from_numpy(self, device, dtype):
-        self._test_copy_with_cvt(to_numpy, device, dtype)
-
     @skipMeta
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16))
     def test_copy_from_dlpack(self, device, dtype):
         self._test_copy_with_cvt(to_dlpack, device, dtype)
-
-    @onlyCPU
-    @dtypes(*set(numpy_to_torch_dtype_dict.values()))
-    def test_copy_from_buffer(self, device, dtype):
-        self._test_copy_with_cvt(to_memview, device, dtype, shape=(5,), only_with_dtype=True)
 
     def _test_copy_mult_devices(self, devices, dtype, cvt):
         cuda1 = devices[0]
@@ -4384,13 +4366,13 @@ class TestAsArray(TestCase):
         check(copy=True)
         check(dtype=dtype, copy=True)
 
-    @onlyCUDA
+    @onlyAccelerator
     @deviceCountAtLeast(2)
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16))
     def test_copy_from_tensor_mult_devices(self, devices, dtype):
         self._test_copy_mult_devices(devices, dtype, identity)
 
-    @onlyCUDA
+    @onlyAccelerator
     @deviceCountAtLeast(2)
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16))
     def test_copy_from_dlpack_mult_devices(self, devices, dtype):
@@ -4427,7 +4409,7 @@ class TestAsArray(TestCase):
                                     "can't alias arbitrary sequence"):
             torch.asarray(original.tolist(), copy=False)
 
-    @onlyCUDA
+    @onlyAccelerator
     @deviceCountAtLeast(2)
     @dtypes(torch.float32)
     def test_unsupported_alias_mult_devices(self, devices, dtype):
@@ -4456,55 +4438,6 @@ class TestAsArray(TestCase):
         check(requires_grad=True, copy=True)
         check(requires_grad=False)
         check(requires_grad=False, copy=True)
-
-    @onlyCPU
-    def test_astensor_consistency(self, device):
-        # See issue: https://github.com/pytorch/pytorch/pull/71757
-
-        examples = [
-            # Scalars
-            True,
-            42,
-            1.0,
-            # Homogeneous Lists
-            [True, True, False],
-            [1, 2, 3, 42],
-            [0.0, 1.0, 2.0, 3.0],
-            # Mixed Lists
-            [True, False, 0],
-            [0.0, True, False],
-            [0, 1.0, 42],
-            [0.0, True, False, 42],
-            # With Complex
-            [0.0, True, False, 42, 5j],
-            # With Range
-            range(5),
-        ]
-
-        for e in examples:
-            original = torch.as_tensor(e)
-            t = torch.asarray(e)
-            self.assertEqual(t, original)
-
-    # Dynamo changes numpy scalar to array, thus skips the asserted error.
-    @xfailIfTorchDynamo
-    @onlyCPU
-    def test_numpy_scalars(self, device):
-        scalar = np.float64(0.5)
-
-        with self.assertRaisesRegex(RuntimeError, "can't alias NumPy scalars."):
-            torch.asarray(scalar, copy=False)
-
-        tensor = torch.asarray(scalar)
-        self.assertEqual(tensor.dim(), 0)
-        self.assertEqual(tensor.item(), scalar.item())
-        self.assertEqual(tensor.dtype, torch.float64)
-        # Regression test for https://github.com/pytorch/pytorch/issues/97021
-        zerodim_arr = np.array(1.)
-        tensor = torch.asarray(zerodim_arr, dtype=torch.int32)
-        self.assertEqual(tensor.dim(), 0)
-        self.assertEqual(tensor.item(), zerodim_arr.item())
-        self.assertEqual(tensor.dtype, torch.int32)
 
     def test_default_device(self, device):
         original = torch.arange(5)
@@ -4540,6 +4473,73 @@ class TestAsArray(TestCase):
         self.assertNotEqual(original.data_ptr(), tensor.data_ptr())
 
 
+class TestAsArrayCpuOnly(_TestAsArrayBase):
+    hw_classification = HardwareClassification.CPU
+
+    @dtypes(*set(numpy_to_torch_dtype_dict.values()))
+    def test_alias_from_numpy(self, device, dtype):
+        self._test_alias_with_cvt(to_numpy, device, dtype)
+
+    @dtypes(*set(numpy_to_torch_dtype_dict.values()))
+    def test_alias_from_buffer(self, device, dtype):
+        self._test_alias_with_cvt(to_memview, device, dtype, shape=(5,), only_with_dtype=True)
+
+    @dtypes(*set(numpy_to_torch_dtype_dict.values()))
+    def test_copy_from_numpy(self, device, dtype):
+        self._test_copy_with_cvt(to_numpy, device, dtype)
+
+    @dtypes(*set(numpy_to_torch_dtype_dict.values()))
+    def test_copy_from_buffer(self, device, dtype):
+        self._test_copy_with_cvt(to_memview, device, dtype, shape=(5,), only_with_dtype=True)
+
+    def test_astensor_consistency(self, device):
+        # See issue: https://github.com/pytorch/pytorch/pull/71757
+
+        examples = [
+            # Scalars
+            True,
+            42,
+            1.0,
+            # Homogeneous Lists
+            [True, True, False],
+            [1, 2, 3, 42],
+            [0.0, 1.0, 2.0, 3.0],
+            # Mixed Lists
+            [True, False, 0],
+            [0.0, True, False],
+            [0, 1.0, 42],
+            [0.0, True, False, 42],
+            # With Complex
+            [0.0, True, False, 42, 5j],
+            # With Range
+            range(5),
+        ]
+
+        for e in examples:
+            original = torch.as_tensor(e)
+            t = torch.asarray(e)
+            self.assertEqual(t, original)
+
+    # Dynamo changes numpy scalar to array, thus skips the asserted error.
+    @xfailIfTorchDynamo
+    def test_numpy_scalars(self, device):
+        scalar = np.float64(0.5)
+
+        with self.assertRaisesRegex(RuntimeError, "can't alias NumPy scalars."):
+            torch.asarray(scalar, copy=False)
+
+        tensor = torch.asarray(scalar)
+        self.assertEqual(tensor.dim(), 0)
+        self.assertEqual(tensor.item(), scalar.item())
+        self.assertEqual(tensor.dtype, torch.float64)
+        # Regression test for https://github.com/pytorch/pytorch/issues/97021
+        zerodim_arr = np.array(1.)
+        tensor = torch.asarray(zerodim_arr, dtype=torch.int32)
+        self.assertEqual(tensor.dim(), 0)
+        self.assertEqual(tensor.item(), zerodim_arr.item())
+        self.assertEqual(tensor.dtype, torch.int32)
+
+
 instantiate_device_type_tests(TestTensorCreation, globals())
 instantiate_device_type_tests(TestTensorCreationCudaOnly, globals(), only_for="cuda")
 instantiate_device_type_tests(TestTensorCreationCpuOnly, globals(), only_for="cpu")
@@ -4551,6 +4551,7 @@ instantiate_device_type_tests(TestLikeTensorCreationCpuOnly, globals(), only_for
 instantiate_device_type_tests(TestBufferProtocol, globals(), only_for="cpu")
 instantiate_device_type_tests(TestFromBlob, globals(), only_for="cpu")
 instantiate_device_type_tests(TestAsArray, globals())
+instantiate_device_type_tests(TestAsArrayCpuOnly, globals(), only_for="cpu")
 
 if __name__ == '__main__':
     TestCase._default_dtype_check_enabled = True
