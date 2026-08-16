@@ -1211,7 +1211,8 @@ class _DynamoCapture:
         example_inputs: Sequence[object],
         dynamic: bool = False,
         trains: bool = False,
-        grad_accum_params: list[tuple[int, str]] | None = None,
+        grad_accum_params: list[tuple[int, list[tuple[str, object]], str]]
+        | None = None,
     ) -> None:
         self.bytecode = bytecode
         self.import_sources = import_sources
@@ -1243,22 +1244,82 @@ def _graph_traces_autograd(gm: torch.fx.GraphModule) -> bool:
     )
 
 
+# How deep to look for an nn.Module inside a frame argument. A path is a tuple of
+# ("index"|"key"|"attr", accessor) steps; the driver replays exactly these.
+_MODULE_SEARCH_DEPTH = 4
+_ModulePath = tuple[tuple[str, object], ...]
+
+
+def _walk_for_modules(
+    value: object, path: _ModulePath, seen: set[int], depth: int
+) -> list[tuple[_ModulePath, torch.nn.Module]]:
+    """Find every nn.Module reachable from ``value``, each with the PATH to it.
+
+    A path rather than just a position, because two same-shaped modules in one
+    container are indistinguishable by parameter name: re-searching by name
+    found the first one for both, left the second unseeded, and stamped the
+    first one's grads twice.
+
+    The walk descends into containers AND into plain objects' attributes,
+    because the commonest training shape is a non-Module trainer holding the
+    model (``self.model``), which a container-only search misses -- and missing
+    it is silent, since a capture with nothing to seed bakes the assign form.
+    A missed module is still caught by the refusal in _capture_dynamo, so this
+    only has to cover the shapes worth serving, not every shape.
+    """
+    if depth > _MODULE_SEARCH_DEPTH or id(value) in seen:
+        return []
+    seen.add(id(value))
+    if isinstance(value, torch.nn.Module):
+        return [(path, value)]
+    found: list[tuple[_ModulePath, torch.nn.Module]] = []
+    if isinstance(value, (list, tuple)):
+        for i, inner in enumerate(value):
+            found.extend(
+                _walk_for_modules(inner, path + (("index", i),), seen, depth + 1)
+            )
+    elif isinstance(value, dict):
+        for k, inner in value.items():
+            if isinstance(k, str):
+                found.extend(
+                    _walk_for_modules(inner, path + (("key", k),), seen, depth + 1)
+                )
+    elif hasattr(value, "__dict__") and not isinstance(value, type):
+        for name, inner in vars(value).items():
+            found.extend(
+                _walk_for_modules(inner, path + (("attr", name),), seen, depth + 1)
+            )
+    return found
+
+
+def _assigns_dot_grad(code: types.CodeType) -> bool:
+    """Whether ``code`` STORES to a ``.grad`` attribute anywhere.
+
+    A store, not a mention: ``torch.autograd.grad(...)`` puts "grad" in
+    co_names and returns its gradients rather than scattering them, so a name
+    test flags a capture that has no parameter grad to attribute at all.
+    Nested code objects are searched too, since the store can sit in a
+    comprehension or an inlined helper.
+    """
+    import dis
+
+    for ins in dis.get_instructions(code):
+        if ins.opname == "STORE_ATTR" and ins.argval == "grad":
+            return True
+    return any(
+        _assigns_dot_grad(c) for c in code.co_consts if isinstance(c, types.CodeType)
+    )
+
+
 def _frame_modules(
     fn: Callable[..., object], args: tuple[object, ...]
-) -> list[tuple[int, torch.nn.Module]]:
-    """Every nn.Module the artifact's ``forward`` will receive, with its POSITION.
+) -> list[tuple[int, _ModulePath, torch.nn.Module]]:
+    """Every nn.Module the artifact's ``forward`` will receive, positioned.
 
     Positions are over the FRAME args, not the caller's ``args``: Dynamo traces
-    ``get_traced_fn(fn)`` and ``convert_frame._get_frame`` PREPENDS the bound self,
-    so for an nn.Module ``fn`` -- or a bound method -- the module carrying the
-    parameters is argument 0 and is absent from ``args`` entirely. Scanning ``args``
-    missed it, which silently baked the assign form of the backward (see
-    Note [precompile dynamo training grad accumulation]), and shifted every recorded
-    position by one for a bound method.
-
-    Containers are searched one level down, so ``train_step([model], x, t)`` is
-    covered too; the position recorded is the container's, which is what the driver
-    indexes and then re-searches the same way.
+    ``get_traced_fn(fn)`` and ``convert_frame._get_frame`` PREPENDS the bound
+    self, so for an nn.Module ``fn`` -- or a bound method -- the module carrying
+    the parameters is argument 0 and is absent from ``args`` entirely.
     """
     from torch._dynamo.convert_frame import get_traced_fn
 
@@ -1266,20 +1327,11 @@ def _frame_modules(
     frame_args: list[object] = ([bound_self] if bound_self is not None else []) + list(
         args
     )
-    found: list[tuple[int, torch.nn.Module]] = []
+    seen: set[int] = set()
+    found = []
     for pos, a in enumerate(frame_args):
-        if isinstance(a, torch.nn.Module):
-            found.append((pos, a))
-        elif isinstance(a, (list, tuple)):
-            found.extend(
-                (pos, inner) for inner in a if isinstance(inner, torch.nn.Module)
-            )
-        elif isinstance(a, dict):
-            found.extend(
-                (pos, inner)
-                for inner in a.values()
-                if isinstance(inner, torch.nn.Module)
-            )
+        for path, module in _walk_for_modules(a, (), seen, 0):
+            found.append((pos, path, module))
     return found
 
 
@@ -1304,9 +1356,9 @@ def _param_grad_inputs(
     fn: Callable[..., object],
     args: tuple[object, ...],
     example_inputs: Sequence[object],
-) -> list[tuple[int, str]]:
+) -> list[tuple[int, list[tuple[str, object]], str]]:
     """Name every param whose ``.grad`` the captured graph took as an INPUT, as
-    ``(positional arg index of the owning module, param name)``.
+    ``(frame arg index, path from that arg to the owning module, param name)``.
 
     Matching is by tensor IDENTITY against the graph's real example inputs, not by parsing
     Dynamo's mangled placeholder names: a ``.grad`` reaches the graph as an input exactly
@@ -1315,10 +1367,10 @@ def _param_grad_inputs(
     """
     by_id = {id(t) for t in example_inputs if isinstance(t, torch.Tensor)}
     found = []
-    for pos, module in _frame_modules(fn, args):
+    for pos, path, module in _frame_modules(fn, args):
         for name, p in module.named_parameters(remove_duplicate=False):
             if p.grad is not None and id(p.grad) in by_id:
-                found.append((pos, name))
+                found.append((pos, list(path), name))
     return found
 
 
@@ -1347,7 +1399,7 @@ def _seed_param_grads(
     by_id = {id(t) for t in example_inputs if isinstance(t, torch.Tensor)}
     seeded = []
     try:
-        for _pos, module in _frame_modules(fn, args):
+        for _pos, _path, module in _frame_modules(fn, args):
             for _name, p in module.named_parameters(remove_duplicate=False):
                 if p.grad is None and p.requires_grad and id(p) in by_id:
                     p.grad = torch.zeros_like(p)
@@ -1492,7 +1544,7 @@ def _capture_dynamo(
         ):
             return convert_frame.fullgraph_capture(fn, args, {})
 
-    grad_accum_params: list[tuple[int, str]] = []
+    grad_accum_params: list[tuple[int, list[tuple[str, object]], str]] = []
     try:
         capture_output = _run_capture()
         bi = capture_output.backend_input
@@ -1517,6 +1569,30 @@ def _capture_dynamo(
                 grad_accum_params = _param_grad_inputs(
                     fn, args, bi.example_inputs if bi is not None else []
                 )
+                if not grad_accum_params:
+                    # Nothing to accumulate into means one of two things: the
+                    # captured backward genuinely writes no parameter grad, or
+                    # we failed to FIND the module holding them -- and the
+                    # second is silent by construction, because the artifact
+                    # then bakes Dynamo's assign form and overwrites from the
+                    # second call of a training loop onward (Note [precompile
+                    # dynamo training grad accumulation]). Enumerating the
+                    # shapes that hold a model is a losing game, so refuse when
+                    # the captured bytecode writes a .grad we did not account
+                    # for, rather than trusting the search to be exhaustive.
+                    _rt = capture_output.graph_capture_output.get_runtime_env()
+                    writes_grad = _assigns_dot_grad(_rt.bytecode)
+                    if writes_grad:
+                        raise PrecompileError(
+                            "precompile tracer='dynamo': this training capture writes a "
+                            "parameter's .grad, but precompile could not find the "
+                            "nn.Module holding it among the arguments, so it cannot bake "
+                            "the accumulating form of the backward. The artifact would "
+                            "match eager on the first step and silently overwrite on "
+                            "every step after. Pass the model as an argument (directly, "
+                            "in a list/tuple/dict, or as an attribute of an argument), "
+                            "or use tracer='make_fx'."
+                        )
             finally:
                 for p in seeded:
                     p.grad = None

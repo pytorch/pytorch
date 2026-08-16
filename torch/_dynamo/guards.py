@@ -4303,33 +4303,19 @@ class GuardsStatePickler(pickle.Pickler):
             return cell
         return type(self)._unpickle_cell(_Missing("unguarded function closure"))
 
-    def _reduce_nested_function(
-        self, obj: types.FunctionType
-    ) -> tuple[Callable[..., Any], tuple[Any, ...]]:
-        # pickle memoizes an object only AFTER saving its reduce args, so an arg
-        # that reaches back to obj re-enters this method forever. The ordinary
-        # `wrapped = deco(base)` at module scope does exactly that once the
-        # globals dict is guarded, and two mutually-referencing wrappers do it
-        # across each other. Substitute a sentinel for anything already being
-        # reduced further up the stack; a guard comparing against _Missing
-        # fails, which is the safe direction.
-        if not hasattr(self, "_reducing"):
-            self._reducing = set()
-        self._reducing.add(id(obj))
-        try:
-            return self._reduce_nested_function_inner(obj)
-        finally:
-            self._reducing.discard(id(obj))
+    @staticmethod
+    def _apply_function_globals(
+        fn: types.FunctionType, guarded_globals: dict[str, object]
+    ) -> None:
+        fn.__globals__.update(guarded_globals)
 
-    def _reduce_nested_function_inner(
-        self, obj: types.FunctionType
-    ) -> tuple[Callable[..., Any], tuple[Any, ...]]:
+    def _reduce_nested_function(self, obj: types.FunctionType) -> tuple[Any, ...]:
         snapshot_globals = id(obj.__globals__) in self.guard_tree_values
         guarded_globals = (
             {
                 name: (
                     value
-                    if self._keep(value) and id(value) not in self._reducing
+                    if self._keep(value)
                     else _Missing("unguarded function global")
                 )
                 for name, value in obj.__globals__.items()
@@ -4379,7 +4365,7 @@ class GuardsStatePickler(pickle.Pickler):
                 name: value for name, value in obj.__dict__.items() if self._keep(value)
             }
         )
-        return type(self)._unpickle_nested_function, (
+        args = (
             obj.__code__,
             obj.__module__,
             obj.__qualname__,
@@ -4388,8 +4374,25 @@ class GuardsStatePickler(pickle.Pickler):
             kwdefaults,
             obj.__name__,
             attributes,
-            guarded_globals,
+            None,
             snapshot_globals,
+        )
+        if not snapshot_globals:
+            return type(self)._unpickle_nested_function, args
+        # The snapshot goes in STATE, not in the args. pickle memoizes an object
+        # only after saving its reduce args, so a snapshot passed as an arg that
+        # reaches back to obj -- the ordinary `wrapped = deco(base)` at module
+        # scope, or two functools.wraps helpers referencing each other through
+        # the module dict -- recurses until RecursionError. State is applied
+        # AFTER memoization, so those references resolve to the function pickle
+        # already built.
+        return (
+            type(self)._unpickle_nested_function,
+            args,
+            guarded_globals,
+            None,
+            None,
+            type(self)._apply_function_globals,
         )
 
     # pyrefly: ignore [bad-override]
@@ -4563,7 +4566,16 @@ class GuardsStatePickler(pickle.Pickler):
                 return type(self)._unpickle_bound_method, (func, method_self)
 
         elif isinstance(obj, type((lambda x: lambda: x)(0).__closure__[0])):  # type: ignore[index] # noqa: PLC3002
-            return type(self)._unpickle_cell, (obj.cell_contents,)
+            # An EMPTY cell -- a free variable only assigned on a path that
+            # did not run -- has nothing to read, and reading it raised
+            # ValueError out of here, which reaches the caller as a package
+            # bypass. _reduce_cell handles the cells it builds; this is the
+            # path a cell reached directly takes.
+            try:
+                contents = obj.cell_contents
+            except ValueError:
+                contents = _Missing("empty function closure")
+            return type(self)._unpickle_cell, (contents,)
 
         if hasattr(torch.distributed, "distributed_c10d") and isinstance(
             obj, torch.distributed.distributed_c10d.Work
@@ -4674,20 +4686,17 @@ def pickle_guards_state(
         pickler.dump(state)
     except torch._dynamo.exc.PackageError:
         raise
-    except (AssertionError, RecursionError):
-        # These are OUR bugs, not a user object refusing to pickle: every
-        # AssertionError raised out of this pickler is an internal invariant
-        # (an unserializable SymInt, a sympy Function with no unpickler, the
-        # FSDP checks), and a RecursionError means a reduce cycle we failed to
-        # break. Turning them into PackageError makes them a silent package
-        # bypass under caching_precompile -- an invisible perf regression
-        # rather than a report -- so they propagate.
-        raise
     except Exception as e:
-        # Pickling walks arbitrary user objects, so a __reduce__ or a property
-        # can raise essentially anything; the caller turns PackageError into a
-        # package bypass, or re-raises it under strict_precompile. Name the
-        # original type so the reason stays diagnosable.
+        # Deliberately broad, including AssertionError. It is tempting to let
+        # that one through as "our bug", but it is not ours to claim:
+        # GradScaler.__getstate__ asserts when pickled mid-iteration, tensor
+        # subclasses assert in __tensor_flatten__, and any user assert in a
+        # __reduce__ or a property lands here. Propagating those turns a
+        # serialization limitation into a hard torch.compile failure for a
+        # program that has nothing wrong with it.
+        # The caller turns PackageError into a package bypass, or re-raises it
+        # under strict_precompile. Name the original type so the reason stays
+        # diagnosable in the bypass message.
         raise torch._dynamo.exc.PackageError(f"{type(e).__name__}: {e}") from e
     return buf.getvalue()
 
