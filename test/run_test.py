@@ -1847,10 +1847,6 @@ def get_selected_tests(options) -> list[str]:
             "inductor/test_aot_inductor",
             "inductor/test_torchinductor_dynamic_shapes",
         ]
-    else:
-        # Exclude mps-only tests otherwise
-        options.exclude.extend(["test_mps", "test_metal"])
-
     if options.xpu:
         selected_tests = exclude_tests(XPU_BLOCKLIST, selected_tests, "on XPU")
     else:
