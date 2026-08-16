@@ -6463,57 +6463,6 @@ Done""",
 
                 out.backward()
 
-    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
-    def test_forward_traceback_preserves_exception_with_checkpoint(self):
-        # Regression test: gatherForwardTraceback() must not clear a pending
-        # Python exception.  See combined_traceback.cpp for the fix.
-        #
-        # Ingredients: (1) CUDA memory history recording with context="all"
-        # so allocator callbacks fire on free, (2) a custom library op whose
-        # forward goes through THPFunction_apply (via Generated in
-        # torch._library.autograd), (3) non-reentrant checkpoint.
-        #
-        # During backward recomputation, _StopRecomputationError is raised
-        # from the checkpoint pack_hook inside _save_variables.  The exception
-        # stays pending in Python thread state while C++ stack-unwinds (the
-        # default python_error ctor does not persist).  Destroying the output
-        # THPObjectPtr during unwinding frees the recomputed output tensor's
-        # CUDA storage, triggering the allocator callback ->
-        # CapturedTraceback::gather() -> gatherForwardTraceback().  On
-        # Python < 3.13, without the PyErr_Fetch/PyErr_Restore fix, the
-        # PyDict_GetItemRef compat shim clears the pending exception ->
-        # SystemError.
-        with torch.library._scoped_library("_test_autograd", "FRAGMENT"):
-
-            @torch.library.custom_op("_test_autograd::sin_op", mutates_args=())
-            def sin_op(x: torch.Tensor) -> torch.Tensor:
-                return x.sin()
-
-            def setup_context(ctx, inputs, output):
-                (x,) = inputs
-                ctx.save_for_backward(x)
-
-            def backward(ctx, grad):
-                (x,) = ctx.saved_tensors
-                return grad * x.cos()
-
-            torch.library.register_autograd(
-                "_test_autograd::sin_op",
-                backward,
-                setup_context=setup_context,
-            )
-
-            def fn(x):
-                return torch.ops._test_autograd.sin_op(x)
-
-            try:
-                torch.cuda.memory._record_memory_history("all", stacks="python")
-                x = torch.randn(4, device="cuda", requires_grad=True)
-                y = checkpoint(fn, x, use_reentrant=False)
-                y.sum().backward()
-            finally:
-                torch.cuda.memory._record_memory_history(None)
-
     def test_no_grad_copy(self):
         # create autograd function that saves grad pointer as class static
         class MyFunc(Function):
@@ -7871,57 +7820,6 @@ for shape in [(1,), ()]:
         # compute mean as a proxy for some joint reasoning
         mean_combined = torch.stack(feat_combined).mean()
         mean_combined.backward()
-
-    def _test_checkpointing_non_reentrant_autocast(self, device_type):
-        for enabled in [True, False]:
-
-            def foo(x, y, z):
-                # torch.mm is on autocast's list of ops that should run in
-                # the autocast precision
-                x = torch.mm(x, y)
-                y = torch.mm(x, z)
-                z = torch.mm(z, z)
-                expected_dtype = torch.float32 if not enabled else torch.bfloat16
-                self.assertEqual(expected_dtype, z.dtype)
-                return z
-
-            x = torch.randn(3, 3, requires_grad=True)
-            y = torch.randn(3, 3, requires_grad=True)
-            z = torch.randn(3, 3, requires_grad=True)
-            if device_type in ("cuda", "xpu"):
-                x = x.to(device_type)
-                y = y.to(device_type)
-                z = z.to(device_type)
-
-            with torch.autocast(
-                enabled=enabled, device_type=device_type, dtype=torch.bfloat16
-            ):
-                loss = checkpoint(foo, x, y, z, use_reentrant=False)
-                loss = loss.sum()
-
-            # Without saving + recasting the autocast type, would raise error in autograd
-            # about mismatched dtypes.
-            loss.backward()  # triggers recomputation to check it runs in bfloat
-
-    def test_checkpointing_non_reentrant_autocast_cpu(self):
-        """
-        Test that autocast args such as the dtype are preserved during non-reentrant
-        checkpoint recomputation on CPU.
-        """
-        self._test_checkpointing_non_reentrant_autocast(device_type="cpu")
-
-    @unittest.skipIf(
-        (not torch.cuda.is_available() or not torch.cuda.is_bf16_supported())
-        and (not torch.xpu.is_available() or not torch.xpu.is_bf16_supported()),
-        "Test requires CUDA or XPU bf16 support",
-    )
-    def test_checkpointing_non_reentrant_autocast_gpu(self):
-        """
-        Test that autocast args/kwargs such as the dtype are preserved during
-        non-reentrant checkpoint recomputation on GPU.
-        """
-        device_type = "cuda" if torch.cuda.is_available() else "xpu"
-        self._test_checkpointing_non_reentrant_autocast(device_type=device_type)
 
     def test_checkpointing_without_reentrant_custom_function_works(self):
         msg = "Unpack is being triggered for a tensor that was already unpacked once"
@@ -14833,6 +14731,106 @@ class TestAutogradDeviceType(TestCase):
 
             self.assertTrue(gradcheck(func, x, fast_mode=True))
 
+    def test_checkpointing_non_reentrant_autocast(self, device):
+        if (device.startswith("cuda") and not torch.cuda.is_bf16_supported()) or (
+            device.startswith("xpu") and not torch.xpu.is_bf16_supported()
+        ):
+            self.skipTest("Test requires bf16 support")
+        for enabled in [True, False]:
+
+            def foo(x, y, z):
+                # torch.mm is on autocast's list of ops that should run in
+                # the autocast precision
+                x = torch.mm(x, y)
+                y = torch.mm(x, z)
+                z = torch.mm(z, z)
+                expected_dtype = torch.float32 if not enabled else torch.bfloat16
+                self.assertEqual(expected_dtype, z.dtype)
+                return z
+
+            x = torch.randn(3, 3, requires_grad=True, device=device)
+            y = torch.randn(3, 3, requires_grad=True, device=device)
+            z = torch.randn(3, 3, requires_grad=True, device=device)
+
+            with torch.autocast(
+                enabled=enabled, device_type=device, dtype=torch.bfloat16
+            ):
+                loss = checkpoint(foo, x, y, z, use_reentrant=False)
+                loss = loss.sum()
+
+            # Without saving + recasting the autocast type, would raise error in autograd
+            # about mismatched dtypes.
+            loss.backward()  # triggers recomputation to check it runs in bfloat
+
+    @onlyAccelerator
+    def test_simple_reentrant_cross_device(self, device):
+        class ReentrantFunc(Function):
+            _cpu_mode = True
+
+            @staticmethod
+            def forward(ctx, x):
+                return x * (x + 2)
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                with torch.enable_grad():
+                    if ReentrantFunc._cpu_mode:
+                        new_param = torch.randn(2, 2, requires_grad=True)
+                        (new_param**2).sum().backward()
+                    else:
+                        new_param = torch.randn(2, 2, device=device, requires_grad=True)
+                        (new_param**2).sum().backward()
+                return grad_output
+
+        # Reentrant starts on GPU thread, finishes on GPU thread
+        x = torch.randn(2, 2, device=device, requires_grad=True)
+        out = ReentrantFunc.apply(x)
+        out.sum().backward()
+
+        # Reentrant starts on CPU thread, finishes on GPU thread
+        x = torch.randn(2, 2, requires_grad=True)
+        # set ReentrantFunc node to GPU to emit tasks to GPU queue
+        ReentrantFunc._cpu_mode = False
+        out = ReentrantFunc.apply(x)
+        out.sum().backward()
+
+        # Reentrant starts on GPU thread, finishes on CPU thread
+        x = torch.randn(2, 2, device=device, requires_grad=True)
+        # set ReentrantFunc node to CPU to emit tasks to CPU queue
+        ReentrantFunc._cpu_mode = True
+        out = ReentrantFunc.apply(x)
+        out.sum().backward()
+
+    @onlyAccelerator
+    def test_cross_device_reentrant_autograd(self, device):
+        # Output on gpu so that this task will be associated with the gpu thread
+        def fn_on_gpu(inp):
+            # Artificially increase the priority of the next op to make sure it runs
+            # as soon as we reach it before the ops of branch1.
+            dummy = inp * 2 * 2 * 2 * 2
+            return inp.to(device=device)
+
+        def parent_on_cpu(inp):
+            # Slow branch of ops on gpu so that the work queue for the gpu thread
+            # won't empty too quickly. They also have smaller priorities than the
+            # ones created by fn_on_gpu
+            branch1 = inp.to(device=device)
+            branch1 = branch1 / branch1
+            branch1 = branch1 / branch1
+            branch1 = branch1 / branch1
+            # Perform checkpoint on cpu tensors. So the last op performed in the reentrant
+            # autograd is an AccumulateGrad that runs on the cpu thread for the gpu thread.
+            # So the cpu thread will notify the gpu thread with an empty NodeTask.
+            branch2 = checkpoint(fn_on_gpu, inp, use_reentrant=True)
+            out = branch2 + branch1
+            return out
+
+        inp = torch.rand(2, requires_grad=True)
+        out = parent_on_cpu(inp)
+        # This will segfault if the empty NodeTask is not handled properly in the
+        # gpu thread ReadyQueue
+        out.sum().backward()
+
 
 class TestAllowMutationOnSaved(TestCase):
     hw_classification = HardwareClassification.GENERIC
@@ -16333,24 +16331,6 @@ class TestMultithreadAutograd(TestCase):
         torch.autograd.set_multithreading_enabled(True)
         self.assertTrue(torch.autograd.is_multithreading_enabled())
 
-    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
-    def test_custom_function_propagates_errors_from_device_thread(self):
-        class MyFunc(Function):
-            @staticmethod
-            def forward(ctx, x):
-                return x
-
-            @staticmethod
-            def backward(ctx, gO):
-                raise RuntimeError("blah")
-                return gO
-
-        t = torch.tensor([1.0, 2.0], requires_grad=True, device=torch.device("cuda"))
-        out = MyFunc.apply(t).sum()
-
-        with self.assertRaisesRegex(RuntimeError, "blah"):
-            out.backward()
-
     def test_remove_obj_from_tls(self):
         # Regression test for deadlock introduced by
         # https://github.com/pytorch/pytorch/pull/173568.
@@ -16362,6 +16342,27 @@ class TestMultithreadAutograd(TestCase):
         self.assertTrue(torch._C._is_key_in_tls("test_obj"))
         torch._C._remove_obj_from_tls("test_obj")
         self.assertFalse(torch._C._is_key_in_tls("test_obj"))
+
+
+class TestMultithreadAutogradCudaOnly(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    def test_custom_function_propagates_errors_from_device_thread(self, device):
+        class MyFunc(Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x
+
+            @staticmethod
+            def backward(ctx, gO):
+                raise RuntimeError("blah")
+                return gO
+
+        t = torch.tensor([1.0, 2.0], requires_grad=True, device=device)
+        out = MyFunc.apply(t).sum()
+
+        with self.assertRaisesRegex(RuntimeError, "blah"):
+            out.backward()
 
 
 class TestNestedCheckpoint(TestCase):
@@ -17508,17 +17509,7 @@ class TestSelectiveActivationCheckpoint(TestCase):
             self.assertEqual(my_count[0], 9)
 
 
-@skipIfTorchDynamo("SAC hook interaction under compile tested elsewhere")
-class TestSACAmbientSavedTensorsHooks(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
-    # Characterizes how a user saved_tensors_hooks context wrapped OUTER around
-    # a selective activation checkpoint (SAC) region interacts with the tensors
-    # SAC decides to save. Historically SAC held those tensors outside the
-    # autograd graph, so an ambient hook (e.g. save_on_cpu) never saw them.
-    # The respect_saved_tensors_hooks arg of checkpoint() opts into routing them
-    # through the hook; the default (legacy) leaves them untouched and warns.
-    # These tests pin both behaviors so the eventual default flip is explicit.
+class _TestSACAmbientSavedTensorsHooksBase(TestCase):
     class RecordingHooks:
         # Records the shapes pack sees without transforming the tensor, so it is
         # numerically transparent (models a CPU-offload hook on CPU).
@@ -17593,6 +17584,19 @@ class TestSACAmbientSavedTensorsHooks(TestCase):
             return hooks.packed, fw
         return hooks.packed
 
+
+@skipIfTorchDynamo("SAC hook interaction under compile tested elsewhere")
+class TestSACAmbientSavedTensorsHooks(_TestSACAmbientSavedTensorsHooksBase):
+    hw_classification = HardwareClassification.GENERIC
+
+    # Characterizes how a user saved_tensors_hooks context wrapped OUTER around
+    # a selective activation checkpoint (SAC) region interacts with the tensors
+    # SAC decides to save. Historically SAC held those tensors outside the
+    # autograd graph, so an ambient hook (e.g. save_on_cpu) never saw them.
+    # The respect_saved_tensors_hooks arg of checkpoint() opts into routing them
+    # through the hook; the default (legacy) leaves them untouched and warns.
+    # These tests pin both behaviors so the eventual default flip is explicit.
+
     def test_hook_outer_sac_inner_default_bypasses(self):
         # Legacy default: the ambient hook is blind to the MUST_SAVE mm output.
         # A FutureWarning fires because a user hook is in scope.
@@ -17631,37 +17635,6 @@ class TestSACAmbientSavedTensorsHooks(TestCase):
         x_ref = x.detach().clone().requires_grad_()
         fn(x_ref).backward()
         torch.testing.assert_close(x.grad, x_ref.grad)
-
-    @unittest.skipIf(not torch.cuda.is_available(), "needs CUDA to observe offload")
-    def test_save_on_cpu_device_movement(self):
-        # save_on_cpu moves saved tensors to CPU. Under the default the SAC-kept
-        # mm output never reaches the hook, so it stays on GPU; under the opt-in
-        # the hook sees it and offloads it to CPU.
-        def offloaded_device(respects):
-            device_by_shape = {}
-
-            def pack(t):
-                device_by_shape[tuple(t.shape)] = t.device.type
-                return t.cpu()
-
-            def unpack(t):
-                return t.cuda()
-
-            x = torch.randn(*self.INPUT_SHAPE, device="cuda", requires_grad=True)
-            context_fn = self._mm_save_context_fn()
-            with torch.autograd.graph.saved_tensors_hooks(pack, unpack):
-                out = checkpoint(
-                    self._fn,
-                    x,
-                    use_reentrant=False,
-                    context_fn=context_fn,
-                    respect_saved_tensors_hooks=respects,
-                )
-            out.backward()
-            return device_by_shape
-
-        self.assertNotIn(self.MM_SHAPE, offloaded_device(False))
-        self.assertEqual(offloaded_device(True).get(self.MM_SHAPE), "cuda")
 
     def test_nested_checkpoint_ignores_internal_hooks(self):
         # An inner selective checkpoint nested inside an outer recompute-all
@@ -17750,6 +17723,44 @@ class TestSACAmbientSavedTensorsHooks(TestCase):
             checkpoint(
                 self._fn, x, use_reentrant=True, respect_saved_tensors_hooks=True
             )
+
+
+@skipIfTorchDynamo("SAC hook interaction under compile tested elsewhere")
+class TestSACAmbientSavedTensorsHooksDeviceType(_TestSACAmbientSavedTensorsHooksBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @onlyAccelerator
+    def test_save_on_cpu_device_movement(self, device):
+        # save_on_cpu moves saved tensors to CPU. Under the default the SAC-kept
+        # mm output never reaches the hook, so it stays on GPU; under the opt-in
+        # the hook sees it and offloads it to CPU.
+        def offloaded_device(respects):
+            device_by_shape = {}
+
+            def pack(t):
+                device_by_shape[tuple(t.shape)] = t.device.type
+                return t.cpu()
+
+            def unpack(t):
+                return t.to(device_by_shape)
+
+            x = torch.randn(*self.INPUT_SHAPE, device=device, requires_grad=True)
+            context_fn = self._mm_save_context_fn()
+            with torch.autograd.graph.saved_tensors_hooks(pack, unpack):
+                out = checkpoint(
+                    self._fn,
+                    x,
+                    use_reentrant=False,
+                    context_fn=context_fn,
+                    respect_saved_tensors_hooks=respects,
+                )
+            out.backward()
+            return device_by_shape
+
+        self.assertNotIn(self.MM_SHAPE, offloaded_device(False))
+        self.assertEqual(
+            offloaded_device(True).get(self.MM_SHAPE), torch.device(device).type
+        )
 
 
 class TestAutogradMultipleDispatch(TestCase):
@@ -18200,72 +18211,55 @@ class TestAutogradCudaOnly(TestCase):
             with emit_nvtx():
                 a.add(1.0)
 
-    def test_simple_reentrant_cross_device(self, device):
-        class ReentrantFunc(Function):
-            _cpu_mode = True
+    def test_forward_traceback_preserves_exception_with_checkpoint(self, device):
+        # Regression test: gatherForwardTraceback() must not clear a pending
+        # Python exception.  See combined_traceback.cpp for the fix.
+        #
+        # Ingredients: (1) CUDA memory history recording with context="all"
+        # so allocator callbacks fire on free, (2) a custom library op whose
+        # forward goes through THPFunction_apply (via Generated in
+        # torch._library.autograd), (3) non-reentrant checkpoint.
+        #
+        # During backward recomputation, _StopRecomputationError is raised
+        # from the checkpoint pack_hook inside _save_variables.  The exception
+        # stays pending in Python thread state while C++ stack-unwinds (the
+        # default python_error ctor does not persist).  Destroying the output
+        # THPObjectPtr during unwinding frees the recomputed output tensor's
+        # CUDA storage, triggering the allocator callback ->
+        # CapturedTraceback::gather() -> gatherForwardTraceback().  On
+        # Python < 3.13, without the PyErr_Fetch/PyErr_Restore fix, the
+        # PyDict_GetItemRef compat shim clears the pending exception ->
+        # SystemError.
+        with torch.library._scoped_library("_test_autograd", "FRAGMENT"):
 
-            @staticmethod
-            def forward(ctx, x):
-                return x * (x + 2)
+            @torch.library.custom_op("_test_autograd::sin_op", mutates_args=())
+            def sin_op(x: torch.Tensor) -> torch.Tensor:
+                return x.sin()
 
-            @staticmethod
-            def backward(ctx, grad_output):
-                with torch.enable_grad():
-                    if ReentrantFunc._cpu_mode:
-                        new_param = torch.randn(2, 2, requires_grad=True)
-                        (new_param**2).sum().backward()
-                    else:
-                        new_param = torch.randn(2, 2, device=device, requires_grad=True)
-                        (new_param**2).sum().backward()
-                return grad_output
+            def setup_context(ctx, inputs, output):
+                (x,) = inputs
+                ctx.save_for_backward(x)
 
-        # Reentrant starts on GPU thread, finishes on GPU thread
-        x = torch.randn(2, 2, device=device, requires_grad=True)
-        out = ReentrantFunc.apply(x)
-        out.sum().backward()
+            def backward(ctx, grad):
+                (x,) = ctx.saved_tensors
+                return grad * x.cos()
 
-        # Reentrant starts on CPU thread, finishes on GPU thread
-        x = torch.randn(2, 2, requires_grad=True)
-        # set ReentrantFunc node to GPU to emit tasks to GPU queue
-        ReentrantFunc._cpu_mode = False
-        out = ReentrantFunc.apply(x)
-        out.sum().backward()
+            torch.library.register_autograd(
+                "_test_autograd::sin_op",
+                backward,
+                setup_context=setup_context,
+            )
 
-        # Reentrant starts on GPU thread, finishes on CPU thread
-        x = torch.randn(2, 2, device=device, requires_grad=True)
-        # set ReentrantFunc node to CPU to emit tasks to CPU queue
-        ReentrantFunc._cpu_mode = True
-        out = ReentrantFunc.apply(x)
-        out.sum().backward()
+            def fn(x):
+                return torch.ops._test_autograd.sin_op(x)
 
-    def test_cross_device_reentrant_autograd(self, device):
-        # Output on gpu so that this task will be associated with the gpu thread
-        def fn_on_gpu(inp):
-            # Artificially increase the priority of the next op to make sure it runs
-            # as soon as we reach it before the ops of branch1.
-            dummy = inp * 2 * 2 * 2 * 2
-            return inp.to(device=device)
-
-        def parent_on_cpu(inp):
-            # Slow branch of ops on gpu so that the work queue for the gpu thread
-            # won't empty too quickly. They also have smaller priorities than the
-            # ones created by fn_on_gpu
-            branch1 = inp.to(device=device)
-            branch1 = branch1 / branch1
-            branch1 = branch1 / branch1
-            branch1 = branch1 / branch1
-            # Perform checkpoint on cpu tensors. So the last op performed in the reentrant
-            # autograd is an AccumulateGrad that runs on the cpu thread for the gpu thread.
-            # So the cpu thread will notify the gpu thread with an empty NodeTask.
-            branch2 = checkpoint(fn_on_gpu, inp, use_reentrant=True)
-            out = branch2 + branch1
-            return out
-
-        inp = torch.rand(2, requires_grad=True)
-        out = parent_on_cpu(inp)
-        # This will segfault if the empty NodeTask is not handled properly in the
-        # gpu thread ReadyQueue
-        out.sum().backward()
+            try:
+                torch.cuda.memory._record_memory_history("all", stacks="python")
+                x = torch.randn(4, device=device, requires_grad=True)
+                y = checkpoint(fn, x, use_reentrant=False)
+                y.sum().backward()
+            finally:
+                torch.cuda.memory._record_memory_history(None)
 
 
 # Import test cases from below autograd/ here. These are found
@@ -18279,6 +18273,12 @@ from autograd.test_logging import TestAutogradLogging  # noqa: F401
 
 instantiate_device_type_tests(TestAutogradDeviceType, globals())
 instantiate_device_type_tests(TestAutogradCudaOnly, globals(), only_for="cuda")
+
+instantiate_device_type_tests(
+    TestMultithreadAutogradCudaOnly, globals(), only_for="cuda"
+)
+
+instantiate_device_type_tests(TestSACAmbientSavedTensorsHooksDeviceType, globals())
 
 instantiate_device_type_tests(TestAutogradMultipleDispatch, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestAutogradStreamSynchronization, globals())
