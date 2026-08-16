@@ -624,7 +624,7 @@ class TestGroupBatchFusion(TestCase):
     def test_batch_linear_lhs_skips_view_users(self):
         # A linear whose output feeds a view that needs the whole row contiguous
         # (e.g. flattening across rows) crashes on the fused non-contiguous
-        # slice — torch.compile raises "Cannot view ... strides (224, 1)" below —
+        # slice (torch.compile raises "Cannot view ... strides (224, 1)" below),
         # so it must not be fused while the other pointwise-consumed linears
         # still are. The counter is 1 either way (it counts fuse() groups, not
         # nodes); the discriminator here is the compile not raising.
@@ -654,8 +654,6 @@ class TestGroupBatchFusion(TestCase):
     def test_batch_linear_lhs_split_getitem_walked(self):
         # split returns a tuple, so its users are operator.getitem nodes, which
         # the guard must walk through to reach the downstream view.
-        import operator
-
         from torch._inductor.fx_passes.group_batch_fusion import (
             _has_layout_sensitive_user,
         )

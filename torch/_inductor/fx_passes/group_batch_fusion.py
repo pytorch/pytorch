@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import collections
+import functools
 import logging
 import operator
 from collections import OrderedDict
@@ -618,42 +619,33 @@ def _op_namespace(tgt) -> str | None:
     return None
 
 
-# aten ops whose output layout follows the input (views, or tuple-of-views for
-# split/chunk/unbind), so the fused non-contiguous layout propagates to their
-# consumers. reshape is included even though it may copy when the layout is
-# incompatible — a copy is contiguous, so walking through it is merely
-# conservative. view / as_strided additionally require a compatible layout and
-# can fail on the non-contiguous fused output. The same ops are traced either
-# as call_function[target=aten.view] or call_method[target="view"], so they are
-# matched by their op name.
-_VIEW_OP_NAMES = OrderedSet(
-    [
-        "view",
-        "as_strided",
-        "reshape",
-        "permute",
-        "transpose",
-        "unsqueeze",
-        "squeeze",
-        "expand",
-        "select",
-        "split",
-        "chunk",
-        "unbind",
-        "slice",
-        "detach",
-        "t",
-    ]
-)
+# Whether an aten op is a view (its output aliases its input, per the schema's
+# alias annotations surfaced as OpOverload.is_view). Pre-grad graphs spell the
+# same view op as call_method "view", as torch.split, or as
+# torch.ops.aten.numpy_T, so we match on the op name and ask aten's schema.
+# This tracks the aten table instead of a hand-maintained list (e.g. it covers
+# view_as / narrow / unfold / diagonal / .T without an edit).
+@functools.lru_cache(None)
+def _is_aten_view_name(name: str) -> bool:
+    packet = getattr(torch.ops.aten, name, None)
+    if packet is None:
+        return False
+    # Iterate overloads(): select/slice/transpose/unbind have no .default.
+    return any(getattr(packet, o).is_view for o in packet.overloads())
 
-# view / as_strided additionally require a compatible layout and can crash on
-# the non-contiguous fused output; the rest are layout-preserving and walked.
-_CRASH_VIEW_OPS = OrderedSet(["view", "as_strided"])
+
+# view / as_strided / view_as require a compatible layout and can crash on the
+# non-contiguous fused output; other views (permute, reshape, ...) work on any
+# layout and just propagate it. This is op semantics, not alias info, so it is
+# the one hand-maintained list.
+_CRASH_VIEW_OPS = OrderedSet(["view", "as_strided", "view_as"])
 
 
 def _view_op_kind(user: torch.fx.Node) -> str | None:
-    # "crash" for view/as_strided (can fail on non-contiguous), "propagate" for
-    # the other view-producing ops (layout flows through), None otherwise.
+    # "crash" for view/as_strided/view_as (can fail on non-contiguous),
+    # "propagate" for the other view-producing ops (layout flows through),
+    # None otherwise. The caller (_has_layout_sensitive_user) checks the target
+    # namespace before this, so only aten ops reach the name lookup below.
     if user.op == "call_function":
         # operator.getitem unwraps the tuple returned by split/chunk/unbind and
         # is itself an unguarded view producer (lin(x)[0]); walk through it.
@@ -668,9 +660,9 @@ def _view_op_kind(user: torch.fx.Node) -> str | None:
         name = user.target
     else:
         return None
-    if name in _VIEW_OP_NAMES:
-        return "crash" if name in _CRASH_VIEW_OPS else "propagate"
-    return None
+    if name in _CRASH_VIEW_OPS:
+        return "crash"
+    return "propagate" if _is_aten_view_name(name) else None
 
 
 def _has_layout_sensitive_user(node: torch.fx.Node) -> bool:
