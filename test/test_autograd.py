@@ -7874,57 +7874,6 @@ for shape in [(1,), ()]:
         mean_combined = torch.stack(feat_combined).mean()
         mean_combined.backward()
 
-    def _test_checkpointing_non_reentrant_autocast(self, device_type):
-        for enabled in [True, False]:
-
-            def foo(x, y, z):
-                # torch.mm is on autocast's list of ops that should run in
-                # the autocast precision
-                x = torch.mm(x, y)
-                y = torch.mm(x, z)
-                z = torch.mm(z, z)
-                expected_dtype = torch.float32 if not enabled else torch.bfloat16
-                self.assertEqual(expected_dtype, z.dtype)
-                return z
-
-            x = torch.randn(3, 3, requires_grad=True)
-            y = torch.randn(3, 3, requires_grad=True)
-            z = torch.randn(3, 3, requires_grad=True)
-            if device_type in ("cuda", "xpu"):
-                x = x.to(device_type)
-                y = y.to(device_type)
-                z = z.to(device_type)
-
-            with torch.autocast(
-                enabled=enabled, device_type=device_type, dtype=torch.bfloat16
-            ):
-                loss = checkpoint(foo, x, y, z, use_reentrant=False)
-                loss = loss.sum()
-
-            # Without saving + recasting the autocast type, would raise error in autograd
-            # about mismatched dtypes.
-            loss.backward()  # triggers recomputation to check it runs in bfloat
-
-    def test_checkpointing_non_reentrant_autocast_cpu(self):
-        """
-        Test that autocast args such as the dtype are preserved during non-reentrant
-        checkpoint recomputation on CPU.
-        """
-        self._test_checkpointing_non_reentrant_autocast(device_type="cpu")
-
-    @unittest.skipIf(
-        (not torch.cuda.is_available() or not torch.cuda.is_bf16_supported())
-        and (not torch.xpu.is_available() or not torch.xpu.is_bf16_supported()),
-        "Test requires CUDA or XPU bf16 support",
-    )
-    def test_checkpointing_non_reentrant_autocast_gpu(self):
-        """
-        Test that autocast args/kwargs such as the dtype are preserved during
-        non-reentrant checkpoint recomputation on GPU.
-        """
-        device_type = "cuda" if torch.cuda.is_available() else "xpu"
-        self._test_checkpointing_non_reentrant_autocast(device_type=device_type)
-
     def test_checkpointing_without_reentrant_custom_function_works(self):
         msg = "Unpack is being triggered for a tensor that was already unpacked once"
 
@@ -14923,6 +14872,37 @@ class TestAutogradDeviceType(TestCase):
                 return inp**2.0
 
             self.assertTrue(gradcheck(func, x, fast_mode=True))
+
+    def test_checkpointing_non_reentrant_autocast(self, device):
+        if (device.startswith("cuda") and not torch.cuda.is_bf16_supported()) or (
+            device.startswith("xpu") and not torch.xpu.is_bf16_supported()
+        ):
+            self.skipTest("Test requires bf16 support")
+        for enabled in [True, False]:
+
+            def foo(x, y, z):
+                # torch.mm is on autocast's list of ops that should run in
+                # the autocast precision
+                x = torch.mm(x, y)
+                y = torch.mm(x, z)
+                z = torch.mm(z, z)
+                expected_dtype = torch.float32 if not enabled else torch.bfloat16
+                self.assertEqual(expected_dtype, z.dtype)
+                return z
+
+            x = torch.randn(3, 3, requires_grad=True, device=device)
+            y = torch.randn(3, 3, requires_grad=True, device=device)
+            z = torch.randn(3, 3, requires_grad=True, device=device)
+
+            with torch.autocast(
+                enabled=enabled, device_type=device, dtype=torch.bfloat16
+            ):
+                loss = checkpoint(foo, x, y, z, use_reentrant=False)
+                loss = loss.sum()
+
+            # Without saving + recasting the autocast type, would raise error in autograd
+            # about mismatched dtypes.
+            loss.backward()  # triggers recomputation to check it runs in bfloat
 
 
 class TestAllowMutationOnSaved(TestCase):
