@@ -2,6 +2,7 @@
 
 import contextlib
 import copy
+import dataclasses
 import functools
 import inspect
 import multiprocessing as mp
@@ -649,6 +650,95 @@ def wrap_forward_function(fn: Callable):
 @torch._dynamo.config.patch("enable_aot_compile", True)
 @instantiate_parametrized_tests
 class TestAOTCompile(torch._inductor.test_case.TestCase):
+    def test_no_match_message_survives_a_raising_guard(self):
+        # __call__ has already established that nothing matched; re-evaluating
+        # the guards to say WHY must not replace that answer with a secondary
+        # failure from one entry, which hides both the entry that raised and
+        # every other entry's reason.
+        class RaisingGuardManager:
+            def __init__(self, inner):
+                self._inner = inner
+
+            def check(self, f_locals):
+                return self._inner.check(f_locals)
+
+            def check_verbose(self, f_locals):
+                raise KeyError("G['SOME_GLOBAL']")
+
+        model = torch.compile(ScaleModule(), fullgraph=True, backend="inductor")
+        model._aot_compile(
+            [
+                ModelInput(
+                    args=(torch.randn(3, 3, dtype=torch.float32),),
+                    kwargs={},
+                    contexts=[],
+                ),
+                ModelInput(
+                    args=(torch.randn(3, 3, dtype=torch.float64),),
+                    kwargs={},
+                    contexts=[],
+                ),
+            ]
+        )
+        results = model.forward.compiled_results
+        results[0]._artifacts.guard_manager = RaisingGuardManager(
+            results[0]._artifacts.guard_manager
+        )
+        with self.assertRaises(RuntimeError) as ctx:
+            model(torch.randn(3, 3, dtype=torch.float16))
+        message = str(ctx.exception)
+        self.assertIn("No AOT compiled graph matched this call", message)
+        self.assertIn("KeyError", message)
+        self.assertIn("SOME_GLOBAL", message)
+        # The entry that raised must not swallow the one that can explain itself.
+        self.assertIn("dtype mismatch", message)
+        self.assertEqual(len(message.splitlines()), 4)
+
+    def test_check_compatibility_compares_artifact_against_current_machine(self):
+        # CompileArtifacts.check_compatibility must invoke the CACHED
+        # SystemInfo's method with the current machine as `other`, the way
+        # _DynamoCacheEntry.check_versions does. Reversed, the "artifact
+        # predates cpu_codegen_target" skip is evaluated against the current
+        # machine -- never None -- so every old artifact is rejected, and every
+        # mismatch message reports the two sides the wrong way round.
+        from torch._dynamo.package import SystemInfo
+
+        def fn(x):
+            return x + 1
+
+        compiled = torch.compile(fn, fullgraph=True, backend="eager").aot_compile(
+            ((torch.randn(3, 3),), {})
+        )
+        artifacts = compiled._artifacts
+        self.assertEqual(artifacts.device_type, "cpu")
+        current_target = SystemInfo.current().cpu_codegen_target
+        if current_target is None:
+            # No usable C++ compiler, so there is no current target to compare
+            # against and the skew arms below have nothing to assert. Skipping
+            # rather than failing is the point of the lazy probe.
+            self.skipTest("no CPU codegen target on this host")
+
+        artifacts.system_info = dataclasses.replace(
+            artifacts.system_info, cpu_codegen_target=None
+        )
+        artifacts.check_compatibility()
+
+        stale = ("mips", "DEFAULT", None, "INVALID", None, None)
+        artifacts.system_info = dataclasses.replace(
+            artifacts.system_info, cpu_codegen_target=stale
+        )
+        with self.assertRaises(RuntimeError) as ctx:
+            artifacts.check_compatibility()
+        message = str(ctx.exception)
+        self.assertIn(f"cached={stale}", message)
+        self.assertIn(f"current={current_target}", message)
+
+        artifacts.system_info = dataclasses.replace(
+            artifacts.system_info, cpu_codegen_target=None, torch_version="0.0.0-fake"
+        )
+        with self.assertRaisesRegex(RuntimeError, "0.0.0-fake"):
+            artifacts.check_compatibility()
+
     def path(self):
         path = os.path.join(cache_dir(), f"package_{self.id()}")
         os.makedirs(path, exist_ok=True)

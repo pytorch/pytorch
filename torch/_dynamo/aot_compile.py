@@ -57,8 +57,18 @@ class CompileArtifacts:
     system_info: SystemInfo = dataclasses.field(default_factory=SystemInfo.current)
 
     def check_compatibility(self) -> None:
-        current_system = SystemInfo.current()
-        current_system.check_compatibility(self.system_info, self.device_type)
+        # The CACHED info is the receiver, matching _DynamoCacheEntry: the skip
+        # for an artifact predating cpu_codegen_target keys off self, and every
+        # mismatch message labels self "cached" and the argument "current".
+        # Determining the codegen target runs the C++ toolchain, so only pay for
+        # it when this artifact actually records one to compare against.
+        current = SystemInfo.current(
+            cpu_codegen=(
+                self.device_type == "cpu"
+                and self.system_info.cpu_codegen_target is not None
+            )
+        )
+        self.system_info.check_compatibility(current, self.device_type)
 
 
 class AOTCompilePickler(pickle.Pickler):
@@ -535,8 +545,15 @@ class AOTCompiledModel:
             if guard_manager is None:
                 lines.append(f"  [{i}] <guards unavailable>")
                 continue
-            f_locals = result.prepare_f_locals(self.model, *args, **kwargs)
-            reason = guard_manager.check_verbose(f_locals)
+            # A guard that raises while being re-evaluated for this report must
+            # not replace the report. The call did not match, and that -- along
+            # with every other entry's reason -- is what the caller has to hear.
+            try:
+                f_locals = result.prepare_f_locals(self.model, *args, **kwargs)
+                reason = guard_manager.check_verbose(f_locals)
+            except Exception as e:
+                lines.append(f"  [{i}] <guard check raised {type(e).__name__}: {e}>")
+                continue
             # Report just the failing guard: GuardDebugInfo's repr is multi-line
             # and would break the per-entry layout into an unreadable blob.
             parts = getattr(reason, "verbose_code_parts", None) or [str(reason)]

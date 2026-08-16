@@ -546,6 +546,42 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
     return toplevel.__qualname__, code_source.strip(".")
 
 
+_CpuCodegenTarget = tuple[str, str, str | None, str, int | None, str | None]
+
+
+def _current_cpu_codegen_target() -> _CpuCodegenTarget | None:
+    """The vector-width inputs inductor bakes into generated CPU code.
+
+    ``pick_vec_isa`` dry-compiles a probe with the C++ toolchain: seconds on a
+    cold inductor cache, and a hard ``InvalidCxxCompiler`` where there is no
+    compiler at all. Callers must ask for it only when the artifact can hold CPU
+    native code, and a host that cannot build any records None -- it can neither
+    have produced nor be about to run an inductor CPU kernel, so there is no
+    baked vector width to protect.
+    """
+    from torch._inductor import config as inductor_config
+    from torch._inductor.cpu_vec_isa import pick_vec_isa
+
+    try:
+        vec_isa = str(pick_vec_isa())
+    except Exception:
+        logger.warning(
+            "Could not determine the CPU vector ISA, so no CPU codegen target "
+            "is recorded and none will be checked.",
+            exc_info=True,
+        )
+        return None
+
+    return (
+        platform.machine(),
+        torch.backends.cpu.get_cpu_capability(),
+        os.environ.get("ATEN_CPU_CAPABILITY"),
+        vec_isa,
+        inductor_config.cpp.simdlen,
+        inductor_config.cpp.march,
+    )
+
+
 @dataclasses.dataclass(frozen=True)
 class SystemInfo:
     """
@@ -559,18 +595,17 @@ class SystemInfo:
     toolkit_version: str | None
     triton_version: tuple[int, int] | None
     gpu_name: str | None
-    cpu_codegen_target: (
-        tuple[str, str, str | None, str, int | None, str | None] | None
-    ) = None
+    cpu_codegen_target: _CpuCodegenTarget | None = None
     CHECK_GPUS = ("cuda", "xpu")
 
     @classmethod
-    def current(cls) -> "SystemInfo":
-        """Create a SystemInfo instance with current system information."""
-        # Get GPU name if CUDA or XPU is available
-        gpu_name = None
-        from torch._inductor import config as inductor_config
-        from torch._inductor.cpu_vec_isa import pick_vec_isa
+    def current(cls, *, cpu_codegen: bool = True) -> "SystemInfo":
+        """Create a SystemInfo instance with current system information.
+
+        ``cpu_codegen=False`` skips the toolchain probe behind
+        ``cpu_codegen_target``; everything else in here costs microseconds. Pass
+        it only where the result cannot reach a comparison that reads the field.
+        """
         from torch.utils._triton import get_triton_version
 
         gpu_name, toolkit_version = None, None
@@ -589,14 +624,7 @@ class SystemInfo:
             toolkit_version=toolkit_version,
             triton_version=get_triton_version((0, 0)),
             gpu_name=gpu_name,
-            cpu_codegen_target=(
-                platform.machine(),
-                torch.backends.cpu.get_cpu_capability(),
-                os.environ.get("ATEN_CPU_CAPABILITY"),
-                str(pick_vec_isa()),
-                inductor_config.cpp.simdlen,
-                inductor_config.cpp.march,
-            ),
+            cpu_codegen_target=_current_cpu_codegen_target() if cpu_codegen else None,
         )
 
     def check_compatibility(
@@ -631,9 +659,17 @@ class SystemInfo:
             and self.cpu_codegen_target is not None
             and self.cpu_codegen_target != other.cpu_codegen_target
         ):
+            # None on the current side means the probe could not run at all;
+            # None on the cached side is the "predates the field" case handled
+            # by the condition above and never reaches here.
+            hint = (
+                " The current target is unknown because no usable C++ compiler was found."
+                if other.cpu_codegen_target is None
+                else ""
+            )
             raise RuntimeError(
                 "Compile package was created with a different CPU codegen target: "
-                f"cached={self.cpu_codegen_target}, current={other.cpu_codegen_target}"
+                f"cached={self.cpu_codegen_target}, current={other.cpu_codegen_target}.{hint}"
             )
         if check_codegen and device_type in self.CHECK_GPUS:
             if not getattr(torch, device_type).is_available():
@@ -677,11 +713,19 @@ class _DynamoCacheEntry:
 
     def check_versions(self) -> None:
         """Check if the current system is compatible with the system used to create this cache entry."""
-        current_system_info = SystemInfo.current()
         device_types = getattr(self, "device_types", None) or frozenset(
             (self.device_type,)
         )
         check_codegen = getattr(self, "requires_native_backend_compatibility", True)
+        # Determining the codegen target runs the C++ toolchain, so only pay for
+        # it when this artifact actually records one to compare against.
+        current_system_info = SystemInfo.current(
+            cpu_codegen=(
+                check_codegen
+                and "cpu" in device_types
+                and self.system_info.cpu_codegen_target is not None
+            )
+        )
         for device_type in device_types:
             self.system_info.check_compatibility(
                 current_system_info,
@@ -850,6 +894,11 @@ class CompilePackage:
         # clear all of them. install() covers resume functions and any frame
         # reached through code_source, not just the entry frame.
         self._installed_precompile_codes: list[types.CodeType] = []
+        # One of those codes that actually received entries, used to notice a
+        # torch._dynamo.reset() wiping the install out from under us. A frame
+        # with no guarded code is installed but gets no entries, so it cannot
+        # serve as the probe.
+        self._installed_precompile_probe: types.CodeType | None = None
         self._installed_precompile_region_id = -1
         self._skipped_codes: list[types.CodeType] = []
         self._region_skipped_codes: list[types.CodeType] = []
@@ -1064,19 +1113,27 @@ class CompilePackage:
 
     def update_device_type(self, graph: torch.fx.Graph | None) -> None:
         device_type = _graph_device_type(graph)
-        current = SystemInfo.current()
+        # cpu_codegen_target only guards CPU native code and computing it runs
+        # the C++ toolchain, so a capture that never emits any must not pay for
+        # it. A cpu graph arriving after an accelerator-only prefix backfills the
+        # field, so the artifact still records what it was captured against.
+        needs_cpu_codegen = (
+            self._requires_native_backend_compatibility and device_type == "cpu"
+        )
+        current = SystemInfo.current(cpu_codegen=needs_cpu_codegen)
         if self._system_info is None:
             self._system_info = current
-        elif (
-            self._requires_native_backend_compatibility
-            and device_type == "cpu"
-            and self._system_info.cpu_codegen_target != current.cpu_codegen_target
-        ):
-            raise RuntimeError(
-                "CPU codegen target changed during precompile capture: "
-                f"first={self._system_info.cpu_codegen_target}, "
-                f"current={current.cpu_codegen_target}"
-            )
+        elif needs_cpu_codegen:
+            if self._system_info.cpu_codegen_target is None:
+                self._system_info = dataclasses.replace(
+                    self._system_info, cpu_codegen_target=current.cpu_codegen_target
+                )
+            elif self._system_info.cpu_codegen_target != current.cpu_codegen_target:
+                raise RuntimeError(
+                    "CPU codegen target changed during precompile capture: "
+                    f"first={self._system_info.cpu_codegen_target}, "
+                    f"current={current.cpu_codegen_target}"
+                )
         self._device_types.add(device_type)
 
     def has_current_entry(self) -> bool:
@@ -1219,9 +1276,14 @@ class CompilePackage:
                     by_name = _GLOBAL_BINDINGS.get(module) or {}
                     stack = by_name.get(name) or []
                     for binding in stack:
+                        # The frame we actually joined, not merely the first one
+                        # holding this value: a later load can stack a value an
+                        # earlier one already installed, and deregistering from
+                        # that earlier frame leaves us an owner of ours forever.
                         if binding.value is installed_global.value:
-                            binding.owners.discard(self)
-                            break
+                            if self in binding.owners:
+                                binding.owners.discard(self)
+                                break
                     stack[:] = [b for b in stack if b.owners]
                     survivor = stack[-1].value if stack else _ABSENT_GLOBAL
                     if not stack:
@@ -1232,9 +1294,14 @@ class CompilePackage:
                     # ours; anything else belongs to whoever wrote it.
                     if current is installed_global.value:
                         del module.__dict__[name]
-                elif current is not survivor:
-                    # An owner remains; make sure the name is bound to THEIR
-                    # value rather than to ours or to nothing.
+                elif current is not survivor and (
+                    current is installed_global.value or current is _ABSENT_GLOBAL
+                ):
+                    # An owner remains; put the name back to THEIR value. Only
+                    # when what is bound is ours or gone, though: a bystander
+                    # that rebound it owns it now, exactly as in the delete case
+                    # above, and overwriting it would hand a package's value to
+                    # whatever else in this module reads the name.
                     module.__dict__[name] = survivor
 
         self._installed_globals = {}
@@ -1275,6 +1342,7 @@ class CompilePackage:
                 code, self._installed_precompile_region_id
             )
         self._installed_precompile_codes = []
+        self._installed_precompile_probe = None
         self._installed_precompile_region_id = -1
 
     def _deserialize_backends(
@@ -1329,6 +1397,19 @@ class CompilePackage:
                 except BaseException:
                     logger.exception("Failed to roll back a partial package install")
                 raise
+
+    def installed_entries_dropped(self) -> bool:
+        """
+        True when the precompile entries install() loaded are gone.
+
+        torch._dynamo.reset() clears every code object install() touched -- they
+        all go through convert_frame.input_codes -- while leaving the installed
+        globals behind, so the next call recompiles instead of serving.
+        """
+        from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
+
+        probe = self._installed_precompile_probe
+        return probe is not None and not _debug_get_precompile_entries(probe)
 
     def reset_after_failed_install(self) -> None:
         """Make an install-clean package reusable for a cold-cache fallback."""
@@ -1412,6 +1493,8 @@ class CompilePackage:
                         target_code, self._installed_precompile_region_id
                     )
                     self._installed_precompile_codes.append(target_code)
+                if entry.guarded_codes and self._installed_precompile_probe is None:
+                    self._installed_precompile_probe = target_code
                 for backend_id in entry.backend_ids:
                     if backend_id not in backends:
                         raise RuntimeError(
@@ -1540,7 +1623,9 @@ class CompilePackage:
             source_info=self._source_info,
             device_type=device_type,
             device_types=device_types,
-            system_info=self._system_info or SystemInfo.current(),
+            # _system_info is None only when no graph was ever captured, so
+            # there is nothing baked and no reason to run the toolchain probe.
+            system_info=self._system_info or SystemInfo.current(cpu_codegen=False),
             requires_native_backend_compatibility=(
                 self._requires_native_backend_compatibility
             ),

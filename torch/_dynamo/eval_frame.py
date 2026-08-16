@@ -234,22 +234,33 @@ class DynamoStance:
 
 
 _stance = DynamoStance()
+
+
 # Thread-local: serving() scopes the calls made in ITS block. A process-global
 # counter made one request handler's serving() block reject a concurrent
 # handler's legitimate recompile, and a serving process is multi-threaded by
 # definition.
-_fail_on_recompile_override = threading.local()
-_force_eager_nested_compile = threading.local()
+class DepthTLS(threading.local):
+    # The default lives on the TYPE. Read through getattr(obj, name, default),
+    # a bare threading.local() builds and clears an AttributeError on every
+    # miss, and the miss is the steady state: only a thread inside the scope
+    # ever writes the attribute, so the threads that pay are exactly the ones
+    # that never use the feature. Both counters are read on the per-call path.
+    depth = 0
+
+
+_fail_on_recompile_override = DepthTLS()
+_force_eager_nested_compile = DepthTLS()
 
 
 def _fail_on_recompile_depth() -> int:
-    return getattr(_fail_on_recompile_override, "depth", 0)
+    return _fail_on_recompile_override.depth
 
 
 @contextlib.contextmanager
 def _use_eager_on_nested_compile() -> Generator[None, None, None]:
     """Run torch.compile wrappers eagerly inside compiler-internal tracing."""
-    prior = getattr(_force_eager_nested_compile, "depth", 0)
+    prior = _force_eager_nested_compile.depth
     _force_eager_nested_compile.depth = prior + 1
     try:
         yield
@@ -258,7 +269,7 @@ def _use_eager_on_nested_compile() -> Generator[None, None, None]:
 
 
 def _is_eager_on_nested_compile() -> bool:
-    return getattr(_force_eager_nested_compile, "depth", 0) > 0
+    return _force_eager_nested_compile.depth > 0
 
 
 def _set_stance(stance: DynamoStance) -> DynamoStance:
@@ -1978,6 +1989,9 @@ def _optimize(
             dynamic_shapes=dynamic_shapes,
         )
 
+    # get_compiler_fn erases the name, and torch.compile hands us a
+    # _TorchCompileWrapper rather than the string the user wrote.
+    emits_native_code = getattr(backend, "compiler_name", backend) != "eager"
     backend = get_compiler_fn(backend)
 
     # Find if backend has any extra context manager
@@ -1992,7 +2006,12 @@ def _optimize(
     if config.caching_precompile and package is None:
         from .package import CompilePackage
 
-        package = CompilePackage(fn=None, dynamo=None, ignore_inlined_sources=False)
+        package = CompilePackage(
+            fn=None,
+            dynamo=None,
+            ignore_inlined_sources=False,
+            requires_native_backend_compatibility=emits_native_code,
+        )
 
     return _optimize_catch_errors(
         convert_frame.convert_frame(
@@ -2922,6 +2941,7 @@ def _optimize_assert(
     Used for fullgraph=True and export, since we must always error on graph breaks and ignore
     symbolic_convert.error_on_graph_break. Can also be used for testing.
     """
+    emits_native_code = getattr(backend, "compiler_name", backend) != "eager"
     backend = get_compiler_fn(backend)
 
     # Find if backend has any extra context manager
@@ -2935,7 +2955,12 @@ def _optimize_assert(
         # and OptimizeContext.
         from .package import CompilePackage
 
-        package = CompilePackage(fn=None, dynamo=None, ignore_inlined_sources=False)
+        package = CompilePackage(
+            fn=None,
+            dynamo=None,
+            ignore_inlined_sources=False,
+            requires_native_backend_compatibility=emits_native_code,
+        )
 
     return _optimize_catch_errors(
         convert_frame.convert_frame_assert(

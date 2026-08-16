@@ -134,7 +134,8 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
        keyword ``example_inputs`` always selects multi-graph Dynamo capture.
    :param guard_filter_fn: Multi-graph serialization filter; returns one boolean per guard
        entry. Live capture retains all guards so later examples trigger their recompiles.
-       Every dropped guard is rejected by default when saving.
+       Risky dropped guards are rejected by default when saving, and every
+       custom-filter drop counts as risky.
    :param recompile_limit: Maximum multi-graph variants captured per frame; defaults to 256
        and overrides a lower ambient accumulated-recompile limit for this capture.
    :param dynamic: Multi-graph dynamic-shape policy forwarded to ``torch.compile``.
@@ -227,9 +228,9 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
    Live capture retains all runtime guards so supplied calls cannot silently reuse the
    wrong variant. ``guard_filter_fn`` applies only to the serialized copy: it receives a
    sequence of guard entries and returns one boolean per entry, with ``True`` serializing
-   that guard. The default drops identity guards that cannot be serialized; every dropped
-   guard is refused by default at ``save()``. If that strict requirement is
-   relaxed, every custom-filter drop is still treated as risky.
+   that guard. The default drops identity guards that cannot be serialized; ``save()``
+   refuses the risky subset by default, and every custom-filter drop counts as risky.
+   Refusing every drop is opt-in (``require_no_dropped_guards=True``).
    ``dynamic`` is forwarded to ``torch.compile``. ``invariants`` names a report file written
    after a successful capture.
 
@@ -242,22 +243,22 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 
    Save with
    ``session.save(path, *, require_complete=True, require_no_risky_drops=True,``
-   ``require_no_dropped_guards=True)``. ``require_complete`` rejects missing variants or
+   ``require_no_dropped_guards=False)``. ``require_complete`` rejects missing variants or
    frames and captures that raised. ``require_no_risky_drops`` rejects dropped identity
    guards on configuration-like slots, every custom-filter drop, and every dropped guard
    observed to distinguish captured variants. ``require_no_dropped_guards`` rejects every
-   guard omitted from the serialized artifact and is the strict default because the risky
-   subset is a lint, not a proof. Set it to ``False`` only to choose the relaxed risky-drop
-   policy; accepting that policy's flagged drops requires separately setting
-   ``require_no_risky_drops=False``.
+   guard omitted from the serialized artifact; it is off by default because every model
+   drops identity guards that cannot be serialized, so requiring none would refuse
+   essentially every real artifact. The risky subset is the rail that is on, and it is a
+   lint, not a proof; set ``require_no_risky_drops=False`` to accept its flagged drops.
 
    .. warning::
 
       Capture is by execution, so unexercised paths are absent. Non-tensor values crossing
       a graph break are equality-guarded and may need one captured variant per value.
-      Identity guards cannot be serialized and are dropped from the artifact, so strict
-      saving rejects ordinary programs that depend on them. Relaxing that refusal can make
-      two variants match the same call and silently select the wrong graph. Explicit
+      Identity guards cannot be serialized and are dropped from the artifact, which is
+      why ``require_no_dropped_guards`` is off by default: those drops can make two
+      variants match the same call and silently select the wrong graph. Explicit
       forward-only inference calls in
       the capture block should run under ``torch.no_grad()`` or
       ``torch.inference_mode()``, and serving must use the same grad mode.

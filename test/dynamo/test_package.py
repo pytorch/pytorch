@@ -16,14 +16,17 @@ import pickle
 import queue
 import re
 import sys
+import sysconfig
 import tempfile
 import threading
+import types
 import unittest
 import weakref
 from unittest import mock
 
 import torch
 import torch._dynamo.package as dynamo_package
+import torch._dynamo.precompile_package as dynamo_package_lint
 import torch._dynamo.testing
 import torch._inductor.config
 import torch._inductor.test_case
@@ -2280,6 +2283,52 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             with self.assertRaisesRegex(RuntimeError, "fail_on_recompile"):
                 loaded(torch.randn(7, 8))
 
+    def test_library_module_requires_the_name_to_resolve_to_the_stdlib(self):
+        # The risky-drop waiver keys on the OWNER's module name, and a name is
+        # not an identity: graphlib, queue, code and distutils are all stdlib
+        # names a third party ships. Checking only that the top-level module's
+        # __file__ starts with the stdlib dir does not separate them, because
+        # purelib NESTS inside stdlib (conda) or platstdlib (venv) -- so every
+        # pip-installed shadow of a stdlib name was waived. distutils is the
+        # live example: SETUPTOOLS_USE_DISTUTILS, an environment variable,
+        # chooses between the stdlib copy and setuptools/_distutils.
+        stdlib_root = sysconfig.get_paths()["stdlib"]
+        shadowed = types.ModuleType("graphlib")
+        shadowed.__file__ = os.path.join(
+            stdlib_root, "site-packages", "graphlib", "__init__.py"
+        )
+        unlocated = types.ModuleType("graphlib")  # no __file__, no __spec__
+
+        for module in (shadowed, unlocated):
+            with mock.patch.dict(sys.modules, {"graphlib": module}):
+                self.assertFalse(dynamo_package_lint._is_library_module("graphlib"))
+
+        # Real stdlib and real torch, including the shapes with no file at all,
+        # must keep their waiver: torch._C._nn owns F.gelu, and pyexpat.errors /
+        # xml.parsers.expat.model are stdlib submodules with no location
+        # evidence of their own. Demanding positive evidence at the DEEPEST
+        # module rejects every one of them, so descendants only have to not be
+        # located somewhere else.
+        import xml.parsers.expat  # noqa: F401
+
+        for name in (
+            "torch",
+            "torch._C",
+            "torch._C._nn",
+            "torch.ops",
+            "os.path",
+            "collections.abc",
+            "sys",
+            "zipimport",
+            "pyexpat.errors",
+            "xml.parsers.expat.model",
+        ):
+            self.assertTrue(
+                dynamo_package_lint._is_library_module(name), f"{name} lost its waiver"
+            )
+        self.assertFalse(dynamo_package_lint._is_library_module("numpy"))
+        self.assertFalse(dynamo_package_lint._is_library_module(None))
+
     def test_save_refuses_risky_dropped_identity_guard(self):
         # Identity guards cannot be serialized, so a bare global holding a
         # function loses its guard. Rebinding it between capture and load would
@@ -2853,6 +2902,255 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
 
         self.assertEqual(capture_target.cpu_codegen_target[4], 256)
         self.assertEqual(saved.cpu_codegen_target, capture_target.cpu_codegen_target)
+
+    def test_reset_probe_ignores_an_installed_code_with_no_entries(self):
+        # The probe has to be a code that really RECEIVED entries. A top-level
+        # forward that only dispatches to submodules produces no guarded code of
+        # its own, is installed anyway so its children can serve, and gets zero
+        # entries. Probing "the first installed code" would call that a dropped
+        # install and raise PackageError on every call, forever.
+        n = 5
+        model = PrecompileStack(n)
+        inputs = [torch.randn(*shape) for shape in ((4, 8), (5, 8), (6, 8))]
+        expected = [model(x) for x in inputs]
+
+        session = precompile_capture(
+            model, backend="eager", recompile_limit=64, dynamic=False
+        )
+        with session as compiled:
+            for x in inputs:
+                compiled(x)
+        self.assertEqual(session.summary().uncovered_frames, ("forward",))
+        session.save(
+            self.path(), require_complete=False, require_no_dropped_guards=False
+        )
+
+        torch._dynamo.reset()
+        loaded = precompile_load(
+            model, self.path(), backend="eager", recompile_limit=64, dynamic=False
+        )
+        try:
+            from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
+
+            package = loaded._package
+            installed = package._installed_precompile_codes
+            entryless = [c for c in installed if not _debug_get_precompile_entries(c)]
+            self.assertTrue(entryless, "no entryless installed code to guard against")
+            self.assertIs(installed[0], entryless[0])  # the naive rule's victim
+            self.assertNotIn(package._installed_precompile_probe, entryless)
+            self.assertFalse(package.installed_entries_dropped())
+            with serving():
+                for x, want in zip(inputs, expected):
+                    self.assertEqual(loaded(x), want)
+        finally:
+            loaded.unload()
+
+    def test_reset_invalidates_a_loaded_artifact_loudly(self):
+        # torch._dynamo.reset() clears the precompile entries install() loaded
+        # while leaving the installed globals in place. The next call then
+        # recompiles silently, or under serving() raises the same RecompileError
+        # an uncovered call raises. Neither says the artifact is gone.
+        x = torch.randn(4, 8)
+        session = precompile_capture(
+            staged_with_graph_breaks, backend="eager", dynamic=False
+        )
+        with session as compiled, torch.no_grad():
+            compiled(x)
+        session.save(self.path(), require_no_dropped_guards=False)
+
+        torch._dynamo.reset()
+        loaded = precompile_load(
+            staged_with_graph_breaks, self.path(), backend="eager", dynamic=False
+        )
+        try:
+            with serving(), torch.no_grad():
+                loaded(x)
+            torch._dynamo.reset()
+            for ctx in (contextlib.nullcontext(), serving()):
+                with self.assertRaises(PackageError) as exc, ctx, torch.no_grad():
+                    loaded(x)
+                self.assertIn("torch._dynamo.reset()", str(exc.exception))
+        finally:
+            loaded.unload()
+
+    def test_eager_precompile_does_not_need_a_cxx_toolchain(self):
+        # cpu_codegen_target only guards inductor's baked CPU vector width, but
+        # computing it dry-compiles a probe, so on a host with no compiler an
+        # eager capture -- and, worse, an eager LOAD in a serve-only container --
+        # died with InvalidCxxCompiler on a field nothing will read.
+        import torch._inductor.cpu_vec_isa as cpu_vec_isa
+        from torch._inductor.exc import InvalidCxxCompiler
+
+        calls = []
+
+        def no_toolchain():
+            calls.append(1)
+            raise InvalidCxxCompiler
+
+        model = PrecompileEmptyGraph()
+        x = torch.randn(4)
+        with mock.patch.object(cpu_vec_isa, "pick_vec_isa", no_toolchain):
+            session = torch.compiler.precompile(
+                model, backend="eager", dynamic=False, example_inputs=[(x,)]
+            )
+            entry = session._session._package.cache_entry()
+            self.assertFalse(entry.requires_native_backend_compatibility)
+            self.assertIsNone(entry.system_info.cpu_codegen_target)
+            session.save(self.path())
+
+            torch._dynamo.reset()
+            loaded = torch.compiler.precompile.load_package(
+                model, self.path(), backend="eager", dynamic=False
+            )
+            with loaded, torch.no_grad(), torch.compiler.precompile.serving():
+                self.assertEqual(loaded(x), model(x))
+        self.assertEqual(calls, [])
+
+    def test_accelerator_capture_defers_the_cpu_toolchain_probe(self):
+        # A capture that has only produced accelerator graphs has no CPU vector
+        # width to record, so it must not run the probe. The first cpu graph
+        # backfills the field: the artifact still has to say what it baked.
+        import torch._inductor.cpu_vec_isa as cpu_vec_isa
+
+        def graph_on(device):
+            graph = torch.fx.Graph()
+            graph.call_function(torch.ones, args=(torch.device(device),))
+            return graph
+
+        calls = []
+        real_pick = cpu_vec_isa.pick_vec_isa
+
+        def counting_pick():
+            calls.append(1)
+            return real_pick()
+
+        with mock.patch.object(cpu_vec_isa, "pick_vec_isa", counting_pick):
+            package = CompilePackage(staged_with_graph_breaks)
+            package.update_device_type(graph_on("cuda"))
+            self.assertEqual(calls, [])
+            self.assertIsNone(package.cache_entry().system_info.cpu_codegen_target)
+
+            package.update_device_type(graph_on("cpu"))
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(
+                package.cache_entry().system_info.cpu_codegen_target,
+                SystemInfo.current().cpu_codegen_target,
+            )
+
+    def test_load_skips_the_cpu_probe_when_the_artifact_records_no_target(self):
+        # None means "this artifact never recorded a target", and
+        # check_compatibility already skips the comparison for it, so computing
+        # the current target is pure cost -- and a hard failure with no compiler.
+        import torch._inductor.cpu_vec_isa as cpu_vec_isa
+
+        calls = []
+        real_pick = cpu_vec_isa.pick_vec_isa
+
+        def counting_pick():
+            calls.append(1)
+            return real_pick()
+
+        entry = dynamo_package._DynamoCacheEntry(
+            codes=[],
+            source_info=dynamo_package.SourceInfo(inlined_sources=set()),
+            device_type="cpu",
+            device_types=frozenset(("cpu",)),
+            requires_native_backend_compatibility=True,
+            system_info=dataclasses.replace(
+                SystemInfo.current(), cpu_codegen_target=None
+            ),
+        )
+        with mock.patch.object(cpu_vec_isa, "pick_vec_isa", counting_pick):
+            entry.check_versions()
+        # Counting rather than raising: a probe that merely no longer CRASHES
+        # still costs seconds, and the crash alone is satisfied by making
+        # _current_cpu_codegen_target catch. Not running it is the fix.
+        self.assertEqual(calls, [])
+
+    def test_caching_precompile_eager_does_not_probe_the_cpu_toolchain(self):
+        # torch.compile(backend="eager") under caching_precompile builds its own
+        # CompilePackage, and that package used to demand native backend
+        # compatibility -- so an eager compile dry-compiled a C++ probe for a
+        # vector width no eager artifact can ever bake.
+        import torch._inductor.cpu_vec_isa as cpu_vec_isa
+
+        calls = []
+        real_pick = cpu_vec_isa.pick_vec_isa
+
+        def counting_pick():
+            calls.append(1)
+            return real_pick()
+
+        def f(x):
+            return x.sin() + 1
+
+        with (
+            torch._dynamo.config.patch(caching_precompile=True),
+            mock.patch.object(cpu_vec_isa, "pick_vec_isa", counting_pick),
+        ):
+            torch.compile(f, backend="eager")(torch.randn(4))
+        self.assertEqual(calls, [])
+
+    def test_native_cpu_artifact_still_rejects_a_codegen_skew(self):
+        # Regression guard for the probe-skipping above: an artifact that DOES
+        # record a CPU codegen target must still be compared against this host,
+        # or an AVX-512 capture silently miscomputes on AVX2.
+        entry = dynamo_package._DynamoCacheEntry(
+            codes=[],
+            source_info=dynamo_package.SourceInfo(inlined_sources=set()),
+            device_type="cpu",
+            device_types=frozenset(("cpu",)),
+            requires_native_backend_compatibility=True,
+            system_info=dataclasses.replace(
+                SystemInfo.current(),
+                cpu_codegen_target=("mips", "DEFAULT", None, "INVALID", None, None),
+            ),
+        )
+        with self.assertRaisesRegex(RuntimeError, "different CPU codegen target"):
+            entry.check_versions()
+
+    def test_codegen_skew_message_says_when_the_probe_could_not_run(self):
+        # A CPU-native artifact on a toolchain-less host is still refused, but
+        # the current side is None rather than a target, and "current=None"
+        # alone reads like a precompile bug rather than a missing compiler.
+        import torch._inductor.cpu_vec_isa as cpu_vec_isa
+        from torch._inductor.exc import InvalidCxxCompiler
+
+        def no_toolchain():
+            raise InvalidCxxCompiler
+
+        cached = dataclasses.replace(
+            SystemInfo.current(),
+            cpu_codegen_target=("x86_64", "AVX512", None, "avx512", None, None),
+        )
+        with mock.patch.object(cpu_vec_isa, "pick_vec_isa", no_toolchain):
+            current = SystemInfo.current()
+        self.assertIsNone(current.cpu_codegen_target)
+        with self.assertRaisesRegex(RuntimeError, "no usable C\\+\\+ compiler"):
+            cached.check_compatibility(current, "cpu")
+
+    def test_caching_precompile_inductor_still_records_the_cpu_target(self):
+        # The eager relaxation must not reach the backend that actually bakes a
+        # vector width into the code it ships.
+        seen = []
+        real = dynamo_package.CompilePackage.cache_entry
+
+        def spy(self):
+            entry = real(self)
+            seen.append(entry)
+            return entry
+
+        def f(x):
+            return x.sin() + 1
+
+        with (
+            torch._dynamo.config.patch(caching_precompile=True),
+            mock.patch.object(dynamo_package.CompilePackage, "cache_entry", spy),
+        ):
+            torch.compile(f, backend="inductor")(torch.randn(4))
+        self.assertTrue(seen)
+        self.assertTrue(all(e.requires_native_backend_compatibility for e in seen))
+        self.assertTrue(all(e.system_info.cpu_codegen_target is not None for e in seen))
 
     def test_two_artifacts_sharing_an_inner_frame_both_serve(self):
         # The shared entry frame has no scale guard; scale is checked only by
@@ -4943,6 +5241,70 @@ def staged(x):
             name for name in set(scope) - before if not name.startswith("__import_")
         )
         self.assertEqual(leftover, [])
+
+    def _bare_package(self):
+        """A package that installs no codes: these exercise the name stack only."""
+
+        def fn(x):
+            return x + 1
+
+        return CompilePackage(fn)
+
+    def test_unload_keeps_a_name_a_bystander_rebound(self):
+        # The binding stack is bookkeeping, not ownership of the namespace:
+        # plain torch.compile, a CleanupHook, or user code can rebind a name a
+        # package installed. Rebinding it to a surviving package's value on the
+        # next unload hands them a compiled value they never asked for -- and
+        # once ours is what is bound, the last unload deletes the name outright.
+        module = types.ModuleType("test_precompile_bystander")
+        first = self._bare_package()
+        second = self._bare_package()
+        first._install_global(module, "g", "first")
+        second._install_global(module, "g", "second")
+
+        module.__dict__["g"] = "bystander"
+        second.uninstall()
+        self.assertEqual(module.__dict__.get("g"), "bystander")
+        first.uninstall()
+        self.assertEqual(module.__dict__.get("g"), "bystander")
+
+    def test_unload_restores_a_name_something_deleted(self):
+        # The "or gone" arm: a CleanupHook or torch._dynamo.reset() can delete a
+        # name out from under a still-serving earlier package, and the later
+        # package's unload is where it gets put back.
+        module = types.ModuleType("test_precompile_deleted")
+        first = self._bare_package()
+        second = self._bare_package()
+        first._install_global(module, "g", "first")
+        second._install_global(module, "g", "second")
+
+        del module.__dict__["g"]
+        second.uninstall()
+        self.assertEqual(module.__dict__.get("g"), "first")
+        first.uninstall()
+        self.assertNotIn("g", module.__dict__)
+
+    def test_unload_deregisters_the_frame_it_owns(self):
+        # A serving process can stack one value twice: two loads of the same
+        # artifact write the same value, and a load of a different one lands
+        # between them. Deregistering by value alone finds the earlier frame,
+        # leaves the unloading package an owner of its own frame, and the name
+        # stays bound to an unloaded package's value for good.
+        module = types.ModuleType("test_precompile_phantom")
+        first = self._bare_package()
+        second = self._bare_package()
+        third = self._bare_package()
+        first._install_global(module, "g", "shared")
+        second._install_global(module, "g", "other")
+        third._install_global(module, "g", "shared")
+
+        third.uninstall()
+        # `second` is the top surviving owner, so the name is its value again.
+        self.assertEqual(module.__dict__.get("g"), "other")
+        second.uninstall()
+        first.uninstall()
+        self.assertNotIn("g", module.__dict__)
+        self.assertEqual(dynamo_package._GLOBAL_BINDINGS.get(module, {}), {})
 
 
 if __name__ == "__main__":

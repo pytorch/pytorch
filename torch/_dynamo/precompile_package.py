@@ -87,10 +87,10 @@ Know these before relying on an artifact in production:
   authoritative list. ``risky_dropped_guards`` includes every drop observed to
   distinguish captured variants plus a lint for configuration-like sources; it
   is still not a proof for unobserved deployments. See ``_is_risky_drop``. The
-  public ``torch.compiler.precompile`` facade refuses every dropped guard by
-  default because real models can otherwise return a wrong answer without
-  recompiling. Callers that relax that strict requirement still get the
-  risky-drop lint as a second gate. Some models trip it on
+  public ``torch.compiler.precompile`` facade rejects the RISKY subset by
+  default. Refusing every drop is opt-in: every model drops the identity guards
+  precompile cannot serialize, so ``require_no_dropped_guards=True`` refuses
+  essentially every real artifact. Some models trip the lint on
   library internals: measured on stock models, torchvision resnet18 and
   mobilenet_v3 report none, timm's ViT reports one (a re-exported
   ``torch._assert``) and transformers' Qwen2 reports 33 built from a two-layer
@@ -98,7 +98,8 @@ Know these before relying on an artifact in production:
   attention-implementation registry looks genuinely config-selected. Report
   counts are per model, not per library: torchvision's efficientnet_b0 reports
   2 and timm's swin reports 5, one of which is a real config slot. Audit the
-  list before explicitly relaxing either dropped-guard requirement.
+  list before relying on the relaxed dropped-guard default, and before
+  relaxing the risky-drop rail on top of it.
 * Some models do not capture yet. For example, T5 raises ``PackageError: Cannot
   find module for code <code object __init__`` from ``_get_code_source``, which
   is byte-identical to base and which plain ``caching_precompile`` also raises.
@@ -129,10 +130,12 @@ import contextlib
 import dataclasses
 import functools
 import hashlib
+import importlib.machinery
 import logging
 import os
 import pickle
 import re
+import site
 import sys
 import sysconfig
 import threading
@@ -243,10 +246,10 @@ def default_guard_filter_fn(
 
     Keeping these makes serialization raise for essentially every function, so
     every drop is recorded with its source name in
-    ``PrecompileSummary.dropped_guards``. The public facade's ``save()`` refuses
-    all of them by default. A caller can choose the relaxed risky-drop lint after
-    auditing the deployment, but that lint is not a proof. See
-    ``risky_dropped_guards``.
+    ``PrecompileSummary.dropped_guards``. ``save()`` does NOT refuse them by
+    default -- ``require_no_dropped_guards`` is False, because requiring none
+    would refuse essentially every model. The rail that is on is the risky-drop
+    lint, and a lint is not a proof. See ``risky_dropped_guards``.
     """
     unsupported = CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
     return [
@@ -289,13 +292,127 @@ def _is_dynamo_synthesized(source_name: str) -> bool:
     )
 
 
+# A pip target nested inside the stdlib dir that sysconfig does not name in
+# this layout -- Debian's /usr/lib/python3.X/dist-packages -- still ends in one
+# of these.
+_INSTALL_DIR_NAMES = frozenset({"site-packages", "dist-packages"})
+
+
+def _norm(path: str) -> str:
+    return os.path.normcase(os.path.realpath(path))
+
+
 @functools.cache
-def _stdlib_dirs() -> tuple[str, ...]:
-    return tuple(
-        os.path.realpath(p)
-        for p in (sysconfig.get_paths().get(k) for k in ("stdlib", "platstdlib"))
-        if p
-    )
+def _stdlib_roots() -> tuple[str, ...]:
+    """
+    Where this interpreter's own library lives. os is unquestionably stdlib, so
+    its directory is the direct evidence and the only one that stays right when
+    the stdlib is a zip; sysconfig and sys._stdlib_dir cover a build where os is
+    frozen with no __file__.
+    """
+    roots = []
+    os_file = getattr(os, "__file__", None)
+    if os_file:
+        roots.append(os.path.dirname(os_file))
+    frozen_dir = getattr(sys, "_stdlib_dir", None)  # 3.11+
+    if frozen_dir:
+        roots.append(frozen_dir)
+    paths = sysconfig.get_paths()
+    roots += [p for p in (paths.get("stdlib"), paths.get("platstdlib")) if p]
+    return tuple(sorted({_norm(p) for p in roots}))
+
+
+@functools.cache
+def _install_roots() -> tuple[str, ...]:
+    """
+    Where a third party lands. This is the load-bearing exclusion: purelib is
+    NESTED inside stdlib in a conda layout and inside platstdlib in a venv, so
+    without it every pip-installed package is under a stdlib root.
+    """
+    paths = sysconfig.get_paths()
+    roots = [p for p in (paths.get("purelib"), paths.get("platlib")) if p]
+    for name in ("getsitepackages", "getusersitepackages"):
+        # getattr, not a direct reference: the "old virtualenv site.py" this
+        # guards against does not DEFINE these, so naming them here would raise
+        # the very AttributeError the except is for -- out of a lint, aborting
+        # the capture it was asked to check.
+        get = getattr(site, name, None)
+        try:
+            got = get() if get is not None else None
+        except Exception:
+            continue  # -S, or a site.py that defines it but cannot answer
+        if got is None:
+            continue
+        roots += [got] if isinstance(got, str) else list(got)
+    return tuple(sorted({_norm(p) for p in roots}))
+
+
+@functools.cache
+def _torch_roots() -> tuple[str, ...]:
+    """
+    Every directory torch's own submodules come from. An editable build splits
+    them -- torch/__init__.py out of the source tree, _C.so and version.py out
+    of site-packages -- and torch.__path__ is exactly that set. It is only
+    trusted if the directory this file is running from is in it, so a
+    sys.modules['torch'] that is not us cannot nominate its own roots.
+    """
+    own_file = globals().get("__file__")
+    if not own_file:
+        return ()  # frozen torch: nothing to anchor to, fall back to the name
+    own = _norm(os.path.dirname(os.path.dirname(own_file)))
+    roots = {own}
+    search = getattr(sys.modules.get("torch"), "__path__", None) or ()
+    listed = {_norm(p) for p in search if isinstance(p, str)}
+    if own in listed:
+        roots |= listed
+    return tuple(sorted(roots))
+
+
+def _within(path: str, roots: tuple[str, ...]) -> bool:
+    return any(path == r or path.startswith(r + os.sep) for r in roots)
+
+
+@functools.cache
+def _classify_file(file: str, stdlib: bool) -> bool | None:
+    """
+    Cached on the __file__ string rather than on the module name: the roots are
+    fixed for the process, so the answer for a path never changes, while the
+    module a name resolves to can.
+    """
+    if not os.path.isabs(file):
+        # Resolving it would be against a cwd that is not the one it was
+        # recorded under, so it is evidence in neither direction. torch.ops
+        # really does carry __file__ == "_ops.py".
+        return None
+    path = _norm(file)
+    if not stdlib:
+        return _within(path, _torch_roots())
+    if _INSTALL_DIR_NAMES.intersection(path.split(os.sep)):
+        return False
+    return _within(path, _stdlib_roots()) and not _within(path, _install_roots())
+
+
+def _located(module: types.ModuleType, name: str, stdlib: bool) -> bool | None:
+    """Shipped here (True), shipped elsewhere (False), or no evidence (None)."""
+    # The module dict rather than getattr: a PEP 562 module __getattr__ is user
+    # code, and a module that raises on an unknown attribute would take save()
+    # down from inside a lint.
+    attrs = getattr(module, "__dict__", None) or {}
+    file = attrs.get("__file__")
+    if isinstance(file, str) and file:
+        verdict = _classify_file(file, stdlib)
+        if verdict is not None:
+            return verdict
+    spec = attrs.get("__spec__")
+    origin = getattr(spec, "origin", None)
+    loader = attrs.get("__loader__") or getattr(spec, "loader", None)
+    if origin == "built-in" or loader is importlib.machinery.BuiltinImporter:
+        # Statically linked, and BuiltinImporter precedes PathFinder on
+        # sys.meta_path, so no file on sys.path is reachable under this name.
+        return name.partition(".")[0] in sys.builtin_module_names
+    if origin == "frozen" or loader is importlib.machinery.FrozenImporter:
+        return True  # frozen also precedes the path finder
+    return None  # namespace package, exec'd in memory, REPL __main__
 
 
 def _is_library_module(module_name: str | None) -> bool:
@@ -305,29 +422,43 @@ def _is_library_module(module_name: str | None) -> bool:
     a third party that monkeypatches ``F.gelu`` at import time still diverges,
     and that is called out in ``_is_risky_drop``'s KNOWN GAP.
 
-    sys.stdlib_module_names is a list of NAMES, not an identity test, and a
-    waiver keyed on it alone is a name collision away from being wrong: a user
-    package called graphlib, code, types or queue -- all real stdlib names --
-    would have its config-selected dispatch waived and save() would accept it.
-    So the module has to resolve to something that actually lives in the stdlib
-    directory. A name that is not imported cannot be checked and is therefore
-    not trusted; a builtin or frozen module has no __file__ and is.
+    sys.stdlib_module_names is a list of NAMES, and a waiver keyed on a name is
+    a collision away from being wrong: graphlib, queue, code and distutils are
+    all stdlib names a third party can and does supply. Worse, the name can be
+    right and the code still not be the stdlib's -- in a default setuptools
+    install ``import distutils`` gets site-packages/setuptools/_distutils, and
+    SETUPTOOLS_USE_DISTUTILS picks which one, which is exactly the
+    config-chooses-the-implementation shape this lint exists to catch. So the
+    module has to RESOLVE to code shipped with the interpreter: located under a
+    stdlib root and not under an install root (purelib nests inside stdlib in
+    conda and inside platstdlib in a venv, so the exclusion is what does the
+    work), or with no file at all because it is built in or frozen, which the
+    path finder cannot shadow. A name that is not imported, a namespace
+    package, and a module with no location evidence are all untrusted.
     """
     if module_name is None:
         return False
-    if module_name == "torch" or module_name.startswith("torch."):
-        return True
     top = module_name.partition(".")[0]
-    if top not in sys.stdlib_module_names:
+    if top == "torch":
+        if not _torch_roots():
+            return True
+        stdlib = False
+    elif top in sys.stdlib_module_names:
+        stdlib = True
+    else:
         return False
-    module = sys.modules.get(top)
-    if module is None:
+    root = sys.modules.get(top)
+    if root is None or _located(root, top, stdlib) is not True:
         return False
-    origin = getattr(module, "__file__", None)
-    if origin is None:
-        # builtin or frozen: nothing on disk to shadow it
-        return top in sys.builtin_module_names or module_name in sys.modules
-    return os.path.realpath(origin).startswith(_stdlib_dirs())
+    parts = module_name.split(".")
+    for i in range(2, len(parts) + 1):
+        name = ".".join(parts[:i])
+        module = sys.modules.get(name)
+        # An unimported inner name has nothing to check, and the package it
+        # would have to be found in has already been located.
+        if module is not None and _located(module, name, stdlib) is False:
+            return False
+    return True
 
 
 def _defined_where_read(
@@ -1443,12 +1574,12 @@ class PrecompileSession:
 
         ``require_complete`` gates exactly ``PrecompileSummary.complete``. The
         two guard rails are separate from it, because a dropped guard is a wrong
-        answer rather than a gap in coverage. The public
-        ``torch.compiler.precompile`` facade requires no
-        dropped guards by default because the risky subset is deliberately only
-        a lint, not a proof. This private helper retains its relaxed default for
-        existing Dynamo package callers; its risky subset remains rejected
-        unless separately acknowledged.
+        answer rather than a gap in coverage. ``require_no_dropped_guards`` is
+        False here and in the public ``torch.compiler.precompile`` facade:
+        every model drops the identity guards precompile cannot serialize, so
+        requiring none refuses essentially every real artifact. The rail that
+        is on by default is ``require_no_risky_drops``, and the risky subset is
+        deliberately only a lint, not a proof.
 
         ``path`` is a FILE, written exactly as given with parent directories
         created, and ``precompile_load`` takes it straight back. Same contract
@@ -1614,9 +1745,9 @@ def precompile_capture(
 
     Runtime guards remain intact during capture. ``guard_filter_fn`` applies
     only to the serialized guard state, so every supplied example observes the
-    same recompilation behavior as ordinary ``torch.compile``. The public facade
-    refuses every dropped guard by default; under the relaxed policy, every
-    guard a custom filter drops is still treated as risky.
+    same recompilation behavior as ordinary ``torch.compile``. ``save()`` refuses
+    the risky subset by default rather than every drop, and every guard a custom
+    filter drops counts as risky.
     """
     return PrecompileSession(
         fn,
@@ -1645,9 +1776,11 @@ def precompile_load(
     optimize context before its globals and guarded codes are installed -- so it
     is done here rather than left to callers.
 
-    Installing mutates global state on the underlying code objects, which
-    ``torch._dynamo.reset()`` does not undo, so the result is also a context
-    manager that unloads on exit.
+    Installing mutates global state on the underlying code objects, so the result
+    is also a context manager that unloads on exit. ``torch._dynamo.reset()`` is
+    not that unload: it destroys the precompile entries while leaving the
+    installed globals in place, so a call after a reset raises rather than
+    silently recompiling. Load the artifact again instead.
 
     Runtime guards remain intact for any compilation allowed outside
     ``serving()``. ``guard_filter_fn`` affects only its serialized package state.
@@ -1708,6 +1841,14 @@ class PrecompiledCallable:
         with self._state:
             if not self._loaded or self._unloading:
                 raise RuntimeError("PrecompiledCallable has been unloaded")
+            if self._package.installed_entries_dropped():
+                raise PackageError(
+                    "torch._dynamo.reset() cleared the precompiled code this "
+                    "artifact installed. The installed globals are still in "
+                    "place, so this call would silently recompile instead of "
+                    "serving, or fail with an indistinguishable RecompileError "
+                    "under serving(). Load the artifact again after the reset."
+                )
             compiled = self._compiled
             if compiled is None:
                 raise AssertionError("loaded callable is missing")
