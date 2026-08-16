@@ -317,8 +317,10 @@ log = logging.getLogger(__name__)
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping, Sequence
+    from collections.abc import Callable, Iterator, Mapping, Sequence
 
+    from torch._dynamo import convert_frame
+    from torch._dynamo.source import Source
     from torch._subclasses.fake_tensor import FakeTensorMode
 
 
@@ -1195,7 +1197,7 @@ class _DynamoCapture:
     ``trains`` marks a capture that performs autograd (the graph carries a traced
     ``torch.autograd.grad``), and ``grad_accum_params`` then names every param the graph
     accumulates a gradient into, as ``(positional arg index of its module, param name)``;
-    see _seed_param_grads and the emitted driver."""
+    see _seed_grad_targets and the emitted driver."""
 
     def __init__(
         self,
@@ -1247,14 +1249,20 @@ def _graph_traces_autograd(gm: torch.fx.GraphModule) -> bool:
 # How deep to look for an nn.Module inside a frame argument. A path is a tuple of
 # ("index"|"key"|"attr", accessor) steps; the driver replays exactly these.
 _MODULE_SEARCH_DEPTH = 6
-# A walk is bounded so an argument that happens to reference a large object
-# graph cannot dominate capture time.
-_MODULE_SEARCH_BUDGET = 2000
+# Objects walked PER FRAME ARGUMENT, so an argument that happens to reference a
+# large object graph cannot dominate capture time. Per argument rather than one
+# counter shared by the frame: a shared one let a big EARLIER argument (a vocab,
+# an in-memory dataset) exhaust the walk before it reached the model in a later
+# argument, so whether the artifact was correct depended on the argument ORDER.
+# The walk below stops expanding as soon as the budget is gone, so the cost is
+# O(budget) rather than O(size of the argument), which is what makes a budget
+# this large cheaper on a pathological argument than the old 2000 was.
+_MODULE_SEARCH_BUDGET = 20000
 _ModulePath = tuple[tuple[str, object], ...]
 
 
 def _walk_for_modules(
-    value: object, path: _ModulePath, seen: set[int], budget: list[int], depth: int
+    value: object, budget: list[int]
 ) -> list[tuple[_ModulePath, torch.nn.Module]]:
     """Find every nn.Module reachable from ``value``, each with the PATH to it.
 
@@ -1263,53 +1271,76 @@ def _walk_for_modules(
     found the first one for both, left the second unseeded, and stamped the
     first one's grads twice.
 
-    ``seen`` is per ARGUMENT, not shared across the frame: one module reachable
-    from two arguments has to be recorded at BOTH paths, because the runtime
-    call may put a different object at each and the driver replays each path
-    independently. Sharing the set recorded only the first and then crashed on
-    the second.
+    The walk starts over for each ARGUMENT (a fresh ``seen`` set and a fresh
+    budget, see _frame_modules), never once for the whole frame: one module
+    reachable from two arguments has to be recorded at BOTH paths, because the
+    runtime call may put a different object at each and the driver replays each
+    path independently. Sharing the set recorded only the first and then crashed
+    on the second.
 
     A module found is not descended into: its own parameters come from
     named_parameters(), and its children are reached through it.
+
+    BREADTH first, so the budget cuts off the deepest layer rather than whatever
+    the first attribute happened to lead into. A trainer holding both a big
+    ``self.dataset`` and ``self.model`` is the ordinary shape, and depth first
+    opened the dataset and never reached the model -- silently, since a training
+    capture with nothing to seed bakes the overwriting form of the backward.
     """
-    if depth > _MODULE_SEARCH_DEPTH or budget[0] <= 0 or id(value) in seen:
-        return []
-    budget[0] -= 1
-    seen.add(id(value))
-    if isinstance(value, torch.nn.Module):
-        return [(path, value)]
-    # Never walk into a module object: it is a namespace, not model state, and
-    # `torch` alone reaches ~48k objects.
-    if isinstance(value, (types.ModuleType, type)):
-        return []
     found: list[tuple[_ModulePath, torch.nn.Module]] = []
-    if isinstance(value, (list, tuple)):
-        for i, inner in enumerate(value):
-            found.extend(
-                _walk_for_modules(
-                    inner, path + (("index", i),), seen, budget, depth + 1
-                )
-            )
-    elif isinstance(value, dict):
-        # Any hashable key, not just str: {0: model} is an ordinary shape, and
-        # the driver's `obj[key]` replay does not care what the key is.
-        for k, inner in value.items():
-            found.extend(
-                _walk_for_modules(inner, path + (("key", k),), seen, budget, depth + 1)
-            )
-    else:
-        for name in _attribute_names(value):
-            try:
-                inner = getattr(value, name)
-            except Exception:
-                # A property can raise; it is not somewhere a model lives.
+    seen: set[int] = {id(value)}
+    frontier: list[tuple[_ModulePath, object]] = [((), value)]
+    for depth in range(_MODULE_SEARCH_DEPTH + 1):
+        if not frontier:
+            break
+        nxt: list[tuple[_ModulePath, object]] = []
+        for path, obj in frontier:
+            if budget[0] <= 0:
+                break
+            budget[0] -= 1
+            if isinstance(obj, torch.nn.Module):
+                found.append((path, obj))
                 continue
-            found.extend(
-                _walk_for_modules(
-                    inner, path + (("attr", name),), seen, budget, depth + 1
-                )
-            )
+            # Never walk into a module object: it is a namespace, not model
+            # state, and `torch` alone reaches ~48k objects.
+            if isinstance(obj, (types.ModuleType, type)):
+                continue
+            if depth == _MODULE_SEARCH_DEPTH:
+                continue
+            edges: Iterator[tuple[tuple[str, object], object]]
+            if isinstance(obj, (list, tuple)):
+                edges = ((("index", i), v) for i, v in enumerate(obj))
+            elif isinstance(obj, dict):
+                # Any hashable key, not just str: {0: model} is an ordinary
+                # shape. A key the artifact cannot write down is refused later,
+                # by _param_grad_inputs, and only if a model is actually found
+                # behind it (_representable_as_source).
+                edges = ((("key", k), v) for k, v in obj.items())
+            else:
+                edges = ((("attr", n), v) for n, v in _attribute_edges(obj))
+            for step, inner in edges:
+                # Stop EXPANDING once the frontier already covers the remaining
+                # budget: without this the walk still pays a full iteration of a
+                # 300k-element argument to enqueue objects it will never look at.
+                if len(nxt) >= budget[0]:
+                    break
+                if id(inner) in seen:
+                    continue
+                seen.add(id(inner))
+                nxt.append((path + (step,), inner))
+        frontier = nxt
     return found
+
+
+def _attribute_edges(value: object) -> Iterator[tuple[str, object]]:
+    """(name, value) for each instance attribute, lazily -- the walk stops
+    consuming this as soon as its budget is gone."""
+    for name in _attribute_names(value):
+        try:
+            yield name, getattr(value, name)
+        except Exception:
+            # A property can raise; it is not somewhere a model lives.
+            continue
 
 
 def _attribute_names(value: object) -> list[str]:
@@ -1344,11 +1375,27 @@ def _frame_modules(
     frame_args: list[object] = ([bound_self] if bound_self is not None else []) + list(
         args
     )
-    budget = [_MODULE_SEARCH_BUDGET]
     found = []
+    truncated = False
     for pos, a in enumerate(frame_args):
-        for path, module in _walk_for_modules(a, (), set(), budget, 0):
+        budget = [_MODULE_SEARCH_BUDGET]
+        for path, module in _walk_for_modules(a, budget):
             found.append((pos, path, module))
+        truncated = truncated or budget[0] <= 0
+    if truncated and not found:
+        # Only when the search came back EMPTY and we know it was cut short:
+        # that is the combination that silently bakes the overwriting form of a
+        # backward (this walk runs only for a training capture). Having found
+        # some module but missed another is not detectable here, and is what the
+        # per-tensor attribution check at the end of _capture_dynamo is for.
+        log.warning(
+            "precompile: no nn.Module was found in fn's arguments, and the search "
+            "for one stopped early after %d objects in at least one argument. A "
+            "training capture that finds no model cannot bake the accumulating form "
+            "of its backward. Pass the model as its own argument, or hold it in a "
+            "shallower container.",
+            _MODULE_SEARCH_BUDGET,
+        )
     return found
 
 
@@ -1369,35 +1416,64 @@ def _module_import_name(module: types.ModuleType) -> str | None:
     return None
 
 
-def _param_grad_inputs(
-    fn: Callable[..., object],
-    args: tuple[object, ...],
-    example_inputs: Sequence[object],
-) -> list[tuple[int, list[tuple[str, object]], str]]:
-    """Name every param whose ``.grad`` the captured graph took as an INPUT, as
-    ``(frame arg index, path from that arg to the owning module, param name)``.
+def _representable_as_source(key: object) -> bool:
+    """Whether ``key`` survives the artifact, which stores it as SOURCE TEXT.
 
-    Matching is by tensor IDENTITY against the graph's real example inputs, not by parsing
-    Dynamo's mangled placeholder names: a ``.grad`` reaches the graph as an input exactly
-    when the traced backward accumulates into it (``p.grad.add_(new_grad)``), which is the
-    form precompile wants (see _seed_param_grads), and identity is what actually says so.
+    GRAD_ACCUM_PARAMS is emitted with repr() and read back by ast.literal_eval
+    (load) and exec (the driver), so a key is usable exactly when its repr is a
+    literal that reads back EQUAL -- equality (and matching hash) rather than
+    identity because that is all the driver's ``obj[key]`` lookup needs. An enum
+    member reprs as ``<K.A: 1>``, which is not even parseable: the capture
+    succeeded and load() then rejected the whole file as "not a precompile
+    artifact".
     """
-    by_id = {id(t) for t in example_inputs if isinstance(t, torch.Tensor)}
-    found = []
-    for pos, path, module in _frame_modules(fn, args):
-        for name, p in module.named_parameters(remove_duplicate=False):
-            if p.grad is not None and id(p.grad) in by_id:
-                found.append((pos, list(path), name))
-    return found
+    import ast
+
+    try:
+        rebuilt = ast.literal_eval(repr(key))
+    except Exception:
+        return False
+    try:
+        return bool(rebuilt == key) and hash(rebuilt) == hash(key)
+    except Exception:
+        # __eq__ / __hash__ are user code and can raise or return a non-bool
+        # (a Tensor key); either way the key is not one we can write down.
+        return False
 
 
-def _seed_param_grads(
-    fn: Callable[..., object],
-    args: tuple[object, ...],
-    example_inputs: Sequence[object],
-) -> list[torch.nn.Parameter]:
-    """Give every graph-input param that has no ``.grad`` a zero one, so a re-capture bakes
-    the ACCUMULATING form of the backward. Returns the params that were seeded (for restore).
+def _grad_target_inputs(gm: torch.fx.GraphModule, n_inputs: int) -> set[int]:
+    """Graph-input indices of the tensors the traced backward differentiates.
+
+    Dynamo lowers both ``Tensor.backward()`` and ``torch.autograd.grad`` to ONE in-graph
+    ``torch.autograd.grad(loss, inputs)`` node, so that node's ``inputs`` list is exactly
+    the set of leaves that can receive a ``.grad``. An unrecognized shape falls back to
+    every input: seeding more can only turn a silent wrong answer into a refusal.
+    """
+    phs = list(gm.graph.find_nodes(op="placeholder"))
+    if len(phs) != n_inputs:
+        raise PrecompileError(
+            f"internal: the captured dynamo subgraph has {len(phs)} placeholders but "
+            f"{n_inputs} example inputs, so precompile cannot tell which tensors its "
+            "backward differentiates."
+        )
+    idx = {id(n): i for i, n in enumerate(phs)}
+    targets: set[int] = set()
+    saw = False
+    for node in gm.graph.nodes:
+        if node.op == "call_function" and node.target is torch.autograd.grad:
+            saw = True
+            inputs = node.args[1] if len(node.args) > 1 else node.kwargs.get("inputs")
+            if not isinstance(inputs, (list, tuple)):
+                return set(range(len(phs)))
+            targets.update(idx[id(v)] for v in inputs if id(v) in idx)
+    return targets if saw else set()
+
+
+def _seed_grad_targets(
+    gm: torch.fx.GraphModule, example_inputs: Sequence[object]
+) -> list[torch.Tensor]:
+    """Give every tensor the traced backward differentiates a zero ``.grad`` if it has
+    none, so a re-capture bakes the ACCUMULATING form. Returns what was seeded.
 
     Note [precompile dynamo training grad accumulation]
     Dynamo's backward rewrite SPECIALIZES on whether ``p.grad`` is None at trace time: with
@@ -1409,25 +1485,122 @@ def _seed_param_grads(
     materialize a zero ``.grad`` for a param the runtime model left at None; zero + accum
     equals eager's assign on the first step, and equals eager on every step after.
 
-    Only params the graph actually READS are seeded (identity-matched against the capture's
-    example inputs), so an unused or frozen param is never given a grad it would not
-    otherwise get, and a big inference model is not made to allocate a full set of grads.
+    Seeding is driven by the GRAPH, not by the module walk, because the walk is the thing
+    that can miss a param -- and a param the walk missed is precisely the one that would
+    silently bake the assign form. Seeding it makes its ``.grad`` a graph INPUT, which is
+    what the attribution check in _param_grad_inputs can see and refuse. The seed is
+    therefore not just a fixup, it is the ORACLE: whether the re-capture still bakes the
+    assign form is exactly how precompile learns that fn nulls that ``.grad`` itself
+    (``zero_grad(set_to_none=True)``, ``p.grad = None``), in which case the assign form is
+    what eager does too. Keyed on requires_grad rather than isinstance(Parameter): a
+    requires_grad BUFFER or a bare tensor attribute is a legal autograd target that
+    named_parameters() can never name, and it has to be caught, not skipped.
     """
-    by_id = {id(t) for t in example_inputs if isinstance(t, torch.Tensor)}
-    seeded = []
+    seeded: list[torch.Tensor] = []
     try:
-        for _pos, _path, module in _frame_modules(fn, args):
-            for _name, p in module.named_parameters(remove_duplicate=False):
-                if p.grad is None and p.requires_grad and id(p) in by_id:
-                    p.grad = torch.zeros_like(p)
-                    seeded.append(p)
+        for i in sorted(_grad_target_inputs(gm, len(example_inputs))):
+            t = example_inputs[i]
+            if (
+                isinstance(t, torch.Tensor)
+                and t.requires_grad
+                and t.is_leaf
+                and t.grad is None
+            ):
+                t.grad = torch.zeros_like(t)
+                seeded.append(t)
     except BaseException:
         # Seeding mutates the CALLER's model, so a failure part way through --
         # an OOM on zeros_like for a large model -- must not leave grads behind.
-        for p in seeded:
-            p.grad = None
+        for t in seeded:
+            t.grad = None
         raise
     return seeded
+
+
+def _dot_grad_graph_inputs(
+    example_inputs: Sequence[object], sources: Mapping[int, Source]
+) -> dict[int, str]:
+    """``{graph-input index: access path}`` for every input that is some tensor's ``.grad``.
+
+    Two detectors, unioned, because each fails open on its own and refusing is the safe
+    direction: the SOURCE label is precise and names a path for the error message but is
+    Dynamo's spelling and could be renamed; IDENTITY cannot be renamed but cannot see a
+    ``.grad`` whose owner the forward never read.
+    """
+    from torch._dynamo.source import AttrSource, GradSource
+
+    found: dict[int, str] = {}
+    for i, src in (sources or {}).items():
+        if isinstance(src, GradSource) or (
+            isinstance(src, AttrSource) and src.member == "grad"
+        ):
+            found[i] = src.name
+    owners = {
+        id(t.grad)
+        for t in example_inputs
+        if isinstance(t, torch.Tensor) and t.grad is not None
+    }
+    for i, t in enumerate(example_inputs):
+        if isinstance(t, torch.Tensor) and id(t) in owners and i not in found:
+            src = (sources or {}).get(i)
+            found[i] = src.name if src is not None else f"graph input #{i}"
+    return found
+
+
+def _param_grad_inputs(
+    fn: Callable[..., object],
+    args: tuple[object, ...],
+    capture_output: convert_frame.CaptureOutput,
+) -> tuple[list[tuple[int, list[tuple[str, object]], str]], list[str], bool]:
+    """``(grad_accum_params, unattributed, any_grad_inputs)``.
+
+    ``grad_accum_params`` names every param whose ``.grad`` the graph took as an INPUT, by
+    tensor IDENTITY (not by parsing Dynamo's mangled placeholder names), as ``(frame arg
+    index, path from that arg to the owning module, param name)``. ``unattributed`` is
+    every OTHER ``.grad`` graph input: the artifact will pass it to the graph, the only
+    mechanism for guaranteeing it exists at runtime is a GRAD_ACCUM_PARAMS entry, and we
+    could not write one -- so the caller refuses. Same loop builds both, so the check and
+    its remedy cannot drift apart.
+    """
+    bi = capture_output.backend_input
+    example_inputs = list(bi.example_inputs) if bi is not None else []
+    sources = getattr(
+        capture_output.graph_capture_output.output_graph.export_metadata,
+        "graph_input_idx_to_local_source",
+        {},
+    )
+    by_id = {id(t) for t in example_inputs if isinstance(t, torch.Tensor)}
+    found = []
+    covered = set()
+    for pos, path, module in _frame_modules(fn, args):
+        for name, p in module.named_parameters(remove_duplicate=False):
+            if p.grad is not None and id(p.grad) in by_id:
+                # Checked here, on the paths actually EMITTED, rather than in
+                # the walk: a dict keyed by something unwritable is only a
+                # problem when a trained model turns out to live behind it.
+                for kind, acc in path:
+                    if kind == "key" and not _representable_as_source(acc):
+                        raise PrecompileError(
+                            "precompile tracer='dynamo': fn's argument "
+                            f"{pos} reaches the nn.Module owning parameter "
+                            f"{name!r} through a dict keyed by {acc!r} (a "
+                            f"{type(acc).__name__}). The artifact records that "
+                            "path as source text, so the key has to be one whose "
+                            "repr() is a Python literal that reads back equal -- "
+                            "a str, int, bool, float, bytes, None, or a tuple of "
+                            "those. Key the dict by the module's name instead, or "
+                            "hold the modules in a list or an attribute."
+                        )
+                found.append((pos, list(path), name))
+                covered.add(id(p.grad))
+    grad_inputs = _dot_grad_graph_inputs(example_inputs, sources)
+    unattributed = [
+        # the OWNER is what the user has to make reachable, so drop the ".grad" tail
+        path.removesuffix(".grad")
+        for i, path in sorted(grad_inputs.items())
+        if id(example_inputs[i]) not in covered
+    ]
+    return found, unattributed, bool(grad_inputs)
 
 
 def _decompose_subgraph(
@@ -1562,30 +1735,36 @@ def _capture_dynamo(
             return convert_frame.fullgraph_capture(fn, args, {})
 
     grad_accum_params: list[tuple[int, list[tuple[str, object]], str]] = []
+    unattributed_grads: list[str] = []
     try:
         capture_output = _run_capture()
         bi = capture_output.backend_input
         trains = bi is not None and _graph_traces_autograd(bi.graph_module)
         if trains:
-            # Training: re-capture with a zero .grad on every graph-input param that lacks
-            # one, so the backward's ``.grad`` update is baked in its ACCUMULATING form on
-            # every param (Note [precompile dynamo training grad accumulation]). Seeding
-            # needs the first capture's example inputs to know WHICH params the graph reads,
+            # Training: re-capture with a zero .grad on every tensor the traced backward
+            # differentiates that lacks one, so the ``.grad`` update is baked in its
+            # ACCUMULATING form (Note [precompile dynamo training grad accumulation]).
+            # Seeding needs the first capture's graph to know WHICH tensors those are,
             # hence two passes; a model whose params already carry grads (a warm training
-            # loop) needs no seeding and skips the second pass. The seeds are recorded while
-            # still attached (that is what _param_grad_inputs matches on) and dropped in the
-            # finally -- the captured graph keeps its own reference, so the lowering below
-            # still sees them, and the caller's model is left exactly as it was.
+            # loop) needs no seeding and skips the second pass. The seeds are recorded
+            # while still attached (that is what _param_grad_inputs matches on) and dropped
+            # in the finally -- the captured graph keeps its own reference, so the lowering
+            # below still sees them, and the caller's model is left exactly as it was.
             if bi is None:
                 raise AssertionError("a training capture always has a backend input")
-            seeded = _seed_param_grads(fn, args, bi.example_inputs)
+            first_capture = capture_output
+            seeded = _seed_grad_targets(bi.graph_module, bi.example_inputs)
             try:
                 if seeded:
                     capture_output = _run_capture()
-                    bi = capture_output.backend_input
-                grad_accum_params = _param_grad_inputs(
-                    fn, args, bi.example_inputs if bi is not None else []
+                grad_accum_params, unattributed_grads, any_grad_inputs = (
+                    _param_grad_inputs(fn, args, capture_output)
                 )
+                if seeded and not any_grad_inputs:
+                    # The re-capture bakes no accumulate at all -- fn nulls .grad itself,
+                    # or only returns grads -- so the seeds bought nothing and only changed
+                    # what fn OBSERVED about .grad. Ship the unseeded capture.
+                    capture_output = first_capture
             finally:
                 for p in seeded:
                     p.grad = None
@@ -1713,6 +1892,29 @@ def _capture_dynamo(
                 "parameters, so that input's gradient would be baked with a trace-time "
                 "assumption about its .grad. Pass the tensor as a module parameter, detach "
                 "it (or set requires_grad=False) before the call, or use tracer='make_fx'."
+            )
+
+        if unattributed_grads:
+            raise PrecompileError(
+                "precompile tracer='dynamo': fn's backward accumulates a gradient into "
+                f"{len(unattributed_grads)} tensor(s) that precompile cannot re-create at "
+                "runtime, because it could not find the nn.Module that owns them among "
+                f"fn's arguments: {unattributed_grads}. The artifact bakes "
+                "``p.grad.add_(new)``, so it must materialize a zero .grad for each one "
+                "before the call, and it can only do that for a parameter it can name; "
+                "baking the assign form instead would match eager on the first call and "
+                "silently OVERWRITE on every call after (Note [precompile dynamo training "
+                "grad accumulation]). precompile searches each argument (including the "
+                "bound self of a method or nn.Module fn) through attributes, lists, tuples "
+                f"and dicts, at most {_MODULE_SEARCH_DEPTH} steps deep and "
+                f"{_MODULE_SEARCH_BUDGET} objects wide, then names parameters with "
+                "named_parameters(). Fix by passing the owning module as its own argument; "
+                "by moving the model ahead of the large unrelated attribute that exhausted "
+                "the search; by registering submodules with nn.ModuleList / nn.ModuleDict "
+                "rather than a plain list or dict; and by registering a trainable tensor "
+                "with register_parameter rather than as a requires_grad buffer or a bare "
+                "attribute. tracer='make_fx' does not help here -- it cannot reach the "
+                "tensor either and refuses too."
             )
 
     gm = bi.graph_module if bi is not None else None
