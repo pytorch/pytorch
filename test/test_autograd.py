@@ -17742,7 +17742,7 @@ class TestSACAmbientSavedTensorsHooksDeviceType(_TestSACAmbientSavedTensorsHooks
                 return t.cpu()
 
             def unpack(t):
-                return t.to(device_by_shape)
+                return t.to(device)
 
             x = torch.randn(*self.INPUT_SHAPE, device=device, requires_grad=True)
             context_fn = self._mm_save_context_fn()
