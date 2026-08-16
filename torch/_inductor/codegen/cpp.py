@@ -1551,7 +1551,7 @@ class CppVecOverrides(CppOverrides):
             # Padded divisor lanes must stay non-zero: masked tail loads
             # zero-fill the unused lanes, and a zero there trips the
             # divide-by-zero check even though the lane is never stored.
-            _t = f"decltype({a})"
+            _t = f"decltype({b})"
             b = f"{_t}::set({_t}(1), {b}, {cexpr_index(V.kernel.num_elems)})"
             return f"remainder_integral({a}, {b})"
         return f"{a} - ({CppVecOverrides.floordiv(a, b)}) * {b}"
@@ -2904,11 +2904,6 @@ class CppVecKernel(CppKernel):
         if num_vectors < 1:
             raise AssertionError("expected num_vectors >= 1")
         return num_vectors
-
-    def _get_raw_num_vectors(self, dtype: torch.dtype) -> float:
-        # This utility function is used to check if the vector lanes has been
-        # fully utilized. For example, uint8 will only use 1/4 of the vector lanes.
-        return self.tiling_factor * dtype.itemsize * 8 / self.vec_isa.bit_width()
 
     def _get_vec_type(self, dtype: torch.dtype) -> str:
         num_vectors = self._get_num_vectors(dtype)

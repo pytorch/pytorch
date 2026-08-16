@@ -3688,7 +3688,9 @@ class CPUReproTests(TestCase):
                 a = torch.arange(2 * length, dtype=dtype).reshape(2, length) + 1
                 b = torch.full((length,), 16, dtype=dtype)
                 torch._dynamo.reset()
+                metrics.reset()
                 self.common(fn, (a, b))
+                check_metrics_vec_kernel_count(1)
 
         a = torch.arange(6, dtype=torch.int64).reshape(2, 3)
         b = torch.tensor([16, 0, 16], dtype=torch.int64)
