@@ -230,7 +230,7 @@ def clear_compile_context_weakrefs(
     tracer_output: DynamoTracerOutput | None,
     compiler_fn: CompilerFn,
 ) -> None:
-    """Clear WeakIdRef entries that can block swap_tensors after compile."""
+    """Clear compile-context references that can retain tensors after compile."""
     should_clear = config.invalidate_compile_context_weakrefs
     if should_clear is None:
         should_clear = _is_registered_backend(innermost_backend(compiler_fn))
@@ -246,6 +246,7 @@ def clear_compile_context_weakrefs(
     _clear_fake_mode_weakrefs(tc.fake_mode)
     if hasattr(output_graph, "_old_fake_mode"):
         _clear_fake_mode_weakrefs(output_graph._old_fake_mode)
+    output_graph.tracked_fakes.clear()
 
 
 class Tracker:
