@@ -35,7 +35,20 @@ from torch.testing._internal.inductor_utils import (
 )
 
 
-torch.set_float32_matmul_precision("high")
+_PRIOR_FP32_MATMUL_PRECISION: str | None = None
+
+
+def setUpModule():
+    global _PRIOR_FP32_MATMUL_PRECISION
+    _PRIOR_FP32_MATMUL_PRECISION = torch.get_float32_matmul_precision()
+    torch.set_float32_matmul_precision("high")
+
+
+def tearDownModule():
+    global _PRIOR_FP32_MATMUL_PRECISION
+    if _PRIOR_FP32_MATMUL_PRECISION is not None:
+        torch.set_float32_matmul_precision(_PRIOR_FP32_MATMUL_PRECISION)
+        _PRIOR_FP32_MATMUL_PRECISION = None
 
 
 @unittest.skipIf(IS_MACOS, "TODO: mac")
@@ -100,7 +113,7 @@ class TestCustomOpAutoTune(TestCase):
             # Basic sanity checks
             self.assertTrue(
                 torch.isfinite(result).all(),
-                f"{op_name} {name} produced non-finite values",
+                lambda msg: f"{msg}\n{op_name} {name} produced non-finite values",
             )
 
         # Verify numerical equivalence
@@ -531,7 +544,7 @@ class TestCustomOpAutoTune(TestCase):
         test_weight = torch.randn(32, device=self.device, dtype=self.dtype)
 
         def find_shape_dispatch(code_list):
-            pattern = re.compile(r"if\s+s\d+\s*[<>=]")
+            pattern = re.compile(r"if\s+s\d+\s*[<>=]|_selector\s*=\s*int\(.*\bs\d+")
             return [
                 line.strip()
                 for code in code_list
@@ -629,10 +642,10 @@ class TestCustomOpAutoTune(TestCase):
         cuda_graph_benchmark_called = False
         original_benchmark_gpu_with_cuda_graph = torch._inductor.runtime.benchmarking.Benchmarker.benchmark_gpu_with_cuda_graph
 
-        def patched_benchmark_gpu_with_cuda_graph(self, fn):
+        def patched_benchmark_gpu_with_cuda_graph(self, fn, *args, **kwargs):
             nonlocal cuda_graph_benchmark_called
             cuda_graph_benchmark_called = True
-            return original_benchmark_gpu_with_cuda_graph(self, fn)
+            return original_benchmark_gpu_with_cuda_graph(self, fn, *args, **kwargs)
 
         torch._dynamo.reset()
         with config.patch(max_autotune=True, fx_graph_cache=False):
@@ -895,7 +908,9 @@ class TestCustomOpAutoTune(TestCase):
         # Verify we got concrete integers during benchmarking (not symbolic)
         unique_shapes = sorted(set(shapes_seen))
         for shape in unique_shapes:
-            self.assertIsInstance(shape, int, f"Expected int, got {type(shape)}")
+            self.assertIsInstance(
+                shape, int, lambda msg: f"{msg}\nExpected int, got {type(shape)}"
+            )
 
         # Verify we hit all 3 ranges during autotuning
         ranges_hit = set()

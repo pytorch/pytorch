@@ -102,6 +102,22 @@ AOTI_API AOTIRuntimeError AOTInductorModelContainerCreateWithDevice(
     const char* device_str,
     const char* cubin_dir);
 
+// Creates an AOTInductor model container with externally-provided weights.
+// No weights are loaded from the .so: the provided constants are used directly
+// (zero-copy of tensor storage, user retains ownership). Constant folding runs
+// at creation time so the container is ready for inference immediately.
+// Constants are passed as a flat array of ABI-stable
+// AOTInductorConstantMapEntry (name -> AtenTensorHandle) rather than
+// AOTInductorConstantMapHandle, which is not ABI stable across the DSO
+// boundary.
+AOTI_API AOTIRuntimeError AOTInductorModelContainerCreateWithExternalConstants(
+    AOTInductorModelContainerHandle* container_handle,
+    size_t num_models,
+    const char* device_str,
+    const char* cubin_dir,
+    const AOTInductorConstantMapEntry* constant_entries,
+    size_t num_constant_entries);
+
 // Deletes the AOTInductor model container.
 AOTI_API AOTIRuntimeError AOTInductorModelContainerDelete(
     AOTInductorModelContainerHandle container_handle);
@@ -366,6 +382,11 @@ AOTI_API AOTIRuntimeError AOTInductorModelUpdateConstantsMapV2(
 AOTI_API AOTIRuntimeError AOTInductorModelContainerGetConstantsBlobSize(
     AOTInductorModelContainerHandle container_handle,
     uint64_t* ret_size);
+
+// Returns whether the container's model invoked load_constants().
+AOTI_API AOTIRuntimeError AOTInductorModelContainerDidCallLoadConstants(
+    AOTInductorModelContainerHandle container_handle,
+    bool* did_call_load_constants);
 
 // Load weights from a single blob in weight_blob_ptr
 AOTI_API AOTIRuntimeError AOTInductorModelUpdateConstantsFromBlob(
