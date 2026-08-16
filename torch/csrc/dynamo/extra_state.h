@@ -299,6 +299,9 @@ void _load_precompile_entry(
     py::object dynamo_code,
     int64_t isolate_recompiles_id);
 py::list _debug_get_precompile_entries(const py::handle& code_obj);
+bool _has_precompile_entries(
+    const py::handle& code_obj,
+    int64_t isolate_recompiles_id);
 void _set_lru_cache(const py::object& boolean);
 
 #endif
