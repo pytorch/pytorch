@@ -134,6 +134,7 @@ import os
 import pickle
 import re
 import sys
+import sysconfig
 import threading
 import types
 from collections.abc import Callable, Iterator, Sequence
@@ -288,18 +289,45 @@ def _is_dynamo_synthesized(source_name: str) -> bool:
     )
 
 
+@functools.cache
+def _stdlib_dirs() -> tuple[str, ...]:
+    return tuple(
+        os.path.realpath(p)
+        for p in (sysconfig.get_paths().get(k) for k in ("stdlib", "platstdlib"))
+        if p
+    )
+
+
 def _is_library_module(module_name: str | None) -> bool:
     """
     Owned by torch or the stdlib, so config on the serving machine does not
     choose between implementations. NB this trusts the OWNER, not the binding:
     a third party that monkeypatches ``F.gelu`` at import time still diverges,
     and that is called out in ``_is_risky_drop``'s KNOWN GAP.
+
+    sys.stdlib_module_names is a list of NAMES, not an identity test, and a
+    waiver keyed on it alone is a name collision away from being wrong: a user
+    package called graphlib, code, types or queue -- all real stdlib names --
+    would have its config-selected dispatch waived and save() would accept it.
+    So the module has to resolve to something that actually lives in the stdlib
+    directory. A name that is not imported cannot be checked and is therefore
+    not trusted; a builtin or frozen module has no __file__ and is.
     """
     if module_name is None:
         return False
     if module_name == "torch" or module_name.startswith("torch."):
         return True
-    return module_name.partition(".")[0] in sys.stdlib_module_names
+    top = module_name.partition(".")[0]
+    if top not in sys.stdlib_module_names:
+        return False
+    module = sys.modules.get(top)
+    if module is None:
+        return False
+    origin = getattr(module, "__file__", None)
+    if origin is None:
+        # builtin or frozen: nothing on disk to shadow it
+        return top in sys.builtin_module_names or module_name in sys.modules
+    return os.path.realpath(origin).startswith(_stdlib_dirs())
 
 
 def _defined_where_read(

@@ -1060,11 +1060,13 @@ class TestPrecompile(TestCase):
             typing.get_type_hints(session_type.invariants)["return"],
             tuple[torch.compiler.FrameInvariants, ...],
         )
-        self.assertTrue(
-            inspect.signature(session_type.save)
-            .parameters["require_no_dropped_guards"]
-            .default
-        )
+        params = inspect.signature(session_type.save).parameters
+        # The risky-drop lint is the rail that is ON by default. Requiring NO
+        # dropped guards at all is not, and must not be: every model drops the
+        # identity guards precompile cannot serialize, so it would refuse
+        # essentially every real artifact.
+        self.assertTrue(params["require_no_risky_drops"].default)
+        self.assertFalse(params["require_no_dropped_guards"].default)
 
     @parametrize("name", ["capture", "load_package"])
     def test_precompile_package_method_documents_guard_filter(self, name):
@@ -1380,6 +1382,9 @@ class TestPrecompile(TestCase):
             "bound_method",
             "in_a_holder",
             "two_in_a_list",
+            "same_module_twice",
+            "int_keyed_dict",
+            "slots_holder",
         ],
     )
     def test_tracer_dynamo_training_accumulates_whatever_holds_the_params(self, shape):
@@ -1475,6 +1480,74 @@ class TestPrecompile(TestCase):
             mk = mk_holder
             call = lambda r: (holders[id(r)], x, t)  # noqa: E731
             eager = lambda r: holders[id(r)].step(x, t)  # noqa: E731
+        elif shape == "same_module_twice":
+            # One module reachable from TWO arguments. A `seen` set shared
+            # across the frame recorded only the first path and then crashed
+            # replaying it against the second argument.
+            def step_logged(log, model, xx, tt):
+                torch.nn.functional.mse_loss(model(xx), tt).backward()
+
+            # The SAME object in both slots at capture is what makes a
+            # frame-wide `seen` set skip the second position; at runtime the
+            # log holds something else, so only the arg-1 path finds the model
+            # being trained. Recording just the first path seeds the wrong
+            # module and the trained one is left unseeded.
+            captured = fresh()
+            others = {}
+
+            def mk_logged():
+                m = fresh()
+                others[id(m)] = torch.nn.Linear(4, 3)
+                return m
+
+            fn = step_logged
+            cap = ({"last": captured}, captured, x, t)
+            mk = mk_logged
+            call = lambda r: ({"last": others[id(r)]}, r, x, t)  # noqa: E731
+            eager = lambda r: step_logged({"last": others[id(r)]}, r, x, t)  # noqa: E731
+        elif shape == "int_keyed_dict":
+            # A non-str dict key is an ordinary shape; the driver's obj[key]
+            # replay does not care what the key is.
+            def step_dict(models, xx, tt):
+                torch.nn.functional.mse_loss(models[0](xx), tt).backward()
+
+            dicts = {}
+
+            def mk_dict():
+                m = fresh()
+                dicts[id(m)] = {0: m}
+                return m
+
+            fn = step_dict
+            cap = ({0: fresh()}, x, t)
+            mk = mk_dict
+            call = lambda r: (dicts[id(r)], x, t)  # noqa: E731
+            eager = lambda r: step_dict(dicts[id(r)], x, t)  # noqa: E731
+        elif shape == "slots_holder":
+            # A __slots__ holder has no __dict__ at all, so a vars()-only walk
+            # missed the model -- silently, since a capture with nothing to
+            # seed bakes the assign form.
+            class Slotted:
+                __slots__ = ("model",)
+
+                def __init__(self, model):
+                    self.model = model
+
+                def step(self, xx, tt):
+                    torch.nn.functional.mse_loss(self.model(xx), tt).backward()
+
+            slotted = {}
+
+            def mk_slotted():
+                h = Slotted(fresh())
+                slotted[id(h.model)] = h
+                return h.model
+
+            fn = Slotted(fresh()).step
+            cap = (x, t)
+            mk = mk_slotted
+            call = lambda r: (slotted[id(r)], x, t)  # noqa: E731
+            eager = lambda r: slotted[id(r)].step(x, t)  # noqa: E731
         else:
             # Two same-shaped modules in ONE container: indistinguishable by
             # parameter name, so a name search stamps the first one twice and
@@ -1518,26 +1591,6 @@ class TestPrecompile(TestCase):
         exec(compile(src, mod.__file__, "exec"), mod.__dict__)
         sys.modules[name] = mod
         return mod
-
-    def test_tracer_dynamo_training_refuses_an_unreachable_model(self):
-        # Enumerating the shapes that can hold a model is a losing game, and
-        # every miss is SILENT: the artifact bakes Dynamo's assign form and
-        # overwrites from the second step. So a capture whose bytecode writes a
-        # .grad precompile could not attribute is refused outright.
-        x, t = torch.randn(5, 4), torch.randn(5, 3)
-
-        def make_step():
-            m = torch.nn.Linear(4, 3)  # reachable only through the closure
-
-            def step(xx, tt):
-                torch.nn.functional.mse_loss(m(xx), tt).backward()
-
-            return step
-
-        with self.assertRaisesRegex(PrecompileError, "could not find the nn.Module"):
-            torch.compiler.precompile(
-                make_step(), x, t, tracer="dynamo", backend="eager"
-            )
 
     def test_tracer_dynamo_module_global_round_trips_by_sys_modules_key(self):
         # A module GLOBAL is by-reference state: recording it in IMPORT_SOURCES
@@ -1691,7 +1744,7 @@ class TestPrecompile(TestCase):
         )
         self.assertEqual(session.summary().guarded_codes, 3)
         with tempfile.TemporaryDirectory() as tmp:
-            with self.assertRaisesRegex(PrecompileError, "not serialized"):
+            with self.assertRaisesRegex(PrecompileError, "can affect dispatch"):
                 session.save(os.path.join(tmp, "artifact.pt"))
 
     def test_multi_graph_custom_guard_filter_fails_closed(self):
@@ -2112,9 +2165,11 @@ class TestPrecompile(TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "artifact.pt")
-            with self.assertRaisesRegex(PrecompileError, "not serialized"):
-                session.save(path)
-            session.save(path, require_no_dropped_guards=False)
+            # A plain nn.Module saves under the DOCUMENTED defaults. It drops
+            # torch-owned MODULE_MATCH/BUILTIN_MATCH guards, which the lint
+            # correctly does not call risky -- requiring zero dropped guards
+            # would refuse this, and every other real model with it.
+            session.save(path)
             torch._dynamo.reset()
             with self.assertLogs("torch._precompile", level="WARNING"):
                 loaded = torch.compiler.precompile.load_package(

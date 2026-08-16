@@ -87,6 +87,26 @@ class _InstalledGlobal:
     value: object
 
 
+@dataclasses.dataclass
+class _GlobalBinding:
+    """One value bound under a name, and the live packages that installed it."""
+
+    value: object
+    owners: weakref.WeakSet["CompilePackage"]
+
+
+# module -> name -> STACK of _GlobalBinding, oldest first.
+#
+# Several live packages can need one name at once. Two loads of the SAME
+# artifact write the same value and share a binding; two loads of different
+# artifacts displace each other and get separate ones. Either way the name must
+# survive until its last owner leaves, and an unload that pops the top has to
+# REBIND to whatever is underneath rather than delete -- an earlier package is
+# still serving and still reads that name from this module. Deleting is only
+# right when the stack empties.
+_GLOBAL_BINDINGS: WeakIdKeyDictionary = WeakIdKeyDictionary()
+
+
 def _code_cache(fn: Callable[..., Any]) -> Callable[..., Any]:
     def _(
         cls: type[Any], code: Union["SerializedCode", types.CodeType]
@@ -1160,6 +1180,12 @@ class CompilePackage:
         self._installed_globals.setdefault(module, []).append(
             _InstalledGlobal(name, value)
         )
+        with _INSTALLER_REGISTRY_LOCK:
+            by_name = _GLOBAL_BINDINGS.setdefault(module, {})
+            stack = by_name.setdefault(name, [])
+            if not stack or stack[-1].value is not value:
+                stack.append(_GlobalBinding(value=value, owners=weakref.WeakSet()))
+            stack[-1].owners.add(self)
 
     def uninstall(self) -> None:
         with _PACKAGE_INSTALL_LOCK:
@@ -1171,21 +1197,45 @@ class CompilePackage:
         if self._innermost_fn is None:
             raise AssertionError("_innermost_fn is not set in uninstall")
         # This namespace is shared with plain torch.compile and with any other
-        # package loaded for the same module, so remove a name only while it is
-        # still bound to what we wrote: one something else has rebound since
-        # belongs to that writer now, and popping it leaves live consumers of
-        # the name with a NameError. Deliberately no attempt to put back what we
-        # displaced -- the only writer that displaces one of these names is a
-        # second package installing the same artifact, whose load orphaned the
-        # first package's value already, so restoring it on the later unload
-        # would leave a compiled backend bound in the module forever.
+        # package loaded for the same module, so a name goes only when BOTH
+        # hold: it is still bound to what we wrote (something that has rebound
+        # since owns it now, and popping it leaves live consumers with a
+        # NameError), and we are its last live owner. Two packages loaded from
+        # one artifact -- the ordinary replica shape -- write the same value
+        # under the same name, and dropping it on the first unload broke the
+        # one still serving. Deliberately no attempt to put back what we
+        # displaced: a writer that displaced this name orphaned our value when
+        # it did so, and restoring it later would leave a compiled backend
+        # bound in the module forever.
         for module, installed in self._installed_globals.items():
             for installed_global in installed:
-                if (
-                    module.__dict__.get(installed_global.name, _ABSENT_GLOBAL)
-                    is installed_global.value
-                ):
-                    del module.__dict__[installed_global.name]
+                name = installed_global.name
+                # Deregister FIRST, unconditionally. Whether our value is still
+                # the one bound decides what to do with the namespace, not
+                # whether we are still an owner: a package whose binding was
+                # displaced by a later load must still drop its claim, or the
+                # last unload finds a phantom owner and leaves the name behind.
+                with _INSTALLER_REGISTRY_LOCK:
+                    by_name = _GLOBAL_BINDINGS.get(module) or {}
+                    stack = by_name.get(name) or []
+                    for binding in stack:
+                        if binding.value is installed_global.value:
+                            binding.owners.discard(self)
+                            break
+                    stack[:] = [b for b in stack if b.owners]
+                    survivor = stack[-1].value if stack else _ABSENT_GLOBAL
+                    if not stack:
+                        by_name.pop(name, None)
+                current = module.__dict__.get(name, _ABSENT_GLOBAL)
+                if survivor is _ABSENT_GLOBAL:
+                    # Nobody left. Remove it only if what is bound is still
+                    # ours; anything else belongs to whoever wrote it.
+                    if current is installed_global.value:
+                        del module.__dict__[name]
+                elif current is not survivor:
+                    # An owner remains; make sure the name is bound to THEIR
+                    # value rather than to ours or to nothing.
+                    module.__dict__[name] = survivor
 
         self._installed_globals = {}
 
