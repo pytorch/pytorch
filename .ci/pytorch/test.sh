@@ -9,6 +9,17 @@ set -ex -o pipefail
 # Suppress ANSI color escape sequences
 export TERM=vt100
 
+# Retry-policy A/B experiment (see unstable.yml). The test config name is the only
+# per-job channel available without changing the shared _linux-test.yml, so the
+# suffix is stripped back to the real config here: everything downstream then sees
+# the same TEST_CONFIG as the trunk arm we are comparing against, and the only
+# difference is the retry policy.
+if [[ "${TEST_CONFIG}" == *_retry_experiment ]]; then
+  export TEST_CONFIG="${TEST_CONFIG%_retry_experiment}"
+  export PYTORCH_NUM_PYTEST_RERUNS=0
+  export PYTORCH_NUM_PROCESS_RETRIES=1
+fi
+
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 # shellcheck source=./common-build.sh
@@ -84,6 +95,18 @@ export TORCH_SERIALIZATION_DEBUG=1
 # any legitimately long compile on those backends.
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
     export TORCHINDUCTOR_COMPILE_WORKER_WAIT_TIMEOUT=300
+    # Cap Inductor compile-worker fan-out on the ROCm test jobs. They run in a
+    # multi-pod-per-node ROCm runner fleet where the nested test container sees
+    # the host CPU count (nproc=192) instead of the pod's CPU allocation (no
+    # cpuset/quota is inherited), so decide_compile_threads() defaults
+    # compile_threads to min(32, cpu_count()) = 32 per test process and
+    # async_compile forks that many GPU-attached compile workers onto the single
+    # visible GPU. That oversubscribes the accelerator scheduler runlist and can
+    # thrash/hang a shard until its timeout. Cap the fan-out to a bounded pool of
+    # 16 workers: this still creates a GPU-attached SubprocPool (unlike a single
+    # thread, which runs compilation inline with no pool) but bounds the number of
+    # concurrent GPU-attached workers below the oversubscription threshold.
+    export TORCHINDUCTOR_COMPILE_THREADS=16
 fi
 
 export VALGRIND=ON
@@ -434,10 +457,14 @@ test_python_smoke() {
   assert_git_not_dirty
 }
 
+# PYTHON_TEST_EXTRA_OPTION intentionally expands into multiple arguments.
+# shellcheck disable=SC2086
 test_python_smoke_b200() {
   # Targeted smoke tests for B200 including FlashAttention CuTe coverage
   install_flash_attn_cute
-  install_cutlass_api
+  # TODO(#189590): Re-enable CUTLASS API after NVGEMM migrates to
+  # cutlass.operators. The preview package pins apache-tvm-ffi==0.1.7, which
+  # is incompatible with CuTeDSL 4.6.2 used by the rest of this job.
   time python test/run_test.py \
     --include \
       test_matmul_cuda \
@@ -445,15 +472,34 @@ test_python_smoke_b200() {
       inductor/test_fp8 \
       nn/attention/test_fa4 \
       nn/attention/test_open_registry \
-      inductor/test_flex_flash \
-      inductor/test_flex_gemm \
+      python_native/test_cutedsl_smoketest \
       inductor/test_torchinductor \
       inductor/test_async_compile \
       inductor/test_nv_universal_gemm \
       inductor/test_fused_attention \
-      test_varlen_attention \
       $PYTHON_TEST_EXTRA_OPTION \
       --upload-artifacts-while-running
+
+  # These suites spend most of their time compiling many independent kernels.
+  # Use xdist's dynamic scheduler to avoid a long tail, and bound each test
+  # worker's Inductor compile pool so parallelism does not multiply to 32x32.
+  time env TORCHINDUCTOR_COMPILE_THREADS=1 python test/run_test.py \
+    --include test_varlen_attention \
+    $PYTHON_TEST_EXTRA_OPTION \
+    --upload-artifacts-while-running \
+    --pytest-xdist-workers 32
+  time env TORCHINDUCTOR_COMPILE_THREADS=2 python test/run_test.py \
+    --include inductor/test_flex_flash \
+    $PYTHON_TEST_EXTRA_OPTION \
+    --upload-artifacts-while-running \
+    --pytest-xdist-workers 32
+  time env TORCHINDUCTOR_COMPILE_THREADS=1 python test/run_test.py \
+    --include inductor/test_flex_gemm \
+    $PYTHON_TEST_EXTRA_OPTION \
+    --upload-artifacts-while-running \
+    --pytest-xdist-workers 32
+
+  time python test/run_test.py --include test_linalg -k "mm or addmv" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   assert_git_not_dirty
 }
 
@@ -487,12 +533,14 @@ test_h100_distributed() {
   assert_git_not_dirty
 }
 
-_run_symm_mem_tests() {
+_run_fabric_handle_tests() {
   # symmetric memory test
   time python test/run_test.py --include distributed/test_symmetric_memory.py  $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include distributed/test_nvshmem.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include distributed/test_shmem_triton.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include distributed/test_nccl.py -k NCCLSymmetricMemoryTest $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include inductor/test_symm_mem_registry.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include inductor/test_low_contention_collectives.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   assert_git_not_dirty
 }
 
@@ -503,7 +551,7 @@ test_h100_symm_mem() {
   # Disable NVLink Switch features (not available on AWS H100 instances)
   export NVSHMEM_DISABLE_NVLS=1
   export NCCL_NVLS_ENABLE=0
-  _run_symm_mem_tests
+  _run_fabric_handle_tests
 }
 
 test_h100_fabric() {
@@ -512,7 +560,7 @@ test_h100_fabric() {
 }
 
 test_b200_symm_mem() {
-  _run_symm_mem_tests
+  _run_fabric_handle_tests
 }
 
 test_h100_cutlass_backend() {
@@ -1090,6 +1138,45 @@ test_inductor_micro_benchmark() {
     test_inductor_set_cpu_affinity
   fi
   python benchmarks/gpt_fast/benchmark.py --output "${TEST_REPORTS_DIR}/gpt_fast_benchmark.csv"
+}
+
+test_better_benchmark() {
+  local test_reports_dir
+  test_reports_dir="$(pwd)/test/test-reports"
+  local debug_dir
+  debug_dir="$(pwd)/test/debug/better-benchmark"
+  local benchmark_dir
+  benchmark_dir="$(mktemp -d "${RUNNER_TEMP:-/tmp}/better-benchmark.XXXXXX")"
+  mkdir -p "${test_reports_dir}" "${debug_dir}"
+
+  git clone --depth 1 --branch main https://github.com/eellison/better-benchmark.git "${benchmark_dir}"
+  pushd "${benchmark_dir}"
+
+  local gpu_indices
+  gpu_indices="$(python - <<'PY'
+import sys
+import torch
+
+count = torch.cuda.device_count()
+if count < 1:
+    raise RuntimeError("Expected at least one GPU")
+print(f"Found {count} GPUs", file=sys.stderr)
+print(",".join(str(index) for index in range(count)))
+PY
+)"
+
+  python scripts/bench_parallel.py \
+    repros/canonical \
+    --all-shapes \
+    --gpus "${gpu_indices}" \
+    --output "${debug_dir}/current.json"
+  # TODO: Add a single-input CI export mode to bench_report.py. For now it
+  # requires --compare, so compare the result with itself and export the
+  # unchanged head values as PyTorch v3 dashboard records.
+  python scripts/bench_report.py \
+    --compare "${debug_dir}/current.json" "${debug_dir}/current.json" \
+    --ci-json "${test_reports_dir}/inductor_kernel_benchmark.json"
+  popd
 }
 
 test_inductor_halide() {
@@ -2101,6 +2188,59 @@ test_executorch() {
   assert_git_not_dirty
 }
 
+test_torchtitan() {
+  install_torchao
+  install_torchcomms
+
+  local torchtitan_commit
+  torchtitan_commit=$(get_pinned_commit torchtitan)
+
+  if [[ ! -d ./torchtitan ]]; then
+    git clone --quiet https://github.com/pytorch/torchtitan.git
+    pushd torchtitan
+    git checkout "${torchtitan_commit}"
+    popd
+  fi
+
+  # Neither helion nor torchtitan should pull their own copies of these from
+  # PyPI, that would silently run the tests against the wrong PyTorch
+  local ci_built_versions
+  ci_built_versions=$(get_pkg_versions torch torchao torchcomms)
+
+  pip_install helion
+
+  pushd torchtitan
+  pip_install -e .
+
+  local installed_versions
+  installed_versions=$(get_pkg_versions torch torchao torchcomms)
+  if [[ "${installed_versions}" != "${ci_built_versions}" ]]; then
+    echo "ERROR: installing helion or torchtitan overwrote the CI-built packages"
+    echo "Expected:"
+    echo "${ci_built_versions}"
+    echo "Got:"
+    echo "${installed_versions}"
+    exit 1
+  fi
+
+  # torchtitan loads checkpoints from a RUNNER_TEMP path but saves them to
+  # OUTPUT_DIR, which defaults relative to cwd. Point both at the same directory.
+  export NGPU=8
+  if [[ -n "${RUNNER_TEMP:-}" ]]; then
+    export OUTPUT_DIR="${RUNNER_TEMP}/artifacts-to-be-uploaded"
+  fi
+
+  if [[ "${TEST_CONFIG}" == *features* ]]; then
+    scripts/ci/pytorch_ci_test_runner.sh feature_tests
+  elif [[ "${TEST_CONFIG}" == *models* ]]; then
+    scripts/ci/pytorch_ci_test_runner.sh model_tests
+  else
+    echo "Unknown torchtitan test config: ${TEST_CONFIG}"
+    exit 1
+  fi
+  popd
+}
+
 test_operator_benchmark() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
@@ -2220,8 +2360,7 @@ elif [[ "$TEST_CONFIG" == *vllm* ]]; then
 
     python -m cli.run test external vllm --test-plan "$TEST_CONFIG" --shard-id "$SHARD_NUMBER" --num-shards "$NUM_TEST_SHARDS"
 elif [[ "$TEST_CONFIG" == *torchtitan* ]]; then
-    (cd .ci/lumen_cli && python -m pip install -e .)
-    python -m cli.run test external torchtitan --test-plan "$TEST_CONFIG" --shard-id "$SHARD_NUMBER" --num-shards "$NUM_TEST_SHARDS"
+  test_torchtitan
 elif [[ "${TEST_CONFIG}" == *executorch* ]]; then
   test_executorch
 elif [[ "$TEST_CONFIG" == 'jit_legacy' ]]; then
@@ -2277,7 +2416,7 @@ elif [[ "${TEST_CONFIG}" == *operator_microbenchmark* ]]; then
         BASELINE_INDEX_URL="https://download.pytorch.org/whl/nightly/cu130"
       elif [[ "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
         # Keep in sync with the ROCm version in the benchmarks docker image
-        BASELINE_INDEX_URL="https://download.pytorch.org/whl/nightly/rocm6.4"
+        BASELINE_INDEX_URL="https://download.pytorch.org/whl/nightly/rocm7.2"
       else
         echo "ERROR: cannot infer BASELINE_INDEX_URL from BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}"
         exit 1
@@ -2302,6 +2441,8 @@ elif [[ "${TEST_CONFIG}" == *inductor-triton-cpu* ]]; then
   test_inductor_triton_cpu
 elif [[ "${TEST_CONFIG}" == *inductor-micro-benchmark* ]]; then
   test_inductor_micro_benchmark
+elif [[ "${TEST_CONFIG}" == *inductor_better_benchmark* ]]; then
+  test_better_benchmark
 elif [[ "${TEST_CONFIG}" == *aoti_cross_compile_for_windows* ]]; then
   test_inductor_aoti_cross_compile_for_windows
 elif [[ "${TEST_CONFIG}" == *huggingface* ]]; then
