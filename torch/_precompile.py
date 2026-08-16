@@ -1246,12 +1246,15 @@ def _graph_traces_autograd(gm: torch.fx.GraphModule) -> bool:
 
 # How deep to look for an nn.Module inside a frame argument. A path is a tuple of
 # ("index"|"key"|"attr", accessor) steps; the driver replays exactly these.
-_MODULE_SEARCH_DEPTH = 4
+_MODULE_SEARCH_DEPTH = 6
+# A walk is bounded so an argument that happens to reference a large object
+# graph cannot dominate capture time.
+_MODULE_SEARCH_BUDGET = 2000
 _ModulePath = tuple[tuple[str, object], ...]
 
 
 def _walk_for_modules(
-    value: object, path: _ModulePath, seen: set[int], depth: int
+    value: object, path: _ModulePath, seen: set[int], budget: list[int], depth: int
 ) -> list[tuple[_ModulePath, torch.nn.Module]]:
     """Find every nn.Module reachable from ``value``, each with the PATH to it.
 
@@ -1260,55 +1263,69 @@ def _walk_for_modules(
     found the first one for both, left the second unseeded, and stamped the
     first one's grads twice.
 
-    The walk descends into containers AND into plain objects' attributes,
-    because the commonest training shape is a non-Module trainer holding the
-    model (``self.model``), which a container-only search misses -- and missing
-    it is silent, since a capture with nothing to seed bakes the assign form.
-    A missed module is still caught by the refusal in _capture_dynamo, so this
-    only has to cover the shapes worth serving, not every shape.
+    ``seen`` is per ARGUMENT, not shared across the frame: one module reachable
+    from two arguments has to be recorded at BOTH paths, because the runtime
+    call may put a different object at each and the driver replays each path
+    independently. Sharing the set recorded only the first and then crashed on
+    the second.
+
+    A module found is not descended into: its own parameters come from
+    named_parameters(), and its children are reached through it.
     """
-    if depth > _MODULE_SEARCH_DEPTH or id(value) in seen:
+    if depth > _MODULE_SEARCH_DEPTH or budget[0] <= 0 or id(value) in seen:
         return []
+    budget[0] -= 1
     seen.add(id(value))
     if isinstance(value, torch.nn.Module):
         return [(path, value)]
+    # Never walk into a module object: it is a namespace, not model state, and
+    # `torch` alone reaches ~48k objects.
+    if isinstance(value, (types.ModuleType, type)):
+        return []
     found: list[tuple[_ModulePath, torch.nn.Module]] = []
     if isinstance(value, (list, tuple)):
         for i, inner in enumerate(value):
             found.extend(
-                _walk_for_modules(inner, path + (("index", i),), seen, depth + 1)
+                _walk_for_modules(
+                    inner, path + (("index", i),), seen, budget, depth + 1
+                )
             )
     elif isinstance(value, dict):
+        # Any hashable key, not just str: {0: model} is an ordinary shape, and
+        # the driver's `obj[key]` replay does not care what the key is.
         for k, inner in value.items():
-            if isinstance(k, str):
-                found.extend(
-                    _walk_for_modules(inner, path + (("key", k),), seen, depth + 1)
-                )
-    elif hasattr(value, "__dict__") and not isinstance(value, type):
-        for name, inner in vars(value).items():
             found.extend(
-                _walk_for_modules(inner, path + (("attr", name),), seen, depth + 1)
+                _walk_for_modules(inner, path + (("key", k),), seen, budget, depth + 1)
+            )
+    else:
+        for name in _attribute_names(value):
+            try:
+                inner = getattr(value, name)
+            except Exception:
+                # A property can raise; it is not somewhere a model lives.
+                continue
+            found.extend(
+                _walk_for_modules(
+                    inner, path + (("attr", name),), seen, budget, depth + 1
+                )
             )
     return found
 
 
-def _assigns_dot_grad(code: types.CodeType) -> bool:
-    """Whether ``code`` STORES to a ``.grad`` attribute anywhere.
+def _attribute_names(value: object) -> list[str]:
+    """Instance attribute names, covering __slots__ as well as __dict__.
 
-    A store, not a mention: ``torch.autograd.grad(...)`` puts "grad" in
-    co_names and returns its gradients rather than scattering them, so a name
-    test flags a capture that has no parameter grad to attribute at all.
-    Nested code objects are searched too, since the store can sit in a
-    comprehension or an inlined helper.
+    A __slots__ holder has no __dict__ at all, so a vars()-only walk missed the
+    model entirely -- and missing it is silent, because a training capture with
+    nothing to seed bakes the assign form.
     """
-    import dis
-
-    for ins in dis.get_instructions(code):
-        if ins.opname == "STORE_ATTR" and ins.argval == "grad":
-            return True
-    return any(
-        _assigns_dot_grad(c) for c in code.co_consts if isinstance(c, types.CodeType)
-    )
+    names = list(getattr(value, "__dict__", {}) or {})
+    for klass in type(value).__mro__:
+        slots = klass.__dict__.get("__slots__", ())
+        if isinstance(slots, str):
+            slots = (slots,)
+        names.extend(s for s in slots if s != "__dict__")
+    return names
 
 
 def _frame_modules(
@@ -1327,10 +1344,10 @@ def _frame_modules(
     frame_args: list[object] = ([bound_self] if bound_self is not None else []) + list(
         args
     )
-    seen: set[int] = set()
+    budget = [_MODULE_SEARCH_BUDGET]
     found = []
     for pos, a in enumerate(frame_args):
-        for path, module in _walk_for_modules(a, (), seen, 0):
+        for path, module in _walk_for_modules(a, (), set(), budget, 0):
             found.append((pos, path, module))
     return found
 
@@ -1569,30 +1586,6 @@ def _capture_dynamo(
                 grad_accum_params = _param_grad_inputs(
                     fn, args, bi.example_inputs if bi is not None else []
                 )
-                if not grad_accum_params:
-                    # Nothing to accumulate into means one of two things: the
-                    # captured backward genuinely writes no parameter grad, or
-                    # we failed to FIND the module holding them -- and the
-                    # second is silent by construction, because the artifact
-                    # then bakes Dynamo's assign form and overwrites from the
-                    # second call of a training loop onward (Note [precompile
-                    # dynamo training grad accumulation]). Enumerating the
-                    # shapes that hold a model is a losing game, so refuse when
-                    # the captured bytecode writes a .grad we did not account
-                    # for, rather than trusting the search to be exhaustive.
-                    _rt = capture_output.graph_capture_output.get_runtime_env()
-                    writes_grad = _assigns_dot_grad(_rt.bytecode)
-                    if writes_grad:
-                        raise PrecompileError(
-                            "precompile tracer='dynamo': this training capture writes a "
-                            "parameter's .grad, but precompile could not find the "
-                            "nn.Module holding it among the arguments, so it cannot bake "
-                            "the accumulating form of the backward. The artifact would "
-                            "match eager on the first step and silently overwrite on "
-                            "every step after. Pass the model as an argument (directly, "
-                            "in a list/tuple/dict, or as an attribute of an argument), "
-                            "or use tracer='make_fx'."
-                        )
             finally:
                 for p in seeded:
                     p.grad = None
