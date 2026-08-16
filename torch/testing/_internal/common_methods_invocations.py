@@ -13177,6 +13177,7 @@ op_db: list[OpInfo] = [
         ref=np.divmod,
         supports_out=False,
         supports_autograd=True,
+        supports_forward_ad=False,
         dtypes=all_types_and(torch.half, torch.bfloat16),
         sample_inputs_func=sample_inputs_divmod,
     ),
