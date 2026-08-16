@@ -572,6 +572,14 @@ ROCM_RELAXED_PROPERTY_CASES = {
     },
 }
 
+if TEST_WITH_ROCM and getRocmVersion() >= (7, 14):
+    # ROCm 7.14 fixes log10 strict numerics but still needs default-mode tolerance.
+    del ROCM_UNARY_NUMERICAL_XFAILS["inductor_numerics"]["log10"]
+    ROCM_RELAXED_PROPERTY_CASES["unary_numerical"]["inductor_default"]["log10"] = {
+        fp16,
+        fp32,
+    }
+
 
 def is_expected_failure(device_type, op_name, backend, test_type, dtype=None):
     """Check if a test is expected to fail."""
@@ -948,14 +956,6 @@ class TestOpInfoProperties(TestCase):
 
         Verifies bitwise equivalence between eager and compiled execution.
         """
-        if (
-            TEST_WITH_ROCM
-            and getRocmVersion() >= (7, 14)
-            and op.name == "log10"
-            and dtype in (torch.float16, torch.float32)
-            and backend in ("inductor_default", "inductor_numerics")
-        ):
-            self.skipTest("known log10 eager-vs-compiled failure on ROCm 7.14")
         torch._dynamo.reset()
         device_type = torch.device(device).type
 
