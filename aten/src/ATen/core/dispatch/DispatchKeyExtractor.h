@@ -68,10 +68,9 @@ struct MultiDispatchKeySet : at::IterArgs<MultiDispatchKeySet> {
   }
   // Tensor?[] translates to this case.
   void operator()(const c10::List<std::optional<at::Tensor>>& xs) {
-    for (const auto& x : xs) {
-      const IValue& ivalue = x.get();
-      if (!ivalue.isNone()) {
-        ts = ts | ivalue.toTensor().key_set();
+    for (std::optional<at::Tensor> x : xs) {
+      if (x.has_value()) {
+        ts = ts | x.value().key_set();
       }
     }
   }
