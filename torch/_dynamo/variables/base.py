@@ -1020,7 +1020,8 @@ class SlotDef:
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         """Call the impl via the wrapper, passing self, tx, and args."""
-        func = getattr(type(vt.realize()), self.impl)
+        vt = vt.realize()
+        func = getattr(type(vt), self.impl)
         return self.wrapper(vt, tx, func, args, kwargs)
 
 

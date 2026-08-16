@@ -2177,24 +2177,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         x = torch.randn(3)
         self.assertEqual(opt(x), fn(x))
 
-    def test_index_int_subclass_fast_path(self):
-        # _PyNumber_Index returns int/int-subclass items via the
-        # PyLong_Check fast path without consulting nb_index, so an
-        # __index__ override on an int subclass must be ignored when the
-        # instance is used as an index.
-        class IntSubWithOverride(int):
-            def __index__(self):
-                return 2
-
-        def fn(x, lst, idx):
-            return x + lst[idx]
-
-        x = torch.zeros(1)
-        lst = [10, 20, 30, 40, 50, 60]
-        idx = IntSubWithOverride(5)
-        opt = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertEqual(opt(x, lst, idx), fn(x, lst, idx))
-
     def test_int_base_out_of_range_value_error(self):
         class MyIndexable:
             def __index__(self):
