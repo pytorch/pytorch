@@ -3322,6 +3322,7 @@ class TestTensorCreationCpuOnly(TestCase):
 
 # Class for testing random tensor creation ops, like torch.randint
 class TestRandomTensorCreation(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
     exact_dtype = True
 
     # TODO: add torch.complex64, torch.complex128
@@ -3552,71 +3553,6 @@ class TestRandomTensorCreation(TestCase):
             self.assertLessEqual(res.max().item(), 9)
             self.assertGreaterEqual(res.min().item(), -10)
 
-    # TODO: this test should be updated
-    @onlyCPU
-    def test_randint_inference(self, device):
-        size = (2, 1)
-        for args in [(3,), (1, 3)]:  # (low,) and (low, high)
-            self.assertIs(torch.int64, torch.randint(*args, size=size).dtype)
-            self.assertIs(torch.int64, torch.randint(*args, size=size, layout=torch.strided).dtype)
-            self.assertIs(torch.int64, torch.randint(*args, size=size, generator=torch.default_generator).dtype)
-            self.assertIs(torch.float32, torch.randint(*args, size=size, dtype=torch.float32).dtype)
-            out = torch.empty(size, dtype=torch.float32)
-            self.assertIs(torch.float32, torch.randint(*args, size=size, out=out).dtype)
-            self.assertIs(torch.float32, torch.randint(*args, size=size, out=out, dtype=torch.float32).dtype)
-            out = torch.empty(size, dtype=torch.int64)
-            self.assertIs(torch.int64, torch.randint(*args, size=size, out=out).dtype)
-            self.assertIs(torch.int64, torch.randint(*args, size=size, out=out, dtype=torch.int64).dtype)
-
-        self.assertRaisesRegex(RuntimeError,
-                               "random_ expects 'from' to be less than 'to', but got from=0 >= to=0",
-                               lambda: torch.randint(0, size=size))
-        self.assertRaisesRegex(RuntimeError,
-                               "random_ expects 'from' to be less than 'to', but got from=-1 >= to=-2",
-                               lambda: torch.randint(-1, -2, size=size))
-        self.assertRaisesRegex(TypeError,
-                               r"randint\(\): argument 'high' \(position 1\) must be int, not float",
-                               lambda: torch.randint(.5, size=size))
-        self.assertRaisesRegex(RuntimeError,
-                               "from is out of bounds for",
-                               lambda: torch.randint(-32769, 0, size=size, dtype=torch.int16))
-        self.assertRaisesRegex(RuntimeError,
-                               "from is out of bounds for",
-                               lambda: torch.randint(-1, 1, size=size, dtype=torch.uint32))
-
-    # TODO: this test should be updated
-    @onlyCPU
-    def test_randint(self, device):
-        SIZE = 100
-
-        def seed(generator):
-            if generator is None:
-                torch.manual_seed(123456)
-            else:
-                generator.manual_seed(123456)
-            return generator
-
-        for generator in (None, torch.Generator()):
-            generator = seed(generator)
-            res1 = torch.randint(0, 6, (SIZE, SIZE), generator=generator)
-            res2 = torch.empty((), dtype=torch.int64)
-            generator = seed(generator)
-            torch.randint(0, 6, (SIZE, SIZE), generator=generator, out=res2)
-            generator = seed(generator)
-            res3 = torch.randint(6, (SIZE, SIZE), generator=generator)
-            res4 = torch.empty((), dtype=torch.int64)
-            generator = seed(generator)
-            torch.randint(6, (SIZE, SIZE), out=res4, generator=generator)
-            self.assertEqual(res1, res2)
-            self.assertEqual(res1, res3)
-            self.assertEqual(res1, res4)
-            self.assertEqual(res2, res3)
-            self.assertEqual(res2, res4)
-            self.assertEqual(res3, res4)
-            self.assertTrue((res1 < 6).all().item())
-            self.assertTrue((res1 >= 0).all().item())
-
-
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "For fb compatibility random not changed in fbcode")
     def test_randint_distribution(self, device):
         size = 1_000_000
@@ -3739,8 +3675,11 @@ class TestRandomTensorCreation(TestCase):
         error = (hist - expected_bin).abs().max() / expected_bin
         self.assertTrue(error < expected_error, lambda msg: f"{msg}\nerror {error} > {expected_error}")
 
+
+class TestRandomTensorCreationCudaOnly(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     # Test exceptions when device and generator types are incompatible
-    @onlyCUDA
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Produces inconsistent errors when run in fbcode.")
     def test_randperm_device_compatibility(self, device):
         cuda_gen = torch.Generator(device='cuda')
@@ -3774,6 +3713,73 @@ class TestRandomTensorCreation(TestCase):
             self.assertRaisesRegex(RuntimeError, regex, lambda: torch.randperm(n, device='cpu', generator=cuda_gen))
             self.assertRaisesRegex(RuntimeError, regex, lambda: torch.randperm(n, device='cpu', generator=cuda_gen, out=cpu_t))
             self.assertRaisesRegex(RuntimeError, regex, lambda: torch.randperm(n, generator=cuda_gen))  # implicitly on CPU
+
+
+class TestRandomTensorCreationCpuOnly(TestCase):
+    hw_classification = HardwareClassification.CPU
+
+    # TODO: this test should be updated
+    def test_randint_inference(self, device):
+        size = (2, 1)
+        for args in [(3,), (1, 3)]:  # (low,) and (low, high)
+            self.assertIs(torch.int64, torch.randint(*args, size=size).dtype)
+            self.assertIs(torch.int64, torch.randint(*args, size=size, layout=torch.strided).dtype)
+            self.assertIs(torch.int64, torch.randint(*args, size=size, generator=torch.default_generator).dtype)
+            self.assertIs(torch.float32, torch.randint(*args, size=size, dtype=torch.float32).dtype)
+            out = torch.empty(size, dtype=torch.float32)
+            self.assertIs(torch.float32, torch.randint(*args, size=size, out=out).dtype)
+            self.assertIs(torch.float32, torch.randint(*args, size=size, out=out, dtype=torch.float32).dtype)
+            out = torch.empty(size, dtype=torch.int64)
+            self.assertIs(torch.int64, torch.randint(*args, size=size, out=out).dtype)
+            self.assertIs(torch.int64, torch.randint(*args, size=size, out=out, dtype=torch.int64).dtype)
+
+        self.assertRaisesRegex(RuntimeError,
+                               "random_ expects 'from' to be less than 'to', but got from=0 >= to=0",
+                               lambda: torch.randint(0, size=size))
+        self.assertRaisesRegex(RuntimeError,
+                               "random_ expects 'from' to be less than 'to', but got from=-1 >= to=-2",
+                               lambda: torch.randint(-1, -2, size=size))
+        self.assertRaisesRegex(TypeError,
+                               r"randint\(\): argument 'high' \(position 1\) must be int, not float",
+                               lambda: torch.randint(.5, size=size))
+        self.assertRaisesRegex(RuntimeError,
+                               "from is out of bounds for",
+                               lambda: torch.randint(-32769, 0, size=size, dtype=torch.int16))
+        self.assertRaisesRegex(RuntimeError,
+                               "from is out of bounds for",
+                               lambda: torch.randint(-1, 1, size=size, dtype=torch.uint32))
+
+    # TODO: this test should be updated
+    def test_randint(self, device):
+        SIZE = 100
+
+        def seed(generator):
+            if generator is None:
+                torch.manual_seed(123456)
+            else:
+                generator.manual_seed(123456)
+            return generator
+
+        for generator in (None, torch.Generator()):
+            generator = seed(generator)
+            res1 = torch.randint(0, 6, (SIZE, SIZE), generator=generator)
+            res2 = torch.empty((), dtype=torch.int64)
+            generator = seed(generator)
+            torch.randint(0, 6, (SIZE, SIZE), generator=generator, out=res2)
+            generator = seed(generator)
+            res3 = torch.randint(6, (SIZE, SIZE), generator=generator)
+            res4 = torch.empty((), dtype=torch.int64)
+            generator = seed(generator)
+            torch.randint(6, (SIZE, SIZE), out=res4, generator=generator)
+            self.assertEqual(res1, res2)
+            self.assertEqual(res1, res3)
+            self.assertEqual(res1, res4)
+            self.assertEqual(res2, res3)
+            self.assertEqual(res2, res4)
+            self.assertEqual(res3, res4)
+            self.assertTrue((res1 < 6).all().item())
+            self.assertTrue((res1 >= 0).all().item())
+
 
 # Class for testing *like ops, like torch.ones_like
 class TestLikeTensorCreation(TestCase):
@@ -4529,6 +4535,8 @@ instantiate_device_type_tests(TestTensorCreation, globals())
 instantiate_device_type_tests(TestTensorCreationCudaOnly, globals(), only_for="cuda")
 instantiate_device_type_tests(TestTensorCreationCpuOnly, globals(), only_for="cpu")
 instantiate_device_type_tests(TestRandomTensorCreation, globals())
+instantiate_device_type_tests(TestRandomTensorCreationCudaOnly, globals(), only_for="cuda")
+instantiate_device_type_tests(TestRandomTensorCreationCpuOnly, globals(), only_for="cpu")
 instantiate_device_type_tests(TestLikeTensorCreation, globals())
 instantiate_device_type_tests(TestBufferProtocol, globals(), only_for="cpu")
 instantiate_device_type_tests(TestFromBlob, globals(), only_for="cpu")
