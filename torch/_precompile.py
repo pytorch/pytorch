@@ -2794,6 +2794,9 @@ class PrecompiledModule:
         # only enforcement of mark_unbacked's min/max here -- the thin dynamo driver has no
         # bounds check of its own) survive into the artifact.
         import torch._inductor.config as _ind_config
+        from torch._dynamo.variables.torch_function import (
+            torch_function_mode_stack_state_mgr,
+        )
         from torch._functorch import aot_autograd
         from torch._inductor.exc import InductorError
         from torch._inductor.standalone_compile import NoRunnableInductorModuleError
@@ -2802,14 +2805,24 @@ class PrecompiledModule:
         if capture.dynamic and hasattr(_ind_config, "scalar_asserts"):
             options["scalar_asserts"] = True
         try:
-            self._graph_python, self._artifact_bytes = aot_autograd.compile_to_python(
-                capture.gm,
-                capture.example_inputs,
-                options=options,
-                # A training capture differentiates INSIDE the graph, so the AOT capture
-                # pass has to run with grad on; see compile_to_python's grad_enabled.
-                grad_enabled=capture.trains,
-            )
+            # With the caller's torch_function modes CLEARED, the way convert_frame
+            # holds them across a backend. Dynamo already applied them symbolically
+            # while capturing, and capture.gm is torch-level Python, so lowering it
+            # with the modes live re-traces through every one of them a SECOND time
+            # and bakes a doubly-transformed kernel -- silently, since the artifact
+            # then needs no mode at all to reproduce the wrong number.
+            with torch_function_mode_stack_state_mgr:
+                self._graph_python, self._artifact_bytes = (
+                    aot_autograd.compile_to_python(
+                        capture.gm,
+                        capture.example_inputs,
+                        options=options,
+                        # A training capture differentiates INSIDE the graph, so the AOT
+                        # capture pass has to run with grad on; see compile_to_python's
+                        # grad_enabled.
+                        grad_enabled=capture.trains,
+                    )
+                )
         except NoRunnableInductorModuleError as e:
             # The subgraph has no lowerable compute (e.g. fn returns an input unchanged,
             # so the graph is a pass-through). Mirror the make_fx inductor path's clean
