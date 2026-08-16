@@ -32,7 +32,7 @@ void fake_quantize_tensor_cachemask_kernel_cuda(
     .check_all_same_dtype(false)
     .add_output(output)
     .add_output(mask)
-    .add_input(input)
+    .add_const_input(input)
     .build();
 
   if (at::isReducedFloatingType(input.scalar_type())) {
@@ -81,14 +81,14 @@ void fake_quantize_tensor_cachemask_tensor_qparams_kernel_cuda(
     const Tensor& fake_quant_enabled,
     int64_t quant_min,
     int64_t quant_max) {
-  float* scale_ptr = scale.data_ptr<float>();
-  int32_t* zp_ptr = zero_point.data_ptr<int32_t>();
-  int64_t* fake_quant_on = fake_quant_enabled.data_ptr<int64_t>();
+  const float* scale_ptr = scale.const_data_ptr<float>();
+  const int32_t* zp_ptr = zero_point.const_data_ptr<int32_t>();
+  const int64_t* fake_quant_on = fake_quant_enabled.const_data_ptr<int64_t>();
   auto iter = TensorIteratorConfig()
     .check_all_same_dtype(false)
     .add_output(output)
     .add_output(mask)
-    .add_input(input)
+    .add_const_input(input)
     .build();
 
   if (at::isReducedFloatingType(input.scalar_type())) {
