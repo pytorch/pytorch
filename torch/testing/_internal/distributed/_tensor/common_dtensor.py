@@ -821,18 +821,15 @@ class DTensorTestBase(DTensorTestMixin, MultiProcessTestCase):
             raise RuntimeError(f"Backend {backend} not supported!")
 
         device_id = None
-        if any(b in backend for b in ACCELERATOR_DIST_BACKENDS):
-            # set device for accelerator pg for collectives
+        if "nccl" in backend or "xccl" in backend:
+            # set device for nccl pg for collectives
             # TODO: if users want to enable testing across hosts, we may need
             # to change this part.
             torch.accelerator.set_device_index(self.rank)
-            # we only need to set device_id for accelerator backend with eager init
-            # so that the communicator is eagerly formed and `split_group` can be
-            # used for subgroup creation. Only set device_id for backends that support
-            # splitting (e.g. nccl). Other backends (e.g. hccl) do not support
-            # split_group and would raise RuntimeError in DeviceMesh initialization.
-            if eager_init and backend == "nccl":
-                device_id = torch.device(f"{self.device_type}:{self.rank}")
+            # we only need to set device_id for nccl backend with eager init
+            device_id = (
+                torch.device(f"{self.device_type}:{self.rank}") if eager_init else None
+            )
 
         # For nccl backend, bind the device to the process if device_id is not None
         # so the nccl communicator is immediately formed and we can use `ncclCommSplit`
@@ -852,12 +849,9 @@ class DTensorTestBase(DTensorTestMixin, MultiProcessTestCase):
         # FIXME can't use the above all_reduce as it causes hangs on bionic and focal. It hangs:
         #  test_dtensor.py  -- DTensorMeshTest.test_dtensor_device_mesh_device_conversion
         if device_id is None:
-            device_type = self.device_type
-            if device_type != "cpu":
-                device_mod = torch.get_device_module(device_type)
-                device_id = device_mod.current_device()
-            else:
-                device_id = self.rank
+            device_id = (
+                torch.cuda.current_device() if self.device_type == "cuda" else self.rank
+            )
 
         if self.device_type == "cpu":
             # NOTE: when `device_id` is not None, barrier() will choose the accelerator
@@ -1228,7 +1222,7 @@ class LocalDTensorTestBase(DTensorTestBase):
 
 def make_wrapped(fn, ctxs):
     @functools.wraps(fn)
-    def wrapped(self, *args, **kwargs):
+    def wrapped(self):
         torch._dynamo.reset()
         stack = contextlib.ExitStack()
         for ctx in ctxs:
@@ -1237,7 +1231,7 @@ def make_wrapped(fn, ctxs):
             else:
                 stack.enter_context(ctx)
         try:
-            out = fn(self, *args, **kwargs)
+            out = fn(self)
         finally:
             stack.close()
         return out
@@ -1534,6 +1528,7 @@ def validate_sharding_rule_sample_backward(
             return None
     except RuntimeError:
         return None
+
     # DTensor backward
     assert len(input_placements) == len(full_tensors), (  # noqa: S101
         f"placement/tensor count mismatch: {len(input_placements)} vs {len(full_tensors)}"

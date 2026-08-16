@@ -84,40 +84,17 @@ def autograd_registration_check(op, args, kwargs):
 
     # Determine which AutogradBACKEND key to check
     all_device_types = {arg.device.type for arg in all_tensors}
-
-    # Map each device type to its Autograd dispatch key dynamically
-    # (e.g. "cuda" -> "AutogradCUDA", "npu" -> "AutogradPrivateUse1").
-    # This avoids hardcoding a device-type whitelist so that newly integrated
-    # accelerators are supported without modifying this function.
-    autograd_keys = {
-        "Autograd" + torch._C._dispatch_key_for_device(device_type)
-        for device_type in all_device_types
-    }
-
-    _known_priority = ["AutogradCUDA", "AutogradCPU", "AutogradXPU"]
-    known_key = next((k for k in _known_priority if k in autograd_keys), None)
-
-
-    new_accelerator_keys = autograd_keys - set(_known_priority)
-    if known_key is not None and known_key != "AutogradCPU" and new_accelerator_keys:
+    if not all_device_types.issubset(["cpu", "cuda", "xpu"]):
+        # Don't want to support other keys yet
         raise NotImplementedError(
-            f"autograd_registration_check: mixed accelerator device types with "
-            f"different Autograd dispatch keys are not supported, got {all_device_types}"
+            f"autograd_registration_check: NYI devices other than CPU/CUDA/XPU, got {all_device_types}"
         )
-    if len(new_accelerator_keys) > 1:
-        raise NotImplementedError(
-            f"autograd_registration_check: mixed accelerator device types with "
-            f"different Autograd dispatch keys are not supported, got {all_device_types}"
-        )
-
-    # Select the key: new accelerator takes precedence over known priority,
-    # and known priority over fallback AutogradCPU.
-    if new_accelerator_keys:
-        key = next(iter(new_accelerator_keys))
-    elif known_key is not None:
-        key = known_key
-    else:
+    if "cuda" in all_device_types:
+        key = "AutogradCUDA"
+    elif "cpu" in all_device_types:
         key = "AutogradCPU"
+    elif "xpu" in all_device_types:
+        key = "AutogradXPU"
 
     if torch._C._dispatch_has_kernel_for_dispatch_key(op.name(), key):
         return
