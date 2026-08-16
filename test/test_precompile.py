@@ -29,6 +29,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    skipIfCrossRef,
     skipIfTorchDynamo,
     TestCase,
 )
@@ -1082,6 +1083,12 @@ class TestPrecompile(TestCase):
         with self.assertRaisesRegex(PrecompileError, "hard-coded"):
             torch.compiler.precompile(f, torch.randn(3), tracer="dynamo")
 
+    # Crossref wraps torch functions in a checker Dynamo treats as skipped, so a
+    # backward traced INTO the graph -- which every tracer="dynamo" training
+    # capture does -- cannot be captured as one full graph. The whole training
+    # family below is therefore unrunnable under crossref and carries this skip;
+    # every other config still runs it.
+    @skipIfCrossRef
     @parametrize("backend", ["inductor", "eager"])
     def test_tracer_dynamo_training_accumulates_like_eager(self, backend):
         # A training step captures with the dynamo tracer: precompile pins
@@ -1116,6 +1123,7 @@ class TestPrecompile(TestCase):
             train_step(ref, x, t)
             self.assertEqual(run.weight.grad, ref.weight.grad)
 
+    @skipIfCrossRef
     @parametrize("backend", ["inductor", "eager"])
     def test_tracer_dynamo_training_self_contained_exec(self, backend):
         # A training artifact is self-contained too: exec'ing python_code alone (no cache,
@@ -1140,6 +1148,7 @@ class TestPrecompile(TestCase):
         train_step(ref, x, t)
         self.assertEqual(run.weight.grad, ref.weight.grad)
 
+    @skipIfCrossRef
     def test_tracer_dynamo_training_optimizer_loop(self):
         # The whole point of accumulating correctly: a zero_grad / step loop converges to
         # the same weights as eager.
@@ -1168,6 +1177,7 @@ class TestPrecompile(TestCase):
             ref_opt.step()
         self.assertEqual(run.weight, ref.weight)
 
+    @skipIfCrossRef
     def test_tracer_dynamo_training_frozen_param_keeps_none_grad(self):
         # Only params the captured backward actually accumulates into are recorded, so a
         # frozen param keeps .grad = None exactly as eager leaves it -- the driver's
@@ -1195,6 +1205,7 @@ class TestPrecompile(TestCase):
         self.assertIsNone(ref[0].weight.grad)
         self.assertEqual(run[1].weight.grad, ref[1].weight.grad)
 
+    @skipIfCrossRef
     def test_tracer_dynamo_training_warm_capture(self):
         # Capturing a model whose params ALREADY carry grads takes the single-pass path
         # (no seeding needed, the accumulate form is what Dynamo bakes anyway) and must
@@ -1217,6 +1228,7 @@ class TestPrecompile(TestCase):
         train_step(ref, x, t)
         self.assertEqual(run.weight.grad, ref.weight.grad)
 
+    @skipIfCrossRef
     def test_tracer_dynamo_training_capture_does_not_touch_example_grads(self):
         # The capture seeds zero grads to bake the accumulate form; it must restore the
         # caller's model exactly (no grads invented on the example model), like the make_fx
@@ -1251,6 +1263,7 @@ class TestPrecompile(TestCase):
         self.assertEqual(f_c(run, x, t), grad_step(ref, x, t))
         self.assertTrue(all(p.grad is None for p in run.parameters()))
 
+    @skipIfCrossRef
     def test_tracer_dynamo_training_input_requiring_grad_rejected(self):
         # Only module parameters get a harvested gradient (invariant 5). A user input that
         # requires grad would carry the same trace-time .grad specialization with no place
@@ -1264,6 +1277,7 @@ class TestPrecompile(TestCase):
         with self.assertRaisesRegex(PrecompileError, "only harvests gradients"):
             torch.compiler.precompile(train_step, m, x, t, tracer="dynamo")
 
+    @skipIfCrossRef
     def test_tracer_dynamo_training_unreachable_model_rejected(self):
         # The whole point of the two-pass capture is to bake the ACCUMULATING form
         # of the backward, which needs a GRAD_ACCUM_PARAMS entry naming each param
@@ -1280,6 +1294,7 @@ class TestPrecompile(TestCase):
             )
         self.assertIn("L['self'].inner.model._parameters['weight']", str(cm.exception))
 
+    @skipIfCrossRef
     def test_tracer_dynamo_training_partial_attribution_rejected(self):
         # PARTIAL attribution is the dangerous shape and the reason the check is a
         # per-tensor one: submodules held in a plain list are invisible to
@@ -1308,6 +1323,7 @@ class TestPrecompile(TestCase):
             )
         self.assertIn("L['model'].extra[0]._parameters['weight']", str(cm.exception))
 
+    @skipIfCrossRef
     def test_tracer_dynamo_training_requires_grad_buffer_rejected(self):
         # A requires_grad BUFFER is a legal autograd target that named_parameters()
         # can never name, so there is no entry to write for it. Refusing aligns the
@@ -1335,6 +1351,7 @@ class TestPrecompile(TestCase):
             )
         self.assertIn("_buffers['scale']", str(cm.exception))
 
+    @skipIfCrossRef
     def test_tracer_dynamo_training_model_behind_a_module_global_rejected(self):
         # Invariant 1 rejects a model baked into fn's globals or closure, but a model
         # behind a MODULE global slips through it: the module is recorded by reference
@@ -1350,6 +1367,7 @@ class TestPrecompile(TestCase):
             )
         self.assertIn("model._parameters['weight']", str(cm.exception))
 
+    @skipIfCrossRef
     def test_tracer_dynamo_training_model_deeper_than_the_search_rejected(self):
         # The walk stops at _MODULE_SEARCH_DEPTH, and past it the failure was silent.
         class D:
@@ -1375,6 +1393,7 @@ class TestPrecompile(TestCase):
             )
         self.assertIn("_parameters['weight']", str(cm.exception))
 
+    @skipIfCrossRef
     def test_tracer_dynamo_training_refusal_does_not_recommend_make_fx(self):
         # Every other precompile refusal offers tracer='make_fx' as the way out, and
         # here that advice is a circle: make_fx cannot reach the tensor either and
@@ -1404,6 +1423,7 @@ class TestPrecompile(TestCase):
         self.assertEqual(f_c(run, x, t), ref.grad_step(x, t))
         self.assertTrue(all(p.grad is None for p in run.inner.model.parameters()))
 
+    @skipIfCrossRef
     def test_tracer_dynamo_in_trace_grad_none_with_unreachable_model_accepted(self):
         # An unreachable model is only wrong when the artifact has to MATERIALIZE a
         # .grad for it. When fn nulls .grad itself, eager assigns too, so the assign
@@ -1431,6 +1451,7 @@ class TestPrecompile(TestCase):
             ):
                 self.assertEqual(got.grad, want.grad)
 
+    @skipIfCrossRef
     def test_tracer_dynamo_in_fn_zero_grad_matches_eager(self):
         # The canonical training step calls zero_grad(set_to_none=True) itself, so
         # the capture's seeds are nulled inside the trace and the accumulate form is
@@ -1499,6 +1520,7 @@ class TestPrecompile(TestCase):
         exec(compile(code, "<a>", "exec"), ns)
         return ns["forward"], train_step, fresh, x, t
 
+    @skipIfCrossRef
     def test_tracer_dynamo_training_exec_forward_accepts_keyword_arguments(self):
         # The exec'd artifact is documented as taking the same args fn took, and
         # for inference it IS fn, so it honors fn's signature. The training path
@@ -1511,6 +1533,7 @@ class TestPrecompile(TestCase):
         self.assertEqual(run.weight.grad, ref.weight.grad)
         self.assertEqual(run.bias.grad, ref.bias.grad)
 
+    @skipIfCrossRef
     def test_tracer_dynamo_training_exec_forward_rejects_a_misplaced_model(self):
         # GRAD_ACCUM_PARAMS records the model's POSITION, so a call that does not
         # put a module there has to say so, rather than surfacing as an IndexError
@@ -1542,6 +1565,7 @@ class TestPrecompile(TestCase):
             "beside_a_big_sibling",
         ],
     )
+    @skipIfCrossRef
     def test_tracer_dynamo_training_accumulates_whatever_holds_the_params(self, shape):
         # GRAD_ACCUM_PARAMS records the FRAME arg index and the PATH from it to
         # the owning module. Frame args prepend the bound self, so scanning the
@@ -1860,6 +1884,7 @@ class TestPrecompile(TestCase):
         )
         self.assertIs(found[0][2], model)
 
+    @skipIfCrossRef
     @parametrize("kind", ["enum", "datetime", "frozenset"])
     def test_tracer_dynamo_training_refuses_an_unwritable_dict_key(self, kind):
         # The path to the model is recorded in the artifact as SOURCE TEXT
@@ -1900,14 +1925,19 @@ class TestPrecompile(TestCase):
     def test_tracer_dynamo_module_global_round_trips_by_sys_modules_key(self):
         # A module GLOBAL is by-reference state: recording it in IMPORT_SOURCES
         # rather than pickling it is what lets a bare module reference next to a
-        # model call capture at all. The sys.modules KEY matters, not __name__:
-        # _collections_abc names itself "collections.abc", which re-imports to a
-        # different module.
+        # model call capture at all. The sys.modules KEY matters, not __name__,
+        # because re-import at load goes through the key. The stdlib's own
+        # example of the two disagreeing (_collections_abc names itself
+        # "collections.abc") stopped being one in 3.14, where both keys reach a
+        # single module object, so the disagreement is built here instead.
+        key, lie = "_precompile_modglobal_target", "_precompile_modglobal_lie"
+        target = self._module_with("VALUE = 'from the keyed module'\n", key)
+        target.__name__ = lie
         name = "_precompile_modglobal_mod"
         mod = self._module_with(
-            "import _collections_abc as cabc\n"
+            f"import {key} as dep\n"
             "def fn(model, xx):\n"
-            "    return model(xx), cabc.__file__\n",
+            "    return model(xx), dep.VALUE\n",
             name,
         )
         try:
@@ -1915,11 +1945,13 @@ class TestPrecompile(TestCase):
             code, cache = torch.compiler.precompile(
                 mod.fn, m, x, tracer="dynamo", backend="eager"
             )
-            self.assertIn("'_collections_abc'", code)
+            self.assertIn(f"'{key}'", code)
+            self.assertNotIn(f"'{lie}'", code)
             f_c = torch.compiler.precompile.load(code, cache)
             self.assertEqual(f_c(m, x)[1], mod.fn(m, x)[1])
         finally:
             sys.modules.pop(name, None)
+            sys.modules.pop(key, None)
 
     def test_tracer_dynamo_module_global_shadowing_a_builtin(self):
         # get_runtime_env pre-seeds used_globals with a BUILTIN of the same
@@ -4556,6 +4588,7 @@ class TestPrecompileNumerics(TestCase):
                 xt = make_tensor((bs, 4), device=device, dtype=torch.float32)
                 self.assertEqual(f_c(m, xt), m(xt))
 
+    @skipIfCrossRef
     def test_tracer_dynamo_training_device(self, device):
         # The dynamo tracer's training capture, device-generically: the traced backward
         # lowers to device kernels (inductor) / runs as inlined source (eager), and the
