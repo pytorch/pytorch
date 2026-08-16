@@ -1,5 +1,7 @@
 # Owner(s): ["oncall: pt2"]
 import copy
+import datetime
+import enum
 import functools
 import io
 import os
@@ -14,7 +16,12 @@ import unittest
 import torch
 import torch.utils._pytree as _pytree
 from torch._dynamo.decorators import mark_dynamic, mark_unbacked
-from torch._precompile import PrecompileError
+from torch._precompile import (
+    _frame_modules,
+    _MODULE_SEARCH_BUDGET,
+    _MODULE_SEARCH_DEPTH,
+    PrecompileError,
+)
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
@@ -73,6 +80,60 @@ class _UnregisteredAttrModule(torch.nn.Module):
 
 _GLOBAL_SLOT_HOLDER = _SlotHolder(torch.randn(3))
 _GLOBAL_UNREGISTERED_MODULE = _UnregisteredAttrModule(torch.randn(3))
+
+
+_GRAD_RAIL_MODULE = types.ModuleType("_precompile_grad_rail_mod")
+_GRAD_RAIL_MODULE.__file__ = "_precompile_grad_rail_mod.py"
+exec(
+    compile(
+        "import torch\nmodel = torch.nn.Linear(4, 3)\n",
+        _GRAD_RAIL_MODULE.__file__,
+        "exec",
+    ),
+    _GRAD_RAIL_MODULE.__dict__,
+)
+sys.modules["_precompile_grad_rail_mod"] = _GRAD_RAIL_MODULE
+
+
+def _grad_rail_module_global_step(xx, tt):
+    torch.nn.functional.mse_loss(_GRAD_RAIL_MODULE.model(xx), tt).backward()
+
+
+class _StarvedInner:
+    def __init__(self, model):
+        self.model = model
+
+
+class _StarvedHolder:
+    """A holder whose model the module walk provably cannot reach.
+
+    The walk is breadth first with a per-argument object budget, so starving it
+    takes breadth AHEAD of the model plus one step of depth: ``bucket`` fills the
+    next frontier before ``inner`` is expanded, and ``inner.model`` is never
+    enqueued. A plain big sibling attribute no longer starves it (that is what
+    breadth first bought), so a test that wants the unreachable case has to be
+    built this way or it silently tests the reachable one.
+    """
+
+    def __init__(self, model):
+        self.bucket = [object() for _ in range(_MODULE_SEARCH_BUDGET + 10)]
+        self.inner = _StarvedInner(model)
+
+    def step(self, xx, tt):
+        torch.nn.functional.mse_loss(self.inner.model(xx), tt).backward()
+
+    def grad_step(self, xx, tt):
+        loss = torch.nn.functional.mse_loss(self.inner.model(xx), tt)
+        return torch.autograd.grad(loss, list(self.inner.model.parameters()))
+
+    def zeroing_step(self, xx, tt):
+        for p in self.inner.model.parameters():
+            p.grad = None
+        torch.nn.functional.mse_loss(self.inner.model(xx), tt).backward()
+
+
+class _Phase(enum.Enum):
+    GEN = 1
 
 
 # A functools.partial carrying a tensor: pickle bakes that tensor BY VALUE via the partial's
@@ -1203,6 +1264,224 @@ class TestPrecompile(TestCase):
         with self.assertRaisesRegex(PrecompileError, "only harvests gradients"):
             torch.compiler.precompile(train_step, m, x, t, tracer="dynamo")
 
+    def test_tracer_dynamo_training_unreachable_model_rejected(self):
+        # The whole point of the two-pass capture is to bake the ACCUMULATING form
+        # of the backward, which needs a GRAD_ACCUM_PARAMS entry naming each param
+        # so the driver can materialize a zero .grad. A param the module walk never
+        # reached gets no entry, and the artifact used to be written anyway: correct
+        # on call 1, silently overwriting the accumulated grad on every call after.
+        x, t = torch.randn(5, 4), torch.randn(5, 3)
+        holder = _StarvedHolder(torch.nn.Linear(4, 3))
+        with self.assertRaisesRegex(
+            PrecompileError, "cannot re-create at runtime"
+        ) as cm:
+            torch.compiler.precompile(
+                holder.step, x, t, tracer="dynamo", backend="eager"
+            )
+        self.assertIn("L['self'].inner.model._parameters['weight']", str(cm.exception))
+
+    def test_tracer_dynamo_training_partial_attribution_rejected(self):
+        # PARTIAL attribution is the dangerous shape and the reason the check is a
+        # per-tensor one: submodules held in a plain list are invisible to
+        # named_parameters(), so GRAD_ACCUM_PARAMS is non-empty (the registered head
+        # is in it) while the list's params are not. Anything that only asked "did we
+        # find any params at all" passed this and froze extra[0]'s grads from step 1.
+        class Net(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.head = torch.nn.Linear(4, 3)
+                object.__setattr__(self, "extra", [torch.nn.Linear(4, 4)])
+
+            def forward(self, xx):
+                return self.head(self.extra[0](xx))
+
+        x, t = torch.randn(5, 4), torch.randn(5, 3)
+
+        def step(model, xx, tt):
+            torch.nn.functional.mse_loss(model(xx), tt).backward()
+
+        with self.assertRaisesRegex(
+            PrecompileError, "cannot re-create at runtime"
+        ) as cm:
+            torch.compiler.precompile(
+                step, Net(), x, t, tracer="dynamo", backend="eager"
+            )
+        self.assertIn("L['model'].extra[0]._parameters['weight']", str(cm.exception))
+
+    def test_tracer_dynamo_training_requires_grad_buffer_rejected(self):
+        # A requires_grad BUFFER is a legal autograd target that named_parameters()
+        # can never name, so there is no entry to write for it. Refusing aligns the
+        # dynamo tracer with the make_fx tracer, which already has its own buffer
+        # error; the word _buffers in the path is the whole diagnosis.
+        class Net(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin = torch.nn.Linear(4, 3)
+                self.register_buffer("scale", torch.ones(3, requires_grad=True))
+
+            def forward(self, xx):
+                return self.lin(xx) * self.scale
+
+        x, t = torch.randn(5, 4), torch.randn(5, 3)
+
+        def step(model, xx, tt):
+            torch.nn.functional.mse_loss(model(xx), tt).backward()
+
+        with self.assertRaisesRegex(
+            PrecompileError, "cannot re-create at runtime"
+        ) as cm:
+            torch.compiler.precompile(
+                step, Net(), x, t, tracer="dynamo", backend="eager"
+            )
+        self.assertIn("_buffers['scale']", str(cm.exception))
+
+    def test_tracer_dynamo_training_model_behind_a_module_global_rejected(self):
+        # Invariant 1 rejects a model baked into fn's globals or closure, but a model
+        # behind a MODULE global slips through it: the module is recorded by reference
+        # and re-imported at load, so _reject_baked_tensors never sees its params. The
+        # walk cannot reach it either (it is not an argument), so this is exactly the
+        # unattributed case and diverges from eager at step 1.
+        x, t = torch.randn(5, 4), torch.randn(5, 3)
+        with self.assertRaisesRegex(
+            PrecompileError, "cannot re-create at runtime"
+        ) as cm:
+            torch.compiler.precompile(
+                _grad_rail_module_global_step, x, t, tracer="dynamo", backend="eager"
+            )
+        self.assertIn("model._parameters['weight']", str(cm.exception))
+
+    def test_tracer_dynamo_training_model_deeper_than_the_search_rejected(self):
+        # The walk stops at _MODULE_SEARCH_DEPTH, and past it the failure was silent.
+        class D:
+            def __init__(self, child):
+                self.child = child
+
+        node: object = torch.nn.Linear(4, 3)
+        for _ in range(_MODULE_SEARCH_DEPTH + 3):
+            node = D(node)
+        x, t = torch.randn(5, 4), torch.randn(5, 3)
+
+        def step(holder, xx, tt):
+            h = holder
+            for _ in range(_MODULE_SEARCH_DEPTH + 3):
+                h = h.child
+            torch.nn.functional.mse_loss(h(xx), tt).backward()
+
+        with self.assertRaisesRegex(
+            PrecompileError, "cannot re-create at runtime"
+        ) as cm:
+            torch.compiler.precompile(
+                step, node, x, t, tracer="dynamo", backend="eager"
+            )
+        self.assertIn("_parameters['weight']", str(cm.exception))
+
+    def test_tracer_dynamo_training_refusal_does_not_recommend_make_fx(self):
+        # Every other precompile refusal offers tracer='make_fx' as the way out, and
+        # here that advice is a circle: make_fx cannot reach the tensor either and
+        # refuses these shapes with its own errors.
+        x, t = torch.randn(5, 4), torch.randn(5, 3)
+        holder = _StarvedHolder(torch.nn.Linear(4, 3))
+        with self.assertRaises(PrecompileError) as cm:
+            torch.compiler.precompile(
+                holder.step, x, t, tracer="dynamo", backend="eager"
+            )
+        self.assertNotIn("use tracer='make_fx'", str(cm.exception))
+
+    def test_tracer_dynamo_unreachable_model_with_pure_autograd_grad_accepted(self):
+        # Nothing is scattered, so there is no .grad to attribute and the rail must
+        # not fire just because a model happens to be out of the walk's reach.
+        x, t = torch.randn(5, 4), torch.randn(5, 3)
+
+        def fresh():
+            torch.manual_seed(0)
+            return _StarvedHolder(torch.nn.Linear(4, 3))
+
+        code, cache = torch.compiler.precompile(
+            fresh().grad_step, x, t, tracer="dynamo", backend="eager"
+        )
+        f_c = torch.compiler.precompile.load(code, cache)
+        run, ref = fresh(), fresh()
+        self.assertEqual(f_c(run, x, t), ref.grad_step(x, t))
+        self.assertTrue(all(p.grad is None for p in run.inner.model.parameters()))
+
+    def test_tracer_dynamo_in_trace_grad_none_with_unreachable_model_accepted(self):
+        # An unreachable model is only wrong when the artifact has to MATERIALIZE a
+        # .grad for it. When fn nulls .grad itself, eager assigns too, so the assign
+        # form the capture bakes is right and refusing would be a false alarm. The
+        # rail can tell because it asks the re-capture rather than the source: seed,
+        # re-capture, and if no .grad came back as a graph input then fn nulled it.
+        # A predicate over "requires_grad graph inputs we could not attribute" -- the
+        # obvious formulation -- refuses this, which is why the test is here.
+        x, t = torch.randn(5, 4), torch.randn(5, 3)
+
+        def fresh():
+            torch.manual_seed(0)
+            return _StarvedHolder(torch.nn.Linear(4, 3))
+
+        code, cache = torch.compiler.precompile(
+            fresh().zeroing_step, x, t, tracer="dynamo", backend="eager"
+        )
+        f_c = torch.compiler.precompile.load(code, cache)
+        run, ref = fresh(), fresh()
+        for _ in range(3):
+            f_c(run, x, t)
+            ref.zeroing_step(x, t)
+            for got, want in zip(
+                run.inner.model.parameters(), ref.inner.model.parameters()
+            ):
+                self.assertEqual(got.grad, want.grad)
+
+    def test_tracer_dynamo_in_fn_zero_grad_matches_eager(self):
+        # The canonical training step calls zero_grad(set_to_none=True) itself, so
+        # the capture's seeds are nulled inside the trace and the accumulate form is
+        # never reached. Shipping the SEEDED capture for that shape left a spare
+        # LOAD_ATTR grad in the residual bytecode that the epilogue never popped:
+        # fn returns None in eager, and the artifact returned the stale .grad tensor
+        # from call 2 on. Reverting to the unseeded capture is what fixes it.
+        x, t = torch.randn(5, 4), torch.randn(5, 3)
+
+        def step(model, xx, tt):
+            model.zero_grad(set_to_none=True)
+            torch.nn.functional.mse_loss(model(xx), tt).backward()
+
+        def fresh():
+            torch.manual_seed(0)
+            return torch.nn.Linear(4, 3)
+
+        code, cache = torch.compiler.precompile(
+            step, fresh(), x, t, tracer="dynamo", backend="eager"
+        )
+        f_c = torch.compiler.precompile.load(code, cache)
+        run, ref = fresh(), fresh()
+        for _ in range(3):
+            self.assertIsNone(f_c(run, x, t))
+            step(ref, x, t)
+            for got, want in zip(run.parameters(), ref.parameters()):
+                self.assertEqual(got.grad, want.grad)
+
+    def test_tracer_dynamo_autograd_grad_does_not_observe_the_seed(self):
+        # Seeding is a capture-time mutation of the caller's model, so fn can SEE it:
+        # `p.grad is not None` traced as True where eager reads False. When the
+        # re-capture turns out to need no accumulate at all -- autograd.grad only
+        # returns grads -- the seeds bought nothing, and the first (unseeded) capture
+        # is the one that has to ship.
+        x, t = torch.randn(5, 4), torch.randn(5, 3)
+
+        def grad_step(model, xx, tt):
+            seen = model.weight.grad is not None
+            loss = torch.nn.functional.mse_loss(model(xx), tt)
+            return seen, torch.autograd.grad(loss, [model.weight])
+
+        def fresh():
+            torch.manual_seed(0)
+            return torch.nn.Linear(4, 3)
+
+        code, cache = torch.compiler.precompile(
+            grad_step, fresh(), x, t, tracer="dynamo", backend="eager"
+        )
+        f_c = torch.compiler.precompile.load(code, cache)
+        self.assertEqual(f_c(fresh(), x, t)[0], grad_step(fresh(), x, t)[0])
+
     def _exec_dynamo_training_artifact(self):
         x, t = torch.randn(5, 4), torch.randn(5, 3)
 
@@ -1257,7 +1536,10 @@ class TestPrecompile(TestCase):
             "two_in_a_list",
             "same_module_twice",
             "int_keyed_dict",
+            "tuple_keyed_dict",
             "slots_holder",
+            "after_a_big_argument",
+            "beside_a_big_sibling",
         ],
     )
     def test_tracer_dynamo_training_accumulates_whatever_holds_the_params(self, shape):
@@ -1396,6 +1678,64 @@ class TestPrecompile(TestCase):
             mk = mk_dict
             call = lambda r: (dicts[id(r)], x, t)  # noqa: E731
             eager = lambda r: step_dict(dicts[id(r)], x, t)  # noqa: E731
+        elif shape == "tuple_keyed_dict":
+            # A tuple key is as ordinary as an int one, and pins the contract
+            # the artifact actually has: any key whose repr() is a literal that
+            # reads back equal, not just str / int.
+            def step_tuple(models, xx, tt):
+                torch.nn.functional.mse_loss(models[("a", 1)](xx), tt).backward()
+
+            tuples = {}
+
+            def mk_tuple():
+                m = fresh()
+                tuples[id(m)] = {("a", 1): m}
+                return m
+
+            fn = step_tuple
+            cap = ({("a", 1): fresh()}, x, t)
+            mk = mk_tuple
+            call = lambda r: (tuples[id(r)], x, t)  # noqa: E731
+            eager = lambda r: step_tuple(tuples[id(r)], x, t)  # noqa: E731
+        elif shape == "after_a_big_argument":
+            # The search for the model is budgeted, and the budget is spent PER
+            # ARGUMENT: one counter shared by the frame let a big EARLIER
+            # argument exhaust it before the walk reached the model, so the same
+            # training step captured correctly or not depending on the order its
+            # arguments happened to be in.
+            junk = [object() for _ in range(_MODULE_SEARCH_BUDGET + 10)]
+
+            def step_after(_junk, model, xx, tt):
+                torch.nn.functional.mse_loss(model(xx), tt).backward()
+
+            fn = step_after
+            cap = (junk, fresh(), x, t)
+            mk = fresh
+            call = lambda r: (junk, r, x, t)  # noqa: E731
+            eager = lambda r: step_after(junk, r, x, t)  # noqa: E731
+        elif shape == "beside_a_big_sibling":
+            # The same starvation one level down, inside ONE argument: a
+            # depth-first walk opened self.dataset and never reached self.model.
+            class BigTrainer:
+                def __init__(self, model):
+                    self.dataset = [object() for _ in range(_MODULE_SEARCH_BUDGET + 10)]
+                    self.model = model
+
+                def step(self, xx, tt):
+                    torch.nn.functional.mse_loss(self.model(xx), tt).backward()
+
+            trainers = {}
+
+            def mk_big():
+                h = BigTrainer(fresh())
+                trainers[id(h.model)] = h
+                return h.model
+
+            fn = BigTrainer(fresh()).step
+            cap = (x, t)
+            mk = mk_big
+            call = lambda r: (trainers[id(r)], x, t)  # noqa: E731
+            eager = lambda r: trainers[id(r)].step(x, t)  # noqa: E731
         elif shape == "slots_holder":
             # A __slots__ holder has no __dict__ at all, so a vars()-only walk
             # missed the model -- silently, since a capture with nothing to
@@ -1455,6 +1795,98 @@ class TestPrecompile(TestCase):
             got = run.lin.weight.grad if shape == "module_fn" else run.weight.grad
             want = ref.lin.weight.grad if shape == "module_fn" else ref.weight.grad
             self.assertEqual(got, want)
+
+    def test_module_search_budget_is_spent_per_argument(self):
+        # The walk that finds the modules a training capture has to seed is
+        # budgeted. Sharing one budget across the frame let a big earlier
+        # argument exhaust it, and a model the walk misses is a model whose
+        # backward bakes the OVERWRITING form -- silently, and only for some
+        # argument orders.
+        big = [object() for _ in range(_MODULE_SEARCH_BUDGET + 10)]
+        model = torch.nn.Linear(4, 3)
+
+        def fn(_junk, m, xx):
+            return m(xx)
+
+        found = _frame_modules(fn, (big, model, torch.randn(2, 4)))
+        self.assertEqual([(pos, path) for pos, path, _m in found], [(1, ())])
+        self.assertIs(found[0][2], model)
+
+    def test_module_search_budget_reaches_past_a_ten_thousand_item_sibling(self):
+        # Pins the size of the budget, not just its per-argument accounting. The
+        # frontier cap means the walk stops ENQUEUEING once the budget is spoken
+        # for, so a large budget costs O(budget) rather than O(argument): 8
+        # pathological 300k-object arguments measured 22ms at 2000 and 28ms at
+        # 20000. A trainer holding a five-figure dataset next to a nested model
+        # is an ordinary shape, and at the old size it is refused outright.
+        class Inner:
+            def __init__(self, model):
+                self.model = model
+
+        class Holder:
+            def __init__(self, model):
+                self.bucket = [object() for _ in range(10000)]
+                self.inner = Inner(model)
+
+        model = torch.nn.Linear(4, 3)
+
+        def fn(holder, xx):
+            return holder.inner.model(xx)
+
+        found = _frame_modules(fn, (Holder(model), torch.randn(2, 4)))
+        self.assertEqual(
+            [(pos, path) for pos, path, _m in found],
+            [(0, (("attr", "inner"), ("attr", "model")))],
+        )
+
+    def test_module_search_finds_a_model_beside_a_big_sibling(self):
+        # Same thing inside ONE argument: the walk is breadth first so the
+        # budget cuts off the deepest layer, not whichever attribute happened to
+        # be visited first. A trainer holding a big dataset next to its model is
+        # the ordinary shape, and depth first never got past the dataset.
+        class Holder:
+            def __init__(self, model):
+                self.dataset = [object() for _ in range(_MODULE_SEARCH_BUDGET + 10)]
+                self.model = model
+
+        model = torch.nn.Linear(4, 3)
+
+        def fn(holder, xx):
+            return holder.model(xx)
+
+        found = _frame_modules(fn, (Holder(model), torch.randn(2, 4)))
+        self.assertEqual(
+            [(pos, path) for pos, path, _m in found], [(0, (("attr", "model"),))]
+        )
+        self.assertIs(found[0][2], model)
+
+    @parametrize("kind", ["enum", "datetime", "frozenset"])
+    def test_tracer_dynamo_training_refuses_an_unwritable_dict_key(self, kind):
+        # The path to the model is recorded in the artifact as SOURCE TEXT
+        # (repr) and read back with ast.literal_eval / exec, so a key whose repr
+        # is not a literal produced a file that captured fine and then could not
+        # be loaded: an enum key emitted "<Phase.GEN: 1>" and load() rejected the
+        # whole file as "not a precompile artifact", while a datetime key parsed
+        # but would not literal_eval and came back as "malformed metadata".
+        key = {
+            "enum": _Phase.GEN,
+            "datetime": datetime.datetime(2024, 1, 1),
+            "frozenset": frozenset({1}),
+        }[kind]
+        x, t = torch.randn(5, 4), torch.randn(5, 3)
+
+        def step(models, xx, tt):
+            torch.nn.functional.mse_loss(models[key](xx), tt).backward()
+
+        with self.assertRaisesRegex(PrecompileError, "keyed by"):
+            torch.compiler.precompile(
+                step,
+                {key: torch.nn.Linear(4, 3)},
+                x,
+                t,
+                tracer="dynamo",
+                backend="eager",
+            )
 
     @staticmethod
     def _module_with(src: str, name: str):
