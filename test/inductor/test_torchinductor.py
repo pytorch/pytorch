@@ -13572,7 +13572,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 torch.randn([8, 256, 256]),
             ],
         )
-
+        
+        
+        
+    @skip_if_halide  # logical-index arg reductions are unsupported by Halide
     def test_argmax_after_fused_reduction_noncontiguous(self):
         def fn(x):
             return torch.argmax(torch.mean(x, dim=-1))
