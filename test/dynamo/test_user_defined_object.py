@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import copy
 import dataclasses
 import types
 import unittest
@@ -1241,6 +1242,190 @@ class TestObjectConstruction(TestCase):
         _, s = fn(torch.randn(3))
         self.assertIs(type(s), object)
         self.assertEqual(cnt.frame_count, 0)
+
+
+class _Namespace(types.SimpleNamespace):
+    pass
+
+
+@torch._dynamo.config.patch(enable_trace_unittest=True)
+class TestSimpleNamespace(TestCase):
+    """types.SimpleNamespace, ported from CPython's SimpleNamespaceTests."""
+
+    @make_dynamo_test
+    def test_constructor(self):
+        def check(ns, expected):
+            self.assertEqual(len(ns.__dict__), len(expected))
+            self.assertEqual(vars(ns), expected)
+            self.assertEqual(list(vars(ns).items()), list(expected.items()))
+
+        check(types.SimpleNamespace(), {})
+        check(types.SimpleNamespace(x=1, y=2), {"x": 1, "y": 2})
+        check(
+            types.SimpleNamespace({"x": 1, "y": 2}, x=4, z=3), {"x": 4, "y": 2, "z": 3}
+        )
+        check(types.SimpleNamespace([["x", 1], ["y", 2]]), {"x": 1, "y": 2})
+        check(types.SimpleNamespace([], x=4), {"x": 4})
+
+    @make_dynamo_test
+    def test_constructor_errors(self):
+        with self.assertRaises(TypeError):
+            types.SimpleNamespace([], [])  # too many positional arguments
+        with self.assertRaises(TypeError):
+            types.SimpleNamespace(1)  # not a mapping or iterable
+        with self.assertRaises(TypeError):
+            types.SimpleNamespace([1])  # non-iterable element
+        with self.assertRaises(ValueError):
+            types.SimpleNamespace([["x"]])  # not a pair
+        with self.assertRaises(TypeError):
+            types.SimpleNamespace({1: 2})  # non-string key
+        with self.assertRaises(TypeError):
+            types.SimpleNamespace(**{1: 2})
+
+    @make_dynamo_test
+    def test_attrget(self):
+        ns = types.SimpleNamespace(x=1, y=2)
+        self.assertEqual(ns.x, 1)
+        self.assertEqual(ns.y, 2)
+        with self.assertRaises(AttributeError):
+            ns.z
+
+    @make_dynamo_test
+    def test_attrset(self):
+        ns = types.SimpleNamespace(x=1)
+        ns.y = "ham"
+        ns.z = None
+        self.assertEqual(ns.__dict__, dict(x=1, y="ham", z=None))
+
+    @make_dynamo_test
+    def test_attrdel(self):
+        ns = types.SimpleNamespace(x=1, y=2, w=3)
+        with self.assertRaises(AttributeError):
+            del ns.spam
+        del ns.y
+        self.assertEqual(vars(ns), dict(x=1, w=3))
+        ns.y = "spam"
+        self.assertEqual(vars(ns), dict(x=1, w=3, y="spam"))
+
+    @make_dynamo_test
+    def test_repr(self):
+        ns = types.SimpleNamespace(x=1, y=2, w=3)
+        self.assertEqual(repr(ns), "namespace(x=1, y=2, w=3)")
+        self.assertEqual(repr(types.SimpleNamespace()), "namespace()")
+        self.assertEqual(repr(types.SimpleNamespace(x="spam")), "namespace(x='spam')")
+
+    @make_dynamo_test
+    def test_repr_subclass(self):
+        self.assertEqual(repr(_Namespace(a=1)), "_Namespace(a=1)")
+
+    @make_dynamo_test
+    def test_recursive_repr(self):
+        ns = types.SimpleNamespace(c="cookie")
+        ns.spam = ns
+        self.assertEqual(repr(ns), "namespace(c='cookie', spam=namespace(...))")
+        sub = _Namespace()
+        sub.spam = sub
+        self.assertEqual(repr(sub), "_Namespace(spam=_Namespace(...))")
+
+    @make_dynamo_test
+    def test_equal(self):
+        ns = types.SimpleNamespace()
+        ns.x = 1
+        self.assertEqual(types.SimpleNamespace(), types.SimpleNamespace())
+        self.assertEqual(types.SimpleNamespace(x=1), ns)
+        self.assertFalse(ns == types.SimpleNamespace())
+        # __eq__ returns NotImplemented against a non-namespace
+        self.assertFalse(types.SimpleNamespace() == 1)
+        self.assertTrue(types.SimpleNamespace() != 1)
+
+    @make_dynamo_test
+    def test_ordering_unsupported(self):
+        with self.assertRaises(TypeError):
+            types.SimpleNamespace(x=1) < types.SimpleNamespace(x=2)  # noqa: B015
+
+    @make_dynamo_test
+    def test_as_dict(self):
+        ns = types.SimpleNamespace(spam="spamspamspam")
+        with self.assertRaises(TypeError):
+            len(ns)
+        with self.assertRaises(TypeError):
+            iter(ns)
+        with self.assertRaises(TypeError):
+            "spam" in ns  # noqa: B015
+        with self.assertRaises(TypeError):
+            ns["spam"]
+
+    @make_dynamo_test
+    def test_nested(self):
+        ns1 = types.SimpleNamespace(a=1, b=2)
+        ns2 = types.SimpleNamespace(x=ns1)
+        self.assertEqual(vars(ns1), dict(a=1, b=2))
+        self.assertEqual(ns2.x.a, 1)
+        self.assertEqual(ns2.x, ns1)
+
+    @make_dynamo_test
+    def test_recursive(self):
+        ns1 = types.SimpleNamespace(c="cookie")
+        ns2 = types.SimpleNamespace()
+        ns3 = types.SimpleNamespace(x=1)
+        ns1.spam = ns1
+        ns2.spam = ns3
+        ns3.spam = ns2
+        self.assertEqual(ns1.spam, ns1)
+        self.assertEqual(ns1.spam.spam, ns1)
+        self.assertEqual(ns2.spam.spam, ns2)
+
+    @make_dynamo_test
+    def test_subclass(self):
+        spam = _Namespace(ham=8, eggs=9)
+        self.assertIs(type(spam), _Namespace)
+        self.assertEqual(vars(spam), {"ham": 8, "eggs": 9})
+
+    @make_dynamo_test
+    def test_replace(self):
+        ns = types.SimpleNamespace(x=11, y=22)
+        ns2 = copy.replace(ns)
+        self.assertEqual(ns2, ns)
+        self.assertIsNot(ns2, ns)
+        self.assertIs(type(ns2), types.SimpleNamespace)
+        ns2.x = 3
+        self.assertEqual(ns.x, 11)
+        self.assertEqual(vars(copy.replace(ns, x=1)), {"x": 1, "y": 22})
+        self.assertEqual(vars(copy.replace(ns, x=1, y=2)), {"x": 1, "y": 2})
+
+    @make_dynamo_test
+    def test_replace_subclass(self):
+        spam2 = copy.replace(_Namespace(ham=8, eggs=9), ham=5)
+        self.assertIs(type(spam2), _Namespace)
+        self.assertEqual(vars(spam2), {"ham": 5, "eggs": 9})
+
+    def test_holds_tensors_in_one_graph(self):
+        def fn(x):
+            ns = types.SimpleNamespace(a=x + 1)
+            ns.b = ns.a * 2
+            del ns.a
+            return ns
+
+        cnt = dynamo_testing.CompileCounter()
+        x = torch.randn(3)
+        got = torch.compile(fn, backend=cnt, fullgraph=True)(x)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertIs(type(got), types.SimpleNamespace)
+        self.assertEqual(vars(got), vars(fn(x)))
+
+    def test_argument_from_outside(self):
+        # A namespace built before the compiled region reaches Dynamo through
+        # VariableBuilder rather than SideEffects, so it needs the same model.
+        def fn(ns, x):
+            before = repr(ns)
+            ns.total = ns.scale * x
+            return before, ns.total, ns == copy.replace(ns, total=ns.total)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(3)
+        expected = fn(types.SimpleNamespace(name="cfg", scale=2), x)
+        got = opt_fn(types.SimpleNamespace(name="cfg", scale=2), x)
+        self.assertEqual(expected, got)
 
 
 if __name__ == "__main__":

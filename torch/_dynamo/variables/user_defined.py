@@ -428,6 +428,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             float.__new__,
             str.__new__,
             collections.deque.__new__,
+            types.SimpleNamespace.__new__,
         }
         return c_new_fns.union(exceptions)
 
@@ -1101,6 +1102,14 @@ class UserDefinedClassVariable(UserDefinedVariable):
             # contents (and defaultdict default_factory / deque maxlen) are
             # preserved.
             return args[0].call_method(tx, name, [], kwargs)
+        elif (
+            name == "__replace__"
+            and args
+            and isinstance(args[0], variables.SimpleNamespaceVariable)
+        ):
+            # copy.replace(ns) resolves type(ns).__replace__ and calls it with
+            # the instance as the sole positional argument.
+            return args[0].call_method(tx, name, [*args[1:]], kwargs)
         elif name == "__len__" and len(args) == 1 and not kwargs:
             from .object_protocol import generic_size
 
@@ -1132,7 +1141,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
             # unreconstructable args (e.g. generators).  Other tp_new functions
             # (tuple.__new__, BaseException.__new__) use the extra args.
             new_fn = self.value.__new__
-            if new_fn in (dict.__new__, set.__new__, collections.deque.__new__):
+            if new_fn in (
+                dict.__new__,
+                set.__new__,
+                collections.deque.__new__,
+                types.SimpleNamespace.__new__,
+            ):
                 init_args: list[VariableTracker] = []
             else:
                 init_args = list(args[1:])
@@ -5508,3 +5522,124 @@ class MutableMappingVariable(UserDefinedObjectVariable):
 
 class RandomVariable(UserDefinedObjectVariable):
     pass
+
+
+class SimpleNamespaceVariable(UserDefinedObjectVariable):
+    """types.SimpleNamespace and its subclasses.
+
+    Attribute get/set/del, __dict__ and vars() are inherited: the type keeps a
+    plain instance dict and does not override __getattribute__, __setattr__ or
+    __delattr__. Only its C slots need a model, since they have no Python source
+    to inline.
+
+    ref: https://github.com/python/cpython/blob/3.13/Objects/namespaceobject.c
+    """
+
+    @staticmethod
+    def is_matching_cls(cls: type) -> bool:
+        return isinstance(cls, type) and issubclass(cls, types.SimpleNamespace)
+
+    def _has_c_slot(self, name: str) -> bool:
+        """True while a subclass has not replaced the C slot with Python code."""
+        return getattr(type(self.value), name, None) is getattr(
+            types.SimpleNamespace, name
+        )
+
+    def _repr_name(self) -> str:
+        # namespace_repr prints "namespace" for the exact type, tp_name otherwise.
+        cls = type(self.value)
+        return "namespace" if cls is types.SimpleNamespace else cls.__name__
+
+    def repr_recursive_sentinel(self) -> str:
+        return f"{self._repr_name()}(...)"
+
+    def _merge_args(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> dict[str, VariableTracker]:
+        """PyDict_Merge over the optional positional arg, then the str-key check.
+
+        namespace_init updates the instance dict from the positional argument
+        first, so dict.update's own TypeError/ValueError come out unchanged, and
+        only then rejects non-string keys.
+        """
+        scratch = ConstDictVariable({}, mutation_type=ValueMutationNew())
+        if args:
+            scratch.call_method(tx, "update", [args[0]], {})
+        merged = {}
+        for key, value in scratch.items.items():
+            if not issubclass(key.vt.python_type(), str):
+                raise_type_error(tx, "keywords must be strings")
+            merged[key.vt.as_python_constant()] = value
+        for name, value in kwargs.items():
+            # ** unpacking a non-str key reaches here unvalidated; CPython
+            # rejects it in the call machinery with this same message.
+            if not isinstance(name, str):
+                raise_type_error(tx, "keywords must be strings")
+            merged[name] = value
+        return merged
+
+    def _attr_items(
+        self, tx: "InstructionTranslatorBase"
+    ) -> list[tuple[str, VariableTracker]]:
+        """The instance dict in insertion order, keyed by plain attribute name."""
+        return [
+            (key.vt.as_python_constant(), value)
+            for key, value in self.get_dict_vt(tx).items.items()
+        ]
+
+    def call_method(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: list[Any],
+        kwargs: dict[str, Any],
+    ) -> VariableTracker:
+        if name == "__init__" and self._has_c_slot("__init__"):
+            if len(args) > 1:
+                raise_type_error(
+                    tx,
+                    f"{type(self.value).__name__} expected at most "
+                    f"1 argument, got {len(args)}",
+                )
+            for attr, value in self._merge_args(tx, args, kwargs).items():
+                tx.output.side_effects.store_instance_dict_attr(self, attr, value)
+            return variables.ConstantVariable.create(None)
+
+        if name == "__replace__" and self._has_c_slot("__replace__"):
+            if args:
+                raise_type_error(tx, "__replace__() takes no positional arguments")
+            cls_vt = VariableTracker.build(tx, type(self.value), self.cls_source)
+            new_vt = tx.output.side_effects.track_new_user_defined_object(
+                cls_vt, cls_vt, [], tx=tx
+            )
+            attrs = dict(self._attr_items(tx))
+            attrs.update(kwargs)
+            for attr, value in attrs.items():
+                tx.output.side_effects.store_instance_dict_attr(new_vt, attr, value)
+            return new_vt
+
+        return super().call_method(tx, name, args, kwargs)
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        if not self._has_c_slot("__repr__"):
+            return super().tp_repr_impl(tx)
+        contents = ", ".join(
+            f"{attr}={tracked_repr(tx, value)}" for attr, value in self._attr_items(tx)
+        )
+        return VariableTracker.build(tx, f"{self._repr_name()}({contents})")
+
+    def tp_richcompare_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
+    ) -> VariableTracker:
+        if not self._has_c_slot(op):
+            return super().tp_richcompare_impl(tx, other, op)
+        # namespace_richcompare requires a real namespace on both sides
+        # (PyObject_TypeCheck, so a spoofed __class__ does not count) and hands
+        # every op to the two instance dicts, which is where the TypeError for
+        # ordering comes from.
+        if not isinstance(other, SimpleNamespaceVariable):
+            return variables.ConstantVariable.create(NotImplemented)
+        return self.get_dict_vt(tx).tp_richcompare_impl(tx, other.get_dict_vt(tx), op)

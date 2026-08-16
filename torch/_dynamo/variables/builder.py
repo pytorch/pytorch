@@ -331,6 +331,7 @@ from .user_defined import (
     IntWrapperVariable,
     KeyedJaggedTensorVariable,
     MutableMappingVariable,
+    SimpleNamespaceVariable,
     SourcelessGraphModuleVariable,
     UserDefinedClassVariable,
     UserDefinedConstantVariable,
@@ -2378,6 +2379,8 @@ class VariableBuilder:
             # reconstructed from a source across a graph break, so a `with` on
             # the reconstructed object can still be entered.
             result = GenericContextWrappingVariable(value, source=self.source)
+        elif SimpleNamespaceVariable.is_matching_cls(type(value)):
+            result = SimpleNamespaceVariable(value, source=self.source)
         else:
             result = UserDefinedObjectVariable(value, source=self.source)
         if not SideEffects.cls_supports_mutation_side_effects(type(value)):
