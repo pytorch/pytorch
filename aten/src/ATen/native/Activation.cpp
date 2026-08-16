@@ -447,6 +447,8 @@ Tensor& hardtanh_out(const Tensor& self, const Scalar& min, const Scalar& max, T
   if (at::isIntegralType(self.scalar_type(), /*include_bool*/false)) {
     int64_t minval = min.toLong();
     int64_t maxval = max.toLong();
+    TORCH_CHECK(self.dtype() != at::kByte || (minval >= 0 &&
+       maxval >=0), "cannot do hardtanh on an unsigned type with negative limits");
     min_ = minval;
     max_ = maxval;
   } else {
