@@ -2632,11 +2632,29 @@ class GeneratedCodeCache:
         ):
             return None
 
+        # def_kernel deduplicates kernel arguments by buffer name, so inputs
+        # with identical layouts can still generate different code depending
+        # on which of them alias the same buffer, e.g. mm(x, x) (one kernel
+        # arg) vs mm(a, b) (two). Key the aliasing structure name-insensitively.
+        #
+        # def_kernel also drops inputs found in V.graph.removed_buffers or in
+        # kernel.prologue_fused_inputs, but neither needs keying: the cache is
+        # only read and written while lowering generates autotune choices, and
+        # both sets are populated only later, during scheduling, whose template
+        # renders (SIMDScheduling.codegen_template via make_kernel_render)
+        # bypass this cache entirely.
+        names = [node.get_name() for node in input_nodes]
+        first_seen: dict[str, int] = {}
+        input_aliasing = tuple(
+            first_seen.setdefault(name, i) for i, name in enumerate(names)
+        )
+
         return repr(
             {
                 "input_nodes": [
                     layout_key(input.get_layout()) for input in input_nodes
                 ],
+                "input_aliasing": input_aliasing,
                 "num_stages": num_stages,
                 "num_warps": num_warps,
                 "prefix_args": prefix_args,
