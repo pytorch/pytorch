@@ -153,6 +153,15 @@ def _add_triton_kernel_info(kernel_name: str, info: dict[str, Any]):
         _triton_kernel_metrics[kernel_name] = info
 
 
+
+def _sanitize_kernel_name(name: str) -> str:
+    # Strip Python class-private attribute mangling (e.g., _ClassName__kernel_name -> kernel_name)
+    name = re.sub(r"^_[A-Za-z0-9_]+?__", "", name)
+    
+    # Existing sanitization logic below...
+    name = re.sub(r"[^\w]", "_", name)
+    return name
+
 def _emit_triton_kernel_compile_metric(
     kernel: CachingAutotuner,
     kernel_name: str,
@@ -673,7 +682,9 @@ class AsyncCompile:
     def _load_kernel_wrapper(self, kernel_name, main_suffix, wrapper_cls, key, path):
         """Reload a kernel module from PyCodeCache and wrap the entry point."""
         mod = torch._inductor.codecache.PyCodeCache.load_by_key_path(key, path)
+        kernel_name = _sanitize_kernel_name(kernel_name)
         main_func_name = f"{kernel_name}_{main_suffix}"
+        # f"{kernel_name}_{main_suffix}"
         return wrapper_cls(getattr(mod, main_func_name), kernel_path=path)
 
     def cutedsl(self, kernel_name: str, source_code: str, precompile_metadata=None):
@@ -731,7 +742,11 @@ class AsyncCompile:
             key, path = torch._inductor.codecache.PyCodeCache.write(source_code)
             mod = torch._inductor.codecache.PyCodeCache.load_by_key_path(key, path)
 
+            
+            kernel_name = _sanitize_kernel_name(kernel_name)
             main_func_name = f"{kernel_name}_{MAIN_SUFFIX}"
+
+
             if not hasattr(mod, main_func_name):
                 available = [name for name in dir(mod) if callable(getattr(mod, name))]
                 raise RuntimeError(
@@ -827,7 +842,9 @@ class AsyncCompile:
             mod = torch._inductor.codecache.PyCodeCache.load_by_key_path(key, path)
 
             # Find our special entry point named function
+            kernel_name = _sanitize_kernel_name(kernel_name)
             main_func_name = f"{kernel_name}_{MAIN_SUFFIX}"
+
             if not hasattr(mod, main_func_name):
                 available = [name for name in dir(mod) if callable(getattr(mod, name))]
                 raise RuntimeError(
@@ -901,7 +918,9 @@ class AsyncCompile:
             key, path = torch._inductor.codecache.PyCodeCache.write(source_code)
             mod = torch._inductor.codecache.PyCodeCache.load_by_key_path(key, path)
 
-            main_func_name = f"{kernel_name}_{MAIN_SUFFIX}"
+            kernel_name = _sanitize_kernel_name(kernel_name)
+            main_func_name = f"{kernel_name}_{main_suffix}"
+
             if not hasattr(mod, main_func_name):
                 available = [name for name in dir(mod) if callable(getattr(mod, name))]
                 raise RuntimeError(
