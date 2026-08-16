@@ -7,9 +7,13 @@
 #include <cstdlib>
 #include <limits>
 #include <map>
+#include <unordered_map>
+
+#include <c10/util/hash.h>
 #include <memory>
 #include <optional>
 #include <type_traits>
+#include <vector>
 
 // WARNING: be extra careful when including more ATen/c10 header files here!
 // Because AOTInductor generated code will copy-paste this cpp_prefix.h for
@@ -21,6 +25,7 @@
 #include <ATen/NumericUtils.h>
 #include <ATen/core/PhiloxRNGEngine.h>
 
+#include <c10/util/ArrayRef.h>
 #include <c10/util/BFloat16-math.h>
 #include <c10/util/BFloat16.h>
 #include <c10/util/Float8_e4m3fn.h>
@@ -35,7 +40,8 @@
 
 #if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2) ||  \
     defined(CPU_CAPABILITY_ZVECTOR) || defined(CPU_CAPABILITY_NEON) || \
-    defined(CPU_CAPABILITY_VSX) || defined(CPU_CAPABILITY_SVE256)
+    defined(CPU_CAPABILITY_VSX) || defined(CPU_CAPABILITY_SVE256) ||   \
+    defined(CPU_CAPABILITY_SVE128)
 #define INDUCTOR_USE_VECTOR_TYPES() 1
 #else
 #define INDUCTOR_USE_VECTOR_TYPES() 0
@@ -91,6 +97,19 @@ struct GetScalarType<at::vec::VectorizedN<T, N>> {
 };
 #endif
 
+inline uint64_t ceil_log2_u64(uint64_t n) {
+  if (n <= 1) {
+    return 0;
+  }
+  n -= 1;
+  uint64_t result = 0;
+  while (n > 0) {
+    n >>= 1;
+    result += 1;
+  }
+  return result;
+}
+
 template <typename T, uint64_t kChunkSize>
 struct CascadeSumHelper {
   // A data struct to help cascade summation:
@@ -100,17 +119,9 @@ struct CascadeSumHelper {
   uint64_t index{0}; // index of the current data.
   CascadeSumHelper() = default;
   CascadeSumHelper(uint64_t N) {
-    uint64_t m = (N + kChunkSize - 1) / kChunkSize; // div up
-    depth = m > 0
-        ? static_cast<std::uint64_t>(ceil(log2(static_cast<double>(m))))
-        : 0;
-    if constexpr (IsVecType<T>::value) {
-      sum_stk.assign(
-          std::max(depth, static_cast<uint64_t>(1)),
-          T(typename T::value_type(0)));
-    } else {
-      sum_stk.assign(std::max(depth, static_cast<uint64_t>(1)), T(0));
-    }
+    const uint64_t m = (N + kChunkSize - 1) / kChunkSize; // div up
+    depth = ceil_log2_u64(m);
+    sum_stk.assign(std::max(depth, static_cast<uint64_t>(1)), T(0));
   }
 };
 
@@ -162,10 +173,8 @@ struct WelfordHelper {
   uint64_t num_chunks{0}; // number of chunks stored in welford_stk.
   WelfordHelper() = default;
   WelfordHelper(uint64_t N) {
-    uint64_t m = (N + kChunkSize - 1) / kChunkSize; // div up
-    depth = m > 0
-        ? static_cast<std::uint64_t>(ceil(log2(static_cast<double>(m))))
-        : 0;
+    const uint64_t m = (N + kChunkSize - 1) / kChunkSize; // div up
+    depth = ceil_log2_u64(m);
     welford_stk.assign(depth, Welford<T>());
   }
 };
@@ -248,7 +257,7 @@ Welford<T> welford_combine(
   auto new_weight = acc.weight + T(1);
   auto delta = data - acc.mean;
   T new_mean;
-  // use new_index to fecth 1 / new_weight to avoid divisions
+  // use new_index to fetch 1 / new_weight to avoid divisions
   new_mean = acc.mean +
       ((w == nullptr || acc.index >= w->weight_recps.size())
            ? delta / new_weight
@@ -821,6 +830,56 @@ inline void inductor_cpu_throw_if_integer_div_error(std::atomic<int>& err) {
 }
 
 template <typename T, typename U>
+inline std::common_type_t<T, U> floor_divide_integral(T a, U b) {
+  using C = std::common_type_t<T, U>;
+  static_assert(
+      std::is_integral_v<C>,
+      "floor_divide_integral expects integral scalar operands");
+  const C a_c = static_cast<C>(a);
+  const C b_c = static_cast<C>(b);
+  if (C10_UNLIKELY_OR_CONST(b_c == 0)) {
+    inductor_cpu_note_integer_div_by_zero();
+    return C(0);
+  }
+  return c10::div_floor_integer(a_c, b_c);
+}
+
+#if INDUCTOR_USE_VECTOR_TYPES()
+template <typename T>
+inline at::vec::Vectorized<T> floor_divide_integral(
+    const at::vec::Vectorized<T>& a,
+    const at::vec::Vectorized<T>& b) {
+  static_assert(
+      std::is_integral_v<T>,
+      "floor_divide_integral expects integral underlying type");
+  using Vec = at::vec::Vectorized<T>;
+  constexpr int kLen = Vec::size();
+  alignas(alignof(Vec)) T out_buf[kLen];
+  alignas(alignof(Vec)) T b_buf[kLen];
+  a.store(out_buf);
+  b.store(b_buf);
+  for (int i = 0; i < kLen; ++i) {
+    out_buf[i] = floor_divide_integral(out_buf[i], b_buf[i]);
+  }
+  return Vec::loadu(out_buf);
+}
+
+template <typename T, int N>
+inline at::vec::VectorizedN<T, N> floor_divide_integral(
+    const at::vec::VectorizedN<T, N>& a,
+    const at::vec::VectorizedN<T, N>& b) {
+  static_assert(
+      std::is_integral_v<T>,
+      "floor_divide_integral expects integral underlying type");
+  at::vec::VectorizedN<T, N> out;
+  for (int i = 0; i < N; ++i) {
+    out[i] = floor_divide_integral(a[i], b[i]);
+  }
+  return out;
+}
+#endif
+
+template <typename T, typename U>
 inline std::common_type_t<T, U> mod(T a, U b) {
   using C = std::common_type_t<T, U>;
   static_assert(
@@ -1007,7 +1066,13 @@ typename std::enable_if_t<std::is_integral_v<T>> atomic_add(
     T offset) {
   static_assert(sizeof(std::atomic<T>) == sizeof(T), "std::atomic issue");
   std::atomic<T>* atomic_addr = (std::atomic<T>*)addr;
-  atomic_addr->fetch_add(offset, std::memory_order_relaxed);
+  if constexpr (std::is_same_v<T, bool>) {
+    if (offset) {
+      atomic_addr->store(true, std::memory_order_relaxed);
+    }
+  } else {
+    atomic_addr->fetch_add(offset, std::memory_order_relaxed);
+  }
 }
 
 #if INDUCTOR_USE_VECTOR_TYPES()
@@ -1020,6 +1085,30 @@ void atomic_add_vec(
   constexpr int len = at::vec::VectorizedN<int64_t, NI>::size();
   static_assert(len <= at::vec::VectorizedN<T, NV>::size());
   __at_align__ std::array<T, len> tmpbuf;
+  __at_align__ std::array<int64_t, len> tmpidx;
+  offset.store(tmpbuf.data(), len);
+  index.store(tmpidx.data(), len);
+  int size = tail_size.has_value() ? tail_size.value() : len;
+  for (int i = 0; i < size; i++) {
+    atomic_add(addr + tmpidx[i], tmpbuf[i]);
+  }
+}
+
+template <
+    typename T,
+    int NI,
+    int NV,
+    typename mask_t,
+    int NM,
+    std::enable_if_t<std::is_same_v<T, bool>, int> = 0>
+void atomic_add_vec(
+    T* addr,
+    at::vec::VectorizedN<int64_t, NI> index,
+    at::vec::VecMask<mask_t, NM> offset,
+    std::optional<int64_t> tail_size = std::nullopt) {
+  constexpr int len = at::vec::VectorizedN<int64_t, NI>::size();
+  static_assert(len <= at::vec::VecMask<mask_t, NM>::size());
+  __at_align__ std::array<bool, len> tmpbuf;
   __at_align__ std::array<int64_t, len> tmpidx;
   offset.store(tmpbuf.data(), len);
   index.store(tmpidx.data(), len);
@@ -1084,36 +1173,24 @@ inline void transpose_mxn(
 #endif
 
 // NOLINTBEGIN(*-avoid-c-arrays)
-inline std::tuple<std::shared_ptr<int64_t[]>, int> _get_factors(
-    int64_t number) {
-  int count = 0;
+inline std::vector<int64_t> _get_factors(int64_t number) {
+  std::vector<int64_t> factors;
   for (auto i = static_cast<int64_t>(std::sqrt(number)); i > 0; --i) {
     if (number % i == 0) {
-      count += 2;
+      factors.emplace_back(number / i);
+      factors.emplace_back(i);
     }
   }
-  auto factors = std::shared_ptr<int64_t[]>(new int64_t[count]);
-  int index = 0;
-  for (auto i = static_cast<int64_t>(std::sqrt(number)); i > 0; --i) {
-    if (number % i == 0) {
-      factors[index++] = number / i;
-      factors[index++] = i;
-    }
-  }
-  return std::make_tuple(factors, count);
+  return factors;
 }
 
-inline std::tuple<std::shared_ptr<int64_t[]>, int> get_factors(int64_t number) {
-  thread_local std::map<int64_t, std::tuple<std::shared_ptr<int64_t[]>, int>>
-      cache;
-  auto it = cache.find(number);
-  if (it != cache.end()) {
-    return it->second;
-  } else {
-    auto factors = _get_factors(number);
-    cache[number] = factors;
-    return factors;
+inline c10::ArrayRef<int64_t> get_factors(int64_t number) {
+  thread_local std::unordered_map<int64_t, std::vector<int64_t>> cache;
+  auto [it, inserted] = cache.try_emplace(number);
+  if (inserted) {
+    it->second = _get_factors(number);
   }
+  return c10::ArrayRef<int64_t>(it->second);
 }
 // NOLINTEND(*-avoid-c-arrays)
 
@@ -1157,11 +1234,10 @@ inline void _mm_get_thread_blocking(
   int64_t n_blocks = (N + Nr - 1) / Nr;
   int64_t k_blocks = (K + Kr - 1) / Kr;
 
-  auto [factors, count] = get_factors(num_threads);
-  assert(count > 0);
+  auto factors = get_factors(num_threads);
+  assert(!factors.empty());
 
-  for (int i = 0; i < count; ++i) {
-    int64_t n_factor = factors[i];
+  for (int64_t n_factor : factors) {
     int64_t m_factor = num_threads / n_factor;
     if (n_blocks >= n_factor && m_blocks >= m_factor) {
       auto [Mt_, Nt_, Kt_] =
@@ -1176,13 +1252,11 @@ inline void _mm_get_thread_blocking(
     return;
   }
 
-  for (int i = 0; i < count; ++i) {
-    int64_t k_factor = factors[i];
+  for (int64_t k_factor : factors) {
     if (k_blocks >= k_factor &&
         (max_k_slices == 0 || k_factor <= max_k_slices)) {
-      auto [mxn_factors, mxn_count] = get_factors(num_threads / k_factor);
-      for (int j = 0; j < mxn_count; ++j) {
-        int64_t n_factor = mxn_factors[j];
+      auto mxn_factors = get_factors(num_threads / k_factor);
+      for (int64_t n_factor : mxn_factors) {
         int64_t m_factor = num_threads / (k_factor * n_factor);
         if (n_blocks >= n_factor && m_blocks >= m_factor) {
           auto [Mt_, Nt_, Kt_] = get_blocking(
@@ -1199,8 +1273,7 @@ inline void _mm_get_thread_blocking(
     return;
   }
 
-  for (int i = 0; i < count; ++i) {
-    int64_t n_factor = factors[i];
+  for (int64_t n_factor : factors) {
     int64_t m_factor = num_threads / n_factor;
     if (n_blocks >= n_factor || m_blocks >= m_factor) {
       auto [Mt_, Nt_, Kt_] =
@@ -1226,20 +1299,19 @@ inline void mm_get_thread_blocking(
     int64_t& Mt,
     int64_t& Nt,
     int64_t& Kt) {
-  thread_local std::map<
-      std::
-          tuple<int, int, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t>,
-      std::tuple<int64_t, int64_t, int64_t>>
-      cache;
+  using Key = std::
+      tuple<int, int, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t>;
+  thread_local std::
+      unordered_map<Key, std::tuple<int64_t, int64_t, int64_t>, c10::hash<Key>>
+          cache;
   auto key = std::make_tuple(num_threads, max_k_slices, M, N, K, Mr, Nr, Kr);
-  auto it = cache.find(key);
-  if (it != cache.end()) {
-    std::tie(Mt, Nt, Kt) = it->second;
-    return;
-  } else {
+  auto [it, inserted] = cache.try_emplace(key);
+  if (inserted) {
     _mm_get_thread_blocking(
         num_threads, max_k_slices, M, N, K, Mr, Nr, Kr, Mt, Nt, Kt);
-    cache[key] = std::make_tuple(Mt, Nt, Kt);
+    it->second = std::make_tuple(Mt, Nt, Kt);
+  } else {
+    std::tie(Mt, Nt, Kt) = it->second;
   }
 }
 
@@ -1263,7 +1335,7 @@ void _mm_get_cache_blocking(
     uint32_t L2_cache_size) {
   // See NOTE [CPP GEMM Cache Blocking Algorithm] for the cache blocking
   // algorithm.
-  // TODO(jgong5): cache cache blocking results
+  // TODO(jgong5): cache the cache blocking results
   // TODO: tune the factor here
   float L1_limit_factor = 0.8;
   float L2_limit_factor = 0.5;
@@ -1280,8 +1352,8 @@ void _mm_get_cache_blocking(
     Kc_blocks = (int64_t)std::floor(L1 / (Kr * Nr * num_byte_B));
   }
 
-  float min_Mc_ratio = 2;
-  int64_t min_Mc_blocks = std::ceil(min_Mc_ratio * Mr / Nr);
+  constexpr int64_t min_Mc_ratio = 2;
+  const int64_t min_Mc_blocks = (min_Mc_ratio * Mr + Nr - 1) / Nr;
   auto Kt_bytes = Kt_blocks * Kr * num_byte_A;
   if (min_Mc_blocks * Mr * Kt_bytes < L2) {
     Mc_blocks = std::min(Mt_blocks, (int64_t)std::floor(L2 / (Mr * Kt_bytes)));
@@ -1321,22 +1393,22 @@ void mm_get_cache_blocking(
     int64_t& Kc_blocks,
     uint32_t L1_cache_size,
     uint32_t L2_cache_size) {
-  thread_local std::map<
-      std::tuple<
-          int,
-          int64_t,
-          int64_t,
-          int64_t,
-          int64_t,
-          int64_t,
-          int64_t,
-          int64_t,
-          int64_t,
-          int64_t,
-          int64_t,
-          int64_t>,
-      std::tuple<int64_t, int64_t, int64_t>>
-      cache;
+  using Key = std::tuple<
+      int,
+      int64_t,
+      int64_t,
+      int64_t,
+      int64_t,
+      int64_t,
+      int64_t,
+      int64_t,
+      int64_t,
+      int64_t,
+      int64_t,
+      int64_t>;
+  thread_local std::
+      unordered_map<Key, std::tuple<int64_t, int64_t, int64_t>, c10::hash<Key>>
+          cache;
   auto key = std::make_tuple(
       num_threads,
       M,
@@ -1350,11 +1422,8 @@ void mm_get_cache_blocking(
       Kt_blocks,
       L1_cache_size,
       L2_cache_size);
-  auto it = cache.find(key);
-  if (it != cache.end()) {
-    std::tie(Mc_blocks, Nc_blocks, Kc_blocks) = it->second;
-    return;
-  } else {
+  auto [it, inserted] = cache.try_emplace(key);
+  if (inserted) {
     _mm_get_cache_blocking<X_t, W_t>(
         num_threads,
         M,
@@ -1371,7 +1440,9 @@ void mm_get_cache_blocking(
         Kc_blocks,
         L1_cache_size,
         L2_cache_size);
-    cache[key] = std::make_tuple(Mc_blocks, Nc_blocks, Kc_blocks);
+    it->second = std::make_tuple(Mc_blocks, Nc_blocks, Kc_blocks);
+  } else {
+    std::tie(Mc_blocks, Nc_blocks, Kc_blocks) = it->second;
   }
 }
 

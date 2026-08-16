@@ -3,14 +3,17 @@ name: Upload docs preview
 # Runs in the base-repo context so it has the AWS credentials needed to write
 # to s3://doc-previews. This exists because OSDC docs builds run in a k8s pod
 # that does not (and should not) have S3 write permission, and fork PRs cannot
-# authenticate via OIDC from the build job itself. The pull.yml docs job stages
-# the built docs as a GHA artifact; this workflow downloads that artifact and
-# performs the actual S3 upload.
+# authenticate via OIDC from the build job itself. The docs-build.yml docs job
+# stages the built docs as a GHA artifact; this workflow downloads that
+# artifact and performs the actual S3 upload.
+#
+# Triggered off docs-build (just the build + docs jobs) rather than the full
+# `pull` workflow so the preview publishes as soon as the docs finish.
 
 on:
   workflow_run:
     workflows:
-      - pull
+      - docs-build
     types:
       - completed
 
@@ -45,19 +48,18 @@ jobs:
         id: metadata
         shell: bash
         run: |
-          set -ex
-          if [ ! -f docs-preview-staging/pr-metadata.txt ]; then
+          set -eu
+          meta="docs-preview-staging/pr-metadata.txt"
+          if [ ! -f "${meta}" ]; then
             echo "pr-metadata.txt missing from artifact, aborting."
             exit 1
           fi
-          # shellcheck disable=SC1091
-          source docs-preview-staging/pr-metadata.txt
-          if [ -z "${PR_NUMBER:-}" ]; then
-            echo "PR_NUMBER is empty, aborting."
+          PR_NUMBER="$(grep -m1 '^PR_NUMBER=' "${meta}" | cut -d= -f2- || true)"
+          if ! [[ "${PR_NUMBER}" =~ ^[0-9]+$ ]]; then
+            echo "PR_NUMBER is not a positive integer, aborting."
             exit 1
           fi
           echo "pr_number=${PR_NUMBER}" >> "${GITHUB_OUTPUT}"
-          echo "docs_type=${DOCS_TYPE}" >> "${GITHUB_OUTPUT}"
 
       - name: Configure AWS credentials
         if: steps.download.outcome == 'success'

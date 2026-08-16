@@ -8,6 +8,7 @@
 #include <ATen/cuda/DeviceUtils.cuh>
 #include <ATen/native/EmbeddingBag.h>
 #include <ATen/TensorUtils.h>
+#include <utility>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -245,7 +246,7 @@ template <typename scalar_t, typename index_t>
 __global__ void EmbeddingBag_accGradParametersKernel_max(
     const index_t *max_indices, const scalar_t *gradOutput,
     scalar_t *gradWeight, int64_t stride, int64_t numBags,
-    index_t padding_idx, const index_t numel) {
+    index_t padding_idx, const int64_t numel) {
 
   using accscalar_t = acc_type<scalar_t, true>;
 
@@ -263,7 +264,7 @@ __global__ void EmbeddingBag_accGradParametersKernel_max(
       if (word_idx >= 0 && word_idx != padding_idx) {
         // If bag is empty, we have max_indices[idx] set to -1 in forward.
         fastAtomicAdd(
-            gradWeight, static_cast<index_t>(word_idx * stride + featureDim),
+            gradWeight, static_cast<int64_t>(word_idx) * stride + featureDim,
             numel, gradOutput[bag * stride + featureDim], true);
       }
     }
@@ -426,7 +427,11 @@ _embedding_bag_cuda(const Tensor &weight, const Tensor &indices_,
     });
   });
 
-  return std::tuple<Tensor, Tensor, Tensor, Tensor>(output, offset2bag, bag_size, max_indices);
+  return std::tuple<Tensor, Tensor, Tensor, Tensor>(
+      std::move(output),
+      std::move(offset2bag),
+      std::move(bag_size),
+      std::move(max_indices));
 }
 
 Tensor _embedding_bag_dense_backward_cuda(const Tensor &grad_, const Tensor &indices,
@@ -546,7 +551,7 @@ Tensor _embedding_bag_per_sample_weights_backward_cuda(
     return output;
   }
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16,
     grad.scalar_type(), "_embedding_bag_per_sample_weights_backward_cuda", [&]() {
       AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "_embedding_bag_per_sample_weights_backward_cuda", [&]() {
         _embedding_bag_per_sample_weights_backward_kernel<scalar_t, index_t>

@@ -5,9 +5,8 @@ import re
 import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
-from torch._higher_order_ops.utils import autograd_not_implemented
+from torch._higher_order_ops.utils import autograd_not_implemented, register_fake
 from torch._ops import HigherOrderOperator
-from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
 
 
@@ -239,6 +238,41 @@ inline_asm_elementwise.py_autograd_impl(
 )
 
 
+@inline_asm_elementwise.py_impl(torch._C._functorch.TransformType.Vmap)
+def _(interpreter, *inputs, asm_str, constraints, dtype, is_pure=True, pack=1):
+    from torch._functorch.vmap import unwrap_batched, wrap_batched
+
+    op = functools.partial(
+        inline_asm_elementwise,
+        asm_str=asm_str,
+        constraints=constraints,
+        dtype=dtype,
+        is_pure=is_pure,
+        pack=pack,
+    )
+    unwrapped, bdims = unwrap_batched(list(inputs), interpreter.level())
+    if all(bdim is None for bdim in bdims):
+        # No input is batched at this level (e.g. this vmap level batches only
+        # tensors that are not asm inputs); the result has no batch dim to wrap.
+        with interpreter.lower():
+            return op(*unwrapped)
+    # The op is elementwise, so batching is a broadcast: move each batch dim to
+    # the front and pad the logical dims so they stay right-aligned across all
+    # inputs while the batch dim broadcasts only against other batch dims.
+    logical_ndim = max(
+        t.ndim - (0 if bdim is None else 1) for t, bdim in zip(unwrapped, bdims)
+    )
+    moved = []
+    for t, bdim in zip(unwrapped, bdims):
+        if bdim is not None:
+            t = t.movedim(bdim, 0)
+            t = t[(slice(None), *([None] * (logical_ndim - (t.ndim - 1))))]
+        moved.append(t)
+    with interpreter.lower():
+        res = op(*moved)
+    return wrap_batched((res,), (0,), interpreter.level())[0]
+
+
 def _elementwise_output_like(*inputs, dtype):
     from torch._prims_common import compute_elementwise_output_logical_to_physical_perm
 
@@ -249,10 +283,9 @@ def _elementwise_output_like(*inputs, dtype):
     )
 
 
-@inline_asm_elementwise.py_impl(FakeTensorMode)
-def _(mode, *inputs, asm_str, constraints, dtype, is_pure=True, pack=1):
-    with mode:
-        return _elementwise_output_like(*inputs, dtype=dtype)
+@register_fake(inline_asm_elementwise, skip_cache=True)
+def _(*inputs, asm_str, constraints, dtype, is_pure=True, pack=1):
+    return _elementwise_output_like(*inputs, dtype=dtype)
 
 
 @inline_asm_elementwise.py_impl(ProxyTorchDispatchMode)

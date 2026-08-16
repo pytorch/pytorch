@@ -36,7 +36,7 @@ void assert_ignored_methods_not_called(
   std::unordered_set<std::string> encountered_ignored_methods;
 
   for (Node* n : all_nodes) {
-    if (ignored_methods.count(n->s(attr::name)) > 0 &&
+    if (ignored_methods.contains(n->s(attr::name)) &&
         getInputDebugName(*n, 0) == "self") {
       encountered_ignored_methods.insert(
           getInputDebugName(*n, 0) + "." + n->s(attr::name));
@@ -73,7 +73,7 @@ void assert_ignored_attributes_not_referenced(
   std::unordered_set<std::string> encountered_ignored_attributes;
 
   for (Node* n : all_nodes) {
-    if (ignored_attributes.count(n->s(attr::name)) > 0 &&
+    if (ignored_attributes.contains(n->s(attr::name)) &&
         getInputDebugName(*n, 0) == "self") {
       encountered_ignored_attributes.insert(
           getInputDebugName(*n, 0) + "." + n->s(attr::name));
@@ -344,7 +344,7 @@ Module Module::clone_impl(
   // ClassType during cloning, so we first need to check if the type
   // is already cloned, if so, we'll create a new module with the cloned
   // ClassType, if not, we'll create a new module and a new ClassType.
-  bool type_already_cloned = type_remap.find(type()) != type_remap.end();
+  bool type_already_cloned = type_remap.contains(type());
   Module r;
   if (type_already_cloned) {
     // if we cloned the class type before, we'll reuse it
@@ -365,7 +365,7 @@ Module Module::clone_impl(
 
     // If this attribute is in the list of ignored attributes, skip it
     // (i.e. do not clone it).
-    if (ignored_attributes.count(attr_name) != 0) {
+    if (ignored_attributes.contains(attr_name)) {
       continue;
     }
 
@@ -409,7 +409,7 @@ Module Module::clone_impl(
     // clone methods, remapping the types to the cloned ones.
     for (auto& fn : type()->methods()) {
       // If this method is not in the list of ignored methods, clone it.
-      if (ignored_methods.count(fn->name()) == 0) {
+      if (!ignored_methods.contains(fn->name())) {
         assert_ignored_methods_not_called(*fn, ignored_methods);
         assert_ignored_attributes_not_referenced(*fn, ignored_attributes);
         r.clone_method(*this, *fn, type_remap);
@@ -589,13 +589,13 @@ std::string Module::dump_to_str(
 
   ss << "module " << type()->name()->qualifiedName() << " {" << '\n';
   ss << "  parameters {" << '\n';
-  ss << torch::jit::jit_log_prefix("    ", parameters_ss.str());
+  ss << torch::jit::jit_log_prefix("    ", std::move(parameters_ss).str());
   ss << "  }" << '\n';
   ss << "  attributes {" << '\n';
-  ss << torch::jit::jit_log_prefix("    ", attributes_ss.str());
+  ss << torch::jit::jit_log_prefix("    ", std::move(attributes_ss).str());
   ss << "  }" << '\n';
   ss << "  methods {" << '\n';
-  ss << torch::jit::jit_log_prefix("  ", methods_ss.str());
+  ss << torch::jit::jit_log_prefix("  ", std::move(methods_ss).str());
   ss << "  }" << '\n';
   ss << "  submodules {" << '\n';
   for (const NameModule& s : named_children()) {
@@ -610,7 +610,7 @@ std::string Module::dump_to_str(
   ss << "  }" << '\n';
   ss << '}' << '\n';
 
-  return ss.str();
+  return std::move(ss).str();
 }
 
 void Module::dump(

@@ -31,7 +31,7 @@ Lots of missing collectives.
 Collectives validation.
 Make timeout robust by making collectives respect the test deadline.
 Make tests robust by making collectives interruptible.
-We need some synchronization around cleanup to ensure that timedout ranks don't cause spurious failures.
+We need some synchronization around cleanup to ensure that timed out ranks don't cause spurious failures.
 
 """
 
@@ -83,7 +83,7 @@ _reduce_ops = {
 # actually update any view metadata if you do differentiation.  This
 # ordinarily "doesn't matter" because distributed collectives aren't
 # differentiable anyway, but it's possible to tickle this in testing if
-# someone tries to touch the grad_fn of a Tensor.  There a few ways to
+# someone tries to touch the grad_fn of a Tensor.  There are a few ways to
 # fix this, but the easiest way was to use the .detach() trick to hide
 # the mutations from autograd.
 
@@ -152,13 +152,24 @@ class AllToAllBase:
         return sizes
 
 
+def _premul_sum_reduce(tensors, factor):
+    if isinstance(factor, torch.Tensor):
+        factor = factor.to(tensors[0].device)
+    return torch.sum(torch.stack([t * factor for t in tensors]), dim=0)
+
+
 class AllReduce:
     def __init__(self, op):
-        if op.op not in _reduce_ops:
+        if op.op == ReduceOp.PREMUL_SUM:
+            self.op = op.op
+            self.premul_factor = op.factor
+        elif op.op in _reduce_ops:
+            self.op = op.op
+            self.premul_factor = None
+        else:
             raise NotImplementedError(
                 f"AllReduce op {op.op} not supported on multithreaded pg for now."
             )
-        self.op = op.op
 
     @torch.no_grad()
     def work(self, data):
@@ -172,7 +183,10 @@ class AllReduce:
             ]
 
             # now mimic reduce across all ranks
-            res = _reduce_ops[self.op](tensors)
+            if self.premul_factor is not None:
+                res = _premul_sum_reduce(tensors, self.premul_factor)
+            else:
+                res = _reduce_ops[self.op](tensors)
 
             # copy all the reduced value to each rank
             for src_rank in range(len(data)):
@@ -398,7 +412,7 @@ class ProcessLocalGroup(dist.ProcessGroup):
             cls._cur_coll_on_pgs = {}
             cls._terminate.clear()
 
-    def alltoall_base(
+    def all_to_all_single(
         self,
         output_buffer: torch.Tensor,
         input_buffer: torch.Tensor,
@@ -441,7 +455,7 @@ class ProcessLocalGroup(dist.ProcessGroup):
         ProcessLocalGroup._end_coll(coll, self)
         return res
 
-    def _allgather_base(self, output_tensor, input_tensor, opts=AllgatherOptions()):
+    def all_gather_single(self, output_tensor, input_tensor, opts=AllgatherOptions()):
         tensor_list = list(torch.chunk(output_tensor, self._world_size))
         return self.allgather([tensor_list], [input_tensor], opts)
 
@@ -469,17 +483,17 @@ class ProcessLocalGroup(dist.ProcessGroup):
         ProcessLocalGroup._end_coll(coll, self)
         return res
 
-    def _reduce_scatter_base(
+    def reduce_scatter_single(
         self, output_tensor, input_tensor, opts=ReduceScatterOptions()
     ):
         tensor_list = list(torch.chunk(input_tensor, self._world_size))
         return self.reduce_scatter([output_tensor], [tensor_list], opts)
 
-    def reduce_scatter_tensor_coalesced(
+    def reduce_scatter_single_coalesced(
         self, output_tensors, input_tensors, opts=ReduceScatterOptions()
     ):
         works = [
-            self._reduce_scatter_base(output_tensor, input_tensor, opts)
+            self.reduce_scatter_single(output_tensor, input_tensor, opts)
             for output_tensor, input_tensor in zip(
                 output_tensors, input_tensors, strict=True
             )
@@ -488,12 +502,12 @@ class ProcessLocalGroup(dist.ProcessGroup):
             work.wait()
         return works[-1]
 
-    def allgather_into_tensor_coalesced(
+    def all_gather_single_coalesced(
         self, output_tensor_list, input_tensor_list, opts=AllgatherOptions()
     ):
         res = None
         for o_t, i_t in zip(output_tensor_list, input_tensor_list, strict=True):
-            res = self._allgather_base(o_t, i_t)
+            res = self.all_gather_single(o_t, i_t)
         return res
 
     def __init__(self, rank, world_size):
@@ -545,7 +559,9 @@ def _create_threaded_pg(prefix_store, rank, world_size, timeout):
     return pg
 
 
-dist.Backend.register_backend("threaded", _create_threaded_pg, devices=["cpu", "cuda"])
+dist.Backend.register_backend(
+    "threaded", _create_threaded_pg, devices=["cpu", "cuda", "xpu"]
+)
 
 
 @dataclass

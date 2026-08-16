@@ -1,6 +1,6 @@
 // Original TunableOp is from onnxruntime.
 // https://github.com/microsoft/onnxruntime/blob/main/onnxruntime/core/framework/tunable.h
-// https://github.com/microsoft/onnxruntime/tree/main/onnxruntime/core/providers/rocm/tunable
+// https://github.com/microsoft/onnxruntime/tree/main/onnxruntime/core/providers/cuda/tunable
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 //
@@ -16,6 +16,14 @@
 #include <torch/version.h>
 
 
+#ifndef USE_ROCM
+#include <cuda.h>
+#include <cuda_runtime_api.h>
+#include <cublasLt.h>
+#include <cublas_v2.h>
+#endif
+
+#include <algorithm>
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -109,7 +117,7 @@ void TuningResultsManager::Add(const std::string& op_signature, const std::strin
   {
     std::scoped_lock l{lock_};
     auto& km = results_[op_signature];  // creates if missing
-    is_new = (km.find(params_signature) == km.end());
+    is_new = (!km.contains(params_signature));
     AddImpl(op_signature, params_signature, std::move(best), km);
     if (is_new) {
       inserted = km.at(params_signature);  // snapshot for I/O after unlocking
@@ -159,6 +167,11 @@ void TuningResultsManager::RecordUntuned( std::ofstream& untuned_file, const std
       TUNABLE_LOG3("Untuned,", op_signature, ",", params_signature);
     }
   }
+}
+
+void TuningResultsManager::ClearUntuned() {
+  std::scoped_lock l{lock_};
+  untuned_results_.clear();
 }
 
 void TuningResultsManager::InitRealtimeAppend(const std::string& filename, const std::unordered_map<std::string, std::string>& validators) {
@@ -301,7 +314,22 @@ TuningResultsValidator::TuningResultsValidator() {
       "PT_VERSION",
       []() { return GetPyTorchVersion(); },
       [this](auto&& k) { return ValidatePyTorchVersion(std::forward<decltype(k)>(k)); });
-#ifdef USE_ROCM
+#ifndef USE_ROCM
+  auto register_exact_validator = [this](const char* name, auto getter) {
+    RegisterValidator(name, getter, [name, getter](auto&& k) {
+      std::string value = getter();
+      TUNABLE_LOG1(name, " validation: expect ", k, " to match ", value);
+      return value == k ? OK : FAIL;
+    });
+  };
+
+  register_exact_validator(
+      "CUBLASLT_VERSION", []() { return c10::str(cublasLtGetVersion()); });
+  register_exact_validator("CUDA_DEVICE", []() {
+    const auto* prop = at::cuda::getCurrentDeviceProperties();
+    return c10::str(prop->major, ".", prop->minor, ":", prop->name);
+  });
+#else
   // hip
   {
     // HIP version is more accurate than ROCm version.  User's environment could be a stock
@@ -374,12 +402,12 @@ static bool CheckMandatoryKeys(
     const std::unordered_map<std::string, std::string>& to_check) {
   bool passed = true;
   for (const auto& k : TuningResultsValidator::mandatory_keys) {
-    if (gv_funcs.find(k) == gv_funcs.end()) {
+    if (!gv_funcs.contains(k)) {
       passed = false;
       TUNABLE_LOG1("key=\"", k, "\" is not registered for Get and Validate. ");
     }
 
-    if (to_check.find(k) == to_check.end()) {
+    if (!to_check.contains(k)) {
       passed = false;
       TUNABLE_LOG1("key=\"", k, "\" is not provided for validation. ");
     }
@@ -406,7 +434,7 @@ static bool CheckKeysMatching(
   if (intersection.size() != required_keys.size()) {
     matched = false;
     for (const auto& k : required_keys) {
-      if (intersection.find(k) == intersection.end()) {
+      if (!intersection.contains(k)) {
         TORCH_WARN("Unmatched validator: \"", k, "\" is required, but the tuning results does not provide it. ");
       }
     }
@@ -414,7 +442,7 @@ static bool CheckKeysMatching(
   if (intersection.size() != provided_keys.size()) {
     matched = false;
     for (const auto& k : provided_keys) {
-      if (intersection.find(k) == intersection.end()) {
+      if (!intersection.contains(k)) {
         TORCH_WARN("Unmatched validator: \"", k, "\" is provided, but pytorch is unable to consume it. ");
       }
     }
@@ -451,7 +479,7 @@ TuningStatus TuningResultsValidator::ValidateAll(
 }
 
 void TuningResultsValidator::RegisterValidator(const std::string& key, const GetFunc& gf, const ValidateFunc& vf) {
-  if (validators_.find(key) != validators_.end()) {
+  if (validators_.contains(key)) {
     TORCH_WARN("Attempting to re-register validator with key ", key);
   }
   else {
@@ -481,6 +509,7 @@ TuningContext::TuningContext() :
     numerics_check_enable_{false},
     max_tuning_duration_ms_{30},
     max_tuning_iterations_{100},
+    cublaslt_requested_algo_count_{8},
     max_warmup_duration_ms_{0},
     max_warmup_iterations_{0},
     icache_flush_{true},
@@ -542,6 +571,7 @@ void TuningContext::EnableRecordUntuned(bool value) {
     TUNABLE_LOG1("Disable Record Untuned for TunableOp");
     TUNABLE_LOG1("Closing Untuned GEMM Results File");
     untuned_file_.close();
+    manager_.ClearUntuned();
   }
 }
 
@@ -654,6 +684,26 @@ int TuningContext::GetMaxTuningIterations() const {
     return val < 0 ? 0 : val;
   }
   return max_tuning_iterations_;
+}
+
+void TuningContext::SetCublasLtRequestedAlgoCount(int count) {
+  cublaslt_requested_algo_count_ = std::max(1, count);
+}
+
+int TuningContext::GetCublasLtRequestedAlgoCount() const {
+  static const auto env = c10::utils::get_env(
+      "PYTORCH_TUNABLEOP_CUBLASLT_REQUESTED_ALGO_COUNT");
+  if (env.has_value()) {
+    try {
+      return std::max(1, std::stoi(env.value()));
+    } catch (const std::exception&) {
+      TORCH_WARN_ONCE(
+          "PYTORCH_TUNABLEOP_CUBLASLT_REQUESTED_ALGO_COUNT is not a valid "
+          "integer (got `", env.value(), "`). Falling back to the value set "
+          "via torch.cuda.tunable.set_cublaslt_requested_algo_count.");
+    }
+  }
+  return cublaslt_requested_algo_count_;
 }
 
 void TuningContext::SetMaxWarmupDurationMs(int max_duration_ms) {
