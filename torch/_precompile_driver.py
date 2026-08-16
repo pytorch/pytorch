@@ -62,9 +62,10 @@ if TYPE_CHECKING:
     # _DYNAMO_STATE is base64(pickle({used_globals, closure, argdefs, kwdefaults})).
     BACKEND_ID: str | None = None
     IMPORT_SOURCES: dict[str, str] = {}
-    # (positional arg index of the owning module, param name) per param the captured
-    # backward accumulates a gradient into; empty for a forward capture.
-    GRAD_ACCUM_PARAMS: list[tuple[int, str]] = []
+    # (frame arg index, path from that arg to the owning module, param name) per
+    # param the captured backward accumulates a gradient into; empty for a forward
+    # capture. The path is a list of ("index"|"key"|"attr", accessor) steps.
+    GRAD_ACCUM_PARAMS: list[tuple[int, list[tuple[str, object]], str]] = []
     _DYNAMO_CODE: str = ""
     _DYNAMO_STATE: str = ""
 
@@ -509,35 +510,43 @@ def _build_dynamo_forward():
         # exactly eager's first-step assign. Only the params the captured graph actually
         # accumulates into are listed, so a frozen or non-contributing param keeps
         # .grad = None as eager leaves it.
-        for _pos, _name in GRAD_ACCUM_PARAMS:
-            # Positions are over the args this forward receives, which for a
-            # bound-method or nn.Module fn includes the bound self at 0. A
-            # container arg is searched one level down, matching how capture
-            # recorded it.
-            _slot = args[_pos] if _pos < len(args) else None
-            _candidates = [_slot]
-            if isinstance(_slot, (list, tuple)):
-                _candidates = list(_slot)
-            elif isinstance(_slot, dict):
-                _candidates = list(_slot.values())
+        for _pos, _path, _name in GRAD_ACCUM_PARAMS:
+            # Replay the exact path capture recorded, rather than searching for
+            # a module that has a parameter of this name: two same-shaped
+            # modules in one container are indistinguishable by name, so a
+            # search stamps the first one twice and leaves the second unseeded.
+            _obj = args[_pos] if _pos < len(args) else None
+            for _kind, _acc in _path:
+                if _obj is None:
+                    break
+                try:
+                    if _kind == "index":
+                        _obj = _obj[_acc]
+                    elif _kind == "key":
+                        _obj = _obj[_acc]
+                    else:
+                        _obj = getattr(_obj, str(_acc))
+                except (LookupError, AttributeError, TypeError):
+                    _obj = None
             _p = None
-            for _c in _candidates:
-                if isinstance(_c, torch.nn.Module):
-                    try:
-                        _p = _c.get_parameter(_name)
-                        break
-                    except AttributeError:
-                        continue
+            if isinstance(_obj, torch.nn.Module):
+                try:
+                    _p = _obj.get_parameter(_name)
+                except AttributeError:
+                    _p = None
             if _p is None:
                 from torch._precompile import PrecompileError as _PrecompileError
 
+                _where = "".join(
+                    f"[{_a!r}]" if _k != "attr" else f".{_a}" for _k, _a in _path
+                )
                 raise _PrecompileError(
                     f"precompile: this training artifact accumulates a gradient into "
-                    f"parameter {_name!r} of the model at positional argument {_pos} "
-                    f"(0-based, counting the bound self for a method or nn.Module fn). "
-                    f"This call passed {len(args)} positional argument(s) and no module "
-                    f"there has that parameter. Pass the model positionally, in the same "
-                    f"position and with the same parameter structure as at capture."
+                    f"parameter {_name!r} of the model at positional argument "
+                    f"{_pos}{_where} (0-based, counting the bound self for a method or "
+                    f"nn.Module fn). This call passed {len(args)} positional "
+                    f"argument(s) and nothing with that parameter is at that path. Pass "
+                    f"the model in the same position and shape as at capture."
                 )
             if _p.grad is None:
                 _p.grad = torch.zeros_like(_p)
