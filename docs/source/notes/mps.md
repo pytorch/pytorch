@@ -45,9 +45,8 @@ else:
 ## Floating-point dtypes
 
 The `mps` device supports `torch.float32`, `torch.float16`, `torch.bfloat16`
-and `torch.complex64`. What it does not have is double precision: Metal
-Shading Language has no `double` type, so `torch.float64` and
-`torch.complex128` are rejected:
+and `torch.complex64`. It has no double precision: Metal Shading Language has
+no `double` type, so `torch.float64` and `torch.complex128` are rejected:
 
 ```python
 >>> torch.ones(3, dtype=torch.float64, device="mps")
@@ -58,27 +57,7 @@ doesn't support float64. Please use float32 instead.
 This is a dtype restriction, not a missing operator, so
 `PYTORCH_ENABLE_MPS_FALLBACK=1` does not apply to it: the error is raised when
 the tensor is allocated or copied to the device, before any operator is
-dispatched.
+dispatched. `Tensor.to("mps")` on a float64 tensor raises for the same reason,
+rather than downcasting implicitly.
 
-Rather than handling the error at each tensor construction site, resolve the
-dtype once, next to the device:
-
-```python
-device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
-# MPS has no float64, so use the wider dtype only where it is available.
-float_dtype = torch.float32 if device.type == "mps" else torch.float64
-
-x = torch.ones(3, dtype=float_dtype, device=device)
-```
-
-The same holds for tensors created on the CPU: cast to a supported dtype
-before moving them, since `Tensor.to("mps")` on a float64 tensor raises rather
-than downcasting implicitly.
-
-```python
-x = torch.ones(3, dtype=torch.float64)
-x = x.to(device=device, dtype=float_dtype)
-```
-
-If double precision is a hard requirement for part of a model, that part has
-to stay on the CPU.
+A computation that genuinely requires double precision has to run on the CPU.
