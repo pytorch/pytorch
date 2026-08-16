@@ -839,7 +839,7 @@ class CachingAutotuner(KernelInterface):
         """Whether ``_dynamic_scale_rblock`` should attempt occupancy-
         driven rblock halving for this autotuner.
         """
-        if "strict_sum_rblock" in self.inductor_meta:
+        if "strict_reduction_rblock" in self.inductor_meta:
             # Strict numerics: don't scale/tune R0_BLOCK for reductions (it shifts the order).
             return False
         return _could_dynamic_scale_rblock(
@@ -2283,7 +2283,7 @@ class CachingAutotuner(KernelInterface):
         # Deterministic mode (and strict numerics) forbid tuning RBLOCK / num_warps for
         # reductions because those knobs shift numerics.
         if (
-            self.deterministic_mode or "strict_sum_rblock" in self.inductor_meta
+            self.deterministic_mode or "strict_reduction_rblock" in self.inductor_meta
         ) and self.heuristic_type in (
             HeuristicType.REDUCTION,
             HeuristicType.PERSISTENT_REDUCTION,
@@ -2641,6 +2641,8 @@ class CachingAutotuner(KernelInterface):
             # kernel.function is None; the fast launcher binds a single device's
             # function pointer, so fall back to the per-device static launcher.
             if getattr(kernel, "device_agnostic", False):
+                return None
+            if getattr(kernel, "global_scratch_size", 0):
                 return None
             cu_function = kernel.function
             num_warps = kernel.num_warps
@@ -4571,7 +4573,7 @@ def _reduction_configs(
         triton_meta=triton_meta,
         num_dynamic=num_dynamic,
     )
-    r0 = inductor_meta.get("strict_sum_rblock")
+    r0 = inductor_meta.get("strict_reduction_rblock")
     if r0 is not None:
         configs = copy.deepcopy(configs)
         for triton_config in configs:
@@ -4741,12 +4743,12 @@ def reduction(
 
     configs = _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs)
     configs = filter_reduction_configs_for_determinism(inductor_meta, configs)
-    strict_rblock = inductor_meta.get("strict_sum_rblock")
+    strict_rblock = inductor_meta.get("strict_reduction_rblock")
     if strict_rblock is not None and any(
         triton_config.kwargs.get("R0_BLOCK", strict_rblock) != strict_rblock
         for triton_config in configs
     ):
-        raise AssertionError("strict sum requires its planned R0_BLOCK")
+        raise AssertionError("strict reduction requires its planned R0_BLOCK")
 
     if return_configs:
         return configs
