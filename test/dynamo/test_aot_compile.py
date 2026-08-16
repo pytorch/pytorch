@@ -649,6 +649,50 @@ def wrap_forward_function(fn: Callable):
 @torch._dynamo.config.patch("enable_aot_compile", True)
 @instantiate_parametrized_tests
 class TestAOTCompile(torch._inductor.test_case.TestCase):
+    def test_no_match_message_survives_a_raising_guard(self):
+        # __call__ has already established that nothing matched; re-evaluating
+        # the guards to say WHY must not replace that answer with a secondary
+        # failure from one entry, which hides both the entry that raised and
+        # every other entry's reason.
+        class RaisingGuardManager:
+            def __init__(self, inner):
+                self._inner = inner
+
+            def check(self, f_locals):
+                return self._inner.check(f_locals)
+
+            def check_verbose(self, f_locals):
+                raise KeyError("G['SOME_GLOBAL']")
+
+        model = torch.compile(ScaleModule(), fullgraph=True, backend="inductor")
+        model._aot_compile(
+            [
+                ModelInput(
+                    args=(torch.randn(3, 3, dtype=torch.float32),),
+                    kwargs={},
+                    contexts=[],
+                ),
+                ModelInput(
+                    args=(torch.randn(3, 3, dtype=torch.float64),),
+                    kwargs={},
+                    contexts=[],
+                ),
+            ]
+        )
+        results = model.forward.compiled_results
+        results[0]._artifacts.guard_manager = RaisingGuardManager(
+            results[0]._artifacts.guard_manager
+        )
+        with self.assertRaises(RuntimeError) as ctx:
+            model(torch.randn(3, 3, dtype=torch.float16))
+        message = str(ctx.exception)
+        self.assertIn("No AOT compiled graph matched this call", message)
+        self.assertIn("KeyError", message)
+        self.assertIn("SOME_GLOBAL", message)
+        # The entry that raised must not swallow the one that can explain itself.
+        self.assertIn("dtype mismatch", message)
+        self.assertEqual(len(message.splitlines()), 4)
+
     def path(self):
         path = os.path.join(cache_dir(), f"package_{self.id()}")
         os.makedirs(path, exist_ok=True)
