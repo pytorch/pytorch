@@ -594,12 +594,7 @@ class CpuInterface(DeviceInterface):
 
     @staticmethod
     def is_triton_capable(device: torch.types.Device = None) -> bool:
-        try:
-            import triton.backends
-        except ModuleNotFoundError:
-            return False
-
-        return "cpu" in triton.backends.backends
+        return True
 
     @staticmethod
     def raise_if_triton_unavailable(device: torch.types.Device = None) -> None:

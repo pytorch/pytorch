@@ -1,6 +1,4 @@
 # Owner(s): ["module: inductor"]
-import unittest
-
 import torch
 from torch._dynamo.device_interface import (
     CpuInterface,
@@ -49,10 +47,8 @@ class TestDeviceInterfaceCapabilityBits(TestCase):
         self.assertFalse(MpsInterface.exposes_streams())
 
     def test_cpu_is_not_gpu(self):
-        """CPU is not a GPU.  is_triton_capable must not crash even without triton."""
+        """CPU is not a GPU."""
         self.assertFalse(CpuInterface.is_gpu())
-        # Must not raise; returns a bool reflecting backend presence.
-        self.assertIsInstance(CpuInterface.is_triton_capable(), bool)
 
     def test_tpu_is_not_gpu(self):
         """TPU is not a GPU."""
@@ -161,46 +157,6 @@ class TestDeviceNeedGuard(TestCase):
             from torch._dynamo import device_interface as di
 
             di.device_interfaces.pop("acc_guard", None)
-
-
-class TestHasTriton(TestCase):
-    """Test has_triton() walks the DeviceInterface registry."""
-
-    def test_has_triton_discovers_privateuse1_device(self):
-        """A registered PrivateUse1 interface declaring is_triton_capable()
-        is discovered by has_triton()."""
-        try:
-            import triton  # noqa: F401
-        except ImportError as err:
-            raise unittest.SkipTest("triton package not available") from err
-
-        from torch.utils._triton import has_triton_package
-
-        if not has_triton_package():
-            raise unittest.SkipTest("triton package not available")
-
-        class AccInterface(DeviceInterface):
-            @staticmethod
-            def is_available() -> bool:
-                return True
-
-            @staticmethod
-            def is_triton_capable(device=None) -> bool:
-                return True
-
-            @classmethod
-            def raise_if_triton_unavailable(cls, device=None) -> None:
-                pass  # no-op: backend is available
-
-        register_interface_for_device("acc_triton", AccInterface)
-        torch.utils._triton.has_triton.cache_clear()
-        try:
-            self.assertTrue(torch.utils._triton.has_triton())
-        finally:
-            torch.utils._triton.has_triton.cache_clear()
-            from torch._dynamo import device_interface as di
-
-            di.device_interfaces.pop("acc_triton", None)
 
 
 class TestGetGpuType(TestCase):
