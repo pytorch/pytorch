@@ -8,6 +8,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/OpMathType.h>
+#include <c10/cuda/CUDAMathCompat.h>
 #include <c10/util/MathConstants.h>
 #include <c10/util/complex.h>
 
@@ -53,19 +54,22 @@ __host__ __device__ scalar_t _log_add_exp_helper(const scalar_t& x, const scalar
 }
 
 template <typename scalar_t>
-__host__ __device__ c10::complex<scalar_t> _fast_build_exp(const c10::complex<scalar_t>& x) {
+__device__ c10::complex<scalar_t> _fast_build_exp(const c10::complex<scalar_t>& x) {
   // complex exponential function, but implemented manually to get fast compilation time
   // this function only handles the case where the x is finite (not inf nor nan)
   const auto xreal = std::real(x);
   const auto ximag = std::imag(x);
   const auto exp_x_abs = std::exp(xreal);
-  auto exp_x_real = exp_x_abs * std::cos(ximag);
-  auto exp_x_imag = exp_x_abs * std::sin(ximag);
+  scalar_t sin_ximag;
+  scalar_t cos_ximag;
+  c10::cuda::compat::sincos(ximag, &sin_ximag, &cos_ximag);
+  auto exp_x_real = exp_x_abs * cos_ximag;
+  auto exp_x_imag = exp_x_abs * sin_ximag;
   return {exp_x_real, exp_x_imag};
 }
 
 template <typename scalar_t>
-__host__ __device__ c10::complex<scalar_t> _fast_build_exp_inf(const c10::complex<scalar_t>& x) {
+__device__ c10::complex<scalar_t> _fast_build_exp_inf(const c10::complex<scalar_t>& x) {
   // complex exponential function, but implemented manually to get fast compilation time
   // this function only handles the case where the real part of x is infinite
   const auto ximag = std::imag(x);
@@ -73,8 +77,9 @@ __host__ __device__ c10::complex<scalar_t> _fast_build_exp_inf(const c10::comple
   if (!::isfinite(ximag)) {  // add this to make consistent with std::exp(x+yi)
     return {exp_x_abs, std::numeric_limits<scalar_t>::quiet_NaN()};
   }
-  const auto sin = std::sin(ximag);
-  const auto cos = std::cos(ximag);
+  scalar_t sin;
+  scalar_t cos;
+  c10::cuda::compat::sincos(ximag, &sin, &cos);
   // special case if the angle is exactly the multiple of pi/2
   auto exp_x_real = (cos == 0) ? (scalar_t)0.0 : exp_x_abs * cos;
   auto exp_x_imag = (sin == 0) ? (scalar_t)0.0 : exp_x_abs * sin;
@@ -82,7 +87,7 @@ __host__ __device__ c10::complex<scalar_t> _fast_build_exp_inf(const c10::comple
 }
 
 template <typename scalar_t>
-__host__ __device__ c10::complex<scalar_t> _log_add_exp_helper(const c10::complex<scalar_t>& x, const c10::complex<scalar_t>& y) {
+__device__ c10::complex<scalar_t> _log_add_exp_helper(const c10::complex<scalar_t>& x, const c10::complex<scalar_t>& y) {
   c10::complex<scalar_t> min = _logaddexp_minmax<scalar_t, /*min=*/true>(x, y);
   c10::complex<scalar_t> max = _logaddexp_minmax<scalar_t, /*min=*/false>(x, y);
   scalar_t min_real = std::real(min);
@@ -171,8 +176,11 @@ const auto logaddexp_complex_string = jiterator_stringify(
         const auto xreal = x.real();
         const auto ximag = x.imag();
         const auto exp_x_abs = exp(xreal);
-        auto exp_x_real = exp_x_abs * cos(ximag);
-        auto exp_x_imag = exp_x_abs * sin(ximag);
+        T sin_ximag;
+        T cos_ximag;
+        sincos(ximag, &sin_ximag, &cos_ximag);
+        auto exp_x_real = exp_x_abs * cos_ximag;
+        auto exp_x_imag = exp_x_abs * sin_ximag;
         return std::complex<T>(exp_x_real, exp_x_imag);
     }
 
@@ -184,8 +192,9 @@ const auto logaddexp_complex_string = jiterator_stringify(
         if (!isfinite(ximag)) {
             return complex_t(exp_x_abs, NAN);
         }
-        const auto sin_val = sin(ximag);
-        const auto cos_val = cos(ximag);
+        T sin_val;
+        T cos_val;
+        sincos(ximag, &sin_val, &cos_val);
         auto exp_x_real = (cos_val == T(0)) ? T(0) : exp_x_abs * cos_val;
         auto exp_x_imag = (sin_val == T(0)) ? T(0) : exp_x_abs * sin_val;
         return complex_t(exp_x_real, exp_x_imag);
