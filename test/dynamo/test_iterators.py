@@ -153,6 +153,21 @@ class TestIterators(torch._dynamo.test_case.TestCase):
             result.append(item + 10)
         self.assertEqual(result, [11, 12, 13, 14, 15])
 
+    def test_tuple_iterator_variable_hierarchy(self):
+        from torch._dynamo.variables.lists import (
+            BaseListIteratorVariable,
+            ListIteratorVariable,
+            TupleIteratorVariable,
+        )
+
+        self.assertTrue(issubclass(ListIteratorVariable, BaseListIteratorVariable))
+        self.assertTrue(issubclass(TupleIteratorVariable, BaseListIteratorVariable))
+        self.assertFalse(issubclass(TupleIteratorVariable, ListIteratorVariable))
+
+        self.assertIs(ListIteratorVariable._cpython_type, type(iter([])))
+        self.assertIs(TupleIteratorVariable._cpython_type, type(iter(())))
+        self.assertIs(TupleIteratorVariable([]).python_type(), type(iter(())))
+
     @make_dynamo_test
     def test_set_iteration(self):
         """Test iteration over set"""

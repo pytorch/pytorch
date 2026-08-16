@@ -1232,6 +1232,17 @@ class TestGeneratorSend(GeneratorTestsBase):
         self.assertEqual(out[1], t.cos())
         self.assertIsNone(out[2])
 
+    def test_yield_from_tuple_iterator(self):
+        def outer(t):
+            yield from iter((t.sin(), t.cos()))
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            return list(outer(t))
+
+        t = torch.randn(2)
+        self.assertEqual(fn(t), [t.sin(), t.cos()])
+
 
 class TestGeneratorClose(GeneratorTestsBase):
     def test_close(self):
