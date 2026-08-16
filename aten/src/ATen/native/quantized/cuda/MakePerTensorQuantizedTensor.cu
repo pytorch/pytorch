@@ -24,7 +24,7 @@ void assign_quantized_tensor_cuda(
         auto iter = TensorIteratorConfig()
           .check_all_same_dtype(false)
           .add_output(dst)
-          .add_input(self)
+          .add_const_input(self)
           .build();
         gpu_kernel(iter, [] GPU_LAMBDA(underlying_t value) -> scalar_t {
           return scalar_t(value);
