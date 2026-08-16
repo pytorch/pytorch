@@ -32,8 +32,18 @@ inline void check_mm_shapes(
     const Tensor& self,
     const Tensor& mat2,
     std::string_view func_name) {
-  TORCH_CHECK(self.dim() == 2, func_name, ": self must be a matrix");
-  TORCH_CHECK(mat2.dim() == 2, func_name, ": mat2 must be a matrix");
+  TORCH_CHECK(
+      self.dim() == 2,
+      func_name,
+      ": self must be a matrix, got ",
+      self.dim(),
+      "-D tensor");
+  TORCH_CHECK(
+      mat2.dim() == 2,
+      func_name,
+      ": mat2 must be a matrix, got ",
+      mat2.dim(),
+      "-D tensor");
   TORCH_CHECK(
       self.sym_size(1) == mat2.sym_size(0),
       func_name,
