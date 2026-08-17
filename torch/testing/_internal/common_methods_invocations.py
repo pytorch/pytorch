@@ -1387,7 +1387,11 @@ def sample_inputs_addbmm(op_info, device, dtype, requires_grad, **kwargs):
             beta_complex, alpha_complex = beta * (1 + 2j), alpha * (2 + 3j)
             yield SampleInput(make_arg(input_shape), args=(make_arg(batch1_shape), make_arg(batch2_shape)),
                               kwargs=dict(beta=beta_complex, alpha=alpha_complex), broadcasts_input=is_broadcasting)
-        yield SampleInput(make_arg(input_shape), args=(make_arg(batch1_shape), make_arg(batch2_shape)),
+        if beta == 0 and (dtype.is_floating_point or dtype.is_complex):
+            input = torch.full(input_shape, math.nan, device=device, dtype=dtype, requires_grad=requires_grad)
+        else:
+            input = make_arg(input_shape)
+        yield SampleInput(input, args=(make_arg(batch1_shape), make_arg(batch2_shape)),
                           kwargs=dict(beta=beta, alpha=alpha), broadcasts_input=is_broadcasting)
 
 def sample_inputs_addcmul_addcdiv(op_info, device, dtype, requires_grad, **kwargs):
@@ -1468,11 +1472,16 @@ def sample_inputs_baddbmm(op_info, device, dtype, requires_grad, **kwargs):
                   ((), (S, S, S), (S, S, M), 1, 1, True),
                   ((), (S, S, S), (S, S, M), 0.6, 0.2, True),
                   ((), (0, S, S), (0, S, M), 1, 1, True),  # empty batch, see #188765
+                  ((S, S, M), (S, S, 0), (S, 0, M), 1, 0, False),
                   ]
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad, low=None, high=None)
     for (input_shape, batch1_shape, batch2_shape, alpha, beta, broadcasts_input) in test_cases:
+        if beta == 0 and (dtype.is_floating_point or dtype.is_complex):
+            input = torch.full(input_shape, math.nan, device=device, dtype=dtype, requires_grad=requires_grad)
+        else:
+            input = make_arg(input_shape)
         yield SampleInput(
-            make_arg(input_shape),
+            input,
             make_arg(batch1_shape),
             make_arg(batch2_shape),
             beta=beta,
@@ -12361,7 +12370,8 @@ op_db: list[OpInfo] = [
            ],
            sample_inputs_func=sample_inputs_addmv),
     OpInfo('addbmm',
-           ref=lambda M, batch1, batch2, beta=1, alpha=1: np.add(np.multiply(np.asarray(beta, dtype=M.dtype), M),
+           ref=lambda M, batch1, batch2, beta=1, alpha=1: np.add(np.zeros_like(M) if beta == 0 else
+                                                                 np.multiply(np.asarray(beta, dtype=M.dtype), M),
                                                                  np.multiply(np.asarray(alpha, dtype=batch1.dtype),
                                                                              np.sum(np.matmul(batch1, batch2), axis=0))),
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16),
