@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Report the active torch/Triton environment as JSON, for bringup.py.
+"""Report the active torch/Triton environment as JSON, for dev.py.
 
 Used by `doctor`, and by `switch` -- which needs the backend to choose a
 provider, and the cache directories to clear once one is installed.
@@ -7,7 +7,7 @@ provider, and the cache directories to clear once one is installed.
 A subprocess for two reasons. The report has to reflect what is installed right
 now, not what the parent imported before a provider swap; and the parent is
 usually run from the repo root, where `import torch` would find the source tree
-rather than the installed package. bringup.py runs this with cwd=/.
+rather than the installed package. dev.py runs this with cwd=/.
 """
 
 from __future__ import annotations
@@ -74,7 +74,7 @@ def main() -> None:
         out["tlx_registry"] = False
         out["tlx_error"] = repr(e)
 
-    # Resolved here rather than in bringup.py so the torch import happens in
+    # Resolved here rather than in dev.py so the torch import happens in
     # this process, which runs from / and so cannot pick up the source tree
     # instead of the installed package. default_cache_dir() handles
     # tempfile.gettempdir() vs /var/tmp under fbcode and username sanitisation.

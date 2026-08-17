@@ -6,7 +6,7 @@ Triton kernels", not "is Inductor correct" -- the full suites do that.
 
 It also says nothing about whether TLX engaged: TORCHINDUCTOR_TLX_MODE is
 printed but never asserted on, so this passes identically on upstream Triton.
-`bringup.py test` sets that variable and gates TLX separately, by running
+`dev.py test` sets that variable and gates TLX separately, by running
 doctor first.
 """
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""TorchTLX bring-up helper: swap the Triton provider and run the TLX tests.
+"""TorchTLX dev helper: swap the Triton provider and run the checks against it.
 
 This fork drives Inductor with FBTriton (facebookexperimental/triton) rather
 than upstream Triton, because torchTLX lives in FBTriton -- see
@@ -12,17 +12,15 @@ quietly measure stock Inductor. `doctor` exists to turn that silent no-op into
 a loud one.
 
 Usage:
-    python tools/torchtlx/bringup.py doctor
-    python tools/torchtlx/bringup.py switch fbtriton
-    python tools/torchtlx/bringup.py switch fbtriton --from-source <fbtriton_repo_path>
-    python tools/torchtlx/bringup.py switch oai
-    python tools/torchtlx/bringup.py test --mode allow
-    python tools/torchtlx/bringup.py test --full
+    python tools/torchtlx/dev.py doctor
+    python tools/torchtlx/dev.py switch fbtriton
+    python tools/torchtlx/dev.py switch fbtriton --from-source <fbtriton_repo_path>
+    python tools/torchtlx/dev.py switch triton
+    python tools/torchtlx/dev.py test --mode allow
 
 `test` runs the torchTLX tests matched by TLX_TEST_PATTERNS; none exist today,
 so it falls back to sanity.py, a fast plumbing check. That check does not
-verify TLX engaged -- doctor does, and test runs it first. --full runs the
-Inductor Triton suite in FULL_TESTS instead of the fallback.
+verify TLX engaged -- doctor does, and test runs it first.
 
 Switching providers does NOT require rebuilding torch; Triton is a pure
 runtime dependency of Inductor.
@@ -62,10 +60,6 @@ FBTRITON_MIN_VERSION = "3.8"
 TLX_TEST_PATTERNS = [
     "test/inductor/test_torchtlx*.py",
 ]
-
-# --full only: 425 tests, ~2.5 min. Too heavy for a plumbing check, but the
-# right thing to run when validating a provider swap properly.
-FULL_TESTS = ["test/inductor/test_triton_kernels.py"]
 
 
 def run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
@@ -108,7 +102,7 @@ def upstream_spec(pkg: str, version: str | None) -> str:
     An explicit --version always wins. Otherwise prefer the build this repo
     pins -- <ver>+git<shorthash> from triton_version.txt and
     ci_commit_pins/triton.txt -- which is what a dev torch is built against,
-    so `switch oai` is reproducible rather than "whatever the nightly index
+    so `switch triton` is reproducible rather than "whatever the nightly index
     has today". Falls back to the bare name when that exact build was never
     published, which is common when the pin is ahead of the index.
     """
@@ -177,7 +171,7 @@ def report(info: dict | None = None) -> tuple[list[str], list[str]]:
     Split because the two mean different things to different callers.
     Install problems (no Triton, colliding distributions) are failures
     whatever you asked for. TLX problems (not FBTriton, no registry) are
-    the expected, correct outcome of `switch oai` -- reporting them is
+    the expected, correct outcome of `switch triton` -- reporting them is
     useful, exiting non-zero for them is not.
 
     Takes an already-collected probe so a caller that needs other facts from
@@ -238,9 +232,9 @@ def report(info: dict | None = None) -> tuple[list[str], list[str]]:
             "silently never engage (tlx.py swallows the ImportError). Install "
             f"an FBTriton >={FBTRITON_MIN_VERSION}, which ships "
             "triton/language/extra/tlx/inductor:  "
-            "`bringup.py switch fbtriton --from-source <checkout>`. No "
+            "`dev.py switch fbtriton --from-source <checkout>`. No "
             "published fbtriton wheel carries the registry yet, so "
-            "`bringup.py switch fbtriton` will not fix this today."
+            "`dev.py switch fbtriton` will not fix this today."
         )
 
     if install_problems or tlx_problems:
@@ -403,7 +397,7 @@ def cmd_switch(args: argparse.Namespace) -> int:
     install_problems, tlx_problems = report(info)
     if install_problems:
         return 1
-    # Landing on a non-TLX Triton is the whole point of `switch oai`, so those
+    # Landing on a non-TLX Triton is the whole point of `switch triton`, so those
     # problems are informational there; they are failures only if fbtriton was
     # requested.
     return 1 if (args.provider == "fbtriton" and tlx_problems) else 0
@@ -433,16 +427,10 @@ def cmd_test(args: argparse.Namespace) -> int:
     print(f"\n--- TORCHINDUCTOR_TLX_MODE={args.mode}")
 
     tests = discover_tlx_tests()
-    if args.full:
-        tests += FULL_TESTS
     if not tests:
-        # Keep the default fast: this is a plumbing check, not a correctness
-        # suite. --full runs the 425-test Inductor/Triton suite (~2.5 min) in
-        # its place -- with torchTLX tests present it would run alongside them.
+        # Keep this fast: a plumbing check, not a correctness suite.
         print("no torchTLX tests found; running the plumbing sanity check")
-        print(
-            f"  (looked for: {', '.join(TLX_TEST_PATTERNS)}; use --full for the suite)"
-        )
+        print(f"  (looked for: {', '.join(TLX_TEST_PATTERNS)})")
         return run(
             [sys.executable, str(Path(__file__).parent / "sanity.py")],
             cwd=REPO_ROOT,
@@ -450,8 +438,6 @@ def cmd_test(args: argparse.Namespace) -> int:
         ).returncode
 
     cmd = [sys.executable, "-m", "pytest", *tests, "-q", "--no-header"]
-    if args.k:
-        cmd += ["-k", args.k]
     return run(cmd, cwd=REPO_ROOT, env=env).returncode
 
 
@@ -466,7 +452,7 @@ def main() -> int:
     sub.add_parser("doctor", help="report the environment and whether TLX can engage")
 
     p_switch = sub.add_parser("switch", help="switch the Triton provider")
-    p_switch.add_argument("provider", choices=["fbtriton", "oai"])
+    p_switch.add_argument("provider", choices=["fbtriton", "triton"])
     p_switch.add_argument("--version", help="pin an exact version")
     p_switch.add_argument(
         "--from-source", metavar="PATH", help="build FBTriton from a local checkout"
@@ -479,14 +465,8 @@ def main() -> int:
 
     p_test = sub.add_parser("test", help="run the torchTLX unit tests")
     p_test.add_argument("--mode", choices=["allow", "force"], default="allow")
-    p_test.add_argument("-k", help="pytest -k filter")
     p_test.add_argument(
         "--skip-doctor", action="store_true", help="run even if TLX cannot engage"
-    )
-    p_test.add_argument(
-        "--full",
-        action="store_true",
-        help=f"run {' '.join(FULL_TESTS)} (~2.5 min) instead of the plumbing check",
     )
 
     args = parser.parse_args()

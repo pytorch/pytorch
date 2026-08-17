@@ -3,15 +3,14 @@
 This fork drives Inductor with [FBTriton](https://github.com/facebookexperimental/triton)
 instead of upstream Triton, because torchTLX lives in FBTriton.
 
-**`bringup.py` is the only interface you need.** It handles both things:
+**`dev.py` is the only interface you need.** It handles both things:
 swapping the Triton provider, and running the checks against it.
 
 ```bash
-python tools/torchtlx/bringup.py switch fbtriton # upstream Triton -> FBTriton
-python tools/torchtlx/bringup.py doctor          # can TLX engage here?
-python tools/torchtlx/bringup.py test            # plumbing check, see below
-python tools/torchtlx/bringup.py switch oai      # back to upstream, for A/B
-python tools/torchtlx/bringup.py test --full     # the Inductor/Triton suite instead
+python tools/torchtlx/dev.py switch fbtriton    # upstream Triton -> FBTriton
+python tools/torchtlx/dev.py doctor             # can TLX engage here?
+python tools/torchtlx/dev.py test --mode allow  # compile + numerics check
+python tools/torchtlx/dev.py switch triton      # back to upstream, for A/B
 ```
 
 There is no environment variable to set and no torch rebuild: Triton is a pure
@@ -19,20 +18,6 @@ runtime dependency of Inductor, so a swap is only a pip operation -- ~30s for a
 published wheel. Getting TLX today means `--from-source`, which is slower: it
 compiles Triton and LLVM, a few minutes. (`FBTRITON=1` exists further down, but
 it is build-infrastructure only and does not apply to you as a user.)
-
-## What `test` runs
-
-torchTLX tests (`test/inductor/test_torchtlx*.py`) if any exist. None do
-today, so what runs is `sanity.py`, a deliberately small plumbing check --
-eager matmul plus compiled pointwise, reduction and backward, asserting
-Inductor emitted a Triton kernel and the numerics match. It finishes in under
-10s; it is not a correctness suite, and it does not check that TLX engaged. It
-would pass identically on upstream Triton -- `doctor` is the gate for that, and
-`test` runs it first.
-
-`--full` runs `test/inductor/test_triton_kernels.py` (425 tests, ~2.5 min)
-*instead of* the plumbing check, and is what to run when validating a provider
-swap. Were there torchTLX tests, it would run alongside them.
 
 ## Compile caches
 
@@ -61,17 +46,17 @@ registry -- no published fbtriton wheel carries it yet:
 ```bash
 # your own checkout (installs as the `triton` distribution)
 git clone https://github.com/facebookexperimental/triton ~/fbtriton
-python tools/torchtlx/bringup.py switch fbtriton --from-source ~/fbtriton
+python tools/torchtlx/dev.py switch fbtriton --from-source ~/fbtriton
 
 # published wheel (installs as the `fbtriton` distribution) -- once one ships
-python tools/torchtlx/bringup.py switch fbtriton
+python tools/torchtlx/dev.py switch fbtriton
 ```
 
 `doctor` reports `TLX registry : OK` once a capable build is installed.
 
 ## Release wheels only: `FBTRITON=1`
 
-Not for users -- `bringup.py switch fbtriton` covers that and needs no
+Not for users -- `dev.py switch fbtriton` covers that and needs no
 environment variable. This applies to exactly one thing: what a **published
 torch wheel declares as its Triton dependency**.
 
@@ -100,8 +85,7 @@ as upstream.
 ### Why the provider is not in `requirements.txt`
 
 `requirements.txt` is left untouched, so a contributor who has no interest in
-torchTLX never encounters it there. Installing the provider is `bringup.py`'s
-job.
+torchTLX never encounters it there. Installing the provider is `dev.py`'s job.
 
 Two things would make a requirement line awkward anyway. No published fbtriton
 wheel carries torchTLX yet -- that needs >=3.8, and the TLX Inductor registry
@@ -117,12 +101,12 @@ both paths.
 
 `TORCHINDUCTOR_TLX_MODE` (equivalently `torch._inductor.config.triton.tlx_mode`)
 takes `allow` (TLX competes via autotuning) or `force` (TLX templates only).
-Any other value, including unset, leaves TLX off. `bringup.py test --mode`
-sets it for you.
+Any other value, including unset, leaves TLX off. `dev.py test --mode` sets it
+for you.
 
 ## ROCm note
 
-On ROCm, `switch oai` installs `triton-rocm` from the PyTorch nightly index
+On ROCm, `switch triton` installs `triton-rocm` from the PyTorch nightly index
 matching your ROCm version. That is the name this repo publishes -- see
 `build_triton_wheel.py` and `RELEASE.md`; the older `pytorch-triton-rocm` is
 frozen at 3.6.0 and would silently give you a Triton far behind your torch.
