@@ -676,12 +676,9 @@ class GridShardingSpec(ShardingSpec):
 class TestCustomShardingSpec(ShardedTensorTestBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    def test_custom_sharding_spec(self):
-        device_type = (
-            torch.accelerator.current_accelerator().type
-            if torch.accelerator.is_available()
-            else "cpu"
-        )
+    @onlyAccelerator
+    def test_custom_sharding_spec(self, device):
+        device_type = torch.device(device).type
         ranks = [f"rank:{i}/{device_type}:{i}" for i in range(4)]
 
         grid_spec = GridShardingSpec(grid_size=4, placements=ranks)
@@ -697,18 +694,19 @@ class TestCustomShardingSpec(ShardedTensorTestBase):
         meta = grid_spec.build_metadata(torch.Size((8, 8)), tensor_properties)
         check_tensor(meta.shards_metadata, torch.Size((8, 8)))
 
+    @onlyAccelerator
     @skip_but_pass_in_sandcastle_if(
         not TEST_MULTIACCELERATOR, "Multi-accelerator required"
     )
     @with_comms
     @skip_if_lt_x_gpu(4)
     @requires_capabilities(Capability.distributed.backend)
-    def test_custom_sharding_spec_tensor_ctor(self):
+    def test_custom_sharding_spec_tensor_ctor(self, device):
         """Test sharded_tensor.ones(...) with the custom
         grid sharding spec.
         """
 
-        device_type = self.device_type
+        device_type = torch.device(device).type
         ranks = [
             f"rank:0/{device_type}:0",
             f"rank:1/{device_type}:1",
@@ -730,23 +728,27 @@ class TestCustomShardingSpec(ShardedTensorTestBase):
         self.assertEqual((2, 2), local_shard.size())
         self.assertEqual(local_shard, torch.ones(2, 2))
 
+    @onlyAccelerator
     @skip_but_pass_in_sandcastle_if(
         not TEST_MULTIACCELERATOR, "Multi-accelerator required"
     )
     @with_comms
     @skip_if_lt_x_gpu(4)
     @requires_capabilities(Capability.distributed.backend)
-    def test_custom_sharding_spec_shard_tensor(self):
+    def test_custom_sharding_spec_shard_tensor(self, device):
         """Test custom spec can be invoked from the
         _shard_tensor callsite.
         """
-        device_type = self.device_type
+        device_type = torch.device(device).type
         ranks = [f"rank:{i}/{device_type}:{i}" for i in range(4)]
 
         grid_spec = GridShardingSpec(grid_size=2, placements=ranks)
 
         with self.assertRaisesRegex(NotImplementedError, "not implemented"):
             _shard_tensor(torch.randn(8, 8), grid_spec)
+
+
+instantiate_device_type_tests(TestCustomShardingSpec, globals())
 
 
 if __name__ == "__main__":
