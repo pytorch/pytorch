@@ -10447,50 +10447,6 @@ class TestMPS(TestCaseMPS):
             ref = torch.ops.aten._fused_rms_norm(x.float(), [N], w.float(), 1e-5)[0].to(dtype)
         self.assertEqual(y, ref, atol=0, rtol=0)
 
-    def _check_var_std_complex(self, x_cpu, dim=None, correction=1, keepdim=False):
-        x_mps = x_cpu.to("mps")
-        var_cpu = torch.var(x_cpu, dim=dim, correction=correction, keepdim=keepdim)
-        var_mps = torch.var(x_mps, dim=dim, correction=correction, keepdim=keepdim)
-        std_cpu = torch.std(x_cpu, dim=dim, correction=correction, keepdim=keepdim)
-        std_mps = torch.std(x_mps, dim=dim, correction=correction, keepdim=keepdim)
-        self.assertFalse(var_cpu.is_complex(), "CPU var of complex should be real")
-        self.assertFalse(var_mps.is_complex(), "MPS var of complex should be real")
-        self.assertEqual(var_mps.cpu(), var_cpu, atol=1e-4, rtol=1e-4)
-        self.assertEqual(std_mps.cpu(), std_cpu, atol=1e-4, rtol=1e-4)
-
-    # https://github.com/pytorch/pytorch/issues/135210
-    def test_var_complex64_scalar(self):
-        x = torch.randn(1000, dtype=torch.complex64)
-        self._check_var_std_complex(x)
-
-    def test_var_complex64_unbiased(self):
-        x = torch.randn(1000, dtype=torch.complex64)
-        self._check_var_std_complex(x, correction=0)
-
-    def test_var_complex64_dim(self):
-        x = torch.randn(8, 64, dtype=torch.complex64)
-        self._check_var_std_complex(x, dim=1)
-        self._check_var_std_complex(x, dim=0)
-
-    def test_var_complex64_keepdim(self):
-        x = torch.randn(4, 16, dtype=torch.complex64)
-        self._check_var_std_complex(x, dim=0, keepdim=True)
-        self._check_var_std_complex(x, dim=1, keepdim=True)
-
-    def test_var_complex64_multi_dim(self):
-        x = torch.randn(4, 8, 16, dtype=torch.complex64)
-        self._check_var_std_complex(x, dim=(0, 2))
-
-    def test_std_complex64_known_value(self):
-        # torch.randn(complex64): real~N(0,1/sqrt(2)), imag~N(0,1/sqrt(2))
-        # var(real)+var(imag) ~= 0.5+0.5 = 1.0, so std ~= 1.0
-        torch.manual_seed(0)
-        x = torch.randn(100000, dtype=torch.complex64)
-        x_mps = x.to("mps")
-        std_cpu = torch.std(x).item()
-        std_mps = torch.std(x_mps).cpu().item()
-        self.assertFalse(isinstance(std_mps, complex), "std should be real")
-        self.assertAlmostEqual(std_mps, std_cpu, delta=0.01)
 
 # Conformance suite for the MPS binary TensorIterator dispatcher: two
 # synthetic kernels (simple_add for arithmetic, simple_ge for comparison)

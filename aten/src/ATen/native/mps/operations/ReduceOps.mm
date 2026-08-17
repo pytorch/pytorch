@@ -364,9 +364,9 @@ static Tensor std_var_common_impl_mps(const Tensor& input_t,
 
   // MPSGraph does not support complex dtypes. Decompose: var(z) = var(real) + var(imag).
   if (c10::isComplexType(input_t.scalar_type())) {
-    auto real_view = at::view_as_real(input_t.contiguous()); // shape [..., 2]; last dim is [real, imag]
-    auto real_part = real_view.select(-1, 0).contiguous();
-    auto imag_part = real_view.select(-1, 1).contiguous();
+    auto real_view = at::view_as_real(input_t); // shape [..., 2]; last dim is [real, imag]
+    auto real_part = real_view.select(-1, 0);
+    auto imag_part = real_view.select(-1, 1);
     auto var_real = std_var_common_impl_mps(real_part, dim, correction, keepdim, STANDARD_VARIANCE);
     auto var_imag = std_var_common_impl_mps(imag_part, dim, correction, keepdim, STANDARD_VARIANCE);
     auto var_sum = var_real.add(var_imag);
