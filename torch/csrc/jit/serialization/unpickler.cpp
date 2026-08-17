@@ -4,7 +4,6 @@
 #ifdef USE_RPC
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #endif
-#include <c10/util/FbcodeMaps.h>
 #include <c10/util/safe_numerics.h>
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/mobile/type_parser.h>
@@ -41,7 +40,7 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
     IValue value;
   };
   std::vector<Work> to_process = {{type_tag, root}};
-  c10::FastSet<const void*> scanned;
+  std::unordered_set<const void*> scanned;
   while (!to_process.empty()) {
     Work w = std::move(to_process.back());
     to_process.pop_back();
@@ -50,10 +49,11 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
     // it would not terminate).
     if (w.value.isPtrType()) {
       const void* key = w.value.internalToPointer();
-      // insert() reports prior presence, so the key is hashed once.
-      if (!scanned.insert(key).second) {
+      auto it = scanned.find(key);
+      if (it != scanned.end()) {
         continue;
       }
+      scanned.emplace_hint(it, key);
     }
     auto kind = w.type->kind();
     if (auto dyn = w.type->castRaw<c10::DynamicType>()) {

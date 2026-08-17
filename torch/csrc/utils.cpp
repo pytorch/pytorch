@@ -1,4 +1,4 @@
-#include <fmt/format.h>
+#include <fmt/core.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/autograd/variable.h>
