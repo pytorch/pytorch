@@ -4698,6 +4698,7 @@ def run(runner, args, original_dir=None):
                 "record_shapes": True,
                 "profile_memory": True,
                 "with_stack": True,
+                "with_modules": True,
                 "activities": activities,
             }
 
