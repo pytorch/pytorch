@@ -40,4 +40,15 @@ void FakeTensorModeTLS::reset_state() {
   tls_set_dispatch_key_included(DispatchKey::Fake, false);
 }
 
+static FakeDeviceIndexResolver fakeDeviceIndexResolver = nullptr;
+
+void setFakeDeviceIndexResolver(FakeDeviceIndexResolver fn) {
+  fakeDeviceIndexResolver = fn;
+}
+
+DeviceIndex resolveFakeDeviceIndex(DeviceType type) {
+  return fakeDeviceIndexResolver ? fakeDeviceIndexResolver(type)
+                                 : static_cast<DeviceIndex>(0);
+}
+
 } // namespace c10::impl
