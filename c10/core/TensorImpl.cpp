@@ -4,13 +4,13 @@
 #include <c10/core/CopyBytes.h>
 #include <c10/core/InferenceMode.h>
 #include <c10/core/SymIntArrayRef.h>
-#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/core/impl/FakeTensorModeTLS.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/core/impl/PyInterpreter.h>
 #include <c10/core/impl/TorchDispatchModeTLS.h>
 #include <c10/util/Logging.h>
 #include <c10/util/accumulate.h>
+#include <algorithm>
 #include <optional>
 
 #include <utility>
@@ -224,17 +224,9 @@ void TensorImpl::set_and_normalize_fake_device(c10::Device fake_device) {
   // normalize device index for indexed device types (not CPU or meta)
   if (fake_device.index() == -1 && fake_device.type() != c10::DeviceType::CPU &&
       fake_device.type() != c10::DeviceType::Meta) {
-    // skip if fakemode already exists
-    if (c10::impl::FakeTensorModeTLS::get_state() == nullptr) {
-      const auto* guard_impl =
-          c10::impl::getDeviceGuardImpl(fake_device.type());
-      if (guard_impl) {
-        fake_device = guard_impl->getDevice();
-      }
-    }
-    if (fake_device.index() == -1) {
-      fake_device = c10::Device(fake_device.type(), 0);
-    }
+    fake_device = c10::Device(
+        fake_device.type(),
+        c10::impl::resolveFakeDeviceIndex(fake_device.type()));
   }
   set_fake_device(fake_device);
 }
@@ -333,8 +325,9 @@ void TensorImpl::release_resources() {
   if (storage_) {
     storage_ = {};
   }
-  if (extra_meta_ && extra_meta_->fake_constant_) {
+  if (extra_meta_) {
     extra_meta_->fake_constant_.reset();
+    extra_meta_->real_tensor_.reset();
     extra_meta_->fake_tensor_mode_.reset();
     extra_meta_->fake_mode_pyobj_.reset();
   }
@@ -958,13 +951,13 @@ void TensorImpl::set_sizes_and_strides(
 
   has_symbolic_sizes_strides_ = true;
   refresh_sizes_strides_policy();
-  if (!extra_meta_) {
-    extra_meta_ = std::make_unique<ExtraMeta>();
-    extra_meta_->symbolic_shape_meta_ =
+  auto& extra_meta{get_extra_meta()};
+  if (extra_meta.symbolic_shape_meta_ == nullptr) {
+    extra_meta.symbolic_shape_meta_ =
         std::make_unique<c10::SymbolicShapeMeta>();
-    extra_meta_->symbolic_shape_meta_->strides_valid_ = !is_sparse();
+    extra_meta.symbolic_shape_meta_->strides_valid_ = !is_sparse();
     if (!storage_offset.has_value()) {
-      extra_meta_->symbolic_shape_meta_->storage_offset_ = storage_offset_;
+      extra_meta.symbolic_shape_meta_->storage_offset_ = storage_offset_;
     }
   }
 
@@ -1113,21 +1106,45 @@ std::shared_ptr<c10::SafePyObject> FakeTensorMode::cache_pyobj_cpp_fake_mode() {
 
 void FakeTensorMode::set_constant(
     const c10::intrusive_ptr<c10::TensorImpl>& fake_impl,
-    c10::intrusive_ptr<c10::TensorImpl> constant,
-    c10::StorageImpl* constant_storage) {
-  std::lock_guard<std::mutex> lock(constant_mutex_);
+    c10::intrusive_ptr<c10::TensorImpl> constant) {
   // a registered fake tensor always has ExtraMeta (set by set_fake_device)
   auto* extra_meta = fake_impl->maybe_get_extra_meta();
   TORCH_INTERNAL_ASSERT(extra_meta != nullptr);
-  if (constant_storage) {
-    constant_storage_mapping_[constant_storage].emplace_back(fake_impl);
+  // Re-setting here must drop the old entry, otherwise mutating the old storage
+  // would invalidate the new constant.
+  if (extra_meta->fake_constant_ && extra_meta->fake_constant_->has_storage()) {
+    auto* old_key =
+        extra_meta->fake_constant_->storage().unsafeGetStorageImpl();
+    auto old_it = constant_storage_mapping_.find(old_key);
+    if (old_it != constant_storage_mapping_.end()) {
+      auto& tensors = old_it->second.tensors;
+      tensors.erase(
+          std::remove_if(
+              tensors.begin(),
+              tensors.end(),
+              [&](const c10::weak_intrusive_ptr<c10::TensorImpl>& weak_ref) {
+                auto impl = weak_ref.lock();
+                return impl && impl.get() == fake_impl.get();
+              }),
+          tensors.end());
+    }
+  }
+  if (constant->has_storage()) {
+    const auto& storage = constant->storage();
+    auto* key = storage.unsafeGetStorageImpl();
+    auto it = constant_storage_mapping_.find(key);
+    if (it == constant_storage_mapping_.end()) {
+      it = constant_storage_mapping_
+               .try_emplace(key, ConstantAliases(storage.getWeakStorageImpl()))
+               .first;
+    }
+    it->second.tensors.emplace_back(fake_impl);
   }
   extra_meta->fake_constant_ = std::move(constant);
 }
 
 c10::intrusive_ptr<c10::TensorImpl> FakeTensorMode::get_constant(
     c10::TensorImpl* fake_impl) const {
-  std::lock_guard<std::mutex> lock(constant_mutex_);
   auto* extra_meta = fake_impl->maybe_get_extra_meta();
   if (extra_meta == nullptr) {
     return nullptr;
@@ -1137,12 +1154,11 @@ c10::intrusive_ptr<c10::TensorImpl> FakeTensorMode::get_constant(
 
 void FakeTensorMode::invalidate_constant_aliases(
     c10::StorageImpl* storage_impl) {
-  std::lock_guard<std::mutex> lock(constant_mutex_);
   auto it = constant_storage_mapping_.find(storage_impl);
   if (it == constant_storage_mapping_.end()) {
     return;
   }
-  for (auto& weak_ref : it->second) {
+  for (auto& weak_ref : it->second.tensors) {
     auto impl = weak_ref.lock();
     if (impl) {
       if (auto* extra_meta = impl->maybe_get_extra_meta()) {
@@ -1151,6 +1167,44 @@ void FakeTensorMode::invalidate_constant_aliases(
     }
   }
   constant_storage_mapping_.erase(it);
+}
+
+void FakeTensorMode::clear_non_cpu_constants() {
+  for (auto it = constant_storage_mapping_.begin();
+       it != constant_storage_mapping_.end();) {
+    std::vector<c10::weak_intrusive_ptr<c10::TensorImpl>> live_tensors;
+    c10::intrusive_ptr<c10::TensorImpl> constant;
+    for (auto& weak_ref : it->second.tensors) {
+      auto impl = weak_ref.lock();
+      if (!impl) {
+        continue;
+      }
+      auto* extra_meta = impl->maybe_get_extra_meta();
+      if (extra_meta == nullptr || !extra_meta->fake_constant_) {
+        continue;
+      }
+      live_tensors.push_back(weak_ref);
+      if (!constant) {
+        constant = extra_meta->fake_constant_;
+      }
+    }
+
+    if (!constant) {
+      it = constant_storage_mapping_.erase(it);
+    } else if (constant->device().is_cpu()) {
+      it->second.tensors = std::move(live_tensors);
+      ++it;
+    } else {
+      for (auto& weak_ref : live_tensors) {
+        if (auto impl = weak_ref.lock()) {
+          if (auto* extra_meta = impl->maybe_get_extra_meta()) {
+            extra_meta->fake_constant_.reset();
+          }
+        }
+      }
+      it = constant_storage_mapping_.erase(it);
+    }
+  }
 }
 
 ExtraMeta::~ExtraMeta() = default;
