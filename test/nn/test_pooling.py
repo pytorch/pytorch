@@ -44,6 +44,7 @@ from torch.testing._internal.common_nn import (
 )
 from torch.testing._internal.common_utils import (
     gcIfJetson,
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize as parametrize_test,
     run_tests,
@@ -56,6 +57,8 @@ from torch.testing._internal.common_utils import (
 
 
 class TestAvgPool(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _sum_pool2d(self, x, kernel_size):
         windows = torch.nn.functional.unfold(
             x, kernel_size=kernel_size, stride=kernel_size
@@ -131,7 +134,9 @@ class TestAvgPool(TestCase):
                         self.assertEqual(actual, expected, rtol=0, atol=1e-5)
 
 
-class TestAvgPoolDeviceType(TestCase):
+class TestAvgPoolDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_avg_pool1d_ceil_mode(self, device):
         # Regression test for gh-36977
         x = 10 * torch.randn((1, 16, 4), device=device)
@@ -163,6 +168,8 @@ class TestAvgPoolDeviceType(TestCase):
 
 
 class TestPoolingNN(NNTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
 
@@ -401,7 +408,9 @@ class TestPoolingNN(NNTestCase):
             )
 
 
-class TestPoolingNNDeviceType(NNTestCase):
+class TestPoolingNNDevice(NNTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @expectedFailureMPS  # MPS adaptive avg pool requires divisible input/output sizes
     def test_adaptive_pooling_avg_nhwc(self, device):
         input = torch.randint(1, 10, (4, 8, 8, 8), dtype=torch.float32).to(device)
@@ -2305,9 +2314,9 @@ torch.{device_type}.synchronize()
         F.adaptive_max_pool3d(imgs, (Od, Oh, Ow))
 
 
-instantiate_device_type_tests(TestAvgPoolDeviceType, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestAvgPoolDevice, globals(), allow_xpu=True)
 instantiate_device_type_tests(
-    TestPoolingNNDeviceType, globals(), allow_mps=True, allow_xpu=True
+    TestPoolingNNDevice, globals(), allow_mps=True, allow_xpu=True
 )
 instantiate_parametrized_tests(TestPoolingNN)
 
