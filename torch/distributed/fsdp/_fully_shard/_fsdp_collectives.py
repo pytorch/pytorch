@@ -708,7 +708,7 @@ def foreach_reduce(
                 storage_offset=flat_grad_offset,
             )
             to_accumulate_grad = fsdp_param.sharded_param.grad is not None
-            if fsdp_param.offload_to_cpu:
+            if fsdp_param.offload_to_cpu and fsdp_param.offload_after_backward:
                 # Only overlap the D2H copy (copying to pinned memory) when no
                 # in-backward CPU consumer of the grad exists. Two such
                 # consumers suppress the overlap:
