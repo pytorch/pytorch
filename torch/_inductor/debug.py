@@ -625,6 +625,8 @@ class DebugFormatter:
         self,
         gm: torch.fx.GraphModule,
         inputs: list[torch.Tensor],
+        *,
+        is_inference: bool = False,
     ) -> None:
         with self.fopen("fx_graph_runnable.py") as fd:
             save_dir = None
@@ -646,6 +648,7 @@ class DebugFormatter:
                     "inductor",
                     save_dir=save_dir,
                     stable_hash=stable_hash,
+                    is_inference=is_inference,
                 )
 
         with self.fopen("fx_graph_readable.py") as fd:

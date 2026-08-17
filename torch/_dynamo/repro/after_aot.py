@@ -1637,10 +1637,10 @@ default settings on this script:
   {tracing_mode=}
   {save_dir=}
   {check_str=}
+  {is_inference=}
 """,
         formatter_class=argparse.RawTextHelpFormatter,
     )
-    parser.set_defaults(is_inference=is_inference)
 
     def common_flags(parser: argparse.ArgumentParser) -> None:
         accuracy_group = parser.add_mutually_exclusive_group()
@@ -1713,6 +1713,20 @@ divergences--you just might not end up with a useful repro in the end.""",
             default=tracing_mode,
             help="how to trace the repro module into a GraphModule with metadata",
         )
+        inference_group = parser.add_mutually_exclusive_group()
+        inference_group.add_argument(
+            "--is-inference",
+            dest="is_inference",
+            action="store_true",
+            help="compile the repro as an inference graph",
+        )
+        inference_group.add_argument(
+            "--no-is-inference",
+            dest="is_inference",
+            action="store_false",
+            help="compile the repro as a training graph",
+        )
+        parser.set_defaults(is_inference=is_inference)
 
     subparsers = parser.add_subparsers(
         dest="command", metavar="{run,minify,analyze}", required=True
