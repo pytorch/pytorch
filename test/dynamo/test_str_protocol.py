@@ -7,10 +7,7 @@ import unittest
 
 import torch
 from torch._dynamo.test_case import run_tests, TestCase
-from torch.testing._internal.common_utils import (
-    HardwareClassification,
-    make_dynamo_test,
-)
+from torch.testing._internal.common_utils import make_dynamo_test
 
 
 class _OpaqueStrDescriptorObject:
@@ -18,8 +15,6 @@ class _OpaqueStrDescriptorObject:
 
 
 class TpStrTests(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
     @make_dynamo_test
     def test_str_int(self):
         assert str(42) == "42"  # noqa: S101
@@ -80,8 +75,6 @@ class TpStrTests(TestCase):
 
 
 class TpStrUserDefinedTests(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
     def test_counter_str(self):
         def fn(x):
             return str(collections.Counter("aba"))
@@ -353,8 +346,6 @@ class TpStrUserDefinedTests(TestCase):
 
 
 class TpStrExceptionTests(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
     @make_dynamo_test
     def test_exception_no_args(self):
         assert str(ValueError()) == ""  # noqa: S101
@@ -413,8 +404,6 @@ class FStringMutationTests(TestCase):
     Dynamo must evaluate f-string formatting at the correct bytecode point
     so that mutations between two f-strings are reflected in the output.
     """
-
-    hw_classification = HardwareClassification.GENERIC
 
     def _check(self, fn, *args_factory):
         import copy

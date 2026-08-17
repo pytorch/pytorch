@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 """Export torch work functions for unary ufuncs, rename/tweak to match numpy.
 This listing is further exported to public symbols in the `_numpy/_ufuncs.py` module.
 """
@@ -50,15 +52,15 @@ from torch import (  # noqa: F401
 
 
 # special cases: torch does not export these names
-def cbrt(x: torch.Tensor) -> torch.Tensor:
+def cbrt(x):
     return torch.pow(x, 1 / 3)
 
 
-def positive(x: torch.Tensor) -> torch.Tensor:
+def positive(x):
     return +x
 
 
-def absolute(x: torch.Tensor) -> torch.Tensor:
+def absolute(x):
     # work around torch.absolute not impl for bools
     if x.dtype == torch.bool:
         return x
