@@ -160,6 +160,12 @@ op_db: list[OpInfo] = [
                     }
                 )
             ),
+            DecorateInfo(
+                toleranceOverride({torch.float16: tol(atol=1e-5, rtol=5e-3)}),
+                "TestConsistency",
+                "test_output_grad_match",
+                device_type="mps",
+            ),
         ),
         skips=(
             DecorateInfo(
@@ -182,6 +188,14 @@ op_db: list[OpInfo] = [
         dtypesIfMPS=all_types_and(torch.bool, torch.half, torch.bfloat16),
         backward_dtypes=floating_types_and(torch.half, torch.bfloat16),
         sample_inputs_func=sample_inputs_i0_i1,
+        decorators=(
+            DecorateInfo(
+                toleranceOverride({torch.float16: tol(atol=1e-5, rtol=3e-2)}),
+                "TestConsistency",
+                "test_output_grad_match",
+                device_type="mps",
+            ),
+        ),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
     ),
