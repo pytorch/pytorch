@@ -272,6 +272,9 @@ CacheEntry* create_cache_entry(
 
 // Extracts the backend fn from the callback.
 PyObject* get_backend(PyObject* callback);
+// Turn on the cache-key lookup inside get_backend. Called once, when the first
+// backend carrying one is constructed; see cache_entry.cpp.
+void enable_precompile_cache_keys();
 
 #ifdef __cplusplus
 
@@ -299,6 +302,9 @@ void _load_precompile_entry(
     py::object dynamo_code,
     int64_t isolate_recompiles_id);
 py::list _debug_get_precompile_entries(const py::handle& code_obj);
+bool _has_precompile_entries(
+    const py::handle& code_obj,
+    int64_t isolate_recompiles_id);
 void _set_lru_cache(const py::object& boolean);
 
 #endif

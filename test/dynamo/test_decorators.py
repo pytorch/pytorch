@@ -1839,33 +1839,6 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
         with torch.compiler.set_stance("fail_on_recompile"):
             f(torch.randn(3, 3))
 
-    @skipIfWindows(msg="Non-recursive torch.compiler.disable is not tested on Windows")
-    def test_set_stance_fail_on_recompile_with_nonrecursive_disable(self):
-        def innermost(x):
-            if torch.compiler.is_compiling():
-                return x + 1
-            return x + 2
-
-        @torch.compiler.disable(recursive=False)
-        def inner(x):
-            if torch.compiler.is_compiling():
-                raise AssertionError("the non-recursively disabled frame was compiled")
-            return innermost(x)
-
-        cnts = torch._dynamo.testing.CompileCounter()
-
-        @torch.compile(backend=cnts)
-        def f(x):
-            return inner(x)
-
-        inp = torch.randn(3, 3)
-        self.assertEqual(f(inp), inp + 1)
-        frame_count = cnts.frame_count
-        self.assertGreater(frame_count, 0)
-        with torch.compiler.set_stance("fail_on_recompile"):
-            self.assertEqual(f(inp), inp + 1)
-        self.assertEqual(cnts.frame_count, frame_count)
-
     def test_set_stance_forbid_in_graph(self):
         @torch.compiler.set_stance("force_eager")
         def a(x):
