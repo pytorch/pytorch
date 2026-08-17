@@ -1303,6 +1303,7 @@ def _unpack_fast_types() -> tuple[type, ...]:
 
         _unpack_fast_types_cache = (
             variables.ConstDictVariable,
+            variables.DictKeySetVariable,
             variables.DictViewVariable,
             variables.MappingProxyVariable,
             variables.DequeVariable,
