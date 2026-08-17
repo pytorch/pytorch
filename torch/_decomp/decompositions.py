@@ -1777,22 +1777,7 @@ def native_group_norm_backward(
             + torch.mul(input.reshape(N, group, cpg, HxW), c2)
             + c3
         )
-        supports_memory_format = input.device.type in (
-            "cpu",
-            "cuda",
-            "meta",
-            torch._C._get_privateuse1_backend_name(),
-        )
-        memory_format = (
-            utils.suggest_memory_format(input)
-            if supports_memory_format
-            else torch.contiguous_format
-        )
-        d_input = (
-            d_input.reshape(input.shape)
-            .to(input.dtype)
-            .contiguous(memory_format=memory_format)
-        )
+        d_input = d_input.reshape(input.shape).to(input.dtype)
     if output_mask[1]:
         d_gamma = (
             (
