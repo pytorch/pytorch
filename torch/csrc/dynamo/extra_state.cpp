@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <mutex>
+#include <optional>
 #include <vector>
 
 #include <c10/util/Exception.h>
@@ -27,6 +28,7 @@ bool use_lru = true;
 // which locks the ExtraState's own strategy_mutex instead.
 uint64_t next_strategy_generation = 0;
 std::mutex generation_mutex;
+std::mutex extra_state_init_mutex;
 
 uint64_t next_generation() {
   std::lock_guard<std::mutex> lock(generation_mutex);
@@ -38,10 +40,10 @@ uint64_t next_generation() {
 // runs Python (LAMBDA_GUARD calls back into the interpreter), which can drop
 // the GIL at any bytecode boundary. Take the uncontended fast path without
 // touching the GIL, and release it before blocking so the owner can finish.
-class CacheLock {
+template <typename Mutex>
+class PythonAwareLock {
  public:
-  explicit CacheLock(std::recursive_mutex& mutex)
-      : lock_(mutex, std::try_to_lock) {
+  explicit PythonAwareLock(Mutex& mutex) : lock_(mutex, std::try_to_lock) {
     if (lock_.owns_lock()) {
       return;
     }
@@ -53,14 +55,47 @@ class CacheLock {
     }
   }
 
-  CacheLock(const CacheLock&) = delete;
-  CacheLock& operator=(const CacheLock&) = delete;
-  CacheLock(CacheLock&&) = delete;
-  CacheLock& operator=(CacheLock&&) = delete;
-  ~CacheLock() = default;
+  PythonAwareLock(const PythonAwareLock&) = delete;
+  PythonAwareLock& operator=(const PythonAwareLock&) = delete;
+  PythonAwareLock(PythonAwareLock&&) = delete;
+  PythonAwareLock& operator=(PythonAwareLock&&) = delete;
+  ~PythonAwareLock() = default;
 
  private:
-  std::unique_lock<std::recursive_mutex> lock_;
+  std::unique_lock<Mutex> lock_;
+};
+
+using CacheLock = PythonAwareLock<std::recursive_mutex>;
+using ExtraStateInitLock = PythonAwareLock<std::mutex>;
+
+class CacheLookupGuard {
+ public:
+  CacheLookupGuard(
+      ExtraState* extra_state,
+      std::vector<CacheEntryPtr>& retired_cache_entries,
+      std::vector<PrecompileEntryPtr>& retired_precompile_entries)
+      : extra_state_(extra_state),
+        retired_cache_entries_(retired_cache_entries),
+        retired_precompile_entries_(retired_precompile_entries) {
+    ++this->extra_state_->active_cache_lookups;
+  }
+
+  CacheLookupGuard(const CacheLookupGuard&) = delete;
+  CacheLookupGuard& operator=(const CacheLookupGuard&) = delete;
+
+  ~CacheLookupGuard() {
+    CHECK(this->extra_state_->active_cache_lookups > 0);
+    --this->extra_state_->active_cache_lookups;
+    if (this->extra_state_->active_cache_lookups == 0) {
+      this->extra_state_->apply_pending_cache_mutations(
+          this->retired_cache_entries_, this->retired_precompile_entries_);
+    }
+  }
+
+ private:
+  ExtraState* extra_state_;
+  std::vector<CacheEntryPtr>& retired_cache_entries_;
+  std::vector<PrecompileEntryPtr>& retired_precompile_entries_;
 };
 } // namespace
 
@@ -69,8 +104,7 @@ Py_ssize_t extra_index = -1;
 ExtraState::ExtraState(PyCodeObject* orig_code_arg)
     : orig_code(orig_code_arg) {}
 
-std::list<CacheEntry>& ExtraState::cache_entry_list(
-    int64_t isolate_recompiles_id) {
+CacheEntryList& ExtraState::cache_entry_list(int64_t isolate_recompiles_id) {
   return this->cache_entry_map[isolate_recompiles_id];
 }
 
@@ -81,27 +115,145 @@ bool ExtraState::has_any_cache_entries() const {
 
 bool ExtraState::has_relevant_entries(int64_t isolate_recompiles_id) const {
   CacheLock lock(this->cache_mutex);
-  return this->cache_entry_map.count(isolate_recompiles_id) > 0 ||
+  return std::any_of(
+             this->precompile_entries.begin(),
+             this->precompile_entries.end(),
+             [isolate_recompiles_id](const PrecompileEntryPtr& entry) {
+               return entry->isolate_recompiles_id == isolate_recompiles_id;
+             }) ||
+      this->cache_entry_map.count(isolate_recompiles_id) > 0 ||
       (isolate_recompiles_id >= 0 && this->cache_entry_map.count(-1) > 0);
 }
 
 void ExtraState::move_to_front(
     CacheEntry* cache_entry,
-    std::list<CacheEntry>& entries) {
+    CacheEntryList& entries) {
   CHECK(cache_entry->_owner == this);
-  CHECK(cache_entry == &*cache_entry->_owner_loc);
+  CHECK(cache_entry == cache_entry->_owner_loc->get());
   entries.splice(entries.begin(), entries, cache_entry->_owner_loc);
 }
 
 void ExtraState::move_to_back(CacheEntry* cache_entry) {
   CHECK(cache_entry->_owner == this);
-  CHECK(cache_entry == &*cache_entry->_owner_loc);
+  CHECK(cache_entry == cache_entry->_owner_loc->get());
   auto& list = this->cache_entry_map[cache_entry->_isolate_recompiles_id];
   list.splice(list.end(), list, cache_entry->_owner_loc);
 }
 
+void ExtraState::clear_cache_entries(
+    std::vector<CacheEntryPtr>& retired_cache_entries) {
+  for (auto& [id, entries] : this->cache_entry_map) {
+    (void)id;
+    for (CacheEntryPtr& entry : entries) {
+      entry->_owner = nullptr;
+      retired_cache_entries.push_back(std::move(entry));
+    }
+  }
+  this->cache_entry_map.clear();
+  this->total_cache_entry_count = 0;
+}
+
+void ExtraState::clear_cache_entries_for_region(
+    int64_t isolate_recompiles_id,
+    std::vector<CacheEntryPtr>& retired_cache_entries) {
+  auto it = this->cache_entry_map.find(isolate_recompiles_id);
+  if (it == this->cache_entry_map.end()) {
+    return;
+  }
+  TORCH_CHECK(this->total_cache_entry_count >= it->second.size());
+  this->total_cache_entry_count -= it->second.size();
+  for (CacheEntryPtr& entry : it->second) {
+    entry->_owner = nullptr;
+    retired_cache_entries.push_back(std::move(entry));
+  }
+  this->cache_entry_map.erase(it);
+}
+
+void ExtraState::clear_precompile_entries(
+    std::vector<PrecompileEntryPtr>& retired_precompile_entries) {
+  for (PrecompileEntryPtr& entry : this->precompile_entries) {
+    retired_precompile_entries.push_back(std::move(entry));
+  }
+  this->precompile_entries.clear();
+}
+
+void ExtraState::clear_precompile_entries_for_region(
+    int64_t isolate_recompiles_id,
+    std::vector<PrecompileEntryPtr>& retired_precompile_entries) {
+  for (auto it = this->precompile_entries.begin();
+       it != this->precompile_entries.end();) {
+    if ((*it)->isolate_recompiles_id == isolate_recompiles_id) {
+      retired_precompile_entries.push_back(std::move(*it));
+      it = this->precompile_entries.erase(it);
+    } else {
+      ++it;
+    }
+  }
+}
+
+bool ExtraState::has_pending_destructive_cache_mutation() const {
+  return this->pending_full_cache_reset ||
+      this->pending_full_precompile_reset ||
+      !this->pending_cache_region_clears.empty() ||
+      !this->pending_precompile_region_resets.empty();
+}
+
+void ExtraState::apply_pending_cache_mutations(
+    std::vector<CacheEntryPtr>& retired_cache_entries,
+    std::vector<PrecompileEntryPtr>& retired_precompile_entries) {
+  bool reset_cache = this->pending_full_cache_reset;
+  bool reset_precompile = this->pending_full_precompile_reset;
+  auto cache_regions = std::move(this->pending_cache_region_clears);
+  auto precompile_regions = std::move(this->pending_precompile_region_resets);
+  this->pending_full_cache_reset = false;
+  this->pending_full_precompile_reset = false;
+  this->pending_cache_region_clears.clear();
+  this->pending_precompile_region_resets.clear();
+
+  if (reset_cache) {
+    this->clear_cache_entries(retired_cache_entries);
+  } else {
+    for (int64_t id : cache_regions) {
+      this->clear_cache_entries_for_region(id, retired_cache_entries);
+    }
+  }
+  if (reset_precompile) {
+    this->clear_precompile_entries(retired_precompile_entries);
+  } else {
+    for (int64_t id : precompile_regions) {
+      this->clear_precompile_entries_for_region(id, retired_precompile_entries);
+    }
+  }
+}
+
+void ExtraState::reset() {
+  std::vector<CacheEntryPtr> retired_cache_entries;
+  std::vector<PrecompileEntryPtr> retired_precompile_entries;
+  {
+    CacheLock lock(this->cache_mutex);
+    if (this->active_cache_lookups > 0) {
+      this->pending_full_cache_reset = true;
+      this->pending_full_precompile_reset = true;
+    } else {
+      this->clear_cache_entries(retired_cache_entries);
+      this->clear_precompile_entries(retired_precompile_entries);
+    }
+  }
+  {
+    std::lock_guard<std::mutex> lock(this->region_frame_state_mutex);
+    this->frame_state = py::dict();
+    this->region_frame_state_map.clear();
+  }
+  {
+    std::lock_guard<std::mutex> lock(this->strategy_mutex);
+    this->strategy = FrameExecStrategy{DEFAULT, DEFAULT};
+    this->strategy_generation = 0;
+    this->region_strategy_map.clear();
+  }
+}
+
 void ExtraState::invalidate(
-    CacheEntry* cache_entry,
+    const CacheEntryHandle& cache_entry,
     py::object deleted_guard_manager,
     py::object live_guard_manager) {
   // Sometimes setting the cache_entry->code to None causes the orig_code to be
@@ -113,38 +265,31 @@ void ExtraState::invalidate(
   Py_INCREF(this->orig_code);
   {
     CacheLock lock(this->cache_mutex);
-    // cache_entry arrives as a non-owning raw pointer, read off the guard
-    // manager before the lock was taken (CheckFunctionManager.invalidate). The
-    // wait above can release the GIL, so another thread holding both the GIL
-    // and this lock -- _clear_cache_entries_for_region, reached from
-    // PrecompiledCallable.unload() -- can destroy the entry while we block.
-    //
-    // Locate the entry by the IDENTITY of the guard manager that owns it, never
-    // by the address we were handed: a std::list node is recycled, so a fresh
-    // entry allocated at the same address would pass an address check and then
-    // be wrongly invalidated, killing a valid compilation. Only live nodes are
-    // dereferenced here, so a freed cache_entry is never touched.
-    CacheEntry* live_entry = nullptr;
+    CacheEntryPtr expected_entry = cache_entry.lock();
+    CacheEntryPtr live_entry;
     for (auto& [id, entries] : this->cache_entry_map) {
       (void)id;
-      for (CacheEntry& live : entries) {
-        if (live.guard_manager.ptr() == live_guard_manager.ptr()) {
-          live_entry = &live;
+      for (CacheEntryPtr& live : entries) {
+        std::lock_guard<std::recursive_mutex> state_lock(live->state_mutex);
+        if (live->guard_manager.ptr() == live_guard_manager.ptr()) {
+          live_entry = live;
           break;
         }
       }
-      if (live_entry != nullptr) {
+      if (live_entry) {
         break;
       }
     }
-    if (live_entry != nullptr) {
-      CHECK(live_entry == cache_entry);
-      CHECK(cache_entry->_owner == this);
-      CHECK(cache_entry == &*cache_entry->_owner_loc);
-      cache_entry->invalidate(std::move(deleted_guard_manager));
+    if (live_entry) {
+      CHECK(live_entry == expected_entry);
+      CHECK(live_entry->_owner == this);
+      CHECK(live_entry.get() == live_entry->_owner_loc->get());
+      live_entry->invalidate(std::move(deleted_guard_manager));
       // Move the cache entry to the end of the list because these will always
       // return False.
-      cache_entry->_owner->move_to_back(cache_entry);
+      if (live_entry->_owner == this) {
+        this->move_to_back(live_entry.get());
+      }
     }
   }
   // The lock must be released BEFORE the decref: if this drops the last
@@ -153,11 +298,11 @@ void ExtraState::invalidate(
   Py_DECREF(this->orig_code);
 }
 
-CacheEntry* extract_cache_entry(
+py::object extract_cache_entry_snapshot(
     ExtraState* extra_state,
     int64_t isolate_recompiles_id) {
   if (extra_state == nullptr) {
-    return nullptr;
+    return py::none();
   }
   CacheLock lock(extra_state->cache_mutex);
   // Search own bucket first, then fall back to default bucket (-1),
@@ -168,10 +313,10 @@ CacheEntry* extract_cache_entry(
   for (int i = 0; i < num_ids; i++) {
     auto it = extra_state->cache_entry_map.find(ids_to_search[i]);
     if (it != extra_state->cache_entry_map.end() && !it->second.empty()) {
-      return &it->second.front();
+      return py::cast(CacheEntrySnapshot(*it->second.front()));
     }
   }
-  return nullptr;
+  return py::none();
 }
 
 FrameState* extract_frame_state(
@@ -181,11 +326,11 @@ FrameState* extract_frame_state(
     return nullptr;
   }
   PyObject* frame_state = nullptr;
+  std::lock_guard<std::mutex> lock(extra_state->region_frame_state_mutex);
   if (isolate_recompiles_id < 0) {
     frame_state = extra_state->frame_state.ptr();
     Py_INCREF(frame_state);
   } else {
-    std::lock_guard<std::mutex> lock(extra_state->region_frame_state_mutex);
     frame_state =
         extra_state->region_frame_state_map[isolate_recompiles_id].ptr();
     Py_INCREF(frame_state);
@@ -298,11 +443,24 @@ void set_extra_state(PyCodeObject* code, ExtraState* extra_state) {
   _PyCode_SetExtra((PyObject*)code, extra_index, extra_state);
 }
 
+void reset_extra_state(PyCodeObject* code) {
+  ExtraState* extra_state = get_extra_state(code);
+  if (extra_state != nullptr) {
+    extra_state->reset();
+  }
+}
+
 ExtraState* init_and_set_extra_state(PyCodeObject* code) {
-  // Invariant - Extra state should not have been set before, therefore it
-  // should be nullptr.
-  CHECK(get_extra_state(code) == nullptr);
-  ExtraState* extra_state = new ExtraState(code);
+  ExtraState* extra_state = get_extra_state(code);
+  if (extra_state != nullptr) {
+    return extra_state;
+  }
+  ExtraStateInitLock lock(extra_state_init_mutex);
+  extra_state = get_extra_state(code);
+  if (extra_state != nullptr) {
+    return extra_state;
+  }
+  extra_state = new ExtraState(code);
   NULL_CHECK(extra_state);
   set_extra_state(code, extra_state);
   // freed by destroy_extra_state (since we need to pass these objects to C)
@@ -325,7 +483,7 @@ static bool backend_match(PyObject* saved_backend, PyObject* backend) {
 }
 
 static bool cache_entry_has_no_guards(
-    const CacheEntry& cache_entry,
+    const CacheEntrySnapshot& cache_entry,
     bool is_skip_guard_eval_unsafe) {
   if (is_skip_guard_eval_unsafe && cache_entry.diff_guard_root_mgr != nullptr) {
     return torch::dynamo::root_guard_manager_has_no_guards(
@@ -334,72 +492,90 @@ static bool cache_entry_has_no_guards(
   return torch::dynamo::root_guard_manager_has_no_guards(cache_entry.root_mgr);
 }
 
+struct CacheEntryMatch {
+  CacheEntryPtr entry;
+  CacheEntrySnapshot snapshot;
+};
+
+static bool cache_entry_is_current(const CacheEntryMatch& match) {
+  CacheEntrySnapshot current(*match.entry);
+  return current.code.ptr() == match.snapshot.code.ptr() &&
+      current.guard_manager.ptr() == match.snapshot.guard_manager.ptr();
+}
+
 // Search a region's cache list for a matching entry.
 // Returns the matching CacheEntry, or nullptr if no match.
 // Sets *guard_error = true if a guard evaluation exception occurred.
-static CacheEntry* lookup_in_list(
-    std::list<CacheEntry>& entries,
+static std::optional<CacheEntryMatch> lookup_in_list(
+    CacheEntryList& entries,
     FrameLocalsMapping* f_locals,
     PyObject* backend,
     bool is_skip_guard_eval_unsafe,
-    bool* guard_error,
-    PyObject** maybe_cached_code) {
+    bool* guard_error) {
   size_t index = 0;
-  for (CacheEntry& cache_entry : entries) {
-    bool valid = Py_IsFalse(backend) ||
-        backend_match(cache_entry.backend.ptr(), backend);
+  size_t entry_count = entries.size();
+  for (auto it = entries.begin(); it != entries.end();) {
+    CacheEntryPtr cache_entry = *it;
+    ++it;
+    CacheEntrySnapshot snapshot(*cache_entry);
+    bool valid =
+        Py_IsFalse(backend) || backend_match(snapshot.backend.ptr(), backend);
 
     if (valid) {
       try {
         if (is_skip_guard_eval_unsafe) {
           valid = cache_entry_has_no_guards(
-                      cache_entry, /*is_skip_guard_eval_unsafe=*/true) ||
+                      snapshot, /*is_skip_guard_eval_unsafe=*/true) ||
               torch::dynamo::run_root_guard_manager(
-                      cache_entry.diff_guard_root_mgr, f_locals);
+                      snapshot.diff_guard_root_mgr, f_locals);
         } else {
           valid = torch::dynamo::run_root_guard_manager(
-              cache_entry.root_mgr, f_locals);
+              snapshot.root_mgr, f_locals);
         }
       } catch (py::error_already_set& e) {
         if (guard_error_hook) {
           py::handle guard_error_hook_handle(guard_error_hook);
           py::handle f_locals_dict = (PyObject*)f_locals->to_dict();
           guard_error_hook_handle(
-              cache_entry.guard_manager,
-              cache_entry.code,
+              snapshot.guard_manager,
+              snapshot.code,
               f_locals_dict,
               index,
-              index == entries.size() - 1);
+              index == entry_count - 1);
         }
         e.restore();
-        *maybe_cached_code = nullptr;
         *guard_error = true;
-        return nullptr;
+        return std::nullopt;
       }
     }
-    if (valid) {
-      return &cache_entry;
+    CacheEntryMatch match{cache_entry, std::move(snapshot)};
+    if (valid && cache_entry_is_current(match)) {
+      return match;
     }
     ++index;
   }
-  return nullptr;
+  return std::nullopt;
 }
 
 static bool try_lookup_without_guard_eval_in_list(
-    std::list<CacheEntry>& entries,
+    CacheEntryList& entries,
     PyObject* backend,
     bool is_skip_guard_eval_unsafe,
-    CacheEntry** found) {
-  for (CacheEntry& cache_entry : entries) {
-    bool valid = Py_IsFalse(backend) ||
-        backend_match(cache_entry.backend.ptr(), backend);
+    std::optional<CacheEntryMatch>* found) {
+  for (CacheEntryPtr& cache_entry : entries) {
+    CacheEntrySnapshot snapshot(*cache_entry);
+    bool valid =
+        Py_IsFalse(backend) || backend_match(snapshot.backend.ptr(), backend);
 
     if (valid) {
-      if (!PyCode_Check(cache_entry.code.ptr())) {
+      if (!PyCode_Check(snapshot.code.ptr())) {
         continue;
       }
-      if (cache_entry_has_no_guards(cache_entry, is_skip_guard_eval_unsafe)) {
-        *found = &cache_entry;
+      CacheEntryMatch match{cache_entry, std::move(snapshot)};
+      if (cache_entry_has_no_guards(
+              match.snapshot, is_skip_guard_eval_unsafe) &&
+          cache_entry_is_current(match)) {
+        *found = std::move(match);
         return true;
       }
       return false;
@@ -413,11 +589,16 @@ void lookup(
     FrameLocalsMapping* f_locals,
     PyObject* backend,
     int64_t isolate_recompiles_id,
-    PyObject** maybe_cached_code,
-    const char** trace_annotation,
+    CacheLookupResult* result,
     bool is_skip_guard_eval_unsafe) {
+  std::vector<CacheEntryPtr> retired_cache_entries;
+  std::vector<PrecompileEntryPtr> retired_precompile_entries;
   CacheLock lock(extra_state->cache_mutex);
-  CacheEntry* found = nullptr;
+  CacheLookupGuard lookup_guard(
+      extra_state, retired_cache_entries, retired_precompile_entries);
+  result->code = py::object();
+  result->trace_annotation.clear();
+  std::optional<CacheEntryMatch> found;
   bool guard_error = false;
 
   // Precompile entries match their OWN region only, deliberately unlike the
@@ -430,10 +611,14 @@ void lookup(
   // when the backend is Py_False, which is every frame under run-only. Callers
   // that install for an isolated region must pass its id (see
   // CompilePackage.install) rather than rely on the default bucket.
-  for (const auto& entry : extra_state->precompile_entries) {
-    if (entry.isolate_recompiles_id == isolate_recompiles_id &&
-        torch::dynamo::run_root_guard_manager(entry.root_mgr, f_locals)) {
-      *maybe_cached_code = entry.code.ptr();
+  for (const PrecompileEntryPtr& entry : extra_state->precompile_entries) {
+    if (entry->isolate_recompiles_id == isolate_recompiles_id &&
+        torch::dynamo::run_root_guard_manager(entry->root_mgr, f_locals)) {
+      if (extra_state->has_pending_destructive_cache_mutation()) {
+        result->code = py::none();
+      } else {
+        result->code = entry->code;
+      }
       return;
     }
   }
@@ -444,9 +629,9 @@ void lookup(
   // to the isolated bucket.
   int64_t ids_to_search[] = {isolate_recompiles_id, -1};
   int num_ids = (isolate_recompiles_id >= 0) ? 2 : 1;
-  std::list<CacheEntry>* found_list = nullptr;
+  CacheEntryList* found_list = nullptr;
 
-  for (int i = 0; i < num_ids && found == nullptr; i++) {
+  for (int i = 0; i < num_ids && !found; i++) {
     auto it = extra_state->cache_entry_map.find(ids_to_search[i]);
     if (it != extra_state->cache_entry_map.end()) {
       found = lookup_in_list(
@@ -454,8 +639,7 @@ void lookup(
           f_locals,
           backend,
           is_skip_guard_eval_unsafe,
-          &guard_error,
-          maybe_cached_code);
+          &guard_error);
       if (guard_error) {
         return;
       }
@@ -465,51 +649,58 @@ void lookup(
     }
   }
 
-  if (found) {
+  if (found && !extra_state->has_pending_destructive_cache_mutation()) {
     if (use_lru) {
-      extra_state->move_to_front(found, *found_list);
+      extra_state->move_to_front(found->entry.get(), *found_list);
     }
-    *maybe_cached_code = found->code.ptr();
-    *trace_annotation = found->trace_annotation.c_str();
+    result->code = found->snapshot.code;
+    result->trace_annotation = found->snapshot.trace_annotation;
     return;
   }
-  *maybe_cached_code = py::none().ptr();
+  result->code = py::none();
 }
 
 bool try_lookup_without_guard_eval(
     ExtraState* extra_state,
     PyObject* backend,
     int64_t isolate_recompiles_id,
-    PyObject** maybe_cached_code,
-    const char** trace_annotation,
+    CacheLookupResult* result,
     bool is_skip_guard_eval_unsafe) {
+  std::vector<CacheEntryPtr> retired_cache_entries;
+  std::vector<PrecompileEntryPtr> retired_precompile_entries;
   CacheLock lock(extra_state->cache_mutex);
+  CacheLookupGuard lookup_guard(
+      extra_state, retired_cache_entries, retired_precompile_entries);
+  result->code = py::object();
+  result->trace_annotation.clear();
   // Own region only, matching lookup().
-  const PrecompileEntry* first_precompile_entry = nullptr;
-  for (const auto& entry : extra_state->precompile_entries) {
-    if (entry.isolate_recompiles_id == isolate_recompiles_id) {
-      first_precompile_entry = &entry;
+  PrecompileEntryPtr first_precompile_entry;
+  for (const PrecompileEntryPtr& entry : extra_state->precompile_entries) {
+    if (entry->isolate_recompiles_id == isolate_recompiles_id) {
+      first_precompile_entry = entry;
       break;
     }
   }
   int64_t ids_to_search[] = {isolate_recompiles_id, -1};
   int num_ids = (isolate_recompiles_id >= 0) ? 2 : 1;
-  if (first_precompile_entry != nullptr) {
+  if (first_precompile_entry) {
     // Only the first precompile entry can be safely fast-pathed: a later
     // guardless entry must not preempt an earlier guarded entry whose guards
     // may pass.
     if (torch::dynamo::root_guard_manager_has_no_guards(
             first_precompile_entry->root_mgr)) {
-      *maybe_cached_code = first_precompile_entry->code.ptr();
+      result->code = extra_state->has_pending_destructive_cache_mutation()
+          ? py::none()
+          : first_precompile_entry->code;
       return true;
     }
     return false;
   }
 
-  std::list<CacheEntry>* found_list = nullptr;
-  CacheEntry* found = nullptr;
+  CacheEntryList* found_list = nullptr;
+  std::optional<CacheEntryMatch> found;
 
-  for (int i = 0; i < num_ids && found == nullptr; i++) {
+  for (int i = 0; i < num_ids && !found; i++) {
     auto it = extra_state->cache_entry_map.find(ids_to_search[i]);
     if (it != extra_state->cache_entry_map.end()) {
       if (!try_lookup_without_guard_eval_in_list(
@@ -522,46 +713,45 @@ bool try_lookup_without_guard_eval(
     }
   }
 
-  if (found) {
+  if (found && !extra_state->has_pending_destructive_cache_mutation()) {
     if (use_lru) {
-      extra_state->move_to_front(found, *found_list);
+      extra_state->move_to_front(found->entry.get(), *found_list);
     }
-    *maybe_cached_code = found->code.ptr();
-    *trace_annotation = found->trace_annotation.c_str();
+    result->code = found->snapshot.code;
+    result->trace_annotation = found->snapshot.trace_annotation;
     return true;
   }
 
-  *maybe_cached_code = Py_None;
+  result->code = py::none();
   return true;
 }
 
-CacheEntry* create_cache_entry(
+CacheEntrySnapshot create_cache_entry(
     ExtraState* extra_state,
     PyObject* guarded_code,
     PyObject* backend) {
   CacheLock lock(extra_state->cache_mutex);
   int64_t id = get_current_isolate_recompiles_id();
   auto& entries = extra_state->cache_entry_list(id);
-  std::list<CacheEntry>::iterator new_iter;
+  CacheEntryPtr new_entry =
+      std::make_shared<CacheEntry>(py::handle(guarded_code), backend);
+  CacheEntryList::iterator new_iter;
   if (use_lru) {
-    entries.emplace_front(guarded_code, backend);
+    entries.emplace_front(new_entry);
     new_iter = entries.begin();
   } else {
-    entries.emplace_back(guarded_code, backend);
+    entries.emplace_back(new_entry);
     new_iter = std::prev(entries.end());
   }
-  new_iter->_owner = extra_state;
-  new_iter->_owner_loc = new_iter;
-  new_iter->_isolate_recompiles_id = id;
+  new_entry->_owner = extra_state;
+  new_entry->_owner_loc = new_iter;
+  new_entry->_isolate_recompiles_id = id;
   extra_state->total_cache_entry_count++;
-  // Set guard_manager references to extra_state and CacheEntry
-  // Warning: lifetime is controlled by C++!
   py::handle guard_manager = py::handle(guarded_code).attr("guard_manager");
-  guard_manager.attr("cache_entry") =
-      py::cast(*new_iter, py::return_value_policy::reference);
+  guard_manager.attr("cache_entry") = py::cast(CacheEntryHandle(new_entry));
   guard_manager.attr("extra_state") =
       py::cast(extra_state, py::return_value_policy::reference);
-  return &*new_iter;
+  return CacheEntrySnapshot(*new_entry);
 }
 
 py::list _debug_get_cache_entry_list(const py::handle& code_obj) {
@@ -581,8 +771,8 @@ py::list _debug_get_cache_entry_list(const py::handle& code_obj) {
     }
     std::sort(ids.begin(), ids.end());
     for (int64_t id : ids) {
-      for (CacheEntry& e : extra->cache_entry_map[id]) {
-        result.append(py::cast(e, py::return_value_policy::reference));
+      for (const CacheEntryPtr& entry : extra->cache_entry_map[id]) {
+        result.append(py::cast(CacheEntrySnapshot(*entry)));
       }
     }
   }
@@ -602,8 +792,8 @@ py::list _get_cache_entries_for_region(
     CacheLock lock(extra->cache_mutex);
     auto it = extra->cache_entry_map.find(isolate_recompiles_id);
     if (it != extra->cache_entry_map.end()) {
-      for (CacheEntry& e : it->second) {
-        result.append(py::cast(e, py::return_value_policy::reference));
+      for (const CacheEntryPtr& entry : it->second) {
+        result.append(py::cast(CacheEntrySnapshot(*entry)));
       }
     }
   }
@@ -623,13 +813,14 @@ void _clear_cache_entries_for_region(
   if (extra == nullptr) {
     return;
   }
+  std::vector<CacheEntryPtr> retired_cache_entries;
   {
     CacheLock lock(extra->cache_mutex);
-    auto it = extra->cache_entry_map.find(isolate_recompiles_id);
-    if (it != extra->cache_entry_map.end()) {
-      TORCH_CHECK(extra->total_cache_entry_count >= it->second.size());
-      extra->total_cache_entry_count -= it->second.size();
-      extra->cache_entry_map.erase(it);
+    if (extra->active_cache_lookups > 0) {
+      extra->pending_cache_region_clears.insert(isolate_recompiles_id);
+    } else {
+      extra->clear_cache_entries_for_region(
+          isolate_recompiles_id, retired_cache_entries);
     }
   }
   {
@@ -665,6 +856,10 @@ PrecompileEntry::PrecompileEntry(py::object gm, py::object c, int64_t region_id)
       torch::dynamo::convert_to_root_guard_manager(guard_manager.attr("root"));
 }
 
+PrecompileEntrySnapshot::PrecompileEntrySnapshot(const PrecompileEntry& entry)
+    : guard_manager(entry.guard_manager),
+      isolate_recompiles_id(entry.isolate_recompiles_id) {}
+
 void _reset_precompile_entries(const py::handle& code_obj) {
   TORCH_CHECK_TYPE(
       py::isinstance(code_obj, py::module::import("types").attr("CodeType")),
@@ -672,8 +867,15 @@ void _reset_precompile_entries(const py::handle& code_obj) {
   PyCodeObject* code = (PyCodeObject*)code_obj.ptr();
   ExtraState* extra = get_extra_state(code);
   if (extra != nullptr) {
-    CacheLock lock(extra->cache_mutex);
-    extra->precompile_entries.clear();
+    std::vector<PrecompileEntryPtr> retired_precompile_entries;
+    {
+      CacheLock lock(extra->cache_mutex);
+      if (extra->active_cache_lookups > 0) {
+        extra->pending_full_precompile_reset = true;
+      } else {
+        extra->clear_precompile_entries(retired_precompile_entries);
+      }
+    }
   }
 }
 
@@ -686,11 +888,16 @@ void _reset_precompile_entries_for_region(
   PyCodeObject* code = (PyCodeObject*)code_obj.ptr();
   ExtraState* extra = get_extra_state(code);
   if (extra != nullptr) {
-    CacheLock lock(extra->cache_mutex);
-    extra->precompile_entries.remove_if(
-        [isolate_recompiles_id](const PrecompileEntry& entry) {
-          return entry.isolate_recompiles_id == isolate_recompiles_id;
-        });
+    std::vector<PrecompileEntryPtr> retired_precompile_entries;
+    {
+      CacheLock lock(extra->cache_mutex);
+      if (extra->active_cache_lookups > 0) {
+        extra->pending_precompile_region_resets.insert(isolate_recompiles_id);
+      } else {
+        extra->clear_precompile_entries_for_region(
+            isolate_recompiles_id, retired_precompile_entries);
+      }
+    }
   }
 }
 
@@ -708,9 +915,11 @@ void _load_precompile_entry(
     extra = init_and_set_extra_state(code);
   }
   CacheLock lock(extra->cache_mutex);
-  auto entry = PrecompileEntry(
-      std::move(guard_manager), std::move(dynamo_code), isolate_recompiles_id);
-  extra->precompile_entries.push_back(std::move(entry));
+  extra->precompile_entries.push_back(
+      std::make_shared<PrecompileEntry>(
+          std::move(guard_manager),
+          std::move(dynamo_code),
+          isolate_recompiles_id));
 }
 
 void _set_lru_cache(const py::object& boolean) {
@@ -722,38 +931,17 @@ void _set_lru_cache(const py::object& boolean) {
 }
 
 py::list _debug_get_precompile_entries(const py::handle& code_obj) {
-  TORCH_CHECK_TYPE(PyCode_Check(code_obj.ptr()), "expected a code object!");
+  TORCH_CHECK_TYPE(
+      py::isinstance(code_obj, py::module::import("types").attr("CodeType")),
+      "expected a code object!");
   PyCodeObject* code = (PyCodeObject*)code_obj.ptr();
   ExtraState* extra = get_extra_state(code);
   py::list result;
   if (extra != nullptr) {
     CacheLock lock(extra->cache_mutex);
-    for (PrecompileEntry& e : extra->precompile_entries) {
-      result.append(py::cast(e, py::return_value_policy::reference));
+    for (const PrecompileEntryPtr& entry : extra->precompile_entries) {
+      result.append(py::cast(PrecompileEntrySnapshot(*entry)));
     }
   }
   return result;
-}
-
-bool _has_precompile_entries(
-    const py::handle& code_obj,
-    int64_t isolate_recompiles_id) {
-  TORCH_CHECK_TYPE(PyCode_Check(code_obj.ptr()), "expected a code object!");
-  PyCodeObject* code = (PyCodeObject*)code_obj.ptr();
-  ExtraState* extra = get_extra_state(code);
-  if (extra == nullptr) {
-    return false;
-  }
-  // Region exact, matching lookup(): an entry from another region never serves
-  // this one, so a second artifact installed on the same code object is not
-  // coverage for the first. A loaded artifact runs this on every served call,
-  // hence no py::list and no Python executed under the lock -- the wait inside
-  // CacheLock is the only place the GIL can drop.
-  CacheLock lock(extra->cache_mutex);
-  for (const PrecompileEntry& entry : extra->precompile_entries) {
-    if (entry.isolate_recompiles_id == isolate_recompiles_id) {
-      return true;
-    }
-  }
-  return false;
 }
