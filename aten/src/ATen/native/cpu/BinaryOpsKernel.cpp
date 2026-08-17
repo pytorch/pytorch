@@ -683,9 +683,15 @@ void maximum_kernel(TensorIteratorBase& iter) {
               [](scalar_t a, scalar_t b) -> scalar_t {
                 if (a != a || b != b) {
                   return std::numeric_limits<scalar_t>::quiet_NaN();
-                } else {
-                  return std::max(a, b);
                 }
+                // `std::max` compares with `<`, which cannot tell +0.0 from
+                // -0.0, so it returns whichever argument came first. Pick the
+                // sign explicitly, so that a zero result does not depend on
+                // whether this path or the vectorized one produced it.
+                if (a == b) {
+                  return std::signbit(a) ? b : a;
+                }
+                return std::max(a, b);
               },
               [](Vectorized<scalar_t> a, Vectorized<scalar_t> b) {
                 return at::vec::maximum(a, b);
@@ -718,9 +724,15 @@ void minimum_kernel(TensorIteratorBase& iter) {
               [](scalar_t a, scalar_t b) -> scalar_t {
                 if (a != a || b != b) {
                   return std::numeric_limits<scalar_t>::quiet_NaN();
-                } else {
-                  return std::min(a, b);
                 }
+                // `std::min` compares with `<`, which cannot tell +0.0 from
+                // -0.0, so it returns whichever argument came first. Pick the
+                // sign explicitly, so that a zero result does not depend on
+                // whether this path or the vectorized one produced it.
+                if (a == b) {
+                  return std::signbit(a) ? a : b;
+                }
+                return std::min(a, b);
               },
               [](Vectorized<scalar_t> a, Vectorized<scalar_t> b) {
                 return at::vec::minimum(a, b);
