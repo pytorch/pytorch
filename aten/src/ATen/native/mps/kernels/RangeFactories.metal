@@ -138,10 +138,10 @@ kernel void logspace_strided(
 // Double-float carries enough significand that rounding its result to the
 // output dtype gives the correctly rounded value.
 inline float arange_fp_value(constant array<float, 4>& se, uint index) {
-  const c10::metal::df32 start{se[0], se[1]};
-  const c10::metal::df32 step{se[2], se[3]};
-  const auto i = c10::metal::df_from_long(static_cast<long>(index));
-  return c10::metal::df_add(start, c10::metal::df_mul(step, i)).hi;
+  const c10::metal::df32 start(se[0], se[1]);
+  const c10::metal::df32 step(se[2], se[3]);
+  const c10::metal::df32 i(static_cast<long>(index));
+  return c10::metal::add(start, c10::metal::mul(step, i)).hi;
 }
 
 template <typename T, typename I>

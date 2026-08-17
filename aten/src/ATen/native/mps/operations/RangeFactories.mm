@@ -10,6 +10,7 @@
 #include <ATen/ops/logspace_native.h>
 #include <ATen/ops/pow.h>
 #include <ATen/ops/range_native.h>
+#include <c10/metal/double_float.h>
 #include <array>
 #include <cmath>
 #include <limits>
@@ -33,22 +34,15 @@ void arange_range_fill_mps(const Scalar& start, const Scalar& step, Tensor& resu
   auto stream = getCurrentMPSStream();
   auto encoder = stream->commandEncoder();
 
-  // The float kernels evaluate start + i * step in double-float, so each
-  // operand is passed as a hi/lo float pair rather than rounded to float here.
-  const auto split = [](double v) {
-    const auto hi = static_cast<float>(v);
-    const auto lo = std::isfinite(hi) ? static_cast<float>(v - static_cast<double>(hi)) : 0.0f;
-    return std::array<float, 2>{hi, lo};
-  };
-
-  // Binds result and {start, step}: int64 for integer dtypes, hi/lo otherwise.
+  // Binds result and {start, step}: int64 for integer dtypes, otherwise the
+  // hi/lo pairs the float kernels evaluate start + i * step in.
   const auto bind_start_step = [&] {
     if (is_int) {
       mtl_setArgs(encoder, result, std::array<int64_t, 2>{start.to<int64_t>(), step.to<int64_t>()});
     } else {
-      const auto s = split(start.to<double>());
-      const auto d = split(step.to<double>());
-      mtl_setArgs(encoder, result, std::array<float, 4>{s[0], s[1], d[0], d[1]});
+      const c10::metal::df32 s(start.to<double>());
+      const c10::metal::df32 d(step.to<double>());
+      mtl_setArgs(encoder, result, std::array<float, 4>{s.hi, s.lo, d.hi, d.lo});
     }
   };
 
