@@ -264,6 +264,11 @@ def get_op_name(layout):
     return layout.__name__.split(".")[0].split("_")[-1]
 
 
+skipIfCppFakeTensor = unittest.skipIf(
+    torch._dynamo.config.use_cpp_fake_tensor, "no nestedtensor w/ cpp faketensor"
+)
+
+
 # Helper function for test_dummy_mha_with_nt
 @torch.fx.wrap
 def convert_dense_to_nested_tensor_legacy(values):
@@ -317,6 +322,7 @@ def convert_nt_to_jagged(nt):
 
 
 @markDynamoStrictTest
+@skipIfCppFakeTensor
 class TestNestedTensor(NestedTensorTestCase):
     @parametrize("batch_size", [2, 4])
     @parametrize("max_seq_len", [3, 5])
@@ -907,6 +913,7 @@ class TestNestedTensor(NestedTensorTestCase):
 
 
 @markDynamoStrictTest
+@skipIfCppFakeTensor
 class TestNestedTensorDeviceType(NestedTensorTestCase):
     # Helper function to generate a pair of random nested tensors
     # the 2 nested tensors have same shapes
@@ -3132,6 +3139,7 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
 
 
 @markDynamoStrictTest
+@skipIfCppFakeTensor
 class TestNestedTensorAutograd(NestedTensorTestCase):
     # Note [Gradcheck args check_batched_grad=False] the common_utils testing version of gradcheck
     # includes the default parameters used for testing ops with gradcheck. However nested tensor
@@ -3954,6 +3962,7 @@ def get_tolerances(
 # We can probably parametrizing existing tests instead of having a separate
 # test class as we begin to support more ops. Also maybe rewrite with OpInfos.
 @markDynamoStrictTest
+@skipIfCppFakeTensor
 class TestNestedTensorSubclass(NestedTensorTestCase):
     # TODO: consolidate with the below
     def _get_list_for_jagged_tensor(self, nested_size, device, requires_grad=True):
@@ -9015,6 +9024,7 @@ COMPARE_TENSOR_COMPONENT_EQUALITY = {
 # OpInfo-based NJT tests. These tests utilize an NJT-specific op_db generated from the standard
 # op_db. Note that certain tradeoffs were made wrt coverage vs. time spent running tests:
 #   * All tests run with dtype=torch.float32 only
+@skipIfCppFakeTensor
 class TestNestedTensorOpInfo(NestedTensorTestCase):
     # TODO: move this
     def _gen_grad_outputs(self, out_val):
@@ -9262,6 +9272,7 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
 from torch.nested._internal.nested_int import NestedIntNode
 
 
+@skipIfCppFakeTensor
 class TestNestedInt(torch.testing._internal.common_utils.TestCase):
     def test_comparisons(self):
         a = torch.SymInt(NestedIntNode(1, 1))
