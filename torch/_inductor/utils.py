@@ -31,6 +31,7 @@ from collections.abc import (
     Mapping,
     MutableMapping,
     MutableSet,
+    Set as AbstractSet,
 )
 from datetime import datetime
 from functools import lru_cache
@@ -88,7 +89,7 @@ from torch.fx.experimental.symbolic_shapes import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Sequence, ValuesView
+    from collections.abc import Sequence, ValuesView
     from pathlib import Path
 
     from torch import SymBool, SymFloat, SymInt
@@ -270,13 +271,14 @@ def _collect_importable_constexpr_types(
                 )
     elif callable(repr_args := getattr(value, "__repr_args__", None)):
         # Pydantic exposes the values selected for repr through this protocol.
-        for _, item in repr_args():
+        repr_items = cast(Callable[[], Iterable[tuple[object, object]]], repr_args)()
+        for _, item in repr_items:
             _collect_importable_constexpr_types(item, result, seen)
     elif isinstance(value, Mapping):
         for key, item in value.items():
             _collect_importable_constexpr_types(key, result, seen)
             _collect_importable_constexpr_types(item, result, seen)
-    elif isinstance(value, (list, tuple, set, OrderedSet, frozenset)):
+    elif isinstance(value, (list, tuple, AbstractSet)):
         for item in value:
             _collect_importable_constexpr_types(item, result, seen)
 
