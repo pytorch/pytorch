@@ -12,7 +12,11 @@ from torch._inductor.select_algorithm import AlgorithmSelectorCache, ExternKerne
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import clear_caches
 from torch.testing._internal.common_cuda import SM90OrLater
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
+)
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -63,6 +67,7 @@ class TestCutlassFallback(TestCase):
         super().tearDown()
         clear_caches()
 
+    @requires_capabilities(Capability.lib.triton)
     @unittest.skipIf(not HAS_CUTLASS, "requires CUTLASS")
     @unittest.skipIf(not SM90OrLater, "requires SM90+")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
@@ -100,6 +105,7 @@ class TestCutlassFallback(TestCase):
                 expected = torch.mm(a, b)
                 torch.testing.assert_close(result, expected, rtol=1e-2, atol=1e-2)
 
+    @requires_capabilities(Capability.lib.triton)
     @unittest.skipIf(not HAS_CUTLASS, "requires CUTLASS")
     @unittest.skipIf(not SM90OrLater, "requires SM90+")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
@@ -156,6 +162,7 @@ class TestCutlassFallback(TestCase):
                     # that's OK -- ATen fallback is in the main benchmark path
                     pass
 
+    @requires_capabilities(Capability.lib.triton)
     @unittest.skipIf(not HAS_CUTLASS, "requires CUTLASS")
     @unittest.skipIf(not SM90OrLater, "requires SM90+")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
@@ -194,6 +201,7 @@ class TestCutlassFallback(TestCase):
                 expected = torch.addmm(bias, a, b)
                 torch.testing.assert_close(result, expected, rtol=1e-2, atol=1e-2)
 
+    @requires_capabilities(Capability.lib.triton)
     @unittest.skipIf(not HAS_CUTLASS, "requires CUTLASS")
     @unittest.skipIf(not SM90OrLater, "requires SM90+")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})

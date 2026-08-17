@@ -7,7 +7,11 @@ from expecttest import assert_expected_inline
 import torch
 from torch._inductor.test_case import TestCase
 from torch._inductor.virtualized import V
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
+)
 from torch.testing._internal.common_utils import HardwareClassification
 from torch.testing._internal.inductor_utils import MockGraphHandler
 
@@ -211,6 +215,7 @@ def {{kernel_name}}_kernel():
                     lambda msg: f"{msg}\nLine should not be indented: '{line}'",
                 )
 
+    @requires_capabilities(Capability.lib.triton)
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_cutedsl_add_e2e(self):
         """End-to-end test with CuteDSL template including code generation verification."""
@@ -265,6 +270,7 @@ def {{kernel_name}}_kernel():
             expected = x + y
             self.assertTrue(torch.allclose(result, expected, atol=1e-5))
 
+    @requires_capabilities(Capability.lib.triton)
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_cutedsl_add_e2e_autotune(self):
         """E2E test with multiple CuteDSL template variants for autotuning."""

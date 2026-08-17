@@ -21,7 +21,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_utils import HardwareClassification
 from torch.testing._internal.common_xpu import Xe2_Or_Later
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_TRITON, MockGraphHandler
+from torch.testing._internal.inductor_utils import MockGraphHandler
 
 
 def _is_cuda_sm90_or_sm10x():
@@ -970,5 +970,4 @@ instantiate_device_type_tests(
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
-    if HAS_CPU or HAS_TRITON:
-        run_tests(needs="filelock")
+    run_tests(needs="filelock")
