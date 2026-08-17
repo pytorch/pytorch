@@ -662,7 +662,7 @@ class GraphArg:
     # TODO: storing a SymInt here but not a FakeTensor is a pretty strange
     # thing to do.  Probably should have example (which stores an int) and
     # fake_example
-    _example: Any
+    _example: object
     # When True, this indicates that this GraphArg is a Python quantity (e.g.,
     # a float or int) which we pass to the FX graph as a Tensor.  This
     # controls how we codegen calls into the Dynamo graph: we will call
@@ -707,7 +707,11 @@ class GraphArg:
                 raise AssertionError("TensorWeakRef expired unexpectedly")
             return r
         else:
-            return self._example
+            # The declared return type is known-incomplete: torch.ScriptObject
+            # and list-of-tensor graphargs also reach here, and output_graph.py
+            # reads them back (1827, 3424, 3441). Do not tighten `_example` to
+            # this union without fixing those paths first.
+            return cast("torch.SymInt | BackwardState | None", self._example)
 
     def __post_init__(self) -> None:
         if isinstance(self._example, torch.Tensor):
@@ -2017,7 +2021,7 @@ class VariableBuilder:
             # tracing, but in dynamo we handle it as a regular object so that
             # trace_rules-based graph breaks (e.g. initial_seed, manual_seed)
             # work gracefully — allowing dynamo to compile code before and
-            # after the generator call. CustomClassObjectVariable's getattro_impl
+            # after the generator call. CustomClassObjectVariable's tp_getattro_impl
             # and call_method are decorated with @_raise_hard_error_if_graph_break,
             # which turns any graph break into a hard error that falls back to
             # eager for the entire function. Generator methods intentionally
@@ -2352,7 +2356,8 @@ class VariableBuilder:
             return self.wrap_user_defined(value)
 
     def wrap_user_defined(self, value: Any) -> VariableTracker:
-        from .user_defined import _CONSTANT_BASE_TYPES
+        from .ctx_manager import GenericContextWrappingVariable
+        from .user_defined import _CONSTANT_BASE_TYPES, is_generic_ctx_manager_cls
 
         self.install_guards(GuardBuilder.TYPE_MATCH)
         if InspectVariable.is_matching_object(value):
@@ -2367,6 +2372,12 @@ class VariableBuilder:
         ):
             self.install_guards(GuardBuilder.CONSTANT_SUBCLASS_MATCH)
             result = UserDefinedConstantVariable(value, source=self.source)
+        elif is_generic_ctx_manager_cls(type(value)):
+            # A generic context manager built inside the compiled region (via
+            # SideEffects.get_variable_cls) must wrap the same way when it is
+            # reconstructed from a source across a graph break, so a `with` on
+            # the reconstructed object can still be entered.
+            result = GenericContextWrappingVariable(value, source=self.source)
         else:
             result = UserDefinedObjectVariable(value, source=self.source)
         if not SideEffects.cls_supports_mutation_side_effects(type(value)):
@@ -4192,7 +4203,8 @@ def handle_traced_output(
         ]
         or (
             # TODO: this is a little sus, because we didn't check what the self is
-            proxy.node.op == "call_method" and proxy.node.target == "bit_length"
+            proxy.node.op == "call_method"
+            and proxy.node.target in {"bit_length", "__index__"}
         )
     ):
         set_example_value(proxy.node, example_value)
@@ -5161,7 +5173,7 @@ class SourcelessBuilder:
                 cls_obj_vt = SourcelessBuilder.create(tx, value.__self__)
                 try:
                     # pyrefly: ignore[bad-argument-type]
-                    return cls_obj_vt.getattro_impl(tx, value.__func__.__name__)
+                    return cls_obj_vt.tp_getattro_impl(tx, value.__func__.__name__)
                 except NotImplementedError:
                     pass  # failthrough to unimplemented branch
             else:
