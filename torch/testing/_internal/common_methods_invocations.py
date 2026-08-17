@@ -12243,6 +12243,8 @@ op_db: list[OpInfo] = [
                # aten.uniform was not decomposed
                DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_quick'),
                DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
+               DecorateInfo(unittest.skip('output is non-deterministic'), 'TestLazyOpInfoDevice', 'test_correctness', device_type='xpu'),
+               DecorateInfo(unittest.skip('output is non-deterministic'), 'TestLazyOpInfoDevice', 'test_correctness_with_reusing_ir', device_type='xpu'),
            )),
     BinaryUfuncInfo('clamp_max',
                     ref=_clamp_max_numpy,
