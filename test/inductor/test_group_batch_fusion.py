@@ -651,6 +651,73 @@ class TestGroupBatchFusion(TestCase):
         self.assertEqual(actual, expected)
         self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
 
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={
+            "batch_linear_lhs": {"min_fuse_set_size": 2},
+        },
+        post_grad_fusion_options={},
+    )
+    def test_batch_linear_lhs_skips_view_as_users(self):
+        # view_as is view in disguise (self.view_symint(other.sym_sizes())), so
+        # it crashes on the fused non-contiguous slice exactly like .view(-1).
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.proj_large = torch.nn.Linear(64, 192, bias=False)
+                self.proj_a = torch.nn.Linear(64, 16, bias=False)
+                self.proj_b = torch.nn.Linear(64, 16, bias=False)
+
+            def forward(self, x):
+                large = self.proj_large(x).view_as(torch.empty(6144))
+                a = torch.sin(self.proj_a(x))
+                b = torch.cos(self.proj_b(x))
+                return large, a, b
+
+        counters.clear()
+        module = M().eval()
+        x = torch.randn(32, 64)
+        with torch.no_grad():
+            expected = module(x)
+            actual = torch.compile(module, fullgraph=True)(x)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
+
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={
+            "batch_linear_lhs": {"min_fuse_set_size": 2},
+        },
+        post_grad_fusion_options={},
+    )
+    def test_batch_linear_lhs_keeps_contiguous_fusion(self):
+        # contiguous() is alias-annotated but layout-breaking: its output is
+        # contiguous for any input, so the fused layout does not propagate
+        # through it. Feeding each linear through .contiguous() before the
+        # layout-sensitive custom op must not block the fusion; without the
+        # layout-breaking handling all three would be skipped (counter 0).
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.proj_large = torch.nn.Linear(64, 192, bias=False)
+                self.proj_a = torch.nn.Linear(64, 16, bias=False)
+                self.proj_b = torch.nn.Linear(64, 16, bias=False)
+
+            def forward(self, x):
+                large = _require_contiguous(self.proj_large(x).contiguous())
+                a = _require_contiguous(self.proj_a(x).contiguous())
+                b = _require_contiguous(self.proj_b(x).contiguous())
+                return torch.cat((large, a, b), dim=1)
+
+        counters.clear()
+        module = M().eval()
+        x = torch.randn(32, 64)
+        with torch.no_grad():
+            expected = module(x)
+            actual = torch.compile(module, fullgraph=True)(x)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
+
     def test_batch_linear_lhs_split_getitem_walked(self):
         # split returns a tuple, so its users are operator.getitem nodes, which
         # the guard must walk through to reach the downstream view.
@@ -663,6 +730,22 @@ class TestGroupBatchFusion(TestCase):
         split = graph.call_function(torch.ops.aten.split, args=(linear, 64, 1))
         getitem = graph.call_function(operator.getitem, args=(split, 0))
         graph.call_method("view", args=(getitem, -1))
+        self.assertTrue(_has_layout_sensitive_user(linear))
+
+    def test_batch_linear_lhs_transposed_view_walked(self):
+        # .T lowers to aten.numpy_T, a view that must be walked through to reach
+        # a downstream layout-sensitive custom op. This is the case that
+        # motivated deriving views from the schema instead of a list.
+        from torch._inductor.fx_passes.group_batch_fusion import (
+            _has_layout_sensitive_user,
+        )
+
+        graph = torch.fx.Graph()
+        linear = graph.placeholder("linear")
+        transposed = graph.call_function(torch.ops.aten.numpy_T, args=(linear,))
+        graph.call_function(
+            torch.ops._batch_linear_lhs_test.require_contiguous, args=(transposed,)
+        )
         self.assertTrue(_has_layout_sensitive_user(linear))
 
     @requires_gpu()
