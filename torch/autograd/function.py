@@ -490,8 +490,8 @@ class _SingleLevelFunction(
         pass. It also has an attribute :attr:`ctx.needs_input_grad` as a tuple
         of booleans representing whether each input needs gradient. E.g.,
         :func:`backward` will have ``ctx.needs_input_grad[0] = True`` if the
-        first input to :func:`forward` needs gradient computed w.r.t. the
-        output.
+        current backward call needs the gradient for the first input to
+        :func:`forward`.
         """
         raise NotImplementedError(
             "You must implement either the backward or vjp method for "
@@ -514,6 +514,21 @@ class _SingleLevelFunction(
     Default is False.
     """
     clear_saved_tensors_on_access = False
+
+    """
+    Optional tuple describing which forward input gradients use each value
+    passed to :meth:`FunctionCtx.save_for_backward`. Each element contains the
+    forward input indices whose gradients may use the corresponding saved
+    tensor. ``None`` conservatively means all tensor inputs.
+
+    When a backward call does not retain the graph, saved tensors that are not
+    needed for any requested input gradient are released before ``backward`` is
+    called and appear as ``None`` in ``ctx.saved_tensors``. The backward formula
+    must guard their use with ``ctx.needs_input_grad``.
+
+    Default is None, which disables selective release.
+    """
+    saved_tensors_input_dependencies = None
 
     """
     Bool that specifies if backward should receive grads as a single mutable
