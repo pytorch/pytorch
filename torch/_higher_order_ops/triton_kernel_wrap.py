@@ -1214,7 +1214,7 @@ _ttir_mutation_analysis_cache: dict[
 ] = {}
 
 
-def _ttir_mutation_analysis_cache_key(
+def ttir_mutation_analysis_cache_key(
     kernel: "TritonKernelType",
     kwargs: dict[str, Any],
     tma_descriptor_metadata: TMADescriptorMetadata,
@@ -1730,7 +1730,7 @@ def ttir_mutation_analysis(
     """
     key = None
     try:
-        key = _ttir_mutation_analysis_cache_key(kernel, kwargs, tma_descriptor_metadata)
+        key = ttir_mutation_analysis_cache_key(kernel, kwargs, tma_descriptor_metadata)
     except Exception:
         log.debug("could not build a cache key for %s", kernel, exc_info=True)
     if key is not None:
@@ -1753,22 +1753,6 @@ def ttir_mutation_analysis(
             _ttir_mutation_analysis_cache.clear()
         _ttir_mutation_analysis_cache[key] = result
     return result
-
-
-def _ttir_mutation_analysis_kwargs(
-    kernel: "TritonKernelType",
-    kwargs: dict[str, Any],
-    tma_descriptor_metadata: TMADescriptorMetadata,
-) -> dict[str, Any]:
-    """The analysis results as HOP kwargs, or {} if they could not be worked out."""
-    analysis = ttir_mutation_analysis(kernel, kwargs, tma_descriptor_metadata)
-    if analysis is None:
-        return {}
-    mutated_arg_names, can_fuse_epilogue = analysis
-    return {
-        "mutated_arg_names": mutated_arg_names,
-        "can_fuse_epilogue": can_fuse_epilogue,
-    }
 
 
 def get_mutated_tensors(
@@ -2821,17 +2805,20 @@ class TracingTritonHOPifier(TritonHOPifier):
             raise AssertionError(
                 f"kernel_idx must be an int, got {type(variable.kernel_idx)}"
             )
-        return triton_kernel_wrapper_mutation(
-            kernel_idx=variable.kernel_idx,
-            constant_args_idx=constant_args_idx,
-            grid=grids,  # type: ignore[arg-type]
+        hop_kwargs: dict[str, Any] = {
+            "kernel_idx": variable.kernel_idx,
+            "constant_args_idx": constant_args_idx,
+            "grid": grids,
             # TMA descriptor capturing not yet
             # supported in non-dynamo tracing
-            tma_descriptor_metadata={},
-            kwargs=graphable_args,
-            launch_kwargs=launch_kwargs,
-            **_ttir_mutation_analysis_kwargs(variable.kernel, combined_args, {}),
-        )
+            "tma_descriptor_metadata": {},
+            "kwargs": graphable_args,
+            "launch_kwargs": launch_kwargs,
+        }
+        analysis = ttir_mutation_analysis(variable.kernel, combined_args, {})
+        if analysis is not None:
+            hop_kwargs["mutated_arg_names"], hop_kwargs["can_fuse_epilogue"] = analysis
+        return triton_kernel_wrapper_mutation(**hop_kwargs)  # type: ignore[arg-type]
 
 
 tracing_triton_hopifier_singleton = TracingTritonHOPifier()

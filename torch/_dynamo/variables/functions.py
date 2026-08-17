@@ -3405,25 +3405,25 @@ from torch._higher_order_ops.triton_kernel_wrap import (
 )
 
 
-def _ttir_mutation_analysis_kwargs_for_node(
+def ttir_mutation_analysis_for_node(
     kernel_idx: int | None,
     constant_args_idx: int,
     non_constant_args: dict[Any, Any],
     tma_descriptor_metadata: TMADescriptorMetadata,
-) -> dict[str, Any]:
-    """Analysis results to record on the node we are about to emit, so that
-    downstream consumers need not each re-derive them.
+) -> tuple[tuple[str, ...], bool] | None:
+    """(names of written args, whether an epilogue may be fused) for the node we
+    are about to emit, so that downstream consumers need not each re-derive it.
 
-    Returns {} if they cannot be worked out here, in which case nothing is
-    recorded and consumers fall back to deriving them themselves.
+    Returns None if it cannot be worked out here, in which case nothing is
+    recorded and consumers fall back to deriving it themselves.
     """
     from torch._higher_order_ops.triton_kernel_wrap import (
-        _ttir_mutation_analysis_kwargs,
         kernel_side_table,
+        ttir_mutation_analysis,
     )
 
     if kernel_idx is None:
-        return {}
+        return None
 
     try:
         example_kwargs = {}
@@ -3440,8 +3440,8 @@ def _ttir_mutation_analysis_kwargs_for_node(
             kernel_idx,
             exc_info=True,
         )
-        return {}
-    return _ttir_mutation_analysis_kwargs(
+        return None
+    return ttir_mutation_analysis(
         kernel, {**example_kwargs, **constant_args}, tma_descriptor_metadata
     )
 
@@ -3640,9 +3640,9 @@ class DynamoTritonHOPifier(TritonHOPifier):
         # Work out here which arguments the kernel mutates, and record it on the
         # node. Deriving it means compiling the kernel to TTIR, and four separate
         # consumers downstream would otherwise each ask independently; see Note
-        # [TTIR analysis cache]. Best effort: if the analysis cannot run, the
-        # argument is omitted and those consumers derive it themselves.
-        analysis_kwargs = _ttir_mutation_analysis_kwargs_for_node(
+        # [TTIR mutation analysis]. Best effort: if the analysis cannot run, the
+        # arguments are omitted and those consumers derive them themselves.
+        analysis = ttir_mutation_analysis_for_node(
             variable.kernel_idx,
             constant_args_idx,
             non_constant_args,
@@ -3657,7 +3657,8 @@ class DynamoTritonHOPifier(TritonHOPifier):
             "kwargs": meta.as_proxy(),
             "launch_kwargs": launch_kwargs,
         }
-        hop_kwargs.update(analysis_kwargs)
+        if analysis is not None:
+            hop_kwargs["mutated_arg_names"], hop_kwargs["can_fuse_epilogue"] = analysis
         tx.output.create_proxy(
             "call_function",
             triton_kernel_wrapper_mutation,
