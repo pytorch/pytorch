@@ -275,27 +275,32 @@ def _parse_profiler_trace_lines(traces: str) -> list[tuple[str, str, str]]:
     return lines
 
 
+def _enable_mutable_operation_checks(test_case):
+    # Checking for mutable operations while tracing is feature flagged: enable
+    # it in testing but not by default. Restoring via addCleanup rather than
+    # tearDown matters because unittest skips tearDown entirely when setUp
+    # raises, and stops at the first statement of tearDown that raises. Either
+    # would leave this global on for every later test in the process, breaking
+    # unrelated tests that legitimately trace mutating code (TestCommonPass).
+    test_case.addCleanup(
+        setattr,
+        torch.fx.proxy.TracerBase,
+        "check_mutable_operations",
+        torch.fx.proxy.TracerBase.check_mutable_operations,
+    )
+    torch.fx.proxy.TracerBase.check_mutable_operations = True
+
+
 class TestFX(JitTestCase):
     hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         super().setUp()
-        # Checking for mutable operations while tracing is feature flagged
-        # Enable it in testing but not by default
-        self.orig_tracer_mutable_flag = (
-            torch.fx.proxy.TracerBase.check_mutable_operations
-        )
-        torch.fx.proxy.TracerBase.check_mutable_operations = True
+        _enable_mutable_operation_checks(self)
 
         if not (IS_FBCODE or IS_WINDOWS or IS_MACOS):
             lib_file_path = find_library_location("libtorchbind_test.so")
             torch.ops.load_library(str(lib_file_path))
-
-    def tearDown(self):
-        super().tearDown()
-        torch.fx.proxy.TracerBase.check_mutable_operations = (
-            self.orig_tracer_mutable_flag
-        )
 
     def checkGraphModule(self, m: torch.nn.Module, args, kwargs=None):
         """Check that an nn.Module's results match the GraphModule version
@@ -5429,18 +5434,7 @@ class TestFXCUDA(JitTestCase):
 
     def setUp(self):
         super().setUp()
-        # Checking for mutable operations while tracing is feature flagged
-        # Enable it in testing but not by default
-        self.orig_tracer_mutable_flag = (
-            torch.fx.proxy.TracerBase.check_mutable_operations
-        )
-        torch.fx.proxy.TracerBase.check_mutable_operations = True
-
-    def tearDown(self):
-        super().tearDown()
-        torch.fx.proxy.TracerBase.check_mutable_operations = (
-            self.orig_tracer_mutable_flag
-        )
+        _enable_mutable_operation_checks(self)
 
     def _assert_profiler_stack_traces_for_nodes(
         self,
@@ -5780,19 +5774,7 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
     def setUp(self):
         super().setUp()
         self.maxDiff = None
-
-        # Checking for mutable operations while tracing is feature flagged
-        # Enable it in testing but not by default
-        self.orig_tracer_mutable_flag = (
-            torch.fx.proxy.TracerBase.check_mutable_operations
-        )
-        torch.fx.proxy.TracerBase.check_mutable_operations = True
-
-    def tearDown(self):
-        super().tearDown()
-        torch.fx.proxy.TracerBase.check_mutable_operations = (
-            self.orig_tracer_mutable_flag
-        )
+        _enable_mutable_operation_checks(self)
 
     def _fn_to_stable_annotation_str(self, obj):
         """
@@ -6145,18 +6127,7 @@ class TestFunctionalTracing(JitTestCase):
 
     def setUp(self):
         super().setUp()
-        # Checking for mutable operations while tracing is feature flagged
-        # Enable it in testing but not by default
-        self.orig_tracer_mutable_flag = (
-            torch.fx.proxy.TracerBase.check_mutable_operations
-        )
-        torch.fx.proxy.TracerBase.check_mutable_operations = True
-
-    def tearDown(self):
-        super().tearDown()
-        torch.fx.proxy.TracerBase.check_mutable_operations = (
-            self.orig_tracer_mutable_flag
-        )
+        _enable_mutable_operation_checks(self)
 
     IGNORE_FUNCS = (
         "has_torch_function",
