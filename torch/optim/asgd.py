@@ -46,6 +46,8 @@ class ASGD(Optimizer):
             raise ValueError(f"Invalid learning rate: {lr}")
         if not 0.0 <= weight_decay:
             raise ValueError(f"Invalid weight_decay value: {weight_decay}")
+        if not 0.0 <= lambd:
+            raise ValueError(f"Invalid lambd value: {lambd}")
 
         defaults = {
             "lr": lr,
