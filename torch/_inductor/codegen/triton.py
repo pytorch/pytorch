@@ -92,6 +92,7 @@ from ..utils import (
     sympy_product,
     sympy_subs,
     TMA_ALIGNMENT,
+    TRITON_FLOAT8_DTYPES,
     triton_type,
     triton_version_uses_attrs_dict,
     upcast_compute_type,
@@ -6235,6 +6236,49 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             shape=shape,
         )
 
+    def _bitcast_reshape_expr(
+        self,
+        value: CSEVariable,
+        shape: Sequence[sympy.Expr | int | str],
+        dtype: torch.dtype,
+    ) -> str:
+        value_expr = str(value)
+        if dtype in TRITON_FLOAT8_DTYPES:
+            value_expr = f"{value_expr}.to(tl.uint8, bitcast=True)"
+        return self._reshape_expr(value, shape, value_expr=value_expr)
+
+    def emit_split_via_reshape(
+        self,
+        value: CSEVariable,
+        reshape_shape: Sequence[sympy.Expr | int | str],
+        part_names: Sequence[str],
+    ) -> None:
+        """Reshape ``value`` to expose the lane axis, then split it.
+
+        ``tl.split`` can only divide the trailing axis in two, so the caller
+        reshapes ``[..., n]`` to ``[..., n // factor, factor]`` first; the lane
+        axis has to be trailing before the split can see it.
+
+        float8 goes through uint8 because Triton's ``tl.split`` does not accept
+        fp8 operands.
+        """
+        dtype = value.dtype
+        assert dtype is not None  # noqa: S101
+        is_float8 = dtype in TRITON_FLOAT8_DTYPES
+        value_expr = str(value)
+        if is_float8:
+            value_expr = f"{value_expr}.to(tl.uint8, bitcast=True)"
+        reshaped = self._reshape_expr(value, reshape_shape, value_expr=value_expr)
+        if not is_float8:
+            self.compute.writeline(f"{', '.join(part_names)} = tl.split({reshaped})")
+            return
+        raw_part_names = [f"{name}_uint8" for name in part_names]
+        self.compute.writeline(f"{', '.join(raw_part_names)} = tl.split({reshaped})")
+        for raw_name, part_name in zip(raw_part_names, part_names):
+            self.compute.writeline(
+                f"{part_name} = {raw_name}.to({triton_type(dtype)}, bitcast=True)"
+            )
+
     def emit_broadcast_via_reshape(
         self,
         value: CSEVariable,
@@ -6249,11 +6293,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         Used for nested-reduction broadcasts that lift a reduced-resolution
         value (one element per group) to full or half resolution.
         """
-        reshaped = self._reshape_expr(value, pre_broadcast_shape)
+        reshaped = self._bitcast_reshape_expr(value, pre_broadcast_shape, dtype)
         broadcasted = (
             f"tl.broadcast_to({reshaped}, {triton_shape_str(broadcast_shape)})"
         )
         line = triton_reshape(broadcasted, list(broadcast_shape), list(final_shape))
+        if dtype in TRITON_FLOAT8_DTYPES:
+            line = f"{line}.to({triton_type(dtype)}, bitcast=True)"
         return self.cse.generate(
             self.compute,
             line,
@@ -6265,11 +6311,15 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     def _reshape_expr(
         value: CSEVariable,
         shape: Sequence[sympy.Expr | int | str],
+        *,
+        value_expr: str | None = None,
     ) -> str:
+        if value_expr is None:
+            value_expr = str(value)
         old_shape = getattr(value, "shape", None)
         if old_shape is None:
-            return f"tl.reshape({value}, {triton_shape_str(shape)})"
-        return triton_reshape(str(value), list(old_shape), list(shape))
+            return f"tl.reshape({value_expr}, {triton_shape_str(shape)})"
+        return triton_reshape(value_expr, list(old_shape), list(shape))
 
     def _lift_helper(
         self, fn, values: tuple[CSEVariable, ...], dtypes: tuple[torch.dtype, ...]
@@ -8086,6 +8136,7 @@ class FusedUserDefinedTritonKernel(TritonKernel):
 class TritonScheduling(SIMDScheduling):
     """Scheduling backend for Triton kernel code generation."""
 
+    supports_sub_parent_epilogue = True
     kernel_type: type[Any] = TritonKernel
     backend_features = OrderedSet(
         [
