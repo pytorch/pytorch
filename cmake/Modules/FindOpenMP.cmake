@@ -267,12 +267,19 @@ function(_OPENMP_GET_FLAGS LANG FLAG_MODE OPENMP_FLAG_VAR OPENMP_LIB_NAMES_VAR)
       set(OpenMP_libomp_LIBRARY "${MKL_OPENMP_LIBRARY}" CACHE STRING "libomp location for OpenMP")
     endif()
 
-    if ((NOT OpenMP_libomp_LIBRARY) AND MSVC AND CMAKE_SYSTEM_PROCESSOR STREQUAL "ARM64")
-      # On MSVC ARM64, OpenMP is provided by vcomp, which is a part of the Visual Studio installation.
+    if ((NOT OpenMP_libomp_LIBRARY) AND MSVC)
+      # On MSVC, `-openmp:experimental` generates vcomp-based code
+      # (_vcomp_fork etc.), so the omp_* API calls must resolve to vcomp as
+      # well. Linking LLVM's libomp instead splits the process across two
+      # OpenMP runtimes: pragmas spawn vcomp worker teams while
+      # omp_get_num_threads()/omp_get_thread_num() ask libomp, which reports
+      # team=1/tid=0 on every worker. invoke_parallel then runs every chunk
+      # on every thread, silently corrupting non-idempotent kernel bodies
+      # (e.g. the bf16/fp16 gemm_transa_ accumulation). See #193784.
       find_library(OpenMP_libomp_LIBRARY
       NAMES vcomp
       HINTS ${CMAKE_${LANG}_IMPLICIT_LINK_DIRECTORIES}
-      DOC "vcomp location for OpenMP on MSVC ARM64"
+      DOC "vcomp location for OpenMP on MSVC"
       )
       mark_as_advanced(OpenMP_libomp_LIBRARY)
     endif()
