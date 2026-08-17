@@ -60,8 +60,18 @@ typedef struct VISIBILITY_HIDDEN PrecompileEntry {
   py::object code;
   void* root_mgr;
   int64_t isolate_recompiles_id;
+  // Opaque token identifying who installed this entry. Several packages may
+  // legitimately hold entries for one code object in one region -- a library
+  // frame two loaded models both reach -- so teardown has to remove what THIS
+  // installer put here and nothing else. Compared by identity; py::none() for
+  // callers that do not track ownership.
+  py::object owner;
 
-  PrecompileEntry(py::object gm, py::object c, int64_t region_id);
+  PrecompileEntry(
+      py::object gm,
+      py::object c,
+      int64_t region_id,
+      py::object owner_token);
 } PrecompileEntry;
 
 typedef struct VISIBILITY_HIDDEN ExtraState {
@@ -293,6 +303,10 @@ void _clear_cache_entries_for_region(
     int64_t isolate_recompiles_id);
 size_t _get_total_cache_entry_count(const py::handle& code_obj);
 void _reset_precompile_entries(const py::handle& code_obj);
+void _reset_precompile_entries_for_owner(
+    const py::handle& code_obj,
+    int64_t isolate_recompiles_id,
+    const py::handle& owner);
 void _reset_precompile_entries_for_region(
     const py::handle& code_obj,
     int64_t isolate_recompiles_id);
@@ -300,7 +314,8 @@ void _load_precompile_entry(
     const py::handle& code_obj,
     py::object guard_manager,
     py::object dynamo_code,
-    int64_t isolate_recompiles_id);
+    int64_t isolate_recompiles_id,
+    py::object owner);
 py::list _debug_get_precompile_entries(const py::handle& code_obj);
 bool _has_precompile_entries(
     const py::handle& code_obj,

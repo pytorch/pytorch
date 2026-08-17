@@ -25,14 +25,15 @@ import platform
 import shutil
 import sys
 import types
-from collections.abc import Callable, Generator, Iterator
+import uuid
+from collections.abc import Callable, Generator, Iterable, Iterator
 from contextlib import nullcontext
 from typing import Any, NewType, Optional, TYPE_CHECKING, Union
 from typing_extensions import Never
 
 import torch
 from torch._dynamo.exc import PackageError
-from torch._dynamo.graph_utils import _graph_device_type
+from torch._dynamo.graph_utils import _graph_device_types
 from torch.utils.weak import WeakIdKeyDictionary
 
 from .bytecode_transformation import (
@@ -239,6 +240,57 @@ class _DynamoCodeCacheEntry:
     bypassed: bool = False
 
 
+def _resume_global_renames(
+    entries: Iterable[_DynamoCodeCacheEntry], install_token: str
+) -> dict[str, str]:
+    """
+    Pick a global name for every resume function that is unique to the code it
+    names and to the package installing it, rather than to the process that
+    captured it.
+
+    ``__resume_at_<offset>_<n>`` comes from a counter that restarts in every
+    capture process, so two artifacts captured separately both claim, say,
+    ``__resume_at_16_3``. A serving process installs both into the same module
+    dict: the second one wins, and because precompile lookup is region-EXACT
+    the first package's frame then resolves the name to a twin holding another
+    region's entries and is served nothing at all.
+
+    The digest alone does not settle it: the shape that mints the same name
+    usually mints the same code with it -- one script captured in two
+    processes, or one artifact loaded twice to serve two model instances --
+    and both then hash to a single name. The token, unique to the loaded
+    package, is what separates those; the digest stays so the name still says
+    which code it belongs to.
+    """
+    renames: dict[str, str] = {}
+    for entry in entries:
+        if not entry.install_to_global:
+            continue
+        digest = hashlib.sha256(pickle.dumps(entry.python_code)).hexdigest()[:16]
+        for name in entry.function_names:
+            renames[name] = f"{name}_{digest}_{install_token}"
+    return renames
+
+
+def _rename_globals(code: types.CodeType, renames: dict[str, str]) -> types.CodeType:
+    """
+    Rewrite ``co_names`` so LOAD_GLOBAL follows the renamed bindings. Indices
+    into ``co_names`` are preserved, so the bytecode itself is untouched.
+    """
+    if not renames:
+        return code
+    consts = tuple(
+        _rename_globals(c, renames) if isinstance(c, types.CodeType) else c
+        for c in code.co_consts
+    )
+    names = tuple(renames.get(name, name) for name in code.co_names)
+    if names == code.co_names and all(
+        new is old for new, old in zip(consts, code.co_consts)
+    ):
+        return code
+    return code.replace(co_names=names, co_consts=consts)
+
+
 def _lookup_code(entry: _DynamoCodeCacheEntry) -> types.CodeType:
     if len(entry.function_names) != 1:
         raise AssertionError(
@@ -423,6 +475,31 @@ def _current_cpu_codegen_target() -> _CpuCodegenTarget | None:
     )
 
 
+# Registered backends that generate no native code, so an artifact of theirs
+# has no baked vector width to protect and must not be gated on one. This is a
+# blacklist on purpose: anything unrecognised -- including a user's own
+# callable, whose compiler_name is just its __name__ -- is assumed to emit
+# code, because a false rejection at load is recoverable and silently running a
+# kernel built for another ISA is not.
+_NO_NATIVE_CODE_BACKENDS = frozenset(
+    {
+        "aot_eager",
+        "aot_eager_decomp_partition",
+        "aot_eager_decomp_partition_crossref",
+        "aot_eager_decomp_partition_with_mode",
+        "aot_eager_default_partitioner",
+        "eager",
+        "eager_debug",
+        "eager_noexcept",
+        "pre_dispatch_eager",
+    }
+)
+
+
+def emits_native_code(backend_name: str) -> bool:
+    return backend_name not in _NO_NATIVE_CODE_BACKENDS
+
+
 @dataclasses.dataclass(frozen=True)
 class SystemInfo:
     """
@@ -551,6 +628,7 @@ class _DynamoCacheEntry:
     source_info: SourceInfo
     device_type: str
     system_info: SystemInfo = dataclasses.field(default_factory=SystemInfo.current)
+    requires_native_backend_compatibility: bool = True
     fn_name: str | None = None
     fn_first_lineno: str | None = None
 
@@ -564,13 +642,17 @@ class _DynamoCacheEntry:
         # cold inductor cache, and a re-raised InvalidCxxCompiler on a host with
         # no compiler at all -- so only pay for it when this artifact actually
         # records one to compare against.
+        check_codegen = self.requires_native_backend_compatibility
         current_system_info = SystemInfo.current(
             cpu_codegen=(
-                self.device_type == "cpu"
+                check_codegen
+                and self.device_type == "cpu"
                 and self.system_info.cpu_codegen_target is not None
             )
         )
-        self.system_info.check_compatibility(current_system_info, self.device_type)
+        self.system_info.check_compatibility(
+            current_system_info, self.device_type, check_codegen=check_codegen
+        )
 
     def debug_info(self) -> dict[str, Any]:
         if len(self.codes) == 0:
@@ -717,6 +799,7 @@ class CompilePackage:
         fn: Callable[..., Any] | None,
         dynamo: _DynamoCacheEntry | None = None,
         ignore_inlined_sources: bool = False,
+        requires_native_backend_compatibility: bool = True,
     ) -> None:
         self._innermost_fn = None
         self._codes: dict[types.CodeType, _DynamoCodeCacheEntry] = {}
@@ -729,13 +812,28 @@ class CompilePackage:
         # region-exact those owners can no longer be served by what is left.
         self._installed_precompile_codes: list[types.CodeType] = []
         self._installed_precompile_region_id = -1
+        # Identity token stamped onto every precompile entry this package
+        # installs, so uninstall() can remove its own and leave a neighbour
+        # package's entries on a shared code object alone.
+        self._install_owner = object()
         # device_type that model compiled with.
         self._device_type = "cpu"
+        # Whether this package's backend generates native code. An eager one
+        # bakes no vector width, so it must neither pay the C++ toolchain probe
+        # at save nor be rejected on ISA skew at load.
+        self._requires_native_backend_compatibility = (
+            requires_native_backend_compatibility
+        )
 
         # For debugging/testing purpose only.
         self._cached_backends: dict[_BackendId, Any] = {}
         self._source_info: SourceInfo = SourceInfo(inlined_sources=set())
         self._resume_codes: set[types.CodeType] = set()
+        # Resume functions install under a global name carrying this token, so
+        # two packages holding byte-identical resume code -- two loads of one
+        # artifact, or two artifacts of one script captured in separate
+        # processes -- do not take each other's name. See _resume_global_renames.
+        self._install_token = uuid.uuid4().hex
         self._initialized = False
         if fn is not None:
             self.initialize(fn, dynamo, ignore_inlined_sources)
@@ -889,16 +987,16 @@ class CompilePackage:
             self._source_info.add_code(code)
 
     def update_device_type(self, graph: torch.fx.Graph | None) -> None:
-        # A variant that compiles to nothing emits no code on any device, and
-        # _graph_device_type's fallback is "cpu": letting an empty graph through
-        # makes a pure-accelerator capture record a cpu_codegen_target it has no
-        # native code for, which then refuses to load on a host with a different
-        # vector ISA or no C++ compiler at all.
-        if graph is None or all(
-            node.op in ("placeholder", "output") for node in graph.nodes
-        ):
+        # Every device the graph NAMES, not the first meta value it carries:
+        # under dynamic shapes the leading placeholder is a SymInt, which has no
+        # device, and reading it as "cpu" makes a pure-accelerator capture bake
+        # a cpu_codegen_target it has no native code for -- which then refuses
+        # to load on a host with a different vector ISA or no C++ compiler. A
+        # graph that names nothing emits nothing and contributes nothing.
+        device_types = _graph_device_types(graph)
+        if not device_types:
             return
-        self._device_type = _graph_device_type(graph)
+        self._device_type = next((d for d in sorted(device_types) if d != "cpu"), "cpu")
 
     def bypass_current_entry(self) -> None:
         if self._current_entry is None:
@@ -962,7 +1060,7 @@ class CompilePackage:
         self._installed_globals.setdefault(module, []).append(name)
 
     def uninstall(self) -> None:
-        from torch._C._dynamo.eval_frame import _reset_precompile_entries_for_region
+        from torch._C._dynamo.eval_frame import _reset_precompile_entries_for_owner
 
         if self._innermost_fn is None:
             raise AssertionError("_innermost_fn is not set in uninstall")
@@ -973,8 +1071,8 @@ class CompilePackage:
         self._installed_globals = {}
 
         for code in self._installed_precompile_codes:
-            _reset_precompile_entries_for_region(
-                code, self._installed_precompile_region_id
+            _reset_precompile_entries_for_owner(
+                code, self._installed_precompile_region_id, self._install_owner
             )
         self._installed_precompile_codes = []
         self._installed_precompile_region_id = -1
@@ -991,16 +1089,18 @@ class CompilePackage:
           2. Install the compiled functions to global scopes.
           3. Install the precompiled cache entries to ExtraStates on the code object.
         """
-        from torch._C._dynamo.eval_frame import (
-            _load_precompile_entry,
-            _reset_precompile_entries_for_region,
-        )
+        from torch._C._dynamo.eval_frame import _load_precompile_entry
 
         from .convert_frame import input_codes
         from .output_graph import get_builtins_dict
 
         self.uninstall()
         self._installed_precompile_region_id = isolate_recompiles_id
+        # Resume functions are bound under a name unique to their code and to
+        # this package, not under the name the capture process happened to
+        # mint. Every reference to them lives in some frame's dynamo bytecode,
+        # remapped below.
+        renames = _resume_global_renames(self._codes.values(), self._install_token)
         for code, entry in self._codes.items():
             context = (
                 _compile_frame_context(code)
@@ -1016,6 +1116,7 @@ class CompilePackage:
                 target_code = code
                 if entry.install_to_global:
                     for function_name in entry.function_names:
+                        function_name = renames.get(function_name, function_name)
                         if code.co_freevars:
                             # Resume functions with freevars need a factory
                             # that takes a closure tuple, matching
@@ -1049,9 +1150,16 @@ class CompilePackage:
 
                 input_codes.add(target_code)
                 if target_code not in self._installed_precompile_codes:
-                    _reset_precompile_entries_for_region(
-                        target_code, self._installed_precompile_region_id
-                    )
+                    # Deliberately NOT clearing the region here. A frame reached
+                    # through code_source is shared -- a library block two
+                    # loaded models both call -- and several packages may hold
+                    # entries for it in one region, which lookup handles by
+                    # evaluating each entry's guards. Clearing the region would
+                    # evict a live neighbour, and since lookup is region-exact
+                    # the neighbour cannot be served by what is left. This
+                    # package's own stale entries are already gone: install()
+                    # runs uninstall() first, which removes exactly the ones it
+                    # owns.
                     self._installed_precompile_codes.append(target_code)
                 for backend_id in entry.backend_ids:
                     if backend_id not in backends:
@@ -1110,8 +1218,12 @@ class CompilePackage:
                     _load_precompile_entry(
                         target_code,
                         guard_manager,
-                        SerializedCode.to_code_object(guarded_code.dynamo_code),
-                        isolate_recompiles_id,
+                        _rename_globals(
+                            SerializedCode.to_code_object(guarded_code.dynamo_code),
+                            renames,
+                        ),
+                        self._installed_precompile_region_id,
+                        self._install_owner,
                     )
 
     def cache_entry(self) -> _DynamoCacheEntry:
@@ -1125,7 +1237,15 @@ class CompilePackage:
             # The field's default_factory would run the C++ toolchain probe on
             # every save; only an artifact that can hold CPU native code has a
             # baked vector width to record.
-            system_info=SystemInfo.current(cpu_codegen=self._device_type == "cpu"),
+            system_info=SystemInfo.current(
+                cpu_codegen=(
+                    self._requires_native_backend_compatibility
+                    and self._device_type == "cpu"
+                )
+            ),
+            requires_native_backend_compatibility=(
+                self._requires_native_backend_compatibility
+            ),
             fn_name=self._innermost_fn.__qualname__,
             fn_first_lineno=self._innermost_fn.__code__.co_firstlineno,
         )
