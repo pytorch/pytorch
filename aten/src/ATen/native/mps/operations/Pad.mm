@@ -368,13 +368,13 @@ static void replication_pad1d_kernel_mps(const Tensor& input_, IntArrayRef paddi
   auto stream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
-      getMPSProfiler().beginProfileKernel(pso, "replication_pad1d_forward", {input, output_c}, stream);
+      getMPSProfiler().beginProfileKernel(pso, "replication_pad1d_forward", {input, output_c});
       auto encoder = stream->commandEncoder();
       [encoder setComputePipelineState:pso];
       mtl_setArgs(encoder, input, output_c, sizes_pad);
       [encoder dispatchThreads:MTLSizeMake(output_W, nplane, nbatch)
           threadsPerThreadgroup:replication_pad1d_threadgroup(pso, output_W, nplane, nbatch)];
-      getMPSProfiler().endProfileKernel(pso, stream);
+      getMPSProfiler().endProfileKernel(pso);
     }
   });
   if (output_needs_copy) {
@@ -412,13 +412,13 @@ static void replication_pad1d_backward_kernel_mps(const Tensor& grad_output_,
   auto stream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
-      getMPSProfiler().beginProfileKernel(pso, "replication_pad1d_backward", {grad_output, grad_input_c}, stream);
+      getMPSProfiler().beginProfileKernel(pso, "replication_pad1d_backward", {grad_output, grad_input_c});
       auto encoder = stream->commandEncoder();
       [encoder setComputePipelineState:pso];
       mtl_setArgs(encoder, grad_output, grad_input_c, sizes_pad);
       [encoder dispatchThreads:MTLSizeMake(input_W, nplane, nbatch)
           threadsPerThreadgroup:replication_pad1d_threadgroup(pso, input_W, nplane, nbatch)];
-      getMPSProfiler().endProfileKernel(pso, stream);
+      getMPSProfiler().endProfileKernel(pso);
     }
   });
   if (grad_input_needs_copy) {

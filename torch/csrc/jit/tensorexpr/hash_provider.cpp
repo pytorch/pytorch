@@ -10,12 +10,20 @@ bool SimplifierHashType::operator==(const SimplifierHashType& other) const {
   return _h == other._h;
 }
 
+bool SimplifierHashType::operator!=(const SimplifierHashType& other) const {
+  return _h != other._h;
+}
+
 bool SimplifierHashType::operator<(const SimplifierHashType& other) const {
   return _h < other._h;
 }
 
 bool SimplifierHashType::operator==(const size_t other) const {
   return _h == other;
+}
+
+bool SimplifierHashType::operator!=(const size_t other) const {
+  return _h != other;
 }
 
 void HashProvider::visit(const AddPtr& v) {

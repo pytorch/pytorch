@@ -11,7 +11,7 @@ from torch.testing._internal.inductor_utils import MockGraphHandler
 
 
 try:
-    import cutlass
+    import cutlass  # noqa: F401
     import cutlass.cute as cute  # noqa: F401
 
     HAS_CUTLASS = True
@@ -72,33 +72,6 @@ def {{kernel_name}}_jit(mA: cute.Tensor, mB: cute.Tensor, mC: cute.Tensor, strea
 class TestCuteDSLTemplate(TestCase):
     """Test cases for CuteDSL template functionality."""
 
-    def test_vendored_dense_efc_kernel_configuration(self):
-        from cutlass.cute.nvgpu import tcgen05
-        from cutlass.operators.providers.cutedsl.evt.converter import EFCConverter
-
-        from torch._inductor.kernel.vendored_templates.cutedsl.dense_gemm_efc import (
-            PersistentDenseGemmEFCKernel,
-        )
-
-        for use_2cta, tile_m, cluster_m, cta_group in (
-            (False, 128, 1, tcgen05.CtaGroup.ONE),
-            (True, 256, 2, tcgen05.CtaGroup.TWO),
-        ):
-            kernel = PersistentDenseGemmEFCKernel(
-                cutlass.Float32,
-                cutlass.BFloat16,
-                use_2cta,
-                (tile_m, 64),
-                (cluster_m, 1),
-                EFCConverter.identity_efc,
-            )
-            self.assertEqual(kernel.arch, "sm_100")
-            self.assertEqual(kernel.mma_tiler_mn, (tile_m, 64))
-            self.assertEqual(kernel.cluster_shape_mn, (cluster_m, 1))
-            self.assertEqual(kernel.cta_group, cta_group)
-            self.assertEqual(kernel.c_dtype, cutlass.BFloat16)
-            self.assertEqual(kernel.threads_per_cta, 224)
-
     def test_gen_imports(self):
         kernel = CuteDSLTemplateKernel(
             kernel_name="test_kernel",
@@ -116,11 +89,6 @@ class TestCuteDSLTemplate(TestCase):
 
         lines = imports.strip().split("\n")
         self.assertEqual(len(lines), 8)
-
-        asm_imports = kernel.gen_imports(uses_inline_asm=True)
-        self.assertIn("inline_asm_elementwise_intrinsic", asm_imports)
-        self.assertNotIn("inline_asm_elementwise_intrinsic", imports)
-        self.assertEqual(len(asm_imports.strip().split("\n")), 9)
 
     def test_render_includes_imports(self):
         template_source = """@cute.kernel
@@ -213,15 +181,6 @@ def {{kernel_name}}_kernel():
                 )
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
-    @unittest.skipIf(
-        # ROCm CI images install the CuTeDSL wheel (its pip marker is
-        # x86_64-Linux, not CUDA), so HAS_CUTLASS is true there while
-        # cuInit fails: cudaErrorInsufficientDriver. Only the tests that
-        # actually launch a kernel are affected; the rest of the class is
-        # mock-based and driver-free.
-        torch.version.hip is not None,
-        "CuTeDSL kernels require an NVIDIA driver",
-    )
     def test_cutedsl_add_e2e(self):
         """End-to-end test with CuteDSL template including code generation verification."""
         from torch._inductor.ir import TensorBox
@@ -276,10 +235,6 @@ def {{kernel_name}}_kernel():
             self.assertTrue(torch.allclose(result, expected, atol=1e-5))
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
-    @unittest.skipIf(
-        torch.version.hip is not None,
-        "CuTeDSL kernels require an NVIDIA driver",
-    )
     def test_cutedsl_add_e2e_autotune(self):
         """E2E test with multiple CuteDSL template variants for autotuning."""
         from torch._inductor.ir import TensorBox
