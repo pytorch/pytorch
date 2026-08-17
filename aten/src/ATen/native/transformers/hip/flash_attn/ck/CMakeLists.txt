@@ -15,8 +15,12 @@ endif()
 if("gfx950" IN_LIST PYTORCH_ROCM_ARCH)
   list(APPEND _ck_fmha_targets gfx950)
 endif()
-if("gfx1200" IN_LIST PYTORCH_ROCM_ARCH OR "gfx1201" IN_LIST PYTORCH_ROCM_ARCH)
-  list(APPEND _ck_fmha_targets gfx12)
+# gfx1200/gfx1201 (RDNA4, gfx12 codegen) is opt-in via USE_ROCM_CK_SDPA_GFX12
+# (OFF by default); see aten/src/ATen/CMakeLists.txt for the env-var check.
+if(_ck_sdpa_gfx12)
+  if("gfx1200" IN_LIST PYTORCH_ROCM_ARCH OR "gfx1201" IN_LIST PYTORCH_ROCM_ARCH)
+    list(APPEND _ck_fmha_targets gfx12)
+  endif()
 endif()
 if(NOT _ck_fmha_targets)
   # Should not happen: aten/src/ATen/CMakeLists.txt disables USE_ROCM_CK_SDPA first.

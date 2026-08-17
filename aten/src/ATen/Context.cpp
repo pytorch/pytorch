@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cstdlib>
 #include <string>
 
 #include <ATen/cpu/FlushDenormal.h>
@@ -577,9 +578,19 @@ at::BlasBackend Context::blasPreferredBackend() {
 bool Context::ckSDPASupported() {
 #ifdef USE_ROCM
   // CK SDPA is only built for a subset of architectures to limit compile time.
-  static const std::vector<std::string> supported_archs = {
-      "gfx942", "gfx950", "gfx1200", "gfx1201",
-  };
+  // gfx1200/gfx1201 (RDNA4) is opt-in via the USE_ROCM_CK_SDPA_GFX12 env var
+  // (OFF by default) so we do not add new arches to the PyTorch CI build matrix.
+  static const std::vector<std::string> supported_archs = [] {
+    std::vector<std::string> v{"gfx942", "gfx950"};
+    if (const char* env = std::getenv("USE_ROCM_CK_SDPA_GFX12")) {
+      const std::string s(env);
+      if (s == "1" || s == "ON" || s == "on" || s == "TRUE" || s == "true" ||
+          s == "YES" || s == "yes") {
+        v.insert(v.end(), {"gfx1200", "gfx1201"});
+      }
+    }
+    return v;
+  }();
   for (auto index : c10::irange(detail::getCUDAHooks().deviceCount())) {
     if (!detail::getCUDAHooks().isGPUArch(supported_archs, index)) {
       TORCH_WARN_ONCE(
