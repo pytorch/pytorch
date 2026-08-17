@@ -5,8 +5,8 @@ import enum
 import functools
 import io
 import os
-import re
 import pickle
+import re
 import subprocess
 import sys
 import tempfile
