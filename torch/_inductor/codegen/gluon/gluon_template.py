@@ -80,14 +80,6 @@ from triton.experimental.gluon import language as gl
                 return self._output_stride_expr(index)
 
             def _add_layout_kwargs(self, kwargs):
-                from triton.experimental.gluon import language as gl
-
-                # Get block dimensions from kwargs
-                BLOCK_M = kwargs.get("BLOCK_M", 64)
-                BLOCK_N = kwargs.get("BLOCK_N", 64)
-                BLOCK_K = kwargs.get("BLOCK_K", 64)
-
-                # Get PyTorch dtype from input nodes
                 import torch
 
                 input_nodes = getattr(self, "input_nodes", [])
@@ -97,48 +89,17 @@ from triton.experimental.gluon import language as gl
                     input_torch_dtype = torch.bfloat16
                 output_torch_dtype = self.output_node.get_dtype()  # type: ignore[attr-defined]
 
-                def torch_dtype_to_gluon(dtype):
+                def torch_dtype_to_gluon_str(dtype):
                     if dtype == torch.float8_e5m2:
-                        return gl.float8e5, "gl.float8e5"
+                        return "gl.float8e5"
                     elif dtype == torch.float8_e4m3fn:
-                        return gl.float8e4nv, "gl.float8e4nv"
+                        return "gl.float8e4nv"
                     else:
-                        dtype_name = str(dtype).split(".")[1]
-                        return getattr(gl, dtype_name), f"gl.{dtype_name}"
+                        return f"gl.{str(dtype).split('.')[1]}"
 
-                input_gluon_dtype, input_dtype_str = torch_dtype_to_gluon(
-                    input_torch_dtype
-                )
-                output_gluon_dtype, output_dtype_str = torch_dtype_to_gluon(
-                    output_torch_dtype
-                )
-
-                # Compute layouts using get_default_for() with the actual dtype
-                a_is_k_major = kwargs.get("A_IS_K_MAJOR", True)
-                b_is_k_major = kwargs.get("B_IS_K_MAJOR", True)
-                a_layout = gl.NVMMASharedLayout.get_default_for(
-                    [BLOCK_M, BLOCK_K] if a_is_k_major else [BLOCK_K, BLOCK_M],
-                    input_gluon_dtype,
-                )
-                b_layout = gl.NVMMASharedLayout.get_default_for(
-                    [BLOCK_N, BLOCK_K] if b_is_k_major else [BLOCK_K, BLOCK_N],
-                    input_gluon_dtype,
-                )
-                c_layout = gl.NVMMASharedLayout.get_default_for(
-                    [BLOCK_M, BLOCK_N], output_gluon_dtype
-                )
-
-                # Extract swizzle widths and add to kwargs
-                kwargs["A_LAYOUT_SWIZZLE_BYTE_WIDTH"] = a_layout.swizzle_byte_width
-                kwargs["B_LAYOUT_SWIZZLE_BYTE_WIDTH"] = b_layout.swizzle_byte_width
-                kwargs["C_LAYOUT_SWIZZLE_BYTE_WIDTH"] = c_layout.swizzle_byte_width
-
-                # Add dtype strings for template
-                kwargs["INPUT_DTYPE"] = input_dtype_str
-                kwargs["OUTPUT_DTYPE"] = output_dtype_str
+                kwargs["INPUT_DTYPE"] = torch_dtype_to_gluon_str(input_torch_dtype)
+                kwargs["OUTPUT_DTYPE"] = torch_dtype_to_gluon_str(output_torch_dtype)
                 kwargs["INDEX_DTYPE_EXPR"] = _gluon_index_dtype(self.index_dtype)
-                kwargs["INPUT_ELEMENT_BITWIDTH"] = input_torch_dtype.itemsize * 8
-                kwargs["OUTPUT_ELEMENT_BITWIDTH"] = output_torch_dtype.itemsize * 8
 
                 # Flip to True manually (no config knob) to enable Proton
                 # profiling scopes inside the generated kernel.
@@ -149,12 +110,6 @@ from triton.experimental.gluon import language as gl
             def render(
                 self, template, kwargs, record_input_dependent_tracked_event=False
             ):
-                """
-                Override render to compute Gluon layout parameters before rendering template.
-
-                We call get_default_for() to get layouts with appropriate swizzle widths,
-                then extract parameters and pass them as template variables.
-                """
                 kwargs = self._add_layout_kwargs(kwargs)
 
                 # Call parent render with updated kwargs

@@ -31,13 +31,13 @@ import triton.profiler.language as pl
 
 @gluon.jit
 def _proton_enter_scope(name: gl.constexpr):
-    if {{ENABLE_PROTON_PROFILING}}:
+    if {{ ENABLE_PROTON_PROFILING }}:
         pl.enter_scope(name)
 
 
 @gluon.jit
 def _proton_exit_scope(name: gl.constexpr):
-    if {{ENABLE_PROTON_PROFILING}}:
+    if {{ ENABLE_PROTON_PROFILING }}:
         pl.exit_scope(name)
 
 
@@ -60,7 +60,7 @@ class PartitionArgs:
 {%- if not USE_TMA_STORE %}
     output_dtype: gl.constexpr
 {%- endif %}
-    c_layout: gl.constexpr
+    c_smem_layout: gl.constexpr
     a_smem_bufs: gl.shared_memory_descriptor
     b_smem_bufs: gl.shared_memory_descriptor
     acc_tmem_bufs: tensor_memory_descriptor
@@ -77,79 +77,6 @@ class PartitionArgs:
     BLOCK_K: gl.constexpr
     NUM_BLOCKS: gl.constexpr
     NUM_COMPUTE_WARPS: gl.constexpr
-
-    @gluon.constexpr_function
-    def __init__(
-        self,
-        a_desc,
-        b_desc,
-{%- if USE_TMA_STORE %}
-        c_desc,
-{%- endif %}
-{%- if M_IS_VARYING or N_IS_VARYING or K_IS_VARYING %}
-        offs_ptr,
-{%- endif %}
-        c_ptr,
-{%- if not C_IS_2D %}
-        c_stride_g,
-{%- endif %}
-        c_stride_m,
-        c_stride_n,
-{%- if not USE_TMA_STORE %}
-        output_dtype,
-{%- endif %}
-        c_layout,
-        a_smem_bufs,
-        b_smem_bufs,
-        acc_tmem_bufs,
-        load_buf_empty_bars,
-        load_buf_full_bars,
-        acc_buf_empty_bars,
-        acc_buf_full_bars,
-        G,
-        M,
-        N,
-        K,
-        BLOCK_M,
-        BLOCK_N,
-        BLOCK_K,
-        NUM_BLOCKS,
-        NUM_COMPUTE_WARPS,
-    ):
-        self.a_desc = a_desc
-        self.b_desc = b_desc
-{%- if USE_TMA_STORE %}
-        self.c_desc = c_desc
-{%- endif %}
-{%- if M_IS_VARYING or N_IS_VARYING or K_IS_VARYING %}
-        self.offs_ptr = offs_ptr
-{%- endif %}
-        self.c_ptr = c_ptr
-{%- if not C_IS_2D %}
-        self.c_stride_g = c_stride_g
-{%- endif %}
-        self.c_stride_m = c_stride_m
-        self.c_stride_n = c_stride_n
-{%- if not USE_TMA_STORE %}
-        self.output_dtype = gl.constexpr(output_dtype)
-{%- endif %}
-        self.c_layout = gl.constexpr(c_layout)
-        self.a_smem_bufs = a_smem_bufs
-        self.b_smem_bufs = b_smem_bufs
-        self.acc_tmem_bufs = acc_tmem_bufs
-        self.load_buf_empty_bars = load_buf_empty_bars
-        self.load_buf_full_bars = load_buf_full_bars
-        self.acc_buf_empty_bars = acc_buf_empty_bars
-        self.acc_buf_full_bars = acc_buf_full_bars
-        self.G = G
-        self.M = M
-        self.N = N
-        self.K = K
-        self.BLOCK_M = gl.constexpr(BLOCK_M)
-        self.BLOCK_N = gl.constexpr(BLOCK_N)
-        self.BLOCK_K = gl.constexpr(BLOCK_K)
-        self.NUM_BLOCKS = gl.constexpr(NUM_BLOCKS)
-        self.NUM_COMPUTE_WARPS = gl.constexpr(NUM_COMPUTE_WARPS)
 
 
 @aggregate
@@ -172,36 +99,6 @@ class GroupIterator:
     BLOCK_N: gl.constexpr
     NUM_BLOCKS: gl.constexpr
 
-    @gluon.constexpr_function
-    def __init__(
-        self,
-        G, g,
-{%- if M_IS_VARYING or N_IS_VARYING or K_IS_VARYING %}
-        offs_ptr,
-{%- endif %}
-        m_start_offset, m_size, n_start_offset, n_size, k_start_offset, k_size,
-        tiles_processed, tile_idx,
-        has_started,
-        BLOCK_M: gl.constexpr, BLOCK_N: gl.constexpr, NUM_BLOCKS: gl.constexpr
-    ):
-        self.G = G
-        self.g = g
-{%- if M_IS_VARYING or N_IS_VARYING or K_IS_VARYING %}
-        self.offs_ptr = offs_ptr
-{%- endif %}
-        self.m_start_offset = m_start_offset
-        self.m_size = m_size
-        self.n_start_offset = n_start_offset
-        self.n_size = n_size
-        self.k_start_offset = k_start_offset
-        self.k_size = k_size
-        self.tiles_processed = tiles_processed
-        self.tile_idx = tile_idx
-        self.has_started = has_started
-        self.BLOCK_M = gl.constexpr(BLOCK_M)
-        self.BLOCK_N = gl.constexpr(BLOCK_N)
-        self.NUM_BLOCKS = gl.constexpr(NUM_BLOCKS)
-
     @gluon.jit
     def create(
         G, M, N, K,
@@ -210,13 +107,14 @@ class GroupIterator:
 {%- endif %}
         BLOCK_M: gl.constexpr, BLOCK_N: gl.constexpr, NUM_BLOCKS: gl.constexpr
     ):
+        zero = gl.to_tensor(0)
         return GroupIterator(
-            G, gl.to_tensor(0),
+            G, zero,
 {%- if M_IS_VARYING or N_IS_VARYING or K_IS_VARYING %}
             offs_ptr,
 {%- endif %}
-            gl.to_tensor(0), M, gl.to_tensor(0), N, gl.to_tensor(0), K,
-            gl.to_tensor(0), gl.program_id(0),
+            zero, M, zero, N, zero, K,
+            zero, gl.program_id(0),
             gl.to_tensor(False),
             BLOCK_M, BLOCK_N, NUM_BLOCKS
         ).next()
@@ -254,8 +152,6 @@ class GroupIterator:
         tiles_processed = self.tiles_processed + (gl.cdiv(self.m_size, self.BLOCK_M) * gl.cdiv(self.n_size, self.BLOCK_N) if self.has_started else 0)
         tile_idx = self.tile_idx + (gl.cdiv(tiles_processed - self.tile_idx, self.NUM_BLOCKS) * self.NUM_BLOCKS if self.has_started else 0)
 
-        has_started = True
-
         return GroupIterator(
             self.G, g,
 {%- if M_IS_VARYING or N_IS_VARYING or K_IS_VARYING %}
@@ -263,7 +159,7 @@ class GroupIterator:
 {%- endif %}
             m_start_offset, m_size, n_start_offset, n_size, k_start_offset, k_size,
             tiles_processed, tile_idx,
-            has_started,
+            gl.to_tensor(True),
             self.BLOCK_M, self.BLOCK_N, self.NUM_BLOCKS
         )
 
@@ -287,32 +183,6 @@ class TileIterator:
     BLOCK_N: gl.constexpr
     NUM_BLOCKS: gl.constexpr
 
-    @gluon.constexpr_function
-    def __init__(
-        self,
-        tile_idx, num_m_tiles, num_n_tiles, num_tiles,
-        m_start_offset, m_size, n_start_offset, n_size,
-        m_tile_offset, n_tile_offset, m_offset, n_offset,
-        has_started,
-        BLOCK_M: gl.constexpr, BLOCK_N: gl.constexpr, NUM_BLOCKS: gl.constexpr
-    ):
-        self.tile_idx = tile_idx
-        self.num_m_tiles = num_m_tiles
-        self.num_n_tiles = num_n_tiles
-        self.num_tiles = num_tiles
-        self.m_start_offset = m_start_offset
-        self.m_size = m_size
-        self.n_start_offset = n_start_offset
-        self.n_size = n_size
-        self.m_tile_offset = m_tile_offset
-        self.n_tile_offset = n_tile_offset
-        self.m_offset = m_offset
-        self.n_offset = n_offset
-        self.has_started = has_started
-        self.BLOCK_M = gl.constexpr(BLOCK_M)
-        self.BLOCK_N = gl.constexpr(BLOCK_N)
-        self.NUM_BLOCKS = gl.constexpr(NUM_BLOCKS)
-
     @gluon.jit
     def create(
         tile_idx,
@@ -322,10 +192,11 @@ class TileIterator:
         num_m_tiles = gl.cdiv(m_size, BLOCK_M)
         num_n_tiles = gl.cdiv(n_size, BLOCK_N)
         num_tiles = num_m_tiles * num_n_tiles
+        zero = gl.to_tensor(0)
         return TileIterator(
             tile_idx, num_m_tiles, num_n_tiles, num_tiles,
             m_start_offset, m_size, n_start_offset, n_size,
-            gl.to_tensor(0), gl.to_tensor(0), gl.to_tensor(0), gl.to_tensor(0),
+            zero, zero, zero, zero,
             gl.to_tensor(False),
             BLOCK_M, BLOCK_N, NUM_BLOCKS
         ).next()
@@ -345,13 +216,11 @@ class TileIterator:
         m_offset = self.m_start_offset + m_tile_offset
         n_offset = self.n_start_offset + n_tile_offset
 
-        has_started = True
-
         return TileIterator(
             tile_idx, self.num_m_tiles, self.num_n_tiles, self.num_tiles,
             self.m_start_offset, self.m_size, self.n_start_offset, self.n_size,
-            m_tile_offset, n_tile_offset, m_offset, n_offset,
-            has_started,
+            m_offset, n_offset, m_tile_offset, n_tile_offset,
+            gl.to_tensor(True),
             self.BLOCK_M, self.BLOCK_N, self.NUM_BLOCKS
         )
 
@@ -363,12 +232,6 @@ class Counter:
     phase: gl.tensor
     num_barriers: gl.constexpr
 
-    @gluon.constexpr_function
-    def __init__(self, index, phase, num_barriers):
-        self.index = index
-        self.phase = phase
-        self.num_barriers = gl.constexpr(num_barriers)
-
     @gluon.jit
     def create(phase, num_barriers: gl.constexpr):
         return Counter(gl.to_tensor(0), gl.to_tensor(phase), num_barriers)
@@ -378,9 +241,11 @@ class Counter:
     def next(self):
         incr = self.index + 1
         rollover = incr == self.num_barriers
-        index = gl.where(rollover, 0, incr)
-        phase = gl.where(rollover, self.phase ^ 1, self.phase)
-        return Counter(index, phase, self.num_barriers)
+        return Counter(
+            gl.where(rollover, 0, incr),
+            gl.where(rollover, self.phase ^ 1, self.phase),
+            self.num_barriers,
+        )
 
 
 @gluon.jit
@@ -619,7 +484,7 @@ def store_partition(pargs: PartitionArgs):
 
 {%- if USE_TMA_STORE %}
     c_smem = gl.allocate_shared_memory(
-        pargs.c_desc.dtype, [BLOCK_M, BLOCK_N], pargs.c_layout
+        pargs.c_desc.dtype, [BLOCK_M, BLOCK_N], pargs.c_smem_layout
     )
 {%- endif %}
 
@@ -670,8 +535,8 @@ def store_partition(pargs: PartitionArgs):
             offs_m = gl.arange(0, BLOCK_M)
             offs_n = gl.arange(0, BLOCK_N)
 
-            idx_m = (tile_iter.m_offset + offs_m).to({{INDEX_DTYPE_EXPR}})
-            idx_n = (tile_iter.n_offset + offs_n).to({{INDEX_DTYPE_EXPR}})
+            idx_m = (tile_iter.m_offset + offs_m).to({{ INDEX_DTYPE_EXPR }})
+            idx_n = (tile_iter.n_offset + offs_n).to({{ INDEX_DTYPE_EXPR }})
 
             mask_m = tile_iter.m_tile_offset + offs_m < group_iter.m_size
             mask_n = tile_iter.n_tile_offset + offs_n < group_iter.n_size
@@ -710,37 +575,18 @@ def store_partition(pargs: PartitionArgs):
 
 
 {%- if M_IS_VARYING or N_IS_VARYING or K_IS_VARYING %}
-{{def_kernel("a_ptr", "b_ptr", "offs_ptr")}}
+{{ def_kernel("a_ptr", "b_ptr", "offs_ptr") }}
 {%- else %}
-{{def_kernel("a_ptr", "b_ptr")}}
+{{ def_kernel("a_ptr", "b_ptr") }}
 {%- endif %}
-    # Layout objects with computed swizzle widths for the given block dimensions
-    a_layout: gl.constexpr = gl.NVMMASharedLayout(
-        swizzle_byte_width={{A_LAYOUT_SWIZZLE_BYTE_WIDTH}},
-        element_bitwidth={{INPUT_ELEMENT_BITWIDTH}},
-        rank=2,
-        transposed=False,
-        fp4_padded=False,
-        cga_layout=[]
-    )
-    b_layout: gl.constexpr = gl.NVMMASharedLayout(
-        swizzle_byte_width={{B_LAYOUT_SWIZZLE_BYTE_WIDTH}},
-        element_bitwidth={{INPUT_ELEMENT_BITWIDTH}},
-        rank=2,
-        transposed=False,
-        fp4_padded=False,
-        cga_layout=[]
-    )
-    c_layout: gl.constexpr = gl.NVMMASharedLayout(
-        swizzle_byte_width={{C_LAYOUT_SWIZZLE_BYTE_WIDTH}},
-        element_bitwidth={{OUTPUT_ELEMENT_BITWIDTH}},
-        rank=2,
-        transposed=False,
-        fp4_padded=False,
-        cga_layout=[]
-    )
+    input_dtype: gl.constexpr = {{ INPUT_DTYPE }}
+    output_dtype: gl.constexpr = {{ OUTPUT_DTYPE }}
 
-    c_ptr = {{get_output()}}
+    a_smem_layout: gl.constexpr = gl.NVMMASharedLayout.get_default_for([BLOCK_M, BLOCK_K] if A_IS_K_MAJOR else [BLOCK_K, BLOCK_M], input_dtype)
+    b_smem_layout: gl.constexpr = gl.NVMMASharedLayout.get_default_for([BLOCK_N, BLOCK_K] if B_IS_K_MAJOR else [BLOCK_K, BLOCK_N], input_dtype)
+    c_smem_layout: gl.constexpr = gl.NVMMASharedLayout.get_default_for([BLOCK_M, BLOCK_N], output_dtype)
+
+    c_ptr = {{ get_output() }}
 
 {%- if A_IS_2D %}
 {%- if B_IS_2D %}
@@ -776,8 +622,7 @@ def store_partition(pargs: PartitionArgs):
     {{ assign_maybe_constexpr_gluon("c_stride_m", output_stride(-2)) }}
     {{ assign_maybe_constexpr_gluon("c_stride_n", output_stride(-1)) }}
 
-    NUM_BLOCKS: gl.constexpr = {{NUM_SMS}}
-    input_dtype: gl.constexpr = {{INPUT_DTYPE}}
+    NUM_BLOCKS: gl.constexpr = {{ NUM_SMS }}
 
     # Create tensor descriptors
     a_desc = tma.make_tensor_descriptor(
@@ -803,7 +648,7 @@ def store_partition(pargs: PartitionArgs):
         block_shape=[1, BLOCK_K, BLOCK_M],
 {%- endif %}
 {%- endif %}
-        layout=a_layout,
+        layout=a_smem_layout,
     )
 
     b_desc = tma.make_tensor_descriptor(
@@ -829,7 +674,7 @@ def store_partition(pargs: PartitionArgs):
         block_shape=[1, BLOCK_K, BLOCK_N],
 {%- endif %}
 {%- endif %}
-        layout=b_layout,
+        layout=b_smem_layout,
     )
 
 {%- if USE_TMA_STORE %}
@@ -838,10 +683,8 @@ def store_partition(pargs: PartitionArgs):
         shape=[G, M, N],
         strides=[c_stride_g, c_stride_m, c_stride_n],
         block_shape=[1, BLOCK_M, BLOCK_N],
-        layout=c_layout,
+        layout=c_smem_layout,
     )
-{%- else %}
-    output_dtype: gl.constexpr = {{OUTPUT_DTYPE}}
 {%- endif %}
 
     # Allocate shared memory buffers
@@ -852,7 +695,7 @@ def store_partition(pargs: PartitionArgs):
 {%- else %}
         [NUM_LOAD_BUFFERS, BLOCK_K, BLOCK_M],
 {%- endif %}
-        a_layout
+        a_smem_layout
     )
     b_smem_bufs = gl.allocate_shared_memory(
         input_dtype,
@@ -861,7 +704,7 @@ def store_partition(pargs: PartitionArgs):
 {%- else %}
         [NUM_LOAD_BUFFERS, BLOCK_K, BLOCK_N],
 {%- endif %}
-        b_layout
+        b_smem_layout
     )
     load_buf_empty_bars = gl.allocate_shared_memory(
         gl.int64, [NUM_LOAD_BUFFERS, 1], mbarrier.MBarrierLayout()
@@ -910,7 +753,7 @@ def store_partition(pargs: PartitionArgs):
 {%- if not USE_TMA_STORE %}
         output_dtype,
 {%- endif %}
-        c_layout,
+        c_smem_layout,
         a_smem_bufs,
         b_smem_bufs,
         acc_tmem_bufs,
