@@ -11,8 +11,6 @@ from typing import Any, NamedTuple
 
 import torch
 
-from ._utils import _empty_with_matching_layout
-
 
 log = logging.getLogger(__name__)
 
@@ -189,7 +187,8 @@ def _varlen_attn_fake(
     """
     window_size = _normalize_window_size(window_size)
 
-    output = _empty_with_matching_layout(query, (*query.shape[:-1], value.size(-1)))
+    # Output has same shape as query
+    output = torch.empty_like(query)
 
     # For varlen path: logsumexp shape is (num_heads, total_q)
     total_q = query.size(0)
