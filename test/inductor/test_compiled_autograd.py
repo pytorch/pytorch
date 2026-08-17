@@ -5662,6 +5662,12 @@ if IS_S390X:
 # clear_saved_tensors_on_access is incompatible with compiled autograd
 skipped_tests.add("test_clear_saved_tensors_on_access")
 skipped_tests.add("test_clear_saved_tensors_on_access_double_access_error")
+
+# Selective saved tensor release currently relies on eager PyNode and generated
+# Node apply paths.
+skipped_tests.add("test_custom_function_selective_saved_tensor_release")
+skipped_tests.add("test_custom_function_selective_release_respects_retain_graph")
+skipped_tests.add("test_generated_backward_selective_saved_tensor_release")
 skipped_tests.add("test_forward_traceback_preserves_exception_with_checkpoint")
 skipped_tests.add("test_checkpoint_error_suggests_mark_dynamic")
 skipped_tests.add("test_checkpoint_automatic_dynamic_graph_shadowing")

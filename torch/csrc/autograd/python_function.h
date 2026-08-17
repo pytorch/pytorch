@@ -24,6 +24,11 @@ struct Graph;
 
 namespace torch::autograd {
 
+struct SavedVariableInputDependencies {
+  std::vector<std::vector<size_t>> dependencies{};
+  std::vector<bool> released{};
+};
+
 // A Function which is implemented by a Python object (i.e., a THPFunction).
 // Calls to 'apply' are forwarded to the Python method implementation.
 //
@@ -43,6 +48,7 @@ struct PyNode : public Node {
       const variable_list& inputs,
       const SwapSavedVariables& saved);
 
+  void will_release_variables() override;
   void release_variables() override;
   std::string name() const override;
   bool is_traceable() override;
@@ -132,8 +138,11 @@ struct THPFunction {
   std::vector<torch::autograd::VariableInfo> output_info;
   std::vector<torch::autograd::VariableInfo> input_info;
   std::vector<torch::autograd::SavedVariable> saved_variables;
+  std::unique_ptr<torch::autograd::SavedVariableInputDependencies>
+      saved_variable_input_dependencies;
   // For each input, true if the input is a THPVariable
   std::vector<bool> is_variable_input;
+  bool needs_input_grad_is_task_specific = false;
   char has_freed_buffers;
 
   // Flag for clear_saved_tensors_on_access feature

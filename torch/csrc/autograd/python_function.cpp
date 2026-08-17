@@ -1,5 +1,6 @@
 #include <torch/csrc/autograd/python_function.h>
 
+#include <algorithm>
 #include <atomic>
 
 #include <ATen/ATen.h>
@@ -146,7 +147,14 @@ static PyObject* unpack_saved_variables(
   // because we will never hit this line of code if the buffers are freed--
   // and in any case saved_for will be non-NULL.)
   TORCH_INTERNAL_ASSERT(saved_for);
+  const auto* dependency_state = self->saved_variable_input_dependencies.get();
+  TORCH_INTERNAL_ASSERT(
+      !dependency_state || dependency_state->released.size() == num_saved);
   for (const auto i : c10::irange(num_saved)) {
+    if (dependency_state && dependency_state->released[i]) {
+      PyTuple_SET_ITEM(saved.get(), i, Py_NewRef(Py_None));
+      continue;
+    }
     auto unpacked_var = saved_variables[i].unpack(saved_for);
     THPObjectPtr value;
     if (!unpacked_var.defined()) {
@@ -184,6 +192,31 @@ PyObject* to_py_size(const std::vector<c10::SymInt>& size) {
 
 namespace torch::autograd {
 
+static void update_needs_input_grad(const PyNode* node, THPFunction* py_fn) {
+  const auto* exec_info = get_current_graph_task_exec_info();
+  const bool task_specific = exec_info && !exec_info->empty();
+  if (!task_specific && !py_fn->needs_input_grad_is_task_specific) {
+    return;
+  }
+
+  THPObjectPtr needs_input_grad(
+      PyTuple_New(static_cast<Py_ssize_t>(py_fn->is_variable_input.size())));
+  if (!needs_input_grad) {
+    throw_python_error();
+  }
+  size_t variable_idx = 0;
+  for (const auto i : c10::irange(py_fn->is_variable_input.size())) {
+    bool needs_grad = false;
+    if (py_fn->is_variable_input[i]) {
+      needs_grad = node->task_should_compute_output(variable_idx++);
+    }
+    PyTuple_SET_ITEM(
+        needs_input_grad.get(), i, Py_NewRef(needs_grad ? Py_True : Py_False));
+  }
+  Py_SETREF(py_fn->needs_input_grad, needs_input_grad.release());
+  py_fn->needs_input_grad_is_task_specific = task_specific;
+}
+
 // NOTE: this function is written in a way that assumes it's only called for
 // backward; it's used by engine.cpp.  This is responsible for forwarding a call
 // from C++'s Node::apply to a Python method "apply".
@@ -192,6 +225,7 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
   pybind11::gil_scoped_acquire gil;
   at::OptionalDeviceGuard _device_guard;
   auto* py_fn = reinterpret_cast<THPFunction*>(pyobj());
+  update_needs_input_grad(this, py_fn);
 
   // Massage a C++ variable_list into a Python arguments tuple
   THPObjectPtr pyInputs(to_py_args(inputs, &_device_guard));
@@ -388,7 +422,35 @@ auto PyNode::release_variables() -> void {
     auto* f = reinterpret_cast<THPFunction*>(pyobj());
     if (f) {
       f->saved_variables.clear();
+      f->saved_variable_input_dependencies.reset();
       f->has_freed_buffers = 1;
+    }
+  }
+}
+
+auto PyNode::will_release_variables() -> void {
+  if (!Py_IsInitialized()) {
+    return;
+  }
+  pybind11::gil_scoped_acquire gil;
+  auto* f = reinterpret_cast<THPFunction*>(pyobj());
+  if (!f || !f->saved_variable_input_dependencies) {
+    return;
+  }
+
+  auto& dependency_state = *f->saved_variable_input_dependencies;
+  TORCH_INTERNAL_ASSERT(
+      f->saved_variables.size() == dependency_state.dependencies.size());
+  dependency_state.released.resize(f->saved_variables.size());
+  for (const auto i : c10::irange(f->saved_variables.size())) {
+    const auto& dependencies = dependency_state.dependencies[i];
+    const bool needed = std::any_of(
+        dependencies.begin(), dependencies.end(), [this](size_t input_idx) {
+          return task_should_compute_output(input_idx);
+        });
+    if (!needed && !dependency_state.released[i]) {
+      f->saved_variables[i].reset_data();
+      dependency_state.released[i] = true;
     }
   }
 }
@@ -406,6 +468,8 @@ bool PyNode::is_aot_backward() const {
 }
 
 void PyNode::compiled_args(CompiledNodeArgs& args) const {
+  auto* f = reinterpret_cast<THPFunction*>(pyobj());
+  update_needs_input_grad(this, f);
   static PyObject* method_name =
       PyUnicode_InternFromString("_compiled_autograd_key");
   THPObjectPtr pykey(PyObject_CallMethodObjArgs(pyobj(), method_name, nullptr));
@@ -425,7 +489,6 @@ void PyNode::compiled_args(CompiledNodeArgs& args) const {
   args.collect_size(static_cast<size_t>(key));
   args.collect_size(static_cast<size_t>(size));
 
-  auto* f = reinterpret_cast<THPFunction*>(pyobj());
   f->compiled_autograd_symints.clear();
   f->compiled_autograd_symints.reserve(size - 1);
   for (const auto i : c10::irange(1, size)) {
@@ -610,6 +673,7 @@ static void THPFunction_dealloc(THPFunction* self) {
   self->output_info.~vector();
   self->input_info.~vector();
   self->saved_variables.~vector();
+  self->saved_variable_input_dependencies.~unique_ptr();
   self->is_variable_input.~vector();
   std::destroy_at(&self->needs_input_grad_bits);
   if (self->cdata) {
@@ -636,6 +700,8 @@ static PyObject* THPFunction_new(
   new (&self->output_info) std::vector<VariableInfo>();
   new (&self->input_info) std::vector<VariableInfo>();
   new (&self->saved_variables) std::vector<SavedVariable>();
+  new (&self->saved_variable_input_dependencies)
+      std::unique_ptr<SavedVariableInputDependencies>();
   new (&self->is_variable_input) std::vector<bool>();
   new (&self->needs_input_grad_bits)
       std::optional<c10::SmallVector<bool, 24>>();
@@ -989,11 +1055,26 @@ static void _save_variables(
     THPFunction* self,
     PyObject* outputs,
     int64_t num_outputs) {
-  if (tensors_to_save.empty())
+  if (self->saved_variable_input_dependencies) {
+    auto& dependency_state = *self->saved_variable_input_dependencies;
+    TORCH_CHECK(
+        dependency_state.dependencies.size() == tensors_to_save.size(),
+        "saved_tensors_input_dependencies must have one entry per value "
+        "passed to save_for_backward, but got ",
+        dependency_state.dependencies.size(),
+        " dependencies for ",
+        tensors_to_save.size(),
+        " saved tensors");
+  }
+  if (tensors_to_save.empty()) {
     return;
+  }
   size_t num_saved = tensors_to_save.size();
   self->saved_variables.clear();
   self->saved_variables.reserve(num_saved);
+  if (self->saved_variable_input_dependencies) {
+    self->saved_variable_input_dependencies->released.assign(num_saved, false);
+  }
 
   std::unordered_set<at::TensorImpl*> output_impls{};
   output_impls.reserve(num_outputs);
@@ -1061,6 +1142,77 @@ struct InputFlags {
 };
 
 namespace {
+std::vector<std::vector<size_t>> parse_saved_tensor_input_dependencies(
+    PyObject* value,
+    const std::vector<bool>& is_variable_input) {
+  THPObjectPtr dependencies(PySequence_Fast(
+      value, "saved_tensors_input_dependencies must be a sequence"));
+  if (!dependencies) {
+    throw_python_error();
+  }
+
+  std::vector<size_t> input_to_edge(is_variable_input.size());
+  std::vector<size_t> all_edges;
+  all_edges.reserve(is_variable_input.size());
+  size_t edge_idx = 0;
+  for (const auto i : c10::irange(is_variable_input.size())) {
+    if (is_variable_input[i]) {
+      input_to_edge[i] = edge_idx;
+      all_edges.push_back(edge_idx++);
+    }
+  }
+
+  const auto num_saved = PySequence_Fast_GET_SIZE(dependencies.get());
+  std::vector<std::vector<size_t>> result;
+  result.reserve(num_saved);
+  for (const auto saved_idx : c10::irange(num_saved)) {
+    PyObject* item = PySequence_Fast_GET_ITEM(dependencies.get(), saved_idx);
+    if (Py_IsNone(item)) {
+      result.push_back(all_edges);
+      continue;
+    }
+
+    THPObjectPtr input_indices(PySequence_Fast(
+        item,
+        "each saved tensor dependency must be a sequence of input indices or None"));
+    if (!input_indices) {
+      throw_python_error();
+    }
+    const auto num_indices = PySequence_Fast_GET_SIZE(input_indices.get());
+    std::vector<size_t> saved_dependencies;
+    saved_dependencies.reserve(num_indices);
+    for (const auto i : c10::irange(num_indices)) {
+      PyObject* index_obj = PySequence_Fast_GET_ITEM(input_indices.get(), i);
+      const auto input_idx = PyLong_AsSsize_t(index_obj);
+      if (input_idx == -1 && PyErr_Occurred()) {
+        throw_python_error();
+      }
+      TORCH_CHECK_INDEX(
+          input_idx >= 0 &&
+              input_idx < static_cast<Py_ssize_t>(is_variable_input.size()),
+          "saved tensor ",
+          saved_idx,
+          " has invalid forward input dependency ",
+          input_idx);
+      TORCH_CHECK_TYPE(
+          is_variable_input[input_idx],
+          "saved tensor ",
+          saved_idx,
+          " depends on non-Tensor forward input ",
+          input_idx);
+      const auto dependency = input_to_edge[input_idx];
+      if (std::find(
+              saved_dependencies.begin(),
+              saved_dependencies.end(),
+              dependency) == saved_dependencies.end()) {
+        saved_dependencies.push_back(dependency);
+      }
+    }
+    result.push_back(std::move(saved_dependencies));
+  }
+  return result;
+}
+
 edge_list collect_next_edges(at::ArrayRef<const Variable*> input_vars) {
   edge_list next_edges;
   next_edges.reserve(input_vars.size());
@@ -1834,6 +1986,19 @@ PyObject* THPFunction_apply(
   ctx->needs_input_grad_bits.emplace(std::move(input_info.needs_input_grad));
   ctx->is_variable_input = std::move(input_info.is_variable_input);
 
+  THPObjectPtr dependencies_attr(
+      PyObject_GetAttrString(cls, "saved_tensors_input_dependencies"));
+  TORCH_CHECK(
+      dependencies_attr,
+      "autograd.Function is missing saved_tensors_input_dependencies attribute");
+  if (!Py_IsNone(dependencies_attr.get())) {
+    ctx->saved_variable_input_dependencies =
+        std::make_unique<SavedVariableInputDependencies>();
+    ctx->saved_variable_input_dependencies->dependencies =
+        parse_saved_tensor_input_dependencies(
+            dependencies_attr.get(), ctx->is_variable_input);
+  }
+
   // Get clear_saved_tensors_on_access from the Function class
   THPObjectPtr clear_attr(
       PyObject_GetAttr(cls, clear_saved_tensors_on_access_name));
@@ -2112,7 +2277,14 @@ PyObject* THPFunction_raw_saved_tensors(THPFunction* self, void* _unused) {
   if (!saved) {
     return nullptr;
   }
+  const auto* dependency_state = self->saved_variable_input_dependencies.get();
+  TORCH_INTERNAL_ASSERT(
+      !dependency_state || dependency_state->released.size() == num_saved);
   for (const auto i : c10::irange(num_saved)) {
+    if (dependency_state && dependency_state->released[i]) {
+      PyTuple_SET_ITEM(saved.get(), i, Py_NewRef(Py_None));
+      continue;
+    }
     py::object obj =
         py::cast(saved_variables[i], py::return_value_policy::reference);
     PyTuple_SET_ITEM(saved.get(), i, obj.release().ptr());
