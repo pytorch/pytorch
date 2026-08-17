@@ -12,22 +12,18 @@ import unittest
 import torch
 from torch.fx._symbolic_trace import symbolic_trace
 
-from torch.fx.passes.graph_drawer import _escape_dot_label, FxGraphDrawer
+from torch.fx.passes.graph_drawer import _escape_dot_label, FxGraphDrawer, HAS_PYDOT
 from torch.fx.passes.infra.partitioner import CapabilityBasedPartitioner
 from torch.fx.passes.operator_support import OperatorSupport
 from torch.fx.passes.utils.fuser_utils import fuse_by_partitions, topo_sort
 from torch.fx.passes.utils.matcher_utils import SubgraphMatcher
 
-from torch.testing._internal.common_utils import run_tests, parametrize, instantiate_parametrized_tests, subtest
+from torch.testing._internal.common_utils import run_tests, parametrize, instantiate_parametrized_tests, subtest, TestCase as CommonTestCase
 from torch.testing._internal.jit_utils import JitTestCase
 
-try:
-    import pydot  # noqa: F401
-
-    HAS_PYDOT = True
-except ImportError:
-    HAS_PYDOT = False
-
+# HAS_PYDOT is reused from graph_drawer rather than re-derived: its probe
+# catches only ModuleNotFoundError, so a present-but-broken pydot must surface
+# as an import error here too instead of silently skipping these tests.
 HAS_DOT = shutil.which("dot") is not None
 
 logging.basicConfig(level=logging.WARNING)
@@ -1210,8 +1206,14 @@ class TestFXMatcherUtils(JitTestCase):
 
 
 @instantiate_parametrized_tests
-class TestFXGraphDrawer(JitTestCase):
+class TestFXGraphDrawer(CommonTestCase):
     """Graph content must not be able to break the dot record label it is placed in."""
+
+    class Einsum(torch.nn.Module):
+        """An equation arg puts a literal `>` in the label (issue #147884)."""
+
+        def forward(self, x):
+            return torch.einsum("a,a->a", x)
 
     def _node_label(self, drawer, node_name):
         labels = [
@@ -1219,7 +1221,9 @@ class TestFXGraphDrawer(JitTestCase):
             for node in drawer.get_dot_graph().get_nodes()
             if node.get_name() == node_name
         ]
-        self.assertEqual(len(labels), 1)
+        self.assertEqual(
+            len(labels), 1, f"expected one node named {node_name!r}, got {len(labels)}"
+        )
         return labels[0]
 
     @parametrize("text,expected", [
@@ -1227,7 +1231,12 @@ class TestFXGraphDrawer(JitTestCase):
         subtest(("{'a': 1}", r"\{'a': 1\}"), name="dict_repr"),
         subtest(("<stdin>", r"\<stdin\>"), name="pseudo_filename"),
         subtest(("a|b", r"a\|b"), name="field_separator"),
-        subtest(("torch.functional.einsum", "torch.functional.einsum"), name="nothing_to_escape"),
+        # Backslash is dot's own escape character and must be doubled, or a
+        # Windows path's `\l` reads as the left-justify directive.
+        subtest((r"C:\lib\foo.py", r"C:\\lib\\foo.py"), name="windows_path"),
+        # Mixes characters that must change with ones that must not, so a
+        # no-op implementation cannot pass.
+        subtest(("torch.functional.einsum(a|b)", r"torch.functional.einsum(a\|b)"), name="mixed"),
     ])
     def test_escape_dot_label(self, text, expected):
         self.assertEqual(_escape_dot_label(text), expected)
@@ -1235,11 +1244,7 @@ class TestFXGraphDrawer(JitTestCase):
     @unittest.skipIf(not HAS_PYDOT, "requires pydot")
     def test_escapes_str_arg(self):
         # https://github.com/pytorch/pytorch/issues/147884
-        class Einsum(torch.nn.Module):
-            def forward(self, x):
-                return torch.einsum("a,a->a", x)
-
-        drawer = FxGraphDrawer(symbolic_trace(Einsum()), "einsum")
+        drawer = FxGraphDrawer(symbolic_trace(self.Einsum()), "einsum")
         self.assertIn(r"a,a-\>a", self._node_label(drawer, "einsum"))
 
     @unittest.skipIf(not HAS_PYDOT, "requires pydot")
@@ -1286,18 +1291,61 @@ class TestFXGraphDrawer(JitTestCase):
         self.assertIn(r"\<stdin\>", label)
         self.assertIn(r"x.sum() \> 0", label)
 
+    @unittest.skipIf(not HAS_PYDOT, "requires pydot")
+    def test_escapes_windows_path_in_stack_trace(self):
+        """A `\\l` inside a path is dot's left-justify directive, not text."""
+        class Add(torch.nn.Module):
+            def forward(self, x):
+                return torch.add(x, 1)
+
+        gm = symbolic_trace(Add())
+        for node in gm.graph.nodes:
+            if node.op == "call_function":
+                node.stack_trace = 'File "C:\\lib\\foo.py", line 1, in forward\n    return torch.add(x, 1)\n'
+
+        drawer = FxGraphDrawer(gm, "win_path", parse_stack_trace=True)
+        self.assertIn(r"C:\\lib\\foo.py", self._node_label(drawer, "add"))
+
+    @parametrize("kwargs,expected", [
+        # Both branches of _get_str_for_args_kwargs: the one-item form omits the
+        # line breaks the multi-item form emits. This is the path the fix
+        # re-plumbs, so it is pinned by an exact label match.
+        subtest(
+            ({"dtype": torch.float32}, r"|kwargs=\{dtype: torch.float32,\}"),
+            name="one",
+        ),
+        subtest(
+            (
+                {"device": "cpu", "dtype": torch.float32},
+                r"|kwargs=\{\ldevice: cpu,\ndtype: torch.float32,\n\}\l",
+            ),
+            name="multiple",
+        ),
+    ])
+    @unittest.skipIf(not HAS_PYDOT, "requires pydot")
+    def test_kwargs_label_shape(self, kwargs, expected):
+        class ToKwargs(torch.nn.Module):
+            def forward(self, x):
+                return x.to(**kwargs)
+
+        drawer = FxGraphDrawer(symbolic_trace(ToKwargs()), "kwargs")
+        self.assertIn(expected, self._node_label(drawer, "to"))
+
+    @unittest.skipIf(not HAS_PYDOT, "requires pydot")
+    def test_non_record_shape_still_escapes(self):
+        """`dot_graph_shape="box"` is a live path (INDUCTOR_DOT_GRAPH_SHAPE_SVG)."""
+        drawer = FxGraphDrawer(symbolic_trace(self.Einsum()), "einsum", dot_graph_shape="box")
+        self.assertIn(r"a,a-\>a", self._node_label(drawer, "einsum"))
+
     @unittest.skipIf(not (HAS_PYDOT and HAS_DOT), "requires pydot and the graphviz dot binary")
     def test_dot_renders_str_arg(self):
-        class Einsum(torch.nn.Module):
-            def forward(self, x):
-                return torch.einsum("a,a->a", x)
-
-        drawer = FxGraphDrawer(symbolic_trace(Einsum()), "einsum")
-        # create_svg() raises if dot rejects the label, so reaching the
-        # assertion at all is most of the test.
+        drawer = FxGraphDrawer(symbolic_trace(self.Einsum()), "einsum")
+        # dot exits 1 on a malformed record label (verified on graphviz 15.1.1)
+        # and pydot turns that into an AssertionError, so create_svg() returning
+        # at all is itself part of the check; the assertion then pins that the
+        # equation survived rather than being dropped with the label.
         svg = html.unescape(drawer.get_dot_graph().create_svg().decode())
         self.assertIn("args=(a,a->a,)", svg)
-
 
 if __name__ == "__main__":
     run_tests()

@@ -65,9 +65,16 @@ _WEIGHT_TEMPLATE = {
 
 def _escape_dot_label(s: str) -> str:
     # dot builds a "record" label out of these characters, so any of them coming
-    # from graph content (op targets, arg reprs, source lines) has to be escaped
-    # or dot rejects the whole label with `Error: bad label format`, e.g.
+    # from graph content (op targets, arg reprs, source lines) has to be escaped.
+    # Otherwise dot discards the label's fields, substitutes the node name, and
+    # reports `Error: bad label format` on stderr, e.g.
     # https://gist.github.com/SungMinCho/1a017aab662c75d805c5954d62c5aabc
+    #
+    # Backslash goes first because it is the escape character itself: a Windows
+    # path in a parsed stack trace (`C:\lib\foo.py`) otherwise has its `\l` read
+    # as dot's left-justify directive, which silently splits the line instead of
+    # erroring.
+    s = s.replace("\\", "\\\\")
     for char in "{}|<>":
         s = s.replace(char, "\\" + char)
     return s
@@ -239,10 +246,10 @@ if HAS_PYDOT:
         ) -> str:
             def _get_str_for_args_kwargs(arg: tuple[Any, ...] | dict[str, Any]) -> str:
                 if isinstance(arg, tuple):
-                    prefix, suffix = r"|args=(\l", r",\n)\l"
+                    name, open_, close = "args", "(", ")"
                     arg_strs_list = [_format_arg(a, max_list_len=8) for a in arg]
                 elif isinstance(arg, dict):
-                    prefix, suffix = r"|kwargs=\{\l", r",\n\}\l"
+                    name, open_, close = "kwargs", r"\{", r"\}"
                     arg_strs_list = [
                         f"{k}: {_format_arg(v, max_list_len=8)}" for k, v in arg.items()
                     ]
@@ -255,10 +262,20 @@ if HAS_PYDOT:
                 if len(arg_strs_list) == 0:
                     return ""
                 escaped = [_escape_dot_label(a) for a in arg_strs_list]
-                arg_strs = prefix + r",\n".join(escaped) + suffix
+                # The one-item form omits the line breaks rather than stripping
+                # them back out afterwards: content is escaped by now, so a
+                # `.replace(r"\l", "")` over the assembled string would eat the
+                # `\l` out of an escaped backslash (`C:\lib` -> `C:\\lib`) too.
                 if len(escaped) == 1:
-                    arg_strs = arg_strs.replace(r"\l", "").replace(r"\n", "")
-                return arg_strs
+                    return f"|{name}={open_}{escaped[0]},{close}"
+                return (
+                    f"|{name}={open_}"
+                    + r"\l"
+                    + r",\n".join(escaped)
+                    + r",\n"
+                    + close
+                    + r"\l"
+                )
 
             label = "{" + f"name=%{node.name}|op_code={node.op}\n"
 
@@ -458,8 +475,11 @@ if HAS_PYDOT:
                         leaf_module.named_buffers(),
                     ):
                         pname1 = node.name + "." + pname
+                        # `register_parameter` / `register_buffer` reject only
+                        # "." and "", so a name like `a|b` would split a field
+                        # here the same way an unescaped arg would.
                         label1 = (
-                            pname1 + "|op_code=get_" + "parameter"
+                            _escape_dot_label(pname1) + "|op_code=get_" + "parameter"
                             if isinstance(ptensor, torch.nn.Parameter)
                             else "buffer" + r"\l"
                         )
