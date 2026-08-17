@@ -173,6 +173,16 @@ class BlockDescriptorTestBase(InductorTestCase):
             self.assertIn("rsplit_start", joined)
             self.assertIn("boundary_check", joined)
 
+    def _assert_no_accumulator_mask(self, code) -> None:
+        # No per-iteration accumulator mask (`_tmp<n> = tl.where(...)`); guarded to
+        # the make_block_ptr backend, which is the one that tags the zero-padded load.
+        if self.block_descriptor_constructor_str == "tl.make_block_ptr":
+            self.assertNotRegex("\n".join(code), r"_tmp\d+ = tl\.where\(")
+
+    def _assert_has_accumulator_mask(self, code) -> None:
+        if self.block_descriptor_constructor_str == "tl.make_block_ptr":
+            self.assertRegex("\n".join(code), r"_tmp\d+ = tl\.where\(")
+
     def _skip_if_host_side_tma(self):
         # Pre-existing, unrelated: make_tensordesc_arg arity mismatch in
         # static_triton_launcher fails all host-TMA descriptor kernels.
@@ -1975,6 +1985,193 @@ class CommonTemplate:
             expected_num_block_pointers=3,
             atol=1e-2,
             rtol=1e-2,
+        )
+        self.assertNotIn("rsplit_start", "\n".join(code))
+
+    # -------- mask_reduction_value_not_accumulator (value mask, not accumulator) -----
+
+    @config.patch(
+        {
+            "triton.cooperative_reductions": False,
+            "split_reductions": True,
+            "force_red_split_dim_as_grid_dim": True,
+            "mask_reduction_value_not_accumulator": True,
+        }
+    )
+    @parametrize(
+        "reduction_fn,atol",
+        [
+            subtest((lambda t, d: t.prod(d) if d is not None else t.prod(), 1e-2), name="prod"),
+            subtest((lambda t, d: t.amax(d) if d is not None else t.amax(), 0), name="amax"),
+            subtest((lambda t, d: t.amin(d) if d is not None else t.amin(), 0), name="amin"),
+        ],
+    )
+    @parametrize(
+        "shape,dim",
+        [
+            subtest(((100003,), None), name="1d_full"),
+            subtest(((8, 100003), 1), name="2d_inner"),
+            subtest(((4, 8, 20000), 2), name="3d_inner"),
+        ],
+    )
+    def test_grid_split_reduction_masks_value_not_accumulator(
+        self, reduction_fn, atol, shape, dim
+    ):
+        self._skip_if_host_side_tma()
+        # Non-zero identity (prod/amax/amin): correct numerics with no accumulator
+        # mask proves the value was masked to the identity (a 0 tail would corrupt).
+        x = torch.randn(*shape, device=self.device)
+        _, code = self._run_and_compare(
+            lambda t: reduction_fn(t, dim),
+            x,
+            expected_num_triton_kernels=None,
+            atol=atol,
+            rtol=1e-2,
+        )
+        self._assert_grid_split_reduction(code)
+        self._assert_no_accumulator_mask(code)
+
+    @config.patch(
+        {
+            "triton.cooperative_reductions": False,
+            "split_reductions": True,
+            "force_red_split_dim_as_grid_dim": True,
+        }
+    )
+    def test_grid_split_reduction_skips_sum_accumulator_mask(self):
+        self._skip_if_host_side_tma()
+        # identity-0 (sum): the zero pad is the identity, so the accumulator mask is
+        # dropped (default-on, independent of mask_reduction_value_not_accumulator).
+        x = torch.randn(8, 100003, device=self.device)
+        _, code = self._run_and_compare(
+            lambda t: t.sum(dim=1),
+            x,
+            expected_num_triton_kernels=None,
+            atol=1e-2,
+            rtol=1e-2,
+        )
+        self._assert_grid_split_reduction(code)
+        self._assert_no_accumulator_mask(code)
+
+    @config.patch(
+        {
+            "triton.cooperative_reductions": False,
+            "split_reductions": True,
+            "force_red_split_dim_as_grid_dim": True,
+            "mask_reduction_value_not_accumulator": False,
+        }
+    )
+    def test_grid_split_reduction_prod_keeps_accumulator_mask_when_flag_off(self):
+        self._skip_if_host_side_tma()
+        # Gating guard: with the flag off, prod (identity 1 != zero pad) keeps its
+        # per-iteration accumulator mask -- exactly what the flag relocates.
+        x = torch.randn(8, 100003, device=self.device)
+        _, code = self._run_and_compare(
+            lambda t: t.prod(dim=1),
+            x,
+            expected_num_triton_kernels=None,
+            atol=1e-2,
+            rtol=1e-2,
+        )
+        self._assert_grid_split_reduction(code)
+        self._assert_has_accumulator_mask(code)
+
+    @config.patch(
+        {
+            "triton.cooperative_reductions": False,
+            "split_reductions": True,
+            "force_red_split_dim_as_grid_dim": True,
+            "mask_reduction_value_not_accumulator": True,
+        }
+    )
+    def test_grid_split_reduction_fused_mixed_identity(self):
+        self._skip_if_host_side_tma()
+        # Different identities over one buffer (sum skipped, amax value-masked):
+        # guards per-load identity-padding disambiguation.
+        x = torch.randn(8, 100003, device=self.device)
+        _, code = self._run_and_compare(
+            lambda t: t.sum(dim=1) + t.amax(dim=1),
+            x,
+            expected_num_triton_kernels=None,
+            atol=1e-2,
+            rtol=1e-2,
+        )
+        self._assert_grid_split_reduction(code)
+
+    @config.patch(
+        {
+            "triton.cooperative_reductions": False,
+            "split_reductions": True,
+            "force_red_split_dim_as_grid_dim": True,
+            "mask_reduction_value_not_accumulator": True,
+        }
+    )
+    @parametrize(
+        "reduction_fn",
+        [
+            subtest(lambda t: t.any(dim=1).to(torch.int32), name="any"),
+            subtest(lambda t: t.all(dim=1).to(torch.int32), name="all"),
+        ],
+    )
+    def test_grid_split_reduction_value_mask_bool(self, reduction_fn):
+        self._skip_if_host_side_tma()
+        x = torch.rand(8, 100003, device=self.device) > 0.5
+        _, code = self._run_and_compare(
+            reduction_fn, x, expected_num_triton_kernels=None
+        )
+        self._assert_grid_split_reduction(code)
+
+    @config.patch(
+        {
+            "triton.cooperative_reductions": False,
+            "split_reductions": True,
+            "force_red_split_dim_as_grid_dim": True,
+            "mask_reduction_value_not_accumulator": True,
+        }
+    )
+    @parametrize(
+        "reduction_fn",
+        [
+            subtest(lambda t: t.sum(dim=1), name="sum"),
+            subtest(lambda t: t.amax(dim=1), name="amax"),
+            subtest(lambda t: t.amin(dim=1), name="amin"),
+        ],
+    )
+    def test_grid_split_reduction_value_mask_int(self, reduction_fn):
+        self._skip_if_host_side_tma()
+        x = torch.randint(-100, 100, (8, 100003), device=self.device, dtype=torch.int32)
+        _, code = self._run_and_compare(
+            reduction_fn, x, expected_num_triton_kernels=None
+        )
+        self._assert_grid_split_reduction(code)
+
+    @config.patch(
+        {
+            "triton.cooperative_reductions": False,
+            "split_reductions": True,
+            "force_red_split_dim_as_grid_dim": True,
+            "mask_reduction_value_not_accumulator": True,
+        }
+    )
+    @parametrize(
+        "reduction_fn,atol",
+        [
+            subtest((lambda t: t.sum(dim=1), 1e-3), name="sum"),
+            subtest((lambda t: t.prod(dim=1), 1e-3), name="prod"),
+            subtest((lambda t: t.amax(dim=1), 0), name="amax"),
+        ],
+    )
+    def test_grid_split_reduction_persistent_flag(self, reduction_fn, atol):
+        self._skip_if_host_side_tma()
+        # Small reduction stays persistent (not grid-split); exercises the flag's
+        # no-op-broadcast skip on the persistent path, which keeps its own broadcast.
+        x = torch.randn(8, 100, device=self.device)
+        _, code = self._run_and_compare(
+            reduction_fn,
+            x,
+            expected_num_triton_kernels=None,
+            atol=atol,
+            rtol=1e-3,
         )
         self.assertNotIn("rsplit_start", "\n".join(code))
 
