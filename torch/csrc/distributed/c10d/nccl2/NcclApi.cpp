@@ -295,13 +295,6 @@ ncclResult_t DefaultNcclApi::groupEnd() {
   return ncclGroupEnd();
 }
 
-#ifdef NCCL_SIM_INFO_INITIALIZER
-ncclResult_t DefaultNcclApi::groupSimulateEnd(ncclSimInfo_t* simInfo) {
-  std::lock_guard<std::mutex> lock(api_mutex_);
-  return ncclGroupSimulateEnd(simInfo);
-}
-#endif
-
 ncclResult_t DefaultNcclApi::commUserRank(ncclComm_t comm, int* myRank) {
   std::lock_guard<std::mutex> lock(api_mutex_);
   return ncclCommUserRank(comm, myRank);
