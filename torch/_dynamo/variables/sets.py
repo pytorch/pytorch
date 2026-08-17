@@ -297,12 +297,6 @@ class AbstractSetVariable(VariableTracker):
             return list(other.items.keys())
         return [HashableTracker(x) for x in unpack_iterable(tx, other)]
 
-    def _new_set(self, items: "Iterable[HashableTracker]") -> "SetVariable":
-        # Build a fresh set of the same concrete type (set / frozenset /
-        # OrderedSet). list() preserves insertion order, which matters for
-        # OrderedSet.
-        return type(self)(list(items), mutation_type=ValueMutationNew())
-
     def sq_contains_impl(
         self, tx: "InstructionTranslatorBase", item: VariableTracker
     ) -> VariableTracker:
@@ -412,6 +406,12 @@ class SetVariable(AbstractSetVariable):
 
     # PySet_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/setobject.c#L2436
     _cpython_type = set
+
+    def _new_set(self, items: "Iterable[HashableTracker]") -> "SetVariable":
+        # Build a fresh set of the same concrete type (set / frozenset /
+        # OrderedSet). list() preserves insertion order, which matters for
+        # OrderedSet.
+        return type(self)(list(items), mutation_type=ValueMutationNew())
 
     def add(
         self,
