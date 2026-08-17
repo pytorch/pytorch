@@ -171,7 +171,9 @@ class TestAccelerator(TestCase):
         self.assertEqual(torch.accelerator.current_stream(), src_prev_stream)
         self.assertEqual(torch.accelerator.current_stream(dst_device), dst_prev_stream)
 
-    @unittest.skipIf(TEST_MPS, "MPS doesn't support pin memory!")
+    @unittest.skipIf(
+        TEST_MPS, "non-blocking MPS->CPU copy does not yet return pinned storage"
+    )
     def test_pin_memory_on_non_blocking_copy(self):
         t_acc = torch.randn(100).to(torch.accelerator.current_accelerator())
         t_host = t_acc.to("cpu", non_blocking=True)
@@ -205,7 +207,6 @@ class TestAccelerator(TestCase):
         ):
             event1.elapsed_time(event2)
 
-    @unittest.skipIf(TEST_MPS, "MPS doesn't support torch.accelerator memory API!")
     def test_memory_stats(self):
         # Ensure that device allocator is initialized
         acc = torch.accelerator.current_accelerator()
@@ -282,7 +283,6 @@ class TestAccelerator(TestCase):
         self.assertEqual(torch.accelerator.max_memory_allocated(), prev_max_allocated)
         self.assertEqual(torch.accelerator.max_memory_reserved(), prev_max_reserved)
 
-    @unittest.skipIf(TEST_MPS, "MPS doesn't support torch.accelerator memory API!")
     def test_get_memory_info(self):
         free_bytes, total_bytes = torch.accelerator.get_memory_info()
         self.assertGreaterEqual(free_bytes, 0)

@@ -421,6 +421,9 @@ class MPSHeapAllocatorImpl {
   MPSStream* m_stream;
   // we hold a reference to MPSEventPool so it could get destroyed after MPSAllocator
   std::shared_ptr<MPSEventPool> m_event_pool;
+  // bytes unavailable for reuse: in-use plus freed-but-pending GPU completion;
+  // feeds active_bytes in getDeviceStats (semantics follow CUDACachingAllocator)
+  c10::CachingAllocator::Stat m_active_bytes;
 
   void init_allocator();
   void init_buffer_pools();
