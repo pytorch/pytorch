@@ -304,6 +304,7 @@ class TestFlyDSLTemplate(TestCase):
             )
 
         kernel = SimpleNamespace(
+            _template_signature_defined=True,
             _template_input_args=[
                 (
                     "arg_mat1",
@@ -321,7 +322,7 @@ class TestFlyDSLTemplate(TestCase):
                     "arg_scale_b",
                     fake_node((96, 8), (8, 1), torch.float8_e8m0fnu),
                 ),
-            ]
+            ],
         )
         buffer = SimpleNamespace(
             layout=SimpleNamespace(
