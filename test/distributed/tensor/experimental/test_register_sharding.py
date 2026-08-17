@@ -183,6 +183,63 @@ class TestRegisterSharding(DTensorTestBase):
         self.assertIsInstance(result, DTensor)
         self.assertEqual(result.full_tensor(), x)
 
+    @with_comms
+    def test_register_sharding_single_tensor_list(self):
+        @torch.library.custom_op("test_dtensor::single_tensor_list", mutates_args=())
+        def single_tensor_list(tensors: list[torch.Tensor]) -> list[torch.Tensor]:
+            return [t.clone() for t in tensors]
+
+        @single_tensor_list.register_fake
+        def _(tensors):
+            return [t.clone() for t in tensors]
+
+        @register_sharding(torch.ops.test_dtensor.single_tensor_list.default)
+        def single_tensor_list_sharding(tensors):
+            placements = [p for t in tensors for p in t.placements]
+            return [(placements, placements)]
+
+        mesh = self.build_device_mesh()
+        x1 = torch.randn(4, 4, device=self.device_type)
+        x1_dt = distribute_tensor(x1, mesh, [Shard(0)])
+
+        single_result = torch.ops.test_dtensor.single_tensor_list([x1_dt])
+        self.assertIsInstance(single_result, (list, tuple))
+        self.assertEqual(len(single_result), 1)
+        self.assertIsInstance(single_result[0], DTensor)
+        self.assertEqual(single_result[0].placements, (Shard(0),))
+        self.assertEqual(single_result[0].full_tensor(), x1)
+
+    @with_comms
+    def test_register_sharding_variadic_tensor_list(self):
+        @torch.library.custom_op("test_dtensor::variadic_tensor_list", mutates_args=())
+        def variadic_tensor_list(tensors: list[torch.Tensor]) -> list[torch.Tensor]:
+            return [t.clone() for t in tensors]
+
+        @variadic_tensor_list.register_fake
+        def _(tensors):
+            return [t.clone() for t in tensors]
+
+        @register_sharding(torch.ops.test_dtensor.variadic_tensor_list.default)
+        def variadic_tensor_list_sharding(tensors):
+            placements = [p for t in tensors for p in t.placements]
+            return [(placements, placements)]
+
+        mesh = self.build_device_mesh()
+        x1 = torch.randn(4, 4, device=self.device_type)
+        x2 = torch.randn(4, 4, device=self.device_type)
+        x1_dt = distribute_tensor(x1, mesh, [Shard(0)])
+        x2_dt = distribute_tensor(x2, mesh, [Shard(0)])
+
+        results = torch.ops.test_dtensor.variadic_tensor_list([x1_dt, x2_dt])
+        self.assertIsInstance(results, (list, tuple))
+        self.assertEqual(len(results), 2)
+        self.assertIsInstance(results[0], DTensor)
+        self.assertIsInstance(results[1], DTensor)
+        self.assertEqual(results[0].placements, (Shard(0),))
+        self.assertEqual(results[1].placements, (Shard(0),))
+        self.assertEqual(results[0].full_tensor(), x1)
+        self.assertEqual(results[1].full_tensor(), x2)
+
 
 if __name__ == "__main__":
     run_tests()
