@@ -355,11 +355,6 @@ class Capability:
         flash_attention = "attention.flash_attention"
         mem_efficient_attention = "attention.mem_efficient_attention"
 
-    class distributed:
-        backend = "distributed.backend"
-        dtensor = "distributed.dtensor"
-        fsdp = "distributed.fsdp"
-
 
 class DeviceTypeTestBase(TestCase):
     device_type: str = "generic_device_type"
