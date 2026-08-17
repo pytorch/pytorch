@@ -87,7 +87,8 @@ class TestHwClassificationLinter(unittest.TestCase):
                 path=msgs[0].path,
                 line=2,
                 description="Test class 'TestFoo' is missing or has an invalid "
-                "hw_classification. Valid declarations:\n"
+                "hw_classification. Only the exact forms below are accepted "
+                "(aliased imports are not recognized):\n"
                 "    hw_classification = HardwareClassification.<MEMBER>\n"
                 "    hw_classification: HardwareClassification = HardwareClassification.<MEMBER>",
             ),
@@ -109,7 +110,8 @@ class TestHwClassificationLinter(unittest.TestCase):
                 path=msgs[0].path,
                 line=2,
                 description="Test class 'TestFoo' is missing or has an invalid "
-                "hw_classification. Valid declarations:\n"
+                "hw_classification. Only the exact forms below are accepted "
+                "(aliased imports are not recognized):\n"
                 "    hw_classification = HardwareClassification.<MEMBER>\n"
                 "    hw_classification: HardwareClassification = HardwareClassification.<MEMBER>",
             ),
@@ -131,7 +133,8 @@ class TestHwClassificationLinter(unittest.TestCase):
                 path=msgs[0].path,
                 line=2,
                 description="Test class 'TestFoo' is missing or has an invalid "
-                "hw_classification. Valid declarations:\n"
+                "hw_classification. Only the exact forms below are accepted "
+                "(aliased imports are not recognized):\n"
                 "    hw_classification = HardwareClassification.<MEMBER>\n"
                 "    hw_classification: HardwareClassification = HardwareClassification.<MEMBER>",
             ),

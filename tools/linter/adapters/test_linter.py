@@ -395,12 +395,12 @@ def _check_no_device_param(ctx: RuleContext) -> list[LintMessage]:
 
 
 @_register(HardwareClassification.ACCELERATOR)
-def _check_must_be_instantiated(ctx: RuleContext) -> list[LintMessage]:
+def _check_accelerator_must_be_instantiated(ctx: RuleContext) -> list[LintMessage]:
     return _check_instantiation(ctx, required=True)
 
 
 @_register(HardwareClassification.ACCELERATOR)
-def _check_has_device_param(ctx: RuleContext) -> list[LintMessage]:
+def _check_accelerator_has_device_param(ctx: RuleContext) -> list[LintMessage]:
     return _check_device_param(ctx, required=True)
 
 
@@ -463,12 +463,12 @@ def _check_no_only_for(ctx: RuleContext) -> list[LintMessage]:
 
 
 @_register(*DEVICE_SPECIFIC_CLASSIFICATIONS)
-def _check_must_be_instantiated(ctx: RuleContext) -> list[LintMessage]:
+def _check_device_specific_must_be_instantiated(ctx: RuleContext) -> list[LintMessage]:
     return _check_instantiation(ctx, required=True)
 
 
 @_register(*DEVICE_SPECIFIC_CLASSIFICATIONS)
-def _check_has_device_param(ctx: RuleContext) -> list[LintMessage]:
+def _check_device_specific_has_device_param(ctx: RuleContext) -> list[LintMessage]:
     return _check_device_param(ctx, required=True)
 
 
@@ -561,7 +561,8 @@ def check_file(filename: str) -> list[LintMessage]:
                     path=filename,
                     line=node.lineno,
                     description=f"Test class '{node.name}' is missing or has an invalid "
-                    f"hw_classification. Valid declarations:\n"
+                    f"hw_classification. Only the exact forms below are accepted "
+                    f"(aliased imports are not recognized):\n"
                     f"    hw_classification = HardwareClassification.<MEMBER>\n"
                     f"    hw_classification: HardwareClassification = HardwareClassification.<MEMBER>",
                 )
