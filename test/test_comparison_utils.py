@@ -18,14 +18,6 @@ def _mismatched_device(device):
     return acc.type if acc is not None else None
 
 
-def _mismatched_device(device):
-    device = torch.device(device)
-    if device.type != "cpu":
-        return "cpu"
-    acc = torch.accelerator.current_accelerator(True)
-    return acc.type if acc is not None else None
-
-
 class TestComparisonUtils(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
