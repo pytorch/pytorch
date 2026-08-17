@@ -289,6 +289,14 @@ void Context::setSDPUseFA3(bool e) {
   enabled_fa3SDP = e;
 }
 
+bool Context::userEnabledFA4SDP() const {
+  return enabled_fa4SDP;
+}
+
+void Context::setSDPUseFA4(bool e) {
+  enabled_fa4SDP = e;
+}
+
 bool Context::userEnabledMemEfficientSDP() const {
   return enabled_mem_efficientSDP;
 }
@@ -368,6 +376,14 @@ bool Context::allowTF32CuBLAS() const {
 void Context::setAllowTF32CuBLAS(bool b) {
   float32_matmul_precision = b ? at::Float32MatmulPrecision::HIGH : at::Float32MatmulPrecision::HIGHEST;
   setFloat32Precision(Float32Backend::CUDA, Float32Op::MATMUL, b ? Float32Precision::TF32 : Float32Precision::IEEE);
+}
+
+bool Context::preferCublasltGroupedGemm() const {
+  return prefer_cublaslt_grouped_gemm;
+}
+
+void Context::setPreferCublasltGroupedGemm(bool b) {
+  prefer_cublaslt_grouped_gemm = b;
 }
 
 Float32MatmulPrecision Context::float32MatmulPrecision() const {

@@ -700,6 +700,36 @@ class MicroPipelineTP4GPUTest(TestCase):
         self.assertIn("fused_matmul_reduce_scatter", code)
         self.assertIn("reduce_scatter_tensor", code)
 
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @fresh_cache()
+    def test_fusion_without_deprecated_enable(self):
+        # Fusion must not require the deprecated enable_symm_mem_for_group
+        # (https://github.com/pytorch/pytorch/issues/193027), so no _test_mode here.
+        group = dist.group.WORLD
+
+        def ag_mm(A_shard: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
+            A = all_gather_single(A_shard, gather_dim=0, group=group.group_name)
+            return A @ B
+
+        def mm_rs(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
+            return reduce_scatter_single(
+                A @ B, "avg", scatter_dim=0, group=group.group_name
+            )
+
+        A_shard = torch.rand(32, 32, device="cuda")
+        A = torch.rand(64, 32, device="cuda")
+        B = torch.rand(32, 16, device="cuda")
+
+        gm = _make_post_grad_fx(ag_mm, A_shard, B)
+        micro_pipeline_tp_pass(gm.graph)
+        self.assertIn("fused_all_gather_matmul", str(gm.graph))
+        self.assertNotIn("all_gather_into_tensor", str(gm.graph))
+
+        gm = _make_post_grad_fx(mm_rs, A, B)
+        micro_pipeline_tp_pass(gm.graph)
+        self.assertIn("fused_matmul_reduce_scatter", str(gm.graph))
+        self.assertNotIn("reduce_scatter_tensor", str(gm.graph))
+
 
 if __name__ == "__main__":
     run_tests()
