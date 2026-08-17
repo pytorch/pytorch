@@ -1017,3 +1017,9 @@ else:
         sparse: bool = False,
     ) -> Sequence[OpInfo]:
         return ops
+
+    def mps_ops_grad_modifier(ops: Sequence[OpInfo]) -> Sequence[OpInfo]:
+        return ops
+
+    def mps_ops_error_inputs_modifier(ops: Sequence[OpInfo]) -> Sequence[OpInfo]:
+        return ops
