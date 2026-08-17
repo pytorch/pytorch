@@ -108,8 +108,11 @@ typedef bool (*BufferComparison)(const BufferBlock*, const BufferBlock*);
 
 struct BufferPool;
 struct AllocParams {
-  AllocParams(size_t Alloc_Size, size_t Requested_Size, BufferPool* Pool)
-      : search_key(Alloc_Size), pool(Pool), requested_size(Requested_Size) {}
+  AllocParams(size_t Alloc_Size, size_t Requested_Size, BufferPool* Pool, bool Allow_In_Flight_Reuse)
+      : search_key(Alloc_Size),
+        pool(Pool),
+        requested_size(Requested_Size),
+        allow_in_flight_reuse(Allow_In_Flight_Reuse) {}
   size_t size() const {
     return search_key.size;
   }
@@ -119,6 +122,8 @@ struct AllocParams {
   BufferPool* pool;
   BufferBlock* buffer_block = nullptr;
   size_t requested_size;
+  // GPU work is ordered by its stream; immediate CPU access is not.
+  bool allow_in_flight_reuse;
   // true if we exceed the low watermark limit. In this case
   // we apply strategies to relieve the pressure before allocation.
   bool has_memory_pressure = false;
@@ -293,7 +298,7 @@ class MPSHeapAllocatorImpl {
     emptyCache();
   }
   // interface exposed to at::Allocator
-  id<MTLBuffer> malloc(size_t size, uint32_t usage);
+  id<MTLBuffer> malloc(size_t size, uint32_t usage, bool allow_in_flight_reuse);
   // frees a buffer and returns it into buffer pool
   void free(void* ptr);
   // releases all the cached buffers and their associated heaps
@@ -430,7 +435,7 @@ class MPSHeapAllocatorImpl {
   bool insert_available_buffer(BufferPool& pool, BufferBlock* buffer_block);
   void erase_available_buffer(BufferPool& pool, BufferBlock* buffer_block);
   BufferBlock* get_allocated_buffer_block(const void* ptr);
-  BufferBlock* alloc_buffer_block(size_t size, uint32_t usage);
+  BufferBlock* alloc_buffer_block(size_t size, uint32_t usage, bool allow_in_flight_reuse);
   void free_buffer(BufferBlock* buffer_block);
   bool release_cached_buffers();
   // waits for buffers parked in-flight in the pool's pending-free list to finish

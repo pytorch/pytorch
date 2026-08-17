@@ -9669,6 +9669,24 @@ class TestMPS(TestCaseMPS):
         # Non-pinned CPU tensors are not reported as pinned.
         self.assertFalse(torch.empty(4).is_pinned())
 
+    @serialTest()
+    def test_pin_memory_does_not_recycle_in_flight_buffer(self):
+        torch.mps.synchronize()
+        torch.mps.empty_cache()
+
+        numel = 1 << 18
+        device_tensor = torch.full((numel,), 40.0, device="mps")
+        result = device_tensor * 2 + 1
+        del device_tensor, result
+
+        expected = torch.full((numel,), 4.5)
+        pinned = expected.pin_memory()
+        copied = pinned.to("mps", non_blocking=True)
+        torch.mps.synchronize()
+
+        self.assertEqual(pinned, expected)
+        self.assertEqual(copied, expected)
+
     # to verify this test, run XCode Instruments "Metal System Trace" or "Logging" tool,
     # press record, then run this python test, and press stop. Next expand
     # the os_signposts->PyTorchMPS and check if events or intervals are logged
