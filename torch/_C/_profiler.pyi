@@ -76,7 +76,6 @@ class _ExperimentalConfig:
     # Deprecated no-ops; retained only so the Python layer can detect and warn.
     profiler_metrics: list[str]
     profiler_measure_per_kernel: bool
-    adjust_profiler_step: bool
 
 class ProfilerConfig:
     def __init__(

@@ -1108,10 +1108,9 @@ def _create_runtime_wrapper(
                             f"{oi}.as_strided_({ui}.size(), {ui}.stride(), {ui}.storage_offset())"
                         )
                     else:
-                        if not meta.mutates_data:
-                            raise AssertionError(
-                                f"expected mutates_data for input {inpt_idx}"
-                            )
+                        assert meta.mutates_data, (  # noqa: S101
+                            f"expected mutates_data for input {inpt_idx}"
+                        )
                     if meta.is_leaf:
                         buf.writeline(
                             f"if {oi}.requires_grad: {oi}.detach().copy_({ui})"

@@ -13,7 +13,6 @@
 
 #include <algorithm>
 #include <optional>
-#include <string>
 #include <unordered_set>
 
 extern "C" {
@@ -412,8 +411,7 @@ PyObject* dynamo__custom_eval_frame(
 
   // callback to run on recursively invoked frames
   py::handle recursive_callback = callback; // borrowed
-  CacheLookupResult cache_lookup_result;
-  PyCodeObject* cached_code = nullptr; // owned by cache_lookup_result
+  PyCodeObject* cached_code = nullptr; // borrowed
   const char* trace_annotation = "";
   PyObject* eval_result = nullptr; // strong reference
 
@@ -469,7 +467,7 @@ PyObject* dynamo__custom_eval_frame(
     // DebugContextGuard calls __enter__ on construction and __exit__ on
     // destruction, so the debug session is scoped to this eval_custom call.
     std::optional<DebugContextGuard> debug_guard;
-    if (breakpoint_code_objects.contains(cached_code) &&
+    if (breakpoint_code_objects.count(cached_code) &&
         bytecode_debugger_callback_obj == nullptr) {
       auto ctx = py::module_::import("torch._dynamo.bytecode_debugger")
                      .attr("_DebugContext")();
@@ -556,12 +554,14 @@ PyObject* dynamo__custom_eval_frame(
   DEBUG_CHECK(PyDict_CheckExact(frame->f_globals));
   DEBUG_CHECK(PyDict_CheckExact(frame->f_builtins));
 
+  PyObject* maybe_cached_code = nullptr;
   std::unique_ptr<FrameLocalsMapping> locals;
   if (!try_lookup_without_guard_eval(
           extra,
           backend,
           isolate_recompiles_id,
-          &cache_lookup_result,
+          &maybe_cached_code,
+          &trace_annotation,
           is_skip_guard_eval_unsafe)) {
     locals = std::make_unique<FrameLocalsMapping>(frame);
     _PytorchRecordFunctionState* rf =
@@ -571,7 +571,8 @@ PyObject* dynamo__custom_eval_frame(
         locals.get(),
         backend,
         isolate_recompiles_id,
-        &cache_lookup_result,
+        &maybe_cached_code,
+        &trace_annotation,
         is_skip_guard_eval_unsafe);
     _pytorch_record_function_exit(rf);
   }
@@ -585,7 +586,7 @@ PyObject* dynamo__custom_eval_frame(
     DEBUG_TRACE("In run only mode %s", get_frame_name(frame));
   }
 
-  if (!cache_lookup_result.code) {
+  if (maybe_cached_code == nullptr) {
     // guard eval failed, keep propagating
     fail();
     return eval_result;
@@ -600,16 +601,14 @@ PyObject* dynamo__custom_eval_frame(
   if (guard_complete_hook != nullptr && has_relevant_entries) {
     py::handle guard_complete_hook_handle(guard_complete_hook);
     // False means force compilation (someone cache missed)
-    py::object res =
-        guard_complete_hook_handle(!cache_lookup_result.code.is_none());
+    py::object res = guard_complete_hook_handle(!Py_IsNone(maybe_cached_code));
     if (!py::cast<bool>(res)) {
-      cache_lookup_result.code = py::none();
+      maybe_cached_code = Py_None; // NB: non-owning
     }
   }
 
-  if (!cache_lookup_result.code.is_none()) {
-    cached_code = (PyCodeObject*)cache_lookup_result.code.ptr();
-    trace_annotation = cache_lookup_result.trace_annotation.c_str();
+  if (!Py_IsNone(maybe_cached_code)) {
+    cached_code = (PyCodeObject*)maybe_cached_code;
     // used cached version
     DEBUG_TRACE("cache hit %s", get_frame_name(frame));
     eval_custom();
@@ -707,12 +706,8 @@ PyObject* dynamo__custom_eval_frame(
     // cache_entry ptr. As a result, extra now becomes the owner of CacheEntry
     // object. This will be cleaned up when set_extra_state is called.
     // Re-enable custom behavior
-    cache_lookup_result.code = py::reinterpret_borrow<py::object>(
-        py::handle((PyObject*)CacheEntry_get_code(new_cache_entry)));
-    cache_lookup_result.trace_annotation =
-        CacheEntry_get_trace_annotation(new_cache_entry);
-    cached_code = (PyCodeObject*)cache_lookup_result.code.ptr();
-    trace_annotation = cache_lookup_result.trace_annotation.c_str();
+    cached_code = CacheEntry_get_code(new_cache_entry),
+    trace_annotation = CacheEntry_get_trace_annotation(new_cache_entry);
     eval_custom();
   } else {
     eval_default();

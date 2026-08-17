@@ -6,7 +6,6 @@ out-of-range dimension/index arguments, matching eager-mode behavior.
 
 import torch
 from torch._dynamo.test_case import run_tests, TestCase
-from torch.testing._internal.common_utils import HardwareClassification
 
 
 OPS = [
@@ -22,8 +21,6 @@ OPS = [
 
 
 class TestIndexErrorContract(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
     def _make_tensor(self):
         return torch.randn(4)
 
