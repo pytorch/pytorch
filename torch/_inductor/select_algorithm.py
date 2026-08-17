@@ -42,6 +42,7 @@ from torch._inductor.await_utils import await_sync
 from torch._inductor.utils import clear_on_fresh_cache
 from torch.utils._filelock import FileLock
 from torch.utils._ordered_set import OrderedSet
+from torch.utils._sympy.value_ranges import ValueRanges
 
 from ..utils._sympy.functions import CeilDiv, Max, Min
 from . import config, ir
@@ -63,6 +64,7 @@ from .codegen.common import (
     WorkspaceArg,
     WorkspaceZeroMode,
 )
+from .codegen.simd import constant_repr
 from .codegen.simd_kernel_features import SIMDKernelFeatures
 from .codegen.subgraph import SubgraphChoiceCaller
 from .codegen.triton import (
@@ -749,23 +751,28 @@ class TritonTemplateKernel(TritonKernel):
         for reduction_index, reduction in enumerate(plan.reductions):
             output_ptr = self.args.output(reduction.output_name)
             source = f"({epilogue_result}).to({output_type})"
-            if reduction.source_type == "abs":
-                source = f"tl.abs({source})"
-            elif reduction.source_type == "square":
-                source = f"({source}) * ({source})"
-            elif reduction.source_type != "identity":
-                raise NotImplementedError(
-                    f"unsupported template-local source: {reduction.source_type}"
+            source = self.create_cse_var(
+                source,
+                ValueRanges.unknown(),
+                dtype=output_dtype,
+                shape=(str(tile_m), str(tile_n)),
+            )
+            with patch.object(self, "compute", self.body):
+                source = self._lower_template_local_reduction_source(
+                    reduction.source, source
                 )
-            source = f"({source}).to({output_type})"
-            if output_dtype.is_floating_point and output_dtype.itemsize < 4:
+            source_type = self.dtype_to_str(reduction.source_dtype)
+            source = f"({source}).to({source_type})"
+            if (
+                reduction.source_dtype.is_floating_point
+                and reduction.source_dtype.itemsize < 4
+            ):
                 source = f"({source}).to(tl.float32)"
-            neutral = {
-                "max": '-float("inf")',
-                "min": 'float("inf")',
-                "prod": "1.0",
-                "sum": "0.0",
-            }[reduction.reduction_type]
+            neutral = constant_repr(
+                ir.Reduction.default_accumulator(
+                    reduction.reduction_type, reduction.source_dtype
+                )
+            )
             value = f"tl.where({reduction_mask}, {source}, {neutral})"
             reduce_fn = get_triton_reduction_function(reduction.reduction_type)
             result = f"_block_local_reduction_{reduction_index}"
@@ -790,6 +797,38 @@ class TritonTemplateKernel(TritonKernel):
                     f"tl.store({output_ptr} + {output_index}, {result}, "
                     "_block_local_store_mask)"
                 )
+
+    def _lower_template_local_reduction_source(self, value: Any, source: Any) -> Any:
+        from torch._inductor.kernel.loop_ir_epilogue_lowering import (
+            GemmEpilogueIRExpression,
+        )
+
+        if isinstance(value, tuple):
+            return tuple(
+                self._lower_template_local_reduction_source(item, source)
+                for item in value
+            )
+        if isinstance(value, list):
+            return [
+                self._lower_template_local_reduction_source(item, source)
+                for item in value
+            ]
+        if not isinstance(value, GemmEpilogueIRExpression):
+            return value
+        if value.op == "load":
+            return source
+        if value.op == "identity":
+            return self._lower_template_local_reduction_source(value.args[0], source)
+        op = getattr(V.ops, value.op)
+        args = tuple(
+            self._lower_template_local_reduction_source(arg, source)
+            for arg in value.args
+        )
+        kwargs = {
+            key: self._lower_template_local_reduction_source(arg, source)
+            for key, arg in value.kwargs
+        }
+        return op(*args, **kwargs)
 
     @property
     def index_dtype(self) -> str:

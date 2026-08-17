@@ -99,7 +99,8 @@ class TemplateLocalReductionIR:
     block_m: int
     block_n: int
     reduction_type: str
-    source_type: str
+    source: GemmEpilogueIRExpression
+    source_dtype: torch.dtype
 
 
 def _expression_values(value: Any):
@@ -433,6 +434,152 @@ def _source_transform(
     return None
 
 
+_INVALID_SOURCE = object()
+
+
+def _normalize_source_expression(
+    expr: Any,
+    source_name: str,
+    allowed_conversion_dtypes: frozenset[torch.dtype],
+) -> GemmEpilogueIRExpression | None:
+    """Replace source loads with a canonical placeholder for structural matching."""
+
+    def normalize(value: Any):
+        if isinstance(value, (tuple, list)):
+            items = [normalize(item) for item in value]
+            if any(item is _INVALID_SOURCE for item in items):
+                return _INVALID_SOURCE
+            values, uses_source = zip(*items) if items else ((), ())
+            result = tuple(values) if isinstance(value, tuple) else list(values)
+            return result, any(uses_source)
+        if not isinstance(value, GemmEpilogueIRExpression):
+            return value, False
+        if value.reductions or value.op in (
+            "index_expr",
+            "reduction",
+            "to_dtype_bitcast",
+        ):
+            return _INVALID_SOURCE
+        if value.op == "load":
+            name, _, stored = value.args
+            if name != source_name or stored is not None:
+                return _INVALID_SOURCE
+            return (
+                GemmEpilogueIRExpression(
+                    "load",
+                    (source_name, sympy.S.Zero, None),
+                    loads=frozenset((source_name,)),
+                ),
+                True,
+            )
+        if value.op == "to_dtype" and (
+            len(value.args) < 2 or value.args[1] not in allowed_conversion_dtypes
+        ):
+            return _INVALID_SOURCE
+
+        args = [normalize(arg) for arg in value.args]
+        kwargs = [(key, normalize(arg)) for key, arg in value.kwargs]
+        values = [*args, *(arg for _, arg in kwargs)]
+        if any(item is _INVALID_SOURCE for item in values):
+            return _INVALID_SOURCE
+        uses_source = any(item[1] for item in values)
+        if not uses_source and value.op not in ("constant", "identity", "to_dtype"):
+            return _INVALID_SOURCE
+        return (
+            GemmEpilogueIRExpression(
+                value.op,
+                tuple(item[0] for item in args),
+                tuple((key, item[0]) for key, item in kwargs),
+                frozenset((source_name,)) if uses_source else frozenset(),
+            ),
+            uses_source,
+        )
+
+    normalized = normalize(expr)
+    if normalized is _INVALID_SOURCE:
+        return None
+    value, uses_source = normalized
+    return (
+        value if uses_source and isinstance(value, GemmEpilogueIRExpression) else None
+    )
+
+
+def _grouped_reduction_ir(
+    store: GemmEpilogueIRStore,
+    source_name: str,
+    group: int,
+    source_dtype: torch.dtype,
+) -> GemmEpilogueIRReduction | None:
+    allowed_conversion_dtypes = frozenset((source_dtype, torch.float32))
+
+    def match_source(expr: Any) -> tuple[GemmEpilogueIRExpression, str | None] | None:
+        source = _normalize_source_expression(
+            expr, source_name, allowed_conversion_dtypes
+        )
+        if source is None:
+            return None
+        return source, _source_transform(expr, source_name, allowed_conversion_dtypes)
+
+    def match_terms(
+        terms: Sequence[Any], reduction_type: str
+    ) -> GemmEpilogueIRReduction | None:
+        if len(terms) != group:
+            return None
+        matches = [match_source(term) for term in terms]
+        if any(match is None for match in matches):
+            return None
+        sources = [match[0] for match in matches if match is not None]
+        source_types = [match[1] for match in matches if match is not None]
+        source_type = source_types[0]
+        legacy_match = source_type is not None and all(
+            value == source_type for value in source_types[1:]
+        )
+        if not legacy_match and not all(source == sources[0] for source in sources[1:]):
+            return None
+        return GemmEpilogueIRReduction(
+            reduction_type,
+            sources[0],
+            source_type=source_type if legacy_match else None,
+        )
+
+    candidates = [expr for expr in _walk(store.value) if expr.op == "reduction"]
+    matches = []
+    for reduction in candidates:
+        matched = match_source(reduction.args[3])
+        if matched is not None:
+            source, source_type = matched
+            matches.append(
+                GemmEpilogueIRReduction(
+                    str(reduction.args[2]), source, source_type=source_type
+                )
+            )
+    if candidates:
+        return matches[0] if len(candidates) == len(matches) == 1 else None
+
+    root = _strip_conversions(store.value)
+    while isinstance(root, GemmEpilogueIRExpression) and root.op in (
+        "add",
+        "mul",
+        "truediv",
+    ):
+        if root.op == "truediv" and _constant_value(root.args[1]) == group:
+            matched = match_terms(_flatten_associative(root.args[0], "add"), "mean")
+            if matched is not None:
+                return matched
+        matched = match_terms(
+            _flatten_associative(root, root.op),
+            "sum" if root.op == "add" else "prod",
+        )
+        if matched is not None:
+            return matched
+        break
+    for op, reduction_type in (("maximum", "max"), ("minimum", "min")):
+        matched = match_terms(_flatten_associative(root, op), reduction_type)
+        if matched is not None:
+            return matched
+    return None
+
+
 def _flatten_associative(expr: Any, op: str) -> list[Any]:
     stripped = _strip_conversions(expr)
     if isinstance(stripped, GemmEpilogueIRExpression) and stripped.op == op:
@@ -449,54 +596,10 @@ def grouped_reduction_ir(
     source_dtype: torch.dtype,
 ) -> tuple[str, str] | None:
     """Classify a primitive or unrolled grouped reduction loop body."""
-    allowed_conversion_dtypes = frozenset((source_dtype, torch.float32))
-    candidates = [expr for expr in _walk(store.value) if expr.op == "reduction"]
-    matches = []
-    for reduction in candidates:
-        reduction_type = str(reduction.args[2])
-        source_type = _source_transform(
-            reduction.args[3], source_name, allowed_conversion_dtypes
-        )
-        if source_type is not None:
-            matches.append((reduction_type, source_type))
-    if candidates:
-        return matches[0] if len(candidates) == len(matches) == 1 else None
-
-    root = _strip_conversions(store.value)
-    while isinstance(root, GemmEpilogueIRExpression) and root.op in (
-        "add",
-        "mul",
-        "truediv",
-    ):
-        if root.op == "truediv" and _constant_value(root.args[1]) == group:
-            terms = _flatten_associative(root.args[0], "add")
-            transforms = [
-                _source_transform(term, source_name, allowed_conversion_dtypes)
-                for term in terms
-            ]
-            if (
-                len(terms) == group
-                and len(frozenset(transforms)) == 1
-                and transforms[0]
-            ):
-                return "mean", transforms[0]
-        terms = _flatten_associative(root, root.op)
-        transforms = [
-            _source_transform(term, source_name, allowed_conversion_dtypes)
-            for term in terms
-        ]
-        if len(terms) == group and len(frozenset(transforms)) == 1 and transforms[0]:
-            return ("sum" if root.op == "add" else "prod"), transforms[0]
-        break
-    for op, reduction_type in (("maximum", "max"), ("minimum", "min")):
-        terms = _flatten_associative(root, op)
-        transforms = [
-            _source_transform(term, source_name, allowed_conversion_dtypes)
-            for term in terms
-        ]
-        if len(terms) == group and len(frozenset(transforms)) == 1 and transforms[0]:
-            return reduction_type, transforms[0]
-    return None
+    matched = _grouped_reduction_ir(store, source_name, group, source_dtype)
+    if matched is None or matched.source_type is None:
+        return None
+    return matched.reduction_type, matched.source_type
 
 
 def template_local_reduction_ir(
@@ -541,7 +644,7 @@ def template_local_reduction_ir(
         store = GemmEpilogueIRAnalysis.store_from_buffer(buffer)
         if store is None:
             return None
-        classified = grouped_reduction_ir(
+        classified = _grouped_reduction_ir(
             store,
             source.get_name(),
             block_m * block_n,
@@ -580,8 +683,13 @@ def template_local_reduction_ir(
         if sympy.simplify(store.index - expected_store) != 0:
             return None
 
-    reduction_type, source_type = classified
-    return TemplateLocalReductionIR(block_m, block_n, reduction_type, source_type)
+    return TemplateLocalReductionIR(
+        block_m,
+        block_n,
+        classified.reduction_type,
+        classified.source,
+        buffer.data.src_dtype,
+    )
 
 
 def _synthetic_reductions_ir(

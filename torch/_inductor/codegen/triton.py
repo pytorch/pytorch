@@ -144,6 +144,9 @@ if TYPE_CHECKING:
     from types import ModuleType
 
     from torch._inductor.dtype_propagation import DtypePropagationOpsHandler
+    from torch._inductor.kernel.loop_ir_epilogue_lowering import (
+        GemmEpilogueIRExpression,
+    )
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
     from ..ir import IRNode
@@ -163,7 +166,8 @@ async_compile = AsyncCompile()
 class TemplateLocalReduction:
     output_name: str
     reduction_type: str
-    source_type: str
+    source: GemmEpilogueIRExpression
+    source_dtype: torch.dtype
 
 
 @dataclasses.dataclass(frozen=True)
@@ -8142,6 +8146,38 @@ class TritonScheduling(SIMDScheduling):
         )
 
     @staticmethod
+    def _template_local_reduction_source_is_supported(value: Any) -> bool:
+        from torch._inductor.kernel.loop_ir_epilogue_lowering import (
+            GemmEpilogueIRExpression,
+        )
+
+        if isinstance(value, (tuple, list)):
+            return all(
+                TritonScheduling._template_local_reduction_source_is_supported(item)
+                for item in value
+            )
+        if not isinstance(value, GemmEpilogueIRExpression):
+            return True
+        if value.op == "load":
+            return True
+        if value.op == "identity":
+            return TritonScheduling._template_local_reduction_source_is_supported(
+                value.args[0]
+            )
+        return (
+            value.op not in ("index_expr", "reduction", "to_dtype_bitcast")
+            and callable(getattr(TritonOverrides, value.op, None))
+            and all(
+                TritonScheduling._template_local_reduction_source_is_supported(arg)
+                for arg in value.args
+            )
+            and all(
+                TritonScheduling._template_local_reduction_source_is_supported(arg)
+                for _, arg in value.kwargs
+            )
+        )
+
+    @staticmethod
     def _template_local_reduction_plan(
         template: ir.TritonTemplateBuffer,
         nodes: Sequence[BaseSchedulerNode],
@@ -8193,6 +8229,10 @@ class TritonScheduling(SIMDScheduling):
                 "sum",
             }:
                 return None
+            if not TritonScheduling._template_local_reduction_source_is_supported(
+                matched.source
+            ):
+                return None
             if any(
                 reduction.get_reduction_type() != matched.reduction_type
                 for reduction in reductions
@@ -8222,7 +8262,10 @@ class TritonScheduling(SIMDScheduling):
                 return None
             reductions_out.append(
                 TemplateLocalReduction(
-                    final.get_name(), matched.reduction_type, matched.source_type
+                    final.get_name(),
+                    matched.reduction_type,
+                    matched.source,
+                    matched.source_dtype,
                 )
             )
         if block is None:

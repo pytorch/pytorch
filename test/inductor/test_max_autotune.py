@@ -218,6 +218,7 @@ class TestMaxAutotune(TestCase):
             "larger_tile_m",
             "larger_tile_n",
             "larger_tile_both",
+            "larger_tile_relu",
             "smaller_tile",
             "nondivisible_tile",
         ),
@@ -244,7 +245,7 @@ class TestMaxAutotune(TestCase):
                 )
             if case == "permute":
                 return blocked.permute(2, 1, 0, 3).amax((1, 3))
-            if case == "relu":
+            if case in ("relu", "larger_tile_relu"):
                 return blocked.relu().amax((1, 3))
             if case == "chain":
                 reduced = blocked.amax((1, 3))
@@ -267,6 +268,7 @@ class TestMaxAutotune(TestCase):
             "larger_tile_m": (256, 128),
             "larger_tile_n": (128, 256),
             "larger_tile_both": (256, 256),
+            "larger_tile_relu": (256, 256),
             "smaller_tile": (64, 128),
             "nondivisible_tile": (128, 128),
         }.get(case)
@@ -293,10 +295,12 @@ class TestMaxAutotune(TestCase):
             "min",
             "nan",
             "multiple",
+            "relu",
             "chain",
             "larger_tile_m",
             "larger_tile_n",
             "larger_tile_both",
+            "larger_tile_relu",
         ):
             FileCheck().check("_block_local_reduction").run(code[0])
         else:
@@ -308,7 +312,9 @@ class TestMaxAutotune(TestCase):
             self.assertEqual(torch.isnan(actual), torch.isnan(f(a, b)))
         elif case == "multiple":
             FileCheck().check("_block_local_reduction_2").run(code[0])
-        elif case.startswith("larger_tile"):
+        if case in ("relu", "larger_tile_relu"):
+            FileCheck().check("tl.maximum").check("_block_local_reduction").run(code[0])
+        if case.startswith("larger_tile"):
             FileCheck().check("tl.arange(0, 2)").check("tl.reshape").run(code[0])
 
     def _make_matrices(self, M, K, N, *batch_dims, dtype, device, requires_grad):
