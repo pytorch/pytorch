@@ -553,7 +553,6 @@ class NestedReduction:
     ) -> bool:
         return (
             config.triton.nested_reduction
-            and not V.graph.cpp_wrapper
             and _is_gpu_triton_backend(outer_node, grouped_node)
             and not outer_node.has_strict_reduction()
             and not grouped_node.has_strict_reduction()
@@ -863,8 +862,6 @@ class NestedReduction:
     @classmethod
     def can_fuse(cls, node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> bool:
         """Check whether a dependent cross-axis reduction pair can be fused."""
-        # TODO: enable nested reduction with cpp wrapper after validating the
-        # additional autotuning meta (min_xblock / min_rblock).
         if not cls._is_enabled_for(node1, node2):
             return False
 
