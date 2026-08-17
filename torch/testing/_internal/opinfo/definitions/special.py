@@ -160,11 +160,6 @@ op_db: list[OpInfo] = [
                     }
                 )
             ),
-            # I1' = I0 - I1/x nearly cancels, so at fp16 the backward amplifies the
-            # rounding of every intermediate plus the already-rounded saved result.
-            # Only rtol moves; raising atol would mask the near-zero gradients.
-            # dtypes= is load-bearing: toleranceOverride assigns rather than merges,
-            # so an unscoped entry here would drop the fp32/bool tolerances above.
             DecorateInfo(
                 toleranceOverride({torch.float16: tol(atol=1e-5, rtol=5e-3)}),
                 "TestConsistency",
@@ -195,9 +190,6 @@ op_db: list[OpInfo] = [
         backward_dtypes=floating_types_and(torch.half, torch.bfloat16),
         sample_inputs_func=sample_inputs_i0_i1,
         decorators=(
-            # Same near-cancellation as special.i1, but the exponential scaling puts
-            # the gradients an order of magnitude closer to zero, so the same
-            # absolute rounding reads as a larger relative error.
             DecorateInfo(
                 toleranceOverride({torch.float16: tol(atol=1e-5, rtol=3e-2)}),
                 "TestConsistency",
