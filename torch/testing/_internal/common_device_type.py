@@ -341,11 +341,6 @@ class Capability:
         fp8 = "dtype.fp8"
         bf16 = "dtype.bf16"
 
-    class lib:
-        """Third-party library capabilities (triton, etc.)."""
-
-        triton = "lib.triton"
-
     class attention:
         """Attention backend capabilities."""
 
@@ -423,22 +418,15 @@ class DeviceTypeTestBase(TestCase):
 
     # Returns the capability map used by @requires_capabilities.
     # Subclasses (CPUTestBase, CUDATestBase, etc.) override _capabilities() to
-    # declare supported capabilities grouped by namespace. This method flattens
-    # the nested map and evaluates the support checks.
+    # declare supported capabilities. This method evaluates the support checks.
     @classmethod
     def get_capabilities(cls) -> dict[str, bool]:
-        return {
-            k: bool(fn())
-            for sub in cls._capabilities().values()
-            for k, fn in sub.items()
-        }
+        return {k: bool(fn()) for k, fn in cls._capabilities().items()}
 
-    # Returns a nested capability map grouped by namespace.
-    # Each namespace (e.g. Capability.dtype) groups related capabilities
-    # (e.g. Capability.dtype.fp8) mapped to callables that determine whether
-    # the current device supports them.
+    # Returns a capability map from capability identifier to a callable that
+    # determines whether the current device supports it.
     @classmethod
-    def _capabilities(cls) -> dict[type, dict[str, Callable[[], bool]]]:
+    def _capabilities(cls) -> dict[str, Callable[[], bool]]:
         return {}
 
     # Flag to disable test suite early due to unrecoverable error such as CUDA error.
@@ -798,20 +786,11 @@ class CPUTestBase(DeviceTypeTestBase):
 
     @classmethod
     def _capabilities(cls):
-        from torch.utils._triton import has_triton
-
         return {
-            Capability.dtype: {
-                Capability.dtype.fp8: lambda: True,
-                Capability.dtype.bf16: lambda: False,
-            },
-            Capability.lib: {
-                Capability.lib.triton: lambda: has_triton(),
-            },
-            Capability.attention: {
-                Capability.attention.flash_attention: lambda: False,
-                Capability.attention.mem_efficient_attention: lambda: False,
-            },
+            Capability.dtype.fp8: lambda: True,
+            Capability.dtype.bf16: lambda: True,
+            Capability.attention.flash_attention: lambda: True,
+            Capability.attention.mem_efficient_attention: lambda: False,
         }
 
 
@@ -835,20 +814,12 @@ class CUDATestBase(DeviceTypeTestBase):
             PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
             SM80OrLater,
         )
-        from torch.utils._triton import has_triton
 
         return {
-            Capability.dtype: {
-                Capability.dtype.fp8: lambda: PLATFORM_SUPPORTS_FP8,
-                Capability.dtype.bf16: lambda: SM80OrLater,
-            },
-            Capability.lib: {
-                Capability.lib.triton: lambda: has_triton(),
-            },
-            Capability.attention: {
-                Capability.attention.flash_attention: lambda: PLATFORM_SUPPORTS_FLASH_ATTENTION,
-                Capability.attention.mem_efficient_attention: lambda: PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
-            },
+            Capability.dtype.fp8: lambda: PLATFORM_SUPPORTS_FP8,
+            Capability.dtype.bf16: lambda: SM80OrLater,
+            Capability.attention.flash_attention: lambda: PLATFORM_SUPPORTS_FLASH_ATTENTION,
+            Capability.attention.mem_efficient_attention: lambda: PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
         }
 
     @classmethod
@@ -927,6 +898,15 @@ class MPSTestBase(DeviceTypeTestBase):
     def _should_stop_test_suite(self):
         return False
 
+    @classmethod
+    def _capabilities(cls):
+        return {
+            Capability.dtype.fp8: lambda: False,
+            Capability.dtype.bf16: lambda: True,
+            Capability.attention.flash_attention: lambda: False,
+            Capability.attention.mem_efficient_attention: lambda: False,
+        }
+
 
 class XPUTestBase(DeviceTypeTestBase):
     device_type = "xpu"
@@ -937,20 +917,12 @@ class XPUTestBase(DeviceTypeTestBase):
         from torch.testing._internal.common_xpu import (
             PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU,
         )
-        from torch.utils._triton import has_triton
 
         return {
-            Capability.dtype: {
-                Capability.dtype.fp8: lambda: True,
-                Capability.dtype.bf16: lambda: True,
-            },
-            Capability.lib: {
-                Capability.lib.triton: lambda: has_triton(),
-            },
-            Capability.attention: {
-                Capability.attention.flash_attention: lambda: PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU,
-                Capability.attention.mem_efficient_attention: lambda: True,
-            },
+            Capability.dtype.fp8: lambda: True,
+            Capability.dtype.bf16: lambda: True,
+            Capability.attention.flash_attention: lambda: PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU,
+            Capability.attention.mem_efficient_attention: lambda: True,
         }
 
     @classmethod
