@@ -189,6 +189,15 @@ class ImportableConstexprType(NamedTuple):
     root_name: str
 
 
+def get_constexpr_dataclass_fields(
+    value: object,
+) -> tuple[dataclasses.Field[Any], ...] | None:
+    """Return the fields that contribute to a dataclass instance's repr."""
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        return tuple(field for field in dataclasses.fields(value) if field.repr)
+    return None
+
+
 def _constexpr_type_repr_prefix(value: object) -> str | None:
     value_type = type(value)
     type_name = getattr(value_type, "__name__", None)
@@ -254,10 +263,9 @@ def _collect_importable_constexpr_types(
             root_name=root_name,
         )
 
-    if dataclasses.is_dataclass(value) and not isinstance(value, type):
-        for field in dataclasses.fields(value):
-            if not field.repr:
-                continue
+    dataclass_fields = get_constexpr_dataclass_fields(value)
+    if dataclass_fields is not None:
+        for field in dataclass_fields:
             _collect_importable_constexpr_types(
                 getattr(value, field.name), result, seen
             )
@@ -265,6 +273,7 @@ def _collect_importable_constexpr_types(
         # attrs exposes the fields used by its generated repr without requiring
         # torch to depend on attrs at runtime.
         for field in attrs_fields:
+            # attrs also accepts a callable repr formatter, so only False disables it.
             if getattr(field, "repr", True) is not False:
                 _collect_importable_constexpr_types(
                     getattr(value, field.name), result, seen
@@ -292,7 +301,9 @@ def get_importable_constexpr_types(
     seen: OrderedSet[int] = OrderedSet()
     for value in values:
         _collect_importable_constexpr_types(value, result, seen)
-    return list(result.values())
+    # Import lines are part of the generated kernel source and its cache key, so
+    # their order must not depend on set iteration or PYTHONHASHSEED.
+    return sorted(result.values(), key=lambda spec: (spec.module, spec.root_name))
 
 
 XPU_KERNEL_FORMAT = (

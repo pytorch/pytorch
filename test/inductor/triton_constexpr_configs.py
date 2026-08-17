@@ -1,4 +1,15 @@
 import dataclasses
+from enum import IntEnum
+from types import SimpleNamespace
+
+
+class UserDefinedTritonKernelConfigMode(IntEnum):
+    FAST = 1
+
+
+@dataclasses.dataclass(frozen=True)
+class UserDefinedTritonKernelEnumConfig:
+    mode: UserDefinedTritonKernelConfigMode
 
 
 class UserDefinedTritonKernelConfigNamespace:
@@ -29,15 +40,12 @@ class UserDefinedTritonKernelHiddenConfig:
     hidden: object = dataclasses.field(repr=False)
 
 
-class _AttrsField:
-    def __init__(self, name, repr_enabled):
-        self.name = name
-        self.repr = repr_enabled
-
-
 class UserDefinedAttrsLikeConfig:
     # attrs publishes this metadata for the fields used by its generated repr.
-    __attrs_attrs__ = (_AttrsField("nested", True), _AttrsField("hidden", False))
+    __attrs_attrs__ = (
+        SimpleNamespace(name="nested", repr=True),
+        SimpleNamespace(name="hidden", repr=False),
+    )
 
     def __init__(self, nested, hidden):
         self.nested = nested

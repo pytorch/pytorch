@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import collections
 import contextlib
+import copy
 import dataclasses
 import dis
 import functools
@@ -67,6 +68,7 @@ from ..utils import (
     DeferredLineBase,
     DelayReplaceLine,
     get_benchmark_name,
+    get_constexpr_dataclass_fields,
     get_dtype_size,
     get_importable_constexpr_types,
     IndentedBuffer,
@@ -132,6 +134,16 @@ def _sanitize_for_repr(obj: Any) -> Any:
         return tuple(_sanitize_for_repr(v) for v in obj)
     if isinstance(obj, Enum):
         return _sanitize_for_repr(obj.value)
+    dataclass_fields = get_constexpr_dataclass_fields(obj)
+    if dataclass_fields is not None:
+        # Avoid the constructor and __post_init__, which may coerce sanitized
+        # values back into Enum instances before repr is generated.
+        result = copy.copy(obj)
+        for field in dataclass_fields:
+            object.__setattr__(
+                result, field.name, _sanitize_for_repr(getattr(obj, field.name))
+            )
+        return result
     return obj
 
 

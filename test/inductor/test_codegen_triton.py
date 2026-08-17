@@ -53,7 +53,9 @@ try:
     from triton_constexpr_configs import (
         UserDefinedAttrsLikeConfig,
         UserDefinedPydanticLikeConfig,
+        UserDefinedTritonKernelConfigMode,
         UserDefinedTritonKernelConfigNamespace,
+        UserDefinedTritonKernelEnumConfig,
         UserDefinedTritonKernelHiddenConfig,
         UserDefinedTritonKernelNestedConfig,
     )
@@ -61,7 +63,9 @@ except ImportError:
     from test.inductor.triton_constexpr_configs import (
         UserDefinedAttrsLikeConfig,
         UserDefinedPydanticLikeConfig,
+        UserDefinedTritonKernelConfigMode,
         UserDefinedTritonKernelConfigNamespace,
+        UserDefinedTritonKernelEnumConfig,
         UserDefinedTritonKernelHiddenConfig,
         UserDefinedTritonKernelNestedConfig,
     )
@@ -183,14 +187,14 @@ class TestCodegenTriton(InductorTestCase):
             type_specs,
             [
                 (
-                    UserDefinedTritonKernelNestedConfig.__module__,
-                    "UserDefinedTritonKernelNestedConfig",
-                    "UserDefinedTritonKernelNestedConfig",
-                ),
-                (
                     UserDefinedTritonKernelConfigNamespace.__module__,
                     "UserDefinedTritonKernelConfigNamespace.Nested",
                     "UserDefinedTritonKernelConfigNamespace",
+                ),
+                (
+                    UserDefinedTritonKernelNestedConfig.__module__,
+                    "UserDefinedTritonKernelNestedConfig",
+                    "UserDefinedTritonKernelNestedConfig",
                 ),
             ],
         )
@@ -225,10 +229,25 @@ class TestCodegenTriton(InductorTestCase):
         )
 
     def test_importable_constexpr_types_set(self):
-        nested_type = UserDefinedTritonKernelConfigNamespace.Nested
-        type_specs = get_importable_constexpr_types([{nested_type(offset=2)}])
-        self.assertEqual(len(type_specs), 1)
-        self.assertEqual(type_specs[0].qualname, nested_type.__qualname__)
+        namespace = UserDefinedTritonKernelConfigNamespace
+        type_specs = get_importable_constexpr_types(
+            [
+                {
+                    UserDefinedTritonKernelNestedConfig(namespace.Nested(offset=2)),
+                    UserDefinedTritonKernelHiddenConfig(3, "hidden"),
+                }
+            ]
+        )
+        root_names = [type_spec.root_name for type_spec in type_specs]
+        self.assertEqual(root_names, sorted(root_names))
+        self.assertEqual(
+            root_names,
+            [
+                "UserDefinedTritonKernelConfigNamespace",
+                "UserDefinedTritonKernelHiddenConfig",
+                "UserDefinedTritonKernelNestedConfig",
+            ],
+        )
 
     def test_importable_constexpr_types_repr_protocols(self):
         nested_type = UserDefinedTritonKernelConfigNamespace.Nested
@@ -939,6 +958,15 @@ def helper(x):
             INNER = Color.RED
 
         self.assertEqual(_sanitize_for_repr(Outer.INNER), "red")
+
+        config = UserDefinedTritonKernelEnumConfig(
+            UserDefinedTritonKernelConfigMode.FAST
+        )
+        self.assertEqual(len(get_importable_constexpr_types([config])), 1)
+        sanitized_config = _sanitize_for_repr(config)
+        self.assertIsInstance(sanitized_config, UserDefinedTritonKernelEnumConfig)
+        self.assertEqual(sanitized_config.mode, 1)
+        compile(repr(sanitized_config), "<sanitized-constexpr>", "eval")
 
         # Non-enum passthrough
         self.assertEqual(_sanitize_for_repr(42), 42)
