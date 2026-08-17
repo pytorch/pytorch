@@ -6,9 +6,9 @@
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
-#include <c10/util/flat_hash_map.h>
 
 #include <limits>
+#include <mutex>
 #include <optional>
 #include <stack>
 #include <vector>
@@ -23,6 +23,7 @@ typedef unsigned long long cudaGraphConditionalHandle;
 namespace at {
 
 struct Generator;
+struct CUDAGeneratorCaptureState;
 struct CUDAGeneratorImpl;
 struct CUDAGeneratorState;
 
@@ -48,6 +49,7 @@ TORCH_CUDA_CPP_API CUDAGraph* get_graph_from_capture_id(CaptureId_t capture_id);
 
 struct TORCH_CUDA_CPP_API CUDAGraph {
   CUDAGraph(bool keep_graph=false);
+  CUDAGraph(bool keep_graph, int64_t num_rng_states);
   ~CUDAGraph();
 
   // Copy and move constructors and assignments are disabled. These
@@ -108,6 +110,12 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
       const Tensor& scalar_cuda_pred_tensor);
 
  private:
+  friend struct at::CUDAGeneratorState;
+
+  at::CUDAGeneratorCaptureState* get_generator_capture_state(
+      CaptureId_t capture_id,
+      at::CUDAGeneratorState& state);
+
   template <typename StreamType>
   std::function<bool(StreamType)> create_allocate_filter() const;
   std::function<bool(cudaStream_t)> create_child_allocate_filter();
@@ -168,10 +176,17 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   // Stream on which capture began
   at::cuda::CUDAStream capture_stream_;
 
-  // multiple generator states and their wholegraph_increments in this graph
-  // that are managed by the CUDA Graph
-  ska::flat_hash_map<c10::intrusive_ptr<at::CUDAGeneratorState>, uint64_t>
-      captured_generator_states_;
+  struct CapturedGeneratorState {
+    c10::intrusive_ptr<at::CUDAGeneratorCaptureState> capture_state;
+    c10::intrusive_ptr<at::CUDAGeneratorState> generator_state;
+    CaptureId_t capture_id{0};
+    uint64_t wholegraph_increment{0};
+  };
+
+  // Assigned entries form a prefix; capture_end discards the unused tail.
+  std::vector<CapturedGeneratorState> captured_generator_states_;
+  std::mutex captured_generator_states_mutex_;
+  int64_t num_rng_states_;
 
   // Device where capture occurred. Right now, for simplicity, we require all ops
   // in a capture to run on the same device, but this is a limitation of CUDAGraph,

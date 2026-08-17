@@ -3159,9 +3159,9 @@ torch.cuda.synchronize()
         x = torch.zeros(1, device="cuda")
         with torch.cuda.stream(s):
             graph.capture_begin()
-            seed_t, off_t, intra_t0 = g.philox_state(4)
+            seed_t, off_t, intra_t0 = g.philox_state(1)
             x += 1
-            _, _, intra_t1 = g.philox_state(4)
+            _, _, intra_t1 = g.philox_state(5)
             graph.capture_end()
         torch.cuda.current_stream().wait_stream(s)
 
@@ -3178,7 +3178,7 @@ torch.cuda.synchronize()
             graph.replay()
             self.assertEqual(seed_t.item(), g.initial_seed())
             self.assertEqual(off_t.item(), offset_before)
-            self.assertEqual(g.get_offset(), offset_before + 8)
+            self.assertEqual(g.get_offset(), offset_before + 12)
 
         # The returned aliases must not allow reallocating the capture
         # state's storage out from under the captured graph.
@@ -3336,6 +3336,138 @@ torch.cuda.synchronize()
         self.assertEqual(buf0, ref0)
         self.assertEqual(buf1, ref1)
 
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipIf(
+        TEST_WITH_ROCM or TEST_CUDAMALLOCASYNC,
+        "requires native CUDA allocator block statistics",
+    )
+    def test_graph_rng_preallocation(self):
+        stat = "active.small_pool.current"
+        allocation_stat = "allocation.small_pool.allocated"
+        generator = torch.Generator(device="cuda")
+        stream = torch.cuda.Stream()
+        graph = torch.cuda.CUDAGraph(num_rng_states=3)
+        output = torch.empty(1, device="cuda")
+        output.uniform_(generator=generator)
+        torch.cuda.synchronize()
+        baseline = torch.cuda.memory_stats()[stat]
+
+        with torch.cuda.stream(stream):
+            graph.capture_begin(pool=torch.cuda.graph_pool_handle())
+            try:
+                self.assertEqual(torch.cuda.memory_stats()[stat] - baseline, 6)
+                allocations = torch.cuda.memory_stats()[allocation_stat]
+                output.uniform_(generator=generator)
+                seed, offset, _ = generator.philox_state(0)
+                output.uniform_(generator=generator)
+                self.assertEqual(
+                    torch.cuda.memory_stats()[allocation_stat], allocations
+                )
+            finally:
+                graph.capture_end()
+
+        # Only the used pair survives, outside the execution pool.
+        self.assertEqual(torch.cuda.memory_stats()[stat] - baseline, 2)
+        state_addresses = {seed.data_ptr(), offset.data_ptr()}
+        state_pools = {
+            block["address"]: segment["segment_pool_id"]
+            for segment in torch.cuda.memory_snapshot(include_traces=False)
+            for block in segment["blocks"]
+            if block["address"] in state_addresses
+        }
+        self.assertEqual(state_pools, dict.fromkeys(state_addresses, (0, 0)))
+        del seed, offset
+        graph.reset()
+        self.assertEqual(torch.cuda.memory_stats()[stat], baseline)
+
+        graph = torch.cuda.CUDAGraph(num_rng_states=0)
+        with torch.cuda.graph(graph, stream=stream):
+            output.add_(1)
+            with self.assertRaisesRegex(RuntimeError, "RNG state limit exceeded"):
+                generator.philox_state(0)
+        graph.replay()
+        torch.cuda.synchronize()
+        self.assertEqual(torch.cuda.memory_stats()[stat], baseline)
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    def test_graph_rng_state_identity_and_limit(self):
+        with self.assertRaisesRegex(RuntimeError, "num_rng_states must be nonnegative"):
+            torch.cuda.CUDAGraph(num_rng_states=-1)
+
+        generator = torch.Generator(device="cuda")
+        first = generator.graphsafe_get_state().manual_seed(123)
+        first.set_offset(12)
+        alias = first.graphsafe_get_state()
+        second = first.clone_state().manual_seed(456)
+        second.set_offset(20)
+        third = first.clone_state()
+        graph = torch.cuda.CUDAGraph(num_rng_states=2)
+        stream = torch.cuda.Stream()
+        output = torch.zeros(1, device="cuda")
+
+        with torch.cuda.stream(stream):
+            graph.capture_begin()
+            try:
+                # A switch without RNG use must not consume a slot.
+                generator.graphsafe_set_state(third)
+                generator.graphsafe_set_state(first)
+                first_pair = generator.philox_state(0)[:2]
+                alias_pair = alias.philox_state(0)[:2]
+                second_pair = second.philox_state(0)[:2]
+                with self.assertRaisesRegex(
+                    RuntimeError, "RNG state limit exceeded.*Increase num_rng_states"
+                ):
+                    third.philox_state(0)
+                same_pair = generator.philox_state(0)[:2]
+                output.add_(1)
+            finally:
+                graph.capture_end()
+
+        first_addresses = [tensor.data_ptr() for tensor in first_pair]
+        self.assertEqual(first_addresses, [tensor.data_ptr() for tensor in alias_pair])
+        self.assertEqual(first_addresses, [tensor.data_ptr() for tensor in same_pair])
+        second_addresses = [tensor.data_ptr() for tensor in second_pair]
+        self.assertEqual(len(set(first_addresses + second_addresses)), 4)
+
+        # Used states still need replay initialization when their increment is zero.
+        graph.replay()
+        torch.cuda.synchronize()
+        self.assertEqual([tensor.item() for tensor in first_pair], [123, 12])
+        self.assertEqual([tensor.item() for tensor in second_pair], [456, 20])
+        self.assertEqual([first.get_offset(), second.get_offset()], [12, 20])
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipIf(
+        TEST_WITH_ROCM or TEST_CUDAMALLOCASYNC,
+        "captured-event regression is specific to the native CUDA allocator",
+    )
+    def test_graph_rng_thread_local_capture_with_pending_event(self):
+        test_script = """
+import torch
+
+capture_stream = torch.cuda.Stream()
+pending = torch.empty(1, device="cuda")
+graph = torch.cuda.CUDAGraph()
+
+with torch.cuda.stream(capture_stream):
+    graph.capture_begin(capture_error_mode="thread_local")
+    with torch.cuda.stream(torch.cuda.default_stream()):
+        pending.record_stream(capture_stream)
+        pending.untyped_storage().resize_(0)
+    output = torch.rand(1, device="cuda")
+    graph.capture_end()
+
+graph.replay()
+torch.cuda.synchronize()
+"""
+        subprocess.check_call([sys.executable, "-c", test_script])
+
     @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/177001")
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
@@ -3452,7 +3584,10 @@ torch.cuda.synchronize()
             baseline_num_blocks, baseline_total_size = baseline
 
             # Allocate CUDA graphs
-            graphs = [torch.cuda.CUDAGraph() for _ in range(num_graphs)]
+            graphs = [
+                torch.cuda.CUDAGraph(num_rng_states=num_generators)
+                for _ in range(num_graphs)
+            ]
 
             # Allocate and manage generator states
             default_generator = torch.cuda.default_generators[0]
@@ -5030,19 +5165,23 @@ exit(2)
         # doesn't create RNG State tensors as inference tensors which can't
         # be inplace modified later.
 
+        generators = [torch.Generator(device="cuda") for _ in range(9)]
+
         def fn(x):
+            for generator in generators:
+                generator.philox_state(0)
             return x + 1
 
         x = torch.randn(10, 10, device="cuda")
 
         with torch.inference_mode():
-            captured_fn = torch.cuda.make_graphed_callables(fn, (x,))
+            captured_fn = torch.cuda.make_graphed_callables(fn, (x,), num_rng_states=9)
             inp = torch.ones(10, 10, device="cuda")
             self.assertEqual(captured_fn(inp), inp + 1)
 
-        torch.cuda.make_graphed_callables(fn, (x,))
+        captured_fn = torch.cuda.make_graphed_callables(fn, (x,), num_rng_states=9)
         inp = torch.ones(10, 10, device="cuda") * 10
-        self.assertEqual(fn(inp), inp + 1)
+        self.assertEqual(captured_fn(inp), inp + 1)
 
     def _test_graphed_optimizer(
         self, steps_warmup, steps_train, optimizer_ctor, kwargs

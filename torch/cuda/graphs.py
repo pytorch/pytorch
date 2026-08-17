@@ -314,6 +314,11 @@ class CUDAGraph(_CUDAGraph):
             ``instantiate``, but the user must call ``instantiate`` again
             manually to make sure the instantiated graph has these
             changes. Pytorch has no means of tracking these changes.
+        num_rng_states (int, optional): Number of RNG seed/offset pairs to
+            allocate before capture. Each distinct generator state first used
+            during capture takes one pair; repeated use shares that pair.
+            Exceeding this count raises an error. Unused pairs are released
+            after capture. Default: ``8``. Set to ``0`` for non-RNG graphs.
 
     .. warning::
         This API is in beta and may change in future releases.
@@ -357,8 +362,8 @@ class CUDAGraph(_CUDAGraph):
     _retained: _RetainedCallbacks
     _retained_finalizer: weakref.finalize | None
 
-    def __new__(cls, keep_graph: bool = False) -> Self:
-        instance = super().__new__(cls, keep_graph)
+    def __new__(cls, keep_graph: bool = False, num_rng_states: int = 8) -> Self:
+        instance = super().__new__(cls, keep_graph, num_rng_states)
         instance._tracker = None
         instance._capture_graph_id = None
         instance._remapped_exec_id = None
@@ -1330,6 +1335,7 @@ def make_graphed_callables(
     pool: _GraphPool | None = None,
     capture_error_mode: str = "global",
     enable_annotations: bool = False,
+    num_rng_states: int = 8,
 ) -> _ModuleOrCallable: ...
 
 
@@ -1342,6 +1348,7 @@ def make_graphed_callables(
     pool: _GraphPool | None = None,
     capture_error_mode: str = "global",
     enable_annotations: bool = False,
+    num_rng_states: int = 8,
 ) -> tuple[_ModuleOrCallable, ...]: ...
 
 
@@ -1353,6 +1360,7 @@ def make_graphed_callables(
     pool: _GraphPool | None = None,
     capture_error_mode: str = "global",
     enable_annotations: bool = False,
+    num_rng_states: int = 8,
 ) -> _ModuleOrCallable | tuple[_ModuleOrCallable, ...]:
     r"""Accept callables (functions or :class:`nn.Module<torch.nn.Module>`\ s) and returns graphed versions.
 
@@ -1392,6 +1400,8 @@ def make_graphed_callables(
             :func:`torch.cuda.graph_annotations.mark_kernels` scopes inside the
             callables (backward kernels are tagged via the scopes' autograd node
             hooks). See :mod:`torch.cuda.graph_annotations`. Default: ``False``.
+        num_rng_states (int, optional): Maximum number of distinct generator states
+            used by each forward or backward graph. Default: ``8``.
 
     .. note::
         The ``requires_grad`` state of each Tensor in ``sample_args`` must match the state
@@ -1481,8 +1491,14 @@ def make_graphed_callables(
         for i in range(len(callables))
     ]
 
-    fwd_graphs = [torch.cuda.CUDAGraph() for _ in range(len(callables))]
-    bwd_graphs = [torch.cuda.CUDAGraph() for _ in range(len(callables))]
+    fwd_graphs = [
+        torch.cuda.CUDAGraph(num_rng_states=num_rng_states)
+        for _ in range(len(callables))
+    ]
+    bwd_graphs = [
+        torch.cuda.CUDAGraph(num_rng_states=num_rng_states)
+        for _ in range(len(callables))
+    ]
 
     mempool = graph_pool_handle() if pool is None else _get_pool_id(pool)
 

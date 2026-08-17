@@ -2309,7 +2309,10 @@ def cudagraphify_impl(
     torch.cuda.synchronize()
 
     # record
-    graph = torch.cuda.CUDAGraph()
+    num_rng_states = max(
+        8, 1 + sum(isinstance(x, torch.Generator) for x in static_inputs)
+    )
+    graph = torch.cuda.CUDAGraph(num_rng_states=num_rng_states)
     with torch.cuda.graph(graph, stream=stream, capture_error_mode="thread_local"):
         static_outputs = model(list(static_inputs))
     if not isinstance(static_outputs, (list, tuple)):

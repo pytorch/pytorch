@@ -1119,8 +1119,13 @@ class CUDAGraphNode:
         inputs.clear()
         del inputs
 
+        num_rng_states = max(
+            8, 1 + sum(isinstance(x, torch.Generator) for x in recording_inputs)
+        )
         self.graph: torch.cuda.CUDAGraph | None = (
-            None if wrapped_function.kernel_free_cudagraph else torch.cuda.CUDAGraph()
+            None
+            if wrapped_function.kernel_free_cudagraph
+            else torch.cuda.CUDAGraph(num_rng_states=num_rng_states)
         )
 
         # we allocate non-static inputs within the same memory pool as the CUDAGraph
