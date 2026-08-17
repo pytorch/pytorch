@@ -196,11 +196,11 @@ TORCH_IMPL_FUNC(glu_out_mps)(const Tensor& self, const int64_t dim, const Tensor
       @autoreleasepool {
         auto computeEncoder = mpsStream->commandEncoder();
         auto pso = lib.getPipelineStateForFunc(fmt::format("glu_dense_{}", scalarToMetalTypeString(self)));
-        getMPSProfiler().beginProfileKernel(pso, "glu_dense", {self});
+        getMPSProfiler().beginProfileKernel(pso, "glu_dense", {self}, mpsStream);
         [computeEncoder setComputePipelineState:pso];
         mtl_setArgs(computeEncoder, output, self, L);
         mtl_dispatch2DJob(computeEncoder, pso, L, outer);
-        getMPSProfiler().endProfileKernel(pso);
+        getMPSProfiler().endProfileKernel(pso, mpsStream);
       }
     });
     return;
@@ -248,11 +248,11 @@ Tensor& glu_backward_mps_out(const Tensor& grad_output, const Tensor& input, int
       @autoreleasepool {
         auto computeEncoder = mpsStream->commandEncoder();
         auto pso = lib.getPipelineStateForFunc(fmt::format("glu_backward_dense_{}", scalarToMetalTypeString(input)));
-        getMPSProfiler().beginProfileKernel(pso, "glu_backward_dense", {input, grad_output});
+        getMPSProfiler().beginProfileKernel(pso, "glu_backward_dense", {input, grad_output}, mpsStream);
         [computeEncoder setComputePipelineState:pso];
         mtl_setArgs(computeEncoder, grad_input, input, grad_output, L);
         mtl_dispatch2DJob(computeEncoder, pso, L, outer);
-        getMPSProfiler().endProfileKernel(pso);
+        getMPSProfiler().endProfileKernel(pso, mpsStream);
       }
     });
     return grad_input;
@@ -279,7 +279,7 @@ Tensor& glu_backward_mps_out(const Tensor& grad_output, const Tensor& input, int
     @autoreleasepool {
       auto computeEncoder = mpsStream->commandEncoder();
       auto pso = lib.getPipelineStateForFunc(fmt::format("glu_backward_{}", scalarToMetalTypeString(input)));
-      getMPSProfiler().beginProfileKernel(pso, "glu_backward", {input, grad_output});
+      getMPSProfiler().beginProfileKernel(pso, "glu_backward", {input, grad_output}, mpsStream);
       [computeEncoder setComputePipelineState:pso];
       bind_iter_tensors(computeEncoder, iter_ref);
       mtl_setArgs<3>(computeEncoder,
@@ -291,7 +291,7 @@ Tensor& glu_backward_mps_out(const Tensor& grad_output, const Tensor& input, int
                      I_byte_offset,
                      static_cast<uint32_t>(iter_ref.ndim()));
       mtl_dispatch1DJob(computeEncoder, pso, iter_ref.numel());
-      getMPSProfiler().endProfileKernel(pso);
+      getMPSProfiler().endProfileKernel(pso, mpsStream);
     }
   });
   return grad_input;
