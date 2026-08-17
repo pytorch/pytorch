@@ -32,7 +32,9 @@ batched-add variants, and scaled GEMM beyond the FP8 tensorwise shape.
 import os
 import shutil
 import tempfile
+import threading
 import unittest
+import warnings
 from collections.abc import Callable
 from typing import cast, TypeAlias
 
@@ -255,6 +257,31 @@ def _untuned_has(lines: list[str], op_substr: str, m: int, n: int, k: int) -> bo
         if all(f"_{d}_" in padded for d in (m, n, k)):
             return True
     return False
+
+
+def _run_without_tunable_fallback_warning(
+    test: TestCase, op: Callable[[], torch.Tensor]
+) -> torch.Tensor:
+    """Run `op` and assert no "falling back to the non-tunable kernel" warning,
+    i.e. the wildcard-selected solution was accepted for the new shape.
+
+    Only the accepted side of the backend compatibility check is covered. The
+    rejection branch cannot be forced from Python: which backend a wildcard
+    entry carries is not controllable, and varying anything other than the
+    dynamic dim misses the wildcard entirely and takes the both-miss path.
+    Covering it needs a C++ test calling RocblasGemmOp::Call with a solution
+    index known to be invalid for the shape, so Tensile's canSolve rejects
+    it."""
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        out = op()
+    fallback_warnings = [
+        warning
+        for warning in caught
+        if "falling back to the non-tunable kernel" in str(warning.message)
+    ]
+    test.assertEqual(fallback_warnings, [])
+    return out
 
 
 class DynamicTunableOpsTest(TestCase):
@@ -506,7 +533,9 @@ class DynamicTunableOpsTest(TestCase):
         # the wildcard seeded in Phase A and dispatches via it.
         torch.cuda.tunable.enable(True)
         torch.cuda.tunable.tuning_enable(False)
-        out = torch.addmm(bias_x, mat1_x, mat2_x)
+        out = _run_without_tunable_fallback_warning(
+            self, lambda: torch.addmm(bias_x, mat1_x, mat2_x)
+        )
 
         self.assertFalse(
             _has_concrete_entry("GemmAndBiasTunableOp", m_test, n, k),
@@ -598,7 +627,9 @@ class DynamicTunableOpsTest(TestCase):
         # Runtime: tunable enabled, tuning disabled, no mask.
         torch.cuda.tunable.enable(True)
         torch.cuda.tunable.tuning_enable(False)
-        out = torch.mm(mat1_x, mat2_x)
+        out = _run_without_tunable_fallback_warning(
+            self, lambda: torch.mm(mat1_x, mat2_x)
+        )
 
         self.assertFalse(
             _has_concrete_entry("GemmTunableOp", m_test, n, k),
@@ -644,7 +675,7 @@ class DynamicTunableOpsTest(TestCase):
         # Runtime: tunable enabled, tuning disabled, no mask.
         torch.cuda.tunable.enable(True)
         torch.cuda.tunable.tuning_enable(False)
-        out = torch.bmm(b1_x, b2_x)
+        out = _run_without_tunable_fallback_warning(self, lambda: torch.bmm(b1_x, b2_x))
 
         self.assertFalse(
             _has_concrete_entry("GemmStridedBatchedTunableOp", m_test, n, k),
@@ -799,7 +830,9 @@ class DynamicTunableOpsTest(TestCase):
 
         torch.cuda.tunable.enable(True)
         torch.cuda.tunable.tuning_enable(False)
-        out = torch.baddbmm(bias_x, b1_x, b2_x)
+        out = _run_without_tunable_fallback_warning(
+            self, lambda: torch.baddbmm(bias_x, b1_x, b2_x)
+        )
 
         self.assertEqual(
             out,
@@ -1410,10 +1443,12 @@ class ScaledGemmTunableOpFP8Test(TestCase):
         )
 
         # Phase C: runtime, no mask, different M -> wildcard fallback
-        # (or aten fallback) must produce correct output.
+        # and pass backend compatibility validation.
         torch.cuda.tunable.enable(True)
         torch.cuda.tunable.tuning_enable(False)
-        out = self._run_scaled_mm(a_x, b_x, sa_x, sb_x)
+        out = _run_without_tunable_fallback_warning(
+            self, lambda: self._run_scaled_mm(a_x, b_x, sa_x, sb_x)
+        )
 
         self.assertEqual(
             out,
@@ -1421,8 +1456,7 @@ class ScaledGemmTunableOpFP8Test(TestCase):
             atol=5e-2,
             rtol=5e-2,
             msg="ScaledGemmTunableOp dispatch output should match "
-            "tunable-disabled reference (either via wildcard fallback "
-            "or via non-tunable aten fallback)",
+            "tunable-disabled reference via wildcard fallback",
         )
 
     def test_scaled_gemm_both_miss_falls_back_safely(self) -> None:
@@ -1923,6 +1957,302 @@ class DynamicDimMaskOperandSelectionTest(TestCase):
             self.assertEqual(
                 ki.dynamic_dim_mask("scaled_mm"), (False, False, False, False)
             )
+
+
+class WildcardFallbackGateTest(TestCase):
+    """Coverage for the `wildcard_fallback_enable` setter, which is all that
+    is observable -- see the module-level observability caveat.
+
+    Opt-in behavior lives in `LegacyConcreteOnlyTunableOpsTest`. The
+    off-by-default initial value cannot be asserted in-process: earlier suites
+    have already written the process-global flag, and the getter
+    short-circuits on a cached PYTORCH_TUNABLEOP_WILDCARD_FALLBACK=1."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        if not torch.cuda.is_available():
+            raise unittest.SkipTest("cuda not available")
+
+    def tearDown(self) -> None:
+        torch.cuda.tunable.enable(False)
+        torch.cuda.tunable.tuning_enable(False)
+        torch.cuda.tunable.wildcard_fallback_enable(False)
+
+    @unittest.skipIf(
+        os.environ.get("PYTORCH_TUNABLEOP_WILDCARD_FALLBACK") == "1",
+        "env var forces IsWildcardFallbackEnabled() true, so the off half "
+        "of the round trip cannot be observed",
+    )
+    def test_gate_round_trips(self) -> None:
+        """`wildcard_fallback_enable` is the flag `TunableOp::operator()`
+        reads before consulting `LookupWildcardFallback`, so the setter and
+        getter must agree in both directions."""
+        torch.cuda.tunable.wildcard_fallback_enable(True)
+        self.assertTrue(torch.cuda.tunable.wildcard_fallback_is_enabled())
+
+        torch.cuda.tunable.wildcard_fallback_enable(False)
+        self.assertFalse(torch.cuda.tunable.wildcard_fallback_is_enabled())
+
+
+class TunableDynamicDimsGuardLifoTest(TestCase):
+    """Token-based LIFO check in TunableDynamicDimsGuard: the destructor finds
+    its own token and removes only that entry, warning if it was not on top."""
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm required")
+    def test_lifo_order_pop_does_not_warn(self) -> None:
+        """The ordinary nested case must stay silent."""
+        handle_outer = torch._C._cuda_tunableop_push_dynamic_dims_mask(0x1)
+        handle_inner = torch._C._cuda_tunableop_push_dynamic_dims_mask(0x2)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            torch._C._cuda_tunableop_pop_dynamic_dims_mask(handle_inner)
+            torch._C._cuda_tunableop_pop_dynamic_dims_mask(handle_outer)
+        lifo = [w for w in caught if "LIFO violation" in str(w.message)]
+        self.assertEqual(
+            lifo,
+            [],
+            f"in-order pop must not warn; got {[str(w.message) for w in lifo]}",
+        )
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm required")
+    def test_out_of_order_pop_warns_and_removes_correct_entry(self) -> None:
+        """Popping the outer guard while the inner one is on top must warn
+        but remove the outer entry without corrupting the inner."""
+        handle_outer = torch._C._cuda_tunableop_push_dynamic_dims_mask(0x1)
+        handle_inner = torch._C._cuda_tunableop_push_dynamic_dims_mask(0x2)
+        with self.assertWarnsRegex(UserWarning, "LIFO violation"):
+            torch._C._cuda_tunableop_pop_dynamic_dims_mask(handle_outer)
+        # Inner guard still on the stack -- pop it cleanly without warning
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            torch._C._cuda_tunableop_pop_dynamic_dims_mask(handle_inner)
+        lifo = [
+            w
+            for w in caught
+            if "LIFO" in str(w.message) or "not found" in str(w.message)
+        ]
+        self.assertEqual(
+            lifo,
+            [],
+            f"inner pop should be clean after outer was removed; got {[str(w.message) for w in lifo]}",
+        )
+
+
+class TestDynamicDimsMaskAPI(TestCase):
+    """Tests for the push/pop dynamic_dims_mask API and context manager."""
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA required")
+    def test_context_manager_push_pop(self) -> None:
+        with torch.cuda.tunable.dynamic_dims_mask(M=True, K=True):
+            mask = torch.cuda.tunable._pack_dynamic_dims_mask(
+                M=True, N=False, K=True, BATCH=False
+            )
+            self.assertNotEqual(mask, 0)
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA required")
+    def test_nested_context_managers(self) -> None:
+        with torch.cuda.tunable.dynamic_dims_mask(M=True):
+            with torch.cuda.tunable.dynamic_dims_mask(N=True):
+                pass
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA required")
+    def test_double_pop_raises(self) -> None:
+        handle = torch._C._cuda_tunableop_push_dynamic_dims_mask(0x1)
+        torch._C._cuda_tunableop_pop_dynamic_dims_mask(handle)
+        with self.assertRaises(RuntimeError):
+            torch._C._cuda_tunableop_pop_dynamic_dims_mask(handle)
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA required")
+    def test_invalid_mask_raises(self) -> None:
+        with self.assertRaises(RuntimeError):
+            torch._C._cuda_tunableop_push_dynamic_dims_mask(0x10)
+
+
+class CrossThreadDestructionTest(TestCase):
+    """Verify that destroying a guard on a non-owner thread does not leak
+    permanently: the orphaned token is cleaned up on the owner's next access."""
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm required")
+    def test_cross_thread_pop_cleans_up_on_next_access(self) -> None:
+        """A guard destroyed on a background thread posts its token to the
+        owner's orphan queue; the owner's next access drains it.
+
+        The base guard underneath is what makes this observable: if the orphan
+        is drained, base is back on top and pops silently; if not, base is
+        buried and its pop reports a LIFO violation."""
+
+        base = torch._C._cuda_tunableop_push_dynamic_dims_mask(0x1)
+        orphan = torch._C._cuda_tunableop_push_dynamic_dims_mask(0x3)
+
+        # Destroy the top guard on a different thread.
+        def pop_on_other_thread():
+            torch._C._cuda_tunableop_pop_dynamic_dims_mask(orphan)
+
+        t = threading.Thread(target=pop_on_other_thread)
+        t.start()
+        t.join()
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            torch._C._cuda_tunableop_pop_dynamic_dims_mask(base)
+        issues = [
+            w
+            for w in caught
+            if "LIFO" in str(w.message) or "not found" in str(w.message)
+        ]
+        self.assertEqual(
+            issues,
+            [],
+            "the orphaned token must be drained before the base guard is "
+            f"popped; got {[str(w.message) for w in issues]}",
+        )
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm required")
+    def test_cross_thread_pop_does_not_corrupt_owner_stack(self) -> None:
+        """Multiple guards on owner thread -- cross-thread destruction of one
+        must not disturb the others."""
+
+        h1 = torch._C._cuda_tunableop_push_dynamic_dims_mask(0x1)
+        h2 = torch._C._cuda_tunableop_push_dynamic_dims_mask(0x2)
+        h3 = torch._C._cuda_tunableop_push_dynamic_dims_mask(0x4)
+
+        # Destroy the middle guard (h2) on another thread.
+        def pop_h2():
+            torch._C._cuda_tunableop_pop_dynamic_dims_mask(h2)
+
+        t = threading.Thread(target=pop_h2)
+        t.start()
+        t.join()
+
+        # Drain orphans by popping h3 (the top). Should be clean.
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            torch._C._cuda_tunableop_pop_dynamic_dims_mask(h3)
+            torch._C._cuda_tunableop_pop_dynamic_dims_mask(h1)
+        issues = [
+            w
+            for w in caught
+            if "LIFO" in str(w.message) or "not found" in str(w.message)
+        ]
+        self.assertEqual(
+            issues, [], f"unexpected warnings: {[str(w.message) for w in issues]}"
+        )
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm required")
+    def test_cross_thread_pop_after_owner_thread_exits(self) -> None:
+        """If the owner thread has already exited (and its thread-local state
+        is destroyed / unregistered), a cross-thread pop is a silent no-op
+        rather than a crash or dangling pointer dereference."""
+
+        handle = [None]
+        owner_done = threading.Event()
+        bg_done = threading.Event()
+
+        def owner_thread():
+            handle[0] = torch._C._cuda_tunableop_push_dynamic_dims_mask(0x7)
+            owner_done.set()
+            # Wait for background thread to be ready, then exit -- this
+            # destroys the thread-local DynamicDimsThreadStateHolder and
+            # unregisters from the global registry.
+            bg_done.wait()
+
+        ot = threading.Thread(target=owner_thread)
+        ot.start()
+        owner_done.wait()
+
+        # Signal the owner thread to exit and wait for its thread-local
+        # state to be torn down.
+        bg_done.set()
+        ot.join()
+
+        # Now pop the handle on this (non-owner) thread. The owner's
+        # registry entry is gone, so this should be a silent no-op.
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            torch._C._cuda_tunableop_pop_dynamic_dims_mask(handle[0])
+        # No crash, no corruption -- just silently dropped.
+        issues = [w for w in caught if "corrupt" in str(w.message).lower()]
+        self.assertEqual(issues, [], f"unexpected corruption warnings: {issues}")
+
+
+class ClearAllTest(TestCase):
+    """Coverage for the testing-only `torch.cuda.tunable._clear_all()`.
+
+    Each test starts with an empty in-memory TuningResultsManager.
+    """
+
+    def setUp(self) -> None:
+        torch.cuda.tunable.enable(False)
+        torch.cuda.tunable.tuning_enable(False)
+        torch.cuda.tunable._clear_all()
+        torch.cuda.tunable.wildcard_fallback_enable(True)
+
+    def tearDown(self) -> None:
+        torch.cuda.tunable.enable(False)
+        torch.cuda.tunable.tuning_enable(False)
+        torch.cuda.tunable.wildcard_fallback_enable(False)
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm required")
+    def test_clear_all_drops_concrete_and_wildcard_entries(self) -> None:
+        m, n, k = 61, 2069, 1031
+        bias, mat1, mat2 = _addmm(m, n, k, seed=91)
+
+        # Tune with M dynamic so both a concrete and a wildcard entry land.
+        torch.cuda.tunable.enable(True)
+        torch.cuda.tunable.tuning_enable(True)
+        with torch.cuda.tunable.dynamic_dims_mask(M=True):
+            torch.addmm(bias, mat1, mat2)
+
+        self.assertTrue(
+            _has_concrete_entry("GemmAndBiasTunableOp", m, n, k),
+            "expected a concrete entry after tuning",
+        )
+        self.assertTrue(
+            _has_wildcard_with_dims("GemmAndBiasTunableOp", n, k),
+            "expected a wildcard entry after tuning with M dynamic",
+        )
+
+        torch.cuda.tunable._clear_all()
+
+        self.assertTrue(
+            torch.cuda.tunable.wildcard_fallback_is_enabled(),
+            "_clear_all() must preserve wildcard fallback enablement",
+        )
+        self.assertEqual(
+            torch.cuda.tunable.get_results(),
+            (),
+            "_clear_all() must leave the in-memory results empty",
+        )
+        self.assertFalse(
+            _has_concrete_entry("GemmAndBiasTunableOp", m, n, k),
+            "_clear_all() must drop the concrete entry",
+        )
+        self.assertFalse(
+            _has_wildcard_with_dims("GemmAndBiasTunableOp", n, k),
+            "_clear_all() must drop the wildcard entry",
+        )
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm required")
+    def test_shape_can_be_retuned_after_clear_all(self) -> None:
+        """The point of the reset: the same shape is tunable again afterwards,
+        so tests no longer have to pick globally disjoint (m, n, k)."""
+        m, n, k = 67, 2081, 1033
+        bias, mat1, mat2 = _addmm(m, n, k, seed=92)
+
+        torch.cuda.tunable.enable(True)
+        torch.cuda.tunable.tuning_enable(True)
+        torch.addmm(bias, mat1, mat2)
+        self.assertTrue(_has_concrete_entry("GemmAndBiasTunableOp", m, n, k))
+
+        torch.cuda.tunable._clear_all()
+        self.assertFalse(_has_concrete_entry("GemmAndBiasTunableOp", m, n, k))
+
+        # Re-tuning the very same shape repopulates the entry.
+        torch.addmm(bias, mat1, mat2)
+        self.assertTrue(
+            _has_concrete_entry("GemmAndBiasTunableOp", m, n, k),
+            "the same shape must be tunable again after _clear_all()",
+        )
 
 
 if __name__ == "__main__":
