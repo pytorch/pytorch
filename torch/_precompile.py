@@ -257,12 +257,12 @@ it.
 # autograd graph the same call builds; a forward capture keeps no_grad), and lowers with
 # compile_to_python(grad_enabled=True) for the same reason. No grad-scatter metadata is
 # needed: the transformed bytecode does the .grad update itself, on the runtime model.
-# The ONE thing precompile has to correct is that Dynamo's rewrite SPECIALIZES on whether
-# p.grad is None at trace time -- a guarded choice in torch.compile, and this artifact
-# checks no guards -- so precompile always bakes the ACCUMULATING form and the driver
-# materializes a zero .grad where the runtime model has none; see Note [precompile dynamo
-# training grad accumulation]. Only params get a harvested grad, as on the make_fx path
-# (invariant 5): a user input that requires grad is rejected.
+# Dynamo's rewrite SPECIALIZES on whether p.grad is None at trace time -- both user code
+# and the backward's assign-vs-accumulate update can observe that choice. The source
+# artifact therefore keeps the original capture and validates the same incoming state in
+# its driver. A cold-state artifact is called after zero_grad(set_to_none=True); a warm
+# artifact accumulates into existing grads. Only params can have that state validated, as
+# on the make_fx path (invariant 5): a user input that requires grad is rejected.
 #
 # Dynamic shapes and decompositions work here too, by different mechanisms than make_fx.
 # Dynamic shapes: mark_unbacked is Dynamo's OWN decorator, so Dynamo captures the marked
@@ -428,15 +428,6 @@ class PrecompiledCallable:
         self._call(self._compiled.__exit__, *exc)
 
     def unload(self) -> None:
-        """Remove everything :func:`load_package` installed for this artifact.
-
-        The precompiled entries come off the code objects and the globals the
-        artifact wrote come out of their modules, so the model recompiles
-        normally afterwards. Exiting this object as a context manager does the
-        same thing; call it directly when the artifact's lifetime is not
-        lexically scoped. Unloading twice is harmless, and a call already in
-        flight on another thread is allowed to finish first.
-        """
         self._call(self._compiled.unload)
 
     @property
@@ -513,7 +504,7 @@ class PrecompileSession:
             require_complete (bool, optional): reject uncovered, bypassed, or truncated
               frames and captures that raised. Default: ``True``.
             require_no_risky_drops (bool, optional): reject dropped guards from a custom
-              filter, guards whose source held different values across variants, and identity guards on
+              filter, guards observed to distinguish variants, and identity guards on
               configurable slots. Default: ``True``.
             require_no_dropped_guards (bool, optional): reject EVERY guard omitted
               from the serialized artifact, not just the ones the lint calls
@@ -960,6 +951,7 @@ def _intern_param_buffers(
 
         def _name(mi: _ModuleIndex, n: str) -> str:
             return f"m{mi}.{n}"
+
     else:
 
         def _name(mi: _ModuleIndex, n: str) -> str:
@@ -1103,9 +1095,11 @@ def _capture(
     if any(marks):
         flat_args, fake_mode = _fakeify_with_unbacked(pb_flat, user_flat, marks)
         user_input_shapes = [
-            None
-            if base is None
-            else tuple(None if i in per else s for i, s in enumerate(base))
+            (
+                None
+                if base is None
+                else tuple(None if i in per else s for i, s in enumerate(base))
+            )
             for base, per in zip(user_input_shapes, marks)
         ]
 
@@ -1312,53 +1306,6 @@ def _baked_tensors(value: object) -> list[torch.Tensor]:
     return found
 
 
-_MODE_STACK_HELPERS = frozenset(
-    {"get_torch_function_mode_stack_at", "set_torch_function_mode_stack"}
-)
-
-
-def _reject_ambient_mode_dependency(bytecode: types.CodeType) -> None:
-    """Refuse a capture whose transformed bytecode reads the LIVE mode stack.
-
-    Dynamo applies an active torch_function mode symbolically, so a stateless one
-    bakes into the graph and the artifact is self-contained. A mode with state is
-    different: Dynamo replays the side effect by RECONSTRUCTING the mode from the
-    runtime stack, so the bytecode calls get_torch_function_mode_stack_at and the
-    artifact silently depends on process state no guard protects (precompile
-    checks none). Served with an empty stack that is a raw IndexError-ish assert;
-    served under an unrelated mode it reads that object instead and returns a
-    wrong number. Refuse instead, the way invariant 1 refuses a baked tensor.
-    """
-    seen: set[int] = set()
-
-    def reads_mode_stack(code: types.CodeType) -> bool:
-        if id(code) in seen:
-            return False
-        seen.add(id(code))
-        # Reads AND writes: a fn that ENTERS a mode itself bakes a
-        # set_torch_function_mode_stack call, so the artifact silently clears
-        # the serving process's mode stack instead of reading it. Either way
-        # the residual bytecode is touching live process state no guard covers.
-        if _MODE_STACK_HELPERS.intersection(code.co_names):
-            return True
-        return any(
-            isinstance(c, types.CodeType) and reads_mode_stack(c)
-            for c in code.co_consts
-        )
-
-    if reads_mode_stack(bytecode):
-        raise PrecompileError(
-            "precompile tracer='dynamo': fn was captured with a torch_function mode "
-            "active, and the captured bytecode reads that mode back off the RUNTIME "
-            "mode stack (it has state Dynamo has to reconstruct). The artifact checks "
-            "no guards, so it would read whatever mode the serving process happens to "
-            "have -- an assertion failure with none, and a silently wrong answer under "
-            "a different one. Capture outside the mode, make the mode stateless so "
-            "its effect bakes into the graph, or use tracer='make_fx', which bakes "
-            "even a stateful mode into a self-contained graph."
-        )
-
-
 def _reject_baked_tensors(
     used_globals: Mapping[str, object],
     closure_contents: list[object],
@@ -1410,9 +1357,10 @@ class _DynamoCapture:
     subgraph was captured with dynamic (mark_unbacked) dims, in which case
     ``example_inputs`` are Dynamo's own symbolic FAKE tensors rather than the real ones.
     ``trains`` marks a capture that performs autograd (the graph carries a traced
-    ``torch.autograd.grad``), and ``grad_accum_params`` then names every param the graph
-    accumulates a gradient into, as ``(positional arg index of its module, param name)``;
-    see _seed_grad_targets and the emitted driver."""
+    ``torch.autograd.grad``), and ``grad_param_states`` then names every parameter whose
+    capture specializes on whether ``.grad`` is ``None``. The emitted driver validates
+    that state before entering user code.
+    """
 
     def __init__(
         self,
@@ -1428,8 +1376,9 @@ class _DynamoCapture:
         example_inputs: Sequence[object],
         dynamic: bool = False,
         trains: bool = False,
-        grad_accum_params: list[tuple[int, list[tuple[str, object]], str]]
-        | None = None,
+        grad_param_states: (
+            list[tuple[int, list[tuple[str, object]], str, bool]] | None
+        ) = None,
     ) -> None:
         self.bytecode = bytecode
         self.import_sources = import_sources
@@ -1442,7 +1391,7 @@ class _DynamoCapture:
         self.example_inputs = example_inputs
         self.dynamic = dynamic
         self.trains = trains
-        self.grad_accum_params = grad_accum_params or []
+        self.grad_param_states = grad_param_states or []
 
 
 def _graph_traces_autograd(gm: torch.fx.GraphModule) -> bool:
@@ -1483,8 +1432,7 @@ def _walk_for_modules(
 
     A path rather than just a position, because two same-shaped modules in one
     container are indistinguishable by parameter name: re-searching by name
-    found the first one for both, left the second unseeded, and stamped the
-    first one's grads twice.
+    found the first one for both and validated the wrong parameter twice.
 
     The walk starts over for each ARGUMENT (a fresh ``seen`` set and a fresh
     budget, see _frame_modules), never once for the whole frame: one module
@@ -1499,8 +1447,8 @@ def _walk_for_modules(
     BREADTH first, so the budget cuts off the deepest layer rather than whatever
     the first attribute happened to lead into. A trainer holding both a big
     ``self.dataset`` and ``self.model`` is the ordinary shape, and depth first
-    opened the dataset and never reached the model -- silently, since a training
-    capture with nothing to seed bakes the overwriting form of the backward.
+    opened the dataset and never reached the model -- silently, since the artifact
+    then cannot validate the backward's captured gradient state.
     """
     found: list[tuple[_ModulePath, torch.nn.Module]] = []
     seen: set[int] = {id(value)}
@@ -1562,8 +1510,7 @@ def _attribute_names(value: object) -> list[str]:
     """Instance attribute names, covering __slots__ as well as __dict__.
 
     A __slots__ holder has no __dict__ at all, so a vars()-only walk missed the
-    model entirely -- and missing it is silent, because a training capture with
-    nothing to seed bakes the assign form.
+    model entirely -- and missing it is silent without a runtime gradient-state check.
     """
     names = list(getattr(value, "__dict__", {}) or {})
     for klass in type(value).__mro__:
@@ -1634,7 +1581,7 @@ def _module_import_name(module: types.ModuleType) -> str | None:
 def _representable_as_source(key: object) -> bool:
     """Whether ``key`` survives the artifact, which stores it as SOURCE TEXT.
 
-    GRAD_ACCUM_PARAMS is emitted with repr() and read back by ast.literal_eval
+    GRAD_PARAM_STATES is emitted with repr() and read back by ast.literal_eval
     (load) and exec (the driver), so a key is usable exactly when its repr is a
     literal that reads back EQUAL -- equality (and matching hash) rather than
     identity because that is all the driver's ``obj[key]`` lookup needs. An enum
@@ -1662,7 +1609,7 @@ def _grad_target_inputs(gm: torch.fx.GraphModule, n_inputs: int) -> set[int]:
     Dynamo lowers both ``Tensor.backward()`` and ``torch.autograd.grad`` to ONE in-graph
     ``torch.autograd.grad(loss, inputs)`` node, so that node's ``inputs`` list is exactly
     the set of leaves that can receive a ``.grad``. An unrecognized shape falls back to
-    every input: seeding more can only turn a silent wrong answer into a refusal.
+    every input: analyzing more can only turn a silent wrong answer into a refusal.
     """
     phs = list(gm.graph.find_nodes(op="placeholder"))
     if len(phs) != n_inputs:
@@ -1687,22 +1634,21 @@ def _grad_target_inputs(gm: torch.fx.GraphModule, n_inputs: int) -> set[int]:
 def _seed_grad_targets(
     gm: torch.fx.GraphModule, example_inputs: Sequence[object]
 ) -> list[torch.Tensor]:
-    """Give every tensor the traced backward differentiates a zero ``.grad`` if it has
-    none, so a re-capture bakes the ACCUMULATING form. Returns what was seeded.
+    """Give every tensor the traced backward differentiates a temporary zero ``.grad``
+    if it has none, so a diagnostic re-capture exposes the gradient inputs. Returns what
+    was seeded.
 
     Note [precompile dynamo training grad accumulation]
     Dynamo's backward rewrite SPECIALIZES on whether ``p.grad`` is None at trace time: with
     no grad it emits ``new = empty_like(p); new.copy_(g)`` and the bytecode ASSIGNS it; with
     a grad present it additionally emits ``p.grad.add_(new)``. torch.compile protects that
-    choice with a guard -- the precompile artifact checks no guards, so baking the assign
-    form silently OVERWRITES on the second call of a training loop where eager accumulates
-    (``p.grad += g``). So precompile always bakes the ACCUMULATE form and has the driver
-    materialize a zero ``.grad`` for a param the runtime model left at None; zero + accum
-    equals eager's assign on the first step, and equals eager on every step after.
+    choice with a guard. The diagnostic capture exposes every existing ``.grad`` as a
+    graph input so precompile can name the owning parameter and emit the equivalent
+    runtime state check. The artifact itself remains the original, unseeded capture.
 
     Seeding is driven by the GRAPH, not by the module walk, because the walk is the thing
     that can miss a param -- and a param the walk missed is precisely the one that would
-    silently bake the assign form. Seeding it makes its ``.grad`` a graph INPUT, which is
+    silently lose its state check. Seeding it makes its ``.grad`` a graph INPUT, which is
     what the attribution check in _param_grad_inputs can see and refuse. The seed is
     therefore not just a fixup, it is the ORACLE: whether the re-capture still bakes the
     assign form is exactly how precompile learns that fn nulls that ``.grad`` itself
@@ -1762,20 +1708,93 @@ def _dot_grad_graph_inputs(
     return found
 
 
+def _validate_grad_param_path(pos: int, path: _ModulePath, name: str) -> None:
+    for kind, acc in path:
+        if kind == "key" and not _representable_as_source(acc):
+            raise PrecompileError(
+                "precompile tracer='dynamo': fn's argument "
+                f"{pos} reaches the nn.Module owning parameter "
+                f"{name!r} through a dict keyed by {acc!r} (a "
+                f"{type(acc).__name__}). The artifact records that "
+                "path as source text, so the key has to be one whose "
+                "repr() is a Python literal that reads back equal -- "
+                "a str, int, bool, float, bytes, None, or a tuple of "
+                "those. Key the dict by the module's name instead, or "
+                "hold the modules in a list or an attribute."
+            )
+
+
+def _capture_guards_grad_outside_zero_grad(
+    capture_output: convert_frame.CaptureOutput,
+) -> bool:
+    """Whether user code observed ``.grad`` before clearing it.
+
+    A capture whose function clears gradients can legitimately have no gradient graph
+    inputs in its seeded diagnostic pass. That alone does not make the incoming state
+    irrelevant: user code may branch on ``p.grad`` before calling ``zero_grad``. Dynamo
+    records both cases as guards, but guards created inside PyTorch's ``zero_grad`` are
+    housekeeping rather than a user-visible observation.
+    """
+    from torch._dynamo.source import AttrSource, GradSource
+
+    guards = capture_output.graph_capture_output.output_graph.guards
+    for guard in guards:
+        source = guard.originating_source
+        is_grad = isinstance(source, GradSource) or (
+            isinstance(source, AttrSource) and source.member == "grad"
+        )
+        if not is_grad:
+            continue
+        user_stack = guard.user_stack or ()
+        inside_torch_zero_grad = any(
+            frame.name == "zero_grad" and "/torch/" in frame.filename.replace("\\", "/")
+            for frame in user_stack
+        )
+        if not inside_torch_zero_grad:
+            return True
+    return False
+
+
+def _seeded_grad_param_states(
+    fn: Callable[..., object],
+    args: tuple[object, ...],
+    seeded: Sequence[torch.Tensor],
+) -> list[tuple[int, list[tuple[str, object]], str, bool]]:
+    """Name seeded parameters whose incoming ``.grad`` was user-observable."""
+    target_ids = {id(t) for t in seeded}
+    found = []
+    covered = set()
+    for pos, path, module in _frame_modules(fn, args):
+        for name, p in module.named_parameters(remove_duplicate=False):
+            if id(p) not in target_ids:
+                continue
+            _validate_grad_param_path(pos, path, name)
+            found.append((pos, list(path), name, True))
+            covered.add(id(p))
+    if uncovered := target_ids - covered:
+        raise PrecompileError(
+            "precompile tracer='dynamo': fn observes an incoming .grad before "
+            "clearing gradients, but precompile cannot name "
+            f"{len(uncovered)} of the affected tensor(s) through an nn.Module "
+            "argument. Pass the owning module as an explicit argument."
+        )
+    return found
+
+
 def _param_grad_inputs(
     fn: Callable[..., object],
     args: tuple[object, ...],
     capture_output: convert_frame.CaptureOutput,
-) -> tuple[list[tuple[int, list[tuple[str, object]], str]], list[str], bool]:
-    """``(grad_accum_params, unattributed, any_grad_inputs)``.
+    initially_none: set[int],
+) -> tuple[list[tuple[int, list[tuple[str, object]], str, bool]], list[str], bool]:
+    """``(grad_param_states, unattributed, any_grad_inputs)``.
 
-    ``grad_accum_params`` names every param whose ``.grad`` the graph took as an INPUT, by
+    ``grad_param_states`` names every param whose ``.grad`` the graph took as an INPUT, by
     tensor IDENTITY (not by parsing Dynamo's mangled placeholder names), as ``(frame arg
-    index, path from that arg to the owning module, param name)``. ``unattributed`` is
-    every OTHER ``.grad`` graph input: the artifact will pass it to the graph, the only
-    mechanism for guaranteeing it exists at runtime is a GRAD_ACCUM_PARAMS entry, and we
-    could not write one -- so the caller refuses. Same loop builds both, so the check and
-    its remedy cannot drift apart.
+    index, path from that arg to the owning module, param name, expected_none)``.
+    ``unattributed`` is every OTHER ``.grad`` graph input: the artifact specializes on
+    that state but cannot validate it at runtime, so the caller refuses. Same loop builds
+    both, so the check and its remedy cannot drift apart.
     """
     bi = capture_output.backend_input
     example_inputs = list(bi.example_inputs) if bi is not None else []
@@ -1793,20 +1812,8 @@ def _param_grad_inputs(
                 # Checked here, on the paths actually EMITTED, rather than in
                 # the walk: a dict keyed by something unwritable is only a
                 # problem when a trained model turns out to live behind it.
-                for kind, acc in path:
-                    if kind == "key" and not _representable_as_source(acc):
-                        raise PrecompileError(
-                            "precompile tracer='dynamo': fn's argument "
-                            f"{pos} reaches the nn.Module owning parameter "
-                            f"{name!r} through a dict keyed by {acc!r} (a "
-                            f"{type(acc).__name__}). The artifact records that "
-                            "path as source text, so the key has to be one whose "
-                            "repr() is a Python literal that reads back equal -- "
-                            "a str, int, bool, float, bytes, None, or a tuple of "
-                            "those. Key the dict by the module's name instead, or "
-                            "hold the modules in a list or an attribute."
-                        )
-                found.append((pos, list(path), name))
+                _validate_grad_param_path(pos, path, name)
+                found.append((pos, list(path), name, id(p) in initially_none))
                 covered.add(id(p.grad))
     grad_inputs = _dot_grad_graph_inputs(example_inputs, sources)
     unattributed = [
@@ -1838,9 +1845,6 @@ def _decompose_subgraph(
     """
     from torch._dispatch.python import enable_python_dispatcher
     from torch._dynamo.utils import detect_fake_mode
-    from torch._dynamo.variables.torch_function import (
-        torch_function_mode_stack_state_mgr,
-    )
 
     # Take the mode off the fakes THEMSELVES rather than from BackendInput.fake_mode: the
     # two are distinct FakeTensorMode objects (they share a ShapeEnv), and running the ops
@@ -1863,18 +1867,7 @@ def _decompose_subgraph(
     # itself disappears) -- which is exactly the shape the make_fx tracer produces, and why
     # the caller re-derives ``trains`` from the returned graph rather than reusing its own.
     grad_cm = torch.enable_grad() if trains else torch.no_grad()
-    # With the caller's torch_function modes CLEARED. gm is torch-level Python that
-    # Dynamo already produced WITH those modes applied symbolically, so re-tracing it
-    # while they are live applies each of them a second time and bakes a
-    # doubly-transformed graph -- the same trap as the inductor lowering below, and
-    # just as silent, since the artifact then needs no mode to reproduce the wrong
-    # number.
-    with (
-        torch_function_mode_stack_state_mgr,
-        grad_cm,
-        fake_mode,
-        enable_python_dispatcher(),
-    ):
+    with grad_cm, fake_mode, enable_python_dispatcher():
         return make_fx(gm, decomposition_table=decompositions)(*fake_inputs)
 
 
@@ -1963,37 +1956,48 @@ def _capture_dynamo(
         ):
             return convert_frame.fullgraph_capture(fn, args, {})
 
-    grad_accum_params: list[tuple[int, list[tuple[str, object]], str]] = []
+    grad_param_states: list[tuple[int, list[tuple[str, object]], str, bool]] = []
     unattributed_grads: list[str] = []
     try:
         capture_output = _run_capture()
         bi = capture_output.backend_input
         trains = bi is not None and _graph_traces_autograd(bi.graph_module)
         if trains:
-            # Training: re-capture with a zero .grad on every tensor the traced backward
-            # differentiates that lacks one, so the ``.grad`` update is baked in its
-            # ACCUMULATING form (Note [precompile dynamo training grad accumulation]).
-            # Seeding needs the first capture's graph to know WHICH tensors those are,
-            # hence two passes; a model whose params already carry grads (a warm training
-            # loop) needs no seeding and skips the second pass. The seeds are recorded
-            # while still attached (that is what _param_grad_inputs matches on) and dropped
-            # in the finally -- the captured graph keeps its own reference, so the lowering
-            # below still sees them, and the caller's model is left exactly as it was.
+            # Training: a diagnostic re-capture temporarily supplies every missing
+            # ``.grad`` so the accumulating form exposes those tensors as graph inputs.
+            # That lets the driver name and validate their capture-time state. The first,
+            # unseeded capture is always the artifact, preserving any user branch on
+            # ``p.grad is None``. A warm capture needs no second pass.
             if bi is None:
                 raise AssertionError("a training capture always has a backend input")
             first_capture = capture_output
             seeded = _seed_grad_targets(bi.graph_module, bi.example_inputs)
+            initially_none = {id(p) for p in seeded}
             try:
                 if seeded:
                     capture_output = _run_capture()
-                grad_accum_params, unattributed_grads, any_grad_inputs = (
-                    _param_grad_inputs(fn, args, capture_output)
+                grad_param_states, unattributed_grads, any_grad_inputs = (
+                    _param_grad_inputs(fn, args, capture_output, initially_none)
                 )
+                if seeded:
+                    # The first capture is the only one that observed the caller's real
+                    # gradient state. The seeded capture exists solely to reveal which
+                    # parameters the accumulating form reads so the driver can validate
+                    # that state. Shipping it would silently change user branches on
+                    # ``p.grad is None`` before the backward.
+                    capture_output = first_capture
                 if seeded and not any_grad_inputs:
                     # The re-capture bakes no accumulate at all -- fn nulls .grad itself,
-                    # or only returns grads -- so the seeds bought nothing and only changed
-                    # what fn OBSERVED about .grad. Ship the unseeded capture.
-                    capture_output = first_capture
+                    # or only returns grads. A direct user observation BEFORE that reset
+                    # still specializes control flow, so preserve a fail-closed runtime
+                    # state check for the seeded parameters. Guards created inside
+                    # torch's zero_grad are only the reset implementation inspecting its
+                    # inputs and do not make the incoming state user-visible.
+                    grad_param_states = (
+                        _seeded_grad_param_states(fn, args, seeded)
+                        if _capture_guards_grad_outside_zero_grad(first_capture)
+                        else []
+                    )
             finally:
                 for p in seeded:
                     p.grad = None
@@ -2102,7 +2106,6 @@ def _capture_dynamo(
         *((runtime_env.kwdefaults or {}).values()),
     ]
     _reject_baked_tensors(used_globals, closure_contents, defaults)
-    _reject_ambient_mode_dependency(gco.bytecode)
 
     if trains:
         # Only PARAMETERS get a scattered gradient (invariant 5), mirroring the make_fx
@@ -2131,12 +2134,11 @@ def _capture_dynamo(
                 "precompile tracer='dynamo': fn's backward accumulates a gradient into "
                 f"{len(unattributed_grads)} tensor(s) that precompile cannot re-create at "
                 "runtime, because it could not find the nn.Module that owns them among "
-                f"fn's arguments: {unattributed_grads}. The artifact bakes "
-                "``p.grad.add_(new)``, so it must materialize a zero .grad for each one "
-                "before the call, and it can only do that for a parameter it can name; "
-                "baking the assign form instead would match eager on the first call and "
-                "silently OVERWRITE on every call after (Note [precompile dynamo training "
-                "grad accumulation]). precompile searches each argument (including the "
+                f"fn's arguments: {unattributed_grads}. The artifact specializes on "
+                "whether each of those gradients exists, but it can validate that state "
+                "only for a parameter it can name. Running without the check can silently "
+                "take a different captured branch or overwrite an accumulated gradient. "
+                "precompile searches each argument (including the "
                 "bound self of a method or nn.Module fn) through attributes, lists, tuples "
                 f"and dicts, at most {_MODULE_SEARCH_DEPTH} steps deep and "
                 f"{_MODULE_SEARCH_BUDGET} objects wide, then names parameters with "
@@ -2173,7 +2175,7 @@ def _capture_dynamo(
             gm = _decompose_subgraph(gm, fake_inputs, decompositions, trains)
             # Re-derive: re-tracing a training graph inlines its backward as plain ATen ops,
             # so the result no longer performs autograd itself and must be lowered / run the
-            # inference way (grad_accum_params still stands -- the .grad accumulation the
+            # inference way (grad_param_states still stands -- the .grad state the
             # inlined backward feeds is unchanged).
             trains = _graph_traces_autograd(gm)
             if dynamic:
@@ -2200,7 +2202,7 @@ def _capture_dynamo(
         example_inputs=example_inputs,
         dynamic=dynamic,
         trains=trains,
-        grad_accum_params=grad_accum_params,
+        grad_param_states=grad_param_states,
     )
 
 
@@ -2372,7 +2374,7 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
             "TRACER",
             "BACKEND_ID",
             "IMPORT_SOURCES",
-            "GRAD_ACCUM_PARAMS",
+            "GRAD_PARAM_STATES",
             "_DYNAMO_CODE",
             "_DYNAMO_STATE",
         }
@@ -2634,17 +2636,11 @@ def _build_dynamo_metadata_section(compiled: PrecompiledModule) -> list[str]:
         "TRACER = 'dynamo'",
         f"BACKEND_ID = {capture.backend_id!r}",
         f"IMPORT_SOURCES = {capture.import_sources!r}",
-        # Training only: (positional arg index of the owning module, param name) for every
-        # param the captured backward accumulates a gradient into. Empty for a forward
-        # capture. The driver materializes a zero .grad for any of these the runtime model
-        # left at None, which is what makes the baked accumulate form match eager on the
-        # first step too (Note [precompile dynamo training grad accumulation]).
-        f"GRAD_ACCUM_PARAMS = {capture.grad_accum_params!r}",
-        # The marshalled bytecode below is CPython-version specific. marshal only
-        # REJECTS a foreign blob across the 3.10/3.11 layout change; between 3.11
-        # and 3.14 it loads happily and the resulting code object segfaults when
-        # called, so the version has to be written down and checked explicitly.
-        f"_DYNAMO_PYTHON_VERSION = {tuple(sys.version_info[:2])!r}",
+        # Training only: (positional arg index, path, parameter name, expected_none) for
+        # every parameter whose captured backward specializes on its incoming .grad.
+        # The driver validates the state before user code so the artifact preserves
+        # capture-time ``p.grad is None`` branches instead of silently normalizing them.
+        f"GRAD_PARAM_STATES = {capture.grad_param_states!r}",
         f"_DYNAMO_CODE = {code_blob!r}",
         f"_DYNAMO_STATE = {state_blob!r}",
         "",
