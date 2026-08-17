@@ -86,8 +86,6 @@ if not torch.backends.mps.is_available():
     TestCase = NoTest
     NNTestCase = NoTest
 
-total_memory = int(subprocess.check_output(["sysctl", "-n", "hw.memsize"]))
-
 MPS_UNSUPPORTED_TYPES = [torch.double, torch.cdouble]
 MPS_DTYPES = [t for t in get_all_dtypes() if t not in MPS_UNSUPPORTED_TYPES]
 
@@ -4668,21 +4666,14 @@ class TestMPS(TestCaseMPS):
                 # TODO: enable memory format test
                 # self.assertEqual(cpu_result.is_contiguous(), mps_result.is_contiguous())
 
-    # Skip if a test needs more memory than the system has.
-    def _skip_if_exceeds_total_memory(self, required_memory):
-        if total_memory < required_memory:
-            self.skipTest(
-                f"Needs {required_memory / (1024**3):0.01f} GiB RAM, "
-                f"but only {total_memory / (1024**3):0.01f} GiB is available.")
-
     @parametrize("dtype", MPS_DTYPES)
+    @largeTensorTest(
+        lambda self, dtype: 1.01 * 2 * (11 + (1 << 31)) * dtype.itemsize,
+        device="mps",
+    )
     def test_cat_large_tensor(self, dtype):
         a_shape = (1, 11 + (1 << 31), 1)
         b_shape = (1, 100, 1)
-
-        # Assume up to 1% extra overhead memory might be required.
-        required_memory = 1.01 * (math.prod(a_shape) + math.prod(a_shape)) * dtype.itemsize
-        self._skip_if_exceeds_total_memory(required_memory)
 
         a_cpu = make_tensor((1,), dtype=dtype, device='cpu').expand(a_shape)
         b_cpu = make_tensor(b_shape, dtype=dtype, device='cpu')
@@ -4717,12 +4708,9 @@ class TestMPS(TestCaseMPS):
         self.assertEqual(r_mps[:, -200:, :], r_cpu_part1)
         self.assertEqual(r_mps[:, :200, :], r_cpu_part2)
 
+    @largeTensorTest("9GB", device="mps")
     def test_large_tensor_to_string(self):
         shape = (2, 1 << 31)
-
-        # Assume up to 1% extra overhead memory might be required.
-        required_memory = 1.01 * 2 * math.prod(shape)
-        self._skip_if_exceeds_total_memory(required_memory)
 
         self.assertEqual(
             str(torch.ones(shape, dtype=torch.int8, device='mps')),
@@ -4740,10 +4728,9 @@ class TestMPS(TestCaseMPS):
     # max view offset is 8 * 2^29 + 1 * 2^28 = 2^32 + 2^28.
     _OVERFLOW_SHAPE = (9, 1, 2, 1, 1 << 28)  # uint8, 4.5 GiB
 
+    @largeTensorTest("10GB", device="mps")
     def test_copy_strided_scatter_offset_overflow_n(self):
         shape = self._OVERFLOW_SHAPE
-        required_memory = 1.05 * 2 * math.prod(shape)
-        self._skip_if_exceeds_total_memory(required_memory)
 
         x_cpu = torch.zeros(shape, dtype=torch.uint8)
         x_mps = x_cpu.to('mps')
@@ -4756,10 +4743,9 @@ class TestMPS(TestCaseMPS):
 
         self.assertEqual(x_mps.cpu(), x_cpu)
 
+    @largeTensorTest("10GB", device="mps")
     def test_copy_strided_gather_offset_overflow_n(self):
         shape = self._OVERFLOW_SHAPE
-        required_memory = 1.05 * 2 * math.prod(shape)
-        self._skip_if_exceeds_total_memory(required_memory)
 
         x_cpu = torch.zeros(shape, dtype=torch.uint8)
         markers = torch.arange(1, 19, dtype=torch.uint8).view(shape[0], 1, shape[2], 1, 1)
@@ -8696,7 +8682,7 @@ class TestMPS(TestCaseMPS):
         # Test bfloat16 mm
         compare_mm(1024, 1, 32769, torch.bfloat16)
 
-    @unittest.skipIf(total_memory < 12_000_000_000, "Needs at least 12Gb RAM to run the test")
+    @largeTensorTest("12GB", device="mps")
     @unittest.skipIf(IS_CI, "May be fixes https://github.com/pytorch/pytorch/issues/149999")
     def test_copy_large(self):
         """ Test that copy of 4Gb+ tensors works """
@@ -12106,11 +12092,11 @@ class TestLinalgMPS(TestCaseMPS):
         rhs = torch.empty((7, 5), dtype=torch.int8, device="mps")
 
         error_cases = [
-            ("Expected self to be of dimension 2", lambda: torch._int_mm(lhs[0], rhs)),
-            ("Expected mat2 to be of dimension 2",
+            ("self must be a matrix", lambda: torch._int_mm(lhs[0], rhs)),
+            ("mat2 must be a matrix",
              lambda: torch._int_mm(
                  lhs, rhs[:, 0], out=torch.empty((3, 5), dtype=torch.int32, device="mps"))),
-            (r"self.size\(1\) needs to match mat2.size\(0\)",
+            (r"mat1 and mat2 shapes cannot be multiplied \(3x7 and 6x5\)",
              lambda: torch._int_mm(lhs, torch.empty((6, 5), dtype=torch.int8, device="mps"))),
             ("Expected self dtype to be int8 or uint8", lambda: torch._int_mm(lhs.float(), rhs)),
             ("Expected mat2 dtype to be of type int8", lambda: torch._int_mm(lhs, rhs.to(torch.uint8))),

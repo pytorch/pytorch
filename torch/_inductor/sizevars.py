@@ -281,11 +281,44 @@ class SizeVarAllocator:
         # (inv_precomputed_replacements).
         self.precomputed_replacements: dict[Expr, sympy.Symbol] = {}
         self.inv_precomputed_replacements: dict[sympy.Symbol, Expr] = {}
-        # optimization_hint is called with the same expression repeatedly
-        # while lowering (on one model, 76k calls over 388 distinct
-        # expressions) and each miss runs sympy substitution plus heuristics,
-        # none of which sympy caches. _lru_cache drops the cache whenever
-        # replacements change.
+        # Note [sizevars query caches]
+        # Lowering and scheduling ask the same symbolic questions thousands of
+        # times, and sympy caches none of it.  The cache has to sit above the
+        # sympy relational, not below: constructing a relational evaluates it,
+        # which drags in assumption queries, so by the time
+        # statically_known_true is reached the cost is already paid.
+        #
+        # Two different invalidation rules apply, and picking the wrong one is
+        # a correctness bug rather than a slowdown:
+        #
+        # - _lru_cache watches len(self.replacements) only.  That is enough for
+        #   a substitution (simplify) or a heuristic (optimization_hint), where
+        #   a stale answer costs an optimization at worst.
+        # - _deduction_lru_cache also watches the ShapeEnv's deductive state.
+        #   Use it for anything answering "is this provably true", because such
+        #   an answer changes as the ShapeEnv learns and unlearns facts.
+        #
+        # Call counts below are from one model's cold compile.
+
+        # 19901 calls, 296 distinct, ~17us each.
+        self._statically_known_true_cache = self._deduction_lru_cache(
+            self._statically_known_true_uncached
+        )
+        # Built lazily: importing .utils at construction time would cycle.
+        self._expr_fits_within_32bit_cache: Callable[[Expr], bool] | None = None
+        # Asked repeatedly about the same pair while splitting iteration
+        # ranges: 9954 calls, 161 distinct, ~67us each because the structural
+        # walk falls back to building sympy.Eq(Mod(...), 0) and evaluating it.
+        self._is_multiple_of_cache = self._deduction_lru_cache(self._is_multiple_of)
+        # 93k calls, 1373 distinct.  A pure substitution, so replacements are
+        # the only input.
+        self._simplify_cache = self._lru_cache(self._simplify_uncached)
+        # A quarter of all lowering time: 31k calls, a few hundred distinct.
+        self._statically_known_equals_cache = self._deduction_lru_cache(
+            self._statically_known_equals_uncached
+        )
+        # 76k calls, 388 distinct; each miss runs sympy substitution plus
+        # heuristics.
         self._optimization_hint_cache = self._lru_cache(
             self._optimization_hint_uncached
         )
@@ -294,6 +327,19 @@ class SizeVarAllocator:
         self._simplify_loops = self.make_simplify_loops_cache()
 
     def simplify(self, expr: Expr):
+        # 82% of the expressions handed to us on one model are a bare Integer or
+        # a bare Symbol, and for those the general path is all overhead: expand()
+        # rebuilds the tree and xreplace() walks it. An Integer has no symbols to
+        # replace, and for a Symbol xreplace is exactly a dict lookup - note
+        # replacements are applied *after* expand, so a substituted value is not
+        # re-expanded either way.
+        if isinstance(expr, sympy.Integer):
+            return expr
+        if isinstance(expr, sympy.Symbol):
+            return self.replacements.get(expr, expr)  # type: ignore[return-value]
+        return self._simplify_cache(expr)
+
+    def _simplify_uncached(self, expr: Expr) -> Expr:
         return sympy.expand(expr).xreplace(self.replacements)
 
     def make_simplify_with_ranges_cache(self) -> Callable[[Expr, VarRanges], Expr]:
@@ -543,17 +589,62 @@ class SizeVarAllocator:
     # asked questions can be answered without guarding otherwise they return False.
     # Those are similar to statically_known_true in symbolic_shapes.py but operate on sympy
     # expressions instead of symnodes.
+    def expr_fits_within_32bit(self, e: Expr) -> bool:
+        """Memoized expr_fits_within_32bit; see torch._inductor.utils.
+
+        The query runs statically_known_true against int32 max and may fall back
+        to hints, ~265us a call, and the same expressions are asked about over
+        and over while deciding index dtypes: 1573 calls covering 70 distinct
+        expressions on one model. Caching is conservative in the right
+        direction: ranges only narrow as a compile proceeds, so an expression
+        that provably fitted still fits, and a stale negative only costs a
+        missed 32-bit indexing opportunity.
+        """
+        cache = self._expr_fits_within_32bit_cache
+        if cache is None:
+            from .utils import expr_fits_within_32bit_uncached
+
+            # Soundness query - it decides index width - so it must also
+            # follow the ShapeEnv's deductive state.
+            cache = self._expr_fits_within_32bit_cache = self._deduction_lru_cache(
+                expr_fits_within_32bit_uncached
+            )
+        return cache(e)
+
     def statically_known_true(self, expr: sympy.Basic | bool) -> bool:
         """
         Returns true if an expression is always true (symbolically or via guards),
         false otherwise. Never add guards, or throw data dependent errors.
         """
+        if expr is True or expr is False:
+            return bool(expr)
+        return self._statically_known_true_cache(expr)
+
+    def _statically_known_true_uncached(self, expr: sympy.Basic | bool) -> bool:
         return statically_known_true(self.shape_env, expr)
+
+    # Note [sizevars integer fast paths]
+    # Most of these comparisons are between two already-concrete sizes: 16795
+    # of 30903 equality queries and 5645 of 7238 greater-than queries on one
+    # model.  Answering those in Python skips both the sympy relational, whose
+    # construction eagerly evaluates and queries assumptions, and the cache
+    # machinery above it.  `type(x) is int` rather than isinstance because
+    # sympy.Integer and bool must keep taking the general path.
 
     def statically_known_equals(self, left: Expr | int, right: Expr | int) -> bool:
         """
         Returns a bool indicating if it is sound to optimize as if left and right are equal.
         """
+        # Over half of all calls compare two concrete sizes, where the answer
+        # needs neither sympy nor a cache lookup.  See Note [sizevars integer
+        # fast paths].
+        if type(left) is int and type(right) is int:
+            return left == right
+        return self._statically_known_equals_cache(left, right)
+
+    def _statically_known_equals_uncached(
+        self, left: Expr | int, right: Expr | int
+    ) -> bool:
         return self.statically_known_true(sympy.Eq(left, right))  # type: ignore[arg-type]
 
     def statically_known_list_equals(
@@ -570,29 +661,33 @@ class SizeVarAllocator:
         """
         Returns a bool indicating if it is sound to optimize as if left is less than or equal to right.
         """
-        expr = left <= right
-        return self.statically_known_true(expr)
+        if type(left) is int and type(right) is int:
+            return left <= right
+        return self.statically_known_true(left <= right)
 
     def statically_known_geq(self, left: Expr, right: Expr | int) -> bool:
         """
         Returns a bool indicating if it is sound to optimize as if left is greater than or equal to right.
         """
-        expr = left >= right
-        return self.statically_known_true(expr)
+        if type(left) is int and type(right) is int:
+            return left >= right
+        return self.statically_known_true(left >= right)
 
     def statically_known_lt(self, left: Expr, right: Expr | int) -> bool:
         """
         Returns a bool indicating if it is sound to optimize as if left is less than right.
         """
-        expr = left < right
-        return self.statically_known_true(expr)
+        if type(left) is int and type(right) is int:
+            return left < right
+        return self.statically_known_true(left < right)
 
     def statically_known_gt(self, left: Expr, right: Expr | int) -> bool:
         """
         Returns a bool indicating if it is sound to optimize as if left is greater than right.
         """
-        expr = left > right
-        return self.statically_known_true(expr)
+        if type(left) is int and type(right) is int:
+            return left > right
+        return self.statically_known_true(left > right)
 
     def _is_multiple_of(self, numerator: Expr, denominator: int) -> bool:
         """
@@ -661,7 +756,7 @@ class SizeVarAllocator:
             return True
 
         if isinstance(denominator, (int, sympy.Integer)):
-            return self._is_multiple_of(numerator, int(denominator))
+            return self._is_multiple_of_cache(numerator, int(denominator))
 
         if numerator == 0:
             return True
@@ -1239,6 +1334,39 @@ class SizeVarAllocator:
             nonlocal prior_len
             if prior_len != len(self.replacements):
                 prior_len = len(self.replacements)
+                fn_cache.cache_clear()
+            return fn_cache(*args, **kwargs)
+
+        return wrapper
+
+    def _deduction_state(self) -> tuple[int, ...]:
+        """State that a "is this provably true" answer depends on.
+
+        ShapeEnv._version_counter summarises replacements, divisible and
+        deferred runtime asserts.  It deliberately excludes axioms, because
+        ShapeEnv's own caches take axioms as an explicit key argument instead -
+        so a cache sitting above that layer has to watch them itself.  Without
+        that, adding an axiom would not make a newly provable fact visible, and
+        _add_axioms popping what it pushed would leave an answer that was only
+        true inside that scope.
+        """
+        shape_env = self.shape_env
+        return (shape_env._version_counter, len(shape_env.axioms))
+
+    def _deduction_lru_cache(self, fn, maxsize=None):
+        """lru_cache that clears whenever the ShapeEnv's deductive state moves.
+
+        See Note [sizevars query caches] for when to use this over _lru_cache.
+        """
+        fn_cache = functools.lru_cache(maxsize)(fn)
+        prior: tuple[int, ...] | None = None
+
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            nonlocal prior
+            state = self._deduction_state()
+            if prior != state:
+                prior = state
                 fn_cache.cache_clear()
             return fn_cache(*args, **kwargs)
 
