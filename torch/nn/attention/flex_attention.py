@@ -137,7 +137,7 @@ __all__ = [
 
 _score_mod_signature = Callable[[Tensor, Tensor, Tensor, Tensor, Tensor], Tensor]
 _mask_mod_signature = Callable[[Tensor, Tensor, Tensor, Tensor], Tensor]
-_Backend: TypeAlias = Literal["AUTO", "TRITON", "FLASH", "TRITON_DECODE"]
+_Backend: TypeAlias = Literal["AUTO", "TRITON", "FLASH", "FLYDSL", "TRITON_DECODE"]
 _R = TypeVar("_R")
 
 
