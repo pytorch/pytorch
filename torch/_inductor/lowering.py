@@ -1714,6 +1714,9 @@ def slice_(x, dim=0, start=0, end=sys.maxsize, step=1, clamp=True):
     if x.maybe_get_layout() is None:
         # realize tensor before accessing layout
         x.realize()
+    # the strides/offset read below are persisted into DynamicSelectStorageOffset
+    # and the as_strided view, so the layout must be frozen first
+    ir.freeze_storage_layout(x)
     stride = x.maybe_get_stride()
 
     if start_index is not None:
@@ -2572,8 +2575,9 @@ def select(x, dim, idx):
             # we use as_strided instead.
             # Removing this branch will cause test_unbacked_select_index_with_check to fail.
 
-            # before accessing size, stride, and offset we need to realize.
+            # freeze: strides/offset are persisted into the as_strided view
             x.realize()
+            ir.freeze_storage_layout(x)
             new_size = x.get_size()
             new_stride = x.get_stride()
             new_storage_offset = x.get_layout().offset + new_stride[dim] * actual_index
@@ -2605,8 +2609,10 @@ def select(x, dim, idx):
         raise AssertionError(unbacked_bindings)
     unbacked_offset_sym, _ = next(iter(unbacked_bindings.items()))
 
-    # before accessing size, stride, and offset we need to realize.
+    # freeze: strides/offset are persisted into DynamicSelectStorageOffset
+    # and the as_strided view
     x.realize()
+    ir.freeze_storage_layout(x)
     new_size = x.get_size()
     new_stride = x.get_stride()
     new_storage_offset = unbacked_offset_sym
@@ -3246,9 +3252,12 @@ def inductor_randint(
     )
 
 
+# The bucketize helpers below run inside a consumer's inner_fn, which is
+# re-traced at codegen after all layouts are frozen; pre-freeze evaluations
+# only feed op counting and read-name collection, so stride hints are sound.
 def _boundaries_helper(tb: TensorBox) -> tuple[str, sympy.Expr, sympy.Expr, sympy.Expr]:
     size = tb.get_size()
-    stride = tb.get_stride()
+    stride = tb.get_stride_hint()
     return (
         tb.get_name(),
         size[-1],
@@ -3264,13 +3273,13 @@ def _realize_bucketize_lookup_tensor(tb: TensorBox) -> TensorBox:
 
 
 def _sorter_helper(tb: TensorBox) -> tuple[str, sympy.Expr]:
-    return tb.get_name(), tb.get_stride()[-1]
+    return tb.get_name(), tb.get_stride_hint()[-1]
 
 
 def _bucketize_indices(
     tb: TensorBox, index: Sequence[sympy.Expr], index_dtype: torch.dtype
 ) -> Any:
-    strides = tb.get_stride()
+    strides = tb.get_stride_hint()
     flattened_index = tb.get_layout().offset + sum(
         (s * i for s, i in zip(strides[:-1], index[:-1])), sympy.S.Zero
     )
@@ -4025,27 +4034,6 @@ def clone(x, *, memory_format=None):
 def _realize_as_pinned(result):
     result.realize()
     result.data.data.get_layout().is_pinned = True
-
-
-def clone_preserve_reinterpret_view(x):
-    reinterpret_view_layouts = []
-    if isinstance(x, TensorBox) and isinstance(x.data, ir.ReinterpretView):
-        x = x.data  # unwrap TensorBox
-        # pyrefly: ignore [bad-assignment]
-        while isinstance(x, ir.ReinterpretView):
-            reinterpret_view_layouts.append(x.get_layout())
-            x = x.data
-        x = TensorBox(x)
-
-    x = clone(x)
-
-    if reinterpret_view_layouts:
-        x = x.data  # unwrap TensorBox
-        for layout in reinterpret_view_layouts[::-1]:
-            x = ir.ReinterpretView(data=x, layout=layout)
-        x = TensorBox(x)
-
-    return x
 
 
 def lift_fresh_copy(x):

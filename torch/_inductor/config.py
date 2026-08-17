@@ -1619,6 +1619,16 @@ padding_alignment_bytes = 128
 # (baseline: 71.09ms, padding w/o this change: 77.38ms, padding with this change: 67.77ms)
 padding_stride_threshold = 1024
 
+# Raise when FlexibleLayout.stride is read directly. The strides of an
+# unfrozen flexible layout are provisional: freezing may reorder or pad them,
+# so a read that outlives the freeze silently produces wrong results (see
+# https://github.com/pytorch/pytorch/pull/192575). Code that persists strides
+# must freeze first (as_storage_and_layout); heuristics that tolerate stale
+# values should read Layout.stride_hint() instead.
+strict_flexible_layout_strides = (
+    os.environ.get("TORCHINDUCTOR_STRICT_FLEXIBLE_LAYOUT_STRIDES", "0") == "1"
+)
+
 # Enable padding outputs, even if they would not be padded in eager mode.
 # By default, we use the same strides as eager mode.
 pad_outputs = False

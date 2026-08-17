@@ -1180,6 +1180,11 @@ def register_onednn_fusion_ops():
                 *_, layout, x, packed_weight, x2 = mm_args(
                     x, packed_weight, x2, layout=layout, out_dtype=output_dtype
                 )
+                if binary_attr == "sum":
+                    # The chosen kernel updates x2 in place and result may be
+                    # re-labeled as a view of x2 below, so x2's layout must not
+                    # change after this point.
+                    ir.as_storage_and_layout(x2)
                 if (
                     isinstance(
                         ir.InputsKernel.unwrap_storage_for_input(x_zp),

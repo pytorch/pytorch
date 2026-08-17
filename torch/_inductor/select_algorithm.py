@@ -6184,7 +6184,8 @@ def should_use_layout_constraints(node):
 def get_strides_with_layout_constraints(node):
     if should_use_layout_constraints(node):
         return V.graph.buffer_layout_constraints[node.get_name()].stride
-    return node.get_stride()
+    # only used for benchmark input generation and logging, so a hint is fine
+    return node.get_stride_hint()
 
 
 class SymbolicGridFn:

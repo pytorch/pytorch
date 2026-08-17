@@ -2622,7 +2622,7 @@ def use_cpp_bmm_template(
     # But the 2D matrix within each batch can still be contiguous, allowing us to apply max autotune.
     # So here we specifically check for contiguity within the 2D matrix of each batch.
     mat1_size = mat1.layout.size
-    mat1_stride = mat1.layout.stride
+    mat1_stride = mat1.layout.stride_hint()
     mat1_each_batch_is_contiguous = (
         _use_template_for_cpu(layout)
         and mat1.get_dtype() == torch.float32
