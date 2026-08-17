@@ -650,38 +650,33 @@ void ProcessGroupNCCL::deregister_address(
   memoryRegistrationHandles_.erase(it);
 }
 
-#if defined(USE_ROCM)
-bool ProcessGroupNCCL::isWindowRegistrationSegment(const void* ptr) {
-  std::lock_guard<std::mutex> lock(memory_registration_mutex_);
+ProcessGroupNCCL::RegistrationMap::iterator ProcessGroupNCCL::
+    findContainingRegistrationLocked(const void* ptr) {
   const auto target = reinterpret_cast<uintptr_t>(ptr);
+  // memoryRegistrationHandles_ is sorted by base address. upper_bound + step
+  // back finds the segment whose base is less than or equal to target.
   auto it = memoryRegistrationHandles_.upper_bound(ptr);
   if (it == memoryRegistrationHandles_.begin()) {
-    return false;
+    return memoryRegistrationHandles_.end();
   }
   --it;
   const auto base = reinterpret_cast<uintptr_t>(it->first);
   if (target < base || target - base >= it->second.len) {
-    return false;
+    return memoryRegistrationHandles_.end();
   }
-  return isNcclAllocatorSegment(it->first, it->second.len);
+  return it;
 }
-#endif
 
 std::pair<ncclWindow_t, size_t> ProcessGroupNCCL::lookupSegmentWindow(
     const void* ptr) {
   std::lock_guard<std::mutex> lock(memory_registration_mutex_);
+  auto it = findContainingRegistrationLocked(ptr);
+  if (it == memoryRegistrationHandles_.end() ||
+      it->second.winHandle == nullptr) {
+    return {nullptr, 0};
+  }
   const auto target = reinterpret_cast<uintptr_t>(ptr);
-  // memoryRegistrationHandles_ is sorted by base address; upper_bound + step
-  // back finds the segment whose base <= target.
-  auto it = memoryRegistrationHandles_.upper_bound(ptr);
-  if (it == memoryRegistrationHandles_.begin()) {
-    return {nullptr, 0};
-  }
-  --it;
   const auto base = reinterpret_cast<uintptr_t>(it->first);
-  if (target >= base + it->second.len || it->second.winHandle == nullptr) {
-    return {nullptr, 0};
-  }
   return {it->second.winHandle, target - base};
 }
 
@@ -690,16 +685,20 @@ ncclResult_t ProcessGroupNCCL::ensureSegmentWindow(const void* ptr) {
     return ncclInvalidUsage;
   }
   std::lock_guard<std::mutex> lock(memory_registration_mutex_);
-  const auto target = reinterpret_cast<uintptr_t>(ptr);
-  auto it = memoryRegistrationHandles_.upper_bound(ptr);
-  if (it == memoryRegistrationHandles_.begin()) {
+  auto it = findContainingRegistrationLocked(ptr);
+  if (it == memoryRegistrationHandles_.end()) {
     return ncclInvalidArgument;
   }
-  --it;
-  const auto base = reinterpret_cast<uintptr_t>(it->first);
-  if (target >= base + it->second.len) {
+#if defined(USE_ROCM)
+  // RCCL can create host-RMA windows for ordinary HIP allocations. Enforce the
+  // NCCL2 allocator contract for every path that creates a window. Return
+  // ncclInvalidArgument because registerMemPool reserves ncclInvalidUsage for
+  // unavailable transports and keeps those segments registered as plain
+  // buffers.
+  if (!isNcclAllocatorSegment(it->first, it->second.len)) {
     return ncclInvalidArgument;
   }
+#endif
   if (it->second.winHandle != nullptr) {
     return ncclSuccess;
   }
