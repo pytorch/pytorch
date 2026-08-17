@@ -9,41 +9,52 @@ from torch._inductor.utils import is_linux, try_import_ck_lib
 log = logging.getLogger(__name__)
 
 
-def _rocm_include_paths(dst_file_ext: str) -> list[str]:
+def _rocm_system_include_dir(rocm_home: str | None = None) -> str:
     from torch.utils import cpp_extension
 
-    rocm_include = (
-        os.path.join(config.rocm.rocm_home, "include")
-        if config.rocm.rocm_home
-        else cpp_extension._join_rocm_home("include")
-    )
+    if rocm_home:
+        return os.path.join(rocm_home, "include")
+    if config.rocm.rocm_home:
+        return os.path.join(config.rocm.rocm_home, "include")
+    return cpp_extension._join_rocm_home("include")
+
+
+def _ck_dir() -> str:
+    from torch.utils import cpp_extension
 
     if config.is_fbcode():
         from libfb.py import parutil
 
-        ck_path = parutil.get_dir_path("composable-kernel-headers")
-    else:
-        if not config.rocm.ck_dir:
-            ck_dir, _, _, _ = try_import_ck_lib()
-            if not ck_dir:
-                log.warning("Unspecified Composable Kernel directory")
-            config.rocm.ck_dir = ck_dir
-        ck_path = config.rocm.ck_dir or cpp_extension._join_rocm_home(
-            "composable_kernel"
-        )
+        return parutil.get_dir_path("composable-kernel-headers")
 
+    if not config.rocm.ck_dir:
+        ck_dir, _, _, _ = try_import_ck_lib()
+        if not ck_dir:
+            log.warning("Unspecified Composable Kernel directory")
+        config.rocm.ck_dir = ck_dir
+    return config.rocm.ck_dir or cpp_extension._join_rocm_home("composable_kernel")
+
+
+def _rocm_header_search_dirs(
+    rocm_home: str | None = None, ck_dir: str | None = None
+) -> list[str]:
+    # CK has to take priority over ROCm since CK is potentially more up-to-date.
+    ck_path = ck_dir or _ck_dir()
     log.debug("Using ck path %s", ck_path)
-
-    ck_include = os.path.join(ck_path, "include")
-    ck_library_include = os.path.join(ck_path, "library", "include")
-
-    # CK has to take priority over ROCm include paths
-    # Since CK is potentially more up-to-date
-    paths = [
-        os.path.realpath(p) for p in (ck_include, ck_library_include, rocm_include)
+    return [
+        os.path.realpath(p)
+        for p in (
+            os.path.join(ck_path, "include"),
+            os.path.join(ck_path, "library", "include"),
+            _rocm_system_include_dir(rocm_home),
+        )
     ]
+
+
+def _rocm_include_paths(dst_file_ext: str) -> list[str]:
+    paths = _rocm_header_search_dirs()
     if dst_file_ext == "exe":
-        ck_utility_include = os.path.join(ck_path, "library", "src", "utility")
+        ck_utility_include = os.path.join(_ck_dir(), "library", "src", "utility")
         paths.append(os.path.realpath(ck_utility_include))
     return paths
 
