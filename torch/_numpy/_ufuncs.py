@@ -1,6 +1,6 @@
-from __future__ import annotations
+# mypy: ignore-errors
 
-import typing
+from __future__ import annotations
 
 import torch
 
@@ -16,17 +16,7 @@ from ._normalizations import (
 )
 
 
-# TYPE_CHECKING is referenced via `typing.` so it is not a module-level name that
-# `from ._ufuncs import *` (whose __all__ is built dynamically) would re-export.
-if typing.TYPE_CHECKING:
-    from collections.abc import Callable
-
-    from ._ndarray import ndarray
-
-
-def _ufunc_postprocess(
-    result: torch.Tensor, out: ndarray | None, casting: CastingModes
-) -> torch.Tensor:
+def _ufunc_postprocess(result, out, casting):
     if out is not None:
         result = _util.typecast_tensor(result, out.dtype.torch_dtype, casting)
         result = torch.broadcast_to(result, out.shape)
@@ -72,9 +62,7 @@ NEP50_FUNCS = (
 )
 
 
-def deco_binary_ufunc(
-    torch_func: Callable[..., torch.Tensor],
-) -> Callable[..., object]:
+def deco_binary_ufunc(torch_func):
     """Common infra for binary ufuncs.
 
     Normalize arguments, sort out type casting, broadcasting and delegate to
@@ -89,18 +77,16 @@ def deco_binary_ufunc(
         out: OutArray | None = None,
         *,
         where: NotImplementedType = True,
-        casting: CastingModes = "same_kind",
+        casting: CastingModes | None = "same_kind",
         order: NotImplementedType = "K",
         dtype: DTypeLike | None = None,
         subok: NotImplementedType = False,
         signature: NotImplementedType = None,
         extobj: NotImplementedType = None,
-    ) -> torch.Tensor:
+    ):
         if dtype is not None:
 
-            def cast(
-                x: torch.Tensor | bool | int | float | complex, dtype: torch.dtype
-            ) -> torch.Tensor:
+            def cast(x, dtype):
                 if isinstance(x, torch.Tensor):
                     return _util.typecast_tensor(x, dtype, casting)
                 else:
@@ -137,7 +123,7 @@ def matmul(
     /,
     out: OutArray | None = None,
     *,
-    casting: CastingModes = "same_kind",
+    casting: CastingModes | None = "same_kind",
     order: NotImplementedType = "K",
     dtype: DTypeLike | None = None,
     subok: NotImplementedType = False,
@@ -145,7 +131,7 @@ def matmul(
     extobj: NotImplementedType = None,
     axes: NotImplementedType = None,
     axis: NotImplementedType = None,
-) -> torch.Tensor:
+):
     if dtype is None:
         dtype = _dtypes_impl.result_type_impl(x1, x2)
     x1, x2 = _util.typecast_tensors((x1, x2), dtype, casting)
@@ -165,13 +151,13 @@ def ldexp(
     out: OutArray | None = None,
     *,
     where: NotImplementedType = True,
-    casting: CastingModes = "same_kind",
+    casting: CastingModes | None = "same_kind",
     order: NotImplementedType = "K",
     dtype: DTypeLike | None = None,
     subok: NotImplementedType = False,
     signature: NotImplementedType = None,
     extobj: NotImplementedType = None,
-) -> torch.Tensor:
+):
     if dtype is not None:
         if isinstance(x1, torch.Tensor):
             x1 = _util.typecast_tensor(x1, dtype, casting)
@@ -207,13 +193,13 @@ def divmod(
     out: tuple[OutArray | None, OutArray | None] = (None, None),
     *,
     where: NotImplementedType = True,
-    casting: CastingModes = "same_kind",
+    casting: CastingModes | None = "same_kind",
     order: NotImplementedType = "K",
     dtype: DTypeLike | None = None,
     subok: NotImplementedType = False,
     signature: NotImplementedType = None,
     extobj: NotImplementedType = None,
-) -> tuple[torch.Tensor, torch.Tensor]:
+):
     # make sure we either have no out arrays at all, or there is either
     # out1, out2, or out=tuple, but not both
     num_outs = sum(x is not None for x in [out1, out2])
@@ -247,11 +233,8 @@ for name in _binary:
     vars()[name] = deco_binary_ufunc(ufunc)
 
 
-def modf(
-    x: object, /, *args: object, **kwds: object
-) -> tuple[torch.Tensor, torch.Tensor]:
-    # divmod is @normalizer-decorated, so it accepts raw array-likes/scalars.
-    quot, rem = divmod(x, 1, *args, **kwds)  # pyrefly: ignore[bad-argument-type]
+def modf(x, /, *args, **kwds):
+    quot, rem = divmod(x, 1, *args, **kwds)
     return rem, quot
 
 
@@ -301,9 +284,7 @@ _fp_unary = [
 ]
 
 
-def deco_unary_ufunc(
-    torch_func: Callable[..., torch.Tensor],
-) -> Callable[..., object]:
+def deco_unary_ufunc(torch_func):
     """Common infra for unary ufuncs.
 
     Normalize arguments, sort out type casting, broadcasting and delegate to
@@ -316,14 +297,14 @@ def deco_unary_ufunc(
         /,
         out: OutArray | None = None,
         *,
-        where: bool = True,
-        casting: CastingModes = "same_kind",
-        order: str = "K",
+        where=True,
+        casting: CastingModes | None = "same_kind",
+        order="K",
         dtype: DTypeLike | None = None,
         subok: NotImplementedType = False,
-        signature: object = None,
-        extobj: object = None,
-    ) -> torch.Tensor:
+        signature=None,
+        extobj=None,
+    ):
         if dtype is not None:
             x = _util.typecast_tensor(x, dtype, casting)
 

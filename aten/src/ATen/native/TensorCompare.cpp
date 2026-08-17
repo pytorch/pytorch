@@ -81,7 +81,7 @@ namespace at::meta {
 static inline void check_for_unsupported_isin_dtype(const ScalarType type) {
   // Bail out for dtypes unsupported by the sorting algorithm to keep the
   // interface consistent.
-  TORCH_CHECK_NOT_IMPLEMENTED(
+  TORCH_CHECK(
       type != ScalarType::Bool && type != ScalarType::ComplexFloat &&
           type != ScalarType::ComplexDouble,
       "Unsupported input type encountered for isin(): ",
@@ -256,8 +256,7 @@ TORCH_META_FUNC2(isin, Scalar_Tensor)
 }
 
 TORCH_META_FUNC(isposinf)(const Tensor& self) {
-  TORCH_CHECK_TYPE(
-      !self.is_complex(), "isposinf does not support complex inputs.");
+  TORCH_CHECK(!self.is_complex(), "isposinf does not support complex inputs.");
   TORCH_CHECK(
       maybe_get_output().defined() ? maybe_get_output().dtype() == at::kBool
                                    : true,
@@ -266,8 +265,7 @@ TORCH_META_FUNC(isposinf)(const Tensor& self) {
 }
 
 TORCH_META_FUNC(isneginf)(const Tensor& self) {
-  TORCH_CHECK_TYPE(
-      !self.is_complex(), "isneginf does not support complex inputs.");
+  TORCH_CHECK(!self.is_complex(), "isneginf does not support complex inputs.");
   TORCH_CHECK(
       maybe_get_output().defined() ? maybe_get_output().dtype() == at::kBool
                                    : true,
@@ -276,8 +274,7 @@ TORCH_META_FUNC(isneginf)(const Tensor& self) {
 }
 
 static void check_unsupported_complex(const char* name, const Tensor& self) {
-  TORCH_CHECK_TYPE(
-      !self.is_complex(), name, ": does not support complex input");
+  TORCH_CHECK(!self.is_complex(), name, ": does not support complex input");
 }
 
 TORCH_PRECOMPUTE_META_FUNC2(max, dim)
