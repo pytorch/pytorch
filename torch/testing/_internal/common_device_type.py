@@ -360,6 +360,9 @@ class Capability:
         backend = "distributed.backend"
         dtensor = "distributed.dtensor"
         fsdp = "distributed.fsdp"
+        fsdp1 = "distributed.fsdp1"
+        fsdp2 = "distributed.fsdp2"
+        sharded_tensor = "distributed.sharded_tensor"
 
     class memory:
         """Device memory capabilities."""
@@ -894,6 +897,9 @@ class CPUTestBase(DeviceTypeTestBase):
                         cls.device_type
                     ),
                     Capability.distributed.fsdp: lambda: False,
+                    Capability.distributed.fsdp1: lambda: False,
+                    Capability.distributed.fsdp2: lambda: False,
+                    Capability.distributed.sharded_tensor: lambda: False,
                 },
                 Capability.memory: {
                     Capability.memory.non_blocking_copy: lambda: False,
@@ -950,6 +956,15 @@ class CUDATestBase(DeviceTypeTestBase):
                         cls.device_type
                     ),
                     Capability.distributed.fsdp: lambda: _distributed_backend_available(
+                        cls.device_type
+                    ),
+                    Capability.distributed.fsdp1: lambda: _distributed_backend_available(
+                        cls.device_type
+                    ),
+                    Capability.distributed.fsdp2: lambda: _distributed_backend_available(
+                        cls.device_type
+                    ),
+                    Capability.distributed.sharded_tensor: lambda: _distributed_backend_available(
                         cls.device_type
                     ),
                 },
@@ -1077,6 +1092,15 @@ class XPUTestBase(DeviceTypeTestBase):
                         cls.device_type
                     ),
                     Capability.distributed.fsdp: lambda: _distributed_backend_available(
+                        cls.device_type
+                    ),
+                    Capability.distributed.fsdp1: lambda: _distributed_backend_available(
+                        cls.device_type
+                    ),
+                    Capability.distributed.fsdp2: lambda: _distributed_backend_available(
+                        cls.device_type
+                    ),
+                    Capability.distributed.sharded_tensor: lambda: _distributed_backend_available(
                         cls.device_type
                     ),
                 },
