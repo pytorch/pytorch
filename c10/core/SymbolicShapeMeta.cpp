@@ -104,19 +104,27 @@ SymBool SymbolicShapeMeta::compute_contiguous() const {
   c10::SymIntArrayRef sizes(sizes_);
   c10::SymIntArrayRef strides(strides_);
 
-  auto result = _compute_contiguous_sym(sizes, strides, numel());
-
-  // If the result is already determined without guarding, just return it.
-  auto maybe_as_bool = result.maybe_as_bool();
-  if (maybe_as_bool.has_value()) {
-    return maybe_as_bool.value();
+  // Cheapest first: this is the only path that can answer without either
+  // guarding or building a symbolic expression.
+  if (_contiguous_or_false_sym(sizes, strides, numel())) {
+    return true;
   }
 
   if (all_hinted(sizes, strides)) {
     // We avoid going through the slow path if everything is hinted,
     // because evaluating a large SymPy expression can be expensive.
+    // NB: deliberately ahead of _contiguous_expr_sym. With hints the concrete
+    // computation is the answer, so the predicate would be built and discarded.
     // TODO exclude backed_size_oblivious from this path.
     return _compute_contiguous<SymInt>(sizes_, strides_, numel());
+  }
+
+  auto result = _contiguous_expr_sym(sizes, strides, numel());
+
+  // If the expression collapsed to a constant, hand back the constant.
+  auto maybe_as_bool = result.maybe_as_bool();
+  if (maybe_as_bool.has_value()) {
+    return maybe_as_bool.value();
   }
 
   return result;

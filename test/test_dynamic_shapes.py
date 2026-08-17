@@ -7264,5 +7264,101 @@ class TestTransferSymbolsFromForeignShapeEnv(TestCase):
         )
 
 
+# Sizes: an int stays concrete, "s" becomes a fresh symbol. Strides are derived
+# from the sizes, so a case really is the layout it claims to be, and a stride is
+# itself a symbolic product like a real tensor's.
+CONTIGUITY_CASES = [
+    ("1d_contig", ["s"], "contiguous", True),
+    ("2d_contig", ["s", "s"], "contiguous", True),
+    ("2d_permuted", ["s", "s"], "reversed", False),
+    ("3d_contig", ["s", "s", "s"], "contiguous", True),
+    ("4d_contig", ["s", "s", "s", "s"], "contiguous", True),
+    ("4d_channels_last", ["s", "s", "s", "s"], "channels_last", False),
+    ("5d_contig", ["s", "s", "s", "s", "s"], "contiguous", True),
+    ("size1_middle", ["s", 1, "s"], "contiguous", True),
+    ("all_size1", [1, 1], "contiguous", True),
+    ("zero_size", [0, "s"], "contiguous", True),
+    ("concrete_contig", [4, 3], "contiguous", True),
+    ("concrete_permuted", [4, 3], "reversed", False),
+    ("mixed_sym_concrete", ["s", 3], "contiguous", True),
+    ("4d_expanded", ["s", "s", 1, "s"], "contiguous", True),
+]
+
+
+def _strides_for(sizes, mode):
+    n = len(sizes)
+    if mode == "contiguous":
+        out = [1] * n
+        for d in range(n - 2, -1, -1):
+            out[d] = out[d + 1] * sizes[d + 1]
+        return out
+    if mode == "reversed":
+        out = [1] * n
+        for d in range(1, n):
+            out[d] = out[d - 1] * sizes[d - 1]
+        return out
+    if mode == "channels_last":
+        _, c, h, w = sizes
+        return [c * h * w, 1, w * c, c]
+    raise AssertionError(mode)
+
+
+class TestSymbolicContiguity(TestCase):
+    """Contiguity of symbolically-shaped tensors.
+
+    c10 answers this in three ways depending on what it knows (see
+    _compute_contiguous_sym): prove it without guarding, compute it concretely
+    when every shape is hinted, or hand back a symbolic predicate. These pin down
+    the answers, so a change to which path runs cannot silently move them.
+    """
+
+    def _make(self, shape_env, size_spec, mode):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        sizes = [
+            s if isinstance(s, int) else create_symint(shape_env, 8, duck=False)
+            for s in size_spec
+        ]
+        strides = _strides_for(sizes, mode)
+        with FakeTensorMode(shape_env=shape_env, allow_non_fake_inputs=True):
+            return torch.empty_strided(sizes, strides, device="meta"), sizes, strides
+
+    @parametrize("case", CONTIGUITY_CASES, name_fn=lambda c: c[0])
+    def test_is_contiguous(self, case):
+        _, size_spec, mode, expected = case
+        shape_env = ShapeEnv()
+        t, _, _ = self._make(shape_env, size_spec, mode)
+        self.assertEqual(t.is_contiguous(), expected)
+        # Asking twice must not change the answer: the result is cached in
+        # SymbolicShapeMeta and derived at most once.
+        self.assertEqual(t.is_contiguous(), expected)
+
+    @parametrize("case", CONTIGUITY_CASES, name_fn=lambda c: c[0])
+    def test_numel_and_non_overlapping_agree(self, case):
+        _, size_spec, mode, expected = case
+        shape_env = ShapeEnv()
+        t, sizes, _ = self._make(shape_env, size_spec, mode)
+        expected_numel = 1
+        for s in sizes:
+            expected_numel = expected_numel * s
+        self.assertEqual(str(t.numel()), str(expected_numel))
+        # A contiguous tensor is necessarily non-overlapping and dense.
+        if expected:
+            from torch._prims_common import is_non_overlapping_and_dense_or_false
+
+            self.assertTrue(is_non_overlapping_and_dense_or_false(t))
+
+    def test_contiguous_proved_without_guarding(self):
+        # The guard-free path must answer plain contiguous cases without
+        # specializing any dimension.
+        shape_env = ShapeEnv()
+        t, _, _ = self._make(shape_env, ["s", "s", "s"], "contiguous")
+        self.assertTrue(t.is_contiguous())
+        self.assertEqual(len(shape_env.guards), 0)
+
+
+instantiate_parametrized_tests(TestSymbolicContiguity)
+
+
 if __name__ == "__main__":
     run_tests()
