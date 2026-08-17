@@ -56,6 +56,7 @@ from ..exc import (
     ObservedException,
     ObservedGeneratorExit,
     ObservedUserStopIteration,
+    raise_attribute_error,
     raise_observed_exception,
     raise_type_error,
     raise_value_error,
@@ -427,26 +428,11 @@ class BaseUserFunctionVariable(VariableTracker):
         # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/funcobject.c
         return VariableTracker.build(tx, repr(self.as_python_constant()))
 
-    def call_method(
-        self,
-        tx: "InstructionTranslatorBase",
-        name: str,
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if name == "__setattr__":
-            if args[0].is_constant_match("__annotations__"):
-                self.annotations = args[1]
-                return ConstantVariable.create(None)
-            return self.get_dict_vt(tx).call_method(
-                tx, "__setitem__", list(args), kwargs
-            )
-        elif name == "__delattr__":
-            if args[0].is_constant_match("__annotations__"):
-                self.annotations = None
-                return ConstantVariable.create(None)
-            return self.get_dict_vt(tx).call_method(tx, "__delitem__", list(args), {})
-        return super().call_method(tx, name, list(args), kwargs)
+    def _set_annotations(
+        self, tx: "InstructionTranslatorBase", value: "VariableTracker | None"
+    ) -> "VariableTracker":
+        self.annotations = value
+        return ConstantVariable.create(None)
 
     def get_filename(self) -> str:
         return self.get_code().co_filename
@@ -524,7 +510,7 @@ class BaseUserFunctionVariable(VariableTracker):
         "__qualname__": GetSet(lambda s, tx: s._get_named_attr(tx, "__qualname__")),
         "__code__": GetSet(lambda s, tx: s._get_named_attr(tx, "__code__")),
         "__dict__": GetSet(lambda s, tx: s.get_dict_vt(tx)),
-        "__annotations__": GetSet(_get_annotations),
+        "__annotations__": GetSet(_get_annotations, _set_annotations),
         "__type_params__": GetSet(_get_type_params),
     }
     tp_members = {
@@ -4803,6 +4789,21 @@ class GetSetDescriptorVariable(VariableTracker):
                 result_source = TypeMROSource(obj.source)
         return VariableTracker.build(tx, resolved, result_source)
 
+    def tp_descr_set_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        obj: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        name = self.descriptor.__name__
+        getset = obj.lookup_tp_getset_member(name)
+        if getset and getset.setter is not None:
+            return getset.setter(obj, tx, value)
+        raise_attribute_error(
+            tx,
+            f"attribute '{name}' of '{obj.python_type_name()}' objects is not writable",
+        )
+
 
 class PropertyVariable(VariableTracker):
     """Python property descriptor.
@@ -4851,6 +4852,34 @@ class PropertyVariable(VariableTracker):
             tx, self.descriptor.fget, source=fget_source, realize=True
         )
         return fget_vt.call_function(tx, [obj], {})
+
+    def tp_descr_set_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        obj: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        # Mirrors property_descr_set: fdel for __delete__ (value is None),
+        # fset otherwise.  The result of the call is discarded.
+        # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L1695-L1737
+        attr = "fdel" if value is None else "fset"
+        func = getattr(self.descriptor, attr)
+        if func is None:
+            action = "deleter" if value is None else "setter"
+            # prop_name is unset for a property built without an fget and never
+            # bound to a class, which is when CPython falls back to the terse
+            # message.
+            name = getattr(self.descriptor, "__name__", None)
+            if name is None:
+                msg = f"can't {'delete' if value is None else 'set'} attribute"
+            else:
+                msg = f"property {name!r} of {obj.python_type().__qualname__!r} object has no {action}"
+            raise_attribute_error(tx, msg)
+        func_source = self.source and AttrSource(self.source, attr)
+        func_vt = VariableTracker.build(tx, func, source=func_source, realize=True)
+        args = [obj] if value is None else [obj, value]
+        func_vt.call_function(tx, args, {})
+        return variables.ConstantVariable.create(None)
 
 
 class TupleGetterVariable(VariableTracker):

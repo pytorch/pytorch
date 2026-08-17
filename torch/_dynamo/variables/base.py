@@ -752,7 +752,7 @@ def _wrap_delattr(
         raise_type_error(tx, "this method takes no keyword arguments")
     if len(args) != 1:
         raise_type_error(tx, f"expected 1 argument, got {len(args)}")
-    return func(self, tx, args[0])
+    return func(self, tx, args[0], None)
 
 
 def _wrap_getattro(
@@ -1065,19 +1065,18 @@ _SLOTDEFS: list[SlotDef] = [
         PyTypeSlots.TP_GETATTRO,
         _wrap_getattro,
     ),
-    # This needs one to model tp_setattro first + PyObject_GenericSetAttr / PyObject_GenericDelAttr
-    # TPSLOT(
-    #     "__setattr__",
-    #     "setattro_impl",
-    #     PyTypeSlots.TP_SETATTRO,
-    #     _wrap_setattr,
-    # ),
-    # TPSLOT(
-    #     "__delattr__",
-    #     "delattro_impl",
-    #     PyTypeSlots.TP_SETATTRO,
-    #     _wrap_delattr,
-    # ),
+    TPSLOT(
+        "__setattr__",
+        "tp_setattro_impl",
+        PyTypeSlots.TP_SETATTRO,
+        _wrap_setattr,
+    ),
+    TPSLOT(
+        "__delattr__",
+        "tp_setattro_impl",
+        PyTypeSlots.TP_SETATTRO,
+        _wrap_delattr,
+    ),
     TPSLOT(
         "__lt__",
         "tp_richcompare_impl",
@@ -1958,6 +1957,36 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         UDOV overrides to check self.value.__dict__ + side effects.
         """
         return None
+
+    def tp_setattro_impl(
+        self,
+        tx: InstructionTranslatorBase,
+        name: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        """Default attribute assignment via object_generic_setattr"""
+        from .object_protocol import object_generic_setattr
+
+        return object_generic_setattr(tx, self, name, value)
+
+    def tp_descr_set_impl(
+        self,
+        tx: InstructionTranslatorBase,
+        obj: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        """Mirrors CPython's tp_descr_set slot (``value is None`` deletes).
+
+        Called when type_implements_tp_descr_set returns True for this type.
+        Subclasses override to provide the actual descriptor write.
+        """
+        unimplemented(
+            gb_type="tp_descr_set_impl not implemented",
+            context=f"{type(self).__name__} has tp_descr_set slot but no tp_descr_set_impl override",
+            explanation=f"The type {self.python_type_name()} has a tp_descr_set C slot but "
+            "Dynamo has no model for it.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
 
     def call_getattr_fallback(
         self, tx: InstructionTranslatorBase, name: str

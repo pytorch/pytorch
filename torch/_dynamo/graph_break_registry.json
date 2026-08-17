@@ -2692,6 +2692,16 @@
       ]
     }
   ],
+  "GB5473": [
+    {
+      "Gb_type": "tp_descr_set_impl not implemented",
+      "Context": "{type(self).__name__} has tp_descr_set slot but no tp_descr_set_impl override",
+      "Explanation": "The type {self.python_type_name()} has a tp_descr_set C slot but Dynamo has no model for it.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB7694": [
     {
       "Gb_type": "torch.switch: unsupported branch return type (constant)",
@@ -3963,6 +3973,16 @@
       "Explanation": "torch.get_device_module accepts 1 optional argument `device`",
       "Hints": [
         "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
+  "GB4247": [
+    {
+      "Gb_type": "C-implemented tp_setattro without VariableTracker model",
+      "Context": "object={self}, name={name}, value={value}",
+      "Explanation": "'{self.python_type_name()}' sets attributes through a C tp_setattro that Dynamo has no model for.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],

@@ -67,12 +67,11 @@ from ..source import (
 from ..utils import (
     check_constant_args,
     check_numpy_ndarray_args,
+    check_positional,
     check_unspec_or_constant_args,
     check_unspec_python_args,
     dict_methods,
     extract_fake_example_value,
-    get_fake_value,
-    is_tensor_getset_descriptor,
     istype,
     numpy_operator_wrapper,
     proxy_args_kwargs,
@@ -116,6 +115,7 @@ from .object_protocol import (
     generic_size,
     generic_str,
     maybe_get_python_type,
+    object_generic_setattr,
     pycallable_check,
     pyiter_check,
     pylong_from_base,
@@ -1819,23 +1819,13 @@ class BuiltinVariable(BaseBuiltinVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if self.fn is object and name == "__setattr__":
-            if len(args) != 3:
-                raise AssertionError(
-                    f"object.__setattr__ expects 3 args, got {len(args)}"
-                )
-            if len(kwargs) != 0:
-                raise AssertionError(
-                    f"object.__setattr__ expects no kwargs, got {len(kwargs)}"
-                )
-            obj, name_var, val = args
-            obj = obj.realize()
-            if (
-                isinstance(obj, UserDefinedObjectVariable)
-                and tx.output.side_effects.is_attribute_mutation(obj)
-                and name_var.is_python_constant()
-            ):
-                return obj.method_setattr_standard(tx, name_var, val)
+        if self.fn is object and name in ("__setattr__", "__delattr__"):
+            if name == "__setattr__":
+                check_positional(tx, "object.__setattr__", len(args), 3, 3)
+                return object_generic_setattr(tx, *args)
+            else:
+                check_positional(tx, "object.__delattr__", len(args), 2, 2)
+                return object_generic_setattr(tx, *args, None)  # type: ignore[bad-argument-count]
 
         if name == "__new__":
             # Supported __new__ methods
@@ -2803,7 +2793,9 @@ class BuiltinVariable(BaseBuiltinVariable):
         obj: VariableTracker,
         name_var: VariableTracker,
     ) -> VariableTracker:
-        return obj.call_method(tx, "__delattr__", [name_var], {})
+        from .object_protocol import generic_setattr
+
+        return generic_setattr(tx, obj, name_var, None)
 
     def call_type(
         self, tx: "InstructionTranslatorBase", obj: VariableTracker
@@ -3562,214 +3554,11 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        from .lazy import LazyVariableTracker
+        from .object_protocol import generic_setattr
 
-        if any(isinstance(a, LazyVariableTracker) for a in args):
-            args = [
-                a.realize() if isinstance(a, LazyVariableTracker) else a for a in args
-            ]
-        if len(args) != 3 or kwargs:
-            raise_observed_exception(TypeError, tx)
+        check_positional(tx, "setattr", len(args), 3, 3)
         obj, name_var, val = args
-        result = self._call_setattr(tx, obj, name_var, val)
-        if result is not None:
-            return result
-        unimplemented(
-            gb_type="setattr() on unsupported type",
-            context=f"setattr({obj}, {name_var}, {val})",
-            explanation=f"setattr() is not supported on type {obj.python_type_name()}",
-            hints=[*graph_break_hints.SUPPORTABLE],
-        )
-
-    def _call_setattr(
-        self,
-        tx: "InstructionTranslatorBase",
-        obj: VariableTracker,
-        name_var: VariableTracker,
-        val: VariableTracker,
-    ) -> VariableTracker | None:
-        if isinstance(
-            obj,
-            (
-                variables.DefaultDictVariable,
-                variables.UserDefinedObjectVariable,
-                variables.NestedUserFunctionVariable,
-                variables.ExceptionVariable,
-                variables.TracebackVariable,
-                variables.DequeVariable,
-            ),
-        ):
-            return obj.call_method(tx, "__setattr__", [name_var, val], {})
-        elif (
-            not tx.output.side_effects.is_attribute_mutation(obj)
-            and obj.source is not None
-            and (underlying := obj.get_value_for_setattr()) is not None
-            and hasattr(underlying, "__dict__")
-            and name_var.is_python_constant()
-        ):
-            tx.output.side_effects.track_object_existing(underlying, obj)
-            name = name_var.as_python_constant()
-            tx.output.side_effects.store_attr(obj, name, val)
-            return val
-        elif (
-            tx.output.side_effects.is_attribute_mutation(obj)
-            and name_var.is_python_constant()
-        ):
-            name = name_var.as_python_constant()
-            if obj.is_tensor():
-                from .builder import wrap_fx_proxy
-
-                if name == "requires_grad":
-                    # TODO(azahed98): Make it work properly
-                    unimplemented(
-                        gb_type="setattr() on Tensor.requires_grad",
-                        context=f"setattr({obj}, {name}, {val})",
-                        explanation="setattr() on Tensor.requires_grad not supported. "
-                        "Mutating requires_grad can introduce a new leaf from non-leaf or vice versa in "
-                        "the middle of the graph, which AOTAutograd does not currently know how to handle.",
-                        hints=[*graph_break_hints.SUPPORTABLE],
-                    )
-                elif name == "data":
-                    # [Note: set_data_on_scoped_tensor]
-                    if obj.source is None:
-                        unimplemented(
-                            gb_type="Failed to mutate tensor data attribute",
-                            context=f"setattr({obj}, {name}, {val})",
-                            explanation="Dynamo only supports mutating `.data`"
-                            " of tensor created outside `torch.compile` region",
-                            hints=[
-                                "Don't mutate `.data` on this tensor, or move "
-                                "the mutation out of `torch.compile` region",
-                            ],
-                        )
-                    elif obj.dtype != val.dtype:  # type: ignore[attr-defined]
-                        unimplemented(
-                            gb_type="Failed to mutate tensor data attribute to different dtype",
-                            context=f"setattr({obj}, {name}, {val})",
-                            explanation="Dynamo only supports mutating `.data`"
-                            " of tensor to a new one with the same dtype",
-                            hints=[
-                                "Don't mutate `.data` on this tensor, or move "
-                                "the mutation out of `torch.compile` region",
-                            ],
-                        )
-                    elif obj.device != val.device:  # type: ignore[attr-defined]
-                        obj_fake = get_fake_value(obj.as_proxy().node, tx)
-                        val_fake = get_fake_value(val.as_proxy().node, tx)
-                        if (
-                            obj_fake.dtype != val_fake.dtype
-                            or obj_fake.shape != val_fake.shape
-                            or obj_fake.stride() != val_fake.stride()
-                        ):
-                            unimplemented(
-                                gb_type="Failed to mutate tensor data attribute across devices with different shape/strides",
-                                context=f"setattr({obj}, {name}, {val})",
-                                explanation="Dynamo only supports cross-device `.data`"
-                                " mutation when shape and strides match",
-                                hints=[
-                                    "Don't mutate `.data` on this tensor, or move "
-                                    "the mutation out of `torch.compile` region",
-                                ],
-                            )
-
-                    # Remove the old reference in tracked fakes - if we don't
-                    # do this, .data value size/shape differences cause
-                    # tracked fakes to produce incorrect guards. Sound
-                    # because the TensorVariable from shallow_copy_data_
-                    # below is new and gets installed in tracked fakes.
-                    to_remove = [
-                        tf for tf in tx.output.tracked_fakes if tf.source == obj.source
-                    ]
-                    for tf in to_remove:
-                        tx.output.tracked_fakes.remove(tf)
-
-                    # Snapshot the placeholder before
-                    # shallow_copy_data_ mutates it. Record the node
-                    # and snapshot so compile_and_call_fx_graph can
-                    # restore the correct metadata before passing the
-                    # graph to the backend.
-                    input_node = obj.as_proxy().node
-                    if input_node.op == "placeholder":
-                        ev = input_node.meta.get("example_value")
-                        if ev is not None and hasattr(ev, "fake_mode"):
-                            from torch._subclasses.fake_impls import fast_detach
-
-                            snapshot = fast_detach(ev.fake_mode, ev)
-                            tx.output._shallow_copy_placeholder_snapshots.setdefault(
-                                input_node, snapshot
-                            )
-
-                    with dynamo_disable_grad(tx), torch.no_grad():
-                        out = wrap_fx_proxy(
-                            tx,
-                            tx.output.create_proxy(
-                                "call_function",
-                                torch.ops.aten.shallow_copy_data_,
-                                *proxy_args_kwargs([obj, val], {}),
-                            ),
-                        )
-
-                    return out
-                elif name in ("_grad", "grad"):
-                    # NOTE: [Tensor "grad" and "_grad" attr]
-                    # _grad and grad share the same setter/getter, see
-                    # THPVariable_properties, and here we make sure setting one
-                    # enables reading `val` from the other, by routing all
-                    # read/write to `grad`.
-                    name = "grad"
-                elif is_tensor_getset_descriptor(name):
-                    # Attribute like `torch.Tensor.real` has special setters we
-                    # don't yet support; it's not as simple adding an entry to
-                    # the side effect mapping.
-                    unimplemented(
-                        gb_type="Failed to set tensor attribute",
-                        context=f"setattr({obj}, {name}, {val})",
-                        explanation="Dynamo doesn't support setting these tensor attributes",
-                        hints=[
-                            f"Don't mutate attribute '{name}' on tensors, or "
-                            "move the mutation out of `torch.compile` region",
-                        ],
-                    )
-
-            tx.output.side_effects.store_attr(obj, name, val)
-            return val
-        elif isinstance(obj, variables.NNModuleVariable):
-            if not tx.output.is_root_tracer():
-                unimplemented(
-                    gb_type="nn.Module mutation in HigherOrderOp",
-                    context=f"nn.Module: {obj}",
-                    explanation="Inplace modifying nn.Module params/buffers inside HigherOrderOps is not allowed.",
-                    hints=[
-                        "Remove the mutation or move it outside of the HigherOrderOp.",
-                        *graph_break_hints.FUNDAMENTAL,
-                    ],
-                )
-            if name_var.is_python_constant() and isinstance(
-                val, variables.TensorVariable
-            ):
-                assigning_fake_val = get_fake_value(val.as_proxy().node, tx)
-
-                try:
-                    getattr_var = obj.tp_getattro_impl(
-                        tx, name_var.as_python_constant()
-                    )
-                except (AttributeError, ObservedAttributeError):
-                    getattr_var = None
-
-                if getattr_var is not None and getattr_var.is_tensor():
-                    # get_fake_val will get the same fake tensor
-                    existing_fake_attr = get_fake_value(getattr_var.as_proxy().node, tx)
-
-                    # same tensor identity, setattr is a no-op
-                    mod_setattr = inspect.getattr_static(obj.module_type, "__setattr__")
-                    if (
-                        existing_fake_attr is assigning_fake_val
-                        and mod_setattr is torch.nn.Module.__setattr__
-                    ):
-                        return getattr_var
-
-            obj.convert_to_unspecialized(tx)
-        return None
+        return generic_setattr(tx, obj, name_var, val)
 
 
 class ListBuiltinVariable(BaseBuiltinVariable):

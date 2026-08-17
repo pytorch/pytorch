@@ -29,6 +29,7 @@ import dataclasses
 import enum
 import functools
 import inspect
+import pickle
 import random
 import sys
 import threading
@@ -37,7 +38,7 @@ import types
 import warnings
 import weakref
 from collections.abc import Callable, Iterable, Sequence
-from typing import Any, cast, NoReturn, TYPE_CHECKING, Union
+from typing import Any, cast, TYPE_CHECKING, Union
 from typing_extensions import is_typeddict
 
 import torch._dynamo.config
@@ -55,6 +56,7 @@ from ..exc import (
     handle_observed_exception,
     ObservedAttributeError,
     ObservedKeyError,
+    raise_attribute_error,
     raise_observed_exception,
     raise_type_error,
     unimplemented,
@@ -137,6 +139,22 @@ try:
     from torch.utils._cxx_pytree import PyTreeSpec
 except ImportError:
     PyTreeSpec = type(None)  # type: ignore[misc, assignment]
+
+
+# C types whose tp_setattro is neither PyObject_GenericSetAttr nor
+# slot_tp_setattro, so neither object_generic_setattr nor tracing __setattr__
+# models them: proxies forward to the referent, thread-locals write a
+# per-thread dict, picklers reject unknown names without an instance dict.
+# Note that defining __setattr__ in the type's own __dict__ does NOT imply a
+# custom slot -- ast.AST and _struct.Struct do, yet keep the generic one.
+# Reads are unaffected: generic_getattr's step 5b consults the live object.
+_NON_GENERIC_SETATTRO_TYPES = (
+    weakref.ProxyType,
+    weakref.CallableProxyType,
+    threading.local,
+    pickle.Pickler,
+    pickle.Unpickler,
+)
 
 
 _SAFE_C_SLOTS: OrderedSet[object] | None = None
@@ -322,6 +340,21 @@ class UserDefinedClassVariable(UserDefinedVariable):
         if mod == "torch" or mod.startswith(("torch.", "torch_")):
             return None
         return self.value
+
+    def tp_setattro_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        if self.ban_mutation:
+            unimplemented(
+                gb_type="Class attribute mutation when the __dict__ was already materialized",
+                context=str(self.value),
+                explanation="Dynamo does not support tracing mutations on a class when its __dict__ is materialized",
+                hints=graph_break_hints.SUPPORTABLE,
+            )
+        return super().tp_setattro_impl(tx, name, value)
 
     def get_id_guard_type(self) -> Callable[..., Any] | None:
         if self.source:
@@ -1140,14 +1173,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 init_args,
                 tx=tx,
             )
-        elif name == "__setattr__" and self.ban_mutation:
-            unimplemented(
-                gb_type="Class attribute mutation when the __dict__ was already materialized",
-                context=str(self.value),
-                explanation="Dynamo does not support tracing mutations on a class when its __dict__ is materialized",
-                hints=graph_break_hints.SUPPORTABLE,
-            )
-
         # Dispatch dunder methods defined on the metaclass (e.g., EnumType.__contains__).
         # In Python, `x in Color` calls `type(Color).__contains__(Color, x)`.
         metaclass = type(self.value)
@@ -2162,6 +2187,18 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     sq_ass_item_impl = mp_ass_subscript_impl
 
+    def tp_descr_set_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        obj: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L9455-L9477
+        if value is None:
+            return self._vectorcall_method(tx, "__delete__", [obj], {})
+        else:
+            return self._vectorcall_method(tx, "__set__", [obj, value], {})
+
     def _maybe_lookup_method(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker | None:
@@ -2225,11 +2262,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def _lookup_method(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
+        # Mirrors lookup_method: a missing dunder is reported as a bare
+        # AttributeError(name).  Reachable for the dunder pairs that share one
+        # slot (__setitem__/__delitem__, __set__/__delete__) when a type
+        # implements only one half.
+        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L2323-L2333
         m = self._maybe_lookup_method(tx, name)
         if m is None:
-            raise_type_error(
-                tx, f"'{self.python_type_name()}' object has no attribute '{name}'"
-            )
+            raise_attribute_error(tx, name)
         return m
 
     def _vectorcall_method(
@@ -2754,14 +2794,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if method is object.__init__:
                 return ConstantVariable.create(None)
 
-            if is_standard_setattr(method) or isinstance(self.value, threading.local):
-                return self.method_setattr_standard(tx, *args, **kwargs)
-
-            if is_standard_delattr(method):
-                return self.method_setattr_standard(
-                    tx, args[0], variables.DeletedVariable()
-                )
-
             if isinstance(self.value, types.GeneratorType):
                 unimplemented(
                     gb_type="call_method on generator",
@@ -2913,185 +2945,198 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     # ref: https://github.com/python/cpython/blob/4833e1cc666375454e4f86aff11b6587968b3333/Objects/typeobject.c#L9368
     mp_length_impl = sq_length_impl
 
-    def method_setattr_standard(
+    def tp_setattro_impl(
         self,
         tx: "InstructionTranslatorBase",
         name: VariableTracker,
-        value: VariableTracker,
+        value: VariableTracker | None,
     ) -> VariableTracker:
-        name_str = ""
-        try:
-            name_str = name.as_python_constant()
-        except NotImplementedError:
-            unimplemented(
-                gb_type="non-const setattr name on user-defined object",
-                context=f"object={self}, name={name}, value={value}",
-                explanation="Detected a call to `setattr` of a user-defined object with a non-constant name.",
-                hints=["Ensure that the name is a string."],
-            )
-        if not tx.output.side_effects.is_attribute_mutation(self):
-            raise AssertionError(
-                "Attempted setattr on a user-defined object that does not have "
-                "an AttributeMutation mutation_type"
-            )
+        # name_str = ""
+        # try:
+        #     name_str = name.as_python_constant()
+        # except NotImplementedError:
+        #     unimplemented(
+        #         gb_type="non-const setattr name on user-defined object",
+        #         context=f"object={self}, name={name}, value={value}",
+        #         explanation="Detected a call to `setattr` of a user-defined object with a non-constant name.",
+        #         hints=["Ensure that the name is a string."],
+        #     )
 
-        if (
-            torch.distributed.is_available()
-            and type(self.value) is torch.distributed.P2POp
-            and (
-                tx.output.side_effects.has_pending_mutation_of_attr(self, name_str)
-                or name_str in self.value.__dict__
-            )
-        ):
-            unimplemented(
-                gb_type="P2POp mutation",
-                context=f"object={self}, name={name}, value={value}",
-                explanation="Dynamo does not support mutating torch.distributed.P2POp instances.",
-                hints=[
-                    "Construct a new torch.distributed.P2POp instead of mutating an existing one inside torch.compile.",
-                ],
-            )
-
-        if name_str == "__class__":
-            unimplemented(
-                gb_type="__class__ assignment on user-defined object",
-                context=f"object={self}, value={value}",
-                explanation="Dynamo does not support reassigning __class__ on user-defined objects.",
-                hints=[
-                    "Move the __class__ assignment outside of the torch.compile region.",
-                ],
-            )
-
-        def raise_cannot_set_attr() -> NoReturn:
-            raise_observed_exception(
-                AttributeError,
-                tx,
-                args=[
-                    f"'{type(self.value).__name__}' object has no attribute '{name_str}'"
-                ],
-            )
-
-        def raise_readonly_attr() -> NoReturn:
-            raise_observed_exception(
-                AttributeError,
-                tx,
-                args=[
-                    f"'{type(self.value).__name__}' object attribute '{name_str}' is read-only"
-                ],
-            )
-
-        def raise_property_error(action: str) -> NoReturn:
-            raise_observed_exception(
-                AttributeError,
-                tx,
-                args=[
-                    f"property '{name_str}' of "
-                    f"'{type(self.value).__name__}' object has no {action}"
-                ],
-            )
-
-        descriptor = self.lookup_class_mro_attr(name_str)
-        if descriptor is not NO_SUCH_SUBOBJ and (
-            hasattr(type(descriptor), "__set__")
-            or hasattr(type(descriptor), "__delete__")
-        ):
-            desc_source = None
-            if self.cls_source:
-                desc_source = self.get_source_by_walking_mro(tx, name_str)
-
-            if isinstance(descriptor, property):
-                if isinstance(value, variables.DeletedVariable):
-                    if descriptor.fdel is None:
-                        raise_property_error("deleter")
-                    fdel_source = (
-                        AttrSource(desc_source, "fdel") if desc_source else None
-                    )
-                    fdel_var = VariableTracker.build(
-                        tx, descriptor.fdel, source=fdel_source
-                    )
-                    return fdel_var.call_function(tx, [self], {})
-                if descriptor.fset is None:
-                    raise_property_error("setter")
-                fset_source = AttrSource(desc_source, "fset") if desc_source else None
-                fset_var = VariableTracker.build(
-                    tx, descriptor.fset, source=fset_source
+        dunder = "__delattr__" if value is None else "__setattr__"
+        # update_one_slot installs slot_tp_setattro (which dispatches back to
+        # __setattr__/__delattr__) only for a Python-level override; a slot
+        # wrapper on the MRO means tp_setattro is the wrapped C function, which
+        # for everything but _NON_GENERIC_SETATTRO_TYPES is
+        # PyObject_GenericSetAttr.
+        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L9964
+        method = self._maybe_get_baseclass_method(dunder)
+        if isinstance(method, types.WrapperDescriptorType):
+            if isinstance(self.value, _NON_GENERIC_SETATTRO_TYPES):
+                unimplemented(
+                    gb_type="C-implemented tp_setattro without VariableTracker model",
+                    context=f"object={self}, name={name}, value={value}",
+                    explanation=f"'{self.python_type_name()}' sets attributes through a C tp_setattro that Dynamo has no model for.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
                 )
-                return fset_var.call_function(tx, [self, value], {})
+            return super().tp_setattro_impl(tx, name, value)
+        args_ = [name] if value is None else [name, value]
+        return self._vectorcall_method(tx, dunder, args_, {})
 
-            if isinstance(descriptor, types.MemberDescriptorType):
-                tx.output.side_effects.store_attr(self, name_str, value)
-                return variables.ConstantVariable.create(None)
+        # if not tx.output.side_effects.is_attribute_mutation(self):
+        #     raise AssertionError(
+        #         "Attempted setattr on a user-defined object that does not have "
+        #         "an AttributeMutation mutation_type"
+        #     )
 
-            if isinstance(descriptor, types.GetSetDescriptorType):
-                if name_str == "__dict__":
-                    self.dict_vt = None
-                # C get/set descriptors are applied by STORE_ATTR itself, so
-                # replay must stay descriptor-aware rather than using the
-                # descriptor-bypassing instance-dict or slot paths.
-                tx.output.side_effects.store_attr(self, name_str, value)
-                return variables.ConstantVariable.create(None)
+        # name_str = name.as_python_constant()
+        # if (
+        #     torch.distributed.is_available()
+        #     and type(self.value) is torch.distributed.P2POp
+        #     and (
+        #         tx.output.side_effects.has_pending_mutation_of_attr(self, name_str)
+        #         or name_str in self.value.__dict__
+        #     )
+        # ):
+        #     unimplemented(
+        #         gb_type="P2POp mutation",
+        #         context=f"object={self}, name={name}, value={value}",
+        #         explanation="Dynamo does not support mutating torch.distributed.P2POp instances.",
+        #         hints=[
+        #             "Construct a new torch.distributed.P2POp instead of mutating an existing one inside torch.compile.",
+        #         ],
+        #     )
 
-            setter = inspect.getattr_static(type(descriptor), "__set__", None)
-            deleter = inspect.getattr_static(type(descriptor), "__delete__", None)
-            # collections._tuplegetter (namedtuple field accessor) is a C-level
-            # data descriptor whose __set__/__delete__ unconditionally raise
-            # AttributeError. Short-circuit so we don't need to model it.
-            _tuplegetter = getattr(collections, "_tuplegetter", None)
-            if _tuplegetter is not None and type(descriptor) is _tuplegetter:
-                raise_readonly_attr()
-            desc_var = VariableTracker.build(tx, descriptor, desc_source)
-            if isinstance(value, variables.DeletedVariable):
-                if isinstance(deleter, types.FunctionType):
-                    del_source = (
-                        AttrSource(TypeSource(desc_source), "__delete__")
-                        if desc_source
-                        else None
-                    )
-                    del_var = VariableTracker.build(
-                        tx, deleter, del_source, realize=True
-                    )
-                    return del_var.call_function(tx, [desc_var, self], {})
-                if deleter is not None:
-                    unimplemented(
-                        gb_type="C-level descriptor delete on user-defined object",
-                        context=f"object={self}, name={name_str}, descriptor={descriptor}",
-                        explanation=(
-                            "Dynamo does not yet model this C-level descriptor deleter "
-                            "for user-defined objects."
-                        ),
-                        hints=[*graph_break_hints.SUPPORTABLE],
-                    )
-                raise_readonly_attr()
-            if isinstance(setter, types.FunctionType):
-                set_source = (
-                    AttrSource(TypeSource(desc_source), "__set__")
-                    if desc_source
-                    else None
-                )
-                set_var = VariableTracker.build(tx, setter, set_source, realize=True)
-                return set_var.call_function(tx, [desc_var, self, value], {})
+        # if name_str == "__class__":
+        #     unimplemented(
+        #         gb_type="__class__ assignment on user-defined object",
+        #         context=f"object={self}, value={value}",
+        #         explanation="Dynamo does not support reassigning __class__ on user-defined objects.",
+        #         hints=[
+        #             "Move the __class__ assignment outside of the torch.compile region.",
+        #         ],
+        #     )
 
-            unimplemented(
-                gb_type="C-level descriptor setattr on user-defined object",
-                context=f"object={self}, name={name_str}, descriptor={descriptor}",
-                explanation=(
-                    "Dynamo does not yet model this C-level descriptor setter "
-                    "for user-defined objects."
-                ),
-                hints=[*graph_break_hints.SUPPORTABLE],
-            )
+        # def raise_cannot_set_attr() -> NoReturn:
+        #     raise_observed_exception(
+        #         AttributeError,
+        #         tx,
+        #         args=[
+        #             f"'{type(self.value).__name__}' object has no attribute '{name_str}'"
+        #         ],
+        #     )
 
-        if hasattr(self.value, "__dict__"):
-            dict_vt = self.get_dict_vt(tx)
-            if isinstance(value, variables.DeletedVariable):
-                if not dict_vt.contains(name_str):
-                    raise_cannot_set_attr()
-                dict_vt.delitem(name_str)
-            else:
-                dict_vt.setitem(name_str, value)
-            return variables.ConstantVariable.create(None)
+        # def raise_readonly_attr() -> NoReturn:
+        #     raise_observed_exception(
+        #         AttributeError,
+        #         tx,
+        #         args=[
+        #             f"'{type(self.value).__name__}' object attribute '{name_str}' is read-only"
+        #         ],
+        #     )
 
-        raise_cannot_set_attr()
+        # def raise_property_error(action: str) -> NoReturn:
+        #     raise_observed_exception(
+        #         AttributeError,
+        #         tx,
+        #         args=[
+        #             f"property '{name_str}' of "
+        #             f"'{type(self.value).__name__}' object has no {action}"
+        #         ],
+        #     )
+
+        # descriptor = self.lookup_class_mro_attr(name_str)
+        # if descriptor is not NO_SUCH_SUBOBJ and (
+        #     hasattr(type(descriptor), "__set__")
+        #     or hasattr(type(descriptor), "__delete__")
+        # ):
+        #     desc_source = None
+        #     if self.cls_source:
+        #         desc_source = self.get_source_by_walking_mro(tx, name_str)
+
+        #     if isinstance(descriptor, property):
+        #         if value is None:
+        #             if descriptor.fdel is None:
+        #                 raise_property_error("deleter")
+        #             fdel_source = (
+        #                 AttrSource(desc_source, "fdel") if desc_source else None
+        #             )
+        #             fdel_var = VariableTracker.build(
+        #                 tx, descriptor.fdel, source=fdel_source
+        #             )
+        #             return fdel_var.call_function(tx, [self], {})
+        #         if descriptor.fset is None:
+        #             raise_property_error("setter")
+        #         fset_source = AttrSource(desc_source, "fset") if desc_source else None
+        #         fset_var = VariableTracker.build(
+        #             tx, descriptor.fset, source=fset_source
+        #         )
+        #         return fset_var.call_function(tx, [self, value], {})
+
+        #     stored = value if value is not None else variables.DeletedVariable()
+        #     if isinstance(descriptor, types.MemberDescriptorType):
+        #         tx.output.side_effects.store_attr(self, name_str, stored)
+        #         return variables.ConstantVariable.create(None)
+
+        #     if isinstance(descriptor, types.GetSetDescriptorType):
+        #         if name == "__dict__":
+        #             self.dict_vt = None
+        #         # C get/set descriptors are applied by STORE_ATTR itself, so
+        #         # replay must stay descriptor-aware rather than using the
+        #         # descriptor-bypassing instance-dict or slot paths.
+        #         tx.output.side_effects.store_attr(self, name_str, stored)
+        #         return variables.ConstantVariable.create(None)
+
+        #     setter = inspect.getattr_static(type(descriptor), "__set__", None)
+        #     deleter = inspect.getattr_static(type(descriptor), "__delete__", None)
+        #     # collections._tuplegetter (namedtuple field accessor) is a C-level
+        #     # data descriptor whose __set__/__delete__ unconditionally raise
+        #     # AttributeError. Short-circuit so we don't need to model it.
+        #     _tuplegetter = getattr(collections, "_tuplegetter", None)
+        #     if _tuplegetter is not None and type(descriptor) is _tuplegetter:
+        #         raise_readonly_attr()
+        #     desc_var = VariableTracker.build(tx, descriptor, desc_source)
+        #     if value is None:
+        #         if isinstance(deleter, types.FunctionType):
+        #             del_source = (
+        #                 AttrSource(TypeSource(desc_source), "__delete__")
+        #                 if desc_source
+        #                 else None
+        #             )
+        #             del_var = VariableTracker.build(
+        #                 tx, deleter, del_source, realize=True
+        #             )
+        #             return del_var.call_function(tx, [desc_var, self], {})
+        #         if deleter is not None:
+        #             unimplemented(
+        #                 gb_type="C-level descriptor delete on user-defined object",
+        #                 context=f"object={self}, name={name_str}, descriptor={descriptor}",
+        #                 explanation=(
+        #                     "Dynamo does not yet model this C-level descriptor deleter "
+        #                     "for user-defined objects."
+        #                 ),
+        #                 hints=[*graph_break_hints.SUPPORTABLE],
+        #             )
+        #         raise_readonly_attr()
+        #     if isinstance(setter, types.FunctionType):
+        #         set_source = (
+        #             AttrSource(TypeSource(desc_source), "__set__")
+        #             if desc_source
+        #             else None
+        #         )
+        #         set_var = VariableTracker.build(tx, setter, set_source, realize=True)
+        #         return set_var.call_function(tx, [desc_var, self, value], {})
+
+        #     unimplemented(
+        #         gb_type="C-level descriptor setattr on user-defined object",
+        #         context=f"object={self}, name={name_str}, descriptor={descriptor}",
+        #         explanation=(
+        #             "Dynamo does not yet model this C-level descriptor setter "
+        #             "for user-defined objects."
+        #         ),
+        #         hints=[*graph_break_hints.SUPPORTABLE],
+        #     )
+
+        # return None
 
     def needs_slow_setattr(self) -> bool:
         return not is_standard_setattr(
@@ -4302,27 +4347,23 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
     ) -> "VariableTracker":
         return self._base_vt.call_method(tx, "with_traceback", args, kwargs)  # type: ignore[missing-attribute]
 
-    def call_method(
+    def tp_setattro_impl(
         self,
         tx: "InstructionTranslatorBase",
-        name: str,
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
+        name: VariableTracker,
+        value: VariableTracker | None,
     ) -> VariableTracker:
-        # __setattr__ is the tp_setattro slot, not dispatched through tp_methods,
-        # so handle it here (mirroring ExceptionVariable.call_method) to route
-        # writes of __cause__/__context__/__suppress_context__/__traceback__ to
-        # the wrapped base exception VT. Without this, `raise X from Y` never
+        # Route writes of the BaseException getsets to the wrapped base
+        # exception VT, which owns them. Without this, `raise X from Y` never
         # records X.__cause__ (issue: contextlib exception-chaining repro).
-        if (
-            name == "__setattr__"
-            and len(args) == 2
-            and args[0].is_constant_match(
-                "__cause__", "__context__", "__suppress_context__", "__traceback__"
-            )
+        if name in (
+            "__cause__",
+            "__context__",
+            "__suppress_context__",
+            "__traceback__",
         ):
-            return self._base_vt.call_method(tx, "__setattr__", args, kwargs)  # type: ignore[missing-attribute]
-        return super().call_method(tx, name, args, kwargs)
+            return self._base_vt.tp_setattro_impl(tx, name, value)  # type: ignore[missing-attribute]
+        return super().tp_setattro_impl(tx, name, value)
 
     def tp_init_impl(
         self,
@@ -4972,30 +5013,6 @@ class DefaultDictVariable(UserDefinedDictVariable):
         )
         return new_dd
 
-    # __ior__ and __setattr__ are C-level slots (nb_inplace_or, tp_setattro),
-    # so they are handled in call_method rather than declared in tp_methods.
-    def call_method(
-        self,
-        tx: "InstructionTranslatorBase",
-        name: str,
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        from .constant import ConstantVariable
-
-        if name == "__setattr__":
-            if len(args) != 2:
-                raise_args_mismatch(tx, name, "2 args", f"{len(args)} args")
-            if (
-                istype(args[0], ConstantVariable) and args[0].value == "default_factory"
-            ) and self.is_supported_factory(args[1]):
-                self.default_factory = args[1]
-                tx.output.side_effects.store_attr(
-                    self, "default_factory", self.default_factory
-                )
-                return ConstantVariable.create(None)
-        return super().call_method(tx, name, args, kwargs)
-
     tp_methods = {
         "__getitem__": Method(_getitem),
         "__missing__": Method(_missing),
@@ -5429,42 +5446,6 @@ class StructSequenceVariable(UserDefinedTupleVariable):
 class MutableMappingVariable(UserDefinedObjectVariable):
     def __init__(self, value: object, **kwargs: Any) -> None:
         super().__init__(value, **kwargs)
-
-    def method_setattr_standard(
-        self,
-        tx: "InstructionTranslatorBase",
-        name: VariableTracker,
-        value: VariableTracker,
-    ) -> VariableTracker:
-        """Override to handle property setters on MutableMapping subclasses.
-
-        This is needed because property.__set__ is a slot wrapper (C function),
-        but property.fset is a Python function we can trace.
-
-        Without this, property setters on newly created MutableMapping objects fail
-        when accessing nested objects (which haven't been initialized yet on the
-        example value). By tracing the fset, we capture the setter logic in the graph
-        instead of running it on uninitialized example objects.
-
-        TODO(compiler): This fix is scoped to MutableMapping only because tracing
-        property setters on ALL UserDefinedObjectVariable can cause failures when
-        the fset calls untraceable C++ functions (e.g., pybind functions). Ideally,
-        this should be extended to all user-defined classes with a graceful fallback
-        when tracing the fset hits an untraceable function.
-        See: https://github.com/pytorch/pytorch/issues/172000
-        """
-        if isinstance(name, variables.ConstantVariable) and isinstance(name.value, str):
-            name_str = name.value
-            descriptor = inspect.getattr_static(type(self.value), name_str, None)
-            if isinstance(descriptor, property) and descriptor.fset is not None:
-                fset_source = None
-                if self.cls_source:
-                    desc_source = self.get_source_by_walking_mro(tx, name_str)
-                    fset_source = AttrSource(desc_source, "fset")
-                fset_vt = VariableTracker.build(tx, descriptor.fset, fset_source)
-                return fset_vt.call_function(tx, [self, value], {})
-
-        return super().method_setattr_standard(tx, name, value)
 
     def _get(self, tx: "InstructionTranslatorBase") -> "VariableTracker | None":
         # `.get` backed by the stdlib Mapping/dict implementation resolves to a

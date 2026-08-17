@@ -1442,6 +1442,32 @@ class SetDelItemTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(self._compile(fn, torch.zeros(1)), fn(torch.zeros(1)))
 
+    def test_missing_half_of_mp_ass_subscript(self):
+        # __setitem__ and __delitem__ share mp_ass_subscript, so a type that
+        # implements only one still reaches slot_mp_ass_subscript for the other.
+        # vectorcall_method then fails the lookup with a bare AttributeError.
+        class SetItemOnly:
+            def __setitem__(self, k, v):
+                pass
+
+        class DelItemOnly:
+            def __delitem__(self, k):
+                pass
+
+        def fn(x):
+            out = []
+            try:
+                del SetItemOnly()[1]
+            except AttributeError as e:
+                out.append(str(e))
+            try:
+                DelItemOnly()[1] = 2
+            except AttributeError as e:
+                out.append(str(e))
+            return out
+
+        self.assertEqual(self._compile(fn, torch.zeros(1)), fn(torch.zeros(1)))
+
     def test_numpy_delitem_raises(self):
         # NumpyNdarrayVariable.mp_ass_subscript_impl rejects deletion with the
         # same ValueError numpy raises eagerly.

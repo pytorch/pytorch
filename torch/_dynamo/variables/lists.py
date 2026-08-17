@@ -1772,31 +1772,6 @@ class DequeVariable(BaseListVariable):
             mutation_type=ValueMutationNew(),
         )
 
-    def call_method(
-        self,
-        tx: "InstructionTranslatorBase",
-        name: str,
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if name == "__setattr__":
-            # deque has no __dict__, so every attribute write raises. A name
-            # backed by a getset descriptor (maxlen) is read-only; anything else
-            # is simply absent.
-            attr_name = args[0].as_python_constant()
-            if self.lookup_tp_getset_member(attr_name) is not None:
-                msg = (
-                    f"attribute '{attr_name}' of 'collections.deque' objects "
-                    "is not writable"
-                )
-            else:
-                msg = (
-                    f"'collections.deque' object has no attribute '{attr_name}' "
-                    "and no __dict__ for setting new attributes"
-                )
-            raise_observed_exception(AttributeError, tx, args=[msg])
-        return super().call_method(tx, name, args, kwargs)
-
     def call_obj_hasattr(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> ConstantVariable:
