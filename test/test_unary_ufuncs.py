@@ -15,7 +15,6 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCPU,
     dtypesIfCUDA,
-    dtypesIfMPS,
     instantiate_device_type_tests,
     largeTensorTest,
     onlyAccelerator,
@@ -1212,10 +1211,9 @@ class TestUnaryUfuncs(TestCase):
     # j1/i1 (limit 1/2) and (-inf) - (-inf) for y1 (limit +inf). OpInfo sample
     # generation does not reliably emit exact zeros, and y1's domain floors samples
     # away from 0, so these special-cased values are only covered here.
-    # Only MPS has half-precision kernels for these forwards, so it is the only
-    # backend that can exercise the reduced-precision backward dispatch.
+    # The half-precision counterpart lives in test_mps.py: only MPS has fp16/bf16
+    # kernels for these forwards, and this class is not instantiated for MPS.
     @dtypes(torch.float32, torch.double)
-    @dtypesIfMPS(torch.float32, torch.float16, torch.bfloat16)
     @parametrize(
         "name, expected",
         (
@@ -1233,7 +1231,6 @@ class TestUnaryUfuncs(TestCase):
     # The x = 0 special casing must not swallow NaN: a NaN input has to keep
     # producing a NaN gradient rather than the finite limit at the origin.
     @dtypes(torch.float32, torch.double)
-    @dtypesIfMPS(torch.float32, torch.float16, torch.bfloat16)
     @parametrize(
         "name",
         ("bessel_j1", "modified_bessel_i1", "i1", "i1e"),
