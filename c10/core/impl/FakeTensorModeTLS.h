@@ -17,8 +17,8 @@ class C10_API FakeTensorModeTLS {
 // Resolves an unindexed fake device (e.g. "cuda") to a concrete index the same
 // way python's FakeTensor._normalize_fake_device does: the backend's current
 // device if it is already initialized, else 0.
-using FakeDeviceIndexResolver = DeviceIndex (*)(DeviceType);
-C10_API void setFakeDeviceIndexResolver(FakeDeviceIndexResolver fn);
-C10_API DeviceIndex resolveFakeDeviceIndex(DeviceType type);
+using NormalizeFakeDeviceFn = DeviceIndex (*)(DeviceType);
+C10_API void setNormalizeFakeDeviceFn(NormalizeFakeDeviceFn fn);
+C10_API DeviceIndex normalizeFakeDevice(DeviceType type);
 
 } // namespace c10::impl
