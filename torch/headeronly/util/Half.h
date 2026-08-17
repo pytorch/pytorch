@@ -213,7 +213,7 @@ C10_HOST_DEVICE inline float fp16_ieee_to_fp32_value(uint16_t h) {
    * Now, remember that denormalized half-precision numbers are represented as:
    *    FP16 = mantissa * 2**(-24).
    * The trick is to construct a normalized single-precision number with the
-   * same mantissa and thehalf-precision input and with an exponent which would
+   * same mantissa and the half-precision input and with an exponent which would
    * scale the corresponding mantissa bits to 2**(-24). A normalized
    * single-precision floating-point number is represented as: FP32 = (1 +
    * mantissa * 2**(-23)) * 2**(exponent - 127) Therefore, when the biased
