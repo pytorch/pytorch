@@ -2235,16 +2235,18 @@ class ComboKernel(Kernel):
 
         This is the single construction seam for the uniform pointer table.
 
-        no_cudagraphs: the table *content* changes every iteration because
-        intermediate buffers are re-allocated on each call, so it cannot be built
-        once. Allocation is amortized instead: a persistent pinned staging buffer
-        and a persistent device table are allocated ONCE per call site (keyed by a
-        codegen-assigned id) and reused every iteration. Each call only fills the
-        pinned buffer and issues a single async H2D copy, eliminating the
-        per-iteration cudaHostAlloc + device alloc that dominated small many-group
-        models (e.g. resnet18: 44 pin_memory()/iter -> 0 in steady state). A
-        per-call-site CUDA event guards reuse so the host cannot overwrite the
-        pinned buffer before its previous async copy has drained.
+        no_cudagraphs: the table *content* can change between iterations because
+        intermediate buffers may be re-allocated. Allocation is amortized: a
+        persistent pinned staging buffer and a persistent device table are
+        allocated ONCE per call site (keyed by a codegen-assigned id) and reused
+        every iteration. Because each call site owns its own persistent table, the
+        `_uniform_stage` helper skips the host build + async H2D copy whenever this
+        call's pointers are unchanged from the previous call for that site (the
+        steady state under the caching allocator, and always for parameter slots),
+        and refreshes only when an address actually changes -- so the pointer-table
+        cost does not eat the uniform-dispatch win, while correctness is preserved.
+        A per-call-site CUDA event guards a refresh so the host cannot overwrite
+        the pinned buffer before its previous async copy has drained.
 
         cudagraphs: the wrapper runs only during warmup + capture (never on
         replay), and pool buffer addresses are stable across replays. The pinned
@@ -2309,13 +2311,24 @@ _uniform_ptr_pool = {}
 
 
 def _uniform_stage(_uid, _ptrs, _device, _cudagraphs):
-    # Build the per-call-site GPU pointer table.
+    # Build (or reuse) the per-call-site GPU pointer table.
     #
-    # The pinned host staging buffer is persistent (allocated once per call site,
-    # never freed) so that a captured host->device copy stays valid on cudagraph
-    # replay -- a per-call/freed pinned source was the original cudaErrorInvalidValue.
+    # Each uniform call site owns its own pool entry (keyed by _uid), so a single
+    # uniform kernel reused across multiple sub-kernel groups never aliases another
+    # group's table (the original fail_accuracy root cause). The pinned host
+    # staging buffer is persistent so a captured host->device copy stays valid on
+    # cudagraph replay -- a per-call/freed pinned source was the original
+    # cudaErrorInvalidValue.
     #
-    # Device table:
+    # no_cudagraphs fast path: because each call site owns a *persistent* device
+    # table, when this call's pointers are identical to the previous call's for the
+    # same site (the steady state under the caching allocator, and always for
+    # parameter slots) the table already holds them -- so skip the host tensor
+    # build + H2D copy entirely. The table is refreshed whenever any address
+    # actually changes, so results stay correct even when buffers move. This is
+    # what keeps the pointer-table cost from eating the uniform-dispatch win.
+    #
+    # Device table (refresh path):
     #   * no_cudagraphs: persistent and reused (no per-iteration alloc); a CUDA
     #     event prevents the host from overwriting the pinned buffer before its
     #     previous async copy drains.
@@ -2323,17 +2336,28 @@ def _uniform_stage(_uid, _ptrs, _device, _cudagraphs):
     #     wrapper runs during capture; the host wrapper does not run on replay, so
     #     the captured H2D re-copies the (stable) pinned addresses into the (stable)
     #     pool table each replay. Event sync/record is illegal during capture and
-    #     is therefore skipped while capturing.
+    #     is therefore skipped while capturing. The fast path is disabled under
+    #     cudagraphs/capture so the copy is always recorded into the graph.
     _n = len(_ptrs)
     _ent = _uniform_ptr_pool.get(_uid)
     if _ent is None or _ent[0].numel() < _n:
         if _ent is not None:
             _ent[2].synchronize()
         _pinned = torch.empty(_n, dtype=torch.int64, device="cpu").pin_memory()
-        _ent = [_pinned, None, torch.cuda.Event()]
+        _ent = [_pinned, None, torch.cuda.Event(), None]
         _uniform_ptr_pool[_uid] = _ent
-    _pinned, _devtbl, _ev = _ent
+    _pinned, _devtbl, _ev, _cached = _ent
     _capturing = torch.cuda.is_current_stream_capturing()
+    if (
+        not _cudagraphs
+        and not _capturing
+        and _devtbl is not None
+        and _devtbl.numel() >= _n
+        and _cached == _ptrs
+    ):
+        # Pointers unchanged for this call site: the persistent device table
+        # already holds them; skip the host build + async H2D copy.
+        return _devtbl
     if not _capturing:
         _ev.synchronize()
     _pinned[:_n].copy_(torch.tensor(_ptrs, dtype=torch.int64))
@@ -2344,6 +2368,8 @@ def _uniform_stage(_uid, _ptrs, _device, _cudagraphs):
     _devtbl[:_n].copy_(_pinned[:_n], non_blocking=True)
     if not _capturing:
         _ev.record()
+    if not _cudagraphs:
+        _ent[3] = list(_ptrs)
     return _devtbl
 """
         )
