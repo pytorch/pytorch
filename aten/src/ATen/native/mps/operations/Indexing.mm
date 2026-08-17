@@ -442,25 +442,26 @@ static void nonzero_impl_mps(const Tensor& self, Tensor& out_, std::optional<int
     return;
   }
 
-  // Fortran-contiguous out_ (the common nDim > 1, n > 1 case) is not
-  // out_.is_contiguous(), so this falls back to a scratch contiguous buffer
-  // plus a full strided copy_ below. CUDA's Nonzero.cu avoids that copy by
-  // scattering into a contiguous {ndim, n} buffer (transposed layout) and
-  // finishing with out.set_(out_temp.t()), a metadata-only transpose. Doing
-  // the same here would require the scatter_nonzero_indices Metal kernel to
-  // write transposed output (output[d * n + pos] instead of
-  // output[pos * ndim + d]) and reworking this function's branching, since
-  // nonzero_static shares this code path with a different output-layout
-  // contract (pre-sized, pre-filled, no resize/as_strided_). Left as a
-  // possible future optimization; not applied here to keep this fix minimal.
-  bool contiguous_output = out_.is_contiguous();
-  Tensor out = contiguous_output ? out_ : at::empty_like(out_, MemoryFormat::Contiguous);
+  // Scatter writes straight into out_ whenever its layout is addressable with a
+  // (row, column) stride pair: row-major, which is nonzero_static's contract, or
+  // Fortran-contiguous, which is nonzero's (matching CPU, see gh-46224). Since
+  // Fortran-contiguous out_ is not out_.is_contiguous(), keying the fast path on
+  // contiguity alone would send the common nonzero case through a scratch buffer
+  // plus a full strided copy_. Anything else (an out= argument with some other
+  // strides) still falls back to that scratch path.
+  const bool direct_write = out_.is_contiguous() || out_.t().is_contiguous();
+  Tensor out = direct_write ? out_ : at::empty_like(out_, MemoryFormat::Contiguous);
 
   int ndim_int = static_cast<int>(nDim);
   // max_entries caps how many nonzeros scatter writes. It is int64 (kernel-side
   // too), so a user-supplied static size or a dynamic count above 2^32 is not
   // truncated.
   int64_t max_entries = *max_elements;
+
+  // Element strides of the scatter destination, so the kernel can fill either
+  // layout in place (see direct_write above).
+  const int64_t out_stride0 = out.stride(0);
+  const int64_t out_stride1 = out.stride(1);
 
   // Pick the scatter index width. tid is a 32-bit grid position, so the flat
   // input index is bounded by numel; the output offset is num_nonzeros * ndim.
@@ -480,14 +481,23 @@ static void nonzero_impl_mps(const Tensor& self, Tensor& out_, std::optional<int
       for (uint64_t base = 0; base < static_cast<uint64_t>(numel); base += chunk_elems) {
         uint64_t this_chunk = std::min(chunk_elems, static_cast<uint64_t>(numel) - base);
         uint32_t block_base = static_cast<uint32_t>(base / threads_per_group);
-        mtl_setArgs(
-            computeEncoder, input, out, ndim_int, input.sizes(), block_offsets_buf, max_entries, base, block_base);
+        mtl_setArgs(computeEncoder,
+                    input,
+                    out,
+                    ndim_int,
+                    input.sizes(),
+                    block_offsets_buf,
+                    max_entries,
+                    base,
+                    block_base,
+                    out_stride0,
+                    out_stride1);
         mtl_dispatch1DJob(computeEncoder, pso_step3, this_chunk);
       }
     }
   });
 
-  if (!contiguous_output) {
+  if (!direct_write) {
     out_.copy_(out);
   }
 }

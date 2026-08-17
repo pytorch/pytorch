@@ -966,7 +966,10 @@ INSTANTIATE_INDEX_FILL_FROM_MASK(half2)
 // Step 3 (scatter_nonzero_indices): Each thread with a nonzero element writes
 // its multi-dimensional indices into the output at the position determined by
 // block_offsets[tgid] plus an intra-block prefix recomputed in threadgroup
-// memory.
+// memory. out_stride0/out_stride1 are the output's element strides, so the
+// same kernel fills either layout the callers need without a staging copy:
+// row-major {n, ndim} for nonzero_static, or Fortran-contiguous for nonzero
+// (which matches CPU, see gh-46224).
 
 template <typename T, enable_if_t<!is_complex_v<T>, bool> = true>
 inline bool is_nonzero(T val) {
@@ -1213,6 +1216,8 @@ kernel void scatter_nonzero_indices(
     constant long& max_entries [[buffer(5)]],
     constant ulong& flat_base [[buffer(6)]],
     constant uint& block_base [[buffer(7)]],
+    constant long& out_stride0 [[buffer(8)]],
+    constant long& out_stride1 [[buffer(9)]],
     uint tid [[thread_position_in_grid]],
     uint tgid [[threadgroup_position_in_grid]],
     uint tgsize [[threads_per_threadgroup]],
@@ -1275,10 +1280,11 @@ kernel void scatter_nonzero_indices(
   // it keeps the per-dimension div/mod below in fast 32-bit math on the input
   // flat index. The output base is always 64-bit (count-side, see above).
   index_t flat = gid;
-  ulong out_base = pos * static_cast<ulong>(ndim);
+  ulong row = pos * static_cast<ulong>(out_stride0);
   for (int d = ndim - 1; d >= 0; d--) {
     index_t dim_size = static_cast<index_t>(sizes[d]);
-    output[out_base + d] = static_cast<int64_t>(flat % dim_size);
+    output[row + static_cast<ulong>(d) * static_cast<ulong>(out_stride1)] =
+        static_cast<int64_t>(flat % dim_size);
     flat /= dim_size;
   }
 }
@@ -1312,6 +1318,8 @@ kernel void scatter_nonzero_indices(
       constant long& max_entries [[buffer(5)]],               \
       constant ulong& flat_base [[buffer(6)]],                \
       constant uint& block_base [[buffer(7)]],                \
+      constant long& out_stride0 [[buffer(8)]],               \
+      constant long& out_stride1 [[buffer(9)]],               \
       uint tid [[thread_position_in_grid]],                   \
       uint tgid [[threadgroup_position_in_grid]],             \
       uint tgsize [[threads_per_threadgroup]],                \
