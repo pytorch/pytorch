@@ -272,6 +272,9 @@ CacheEntry* create_cache_entry(
 
 // Extracts the backend fn from the callback.
 PyObject* get_backend(PyObject* callback);
+// Turn on the cache-key lookup inside get_backend. Called once, when the first
+// backend carrying one is constructed; see cache_entry.cpp.
+void enable_precompile_cache_keys();
 
 #ifdef __cplusplus
 

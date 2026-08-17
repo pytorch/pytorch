@@ -4,6 +4,8 @@
 #include <torch/csrc/dynamo/debug_macros.h>
 #include <torch/csrc/dynamo/extra_state.h>
 
+#include <atomic>
+
 CacheEntry::CacheEntry(const py::handle& guarded_code, PyObject* backend)
     : backend{py::cast<py::object>(get_backend(backend))} {
   this->guard_manager = guarded_code.attr("guard_manager");
@@ -70,10 +72,24 @@ PyObject* CacheEntry_to_obj(CacheEntry* e) {
 // off. Both attributes below must therefore be plain stored attributes, not
 // properties or __getattr__ results, or the object dies with the temporary
 // py::object this returns the pointer of.
+// Set once, the first time a backend that carries a cache key is built. Until
+// then the lookup below is skipped: it is a MISS at every level of the callback
+// chain for everyone who never precompiles, and py::hasattr on a const char*
+// builds a str and raises-and-clears an AttributeError each time, on a path
+// that runs per intercepted frame. Never cleared -- once such a backend exists
+// in the process the chain can hold one for the rest of its life.
+static std::atomic<bool> precompile_cache_keys_in_use{false};
+
+void enable_precompile_cache_keys() {
+  precompile_cache_keys_in_use.store(true, std::memory_order_relaxed);
+}
+
 PyObject* get_backend(PyObject* callback) {
+  const bool check_cache_key =
+      precompile_cache_keys_in_use.load(std::memory_order_relaxed);
   py::handle handle = py::handle(callback);
   while (true) {
-    if (py::hasattr(handle, "_torchdynamo_cache_key")) {
+    if (check_cache_key && py::hasattr(handle, "_torchdynamo_cache_key")) {
       return handle.attr("_torchdynamo_cache_key").ptr();
     }
     if (!py::hasattr(handle, "_torchdynamo_orig_backend")) {
