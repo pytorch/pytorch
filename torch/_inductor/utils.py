@@ -286,6 +286,8 @@ def _collect_importable_constexpr_types(
 def get_importable_constexpr_types(
     values: Iterable[object],
 ) -> list[ImportableConstexprType]:
+    """Collect imports for constructor-style constexpr reprs that use the type's
+    ``__qualname__`` and can be evaluated in the generated module."""
     result: dict[str, ImportableConstexprType] = {}
     seen: OrderedSet[int] = OrderedSet()
     for value in values:

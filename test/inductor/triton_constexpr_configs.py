@@ -1,11 +1,6 @@
 import dataclasses
 
 
-@dataclasses.dataclass(frozen=True)
-class UserDefinedTritonKernelConfig:
-    offset: int
-
-
 class UserDefinedTritonKernelConfigNamespace:
     @dataclasses.dataclass(frozen=True)
     class Nested:
