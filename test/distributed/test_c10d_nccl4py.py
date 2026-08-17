@@ -248,6 +248,103 @@ class TestNCCL4PyBackendCollectives(MultiProcessTestCase):
         self._destroy_pg()
 
     @skip_if_lt_x_gpu(2)
+    def test_alltoall(self):
+        self._init_pg()
+        device = torch.device(f"cuda:{self.rank}")
+        inp = [
+            torch.full((4,), float(self.rank + 1), device=device)
+            for _ in range(self.world_size)
+        ]
+        out = [torch.zeros(4, device=device) for _ in range(self.world_size)]
+        dist.all_to_all(out, inp)
+        torch.cuda.synchronize(device)
+        for i in range(self.world_size):
+            self.assertEqual(out[i], torch.full((4,), float(i + 1), device=device))
+        self._destroy_pg()
+
+    @skip_if_lt_x_gpu(2)
+    def test_reduce_scatter(self):
+        self._init_pg()
+        device = torch.device(f"cuda:{self.rank}")
+        inp = [
+            torch.ones(4, device=device) * (self.rank + 1)
+            for _ in range(self.world_size)
+        ]
+        out = torch.zeros(4, device=device)
+        dist.reduce_scatter(out, inp)
+        torch.cuda.synchronize(device)
+        expected = torch.full((4,), 3.0, device=device)
+        self.assertEqual(out, expected)
+        self._destroy_pg()
+
+    @skip_if_lt_x_gpu(2)
+    def test_all_to_all_single_uneven(self):
+        self._init_pg()
+        device = torch.device(f"cuda:{self.rank}")
+        if self.rank == 0:
+            inp = torch.tensor([1.0, 2.0, 3.0], device=device)
+            out = torch.zeros(2, device=device)
+            in_splits = [1, 2]
+            out_splits = [1, 1]
+        else:
+            inp = torch.tensor([4.0, 5.0, 6.0], device=device)
+            out = torch.zeros(4, device=device)
+            in_splits = [1, 2]
+            out_splits = [2, 2]
+        dist.all_to_all_single(out, inp, out_splits, in_splits)
+        torch.cuda.synchronize(device)
+        if self.rank == 0:
+            self.assertEqual(out, torch.tensor([1.0, 4.0], device=device))
+        else:
+            self.assertEqual(out, torch.tensor([2.0, 3.0, 5.0, 6.0], device=device))
+        self._destroy_pg()
+
+    @skip_if_lt_x_gpu(2)
+    def test_coalescing(self):
+        self._init_pg()
+        device = torch.device(f"cuda:{self.rank}")
+        pg = dist.distributed_c10d._get_default_group()
+        backend = pg._get_backend(torch.device(device))
+        t1 = torch.ones(4, device=device) * (self.rank + 1)
+        t2 = torch.ones(4, device=device) * (self.rank + 1) * 10
+        backend.start_coalescing()
+        backend.allreduce([t1], dist.AllreduceOptions())
+        backend.allreduce([t2], dist.AllreduceOptions())
+        work = backend.end_coalescing()
+        work.wait()
+        torch.cuda.synchronize(device)
+        self.assertEqual(t1, torch.full((4,), 3.0, device=device))
+        self.assertEqual(t2, torch.full((4,), 30.0, device=device))
+        self._destroy_pg()
+
+    @skip_if_lt_x_gpu(2)
+    def test_split(self):
+        self._init_pg()
+        device = torch.device(f"cuda:{self.rank}")
+        # Create a subgroup containing only rank 0
+        subgroup = dist.new_group([0])
+        if self.rank == 0:
+            t = torch.ones(4, device=device) * 42.0
+            dist.all_reduce(t, group=subgroup)
+            torch.cuda.synchronize(device)
+            self.assertEqual(t, torch.full((4,), 42.0, device=device))
+        dist.barrier()
+        self._destroy_pg()
+
+    @skip_if_lt_x_gpu(2)
+    def test_get_future(self):
+        self._init_pg()
+        device = torch.device(f"cuda:{self.rank}")
+        t = torch.ones(4, device=device) * (self.rank + 1)
+        work = dist.all_reduce(t, async_op=True)
+        fut = work.get_future()
+        fut.wait()
+        torch.cuda.synchronize(device)
+        expected = torch.full((4,), 3.0, device=device)
+        self.assertEqual(t, expected)
+        self._destroy_pg()
+
+    @skip_if_lt_x_gpu(2)
     def test_allreduce_rejects_noncontiguous(self):
         self._init_pg()
         device = torch.device(f"cuda:{self.rank}")

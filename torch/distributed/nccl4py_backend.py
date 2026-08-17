@@ -18,6 +18,7 @@ __all__ = ["NCCL4PyBackend"]
 import torch
 import torch.distributed as dist
 from torch._C._distributed_c10d import Backend as C10DBackend, ReduceOp
+from torch.distributed._watchdog import _get_watchdog, stream_complete, stream_timeout
 
 
 try:
@@ -29,21 +30,28 @@ except ModuleNotFoundError:
 class _NcclWork(dist._Work):
     """Work handle backed by a CUDA event recorded after the NCCL operation."""
 
-    def __init__(self, event, device):
+    def __init__(self, event, device, wd_handle=None):
         super().__init__()
         self._event = event
         self._device = device
+        self._wd_handle = wd_handle
 
     def wait(self, timeout=None):
         if self._event is not None:
             current = torch.cuda.current_stream(self._device)
             self._event.wait(current)
             self._event = None
+        if self._wd_handle is not None:
+            self._wd_handle.cancel()
+            self._wd_handle = None
         return True
 
     def get_future(self):
-        fut = torch.futures.Future()
-        fut.set_result(True)
+        fut = torch.futures.Future(devices=[self._device])
+        if self._event is not None:
+            stream_complete(lambda: fut.set_result(True), event=self._event)
+        else:
+            fut.set_result(True)
         return fut
 
 
@@ -76,6 +84,7 @@ class NCCL4PyBackend(C10DBackend):
         self._comm = nccl.Communicator.init(nranks=size, rank=rank, unique_id=uid)
         self._internal_stream = torch.cuda.Stream(device=self._device)
         self._barrier_tensor = torch.zeros(1, dtype=torch.float32, device=self._device)
+        _get_watchdog()
 
     @property
     def options(self):
@@ -112,7 +121,9 @@ class NCCL4PyBackend(C10DBackend):
     def _make_work(self, stream):
         event = torch.cuda.Event()
         event.record(stream)
-        return _NcclWork(event, self._device)
+        with torch.cuda.stream(stream):
+            wd_handle = stream_timeout(self._options._timeout)
+        return _NcclWork(event, self._device, wd_handle)
 
     def _get_nccl_redop(self, reduce_op, tensor):
         """Returns (nccl_op, custom_op_or_None).
@@ -350,7 +361,8 @@ class NCCL4PyBackend(C10DBackend):
     def barrier(self, opts):
         stream = self._op_stream(opts.asyncOp)
         s = stream.cuda_stream
-        self._barrier_tensor.zero_()
+        with torch.cuda.stream(stream):
+            self._barrier_tensor.zero_()
         self._comm.allreduce(
             self._barrier_tensor, self._barrier_tensor, nccl.SUM, stream=s
         )
