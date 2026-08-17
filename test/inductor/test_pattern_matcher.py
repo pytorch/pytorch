@@ -49,6 +49,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_LINUX,
     parametrize,
+    subtest,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, IS_BIG_GPU
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
@@ -964,6 +965,22 @@ class TestPatternMatcher(TestCase):
             self.assertEqual(result, fn())
             self.assertGreaterEqual(counters["inductor"]["pattern_matcher_count"], 1)
             counters.clear()
+
+    @parametrize(
+        "fn",
+        [
+            subtest(lambda: torch.tensor(5.0).cumsum(0), name="float"),
+            subtest(lambda: torch.tensor(5).cumsum(0), name="integer"),
+            subtest(lambda: torch.tensor(True).cumsum(0), name="boolean"),
+            subtest(lambda: torch.zeros(()).cumsum(0), name="zeros"),
+            subtest(lambda: torch.full((), 5.0).cumsum(0), name="full"),
+            subtest(lambda: torch.tensor(5.0).cumsum(-1), name="negative_dim"),
+        ],
+    )
+    def test_pointless_cumsum_scalar(self, fn):
+        expected = fn()
+        result = torch.compile(fn, fullgraph=True)()
+        self.assertEqual(result, expected)
 
     def test_reciprocal_sqrt_to_rsqrt(self):
         # reciprocal(sqrt(x)) should fuse into a single rsqrt in the kernel.
