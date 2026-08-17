@@ -1818,6 +1818,39 @@ def forward(self, x_1, output_1):
         self.assertTrue(any(call.args[2] for call in clone_mock.call_args_list))
 
     @requires_gpu
+    def test_triton_kernel_mutated_column_slice_of_intermediate(self):
+        # Regression for the minimal repro in #161115, the shape that reaches this
+        # from real workloads: the mutated arg is a contiguous column prefix of an
+        # intermediate, so it is non-dense with a large row stride but a zero
+        # storage_offset. Cloning it through as_strided spans
+        # row_stride * (rows - 1) + cols elements of a buffer allocated for
+        # rows * cols, so the clone is filled from past the end of that buffer and
+        # every value the kernel reads back is whatever the memory held.
+        # n_rows matters: below about 64 Inductor keeps the view inside the
+        # workspace buffer and there is nothing out of bounds to catch, and far
+        # above it the read runs off the allocation into a hard CUDA fault that
+        # would take the rest of the suite with it.
+        @triton.jit
+        def scale_inplace_kernel(x_ptr, row_stride, n_cols, BLOCK: tl.constexpr):
+            row = tl.program_id(0)
+            offs = tl.arange(0, BLOCK)
+            mask = offs < n_cols
+            vals = tl.load(x_ptr + row * row_stride + offs, mask=mask)
+            tl.store(x_ptr + row * row_stride + offs, vals * 2.0, mask=mask)
+
+        n_rows, width, n_cols = 64, 4096, 512
+
+        def f(base):
+            workspace = torch.tanh(base)
+            x = workspace[:, :n_cols]
+            scale_inplace_kernel[(n_rows,)](x, x.stride(0), n_cols, BLOCK=n_cols)
+            return x
+
+        base = torch.randn(n_rows, width, device=GPU_TYPE)
+        expected = torch.tanh(base)[:, :n_cols] * 2.0
+        self.assertEqual(torch.compile(f, fullgraph=True)(base), expected)
+
+    @requires_gpu
     @largeTensorTest("6GB", device=GPU_TYPE)
     def test_triton_kernel_mutated_offset_view_large_tensor(self):
         # The bug itself is shape-independent -- the same over-extent read is emitted
