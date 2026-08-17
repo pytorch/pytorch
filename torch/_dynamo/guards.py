@@ -39,7 +39,7 @@ import weakref
 from contextlib import contextmanager
 from copy import deepcopy
 from inspect import currentframe
-from typing import Any, cast, NamedTuple, NoReturn, TYPE_CHECKING
+from typing import Any, NamedTuple, NoReturn, TYPE_CHECKING
 from typing_extensions import LiteralString, TypeAliasType, TypeVar
 from weakref import ReferenceType
 
@@ -215,14 +215,13 @@ except ModuleNotFoundError:
 
 
 if TYPE_CHECKING:
-    from collections.abc import Generator, KeysView, Sequence, Sized
+    from collections.abc import Generator, KeysView, Sequence
 
     from sympy import Symbol
 
     from torch._C import DispatchKeySet
     from torch._dynamo.output_graph import OutputGraphCommon, OutputGraphGuardsState
     from torch._dynamo.package import SerializedCode
-    from torch.utils._python_dispatch import TraceableWrapperSubclass
 
 T = TypeVar("T")
 log = logging.getLogger(__name__)
@@ -234,18 +233,18 @@ recompiles_verbose_log = torch._logging.getArtifactLogger(
 verbose_guards_log = torch._logging.getArtifactLogger(__name__, "verbose_guards")
 
 
-def _sequence_length(value: object) -> int:
+def _sequence_length(value: Any) -> int:
     if isinstance(value, set):
         return set.__len__(value)
     if isinstance(value, frozenset):
         return frozenset.__len__(value)
-    return len(cast("Sized", value))
+    return len(value)
 
 
 _COW_TENSOR_UNSUPPORTED = object()
 
 
-def _try_is_cow_tensor(value: object) -> bool | object:
+def _try_is_cow_tensor(value: Any) -> bool | object:
     if not isinstance(value, torch.Tensor):
         return _COW_TENSOR_UNSUPPORTED
     if torch._C._dispatch_keys(value).has(torch._C.DispatchKey.Python):
@@ -253,7 +252,7 @@ def _try_is_cow_tensor(value: object) -> bool | object:
     return torch._C._is_cow_tensor(value)  # pyrefly: ignore[missing-attribute]
 
 
-def _cow_tensor_matches(value: object, expected: object) -> bool:
+def _cow_tensor_matches(value: Any, expected: Any) -> bool:
     if not isinstance(expected, bool):
         return False
     actual = _try_is_cow_tensor(value)
@@ -980,7 +979,7 @@ def get_tensor_guard_code_part(
     return guard_str
 
 
-def get_key_index(dct: dict[Any, Any], key: object) -> int:
+def get_key_index(dct: dict[Any, Any], key: Any) -> int:
     # Ensure that we call dict.keys and not value.keys (which can call
     # overridden keys method). In the C++ guards, we relied on PyDict_Next
     # to traverse the dictionary, which uses the internal data structure and
@@ -992,7 +991,7 @@ def get_key_index_source(source: Any, index: Any) -> str:
     return f"list(dict.keys({source}))[{index}]"
 
 
-def raise_local_type_error(obj: object) -> NoReturn:
+def raise_local_type_error(obj: Any) -> NoReturn:
     raise TypeError(
         f"Type {type(obj)} for object {obj} cannot be saved "
         + "into torch.compile() package since it's defined in local scope. "
@@ -1000,7 +999,7 @@ def raise_local_type_error(obj: object) -> NoReturn:
     )
 
 
-def should_optimize_getattr_on_nn_module(value: object) -> bool:
+def should_optimize_getattr_on_nn_module(value: Any) -> bool:
     return isinstance(value, torch.nn.Module)
 
 
@@ -1167,14 +1166,11 @@ def _validate_default_subclass_metadata_guard(metadata: Any, cls: type[Any]) -> 
     )
 
 
-# Used by TENSOR_SUBCLASS_METADATA_MATCH guard check spec.
-# Unlike check_dtensor_spec below, this pair is only reached at trace time:
-# TENSOR_SUBCLASS_METADATA_MATCH has its own inlined metadata_checker closure
-# for the C++ path, so narrowing with a typing.cast is free here.
-def extract_subclass_metadata(guard: Any, value: object) -> tuple[Any, ...]:
+# Used by TENSOR_SUBCLASS_METADATA_MATCH guard check spec
+def extract_subclass_metadata(guard: Any, value: Any) -> tuple[Any, ...]:
     cls = type(value)
     has_custom_guard = hasattr(value, "__metadata_guard__")
-    metadata = cast("TraceableWrapperSubclass", value).__tensor_flatten__()[1]
+    metadata = value.__tensor_flatten__()[1]
     if not has_custom_guard:
         _validate_default_subclass_metadata_guard(metadata, cls)
     metadata = deepcopy(metadata)
@@ -1182,30 +1178,25 @@ def extract_subclass_metadata(guard: Any, value: object) -> tuple[Any, ...]:
 
 
 # Used by TENSOR_SUBCLASS_METADATA_MATCH guard check spec
-def check_subclass_metadata(value: object, metadata: tuple[Any, ...]) -> bool:
+def check_subclass_metadata(value: Any, metadata: tuple[Any, ...]) -> bool:
     saved_metadata, cls, has_custom_guard = metadata
-    subclass_metadata = cast("TraceableWrapperSubclass", value).__tensor_flatten__()[1]
     if has_custom_guard:
-        return cls.__metadata_guard__(saved_metadata, subclass_metadata)
-    return subclass_metadata == saved_metadata
+        return cls.__metadata_guard__(saved_metadata, value.__tensor_flatten__()[1])
+    return value.__tensor_flatten__()[1] == saved_metadata
 
 
 # Used by DTENSOR_SPEC_MATCH guard check spec
-def extract_dtensor_spec(guard: Any, value: object) -> Any:
+def extract_dtensor_spec(guard: Any, value: Any) -> Any:
     return deepcopy(value)
 
 
 # Used by DTENSOR_SPEC_MATCH guard check spec
-def check_dtensor_spec(value: object, metadata: Any) -> bool:
-    # DTENSOR_SPEC_MATCH's lambda guard calls this on every guard evaluation,
-    # so narrow with a suppression rather than a typing.cast, which would be a
-    # real call on the check path.
-    # pyrefly: ignore[missing-attribute]
+def check_dtensor_spec(value: Any, metadata: Any) -> bool:
     return value._check_equals(metadata, skip_shapes=True)
 
 
 # Used by OPAQUE_OBJ_GUARD_FN_MATCH guard check spec
-def extract_opaque_obj(guard: Any, value: object) -> Any:
+def extract_opaque_obj(guard: Any, value: Any) -> Any:
     opaque_info = get_opaque_obj_info(type(value))
     if not opaque_info or not opaque_info.guard_fn:
         return None
@@ -1213,7 +1204,7 @@ def extract_opaque_obj(guard: Any, value: object) -> Any:
 
 
 # Used by OPAQUE_OBJ_GUARD_FN_MATCH guard check spec
-def check_opaque_obj(value: object, metadata: Any) -> bool:
+def check_opaque_obj(value: Any, metadata: Any) -> bool:
     if metadata is None:
         return True
     opaque_info = get_opaque_obj_info(type(value))
@@ -1223,20 +1214,20 @@ def check_opaque_obj(value: object, metadata: Any) -> bool:
 
 
 # Used by CLOSURE_MATCH guard check spec
-def extract_closure(guard: Any, value: object) -> Any:
+def extract_closure(guard: Any, value: Any) -> Any:
     if type(value) is types.FunctionType and hasattr(value, "__code__"):
         return value.__code__
     return id(value)
 
 
 # Used by CLOSURE_MATCH guard check spec
-def check_closure(value: object, metadata: Any) -> bool:
+def check_closure(value: Any, metadata: Any) -> bool:
     if type(value) is types.FunctionType and hasattr(value, "__code__"):
         return value.__code__ is metadata
     return id(value) == metadata
 
 
-def _constant_subclass_base_value(value: object) -> Any:
+def _constant_subclass_base_value(value: Any) -> Any:
     """Extract the base constant value from a constant subclass instance."""
     from .variables.user_defined import _CONSTANT_BASE_TYPES
 
@@ -2475,7 +2466,7 @@ class GuardBuilder(GuardBuilderBase):
         get_metadata_fn=lambda guard, value: _guard_create_fn_keyword(guard, "key"),
         eval_fn=lambda value, metadata: metadata in value,
     )
-    def SET_CONTAINS(self, guard: Guard, key: object) -> None:
+    def SET_CONTAINS(self, guard: Guard, key: Any) -> None:
         set_ref = self.arg_ref(guard)
         item = key
 
@@ -2497,7 +2488,7 @@ class GuardBuilder(GuardBuilderBase):
         get_metadata_fn=lambda guard, value: _guard_create_fn_keyword(guard, "key"),
         eval_fn=lambda value, metadata: metadata not in value,
     )
-    def SET_NOT_CONTAINS(self, guard: Guard, key: object) -> None:
+    def SET_NOT_CONTAINS(self, guard: Guard, key: Any) -> None:
         set_ref = self.arg_ref(guard)
         item = key
 
@@ -2546,7 +2537,7 @@ class GuardBuilder(GuardBuilderBase):
         if not isinstance(expected, bool):
             raise AssertionError("COW_TENSOR_MATCH requires a plain Tensor")
 
-        def guard_fn(x: object) -> bool:
+        def guard_fn(x: Any) -> bool:
             return _cow_tensor_matches(x, expected)
 
         code = f"___cow_tensor_matches({self.arg_ref(guard)}, {expected!r})"
@@ -2625,7 +2616,7 @@ class GuardBuilder(GuardBuilderBase):
         get_metadata_fn=lambda guard, value: None,
         eval_fn=lambda value, metadata: value is not None,
     )
-    def NOT_NONE_MATCH(self, guard: Guard, value: object | None = None) -> None:
+    def NOT_NONE_MATCH(self, guard: Guard, value: Any | None = None) -> None:
         ref = self.arg_ref(guard)
         val = self.get(guard)
         if not isinstance(val, torch.Tensor):
@@ -2685,7 +2676,7 @@ class GuardBuilder(GuardBuilderBase):
         # TODO(anijain2305) - Consider this moving this guard to C++
         compare_fn = torch._functorch.pyfunctorch.compare_functorch_state
 
-        def fn(x: object) -> bool:
+        def fn(x: Any) -> bool:
             return compare_fn(states)
 
         self.guard_manager.root.add_lambda_guard(
@@ -2715,7 +2706,7 @@ class GuardBuilder(GuardBuilderBase):
         ]
         self._set_guard_export_info(guard, code)
 
-        def fn(x: object) -> bool:
+        def fn(x: Any) -> bool:
             return guard_hooks_ids == hooks_ids_fn(get_hooks())
 
         self.guard_manager.root.add_lambda_guard(
@@ -2749,21 +2740,16 @@ class GuardBuilder(GuardBuilderBase):
         original_metadata = deepcopy(
             pytree.tree_map_only(torch.SymInt, lambda _: _AnyCompare(), metadata)
         )
-        # Either arm runs on every guard evaluation, so they narrow the opaque
-        # guarded value with a suppression rather than a typing.cast, which
-        # would be a real call on the check path.
         if has_custom_guard:
 
-            def metadata_checker(x: object) -> bool:
+            def metadata_checker(x: Any) -> bool:
                 return cls.__metadata_guard__(
-                    original_metadata,
-                    x.__tensor_flatten__()[1],  # pyrefly: ignore[missing-attribute]
+                    original_metadata, x.__tensor_flatten__()[1]
                 )
 
         else:
 
-            def metadata_checker(x: object) -> bool:
-                # pyrefly: ignore[missing-attribute]
+            def metadata_checker(x: Any) -> bool:
                 return x.__tensor_flatten__()[1] == original_metadata
 
         global_name = f"___check_metadata_{id(metadata_checker)}_c{CompileContext.current_compile_id()}"
@@ -2782,7 +2768,7 @@ class GuardBuilder(GuardBuilderBase):
         # TODO - Consider moving this to C++ if stable
         expected = extract_dtensor_spec(guard, self.get(guard))
 
-        def guard_fn(x: object) -> bool:
+        def guard_fn(x: Any) -> bool:
             return check_dtensor_spec(x, expected)
 
         code = f"__dtensor_spec_{id(guard_fn)}"
@@ -2803,7 +2789,7 @@ class GuardBuilder(GuardBuilderBase):
         if original_values is None:
             return
 
-        def opaque_guard_checker(x: object) -> bool:
+        def opaque_guard_checker(x: Any) -> bool:
             return check_opaque_obj(x, original_values)
 
         global_name = f"___check_opaque_guard_fn_{id(opaque_guard_checker)}_c{CompileContext.current_compile_id()}"
@@ -2973,11 +2959,8 @@ class GuardBuilder(GuardBuilderBase):
         base_value = base_type(val)
         code = [f"{base_type.__name__}({ref}) == {base_value!r}"]
 
-        def check_fn(x: object) -> bool:
-            # Mirrors _constant_subclass_base_value: base_type is a union of
-            # int/float/str, none of which typecheck against an opaque arg,
-            # but x is an instance of base_type by construction.
-            return base_type(x) == base_value  # pyrefly: ignore[bad-argument-type]
+        def check_fn(x: Any) -> bool:
+            return base_type(x) == base_value
 
         self.get_guard_manager(guard).add_lambda_guard(
             check_fn,
@@ -3177,7 +3160,7 @@ class GuardBuilder(GuardBuilderBase):
         count_type = type(value)
         normalized_count_iter = normalize_count_iter(value)
 
-        def guard_fn(x: object) -> bool:
+        def guard_fn(x: Any) -> bool:
             return (
                 type(x) is count_type
                 and normalize_count_iter(x) == normalized_count_iter
@@ -3276,17 +3259,10 @@ class GuardBuilder(GuardBuilderBase):
         ref = self.arg_ref(guard)
         value = self.get(guard)
 
-        # SUPPORTED_NODES normally uses DICT_VERSION (PEP 509) as an O(1) fast
-        # path. That guard cannot be serialized, so when saving we fall through
-        # to keys-match and stick the choice on the Guard. Load rebuilds with
-        # save_guards=False but sees the pickled flag, so it keeps keys-match
-        # instead of re-promoting to DICT_VERSION.
         if value is torch.utils._pytree.SUPPORTED_NODES:
-            if self.save_guards:
-                guard._force_dict_keys_match = True
-            if not guard._force_dict_keys_match:
-                self.DICT_VERSION(guard)
-                return
+            # For SUPPORTED_NODES, we can guard on the dictionary version (PEP509).
+            self.DICT_VERSION(guard)
+            return
 
         self.SEQUENCE_LENGTH(guard)
 
@@ -3881,7 +3857,7 @@ class GuardBuilder(GuardBuilderBase):
         self,
         guard: Guard,
         code_list: list[str],
-        provided_guarded_object: object | None = None,
+        provided_guarded_object: Any | None = None,
         provided_func_name: str | None = None,
     ) -> None:
         # WARNING: It is important that cur_frame/caller do NOT stay in
@@ -4977,16 +4953,6 @@ class CheckFunctionManager:
         )
 
         for guard in sorted_guards:
-            # guard_types/code_list are per-build export info, but they
-            # accumulate on the shared Guard objects across builds. Reset them
-            # so results from a previous build (e.g. the pre-filtering build or
-            # an earlier non-save CheckFunctionManager) don't leak into this
-            # build; serialize_guards relies on them to detect unserializable
-            # guards, and a non-save build may derive different guards (e.g.
-            # DICT_VERSION for SUPPORTED_NODES) than a save build.
-            guard.guard_types = None
-            guard.code_list = None
-
             if (
                 not guard_on_nn_modules
                 and guard.is_specialized_nn_module()
