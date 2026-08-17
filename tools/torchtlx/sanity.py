@@ -16,9 +16,9 @@ import os
 import sys
 import time
 
-import torch
 import triton
 
+import torch
 from torch._inductor.utils import run_and_get_code
 
 
