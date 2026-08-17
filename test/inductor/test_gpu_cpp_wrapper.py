@@ -1,4 +1,5 @@
 # Owner(s): ["module: inductor"]
+import copy
 import itertools
 import os
 import subprocess
@@ -21,7 +22,11 @@ from torch._inductor.codegen.cuda.device_op_overrides import CUDADeviceOpOverrid
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import IndentedBuffer
 from torch._inductor.virtualized import V
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
+)
 from torch.testing._internal.common_utils import (
     find_library_location,
     HardwareClassification,
@@ -46,7 +51,6 @@ try:
             test_pattern_matcher,
             test_select_algorithm,
             test_torchinductor,
-            test_torchinductor_dynamic_shapes,
         )
     except ImportError:
         import test_combo_kernels  # @manual=fbcode//caffe2/test/inductor:combo_kernels-library
@@ -55,15 +59,10 @@ try:
         import test_pattern_matcher  # @manual=fbcode//caffe2/test/inductor:pattern_matcher-library
         import test_select_algorithm  # @manual=fbcode//caffe2/test/inductor:select_algorithm-library
         import test_torchinductor  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
-        import test_torchinductor_dynamic_shapes  # @manual=fbcode//caffe2/test/inductor:test_inductor-library_dynamic_shapes
 except unittest.SkipTest:
     if __name__ == "__main__":
         sys.exit(0)
     raise
-
-
-class GpuWrapperTemplate:
-    pass
 
 
 def _register_fbcode_cpp_wrapper_arg_helper_op(m, device):
@@ -103,6 +102,7 @@ def _register_fbcode_cpp_wrapper_arg_helper_op(m, device):
 class TestGpuWrapper(InductorTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @requires_capabilities(Capability.lib.triton)
     def test_cpp_wrapper_compile_timing_recorded(self, device):
         from torch._dynamo.utils import compilation_time_metrics
         from torch._inductor.utils import fresh_cache
@@ -121,6 +121,7 @@ class TestGpuWrapper(InductorTestCase):
         durations = compilation_time_metrics["cpp_wrapper_compile"]
         self.assertTrue(any(t > 0 for t in durations))
 
+    @requires_capabilities(Capability.lib.triton)
     def test_aoti_debug_printer_works_on_constants(self, device):
         batch_size = 32
         seq_length = 50
@@ -142,6 +143,7 @@ class TestGpuWrapper(InductorTestCase):
         )(test_fn)
         comp()
 
+    @requires_capabilities(Capability.lib.triton)
     def test_non_tensor_args_wrapped_on_cpu(self, device):
         def test_fn(x, s):
             return (x + s).sum()
@@ -153,6 +155,7 @@ class TestGpuWrapper(InductorTestCase):
         self.assertIn("torch.tensor(arg, device='cpu')", code)
 
     @config.patch(implicit_fallbacks=True)
+    @requires_capabilities(Capability.lib.triton)
     def test_fbcode_custom_op_fallback_python_arg_helpers(self, device):
         if not config.is_fbcode():
             self.skipTest("fbcode-only cpp_wrapper symbol visibility test")
@@ -178,6 +181,7 @@ class TestGpuWrapper(InductorTestCase):
             self.assertEqual(actual, expected)
 
     @config.patch(implicit_fallbacks=True)
+    @requires_capabilities(Capability.lib.triton)
     def test_custom_op_fallback_symint_dispatch(self, device):
         # A custom op with a SymInt argument (e.g.
         # fbgemm::permute_2D_sparse_data_input1D) must not be routed to the
@@ -209,6 +213,7 @@ class TestGpuWrapper(InductorTestCase):
             )
 
     @config.patch(implicit_fallbacks=True)
+    @requires_capabilities(Capability.lib.triton)
     def test_custom_op_fallback_boxes_none_as_undefined_tensor(self, device):
         if IS_FBCODE or IS_SANDCASTLE:
             torch.ops.load_library("//caffe2/test/inductor:custom_ops")
@@ -237,6 +242,7 @@ class TestGpuWrapper(InductorTestCase):
         self.assertIn("c10::IValue(at::Tensor())", code)
 
     @parametrize("per_subkernel_blocks", [False, True])
+    @requires_capabilities(Capability.lib.triton)
     def test_lazy_compile_combo_kernel_default_config(
         self, device, per_subkernel_blocks
     ):
@@ -291,6 +297,7 @@ class TestGpuWrapper(InductorTestCase):
                     ),
                 )
 
+    @requires_capabilities(Capability.lib.triton)
     def test_cudagraph_no_partition(self, device):
         def test_fn(x, s):
             return (x + s).sum()
@@ -310,6 +317,7 @@ class TestGpuWrapper(InductorTestCase):
             res = comp(x, s)
             self.assertEqual(res, expected)
 
+    @requires_capabilities(Capability.lib.triton)
     def test_many_args_fold_expression_nesting(self, device):
         if torch.device(device).type == "xpu":
             self.skipTest("ocloc backend compiler crashes with too many kernel args")
@@ -334,6 +342,7 @@ class TestGpuWrapper(InductorTestCase):
         for p, e in zip(params, expected):
             self.assertEqual(p, e)
 
+    @requires_capabilities(Capability.lib.triton)
     def test_cpp_wrapper_backward_lazy_compile(self, device):
         """Test that options={"cpp_wrapper": True} works with backward pass.
 
@@ -355,6 +364,7 @@ class TestGpuWrapper(InductorTestCase):
         result = opt_fn(x, output_grad)
         self.assertEqual(result.shape, x.shape)
 
+    @requires_capabilities(Capability.lib.triton)
     def test_cuda_cpp_wrapper_skips_vec_isa_for_device_only_code(self, device):
         def fn(x):
             return (x.sin() + 1).cos()
@@ -369,6 +379,7 @@ class TestGpuWrapper(InductorTestCase):
 
     # The vec-ISA probe child cannot resolve ROCm SDK libraries in CI.
     @skipIfRocmVersionAtLeast([7, 14])
+    @requires_capabilities(Capability.lib.triton)
     def test_cuda_cpp_wrapper_keeps_vec_isa_for_host_vectorized_code(self, device):
         def fn(x):
             x = x + 1
@@ -390,6 +401,7 @@ class TestGpuWrapper(InductorTestCase):
         self.assertIn("at::vec::", code)
         self.assertIn("needs_vec_isa=True", code)
 
+    @requires_capabilities(Capability.lib.triton)
     def test_cuda_cpp_wrapper_build_separate_splits_vec_isa_requirements(self, device):
         def fn(x):
             x = x + 1
@@ -413,6 +425,7 @@ class TestGpuWrapper(InductorTestCase):
         self.assertIn("needs_vec_isa=False", code)
         self.assertIn("kernel_needs_vec_isa=True", code)
 
+    @requires_capabilities(Capability.lib.triton)
     def test_map_fullgraph_cpp_wrapper(self, device):
         def body_fn(x):
             return torch.nn.functional.gelu(x)
@@ -425,6 +438,7 @@ class TestGpuWrapper(InductorTestCase):
         opt_fn = torch.compile(fn, fullgraph=True, options={"cpp_wrapper": True})
         self.assertEqual(opt_fn(xs), expected)
 
+    @requires_capabilities(Capability.lib.triton)
     def test_any_fallback_cpp_wrapper(self, device):
         with torch.library._scoped_library("mylib_fallback", "FRAGMENT") as m:
             m.define("any_fallback(Tensor x, Any y) -> Tensor")
@@ -530,6 +544,7 @@ class TestGpuWrapperGeneric(InductorTestCase):
 class TestGpuWrapperCuda(InductorTestCase):
     hw_classification = HardwareClassification.CUDA
 
+    @requires_capabilities(Capability.lib.triton)
     def test_debug_sync_graph(self, device):
         def test_fn(x):
             return x * 2
@@ -542,6 +557,7 @@ class TestGpuWrapperCuda(InductorTestCase):
             result = compiled(x)
         self.assertEqual(result, x * 2)
 
+    @requires_capabilities(Capability.lib.triton)
     def test_debug_sync_kernel(self, device):
         def test_fn(x):
             return x * 2
@@ -607,6 +623,7 @@ for i, (a, r) in enumerate(zip(args, ref_args)):
 class TestLazyCompileKernelCollision(InductorTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @requires_capabilities(Capability.lib.triton)
     def test_lazy_compile_kernel_name_collision_across_modules(self):
         """The collision manifests when a fresh process loads .so modules from
         warm on-disk caches: AOTAutograd cache hits cause both forward and
@@ -677,6 +694,7 @@ class TestCppWrapperStaticInitDeadlock(InductorTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @skipIfXpu(msg="https://github.com/pytorch/pytorch/issues/184496")
+    @requires_capabilities(Capability.lib.triton)
     def test_static_init_dlopen_does_not_deadlock(self):
         """The cpp_wrapper-generated .so must not trigger Triton kernel
         compilation from a static initializer (dlopen-time): doing so
@@ -817,6 +835,7 @@ run()
 class TestLazyTmaGlobalScratch(InductorTestCase):
     hw_classification = HardwareClassification.CUDA
 
+    @requires_capabilities(Capability.lib.triton)
     def test_lazy_tma_global_scratch_scales_with_launch_grid(self, device):
         if torch.version.hip:
             self.skipTest("requires CUDA")
@@ -857,6 +876,7 @@ class TestLazyTmaGlobalScratch(InductorTestCase):
 class DynamicShapesGpuWrapperGpuTests(InductorTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @requires_capabilities(Capability.lib.triton)
     def test_annotation_training(self, device):
         batch_size = 32
         seq_length = 50
@@ -877,7 +897,6 @@ class DynamicShapesGpuWrapperGpuTests(InductorTestCase):
         )
         fn()
 
-
 test_failures_gpu_wrapper = {
     "test_mm_plus_mm2_dynamic_shapes": test_torchinductor.TestFailure(
         ("gpu_wrapper",), is_skip=True
@@ -896,13 +915,20 @@ def make_test_case(
     name,
     device,
     tests,
+    target_cls,
+    fn_suffix,
     condition=True,
     slow=False,
     func_inputs=None,
     code_string_count=None,
     check_code=True,
+    dynamic_shapes=False,
+    test_failures=None,
+    tf_suffix=None,
+    xfail_props=(),
 ):
     test_name = f"{name}_{device}" if device else name
+    full_name = f"{test_name}_{fn_suffix}"
     if code_string_count is None:
         code_string_count = {}
 
@@ -911,6 +937,7 @@ def make_test_case(
         raise AssertionError("not a callable")
     func = slowTest(func) if slow else func
 
+    @requires_capabilities(Capability.lib.triton)
     @config.patch(cpp_wrapper=True)
     def fn(self):
         tests.setUpClass()
@@ -936,16 +963,30 @@ def make_test_case(
             tests.tearDown()
             tests.tearDownClass()
 
-    fn.__name__ = test_name
-    import copy
+    if dynamic_shapes:
+        fn = torch._dynamo.config.patch(assume_static_by_default=False)(fn)
 
+    fn.__name__ = test_name
     fn.__dict__ = copy.deepcopy(func.__dict__)
+
+    for prop in xfail_props:
+        if hasattr(func, prop):
+            fn = unittest.expectedFailure(fn)
+            break
+
+    if test_failures is not None:
+        if tf_suffix is None:
+            tf_suffix = fn_suffix
+        template_name = f"{test_name}_dynamic_shapes" if dynamic_shapes else test_name
+        tf = test_failures.get(template_name)
+        if tf and tf_suffix in tf.suffixes:
+            if tf.is_skip:
+                fn = unittest.skip("Skipped!")(fn)
+            else:
+                fn = unittest.expectedFailure(fn)
+
     if condition:
-        setattr(
-            GpuWrapperTemplate,
-            test_name,
-            fn,
-        )
+        setattr(target_cls, full_name, fn)
 
 
 if RUN_GPU:
@@ -1069,23 +1110,29 @@ if RUN_GPU:
             tests=test_select_algorithm.TestSelectAlgorithm(),
         ),
     ]:
-        make_test_case(item.name, item.device, item.tests, check_code=item.check_code)
+        make_test_case(
+            item.name,
+            item.device,
+            item.tests,
+            target_cls=TestGpuWrapper,
+            fn_suffix="gpu_wrapper",
+            check_code=item.check_code,
+            test_failures=test_failures_gpu_wrapper,
+            tf_suffix="gpu_wrapper",
+        )
+        make_test_case(
+            item.name,
+            item.device,
+            item.tests,
+            target_cls=DynamicShapesGpuWrapperGpuTests,
+            fn_suffix="dynamic_shapes_gpu_wrapper",
+            check_code=item.check_code,
+            dynamic_shapes=True,
+            test_failures=test_failures_gpu_wrapper,
+            tf_suffix="gpu_wrapper",
+            xfail_props=("_expected_failure_dynamic", "_expected_failure_dynamic_wrapper"),
+        )
 
-    test_torchinductor.copy_tests(
-        GpuWrapperTemplate, TestGpuWrapper, "gpu_wrapper", test_failures_gpu_wrapper
-    )
-
-    DynamicShapesGpuWrapperTemplate = (
-        test_torchinductor_dynamic_shapes.make_dynamic_cls(GpuWrapperTemplate)
-    )
-
-    test_torchinductor.copy_tests(
-        DynamicShapesGpuWrapperTemplate,
-        DynamicShapesGpuWrapperGpuTests,
-        "gpu_wrapper",
-        test_failures_gpu_wrapper,
-        xfail_prop="_expected_failure_dynamic_wrapper",
-    )
 
 instantiate_device_type_tests(
     TestGpuWrapper, globals(), except_for="cpu", allow_xpu=True
