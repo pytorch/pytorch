@@ -1530,10 +1530,9 @@ def validate_sharding_rule_sample_backward(
         return None
 
     # DTensor backward
-    if len(input_placements) != len(full_tensors):
-        raise AssertionError(
-            f"placement/tensor count mismatch: {len(input_placements)} vs {len(full_tensors)}"
-        )
+    assert len(input_placements) == len(full_tensors), (  # noqa: S101
+        f"placement/tensor count mismatch: {len(input_placements)} vs {len(full_tensors)}"
+    )
     dt_tensors = [
         distribute_tensor(c, device_mesh, (p,))
         for c, p in zip(_clone_with_grad(full_tensors), input_placements, strict=True)

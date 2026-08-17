@@ -654,8 +654,7 @@ def _update_reuse_args_tensors(
             wrapper._runtime_tensor = getattr(val, "runtime_tensor", val)
     local_reduce = getattr(args, "local_reduce_out", None)
     if local_reduce is not None:
-        if args_kwargs is None:
-            raise AssertionError("expected args_kwargs to be not None")
+        assert args_kwargs is not None  # noqa: S101
         local_reduce._runtime_tensor = args_kwargs["local_reduce_out"]
     return True
 

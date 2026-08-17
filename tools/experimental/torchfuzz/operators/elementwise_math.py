@@ -581,8 +581,7 @@ class AddcmulOperator(TernaryElementwiseOperatorBase):
 
 
 def _clamp_bound(output_spec: Spec) -> float | int:
-    if not isinstance(output_spec, TensorSpec):
-        raise AssertionError(f"expected TensorSpec, got {type(output_spec)}")
+    assert isinstance(output_spec, TensorSpec)  # noqa: S101
     bound = round(random.uniform(-10.0, 10.0), 4)
     if output_spec.dtype not in FLOAT_DTYPES:
         bound = int(bound)
@@ -605,8 +604,7 @@ class ClampMaxOperator(Operator):
         return output_spec.dtype != torch.bool
 
     def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
-        if not isinstance(output_spec, TensorSpec):
-            raise AssertionError(f"expected TensorSpec, got {type(output_spec)}")
+        assert isinstance(output_spec, TensorSpec)  # noqa: S101
         return [
             TensorSpec(
                 size=output_spec.size,
@@ -641,8 +639,7 @@ class ClampMinOperator(Operator):
         return output_spec.dtype != torch.bool
 
     def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
-        if not isinstance(output_spec, TensorSpec):
-            raise AssertionError(f"expected TensorSpec, got {type(output_spec)}")
+        assert isinstance(output_spec, TensorSpec)  # noqa: S101
         return [
             TensorSpec(
                 size=output_spec.size,
@@ -718,8 +715,7 @@ class LdexpOperator(Operator):
         return is_float_dtype(output_spec.dtype)
 
     def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
-        if not isinstance(output_spec, TensorSpec):
-            raise AssertionError(f"expected TensorSpec, got {type(output_spec)}")
+        assert isinstance(output_spec, TensorSpec)  # noqa: S101
         return [
             TensorSpec(
                 size=output_spec.size,
