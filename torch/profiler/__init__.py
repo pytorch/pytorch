@@ -18,6 +18,7 @@ from torch._environment import is_fbcode
 from torch.autograd.profiler import KinetoStepTracker, record_function
 from torch.optim.optimizer import Optimizer, register_optimizer_step_post_hook
 
+from ._opentelemetry import opentelemetry_trace_handler
 from .profiler import (
     _KinetoProfile,
     ExecutionTraceObserver,
@@ -28,12 +29,15 @@ from .profiler import (
     tensorboard_trace_handler,
 )
 
+opentelemetry_trace_handler.__module__ = "torch.profiler"
+
 
 __all__ = [
     "profile",
     "schedule",
     "supported_activities",
     "tensorboard_trace_handler",
+    "opentelemetry_trace_handler",
     "ProfilerAction",
     "ProfilerActivity",
     "kineto_available",
