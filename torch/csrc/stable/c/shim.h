@@ -2,7 +2,6 @@
 #define STABLE_TORCH_SHIM
 
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
-#include <torch/csrc/inductor/aoti_torch/c/shim_mps.h>
 
 #include <torch/csrc/stable/version.h>
 
@@ -296,20 +295,6 @@ AOTI_TORCH_EXPORT AOTITorchError torch_generator_get_device(
 // undefined tensors and for tensors without storage (e.g. sparse tensors).
 AOTI_TORCH_EXPORT AOTITorchError
 torch_has_storage(AtenTensorHandle tensor, bool* ret_has_storage);
-
-#ifdef USE_MPS
-
-// Binds size bytes at ptr so float, bool and small array args can be used
-// (for tensor and int64_t types see aoti_torch/c/shim_mps.h).
-// setBytes supports transient data up to 4 KB. Pass larger data as a tensor:
-// https://developer.apple.com/documentation/metal/mtlcomputecommandencoder/1443159-setbytes
-AOTI_TORCH_EXPORT AOTITorchError torch_mps_set_arg_bytes(
-    AOTIMetalKernelFunctionHandle func,
-    unsigned idx,
-    const void* ptr,
-    uint64_t size);
-
-#endif // USE_MPS
 
 // --- Python interop shims -------------------------------------------------
 // Unlike the rest of the stable ABI, these convert between a Python

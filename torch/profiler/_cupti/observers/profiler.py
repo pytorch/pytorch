@@ -885,26 +885,12 @@ def _resolve_host_fn_columns(host_fns: dict[int, Any], frame: dict[str, Any]) ->
     return names, addrs
 
 
-# Where a resolver's lane ordinal lands (see LaneResolver). Above any CUDA stream id, so a lane
-# and a stream are never the same display lane, and a constant rather than "next free id in this
-# window" so one logical lane keeps one id across traces of a job -- consumers compare lanes
-# between traces. Readable on sight: 100008 is resolver lane 8.
-LOGICAL_LANE_BASE = 100_000
-
-
 def _resolve_lane_columns(lane_resolver, frame: dict[str, Any]) -> Any:
     """Per-row (logical_lane, lane_name) for graphed ops. Graphed rows (graph_node_id != 0)
     get the resolver's (lane, name), or keep their CUDA stream when it returns None; eager rows
     keep their CUDA stream and no name (the monitor names those "stream N"). The resolver is
     keyed and memoized on graph_node_id by the observer (see CuptiMonitorObserver._lane_resolver),
-    so distinct nodes resolve once for its lifetime.
-
-    A resolver returns an ordinal in its own space, which is placed in the reserved lane range
-    here (LOGICAL_LANE_BASE) -- lanes share the CUDA stream namespace, so an un-offset ordinal
-    would be indistinguishable from a stream id, and the two would render as one lane. This is
-    the only place lanes are assigned, so it is the only place that has to hold the invariant.
-    Returning the op's own stream number is therefore still a distinct logical lane; None is how
-    a resolver says "leave it on its CUDA stream"."""
+    so distinct nodes resolve once for its lifetime."""
     gnid = frame["graph_node_id"]
     n = len(gnid)
     logical = np.array(
@@ -916,8 +902,7 @@ def _resolve_lane_columns(lane_resolver, frame: dict[str, Any]) -> Any:
             continue
         res = lane_resolver(g)
         if res is not None:
-            lane, names[i] = res
-            logical[i] = lane + (0 if lane >= LOGICAL_LANE_BASE else LOGICAL_LANE_BASE)
+            logical[i], names[i] = res
     return logical, names
 
 
