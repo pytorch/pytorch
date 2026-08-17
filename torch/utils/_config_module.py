@@ -6,7 +6,6 @@ import inspect
 import io
 import os
 import pickle
-import sys
 import tokenize
 import unittest
 from collections.abc import Callable
