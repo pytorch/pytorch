@@ -234,15 +234,14 @@ class AOTInductorModelContainer {
 
     auto& const_folded = active().fold_state;
     if (const_folded == ConstantState::INITIALIZED) {
-      // Do NOT call get_available_model() before upgrading to exclusive lock.
+      // Do NOT call checkout_model() before upgrading to exclusive lock.
       // Holding a model across the upgrade causes a deadlock when another
       // thread holds a shared lock and waits for the model.
       model_lk.unlock();
       std::unique_lock constants_folding_lk(model_exec_mutex_);
       // Double locking to make sure constant folding is only ran once.
       if (const_folded == ConstantState::INITIALIZED) {
-        auto* model = get_available_model();
-        // TODO: add try catch block to handle exception.
+        auto model = checkout_model();
         auto folded_const_map = model->run_const_fold(
             stream, proxy_executor, /* initialization = */ true);
         update_constant_buffer(
@@ -250,11 +249,7 @@ class AOTInductorModelContainer {
             /* use_inactive = */ false,
             /* validate_full_update = */ false);
         const_folded = ConstantState::FOLDED;
-        {
-          std::lock_guard lk(models_mutex_);
-          pending_models_.push_back(model);
-        }
-        pending_models_available_.notify_one();
+        model.mark_pending();
       }
       constants_folding_lk.unlock();
       model_lk.lock();
@@ -263,21 +258,9 @@ class AOTInductorModelContainer {
           "Unknown constant state: " + toStringConstantState(const_folded));
     }
 
-    auto* model = get_available_model();
-
-    try {
-      model->run(input_handles, output_handles, stream, proxy_executor);
-    } catch (...) {
-      std::lock_guard lk(models_mutex_);
-      available_models_.push_back(model);
-      throw;
-    }
-
-    {
-      std::lock_guard lk(models_mutex_);
-      pending_models_.push_back(model);
-    }
-    pending_models_available_.notify_one();
+    auto model = checkout_model();
+    model->run(input_handles, output_handles, stream, proxy_executor);
+    model.mark_pending();
   }
 
   // Non-thread-aware variant of run(). Obviously unsafe to use in a threaded
@@ -439,65 +422,48 @@ class AOTInductorModelContainer {
       bool inactive_buffer,
       DeviceStreamType stream,
       AOTIProxyExecutorHandle proxy_executor) {
-    AOTInductorModel* model;
     auto& const_folded =
         inactive_buffer ? inactive().fold_state : active().fold_state;
     if (!inactive_buffer) {
       // We would need to acquire a unique lock if we want to run constant
       // folding on the active buffer.
       std::unique_lock constants_folding_lk(model_exec_mutex_);
-      model = get_available_model();
-      try {
-        auto folded_const_map = model->run_const_fold(stream, proxy_executor);
-        update_constant_buffer(
-            std::move(folded_const_map),
-            /* use_inactive = */ false,
-            /* validate_full_update = */ false);
-        const_folded = ConstantState::FOLDED;
-      } catch (...) {
-        std::lock_guard lk(models_mutex_);
-        available_models_.push_back(model);
-        throw;
-      }
+      auto model = checkout_model();
+      auto folded_const_map = model->run_const_fold(stream, proxy_executor);
+      update_constant_buffer(
+          std::move(folded_const_map),
+          /* use_inactive = */ false,
+          /* validate_full_update = */ false);
+      const_folded = ConstantState::FOLDED;
+      model.mark_pending();
     } else {
       std::shared_lock model_lk(model_exec_mutex_);
-      model = get_available_model();
+      auto model = checkout_model();
 
       // We swap the constant mapping to the inactive buffer in the model to run
       // const run.
       auto inactive_map = inactive().map;
       auto inactive_array = inactive().array;
 
-      try {
-        model->update_constants_map(
-            inactive_map, /* remap_constants_array= */ false);
-        model->update_constants_array(inactive_array);
+      model->update_constants_map(
+          inactive_map, /* remap_constants_array= */ false);
+      model->update_constants_array(inactive_array);
 
-        auto folded_const_map = model->run_const_fold(stream, proxy_executor);
-        update_constant_buffer(
-            std::move(folded_const_map),
-            /* use_inactive = */ true,
-            /* validate_full_update = */ false);
+      auto folded_const_map = model->run_const_fold(stream, proxy_executor);
+      update_constant_buffer(
+          std::move(folded_const_map),
+          /* use_inactive = */ true,
+          /* validate_full_update = */ false);
 
-        // Swap back the model's constants mapping
-        auto active_map = active().map;
-        auto active_array = active().array;
-        model->update_constants_map(
-            active_map, /* remap_constants_array= */ false);
-        model->update_constants_array(active_array);
-        const_folded = ConstantState::FOLDED;
-      } catch (...) {
-        std::lock_guard lk(models_mutex_);
-        available_models_.push_back(model);
-        throw;
-      }
+      // Swap back the model's constants mapping
+      auto active_map = active().map;
+      auto active_array = active().array;
+      model->update_constants_map(
+          active_map, /* remap_constants_array= */ false);
+      model->update_constants_array(active_array);
+      const_folded = ConstantState::FOLDED;
+      model.mark_pending();
     }
-
-    {
-      std::lock_guard lk(models_mutex_);
-      pending_models_.push_back(model);
-    }
-    pending_models_available_.notify_one();
   }
 
   bool _is_tensor_constant_type(const size_t idx) const {
@@ -970,14 +936,68 @@ class AOTInductorModelContainer {
     return buffers_[1 - active_idx_];
   }
 
-  AOTInductorModel* get_available_model() {
+  // RAII handle for a model checked out of available_models_. Destroying the
+  // handle puts the model straight back into available_models_, which is what
+  // an aborted run needs. A run that reached the device must instead end with
+  // mark_pending(): its work may still be in flight, so the model only becomes
+  // reusable once is_finished() reports completion (see
+  // reclaim_finished_models). Anything else the run mutated on the model (e.g.
+  // a constants binding) is not the handle's responsibility to undo.
+  class ModelLease {
+   public:
+    ModelLease(AOTInductorModelContainer& container, AOTInductorModel* model)
+        : container_(container), model_(model) {}
+
+    ModelLease(const ModelLease&) = delete;
+    ModelLease& operator=(const ModelLease&) = delete;
+
+    ModelLease(ModelLease&& other) noexcept
+        : container_(other.container_), model_(other.model_) {
+      other.model_ = nullptr;
+    }
+    ModelLease& operator=(ModelLease&&) = delete;
+
+    ~ModelLease() {
+      if (model_ != nullptr) {
+        container_.return_available_model(model_);
+      }
+    }
+
+    AOTInductorModel* operator->() const {
+      return model_;
+    }
+
+    void mark_pending() {
+      container_.enqueue_pending_model(model_);
+      model_ = nullptr;
+    }
+
+   private:
+    AOTInductorModelContainer& container_;
+    AOTInductorModel* model_;
+  };
+
+  ModelLease checkout_model() {
     std::unique_lock lk(models_mutex_);
     if (available_models_.empty()) {
       reclaim_finished_models(lk);
     }
     auto* result = available_models_.back();
     available_models_.pop_back();
-    return result;
+    return ModelLease(*this, result);
+  }
+
+  void return_available_model(AOTInductorModel* model) {
+    std::lock_guard lk(models_mutex_);
+    available_models_.push_back(model);
+  }
+
+  void enqueue_pending_model(AOTInductorModel* model) {
+    {
+      std::lock_guard lk(models_mutex_);
+      pending_models_.push_back(model);
+    }
+    pending_models_available_.notify_one();
   }
 
   // This mutex is used to protect execution of model.
@@ -1022,8 +1042,7 @@ class AOTInductorModelContainer {
     try {
       model->wait_for_completion();
     } catch (...) {
-      lk.lock();
-      available_models_.push_back(model);
+      return_available_model(model);
       throw;
     }
     lk.lock();
