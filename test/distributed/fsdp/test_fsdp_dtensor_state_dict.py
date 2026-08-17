@@ -82,7 +82,7 @@ class FSDPDTensorStateDictTestBase(DTensorContinuousTestBase):
 
     @property
     def world_size(self) -> int:
-        return min(4, _get_device_module(self.device_type).device_count())
+        return _get_device_module(self.device_type).device_count()
 
 
 class TestFSDPWithDeviceMeshAndDTensor(FSDPDTensorStateDictTestBase):
