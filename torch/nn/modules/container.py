@@ -30,6 +30,11 @@ __all__ = [
 T = TypeVar("T", bound=Module)
 _V = TypeVar("_V")
 
+# Device types whose parameters carry no materialized storage worth reporting in
+# a repr. Listing the non-accelerators rather than the accelerators means a newly
+# supported backend starts printing its device without an edit here.
+_NO_DEVICE_STR_TYPES = ("cpu", "meta", "xla", "lazy")
+
 
 # Copied from torch.nn.modules.module, required for a custom __repr__ for ModuleList
 def _addindent(s_, numSpaces):
@@ -774,7 +779,7 @@ class ParameterList(Module):
         for k, p in enumerate(self):
             if isinstance(p, torch.Tensor):
                 size_str = "x".join(str(size) for size in p.size())
-                if p.device.type in ["cuda", torch._C._get_privateuse1_backend_name()]:
+                if p.device.type not in _NO_DEVICE_STR_TYPES:
                     device_str = f" ({p.device})"
                 else:
                     device_str = ""
@@ -1009,7 +1014,7 @@ class ParameterDict(Module):
         for k, p in self.items():
             if isinstance(p, torch.Tensor):
                 size_str = "x".join(str(size) for size in p.size())
-                if p.device.type in ["cuda", torch._C._get_privateuse1_backend_name()]:
+                if p.device.type not in _NO_DEVICE_STR_TYPES:
                     device_str = f" ({p.device})"
                 else:
                     device_str = ""
