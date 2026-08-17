@@ -31,7 +31,6 @@ from torch.testing._internal.common_device_type import (
     onlyCUDA,
     onlyMPS,
     onlyNativeDeviceTypes,
-    skipXPUIf,
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.common_dtype import floating_types_and
@@ -1448,7 +1447,6 @@ torch.cuda.synchronize()
         )
 
     @expectedFailureMPS  # TODO: Fixme
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/4731")
     @dtypes(torch.half, torch.bfloat16, torch.float, torch.double)
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @gcIfJetson
@@ -2302,9 +2300,7 @@ torch.cuda.synchronize()
 
 
 instantiate_device_type_tests(TestAvgPoolDeviceType, globals())
-instantiate_device_type_tests(
-    TestPoolingNNDeviceType, globals(), allow_mps=True, allow_xpu=True
-)
+instantiate_device_type_tests(TestPoolingNNDeviceType, globals(), allow_mps=True)
 instantiate_parametrized_tests(TestPoolingNN)
 
 if __name__ == "__main__":

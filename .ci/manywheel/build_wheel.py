@@ -36,34 +36,26 @@ def configure_blas_env() -> None:
             os.environ["CMAKE_LIBRARY_PATH"] = "/opt/intel/lib:/lib"
         return
 
-    elif arch == "aarch64":
-        if not Path("/acl").is_dir():
-            sys.exit("ERROR: ARM Compute Library not found at /acl")
-        os.environ["USE_MKLDNN"] = "1"
-        os.environ["USE_MKLDNN_ACL"] = "1"
-        os.environ["ACL_ROOT_DIR"] = "/acl"
+    if arch != "aarch64":
+        return
 
-        if gpu_arch_type == "cuda-aarch64":
-            nvpl = Path("/usr/local/lib/libnvpl_blas_lp64_gomp.so.0")
-            if not nvpl.is_file():
-                sys.exit(f"ERROR: NVPL BLAS not found at {nvpl}")
-            print("Using NVPL BLAS/LAPACK and ACL for MKLDNN on CUDA aarch64")
-            os.environ["BLAS"] = "NVPL"
-        elif gpu_arch_type in ("cpu-aarch64", "cpu"):
-            openblas = Path("/opt/OpenBLAS/lib/libopenblas.so.0")
-            if not openblas.is_file():
-                sys.exit(f"ERROR: OpenBLAS not found at {openblas}")
-            print("Using OpenBLAS and ACL for MKLDNN on CPU aarch64")
-            os.environ["BLAS"] = "OpenBLAS"
-            os.environ["OpenBLAS_HOME"] = "/opt/OpenBLAS"
+    if not Path("/acl").is_dir():
+        sys.exit("ERROR: ARM Compute Library not found at /acl")
+    os.environ["USE_MKLDNN"] = "1"
+    os.environ["USE_MKLDNN_ACL"] = "1"
+    os.environ["ACL_ROOT_DIR"] = "/acl"
 
-    elif arch == "riscv64":
-        os.environ["USE_MKLDNN"] = "0"
-
+    if gpu_arch_type == "cuda-aarch64":
+        nvpl = Path("/usr/local/lib/libnvpl_blas_lp64_gomp.so.0")
+        if not nvpl.is_file():
+            sys.exit(f"ERROR: NVPL BLAS not found at {nvpl}")
+        print("Using NVPL BLAS/LAPACK and ACL for MKLDNN on CUDA aarch64")
+        os.environ["BLAS"] = "NVPL"
+    elif gpu_arch_type in ("cpu-aarch64", "cpu"):
         openblas = Path("/opt/OpenBLAS/lib/libopenblas.so.0")
         if not openblas.is_file():
             sys.exit(f"ERROR: OpenBLAS not found at {openblas}")
-        print("Using OpenBLAS for MKLDNN on CPU riscv64")
+        print("Using OpenBLAS and ACL for MKLDNN on CPU aarch64")
         os.environ["BLAS"] = "OpenBLAS"
         os.environ["OpenBLAS_HOME"] = "/opt/OpenBLAS"
 
