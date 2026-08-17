@@ -81,13 +81,7 @@ bool ExtraState::has_any_cache_entries() const {
 
 bool ExtraState::has_relevant_entries(int64_t isolate_recompiles_id) const {
   CacheLock lock(this->cache_mutex);
-  return std::any_of(
-             this->precompile_entries.begin(),
-             this->precompile_entries.end(),
-             [isolate_recompiles_id](const PrecompileEntry& entry) {
-               return entry.isolate_recompiles_id == isolate_recompiles_id;
-             }) ||
-      this->cache_entry_map.count(isolate_recompiles_id) > 0 ||
+  return this->cache_entry_map.count(isolate_recompiles_id) > 0 ||
       (isolate_recompiles_id >= 0 && this->cache_entry_map.count(-1) > 0);
 }
 
@@ -728,9 +722,7 @@ void _set_lru_cache(const py::object& boolean) {
 }
 
 py::list _debug_get_precompile_entries(const py::handle& code_obj) {
-  TORCH_CHECK_TYPE(
-      py::isinstance(code_obj, py::module::import("types").attr("CodeType")),
-      "expected a code object!");
+  TORCH_CHECK_TYPE(PyCode_Check(code_obj.ptr()), "expected a code object!");
   PyCodeObject* code = (PyCodeObject*)code_obj.ptr();
   ExtraState* extra = get_extra_state(code);
   py::list result;
@@ -741,4 +733,27 @@ py::list _debug_get_precompile_entries(const py::handle& code_obj) {
     }
   }
   return result;
+}
+
+bool _has_precompile_entries(
+    const py::handle& code_obj,
+    int64_t isolate_recompiles_id) {
+  TORCH_CHECK_TYPE(PyCode_Check(code_obj.ptr()), "expected a code object!");
+  PyCodeObject* code = (PyCodeObject*)code_obj.ptr();
+  ExtraState* extra = get_extra_state(code);
+  if (extra == nullptr) {
+    return false;
+  }
+  // Region exact, matching lookup(): an entry from another region never serves
+  // this one, so a second artifact installed on the same code object is not
+  // coverage for the first. A loaded artifact runs this on every served call,
+  // hence no py::list and no Python executed under the lock -- the wait inside
+  // CacheLock is the only place the GIL can drop.
+  CacheLock lock(extra->cache_mutex);
+  for (const PrecompileEntry& entry : extra->precompile_entries) {
+    if (entry.isolate_recompiles_id == isolate_recompiles_id) {
+      return true;
+    }
+  }
+  return false;
 }
