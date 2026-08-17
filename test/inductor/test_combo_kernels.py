@@ -2316,6 +2316,27 @@ class ComboKernelCompileTimeAutotuneTests(TestCase):
         # No timing-based benchmark ran in deterministic mode.
         self.assertEqual(counters["inductor"]["combo_subkernel_autotune"], 0)
 
+    @requires_gpu_and_triton
+    def test_deterministic_mode_preserves_runtime_autotune(self):
+        def f(a, b):
+            return a + 1.0, b * 2.0
+
+        inps = [
+            torch.randn(4096, device=GPU_TYPE),
+            torch.randn(8192, device=GPU_TYPE),
+        ]
+        with (
+            fresh_cache(),
+            torch._inductor.config.patch(
+                deterministic=True,
+                combo_kernel_compile_time_autotune=False,
+            ),
+        ):
+            out, code = run_and_get_code(torch.compile(f), *inps)
+        self.assertEqual(out, f(*inps))
+        self.assertNotIn("'stitched_num_warps'", " ".join(code))
+
+
 @instantiate_parametrized_tests
 class ComboKernelPDLTests(TestCase):
     """Tests for PDL (Programmatic Dependent Launch) support in combo kernels."""
