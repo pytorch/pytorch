@@ -11,6 +11,7 @@ import collections
 import torch
 import torch._dynamo.test_case
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     make_dynamo_test,
     parametrize,
@@ -73,6 +74,8 @@ _MAPPING_TYPES = [
 
 class TestMpAssSubscript(torch._dynamo.test_case.TestCase):
     """All mapping __setitem__ tests in one class."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         super().setUp()
