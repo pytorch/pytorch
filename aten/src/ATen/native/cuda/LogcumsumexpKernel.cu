@@ -106,17 +106,26 @@ __device__ c10::complex<scalar_t> _log_add_exp_helper(const c10::complex<scalar_
   }
 }
 
+// Named function object rather than a `__device__` lambda: CUB's scan dispatch
+// queries the operator's return type in host code, which is ill-formed for an
+// extended `__device__` lambda. It must stay `__device__`-only because
+// `_log_add_exp_helper` reaches `c10::cuda::compat::sincos`, which is
+// device-only under HIP.
+template <typename scalar_t>
+struct LogAddExpOp {
+  __device__ scalar_t operator()(const scalar_t x_, const scalar_t y_) const {
+    using opmath_t = at::opmath_type<scalar_t>;
+    const opmath_t x{x_}, y{y_};
+    return _log_add_exp_helper(x, y);
+  }
+};
+
 void launch_logcumsumexp_cuda_kernel(const TensorBase& result, const TensorBase& self, int64_t dim) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16,
       self.scalar_type(), "logcumsumexp_cuda",
       [&]() {
-        using opmath_t = at::opmath_type<scalar_t>;
         scalar_t init = -std::numeric_limits<scalar_t>::infinity();
-        auto log_add_exp = [] C10_DEVICE (const scalar_t x_, const scalar_t y_) -> scalar_t {
-          const opmath_t x{x_}, y{y_};
-          return _log_add_exp_helper(x, y);
-        };
-        scan_dim<scalar_t>(self, result, dim, init, log_add_exp);
+        scan_dim<scalar_t>(self, result, dim, init, LogAddExpOp<scalar_t>{});
       });
 }
 
