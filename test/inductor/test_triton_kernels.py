@@ -1767,6 +1767,57 @@ def forward(self, x_1, output_1):
             self.assertFalse(tensor_bases)
 
     @requires_gpu
+    def test_triton_kernel_mutated_offset_view_inference_mode(self):
+        # The gapped regression above traces with view tracking on, so the mutated
+        # arg always carries a _base. inference_mode disables ADInplaceOrView;
+        # FunctionalTensor records ancestry in _inference_mode_base instead, but only
+        # under the export configs that populate it. If the base is lost here the
+        # clone goes back to spanning storage_offset + span of a buffer sized to the
+        # view alone -- either the original silent miscompile, or the InductorError
+        # the as_strided extent check now raises for it. Both fail this test.
+        @triton.jit
+        def maybe_fill_kernel(
+            out_ptr, do_write, n_cols, GAP: tl.constexpr, BLOCK: tl.constexpr
+        ):
+            if do_write != 0:
+                offs = tl.arange(0, BLOCK)
+                tl.store(out_ptr + offs * GAP, 1.0, mask=offs < n_cols)
+
+        n_cols, n_rows, skipped_row, gap = 256, 8, 7, 2
+        width = n_cols * gap
+
+        def make_base():
+            return torch.arange(
+                1, n_rows * width + 1, dtype=torch.float32, device=GPU_TYPE
+            ).reshape(n_rows, width)
+
+        def f():
+            base = make_base()
+            for i in range(n_rows):
+                row = base[i : i + 1, ::gap]
+                maybe_fill_kernel[(1,)](
+                    row, 0 if i == skipped_row else 1, n_cols, GAP=gap, BLOCK=n_cols
+                )
+                base[i : i + 1, ::gap] = row
+            return base
+
+        from torch._higher_order_ops import triton_kernel_wrap as tkw
+
+        with torch.inference_mode():
+            expected = make_base()
+            for i in range(n_rows):
+                if i != skipped_row:
+                    expected[i, ::gap] = 1.0
+            with mock.patch.object(
+                tkw, "_clone_mutated_arg", wraps=tkw._clone_mutated_arg
+            ) as clone_mock:
+                self.assertEqual(torch.compile(f, fullgraph=True)(), expected)
+        # Numerics are the contract; this pins the mechanism, so a change that stops
+        # threading the base fails here instead of passing on whatever memory holds.
+        self.assertTrue(clone_mock.call_args_list)
+        self.assertTrue(any(call.args[2] for call in clone_mock.call_args_list))
+
+    @requires_gpu
     @largeTensorTest("6GB", device=GPU_TYPE)
     def test_triton_kernel_mutated_offset_view_large_tensor(self):
         # The bug itself is shape-independent -- the same over-extent read is emitted

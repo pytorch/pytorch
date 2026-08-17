@@ -7418,6 +7418,34 @@ for dtype in (torch.int32, torch.int64):
         with self.assertRaisesRegex(torch._inductor.exc.InductorError, "holds only"):
             torch.compile(fn, fullgraph=True)(torch.randn(64, device=self.device))
 
+    @torch._inductor.config.patch(force_disable_caches=True)
+    def test_as_strided_past_unbacked_buffer_extent(self):
+        # Same over-extent, but with an unbacked size the comparison cannot be
+        # decided while compiling: statically_known_gt is false and check_leq only
+        # defers a runtime assertion. That assertion is registered by the as_strided
+        # lowering, so it exists only while that lowering runs -- a warm FX graph
+        # cache replays the artifact without it and the read goes through unchecked.
+        # Caches are disabled here so this pins the half that is covered.
+        def fn(x):
+            y = x * 2
+            return torch.as_strided_copy(y, (128,), (1,), 0)
+
+        inp = torch.randn(64, device=self.device)
+        torch._dynamo.decorators.mark_unbacked(inp, 0)
+        with self.assertRaises((RuntimeError, AssertionError)):
+            torch.compile(fn, fullgraph=True)(inp)
+
+    def test_as_strided_within_unbacked_buffer_extent(self):
+        # The complement: an unbacked buffer that does turn out to be large enough
+        # must still compile and run, so the guard cannot reject on unprovable alone.
+        def fn(x):
+            y = x * 2
+            return torch.as_strided_copy(y, (128,), (1,), 0)
+
+        inp = torch.randn(256, device=self.device)
+        torch._dynamo.decorators.mark_unbacked(inp, 0)
+        self.assertEqual(torch.compile(fn, fullgraph=True)(inp), fn(inp))
+
     def test_repeat_interleave(self):
         def fn(x):
             return (
