@@ -417,6 +417,14 @@ def _build_dynamo_forward():
     import types
 
     try:
+        produced_on = globals().get("_DYNAMO_PYTHON_VERSION")
+        if produced_on is not None and tuple(produced_on) != sys.version_info[:2]:
+            # Explicit, because marshal is not the guard it looks like: only the
+            # 3.10 -> 3.11 layout change makes it raise. A 3.12 blob loads on 3.13
+            # and then segfaults when the code object is executed, so refuse first.
+            raise ValueError(
+                f"artifact was produced on Python {produced_on[0]}.{produced_on[1]}"
+            )
         code = marshal.loads(base64.b64decode(_DYNAMO_CODE))
         if not isinstance(code, types.CodeType):
             # marshal can successfully deserialize a non-code object (int, list, ...) from a
