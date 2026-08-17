@@ -305,7 +305,8 @@ DeviceAssertionsData* CUDAKernelLaunchRegistry::
   cpuDevice.type = cudaMemLocationTypeDevice;
   cpuDevice.id = cudaCpuDeviceId;
 #else
-  // Use v1 int form: the v2 cudaMemLocation struct fails under HIP on ROCm.
+  // hipMemAdvise_v2 with hipMemLocationTypeDevice + hipCpuDeviceId fails on
+  // ROCm; the v1 int API maps to Host semantics and works.
   const auto cpuDevice = cudaCpuDeviceId;
 #endif
 
