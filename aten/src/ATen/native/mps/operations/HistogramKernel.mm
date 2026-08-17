@@ -122,7 +122,7 @@ void histogramdd_kernel_impl(Tensor& hist_output,
       id<MTLComputePipelineState> histogramPSO = lib.getPipelineStateForFunc(kernel);
 
       // this function call is a no-op if MPS Profiler is not enabled
-      getMPSProfiler().beginProfileKernel(histogramPSO, "histogram", allTensorsList, mpsStream);
+      getMPSProfiler().beginProfileKernel(histogramPSO, "histogram", allTensorsList);
 
       [computeEncoder setComputePipelineState:histogramPSO];
       mtl_setArgs(computeEncoder, input, weight, thread_histograms, stridedIndicesBuffer, D);
@@ -137,7 +137,7 @@ void histogramdd_kernel_impl(Tensor& hist_output,
 
       mtl_dispatch1DJob(computeEncoder, histogramPSO, numThreads);
 
-      getMPSProfiler().endProfileKernel(histogramPSO, mpsStream);
+      getMPSProfiler().endProfileKernel(histogramPSO);
     }
   });
   at::sum_out(hist_output, thread_histograms, /*dim=*/{0});
