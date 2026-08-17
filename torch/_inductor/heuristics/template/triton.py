@@ -70,8 +70,10 @@ def _use_template_autows() -> bool:
 # Check if running on ROCm
 IS_ROCM = torch.version.hip is not None
 
-if IS_ROCM:
-    _rocm_version = tuple(int(v) for v in torch.version.rocm.split(".")[:2])
+_rocm_version = (
+    tuple(int(v) for v in torch.version.rocm.split(".")[:2])  # type: ignore[union-attr]
+    if torch.version.rocm is not None else (0, 0)
+)
 
 
 def _origami_enabled() -> bool:
