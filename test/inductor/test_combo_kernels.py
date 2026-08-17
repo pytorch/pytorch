@@ -384,9 +384,8 @@ class ComboKernelTests(TestCase):
         events = []
         for line in source.splitlines():
             line = line.lstrip()
-            if (
-                " = torch.ops.aten._scaled_dot_product_" in line
-                or line.startswith(aoti_sdpa)
+            if " = torch.ops.aten._scaled_dot_product_" in line or line.startswith(
+                aoti_sdpa
             ):
                 events.append("attention")
             elif ".run(" in line or line.startswith("call_triton_"):
