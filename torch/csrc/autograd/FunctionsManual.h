@@ -584,7 +584,6 @@ std::tuple<at::Tensor, at::Tensor> slogdet_jvp(
     const at::Tensor& LU,
     const at::Tensor& pivots,
     const at::Tensor& dA,
-    const at::Tensor& A,
     const at::Tensor& sign,
     const bool use_A_T);
 at::Tensor slogdet_backward(
@@ -967,7 +966,6 @@ Tensor linalg_solve_jvp(
     const Tensor& dA,
     const Tensor& dB,
     const Tensor& X,
-    const Tensor& A,
     const Tensor& LU,
     const Tensor& pivots,
     const bool left);
@@ -986,7 +984,6 @@ Tensor linalg_det_backward(
 Tensor linalg_det_jvp(
     const Tensor& dA,
     const Tensor& det,
-    const Tensor& A,
     const Tensor& LU,
     const Tensor& pivots,
     const bool use_A_T);

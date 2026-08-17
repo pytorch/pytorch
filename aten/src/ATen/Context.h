@@ -282,9 +282,6 @@ class TORCH_API Context {
   void setSDPUseFA3(bool /*e*/);
   bool userEnabledFA3SDP() const;
 
-  void setSDPUseFA4(bool /*e*/);
-  bool userEnabledFA4SDP() const;
-
   void setSDPUseMemEfficient(bool /*e*/);
   bool userEnabledMemEfficientSDP() const;
 
@@ -491,7 +488,6 @@ class TORCH_API Context {
       at::SDPBackend::overrideable};
   bool enabled_flashSDP = true;
   bool enabled_fa3SDP = false;
-  bool enabled_fa4SDP = false;
   bool enabled_mem_efficientSDP = true;
   bool enabled_mathSDP = true;
   bool enabled_cudnnSDP = true;

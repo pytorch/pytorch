@@ -33,7 +33,6 @@ from torch.testing._internal.common_device_type import (
     skipCUDAIf,
 )
 from torch.testing._internal.common_utils import (
-    DeterministicGuard,
     parametrize,
     run_tests,
     TestCase,
@@ -987,50 +986,6 @@ class TestScheduler(TestCase):
 
         with inductor_config.patch(deterministic=True):
             check_realizes()
-
-    @xfailIfNoAcceleratorTriton
-    @onlyCUDA
-    @parametrize("op", ["select_scatter", "index_put"])
-    # Both settings are pinned so the test can only pass via graph_fanout:
-    # deterministic mode makes expand realize src on its own, and the read
-    # threshold decides whether src counts as expensive at all.
-    @inductor_config.patch(deterministic=False, realize_reads_threshold=4)
-    def test_scatter_realizes_expensive_src(self, op):
-        def src(a, b, c, d, e):
-            return a[..., 1] * b[..., 0] + c[..., 1] * d[..., 0] + e[..., 2]
-
-        if op == "select_scatter":
-
-            def fn(base, *args):
-                return torch.select_scatter(base, src(*args), dim=2, index=1)
-        else:
-
-            def fn(base, *args):
-                index = torch.arange(base.shape[0], device=base.device)
-                base.index_put_((index,), src(*args))
-                return base
-
-        device = "cuda"
-        torch.manual_seed(0)
-        base_size = (32, 32, 26) if op == "select_scatter" else (26, 32, 32)
-        base = torch.rand(base_size, dtype=torch.float32, device=device)
-        args = [
-            torch.rand((32, 32, 26), dtype=torch.float32, device=device)
-            for _ in range(5)
-        ]
-        expected = fn(base.clone(), *args)
-
-        torch._dynamo.reset()
-        metrics.reset()
-        with DeterministicGuard(False), fresh_inductor_cache():
-            compiled = torch.compile(fn, backend="inductor", fullgraph=True)
-            actual = compiled(base.clone(), *args)
-
-        self.assertEqual(expected, actual)
-        # src must not be inlined into the scatter loop, which would recompute it
-        # once per element of the broadcast dim.
-        self.assertEqual(metrics.ir_nodes_pre_fusion, 2)
-        self.assertEqual(metrics.generated_kernel_count, 2)
 
 
 class TestScoreFusionMemory(TestCase):
