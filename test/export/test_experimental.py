@@ -1276,7 +1276,6 @@ class TestExperimentDevice(TestCase):
 
         self._test_export_blockmask_with_mask_fn(make_mask_fn, device)
 
-    @onlyAccelerator
     def test_export_blockmask_mutated_closure(self, device):
         def make_mask_fn():
             res = 1
@@ -1289,7 +1288,6 @@ class TestExperimentDevice(TestCase):
 
         self._test_export_blockmask_with_mask_fn(make_mask_fn, device)
 
-    @onlyAccelerator
     def test_export_blockmask_closure_with_containers(self, device):
         def make_mask_fn():
             offsets = [1, 2, 3]
@@ -1302,7 +1300,6 @@ class TestExperimentDevice(TestCase):
 
         self._test_export_blockmask_with_mask_fn(make_mask_fn, device)
 
-    @onlyAccelerator
     def test_export_blockmask_closure_triple_nested(self, device):
         def make_mask_fn():
             a = 1
@@ -1324,7 +1321,6 @@ class TestExperimentDevice(TestCase):
 
         self._test_export_blockmask_with_mask_fn(make_mask_fn, device)
 
-    @onlyAccelerator
     def test_export_blockmask_closure_self_recursive(self, device):
         from torch.nn.attention.flex_attention import create_block_mask
 
@@ -1355,7 +1351,6 @@ class TestExperimentDevice(TestCase):
         ):
             _dynamo_graph_capture_for_export(module)(x)
 
-    @onlyAccelerator
     def test_export_blockmask_closure_tensor(self, device):
         from torch.nn.attention.flex_attention import create_block_mask
 
@@ -1387,7 +1382,6 @@ class TestExperimentDevice(TestCase):
         ):
             _dynamo_graph_capture_for_export(module)(x)
 
-    @onlyAccelerator
     def test_export_blockmask_closure_unsupported_class_instance(self, device):
         from torch.nn.attention.flex_attention import create_block_mask
 
@@ -1422,7 +1416,6 @@ class TestExperimentDevice(TestCase):
         ):
             _dynamo_graph_capture_for_export(module)(x)
 
-    @onlyAccelerator
     def test_export_blockmask_closure_mutually_recursive(self, device):
         from torch.nn.attention.flex_attention import create_block_mask
 
@@ -1458,7 +1451,6 @@ class TestExperimentDevice(TestCase):
         ):
             _dynamo_graph_capture_for_export(module)(x)
 
-    @onlyAccelerator
     def test_dynamo_graph_capture_fx_graph_annotate_overlap_pass(self, device):
         class DummyOp(torch.autograd.Function):
             @staticmethod
@@ -1521,7 +1513,6 @@ class TestExperimentDevice(TestCase):
         test_inputs = input_fn()
         self.assertEqual(gm(*test_inputs), model(*test_inputs))
 
-    @onlyAccelerator
     def test_aot_export_blockmask_closure_spec_mismatch(self, device):
         """BlockMasks with same closure structure produce equal TreeSpecs.
 
@@ -1571,7 +1562,6 @@ class TestExperimentDevice(TestCase):
         _, spec_c = pytree.tree_flatten(mask_c)
         self.assertNotEqual(spec_a, spec_c)
 
-    @onlyAccelerator
     def test_blockmask_and_masks_closure_extraction(self, device):
         """and_masks closure tensors are recursively extracted into pytree leaves.
 
@@ -1624,22 +1614,17 @@ class TestExperimentDevice(TestCase):
         self.assertTrue(callable(restored.mask_mod))
 
 
-instantiate_device_type_tests(TestExperimentDevice, globals())
-
+instantiate_device_type_tests(TestExperimentDevice, globals(), except_for="cpu")
 
 @unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "dynamo isn't supported")
 class TestExperimentOnCUDA(TestCase):
     hw_classification = HardwareClassification.CUDA
 
-    def setUp(self):
-        if not torch.cuda.is_available():
-            self.skipTest("CUDA not available")
-
     @unittest.skipUnless(
         IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED and not torch.version.hip,
         "Requires CUDA with SM >= 8.0, Triton, and not ROCm",
     )
-    def test_aot_export_flex_attention_callable_mask_mod(self):
+    def test_aot_export_flex_attention_callable_mask_mod(self, device):
         """Test flex_attention AOT export with callable class as mask_mod.
 
         _MaskModWrapper must delegate __eq__ to callable objects for TreeSpec
@@ -1695,8 +1680,8 @@ class TestExperimentOnCUDA(TestCase):
                 return (out.transpose(1, 2).contiguous().view(B, L, D),)
 
         embed_dim, num_heads, seq_len = 64, 2, 128
-        model = FlexAttentionModel(embed_dim, num_heads).cuda()
-        x = torch.randn(1, seq_len, embed_dim, device="cuda")
+        model = FlexAttentionModel(embed_dim, num_heads).to(device)
+        x = torch.randn(1, seq_len, embed_dim, device=device)
 
         gm, signature = aot_export_module(model, [x], trace_joint=False)
 
@@ -1711,7 +1696,7 @@ class TestExperimentOnCUDA(TestCase):
         IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED and not torch.version.hip,
         "Requires CUDA with SM >= 8.0, Triton, and not ROCm",
     )
-    def test_aot_export_flex_attention_with_blockmask_placeholders(self):
+    def test_aot_export_flex_attention_with_blockmask_placeholders(self, device):
         from torch._subclasses.fake_tensor import FakeTensorMode
         from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 
@@ -1727,7 +1712,7 @@ class TestExperimentOnCUDA(TestCase):
                     H=None,
                     Q_LEN=16,
                     KV_LEN=16,
-                    device="cuda",
+                    device=device,
                 )
 
             def forward(self, x):
@@ -1748,11 +1733,11 @@ class TestExperimentOnCUDA(TestCase):
                     mod,
                     parts[-1],
                     torch.nn.Parameter(
-                        torch.empty(param.shape, dtype=param.dtype, device="cuda"),
+                        torch.empty(param.shape, dtype=param.dtype, device=device),
                         requires_grad=param.requires_grad,
                     ),
                 )
-            x = torch.randn(1, 16, 64, device="cuda")
+            x = torch.randn(1, 16, 64, device=device)
 
         gm = dynamo_graph_capture_for_export(model)(x)
         block_mask_placeholders = [
@@ -1767,7 +1752,7 @@ class TestExperimentOnCUDA(TestCase):
 
         self.assertIsNotNone(joint_with_descriptors.graph_module)
 
-    def test_aot_export_blockmask_with_new_closure(self):
+    def test_aot_export_blockmask_with_new_closure(self, device):
         import contextlib
 
         from torch._export.utils import _compiling_state_context
@@ -1796,7 +1781,7 @@ class TestExperimentOnCUDA(TestCase):
                 )
                 return x, block_mask
 
-        args = (torch.randn(2, 128, device="cuda"),)
+        args = (torch.randn(2, 128, device=device),)
         gm = dynamo_graph_capture_for_export(Model())(*args)
 
         fake_mode = gm.meta["fake_mode"]
@@ -1903,6 +1888,8 @@ def forward(self, arg0_1):
             compiled_fn = aot_compile_joint_with_descriptors(joint_with_descriptors)
             # Shouldn't crash
             self.assertIsNotNone(compiled_fn)
+
+instantiate_device_type_tests(TestExperimentOnCUDA, globals(), only_for="cuda")
 
 if __name__ == "__main__":
     run_tests()
