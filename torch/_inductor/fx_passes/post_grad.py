@@ -67,7 +67,7 @@ from .group_batch_fusion import group_batch_fusion_passes, POST_GRAD_FUSIONS
 from .micro_pipeline_tp import micro_pipeline_tp_pass
 from .pre_grad import is_same_dict, save_inductor_dict
 from .reduced_atomic_contention import partitioned_scatter_optimization_pass
-from .reinplace import META_ONLY_OPS, reinplace_inplaceable_ops
+from .reinplace import reinplace_inplaceable_ops
 from .split_cat import POST_GRAD_PATTERNS
 
 
@@ -142,96 +142,36 @@ def _chain_random_ops_for_ordering(graph: torch.fx.Graph) -> None:
     preserve_node_ordering(graph, additional_deps_map)
 
 
-def reject_current_device_nodes(graph: torch.fx.Graph) -> None:
-    """[device-as-parameter] Reject CooR coor::current_device() nodes in inductor.
+def respecialize_current_device_nodes(graph: torch.fx.Graph) -> None:
+    """[device-as-parameter] Re-specialize CooR _coor_current_device() device nodes.
 
-    Under compile_on_one_rank, make_fx rewrites a baked accelerator device operand to a
-    ``coor::current_device()`` node so the FX graph is rank-agnostic. Inductor has no
-    device-valued IR and cannot lower a device-returning op, so raise a clear, actionable
-    error instead of failing later with a cryptic lowering assertion. A follow-up adds
-    real support by stripping the node before lowering.
+    Under compile-on-one-rank, make_fx rewrites a baked accelerator device operand to a
+    ``_coor_current_device()`` node so the FX graph is rank-agnostic. Inductor has no
+    device-valued IR, so before lowering we replace each use of that node with the node's
+    own runtime value -- the concrete current device (``_coor_current_device()``), the
+    authoritative source, not the consumer's meta. Runs in post_grad, before GraphLowering,
+    so the node never reaches the call_function OpOverload assertion. ``_coor_current_device``
+    lives in core fx and only reads torch.accelerator, so this never imports
+    torch.distributed for a non-distributed compile.
     """
-    import torch.fx.experimental.proxy_tensor
+    # Importing proxy_tensor registers the coor::current_device op (core fx, no
+    # torch.distributed) and gives us its impl for the concrete value.
+    from torch.fx.experimental.proxy_tensor import _coor_current_device
 
     target = torch.ops.coor.current_device.default
-    if any(n.op == "call_function" and n.target is target for n in graph.nodes):
-        raise RuntimeError(
-            "compile_on_one_rank is not supported with the inductor backend when the "
-            "graph contains a device-derived factory or cast (it emits a "
-            "coor::current_device node that inductor cannot lower). Use a non-inductor "
-            "backend (e.g. aot_eager) or disable compile_on_one_rank."
-        )
-
-
-def _cse_repeated_gpu_wheres(gm: torch.fx.GraphModule) -> None:
-    """CSE the data-independent producer slices of repeated GPU wheres."""
-    where = aten.where.self
-    candidates = [
-        node
-        for node in gm.graph.find_nodes(op="call_function", target=where)
-        if isinstance((value := node.meta.get("val")), torch.Tensor)
-        and is_gpu(value.device.type)
-    ]
-    if len(candidates) < 2:
+    nodes = graph.find_nodes(op="call_function", target=target)
+    if not nodes:
         return
-
-    functional_mutations = (
-        torch.ops.higher_order.auto_functionalized,
-        torch.ops.higher_order.auto_functionalized_v2,
-        torch.ops.higher_order.triton_kernel_wrapper_functional,
-    )
-    mutation_aliases = OrderedSet[torch.fx.Node]()
-    for mutation in (
-        node
-        for node in gm.graph.nodes
-        if pattern_matcher.is_mutation_op(node) or node.target in functional_mutations
-    ):
-        stack = list(mutation.all_input_nodes)
-        while stack:
-            node = stack.pop()
-            if node in mutation_aliases:
-                continue
-            mutation_aliases.add(node)
-            storage = get_node_storage(node)
-            if storage is not None:
-                stack.extend(
-                    input_node
-                    for input_node in node.all_input_nodes
-                    if get_node_storage(input_node) == storage
-                )
-
-    tensor_data_dependent = OrderedSet[torch.fx.Node]()
-    for node in gm.graph.nodes:
-        if node in mutation_aliases or (
-            node.op in ("placeholder", "get_attr")
-            and isinstance(node.meta.get("val"), torch.Tensor)
-        ):
-            tensor_data_dependent.add(node)
-        elif node.op == "call_function" and node.target in META_ONLY_OPS:
-            continue
-        elif any(arg in tensor_data_dependent for arg in node.all_input_nodes):
-            tensor_data_dependent.add(node)
-
-    cse_nodes = OrderedSet[torch.fx.Node]()
-    for candidate in candidates:
-        if candidate in tensor_data_dependent:
-            continue
-        stack = [candidate]
-        while stack:
-            node = stack.pop()
-            if node in cse_nodes or node in tensor_data_dependent:
-                continue
-            cse_nodes.add(node)
-            stack.extend(node.all_input_nodes)
-    if sum(candidate in cse_nodes for candidate in candidates) < 2:
-        return
-
-    from torch._functorch.compile_utils import fx_graph_cse
-
-    gm.graph = fx_graph_cse(
-        gm.graph,
-        extra_node_key=lambda node: None if node in cse_nodes else node,
-    )
+    device = _coor_current_device()
+    for node in nodes:
+        for user in list(node.users):
+            user.args = torch.fx.map_arg(
+                user.args, lambda n: device if n is node else n
+            )
+            user.kwargs = torch.fx.map_arg(
+                user.kwargs, lambda n: device if n is node else n
+            )
+        graph.erase_node(node)
 
 
 def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
@@ -291,9 +231,10 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         _remove_profiler_ops
     )
 
-    # [device-as-parameter] Reject CooR device nodes inductor can't lower (clear error).
-    GraphTransformObserver(gm, "reject_current_device").apply_graph_pass(
-        reject_current_device_nodes
+    # [device-as-parameter] Re-specialize CooR current_device() device nodes before
+    # lowering (inductor has no device-valued IR).
+    GraphTransformObserver(gm, "respecialize_current_device").apply_graph_pass(
+        respecialize_current_device_nodes
     )
 
     if config.pattern_matcher:
@@ -517,11 +458,6 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         GraphTransformObserver(
             gm, "replace_collectives_with_low_contention"
         ).apply_graph_pass(replace_collectives_with_low_contention)
-
-    if config.combo_kernels:
-        GraphTransformObserver(gm, "cse_repeated_gpu_wheres").apply_gm_pass(
-            _cse_repeated_gpu_wheres
-        )
 
     # Keep these last, since they introduce mutation. Look at
     # ./fx_passes/README.md for a discussion of mutation invariants.
@@ -1081,6 +1017,11 @@ def mm_plus_mm(match: Match, mat1, mat2, mat3, mat4):
     return inductor.kernel.mm_plus_mm.tuned_mm_plus_mm(mat1, mat2, mat3, mat4)
 
 
+def pointless_cumsum_non_scalar_check(match: Match) -> bool:
+    # Scalar cumsum is already handled directly by lowering.cumsum.
+    return len(match.kwargs["shape"]) > 0
+
+
 @register_graph_pattern(
     CallFunction(
         aten.cumsum.default,
@@ -1097,6 +1038,7 @@ def mm_plus_mm(match: Match, mat1, mat2, mat3, mat4):
         KeywordArg("dim"),
         _users=MULTIPLE,
     ),
+    extra_check=pointless_cumsum_non_scalar_check,
     # pyrefly: ignore [bad-argument-type]
     pass_dict=pass_patterns[1],
 )

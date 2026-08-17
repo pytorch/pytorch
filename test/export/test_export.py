@@ -7124,6 +7124,30 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             (torch.tensor(6), torch.tensor(6), torch.tensor(6), torch.randn(1)),
         )
 
+    def test_torch_check_symbool_python_not_strict(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                c = x.item()
+                torch._check(not (c * 2 == 0))
+                if c * 2 == 0:
+                    return x.sin()
+                return x + 1
+
+        export(M(), (torch.tensor(3, dtype=torch.int64),), strict=True)
+
+    def test_torch_check_symbool_python_not_nonstrict_error(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                c = x.item()
+                torch._check(not (c * 2 == 0))
+                return x + 1
+
+        with self.assertRaisesRegex(
+            torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode,
+            "Python `not` on a symbolic boolean",
+        ):
+            export(M(), (torch.tensor(3, dtype=torch.int64),), strict=False)
+
     def test_replaced_unbacked_bindings(self):
         import sympy
 
@@ -14459,6 +14483,34 @@ def forward(self, c_submod_params, x):
         epm = ep.module()
         ufm = torch.export.unflatten(ep)
         self.assertTrue(torch.allclose(ufm(*inp), epm(*inp)))
+
+    def test_cond_dynamic_shape_trunc_div_one_output_metadata(self):
+        class M(torch.nn.Module):
+            def forward(self, x, flag):
+                def true_fn(x):
+                    ori_size = (
+                        math.trunc(x.shape[-2] / 1),
+                        math.trunc(x.shape[-1] / 1),
+                    )
+                    new_size = (
+                        math.trunc(x.shape[-2] + 0.5),
+                        math.trunc(x.shape[-1] + 0.5),
+                    )
+                    x = F.interpolate(x, size=new_size, mode="bilinear")
+                    return F.interpolate(x, size=ori_size, mode="bilinear")
+
+                def false_fn(x):
+                    return x.clone()
+
+                return torch.cond(flag, true_fn, false_fn, [x])
+
+        inputs = (torch.rand(1, 3, 28, 28), torch.tensor([True]))
+        dynamic_shapes = {
+            "x": {2: Dim.DYNAMIC, 3: Dim.DYNAMIC},
+            "flag": None,
+        }
+        ep = export(M(), inputs, dynamic_shapes=dynamic_shapes, strict=False)
+        self.assertEqual(ep.module()(*inputs).shape, inputs[0].shape)
 
     @testing.expectedFailureStrictV2
     def test_unflatten_multiple_graphs_shared_submodule(self):
