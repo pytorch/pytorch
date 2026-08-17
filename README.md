@@ -423,7 +423,7 @@ should increase shared memory size either with `--ipc=host` or `--shm-size` comm
 
 **NOTE:** Must be built with a Docker version >= 23.0
 
-The Dockerfile is supplied to build images with CUDA 12.6 support and cuDNN v9.
+The Dockerfile is supplied to build images with CUDA 12.1 support and cuDNN v9.
 You can pass `PYTHON_VERSION=x.y` make variable to specify which Python version is to be used by Miniconda, or leave it
 unset to use the default, as the Dockerfile uses system Python.
 
@@ -583,7 +583,8 @@ Pointers to get you started:
 ## Communication
 * Forums: Discuss implementations, research, etc. https://discuss.pytorch.org
 * GitHub Issues: Bug reports, feature requests, install issues, RFCs, thoughts, etc.
-* Slack: The [PyTorch Slack](https://pytorch.slack.com/) hosts a primary audience of moderate to experienced PyTorch users and developers for general chat, online discussions, collaboration, etc.
+* Slack: The [PyTorch Slack](https://pytorch.slack.com/) hosts a primary audience of moderate to experienced PyTorch users and developers for general chat, online discussions, collaboration, etc. If you are a beginner looking for help, the primary medium is [PyTorch Forums](https://discuss.pytorch.org). If you need a slack invite, please fill this form: https://goo.gl/forms/PP1AGvNHpSaJP8to1
+* Newsletter: No-noise, a one-way email newsletter with important announcements about PyTorch. You can sign-up here: https://eepurl.com/cbG0rv
 * Facebook Page: Important announcements about PyTorch. https://www.facebook.com/pytorch
 * For brand guidelines, please visit our website at [pytorch.org](https://pytorch.org/)
 

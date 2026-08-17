@@ -1,15 +1,12 @@
 # Owner(s): ["module: dynamo"]
-"""Tests for tp_getattro_impl: unified attribute access protocol in Dynamo."""
+"""Tests for getattro_impl: unified attribute access protocol in Dynamo."""
 
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
-from torch.testing._internal.common_utils import HardwareClassification
 
 
 class TpGetattroTests(torch._dynamo.test_case.TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
     # --- getattr() builtin ---
 
     def test_getattr_constant(self):
@@ -423,7 +420,7 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)(x)
         self.assertEqual(result, torch.sin(x))
 
-    # --- Descriptor protocol (tp_descr_get through tp_getattro_impl) ---
+    # --- Descriptor protocol (tp_descr_get through getattro_impl) ---
 
     def test_data_descriptor_priority_over_instance_dict(self):
         """Data descriptors (property) take precedence over instance __dict__."""
@@ -734,7 +731,7 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
             torch.compile(fn, backend="eager")()
 
     def test_range_start_stop_step(self):
-        """RangeVariable.tp_getattro_impl fast path for start/stop/step."""
+        """RangeVariable.getattro_impl fast path for start/stop/step."""
 
         def fn():
             r = range(2, 10, 3)

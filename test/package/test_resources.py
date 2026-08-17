@@ -1,4 +1,4 @@
-# Owner(s): ["module: package/deploy"]
+# Owner(s): ["oncall: package/deploy"]
 
 from io import BytesIO
 from sys import version_info

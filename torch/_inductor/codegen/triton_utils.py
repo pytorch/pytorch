@@ -38,10 +38,7 @@ def should_unwrap_unspec_arg(name: str):
 
 
 def use_uint8_triton_storage_for_cuda_float8_e4m3fn(
-    dtype: torch.dtype,
-    arg_name: str | None = None,
-    *,
-    device: torch.device | None = None,
+    dtype: torch.dtype, arg_name: str | None = None
 ) -> bool:
     # Triton rejects fp8e4nv pointer types before sm89, but eager CUDA can
     # still dequantize float8_e4m3fn values by treating storage as raw bytes.
@@ -50,11 +47,10 @@ def use_uint8_triton_storage_for_cuda_float8_e4m3fn(
     if arg_name is not None and not arg_name.startswith("in_ptr"):
         return False
 
-    if device is None:
-        try:
-            device = V.graph.get_current_device_or_throw()
-        except AttributeError:
-            return False
+    try:
+        device = V.graph.get_current_device_or_throw()
+    except AttributeError:
+        return False
 
     if device.type != "cuda":
         return False
