@@ -254,6 +254,13 @@ struct C10_API FakeTensorMode {
   // mixed-device ops
   std::optional<c10::DeviceType> prefer_device_type_ = std::nullopt;
 
+  // Mode state python reads and writes through CppFakeTensorMode's accessors.
+  uint64_t epoch_ = 0;
+  bool allow_fallback_kernels_ = true;
+  bool allow_scalar_outputs_ = false;
+  bool allow_non_fake_inputs_ = false;
+  bool static_shapes_ = false;
+
   FakeTensorMode(
       std::shared_ptr<c10::SafePyObject> shape_env,
       std::shared_ptr<c10::SafePyObject> converter,
@@ -292,9 +299,6 @@ struct C10_API FakeTensorMode {
   struct ConstantAliases {
     explicit ConstantAliases(c10::weak_intrusive_ptr<c10::StorageImpl> st)
         : storage(std::move(st)) {}
-    // Mirrors python's StorageWeakRef: holding a weak ref keeps the
-    // StorageImpl's refcount block alive, so the raw pointer used as the map
-    // key can neither dangle nor be recycled by a later allocation.
     c10::weak_intrusive_ptr<c10::StorageImpl> storage;
     std::vector<c10::weak_intrusive_ptr<c10::TensorImpl>> tensors;
   };
