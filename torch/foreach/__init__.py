@@ -135,14 +135,22 @@ per-tensor execution.
 """
 
 
-def _unary_doc(name: str, reference: str, *, inplace: bool) -> str:
+def _unary_doc(
+    name: str,
+    reference: str,
+    *,
+    inplace: bool,
+    note: str | None = None,
+) -> str:
     suffix = "tuple[Tensor, ...] | list[Tensor]" if inplace else "tuple[Tensor, ...]"
+    note_text = "" if note is None else f"\n{note}\n"
     return rf"""
 {name}(inputs) -> {suffix}
 
 Applies :func:`{reference}` to each tensor in ``inputs``.
 
 {_common(reference, inplace)}
+{note_text}
 
 Args:
     inputs (list or tuple of Tensor): tensors to transform.
@@ -155,16 +163,25 @@ Returns:
 def _binary_doc(
     name: str,
     reference: str,
-    forms: str,
+    signatures: tuple[str, ...],
     *,
     inplace: bool,
     alpha: str | None = None,
     operand: str = "other",
     shared_tensor: bool = False,
+    operand_note: str | None = None,
 ) -> str:
     suffix = "tuple[Tensor, ...] | list[Tensor]" if inplace else "tuple[Tensor, ...]"
     alpha_sig = ", *, alpha=1" if alpha is not None else ""
     alpha_doc = "" if alpha is None else f"\n    alpha (Number, optional): {alpha}"
+    signature_lines = (f"    {name}({signature})" for signature in signatures)
+    supported_signatures = "\n".join(signature_lines)
+    shared_tensor_note = (
+        "\nA shared ``Tensor`` operand must be a 0-D scalar tensor.\n"
+        if shared_tensor
+        else ""
+    )
+    operand_note_text = "" if operand_note is None else f"\n{operand_note}\n"
     operand_type = "Number, list or tuple of Number, or list or tuple of Tensor"
     if shared_tensor:
         operand_type = f"{operand_type}, or Tensor"
@@ -175,7 +192,13 @@ Applies :func:`{reference}` to every tensor in ``inputs``.
 
 {_common(reference, inplace)}
 
-Supported forms for ``{operand}``: {forms}
+Supported signatures::
+
+{supported_signatures}
+
+``TensorList`` and ``ScalarList`` denote a list or tuple of tensors and
+scalars, respectively.
+{shared_tensor_note}{operand_note_text}
 
 Args:
     inputs (list or tuple of Tensor): tensors to transform.
@@ -1298,8 +1321,24 @@ else:
         reciprocal_,
         _unary_doc("reciprocal_", "torch.reciprocal", inplace=True),
     )
-    round = _set_doc(round, _unary_doc("round", "torch.round", inplace=False))
-    round_ = _set_doc(round_, _unary_doc("round_", "torch.round", inplace=True))
+    round = _set_doc(
+        round,
+        _unary_doc(
+            "round",
+            "torch.round",
+            inplace=False,
+            note="The ``decimals`` argument is not supported.",
+        ),
+    )
+    round_ = _set_doc(
+        round_,
+        _unary_doc(
+            "round_",
+            "torch.round",
+            inplace=True,
+            note="The ``decimals`` argument is not supported.",
+        ),
+    )
     rsqrt = _set_doc(rsqrt, _unary_doc("rsqrt", "torch.rsqrt", inplace=False))
     rsqrt_ = _set_doc(rsqrt_, _unary_doc("rsqrt_", "torch.rsqrt", inplace=True))
     sigmoid = _set_doc(sigmoid, _unary_doc("sigmoid", "torch.sigmoid", inplace=False))
@@ -1343,7 +1382,12 @@ Returns:
         _binary_doc(
             "add",
             "torch.add",
-            "a shared scalar, a scalar list or tuple, a tensor list, or a shared 0-D scalar tensor",
+            (
+                "inputs, other: Scalar",
+                "inputs, other: ScalarList",
+                "inputs, other: TensorList, *, alpha=1",
+                "inputs, other: Tensor, *, alpha=1",
+            ),
             inplace=False,
             alpha=(
                 "supported only when ``other`` is a tensor list or a shared 0-D "
@@ -1357,7 +1401,12 @@ Returns:
         _binary_doc(
             "add_",
             "torch.add",
-            "a shared scalar, a scalar list or tuple, a tensor list, or a shared 0-D scalar tensor",
+            (
+                "inputs, other: Scalar",
+                "inputs, other: ScalarList",
+                "inputs, other: TensorList, *, alpha=1",
+                "inputs, other: Tensor, *, alpha=1",
+            ),
             inplace=True,
             alpha=(
                 "supported only when ``other`` is a tensor list or a shared 0-D "
@@ -1371,7 +1420,11 @@ Returns:
         _binary_doc(
             "sub",
             "torch.sub",
-            "a shared scalar, a scalar list or tuple, or a tensor list",
+            (
+                "inputs, other: Scalar",
+                "inputs, other: ScalarList",
+                "inputs, other: TensorList, *, alpha=1",
+            ),
             inplace=False,
             alpha="supported only when ``other`` is a tensor list. Default: ``1``.",
         ),
@@ -1381,7 +1434,11 @@ Returns:
         _binary_doc(
             "sub_",
             "torch.sub",
-            "a shared scalar, a scalar list or tuple, or a tensor list",
+            (
+                "inputs, other: Scalar",
+                "inputs, other: ScalarList",
+                "inputs, other: TensorList, *, alpha=1",
+            ),
             inplace=True,
             alpha="supported only when ``other`` is a tensor list. Default: ``1``.",
         ),
@@ -1391,7 +1448,12 @@ Returns:
         _binary_doc(
             "mul",
             "torch.mul",
-            "a shared scalar, a scalar list or tuple, a tensor list, or a shared 0-D scalar tensor",
+            (
+                "inputs, other: Scalar",
+                "inputs, other: ScalarList",
+                "inputs, other: TensorList",
+                "inputs, other: Tensor",
+            ),
             inplace=False,
             shared_tensor=True,
         ),
@@ -1401,7 +1463,12 @@ Returns:
         _binary_doc(
             "mul_",
             "torch.mul",
-            "a shared scalar, a scalar list or tuple, a tensor list, or a shared 0-D scalar tensor",
+            (
+                "inputs, other: Scalar",
+                "inputs, other: ScalarList",
+                "inputs, other: TensorList",
+                "inputs, other: Tensor",
+            ),
             inplace=True,
             shared_tensor=True,
         ),
@@ -1411,9 +1478,15 @@ Returns:
         _binary_doc(
             "div",
             "torch.div",
-            "a shared scalar, a scalar list or tuple, a tensor list, or a shared 0-D scalar tensor",
+            (
+                "inputs, other: Scalar",
+                "inputs, other: ScalarList",
+                "inputs, other: TensorList",
+                "inputs, other: Tensor",
+            ),
             inplace=False,
             shared_tensor=True,
+            operand_note="The ``rounding_mode`` argument is not supported.",
         ),
     )
     div_ = _set_doc(
@@ -1421,9 +1494,15 @@ Returns:
         _binary_doc(
             "div_",
             "torch.div",
-            "a shared scalar, a scalar list or tuple, a tensor list, or a shared 0-D scalar tensor",
+            (
+                "inputs, other: Scalar",
+                "inputs, other: ScalarList",
+                "inputs, other: TensorList",
+                "inputs, other: Tensor",
+            ),
             inplace=True,
             shared_tensor=True,
+            operand_note="The ``rounding_mode`` argument is not supported.",
         ),
     )
 
@@ -1432,7 +1511,11 @@ Returns:
         _binary_doc(
             "clamp_min",
             "torch.clamp_min",
-            "a shared scalar, a scalar list or tuple, or a tensor list",
+            (
+                "inputs, min: Scalar",
+                "inputs, min: ScalarList",
+                "inputs, min: TensorList",
+            ),
             inplace=False,
             operand="min",
         ),
@@ -1442,7 +1525,11 @@ Returns:
         _binary_doc(
             "clamp_min_",
             "torch.clamp_min",
-            "a shared scalar, a scalar list or tuple, or a tensor list",
+            (
+                "inputs, min: Scalar",
+                "inputs, min: ScalarList",
+                "inputs, min: TensorList",
+            ),
             inplace=True,
             operand="min",
         ),
@@ -1452,7 +1539,11 @@ Returns:
         _binary_doc(
             "clamp_max",
             "torch.clamp_max",
-            "a shared scalar, a scalar list or tuple, or a tensor list",
+            (
+                "inputs, max: Scalar",
+                "inputs, max: ScalarList",
+                "inputs, max: TensorList",
+            ),
             inplace=False,
             operand="max",
         ),
@@ -1462,7 +1553,11 @@ Returns:
         _binary_doc(
             "clamp_max_",
             "torch.clamp_max",
-            "a shared scalar, a scalar list or tuple, or a tensor list",
+            (
+                "inputs, max: Scalar",
+                "inputs, max: ScalarList",
+                "inputs, max: TensorList",
+            ),
             inplace=True,
             operand="max",
         ),
@@ -1473,10 +1568,15 @@ Returns:
             "minimum",
             "torch.minimum",
             (
-                "a shared scalar or a scalar list or tuple (with ``torch.clamp_max`` "
-                "semantics), or a tensor list"
+                "inputs, other: Scalar",
+                "inputs, other: ScalarList",
+                "inputs, other: TensorList",
             ),
             inplace=False,
+            operand_note=(
+                "Scalar and ``ScalarList`` operands use :func:`torch.clamp_max` "
+                "semantics."
+            ),
         ),
     )
     minimum_ = _set_doc(
@@ -1485,10 +1585,15 @@ Returns:
             "minimum_",
             "torch.minimum",
             (
-                "a shared scalar or a scalar list or tuple (with ``torch.clamp_max`` "
-                "semantics), or a tensor list"
+                "inputs, other: Scalar",
+                "inputs, other: ScalarList",
+                "inputs, other: TensorList",
             ),
             inplace=True,
+            operand_note=(
+                "Scalar and ``ScalarList`` operands use :func:`torch.clamp_max` "
+                "semantics."
+            ),
         ),
     )
     maximum = _set_doc(
@@ -1497,10 +1602,15 @@ Returns:
             "maximum",
             "torch.maximum",
             (
-                "a shared scalar or a scalar list or tuple (with ``torch.clamp_min`` "
-                "semantics), or a tensor list"
+                "inputs, other: Scalar",
+                "inputs, other: ScalarList",
+                "inputs, other: TensorList",
             ),
             inplace=False,
+            operand_note=(
+                "Scalar and ``ScalarList`` operands use :func:`torch.clamp_min` "
+                "semantics."
+            ),
         ),
     )
     maximum_ = _set_doc(
@@ -1509,10 +1619,15 @@ Returns:
             "maximum_",
             "torch.maximum",
             (
-                "a shared scalar or a scalar list or tuple (with ``torch.clamp_min`` "
-                "semantics), or a tensor list"
+                "inputs, other: Scalar",
+                "inputs, other: ScalarList",
+                "inputs, other: TensorList",
             ),
             inplace=True,
+            operand_note=(
+                "Scalar and ``ScalarList`` operands use :func:`torch.clamp_min` "
+                "semantics."
+            ),
         ),
     )
 
@@ -1525,9 +1640,15 @@ Applies :func:`torch.pow` at each list position.
 
 {_common("torch.pow", False)}
 
-``input`` may be a tensor list and ``exponent`` may be a shared scalar,
-a scalar list or tuple, or a tensor list. Alternatively, ``input`` may be a
-shared scalar when ``exponent`` is a tensor list.
+Supported signatures::
+
+    pow(input: TensorList, exponent: Scalar)
+    pow(input: TensorList, exponent: ScalarList)
+    pow(input: TensorList, exponent: TensorList)
+    pow(input: Scalar, exponent: TensorList)
+
+``TensorList`` and ``ScalarList`` denote a list or tuple of tensors and
+scalars, respectively.
 
 Args:
     input (Number, list of Tensor, or tuple of Tensor): bases.
@@ -1546,8 +1667,14 @@ In-place version of :func:`torch.foreach.pow`.
 
 {_common("torch.pow", True)}
 
-``inputs`` must be a tensor list. ``exponent`` may be a shared scalar, a
-scalar list or tuple, or a tensor list. The scalar-left form has no in-place variant.
+Supported signatures::
+
+    pow_(inputs: TensorList, exponent: Scalar)
+    pow_(inputs: TensorList, exponent: ScalarList)
+    pow_(inputs: TensorList, exponent: TensorList)
+
+``TensorList`` and ``ScalarList`` denote a list or tuple of tensors and
+scalars, respectively. The scalar-left form has no in-place variant.
 
 Args:
     inputs (list or tuple of Tensor): bases to mutate.
@@ -1669,7 +1796,8 @@ Copies each tensor in ``srcs`` into the corresponding tensor in
 ``inputs``, following :meth:`torch.Tensor.copy_`.
 
 Both lists must be non-empty and have the same length. The operation mutates
-the tensors in ``inputs`` and returns the exact ``inputs`` container.
+the tensors in ``inputs`` and returns the exact ``inputs`` container. There is
+no functional ``torch.foreach.copy`` operation.
 
 Args:
     inputs (list or tuple of Tensor): destination tensors.
@@ -1689,7 +1817,8 @@ zero_(inputs) -> tuple[Tensor, ...] | list[Tensor]
 Fills every tensor in ``inputs`` with zero.
 
 The operation is equivalent to calling :meth:`torch.Tensor.zero_` on every
-tensor and returns the exact ``inputs`` container.
+tensor and returns the exact ``inputs`` container. There is no functional
+``torch.foreach.zero`` operation.
 
 Args:
     inputs (list or tuple of Tensor): tensors to zero.
@@ -1708,7 +1837,7 @@ Multiplies corresponding matrices from ``inputs`` and ``mat2s`` using
 
 Both lists must be non-empty and have the same length. Compatible calls may use
 a grouped matrix multiplication implementation; all other supported calls use a
-loop of :func:`torch.mm`.
+loop of :func:`torch.mm`. There is no in-place ``torch.foreach.mm_`` operation.
 
 Args:
     inputs (list or tuple of Tensor): first matrices.
