@@ -594,11 +594,13 @@ class _FileSystemWriter(StorageWriter):
         path: str | os.PathLike,
         single_file_per_rank: bool = True,
         sync_files: bool = True,
-        thread_count: int = 1,
+        thread_count: int | None = 1,
         per_thread_copy_ahead: int = 10_000_000,
         overwrite: bool = True,
         _extensions: Sequence[StreamTransformExtension] | None = None,
         serialization_format: SerializationFormat = SerializationFormat.TORCH_SAVE,
+        max_threads: int = 16,
+        min_size_per_thread: int = 1024 * 1024 * 1024,
         *args: Any,
         **kwargs: Any,
     ) -> None:
@@ -609,10 +611,12 @@ class _FileSystemWriter(StorageWriter):
             path: directory where the checkpoint will be written to.
             single_file_per_rank: Produce one file per rank instead of one file per tensor/blob. Default to True.
             sync_files : force files to be synced to permanent storage. Default to True.
-            thread_count: Number of IO threads to use to write. Default to 1.
+            thread_count: Number of IO threads to use to write. Default to 1. If set to None, thread count is dynamically auto-tuned based on plan size.
             per_thread_copy_ahead: How many bytes to copy from the GPU ahead of saving them. Default 10Mb.
             overwrite: Whether to allow overwriting existing checkpoints. Defaults to True.
             _extensions: Extensions to apply to output streams (EXPERIMENTAL)
+            max_threads: Maximum number of IO threads to use when auto-tuning thread_count. Default to 16.
+            min_size_per_thread: Minimum chunk size in bytes per thread when auto-tuning thread_count. Default to 1GB.
 
         N. B. If sync_files is disabled, there's no guarantee that the checkpoint will be consistent in the case of a failure.
         """
@@ -622,6 +626,8 @@ class _FileSystemWriter(StorageWriter):
         self.single_file_per_rank = single_file_per_rank
         self.sync_files = sync_files
         self.thread_count = thread_count
+        self.max_threads = max_threads
+        self.min_size_per_thread = min_size_per_thread
         self.per_thread_copy_ahead = per_thread_copy_ahead
         self.save_id = _generate_uuid()
         self.overwrite = overwrite
@@ -681,11 +687,49 @@ class _FileSystemWriter(StorageWriter):
         ]
         return new_plans
 
+    def _calculate_optimal_thread_count(self, plan: SavePlan) -> int:
+        """
+        Dynamically calculate the optimal number of IO threads for writing.
+
+        The thread count is chosen based on:
+        1. Number of available CPU cores.
+        2. Number of write items in the save plan.
+        3. Total payload size in bytes divided by min_size_per_thread.
+        """
+        try:
+            # Respect CPU affinity / quota in containerized or shared environments
+            num_cores = len(os.sched_getaffinity(0))
+        except (AttributeError, NotImplementedError, OSError):
+            num_cores = os.cpu_count() or 1
+
+        max_threads = min(num_cores, self.max_threads)
+        num_items = len(plan.items)
+        max_threads = min(max_threads, num_items)
+
+        if max_threads <= 1:
+            return 1
+
+        total_size = sum(
+            _item_size(item) for item in plan.items if item.tensor_data is not None
+        )
+
+        if self.min_size_per_thread <= 0:
+            return max_threads
+
+        suggested_threads = total_size // self.min_size_per_thread
+
+        thread_count = max(1, min(suggested_threads, max_threads))
+        return thread_count
+
     def write_data(
         self,
         plan: SavePlan,
         planner: SavePlanner,
     ) -> Future[list[WriteResult]]:
+        thread_count = self.thread_count
+        if thread_count is None:
+            thread_count = self._calculate_optimal_thread_count(plan)
+
         storage_plan: _StoragePrefix = plan.storage_data
         file_count = 0
 
@@ -697,7 +741,7 @@ class _FileSystemWriter(StorageWriter):
 
         file_queue: queue.Queue = queue.Queue()
         if self.single_file_per_rank:
-            for bucket in _split_by_size_and_type(self.thread_count, plan.items):
+            for bucket in _split_by_size_and_type(thread_count, plan.items):
                 file_name = gen_file()
                 path = self.fs.concat_path(self.path, file_name)
                 file_queue.put((path, file_name, bucket))
@@ -707,17 +751,18 @@ class _FileSystemWriter(StorageWriter):
                 path = self.fs.concat_path(self.path, file_name)
                 file_queue.put((path, file_name, [item]))
 
-        return self._write_data(planner, file_queue)
+        return self._write_data(planner, file_queue, thread_count)
 
     def _write_data(
         self,
         planner: SavePlanner,
         file_queue: queue.Queue,
+        thread_count: int,
     ) -> Future[list[WriteResult]]:
         result_queue: queue.Queue = queue.Queue()
 
         threads = []
-        for _ in range(1, self.thread_count):
+        for _ in range(1, thread_count):
             t = threading.Thread(
                 target=_write_files_from_queue,
                 args=(
@@ -728,7 +773,7 @@ class _FileSystemWriter(StorageWriter):
                     self.transforms,
                     self.per_thread_copy_ahead,
                     self.sync_files,
-                    self.thread_count,
+                    thread_count,
                     self.serialization_format,
                 ),
             )
@@ -743,7 +788,7 @@ class _FileSystemWriter(StorageWriter):
             transforms=self.transforms,
             inflight_threshhold=self.per_thread_copy_ahead,
             use_fsync=self.sync_files,
-            thread_count=self.thread_count,
+            thread_count=thread_count,
             serialization_format=self.serialization_format,
         )
 
@@ -990,12 +1035,13 @@ class FileSystemWriter(_FileSystemWriter, BlockingAsyncStager):
         path: str | os.PathLike,
         single_file_per_rank: bool = True,
         sync_files: bool = True,
-        thread_count: int = 1,
+        thread_count: int | None = 1,
         per_thread_copy_ahead: int = 10_000_000,
         cache_staged_state_dict: bool = False,
         overwrite: bool = True,
         _extensions: Sequence[StreamTransformExtension] | None = None,
         serialization_format: SerializationFormat = SerializationFormat.TORCH_SAVE,
+        **kwargs: Any,
     ) -> None:
         """
         Initialize the writer pointing to `path`.
@@ -1004,7 +1050,7 @@ class FileSystemWriter(_FileSystemWriter, BlockingAsyncStager):
             path: directory where the checkpoint will be written to.
             single_file_per_rank: Produce one file per rank instead of one file per tensor/blob. Default to True.
             sync_files : force files to be synced to permanent storage. Default to True.
-            thread_count: Number of IO threads to use to write. Default to 1.
+            thread_count: Number of IO threads to use to write. Defaults to 1. If set to None, thread count is dynamically auto-tuned based on plan size.
             per_thread_copy_ahead: How many bytes to copy from the GPU ahead of saving them. Default 10Mb.
             cache_staged_state_dict: Whether to cache the staged state_dict. This option decreases staging latency
                 at the cost of increased memory usage. Additionally, if this parameter is set to True, it's the expectation
@@ -1024,6 +1070,7 @@ class FileSystemWriter(_FileSystemWriter, BlockingAsyncStager):
             overwrite=overwrite,
             _extensions=_extensions,
             serialization_format=serialization_format,
+            **kwargs,
         )
         BlockingAsyncStager.__init__(
             self,

@@ -556,6 +556,63 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
                     )
 
 
+class TestThreadCountAutoTuning(TestCase):
+    def test_calculate_optimal_thread_count(self) -> None:
+        with tempfile.TemporaryDirectory() as path:
+            writer = FileSystemWriter(
+                path=path,
+                thread_count=None,
+                max_threads=8,
+                min_size_per_thread=1024,  # 1 KB per thread for testing
+            )
+            self.assertIsNone(writer.thread_count)
+
+            # Create a save plan
+            state_dict = {
+                "t1": torch.ones(256, dtype=torch.float32),   # 1024 bytes (1 KB)
+                "t2": torch.ones(512, dtype=torch.float32),   # 2048 bytes (2 KB)
+                "t3": torch.ones(1024, dtype=torch.float32),  # 4096 bytes (4 KB)
+                "t4": torch.ones(2048, dtype=torch.float32),  # 8192 bytes (8 KB)
+            }
+            planner = dist.checkpoint.DefaultSavePlanner()
+            planner.set_up_planner(state_dict, is_coordinator=True)
+            plan = planner.create_local_plan()
+
+            # Total tensor size = 15360 bytes = 15 KB
+            # suggested = 15360 // 1024 = 15
+            # max_threads capped at len(items) = 4
+            thread_count = writer._calculate_optimal_thread_count(plan)
+            self.assertGreaterEqual(thread_count, 1)
+            self.assertLessEqual(thread_count, 4)
+
+            # Small plan < min_size_per_thread
+            small_writer = FileSystemWriter(
+                path=path,
+                thread_count=None,
+                max_threads=8,
+                min_size_per_thread=100 * 1024 * 1024,  # 100 MB
+            )
+            self.assertEqual(small_writer._calculate_optimal_thread_count(plan), 1)
+
+    def test_filesystem_writer_save_and_load_auto_tuned(self) -> None:
+        with tempfile.TemporaryDirectory() as path:
+            state_dict_to_save = {
+                f"tensor_{i}": torch.randn(10, 10) for i in range(8)
+            }
+            # Save with auto-tuned thread_count (None)
+            fs_writer = FileSystemWriter(path=path, thread_count=None)
+            save(state_dict=state_dict_to_save, storage_writer=fs_writer, no_dist=True)
+
+            state_dict_to_load = {
+                f"tensor_{i}": torch.zeros(10, 10) for i in range(8)
+            }
+            fs_reader = FileSystemReader(path=path)
+            load(state_dict=state_dict_to_load, storage_reader=fs_reader, no_dist=True)
+
+            for k in state_dict_to_save:
+                self.assertTrue(torch.equal(state_dict_to_save[k], state_dict_to_load[k]))
+
+
 instantiate_parametrized_tests(TestDistributedStateDictSaveLoad)
 instantiate_parametrized_tests(TestDistributedStateDictSaveLoadRot13)
 instantiate_parametrized_tests(TestDistributedStateDictSaveLoadWithSharedTensor)
@@ -564,3 +621,4 @@ instantiate_parametrized_tests(TestDistributedReshardOnLoad)
 
 if __name__ == "__main__":
     run_tests()
+
