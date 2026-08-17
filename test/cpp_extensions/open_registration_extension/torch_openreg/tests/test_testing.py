@@ -1,5 +1,6 @@
 # Owner(s): ["module: PrivateUse1"]
 
+import inspect
 import unittest
 from collections import defaultdict
 from contextlib import contextmanager
@@ -309,7 +310,20 @@ class TestCapabilityGating(TestCase):
     executed_count = 0
 
     @classmethod
+    def setUpClass(cls):
+        cls._saved_capabilities = inspect.getattr_static(
+            PrivateUse1TestBase, "_capabilities"
+        )
+        PrivateUse1TestBase._capabilities = classmethod(
+            lambda cls: {
+                Capability.dtype.fp8: lambda: True,
+                Capability.dtype.bf16: lambda: False,
+            }
+        )
+
+    @classmethod
     def tearDownClass(cls):
+        PrivateUse1TestBase._capabilities = cls._saved_capabilities
         expected_runs = 3
         if cls.executed_count != expected_runs:
             raise AssertionError(
@@ -363,12 +377,6 @@ class TestCapabilityGating(TestCase):
         type(self).executed_count += 1
 
 
-PrivateUse1TestBase._capabilities = classmethod(
-    lambda cls: {
-        Capability.dtype.fp8: lambda: True,
-        Capability.dtype.bf16: lambda: False,
-    }
-)
 instantiate_device_type_tests(TestCapabilityGating, globals(), only_for="openreg")
 
 

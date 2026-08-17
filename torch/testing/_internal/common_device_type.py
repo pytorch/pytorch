@@ -328,7 +328,9 @@ class Capability:
 
     Tests declare requirements with :func:`requires_capabilities`::
 
-        @requires_capabilities(Capability.lib.triton, Capability.dtype.fp8)
+        @requires_capabilities(
+            Capability.dtype.fp8, Capability.attention.flash_attention
+        )
         def test_foo(self, device): ...
 
     Device test bases declare what they support by overriding
