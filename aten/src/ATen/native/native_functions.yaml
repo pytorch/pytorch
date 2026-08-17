@@ -15199,6 +15199,7 @@
 - func: _safe_softmax(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
   dispatch:
     CompositeExplicitAutograd: _safe_softmax
+    XPU: _safe_softmax_xpu
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA, NestedTensorXPU: _safe_softmax
 
 # Apparently, putting "forward" in the name will cause Python bindings to be skipped, so "fwd" it is.
