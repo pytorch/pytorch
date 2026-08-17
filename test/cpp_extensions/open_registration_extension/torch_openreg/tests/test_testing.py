@@ -397,18 +397,21 @@ def _dummy_module_inputs(module_info, device, dtype, requires_grad, training, **
     ]
 
 
-def _make_dummy_module(name, **kwargs):
+def _make_dummy_module(name, dtypes=(torch.float32,), **kwargs):
     module_cls = type(name, (torch.nn.Identity,), {})
     return ModuleInfo(
         module_cls,
         module_inputs_func=_dummy_module_inputs,
-        dtypes=(torch.float32,),
+        dtypes=dtypes,
         **kwargs,
     )
 
 
 module_normal = _make_dummy_module("module_normal")
 module_skip = _make_dummy_module("module_skip")
+module_skip_f32 = _make_dummy_module(
+    "module_skip_f32", dtypes={torch.float32, torch.float64}
+)
 module_xfail = _make_dummy_module("module_xfail")
 
 # Dummy modules for testing combined module_allowlist + module_overrides
@@ -430,9 +433,14 @@ class TestModuleTypeOpenReg(TestCase):
         for module_name in should_not_run:
             if cls._executed[module_name] != 0:
                 raise AssertionError(f"{module_name} test body should never run")
+        if cls._executed["module_skip_f32"] != 1:
+            raise AssertionError(
+                "module_skip_f32 should have run exactly once,"
+                f"but ran {cls._executed['module_skip_f32']} times"
+            )
         super().tearDownClass()
 
-    @modules([module_normal, module_skip, module_xfail])
+    @modules([module_normal, module_skip, module_skip_f32, module_xfail])
     def test_module(self, device, dtype, module_info, training):
         if module_info.name in ("module_skip", "module_xfail"):
             self.fail(f"{module_info.name} deliberately fails")
@@ -482,6 +490,9 @@ class TestModuleAllowlistWithOverrides(TestCase):
 
 OPENREG_MODULE_OVERRIDES = {
     "module_skip": [DecorateInfo(unittest.skip("skip module_skip"))],
+    "module_skip_f32": [
+        DecorateInfo(unittest.skip("skip module_skip_f32"), dtypes=(torch.float32,))
+    ],
     "module_xfail": [DecorateInfo(unittest.expectedFailure)],
 }
 with _temp_test_configs(PrivateUse1TestBase, module_overrides=OPENREG_MODULE_OVERRIDES):
