@@ -537,12 +537,12 @@ class TracebackVariable(VariableTracker):
             raise_observed_exception(TypeError, tx)
         if not isinstance(val, (TracebackVariable, ConstantVariable)):
             raise AssertionError(
-                f"tb_next val must be TracebackVariable or ConstantVariable, got {type(val)}"
+                f"tb_next val must be TracebackVariable or ConstantVariable, got {type(val).__name__}"
             )
         if self.has_reference_cycle(val) or (
             istype(val, TracebackVariable) and val.has_reference_cycle(self)
         ):
-            raise_observed_exception(ValueError, tx)
+            raise_observed_exception(ValueError, tx, args=["traceback loop detected"])
         self.tb_next = val
         return variables.ConstantVariable.create(None)
 
