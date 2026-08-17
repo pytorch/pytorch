@@ -42,6 +42,7 @@ from torch.testing._internal.common_quantized import (
     _bfloat16_to_float4_e2m1fn_x2,
 )
 from torch.testing._internal.common_utils import (
+    getRocmVersion,
     make_fullrank_matrices_with_distinct_singular_values,
     TEST_WITH_ROCM, IS_FBCODE, IS_LINUX, IS_WINDOWS, IS_MACOS, MACOS_VERSION, TEST_SCIPY,
     torch_to_numpy_dtype_dict, numpy_to_torch_dtype, TEST_WITH_ASAN,
@@ -13816,11 +13817,16 @@ op_db: list[OpInfo] = [
            # CUDA forward supports float16 (native cuSPARSE SDDMM) and bfloat16
            # (computed in float32; cuSPARSE has no bf16 SDDMM kernel). Backward
            # routes through cuSPARSE SpMM: float16 needs CC >= 5.3, bfloat16 needs
-           # CC >= 8.0, and ROCm's hipSPARSE SpMM implements neither dtype.
+           # CC >= 8.0. hipSPARSE SpMM supports both low-precision dtypes from
+           # ROCm 7.14.
            dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
            backward_dtypesIfCUDA=floating_and_complex_types_and(
-               *([torch.half] if not TEST_WITH_ROCM else []),
-               *([torch.bfloat16] if SM80OrLater and not TEST_WITH_ROCM else [])),
+               torch.half, *([torch.bfloat16] if SM80OrLater else [])),
+           backward_dtypesIfROCM=(
+               floating_and_complex_types_and(torch.half, torch.bfloat16)
+               if TEST_WITH_ROCM and getRocmVersion() >= (7, 14)
+               else floating_and_complex_types()
+           ),
            supports_autograd=True,
            sample_inputs_func=sample_inputs_sparse_sampled_addmm,
            decorators=[
@@ -17796,7 +17802,7 @@ op_db: list[OpInfo] = [
     UnaryUfuncInfo('nn.functional.hardtanh',
                    aten_name="hardtanh",
                    aten_backward_name='hardtanh_backward',
-                   dtypes=all_types_and(torch.half, torch.bfloat16),
+                   dtypes=floating_types_and(torch.int8, torch.int16, torch.int32, torch.int64, torch.half, torch.bfloat16),
                    backward_dtypes=all_types_and(torch.half, torch.bfloat16),
                    backward_dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
                    assert_autodiffed=True,
