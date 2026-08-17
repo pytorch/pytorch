@@ -1944,7 +1944,7 @@ class TestUtilityFunsCuda(_BaseTestCase):
         self.assertSetEqual({i.name for i in graph.graph.initializer}, {"w_cpu"})
 
 
-instantiate_device_type_tests(TestUtilityFunsCuda, globals(), only_for='cuda')
+instantiate_device_type_tests(TestUtilityFunsCuda, globals(), only_for=("cuda",))
 
 if __name__ == "__main__":
     common_utils.run_tests()
