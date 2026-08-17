@@ -15,6 +15,7 @@ from torch.testing._internal.common_utils import HardwareClassification
 
 class TestOpRecorder(common_utils.TestCase):
     hw_classification = HardwareClassification.GENERIC
+    
     def setUp(self):
         super().setUp()
         self.opset_version = 17
