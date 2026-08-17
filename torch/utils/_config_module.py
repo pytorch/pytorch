@@ -434,15 +434,12 @@ class ConfigModule(ModuleType):
 
             if config.alias is not None:
                 self._set_alias_val(config, value)
-                # Clear ``hide`` so an aliased field stays readable after a
-                # mock.patch teardown (delattr sets hide=True, then setattr
-                # must clear it; see _ConfigEntry.hide).
-                config.hide = False
             else:
                 config.user_override.set(value)
                 self._hash_dirty_var.set(True)
                 self._mark_get_dict_dirty(name)
-                config.hide = False
+            # delattr sets hide=True; mock.patch's teardown setattr must clear it.
+            config.hide = False
 
     def __getattr__(self, name: str) -> Any:
         try:
@@ -981,6 +978,11 @@ class ConfigModule(ModuleType):
 
         """
         config = self._config
+        for k in changes:
+            if config[k].alias is not None:
+                raise AssertionError(
+                    f"_make_closure_patcher does not support aliased config {k}"
+                )
 
         def change() -> Callable[[], None]:
             prior = {k: config[k].user_override.get() for k in changes}
@@ -1111,8 +1113,20 @@ def alias_fields_from(parent_cls: type) -> Callable[[type], type]:
         for k, v in parent_cls.__dict__.items():
             if k.startswith("_") or k in child_cls.__dict__:
                 continue
-            # Only alias actual config fields. Nested classes, functions, and
-            # other non-field members of the parent must not become entries.
+            if isinstance(v, type) and not issubclass(v, _Config):
+                # A nested subconfig class of the parent. inherit_fields_from
+                # could copy it wholesale and let install_config_module's
+                # visit() recurse into it; alias_fields_from has no way to
+                # alias a whole subtree, so silently dropping it here would
+                # make the child lose it with no error at decoration time or
+                # install time -- just a missing key at first read. Refuse
+                # instead of guessing.
+                raise AssertionError(
+                    f"alias_fields_from cannot alias nested subconfig class "
+                    f"{parent_cls.__name__}.{k}"
+                )
+            # Only alias actual config fields. Functions and other non-field
+            # members of the parent must not become entries.
             if not isinstance(v, (*CONFIG_TYPES, _Config)):
                 continue
             if isinstance(v, _Config):
