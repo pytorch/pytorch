@@ -38,7 +38,8 @@ class TestShardUtilsDistributed(FSDPTest):
     @skip_if_lt_x_gpu(2)
     @requires_capabilities(
         Capability.distributed.backend,
-        Capability.distributed.fsdp,
+        Capability.distributed.fsdp1,
+        Capability.distributed.sharded_tensor,
     )
     def test_create_chunk_sharded_tensor(self, device):
         for size in ((1,), (1, 6), (12,), (12, 6), (25,), (25, 6)):
@@ -76,7 +77,7 @@ class TestShardUtilsDistributedDTensor(DTensorTestBase):
     @requires_capabilities(
         Capability.distributed.backend,
         Capability.distributed.dtensor,
-        Capability.distributed.fsdp,
+        Capability.distributed.fsdp1,
     )
     def test_create_chunk_dtensor(self, device):
         device_mesh = self.build_device_mesh()
