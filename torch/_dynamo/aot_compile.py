@@ -57,18 +57,8 @@ class CompileArtifacts:
     system_info: SystemInfo = dataclasses.field(default_factory=SystemInfo.current)
 
     def check_compatibility(self) -> None:
-        # The CACHED info is the receiver, matching _DynamoCacheEntry: the skip
-        # for an artifact predating cpu_codegen_target keys off self, and every
-        # mismatch message labels self "cached" and the argument "current".
-        # Determining the codegen target runs the C++ toolchain, so only pay for
-        # it when this artifact actually records one to compare against.
-        current = SystemInfo.current(
-            cpu_codegen=(
-                self.device_type == "cpu"
-                and self.system_info.cpu_codegen_target is not None
-            )
-        )
-        self.system_info.check_compatibility(current, self.device_type)
+        current_system = SystemInfo.current()
+        current_system.check_compatibility(self.system_info, self.device_type)
 
 
 class AOTCompilePickler(pickle.Pickler):
@@ -253,22 +243,6 @@ class AOTCompiledFunction:
             guard_scope = self._guard_globals
             if guard_scope is None:
                 guard_scope = self.fn.__globals__
-            else:
-                # Seed the artifact's own __import_* aliases. Dynamo MINTS those
-                # at trace time (symbolic_convert.import_source writes them into
-                # the tracing process's globals) and roots guards at them -- every
-                # child nn.Module call guards its hook dicts through
-                # G['__import_torch_dot_nn_dot_modules_dot_module']. A process
-                # that only LOADS never traced, so its module dict has none and
-                # the guard KeyErrors on every call. setdefault, so only the
-                # synthetic names are added: a real global the loading process
-                # already has keeps its live value, which is the point of using
-                # the live scope at all.
-                for (
-                    alias,
-                    module_name,
-                ) in self._artifacts.runtime_env.import_sources.items():
-                    guard_scope.setdefault(alias, importlib.import_module(module_name))
             self._artifacts.guard_manager = load_guard_manager(
                 guards_state,
                 self._artifacts.original_code,
@@ -538,7 +512,9 @@ class AOTCompiledModel:
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         for result in self.compiled_results:
-            if result.guard_check(self.model, *args, **kwargs):
+            if result._guard_check_enabled and result.guard_check(
+                self.model, *args, **kwargs
+            ):
                 return result(self.model, *args, **kwargs)
         # disable_guard_check() is the escape hatch for an artifact whose guards
         # fail on the serving machine for a reason the caller judges benign. A
