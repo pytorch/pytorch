@@ -230,17 +230,6 @@ op_assert_ref_tol_table = {
     (torch.float16, torch.ops.aten.addcmul.default): 1e-5,
 }
 
-# XPU-specific tolerance overrides. These are only applied when the compared
-# tensors live on an xpu device, and are max-combined with op_assert_ref_tol_table.
-# This keeps the shared (CPU/CUDA) tolerances untouched while allowing XPU to be
-# looser where its eager kernels accumulate rounding differently from the
-# decomposition (XPU can never become stricter than the shared table this way).
-op_assert_ref_tol_table_xpu = {
-    # XPU eager reflection_pad2d_backward accumulates slightly larger bfloat16
-    # rounding error than the decomposition; shared 5e-3 is marginally too tight.
-    (torch.bfloat16, torch.ops.aten.reflection_pad2d_backward.default): 1e-2,
-}
-
 
 def op_assert_ref(test_case, op, test_dtype, i, orig, decomp, ref, args, kwargs):
     if orig.dtype != decomp.dtype:
@@ -259,8 +248,6 @@ def op_assert_ref(test_case, op, test_dtype, i, orig, decomp, ref, args, kwargs)
         orig_diff = (orig - ref).abs().max()
         decomp_diff = (decomp - ref).abs().max()
         atol = op_assert_ref_tol_table.get((test_dtype, op), 1e-7)
-        if orig.device.type == "xpu":
-            atol = max(atol, op_assert_ref_tol_table_xpu.get((test_dtype, op), 0.0))
         if decomp_diff > orig_diff + atol:
             raise RuntimeError(
                 f"Difference from float64 is larger with decomposition {op.__name__}"
