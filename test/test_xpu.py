@@ -3538,6 +3538,23 @@ class TestXpuAutocast(TestAutocast):
         self.assertEqual(torch.is_autocast_enabled("xpu"), torch.is_autocast_enabled())
         self.assertEqual(is_enabled, torch.is_autocast_enabled())
 
+    def test_fft_fp16_promotion(self):
+        shapes = [tuple(range(5, 5 + ndim)) for ndim in range(1, 6)]
+        for shape in shapes:
+            # r2c: rfftn with float16 input should produce complex32
+            x_r = torch.randn(shape, device="xpu", dtype=torch.float16)
+            result_r2c = torch.fft.rfftn(x_r)
+            self.assertEqual(result_r2c.dtype, torch.complex32)
+            expected_r2c = torch.fft.rfftn(x_r.to(torch.float32)).to(torch.complex32)
+            self.assertEqual(result_r2c, expected_r2c, atol=1e-6, rtol=1e-3)
+
+            # c2r: irfftn with complex32 input should produce float16
+            freq = torch.fft.rfftn(x_r)
+            result_c2r = torch.fft.irfftn(freq)
+            self.assertEqual(result_c2r.dtype, torch.float16)
+            expected_c2r = torch.fft.irfftn(freq.to(torch.complex64)).to(torch.float16)
+            self.assertEqual(result_c2r, expected_c2r, atol=1e-6, rtol=1e-3)
+
 
 @unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
 class TestXpuTrace(TestCase):
