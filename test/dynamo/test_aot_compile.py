@@ -925,6 +925,30 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
     def test_aot_compile_grad_mode_after_prior_compile(self):
         _run_in_subprocess(_subprocess_grad_mode_after_prior_compile)
 
+    def test_aot_compile_torch_func_vmap_grad(self):
+        import torch.func as tf
+
+        def value(pos):
+            return torch.linalg.norm(pos[1] - pos[0])
+
+        batched_grad = tf.vmap(tf.grad(value, argnums=0), in_dims=(0,))
+        x = torch.randn(64, 2, 3, dtype=torch.float64)
+        compiled_fn = torch.compile(
+            batched_grad, fullgraph=True, dynamic=False
+        ).aot_compile(  # noqa: UNSPECIFIED_BACKEND
+            ((x,), {})
+        )
+        expected = batched_grad(x)
+        actual = compiled_fn(x)
+        self.assertEqual(expected, actual)
+        compiled_fn.save_compiled_function(self.path())
+        torch._dynamo.reset()
+        with torch.compiler.set_stance("fail_on_recompile"):
+            with open(self.path(), "rb") as f:
+                loaded_fn = torch.compiler.load_compiled_function(f)
+            actual = loaded_fn(x)
+            self.assertEqual(expected, actual)
+
     def test_aot_compile_source_info(self):
         from torch._dynamo.package import SourceInfo
 
@@ -1149,8 +1173,15 @@ from user code:
         x = torch.randn(3, 3, requires_grad=True)
         with self.assertRaisesRegex(RuntimeError, "No AOT compiled graph matched"):
             model(x)
-        model.forward.compiled_results[0].disable_guard_check()
+        result = model.forward.compiled_results[0]
+        result.disable_guard_check()
         self.assertEqual(model(x), x * 2)
+        with patch.object(
+            result,
+            "guard_check",
+            side_effect=RuntimeError("serving environment mismatch"),
+        ):
+            self.assertEqual(model(x), x * 2)
 
     def test_disable_guard_check_does_not_shadow_a_matching_result(self):
         # An opted-out result accepts anything, so it has to be the last resort
