@@ -11072,8 +11072,8 @@ class GraphModule(torch.nn.Module):
             sym_size_int_1: "Sym(u2)" = torch.ops.aten.sym_size.int(arg4_1, 0)
 
             rsub: "i64[]" = torch.ops.aten.rsub.Scalar(arg0_1, sym_size_int_1);  sym_size_int_1 = None
-            sub_1: "i64[]" = torch.ops.aten.sub.Tensor(rsub, 1);  rsub = None
-            _local_scalar_dense: "Sym(u7)" = torch.ops.aten._local_scalar_dense.default(sub_1);  sub_1 = None
+            sub: "i64[]" = torch.ops.aten.sub.Tensor(rsub, 1);  rsub = None
+            _local_scalar_dense: "Sym(u7)" = torch.ops.aten._local_scalar_dense.default(sub);  sub = None
             select: "f32[3, 3]" = torch.ops.aten.select.int(arg4_1, 0, _local_scalar_dense);  arg4_1 = _local_scalar_dense = None
             t: "f32[3, 3]" = torch.ops.aten.t.default(arg6_1);  arg6_1 = None
             t_1: "f32[3, 3]" = torch.ops.aten.t.default(t);  t = None
@@ -11084,14 +11084,14 @@ class GraphModule(torch.nn.Module):
             sum_1: "f32[1, 3]" = torch.ops.aten.sum.dim_IntList(arg1_1, [0], True)
             view: "f32[3]" = torch.ops.aten.view.default(sum_1, [3]);  sum_1 = None
             t_4: "f32[3, 3]" = torch.ops.aten.t.default(t_3);  t_3 = None
-            mul_4: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg1_1, select)
-            mul_5: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg1_1, select);  arg1_1 = select = None
-            add_7: "f32[3, 3]" = torch.ops.aten.add.Tensor(mm, mul_5);  mm = mul_5 = None
-            add_8: "f32[3, 3]" = torch.ops.aten.add.Tensor(add_7, mul_4);  add_7 = mul_4 = None
-            add_9: "i64[]" = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
-            add_10: "f32[3]" = torch.ops.aten.add.Tensor(view, arg2_1);  view = arg2_1 = None
-            add_11: "f32[3, 3]" = torch.ops.aten.add.Tensor(t_4, arg3_1);  t_4 = arg3_1 = None
-            return (add_9, add_8, add_10, add_11)
+            mul_1: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg1_1, select)
+            mul_2: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg1_1, select);  arg1_1 = select = None
+            add_2: "f32[3, 3]" = torch.ops.aten.add.Tensor(mm, mul_2);  mm = mul_2 = None
+            add_3: "f32[3, 3]" = torch.ops.aten.add.Tensor(add_2, mul_1);  add_2 = mul_1 = None
+            add_4: "i64[]" = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
+            add_5: "f32[3]" = torch.ops.aten.add.Tensor(view, arg2_1);  view = arg2_1 = None
+            add_6: "f32[3, 3]" = torch.ops.aten.add.Tensor(t_4, arg3_1);  t_4 = arg3_1 = None
+            return (add_4, add_3, add_5, add_6)
 """,
             )
 
