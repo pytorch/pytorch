@@ -11385,6 +11385,18 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         x = torch.randn(1, 2048, dtype=torch.float32)
         self.common(fn, (x,))
 
+    @skipCPUIf(True, "requires Triton atomic_or on tl.int1")
+    @skip_if_pallas
+    def test_index_put_bool_accumulate(self):
+        def fn(x, idx, values):
+            return x.index_put((idx,), values, accumulate=True)
+
+        # Exercise True + True through both duplicate writes and existing data.
+        x = torch.tensor([False, True], device=self.device)
+        idx = torch.tensor([0, 0, 1], device=self.device)
+        values = torch.tensor([True, True, True], device=self.device)
+        self.common(fn, (x, idx, values))
+
     def test_index_ops_on_expanded_tensor(self):
         def make_input(src):
             return torch.zeros(1, src.size(1), device=src.device).expand(
