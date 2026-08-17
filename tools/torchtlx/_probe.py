@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
-"""Report the active torch/Triton environment as JSON, for bringup.py doctor.
+"""Report the active torch/Triton environment as JSON, for bringup.py.
 
-Run as a subprocess so `doctor` reflects what is installed right now rather
-than what the parent process imported before a provider swap.
+Used by `doctor`, and by `switch` -- which needs the backend to choose a
+provider, and the cache directories to clear once one is installed.
+
+A subprocess for two reasons. The report has to reflect what is installed right
+now, not what the parent imported before a provider swap; and the parent is
+usually run from the repo root, where `import torch` would find the source tree
+rather than the installed package. bringup.py runs this with cwd=/.
 """
 
 from __future__ import annotations

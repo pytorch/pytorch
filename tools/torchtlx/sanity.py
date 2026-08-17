@@ -2,8 +2,12 @@
 """Fast plumbing check: torch.compile -> Inductor -> Triton -> GPU.
 
 Deliberately small. This answers "is the stack wired up and producing correct
-Triton kernels", not "is Inductor correct" -- the full suites do that. Run via
-`bringup.py test`, which sets TORCHINDUCTOR_TLX_MODE first.
+Triton kernels", not "is Inductor correct" -- the full suites do that.
+
+It also says nothing about whether TLX engaged: TORCHINDUCTOR_TLX_MODE is
+printed but never asserted on, so this passes identically on upstream Triton.
+`bringup.py test` sets that variable and gates TLX separately, by running
+doctor first.
 """
 
 from __future__ import annotations

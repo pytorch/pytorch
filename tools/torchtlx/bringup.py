@@ -19,9 +19,10 @@ Usage:
     python tools/torchtlx/bringup.py test --mode allow
     python tools/torchtlx/bringup.py test --full
 
-`test` runs the torchTLX tests matched by TLX_TEST_PATTERNS; with none present
-it falls back to sanity.py, a fast plumbing check. --full adds the Inductor
-Triton suite in FULL_TESTS.
+`test` runs the torchTLX tests matched by TLX_TEST_PATTERNS; none exist today,
+so it falls back to sanity.py, a fast plumbing check. That check does not
+verify TLX engaged -- doctor does, and test runs it first. --full runs the
+Inductor Triton suite in FULL_TESTS instead of the fallback.
 
 Switching providers does NOT require rebuilding torch; Triton is a pure
 runtime dependency of Inductor.
@@ -436,7 +437,8 @@ def cmd_test(args: argparse.Namespace) -> int:
         tests += FULL_TESTS
     if not tests:
         # Keep the default fast: this is a plumbing check, not a correctness
-        # suite. --full adds the 425-test Inductor/Triton suite (~2.5 min).
+        # suite. --full runs the 425-test Inductor/Triton suite (~2.5 min) in
+        # its place -- with torchTLX tests present it would run alongside them.
         print("no torchTLX tests found; running the plumbing sanity check")
         print(
             f"  (looked for: {', '.join(TLX_TEST_PATTERNS)}; use --full for the suite)"
@@ -484,7 +486,7 @@ def main() -> int:
     p_test.add_argument(
         "--full",
         action="store_true",
-        help=f"also run the full Inductor/Triton suite ({' '.join(FULL_TESTS)}, ~2.5 min)",
+        help=f"run {' '.join(FULL_TESTS)} (~2.5 min) instead of the plumbing check",
     )
 
     args = parser.parse_args()

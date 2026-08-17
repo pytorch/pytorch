@@ -4,57 +4,35 @@ This fork drives Inductor with [FBTriton](https://github.com/facebookexperimenta
 instead of upstream Triton, because torchTLX lives in FBTriton.
 
 **`bringup.py` is the only interface you need.** It handles both things:
-swapping the Triton provider, and running the torchTLX tests against it.
+swapping the Triton provider, and running the checks against it.
 
 ```bash
 python tools/torchtlx/bringup.py switch fbtriton # upstream Triton -> FBTriton
 python tools/torchtlx/bringup.py doctor          # can TLX engage here?
-python tools/torchtlx/bringup.py test            # run the torchTLX tests
+python tools/torchtlx/bringup.py test            # plumbing check, see below
 python tools/torchtlx/bringup.py switch oai      # back to upstream, for A/B
-python tools/torchtlx/bringup.py test --full     # ... plus the full Inductor/Triton suite
+python tools/torchtlx/bringup.py test --full     # the Inductor/Triton suite instead
 ```
 
-There is no environment variable to set and nothing to rebuild: Triton is a
-pure runtime dependency of Inductor, so swapping to a published wheel is a
-~30s pip operation. `--from-source` is much slower -- it compiles Triton and
-LLVM, a few minutes. (`FBTRITON=1` exists further down, but it is
-build-infrastructure only and does not apply to you as a user.)
+There is no environment variable to set and no torch rebuild: Triton is a pure
+runtime dependency of Inductor, so a swap is only a pip operation -- ~30s for a
+published wheel. Getting TLX today means `--from-source`, which is slower: it
+compiles Triton and LLVM, a few minutes. (`FBTRITON=1` exists further down, but
+it is build-infrastructure only and does not apply to you as a user.)
 
 ## What `test` runs
 
-torchTLX tests (`test/inductor/test_torchtlx*.py`). Today that is
-`test_torchtlx_templates.py`, which asserts the contract between this repo and
-FBTriton: every TLX template Inductor proposes must have a heuristic
-registered for the running device. Those tests skip when the active Triton has
-no TLX registry, so they are inert on upstream Triton.
+torchTLX tests (`test/inductor/test_torchtlx*.py`) if any exist. None do
+today, so what runs is `sanity.py`, a deliberately small plumbing check --
+eager matmul plus compiled pointwise, reduction and backward, asserting
+Inductor emitted a Triton kernel and the numerics match. It finishes in under
+10s; it is not a correctness suite, and it does not check that TLX engaged. It
+would pass identically on upstream Triton -- `doctor` is the gate for that, and
+`test` runs it first.
 
-They are also blocklisted in `tools/testing/discover_tests.py`, so PyTorch CI
-never picks them up. No CI job installs an FBTriton, so all CI could report is
-skips -- while the file would still cost a slot in the inductor shards and show
-up in target determination. `bringup.py test` runs it by path and is unaffected.
-
-With no torchTLX tests present it falls back to `sanity.py`, a deliberately
-small plumbing check -- eager matmul
-plus compiled pointwise, reduction and backward, asserting Inductor emitted a
-Triton kernel and the numerics match. It finishes in under 10s; it is not a
-correctness suite. `--full` adds `test/inductor/test_triton_kernels.py`
-(425 tests, ~2.5 min), which is what to run when validating a provider swap.
-
-## Tests for the wiring itself
-
-`tools/test/test_torchtlx_wiring.py` asserts the claim this fork rests on --
-that FBTriton is opt-in and the default build path is unchanged -- by
-evaluating the Triton block of `.ci/pytorch/binary_populate_env.sh` and
-comparing the emitted requirement strings. It also guards that nothing lands
-under `.ci/docker/`, whose tree hash gates every CI Docker image rebuild.
-
-It lives in `tools/test/` rather than here so that CI collects it: the lint
-workflow runs `pytest tools/test`. That job uses the linter image, so the test
-imports neither torch nor triton and needs no GPU and no network.
-
-```bash
-python tools/test/test_torchtlx_wiring.py
-```
+`--full` runs `test/inductor/test_triton_kernels.py` (425 tests, ~2.5 min)
+*instead of* the plumbing check, and is what to run when validating a provider
+swap. Were there torchTLX tests, it would run alongside them.
 
 ## Compile caches
 
@@ -144,7 +122,12 @@ sets it for you.
 
 ## ROCm note
 
-On ROCm, `switch oai` installs `pytorch-triton-rocm` from the PyTorch nightly
-index matching your ROCm version. `fbtriton`, `triton`, and
-`pytorch-triton-rocm` all install a top-level `triton` package and collide, so
-`switch` uninstalls every known provider before installing the requested one.
+On ROCm, `switch oai` installs `triton-rocm` from the PyTorch nightly index
+matching your ROCm version. That is the name this repo publishes -- see
+`build_triton_wheel.py` and `RELEASE.md`; the older `pytorch-triton-rocm` is
+frozen at 3.6.0 and would silently give you a Triton far behind your torch.
+
+Every provider -- `fbtriton`, `triton`, `triton-rocm`, and the legacy
+`pytorch-triton*` names -- installs a top-level `triton` package, so they
+collide. `switch` therefore uninstalls all of them before installing the
+requested one.
