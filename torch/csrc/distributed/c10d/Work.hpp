@@ -32,6 +32,7 @@ enum class OpType : std::uint8_t {
   COALESCED = 17,
   _ALLREDUCE_SPARSE = 18,
   REDUCE_SCATTER_TENSOR_COALESCED = 19,
+  ALLGATHER_INTO_TENSOR_COALESCED = 20,
   UNKNOWN = 100,
 };
 
@@ -74,7 +75,7 @@ class TORCH_API Work : public torch::CustomClassHolder {
   // Returns exception if isSuccess() returned false.
   virtual std::exception_ptr exception() const;
 
-  // Returns source rank if this objects represents a recv-from-any.
+  // Returns source rank if this object represents a recv-from-any.
   virtual int sourceRank() const;
 
   // Returns result tensors, if applicable.
@@ -132,6 +133,8 @@ class TORCH_API Work : public torch::CustomClassHolder {
   virtual float getDuration() const;
 
   virtual uint64_t getSequencenumber() const;
+
+  virtual std::chrono::milliseconds getTimeout() const;
 
   OpType retrieveOpType() const;
 

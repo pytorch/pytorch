@@ -4,7 +4,9 @@ import json
 import os
 import pprint
 import sys
+import unittest
 from unittest import mock
+from unittest.mock import patch
 
 import torch
 import torch._dynamo.config as dynamo_config
@@ -12,18 +14,58 @@ import torch._inductor.config as inductor_config
 import torch.compiler.config as compiler_config
 from torch._dynamo import utils
 from torch._inductor.test_case import TestCase
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
+)
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    IS_LINUX,
+    IS_MACOS,
+    TEST_WITH_ASAN,
+    TEST_WITH_ROCM,
+    TEST_WITH_SLOW,
+)
 
 
 _IS_WINDOWS = sys.platform == "win32"
 
 
 class TestUtils(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_cleanup_hook_tolerates_missing_name(self):
+        # During interpreter shutdown the scope's module __dict__ may already be
+        # cleared before the weakref callback fires the hook. The hook must not
+        # raise KeyError (which would surface as an "Exception ignored in
+        # weakref callback").
+        scope = {}
+        hook = utils.CleanupHook.create(scope, "myglobal", object())
+        del scope["myglobal"]
+        hook()
+
+        # The normal path still removes the installed global.
+        hook2 = utils.CleanupHook.create(scope, "myglobal", object())
+        hook2()
+        self.assertNotIn("myglobal", scope)
+
     def test_nan(self):
         a = torch.Tensor([float("nan")])
         b = torch.Tensor([float("nan")])
         fp64_ref = torch.DoubleTensor([5.0])
         res = utils.same(a, b, fp64_ref=fp64_ref, equal_nan=True)
         self.assertTrue(res)
+
+    def test_same_iou_for_bool_propagates_to_instances(self):
+        Instances = type("Instances", (), {})
+        ref = Instances()
+        res = Instances()
+        ref.pred_masks = torch.ones((4, 16, 16), dtype=torch.bool)
+        res.pred_masks = ref.pred_masks.clone()
+        res.pred_masks[0, 0, 0] = False
+
+        self.assertFalse(utils.same(ref, res))
+        self.assertTrue(utils.same(ref, res, use_iou_for_bool=True))
 
     def test_larger_multiplier_for_smaller_tensor(self):
         """
@@ -94,7 +136,7 @@ class TestUtils(TestCase):
         """
 
         def run_forward_backward():
-            model = torch.compile(TestModel())
+            model = torch.compile(TestModel())  # noqa: UNSPECIFIED_BACKEND
             x = torch.rand([3], requires_grad=True)
             output = model(x)
             loss_fn = torch.nn.MSELoss()
@@ -167,8 +209,6 @@ class TestUtils(TestCase):
             traced_code_lists.append(get_traced_code())
             return gm.forward
 
-        utils_path = os.path.join(os.path.dirname(__file__), "utils.py")
-
         # === no inlining ===
         @torch.compile(backend=my_backend)
         def fn(x):
@@ -191,11 +231,11 @@ class TestUtils(TestCase):
         self.assertEqual(get_filenames(traced_code_lists), [[__file__, utils_path]])
 
         # === graph break occurs during inlining ===
+        @torch._dynamo.disable_nested_graph_breaks
         @torch.compile(backend=my_backend)
         def fn(x):
             z = x + 1
-            with torch._dynamo.disable_nested_graph_breaks():
-                y = break_it(z)
+            y = break_it(z)
             return y * 2
 
         x = torch.randn(3)
@@ -261,12 +301,12 @@ class TestUtils(TestCase):
         self.assertIn(
             expected_tensor_key,
             ReinplaceCounters._values,
-            f"Expected key {expected_tensor_key} not found",
+            lambda msg: f"{msg}\nExpected key {expected_tensor_key} not found",
         )
         self.assertIn(
             expected_bytes_key,
             ReinplaceCounters._values,
-            f"Expected key {expected_bytes_key} not found",
+            lambda msg: f"{msg}\nExpected key {expected_bytes_key} not found",
         )
 
         # Verify the values are correct
@@ -284,7 +324,7 @@ class TestUtils(TestCase):
         self.assertIn(
             expected_key2,
             ReinplaceCounters._values,
-            f"Expected key {expected_key2} not found",
+            lambda msg: f"{msg}\nExpected key {expected_key2} not found",
         )
         self.assertEqual(ReinplaceCounters._values[expected_key2], 3)
 
@@ -322,13 +362,15 @@ class TestDynamoTimed(TestCase):
     Test utilities surrounding dynamo_timed.
     """
 
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         if hasattr(torch._dynamo, "reset_recompile_user_contexts"):
             torch._dynamo.reset_recompile_user_contexts()
 
     def run_forward_backward(self):
-        model = torch.compile(TestModel())
+        model = torch.compile(TestModel())  # noqa: UNSPECIFIED_BACKEND
         x = torch.rand([3], requires_grad=True)
         output = model(x)
         loss_fn = torch.nn.MSELoss()
@@ -385,8 +427,8 @@ class TestDynamoTimed(TestCase):
 
         self.assertEqual(
             compilation_events[0].graph_node_shapes,
-            "{'l_self_modules_linear_parameters_weight_': [1, 3], "
-            "'l_self_modules_linear_parameters_bias_': [1], "
+            "{'l_self_modules_linear_parameters_bias_': [1], "
+            "'l_self_modules_linear_parameters_weight_': [1, 3], "
             "'l_x_': [3], 'linear': [1]}",
         )
 
@@ -451,6 +493,10 @@ class TestDynamoTimed(TestCase):
             "'Dynamo does not know how to trace builtin operator `print`'",
         )
 
+    @unittest.skipIf(
+        TEST_WITH_ASAN or IS_LINUX or IS_MACOS or TEST_WITH_ROCM or TEST_WITH_SLOW,
+        "https://github.com/pytorch/pytorch/issues/148093",
+    )
     @dynamo_config.patch(
         {
             "log_compilation_metrics": True,
@@ -500,7 +546,8 @@ class TestDynamoTimed(TestCase):
             pprint.pformat(utils.compilation_time_metrics),
             filter_expected(
                 """\
-{'GraphLowering.codegen': [0.0, 0.0],
+{'CacheBase.get_system.triton_key': [0.0],
+ 'GraphLowering.codegen': [0.0, 0.0],
  'GraphLowering.compile_to_fn': [0.0, 0.0],
  'GraphLowering.compile_to_module': [0.0, 0.0],
  'GraphLowering.run': [0.0, 0.0],
@@ -539,6 +586,7 @@ class TestDynamoTimed(TestCase):
  'pass.post_grad_passes.decompose_map_to_while_loop': [0.0, 0.0],
  'pass.post_grad_passes.decompose_scan_to_while_loop': [0.0, 0.0],
  'pass.post_grad_passes.decompose_triton_kernel_wrapper_functional': [0.0, 0.0],
+ 'pass.post_grad_passes.fix_auto_functionalized_dtype_views': [0.0, 0.0],
  'pass.post_grad_passes.move_constructors_to_cuda': [0.0, 0.0],
  'pass.post_grad_passes.pass_pattern_0': [0.0, 0.0],
  'pass.post_grad_passes.pass_pattern_1': [0.0, 0.0],
@@ -554,7 +602,8 @@ class TestDynamoTimed(TestCase):
  'pass.pre_grad_passes.group_batch_fusion_passes': [0.0]}"""
                 if _IS_WINDOWS
                 else """\
-{'GraphLowering.codegen': [0.0, 0.0],
+{'CacheBase.get_system.triton_key': [0.0],
+ 'GraphLowering.codegen': [0.0, 0.0],
  'GraphLowering.compile_to_fn': [0.0, 0.0],
  'GraphLowering.compile_to_module': [0.0, 0.0],
  'GraphLowering.run': [0.0, 0.0],
@@ -593,6 +642,7 @@ class TestDynamoTimed(TestCase):
  'pass.post_grad_passes.decompose_map_to_while_loop': [0.0, 0.0],
  'pass.post_grad_passes.decompose_scan_to_while_loop': [0.0, 0.0],
  'pass.post_grad_passes.decompose_triton_kernel_wrapper_functional': [0.0, 0.0],
+ 'pass.post_grad_passes.fix_auto_functionalized_dtype_views': [0.0, 0.0],
  'pass.post_grad_passes.move_constructors_to_cuda': [0.0, 0.0],
  'pass.post_grad_passes.pass_pattern_0': [0.0, 0.0],
  'pass.post_grad_passes.pass_pattern_1': [0.0, 0.0],
@@ -655,6 +705,7 @@ class TestDynamoTimed(TestCase):
             e.co_filename = None
             e.co_firstlineno = None
             e.inductor_config = None
+            e.functorch_config = None
             e.compiler_config = None
             e.cuda_version = None
             e.triton_version = None
@@ -714,6 +765,7 @@ class TestDynamoTimed(TestCase):
  'fail_user_frame_filename': None,
  'fail_user_frame_lineno': None,
  'frame_key': '1',
+ 'functorch_config': None,
  'gc_time_us': 0,
  'graph_input_count': 3,
  'graph_node_count': 5,
@@ -807,6 +859,7 @@ class TestDynamoTimed(TestCase):
  'fail_user_frame_filename': None,
  'fail_user_frame_lineno': None,
  'frame_key': '1',
+ 'functorch_config': None,
  'gc_time_us': 0,
  'graph_input_count': 3,
  'graph_node_count': 5,
@@ -914,6 +967,7 @@ class TestDynamoTimed(TestCase):
  'fail_user_frame_filename': None,
  'fail_user_frame_lineno': None,
  'frame_key': None,
+ 'functorch_config': None,
  'gc_time_us': None,
  'graph_input_count': None,
  'graph_node_count': None,
@@ -1007,6 +1061,7 @@ class TestDynamoTimed(TestCase):
  'fail_user_frame_filename': None,
  'fail_user_frame_lineno': None,
  'frame_key': None,
+ 'functorch_config': None,
  'gc_time_us': None,
  'graph_input_count': None,
  'graph_node_count': None,
@@ -1078,7 +1133,7 @@ class TestDynamoTimed(TestCase):
 
         compilation_events = []
         with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
-            torch.compile(test1)(torch.randn(1))
+            torch.compile(test1)(torch.randn(1))  # noqa: UNSPECIFIED_BACKEND
             compilation_events = [arg[0][0] for arg in log_event.call_args_list]
         self.assertIn(
             '"job_id": "test_job_id"',
@@ -1093,14 +1148,14 @@ class TestDynamoTimed(TestCase):
     def test_ir_count(self):
         # Different python versions have different potential IR counts.
         version = (sys.version_info[0], sys.version_info[1])
-        self.assertIn(version, ((3, 9), (3, 10), (3, 11), (3, 12), (3, 13), (3, 14)))
+        self.assertIn(version, ((3, 10), (3, 11), (3, 12), (3, 13), (3, 14), (3, 15)))
         first, second = {
-            (3, 9): (10, 6),
             (3, 10): (10, 6),
             (3, 11): (11, 7),
             (3, 12): (11, 7),
             (3, 13): (11, 7),
             (3, 14): (11, 7),
+            (3, 15): (11, 7),
         }[version]
 
         def test1(x):
@@ -1110,7 +1165,7 @@ class TestDynamoTimed(TestCase):
 
         compilation_events = []
         with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
-            torch.compile(test1)(torch.randn(10, 10))
+            torch.compile(test1)(torch.randn(10, 10))  # noqa: UNSPECIFIED_BACKEND
             compilation_events = [arg[0][0] for arg in log_event.call_args_list]
         self.assertEqual(compilation_events[0].ir_count, first)
 
@@ -1120,7 +1175,7 @@ class TestDynamoTimed(TestCase):
 
         compilation_events = []
         with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
-            torch.compile(test2)(torch.randn(10, 10))
+            torch.compile(test2)(torch.randn(10, 10))  # noqa: UNSPECIFIED_BACKEND
             compilation_events = [arg[0][0] for arg in log_event.call_args_list]
         self.assertEqual(compilation_events[0].ir_count, second)
 
@@ -1138,7 +1193,7 @@ class TestDynamoTimed(TestCase):
 
         compilation_events = []
         with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
-            torch.compile(graph_module)(torch.randn(6, 6))
+            torch.compile(graph_module)(torch.randn(6, 6))  # noqa: UNSPECIFIED_BACKEND
             compilation_events = [arg[0][0] for arg in log_event.call_args_list]
         self.assertEqual(
             compilation_events[0].inductor_provenance,
@@ -1151,7 +1206,7 @@ class TestDynamoTimed(TestCase):
         compilation_events = []
         with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
 
-            @torch.compile()
+            @torch.compile()  # noqa: UNSPECIFIED_BACKEND
             def f(x):
                 return x * x
 
@@ -1170,7 +1225,7 @@ class TestDynamoTimed(TestCase):
             mock.patch("torch._dynamo.utils.log_compilation_event") as log_event,
         ):
 
-            @torch.compile()
+            @torch.compile()  # noqa: UNSPECIFIED_BACKEND
             def f(x):
                 return x * x
 
@@ -1201,7 +1256,7 @@ class TestDynamoTimed(TestCase):
         compilation_events = []
         with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
             m = ModelSimple()
-            torch.compile(m)(torch.randn(1, 10, 10))
+            torch.compile(m)(torch.randn(1, 10, 10))  # noqa: UNSPECIFIED_BACKEND
             compilation_events = [arg[0][0] for arg in log_event.call_args_list]
         self.assertEqual(compilation_events[0].param_numel, 520)
         self.assertEqual(compilation_events[0].param_bytes, 4 * 520)
@@ -1219,7 +1274,7 @@ class TestDynamoTimed(TestCase):
         compilation_events = []
         with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
             m = ModelWrapped()
-            torch.compile(m)(torch.randn(1, 10, 10))
+            torch.compile(m)(torch.randn(1, 10, 10))  # noqa: UNSPECIFIED_BACKEND
             compilation_events = [arg[0][0] for arg in log_event.call_args_list]
         self.assertEqual(compilation_events[0].param_numel, 1040)
         self.assertEqual(compilation_events[0].param_bytes, 4 * 1040)
@@ -1231,7 +1286,7 @@ class TestDynamoTimed(TestCase):
         m = nn.Sequential(l1, nn.Sequential(l1, l2))
         self.assertEqual([x.numel() for x in m.parameters()], [16, 4, 16, 4])
         with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
-            torch.compile(m)(torch.randn(4, 4))
+            torch.compile(m)(torch.randn(4, 4))  # noqa: UNSPECIFIED_BACKEND
             compilation_events = [arg[0][0] for arg in log_event.call_args_list]
         self.assertEqual(compilation_events[0].param_numel, 40)
         self.assertEqual(compilation_events[0].param_bytes, 4 * 40)
@@ -1244,17 +1299,42 @@ class TestDynamoTimed(TestCase):
         m = nn.Sequential(l1, nn.Sequential(l2))
         self.assertEqual([x.numel() for x in m.parameters()], [16, 4, 4])
         with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
-            torch.compile(m)(torch.randn(4, 4))
+            torch.compile(m)(torch.randn(4, 4))  # noqa: UNSPECIFIED_BACKEND
             compilation_events = [arg[0][0] for arg in log_event.call_args_list]
         self.assertEqual(compilation_events[0].param_numel, 24)
         self.assertEqual(compilation_events[0].param_bytes, 4 * 24)
         self.assertEqual(compilation_events[0].param_count, 3)
 
 
+class TestTimedSync(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @onlyAccelerator
+    def test_timed_syncs_on_accelerator(self, device):
+        from torch._dynamo.utils import timed
+
+        called = []
+        gm = torch.fx.symbolic_trace(torch.nn.Identity())
+        inputs = [torch.randn(4, device=device)]
+
+        with patch(
+            "torch.accelerator.synchronize", side_effect=lambda: called.append(1)
+        ):
+            timed(gm, inputs, times=1)
+
+        # once before loop + once per iteration for times=1
+        self.assertEqual(len(called), 2)
+
+
+instantiate_device_type_tests(TestTimedSync, globals(), allow_xpu=True)
+
+
 class TestInductorConfigParsingForLogging(TestCase):
     """
     Test for parsing inductor config for logging in CompilationMetrics.
     """
+
+    hw_classification = HardwareClassification.GENERIC
 
     class TestObject:
         def __init__(self, a, b):
@@ -1319,6 +1399,41 @@ class TestInductorConfigParsingForLogging(TestCase):
         mocked_inductor_config.get_config_copy.return_value = None
         inductor_config_json = utils._scrubbed_inductor_config_for_logging()
         self.assertEqual(inductor_config_json, expected)
+
+
+class TestFunctorchConfigParsingForLogging(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_functorch_config_jsonify(self):
+        functorch_config_json = utils._functorch_config_for_logging()
+        self.assertIsInstance(functorch_config_json, str)
+        parsed = json.loads(functorch_config_json)
+        self.assertIn("activation_memory_budget", parsed)
+        self.assertEqual(parsed["activation_memory_budget"], 1.0)
+
+    def test_functorch_config_blocklist(self):
+        functorch_config_json = utils._functorch_config_for_logging()
+        parsed = json.loads(functorch_config_json)
+        self.assertNotIn("TYPE_CHECKING", parsed)
+        self.assertNotIn("_save_config_ignore", parsed)
+
+    @mock.patch("torch._dynamo.utils.torch._functorch.config")
+    def test_functorch_config_none(self, mocked_config):
+        mocked_config.get_config_copy.side_effect = AttributeError
+        result = utils._functorch_config_for_logging()
+        self.assertIsNone(result)
+
+    @mock.patch("torch._dynamo.utils.torch._functorch.config")
+    def test_functorch_config_runtime_error(self, mocked_config):
+        mocked_config.get_config_copy.side_effect = RuntimeError
+        result = utils._functorch_config_for_logging()
+        self.assertIsNone(result)
+
+    @mock.patch("torch._dynamo.utils.justknobs_check", return_value=False)
+    def test_functorch_config_jk_disabled(self, mocked_jk):
+        result = utils._functorch_config_for_logging()
+        self.assertIsNone(result)
+        mocked_jk.assert_called_once_with("pytorch/dynamo:log_functorch_config")
 
 
 if __name__ == "__main__":

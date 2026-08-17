@@ -166,7 +166,7 @@ def dump_state(fx_g: fx.GraphModule, inps: Sequence[torch.Tensor]) -> None:
     print(
         f"""
 # Working Repro with {len(fx_g.graph.nodes)} nodes
-inps = {[(i.shape, i.dtype, i.device.type) for i in inps]}
+inps = {[(i.shape, i.dtype, str(i.device)) for i in inps]}
 inps = [torch.zeros(())] + [torch.ones(shape, dtype=dtype, device=device) for (shape, dtype, device) in inps]
 {fx_g.code}
 """
@@ -349,7 +349,7 @@ def minifier(
         granularity = max(1, granularity // 2)
         output: fx.Node | None = None
         for idx, node in enumerate(cur_graph.nodes):
-            node.idx = idx
+            node.idx = idx  # type: ignore[attr-defined]
             if node.op == "output":
                 output = node
                 break

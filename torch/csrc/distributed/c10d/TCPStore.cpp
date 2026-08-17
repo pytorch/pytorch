@@ -4,9 +4,9 @@
 #include <fmt/ranges.h>
 #include <torch/csrc/distributed/c10d/Backoff.hpp>
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>
-#include <torch/csrc/distributed/c10d/TCPStoreBackend.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/logging.h>
+#include <torch/csrc/distributed/c10d/store/TCPStoreBackend.hpp>
 
 #include <chrono>
 #include <fstream>
@@ -737,7 +737,7 @@ std::vector<std::string> TCPStore::listKeys() {
   for (auto i = 0; i < numKeys; ++i) {
     auto bits = client_->receiveBits();
     std::string str(bits.begin(), bits.end());
-    if (str.find(keyPrefix_) == 0) {
+    if (str.starts_with(keyPrefix_)) {
       str = str.substr(keyPrefix_.size());
     } else {
       continue;

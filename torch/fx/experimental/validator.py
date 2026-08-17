@@ -170,7 +170,7 @@ try:
 
     # Implementation of Python semantics as Z3 expressions.
     #
-    # Z3 Real-Int theory has operators with semantics that differ that of
+    # Z3 Real-Int theory has operators with semantics that differ from that of
     # Python. Therefore, in order to get it right, we need to implement
     # the (Python) semantics we are relying on in Z3.
     @dataclass
@@ -250,7 +250,7 @@ try:
             return z3.Abs(number)
 
         def round_to_int(self, number: z3.ArithRef) -> z3.ArithRef:
-            # Pythons builtin 'round' implements the 'round half to even' strategy
+            # Python's builtin 'round' implements the 'round half to even' strategy
             # See https://en.wikipedia.org/wiki/Rounding#Rounding_half_to_even
             # z3 has an equivalent z3.fpRoundToIntegral(z3.RoundNearestTiesToEven(), ...), but this only applies to
             # floating point numbers, which is different from real numbers that we are dealing with here.
@@ -284,7 +284,7 @@ try:
         # This is needed because the argument of some FX nodes were
         # literal integers, instead of booleans. So, whenever this flag
         # is set, we also convert ints to booleans.
-        boolean_ops = {operator.not_}
+        boolean_ops = {operator.not_, torch.sym_not}
         as_bool = op in boolean_ops
 
         # Lifts the function into 'z3.ExprRef' domain.
@@ -318,6 +318,7 @@ try:
         replacement_map = {
             # Operator module.
             operator.not_: lift(z3.Not),
+            torch.sym_not: lift(z3.Not),
             operator.and_: lift(ops.bitwise_and),
             operator.or_: lift(ops.bitwise_or),
             operator.lshift: lift(ops.lshift),
@@ -335,6 +336,7 @@ try:
             torch.sym_float: lift(ops.to_real),
             torch.sym_max: lift(ops.max),
             torch.sym_min: lift(ops.min),
+            torch.sym_not: lift(z3.Not),
             torch.sym_sum: lift(ops.sym_sum),
             torch.sym_ite: lift(lambda b, t, f: z3.If(b, t, f)),
             torch._sym_sqrt: lift(ops.sqrt),  # type: ignore[attr-defined]
@@ -522,7 +524,7 @@ try:
                 raise AssertionError(f"Z3 variable not found for: {symbol}")
             return self.symbols[symbol]
 
-        # Create a variable in Z3 of 'type' for 'symbol', if it doesn't already exists.
+        # Create a variable in Z3 of 'type' for 'symbol', if it doesn't already exist.
         def add_var(self, symbol: sympy.Symbol, type: type) -> z3.ExprRef:
             if symbol in self.symbols:
                 return self.symbols[symbol]

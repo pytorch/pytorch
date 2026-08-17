@@ -160,15 +160,23 @@ class DeviceInterface:
     @classmethod
     def raise_if_triton_unavailable(cls, device: torch.types.Device = None) -> None:
         """
-        Raises a `RuntimeError` with the appropriate human-readable instructions
-        to resolve the issue if Triton is not available for the given device, or
-        the default device if `device` is `None`.
+        Raises a `TritonUnavailableError` with human-readable instructions if
+        the Triton backend for the given device (or the default device if
+        `device` is `None`) is not built. Implementations may raise a
+        different, more specific error when the device itself is not
+        Triton-capable (e.g. CUDA raises `GPUTooOldForTriton`), so callers
+        that only want an availability answer should check
+        `is_triton_capable()` first.
 
         The caller should ensure the presence of the 'triton' package before
         calling this method.
         """
+        from torch._dynamo.exc import TritonUnavailableError
+
         if not cls.is_triton_capable():
-            raise RuntimeError("This device is not capable of supporting Triton")
+            raise TritonUnavailableError(
+                "This device is not capable of supporting Triton"
+            )
 
 
 class DeviceGuard:
@@ -247,14 +255,14 @@ class CudaInterface(DeviceInterface):
     stream = staticmethod(torch.cuda.stream)  # type: ignore[assignment]
     current_stream = staticmethod(torch.cuda.current_stream)
     set_stream = staticmethod(torch.cuda.set_stream)  # type: ignore[assignment]
-    _set_stream_by_id = staticmethod(torch.cuda._set_stream_by_id)
+    _set_stream_by_id = staticmethod(torch.cuda._set_stream_by_id)  # type: ignore[assignment]
     synchronize = staticmethod(torch.cuda.synchronize)
-    get_device_properties = staticmethod(torch.cuda.get_device_properties)
+    get_device_properties = staticmethod(torch.cuda.get_device_properties)  # type: ignore[assignment]
     get_raw_stream = staticmethod(get_cuda_stream)  # type: ignore[assignment, arg-type]
-    exchange_device = staticmethod(torch.cuda._exchange_device)
-    maybe_exchange_device = staticmethod(torch.cuda._maybe_exchange_device)
+    exchange_device = staticmethod(torch.cuda._exchange_device)  # type: ignore[arg-type, has-type]
+    maybe_exchange_device = staticmethod(torch.cuda._maybe_exchange_device)  # type: ignore[arg-type, has-type]
     memory_allocated = staticmethod(torch.cuda.memory_allocated)
-    is_bf16_supported = staticmethod(torch.cuda.is_bf16_supported)
+    is_bf16_supported = staticmethod(torch.cuda.is_bf16_supported)  # type: ignore[arg-type]
 
     # Can be mock patched by @patch decorator.
     @staticmethod
@@ -271,13 +279,18 @@ class CudaInterface(DeviceInterface):
 
     @staticmethod
     def is_triton_capable(device: torch.types.Device = None) -> bool:
+        # Use the Worker API (device properties cached in the main process
+        # before fork) instead of torch.cuda.get_device_properties directly, so
+        # the capability check stays safe when called from spawn-based compile
+        # workers.
         return (
             torch.version.hip is not None
-            or torch.cuda.get_device_properties(device).major >= 7
+            or CudaInterface.Worker.get_device_properties(device).major >= 7
         )
 
     @staticmethod
     def raise_if_triton_unavailable(device: torch.types.Device = None) -> None:
+        from torch._dynamo.exc import TritonUnavailableError
         from torch._inductor.exc import GPUTooOldForTriton
 
         if not CudaInterface.is_triton_capable(device):
@@ -288,9 +301,9 @@ class CudaInterface(DeviceInterface):
 
         if torch.version.hip is not None:
             if "amd" not in triton.backends.backends:
-                raise RuntimeError("triton not built with the 'amd' backend")
+                raise TritonUnavailableError("triton not built with the 'amd' backend")
         elif "nvidia" not in triton.backends.backends:
-            raise RuntimeError("triton not built with the 'nvidia' backend")
+            raise TritonUnavailableError("triton not built with the 'nvidia' backend")
 
 
 get_mtia_stream: Callable[[int], int] | None
@@ -341,19 +354,19 @@ class MtiaInterface(DeviceInterface):
             return caching_worker_device_properties["mtia"][device]
 
     current_device = staticmethod(torch.mtia.current_device)
-    set_device = staticmethod(torch.mtia.set_device)
+    set_device = staticmethod(torch.mtia.set_device)  # type: ignore[assignment]
     device_count = staticmethod(torch.mtia.device_count)
-    stream = staticmethod(torch.mtia.stream)
+    stream = staticmethod(torch.mtia.stream)  # type: ignore[assignment]
     current_stream = staticmethod(torch.mtia.current_stream)
-    set_stream = staticmethod(torch.mtia.set_stream)
-    _set_stream_by_id = staticmethod(torch.mtia._set_stream_by_id)
+    set_stream = staticmethod(torch.mtia.set_stream)  # type: ignore[assignment]
+    _set_stream_by_id = staticmethod(torch.mtia._set_stream_by_id)  # type: ignore[assignment]
     synchronize = staticmethod(torch.mtia.synchronize)
-    get_device_properties = staticmethod(torch.mtia.get_device_properties)
+    get_device_properties = staticmethod(torch.mtia.get_device_properties)  # type: ignore[assignment]
     get_raw_stream = staticmethod(get_mtia_stream)  # type: ignore[assignment, arg-type]
-    exchange_device = staticmethod(torch.mtia._exchange_device)
-    maybe_exchange_device = staticmethod(torch.mtia._maybe_exchange_device)
-    memory_allocated = staticmethod(torch.mtia.memory_allocated)
-    is_bf16_supported = staticmethod(torch.mtia.is_bf16_supported)
+    exchange_device = staticmethod(torch.mtia._exchange_device)  # type: ignore[arg-type, has-type]
+    maybe_exchange_device = staticmethod(torch.mtia._maybe_exchange_device)  # type: ignore[arg-type, has-type]
+    memory_allocated = staticmethod(torch.mtia.memory_allocated)  # type: ignore[assignment]
+    is_bf16_supported = staticmethod(torch.mtia.is_bf16_supported)  # type: ignore[arg-type]
 
     # Can be mock patched by @patch decorator.
     @staticmethod
@@ -374,8 +387,10 @@ class MtiaInterface(DeviceInterface):
     def raise_if_triton_unavailable(device: torch.types.Device = None) -> None:
         import triton.backends
 
+        from torch._dynamo.exc import TritonUnavailableError
+
         if "mtia" not in triton.backends.backends:
-            raise RuntimeError("triton not built with the 'mtia' backend")
+            raise TritonUnavailableError("triton not built with the 'mtia' backend")
 
 
 get_xpu_stream: Callable[[int], int] | None
@@ -427,16 +442,16 @@ class XpuInterface(DeviceInterface):
 
     current_device = staticmethod(torch.xpu.current_device)
     set_device = staticmethod(torch.xpu.set_device)
-    device_count = staticmethod(torch.xpu.device_count)
+    device_count = staticmethod(torch.xpu.device_count)  # type: ignore[has-type]
     stream = staticmethod(torch.xpu.stream)  # type: ignore[assignment]
     current_stream = staticmethod(torch.xpu.current_stream)
     set_stream = staticmethod(torch.xpu.set_stream)  # type: ignore[assignment]
-    _set_stream_by_id = staticmethod(torch.xpu._set_stream_by_id)
+    _set_stream_by_id = staticmethod(torch.xpu._set_stream_by_id)  # type: ignore[assignment]
     synchronize = staticmethod(torch.xpu.synchronize)
-    get_device_properties = staticmethod(torch.xpu.get_device_properties)
+    get_device_properties = staticmethod(torch.xpu.get_device_properties)  # type: ignore[assignment]
     get_raw_stream = staticmethod(get_xpu_stream)  # type: ignore[assignment, arg-type]
-    exchange_device = staticmethod(torch.xpu._exchange_device)
-    maybe_exchange_device = staticmethod(torch.xpu._maybe_exchange_device)
+    exchange_device = staticmethod(torch.xpu._exchange_device)  # type: ignore[arg-type, has-type]
+    maybe_exchange_device = staticmethod(torch.xpu._maybe_exchange_device)  # type: ignore[arg-type, has-type]
     memory_allocated = staticmethod(torch.xpu.memory_allocated)
 
     # Can be mock patched by @patch decorator.
@@ -461,8 +476,10 @@ class XpuInterface(DeviceInterface):
     def raise_if_triton_unavailable(device: torch.types.Device = None) -> None:
         import triton.backends
 
+        from torch._dynamo.exc import TritonUnavailableError
+
         if "intel" not in triton.backends.backends:
-            raise RuntimeError("triton not built with the 'intel' backend")
+            raise TritonUnavailableError("triton not built with the 'intel' backend")
 
 
 @dataclass
@@ -525,8 +542,10 @@ class CpuInterface(DeviceInterface):
     def raise_if_triton_unavailable(device: torch.types.Device = None) -> None:
         import triton.backends
 
+        from torch._dynamo.exc import TritonUnavailableError
+
         if "cpu" not in triton.backends.backends:
-            raise RuntimeError("triton not built with the 'cpu' backend")
+            raise TritonUnavailableError("triton not built with the 'cpu' backend")
 
 
 class MpsInterface(DeviceInterface):

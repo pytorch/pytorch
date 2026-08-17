@@ -23,14 +23,15 @@ import torch
 import torch.testing
 from torch._dynamo import polyfills
 from torch._logging._internal import trace_log
-from torch.testing._internal.common_utils import (
+from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
+    HardwareClassification,
     IS_WINDOWS,
     TEST_WITH_CROSSREF,
     TEST_WITH_TORCHDYNAMO,
     TestCase as TorchTestCase,
 )
 
-from . import config, reset, utils
+from . import config, utils
 
 
 log = logging.getLogger(__name__)
@@ -75,12 +76,13 @@ class TestCase(TorchTestCase):
     @classmethod
     def setUpClass(cls) -> None:
         super().setUpClass()
-        cls._exit_stack = contextlib.ExitStack()
-        cls._exit_stack.enter_context(
+        cls._exit_stack = contextlib.ExitStack()  # type: ignore[attr-defined]
+        cls._exit_stack.enter_context(  # type: ignore[attr-defined]
             config.patch(
                 raise_on_ctx_manager_usage=True,
                 suppress_errors=False,
                 log_compilation_metrics=False,
+                canonicalize_output_graph_node_order=True,
             ),
         )
 
@@ -89,7 +91,6 @@ class TestCase(TorchTestCase):
         self._prior_nested_graph_breaks = config.nested_graph_breaks
         config.nested_graph_breaks = True
         super().setUp()
-        reset()
         utils.counters.clear()
         self.handler = logging.NullHandler()
         trace_log.addHandler(self.handler)
@@ -98,7 +99,6 @@ class TestCase(TorchTestCase):
         trace_log.removeHandler(self.handler)
         for k, v in utils.counters.items():
             log.debug("%s %s", k, v.most_common())
-        reset()
         utils.counters.clear()
         torch._C._autograd._saved_tensors_hooks_enable()
         super().tearDown()
@@ -108,20 +108,30 @@ class TestCase(TorchTestCase):
         config.nested_graph_breaks = self._prior_nested_graph_breaks
 
     def before_cuda_memory_leak_check(self) -> None:
-        reset()
+        super().before_cuda_memory_leak_check()
         utils.counters.clear()
 
     def assertEqual(self, x: Any, y: Any, *args: Any, **kwargs: Any) -> None:  # type: ignore[override]
-        if (
-            config.debug_disable_compile_counter
-            and isinstance(x, utils.CompileCounterInt)
-            or isinstance(y, utils.CompileCounterInt)
-        ):
-            return
+        if config.debug_disable_compile_counter:
+            if isinstance(x, utils.CompileCounterInt) or isinstance(
+                y, utils.CompileCounterInt
+            ):
+                return
+            # skip checks like self.assertEqual(len(counters["graph_break"]), 1)
+            if (
+                (cur_frame := inspect.currentframe())
+                and (upper_frame := cur_frame.f_back)
+                and (upper_code := inspect.getframeinfo(upper_frame).code_context)
+                and "counters" in upper_code[0]
+            ):
+                return
         return super().assertEqual(x, y, *args, **kwargs)
 
-    # assertExpectedInline might also need to be disabled for wrapped nested
-    # graph break tests
+    def assertExpectedInline(self, *args: Any, **kwargs: Any) -> None:  # type: ignore[override]
+        if config.debug_disable_compile_counter:
+            return
+        kwargs["skip"] = kwargs.get("skip", 0) + 1
+        return super().assertExpectedInline(*args, **kwargs)
 
 
 class CPythonTestCase(TestCase):
@@ -132,6 +142,7 @@ class CPythonTestCase(TestCase):
     tracing through unittest methods.
     """
 
+    hw_classification = HardwareClassification.GENERIC
     _stack: contextlib.ExitStack
     dynamo_strict_nopython = True
 
@@ -230,8 +241,8 @@ class CPythonTestCase(TestCase):
             )
 
         super().setUpClass()
-        cls._stack = contextlib.ExitStack()
-        cls._stack.enter_context(
+        cls._stack = contextlib.ExitStack()  # type: ignore[attr-defined]
+        cls._stack.enter_context(  # type: ignore[attr-defined]
             config.patch(
                 enable_trace_unittest=True,
                 enable_trace_load_build_class=True,

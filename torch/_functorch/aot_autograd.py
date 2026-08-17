@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import itertools
 import time
 from contextlib import nullcontext
 from functools import wraps
-from typing import Any, Literal, TYPE_CHECKING
+from typing import Any, cast, Literal, TYPE_CHECKING
 from typing_extensions import ParamSpec, TypeVar
 from unittest.mock import patch
 
@@ -28,7 +29,8 @@ from torch._guards import detect_fake_mode
 from torch._inductor.codecache import resolve_pre_grad_pass_timing
 
 # Runtime annotation consumers still resolve BoxedBool from module globals.
-from torch._subclasses import FakeTensor, FakeTensorMode
+from torch._subclasses import FakeTensorMode
+from torch._subclasses.fake_tensor import maybe_get_fake_mode
 from torch.export._tree_utils import reorder_kwargs
 from torch.fx.experimental.proxy_tensor import make_fx
 
@@ -108,6 +110,7 @@ from ._aot_autograd.runtime_wrappers import (  # noqa: F401
     SerializableCompiledFunction,
 )
 from ._aot_autograd.schemas import (  # noqa: F401
+    ActInputPath,
     AOTConfig,
     AOTDispatchCompiler,
     AOTGraphCapture,
@@ -136,6 +139,10 @@ from ._aot_autograd.subclass_utils import (  # noqa: F401
     unwrap_tensor_subclasses_with_indices_to_original,
     wrap_tensor_subclasses,
     wrap_tensor_subclasses_maybe_joint,
+)
+from ._aot_autograd.to_standalone_python import (  # noqa: F401
+    compile_to_python,
+    load_from_python,
 )
 from ._aot_autograd.utils import (  # noqa: F401
     _get_autocast_states,
@@ -447,7 +454,7 @@ AOT_COUNTER = itertools.count()
 # However, Inductor does not want the concept of tokens in the final generated
 # code's input and output. Since changing the graph signature inside of inductor
 # is difficult, after generating the forward graph, we will run a pass to
-# remove the tokens from the inputgenerate the following graph for Inductor, where
+# remove the tokens from the input and generate the following graph for Inductor, where
 # the tokens are created and sunk within the graph, rather than as inputs and
 # outputs:
 #
@@ -506,20 +513,23 @@ def create_aot_state(
     # TODO: Chillee argues that dynamo itself should pass in fake tensors to
     # the list of arguments when compiling; at the moment we do not do this
 
-    if aot_config.decompositions is None:
-        aot_config.decompositions = {}
-
-    aot_config.decompositions = {
+    decompositions = aot_config.decompositions or {}
+    decompositions = {
         **aot_autograd_decompositions,
-        **aot_config.decompositions,
+        **decompositions,
     }
 
     if config.functionalize_rng_ops:
         # Update the decompositions with functionalized random decompositions
-        aot_config.decompositions = {  # type: ignore[assignment]
+        decompositions = {
             **rng_decompositions,
-            **aot_config.decompositions,
+            **decompositions,
         }
+
+    aot_config = dataclasses.replace(
+        aot_config,
+        decompositions=cast("dict[OpOverload, Callable[..., Any]]", decompositions),
+    )
 
     # Check flat_args to see if they're already fake.  If so, use that fake
     # mode instead.
@@ -542,7 +552,7 @@ def create_aot_state(
     )
 
     from torch._library.fake_class_registry import FakeScriptObject, maybe_to_fake_obj
-    from torch._library.opaque_object import is_opaque_type
+    from torch._library.opaque_object import is_custom_class
 
     # Tracing may mutate the states the fake script object,
     # so we need to duplicate the fake script objects so that subsequent tracing
@@ -550,7 +560,7 @@ def create_aot_state(
     def _dup_fake_script_obj(fake_flat_args: FakifiedFlatArgs) -> list[Any]:
         return [
             maybe_to_fake_obj(detect_fake_mode(fake_flat_args), arg.real_obj)
-            if isinstance(arg, FakeScriptObject) or is_opaque_type(type(arg))
+            if isinstance(arg, FakeScriptObject) or is_custom_class(type(arg))
             else arg
             for arg in fake_flat_args
         ]
@@ -578,7 +588,11 @@ def create_aot_state(
                     "aot_collect_metadata", log_pt2_compile_event=True
                 )
 
-            with dynamo_timed_ctx, ctx:
+            with (
+                dynamo_timed_ctx,
+                ctx,
+                torch._dynamo.eval_frame._use_eager_on_nested_compile(),
+            ):
                 fw_metadata = run_functionalized_fw_and_collect_metadata(
                     flat_fn,
                     flat_args_descs=flat_args_descs,
@@ -793,7 +807,7 @@ def aot_function(
             flat_fn, out_spec = create_tree_flattened_fn(fn, args, kwargs)
             (fake_mode, shape_env) = construct_fake_mode(flat_args, aot_config)
             fake_flat_args: FakifiedFlatArgs
-            fake_flat_args, act_input_indices = process_inputs(
+            fake_flat_args, act_input_paths = process_inputs(
                 flat_args, aot_config, fake_mode, shape_env
             )
             # TODO: We actually could use the pytree path to make better descs.
@@ -811,7 +825,7 @@ def aot_function(
                     fake_mode,
                     shape_env,
                 )
-                aot_state.fw_metadata.act_input_indices = act_input_indices
+                aot_state.fw_metadata.act_input_paths = act_input_paths
                 aot_graph_capture = aot_stage1_graph_capture(aot_state, flat_fn)
                 compiled_fn, _ = aot_stage2_compile(
                     aot_state,
@@ -918,12 +932,12 @@ def autograd_cache_key(
     )
 
     fake_mode, shape_env = construct_fake_mode(full_args, aot_config)
-    fake_flat_args, _act_input_indices = process_inputs(
+    fake_flat_args, act_input_paths = process_inputs(
         full_args, aot_config, fake_mode, shape_env, ignore_shape_env
     )
 
     return autograd_cache.autograd_cache_key(
-        graph, fake_flat_args, aot_config, compiler_config_extra
+        graph, fake_flat_args, aot_config, compiler_config_extra, act_input_paths
     )
 
 
@@ -988,8 +1002,9 @@ def prepare_aot_config(
 
     dynamic_shapes = False
     for x in full_args:
-        if isinstance(x, FakeTensor):
-            dynamic_shapes = x.fake_mode.shape_env is not None
+        fake_mode = maybe_get_fake_mode(x)
+        if fake_mode is not None:
+            dynamic_shapes = fake_mode.shape_env is not None
             break
 
     aot_config = AOTConfig(
@@ -1050,7 +1065,7 @@ def prepare_aot_module_simplified(
     ShapeEnv | None,
     pytree.TreeSpec | None,
     PytreeThunk | None,
-    list[int],
+    list[ActInputPath],
 ]:
     if not flatten:
         if kwargs is not None:
@@ -1104,7 +1119,7 @@ def prepare_aot_module_simplified(
 
     fake_mode, shape_env = construct_fake_mode(full_args, aot_config)
     # NB: full_args_descs not needed here, fake_flat_args is 1:1 with full_args
-    fake_flat_args, act_input_indices = process_inputs(
+    fake_flat_args, act_input_paths = process_inputs(
         full_args, aot_config, fake_mode, shape_env, ignore_shape_env
     )
 
@@ -1120,7 +1135,7 @@ def prepare_aot_module_simplified(
         shape_env,
         in_spec,
         out_spec,
-        act_input_indices,
+        act_input_paths,
     )
 
 
@@ -1178,7 +1193,7 @@ def aot_module_simplified(
             shape_env,
             _in_spec,
             _out_spec,
-            act_input_indices,
+            act_input_paths,
         ) = prepare_aot_module_simplified(
             mod,
             args,
@@ -1201,13 +1216,14 @@ def aot_module_simplified(
             remote = should_use_remote_autograd_cache()
             if local or remote:
                 set_feature_use("aot_autograd_remote_cache", remote)
-                compiled_fn = AOTAutogradCache.try_load(
+                compiled_fn, aot_config = AOTAutogradCache.try_load(
                     mod,
                     fake_flat_args,
                     aot_config,
                     compiler_config_extra,
                     local,
                     remote,
+                    act_input_paths,
                     compile_region_name=compile_region_name,
                 )
 
@@ -1229,7 +1245,7 @@ def aot_module_simplified(
                 fake_mode,
                 shape_env,
             )
-            aot_state.fw_metadata.act_input_indices = act_input_indices
+            aot_state.fw_metadata.act_input_paths = act_input_paths
             aot_graph_capture = aot_stage1_graph_capture(aot_state, functional_call)
             compiled_fn, _ = aot_stage2_compile(
                 aot_state,
@@ -1386,7 +1402,7 @@ def aot_export_joint_with_descriptors(
         shape_env,
         in_spec,
         out_spec,
-        act_input_indices,
+        act_input_paths,
     ) = prepare_aot_module_simplified(
         mod,
         args,
@@ -1420,7 +1436,7 @@ def aot_export_joint_with_descriptors(
         fake_mode,
         shape_env,
     )
-    aot_state.fw_metadata.act_input_indices = act_input_indices
+    aot_state.fw_metadata.act_input_paths = act_input_paths
 
     # NB: no cache lookup!
     aot_graph_capture = aot_stage1_graph_capture(aot_state, functional_call)
@@ -1474,10 +1490,13 @@ def aot_compile_joint_with_descriptors(
 
     cache_ctx = nullcontext()
     if serializable:
-        jd._aot_state.aot_config.cache_info = AOTAutogradCacheInfo(
-            jd.cache_hash(),
-            time.time_ns(),
-            forward_symints=[],
+        jd._aot_state.aot_config = dataclasses.replace(
+            jd._aot_state.aot_config,
+            cache_info=AOTAutogradCacheInfo(
+                jd.cache_hash(),
+                time.time_ns(),
+                forward_symints=[],
+            ),
         )
         cache_ctx = torch._functorch.config.patch(
             {
@@ -1923,7 +1942,7 @@ def _aot_export_function(
         fake_mode, shape_env = construct_fake_mode(flat_args, aot_config)
     else:
         shape_env = fake_mode.shape_env
-    fake_flat_args, act_input_indices = process_inputs(
+    fake_flat_args, act_input_paths = process_inputs(
         flat_args, aot_config, fake_mode, shape_env
     )
     # TODO: Improve the descs here with pytree information
@@ -1941,7 +1960,7 @@ def _aot_export_function(
             fake_mode,
             shape_env,
         )
-        aot_state.fw_metadata.act_input_indices = act_input_indices
+        aot_state.fw_metadata.act_input_paths = act_input_paths
         aot_graph_capture = aot_stage1_graph_capture(aot_state, flat_fn)
         fx_g, meta = aot_stage2_export(aot_state, aot_graph_capture)
 

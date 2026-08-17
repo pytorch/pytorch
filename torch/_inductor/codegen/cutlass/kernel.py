@@ -78,7 +78,7 @@ class CUTLASSKernel(Kernel):
     Baseclass for Cutlass based Kernels
     """
 
-    overrides = OpOverrides
+    overrides = OpOverrides  # type: ignore[assignment]
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -205,7 +205,8 @@ class CUTLASSKernel(Kernel):
         if V.graph.sizevars.statically_known_equals(strides[-1], 1):
             return _normalize_idx(-2, len(strides))
 
-        assert V.graph.sizevars.statically_known_equals(strides[-2], 1), strides[-2]
+        if not V.graph.sizevars.statically_known_equals(strides[-2], 1):
+            raise AssertionError(strides[-2])
         return _normalize_idx(-1, len(strides))
 
 
@@ -219,7 +220,7 @@ class CUTLASSTemplateKernel(CUTLASSKernel):
         kernel_name: str,
         runtime_arg_info: list["ArgInfo"],
         runtime_arg_values: list[Any],
-        device_type: str = "cuda",
+        device_type: str = "cuda",  # type: ignore[assignment]
     ) -> None:
         """
         Initializes a new instance of the CUTLASSTemplateKernel class.
@@ -279,7 +280,7 @@ class CUTLASSTemplateKernel(CUTLASSKernel):
                 if self.find_layout_arg(node, attr, dim) is not None:
                     continue
                 for symbol in expr.free_symbols:
-                    free_symbols.add(symbol)
+                    free_symbols.add(symbol)  # type: ignore[arg-type]
         return free_symbols
 
     def def_kernel(
@@ -311,7 +312,11 @@ class CUTLASSTemplateKernel(CUTLASSKernel):
             )
 
         if input_reorder is not None:
-            assert len(inputs) == len(input_reorder)
+            if len(inputs) != len(input_reorder):
+                raise AssertionError(
+                    f"expected len(inputs) == len(input_reorder), got "
+                    f"{len(inputs)} != {len(input_reorder)}"
+                )
         else:
             input_reorder = list(range(len(inputs)))
 
@@ -355,7 +360,7 @@ class CUTLASSTemplateKernel(CUTLASSKernel):
     def call_kernel(
         self,
         name: str,
-        node: "CUTLASSTemplateBuffer",
+        node: "CUTLASSTemplateBuffer",  # type: ignore[name-defined]
     ) -> None:
         """
         Generates code to call the kernel through V.graph.wrapper_code.
@@ -371,7 +376,10 @@ class CUTLASSTemplateKernel(CUTLASSKernel):
         if V.graph.cpp_wrapper:
             # Make sure we initialize these kernels since they're exported as
             # C-style symbol names.
-            assert isinstance(wrapper, CppWrapperCpu)
+            if not isinstance(wrapper, CppWrapperCpu):
+                raise AssertionError(
+                    f"expected wrapper to be CppWrapperCpu, got {type(wrapper)}"
+                )
             wrapper.initialized_kernels[name] = self
             # We always originally initialize name with "KERNEL_NAME". So, we
             # we replace with the real kernel name passed as an arg to this function.
@@ -383,7 +391,7 @@ class CUTLASSTemplateKernel(CUTLASSKernel):
         dynamic_shape_args = self.get_dynamic_shape_args()
         offset_args = self.get_offset_args()
         call_args.extend(dynamic_shape_args)  # type: ignore[arg-type]
-        call_args.extend(offset_args)
+        call_args.extend(offset_args)  # type: ignore[arg-type]
         for arg in self.runtime_arg_values:
             call_args.append(str(arg))
         arg_types.extend("const int" for _ in dynamic_shape_args)
@@ -613,8 +621,8 @@ class CUTLASSTemplateCaller(ChoiceCaller):
         ],
         bmreq: CUTLASSBenchmarkRequest,
         supports_epilogue_fusion: bool,
-        template: "CUTLASSTemplate",
-        info_kwargs: dict[str, PrimitiveInfoType | list[PrimitiveInfoType]] | None,
+        template: "CUTLASSTemplate",  # type: ignore[name-defined]
+        info_kwargs: dict[str, PrimitiveInfoType | list[PrimitiveInfoType]] | None,  # type: ignore[type-arg]
         description: str,
     ) -> None:
         super().__init__(name, input_nodes, layout, description)
@@ -626,11 +634,13 @@ class CUTLASSTemplateCaller(ChoiceCaller):
         self.info_kwargs = info_kwargs
 
     def precompile(self) -> None:
-        assert self.bmreq is not None
+        if self.bmreq is None:
+            raise AssertionError("expected self.bmreq to not be None")
         self.bmreq.precompile()
 
     def benchmark(self, *args, out) -> float:
-        assert self.bmreq is not None
+        if self.bmreq is None:
+            raise AssertionError("expected self.bmreq to not be None")
         if config.profile_bandwidth_with_do_bench_using_profiling:
             algo = self.bmreq.make_run_fn(*args, out=out)
             return do_bench_using_profiling(algo)

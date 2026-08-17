@@ -13,8 +13,8 @@ ensuring type safety and clear contracts between different components of the sys
 
 import dataclasses
 import types
-from collections.abc import Callable
-from typing import Any, NamedTuple, Protocol
+from collections.abc import Callable, Mapping
+from typing import Any, NamedTuple, Protocol, runtime_checkable
 
 # CacheEntry has a `guard_manager` field for the guard, and a `code` field for the code object.
 from torch._C._dynamo.eval_frame import (
@@ -83,6 +83,7 @@ class ConvertFrameReturn:
     # also apply frame_exec strategy to future frames with same code
     apply_to_code: bool = True
     guarded_code: GuardedCode | None = None
+    skip_reason: str | None = None
 
 
 def wrap_guarded_code(guarded_code: GuardedCode) -> ConvertFrameReturn:
@@ -102,6 +103,14 @@ class DynamoCallbackFn(Protocol):
 
 
 DynamoCallback = DynamoCallbackFn | None | bool
+
+
+CompilerConfig = Mapping[str, Any]
+
+
+@runtime_checkable
+class CompilerConfigProvider(Protocol):
+    def get_compiler_config(self) -> CompilerConfig | None: ...
 
 
 class DynamoGuardHook(Protocol):

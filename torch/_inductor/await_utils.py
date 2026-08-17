@@ -72,10 +72,10 @@ def get_loop(
             stack.enter_context(_restore_loop(loop=loop))
             loop = stack.enter_context(_new_loop(loop.get_task_factory()))  # type: ignore[arg-type]
         elif loop.is_closed():
-            loop = stack.enter_context(_new_loop())
+            loop = stack.enter_context(_new_loop())  # type: ignore[arg-type]
         elif always_create_new_loop:
             stack.enter_context(_restore_loop(loop=loop))
-            loop = stack.enter_context(_new_loop())
+            loop = stack.enter_context(_new_loop())  # type: ignore[arg-type]
         yield loop
 
 
@@ -146,7 +146,7 @@ def _patch_loop(loop: AbstractEventLoop) -> OrderedSet[Future]:  # type: ignore[
         coro: TCoro,  # type: ignore[type-arg]
         *,
         context: Context | None = None,
-    ) -> asyncio.Future:
+    ) -> asyncio.Future:  # type: ignore[valid-type, type-arg]
         task_factory = task_factories[0]
         if task_factory is None:
             if sys.version_info >= (3, 11):
@@ -169,7 +169,7 @@ def _patch_loop(loop: AbstractEventLoop) -> OrderedSet[Future]:  # type: ignore[
         return task
 
     # pyre-ignore[6]
-    loop.set_task_factory(_safe_task_factory)
+    loop.set_task_factory(_safe_task_factory)  # type: ignore[method-assign, arg-type]
     # pyre-ignore[8]
     loop.set_task_factory = _set_task_factory  # type: ignore[method-assign, assignment]
     # pyre-ignore[8]
