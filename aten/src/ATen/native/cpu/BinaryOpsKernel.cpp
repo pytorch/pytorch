@@ -15,6 +15,7 @@
 #include <ATen/native/cpu/Loops.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/TypeSafeSignMath.h>
+#include <c10/util/copysign.h>
 #include <c10/util/generic_math.h>
 
 namespace at::native {
@@ -371,7 +372,11 @@ void remainder_kernel(TensorIteratorBase& iter) {
               float a0 = static_cast<float>(a);
               float b0 = static_cast<float>(b);
               float mod0 = std::fmod(a0, b0);
-              if ((mod0 != 0) && ((b0 < 0) != (mod0 < 0))) {
+              if (mod0 == 0) {
+                // fmod gives the zero the sign of the dividend. The result
+                // takes the sign of the divisor, like Python and NumPy.
+                mod0 = std::copysign(0.0f, b0);
+              } else if ((b0 < 0) != (mod0 < 0)) {
                 mod0 += b0;
               }
               return mod0;
@@ -382,10 +387,17 @@ void remainder_kernel(TensorIteratorBase& iter) {
           auto mod0 = a0.fmod(b0);
           auto mod1 = a1.fmod(b1);
           const auto zero = Vectorized<float>(0);
-          auto mask0 = (mod0 != zero) & ((b0 < zero) ^ (mod0 < zero));
-          auto mask1 = (mod1 != zero) & ((b1 < zero) ^ (mod1 < zero));
-          a0 = Vectorized<float>::blendv(mod0, mod0 + b0, mask0);
-          a1 = Vectorized<float>::blendv(mod1, mod1 + b1, mask1);
+          a0 = Vectorized<float>::blendv(
+              mod0, mod0 + b0, (b0 < zero) ^ (mod0 < zero));
+          a1 = Vectorized<float>::blendv(
+              mod1, mod1 + b1, (b1 < zero) ^ (mod1 < zero));
+          // Give a zero result the sign of the divisor. Keeping just the sign
+          // bit of b is copysign(0, b). These selects own the zero case, so the
+          // masks above no longer exclude it. A zero divisor gives NaN, which
+          // compares false and is left alone.
+          const auto sign_bit = Vectorized<float>(-0.0f);
+          a0 = Vectorized<float>::blendv(a0, b0 & sign_bit, mod0 == zero);
+          a1 = Vectorized<float>::blendv(a1, b1 & sign_bit, mod1 == zero);
           return convert_float_bfloat16(a0, a1);
         });
   } else {
@@ -396,15 +408,29 @@ void remainder_kernel(TensorIteratorBase& iter) {
               [=](scalar_t a, scalar_t b)
                   __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
                     scalar_t mod = std::fmod(a, b);
-                    if ((mod != 0) && ((b < 0) != (mod < 0)))
+                    if (mod == 0) {
+                      // fmod gives the zero the sign of the dividend, but the
+                      // result is documented to take the sign of the divisor,
+                      // like Python and NumPy. A zero divisor gives NaN here,
+                      // not zero, so it does not reach this.
+                      mod = c10::copysign(scalar_t(0), b);
+                    } else if ((b < 0) != (mod < 0)) {
                       mod += b;
+                    }
                     return mod;
                   },
               [=](Vectorized<scalar_t> a, Vectorized<scalar_t> b) {
+                using vec_t = Vectorized<scalar_t>;
                 auto mod = a.fmod(b);
-                const auto zero = Vectorized<scalar_t>(0);
-                auto mask = (mod != zero) & ((b < zero) ^ (mod < zero));
-                return Vectorized<scalar_t>::blendv(mod, mod + b, mask);
+                const auto zero = vec_t(0);
+                auto res =
+                    vec_t::blendv(mod, mod + b, (b < zero) ^ (mod < zero));
+                // Give a zero result the sign of the divisor. Keeping just the
+                // sign bit of b is copysign(0, b), and cheaper than
+                // vec_t::copysign, which calls into Sleef. This select owns the
+                // zero case, so the mask above no longer excludes it. A zero
+                // divisor gives NaN, which compares false and is left alone.
+                return vec_t::blendv(res, b & vec_t(-scalar_t(0)), mod == zero);
               });
         });
   }

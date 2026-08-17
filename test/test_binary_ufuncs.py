@@ -3310,6 +3310,28 @@ class TestBinaryUfuncsDevice(TestCase):
                     ((torch.remainder, torch.Tensor.remainder_, np.remainder),),
                 )
 
+    # The XPU kernel lives in intel/torch-xpu-ops and has the same bug, so it
+    # has to be fixed there: BinaryRemainderKernel.cpp, RemainderFloatingFunctor.
+    @skipXPU
+    @dtypes(torch.half, torch.bfloat16, torch.float, torch.double)
+    def test_remainder_zero_sign(self, device, dtype):
+        # remainder gives the result the sign of the divisor, so a zero result
+        # should be signed too. fmod signs the zero after the dividend instead,
+        # and the fixup for that only ran when the result was nonzero.
+        values = (-6.0, -4.0, -1.0, -0.0, 0.0, 1.0, 4.0, 6.0)
+        divisors = (-3.0, -2.0, -1.0, 1.0, 2.0, 3.0)
+        for a, b in product(values, divisors):
+            # short tensors take the scalar loop, long ones the vectorized loop
+            for n in (1, 2, 3, 64):
+                actual = torch.remainder(
+                    torch.full((n,), a, dtype=dtype, device=device),
+                    torch.full((n,), b, dtype=dtype, device=device),
+                )
+                expected = torch.full_like(actual, a % b)
+                self.assertEqual(actual, expected, atol=0, rtol=0)
+                # assertEqual says -0.0 equals 0.0, so compare the sign bit
+                self.assertEqual(actual.signbit(), expected.signbit())
+
     @dtypes(torch.float, torch.double)
     def test_remainder_fmod_large_dividend(self, device, dtype):
         alarge = 1e9

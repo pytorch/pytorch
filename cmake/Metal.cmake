@@ -9,7 +9,8 @@ endif()
 
 # Headers transitively included by .metal sources. Any change to these must
 # retrigger the metal -> air step, since xcrun metal does not emit depfiles
-# we can hand to ninja.
+# we can hand to ninja. The metal -> metallib.h step embeds these same headers
+# into the shader source, so it needs them too.
 file(GLOB METAL_HEADER_DEPS CONFIGURE_DEPENDS
      "${CMAKE_SOURCE_DIR}/c10/metal/*.h"
      "${CMAKE_SOURCE_DIR}/aten/src/ATen/native/mps/kernels/*.h")
@@ -39,7 +40,7 @@ function(metal_to_metallib_h SHADER)
     cmake_path(APPEND_STRING SHADER_HDR "_metallib.h")
 
     add_custom_command(COMMAND ${Python_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/write_metallib_headers.py ${SHADER_ABSOLUTE} ${SHADER_HDR}
-                       DEPENDS ${SHADER_ABSOLUTE} ${CMAKE_SOURCE_DIR}/scripts/write_metallib_headers.py
+                       DEPENDS ${SHADER_ABSOLUTE} ${METAL_HEADER_DEPS} ${CMAKE_SOURCE_DIR}/scripts/write_metallib_headers.py
                        OUTPUT ${SHADER_HDR}
                        COMMENT "Generating metallib wrapper header for ${SHADER}"
                        VERBATIM)

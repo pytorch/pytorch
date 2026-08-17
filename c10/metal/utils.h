@@ -393,7 +393,11 @@ template <
 inline float remainder(const T x, const U y) {
   const auto x_f = static_cast<float>(x);
   const auto y_f = static_cast<float>(y);
-  return x_f - y_f * floor_divide(x_f, y_f);
+  const auto rc = x_f - y_f * floor_divide(x_f, y_f);
+  // The subtraction cancels to +0.0 whatever the signs were, but the result
+  // takes the sign of the divisor, like Python and NumPy. A zero divisor
+  // gives NaN here, not zero, so it does not reach this.
+  return rc == 0 ? ::metal::copysign(0.0f, y_f) : rc;
 }
 
 template <

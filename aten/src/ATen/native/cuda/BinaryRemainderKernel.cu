@@ -4,6 +4,7 @@
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/TensorIterator.h>
+#include <c10/cuda/CUDAMathCompat.h>
 #include <c10/util/TypeSafeSignMath.h>
 
 #include <limits>
@@ -50,7 +51,13 @@ void remainder_kernel_cuda(TensorIteratorBase& iter) {
       gpu_kernel_with_scalars(iter,
         []GPU_LAMBDA(scalar_t a, scalar_t b) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
           auto mod = ::fmod(a, b);
-          if (mod != 0 && c10::signs_differ(b, mod)) {
+          if (mod == 0) {
+            // fmod gives the zero the sign of the dividend, but the result is
+            // documented to take the sign of the divisor, like Python and
+            // NumPy. A zero divisor gives NaN here, not zero, so it does not
+            // reach this.
+            mod = c10::cuda::compat::copysign(scalar_t(0), b);
+          } else if (c10::signs_differ(b, mod)) {
             mod += b;
           }
           return mod;
