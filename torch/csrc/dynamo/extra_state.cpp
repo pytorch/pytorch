@@ -81,7 +81,13 @@ bool ExtraState::has_any_cache_entries() const {
 
 bool ExtraState::has_relevant_entries(int64_t isolate_recompiles_id) const {
   CacheLock lock(this->cache_mutex);
-  return this->cache_entry_map.count(isolate_recompiles_id) > 0 ||
+  return std::any_of(
+             this->precompile_entries.begin(),
+             this->precompile_entries.end(),
+             [isolate_recompiles_id](const PrecompileEntry& entry) {
+               return entry.isolate_recompiles_id == isolate_recompiles_id;
+             }) ||
+      this->cache_entry_map.count(isolate_recompiles_id) > 0 ||
       (isolate_recompiles_id >= 0 && this->cache_entry_map.count(-1) > 0);
 }
 
@@ -98,6 +104,26 @@ void ExtraState::move_to_back(CacheEntry* cache_entry) {
   CHECK(cache_entry == &*cache_entry->_owner_loc);
   auto& list = this->cache_entry_map[cache_entry->_isolate_recompiles_id];
   list.splice(list.end(), list, cache_entry->_owner_loc);
+}
+
+void ExtraState::reset() {
+  {
+    CacheLock lock(this->cache_mutex);
+    this->precompile_entries.clear();
+    this->cache_entry_map.clear();
+    this->total_cache_entry_count = 0;
+  }
+  {
+    std::lock_guard<std::mutex> lock(this->region_frame_state_mutex);
+    this->frame_state = py::dict();
+    this->region_frame_state_map.clear();
+  }
+  {
+    std::lock_guard<std::mutex> lock(this->strategy_mutex);
+    this->strategy = FrameExecStrategy{DEFAULT, DEFAULT};
+    this->strategy_generation = 0;
+    this->region_strategy_map.clear();
+  }
 }
 
 void ExtraState::invalidate(
@@ -298,6 +324,13 @@ void set_extra_state(PyCodeObject* code, ExtraState* extra_state) {
   _PyCode_SetExtra((PyObject*)code, extra_index, extra_state);
 }
 
+void reset_extra_state(PyCodeObject* code) {
+  ExtraState* extra_state = get_extra_state(code);
+  if (extra_state != nullptr) {
+    extra_state->reset();
+  }
+}
+
 ExtraState* init_and_set_extra_state(PyCodeObject* code) {
   // Invariant - Extra state should not have been set before, therefore it
   // should be nullptr.
@@ -342,8 +375,7 @@ static CacheEntry* lookup_in_list(
     FrameLocalsMapping* f_locals,
     PyObject* backend,
     bool is_skip_guard_eval_unsafe,
-    bool* guard_error,
-    PyObject** maybe_cached_code) {
+    bool* guard_error) {
   size_t index = 0;
   for (CacheEntry& cache_entry : entries) {
     bool valid = Py_IsFalse(backend) ||
@@ -372,7 +404,6 @@ static CacheEntry* lookup_in_list(
               index == entries.size() - 1);
         }
         e.restore();
-        *maybe_cached_code = nullptr;
         *guard_error = true;
         return nullptr;
       }
@@ -413,10 +444,11 @@ void lookup(
     FrameLocalsMapping* f_locals,
     PyObject* backend,
     int64_t isolate_recompiles_id,
-    PyObject** maybe_cached_code,
-    const char** trace_annotation,
+    CacheLookupResult* result,
     bool is_skip_guard_eval_unsafe) {
   CacheLock lock(extra_state->cache_mutex);
+  result->code = py::object();
+  result->trace_annotation.clear();
   CacheEntry* found = nullptr;
   bool guard_error = false;
 
@@ -433,7 +465,7 @@ void lookup(
   for (const auto& entry : extra_state->precompile_entries) {
     if (entry.isolate_recompiles_id == isolate_recompiles_id &&
         torch::dynamo::run_root_guard_manager(entry.root_mgr, f_locals)) {
-      *maybe_cached_code = entry.code.ptr();
+      result->code = entry.code;
       return;
     }
   }
@@ -454,8 +486,7 @@ void lookup(
           f_locals,
           backend,
           is_skip_guard_eval_unsafe,
-          &guard_error,
-          maybe_cached_code);
+          &guard_error);
       if (guard_error) {
         return;
       }
@@ -469,21 +500,22 @@ void lookup(
     if (use_lru) {
       extra_state->move_to_front(found, *found_list);
     }
-    *maybe_cached_code = found->code.ptr();
-    *trace_annotation = found->trace_annotation.c_str();
+    result->code = found->code;
+    result->trace_annotation = found->trace_annotation;
     return;
   }
-  *maybe_cached_code = py::none().ptr();
+  result->code = py::none();
 }
 
 bool try_lookup_without_guard_eval(
     ExtraState* extra_state,
     PyObject* backend,
     int64_t isolate_recompiles_id,
-    PyObject** maybe_cached_code,
-    const char** trace_annotation,
+    CacheLookupResult* result,
     bool is_skip_guard_eval_unsafe) {
   CacheLock lock(extra_state->cache_mutex);
+  result->code = py::object();
+  result->trace_annotation.clear();
   // Own region only, matching lookup().
   const PrecompileEntry* first_precompile_entry = nullptr;
   for (const auto& entry : extra_state->precompile_entries) {
@@ -500,7 +532,7 @@ bool try_lookup_without_guard_eval(
     // may pass.
     if (torch::dynamo::root_guard_manager_has_no_guards(
             first_precompile_entry->root_mgr)) {
-      *maybe_cached_code = first_precompile_entry->code.ptr();
+      result->code = first_precompile_entry->code;
       return true;
     }
     return false;
@@ -526,12 +558,12 @@ bool try_lookup_without_guard_eval(
     if (use_lru) {
       extra_state->move_to_front(found, *found_list);
     }
-    *maybe_cached_code = found->code.ptr();
-    *trace_annotation = found->trace_annotation.c_str();
+    result->code = found->code;
+    result->trace_annotation = found->trace_annotation;
     return true;
   }
 
-  *maybe_cached_code = Py_None;
+  result->code = py::none();
   return true;
 }
 
@@ -722,7 +754,9 @@ void _set_lru_cache(const py::object& boolean) {
 }
 
 py::list _debug_get_precompile_entries(const py::handle& code_obj) {
-  TORCH_CHECK_TYPE(PyCode_Check(code_obj.ptr()), "expected a code object!");
+  TORCH_CHECK_TYPE(
+      py::isinstance(code_obj, py::module::import("types").attr("CodeType")),
+      "expected a code object!");
   PyCodeObject* code = (PyCodeObject*)code_obj.ptr();
   ExtraState* extra = get_extra_state(code);
   py::list result;
@@ -733,27 +767,4 @@ py::list _debug_get_precompile_entries(const py::handle& code_obj) {
     }
   }
   return result;
-}
-
-bool _has_precompile_entries(
-    const py::handle& code_obj,
-    int64_t isolate_recompiles_id) {
-  TORCH_CHECK_TYPE(PyCode_Check(code_obj.ptr()), "expected a code object!");
-  PyCodeObject* code = (PyCodeObject*)code_obj.ptr();
-  ExtraState* extra = get_extra_state(code);
-  if (extra == nullptr) {
-    return false;
-  }
-  // Region exact, matching lookup(): an entry from another region never serves
-  // this one, so a second artifact installed on the same code object is not
-  // coverage for the first. A loaded artifact runs this on every served call,
-  // hence no py::list and no Python executed under the lock -- the wait inside
-  // CacheLock is the only place the GIL can drop.
-  CacheLock lock(extra->cache_mutex);
-  for (const PrecompileEntry& entry : extra->precompile_entries) {
-    if (entry.isolate_recompiles_id == isolate_recompiles_id) {
-      return true;
-    }
-  }
-  return false;
 }

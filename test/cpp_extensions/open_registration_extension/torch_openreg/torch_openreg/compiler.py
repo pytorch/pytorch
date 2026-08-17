@@ -20,9 +20,10 @@ def openreg(gm, example_inputs):
         if node.op == "placeholder" and "val" in node.meta:
             fake = node.meta["val"]
             if isinstance(fake, torch.Tensor):
-                assert fake.device.type in ("openreg", "cpu"), (  # noqa: S101
-                    f"Unexpected device {fake.device} in openreg backend"
-                )
+                if fake.device.type not in ("openreg", "cpu"):
+                    raise AssertionError(
+                        f"Unexpected device {fake.device} in openreg backend"
+                    )
 
     gm.graph.eliminate_dead_code()
     gm.recompile()
