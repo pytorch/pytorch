@@ -27,7 +27,6 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     largeTensorTest,
     onlyAccelerator,
-    onlyNativeDeviceTypes,
     skipXPUIf,
     TEST_WITH_ROCM,
 )
@@ -1828,7 +1827,6 @@ torch.cuda.synchronize()
                 grad_output, input, kernel_size, output_size, indices
             )
 
-    @onlyNativeDeviceTypes
     def test_fractional_max_pool_invalid_kernel_size(self, device):
         x = torch.randn(1, 2, 7, 7, device=device)
         samples = x.new(1, 2, 2).uniform_()
