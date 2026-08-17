@@ -187,9 +187,6 @@ class TestLazyTensorDevice(JitTestCase):
         torch.testing.assert_close(out_ref.cpu(), out.cpu())
 
 
-instantiate_device_type_tests(TestLazyTensorDevice, globals(), allow_xpu=True)
-
-
 class TestLazyOpInfoDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
@@ -332,13 +329,6 @@ class TestLazyOpInfoDevice(TestCase):
         torch._lazy.config.set_reuse_ir(False)
 
 
-# TODO: after we move to master, add Lazy as a new Device here:
-# https://github.com/pytorch/pytorch/blob/master/torch/testing/_internal/common_device_type.py#L532
-instantiate_device_type_tests(
-    TestLazyOpInfoDevice, globals(), only_for="cpu,xpu", allow_xpu=True
-)
-
-
 class TestLazyDynamicOpsDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
@@ -380,6 +370,12 @@ class TestLazyDynamicOpsDevice(TestCase):
         self.assertEqual(out_cpu.shape, out_lazy.shape)
 
 
+instantiate_device_type_tests(TestLazyTensorDevice, globals(), allow_xpu=True)
+# TODO: after we move to master, add Lazy as a new Device here:
+# https://github.com/pytorch/pytorch/blob/master/torch/testing/_internal/common_device_type.py#L532
+instantiate_device_type_tests(
+    TestLazyOpInfoDevice, globals(), only_for=("cpu", "xpu"), allow_xpu=True
+)
 instantiate_device_type_tests(TestLazyDynamicOpsDevice, globals(), allow_xpu=True)
 
 
