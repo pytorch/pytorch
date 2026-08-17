@@ -155,8 +155,9 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
 
     bool reusable = false;
 #if SYCL_COMPILER_VERSION >= 20260200
-    reusable = c10::xpu::get_raw_device(stream.device_index())
-                   .has(sycl::aspect::ext_oneapi_per_event_profiling);
+    auto& device = c10::xpu::get_raw_device(stream.device_index());
+    reusable = device.has(sycl::aspect::ext_oneapi_per_event_profiling) &&
+        device.has(sycl::aspect::ext_oneapi_ipc_event);
 #endif
     if (reusable) {
 #if SYCL_COMPILER_VERSION >= 20260200
@@ -201,8 +202,9 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
 
     bool reusable = false;
 #if SYCL_COMPILER_VERSION >= 20260200
-    reusable = c10::xpu::get_raw_device(stream.device_index())
-                   .has(sycl::aspect::ext_oneapi_per_event_profiling);
+    auto& device = c10::xpu::get_raw_device(stream.device_index());
+    reusable = device.has(sycl::aspect::ext_oneapi_per_event_profiling) &&
+        device.has(sycl::aspect::ext_oneapi_ipc_event);
 #endif
     if (reusable) {
 #if SYCL_COMPILER_VERSION >= 20260200
@@ -271,8 +273,9 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
         !(flag & EventFlag::TIMING),
         "Cannot create IPC handle for event with timing enabled.");
 #if SYCL_COMPILER_VERSION >= 20260200
-    bool reusable = c10::xpu::get_raw_device(device_index)
-                        .has(sycl::aspect::ext_oneapi_per_event_profiling);
+    auto& device = c10::xpu::get_raw_device(device_index);
+    bool reusable = device.has(sycl::aspect::ext_oneapi_per_event_profiling) &&
+        device.has(sycl::aspect::ext_oneapi_ipc_event);
     TORCH_CHECK(reusable, "Event must be reusable to support IPC.");
     sycl::event* xpu_event = reinterpret_cast<sycl::event*>(*event);
     if (!xpu_event) {
@@ -294,8 +297,9 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
       const DeviceIndex device_index,
       const std::string& handle_string) const override {
 #if SYCL_COMPILER_VERSION >= 20260200
-    bool reusable = c10::xpu::get_raw_device(device_index)
-                        .has(sycl::aspect::ext_oneapi_per_event_profiling);
+    auto& device = c10::xpu::get_raw_device(device_index);
+    bool reusable = device.has(sycl::aspect::ext_oneapi_per_event_profiling) &&
+        device.has(sycl::aspect::ext_oneapi_ipc_event);
     TORCH_CHECK(reusable, "Event must be reusable to support IPC.");
     const auto* data = reinterpret_cast<const std::byte*>(handle_string.data());
     sycl::ext::oneapi::experimental::ipc::handle_data_t handle_data(
