@@ -24,9 +24,7 @@ from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import distribute_tensor, DTensor, Shard
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import (
-    Capability,
     instantiate_device_type_tests,
-    requires_capabilities,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import HardwareClassification, run_tests
@@ -141,10 +139,6 @@ class TestStateDictUtils(_CpuStateDictTestMixin, DTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(2)
-    @requires_capabilities(
-        Capability.distributed.backend,
-        Capability.distributed.dtensor,
-    )
     def test_gather_state_dict_dtensor(self, device):
         device_type = torch.device(device).type
         device_mesh = self.build_device_mesh()
@@ -163,10 +157,6 @@ class TestStateDictUtils(_CpuStateDictTestMixin, DTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    @requires_capabilities(
-        Capability.distributed.backend,
-        Capability.distributed.dtensor,
-    )
     def test_gather_with_cpu_and_ranks_only(self, device):
         device_type = torch.device(device).type
         device_mesh = self.build_device_mesh()
@@ -190,10 +180,6 @@ class TestStateDictUtils(_CpuStateDictTestMixin, DTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    @requires_capabilities(
-        Capability.distributed.backend,
-        Capability.distributed.dtensor,
-    )
     def test_cpu_and_ranks_only(self, device):
         device_type = torch.device(device).type
         device = torch.device(device_type)
@@ -213,10 +199,6 @@ class TestStateDictUtils(_CpuStateDictTestMixin, DTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    @requires_capabilities(
-        Capability.distributed.backend,
-        Capability.distributed.dtensor,
-    )
     def test_complicated_dict(self, device):
         device_type = torch.device(device).type
 
@@ -254,10 +236,6 @@ class TestStateDictUtils(_CpuStateDictTestMixin, DTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(2)
-    @requires_capabilities(
-        Capability.distributed.backend,
-        Capability.distributed.dtensor,
-    )
     def test_create_cpu_state_dict(self, device):
         device_type = torch.device(device).type
         buffer = io.BytesIO()
@@ -278,10 +256,6 @@ class TestStateDictUtils(_CpuStateDictTestMixin, DTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(2)
-    @requires_capabilities(
-        Capability.distributed.backend,
-        Capability.distributed.dtensor,
-    )
     def test_state_dict_util_distribute_tensors(self, device):
         device_type = torch.device(device).type
         even_tensor = torch.randn(self.world_size, 2)
@@ -314,10 +288,6 @@ class TestStateDictUtils(_CpuStateDictTestMixin, DTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(2)
-    @requires_capabilities(
-        Capability.distributed.backend,
-        Capability.distributed.dtensor,
-    )
     def test_cpu_offload_for_dtensor(self, device):
         device_type = torch.device(device).type
         device_mesh = init_device_mesh(device_type, mesh_shape=(self.world_size,))
