@@ -2134,6 +2134,94 @@ class TestCvtE8M0Rceil(TestCase):
         self.assertEqual(compiled_result, expected)
 
 
+class TestCvtE8M0RceilFallback(TestCase):
+    """Tests for cvt_e8m0_rceil prim with the software fallback (non-SM100).
+
+    On devices without the SM100 PTX instruction, Inductor lowers
+    cvt_e8m0_rceil to IEEE 754 bit manipulation of the float32 biased
+    exponent (ceiling rounding, satfinite to 254). These tests verify the
+    compiled result matches the eager reference on that fallback path.
+    """
+
+    @skipCUDAIf(
+        utils.is_nvidia_sm100_or_later(),
+        "SM100+ uses the PTX instruction, not the software fallback",
+    )
+    @onlyOn(["cpu", "cuda"])
+    def test_correctness(self, device):
+        """Compiled output matches eager for finite values, subnormals, and zero."""
+
+        def fn(inp):
+            return inductor_prims.cvt_e8m0_rceil(inp)
+
+        inp = torch.tensor(
+            [
+                1.0,
+                2.0,
+                4.0,
+                8.0,  # exact powers of two
+                3.0,
+                1.5,
+                0.75,
+                0.5,  # non-power-of-two
+                -1.0,
+                -2.0,
+                -3.0,
+                -0.5,  # negative
+                1.0e-40,
+                1.4e-45,
+                -1.4e-45,  # subnormal
+                0.0,
+                -0.0,  # zero
+            ],
+            device=device,
+            dtype=torch.float32,
+        )
+        self.assertEqual(torch.compile(fn, fullgraph=True)(inp), fn(inp))
+
+    @skipCUDAIf(
+        utils.is_nvidia_sm100_or_later(),
+        "SM100+ uses the PTX instruction, not the software fallback",
+    )
+    @onlyOn(["cpu", "cuda"])
+    def test_values_just_above_power_of_two(self, device):
+        """1 ULP above 2^e must ceil to e+1, not round down to e (gh-178045)."""
+        E8M0_BIAS = 127
+
+        def fn(inp):
+            return inductor_prims.cvt_e8m0_rceil(inp)
+
+        powers = [float(2**e) for e in range(8)]
+        one_ulp_above = [
+            torch.nextafter(torch.tensor(p), torch.tensor(float("inf"))).item()
+            for p in powers
+        ]
+        inp = torch.tensor(one_ulp_above, device=device, dtype=torch.float32)
+        expected = torch.tensor(
+            [E8M0_BIAS + e + 1 for e in range(8)], device=device, dtype=torch.uint8
+        )
+        self.assertEqual(torch.compile(fn, fullgraph=True)(inp), expected)
+
+    @skipCUDAIf(
+        utils.is_nvidia_sm100_or_later(),
+        "SM100+ uses the PTX instruction, not the software fallback",
+    )
+    @onlyOn(["cpu", "cuda"])
+    def test_inf_nan_saturate_to_254(self, device):
+        """inf and nan (both signs) saturate to the max finite e8m0 value 254."""
+
+        def fn(inp):
+            return inductor_prims.cvt_e8m0_rceil(inp)
+
+        inp = torch.tensor(
+            [float("inf"), float("-inf"), float("nan"), float("-nan")],
+            device=device,
+            dtype=torch.float32,
+        )
+        expected = torch.tensor([254, 254, 254, 254], device=device, dtype=torch.uint8)
+        self.assertEqual(torch.compile(fn, fullgraph=True)(inp), expected)
+
+
 @unittest.skipIf(not HAS_CUDA_AND_TRITON, "Requires CUDA + Triton")
 @unittest.skipIf(
     utils.is_nvidia_sm100_or_later(),
@@ -2251,6 +2339,9 @@ class TestE8M0Log2PatternBitManip(TestCase):
 instantiate_device_type_tests(TestFP8Types, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestFP8Lowering, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestE8M0ToFloat, globals(), only_for=("cpu", "cuda"))
+instantiate_device_type_tests(
+    TestCvtE8M0RceilFallback, globals(), only_for=("cpu", "cuda")
+)
 
 
 if __name__ == "__main__":
