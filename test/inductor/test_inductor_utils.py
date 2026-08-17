@@ -5,7 +5,7 @@ import logging
 from unittest import mock
 
 import torch
-from torch._inductor import utils
+from torch._inductor import config, utils
 from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import do_bench_using_profiling
@@ -20,6 +20,16 @@ device_type = (
     if (acc := torch.accelerator.current_accelerator(check_available=True))
     else "cpu"
 )
+
+
+class TestFallbackByDefault(TestCase):
+    def test_sym_size_uses_inductor_lowering_in_lite_mode(self):
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        sym_size = graph.call_function(torch.ops.aten.sym_size.int, (x, 0))
+
+        with config.patch({"fallback_by_default": True}):
+            self.assertFalse(utils.should_fallback_by_default(sym_size))
 
 
 class FakeKinetoEvent:
@@ -83,7 +93,9 @@ class TestBench(TestCase):
         super().setUpClass()
         x = torch.rand(1024, 10).to(device_type).half()
         w = torch.rand(512, 10).to(device_type).half()
-        cls._bench_fn = functools.partial(torch.nn.functional.linear, x, w)
+        cls._bench_fn = staticmethod(
+            functools.partial(torch.nn.functional.linear, x, w)
+        )
 
     def test_benchmarker(self):
         res = benchmarker.benchmark_gpu(self._bench_fn)

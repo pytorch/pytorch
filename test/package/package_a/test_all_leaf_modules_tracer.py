@@ -1,4 +1,4 @@
-# Owner(s): ["oncall: package/deploy"]
+# Owner(s): ["module: package/deploy"]
 
 from torch.fx import Tracer
 
