@@ -268,14 +268,15 @@ struct C10_API FakeTensorMode {
   // stored on the fake's ExtraMeta so it dies with the tensor
   void set_constant(
       const c10::intrusive_ptr<c10::TensorImpl>& fake_impl,
-      c10::intrusive_ptr<c10::TensorImpl> constant,
-      c10::StorageImpl* constant_storage);
+      c10::intrusive_ptr<c10::TensorImpl> constant);
 
   // return the real constant a fake tensor was created from, or nullptr
   c10::intrusive_ptr<c10::TensorImpl> get_constant(
       c10::TensorImpl* fake_impl) const;
   // drop constant tracking for fake tensors aliasing this mutated storage
   void invalidate_constant_aliases(c10::StorageImpl* storage_impl);
+  // drop non-CPU constants, keeping cheap CPU ones for constant folding
+  void clear_non_cpu_constants();
 
   // A fake tensor needs to be able to hand back its mode (ie t.fake_mode) on
   // the python side so we need a reference to the python CppFakeTensorMode
@@ -288,13 +289,17 @@ struct C10_API FakeTensorMode {
 
   // key = constant storage, values = all fake tensors that share this storage
   // (aliases)
-  std::unordered_map<
-      c10::StorageImpl*,
-      std::vector<c10::weak_intrusive_ptr<c10::TensorImpl>>>
+  struct ConstantAliases {
+    explicit ConstantAliases(c10::weak_intrusive_ptr<c10::StorageImpl> st)
+        : storage(std::move(st)) {}
+    // Mirrors python's StorageWeakRef: holding a weak ref keeps the
+    // StorageImpl's refcount block alive, so the raw pointer used as the map
+    // key can neither dangle nor be recycled by a later allocation.
+    c10::weak_intrusive_ptr<c10::StorageImpl> storage;
+    std::vector<c10::weak_intrusive_ptr<c10::TensorImpl>> tensors;
+  };
+  std::unordered_map<c10::StorageImpl*, ConstantAliases>
       constant_storage_mapping_;
-  // protects constant_storage_mapping_ and the ExtraMeta::fake_constant_ fields
-  // it indexes
-  mutable std::mutex constant_mutex_;
 
   // cache for cache_pyobj_cpp_fake_mode()
   std::weak_ptr<c10::SafePyObject> pyobj_cpp_fake_mode_;
@@ -1533,6 +1538,15 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   void set_fake_tensor_mode(std::shared_ptr<FakeTensorMode> mode) {
     auto& extra_meta = get_extra_meta();
+    // python validates allow_meta against the mode that owns the tensor, which
+    // is only known here: set_fake_device may run before the mode is attached
+    // (and outside its scope), so its ambient-TLS check can pass vacuously.
+    if (mode && extra_meta.fake_device_.has_value() &&
+        extra_meta.fake_device_->type() == c10::DeviceType::Meta) {
+      TORCH_CHECK(
+          mode->allow_meta_,
+          "device.type must not be 'meta' when allow_meta is False");
+    }
     extra_meta.fake_mode_pyobj_ =
         mode ? mode->cache_pyobj_cpp_fake_mode() : nullptr;
     extra_meta.fake_tensor_mode_ = std::move(mode);
