@@ -35,4 +35,15 @@
     NCCL_VERSION_CODE >= NCCL_VERSION(2, 29, 7)
 #define NCCL_DEVICE_HAS_REDUCE_COPY
 #endif
+
+// Host-side CFT (Compute Fabric Transport) logical-endpoint queries:
+// ncclGetPeerDeviceLeInfo / ncclGetMultimemDeviceLeInfo. They resolve a window
+// offset into the `(leId, leOffset)` pair that the device-side `ncclCft`
+// put/get/red family consumes, so a custom kernel can drive CFT without
+// building a ncclDevComm. The LEs only exist if the communicator was created
+// with `ncclConfig_t::hostCftMode` enabled (see NCCL_HAS_HOST_CFT_MODE).
+#if defined(NCCL_HAS_SYMMEM_DEVICE_SUPPORT) && \
+    NCCL_VERSION_CODE >= NCCL_VERSION(2, 31, 2)
+#define NCCL_HAS_HOST_CFT
+#endif
 #endif // USE_NCCL
