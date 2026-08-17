@@ -694,22 +694,13 @@ struct CachingHostAllocatorImpl {
   virtual B* get_free_block(size_t size, BlockPool& pool) {
     auto index = size_index(size);
     std::lock_guard<std::mutex> g(pool.free_list_[index].mutex_);
-    // A bucket normally holds only exact-power-of-two blocks, since allocate
-    // rounds every request up to a power of two. But requests above
-    // pinned_max_round_threshold skip rounding while still being cached, so a
-    // single Log2_64_Ceil bucket can hold blocks of differing (unrounded)
-    // sizes. Returning a block smaller than the request would overflow the
-    // buffer, so scan for one that is large enough.
-    auto& list = pool.free_list_[index].list_;
-    for (auto it = list.rbegin(); it != list.rend(); ++it) {
-      B* block = *it;
-      if (block->size_ >= size) {
-        list.erase(std::next(it).base());
-        block->allocated_.store(true, std::memory_order_relaxed);
-        stats_.active_bucket_stats[index].increase(1);
-        stats_.active_bytes_bucket_stats[index].increase(block->size_);
-        return block;
-      }
+    if (!pool.free_list_[index].list_.empty()) {
+      B* block = pool.free_list_[index].list_.back();
+      pool.free_list_[index].list_.pop_back();
+      block->allocated_.store(true, std::memory_order_relaxed);
+      stats_.active_bucket_stats[index].increase(1);
+      stats_.active_bytes_bucket_stats[index].increase(size);
+      return block;
     }
     return nullptr;
   }
