@@ -22,16 +22,17 @@ from torch._inductor.runtime.triton_heuristics import (
 )
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import ensure_nv_universal_gemm_available, fresh_cache
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    onlyAccelerator,
+    requires_capabilities,
+)
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
+    HardwareClassification,
     parametrize,
     skipIfNoCuteDSL,
     skipIfWindows,
-)
-from torch.testing._internal.inductor_utils import (
-    GPU_TYPE,
-    requires_gpu,
-    requires_triton,
 )
 
 
@@ -96,6 +97,8 @@ def {{kernel_name}}_precompile(precompile_shapes, precompile_strides=None,
 
 
 class TestNVGemmPickling(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @unittest.skipIf(
         not ensure_nv_universal_gemm_available(),
         "NVIDIA Universal GEMM (cutlass_api) library not available",
@@ -162,8 +165,9 @@ def _forked_daemon_compile_worker(q):
         shutdown_compile_workers()
 
 
-@instantiate_parametrized_tests
 class TestAsyncCompile(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _run_daemon_compile_worker(self, worker_start_method):
         ctx = multiprocessing.get_context("spawn")
         q = ctx.Queue()
@@ -264,15 +268,15 @@ class TestAsyncCompile(TestCase):
             self.assertTrue(ready_future_cleared)
             self.assertFalse(use_process_pool)
 
-    @requires_gpu()
-    @requires_triton()
+    @onlyAccelerator
+    @requires_capabilities(Capability.lib.triton)
     @parametrize("method", ("subprocess", "fork", "spawn"))
-    def test_pool(self, method):
+    def test_pool(self, device, method):
         def fn(x, y):
             return x + y
 
-        x = torch.rand(10).to(GPU_TYPE)
-        y = torch.rand(10).to(GPU_TYPE)
+        x = torch.rand(10).to(device)
+        y = torch.rand(10).to(device)
 
         with config.patch("worker_start_method", method):
             shutdown_compile_workers()
@@ -282,8 +286,8 @@ class TestAsyncCompile(TestCase):
                 compiled_fn = torch.compile(fn)
                 self.assertEqual(fn(x, y), compiled_fn(x, y))
 
-    @requires_gpu()
-    @requires_triton()
+    @onlyAccelerator
+    @requires_capabilities(Capability.lib.triton)
     def test_bad_kernel(self):
         shutdown_compile_workers()
 
@@ -295,8 +299,8 @@ class TestAsyncCompile(TestCase):
                     "fake_kernel_name", source_code="This definitely doesn't exist"
                 ).result()
 
-    @requires_gpu()
-    @requires_triton()
+    @onlyAccelerator
+    @requires_capabilities(Capability.lib.triton)
     def test_wait_pool_ready(self):
         shutdown_compile_workers()
 
@@ -333,11 +337,11 @@ class TestAsyncCompile(TestCase):
         finally:
             shutdown_compile_workers()
 
-    @requires_gpu()
-    @requires_triton()
+    @onlyAccelerator
+    @requires_capabilities(Capability.lib.triton)
     @patch("torch._inductor.runtime.coordinate_descent_tuner.CoordescTuner.autotune")
     @parametrize("method", ("subprocess", "fork", "spawn"))
-    def test_autotune_lookup_table(self, mock_autotune, method):
+    def test_autotune_lookup_table(self, device, mock_autotune, method):
         def f(a, b):
             return (a @ b).to(torch.float32).sum(dim=1)
 
@@ -395,8 +399,8 @@ def triton_fused_fake_name(in_ptr0, out_ptr0, xnumel, r0_numel, XBLOCK : tl.cons
         )
         mock_autotune.return_value = autotune_config
 
-        a = torch.randn(1152, 1024, device=GPU_TYPE, dtype=torch.float16).T
-        b = torch.randn(1152, 11776, device=GPU_TYPE, dtype=torch.float16)
+        a = torch.randn(1152, 1024, device=device, dtype=torch.float16).T
+        b = torch.randn(1152, 11776, device=device, dtype=torch.float16)
         compiled_f = torch.compile(f)
 
         with config.patch(
@@ -452,6 +456,8 @@ def triton_fused_fake_name(in_ptr0, out_ptr0, xnumel, r0_numel, XBLOCK : tl.cons
 
 @skipIfNoCuteDSL
 class TestCuteDSLSubprocessCompile(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def _compile_and_run_add(self, template_name):
         """Compile a CuteDSL add kernel via torch.compile and verify correctness."""
         from torch._inductor.codegen.cutedsl.cutedsl_template import CuteDSLTemplate
@@ -2148,6 +2154,7 @@ class TestCuteDSLSubprocessGroupedGemm(TestCase):
     Exercises the full path: CuTe DSL template selection -> codegen ->
     subprocess compilation -> precompile metadata -> disk cache -> correctness.
     """
+    hw_classification = HardwareClassification.CUDA
 
     def test_grouped_gemm_subprocess_e2e(self):
         shutdown_compile_workers()
@@ -2187,6 +2194,11 @@ class TestCuteDSLSubprocessGroupedGemm(TestCase):
 
         torch.testing.assert_close(c_eager, c_compiled)
 
+
+instantiate_device_type_tests(TestNVGemmPickling, globals(), only_for="cuda")
+instantiate_device_type_tests(TestAsyncCompile, globals(), allow_xpu=True, allow_mps=True)
+instantiate_device_type_tests(TestCuteDSLSubprocessCompile, globals(), only_for="cuda")
+instantiate_device_type_tests(TestCuteDSLSubprocessGroupedGemm, globals(), only_for="cuda")
 
 if __name__ == "__main__":
     run_tests()
