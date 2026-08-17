@@ -132,7 +132,6 @@ dtensor_fails = {
     xfail("randn_like"),
     xfail("uniform"),
     # mixed Tensor/DTensor inputs: op creates plain Tensors mixed with DTensor args
-    xfail("divmod"),
     xfail("__getitem__"),
     xfail("nn.functional.fractional_max_pool2d"),
     xfail("nn.functional.fractional_max_pool3d"),
@@ -778,7 +777,6 @@ ops_unbacked_dtensor_dde = {
     xfail("cumprod"),
     xfail("diagonal_scatter"),
     xfail("dist"),
-    xfail("divmod"),
     xfail("fill"),
     xfail("flatten"),
     xfail("flip"),
