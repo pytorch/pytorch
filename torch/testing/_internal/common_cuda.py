@@ -88,8 +88,6 @@ IS_SM90 = LazyVal(lambda: torch.version.hip is None and torch.cuda.is_available(
                   torch.cuda.get_device_capability() == (9, 0))
 IS_SM100 = LazyVal(lambda: torch.version.hip is None and torch.cuda.is_available() and
                    torch.cuda.get_device_capability() == (10, 0))
-IS_SM103 = LazyVal(lambda: torch.version.hip is None and torch.cuda.is_available() and
-                   torch.cuda.get_device_capability() == (10, 3))
 IS_SM10X = LazyVal(lambda: torch.version.hip is None and torch.cuda.is_available() and
                    torch.cuda.get_device_capability()[0] == 10)
 IS_SM12X = LazyVal(lambda: torch.version.hip is None and torch.cuda.is_available() and
@@ -297,10 +295,23 @@ def evaluate_platform_supports_mxfp8_grouped_gemm():
         return built_with_mslk and IS_SM100
     return False
 
+def hipsparselt_supported_archs():
+    # Keep in sync with hipSparseLtSupportedArchs() in
+    # aten/src/ATen/native/sparse/cuda/cuSPARSELtOps.cpp. Gating on a wider set
+    # than the runtime supports turns a skip into a hard TORCH_CHECK failure.
+    if ROCM_VERSION >= (7, 14):
+        return ['gfx942', 'gfx950', 'gfx1250']
+    elif ROCM_VERSION >= (7, 12):
+        return ['gfx942', 'gfx950']
+    return []
+
+def evaluate_platform_supports_hipsparselt():
+    return bool(torch.version.hip) and evaluate_gfx_arch_within(hipsparselt_supported_archs())
+
 def evaluate_platform_supports_fp8_sparse():
     if torch.cuda.is_available():
         if torch.version.hip:
-            return 'gfx950' in torch.cuda.get_device_properties(0).gcnArchName
+            return evaluate_platform_supports_hipsparselt()
         else:
             return (
                 (SM90OrLater or torch.cuda.get_device_capability() == (8, 9))
@@ -586,11 +597,6 @@ def xfailIfSM120OrLater(func):
         return func
     return func if not SM120OrLater else unittest.expectedFailure(func)
 
-def skipIfSM103(func):
-    if TEST_WITH_ROCM:
-        return func
-    return unittest.skip("Test skipped on SM103")(func) if IS_SM103 else func
-
 def xfailIfSM12X(func):
     return func if not IS_SM12X else unittest.expectedFailure(func)
 
@@ -628,7 +634,7 @@ def xfailCUDAIfSM89OrLaterOnWindows(test_fn):
     return _xfail_cuda_on_windows_wrapper(test_fn) if IS_WINDOWS and SM89OrLater else test_fn
 
 
-# When using nvcc from the CUDA toolkit its versuib must be at least the one from ptxas bundled with Triton
+# When using nvcc from the CUDA toolkit its version must be at least the one from ptxas bundled with Triton
 TRITON_PTXAS_VERSION = (12, 8)
 requires_triton_ptxas_compat = unittest.skipIf(not torch.version.xpu
                                                and torch.version.hip is None
