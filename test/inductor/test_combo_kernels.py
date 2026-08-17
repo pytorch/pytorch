@@ -2738,7 +2738,10 @@ class ComboKernelTestsMaxAutotune(TestCase):
             self.assertIn("'max_persistent_rblock': 1024", joined)
 
     @requires_gpu_and_triton
-    def test_combo_kernel_coordesc_tunes_largest_subkernel_first(self):
+    @parametrize("compile_time_autotune", [False, True])
+    def test_combo_kernel_coordesc_tunes_largest_subkernel_first(
+        self, compile_time_autotune
+    ):
         def fn(a, b, c):
             return (
                 torch.nn.functional.relu(a),
@@ -2761,12 +2764,23 @@ class ComboKernelTestsMaxAutotune(TestCase):
             }
 
         logger = logging.getLogger("torch._inductor.runtime.coordinate_descent_tuner")
-        with torch._inductor.config.patch(coordinate_descent_tuning=True):
+        with (
+            fresh_cache(),
+            torch._inductor.config.patch(
+                {
+                    "coordinate_descent_tuning": True,
+                    "combo_kernel_compile_time_autotune": compile_time_autotune,
+                }
+            ),
+        ):
             with self.assertLogs(logger, level=logging.DEBUG) as cm:
                 out_compiled = torch.compile(fn)(*inps)
 
         self.assertEqual(out_eager, out_compiled)
 
+        # Compile-time autotune passes per-subkernel blocks as args, so runtime
+        # coordinate descent still refines the suffixed XBLOCK_i fields (same as
+        # the runtime per-subkernel path).
         baseline_log = next(
             msg for msg in cm.output if "Baseline Config" in msg and "XBLOCK_" in msg
         )
