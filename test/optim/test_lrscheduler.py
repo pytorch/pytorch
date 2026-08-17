@@ -527,6 +527,30 @@ class TestLRScheduler(TestCase):
             with self.assertRaisesRegex(ValueError, "factor"):
                 ConstantLR(self.opt, factor=factor)
 
+    def test_invalid_divisor_params_do_not_mutate_optimizer(self):
+        # A failed construction must leave the optimizer untouched so the same
+        # optimizer can be reused once the arguments are fixed.
+        cases = [
+            lambda opt: StepLR(opt, step_size=0),
+            lambda opt: CosineAnnealingLR(opt, T_max=0),
+            lambda opt: PolynomialLR(opt, total_iters=0),
+            lambda opt: LinearLR(opt, total_iters=0),
+            lambda opt: CyclicLR(opt, base_lr=0.01, max_lr=0.1, step_size_up=0),
+            lambda opt: CyclicLR(
+                opt, base_lr=0.01, max_lr=0.1, step_size_up=10, step_size_down=0
+            ),
+            lambda opt: OneCycleLR(opt, max_lr=0.1, total_steps=10, div_factor=0),
+            lambda opt: OneCycleLR(opt, max_lr=0.1, total_steps=10, final_div_factor=0),
+            lambda opt: ConstantLR(opt, factor=0.0),
+        ]
+        for ctor in cases:
+            param = torch.nn.Parameter(torch.zeros(()))
+            opt = SGD([param], lr=0.05, momentum=0.5)
+            before = dict(opt.param_groups[0])
+            with self.assertRaises(ValueError):
+                ctor(opt)
+            self.assertEqual(opt.param_groups[0], before)
+
     def test_scheduler_accepts_minimal_positive_divisor_params(self):
         StepLR(self.opt, step_size=1)
         CosineAnnealingLR(self.opt, T_max=1)

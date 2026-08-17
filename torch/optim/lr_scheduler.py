@@ -813,9 +813,7 @@ class ConstantLR(LRScheduler):
         last_epoch: int = -1,
     ) -> None:
         if factor > 1.0 or factor <= 0:
-            raise ValueError(
-                f"factor must be positive and at most 1, but got {factor}"
-            )
+            raise ValueError(f"factor must be positive and at most 1, but got {factor}")
 
         self.factor = factor
         self.total_iters = total_iters
@@ -1914,19 +1912,21 @@ class CyclicLR(LRScheduler):
             raise TypeError(f"{type(optimizer).__name__} is not an Optimizer")
         self.optimizer = optimizer
 
-        base_lrs = _format_param("base_lr", optimizer, base_lr)
-        if last_epoch == -1:
-            for lr, group in zip(base_lrs, optimizer.param_groups, strict=True):
-                _update_param_group_val(group, "lr", lr)
-
-        self.max_lrs = _format_param("max_lr", optimizer, max_lr)
-
+        # Validate step sizes before any optimizer state is mutated below, so a
+        # failed construction leaves the optimizer untouched.
         if step_size_up <= 0:
             raise ValueError(f"step_size_up must be positive, but got {step_size_up}")
         if step_size_down is not None and step_size_down <= 0:
             raise ValueError(
                 f"step_size_down must be positive, but got {step_size_down}"
             )
+
+        base_lrs = _format_param("base_lr", optimizer, base_lr)
+        if last_epoch == -1:
+            for lr, group in zip(base_lrs, optimizer.param_groups, strict=True):
+                _update_param_group_val(group, "lr", lr)
+
+        self.max_lrs = _format_param("max_lr", optimizer, max_lr)
 
         # pyrefly: ignore [bad-assignment]
         step_size_up = float(step_size_up)
@@ -2503,9 +2503,7 @@ class OneCycleLR(LRScheduler):
 
         # Validate div_factor and final_div_factor
         if div_factor <= 0:
-            raise ValueError(
-                f"div_factor must be positive, but got {div_factor}"
-            )
+            raise ValueError(f"div_factor must be positive, but got {div_factor}")
         if final_div_factor <= 0:
             raise ValueError(
                 f"final_div_factor must be positive, but got {final_div_factor}"
