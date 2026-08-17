@@ -1282,11 +1282,20 @@ test_unbacked_parity_smoketest() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
 
-  # 1.0% was below a100 timing noise (DistillGPT2/T5Small ~1.2-1.5% slower);
-  # 3.0% still catches real, much larger parity regressions.
-  local THRESHOLD=3.0
+  # 3.0% still sat inside a100 timing noise. Across 12 periodic runs the
+  # per-model spread reached ~7 points (MobileBertForMaskedLM ranged -2.9%
+  # to +4.3%), and DistillGPT2/T5Small carry a stable ~2-2.5% unbacked
+  # overhead that the noise rides on top of. 5.0% clears every delta seen
+  # in those runs while still catching real, much larger parity regressions.
+  local THRESHOLD=5.0
   local MAX_RETRIES=3
   local MODELS="MobileBertForMaskedLM|DistilBertForMaskedLM|DistillGPT2|T5Small"
+
+  # How many runs each model regressed in, keyed by model name. Counting per
+  # model rather than per run matters: three different models each blipping
+  # once used to be reported as one model regressing "3/3 runs", which is
+  # both a false positive and a misleading failure message.
+  local -A regressed_runs=()
 
   # Issue 6: Write per-run output files for post-failure debugging
   run_comparison() {
@@ -1313,6 +1322,7 @@ test_unbacked_parity_smoketest() {
         # Nit: Use awk instead of bc -l to avoid dependency on bc
         if awk "BEGIN{exit !($diff > $THRESHOLD)}"; then
           regressions+=("$model:+${diff}%")
+          regressed_runs["$model"]=$(( ${regressed_runs["$model"]:-0} + 1 ))
         fi
       fi
     done < "$output_file"
@@ -1389,7 +1399,6 @@ test_unbacked_parity_smoketest() {
   fi
 
   # Regression detected - retry to confirm
-  local regression_count=1
   for ((retry=2; retry<=MAX_RETRIES; retry++)); do
     echo ""
     echo "=== Retry $retry/$MAX_RETRIES (potential regression detected) ==="
@@ -1401,20 +1410,27 @@ test_unbacked_parity_smoketest() {
       exit 1
     fi
 
-    if check_regressions "$retry"; then
-      ((regression_count++))
+    check_regressions "$retry" || true
+  done
+
+  # Confirm only when the same model regressed in a majority of runs
+  local required=$((MAX_RETRIES / 2 + 1))
+  local worst_model="" worst_count=0 model count
+  for model in "${!regressed_runs[@]}"; do
+    count=${regressed_runs["$model"]}
+    if [[ $count -gt $worst_count ]]; then
+      worst_count=$count
+      worst_model=$model
     fi
   done
 
-  # Check if regression was consistent (majority of runs)
-  local required=$((MAX_RETRIES / 2 + 1))
-  if [[ $regression_count -ge $required ]]; then
+  if [[ $worst_count -ge $required ]]; then
     echo ""
-    echo "❌ REGRESSION CONFIRMED: Detected in $regression_count/$MAX_RETRIES runs (threshold: ${THRESHOLD}%)"
+    echo "❌ REGRESSION CONFIRMED: $worst_model regressed in $worst_count/$MAX_RETRIES runs (threshold: ${THRESHOLD}%)"
     exit 1
   else
     echo ""
-    echo "✅ PASSED: Regressions were not consistent ($regression_count/$MAX_RETRIES runs, needed $required)"
+    echo "✅ PASSED: No model regressed consistently (worst: ${worst_model:-none} $worst_count/$MAX_RETRIES, needed $required)"
     exit 0
   fi
 }
