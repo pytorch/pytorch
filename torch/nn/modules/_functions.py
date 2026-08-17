@@ -7,18 +7,19 @@ from torch.autograd.function import Function
 def _is_current_stream_capturing():
     r"""Return whether the current accelerator's stream is capturing a graph.
 
-    torch.cuda and torch.xpu each expose their own is_current_stream_capturing();
-    there is no unified torch.accelerator equivalent yet, so dispatch on the
-    current accelerator type here instead.
+    There is no unified torch.accelerator equivalent yet, so look up
+    is_current_stream_capturing on the current accelerator's own module
+    (e.g. torch.cuda, torch.xpu) by the same naming convention those modules
+    already follow. Backends without graph-capture support (or without this
+    function) safely fall through to False.
     """
     accelerator = torch.accelerator.current_accelerator(check_available=True)
     if accelerator is None:
         return False
-    if accelerator.type == "cuda":
-        return torch.cuda.is_current_stream_capturing()
-    if accelerator.type == "xpu":
-        return torch.xpu.is_current_stream_capturing()
-    return False
+    is_capturing = getattr(
+        torch.get_device_module(accelerator.type), "is_current_stream_capturing", None
+    )
+    return is_capturing() if is_capturing is not None else False
 
 
 class SyncBatchNorm(Function):
