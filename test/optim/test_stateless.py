@@ -8,7 +8,6 @@ import torch.nn.utils.stateless as stateless
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.optim._stateless import swap_in_optimizer_params_and_state
 from torch.testing._internal.common_utils import (
-    HardwareClassification,
     load_tests,
     run_tests,
     skipIfTorchDynamo,
@@ -32,8 +31,6 @@ class ChainedLinear(torch.nn.Module):
 
 
 class TestSwapInOptimizerParamsAndState(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
     class _TestException(Exception):
         pass
 

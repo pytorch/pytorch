@@ -7,22 +7,16 @@ has valid ownership information in a comment header. Valid means:
   - The format of the header follows the pattern "# Owner(s): ["list", "of owner", "labels"]
   - Each owner label actually exists in PyTorch
   - Each owner label starts with "module: " or "oncall: " or is in ACCEPTABLE_OWNER_LABELS
-
-The set of valid labels is a snapshot checked in at LABELS_FILE rather than fetched at
-runtime, so that linting neither needs network access nor breaks when a label is deleted
-upstream. Refresh it with:
-
-  python3 .github/scripts/export_pytorch_labels.py pytorch pytorch \
-      --output-file tools/linter/adapters/pytorch_labels.json
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import urllib.error
 from enum import Enum
-from pathlib import Path
-from typing import NamedTuple
+from typing import Any, NamedTuple
+from urllib.request import urlopen
 
 
 LINTER_CODE = "TESTOWNERS"
@@ -47,8 +41,23 @@ class LintMessage(NamedTuple):
     description: str | None
 
 
-LABELS_FILE = Path(__file__).parent / "pytorch_labels.json"
-PYTORCH_LABELS = set(json.loads(LABELS_FILE.read_text()))
+def get_pytorch_labels() -> Any:
+    url = "https://ossci-metrics.s3.amazonaws.com/pytorch_labels.json"
+    try:
+        labels = urlopen(url).read().decode("utf-8")
+    except urllib.error.URLError:
+        # This is an FB-only hack, if the json isn't available we may
+        # need to use a forwarding proxy to get out
+        proxy_url = "http://fwdproxy:8080"
+        proxy_handler = urllib.request.ProxyHandler(
+            {"http": proxy_url, "https": proxy_url}
+        )
+        context = urllib.request.build_opener(proxy_handler)
+        labels = context.open(url).read().decode("utf-8")
+    return json.loads(labels)
+
+
+PYTORCH_LABELS = get_pytorch_labels()
 # Team/owner labels usually start with "module: " or "oncall: ", but the following are acceptable exceptions
 ACCEPTABLE_OWNER_LABELS = ["NNC", "high priority"]
 OWNERS_PREFIX = "# Owner(s): "
@@ -73,9 +82,7 @@ def check_labels(
                     replacement=None,
                     description=(
                         f"{label} is not a PyTorch label "
-                        "(please choose from https://github.com/pytorch/pytorch/labels). "
-                        "If it was added recently, refresh the checked-in label snapshot "
-                        "as described in tools/linter/adapters/testowners_linter.py"
+                        "(please choose from https://github.com/pytorch/pytorch/labels)"
                     ),
                 )
             )

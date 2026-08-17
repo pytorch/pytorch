@@ -11,7 +11,6 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
     onlyOn,
-    skipXPUIf,
 )
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
@@ -834,7 +833,6 @@ class TestMultiheadAttentionNNDeviceType(NNTestCase):
             self.assertEqual(result_fast_path_masked, result_ref_masked)
 
     @torch.no_grad()
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/4448")
     @unittest.skipIf(
         TEST_WITH_CROSSREF,
         "CrossRef turns on TorchFunctionMode, and so disables fastpath.",
@@ -995,9 +993,7 @@ class TestMultiheadAttentionNNDeviceType(NNTestCase):
         mha(query, key, key)
 
 
-instantiate_device_type_tests(
-    TestMultiheadAttentionNNDeviceType, globals(), allow_xpu=True
-)
+instantiate_device_type_tests(TestMultiheadAttentionNNDeviceType, globals())
 instantiate_parametrized_tests(TestMultiheadAttentionNN)
 
 if __name__ == "__main__":

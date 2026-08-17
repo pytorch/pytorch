@@ -106,10 +106,6 @@ class WorkNCCL : public c10d::Work {
 
  private:
   bool setTerminalStatus(WorkStatus status);
-  // Push successful completion out to the backend's completion hooks, with the
-  // device duration if this work was timed. Called by WorkNCCLQueue for each
-  // work it retires as COMPLETED, which is once per work.
-  void notifyCompletion();
   // Poll the CUDA events and advance status; used by the GC queue + watchdog.
   WorkStatus checkStatus(
       std::optional<std::chrono::milliseconds> timeout = std::nullopt);
@@ -124,8 +120,6 @@ class WorkNCCL : public c10d::Work {
   std::vector<c10::intrusive_ptr<WorkNCCL>> children_;
 
   ProcessGroupNCCL* comm_; // non-owning; see class comment
-  int64_t reconfigure_uuid_{-1};
-  bool blocking_wait_{false};
   std::unique_ptr<at::cuda::CUDAEvent> start_event_;
   std::unique_ptr<at::cuda::CUDAEvent> end_event_;
   at::cuda::CUDAStream stream_;
@@ -162,10 +156,7 @@ class WorkNCCLQueue {
   void enqueueWork(c10::intrusive_ptr<WorkNCCL> work, cudaStream_t stream);
 
  private:
-  // completed collects the works retired as COMPLETED, so the caller can push
-  // their completion out after dropping work_queues_mutex_.
-  WorkNCCL::WorkStatus garbageCollectLocked(
-      std::vector<c10::intrusive_ptr<WorkNCCL>>& completed);
+  WorkNCCL::WorkStatus garbageCollectLocked();
   std::unordered_map<cudaStream_t, std::queue<c10::intrusive_ptr<WorkNCCL>>>
       stream_work_queues_;
   std::queue<c10::intrusive_ptr<WorkNCCL>> completed_work_queue_;

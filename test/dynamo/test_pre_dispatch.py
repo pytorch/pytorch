@@ -2,12 +2,9 @@
 import torch
 import torch._dynamo
 import torch._dynamo.test_case
-from torch.testing._internal.common_utils import HardwareClassification
 
 
 class PreDispatchTests(torch._dynamo.test_case.TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
     def test_no_grad_simple(self):
         def f(a):
             b = a.sin()

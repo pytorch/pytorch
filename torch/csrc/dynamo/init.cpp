@@ -634,6 +634,8 @@ void initDynamoBindings(PyObject* torch) {
       py::arg("dynamo_code"),
       py::arg("isolate_recompiles_id") = -1);
   m.def("_debug_get_precompile_entries", &_debug_get_precompile_entries);
+  m.def("_has_precompile_entries", &_has_precompile_entries);
+  m.def("_enable_precompile_cache_keys", &enable_precompile_cache_keys);
   m.def("_set_lru_cache", &_set_lru_cache);
   m.def(
       "_get_frame_value_stack_with_depth", &_get_frame_value_stack_with_depth);

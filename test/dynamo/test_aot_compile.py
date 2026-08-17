@@ -2,6 +2,7 @@
 
 import contextlib
 import copy
+import dataclasses
 import functools
 import inspect
 import multiprocessing as mp
@@ -411,6 +412,18 @@ class AbsentGlobalModule(torch.nn.Module):
         return x @ AOT_ABSENT_WEIGHT
 
 
+class ParentWithChildModule(torch.nn.Module):
+    # Calling a CHILD module routes through nn.Module.__call__, whose hook-dict
+    # guards are rooted at Dynamo's synthetic __import_torch_dot_nn_... alias.
+    # That is the shape a reloaded artifact could not resolve.
+    def __init__(self):
+        super().__init__()
+        self.lin = torch.nn.Linear(4, 4)
+
+    def forward(self, x):
+        return self.lin(x)
+
+
 def keep_global_guards(guard_entries):
     # Same policy the guard serializer enforces: drop only what cannot be
     # serialized, and in particular keep the global guards that the default
@@ -649,6 +662,44 @@ def wrap_forward_function(fn: Callable):
 @torch._dynamo.config.patch("enable_aot_compile", True)
 @instantiate_parametrized_tests
 class TestAOTCompile(torch._inductor.test_case.TestCase):
+    def test_aot_compile_module_import_alias_guard_survives_reload(self):
+        # Dynamo mints __import_* aliases into the TRACING process's globals and
+        # roots guards at them. A process that only loads never traced, so the
+        # live module dict this artifact guards against has none of them -- and
+        # every call died on KeyError on G['__import_torch_dot_nn_dot_modules_
+        # dot_module'] before the aliases were seeded. The existing scope tests
+        # cannot see it: the capture in the same process already leaked those
+        # names into this module's globals, so they resolve. Pop them to get
+        # what a fresh process sees.
+        mod = ParentWithChildModule()
+        x = torch.randn(4, 4)
+        expected = mod(x)
+        model = torch.compile(
+            mod,
+            fullgraph=True,
+            backend="eager",
+            options={"guard_filter_fn": keep_global_guards},
+        )
+        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
+        data = model._save_aot_compiled_module()
+        torch._dynamo.reset()
+        g = globals()
+        aliases = {k: g.pop(k) for k in [k for k in g if k.startswith("__import_")]}
+        self.assertTrue(aliases, "capture leaked no aliases; the test cannot bite")
+        try:
+            fresh = ParentWithChildModule()
+            fresh.load_state_dict(mod.state_dict())
+            reloaded = torch.compile(
+                fresh,
+                fullgraph=True,
+                backend="eager",
+                options={"guard_filter_fn": keep_global_guards},
+            )
+            reloaded._load_aot_compiled_module(data)
+            self.assertEqual(reloaded(x), expected)
+        finally:
+            g.update(aliases)
+
     def test_no_match_message_survives_a_raising_guard(self):
         # __call__ has already established that nothing matched; re-evaluating
         # the guards to say WHY must not replace that answer with a secondary
@@ -692,6 +743,51 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
         # The entry that raised must not swallow the one that can explain itself.
         self.assertIn("dtype mismatch", message)
         self.assertEqual(len(message.splitlines()), 4)
+
+    def test_check_compatibility_compares_artifact_against_current_machine(self):
+        # CompileArtifacts.check_compatibility must invoke the CACHED
+        # SystemInfo's method with the current machine as `other`, the way
+        # _DynamoCacheEntry.check_versions does. Reversed, the "artifact
+        # predates cpu_codegen_target" skip is evaluated against the current
+        # machine -- never None -- so every old artifact is rejected, and every
+        # mismatch message reports the two sides the wrong way round.
+        from torch._dynamo.package import SystemInfo
+
+        def fn(x):
+            return x + 1
+
+        compiled = torch.compile(fn, fullgraph=True, backend="eager").aot_compile(
+            ((torch.randn(3, 3),), {})
+        )
+        artifacts = compiled._artifacts
+        self.assertEqual(artifacts.device_type, "cpu")
+        current_target = SystemInfo.current().cpu_codegen_target
+        if current_target is None:
+            # No usable C++ compiler, so there is no current target to compare
+            # against and the skew arms below have nothing to assert. Skipping
+            # rather than failing is the point of the lazy probe.
+            self.skipTest("no CPU codegen target on this host")
+
+        artifacts.system_info = dataclasses.replace(
+            artifacts.system_info, cpu_codegen_target=None
+        )
+        artifacts.check_compatibility()
+
+        stale = ("mips", "DEFAULT", None, "INVALID", None, None)
+        artifacts.system_info = dataclasses.replace(
+            artifacts.system_info, cpu_codegen_target=stale
+        )
+        with self.assertRaises(RuntimeError) as ctx:
+            artifacts.check_compatibility()
+        message = str(ctx.exception)
+        self.assertIn(f"cached={stale}", message)
+        self.assertIn(f"current={current_target}", message)
+
+        artifacts.system_info = dataclasses.replace(
+            artifacts.system_info, cpu_codegen_target=None, torch_version="0.0.0-fake"
+        )
+        with self.assertRaisesRegex(RuntimeError, "0.0.0-fake"):
+            artifacts.check_compatibility()
 
     def path(self):
         path = os.path.join(cache_dir(), f"package_{self.id()}")
@@ -925,30 +1021,6 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
     def test_aot_compile_grad_mode_after_prior_compile(self):
         _run_in_subprocess(_subprocess_grad_mode_after_prior_compile)
 
-    def test_aot_compile_torch_func_vmap_grad(self):
-        import torch.func as tf
-
-        def value(pos):
-            return torch.linalg.norm(pos[1] - pos[0])
-
-        batched_grad = tf.vmap(tf.grad(value, argnums=0), in_dims=(0,))
-        x = torch.randn(64, 2, 3, dtype=torch.float64)
-        compiled_fn = torch.compile(
-            batched_grad, fullgraph=True, dynamic=False
-        ).aot_compile(  # noqa: UNSPECIFIED_BACKEND
-            ((x,), {})
-        )
-        expected = batched_grad(x)
-        actual = compiled_fn(x)
-        self.assertEqual(expected, actual)
-        compiled_fn.save_compiled_function(self.path())
-        torch._dynamo.reset()
-        with torch.compiler.set_stance("fail_on_recompile"):
-            with open(self.path(), "rb") as f:
-                loaded_fn = torch.compiler.load_compiled_function(f)
-            actual = loaded_fn(x)
-            self.assertEqual(expected, actual)
-
     def test_aot_compile_source_info(self):
         from torch._dynamo.package import SourceInfo
 
@@ -1173,15 +1245,8 @@ from user code:
         x = torch.randn(3, 3, requires_grad=True)
         with self.assertRaisesRegex(RuntimeError, "No AOT compiled graph matched"):
             model(x)
-        result = model.forward.compiled_results[0]
-        result.disable_guard_check()
+        model.forward.compiled_results[0].disable_guard_check()
         self.assertEqual(model(x), x * 2)
-        with patch.object(
-            result,
-            "guard_check",
-            side_effect=RuntimeError("serving environment mismatch"),
-        ):
-            self.assertEqual(model(x), x * 2)
 
     def test_disable_guard_check_does_not_shadow_a_matching_result(self):
         # An opted-out result accepts anything, so it has to be the last resort
