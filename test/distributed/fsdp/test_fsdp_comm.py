@@ -76,7 +76,7 @@ class FSDPCommTestBase(FSDPTestContinuous):
 
     @property
     def world_size(self) -> int:
-        return min(2, _get_device_module(self.device_type).device_count())
+        return _get_device_module(self.device_type).device_count()
 
 
 class TestCommunication(FSDPCommTestBase):
@@ -323,6 +323,10 @@ class TestCommunication(FSDPCommTestBase):
 
 
 class TestExplicitUnshard(FSDPCommTestBase):
+    @property
+    def world_size(self) -> int:
+        return min(_get_device_module(self.device_type).device_count(), 2)
+
     @requires_world_size(2)
     @requires_capabilities(
         Capability.distributed.backend,
