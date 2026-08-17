@@ -713,11 +713,15 @@ bool MPSHeapAllocatorImpl::waitForEvents(c10::ArrayRef<const void*> buffers) {
       // wait on events if "shared" buffer was allocated on MPSAllocator and
       // or actually needs waiting (based on retainCount)
       if (buffer_block && (buffer_block->heap->pool->usage & UsageFlags::SHARED) && buffer_block->retainCount() > 1) {
+        auto& event = buffer_block->event;
+        auto& stream_uses = buffer_block->stream_uses;
+        size_t num_events = stream_uses.size() + (event ? 1 : 0);
         std::vector<MPSEvent*> events;
-        if (buffer_block->event) {
-          events.push_back(buffer_block->event.get());
+        events.reserve(num_events);
+        if (event) {
+          events.push_back(event.get());
         }
-        for (auto& stream_use : buffer_block->stream_uses) {
+        for (auto& stream_use : stream_uses) {
           events.push_back(stream_use.second.get());
         }
         if (!events.empty()) {

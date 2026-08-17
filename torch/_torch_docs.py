@@ -14941,9 +14941,10 @@ for unary_base_func_name in (
         add_docstr(
             getattr(torch, unary_foreach_func_name),
             rf"""
-{unary_foreach_func_name}(self: List[Tensor]) -> List[Tensor]
+{unary_foreach_func_name}(self: tuple[Tensor, ...] | list[Tensor]) -> tuple[Tensor, ...]
 
-Apply :func:`torch.{unary_base_func_name}` to each Tensor of the input list.
+Applies :func:`torch.{unary_base_func_name}` to each tensor in ``self`` and returns the
+results as a tuple.
             """,
         )
     unary_inplace_foreach_func_name = f"{unary_foreach_func_name}_"
@@ -14951,9 +14952,10 @@ Apply :func:`torch.{unary_base_func_name}` to each Tensor of the input list.
         add_docstr(
             getattr(torch, unary_inplace_foreach_func_name),
             rf"""
-{unary_inplace_foreach_func_name}(self: List[Tensor]) -> None
+{unary_inplace_foreach_func_name}(self: tuple[Tensor, ...] | list[Tensor]) -> tuple[Tensor, ...] | list[Tensor]
 
-Apply :func:`torch.{unary_base_func_name}` to each Tensor of the input list.
+Applies :func:`torch.{unary_base_func_name}` in-place to each tensor in ``self`` and
+returns ``self``. The returned object is the exact list or tuple passed as input.
         """,
         )
 

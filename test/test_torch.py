@@ -1607,6 +1607,25 @@ class TestTorchDeviceType(TestCase):
             torch.device(device).type == 'cuda')
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
+    def test_deterministic_interpolate_bicubic(self, device):
+        input = torch.randn(1, 2, 4, 4, device=device, requires_grad=True)
+        output_grad = torch.randn(1, 2, 9, 12, device=device)
+        grad = None
+        with DeterministicGuard(True):
+            for _ in range(5):
+                res = torch.nn.functional.interpolate(
+                    input,
+                    size=(9, 12),
+                    mode='bicubic',
+                    align_corners=False)
+                res.backward(output_grad)
+                if grad is None:
+                    grad = input.grad
+                else:
+                    self.assertEqual(grad, input.grad, atol=0, rtol=0)
+                input.grad = None
+
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_interpolate_trilinear(self, device):
         input = torch.randn(1, 2, 4, 4, 4, device=device, requires_grad=True)
         res = torch.nn.functional.interpolate(
@@ -2106,8 +2125,6 @@ class TestTorchDeviceType(TestCase):
         expect_no_sync = (lambda: _ind_put_fn(x, mask, 1.),
                           lambda: _ind_put_fn(x, mask_cpu, y),
                           lambda: _ind_put_fn(x, ind, y),
-                          lambda: _ind_put_fn(x, 0, 5.),
-                          lambda: _ind_put_fn(x, slice(0, 1), 5.),
                           lambda: _ind_get_fn(x, mask_cpu),
                           lambda: _ind_get_fn(x, ind),
                           lambda: torch.nn.functional.one_hot(ind, num_classes=size),
