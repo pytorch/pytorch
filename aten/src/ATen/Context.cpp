@@ -992,7 +992,7 @@ namespace {
 // for an indexed device type with no index, use the backend's current device if
 // the backend is already initialized, else index 0, matches python faketensor
 // normalize device behaviour
-DeviceIndex normalizeFakeDeviceIndex(DeviceType type) {
+DeviceIndex normalizeFakeDevice(DeviceType type) {
   // python's _is_indexed_device_type
   if (type != kCUDA && type != kHIP && type != kXPU && type != kMPS &&
       type != kMTIA && type != kPrivateUse1) {
@@ -1014,8 +1014,8 @@ DeviceIndex normalizeFakeDeviceIndex(DeviceType type) {
   return 0;
 }
 
-const bool registerFakeDeviceIndexResolver = []() {
-  c10::impl::setFakeDeviceIndexResolver(&normalizeFakeDeviceIndex);
+const bool registerNormalizeFakeDeviceFn = []() {
+  c10::impl::setNormalizeFakeDeviceFn(&normalizeFakeDevice);
   return true;
 }();
 
