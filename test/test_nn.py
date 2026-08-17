@@ -8287,26 +8287,13 @@ class TestNNDeviceType(NNTestCase):
         subtest(("rms_norm", [8, 16], True), name="rms_norm_multidim"),
     ])
     def test_layer_norm_gamma_beta_backward_huge_M_buffers(self, device, op, normalized_shape, has_weight):
-        # Regression test: LaunchGammaBetaBackwardCUDAKernel's huge-M path
-        # (M > 64*1024 && N / warp_size < sm_count / 2) sized dgamma_blocks/
-        # dbeta_blocks from dgamma->size(-1) instead of N. For multi-dim
-        # normalized_shape, size(-1) is only the last dim and can be
-        # narrower than N, an out-of-bounds device write reproducing:
-        #   Memory access fault by GPU node-5 ... Reason: Write access to a
-        #   read-only page.
-        # For undefined gamma (weight=None), size(-1) on the undefined
-        # tensor silently returns 0, allocating an empty buffer instead of
-        # raising, reproducing:
-        #   RuntimeError: Function NativeLayerNormBackward0 returned an
-        #   invalid gradient at index 2 - got [0] but expected shape
-        #   compatible with [64]
-        # rms_norm shares the same allocation, via
-        # LayerNormBackwardKernelImplInternal<scalar_t, /*rms_norm=*/true>.
-        #
-        # Test assumption: this only exercises the huge-M path if
-        # N / warp_size < sm_count / 2 (ShouldUseHugeMGammaBetaBackwardKernel).
-        # With N=128 that requires sm_count > 8 on warp_size 32, or > 4 on
-        # warp_size 64; a small-GPU runner could silently drop off this path.
+        # The huge-M path (M > 64*1024 && N / warp_size < sm_count / 2,
+        # shared by layer_norm and rms_norm via
+        # LayerNormBackwardKernelImplInternal<..., rms_norm>) allocates
+        # scratch buffers sized by N. Undefined gamma (weight=None) and
+        # multi-dim normalized_shape are the cases where a size derived
+        # from gamma's own shape instead of N would go wrong. Both cases
+        # are covered alongside the plain defined-gamma case.
         M = 100000
         eps = 1e-5
         x = torch.randn(M, *normalized_shape, dtype=torch.float32)
