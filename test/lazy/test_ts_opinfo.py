@@ -20,7 +20,11 @@ from torch.testing._internal.common_device_type import (
     ops,
 )
 from torch.testing._internal.common_methods_invocations import op_db
-from torch.testing._internal.common_utils import HardwareClassification, run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 from torch.testing._internal.jit_utils import JitTestCase
 
 
@@ -330,7 +334,9 @@ class TestLazyOpInfoDevice(TestCase):
 
 # TODO: after we move to master, add Lazy as a new Device here:
 # https://github.com/pytorch/pytorch/blob/master/torch/testing/_internal/common_device_type.py#L532
-instantiate_device_type_tests(TestLazyOpInfoDevice, globals(), only_for="cpu,xpu", allow_xpu=True)
+instantiate_device_type_tests(
+    TestLazyOpInfoDevice, globals(), only_for="cpu,xpu", allow_xpu=True
+)
 
 
 class TestLazyDynamicOpsDevice(TestCase):
