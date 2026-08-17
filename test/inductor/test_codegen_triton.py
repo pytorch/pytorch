@@ -542,6 +542,57 @@ def helper(x):
         self.assertEqual(options.expand_shape, ("XBLOCK", "R0_BLOCK"))
         self.assertIn(override_mask, options.mask_vars)
 
+    def test_reduction_invariant_indexing_consumers(self):
+        xnumel = sympy.Integer(65)
+        rnumel = sympy.Integer(65)
+        kernel = TritonKernel(
+            {"x": xnumel, "r0_": rnumel},
+            features=SIMDKernelFeatures([], xnumel, rnumel),
+            override_persistent_reduction=False,
+            override_cooperative_reduction=False,
+        )
+        scalar_mask = TritonCSEVariable(
+            "tmp0", ValueRanges.unknown(), torch.bool, shape=("1", "1")
+        )
+
+        with (
+            self._graph.set_current_device(torch.device("cuda")),
+            V.set_kernel_handler(kernel),
+            patch.object(kernel, "_load_mask", scalar_mask),
+        ):
+            x_tree, r_tree = kernel.range_trees
+            x_index = x_tree.full_range().symbol()
+            r_index = r_tree.full_range().symbol()
+            x_value = TritonKernelOverrides.index_expr(x_index, torch.int64)
+            with patch.object(
+                kernel,
+                "indirect_assert",
+                wraps=kernel.indirect_assert,
+            ) as x_indirect_assert:
+                kernel.check_bounds(x_index, xnumel, lower=True, upper=True)
+            r_value = TritonKernelOverrides.index_expr(r_index, torch.int64)
+            with patch.object(
+                kernel,
+                "indirect_assert",
+                wraps=kernel.indirect_assert,
+            ) as r_indirect_assert:
+                kernel.check_bounds(r_index, rnumel, lower=True, upper=True)
+
+        self.assertEqual(("XBLOCK", "1"), tuple(map(str, x_value.shape or ())))
+        self.assertIn("[XBLOCK, 1]", x_indirect_assert.call_args.args[0])
+        x_bounds_mask = x_indirect_assert.call_args.args[3]
+        self.assertIsInstance(x_bounds_mask, str)
+        self.assertNotIn(r_tree.mask_name(), x_bounds_mask)
+        dense_shape = ("XBLOCK", "R0_BLOCK")
+        self.assertEqual(dense_shape, tuple(map(str, r_value.shape or ())))
+        self.assertIn(
+            "[" + ", ".join(dense_shape) + "]",
+            r_indirect_assert.call_args.args[0],
+        )
+        r_bounds_mask = r_indirect_assert.call_args.args[3]
+        self.assertIsInstance(r_bounds_mask, str)
+        self.assertIn(r_tree.mask_name(), r_bounds_mask)
+
     @inductor_config.patch("triton.divisible_by_16", True)
     def test_config_of_sizearg(self):
         from torch._inductor.utils import (

@@ -2467,7 +2467,10 @@ class TritonKernelOverrides(TritonOverrides):
     def index_expr(cls, expr, dtype):
         expr = _materialize_trunc_to_float_expr(expr, dtype)
         indexing = V.kernel.indexing(
-            expr, block_ptr=False, tma_compatibility_checker=None
+            expr,
+            block_ptr=False,
+            tma_compatibility_checker=None,
+            allow_reduction_invariant_indexing=True,
         )
         if not isinstance(indexing, IndexingOptions):
             raise AssertionError(f"expected IndexingOptions, got {type(indexing)}")
@@ -3798,7 +3801,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         allow_reduction_invariant_indexing=False,
     ):
         """
-        Compute the index and mask to pass to tl.load() or tl.store().
+        Compute the index expression, masks, and block shape for a Triton operation.
 
         ``allow_reduction_invariant_indexing`` lets a caller request narrower
         indexing when it can consume a shape with omitted reduction axes. The
@@ -4511,7 +4514,15 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         if not isinstance(expr, sympy.Expr):
             raise AssertionError(f"expected sympy.Expr, got {type(expr)}")
-        indexing = self.indexing(expr, block_ptr=False, tma_compatibility_checker=None)
+        indexing = self.indexing(
+            expr,
+            block_ptr=False,
+            tma_compatibility_checker=None,
+            # Dispatch and loop guards ensure that each omitted axis has a live
+            # coordinate whenever this check executes, so the dense check is a
+            # broadcast of the narrow one.
+            allow_reduction_invariant_indexing=True,
+        )
         if not isinstance(indexing, IndexingOptions):
             raise AssertionError(f"expected IndexingOptions, got {type(indexing)}")
 
