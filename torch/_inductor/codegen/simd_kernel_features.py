@@ -104,7 +104,8 @@ class EnableReduction(NodeScheduleMarker):
 
 class SIMDKernelFeatures:
     """
-    An ordered schedule of nodes that will become a single kernel.
+    An ordered schedule of nodes that will become a single kernel. A separately
+    emitted stage may contribute only to ``indexing_node_schedule``.
     """
 
     def __init__(
@@ -114,8 +115,13 @@ class SIMDKernelFeatures:
         reduction_numel: sympy.Expr = sympy.S.One,
         coalesce_analysis: CoalesceVarAnalysis | None = None,
         tiling_scores: dict[str, sympy.Expr] | None = None,
+        *,
+        indexing_node_schedule: list[NodeScheduleEntry] | None = None,
     ):
         self.node_schedule = node_schedule
+        self.indexing_node_schedule = (
+            node_schedule if indexing_node_schedule is None else indexing_node_schedule
+        )
         # numel excludes reduction_numel
         self.numel: sympy.Expr = V.graph.sizevars.simplify(numel)
         self.reduction_numel: sympy.Expr = V.graph.sizevars.simplify(reduction_numel)
@@ -132,6 +138,7 @@ class SIMDKernelFeatures:
             self.reduction_numel,
             self.coalesce_analysis,
             tiling_scores,
+            indexing_node_schedule=self.indexing_node_schedule,
         )
 
     @cache_on_self
@@ -141,6 +148,10 @@ class SIMDKernelFeatures:
     @cache_on_self
     def scheduler_nodes(self) -> Iterable[SchedulerNode]:
         return tuple(NodeScheduleMarker.only_nodes(self.node_schedule))
+
+    @cache_on_self
+    def indexing_scheduler_nodes(self) -> Iterable[SchedulerNode]:
+        return tuple(NodeScheduleMarker.only_nodes(self.indexing_node_schedule))
 
     def reduction_nodes(self) -> list[SchedulerNode]:
         return [n for n in self.scheduler_nodes() if n.is_reduction()]
@@ -202,7 +213,7 @@ class SIMDKernelFeatures:
     def select_index_dtype(self) -> torch.dtype:
         # Gather all used buffer names
         buffer_names: OrderedSet[str] = OrderedSet()
-        for node in self.scheduler_nodes():
+        for node in self.indexing_scheduler_nodes():
             buffer_names.update(node.get_buffer_names())
             buffer_names.update(node.used_buffer_names())
         buffers = [V.graph.get_buffer(name) for name in buffer_names]
@@ -247,7 +258,7 @@ class SIMDKernelFeatures:
 
         int32_max = sympy.Integer(2**31 - 1)
         int32_min = sympy.Integer(-(2**31))
-        for node in self.scheduler_nodes():
+        for node in self.indexing_scheduler_nodes():
             for dep in itertools.chain(node.read_writes.reads, node.read_writes.writes):
                 if not isinstance(dep, MemoryDep):
                     continue
