@@ -22,7 +22,7 @@ import torch.onnx.operators
 import torch.utils.cpp_extension
 from torch._dynamo.bytecode_transformation import transform_code_object
 from torch._dynamo.exc import PackageError
-from torch._dynamo.guards import CheckFunctionManager, CompileId
+from torch._dynamo.guards import CheckFunctionManager, CompileId, GuardsStatePickler
 from torch._dynamo.package import CompilePackage
 from torch._dynamo.source import LocalSource
 from torch._dynamo.symbolic_convert import (
@@ -85,6 +85,16 @@ def keep_kwdefaults(func):
     @functools.wraps(func)
     def wrapper(self, x):
         if func.__kwdefaults__["scale"] == 2.0:
+            x = x + 1
+        return func(self, x)
+
+    return wrapper
+
+
+def keep_annotations(func):
+    @functools.wraps(func)
+    def wrapper(self, x):
+        if len(func.__annotations__) == 2:
             x = x + 1
         return func(self, x)
 
@@ -177,6 +187,12 @@ class DecoratedKwdefaultsForwardModule(torch.nn.Module):
     @keep_kwdefaults
     def forward(self, x, *, scale=2.0):
         return x * scale
+
+
+class DecoratedAnnotationsForwardModule(torch.nn.Module):
+    @keep_annotations
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return x * 2
 
 
 class DecoratedAttributeForwardModule(torch.nn.Module):
@@ -810,6 +826,14 @@ class TestGuardSerialization(TestGuardSerializationBase):
             ref, loaded, {"self": mod, "x": torch.randn(3), "func": inner}, True
         )
 
+    def test_fqn_mismatched_function_preserves_annotations(self):
+        mod = DecoratedAnnotationsForwardModule()
+        ref, loaded = self._test_serialization("SEQUENCE_LENGTH", mod, torch.randn(3))
+        inner = type(mod).forward.__wrapped__
+        self._test_check_fn(
+            ref, loaded, {"self": mod, "x": torch.randn(3), "func": inner}, True
+        )
+
     def test_fqn_mismatched_function_preserves_attributes(self):
         mod = DecoratedAttributeForwardModule()
         ref, loaded = self._test_serialization("EQUALS_MATCH", mod, torch.randn(3))
@@ -989,6 +1013,36 @@ class TestGuardSerialization(TestGuardSerializationBase):
                 check_leaf_guards(child_mgr)
 
         check_leaf_guards(ref.root)
+
+    @unittest.skipIf(
+        not torch.distributed.is_available(), "requires torch.distributed"
+    )
+    def test_fsdp_module_serialization_preserves_dynamic_type(self):
+        from torch.distributed.fsdp._fully_shard._fully_shard import (
+            disable_fsdp_module_new_init,
+            FSDPModule,
+            get_cls_to_fsdp_cls,
+        )
+
+        fsdp_type = type("FSDPGlobalModule", (FSDPModule, GlobalModule), {})
+        cls_to_fsdp_cls = get_cls_to_fsdp_cls()
+        previous_fsdp_type = cls_to_fsdp_cls.get(GlobalModule)
+        cls_to_fsdp_cls[GlobalModule] = fsdp_type
+        module = GlobalModule()
+        module.__class__ = fsdp_type
+
+        try:
+            buffer = io.BytesIO()
+            pickler = GuardsStatePickler({id(module): module}, {}, {}, buffer)
+            pickler.dump(module)
+            with disable_fsdp_module_new_init():
+                restored = pickle.loads(buffer.getvalue())
+            self.assertIs(type(restored), fsdp_type)
+        finally:
+            if previous_fsdp_type is None:
+                del cls_to_fsdp_cls[GlobalModule]
+            else:
+                cls_to_fsdp_cls[GlobalModule] = previous_fsdp_type
 
     def test_tensor_subclass_metadata_match(self):
         class LocalSubclass(torch.Tensor):
@@ -1899,6 +1953,60 @@ class TestGuardSerialization(TestGuardSerializationBase):
         m = Module()
         ref, loaded = self._test_serialization("TENSOR_MATCH", m, torch.randn(3, 2))
         self._test_check_fn(ref, loaded, {"self": m, "x": torch.randn(3, 2)}, True)
+
+    def test_module_dtype_does_not_corrupt_tensor_metadata(self):
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.dtype = torch.float64
+                self.param = torch.nn.Parameter(torch.randn(3, 2, dtype=self.dtype))
+
+            def forward(self, x):
+                return x + self.param
+
+        m = Module()
+        ref, loaded = self._test_serialization(
+            "TENSOR_MATCH", m, torch.randn(3, 2, dtype=m.dtype)
+        )
+        self._test_check_fn(
+            ref,
+            loaded,
+            {"self": m, "x": torch.randn(3, 2, dtype=m.dtype)},
+            True,
+        )
+        self._test_check_fn(
+            ref,
+            loaded,
+            {"self": m, "x": torch.randn(3, 2, dtype=torch.float32)},
+            False,
+        )
+
+    def test_tensor_python_attribute_serialization(self):
+        def fn(xs):
+            return xs[0]._cpu_copy + 1
+
+        def make_tensor(copy_size):
+            x = torch.randn(3)
+            x._cpu_copy = torch.randn(copy_size)
+            return x
+
+        ref, loaded = self._test_serialization("TENSOR_MATCH", fn, [make_tensor(3)])
+        self._test_check_fn(ref, loaded, {"xs": [make_tensor(3)]}, True)
+        self._test_check_fn(ref, loaded, {"xs": [make_tensor(4)]}, False)
+
+    def test_tensor_dimension_marking_serialization(self):
+        def fn(x):
+            return x + 1
+
+        def make_dynamic_tensor():
+            x = torch.randn(3)
+            torch._dynamo.mark_dynamic(x, 0)
+            return x
+
+        ref, loaded = self._test_serialization(
+            "TENSOR_MATCH", fn, make_dynamic_tensor()
+        )
+        self._test_check_fn(ref, loaded, {"x": make_dynamic_tensor()}, True)
 
     def test_bound_method_input(self):
         class MyModule(torch.nn.Module):

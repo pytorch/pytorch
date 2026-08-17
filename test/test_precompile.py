@@ -8,7 +8,6 @@ import inspect
 import io
 import os
 import pickle
-import re
 import subprocess
 import sys
 import tempfile
@@ -2146,10 +2145,7 @@ class TestPrecompile(TestCase):
 
     @parametrize("tracer", ["dynamo", "make_fx"])
     @parametrize("backend", ["eager", "inductor"])
-    @parametrize("decompose", [False, True])
-    def test_capture_under_a_torch_function_mode_applies_it_once(
-        self, tracer, backend, decompose
-    ):
+    def test_capture_under_a_torch_function_mode_applies_it_once(self, tracer, backend):
         # Capture clears the caller's torch_function modes so Dynamo can apply them
         # SYMBOLICALLY while tracing. The captured graph is torch-level Python, so
         # lowering it with the modes restored re-traces through every one of them a
@@ -2170,38 +2166,10 @@ class TestPrecompile(TestCase):
         with PlusOne():
             expected = fn(x).clone()
             code, cache = torch.compiler.precompile(
-                fn,
-                x,
-                tracer=tracer,
-                backend=backend,
-                # The decompositions re-trace is a SECOND pass over the same
-                # torch-level graph, so it doubles the modes independently of
-                # the lowering; both have to run with the stack cleared.
-                **({"decompositions": {}} if decompose else {}),
+                fn, x, tracer=tracer, backend=backend
             )
         # Served with NO mode: the artifact must already carry the one application.
         self.assertEqual(torch.compiler.precompile.load(code, cache)(x), expected)
-
-    def test_tracer_dynamo_artifact_refuses_a_foreign_python_version(self):
-        # The artifact inlines marshalled CPython bytecode. marshal is NOT the
-        # version guard it appears to be: only the 3.10 -> 3.11 layout change
-        # makes it raise, and a blob carried between 3.11 and 3.14 loads happily
-        # and then SEGFAULTS when the code object runs. So the producing version
-        # is written into the artifact and checked before marshal.loads.
-        x = torch.randn(3)
-
-        def fn(xx):
-            return xx.sin() + 1
-
-        code, cache = torch.compiler.precompile(fn, x, tracer="dynamo", backend="eager")
-        stamp = re.search(r"_DYNAMO_PYTHON_VERSION = (\(\d+, \d+\))", code)
-        self.assertIsNotNone(stamp)
-        self.assertEqual(eval(stamp.group(1)), sys.version_info[:2])
-        self.assertEqual(torch.compiler.precompile.load(code, cache)(x), fn(x))
-
-        foreign = code.replace(stamp.group(1), "(3, 99)")
-        with self.assertRaisesRegex(PrecompileError, "Python version"):
-            torch.compiler.precompile.load(foreign, None)
 
     def test_tracer_dynamo_module_global_round_trips_by_sys_modules_key(self):
         # A module GLOBAL is by-reference state: recording it in IMPORT_SOURCES
@@ -3219,14 +3187,7 @@ class TestPrecompile(TestCase):
                 sum(_get_total_cache_entry_count(code) for code in codes), 0
             )
             self.assertEqual(loaded._package.cached_backends, {})
-            # Collect until it sticks rather than once: a free-threaded build
-            # (3.13t/3.14t) uses deferred reference counting, so an object whose
-            # last reference just went away can survive a single collection and
-            # this assertion failed only on the py3.14t shard.
-            for _ in range(3):
-                gc.collect()
-                if backend_ref() is None:
-                    break
+            gc.collect()
             self.assertIsNone(backend_ref())
             with self.assertRaisesRegex(RuntimeError, "has been unloaded"):
                 loaded(x, True)

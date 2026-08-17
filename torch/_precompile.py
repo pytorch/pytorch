@@ -428,15 +428,6 @@ class PrecompiledCallable:
         self._call(self._compiled.__exit__, *exc)
 
     def unload(self) -> None:
-        """Remove everything :func:`load_package` installed for this artifact.
-
-        The precompiled entries come off the code objects and the globals the
-        artifact wrote come out of their modules, so the model recompiles
-        normally afterwards. Exiting this object as a context manager does the
-        same thing; call it directly when the artifact's lifetime is not
-        lexically scoped. Unloading twice is harmless, and a call already in
-        flight on another thread is allowed to finish first.
-        """
         self._call(self._compiled.unload)
 
     @property
@@ -1791,9 +1782,6 @@ def _decompose_subgraph(
     """
     from torch._dispatch.python import enable_python_dispatcher
     from torch._dynamo.utils import detect_fake_mode
-    from torch._dynamo.variables.torch_function import (
-        torch_function_mode_stack_state_mgr,
-    )
 
     # Take the mode off the fakes THEMSELVES rather than from BackendInput.fake_mode: the
     # two are distinct FakeTensorMode objects (they share a ShapeEnv), and running the ops
@@ -1816,18 +1804,7 @@ def _decompose_subgraph(
     # itself disappears) -- which is exactly the shape the make_fx tracer produces, and why
     # the caller re-derives ``trains`` from the returned graph rather than reusing its own.
     grad_cm = torch.enable_grad() if trains else torch.no_grad()
-    # With the caller's torch_function modes CLEARED. gm is torch-level Python that
-    # Dynamo already produced WITH those modes applied symbolically, so re-tracing it
-    # while they are live applies each of them a second time and bakes a
-    # doubly-transformed graph -- the same trap as the inductor lowering below, and
-    # just as silent, since the artifact then needs no mode to reproduce the wrong
-    # number.
-    with (
-        torch_function_mode_stack_state_mgr,
-        grad_cm,
-        fake_mode,
-        enable_python_dispatcher(),
-    ):
+    with grad_cm, fake_mode, enable_python_dispatcher():
         return make_fx(gm, decomposition_table=decompositions)(*fake_inputs)
 
 
@@ -2592,11 +2569,6 @@ def _build_dynamo_metadata_section(compiled: PrecompiledModule) -> list[str]:
         # left at None, which is what makes the baked accumulate form match eager on the
         # first step too (Note [precompile dynamo training grad accumulation]).
         f"GRAD_ACCUM_PARAMS = {capture.grad_accum_params!r}",
-        # The marshalled bytecode below is CPython-version specific. marshal only
-        # REJECTS a foreign blob across the 3.10/3.11 layout change; between 3.11
-        # and 3.14 it loads happily and the resulting code object segfaults when
-        # called, so the version has to be written down and checked explicitly.
-        f"_DYNAMO_PYTHON_VERSION = {tuple(sys.version_info[:2])!r}",
         f"_DYNAMO_CODE = {code_blob!r}",
         f"_DYNAMO_STATE = {state_blob!r}",
         "",

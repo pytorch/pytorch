@@ -3820,8 +3820,12 @@ class GuardBuilder(GuardBuilderBase):
             absent_attrs: list[str] = []
             for attr_name in dim_marking_attrs:
                 if hasattr(value, attr_name):
-                    expected_attrs[attr_name] = getattr(value, attr_name)
-                    code_part = f"((getattr({tensor_name}, '{attr_name}', set()).issubset({getattr(value, attr_name)!r})) if hasattr({tensor_name}, '{attr_name}') else True)"
+                    attr_value = getattr(value, attr_name)
+                    expected_attrs[attr_name] = attr_value
+                    # Tensor attributes are serialized when their values are
+                    # reachable from the guard tree.
+                    self.guard_tree_values[id(attr_value)] = attr_value
+                    code_part = f"((getattr({tensor_name}, '{attr_name}', set()).issubset({attr_value!r})) if hasattr({tensor_name}, '{attr_name}') else True)"
                     code.append(code_part)
                 else:
                     absent_attrs.append(attr_name)
@@ -3836,6 +3840,8 @@ class GuardBuilder(GuardBuilderBase):
                 for attr_name in dep_attr_names:
                     attr_value = getattr(value, attr_name, None)
                     dependent_attrs[attr_name] = (attr_value, gate_attr)
+                    if attr_value is not None:
+                        self.guard_tree_values[id(attr_value)] = attr_value
                     code_part = f"((getattr({tensor_name}, '{attr_name}', None) == {attr_value!r}) if hasattr({tensor_name}, '{gate_attr}') else True)"
                     code.append(code_part)
 
@@ -4109,6 +4115,7 @@ class GuardsStatePickler(pickle.Pickler):
         pytype: type,
         dispatch_keys_raw: int,
         grad: torch.Tensor,
+        guarded_attrs: dict[str, Any] | None = None,
     ) -> torch.Tensor:
         fake_mode = torch._subclasses.FakeTensorMode()
         tensor_converter = torch._subclasses.fake_tensor.FakeTensorConverter()
@@ -4120,6 +4127,8 @@ class GuardsStatePickler(pickle.Pickler):
             torch._C.DispatchKeySet.from_raw_repr(dispatch_keys_raw),
         )
         ret.grad = grad
+        for name, value in (guarded_attrs or {}).items():
+            setattr(ret, name, value)
         return ret
 
     @classmethod
@@ -4184,6 +4193,18 @@ class GuardsStatePickler(pickle.Pickler):
         ]
 
     @classmethod
+    def _unpickle_fsdp_module(
+        cls,
+        original_type: type[torch.nn.Module],
+        state: dict[str, Any],
+    ) -> torch.nn.Module:
+        fsdp_type = cls._unpickle_fsdp_module_type(original_type)
+        module = torch.nn.Module()
+        module.__class__ = fsdp_type
+        torch.nn.Module.__setstate__(module, state)
+        return module
+
+    @classmethod
     def _unpickle_ddp_module(
         cls, state: dict[str, Any]
     ) -> torch.nn.parallel.DistributedDataParallel:
@@ -4244,6 +4265,7 @@ class GuardsStatePickler(pickle.Pickler):
         attributes: dict[str, object] | None = None,
         guarded_globals: dict[str, object] | None = None,
         snapshot_globals: bool = False,
+        annotations: dict[str, object] | None = None,
     ) -> types.FunctionType:
         if snapshot_globals:
             # Deliberately no import_module here: the snapshot IS the scope, and
@@ -4266,6 +4288,8 @@ class GuardsStatePickler(pickle.Pickler):
         )
         fn.__qualname__ = qualname
         fn.__kwdefaults__ = kwdefaults
+        if annotations is not None:
+            fn.__annotations__ = annotations
         if attributes:
             fn.__dict__.update(attributes)
         return fn
@@ -4355,6 +4379,20 @@ class GuardsStatePickler(pickle.Pickler):
             if not kwdefaults and not keep_kwdefaults:
                 kwdefaults = None
 
+        annotations = obj.__annotations__
+        keep_annotations = self._keep(annotations)
+        annotations = {
+            name: (
+                value
+                if self._keep(value)
+                else _Missing("unguarded function annotation")
+            )
+            for name, value in annotations.items()
+            if keep_annotations or self._keep(value)
+        }
+        if not annotations and not keep_annotations:
+            annotations = None
+
         closure = obj.__closure__
         if closure is not None:
             closure = tuple(self._reduce_cell(cell) for cell in closure)
@@ -4376,6 +4414,7 @@ class GuardsStatePickler(pickle.Pickler):
             attributes,
             None,
             snapshot_globals,
+            annotations,
         )
         if not snapshot_globals:
             return type(self)._unpickle_nested_function, args
@@ -4408,6 +4447,11 @@ class GuardsStatePickler(pickle.Pickler):
             from torch._dynamo.package import SerializedCode
 
             return type(self)._unpickle_code, (SerializedCode.from_code_object(obj),)
+
+        if isinstance(obj, torch.dtype):
+            # Dtypes are singleton metadata in Tensor's pickle reducer. Pruning an
+            # unrelated dtype attribute would corrupt every tensor of that dtype.
+            return NotImplemented
 
         if id(obj) in self.missing_values:
             return _Missing, ("missing values",)
@@ -4449,12 +4493,20 @@ class GuardsStatePickler(pickle.Pickler):
             ):
                 pytype = obj.pytype if obj.pytype is not None else torch.Tensor
 
+            # Tensor metadata reconstruction omits Python attributes, but a
+            # guard may be rooted at one. Preserve only guard-reachable values.
+            guarded_attrs = {
+                name: value
+                for name, value in getattr(obj, "__dict__", {}).items()
+                if id(value) in self.guard_tree_values
+            }
             return type(self)._unpickle_tensor, (
                 torch.empty_like(obj, device="meta", requires_grad=obj.requires_grad),
                 obj.device,
                 pytype,
                 torch._C._dispatch_keys(obj).raw_repr(),
                 obj.grad,
+                guarded_attrs,
             )
 
         elif isinstance(obj, torch.nn.Module):
@@ -4469,6 +4521,28 @@ class GuardsStatePickler(pickle.Pickler):
                 if callable(attr):
                     continue
                 self.missing_values[id(attr)] = attr
+
+            if (
+                hasattr(torch.distributed, "fsdp")
+                and isinstance(
+                    obj, torch.distributed.fsdp._fully_shard._fully_shard.FSDPModule
+                )
+            ):
+                original_type = type(obj).__mro__[type(obj)._orig_cls_mro_index]
+                if not issubclass(original_type, torch.nn.Module):
+                    raise AssertionError(
+                        f"Expected nn.Module subclass, got {original_type}"
+                    )
+                if (
+                    torch.distributed.fsdp._fully_shard._fully_shard.get_cls_to_fsdp_cls().get(
+                        original_type
+                    )
+                    is type(obj)
+                ):
+                    return type(self)._unpickle_fsdp_module, (
+                        original_type,
+                        obj.__getstate__(),
+                    )
 
             # DDP module is a special case because it tries to restore unneeded
             # data in custom __setstate__. We cannot skip ddp module because it

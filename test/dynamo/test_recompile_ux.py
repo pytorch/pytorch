@@ -71,6 +71,40 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(triggered)
 
+    def test_precompile_entry_runs_guard_complete_hook(self):
+        from torch._C._dynamo.eval_frame import (
+            _load_precompile_entry,
+            _reset_precompile_entries,
+            set_guard_complete_hook,
+        )
+
+        def fn(x):
+            return x + 1
+
+        def injected(x):
+            return x + 42
+
+        hook_results = []
+
+        def hook(guard_eval_result):
+            hook_results.append(guard_eval_result)
+            return guard_eval_result
+
+        compiled_fn = torch.compile(fn, backend="eager")
+        _load_precompile_entry(
+            fn.__code__,
+            torch._dynamo.guards.GuardManagerWrapper(),
+            injected.__code__,
+        )
+        prior_hook = set_guard_complete_hook(hook)
+        try:
+            args = (torch.randn(3, 2),)
+            self.assertEqual(compiled_fn(*args), injected(*args))
+            self.assertEqual(hook_results, [True])
+        finally:
+            set_guard_complete_hook(prior_hook)
+            _reset_precompile_entries(fn.__code__)
+
     def test_loop_torture(self):
         def loop_torture(input, iters):
             out = input
@@ -1708,67 +1742,6 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(self._num_cache_entries(f), 0)
 
     # ===== Debug / introspection =====
-
-    def test_cache_key_lookup_is_off_until_a_cache_key_backend_exists(self):
-        # get_backend walks the callback chain on every intercepted frame, and
-        # looking for _torchdynamo_cache_key there is a MISS at every level for
-        # anyone who never precompiles -- a raising attribute lookup per level
-        # per frame, measured at ~1 us on a steady-state compiled call. The
-        # lookup is therefore gated on a flag that only a backend carrying such
-        # a key turns on. Nothing else in the tree sets that attribute, so the
-        # gate is invisible; this pins that the switch exists and is one-way.
-        from torch._C._dynamo.eval_frame import _enable_precompile_cache_keys
-
-        def fn(x):
-            return x.sin()
-
-        opt = torch.compile(fn, backend="eager")
-        x = torch.randn(4)
-        self.assertEqual(opt(x), fn(x))
-
-        # Idempotent and safe to call before, during and after compilation.
-        _enable_precompile_cache_keys()
-        _enable_precompile_cache_keys()
-        torch._dynamo.reset()
-        opt2 = torch.compile(fn, backend="eager")
-        self.assertEqual(opt2(x), fn(x))
-
-    def test_has_precompile_entries_is_region_exact(self):
-        """_has_precompile_entries answers for one region only. lookup() never
-        serves a precompile entry from another region, so an entry belonging to
-        a second artifact installed on the same code object is not coverage for
-        the first. It exists so that a caller can ask that question without
-        building the list of wrappers _debug_get_precompile_entries returns."""
-        from torch._C._dynamo.eval_frame import (
-            _debug_get_cache_entry_list,
-            _has_precompile_entries,
-            _load_precompile_entry,
-            _reset_precompile_entries_for_region,
-        )
-
-        def never_compiled(x):
-            return x + 1
-
-        self.assertFalse(_has_precompile_entries(never_compiled.__code__, -1))
-        with self.assertRaisesRegex(TypeError, "expected a code object"):
-            _has_precompile_entries(never_compiled, -1)
-
-        def f(x):
-            return x.sin()
-
-        torch.compile(f, backend="eager", dynamic=False)(torch.randn(3))
-        code = f.__code__
-        self.assertFalse(_has_precompile_entries(code, 7))
-
-        guard_manager = _debug_get_cache_entry_list(code)[0].guard_manager
-        _load_precompile_entry(code, guard_manager, code, 7)
-        try:
-            self.assertTrue(_has_precompile_entries(code, 7))
-            self.assertFalse(_has_precompile_entries(code, 9))
-            self.assertFalse(_has_precompile_entries(code, -1))
-        finally:
-            _reset_precompile_entries_for_region(code, 7)
-        self.assertFalse(_has_precompile_entries(code, 7))
 
     def test_isolate_recompiles_debug_cache_entry_list_deterministic_order(self):
         """_debug_get_cache_entry_list returns entries sorted by

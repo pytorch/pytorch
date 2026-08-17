@@ -222,12 +222,10 @@ def _capture_config() -> Iterator[None]:
             _CAPTURE_CONFIG_STATE.set((depth, prior))
 
 
-def _clear_package_region(
-    codes: Sequence[types.CodeType], isolate_recompiles_id: int
-) -> None:
+def _clear_package_region(package: CompilePackage, isolate_recompiles_id: int) -> None:
     from .eval_frame import _clear_cache_entries_for_region
 
-    for code in codes:
+    for code in package.code_objects():
         _clear_cache_entries_for_region(code, isolate_recompiles_id)
 
 
@@ -852,10 +850,6 @@ class _PrecompileBackend:
         inner = torch._dynamo.lookup_backend(backend)
         self._torchdynamo_orig_backend = inner
         self._torchdynamo_cache_key = object()
-        # get_backend skips looking for that key until it knows one exists,
-        # because the lookup is a raising miss at every level of the callback
-        # chain for every torch.compile user who never precompiles.
-        torch._C._dynamo.eval_frame._enable_precompile_cache_keys()
         self.backend_ctx_ctor = getattr(
             inner, "backend_ctx_ctor", contextlib.nullcontext
         )
@@ -1225,7 +1219,7 @@ class PrecompileSession:
 
         isolate_recompiles_id = self._isolate_recompiles_id
         try:
-            _clear_package_region(self._package.region_codes(), isolate_recompiles_id)
+            _clear_package_region(self._package, isolate_recompiles_id)
         finally:
             _unregister_explicit_compile_region(isolate_recompiles_id)
             self._isolate_recompiles_id = None
@@ -1540,11 +1534,7 @@ class PrecompileSession:
             for fact in f.undetermined:
                 lines.append(f"  unknown   {fact.render()}")
         os.makedirs(os.path.dirname(os.path.abspath(path)) or ".", exist_ok=True)
-        # UTF-8 explicitly: the report renders user identifiers (module, class and
-        # parameter names) and the ambient locale can be ASCII in a container, where
-        # a non-ASCII name would raise UnicodeEncodeError and leave a truncated file
-        # behind -- from the one call that exists to explain the artifact.
-        with open(path, "w", encoding="utf-8") as handle:
+        with open(path, "w") as handle:
             handle.write("\n".join(lines) + "\n")
         log.info(
             "precompile: wrote invariants for %d frame(s) to %s", len(frames), path
@@ -1905,16 +1895,11 @@ class PrecompiledCallable:
                 self._state.notify_all()
                 raise
             self._loaded = False
-        # uninstall() forgets which code objects it installed onto, and a frame
-        # reached through code_source was installed onto the live code the
-        # running program resolves rather than the reconstructed twin the
-        # package holds, so the set to clear has to be taken first.
-        codes = self._package.region_codes()
         try:
             self._package.uninstall()
         finally:
             try:
-                _clear_package_region(codes, self._isolate_recompiles_id)
+                _clear_package_region(self._package, self._isolate_recompiles_id)
             finally:
                 from .eval_frame import _unregister_explicit_compile_region
 

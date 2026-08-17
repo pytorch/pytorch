@@ -642,6 +642,7 @@ class ConvertFrameAssert:
             self._one_graph,
             self._export,
             self._export_constraints,
+            package=self._package,
             recompile_limit=self._recompile_limit,
         )
 
@@ -2007,7 +2008,9 @@ def _compile(
 
     metrics_context = get_metrics_context()
     package_code_context = (
-        package.code_context(code) if package is not None else contextlib.nullcontext()
+        package.code_context(code, frame.f_locals if frame is not None else None)
+        if package is not None
+        else contextlib.nullcontext()
     )
     with (
         _use_lazy_graph_module(config.use_lazy_graph_module),
@@ -2391,6 +2394,7 @@ class ConvertFrame:
             recompile_limit=recompile_limit,
         )
         self._hooks = hooks
+        self._package = package
         self._recompile_limit = recompile_limit
 
     @property
@@ -2399,6 +2403,7 @@ class ConvertFrame:
         return lambda backend: convert_frame(
             backend,
             self._hooks,
+            package=self._package,
             recompile_limit=self._recompile_limit,
         )
 
