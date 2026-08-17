@@ -617,7 +617,9 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
         # type(default) (which would be NoneType for a str | None field).
         self.assertEqual(_alias_child_mixed.__dict__["e_config_int"].value_type, int)
         self.assertEqual(_alias_child_mixed.__dict__["e_annotated"].value_type, str)
-        self.assertEqual(_alias_child_mixed.__dict__["e_annotated_config"].value_type, str | None)
+        self.assertEqual(
+            _alias_child_mixed.__dict__["e_annotated_config"].value_type, str | None
+        )
 
     def test_alias_fields_from_child_override_not_aliased(self):
         # A field that the child explicitly defines must not be replaced by an
@@ -626,7 +628,9 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
         self.assertNotIsInstance(_alias_child_with_override.__dict__["e_bool"], _Config)
         self.assertFalse(_alias_child_with_override.__dict__["e_bool"])
         # Other fields are still aliased.
-        self.assertIsInstance(_alias_child_with_override.__dict__["e_config_int"], _Config)
+        self.assertIsInstance(
+            _alias_child_with_override.__dict__["e_config_int"], _Config
+        )
         self.assertIsNotNone(_alias_child_with_override.__dict__["e_config_int"].alias)
 
     def test_alias_unresolvable_raises(self):
