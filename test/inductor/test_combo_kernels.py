@@ -380,13 +380,17 @@ class ComboKernelTests(TestCase):
             _, code = run_and_get_code(torch.compile(fn), *inps)
 
         source = "\n".join(code)
-        events = [
-            "attention"
-            if " = torch.ops.aten._scaled_dot_product_" in line
-            else "kernel"
-            for line in source.splitlines()
-            if ".run(" in line or " = torch.ops.aten._scaled_dot_product_" in line
-        ]
+        aoti_sdpa = "AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_cuda__scaled_dot_product_"
+        events = []
+        for line in source.splitlines():
+            line = line.lstrip()
+            if (
+                " = torch.ops.aten._scaled_dot_product_" in line
+                or line.startswith(aoti_sdpa)
+            ):
+                events.append("attention")
+            elif ".run(" in line or line.startswith("call_triton_"):
+                events.append("kernel")
         self.assertEqual(events[:4], ["kernel", "attention", "kernel", "attention"])
         self.assertNotIn("'num_kernels': 2", source)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 3)
