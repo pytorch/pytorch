@@ -2217,8 +2217,12 @@ def ensure_nvmatmul_heuristics_available() -> bool:
         return False
 
 
-def use_flydsl_mxfp8_template(layout: Layout) -> bool:
-    """Return whether the gfx950 MXFP8 FlyDSL template may be selected."""
+def use_flydsl_scaled_mm_template(layout: Layout) -> bool:
+    """Return whether a gfx950 FlyDSL scaled_mm template may be selected.
+
+    Shared by the MXFP8 and MXFP4 lowerings: nothing here depends on the input
+    dtype, only on the backend list, the runtime being importable, and the arch.
+    """
     if not _use_autotune_backend("FLYDSL"):
         return False
     if torch.version.hip is None:
@@ -2240,7 +2244,7 @@ def use_flydsl_mxfp8_template(layout: Layout) -> bool:
         props = torch.cuda.get_device_properties(device_index)
         gcn_arch = getattr(props, "gcnArchName", "") or ""
     except Exception:
-        log.debug("Could not determine ROCm arch for MXFP8 FlyDSL gate", exc_info=True)
+        log.debug("Could not determine ROCm arch for FlyDSL gate", exc_info=True)
         return False
     return gcn_arch.split(":", 1)[0] == "gfx950"
 
