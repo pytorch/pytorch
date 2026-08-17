@@ -521,21 +521,19 @@ class ConfigModule(ModuleType):
         last_error: ModuleNotFoundError | None = None
         for i in range(len(parts) - 1, 0, -1):
             module_name = ".".join(parts[:i])
-            module = sys.modules.get(module_name)
-            if module is None:
-                try:
-                    module = importlib.import_module(module_name)
-                except ModuleNotFoundError as e:
-                    # Only swallow the case where this prefix itself isn't a
-                    # module; a shorter prefix may still resolve. A genuine
-                    # import failure *inside* an existing module (some deeper
-                    # missing dependency) must propagate rather than be masked.
-                    if e.name is not None and (
-                        module_name == e.name or module_name.startswith(e.name + ".")
-                    ):
-                        last_error = e
-                        continue
-                    raise
+            try:
+                module = importlib.import_module(module_name)
+            except ModuleNotFoundError as e:
+                # Only swallow the case where this prefix itself isn't a
+                # module; a shorter prefix may still resolve. A genuine
+                # import failure *inside* an existing module (some deeper
+                # missing dependency) must propagate rather than be masked.
+                if e.name is not None and (
+                    module_name == e.name or module_name.startswith(e.name + ".")
+                ):
+                    last_error = e
+                    continue
+                raise
             container: ModuleType | SubConfigProxy = module
             for attr in parts[i:-1]:
                 container = getattr(container, attr)
@@ -1121,7 +1119,11 @@ def alias_fields_from(parent_cls: type) -> Callable[[type], type]:
             if isinstance(v, _Config):
                 # ``type(v)`` would be ``_Config`` itself; recover the real
                 # value type from the field's declared type or its default.
-                value_type = v.value_type or type(v.default)
+                # Annotations are only back-filled into _Config by
+                # install_config_module, which runs after this decorator, so
+                # check the class annotation as a fallback before defaulting
+                # to type(default). Explicit value_type= still wins.
+                value_type = v.value_type or annotations.get(k) or type(v.default)
             else:
                 value_type = annotations.get(k, type(v))
             setattr(child_cls, k, Config(alias=f"{prefix}.{k}", value_type=value_type))

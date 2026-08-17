@@ -33,6 +33,7 @@ class _alias_parent_mixed:
     e_bool = True
     e_config_int = Config(default=7)
     e_annotated: str = "hi"
+    e_annotated_config: str | None = Config(default=None)
 
     class not_a_field:
         pass
@@ -44,6 +45,12 @@ class _alias_parent_mixed:
 @alias_fields_from(_alias_parent_mixed)
 class _alias_child_mixed:
     pass
+
+
+@alias_fields_from(_alias_parent_mixed)
+class _alias_child_with_override:
+    # Override e_bool; all other parent fields should be aliased.
+    e_bool = False
 
 
 class TestConfigModule(TestCase):
@@ -605,9 +612,22 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
     def test_alias_fields_from_unannotated_config_value_type(self):
         # A parent field declared via Config(default=...) with no annotation
         # must resolve to the default's type, not the _Config class. An
-        # annotated plain field resolves to its annotation.
+        # annotated plain field resolves to its annotation. An annotated
+        # Config(default=...) field must resolve to the annotation, not
+        # type(default) (which would be NoneType for a str | None field).
         self.assertEqual(_alias_child_mixed.__dict__["e_config_int"].value_type, int)
         self.assertEqual(_alias_child_mixed.__dict__["e_annotated"].value_type, str)
+        self.assertEqual(_alias_child_mixed.__dict__["e_annotated_config"].value_type, str | None)
+
+    def test_alias_fields_from_child_override_not_aliased(self):
+        # A field that the child explicitly defines must not be replaced by an
+        # alias; the child's own definition takes precedence.
+        # e_bool is the child's plain bool, not a _Config alias wrapper.
+        self.assertNotIsInstance(_alias_child_with_override.__dict__["e_bool"], _Config)
+        self.assertFalse(_alias_child_with_override.__dict__["e_bool"])
+        # Other fields are still aliased.
+        self.assertIsInstance(_alias_child_with_override.__dict__["e_config_int"], _Config)
+        self.assertIsNotNone(_alias_child_with_override.__dict__["e_config_int"].alias)
 
     def test_alias_unresolvable_raises(self):
         # An alias whose module prefix does not exist raises AttributeError.
