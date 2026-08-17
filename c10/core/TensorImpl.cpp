@@ -193,8 +193,13 @@ void TensorImpl::_change_backend_component_keys(c10::Device device) {
 }
 
 void TensorImpl::set_fake_device(c10::Device fake_device) {
-  if (fake_device.type() == c10::DeviceType::Meta) {
-    auto mode = c10::impl::FakeTensorModeTLS::get_state();
+  // Validate against the mode that owns this tensor, like python does. The
+  // ambient mode is the wrong one to ask: it may be a different mode than the
+  // one being attached (rejecting a tensor it does not own), or absent
+  // entirely. When no mode is attached yet, set_fake_tensor_mode does the check
+  // once it knows the owner.
+  if (fake_device.type() == c10::DeviceType::Meta && extra_meta_ != nullptr) {
+    const auto& mode = extra_meta_->fake_tensor_mode_;
     TORCH_CHECK(
         mode == nullptr || mode->allow_meta_,
         "device.type must not be 'meta' when allow_meta is False");
@@ -225,8 +230,7 @@ void TensorImpl::set_and_normalize_fake_device(c10::Device fake_device) {
   if (fake_device.index() == -1 && fake_device.type() != c10::DeviceType::CPU &&
       fake_device.type() != c10::DeviceType::Meta) {
     fake_device = c10::Device(
-        fake_device.type(),
-        c10::impl::resolveFakeDeviceIndex(fake_device.type()));
+        fake_device.type(), c10::impl::normalizeFakeDevice(fake_device.type()));
   }
   set_fake_device(fake_device);
 }
