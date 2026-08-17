@@ -344,6 +344,106 @@ def maybe_get_fake_constant(x: object) -> Tensor | None:
     return None
 
 
+def _avoid_device_init() -> bool:
+    if torch.xpu._is_compiled():
+        if torch.cuda._is_compiled():
+            raise AssertionError("Cannot have both xpu and cuda compiled")
+        return not torch.xpu.is_available()
+
+    return not (
+        torch.cuda.is_available()
+        or (hasattr(torch, "hpu") and torch.hpu.is_available())
+        or _is_privateuse1_backend_available()
+    )
+
+
+def _prep_args_for_hash(
+    mode: FakeTensorMode,
+    result: list[object],
+    args: Mapping[str, object] | Sequence[object] | Iterable[object],
+    state: _CacheKeyState,
+    id_hashed_objects: list[object],
+) -> None:
+    """
+    Translate the provided args into a form suitable for caching at FakeTensor
+    dispatch, i.e., convert unhashable types like lists & dicts into tuples and
+    convert FakeTensors into metadata. Raises _BypassDispatchCache to signal
+    unsupported cases that should bypass caching.
+    """
+    from torch._higher_order_ops.auto_functionalize import (
+        FunctionalCallableWithEpilogue,
+    )
+    from torch._higher_order_ops.utils import SubgraphCallableWrapper
+
+    if isinstance(args, (list, tuple, dict)):
+        result.append(type(args))
+        result.append(f"length_{len(args)}")
+
+    if isinstance(args, dict):
+        _prep_args_for_hash(mode, result, args.keys(), state, id_hashed_objects)
+        _prep_args_for_hash(mode, result, args.values(), state, id_hashed_objects)
+        return
+
+    for arg in args:
+        if is_fake_tensor(arg):
+            if not mode.is_our_fake(arg):
+                raise _BypassDispatchCache("not our fake")
+            if maybe_get_fake_constant(arg) is not None:
+                raise _BypassDispatchCache("constant attribute")
+            if is_sparse_any(arg):
+                raise _BypassDispatchCache(f"{arg.layout} tensor")
+            if arg.is_mkldnn:
+                raise _BypassDispatchCache("mkldnn tensor")
+            metadata = extract_tensor_metadata(arg)
+            metadata._flatten_into(result, mode, state)
+        elif isinstance(arg, Tensor):
+            raise _BypassDispatchCache("non-fake tensor")
+        elif isinstance(arg, SymInt):
+            state.convert_sym_int(result, arg)
+        elif isinstance(arg, (SymBool, SymFloat)):
+            raise _BypassDispatchCache("symbolic shape")
+        elif isinstance(arg, (list, tuple, dict)):
+            _prep_args_for_hash(mode, result, arg, state, id_hashed_objects)
+        elif isinstance(arg, types.FunctionType):
+            raise _BypassDispatchCache("function argument")
+        elif isinstance(arg, torch.fx.GraphModule):
+            # This is used for invoke_subgraph where id(graph_module) allows
+            # us to cache fake outputs
+            result.append(type(arg))
+            result.append(id(arg))
+            id_hashed_objects.append(arg)
+        elif isinstance(arg, SubgraphCallableWrapper):
+            result.append(hash(arg))
+            id_hashed_objects.append(arg.subgraph)
+        elif isinstance(arg, FunctionalCallableWithEpilogue):
+            result.append(type(arg))
+            result.append(hash(arg))
+            id_hashed_objects.append(arg.orig_callable)
+        else:
+            # It's important to capture the type of the arg since, e.g., 1 and 1.0
+            # hash to the same value, but can produce different dtypes for the
+            # output tensor.
+            result.append(type(arg))
+            result.append(arg)
+
+
+def _create_symbolic_nested_int(shape_env: Any, nt_tensor_id: int) -> IntLikeType:
+    # See Note: [Creating symbolic nested int]
+    # Returned nested int always has coeff=1; multiply the result by coeff if needed
+    import torch.nested._internal.nested_tensor
+    from torch.nested._internal.nested_int import NestedIntNode
+
+    if shape_env is None:
+        raise AssertionError("shape_env must not be None")
+    hint = torch.SymInt(NestedIntNode(nt_tensor_id, 1))
+    src = torch._dynamo.source.EphemeralSource("intermediate_offsets_or_lengths")
+    return shape_env.create_symintnode(
+        sym=shape_env.create_symbol(val=hint, source=src),
+        hint=hint,
+        source=src,
+    )
+
+
 @functools.cache
 def get_schema_info(func: OpOverload) -> torch._C._SchemaInfo:
     return torch._C._SchemaInfo(func._schema)
@@ -1667,16 +1767,7 @@ class FakeTensorMode(TorchDispatchMode):
     #   (see NOTE: [torch.tensor, lift_fresh, and device movement])
     @property
     def avoid_device_init(self) -> bool:
-        if torch.xpu._is_compiled():
-            if torch.cuda._is_compiled():
-                raise AssertionError("Cannot have both xpu and cuda compiled")
-            return not torch.xpu.is_available()
-
-        return not (
-            torch.cuda.is_available()
-            or (hasattr(torch, "hpu") and torch.hpu.is_available())
-            or _is_privateuse1_backend_available()
-        )
+        return _avoid_device_init()
 
     @property
     def stack(self) -> str:
@@ -2010,67 +2101,7 @@ class FakeTensorMode(TorchDispatchMode):
         state: _CacheKeyState,
         id_hashed_objects: list[object],
     ) -> None:
-        """
-        Translate the provided args into a form suitable for caching at FakeTensor
-        dispatch, i.e., convert unhashable types like lists & dicts into tuples and
-        convert FakeTensors into metadata. Raises _BypassDispatchCache to signal
-        unsupported cases that should bypass caching.
-        """
-        from torch._higher_order_ops.auto_functionalize import (
-            FunctionalCallableWithEpilogue,
-        )
-        from torch._higher_order_ops.utils import SubgraphCallableWrapper
-
-        if isinstance(args, (list, tuple, dict)):
-            result.append(type(args))
-            result.append(f"length_{len(args)}")
-
-        if isinstance(args, dict):
-            self._prep_args_for_hash(result, args.keys(), state, id_hashed_objects)
-            self._prep_args_for_hash(result, args.values(), state, id_hashed_objects)
-            return
-
-        for arg in args:
-            if isinstance(arg, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
-                if not self.is_our_fake(arg):
-                    raise _BypassDispatchCache("not our fake")
-                if arg.constant is not None:
-                    raise _BypassDispatchCache("constant attribute")
-                if is_sparse_any(arg):
-                    raise _BypassDispatchCache(f"{arg.layout} tensor")
-                if arg.is_mkldnn:
-                    raise _BypassDispatchCache("mkldnn tensor")
-                metadata = extract_tensor_metadata(arg)
-                metadata._flatten_into(result, self, state)
-            elif isinstance(arg, Tensor):
-                raise _BypassDispatchCache("non-fake tensor")
-            elif isinstance(arg, SymInt):
-                state.convert_sym_int(result, arg)
-            elif isinstance(arg, (SymBool, SymFloat)):
-                raise _BypassDispatchCache("symbolic shape")
-            elif isinstance(arg, (list, tuple, dict)):
-                self._prep_args_for_hash(result, arg, state, id_hashed_objects)
-            elif isinstance(arg, types.FunctionType):
-                raise _BypassDispatchCache("function argument")
-            elif isinstance(arg, torch.fx.GraphModule):
-                # This is used for invoke_subgraph where id(graph_module) allows
-                # us to cache fake outputs
-                result.append(type(arg))
-                result.append(id(arg))
-                id_hashed_objects.append(arg)
-            elif isinstance(arg, SubgraphCallableWrapper):
-                result.append(hash(arg))
-                id_hashed_objects.append(arg.subgraph)
-            elif isinstance(arg, FunctionalCallableWithEpilogue):
-                result.append(type(arg))
-                result.append(hash(arg))
-                id_hashed_objects.append(arg.orig_callable)
-            else:
-                # It's important to capture the type of the arg since, e.g., 1 and 1.0
-                # hash to the same value, but can produce different dtypes for the
-                # output tensor.
-                result.append(type(arg))
-                result.append(arg)
+        _prep_args_for_hash(self, result, args, state, id_hashed_objects)
 
     def _validate_output_for_cache_entry(
         self,
@@ -3365,11 +3396,6 @@ class FakeTensorMode(TorchDispatchMode):
     def create_symbolic_nested_int(
         self, *, nt_tensor_id: int | None = None
     ) -> IntLikeType:
-        # See Note: [Creating symbolic nested int]
-        # Returned nested int always has coeff=1; multiply the result by coeff if needed
-        import torch.nested._internal.nested_tensor
-        from torch.nested._internal.nested_int import NestedIntNode
-
         if nt_tensor_id is None:
             nt_tensor_id = self.nt_tensor_id_counter
             if not self.enter_stack:
@@ -3377,20 +3403,7 @@ class FakeTensorMode(TorchDispatchMode):
                     "should only be called while FakeTensorMode is active"
                 )
             self.nt_tensor_id_counter += 1
-        hint = torch.SymInt(NestedIntNode(nt_tensor_id, 1))
-
-        src = torch._dynamo.source.EphemeralSource("intermediate_offsets_or_lengths")
-        if self.shape_env is None:
-            raise AssertionError("self.shape_env must not be None")
-        ret = self.shape_env.create_symintnode(
-            sym=self.shape_env.create_symbol(
-                val=hint,
-                source=src,
-            ),
-            hint=hint,
-            source=src,
-        )
-        return ret
+        return _create_symbolic_nested_int(self.shape_env, nt_tensor_id)
 
     _cpp_meta_supports_symint = ordered_set(
         aten.empty.memory_format,
