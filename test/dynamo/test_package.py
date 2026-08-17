@@ -3569,7 +3569,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             pass
         self.assertTrue(os.path.isfile(path))
         self.assertFalse(os.path.isdir(path))
-        with open(path) as handle:
+        with open(path, encoding="utf-8") as handle:
             self.assertIn("# precompile invariants for", handle.read())
 
     def test_invariants_report_tensor_properties_that_split_a_compilation(self):
@@ -3661,7 +3661,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             any("top_saved_tensors_hooks" in f.render() for f in frame.invariant)
         )
 
-        with open(path) as handle:
+        with open(path, encoding="utf-8") as handle:
             text = handle.read()
         self.assertNotRegex(text, r"\b\d{9,}\b")
 
@@ -3869,7 +3869,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             invariants=path,
         ):
             pass
-        with open(path) as handle:
+        with open(path, encoding="utf-8") as handle:
             text = handle.read()
         self.assertIn("_<id>_c<n>", text)
         self.assertNotRegex(text, r"_\d{9,}_c\d")
@@ -5662,7 +5662,12 @@ def staged(x):
             for name, value in installed.items()
             if scope.get(name) is not value
         }
-        self.assertTrue(rebound)
+        # Two separate preconditions, asserted separately: an empty `rebound` can
+        # mean the first load installed nothing OR that the second load produced
+        # objects identical to the first, and those are different bugs. The
+        # py3.14t shard reports the second one, so name them.
+        self.assertTrue(installed, "the first load installed no globals")
+        self.assertTrue(rebound, f"the second load rebound none of {sorted(installed)}")
 
         first.unload()
         for name, value in rebound.items():

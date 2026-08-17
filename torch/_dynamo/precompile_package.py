@@ -852,6 +852,10 @@ class _PrecompileBackend:
         inner = torch._dynamo.lookup_backend(backend)
         self._torchdynamo_orig_backend = inner
         self._torchdynamo_cache_key = object()
+        # get_backend skips looking for that key until it knows one exists,
+        # because the lookup is a raising miss at every level of the callback
+        # chain for every torch.compile user who never precompiles.
+        torch._C._dynamo.eval_frame._enable_precompile_cache_keys()
         self.backend_ctx_ctor = getattr(
             inner, "backend_ctx_ctor", contextlib.nullcontext
         )
@@ -1536,7 +1540,11 @@ class PrecompileSession:
             for fact in f.undetermined:
                 lines.append(f"  unknown   {fact.render()}")
         os.makedirs(os.path.dirname(os.path.abspath(path)) or ".", exist_ok=True)
-        with open(path, "w") as handle:
+        # UTF-8 explicitly: the report renders user identifiers (module, class and
+        # parameter names) and the ambient locale can be ASCII in a container, where
+        # a non-ASCII name would raise UnicodeEncodeError and leave a truncated file
+        # behind -- from the one call that exists to explain the artifact.
+        with open(path, "w", encoding="utf-8") as handle:
             handle.write("\n".join(lines) + "\n")
         log.info(
             "precompile: wrote invariants for %d frame(s) to %s", len(frames), path
