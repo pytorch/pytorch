@@ -6,10 +6,7 @@
 
 #include <torch/csrc/dynamo/utils.h>
 #include <torch/csrc/utils/pybind.h>
-#include <cstdint>
 #include <list>
-#include <memory>
-#include <mutex>
 
 extern "C" {
 
@@ -40,7 +37,8 @@ typedef struct ExtraState ExtraState;
 
 #ifdef __cplusplus
 
-C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated-copy-with-user-provided-dtor")
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED(
+    "-Wdeprecated-copy-with-user-provided-dtor")
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated-copy-dtor")
 // NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 typedef struct VISIBILITY_HIDDEN CacheEntry {
@@ -59,52 +57,23 @@ typedef struct VISIBILITY_HIDDEN CacheEntry {
   // Reference to owning ExtraState
   ExtraState* _owner{nullptr};
   // Reference to this CacheEntry's location in owner's linked list
-  std::list<std::shared_ptr<CacheEntry>>::iterator _owner_loc;
+  std::list<CacheEntry>::iterator _owner_loc;
   // The isolate_recompiles_id for this entry's bucket in cache_entry_map
   int64_t _isolate_recompiles_id{-1};
   // Reference to string representation of the CompileContext
   std::string trace_annotation;
-  uint64_t identity;
-  // Serializes snapshotting and mutation through the weak Python handle.
-  mutable std::recursive_mutex state_mutex;
 
   CacheEntry(const py::handle& guarded_code, PyObject* backend);
-  CacheEntry(const CacheEntry&) = delete;
-  CacheEntry(CacheEntry&&) = delete;
-  CacheEntry& operator=(const CacheEntry&) = delete;
-  CacheEntry& operator=(CacheEntry&&) = delete;
+  CacheEntry(const CacheEntry&) = default;
+  CacheEntry(CacheEntry&&) = default;
+  CacheEntry& operator=(const CacheEntry&) = default;
+  CacheEntry& operator=(CacheEntry&&) = default;
   ~CacheEntry();
 
   void invalidate(py::object deleted_guard_manager);
   // Called from the python side to update the diff guard root manager
   void update_diff_guard_root_manager();
 } CacheEntry;
-
-class VISIBILITY_HIDDEN CacheEntryHandle {
- public:
-  explicit CacheEntryHandle(const std::shared_ptr<CacheEntry>& entry);
-
-  std::shared_ptr<CacheEntry> lock() const;
-  py::object backend() const;
-  void update_diff_guard_root_manager() const;
-
- private:
-  std::weak_ptr<CacheEntry> entry_;
-};
-
-struct VISIBILITY_HIDDEN CacheEntrySnapshot {
-  py::object guard_manager;
-  py::object code;
-  py::object compile_id;
-  py::object backend;
-  int64_t isolate_recompiles_id;
-  std::string trace_annotation;
-  uint64_t identity;
-  void* root_mgr;
-  void* diff_guard_root_mgr;
-
-  explicit CacheEntrySnapshot(const CacheEntry& entry);
-};
 C10_DIAGNOSTIC_POP()
 C10_DIAGNOSTIC_POP()
 
@@ -115,6 +84,10 @@ PyCodeObject* CacheEntry_get_code(CacheEntry* e);
 
 // Returns borrowed string representation of CompileContext
 const char* CacheEntry_get_trace_annotation(CacheEntry* e);
+
+// Returns a borrowed reference to CacheEntry as a PyObject
+// Warning: lifetime is controlled by C++
+PyObject* CacheEntry_to_obj(CacheEntry* e);
 
 #ifdef __cplusplus
 } // extern "C"

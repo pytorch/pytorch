@@ -387,10 +387,46 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
     return toplevel.__qualname__, code_source.strip(".")
 
 
+_CpuCodegenTarget = tuple[str, str, str | None, str, int | None, str | None]
+
+
+def _current_cpu_codegen_target() -> _CpuCodegenTarget | None:
+    """The vector-width inputs inductor bakes into generated CPU code.
+
+    ``pick_vec_isa`` dry-compiles a probe with the C++ toolchain: seconds on a
+    cold inductor cache, and a hard ``InvalidCxxCompiler`` where there is no
+    compiler at all. Callers must ask for it only when the artifact can hold CPU
+    native code, and a host that cannot build any records None -- it can neither
+    have produced nor be about to run an inductor CPU kernel, so there is no
+    baked vector width to protect.
+    """
+    from torch._inductor import config as inductor_config
+    from torch._inductor.cpu_vec_isa import pick_vec_isa
+
+    try:
+        vec_isa = str(pick_vec_isa())
+    except Exception:
+        logger.warning(
+            "Could not determine the CPU vector ISA, so no CPU codegen target "
+            "is recorded and none will be checked.",
+            exc_info=True,
+        )
+        return None
+
+    return (
+        platform.machine(),
+        torch.backends.cpu.get_cpu_capability(),
+        os.environ.get("ATEN_CPU_CAPABILITY"),
+        vec_isa,
+        inductor_config.cpp.simdlen,
+        inductor_config.cpp.march,
+    )
+
+
 @dataclasses.dataclass(frozen=True)
 class SystemInfo:
     """
-    System information including Python, PyTorch, and GPU details.
+    System information including Python, PyTorch, CPU codegen, and GPU details.
     This information is used to ensure compiled artifacts can only be loaded
     with compatible system configurations.
     """
@@ -400,13 +436,17 @@ class SystemInfo:
     toolkit_version: str | None
     triton_version: tuple[int, int] | None
     gpu_name: str | None
+    cpu_codegen_target: _CpuCodegenTarget | None = None
     CHECK_GPUS = ("cuda", "xpu")
 
     @classmethod
-    def current(cls) -> "SystemInfo":
-        """Create a SystemInfo instance with current system information."""
-        # Get GPU name if CUDA or XPU is available
-        gpu_name = None
+    def current(cls, *, cpu_codegen: bool = True) -> "SystemInfo":
+        """Create a SystemInfo instance with current system information.
+
+        ``cpu_codegen=False`` skips the toolchain probe behind
+        ``cpu_codegen_target``; everything else in here costs microseconds. Pass
+        it only where the result cannot reach a comparison that reads the field.
+        """
         from torch.utils._triton import get_triton_version
 
         gpu_name, toolkit_version = None, None
@@ -425,10 +465,15 @@ class SystemInfo:
             toolkit_version=toolkit_version,
             triton_version=get_triton_version((0, 0)),
             gpu_name=gpu_name,
+            cpu_codegen_target=_current_cpu_codegen_target() if cpu_codegen else None,
         )
 
     def check_compatibility(
-        self, other: "SystemInfo", device_type: str = "cpu"
+        self,
+        other: "SystemInfo",
+        device_type: str = "cpu",
+        *,
+        check_codegen: bool = True,
     ) -> None:
         """
         Check if this SystemInfo is compatible with another SystemInfo.
@@ -443,9 +488,41 @@ class SystemInfo:
             raise RuntimeError(
                 f"Compile package was created with a different PyTorch version: {self.torch_version}"
             )
+        # None means the artifact predates this field, not "no vector ISA".
+        # Only a build with a stable torch_version reaches here with None at
+        # all -- a dev build embeds the git hash, so the torch_version check
+        # just above fires first -- but for a release build it is every artifact already on
+        # disk, rejected over a target they never recorded. New artifacts always
+        # carry a tuple, so the skip does not widen over time.
+        if (
+            check_codegen
+            and device_type == "cpu"
+            and self.cpu_codegen_target is not None
+            and self.cpu_codegen_target != other.cpu_codegen_target
+        ):
+            # None on the current side means the probe could not run at all;
+            # None on the cached side is the "predates the field" case handled
+            # by the condition above and never reaches here.
+            hint = (
+                " The current target is unknown because no usable C++ compiler was found."
+                if other.cpu_codegen_target is None
+                else ""
+            )
+            raise RuntimeError(
+                "Compile package was created with a different CPU codegen target: "
+                f"cached={self.cpu_codegen_target}, current={other.cpu_codegen_target}.{hint}"
+            )
         if device_type in self.CHECK_GPUS:
+            # Device EXISTENCE is not a native-code question: an artifact
+            # holding cuda tensors cannot run without cuda whatever backend
+            # produced it, so this check stays outside check_codegen. Only the
+            # toolkit/Triton/GPU-model checks below describe generated code and
+            # are skipped for a backend that emits none.
             if not getattr(torch, device_type).is_available():
                 raise RuntimeError(f"{device_type} is not available")
+
+            if not check_codegen:
+                return
 
             if self.toolkit_version != other.toolkit_version:
                 raise RuntimeError(
@@ -483,7 +560,16 @@ class _DynamoCacheEntry:
 
     def check_versions(self) -> None:
         """Check if the current system is compatible with the system used to create this cache entry."""
-        current_system_info = SystemInfo.current()
+        # Determining the codegen target runs the C++ toolchain -- seconds on a
+        # cold inductor cache, and a re-raised InvalidCxxCompiler on a host with
+        # no compiler at all -- so only pay for it when this artifact actually
+        # records one to compare against.
+        current_system_info = SystemInfo.current(
+            cpu_codegen=(
+                self.device_type == "cpu"
+                and self.system_info.cpu_codegen_target is not None
+            )
+        )
         self.system_info.check_compatibility(current_system_info, self.device_type)
 
     def debug_info(self) -> dict[str, Any]:
@@ -637,6 +723,12 @@ class CompilePackage:
 
         self._current_entry: _DynamoCodeCacheEntry | None = None
         self._installed_globals: dict[types.ModuleType, list[str]] = {}
+        # Code objects holding this package's region state, so uninstall() can
+        # clear all of them -- and only them. Clearing the code object wholesale
+        # would take every OTHER region's entries with it, and since lookup() is
+        # region-exact those owners can no longer be served by what is left.
+        self._installed_precompile_codes: list[types.CodeType] = []
+        self._installed_precompile_region_id = -1
         # device_type that model compiled with.
         self._device_type = "cpu"
 
@@ -647,7 +739,6 @@ class CompilePackage:
         self._initialized = False
         if fn is not None:
             self.initialize(fn, dynamo, ignore_inlined_sources)
-            self.uninstall()
             self.validate()
 
     def is_initialized(self) -> bool:
@@ -798,6 +889,15 @@ class CompilePackage:
             self._source_info.add_code(code)
 
     def update_device_type(self, graph: torch.fx.Graph | None) -> None:
+        # A variant that compiles to nothing emits no code on any device, and
+        # _graph_device_type's fallback is "cpu": letting an empty graph through
+        # makes a pure-accelerator capture record a cpu_codegen_target it has no
+        # native code for, which then refuses to load on a host with a different
+        # vector ISA or no C++ compiler at all.
+        if graph is None or all(
+            node.op in ("placeholder", "output") for node in graph.nodes
+        ):
+            return
         self._device_type = _graph_device_type(graph)
 
     def bypass_current_entry(self) -> None:
@@ -862,7 +962,7 @@ class CompilePackage:
         self._installed_globals.setdefault(module, []).append(name)
 
     def uninstall(self) -> None:
-        from torch._C._dynamo.eval_frame import _reset_precompile_entries
+        from torch._C._dynamo.eval_frame import _reset_precompile_entries_for_region
 
         if self._innermost_fn is None:
             raise AssertionError("_innermost_fn is not set in uninstall")
@@ -872,21 +972,35 @@ class CompilePackage:
 
         self._installed_globals = {}
 
-        _reset_precompile_entries(self._innermost_fn.__code__)
+        for code in self._installed_precompile_codes:
+            _reset_precompile_entries_for_region(
+                code, self._installed_precompile_region_id
+            )
+        self._installed_precompile_codes = []
+        self._installed_precompile_region_id = -1
 
-    def install(self, backends: dict[_BackendId, Any]) -> None:
+    def install(
+        self,
+        backends: dict[_BackendId, Any],
+        *,
+        isolate_recompiles_id: int = -1,
+    ) -> None:
         """
         Sync the package states to the compiled function. This includes the following actions:
           1. Clean up the previously installed states.
           2. Install the compiled functions to global scopes.
           3. Install the precompiled cache entries to ExtraStates on the code object.
         """
-        from torch._C._dynamo.eval_frame import _load_precompile_entry
+        from torch._C._dynamo.eval_frame import (
+            _load_precompile_entry,
+            _reset_precompile_entries_for_region,
+        )
 
         from .convert_frame import input_codes
         from .output_graph import get_builtins_dict
 
         self.uninstall()
+        self._installed_precompile_region_id = isolate_recompiles_id
         for code, entry in self._codes.items():
             context = (
                 _compile_frame_context(code)
@@ -934,6 +1048,11 @@ class CompilePackage:
                     continue
 
                 input_codes.add(target_code)
+                if target_code not in self._installed_precompile_codes:
+                    _reset_precompile_entries_for_region(
+                        target_code, self._installed_precompile_region_id
+                    )
+                    self._installed_precompile_codes.append(target_code)
                 for backend_id in entry.backend_ids:
                     if backend_id not in backends:
                         raise RuntimeError(
@@ -992,6 +1111,7 @@ class CompilePackage:
                         target_code,
                         guard_manager,
                         SerializedCode.to_code_object(guarded_code.dynamo_code),
+                        isolate_recompiles_id,
                     )
 
     def cache_entry(self) -> _DynamoCacheEntry:
@@ -1002,6 +1122,10 @@ class CompilePackage:
             codes=list(self._codes.values()),
             source_info=self._source_info,
             device_type=self._device_type,
+            # The field's default_factory would run the C++ toolchain probe on
+            # every save; only an artifact that can hold CPU native code has a
+            # baked vector width to record.
+            system_info=SystemInfo.current(cpu_codegen=self._device_type == "cpu"),
             fn_name=self._innermost_fn.__qualname__,
             fn_first_lineno=self._innermost_fn.__code__.co_firstlineno,
         )
@@ -1274,16 +1398,25 @@ class DiskDynamoCache(DiskDynamoStore):
         counters["dynamo_cache"]["dynamo_cache_miss"] += 1
         return None
 
-    def load_and_install_package(self, fn: Callable[..., Any]) -> CompilePackage | None:
+    def load_and_install_package(
+        self, fn: Callable[..., Any], isolate_recompiles_id: int
+    ) -> CompilePackage | None:
         """
-        Load directly into a package and install backends
+        Load directly into a package and install backends.
+
+        ``isolate_recompiles_id`` must be the region the caller will look up in:
+        precompile entries match their own region only, so installing into the
+        default bucket for an isolated caller loads the artifact and then serves
+        nothing from it.
         """
         results = self.load(fn)
         if results is None:
             return None
         else:
             package = CompilePackage(fn, results.dynamo)
-            package.install(results.backends)
+            package.install(
+                results.backends, isolate_recompiles_id=isolate_recompiles_id
+            )
             return package
 
     def path_prefix(self) -> str:

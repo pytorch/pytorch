@@ -3,6 +3,7 @@ import faulthandler
 import operator
 import queue
 import sys
+import textwrap
 import threading
 import unittest
 import weakref
@@ -22,6 +23,7 @@ from torch._dynamo.exc import FailOnRecompileLimitHit
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    TestCase,
 )
 from torch.testing._internal.logging_utils import kwargs_to_settings, log_settings
 
@@ -70,312 +72,6 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
             opt_model(x, i)
 
         self.assertTrue(triggered)
-
-    def test_precompile_entry_runs_guard_complete_hook(self):
-        from torch._C._dynamo.eval_frame import (
-            _load_precompile_entry,
-            _reset_precompile_entries,
-            set_guard_complete_hook,
-        )
-
-        def fn(x):
-            return x + 1
-
-        def injected(x):
-            return x + 42
-
-        hook_results = []
-
-        def hook(guard_eval_result):
-            hook_results.append(guard_eval_result)
-            return guard_eval_result
-
-        compiled_fn = torch.compile(fn, backend="eager")
-        _load_precompile_entry(
-            fn.__code__,
-            torch._dynamo.guards.GuardManagerWrapper(),
-            injected.__code__,
-        )
-        prior_hook = set_guard_complete_hook(hook)
-        try:
-            args = (torch.randn(3, 2),)
-            self.assertEqual(compiled_fn(*args), injected(*args))
-            self.assertEqual(hook_results, [True])
-        finally:
-            set_guard_complete_hook(prior_hook)
-            _reset_precompile_entries(fn.__code__)
-
-    def test_reset_waits_for_inflight_precompile_guard(self):
-        from torch._C._dynamo.eval_frame import _load_precompile_entry, reset_code
-        from torch._dynamo.guards import GuardManagerWrapper, RootGuardManager
-
-        def fn(x):
-            return x + 1
-
-        def injected(x):
-            return x + 42
-
-        guard_entered = threading.Event()
-        release_guard = threading.Event()
-        reset_started = threading.Event()
-        errors = queue.SimpleQueue()
-        results = []
-
-        def blocking_guard(_locals):
-            guard_entered.set()
-            if not release_guard.wait(10):
-                raise AssertionError("timed out waiting to release guard")
-            return True
-
-        root = RootGuardManager()
-        root.add_lambda_guard(blocking_guard, [], None)
-        compiled_fn = torch.compile(fn, backend="eager")
-        _load_precompile_entry(
-            fn.__code__, GuardManagerWrapper(root), injected.__code__
-        )
-        args = (torch.randn(3, 2),)
-
-        def run_compiled():
-            try:
-                results.append(compiled_fn(*args))
-            except BaseException as error:
-                errors.put(error)
-
-        def run_reset():
-            try:
-                reset_started.set()
-                reset_code(fn.__code__)
-            except BaseException as error:
-                errors.put(error)
-
-        worker = threading.Thread(target=run_compiled, daemon=True)
-        resetter = threading.Thread(target=run_reset, daemon=True)
-        try:
-            worker.start()
-            self.assertTrue(guard_entered.wait(10))
-            resetter.start()
-            self.assertTrue(reset_started.wait(10))
-            resetter.join(1)
-            self.assertTrue(resetter.is_alive())
-        finally:
-            release_guard.set()
-            worker.join(10)
-            resetter.join(10)
-            reset_code(fn.__code__)
-
-        self.assertFalse(worker.is_alive())
-        self.assertFalse(resetter.is_alive())
-        raised = []
-        while not errors.empty():
-            raised.append(errors.get_nowait())
-        self.assertEqual(raised, [])
-        self.assertEqual(results, [injected(*args)])
-
-    def test_reset_after_lookup_keeps_cached_code_alive(self):
-        from torch._C._dynamo.eval_frame import (
-            _load_precompile_entry,
-            reset_code,
-            set_guard_complete_hook,
-        )
-        from torch._dynamo.guards import GuardManagerWrapper
-
-        def fn(x):
-            return x + 1
-
-        hook_entered = threading.Event()
-        release_hook = threading.Event()
-        errors = queue.SimpleQueue()
-        results = []
-
-        def blocking_hook(guard_eval_result):
-            hook_entered.set()
-            if not release_hook.wait(10):
-                raise AssertionError("timed out waiting to release guard hook")
-            return guard_eval_result
-
-        compiled_fn = torch.compile(fn, backend="eager")
-        injected_code = (lambda x: x + 42).__code__
-        _load_precompile_entry(fn.__code__, GuardManagerWrapper(), injected_code)
-        del injected_code
-        args = (torch.randn(3, 2),)
-
-        def run_compiled():
-            try:
-                results.append(compiled_fn(*args))
-            except BaseException as error:
-                errors.put(error)
-
-        def run_reset():
-            try:
-                reset_code(fn.__code__)
-            except BaseException as error:
-                errors.put(error)
-
-        prior_hook = set_guard_complete_hook(blocking_hook)
-        worker = threading.Thread(target=run_compiled, daemon=True)
-        resetter = threading.Thread(target=run_reset, daemon=True)
-        try:
-            worker.start()
-            self.assertTrue(hook_entered.wait(10))
-            resetter.start()
-            resetter.join(10)
-            self.assertFalse(resetter.is_alive())
-        finally:
-            release_hook.set()
-            worker.join(10)
-            resetter.join(10)
-            set_guard_complete_hook(prior_hook)
-            reset_code(fn.__code__)
-
-        self.assertFalse(worker.is_alive())
-        raised = []
-        while not errors.empty():
-            raised.append(errors.get_nowait())
-        self.assertEqual(raised, [])
-        self.assertEqual(results, [args[0] + 42])
-
-    def test_reentrant_reset_from_backend_equality(self):
-        from torch._C._dynamo.eval_frame import reset_code
-
-        def fn(x):
-            return x + 1
-
-        class Backend:
-            __hash__ = object.__hash__
-
-            def __init__(self):
-                self.reset_on_equality = False
-                self.comparisons = 0
-
-            def __call__(self, gm, _example_inputs):
-                return gm.forward
-
-            def __eq__(self, other):
-                self.comparisons += 1
-                if self.reset_on_equality:
-                    reset_code(fn.__code__)
-                return self is other
-
-        first_backend = Backend()
-        args = (torch.randn(3),)
-        self.assertEqual(torch.compile(fn, backend=first_backend)(*args), fn(*args))
-
-        first_backend.reset_on_equality = True
-        second_backend = Backend()
-        self.assertEqual(torch.compile(fn, backend=second_backend)(*args), fn(*args))
-        self.assertGreater(first_backend.comparisons, 0)
-
-    def test_cache_entry_snapshots_survive_reset(self):
-        from torch._C._dynamo.eval_frame import (
-            _debug_get_cache_entry_list,
-            _debug_get_precompile_entries,
-            _load_precompile_entry,
-            reset_code,
-        )
-        from torch._dynamo.guards import GuardManagerWrapper
-
-        def fn(x):
-            return x + 1
-
-        args = (torch.randn(3),)
-        self.assertEqual(torch.compile(fn, backend="eager")(*args), fn(*args))
-        cache_entry = _debug_get_cache_entry_list(fn.__code__)[0]
-        cached_code = cache_entry.code
-        cached_guard_manager = cache_entry.guard_manager
-
-        _load_precompile_entry(
-            fn.__code__, GuardManagerWrapper(), (lambda x: x + 2).__code__
-        )
-        precompile_entry = _debug_get_precompile_entries(fn.__code__)[0]
-        precompiled_guard_manager = precompile_entry.guard_manager
-
-        reset_code(fn.__code__)
-        self.assertIs(cache_entry.code, cached_code)
-        self.assertIs(cache_entry.guard_manager, cached_guard_manager)
-        self.assertIs(precompile_entry.guard_manager, precompiled_guard_manager)
-
-    @unittest.skipUnless(
-        hasattr(sys, "_is_gil_enabled") and not sys._is_gil_enabled(),
-        "requires a free-threaded Python build",
-    )
-    def test_free_threaded_cold_extra_state_initialization(self):
-        errors = queue.SimpleQueue()
-
-        for index in range(10):
-            namespace = {"__name__": __name__}
-            exec(f"def fn_{index}(x):\n    return x + 1\n", namespace)
-            fn = namespace[f"fn_{index}"]
-            compiled = torch.compile(fn, backend="eager")
-            barrier = threading.Barrier(8)
-
-            def run():
-                try:
-                    barrier.wait()
-                    result = compiled(torch.ones(1))
-                    if not torch.equal(result, torch.full((1,), 2.0)):
-                        raise AssertionError(f"unexpected result: {result}")
-                except BaseException as error:
-                    errors.put(error)
-
-            threads = [threading.Thread(target=run) for _ in range(8)]
-            for thread in threads:
-                thread.start()
-            for thread in threads:
-                thread.join(30)
-                self.assertFalse(thread.is_alive())
-
-        raised = []
-        while not errors.empty():
-            raised.append(errors.get_nowait())
-        self.assertEqual(raised, [])
-
-    @unittest.skipUnless(
-        hasattr(sys, "_is_gil_enabled") and not sys._is_gil_enabled(),
-        "requires a free-threaded Python build",
-    )
-    def test_free_threaded_reset_races_default_frame_state_read(self):
-        from torch._C._dynamo.eval_frame import reset_code
-
-        def fn(x):
-            return x + 1
-
-        compiled = torch.compile(fn, backend="eager")
-        self.assertEqual(compiled(torch.ones(1)), torch.full((1,), 2.0))
-        barrier = threading.Barrier(2)
-        errors = queue.SimpleQueue()
-
-        def call_compiled():
-            try:
-                barrier.wait()
-                for _ in range(200):
-                    result = compiled(torch.ones(1))
-                    if not torch.equal(result, torch.full((1,), 2.0)):
-                        raise AssertionError(f"unexpected result: {result}")
-            except BaseException as error:
-                errors.put(error)
-
-        def reset_compiled():
-            try:
-                barrier.wait()
-                for _ in range(200):
-                    reset_code(fn.__code__)
-            except BaseException as error:
-                errors.put(error)
-
-        threads = [
-            threading.Thread(target=call_compiled),
-            threading.Thread(target=reset_compiled),
-        ]
-        for thread in threads:
-            thread.start()
-        for thread in threads:
-            thread.join(60)
-            self.assertFalse(thread.is_alive())
-
-        raised = []
-        while not errors.empty():
-            raised.append(errors.get_nowait())
-        self.assertEqual(raised, [])
 
     def test_loop_torture(self):
         def loop_torture(input, iters):
@@ -2014,6 +1710,109 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(self._num_cache_entries(f), 0)
 
     # ===== Debug / introspection =====
+
+    def test_cache_key_lookup_is_off_until_a_cache_key_backend_exists(self):
+        # get_backend walks the callback chain on every intercepted frame, and
+        # looking for _torchdynamo_cache_key there is a MISS at every level for
+        # anyone who never precompiles -- a raising attribute lookup per level
+        # per frame, measured at ~1 us on a steady-state compiled call. The
+        # lookup is therefore gated on a flag that only a backend carrying such
+        # a key turns on. Nothing else in the tree sets that attribute, so the
+        # gate is invisible; this pins that the switch exists and is one-way.
+        # The gate is process-global and one-way, and anything that imports the
+        # precompile backend flips it, so the OFF half can only be observed in a
+        # fresh interpreter. Two wrappers over ONE shared backend are the
+        # discriminator: with the gate off get_backend follows
+        # _torchdynamo_orig_backend to that shared object and both compilations
+        # share one cache identity; with it on, their distinct cache keys are
+        # two identities.
+        script = textwrap.dedent(
+            """
+            import torch
+            from torch._C._dynamo.eval_frame import (
+                _debug_get_cache_entry_list,
+                _enable_precompile_cache_keys,
+            )
+
+            def fn(x):
+                return x.sin()
+
+            class Backend:
+                # The shape _PrecompileBackend has, minus the __init__ that
+                # would flip the gate before the OFF half is measured.
+                def __init__(self, inner):
+                    self._torchdynamo_orig_backend = inner
+                    self._torchdynamo_cache_key = object()
+
+                def __call__(self, gm, inputs):
+                    return self._torchdynamo_orig_backend(gm, inputs)
+
+            inner = torch._dynamo.lookup_backend("eager")
+
+            def entries(same_key):
+                torch._dynamo.reset()
+                x = torch.randn(4)
+                a, b = Backend(inner), Backend(inner)
+                if same_key:
+                    b._torchdynamo_cache_key = a._torchdynamo_cache_key
+                # optimize(), not compile(backend=), because compile() wraps the
+                # backend in a _TorchCompileWrapper that is not in the chain
+                # get_backend walks.
+                torch._dynamo.optimize(a)(fn)(x)
+                torch._dynamo.optimize(b)(fn)(x)
+                return len(_debug_get_cache_entry_list(fn.__code__))
+
+            print("off", entries(False))
+            _enable_precompile_cache_keys()
+            _enable_precompile_cache_keys()  # idempotent
+            print("on", entries(False))
+            print("on_same_key", entries(True))
+            """
+        )
+        stdout, stderr = TestCase.run_process_no_exception(script)
+        out = stdout.decode()
+        self.assertIn("off 1", out, stderr.decode())
+        self.assertIn("on 2", out, stderr.decode())
+        # The key IS the identity, so two backends sharing one key still share
+        # one cache entry -- the gate must not simply split every backend.
+        self.assertIn("on_same_key 1", out, stderr.decode())
+
+    def test_has_precompile_entries_is_region_exact(self):
+        """_has_precompile_entries answers for one region only. lookup() never
+        serves a precompile entry from another region, so an entry belonging to
+        a second artifact installed on the same code object is not coverage for
+        the first. It exists so that a caller can ask that question without
+        building the list of wrappers _debug_get_precompile_entries returns."""
+        from torch._C._dynamo.eval_frame import (
+            _debug_get_cache_entry_list,
+            _has_precompile_entries,
+            _load_precompile_entry,
+            _reset_precompile_entries_for_region,
+        )
+
+        def never_compiled(x):
+            return x + 1
+
+        self.assertFalse(_has_precompile_entries(never_compiled.__code__, -1))
+        with self.assertRaisesRegex(TypeError, "expected a code object"):
+            _has_precompile_entries(never_compiled, -1)
+
+        def f(x):
+            return x.sin()
+
+        torch.compile(f, backend="eager", dynamic=False)(torch.randn(3))
+        code = f.__code__
+        self.assertFalse(_has_precompile_entries(code, 7))
+
+        guard_manager = _debug_get_cache_entry_list(code)[0].guard_manager
+        _load_precompile_entry(code, guard_manager, code, 7)
+        try:
+            self.assertTrue(_has_precompile_entries(code, 7))
+            self.assertFalse(_has_precompile_entries(code, 9))
+            self.assertFalse(_has_precompile_entries(code, -1))
+        finally:
+            _reset_precompile_entries_for_region(code, 7)
+        self.assertFalse(_has_precompile_entries(code, 7))
 
     def test_isolate_recompiles_debug_cache_entry_list_deterministic_order(self):
         """_debug_get_cache_entry_list returns entries sorted by
