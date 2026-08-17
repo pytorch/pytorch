@@ -34,11 +34,11 @@ def _is_supported_arch(device_index: int) -> bool:
 def _fits_int32_buffer_span(rows_m: int, n: int, itemsize: int) -> bool:
     """Whether a contiguous (rows_m, n) tensor fits FlyDSL buffer indexing."""
     int32_max = (1 << 31) - 1
-    num_records_max = (1 << 32) - 1
+    uint32_max = (1 << 32) - 1
     return (
         0 < rows_m <= int32_max
         and 0 < n <= int32_max
-        and rows_m * n * itemsize <= num_records_max
+        and rows_m * n * itemsize <= uint32_max
     )
 
 
