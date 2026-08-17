@@ -59,6 +59,7 @@ class SingnatureOnlyLlamaModel(torch.nn.Module):
 @common_utils.instantiate_parametrized_tests
 class TestDynamicShapes(common_utils.TestCase):
     hw_classification = HardwareClassification.GENERIC
+    
     @common_utils.parametrize(
         "dynamic_shapes, input_names, expected_dynamic_axes",
         [
