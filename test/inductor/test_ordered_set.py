@@ -434,6 +434,8 @@ class TestJointOps(TestCase):
 
 
 class TestSet(TestJointOps, TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     thetype = OrderedSet
     basetype = OrderedSet
 
@@ -856,6 +858,8 @@ class TestBasicOps(TestCase):
 
 
 class TestBasicOpsEmpty(TestBasicOps, TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.case = "empty OrderedSet"
@@ -870,6 +874,8 @@ class TestBasicOpsEmpty(TestBasicOps, TestCase):
 
 
 class TestBasicOpsSingleton(TestBasicOps, TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.case = "unit OrderedSet (number)"
@@ -890,6 +896,8 @@ class TestBasicOpsSingleton(TestBasicOps, TestCase):
 
 
 class TestBasicOpsTuple(TestBasicOps, TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.case = "unit OrderedSet (tuple)"
@@ -910,6 +918,8 @@ class TestBasicOpsTuple(TestBasicOps, TestCase):
 
 
 class TestBasicOpsTriple(TestBasicOps, TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.case = "triple OrderedSet"
@@ -924,6 +934,8 @@ class TestBasicOpsTriple(TestBasicOps, TestCase):
 
 
 class TestBasicOpsString(TestBasicOps, TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.case = "string OrderedSet"
@@ -941,6 +953,8 @@ class TestBasicOpsString(TestBasicOps, TestCase):
 
 
 class TestBasicOpsBytes(TestBasicOps, TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.case = "bytes OrderedSet"
@@ -958,6 +972,8 @@ class TestBasicOpsBytes(TestBasicOps, TestCase):
 
 
 class TestBasicOpsMixedStringBytes(TestBasicOps, TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         warnings.simplefilter("ignore", BytesWarning)
@@ -1328,6 +1344,8 @@ class TestSubsets(TestCase):
 
 
 class TestSubsetEqualEmpty(TestSubsets, TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     left = OrderedSet()
     right = OrderedSet()
     name = "both empty"
@@ -1338,6 +1356,8 @@ class TestSubsetEqualEmpty(TestSubsets, TestCase):
 
 
 class TestSubsetEqualNonEmpty(TestSubsets, TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     left = OrderedSet([1, 2])
     right = OrderedSet([1, 2])
     name = "equal pair"
@@ -1348,6 +1368,8 @@ class TestSubsetEqualNonEmpty(TestSubsets, TestCase):
 
 
 class TestSubsetEmptyNonEmpty(TestSubsets, TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     left = OrderedSet()
     right = OrderedSet([1, 2])
     name = "one empty, one non-empty"
@@ -1358,6 +1380,8 @@ class TestSubsetEmptyNonEmpty(TestSubsets, TestCase):
 
 
 class TestSubsetPartial(TestSubsets, TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     left = OrderedSet([1])
     right = OrderedSet([1, 2])
     name = "one a non-empty proper subset of other"
@@ -1368,6 +1392,8 @@ class TestSubsetPartial(TestSubsets, TestCase):
 
 
 class TestSubsetNonOverlap(TestSubsets, TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     left = OrderedSet([1])
     right = OrderedSet([2])
     name = "neither empty, neither contains"
@@ -1498,6 +1524,8 @@ class TestOnlySetsInBinaryOps(TestCase):
 
 
 class TestOnlySetsNumeric(TestOnlySetsInBinaryOps, TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.OrderedSet = OrderedSet((1, 2, 3))
@@ -1509,6 +1537,8 @@ class TestOnlySetsNumeric(TestOnlySetsInBinaryOps, TestCase):
 
 
 class TestOnlySetsDict(TestOnlySetsInBinaryOps, TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.OrderedSet = OrderedSet((1, 2, 3))
@@ -1520,6 +1550,8 @@ class TestOnlySetsDict(TestOnlySetsInBinaryOps, TestCase):
 
 
 class TestOnlySetsOperator(TestOnlySetsInBinaryOps, TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.OrderedSet = OrderedSet((1, 2, 3))
@@ -1531,6 +1563,8 @@ class TestOnlySetsOperator(TestOnlySetsInBinaryOps, TestCase):
 
 
 class TestOnlySetsTuple(TestOnlySetsInBinaryOps, TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.OrderedSet = OrderedSet((1, 2, 3))
@@ -1542,6 +1576,8 @@ class TestOnlySetsTuple(TestOnlySetsInBinaryOps, TestCase):
 
 
 class TestOnlySetsString(TestOnlySetsInBinaryOps, TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.OrderedSet = OrderedSet((1, 2, 3))
@@ -1553,6 +1589,8 @@ class TestOnlySetsString(TestOnlySetsInBinaryOps, TestCase):
 
 
 class TestOnlySetsGenerator(TestOnlySetsInBinaryOps, TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
 
@@ -1594,6 +1632,8 @@ class TestCopying:
 
 
 class TestCopyingEmpty(TestCopying, TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.OrderedSet = OrderedSet()
@@ -1603,6 +1643,8 @@ class TestCopyingEmpty(TestCopying, TestCase):
 
 
 class TestCopyingSingleton(TestCopying, TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.OrderedSet = OrderedSet(["hello"])
@@ -1612,6 +1654,8 @@ class TestCopyingSingleton(TestCopying, TestCase):
 
 
 class TestCopyingTriple(TestCopying, TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.OrderedSet = OrderedSet(["zero", 0, None])
@@ -1621,6 +1665,8 @@ class TestCopyingTriple(TestCopying, TestCase):
 
 
 class TestCopyingTuple(TestCopying, TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.OrderedSet = OrderedSet([(1, 2)])
@@ -1630,6 +1676,8 @@ class TestCopyingTuple(TestCopying, TestCase):
 
 
 class TestCopyingNested(TestCopying, TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.OrderedSet = OrderedSet([((1, 2), (3, 4))])
