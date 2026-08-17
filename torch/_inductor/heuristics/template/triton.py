@@ -58,11 +58,6 @@ else:
 log = logging.getLogger(__name__)
 
 
-def _origami_enabled() -> bool:
-    """Check if origami GEMM optimization is enabled."""
-    return config.rocm.origami
-
-
 USE_META_WS = meta_ws_enabled()
 
 
@@ -74,13 +69,22 @@ def _use_template_autows() -> bool:
 
 # Check if running on ROCm
 IS_ROCM = torch.version.hip is not None
+_rocm_version = (
+    tuple(int(v) for v in torch.version.hip.split(".")[:2]) if IS_ROCM else (0, 0)
+)
+
+
+def _origami_enabled() -> bool:
+    """Check if origami GEMM optimization is enabled."""
+    return config.rocm.origami and _rocm_version < (10, 0)
 
 
 # rocm-origami pip pkg is only available on ROCm builds and is only used when
 # both max_autotune and config.rocm.origami are enabled (env-var driven, set once
 # at config import). Cache the import here so the hot path never pays an exception
 # and CUDA/CPU/origami-disabled processes never attempt the import.
-if IS_ROCM and config.max_autotune and config.rocm.origami:
+# origami is not supported on ROCm 10.0+.
+if IS_ROCM and _rocm_version < (10, 0) and config.max_autotune and config.rocm.origami:
     try:
         import origami  # type: ignore[import-not-found]
     except ImportError:

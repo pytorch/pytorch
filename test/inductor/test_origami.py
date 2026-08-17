@@ -32,6 +32,10 @@ PERF_SLOWDOWN_TOLERANCE = 1.05  # 5% tolerance on performance
 # Use torch.cuda.get_device_properties() to query actual device capabilities.
 
 IS_ROCM = torch.version.hip is not None
+_rocm_version = (
+    tuple(int(v) for v in torch.version.hip.split(".")[:2]) if IS_ROCM else (0, 0)
+)
+ORIGAMI_ROCM_SUPPORTED = IS_ROCM and _rocm_version < (10, 0)
 
 try:
     import origami
@@ -61,6 +65,10 @@ def tearDownModule():
 
 @unittest.skipIf(not HAS_GPU_AND_TRITON, "requires GPU and Triton")
 @unittest.skipIf(not IS_ROCM, "Origami integration is ROCm-only")
+@unittest.skipIf(
+    not ORIGAMI_ROCM_SUPPORTED,
+    "Origami is not supported on ROCm 10.0+",
+)
 @unittest.skipIf(not HAS_ORIGAMI, "Origami package is not installed")
 @unittest.skipIf(
     not (config.max_autotune and config.rocm.origami),
@@ -492,7 +500,7 @@ class TestOrigami(TestCase):
         snippet = (
             "import os, torch\n"
             "from torch._inductor import config\n"
-            "from torch._inductor.template_heuristics import triton as th\n"
+            "from torch._inductor.heuristics.template import triton as th\n"
             "assert os.environ.get('TORCHINDUCTOR_ORIGAMI') == '0', 'env var not set to 0'\n"
             "assert th.origami is None, f'expected None, got {th.origami!r}'\n"
             "# Even after flipping the config knob mid-process, origami stays None\n"
@@ -520,7 +528,8 @@ class TestOrigami(TestCase):
 
 
 @unittest.skipIf(
-    HAS_GPU_AND_TRITON and IS_ROCM, "Skipped on ROCm where origami is available"
+    HAS_GPU_AND_TRITON and ORIGAMI_ROCM_SUPPORTED,
+    "Skipped on ROCm < 10.0 where origami is available",
 )
 class TestOrigamiSkippedOnNonROCm(TestCase):
     """Test that origami is properly skipped on non-ROCm devices (CUDA/CPU).
