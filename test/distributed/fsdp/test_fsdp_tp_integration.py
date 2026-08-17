@@ -116,7 +116,7 @@ class TPFSDPIntegrationTestBase(FSDPTestContinuous):
 
     @property
     def world_size(self) -> int:
-        return min(4, _get_device_module(self.device_type).device_count())
+        return _get_device_module(self.device_type).device_count()
 
 
 class TestTPFSDPIntegration(TPFSDPIntegrationTestBase):
@@ -531,7 +531,6 @@ class TestTPFSDPIntegration(TPFSDPIntegrationTestBase):
 instantiate_device_type_tests(
     TestTPFSDPIntegration,
     globals(),
-    except_for="cpu",
     allow_xpu=True,
 )
 
