@@ -284,10 +284,21 @@ class TestCoordinateDescentTuner(TestCase):
                     "XBLOCK_0": 64,
                     "XBLOCK_1": 256,
                     "R0_BLOCK_1": 128,
-                }
+                },
+                "combo_coordesc_field_minimums": {
+                    "XBLOCK_0": 4,
+                    "XBLOCK_1": 8,
+                    "R0_BLOCK_1": 16,
+                },
             },
         )
 
+        self.assertTrue(tuner.value_too_small("XBLOCK_0", 2))
+        self.assertFalse(tuner.value_too_small("XBLOCK_0", 4))
+        self.assertTrue(tuner.value_too_small("XBLOCK_1", 4))
+        self.assertFalse(tuner.value_too_small("XBLOCK_1", 8))
+        self.assertTrue(tuner.value_too_small("R0_BLOCK_1", 8))
+        self.assertFalse(tuner.value_too_small("R0_BLOCK_1", 16))
         self.assertFalse(tuner.value_too_large("XBLOCK_0", 64))
         self.assertTrue(tuner.value_too_large("XBLOCK_0", 128))
         self.assertFalse(tuner.value_too_large("XBLOCK_1", 256))
@@ -301,6 +312,7 @@ class TestCoordinateDescentTuner(TestCase):
             inductor_meta={
                 "min_xblock": 16,
                 "min_rblock": 64,
+                "tma_min_block_sizes": {"XBLOCK": 4},
             },
         )
 
@@ -310,6 +322,21 @@ class TestCoordinateDescentTuner(TestCase):
         self.assertFalse(tuner.value_too_small("R0_BLOCK", 64))
         self.assertEqual(tuner.get_neighbour_values("XBLOCK", 16), [32])
         self.assertEqual(tuner.get_neighbour_values("R0_BLOCK", 64), [128])
+
+    def test_tma_minimum_block_sizes(self):
+        tuner = CoordescTuner(
+            inductor_meta={
+                "tma_min_block_sizes": {
+                    "XBLOCK": 4,
+                    "R0_BLOCK": 16,
+                }
+            }
+        )
+
+        self.assertTrue(tuner.value_too_small("XBLOCK", 2))
+        self.assertFalse(tuner.value_too_small("XBLOCK", 4))
+        self.assertTrue(tuner.value_too_small("R0_BLOCK", 8))
+        self.assertFalse(tuner.value_too_small("R0_BLOCK", 16))
 
     def test_combo_metadata_orders_larger_subkernels_first_for_coordesc(self):
         def make_configs(xblock, yblock):
@@ -390,6 +417,47 @@ class TestCoordinateDescentTuner(TestCase):
         self.assertEqual(
             tuner.tunable_fields[: len(inductor_meta["combo_coordesc_field_order"])],
             inductor_meta["combo_coordesc_field_order"],
+        )
+
+    def test_compile_time_combo_metadata_preserves_block_minimums(self):
+        inductor_meta = {
+            "combo_grid_meta": {
+                "num_kernels": 2,
+                "heuristic_0": "pointwise",
+                "size_hints_0": {"x": 64},
+                "size_hints_1": {"x": 256},
+                "inductor_meta_0": {"tma_min_block_sizes": {"XBLOCK": 4}},
+                "inductor_meta_1": {
+                    "tma_min_block_sizes": {"XBLOCK": 4},
+                    "min_xblock": 8,
+                },
+                "default_config": {"XBLOCK_0": 4, "XBLOCK_1": 16},
+                "stitched_launch_candidates": [({}, 4, 1)],
+            }
+        }
+
+        configs = triton_heuristics._handle_combo_kernel_per_subkernel_blocks(
+            {"x": 256},
+            inductor_meta,
+            triton_meta={},
+        )
+
+        self.assertIsNotNone(configs)
+        self.assertEqual(
+            inductor_meta["combo_coordesc_field_order"],
+            ["XBLOCK_1", "XBLOCK_0"],
+        )
+        self.assertEqual(
+            inductor_meta["combo_coordesc_field_minimums"],
+            {"XBLOCK_0": 4, "XBLOCK_1": 8},
+        )
+        tuner = CoordescTuner(inductor_meta=inductor_meta)
+        self.assertEqual(
+            [
+                cfg.kwargs["XBLOCK_0"]
+                for cfg in tuner.get_neighbour_configs(configs[0], "XBLOCK_0")
+            ],
+            [8],
         )
 
 

@@ -4119,13 +4119,24 @@ def _update_combo_kernel_kwargs(
         kwargs[suffixed_key if suffixed_key in block_arg_names else key] = value
 
 
+def _combo_coordesc_min_block_sizes(
+    combo_meta: dict[str, Any], subkernel_idx: int
+) -> dict[str, int]:
+    sub_meta = combo_meta.get(f"inductor_meta_{subkernel_idx}", {})
+    minimums = dict(sub_meta.get("tma_min_block_sizes") or {})
+    for key, meta_key in (("XBLOCK", "min_xblock"), ("R0_BLOCK", "min_rblock")):
+        if (minimum := sub_meta.get(meta_key)) is not None:
+            minimums[key] = max(minimums.get(key, 1), minimum)
+    return minimums
+
+
 def _combo_coordesc_meta(
     combo_meta: dict[str, Any], block_config: dict[str, int]
-) -> tuple[list[str], dict[str, int]]:
+) -> tuple[list[str], dict[str, int], dict[str, int]]:
     """Suffixed per-subkernel block fields (XBLOCK_0, XBLOCK_1, ...) and their
-    max sizes so coordinate descent can tune a compile-time stitched combo's
-    blocks. Heaviest sub-kernels first, matching the runtime per-subkernel
-    builder (largest dominates runtime, gets tuned while the budget is freshest).
+    min/max sizes so coordinate descent can tune a compile-time stitched combo's
+    blocks. Heaviest sub-kernels first, matching the runtime per-subkernel builder
+    (largest dominates runtime, gets tuned while the budget is freshest).
     """
     order = sorted(
         range(combo_meta["num_kernels"]),
@@ -4135,18 +4146,23 @@ def _combo_coordesc_meta(
     )
     field_order: list[str] = []
     field_limits: dict[str, int] = {}
+    field_minimums: dict[str, int] = {}
     for i in order:
         size_hints_i = combo_meta[f"size_hints_{i}"]
+        min_block_sizes = _combo_coordesc_min_block_sizes(combo_meta, i)
         for key in block_config:
             if key.rsplit("_", 1)[-1] != str(i):
                 continue
             field_order.append(key)
-            prefix = key.rsplit("_", 1)[0].removesuffix("BLOCK").lower()
+            block_key = key.rsplit("_", 1)[0]
+            prefix = block_key.removesuffix("BLOCK").lower()
             if prefix in size_hints_i:
                 field_limits[key] = min(
                     TRITON_MAX_BLOCK[prefix.upper()], size_hints_i[prefix]
                 )
-    return field_order, field_limits
+            if block_key in min_block_sizes:
+                field_minimums[key] = min_block_sizes[block_key]
+    return field_order, field_limits, field_minimums
 
 
 def _handle_combo_kernel_per_subkernel_blocks(
@@ -4192,9 +4208,12 @@ def _handle_combo_kernel_per_subkernel_blocks(
             block_config = combo_meta.get("default_config") or {}
             # Blocks are args here (not baked), so coordinate descent can refine
             # the per-subkernel block sizes on top of the compile-time winners.
-            field_order, field_limits = _combo_coordesc_meta(combo_meta, block_config)
+            field_order, field_limits, field_minimums = _combo_coordesc_meta(
+                combo_meta, block_config
+            )
             inductor_meta["combo_coordesc_field_order"] = field_order
             inductor_meta["combo_coordesc_field_limits"] = field_limits
+            inductor_meta["combo_coordesc_field_minimums"] = field_minimums
             return [
                 triton.Config({**block_config, **kwargs}, num_warps=nw, num_stages=ns)
                 for kwargs, nw, ns in launch_candidates
@@ -4223,6 +4242,7 @@ def _handle_combo_kernel_per_subkernel_blocks(
     all_num_stages: list[int] = []
     unique_warp_stage_pairs: OrderedSet[tuple[int, int]] = OrderedSet()
     combo_coordesc_field_limits: dict[str, int] = {}
+    combo_coordesc_field_minimums: dict[str, int] = {}
     block_arg_names = OrderedSet(combo_meta.get("block_arg_names", ()))
 
     # Group sub-kernels with identical config kwargs to skip redundant tuning.
@@ -4231,6 +4251,7 @@ def _handle_combo_kernel_per_subkernel_blocks(
     for i in range(num_kernels):
         subkernel_heuristic = combo_meta[f"heuristic_{i}"]
         size_hints_i = combo_meta[f"size_hints_{i}"]
+        min_block_sizes_i = _combo_coordesc_min_block_sizes(combo_meta, i)
         # Per-sub-kernel inductor_meta passthrough packed by combo_grid_meta()
         # via TritonKernel.inductor_meta_per_kernel(). Forward into
         # inductor_meta_i so pointwise()/_reduction_configs()/_persistent_reduction_configs()
@@ -4299,6 +4320,8 @@ def _handle_combo_kernel_per_subkernel_blocks(
                     TRITON_MAX_BLOCK[prefix.upper()],
                     size_hints_i[prefix],
                 )
+            if key in min_block_sizes_i:
+                combo_coordesc_field_minimums[combined_key] = min_block_sizes_i[key]
 
         all_num_warps.append(cfg.num_warps)
         all_num_stages.append(cfg.num_stages)
@@ -4333,6 +4356,7 @@ def _handle_combo_kernel_per_subkernel_blocks(
         field for group in combo_tuning_groups for field in group["coordesc_fields"]
     ]
     inductor_meta["combo_coordesc_field_limits"] = combo_coordesc_field_limits
+    inductor_meta["combo_coordesc_field_minimums"] = combo_coordesc_field_minimums
     # Candidates for num_warps/num_stages re-tuning after block sizes are finalized
     inductor_meta["combo_warp_stage_candidates"] = list(unique_warp_stage_pairs)
 

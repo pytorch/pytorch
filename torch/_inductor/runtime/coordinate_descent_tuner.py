@@ -173,6 +173,22 @@ class CoordescTuner:
         return False
 
     def value_too_small(self, name: str, val: int) -> bool:
+        field_minimums = self.inductor_meta.get("combo_coordesc_field_minimums")
+        if (
+            isinstance(field_minimums, dict)
+            and name in field_minimums
+            and val < field_minimums[name]
+        ):
+            return True
+
+        tma_minimums = self.inductor_meta.get("tma_min_block_sizes")
+        if (
+            isinstance(tma_minimums, dict)
+            and name in tma_minimums
+            and val < tma_minimums[name]
+        ):
+            return True
+
         min_block = None
         if name == "XBLOCK":
             min_block = self.inductor_meta.get("min_xblock")
