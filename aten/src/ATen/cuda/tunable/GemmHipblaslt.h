@@ -602,7 +602,9 @@ class HipblasltGemmOp : public Callable<ParamsT> {
         return FAIL;
       }
 
-      void* workspace_buffer = at::cuda::getCUDABlasLtWorkspace();
+      at::DataPtr capture_workspace;
+      void* workspace_buffer =
+          at::cuda::getCUDABlasLtWorkspace(capture_workspace);
 
       TORCH_HIPBLASLT_CHECK(hipblasLtMatmul(op_handle,
             matmul.descriptor(),

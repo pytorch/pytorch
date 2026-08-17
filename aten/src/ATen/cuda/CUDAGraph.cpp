@@ -383,8 +383,7 @@ void CUDAGraph::reset() {
       capturing_to_pool_ = false;
     }
 
-    // Clean up cuBLAS workspaces allocated on the capture stream, otherwise live allocations prevent
-    // private pool cleanup
+    // Clean up workspaces from callers using the raw cuBLAS handle API.
     clearCublasWorkspacesForStream(capture_stream_.stream());
 
     // notifyCaptureDestroy may throw. How should we handle this?
