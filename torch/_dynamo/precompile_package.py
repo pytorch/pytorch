@@ -139,7 +139,7 @@ import sys
 import sysconfig
 import threading
 import types
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextvars import ContextVar
 from typing import Any, TYPE_CHECKING
 from typing_extensions import Self
@@ -924,6 +924,11 @@ def _code_fingerprint(code: types.CodeType) -> str:
                 code.co_code,
                 code.co_names,
                 code.co_varnames,
+                # LOAD_DEREF addresses a cell by INDEX, so two closures that
+                # capture different variables have identical co_code and are
+                # told apart only by the names they close over.
+                code.co_freevars,
+                code.co_cellvars,
                 _stable_consts(code.co_consts),
             )
         )
@@ -1098,8 +1103,37 @@ def _example_call(
         return example, {}
     raise TypeError(
         f"example_inputs takes tuples of positional args or ExampleInput, got "
-        f"{type(example).__name__}. Wrap keyword arguments in ExampleInput."
+        f"{type(example).__name__}. Wrap keyword arguments in "
+        f"torch.compiler.precompile.ExampleInput."
     )
+
+
+def _wont_generalize(
+    kept: set[tuple[str, str]],
+    guard_sets: Mapping[tuple[str, str, int], Sequence[frozenset[_GuardFact]]],
+) -> tuple[str, ...]:
+    """Sources no captured variant will serve a new value for.
+
+    A source pinned in ONE variant is not pinned for the artifact: the union of
+    kept guards says "some graph equality-matched this", while what the warning
+    claims is "no graph will take anything else". A frame whose other variant
+    guards the same source generically -- the ordinary shape once two examples
+    are captured -- serves the new value fine, and warning about it tells the
+    caller to enumerate values that already work.
+    """
+    pinned = {n for t, n in kept if _pins_a_value(t, n)}
+    if not pinned:
+        return ()
+    for variants in guard_sets.values():
+        for facts in variants:
+            mentioned = {f.source for f in facts}
+            pins_here = {
+                f.source for f in facts if _pins_a_value(f.guard_type, f.source)
+            }
+            # This variant reached the source without pinning it, so it is the
+            # graph that serves other values.
+            pinned -= mentioned - pins_here
+    return tuple(sorted(pinned))
 
 
 def _summarize(
@@ -1110,8 +1144,9 @@ def _summarize(
     truncated: frozenset[str],
     uncovered: frozenset[str],
     capture_errors: Sequence[str],
+    guard_sets: Mapping[tuple[str, str, int], Sequence[frozenset[_GuardFact]]],
 ) -> PrecompileSummary:
-    wont_generalize = tuple(sorted({n for t, n in kept if _pins_a_value(t, n)}))
+    wont_generalize = _wont_generalize(kept, guard_sets)
     return PrecompileSummary(
         frames=len(entry.codes),
         resume_functions=sum(1 for c in entry.codes if c.install_to_global),
@@ -1159,7 +1194,8 @@ class PrecompileSession:
         elif bad_container:
             raise TypeError(
                 f"example_inputs takes a sequence of calls -- each a tuple of "
-                f"positional args, or an ExampleInput -- got "
+                f"positional args, or a "
+                f"torch.compiler.precompile.ExampleInput -- got "
                 f"{type(example_inputs).__name__}. A single call is "
                 f"example_inputs=[(x,)], not example_inputs=x."
             )
@@ -1432,7 +1468,7 @@ class PrecompileSession:
                 fact = _GuardFact(
                     guard_type=entry.guard_type,
                     source=_normalize(entry.name),
-                    code=_render_code(entry.orig_guard.code_list),
+                    code=_render_code(entry.code),
                     value="" if unmodelled else _value_fingerprint(entry),
                     enforced=keep,
                 )
@@ -1609,6 +1645,7 @@ class PrecompileSession:
             self._package.truncated_frames,
             self._package.uncovered_frames,
             self._capture_errors,
+            self._guard_sets,
         )
 
     def save(

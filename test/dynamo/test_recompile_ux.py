@@ -1814,6 +1814,47 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
             _reset_precompile_entries_for_region(code, 7)
         self.assertFalse(_has_precompile_entries(code, 7))
 
+    def test_precompile_entries_are_removed_by_owner_not_by_region(self):
+        """Several packages may legitimately hold entries for one code object in
+        one region -- a library frame two loaded models both reach -- and lookup
+        picks between them by evaluating guards. Teardown must therefore remove
+        what one installer put there and leave the neighbour's alone; clearing
+        the whole region evicts a live artifact that, because lookup is
+        region-exact, nothing else can serve."""
+        from torch._C._dynamo.eval_frame import (
+            _debug_get_cache_entry_list,
+            _debug_get_precompile_entries,
+            _load_precompile_entry,
+            _reset_precompile_entries_for_owner,
+            _reset_precompile_entries_for_region,
+        )
+
+        def f(x):
+            return x.sin()
+
+        torch.compile(f, backend="eager", dynamic=False)(torch.randn(3))
+        code = f.__code__
+        guard_manager = _debug_get_cache_entry_list(code)[0].guard_manager
+
+        first, second = object(), object()
+        _load_precompile_entry(code, guard_manager, code, -1, first)
+        _load_precompile_entry(code, guard_manager, code, -1, second)
+        try:
+            self.assertEqual(len(_debug_get_precompile_entries(code)), 2)
+            _reset_precompile_entries_for_owner(code, -1, first)
+            # The neighbour survives.
+            self.assertEqual(len(_debug_get_precompile_entries(code)), 1)
+            # Removing an owner that holds nothing here is a no-op.
+            _reset_precompile_entries_for_owner(code, -1, first)
+            self.assertEqual(len(_debug_get_precompile_entries(code)), 1)
+            # Same owner, different region: also a no-op.
+            _reset_precompile_entries_for_owner(code, 7, second)
+            self.assertEqual(len(_debug_get_precompile_entries(code)), 1)
+            _reset_precompile_entries_for_owner(code, -1, second)
+            self.assertEqual(len(_debug_get_precompile_entries(code)), 0)
+        finally:
+            _reset_precompile_entries_for_region(code, -1)
+
     def test_isolate_recompiles_debug_cache_entry_list_deterministic_order(self):
         """_debug_get_cache_entry_list returns entries sorted by
         isolate_recompiles_id for deterministic output."""

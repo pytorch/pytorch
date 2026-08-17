@@ -681,10 +681,15 @@ size_t _get_total_cache_entry_count(const py::handle& code_obj) {
   return extra->total_cache_entry_count;
 }
 
-PrecompileEntry::PrecompileEntry(py::object gm, py::object c, int64_t region_id)
+PrecompileEntry::PrecompileEntry(
+    py::object gm,
+    py::object c,
+    int64_t region_id,
+    py::object owner_token)
     : guard_manager(std::move(gm)),
       code(std::move(c)),
-      isolate_recompiles_id(region_id) {
+      isolate_recompiles_id(region_id),
+      owner(std::move(owner_token)) {
   TORCH_CHECK(
       PyCode_Check(code.ptr()), "Expecting CodeType from PrecompileEntry.");
   root_mgr =
@@ -720,11 +725,32 @@ void _reset_precompile_entries_for_region(
   }
 }
 
+void _reset_precompile_entries_for_owner(
+    const py::handle& code_obj,
+    int64_t isolate_recompiles_id,
+    const py::handle& owner) {
+  TORCH_CHECK_TYPE(
+      py::isinstance(code_obj, py::module::import("types").attr("CodeType")),
+      "expected a code object!");
+  PyCodeObject* code = (PyCodeObject*)code_obj.ptr();
+  ExtraState* extra = get_extra_state(code);
+  if (extra != nullptr) {
+    CacheLock lock(extra->cache_mutex);
+    PyObject* owner_ptr = owner.ptr();
+    extra->precompile_entries.remove_if(
+        [isolate_recompiles_id, owner_ptr](const PrecompileEntry& entry) {
+          return entry.isolate_recompiles_id == isolate_recompiles_id &&
+              entry.owner.ptr() == owner_ptr;
+        });
+  }
+}
+
 void _load_precompile_entry(
     const py::handle& code_obj,
     py::object guard_manager,
     py::object dynamo_code,
-    int64_t isolate_recompiles_id) {
+    int64_t isolate_recompiles_id,
+    py::object owner) {
   TORCH_CHECK_TYPE(
       py::isinstance(code_obj, py::module::import("types").attr("CodeType")),
       "expected a code object!");
@@ -735,7 +761,10 @@ void _load_precompile_entry(
   }
   CacheLock lock(extra->cache_mutex);
   auto entry = PrecompileEntry(
-      std::move(guard_manager), std::move(dynamo_code), isolate_recompiles_id);
+      std::move(guard_manager),
+      std::move(dynamo_code),
+      isolate_recompiles_id,
+      std::move(owner));
   extra->precompile_entries.push_back(std::move(entry));
 }
 

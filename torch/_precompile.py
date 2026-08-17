@@ -2310,6 +2310,13 @@ def _build_metadata_section(compiled: PrecompiledModule) -> list[str]:
         # subclass leaf); the drivers reject a runtime mismatch (invariants 3 and 6).
         # Memory-format mismatches are caught by the inductor artifact's own
         # assert_size_stride (pinned on at capture).
+        # Every device type the captured graph dispatches on, from the GRAPH
+        # rather than from the runtime tensors: the drivers neutralize ambient
+        # autocast on these, and a graph can reach a device none of its inputs
+        # live on (an explicit .to("cuda") inside fn) or have no tensor inputs
+        # at all. Absent in artifacts written before this field, which the
+        # drivers treat as "nothing to neutralize", their prior behaviour.
+        f"GRAPH_DEVICES = {_graph_device_types(compiled._gm) if compiled._gm is not None else ()!r}",
         f"USER_INPUT_SHAPES = {compiled._user_input_shapes!r}",
         f"USER_INPUT_DTYPES = {compiled._user_input_dtypes!r}",
         f"USER_INPUT_DEVICES = {compiled._user_input_devices!r}",
@@ -2543,6 +2550,7 @@ def _emit_driver_source(forward_fn_name: str) -> str:
         inspect.getsource(driver._extract_param_buffers),
         inspect.getsource(driver._fail),
         inspect.getsource(driver._check_structure),
+        inspect.getsource(driver._autocast_off),
         inspect.getsource(forward_fn).replace(
             f"def {forward_fn_name}(", "def forward(", 1
         ),
@@ -2641,6 +2649,13 @@ def _build_dynamo_metadata_section(compiled: PrecompiledModule) -> list[str]:
         # left at None, which is what makes the baked accumulate form match eager on the
         # first step too (Note [precompile dynamo training grad accumulation]).
         f"GRAD_ACCUM_PARAMS = {capture.grad_accum_params!r}",
+        # Every device type the captured graph dispatches on, from the GRAPH
+        # rather than from the runtime tensors: the drivers neutralize ambient
+        # autocast on these, and a graph can reach a device none of its inputs
+        # live on (an explicit .to("cuda") inside fn) or have no tensor inputs
+        # at all. Absent in artifacts written before this field, which the
+        # drivers treat as "nothing to neutralize", their prior behaviour.
+        f"GRAPH_DEVICES = {_graph_device_types(capture.gm) if capture.gm is not None else ()!r}",
         # The marshalled bytecode below is CPython-version specific. marshal only
         # REJECTS a foreign blob across the 3.10/3.11 layout change; between 3.11
         # and 3.14 it loads happily and the resulting code object segfaults when
@@ -2650,6 +2665,22 @@ def _build_dynamo_metadata_section(compiled: PrecompiledModule) -> list[str]:
         f"_DYNAMO_STATE = {state_blob!r}",
         "",
     ]
+
+
+def _graph_device_types(gm: torch.fx.GraphModule) -> tuple[str, ...]:
+    """Every device type the graph dispatches on, from its node metadata.
+
+    Derived from the GRAPH, not from the runtime params and inputs: a graph can
+    reach a device none of its inputs live on (an explicit ``.to("cuda")`` in
+    the middle of fn), and a graph built only from factory ops has no input
+    device at all. Both cases leave a runtime scan blind exactly where an
+    ambient-state leak needs closing.
+    """
+    from torch._dynamo.graph_utils import _graph_device_types as _scan
+
+    return tuple(
+        sorted(d for d in _scan(gm.graph) if torch.amp.is_autocast_available(d))
+    )
 
 
 def _graph_autocast_pins(gm: torch.fx.GraphModule) -> list[str]:
@@ -2664,24 +2695,8 @@ def _graph_autocast_pins(gm: torch.fx.GraphModule) -> list[str]:
     for the ordinary case means an explicit enabled=False) makes the artifact
     reproduce what it recorded, exactly as the grad-mode pin does.
     """
-    from torch.utils._pytree import tree_flatten
-
-    devices: set[str] = set()
-    for node in gm.graph.nodes:
-        for key in ("val", "example_value"):
-            if key not in node.meta:
-                continue
-            flat, _ = tree_flatten(node.meta[key])
-            for obj in flat:
-                if isinstance(obj, torch.Tensor):
-                    devices.add(obj.device.type)
-                elif isinstance(obj, torch.device):
-                    devices.add(obj.type)
-
     pins = []
-    for device in sorted(devices):
-        if not torch.amp.is_autocast_available(device):
-            continue
+    for device in _graph_device_types(gm):
         if torch.is_autocast_enabled(device):
             dtype = str(torch.get_autocast_dtype(device)).replace("torch.", "_torch.")
             pins.append(f'_torch.amp.autocast("{device}", dtype={dtype}, enabled=True)')
@@ -2744,6 +2759,7 @@ def _emit_dynamo_driver_source() -> str:
 
     blocks = [
         inspect.getsource(driver._rebuild_cell),
+        inspect.getsource(driver._autocast_off),
         inspect.getsource(driver._build_dynamo_forward),
     ]
     body = "\n\n".join(block.rstrip() for block in blocks)

@@ -592,13 +592,24 @@ PyObject* dynamo__custom_eval_frame(
     return eval_result;
   }
 
+  // The lookups above hand back a BORROWED pointer and then drop the cache
+  // lock. Everything below can release the GIL -- has_relevant_entries takes
+  // CacheLock, and the guard-collective hook runs Python -- so a concurrent
+  // unload can destroy the entry that owns this code object before
+  // eval_custom() runs it. A precompile entry is often that code object's only
+  // owner, so the result is a freed pointer handed to the interpreter. Own it
+  // for the rest of the frame.
+  py::object cached_code_owner =
+      py::reinterpret_borrow<py::object>(maybe_cached_code);
+
   // NB: We only do guard collectives when there are compiled code entries
   // for the current region (or the default region); this reduces
   // overtriggering and we don't need to do guard collectives the very first
-  // time we've seen a frame in this region.
-  bool has_relevant_entries =
-      extra->has_relevant_entries(isolate_recompiles_id);
-  if (guard_complete_hook != nullptr && has_relevant_entries) {
+  // time we've seen a frame in this region. Only the hook consumes this and
+  // computing it takes the cache lock, so it is not worth paying for -- nor
+  // worth opening a GIL-release window for -- on every intercepted frame.
+  if (guard_complete_hook != nullptr &&
+      extra->has_relevant_entries(isolate_recompiles_id)) {
     py::handle guard_complete_hook_handle(guard_complete_hook);
     // False means force compilation (someone cache missed)
     py::object res = guard_complete_hook_handle(!Py_IsNone(maybe_cached_code));

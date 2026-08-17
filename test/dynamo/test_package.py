@@ -3335,7 +3335,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         loaded_a = precompile_load(model_a, paths[0], backend="eager", dynamic=False)
 
         eval_frame = torch._C._dynamo.eval_frame
-        real_reset = eval_frame._reset_precompile_entries_for_region
+        real_reset = eval_frame._reset_precompile_entries_for_owner
         shared_code = shared.SharedBlock.forward.__code__
         self.assertIn(shared_code, loaded_a._package._installed_precompile_codes)
         at_shared_reset = threading.Event()
@@ -3360,12 +3360,12 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             def __exit__(self, *exc):
                 self.lock.release()
 
-        def delayed_reset(code, isolate_recompiles_id):
+        def delayed_reset(code, isolate_recompiles_id, owner):
             if code is shared_code and threading.current_thread() is unload_thread:
                 at_shared_reset.set()
                 if not allow_reset.wait(10):
                     raise RuntimeError("timed out waiting to reset precompile entries")
-            real_reset(code, isolate_recompiles_id)
+            real_reset(code, isolate_recompiles_id, owner)
 
         def unload_a():
             try:
@@ -3386,7 +3386,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         with (
             mock.patch.object(dynamo_package, "_PACKAGE_INSTALL_LOCK", observed_lock),
             mock.patch.object(
-                eval_frame, "_reset_precompile_entries_for_region", delayed_reset
+                eval_frame, "_reset_precompile_entries_for_owner", delayed_reset
             ),
         ):
             unload_thread = threading.Thread(target=unload_a)

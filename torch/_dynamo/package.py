@@ -35,7 +35,7 @@ from typing_extensions import Never
 
 import torch
 from torch._dynamo.exc import PackageError
-from torch._dynamo.graph_utils import _graph_device_type
+from torch._dynamo.graph_utils import _graph_device_types
 from torch.utils.weak import WeakIdKeyDictionary
 
 from .bytecode_transformation import (
@@ -591,6 +591,31 @@ def _current_cpu_codegen_target() -> _CpuCodegenTarget | None:
     )
 
 
+# Registered backends that generate no native code, so an artifact of theirs
+# has no baked vector width to protect and must not be gated on one. This is a
+# blacklist on purpose: anything unrecognised -- including a user's own
+# callable, whose compiler_name is just its __name__ -- is assumed to emit
+# code, because a false rejection at load is recoverable and silently running a
+# kernel built for another ISA is not.
+_NO_NATIVE_CODE_BACKENDS = frozenset(
+    {
+        "aot_eager",
+        "aot_eager_decomp_partition",
+        "aot_eager_decomp_partition_crossref",
+        "aot_eager_decomp_partition_with_mode",
+        "aot_eager_default_partitioner",
+        "eager",
+        "eager_debug",
+        "eager_noexcept",
+        "pre_dispatch_eager",
+    }
+)
+
+
+def emits_native_code(backend_name: str) -> bool:
+    return backend_name not in _NO_NATIVE_CODE_BACKENDS
+
+
 @dataclasses.dataclass(frozen=True)
 class SystemInfo:
     """
@@ -910,6 +935,10 @@ class CompilePackage:
         # processes -- do not take each other's name. See
         # _resume_global_renames.
         self._install_token = uuid.uuid4().hex
+        # Identity token stamped onto every precompile entry this package
+        # installs, so uninstall() can remove its own and leave a neighbour
+        # package's entries on a shared code object alone.
+        self._install_owner = object()
 
         self._current_entry: _DynamoCodeCacheEntry | None = None
         self._installed_globals: dict[types.ModuleType, list[_InstalledGlobal]] = {}
@@ -1147,24 +1176,23 @@ class CompilePackage:
             self._source_info.add_code(code)
 
     def update_device_type(self, graph: torch.fx.Graph | None) -> None:
-        # A variant that compiles to nothing -- an exercised branch with no
-        # tensor op, which this package records as a guarded empty variant
-        # rather than skipping -- emits no code on any device. Attributing it
-        # somewhere would be wrong in both directions: _graph_device_type's
-        # fallback is "cpu", so a pure-accelerator capture would record a
-        # cpu_codegen_target it has no native code for and then refuse to load
-        # on a host with a different vector ISA or no C++ compiler at all.
-        if graph is None or all(
-            node.op in ("placeholder", "output") for node in graph.nodes
-        ):
+        # Every device the graph names, not just one: a variant that compiles to
+        # nothing (an exercised branch with no tensor op, which this package
+        # records as a guarded empty variant rather than skipping) names none
+        # and must contribute none, and a graph whose leading placeholder is a
+        # SymInt must not be read as "cpu". Getting either wrong makes a
+        # pure-accelerator capture bake a cpu_codegen_target it has no native
+        # code for, and then refuse to load on a host with a different vector
+        # ISA or no C++ compiler at all.
+        device_types = _graph_device_types(graph)
+        if not device_types:
             return
-        device_type = _graph_device_type(graph)
         # cpu_codegen_target only guards CPU native code and computing it runs
         # the C++ toolchain, so a capture that never emits any must not pay for
         # it. A cpu graph arriving after an accelerator-only prefix backfills the
         # field, so the artifact still records what it was captured against.
         needs_cpu_codegen = (
-            self._requires_native_backend_compatibility and device_type == "cpu"
+            self._requires_native_backend_compatibility and "cpu" in device_types
         )
         current = SystemInfo.current(cpu_codegen=needs_cpu_codegen)
         if self._system_info is None:
@@ -1180,7 +1208,7 @@ class CompilePackage:
                     f"first={self._system_info.cpu_codegen_target}, "
                     f"current={current.cpu_codegen_target}"
                 )
-        self._device_types.add(device_type)
+        self._device_types.update(device_types)
 
     def has_current_entry(self) -> bool:
         return self._current_entry is not None
@@ -1335,7 +1363,7 @@ class CompilePackage:
             self._uninstall()
 
     def _uninstall(self) -> None:
-        from torch._C._dynamo.eval_frame import _reset_precompile_entries_for_region
+        from torch._C._dynamo.eval_frame import _reset_precompile_entries_for_owner
 
         if self._innermost_fn is None:
             raise AssertionError("_innermost_fn is not set in uninstall")
@@ -1424,8 +1452,8 @@ class CompilePackage:
         self._region_skipped_codes = []
 
         for code in self._installed_precompile_codes:
-            _reset_precompile_entries_for_region(
-                code, self._installed_precompile_region_id
+            _reset_precompile_entries_for_owner(
+                code, self._installed_precompile_region_id, self._install_owner
             )
         self._installed_precompile_codes = []
         self._installed_precompile_probe = None
@@ -1518,10 +1546,7 @@ class CompilePackage:
             self._initialized = False
 
     def _install_codes(self, backends: dict[_BackendId, Any]) -> None:
-        from torch._C._dynamo.eval_frame import (
-            _load_precompile_entry,
-            _reset_precompile_entries_for_region,
-        )
+        from torch._C._dynamo.eval_frame import _load_precompile_entry
 
         from .convert_frame import input_codes
         from .output_graph import get_builtins_dict
@@ -1584,9 +1609,16 @@ class CompilePackage:
 
                 input_codes.add(target_code)
                 if target_code not in self._installed_precompile_codes:
-                    _reset_precompile_entries_for_region(
-                        target_code, self._installed_precompile_region_id
-                    )
+                    # Deliberately NOT clearing the region here. A frame reached
+                    # through code_source is shared -- a library block two
+                    # loaded models both call -- and several packages may hold
+                    # entries for it in one region, which lookup handles by
+                    # evaluating each entry's guards. Clearing the region would
+                    # evict a live neighbour, and since lookup is region-exact
+                    # the neighbour cannot be served by what is left. This
+                    # package's own stale entries are already gone: install()
+                    # runs uninstall() first, which removes exactly the ones it
+                    # owns.
                     self._installed_precompile_codes.append(target_code)
                 if entry.guarded_codes and self._installed_precompile_probe is None:
                     self._installed_precompile_probe = target_code
@@ -1715,6 +1747,7 @@ class CompilePackage:
                             renames,
                         ),
                         self._installed_precompile_region_id,
+                        self._install_owner,
                     )
 
     def cache_entry(self) -> _DynamoCacheEntry:

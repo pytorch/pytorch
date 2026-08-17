@@ -3294,6 +3294,76 @@ class TestPrecompile(TestCase):
                 sum(_get_total_cache_entry_count(code) for code in codes), 0
             )
 
+    def test_example_inputs_accepts_keyword_calls_and_rejects_a_bare_container(self):
+        # The TypeErrors here name torch.compiler.precompile.ExampleInput, so
+        # both the type and the path have to keep working.
+        def fn(x, scale=1):
+            return x * scale
+
+        x = torch.randn(3)
+        example_input = torch.compiler.precompile.ExampleInput
+        session = torch.compiler.precompile(
+            fn,
+            backend="eager",
+            dynamic=False,
+            example_inputs=[(x,), example_input(args=(x,), kwargs={"scale": 2})],
+        )
+        self.assertEqual(session.summary().guarded_codes, 2)
+
+        # The likeliest mistake is passing the tensors instead of a sequence of
+        # calls. A one-element tensor is falsy, so the old `example_inputs or ()`
+        # accepted it as "no examples" and only failed much later at save().
+        for bad in (x, torch.zeros(1), torch.nn.Linear(2, 2)):
+            with self.assertRaisesRegex(TypeError, "example_inputs takes a sequence"):
+                torch.compiler.precompile(fn, backend="eager", example_inputs=bad)
+
+    def test_serving_no_match_message_is_bounded_and_region_scoped(self):
+        # The documented primary failure mode. Every entry's guard_manager repr
+        # is the whole guard tree, so interpolating all of them made this
+        # megabytes long on a multi-variant artifact -- logged on every
+        # uncovered request. And _debug_get_precompile_entries is region-blind,
+        # so a second loaded artifact's variants were counted and printed as
+        # reasons THIS call failed, telling the reader shapes it does not cover.
+        shapes_a, shapes_b = [1, 2, 3, 4, 5, 6, 7, 8], [40, 41]
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = []
+            for name, shapes in (("a.pt", shapes_a), ("b.pt", shapes_b)):
+                session = torch.compiler.precompile(
+                    _precompile_single_graph,
+                    backend="eager",
+                    dynamic=False,
+                    example_inputs=[(torch.randn(n),) for n in shapes],
+                )
+                path = os.path.join(tmp, name)
+                session.save(path, require_no_dropped_guards=False)
+                paths.append(path)
+            torch._dynamo.reset()
+            with (
+                torch.compiler.precompile.load_package(
+                    _precompile_single_graph, paths[0], backend="eager"
+                ) as ca,
+                torch.compiler.precompile.load_package(
+                    _precompile_single_graph, paths[1], backend="eager"
+                ) as cb,
+            ):
+                with torch.no_grad():
+                    ca(torch.randn(shapes_a[0]))
+                    cb(torch.randn(shapes_b[0]))
+                with self.assertRaises(PrecompileError) as ctx:
+                    with torch.compiler.precompile.serving(), torch.no_grad():
+                        ca(torch.randn(99))
+        message = str(ctx.exception)
+        # Only ca's variants are candidates, so only ca's count is reported.
+        self.assertIn(f"Failed on all {len(shapes_a)} precompiled variant(s)", message)
+        reasons = [ln for ln in message.splitlines() if ln.strip().startswith("[")]
+        self.assertEqual(len(reasons), 5)
+        self.assertIn(f"... and {len(shapes_a) - 5} more variant(s) not shown", message)
+        # None of the other artifact's shapes may appear as a reason.
+        for n in shapes_b:
+            self.assertNotIn(f"expected {n},", message)
+        # Bounded: the guard-tree dump this replaced was ~27KB per variant.
+        self.assertLess(len(message), 4000)
+
     def test_multi_graph_fallback_limit_still_fails_in_serving(self):
         session = torch.compiler.precompile(
             _precompile_single_graph,
@@ -5331,6 +5401,14 @@ class TestPrecompile(TestCase):
         self.assertEqual(run.weight.grad, ref.weight.grad)
 
 
+def _graph_devices_literal(code: str) -> str:
+    """The GRAPH_DEVICES line the artifact records, for tests that assert on it."""
+    for line in code.splitlines():
+        if line.startswith("GRAPH_DEVICES"):
+            return line
+    raise AssertionError("artifact has no GRAPH_DEVICES line")
+
+
 @skipIfTorchDynamo("precompile's make_fx capture is incompatible with dynamo wrapping")
 class TestPrecompileNumerics(TestCase):
     # Numeric-correctness tests run device-generically so the same coverage
@@ -5943,6 +6021,76 @@ class TestPrecompileNumerics(TestCase):
             train_step(ref, x, t)
             self.assertEqual(run.weight.grad, ref.weight.grad)
             self.assertEqual(run.bias.grad, ref.bias.grad)
+
+    @parametrize("tracer", ("make_fx", "dynamo"))
+    @parametrize("backend", ("eager", "inductor"))
+    def test_artifact_reproduces_capture_time_autocast(self, device, tracer, backend):
+        # The artifact checks no guards, so ambient autocast in the serving
+        # process must not reach it -- in either direction. An eager graph
+        # re-dispatches wholesale; an inductor one still calls extern_kernels.
+        # Both drivers therefore pin the state the capture recorded, keyed off
+        # the GRAPH's devices (GRAPH_DEVICES), not the runtime tensors'.
+        def fn(model, xx):
+            return model(xx)
+
+        device_type = torch.device(device).type
+        model = torch.nn.Linear(8, 8).to(device).eval()
+        x = make_tensor((4, 8), device=device, dtype=torch.float32)
+
+        with torch.no_grad(), torch.autocast(device_type, dtype=torch.bfloat16):
+            hot_code, hot_cache = torch.compiler.precompile(
+                fn, model, x, backend=backend, tracer=tracer
+            )
+        with torch.no_grad():
+            cold_code, cold_cache = torch.compiler.precompile(
+                fn, model, x, backend=backend, tracer=tracer
+            )
+
+        for code, cache, captured_under_autocast in (
+            (hot_code, hot_cache, True),
+            (cold_code, cold_cache, False),
+        ):
+            loaded = torch.compiler.precompile.load(code, cache)
+            with torch.no_grad():
+                plain = loaded(model, x)
+            with torch.no_grad(), torch.autocast(device_type, dtype=torch.bfloat16):
+                under = loaded(model, x)
+            expected = torch.bfloat16 if captured_under_autocast else torch.float32
+            self.assertEqual(plain.dtype, expected)
+            # Serving under an autocast the capture did not see must change
+            # nothing at all, not merely keep the dtype.
+            self.assertEqual(under.dtype, expected)
+            self.assertEqual(plain, under)
+
+    def test_artifact_autocast_covers_a_device_no_input_lives_on(self, device):
+        # GRAPH_DEVICES comes from the captured graph: a fn that moves to
+        # another device mid-way dispatches somewhere no param or input lives,
+        # which a scan of the runtime tensors cannot see.
+        device_type = torch.device(device).type
+        if device_type == "cpu":
+            raise unittest.SkipTest("needs a second device")
+
+        def fn(model, xx):
+            y = model(xx)
+            moved = y.to(device)
+            return torch.mm(moved, moved.t())
+
+        model = torch.nn.Linear(8, 8).eval()  # stays on cpu
+        x = make_tensor((4, 8), device="cpu", dtype=torch.float32)
+        with torch.no_grad():
+            code, cache = torch.compiler.precompile(fn, model, x, backend="eager")
+        devices = _graph_devices_literal(code)
+        self.assertIn(f"'{device_type}'", devices)
+        self.assertIn("'cpu'", devices)
+
+        loaded = torch.compiler.precompile.load(code, cache)
+        with torch.no_grad():
+            plain = loaded(model, x)
+        with torch.no_grad(), torch.autocast(device_type, dtype=torch.bfloat16):
+            under = loaded(model, x)
+        self.assertEqual(plain.dtype, torch.float32)
+        self.assertEqual(under.dtype, torch.float32)
+        self.assertEqual(plain, under)
 
     def test_tracer_dynamo_eager_custom_builtins(self, device):
         # The dynamo eager emitter (_emit_dynamo_eager_subgraph) injects fx's full

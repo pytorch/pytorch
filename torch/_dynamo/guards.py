@@ -4642,6 +4642,7 @@ def make_guard_filter_entry(guard: Guard, builder: GuardBuilder) -> GuardFilterE
         derived_guard_types=(tuple(guard.guard_types) if guard.guard_types else ()),
         is_global=is_global,
         orig_guard=guard,
+        code=tuple(guard.code_list or ()),
     )
 
 
@@ -4802,22 +4803,28 @@ class CheckFunctionManager:
         with torch._C.DisableTorchFunction():
             filter_entries: list[GuardFilterEntry] | None = None
 
+            def build_filter_entries() -> None:
+                nonlocal filter_entries
+                if filter_entries is not None:
+                    return
+                inspection_builder, _ = self.build_guards(
+                    all_guards,
+                    existing_diff_guard_sources,
+                    f_code,
+                    output_graph,
+                    False,
+                )
+                filter_entries = [
+                    make_guard_filter_entry(guard, inspection_builder)
+                    for guard in all_guards
+                ]
+
             def apply_filter(
                 filter_fn: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]],
             ) -> list[Guard]:
-                nonlocal filter_entries
+                build_filter_entries()
                 if filter_entries is None:
-                    inspection_builder, _ = self.build_guards(
-                        all_guards,
-                        existing_diff_guard_sources,
-                        f_code,
-                        output_graph,
-                        False,
-                    )
-                    filter_entries = [
-                        make_guard_filter_entry(guard, inspection_builder)
-                        for guard in all_guards
-                    ]
+                    raise AssertionError("filter_entries must be built")
                 filter_results = filter_fn(filter_entries)
                 if len(filter_results) != len(all_guards):
                     raise AssertionError(
@@ -4829,6 +4836,17 @@ class CheckFunctionManager:
                 return [
                     guard for guard, keep in zip(all_guards, filter_results) if keep
                 ]
+
+            # Guard.set_export_info EXTENDS code_list on every build, so an
+            # inspection build that runs AFTER the runtime one hands the filter
+            # -- and therefore _GuardFact.code and the committed invariants
+            # report -- each guard's code parts two or three times over. Build
+            # the entries first whenever anything is going to want them, which
+            # for a serialization-only filter is not otherwise until later.
+            if guard_filter_fn is not None or (
+                save_guards and serialization_guard_filter_fn is not None
+            ):
+                build_filter_entries()
 
             runtime_guards = (
                 apply_filter(guard_filter_fn) if guard_filter_fn else all_guards
