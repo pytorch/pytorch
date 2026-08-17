@@ -1709,6 +1709,30 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
 
     # ===== Debug / introspection =====
 
+    def test_cache_key_lookup_is_off_until_a_cache_key_backend_exists(self):
+        # get_backend walks the callback chain on every intercepted frame, and
+        # looking for _torchdynamo_cache_key there is a MISS at every level for
+        # anyone who never precompiles -- a raising attribute lookup per level
+        # per frame, measured at ~1 us on a steady-state compiled call. The
+        # lookup is therefore gated on a flag that only a backend carrying such
+        # a key turns on. Nothing else in the tree sets that attribute, so the
+        # gate is invisible; this pins that the switch exists and is one-way.
+        from torch._C._dynamo.eval_frame import _enable_precompile_cache_keys
+
+        def fn(x):
+            return x.sin()
+
+        opt = torch.compile(fn, backend="eager")
+        x = torch.randn(4)
+        self.assertEqual(opt(x), fn(x))
+
+        # Idempotent and safe to call before, during and after compilation.
+        _enable_precompile_cache_keys()
+        _enable_precompile_cache_keys()
+        torch._dynamo.reset()
+        opt2 = torch.compile(fn, backend="eager")
+        self.assertEqual(opt2(x), fn(x))
+
     def test_has_precompile_entries_is_region_exact(self):
         """_has_precompile_entries answers for one region only. lookup() never
         serves a precompile entry from another region, so an entry belonging to
