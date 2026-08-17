@@ -432,15 +432,7 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cpu(
 
 int64_t _fused_sdp_choice_cpp(const Tensor& query_, const Tensor& key, const Tensor& value,
         const std::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal, std::optional<double> scale, bool enable_gqa){
-  auto kernel_params = sdp::normalize_unbatched_input({
-      .query = query_,
-      .key = key,
-      .value = value,
-      .attn_mask = attn_mask_,
-      .dropout = dropout_p,
-      .is_causal = is_causal,
-      .enable_gqa = enable_gqa,
-  });
+  sdp::sdp_params kernel_params{query_, key, value, attn_mask_, dropout_p, is_causal, enable_gqa};
   auto backend = sdp::select_sdp_backend_cpp(kernel_params);
   if (backend == sdp::SDPBackend::error) {
     TORCH_CHECK(
@@ -463,24 +455,15 @@ int64_t _fused_sdp_choice_meta(
     bool is_causal,
     std::optional<double> scale,
     bool enable_gqa) {
-  auto kernel_params = sdp::normalize_unbatched_input({
-      .query = query_,
-      .key = key,
-      .value = value,
-      .attn_mask = attn_mask_,
-      .dropout = dropout_p,
-      .is_causal = is_causal,
-      .enable_gqa = enable_gqa,
-  });
-  auto query_key_set = kernel_params.query.key_set();
+  auto query_key_set = query_.key_set();
   bool has_hpu = query_key_set.has(c10::DispatchKey::HPU);
   if (has_hpu) {
     auto choice_int = at::_ops::_fused_sdp_choice::redispatch(
         c10::DispatchKeySet(DispatchKey::HPU),
-        kernel_params.query,
-        kernel_params.key,
-        kernel_params.value,
-        kernel_params.attn_mask,
+        query_,
+        key,
+        value,
+        attn_mask_,
         dropout_p,
         is_causal,
         scale,
@@ -490,16 +473,7 @@ int64_t _fused_sdp_choice_meta(
 #if defined(USE_ROCM)
   bool has_rocm = query_key_set.has(c10::DispatchKey::HIP);
   if (has_rocm) {
-    auto choice_int = _fused_sdp_choice_stub(
-        at::kHIP,
-        kernel_params.query,
-        kernel_params.key,
-        kernel_params.value,
-        kernel_params.attn_mask,
-        dropout_p,
-        is_causal,
-        scale,
-        enable_gqa);
+    auto choice_int = _fused_sdp_choice_stub(at::kHIP, query_, key, value, attn_mask_, dropout_p, is_causal, scale, enable_gqa);
     return choice_int;
   }
 #else
@@ -507,10 +481,10 @@ int64_t _fused_sdp_choice_meta(
   if (has_cuda) {
     auto choice_int = _fused_sdp_choice_stub(
         at::kCUDA,
-        kernel_params.query,
-        kernel_params.key,
-        kernel_params.value,
-        kernel_params.attn_mask,
+        query_,
+        key,
+        value,
+        attn_mask_,
         dropout_p,
         is_causal,
         scale,
@@ -522,10 +496,10 @@ int64_t _fused_sdp_choice_meta(
   if (has_xpu) {
     auto choice_int = _fused_sdp_choice_stub(
         at::kXPU,
-        kernel_params.query,
-        kernel_params.key,
-        kernel_params.value,
-        kernel_params.attn_mask,
+        query_,
+        key,
+        value,
+        attn_mask_,
         dropout_p,
         is_causal,
         scale,
@@ -762,31 +736,6 @@ Tensor scaled_dot_product_attention(
     bool is_causal,
     std::optional<double> scale,
     bool enable_gqa) {
-  // Give fused backends a batch dimension for unbatched inputs.
-  if (query_.dim() == 3) {
-    auto normalized_params = sdp::normalize_unbatched_input({
-        .query = query_,
-        .key = key,
-        .value = value,
-        .attn_mask = attn_mask_,
-        .dropout = dropout_p,
-        .is_causal = is_causal,
-        .enable_gqa = enable_gqa,
-    });
-    if (normalized_params.query.dim() != query_.dim()) {
-      return at::native::scaled_dot_product_attention(
-                 normalized_params.query,
-                 normalized_params.key,
-                 normalized_params.value,
-                 normalized_params.attn_mask,
-                 dropout_p,
-                 is_causal,
-                 scale,
-                 enable_gqa)
-          .squeeze(0);
-    }
-  }
-
   using sdp::SDPBackend;
   validate_sdpa_input(query_, key, value, attn_mask_, dropout_p, is_causal, scale);
   // NB: This op is CompositeImplicitAutograd -- autograd traces through the
@@ -829,7 +778,7 @@ Tensor scaled_dot_product_attention(
     case SDPBackend::flash_attention: {
       if(query_device_type == DeviceType::CUDA ||
          query_device_type == DeviceType::XPU) {
-        c10::SymInt og_size = value.sym_size(-1);
+        c10::SymInt og_size = query_.sym_size(-1);
         int alignment_size = (query_device_type == DeviceType::XPU) ? 1 : 8;
         Tensor query_padded = pad_last_dim(query_, alignment_size);
         Tensor key_padded = pad_last_dim(key, alignment_size);
