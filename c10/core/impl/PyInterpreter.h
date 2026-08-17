@@ -9,6 +9,7 @@
 #include <c10/util/ArrayRef.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/python_stub.h>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -17,6 +18,7 @@
 namespace c10 {
 struct IValue;
 class OperatorHandle;
+struct SafePyObject;
 struct TensorImpl;
 namespace impl {
 struct PyObjectSlot;
@@ -224,6 +226,36 @@ struct C10_API PyInterpreterVTable {
       uintptr_t event) const = 0;
 
   virtual void reset_backward_hooks(const TensorImpl* self) const = 0;
+
+  // C++ FakeTensor callbacks; each returns true if it handled the op.
+  // try a registered Python decomposition for op
+  virtual bool fake_try_decomp(
+      const c10::OperatorHandle& op,
+      torch::jit::Stack* stack) const = 0;
+  // try the Python op_implementations handlers for op
+  virtual bool fake_try_op_impl(
+      const c10::OperatorHandle& op,
+      torch::jit::Stack* stack,
+      c10::Device common_device) const = 0;
+  // try the Python pointwise fast op-impl for op
+  virtual bool fake_try_fast_op_impls(
+      const c10::OperatorHandle& op,
+      torch::jit::Stack* stack,
+      c10::Device common_device) const = 0;
+  // try op's prim_meta_impl if it defines one
+  virtual bool fake_try_prim_meta(
+      const c10::OperatorHandle& op,
+      torch::jit::Stack* stack) const = 0;
+  // delegates to the mode's fake tensor converter to build a meta tensor
+  virtual c10::intrusive_ptr<TensorImpl> to_meta_tensor(
+      const c10::intrusive_ptr<TensorImpl>& real) const = 0;
+  // whether the active fake mode permits non-fake (real) tensor inputs, reading
+  // the live Python value (mode attr + fake_tensor_tls override)
+  virtual bool allow_non_fake_inputs() const = 0;
+  // promote a Python weak reference to a strong reference to its referent, or
+  // nullptr if the referent has already been collected
+  virtual std::shared_ptr<SafePyObject> strong_ref_from_weakref(
+      const SafePyObject& weakref) const = 0;
 };
 
 struct C10_API PyInterpreter {

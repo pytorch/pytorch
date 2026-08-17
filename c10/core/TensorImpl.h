@@ -38,8 +38,10 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <type_traits>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -226,6 +228,8 @@ struct C10_API BackendMeta : intrusive_ptr_target {
   }
 };
 
+struct C10_API ExtraMeta;
+
 // same as Python's FakeTensorMode
 // storing shape env and converter from Python, we'll use these later
 // to implement sym ints, real tensor conversion, etc
@@ -234,12 +238,67 @@ struct C10_API BackendMeta : intrusive_ptr_target {
 struct C10_API FakeTensorMode {
   std::shared_ptr<c10::SafePyObject> shape_env_;
   std::shared_ptr<c10::SafePyObject> fake_tensor_converter_;
+  // weak reference to the Python CppFakeTensorMode object backing this mode
+  // (used by callbacks)
+  std::shared_ptr<c10::SafePyObject> fake_mode_pyobj_;
+
+  // when false, disallow a fake tensor from having a 'meta' device
+  bool allow_meta_ = true;
+
+  // when true, fake tensors carry a real tensor and the fallback runs the
+  // real op to
+  // hint unbacked symbols. Read once at mode creation, matching Python.
+  bool propagate_real_tensors_ = false;
+
+  // if set, prefer this device type when resolving the common device for
+  // mixed-device ops
+  std::optional<c10::DeviceType> prefer_device_type_ = std::nullopt;
 
   FakeTensorMode(
       std::shared_ptr<c10::SafePyObject> shape_env,
-      std::shared_ptr<c10::SafePyObject> converter)
+      std::shared_ptr<c10::SafePyObject> converter,
+      bool allow_meta = true,
+      std::optional<c10::DeviceType> prefer_device_type = std::nullopt)
       : shape_env_(std::move(shape_env)),
-        fake_tensor_converter_(std::move(converter)) {}
+        fake_tensor_converter_(std::move(converter)),
+        allow_meta_(allow_meta),
+        prefer_device_type_(prefer_device_type) {}
+
+  // record the real constant a fake tensor was created from; the constant is
+  // stored on the fake's ExtraMeta so it dies with the tensor
+  void set_constant(
+      const c10::intrusive_ptr<c10::TensorImpl>& fake_impl,
+      c10::intrusive_ptr<c10::TensorImpl> constant,
+      c10::StorageImpl* constant_storage);
+
+  // return the real constant a fake tensor was created from, or nullptr
+  c10::intrusive_ptr<c10::TensorImpl> get_constant(
+      c10::TensorImpl* fake_impl) const;
+  // drop constant tracking for fake tensors aliasing this mutated storage
+  void invalidate_constant_aliases(c10::StorageImpl* storage_impl);
+
+  // A fake tensor needs to be able to hand back its mode (ie t.fake_mode) on
+  // the python side so we need a reference to the python CppFakeTensorMode
+  // object. We need a weak ref on the C++ FakeTensorMode object because
+  // otherwise we will have a cycle, but we still need a strong ref somewhere so
+  // that we don't lose the ref. So each fake tensor should hold onto a strong
+  // ref of the python CppFakeTensorMode object through
+  // ExtraMeta::fake_mode_pyobj_.
+  std::shared_ptr<c10::SafePyObject> cache_pyobj_cpp_fake_mode();
+
+  // key = constant storage, values = all fake tensors that share this storage
+  // (aliases)
+  std::unordered_map<
+      c10::StorageImpl*,
+      std::vector<c10::weak_intrusive_ptr<c10::TensorImpl>>>
+      constant_storage_mapping_;
+  // protects constant_storage_mapping_ and the ExtraMeta::fake_constant_ fields
+  // it indexes
+  mutable std::mutex constant_mutex_;
+
+  // cache for cache_pyobj_cpp_fake_mode()
+  std::weak_ptr<c10::SafePyObject> pyobj_cpp_fake_mode_;
+  std::mutex pyobj_cpp_fake_mode_mutex_;
 };
 
 struct C10_API ExtraMeta {
@@ -249,9 +308,16 @@ struct C10_API ExtraMeta {
   std::optional<std::string> custom_storage_error_msg_ = std::nullopt;
   std::optional<c10::Device> fake_device_ = std::nullopt;
   std::shared_ptr<FakeTensorMode> fake_tensor_mode_ = nullptr;
+  // Python object for the cpp fake tensor mode.
+  std::shared_ptr<c10::SafePyObject> fake_mode_pyobj_ = nullptr;
+  // The real tensor this fake shadows, when propagate_real_tensors is on.
+  c10::intrusive_ptr<c10::TensorImpl> real_tensor_ = nullptr;
+  // The real constant this fake was created from (via
+  // FakeTensorMode::set_constant), or null.
+  c10::intrusive_ptr<c10::TensorImpl> fake_constant_ = nullptr;
 
   ExtraMeta() = default;
-  ~ExtraMeta() = default;
+  ~ExtraMeta();
   ExtraMeta(const ExtraMeta& other) {
     if (other.symbolic_shape_meta_) {
       symbolic_shape_meta_ =
@@ -264,6 +330,7 @@ struct C10_API ExtraMeta {
     custom_storage_error_msg_ = other.custom_storage_error_msg_;
     fake_device_ = other.fake_device_;
     fake_tensor_mode_ = other.fake_tensor_mode_;
+    fake_mode_pyobj_ = other.fake_mode_pyobj_;
   }
   ExtraMeta& operator=(const ExtraMeta& other) = delete;
   ExtraMeta(ExtraMeta&& other) = delete;
@@ -1449,8 +1516,26 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // use when the device might lack an index ("cuda" vs "cuda:0").
   void set_and_normalize_fake_device(c10::Device fake_device);
 
+  // the fake device recorded for this tensor, or nullopt if none
+  std::optional<c10::Device> fake_device() const {
+    if (!extra_meta_) {
+      return std::nullopt;
+    }
+    return extra_meta_->fake_device_;
+  }
+
+  // Make a fake tensor report the mkldnn (opaque) layout without real mkldnn
+  // storage.
+  void set_fake_mkldnn(bool value) {
+    key_set_ = value ? key_set_.add(DispatchKey::MkldnnCPU)
+                     : key_set_.remove(DispatchKey::MkldnnCPU);
+  }
+
   void set_fake_tensor_mode(std::shared_ptr<FakeTensorMode> mode) {
-    get_extra_meta().fake_tensor_mode_ = std::move(mode);
+    auto& extra_meta = get_extra_meta();
+    extra_meta.fake_mode_pyobj_ =
+        mode ? mode->cache_pyobj_cpp_fake_mode() : nullptr;
+    extra_meta.fake_tensor_mode_ = std::move(mode);
   }
 
   std::shared_ptr<FakeTensorMode> fake_tensor_mode() const {
@@ -1458,6 +1543,25 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       return nullptr;
     }
     return extra_meta_->fake_tensor_mode_;
+  }
+
+  // The real tensor this fake shadows under propagate_real_tensors, or nullptr.
+  void set_real_tensor(c10::intrusive_ptr<c10::TensorImpl> real) {
+    get_extra_meta().real_tensor_ = std::move(real);
+  }
+
+  c10::intrusive_ptr<c10::TensorImpl> real_tensor() const {
+    if (!extra_meta_) {
+      return nullptr;
+    }
+    return extra_meta_->real_tensor_;
+  }
+
+  // the ExtraMeta backing this tensor, or nullptr if none; does not allocate.
+  // Used as the identity key for FakeTensorMode constant tracking.
+  // This is for FakeTensor only.
+  ExtraMeta* maybe_get_extra_meta() const {
+    return extra_meta_.get();
   }
 
   /**

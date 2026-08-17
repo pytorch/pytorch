@@ -2,7 +2,7 @@
 
 import torch
 from torch._prims.debug_prims import load_tensor_reader
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensorMode, is_fake_tensor
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
@@ -106,7 +106,7 @@ class TestContentStore(TestCase):
                     x4 = torch.ops.debugprims.load_tensor.default(
                         "x", (4,), (1,), dtype=torch.float32, device=device
                     )
-                    self.assertIsInstance(x4, FakeTensor)
+                    self.assertTrue(is_fake_tensor(x4))
                     same_meta_as_x(x4)
 
                 # Check fp64 works on non-MPS platforms, since MPS doesn't currently
