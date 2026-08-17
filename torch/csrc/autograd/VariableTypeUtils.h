@@ -104,7 +104,7 @@ inline void throw_error_for_complex_autograd(
     const at::Tensor& tensor,
     const char* name) {
   if (tensor.requires_grad()) {
-    TORCH_CHECK(
+    TORCH_CHECK_NOT_IMPLEMENTED(
         !tensor.is_complex(),
         name,
         " does not support automatic differentiation for outputs with complex dtype.");
