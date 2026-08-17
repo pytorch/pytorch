@@ -5703,6 +5703,10 @@ class Scheduler:
         if atomic_add_template_epilogue and not config.epilogue_fusion_with_atomic_add:
             return FusionResult.fuse(False)
 
+        backend = self.get_backend(node1.get_device())
+        if backend.can_fuse_reduction_chain(node1, node2):
+            return FusionResult.fuse(True)
+
         if not config.benchmark_fusion and not is_multi_template:
             return FusionResult.fuse(True)
 
@@ -5783,6 +5787,31 @@ class Scheduler:
             if self._has_layout_conflict_for_template(multi_node):
                 return FusionResult.fuse(False)
 
+            from torch._inductor.codegen.simd import CantSplit
+
+            backend = self.get_backend(device)
+            template_local_reduction = backend.can_fuse_reduction_epilogue(node1, node2)
+
+            def choice_supports_fusion(choice: ir.ChoiceCaller) -> bool:
+                if not isinstance(
+                    choice, torch._inductor.select_algorithm.TritonTemplateCaller
+                ):
+                    return False
+                if template_local_reduction and not (
+                    backend.can_fuse_reduction_epilogue_choice(node1, node2, choice)
+                ):
+                    return False
+                # For prologue fusion we check if the underlying template of the choice
+                # supports all allowed prologue inputs. If not, we skip this choice in
+                # the fusion benchmark.
+                # TODO: Remove this check after all Triton templates support prologue fusion.
+                # Currently, persistent+TMA Triton template does not due to the TMA-based loads.
+                return not (
+                    not epilogue_fusion
+                    and hasattr(choice, "allowed_prologue_inps")
+                    and choice.allowed_prologue_inps != multi_node.allowed_prologue_inps
+                )
+
             hint_override_best_fusion_choice: dict[int | None, ir.ChoiceCaller] = {}
             if not has_atomic_add:
                 for hint_override in config.multi_kernel_hints:
@@ -5791,21 +5820,25 @@ class Scheduler:
                     ] = []
                     choice_timings = multi_node.choice_timings(hint_override)
                     for choice, _ in sorted(choice_timings.items(), key=lambda x: x[1]):
-                        if not isinstance(
-                            choice,
-                            torch._inductor.select_algorithm.TritonTemplateCaller,
-                        ):
+                        if not choice_supports_fusion(choice):
                             continue
-                        with multi_node.swap_as_triton_caller(choice):
-                            future_choices.append(
-                                (
-                                    choice,
-                                    *self.compile_kernel(
-                                        node_list_fused,
-                                        hint_override=choice.hint_override,
-                                    ),
+                        triton_choice = typing.cast(
+                            torch._inductor.select_algorithm.TritonTemplateCaller,
+                            choice,
+                        )
+                        try:
+                            with multi_node.swap_as_triton_caller(triton_choice):
+                                future_choices.append(
+                                    (
+                                        triton_choice,
+                                        *self.compile_kernel(
+                                            node_list_fused,
+                                            hint_override=triton_choice.hint_override,
+                                        ),
+                                    )
                                 )
-                            )
+                        except CantSplit:
+                            continue
 
                     min_ms_fused = float("inf")
                     ms_fused_choice: TritonTemplateCallerBase | None = None
@@ -5843,7 +5876,9 @@ class Scheduler:
 
             from torch._inductor.codegen.nv_universal_gemm import NVUniversalGemmCaller
 
-            bench_epilogue = config.benchmark_epilogue_fusion
+            bench_epilogue = (
+                config.benchmark_epilogue_fusion and not template_local_reduction
+            )
             num_fusible_callers = sum(
                 isinstance(c, (TritonTemplateCallerBase, NVUniversalGemmCaller))
                 for c in multi_node.choices
@@ -5868,24 +5903,6 @@ class Scheduler:
                 # Use 0 for unfused time, won't be used as bench_epilogue
                 # is guaranteed to be False here
                 choice_timings_iter = [(c, 0) for c in multi_node.choices]
-
-            from torch._inductor.codegen.simd import CantSplit
-
-            def choice_supports_fusion(choice: ir.ChoiceCaller) -> bool:
-                if not isinstance(
-                    choice, torch._inductor.select_algorithm.TritonTemplateCaller
-                ):
-                    return False
-                # For prologue fusion we check if the underlying template of the choice
-                # supports all allowed prologue inputs. If not, we skip this choice in
-                # the fusion benchmark.
-                # TODO: Remove this check after all Triton templates support prologue fusion.
-                # Currently, persistent+TMA Triton template does not due to the TMA-based loads.
-                return not (
-                    not epilogue_fusion
-                    and hasattr(choice, "allowed_prologue_inps")
-                    and choice.allowed_prologue_inps != multi_node.allowed_prologue_inps
-                )
 
             def compile_without_benchmarking(
                 choice: torch._inductor.select_algorithm.TritonTemplateCaller,
@@ -5961,6 +5978,8 @@ class Scheduler:
             future_choices: list[tuple[Any, LambdaFuture | None, ModuleType]] = []
             template_choices = 0
             for choice, unfused_time in choice_timings_iter:
+                if template_local_reduction and not choice_supports_fusion(choice):
+                    continue
                 is_triton = isinstance(
                     choice, torch._inductor.ir.TritonTemplateCallerBase
                 )
@@ -6021,6 +6040,7 @@ class Scheduler:
                                 (choice, *self.compile_kernel(node_list_fused))
                             )
                 except CantSplit:
+                    template_choices -= 1
                     continue
 
             if len(future_choices) == 0:
@@ -6098,6 +6118,9 @@ class Scheduler:
                                 min_ms_fused = ms_fused
                                 ms_fused_choice = choice
                     else:
+                        if template_local_reduction and res:
+                            ms_fused_choice = choice
+                            break
                         fusible_choice = (
                             min_choice == choice
                             or ms2 + ms1 > choice_timings[choice] + ms2_fused
@@ -8193,11 +8216,16 @@ class Scheduler:
             node1.get_device()
         ).can_fuse_multi_outputs_template(node1, node2):
             return True
-        if node1.is_template() and self.get_backend(
-            node1.get_device()
-        ).can_fuse_reduction_epilogue(node1, node2):
+        if (
+            node1.is_template() or isinstance(node1, FusedSchedulerNode)
+        ) and self.get_backend(node1.get_device()).can_fuse_reduction_epilogue(
+            node1, node2
+        ):
             return True
-
+        if any(node.is_reduction() for node in node1.get_nodes()) and self.get_backend(
+            node1.get_device()
+        ).can_fuse_reduction_chain(node1, node2):
+            return True
         if isinstance(node1, GroupedSchedulerNode) or isinstance(
             node2, GroupedSchedulerNode
         ):
@@ -10650,6 +10678,19 @@ class BaseScheduling:  # noqa: docstring_linter
         raise NotImplementedError
 
     def can_fuse_reduction_epilogue(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> bool:
+        return False
+
+    def can_fuse_reduction_epilogue_choice(
+        self,
+        node1: BaseSchedulerNode,
+        node2: BaseSchedulerNode,
+        choice: Any,
+    ) -> bool:
+        return False
+
+    def can_fuse_reduction_chain(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:
         return False

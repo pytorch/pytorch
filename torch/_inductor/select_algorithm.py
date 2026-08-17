@@ -42,6 +42,7 @@ from torch._inductor.await_utils import await_sync
 from torch._inductor.utils import clear_on_fresh_cache
 from torch.utils._filelock import FileLock
 from torch.utils._ordered_set import OrderedSet
+from torch.utils._sympy.value_ranges import ValueRanges
 
 from ..utils._sympy.functions import CeilDiv, Max, Min
 from . import config, ir
@@ -63,9 +64,12 @@ from .codegen.common import (
     WorkspaceArg,
     WorkspaceZeroMode,
 )
+from .codegen.simd import constant_repr
 from .codegen.simd_kernel_features import SIMDKernelFeatures
 from .codegen.subgraph import SubgraphChoiceCaller
 from .codegen.triton import (
+    get_triton_reduction_function,
+    TemplateLocalReductionPlan,
     texpr,
     TMACompatibilityChecker,
     TritonKernel,
@@ -562,6 +566,7 @@ class TritonTemplateKernel(TritonKernel):
         triton_meta: TritonMeta | None = None,
         always_freeze_layout: bool = False,
         index_dtype_override: str | None = None,
+        template_local_reduction_tile: tuple[int, int] | None = None,
     ) -> None:
         tma_2d = tma_store or tma_load_for_template_epilogue
         if tma_store:
@@ -671,6 +676,8 @@ class TritonTemplateKernel(TritonKernel):
         self.template_out_shape: str | tuple[str] | None = None
         self.ops_handler: V.WrapperHandler | None = None  # type: ignore[name-defined]
         self.root_var_renames: dict[str, str] = {}
+        self.template_local_reduction_plan: TemplateLocalReductionPlan | None = None
+        self.template_local_reduction_tile = template_local_reduction_tile
 
         # When caching is enabled, the generated code is not dependent on the input nodes names, or
         # symbolic sizes names.
@@ -699,6 +706,129 @@ class TritonTemplateKernel(TritonKernel):
 
         # Tracking for intermediate variables
         self.tmp_var_ctr = itertools.count()
+
+    def _match_template_local_reduction(
+        self, epilogue_nodes: Sequence[Any]
+    ) -> TemplateLocalReductionPlan | None:
+        if self.template_local_reduction_tile is None:
+            return None
+
+        nodes = [node for epilogue in epilogue_nodes for node in epilogue.get_nodes()]
+        return TritonScheduling._template_local_reduction_plan(self.output_node, nodes)
+
+    def _codegen_template_local_reductions(
+        self, epilogue_result, output_dtype, mask
+    ) -> None:
+        plan = self.template_local_reduction_plan
+        if plan is None:
+            return
+        if self.template_local_reduction_tile is None:
+            raise AssertionError("expected a template-local reduction tile")
+
+        tile_m, tile_n = self.template_local_reduction_tile
+        block_m, block_n = plan.block
+        groups_m = tile_m // block_m
+        groups_n = tile_n // block_n
+        output_index = None
+        if (groups_m, groups_n) != (1, 1):
+            output_m = self.index_to_str(plan.output_size[0])
+            output_n = self.index_to_str(plan.output_size[1])
+            pid_m = "_block_local_pid_m"
+            pid_n = "_block_local_pid_n"
+            self.body.writeline(
+                f"{pid_m} = (pid_m * {groups_m} + tl.arange(0, {groups_m}))[:, None]"
+            )
+            self.body.writeline(
+                f"{pid_n} = (pid_n * {groups_n} + tl.arange(0, {groups_n}))[None, :]"
+            )
+            self.body.writeline(
+                f"_block_local_store_mask = ({pid_m} < {output_m}) & ({pid_n} < {output_n})"
+            )
+            output_index = f"{pid_m} * {output_n} + {pid_n}"
+
+        output_type = self.dtype_to_str(output_dtype)
+        reduction_mask = mask or self.template_mask or "(xmask & ymask)"
+        for reduction_index, reduction in enumerate(plan.reductions):
+            output_ptr = self.args.output(reduction.output_name)
+            source = f"({epilogue_result}).to({output_type})"
+            source = self.create_cse_var(
+                source,
+                ValueRanges.unknown(),
+                dtype=output_dtype,
+                shape=(str(tile_m), str(tile_n)),
+            )
+            with patch.object(self, "compute", self.body):
+                source = self._lower_template_local_reduction_source(
+                    reduction.source, source
+                )
+            source_type = self.dtype_to_str(reduction.source_dtype)
+            source = f"({source}).to({source_type})"
+            if (
+                reduction.source_dtype.is_floating_point
+                and reduction.source_dtype.itemsize < 4
+            ):
+                source = f"({source}).to(tl.float32)"
+            neutral = constant_repr(
+                ir.Reduction.default_accumulator(
+                    reduction.reduction_type, reduction.source_dtype
+                )
+            )
+            value = f"tl.where({reduction_mask}, {source}, {neutral})"
+            reduce_fn = get_triton_reduction_function(reduction.reduction_type)
+            result = f"_block_local_reduction_{reduction_index}"
+            if (groups_m, groups_n) == (1, 1):
+                self.body.writeline(
+                    f"{result} = {reduce_fn}({reduce_fn}({value}, 1), 0)"
+                )
+                self.body.writeline(
+                    f"tl.store({output_ptr} + pid_m * grid_n + pid_n, {result})"
+                )
+            else:
+                if output_index is None:
+                    raise AssertionError("expected a template-local output index")
+                value = (
+                    f"tl.reshape({value}, ({groups_m}, {block_m}, "
+                    f"{groups_n}, {block_n}))"
+                )
+                self.body.writeline(
+                    f"{result} = {reduce_fn}({reduce_fn}({value}, 3), 1)"
+                )
+                self.body.writeline(
+                    f"tl.store({output_ptr} + {output_index}, {result}, "
+                    "_block_local_store_mask)"
+                )
+
+    def _lower_template_local_reduction_source(self, value: Any, source: Any) -> Any:
+        from torch._inductor.kernel.loop_ir_epilogue_lowering import (
+            GemmEpilogueIRExpression,
+        )
+
+        if isinstance(value, tuple):
+            return tuple(
+                self._lower_template_local_reduction_source(item, source)
+                for item in value
+            )
+        if isinstance(value, list):
+            return [
+                self._lower_template_local_reduction_source(item, source)
+                for item in value
+            ]
+        if not isinstance(value, GemmEpilogueIRExpression):
+            return value
+        if value.op == "load":
+            return source
+        if value.op == "identity":
+            return self._lower_template_local_reduction_source(value.args[0], source)
+        op = getattr(V.ops, value.op)
+        args = tuple(
+            self._lower_template_local_reduction_source(arg, source)
+            for arg in value.args
+        )
+        kwargs = {
+            key: self._lower_template_local_reduction_source(arg, source)
+            for key, arg in value.kwargs
+        }
+        return op(*args, **kwargs)
 
     @property
     def index_dtype(self) -> str:
@@ -1691,6 +1821,8 @@ class TritonTemplateKernel(TritonKernel):
                     epilogue_result, acc_dtype, src_dtype=output_dtype
                 )
 
+            self._codegen_template_local_reductions(epilogue_result, output_dtype, mask)
+
             V.ops.store(
                 self.output_node.get_name(),
                 output_index,
@@ -1951,8 +2083,25 @@ class TritonTemplateKernel(TritonKernel):
         none unfused, no prologue source tracking.  Override in subclasses
         for per-output routing.
         """
+        local_reduction_plan = self._match_template_local_reduction(epilogue_nodes)
+        if local_reduction_plan is not None:
+            if not TritonScheduling._template_local_reduction_tile_is_compatible(
+                self.template_local_reduction_tile, local_reduction_plan.block
+            ):
+                from torch._inductor.codegen.simd import CantSplit
+
+                raise CantSplit(
+                    self.template_local_reduction_tile,
+                    OrderedSet((local_reduction_plan.block,)),
+                )
+            self.template_local_reduction_plan = local_reduction_plan
+            for reduction in local_reduction_plan.reductions:
+                self.args.output(reduction.output_name)
+            routed_epilogues: list[Any] = []
+        else:
+            routed_epilogues = epilogue_nodes
         self._epilogue_nodes_by_subgraph: defaultdict[int, list[Any]] = defaultdict(
-            lambda: epilogue_nodes
+            lambda: routed_epilogues
         )
         self._unfused_epilogues: list[Any] = []
         self._prologue_sources: dict[str, frozenset[str]] = {}
@@ -2698,6 +2847,7 @@ class TritonTemplate(KernelTemplate):
         cache_codegen_enabled_for_template=False,
         prologue_loads_all_inputs=False,
         always_freeze_layout: bool = False,
+        supports_template_local_reduction: bool = False,
     ) -> None:
         super().__init__(name, hash=hashlib.sha256(source.encode("utf-8")).hexdigest())
         self.grid = grid
@@ -2721,6 +2871,7 @@ class TritonTemplate(KernelTemplate):
         # immediately instead of using layout constraints. This is used by
         # FlexAttention templates which require frozen layouts.
         self.always_freeze_layout = always_freeze_layout
+        self.supports_template_local_reduction = supports_template_local_reduction
 
     # When this flag is on, we ensure that the cached results and the generated result if cache
     # was not used are the same.
@@ -2835,6 +2986,11 @@ class TritonTemplate(KernelTemplate):
         # Add index dtype to defines so it's available in the template
         defines.write(f"INDEX_DTYPE : tl.constexpr = {index_dtype}\n")
         defines = defines.getvalue()
+        template_local_reduction_tile = (
+            (kwargs["BLOCK_M"], kwargs["BLOCK_N"])
+            if self.supports_template_local_reduction
+            else None
+        )
 
         kernel_options = {
             "input_nodes": input_nodes,
@@ -2851,6 +3007,7 @@ class TritonTemplate(KernelTemplate):
             "prologue_loads_all_inputs": self.prologue_loads_all_inputs,
             "always_freeze_layout": self.always_freeze_layout,
             "index_dtype_override": index_dtype,
+            "template_local_reduction_tile": template_local_reduction_tile,
         }
 
         if HAS_WARP_SPEC:
@@ -3222,6 +3379,7 @@ class TritonTemplate(KernelTemplate):
             workspace_arg=workspace_arg,
             allowed_prologue_inps=result.prologue_supported_inputs,
             hint_override=hint_override,
+            template_local_reduction_tile=options["template_local_reduction_tile"],
         )
 
 
@@ -3364,6 +3522,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         workspace_arg: WorkspaceArg | None = None,
         allowed_prologue_inps: OrderedSet[str] | None = None,
         hint_override: int | None = None,
+        template_local_reduction_tile: tuple[int, int] | None = None,
     ) -> None:
         super().__init__(name, input_nodes, layout, description)
         self.make_kernel_render = make_kernel_render
@@ -3384,6 +3543,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
             allowed_prologue_inps if allowed_prologue_inps is not None else OrderedSet()
         )
         self.hint_override = hint_override
+        self.template_local_reduction_tile = template_local_reduction_tile
 
         self.n_regs = None
 
@@ -3427,6 +3587,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
             make_kernel_render=self.make_kernel_render,
             mutated_inputs=self.mutated_inputs,
             allowed_prologue_inps=self.allowed_prologue_inps,
+            template_local_reduction_tile=self.template_local_reduction_tile,
         )
         # Pass KTC annotation to the buffer for encoding
         if "ktc" in self.annotations:

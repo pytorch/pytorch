@@ -980,6 +980,46 @@ class TestFP8Lowering(TestCase):
             # setting a small absolute tolerance in these tests
             torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.05)
 
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @unittest.skipIf(
+        not has_triton_tma_device() or not is_big_gpu(),
+        "Need device-side TMA support in Triton and max-autotune",
+    )
+    def test_tensorwise_scaling_tma_block_reduction_fallback(self, device):
+        dtype_float8 = _fix_fp8_dtype_for_rocm(torch.float8_e4m3fn, device)
+        x = torch.randn(256, 64, dtype=torch.bfloat16, device=device)
+        w = torch.randn(256, 64, dtype=torch.bfloat16, device=device)
+        x_fp8, x_inverse_scale = _quantize_tensorwise(x, dtype_float8)
+        w_fp8, w_inverse_scale = _quantize_tensorwise(w, dtype_float8)
+
+        def linear(x_fp8, x_inverse_scale, w_t_fp8, w_inverse_scale):
+            y = scaled_mm(
+                x_fp8,
+                w_t_fp8,
+                x_inverse_scale,
+                ScalingType.TensorWise,
+                w_inverse_scale,
+                ScalingType.TensorWise,
+                output_dtype=torch.bfloat16,
+            )
+            return y.view(2, 128, 2, 128).amax((1, 3))
+
+        args = (x_fp8, x_inverse_scale, w_fp8.t(), w_inverse_scale)
+        expected = linear(*args)
+        with config.patch(
+            {
+                "triton.enable_persistent_tma_matmul": True,
+                "test_configs.autotune_choice_name_regex": "triton_scaled_mm_device_tma",
+                "max_autotune_gemm_backends": "TRITON",
+                "max_autotune": True,
+            }
+        ):
+            actual, code = run_and_get_code(torch.compile(linear), *args)
+
+        self.assertEqual(actual, expected)
+        FileCheck().check_not("_block_local_reduction").run(code[0])
+
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @onlyOn(["cuda", "xpu", "cpu"])
     @parametrize("shape", ("16,16,32", "16,32,32", "1024,1024,512"))
