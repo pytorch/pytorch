@@ -715,6 +715,15 @@ TORCH_META_FUNC(linalg_qr)(const Tensor& A,
   const auto n = A_shape.cend()[-1];
   const auto k = std::min(m, n);
 
+  // Early check for 32-bit LAPACK limit (CPU only)
+  if (A.device().is_cpu()) {
+    TORCH_CHECK(
+        m <= std::numeric_limits<int>::max() && n <= std::numeric_limits<int>::max(),
+        "linalg.qr: The dimensions of the input matrix (", m, "x", n,
+        ") exceed the 32-bit LAPACK interface limit (",
+        std::numeric_limits<int>::max(), ").");
+  }
+
   if (compute_q) {
     auto Q_shape = A_shape;
     Q_shape.end()[-1] = reduced_mode ? k : m;
@@ -770,6 +779,30 @@ TORCH_META_FUNC(_linalg_svd)(const Tensor& A,
   const auto m = sizes.cend()[-2];
   const auto n = sizes.cend()[-1];
   const auto k = std::min(m, n);
+
+  // Early check for 32-bit LAPACK workspace overflow (CPU only)
+  if (A.device().is_cpu()) {
+    TORCH_CHECK(
+        m <= std::numeric_limits<int>::max() && n <= std::numeric_limits<int>::max(),
+        "linalg.svd: The dimensions of the input matrix (", m, "x", n,
+        ") exceed the 32-bit LAPACK interface limit (",
+        std::numeric_limits<int>::max(), ").");
+    if (!A.is_complex()) {
+      TORCH_CHECK(
+          k < 26755,
+          "linalg.svd: the required LAPACK workspace size for a ", m, "x", n,
+          " matrix exceeds the 32-bit LAPACK interface limit. "
+          "Consider using smaller matrices or a LAPACK build with 64-bit "
+          "integer support (ILP64).");
+    } else if (compute_uv) {
+      TORCH_CHECK(
+          k < 46340,
+          "linalg.svd: the required LAPACK workspace size for a ", m, "x", n,
+          " complex matrix exceeds the 32-bit LAPACK interface limit. "
+          "Consider using smaller matrices or a LAPACK build with 64-bit "
+          "integer support (ILP64).");
+    }
+  }
 
   // Prepare sizes for U
   if (compute_uv) {
@@ -850,6 +883,36 @@ TORCH_META_FUNC(_linalg_eigh)(const Tensor& A,
                               bool compute_v) {
   at::native::squareCheckInputs(A, "linalg.eigh");
   at::native::checkUplo(uplo);
+
+  // Early check for 32-bit LAPACK workspace overflow (CPU only)
+  if (A.device().is_cpu() && compute_v) {
+    auto n = A.size(-1);
+    // syevd (real): lwork = 2*n*n + 6*n + 1
+    // heevd (complex): lwork = 2*n*n + 2*n + 1, lrwork = 2*n*n + 5*n + 1
+    // Both overflow int for n >= 32767
+    int64_t lwork_required = A.is_complex()
+        ? (2 * n * n + 2 * n + 1)
+        : (2 * n * n + 6 * n + 1);
+    TORCH_CHECK(
+        lwork_required <= std::numeric_limits<int>::max(),
+        "linalg.eigh: the required LAPACK workspace size (", lwork_required,
+        ") for a ", n, "x", n,
+        " matrix exceeds the 32-bit LAPACK interface limit (",
+        std::numeric_limits<int>::max(),
+        "). Consider using smaller matrices or a LAPACK build with 64-bit "
+        "integer support (ILP64).");
+    if (A.is_complex()) {
+      int64_t lrwork_required = 2 * n * n + 5 * n + 1;
+      TORCH_CHECK(
+          lrwork_required <= std::numeric_limits<int>::max(),
+          "linalg.eigh: the required LAPACK real workspace size (",
+          lrwork_required, ") for a ", n, "x", n,
+          " complex matrix exceeds the 32-bit LAPACK interface limit (",
+          std::numeric_limits<int>::max(),
+          "). Consider using smaller matrices or a LAPACK build with 64-bit "
+          "integer support (ILP64).");
+    }
+  }
 
   auto shape = A.sizes().vec();
   if (compute_v) {
@@ -2868,6 +2931,16 @@ DEFINE_DISPATCH(linalg_eig_stub);
 static std::tuple<Tensor&, Tensor&> linalg_eig_out_info(const Tensor& input, Tensor& values, Tensor& vectors, Tensor& infos, bool compute_eigenvectors) {
   auto options = input.options();
 
+  // Early check for 32-bit LAPACK limit (CPU only)
+  if (input.device().is_cpu()) {
+    auto n = input.size(-1);
+    TORCH_CHECK(
+        n <= std::numeric_limits<int>::max(),
+        "linalg.eig: The dimensions of the input matrix (", n, "x", n,
+        ") exceed the 32-bit LAPACK interface limit (",
+        std::numeric_limits<int>::max(), ").");
+  }
+
   // These internal asserts make explicit the assumptions in the implementation
   // Error check with the actual error messages are done on the higher level of the hierarchy of calls
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.dim() >= 2);
@@ -2968,6 +3041,16 @@ static std::tuple<Tensor&, Tensor&> linalg_eig_out_info(const Tensor& input, Ten
 }
 
 std::tuple<Tensor&, Tensor&> linalg_eig_out(const Tensor& input, Tensor& values, Tensor& vectors) {
+  // Early check for 32-bit LAPACK limit (CPU only)
+  if (input.device().is_cpu()) {
+    auto n = input.size(-1);
+    TORCH_CHECK(
+        n <= std::numeric_limits<int>::max(),
+        "linalg.eig: The dimensions of the input matrix (", n, "x", n,
+        ") exceed the 32-bit LAPACK interface limit (",
+        std::numeric_limits<int>::max(), ").");
+  }
+
   TORCH_CHECK(input.isfinite().all().item<bool>(), "torch.linalg.eig: input tensor should not contain infs or NaNs.");
   squareCheckInputs(input, "linalg.eig");
 
@@ -3334,6 +3417,17 @@ static void linalg_lstsq_out_info(
     const Tensor& other,
     double rcond,
     std::string& driver) {
+  // Early check for 32-bit LAPACK limit (CPU only)
+  if (input.device().is_cpu()) {
+    auto m = input.size(-2);
+    auto n = input.size(-1);
+    TORCH_CHECK(
+        m <= std::numeric_limits<int>::max() && n <= std::numeric_limits<int>::max(),
+        "linalg.lstsq: The dimensions of the input matrix (", m, "x", n,
+        ") exceed the 32-bit LAPACK interface limit (",
+        std::numeric_limits<int>::max(), ").");
+  }
+
   // These internal asserts make explicit the assumptions in the implementation
   // Error check with the actual error messages are done on the higher level of
   // the hierarchy of calls
