@@ -100,6 +100,53 @@ def _match_gelu_erf(node: ast.expr) -> "ast.expr | None":
     return None
 
 
+def _match_silu(node: ast.expr) -> "ast.expr | None":
+    """Match SiLU decomposition ``x / (1 + exp(0.0 - x))`` and return ``x``.
+
+    Inductor decomposes silu(x) as x / (1 + exp(-x)). With our neg() op
+    emitting (0.0 - x), the generated code is: x / (1.0 + exp((0.0 - x))).
+    """
+    # Must be a division: x / denom
+    if not (isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div)):
+        return None
+    x = node.left
+    denom = node.right
+
+    # denom must be: 1.0 + exp(neg_x) or exp(neg_x) + 1.0
+    if not (isinstance(denom, ast.BinOp) and isinstance(denom.op, ast.Add)):
+        return None
+
+    operands = [denom.left, denom.right]
+    one = next((o for o in operands if _is_close_constant(o, 1.0)), None)
+    if one is None:
+        return None
+    exp_part = next((o for o in operands if o is not one), None)
+    if exp_part is None:
+        return None
+
+    # exp_part must be exp(neg_x)
+    exp_call = _match_call(exp_part, "exp")
+    if exp_call is None:
+        return None
+    neg_x = exp_call.args[0]
+
+    # neg_x must be (0.0 - x) where x matches the numerator
+    if (
+        isinstance(neg_x, ast.BinOp)
+        and isinstance(neg_x.op, ast.Sub)
+        and _is_close_constant(neg_x.left, 0.0)
+        and _same(neg_x.right, x)
+    ):
+        return x
+
+    # Also handle unary minus: -x
+    if isinstance(neg_x, ast.UnaryOp) and isinstance(neg_x.op, ast.USub):
+        if _same(neg_x.operand, x):
+            return x
+
+    return None
+
+
 @dataclass(frozen=True)
 class _ActivationPattern:
     # ``name`` must be a functor the CUTLASS EVT frontend binds natively (see
@@ -115,6 +162,7 @@ class _ActivationPattern:
 # Add new entries here to re-fuse additional decomposed activations.
 _ACTIVATION_PATTERNS: tuple[_ActivationPattern, ...] = (
     _ActivationPattern("gelu", "erf", _match_gelu_erf),
+    _ActivationPattern("silu", "0.0 -", _match_silu),
 )
 
 
@@ -332,6 +380,10 @@ class CutlassEVTOpsMixIn:
     @staticmethod
     def erf(x0: str) -> str:
         return CutlassEVTOpsMixIn._prefix_un_op("erf", x0)
+
+    @staticmethod
+    def silu(x0: str) -> str:
+        return CutlassEVTOpsMixIn._prefix_un_op("silu", x0)
 
 
 class MockCutlassHandler(CutlassEVTOpsMixIn, WrapperHandler):
