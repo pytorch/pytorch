@@ -5,7 +5,11 @@ from torch._C import FileCheck
 from torch._inductor.custom_graph_pass import CustomPartitionerFn, get_hash_for_files
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_fw_bw_and_get_code
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
+)
 from torch.testing._internal.common_utils import HardwareClassification
 
 
@@ -30,6 +34,7 @@ class MyCustomPartitionerFn(CustomPartitionerFn):
 class TestCustomPartitionerFn(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @requires_capabilities(Capability.lib.triton)
     def test_custom_partitioner_fn(self, device):
         """
         For function f(a, b), with the  partitioner in the compile_fx stack,
