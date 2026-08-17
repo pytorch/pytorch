@@ -32,7 +32,7 @@ from typing_extensions import Never
 
 import torch
 from torch._dynamo.exc import PackageError
-from torch._dynamo.graph_utils import _graph_device_type
+from torch._dynamo.graph_utils import _graph_device_types
 from torch.utils.weak import WeakIdKeyDictionary
 
 from .bytecode_transformation import (
@@ -423,6 +423,31 @@ def _current_cpu_codegen_target() -> _CpuCodegenTarget | None:
     )
 
 
+# Registered backends that generate no native code, so an artifact of theirs
+# has no baked vector width to protect and must not be gated on one. This is a
+# blacklist on purpose: anything unrecognised -- including a user's own
+# callable, whose compiler_name is just its __name__ -- is assumed to emit
+# code, because a false rejection at load is recoverable and silently running a
+# kernel built for another ISA is not.
+_NO_NATIVE_CODE_BACKENDS = frozenset(
+    {
+        "aot_eager",
+        "aot_eager_decomp_partition",
+        "aot_eager_decomp_partition_crossref",
+        "aot_eager_decomp_partition_with_mode",
+        "aot_eager_default_partitioner",
+        "eager",
+        "eager_debug",
+        "eager_noexcept",
+        "pre_dispatch_eager",
+    }
+)
+
+
+def emits_native_code(backend_name: str) -> bool:
+    return backend_name not in _NO_NATIVE_CODE_BACKENDS
+
+
 @dataclasses.dataclass(frozen=True)
 class SystemInfo:
     """
@@ -551,6 +576,7 @@ class _DynamoCacheEntry:
     source_info: SourceInfo
     device_type: str
     system_info: SystemInfo = dataclasses.field(default_factory=SystemInfo.current)
+    requires_native_backend_compatibility: bool = True
     fn_name: str | None = None
     fn_first_lineno: str | None = None
 
@@ -564,13 +590,17 @@ class _DynamoCacheEntry:
         # cold inductor cache, and a re-raised InvalidCxxCompiler on a host with
         # no compiler at all -- so only pay for it when this artifact actually
         # records one to compare against.
+        check_codegen = self.requires_native_backend_compatibility
         current_system_info = SystemInfo.current(
             cpu_codegen=(
-                self.device_type == "cpu"
+                check_codegen
+                and self.device_type == "cpu"
                 and self.system_info.cpu_codegen_target is not None
             )
         )
-        self.system_info.check_compatibility(current_system_info, self.device_type)
+        self.system_info.check_compatibility(
+            current_system_info, self.device_type, check_codegen=check_codegen
+        )
 
     def debug_info(self) -> dict[str, Any]:
         if len(self.codes) == 0:
@@ -717,6 +747,7 @@ class CompilePackage:
         fn: Callable[..., Any] | None,
         dynamo: _DynamoCacheEntry | None = None,
         ignore_inlined_sources: bool = False,
+        requires_native_backend_compatibility: bool = True,
     ) -> None:
         self._innermost_fn = None
         self._codes: dict[types.CodeType, _DynamoCodeCacheEntry] = {}
@@ -725,6 +756,12 @@ class CompilePackage:
         self._installed_globals: dict[types.ModuleType, list[str]] = {}
         # device_type that model compiled with.
         self._device_type = "cpu"
+        # Whether this package's backend generates native code. An eager one
+        # bakes no vector width, so it must neither pay the C++ toolchain probe
+        # at save nor be rejected on ISA skew at load.
+        self._requires_native_backend_compatibility = (
+            requires_native_backend_compatibility
+        )
 
         # For debugging/testing purpose only.
         self._cached_backends: dict[_BackendId, Any] = {}
@@ -884,16 +921,16 @@ class CompilePackage:
             self._source_info.add_code(code)
 
     def update_device_type(self, graph: torch.fx.Graph | None) -> None:
-        # A variant that compiles to nothing emits no code on any device, and
-        # _graph_device_type's fallback is "cpu": letting an empty graph through
-        # makes a pure-accelerator capture record a cpu_codegen_target it has no
-        # native code for, which then refuses to load on a host with a different
-        # vector ISA or no C++ compiler at all.
-        if graph is None or all(
-            node.op in ("placeholder", "output") for node in graph.nodes
-        ):
+        # Every device the graph NAMES, not the first meta value it carries:
+        # under dynamic shapes the leading placeholder is a SymInt, which has no
+        # device, and reading it as "cpu" makes a pure-accelerator capture bake
+        # a cpu_codegen_target it has no native code for -- which then refuses
+        # to load on a host with a different vector ISA or no C++ compiler. A
+        # graph that names nothing emits nothing and contributes nothing.
+        device_types = _graph_device_types(graph)
+        if not device_types:
             return
-        self._device_type = _graph_device_type(graph)
+        self._device_type = next((d for d in sorted(device_types) if d != "cpu"), "cpu")
 
     def bypass_current_entry(self) -> None:
         if self._current_entry is None:
@@ -1100,7 +1137,15 @@ class CompilePackage:
             # The field's default_factory would run the C++ toolchain probe on
             # every save; only an artifact that can hold CPU native code has a
             # baked vector width to record.
-            system_info=SystemInfo.current(cpu_codegen=self._device_type == "cpu"),
+            system_info=SystemInfo.current(
+                cpu_codegen=(
+                    self._requires_native_backend_compatibility
+                    and self._device_type == "cpu"
+                )
+            ),
+            requires_native_backend_compatibility=(
+                self._requires_native_backend_compatibility
+            ),
             fn_name=self._innermost_fn.__qualname__,
             fn_first_lineno=self._innermost_fn.__code__.co_firstlineno,
         )
