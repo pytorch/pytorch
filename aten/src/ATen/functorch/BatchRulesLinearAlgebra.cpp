@@ -689,14 +689,6 @@ _scaled_dot_product_cudnn_attention_batch_rule(
         value_bdim.has_value() || attn_bias_bdim.has_value();
     check_randomness(randomness, any_tensor_batched);
   }
-  // BatchedTensor wrappers hide requires_grad from the composite SDPA wrapper.
-  // Recompute it after unwrapping so training forwards produce LSE for backward.
-  compute_log_sumexp =
-      compute_log_sumexp ||
-      (at::GradMode::is_enabled() &&
-       (query.requires_grad() || key.requires_grad() || value.requires_grad() ||
-        (attn_bias.has_value() && attn_bias->defined() &&
-         attn_bias->requires_grad())));
   auto batch_size = attn_bias.has_value() && attn_bias->defined()
       ? get_bdim_size4(query, query_bdim, key, key_bdim, value, value_bdim, *attn_bias, attn_bias_bdim)
       : get_bdim_size3(query, query_bdim, key, key_bdim, value, value_bdim);

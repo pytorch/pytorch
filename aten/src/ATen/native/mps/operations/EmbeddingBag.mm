@@ -116,7 +116,7 @@ static std::tuple<Tensor, Tensor, Tensor, Tensor> _embedding_bag_mps_impl(
       auto pipeline_state = lib.getPipelineStateForFunc(
           fmt::format("embedding_bag_{}_{}", scalarToMetalTypeString(weight), scalarToMetalTypeString(indices)));
 
-      getMPSProfiler().beginProfileKernel(pipeline_state, "embedding_bag", {weight, indices, offsets}, stream);
+      getMPSProfiler().beginProfileKernel(pipeline_state, "embedding_bag", {weight, indices, offsets});
       [computeEncoder setComputePipelineState:pipeline_state];
       mtl_setArgs(computeEncoder,
                   weight,
@@ -131,7 +131,7 @@ static std::tuple<Tensor, Tensor, Tensor, Tensor> _embedding_bag_mps_impl(
                   stream->getErrorBuffer());
 
       mtl_dispatch1DJob(computeEncoder, pipeline_state, num_threads);
-      getMPSProfiler().endProfileKernel(pipeline_state, stream);
+      getMPSProfiler().endProfileKernel(pipeline_state);
     }
   });
 
@@ -230,7 +230,7 @@ Tensor _embedding_bag_dense_backward_mps(const Tensor& output_grad,
                                                                     mps::scalarToMetalTypeString(indices)));
 
       getMPSProfiler().beginProfileKernel(
-          pipeline_state, "embedding_bag", {output_grad, indices, offset2bag, bag_size}, stream);
+          pipeline_state, "embedding_bag", {output_grad, indices, offset2bag, bag_size});
       [computeEncoder setComputePipelineState:pipeline_state];
       mps::mtl_setArgs(computeEncoder,
                        output_grad,
@@ -243,7 +243,7 @@ Tensor _embedding_bag_dense_backward_mps(const Tensor& output_grad,
                        params);
 
       mps::mtl_dispatch1DJob(computeEncoder, pipeline_state, num_threads);
-      getMPSProfiler().endProfileKernel(pipeline_state, stream);
+      getMPSProfiler().endProfileKernel(pipeline_state);
     }
   });
 
@@ -282,15 +282,13 @@ Tensor _embedding_bag_per_sample_weights_backward_mps(const Tensor& output_grad,
                                                                     mps::scalarToMetalTypeString(output_grad),
                                                                     mps::scalarToMetalTypeString(indices)));
 
-      getMPSProfiler().beginProfileKernel(pipeline_state,
-                                          "embedding_bag_per_sample_weights_backward",
-                                          {output_grad, weight, indices, offset2bag},
-                                          stream);
+      getMPSProfiler().beginProfileKernel(
+          pipeline_state, "embedding_bag_per_sample_weights_backward", {output_grad, weight, indices, offset2bag});
       [computeEncoder setComputePipelineState:pipeline_state];
       mps::mtl_setArgs(computeEncoder, output_grad, weight, indices, offset2bag, per_sample_weights_grad, params);
 
       mps::mtl_dispatch1DJob(computeEncoder, pipeline_state, num_threads);
-      getMPSProfiler().endProfileKernel(pipeline_state, stream);
+      getMPSProfiler().endProfileKernel(pipeline_state);
     }
   });
 

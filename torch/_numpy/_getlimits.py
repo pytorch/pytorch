@@ -1,13 +1,15 @@
+# mypy: ignore-errors
+
 import torch
 
 from . import _dtypes
 
 
-def finfo(dtyp: object) -> torch.finfo:
+def finfo(dtyp):
     torch_dtype = _dtypes.dtype(dtyp).torch_dtype
     return torch.finfo(torch_dtype)
 
 
-def iinfo(dtyp: object) -> torch.iinfo:
+def iinfo(dtyp):
     torch_dtype = _dtypes.dtype(dtyp).torch_dtype
     return torch.iinfo(torch_dtype)

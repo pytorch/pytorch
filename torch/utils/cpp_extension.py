@@ -1613,12 +1613,7 @@ def CUDAExtension(name, sources, *args, **kwargs):
                               hipify_result[s_abs].hipified_path is not None) else s_abs)
             # setup() arguments must *always* be /-separated paths relative to the setup.py directory,
             # *never* absolute paths
-            try:
-                hip_path = os.path.relpath(hipified_s_abs, build_dir)
-            except ValueError:
-                # Cross-drive on Windows: no relative path exists; fall back to absolute (#91797).
-                hip_path = hipified_s_abs
-            hipified_sources.add(hip_path)
+            hipified_sources.add(os.path.relpath(hipified_s_abs, build_dir))
 
         sources = list(hipified_sources)
 
@@ -2371,8 +2366,7 @@ def _jit_compile(name,
                 clean_ctx_mgr = contextlib.nullcontext()
             with clean_ctx_mgr as clean_ctx:
                 if IS_HIP_EXTENSION and (with_cuda or with_cudnn):
-                    if hipify_python is None:
-                        raise AssertionError("expected hipify_python to be not None")
+                    assert hipify_python is not None  # noqa: S101
                     hipify_result = hipify_python.hipify(
                         project_directory=build_directory,
                         output_directory=build_directory,

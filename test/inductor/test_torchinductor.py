@@ -180,44 +180,6 @@ _P = ParamSpec("_P")
 
 HAS_AVX2 = "fbgemm" in torch.backends.quantized.supported_engines
 
-_OPS_WITHOUT_GPU_LOWP: frozenset[str] = frozenset(
-    {
-        "airy_ai",
-        "bessel_i0",
-        "bessel_i1",
-        "bessel_j0",
-        "bessel_j1",
-        "bessel_y0",
-        "bessel_y1",
-        "chebyshev_polynomial_t",
-        "chebyshev_polynomial_u",
-        "chebyshev_polynomial_v",
-        "chebyshev_polynomial_w",
-        "erfcx",
-        "gammainc",
-        "gammaincc",
-        "hermite_polynomial_h",
-        "hermite_polynomial_he",
-        "i1",
-        "i1e",
-        "laguerre_polynomial_l",
-        "legendre_polynomial_p",
-        "modified_bessel_i0",
-        "modified_bessel_i1",
-        "modified_bessel_k0",
-        "modified_bessel_k1",
-        "ndtri",
-        "scaled_modified_bessel_k0",
-        "scaled_modified_bessel_k1",
-        "shifted_chebyshev_polynomial_t",
-        "shifted_chebyshev_polynomial_u",
-        "shifted_chebyshev_polynomial_v",
-        "shifted_chebyshev_polynomial_w",
-        "spherical_bessel_j0",
-        "zeta",
-    }
-)
-
 if TEST_WITH_ROCM:
     torch._inductor.config.force_layout_optimization = 1
     os.environ["PYTORCH_MIOPEN_SUGGEST_NHWC"] = "1"
@@ -17060,10 +17022,42 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     def test_pointwise(self, name, op):
         dtype = torch.float32
         check_lowp = True
-        if self.device == GPU_TYPE and (
-            name in _OPS_WITHOUT_GPU_LOWP or (GPU_TYPE == "mtia" and name == "log_ndtr")
-        ):
-            # Low-precision implementations are unavailable for these operators.
+        if self.device == GPU_TYPE and name in {
+            "airy_ai",
+            "bessel_i0",
+            "bessel_i1",
+            "bessel_j0",
+            "bessel_j1",
+            "bessel_y0",
+            "bessel_y1",
+            "erfcx",
+            "gammainc",
+            "gammaincc",
+            "i1",
+            "i1e",
+            "modified_bessel_i0",
+            "modified_bessel_i1",
+            "modified_bessel_k0",
+            "modified_bessel_k1",
+            "ndtri",
+            "scaled_modified_bessel_k0",
+            "scaled_modified_bessel_k1",
+            "spherical_bessel_j0",
+            "zeta",
+            "chebyshev_polynomial_t",
+            "chebyshev_polynomial_v",
+            "chebyshev_polynomial_u",
+            "chebyshev_polynomial_w",
+            "legendre_polynomial_p",
+            "shifted_chebyshev_polynomial_t",
+            "shifted_chebyshev_polynomial_u",
+            "shifted_chebyshev_polynomial_v",
+            "shifted_chebyshev_polynomial_w",
+            "hermite_polynomial_h",
+            "hermite_polynomial_he",
+            "laguerre_polynomial_l",
+        }:
+            # <func>_cuda not implemented for Half
             check_lowp = False
 
         if (
@@ -17199,36 +17193,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         )
         with ctx:
             self.common(fn, args, check_lowp=check_lowp, atol=1e-4, rtol=1e-4)
-
-    @parametrize("dtype", [torch.float32, torch.float64])
-    def test_log_ndtr_signbit(self, dtype):
-        """Regression test for https://github.com/pytorch/pytorch/issues/187336."""
-        if not self.is_dtype_supported(dtype):
-            self.skipTest(f"dtype {dtype} not supported on {self.device}")
-        if self.device == "mps":
-            # aten::special_log_ndtr.out is not currently implemented for the MPS device
-            # See issue: https://github.com/pytorch/pytorch/issues/191339 (or a dedicated follow-up issue)
-            self.skipTest("aten::special_log_ndtr.out not implemented on MPS")
-
-        def fn(x):
-            return torch.special.log_ndtr(x)
-
-        x = torch.tensor([100.0, -5.0], dtype=dtype, device=self.device)
-
-        expected = fn(x)
-        actual = torch.compile(fn, backend="inductor")(x)
-
-        # Value must match eager
-        self.assertEqual(actual, expected)
-        # Signbit must be set for 100.0 (result is -0.0, not +0.0)
-        self.assertTrue(
-            torch.signbit(actual[0]).item(),
-            f"log_ndtr(100.0) signbit lost for {dtype} on {self.device}",
-        )
-
-    # Halide backend does not support copysign; Triton-CPU libdevice lacks erfcx
-    test_log_ndtr_signbit._expected_failure_halide = True
-    test_log_ndtr_signbit._expected_failure_triton_cpu = True
 
     # codegen test fails with no dynamic for loop in dynamic shape tests
     @expectedFailureCodegenDynamic
@@ -19455,13 +19419,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         compiled = torch.compile(fn, backend="inductor", dynamic=True)
         for _ in range(4):
             self.assertEqual(compiled(x, a, b), fn(x, a, b))
-
-    def test_eye_uint16_index(self):
-        # Inductor uses uint16 indices for this size; the output remains float32.
-        def fn(x):
-            return torch.eye(x.shape[-1], device=x.device)
-
-        self.common(fn, (torch.zeros(10, 256, device=self.device),))
 
     # end of class CommonTemplate - add new tests here
 
