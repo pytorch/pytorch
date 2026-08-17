@@ -29,7 +29,6 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_device_type import (
     IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED,
     instantiate_device_type_tests,
-    onlyAccelerator,
 )
 from torch.testing._internal.common_utils import HardwareClassification
 from torch.utils import _pytree as pytree
