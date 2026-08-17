@@ -167,6 +167,50 @@ class TestTritonHeuristics(TestCase):
         with self.assertRaisesRegex(AssertionError, "exceeds Triton maximum"):
             make_matmul_triton_config({"x": 256, "y": 128, "r": 64}, 8, 1)
 
+    def test_persistent_reduction_budget_uses_emitted_rblock(self):
+        # Under dynamic shapes the emitted R0_BLOCK can exceed size_hints["r0_"];
+        # configs must be budgeted against the emitted block, not the hint.
+        MAX_PERSISTENT_BLOCK_NUMEL = 4096
+        size_hints = {"x": 512, "r0_": 8}
+        emitted_rblock = 512
+
+        for device_type in ("cuda", "hip"):
+            device = DeviceProperties(
+                type=device_type,
+                index=0,
+                multi_processor_count=1,
+                cc=80,
+                major=8,
+                max_threads_per_block=1024,
+                warp_size=32,
+            )
+            triton_meta = {"device": device}
+
+            unconstrained = _persistent_reduction_configs(
+                size_hints=size_hints,
+                inductor_meta={},
+                triton_meta=triton_meta,
+            )
+            constrained = _persistent_reduction_configs(
+                size_hints=size_hints,
+                inductor_meta={"persistent_rblock": emitted_rblock},
+                triton_meta=triton_meta,
+            )
+
+            self.assertTrue(constrained)
+            for cfg in constrained:
+                xblock = cfg.kwargs["XBLOCK"]
+                if xblock == 1:
+                    continue
+                self.assertLessEqual(
+                    xblock * emitted_rblock, MAX_PERSISTENT_BLOCK_NUMEL
+                )
+
+            unconstrained_xblocks = {c.kwargs["XBLOCK"] for c in unconstrained}
+            constrained_xblocks = {c.kwargs["XBLOCK"] for c in constrained}
+            self.assertTrue(constrained_xblocks.issubset(unconstrained_xblocks))
+            self.assertLess(len(constrained_xblocks), len(unconstrained_xblocks))
+
     def test_reduction_min_block_preserves_tile_product(self):
         cfg = _enforce_reduction_config_block_minimums(
             [triton.Config({"XBLOCK": 64, "R0_BLOCK": 1024})],

@@ -7177,6 +7177,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             out["native_matmul_persistent_rblock"] = rblock
         if self.add_persistent_rblock:
             out["add_persistent_rblock"] = True
+        if (rblock := self._get_emitted_persistent_rblock()) is not None:
+            out["persistent_rblock"] = rblock
         if (rblock := self._strict_reduction_rblock()) is not None:
             out["strict_reduction_rblock"] = rblock
         if (
@@ -7599,6 +7601,22 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             if tree.is_reduction
         ]
         return math.prod(rblocks) if rblocks else None
+
+    def _get_emitted_persistent_rblock(self) -> int | None:
+        # The R block the kernel actually emits. Under dynamic shapes this can
+        # exceed the size hint, so config selection budgets against it.
+        if not self.persistent_reduction:
+            return None
+        try:
+            rblocks = [
+                self._get_persistent_RBLOCK(tree.numel)
+                for tree in self.range_trees
+                if tree.is_reduction
+            ]
+        except ValueError:
+            return None
+        total = math.prod(rblocks) if rblocks else 1
+        return total if total > 1 else None
 
     def _get_persistent_reduction_block(self, rnumel) -> int:
         if (rblock := self._strict_reduction_rblock()) is not None:
