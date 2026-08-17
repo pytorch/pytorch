@@ -1500,6 +1500,44 @@ def _make_node_magic(method: str, func: Callable[..., sympy.Basic]) -> None:
             )
         if not isinstance(other, SymNode):
             raise AssertionError(f"Expected SymNode, got {type(other)}")
+
+        # See Note [symbolic op memo] in symbolic_shapes.py. The cache holds the
+        # resulting expression, never the SymNode: proxy slots are keyed on node
+        # identity, so returning one node to two call sites would give the second
+        # the first's provenance in the graph being traced.
+        shape_env = self.shape_env
+        cache = None
+        cache_key = None
+        if shape_env is not None:
+            cache = shape_env._symop_cache
+            cache_key = (
+                method,
+                self._expr,
+                other._expr,
+                shape_env._replacements_version_counter,
+            )
+            cached = cache.get(cache_key)
+            if cached is not None:
+                out, pytype, optimized_summation = cached
+                if (
+                    pytype is not None
+                    and out_hint is not _NO_HINT
+                    and out_hint is not None
+                    and not isinstance(out_hint, SymTypes)
+                ):
+                    out_hint = pytype(out_hint)  # type: ignore[arg-type]
+                fx_node, _ = shape_env._create_fx_call_function(
+                    op, (self.fx_node, other.fx_node)
+                )
+                return SymNode(
+                    out,
+                    shape_env,
+                    pytype,
+                    out_hint,  # type: ignore[arg-type]
+                    fx_node=fx_node,
+                    optimized_summation=optimized_summation,
+                )
+
         optimized_summation = False
         try:
             if method == "mod":
@@ -1607,6 +1645,8 @@ def _make_node_magic(method: str, func: Callable[..., sympy.Basic]) -> None:
             fx_node=fx_node,
             optimized_summation=optimized_summation,  # see Note [optimized_summation]
         )
+        if cache is not None:
+            cache[cache_key] = (out, pytype, optimized_summation)
         return result
 
     @capture_provenance
