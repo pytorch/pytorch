@@ -44,6 +44,7 @@ from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import is_sym_node
 from torch.fx.experimental.symbolic_shapes import fx_placeholder_vals, guard_or_true
 from torch.fx.graph_module import GraphModule
+from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.fx.passes._tensorify_python_scalars import tensorify_python_scalars
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.types import py_sym_types
@@ -1517,15 +1518,39 @@ def maybe_inline_graph_saved_tensors_hooks(
                 lambda: f"aot_saved_tensors_hooks_pack {saved.name}",  # type: ignore[union-attr]
                 structured_logs,
             )
+
             # Extract pack_out_val from the traced graph's output-node meta.
             # `pack_g` is what gets inlined into the joint graph below via
             # `node_copy`, so its output meta uses the same symbols the
             # inlined nodes carry — no identity mismatch, no need to re-run
             # the hook to get an "example value".
+            #
+            # FX stores the output node's container args as immutable_list /
+            # immutable_dict. Executing the hook (the old code path) instead
+            # returned plain list / dict. `pack_out_val` feeds the unpack hook
+            # trace below (`prepare_hook_gm(unpack_hook_gm, (pack_out_val,))`),
+            # so normalize the containers back to their runtime types to keep
+            # the unpack trace in parity with eager and avoid tracing a
+            # different backward for container-type-sensitive unpack hooks.
+            def _materialize_fx_output_containers(x: Any) -> Any:
+                if type(x) in (immutable_list, list):
+                    return [_materialize_fx_output_containers(v) for v in x]
+                if type(x) in (immutable_dict, dict):
+                    return {
+                        k: _materialize_fx_output_containers(v) for k, v in x.items()
+                    }
+                if isinstance(x, tuple):
+                    values = tuple(_materialize_fx_output_containers(v) for v in x)
+                    return type(x)(*values) if hasattr(x, "_fields") else values
+                return x
+
+            pack_out_args = _materialize_fx_output_containers(
+                pack_g.output_node().args[0]
+            )
             pack_out_val = pytree.tree_map_only(
                 torch.fx.Node,
                 lambda n: n.meta["val"],
-                pack_g.output_node().args[0],
+                pack_out_args,
             )
 
         requires_sc_handling = any(
