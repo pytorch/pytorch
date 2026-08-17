@@ -7362,7 +7362,6 @@ instantiate_device_type_tests(
     except_for=(
         "cuda",
         "xpu",
-        "privateuse1",
     ),
 )
 
