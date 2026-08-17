@@ -246,7 +246,7 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
    ``require_no_dropped_guards=False)``. ``require_complete`` rejects missing variants or
    frames and captures that raised. ``require_no_risky_drops`` rejects dropped identity
    guards on configuration-like slots, every custom-filter drop, and every dropped guard
-   whose SOURCE held different values across captured variants. ``require_no_dropped_guards`` rejects every
+   observed to distinguish captured variants. ``require_no_dropped_guards`` rejects every
    guard omitted from the serialized artifact; it is off by default because every model
    drops identity guards that cannot be serialized, so requiring none would refuse
    essentially every real artifact. The risky subset is the rail that is on, and it is a
@@ -294,10 +294,6 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
    Return a context manager that forbids compilation. Use it around calls to a loaded
    multi-graph artifact so an input or path missing from the capture raises instead of
    silently compiling a new variant.
-
-   The scope is THREAD-LOCAL: it constrains only the thread that entered it. A serving
-   process must enter it on every request thread, or the threads that did not will
-   quietly compile the variants this is meant to catch.
 
    Example::
 
