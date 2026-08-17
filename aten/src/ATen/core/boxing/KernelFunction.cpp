@@ -1,6 +1,8 @@
 #include <ATen/core/boxing/KernelFunction.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 
+#include <iterator>
+#include <memory>
 #include <sstream>
 
 namespace c10 {
@@ -56,12 +58,12 @@ bool KernelFunction::_equalsBoxedAndUnboxed(const KernelFunction& other) const {
 namespace impl {
 
 torch::jit::Stack boxedBufferToStack(IValue* begin, IValue* end) {
-  torch::jit::Stack stack;
-  stack.reserve(static_cast<size_t>(end - begin));
-  for (IValue* it = begin; it != end; ++it) {
-    stack.push_back(std::move(*it));
-  }
-  return stack;
+  return torch::jit::Stack(
+      std::make_move_iterator(begin), std::make_move_iterator(end));
+}
+
+void destroyBoxedBuffer(IValue* begin, IValue* end) noexcept {
+  std::destroy(begin, end);
 }
 
 } // namespace impl

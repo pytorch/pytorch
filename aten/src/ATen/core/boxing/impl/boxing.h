@@ -136,6 +136,11 @@ C10_ALWAYS_INLINE_UNLESS_MOBILE void boxArgsToStack(
 // (then moved-from) IValues is left to the caller's BoxedBuffer.
 TORCH_API torch::jit::Stack boxedBufferToStack(IValue* begin, IValue* end);
 
+// Destroys [begin, end). Out of line so that each boxArgs instantiation
+// emits a single call instead of its own unrolled sequence of inlined
+// IValue destructors.
+TORCH_API void destroyBoxedBuffer(IValue* begin, IValue* end) noexcept;
+
 namespace detail {
 // Uninitialized storage for N boxed IValues. The destructor destroys
 // [begin, end): cheap moved-from IValues after a successful
@@ -154,7 +159,7 @@ struct BoxedBuffer final {
   BoxedBuffer(const BoxedBuffer&) = delete;
   BoxedBuffer& operator=(const BoxedBuffer&) = delete;
   ~BoxedBuffer() {
-    std::destroy(begin, end);
+    destroyBoxedBuffer(begin, end);
   }
 };
 } // namespace detail
