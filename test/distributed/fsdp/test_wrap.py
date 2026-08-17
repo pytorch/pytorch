@@ -215,7 +215,7 @@ class TestFSDPWrap(FSDPTestContinuous):
     @skip_if_lt_x_gpu(2)
     @requires_capabilities(
         Capability.distributed.backend,
-        Capability.distributed.fsdp,
+        Capability.distributed.fsdp1,
     )
     @parametrize("nested", [True, False])
     @parametrize(
@@ -243,7 +243,7 @@ class TestFSDPWrap(FSDPTestContinuous):
     @skip_if_lt_x_gpu(2)
     @requires_capabilities(
         Capability.distributed.backend,
-        Capability.distributed.fsdp,
+        Capability.distributed.fsdp1,
     )
     @parametrize("use_or_policy", [True, False])
     def test_wrap_batchnorm_individually(self, device, use_or_policy):
@@ -274,7 +274,7 @@ class TestFSDPWrap(FSDPTestContinuous):
     @skip_if_lt_x_gpu(2)
     @requires_capabilities(
         Capability.distributed.backend,
-        Capability.distributed.fsdp,
+        Capability.distributed.fsdp1,
     )
     def test_bn_always_wrapped_individually(self, device):
         """
@@ -334,7 +334,7 @@ class TestFSDPWrap(FSDPTestContinuous):
     @skip_if_lt_x_gpu(2)
     @requires_capabilities(
         Capability.distributed.backend,
-        Capability.distributed.fsdp,
+        Capability.distributed.fsdp1,
     )
     @parametrize(
         "cpu_offload",
@@ -427,7 +427,7 @@ class TestFSDPWrap(FSDPTestContinuous):
     @skip_if_lt_x_gpu(1)
     @requires_capabilities(
         Capability.distributed.backend,
-        Capability.distributed.fsdp,
+        Capability.distributed.fsdp1,
     )
     def test_zero_argument(self, device):
         class ZeroArguModel(nn.Module):
@@ -454,7 +454,7 @@ class TestAutoWrap(TestCase):
         not TEST_MULTIACCELERATOR, "Requires at least 2 accelerator devices"
     )
     @requires_capabilities(
-        Capability.distributed.fsdp,
+        Capability.distributed.fsdp1,
     )
     @parametrize("wrap_method", [WrapMethod.FSDP_CTOR, WrapMethod.WRAP_API])
     def test_wrap(self, device, wrap_method):
@@ -479,7 +479,7 @@ class TestAutoWrap(TestCase):
         not TEST_MULTIACCELERATOR, "Requires at least 2 accelerator devices"
     )
     @requires_capabilities(
-        Capability.distributed.fsdp,
+        Capability.distributed.fsdp1,
     )
     def test_wrap_disabled_outside_context(self, device):
         pg = self.process_group
@@ -501,7 +501,7 @@ class TestAutoWrap(TestCase):
         not TEST_MULTIACCELERATOR, "Requires at least 2 accelerator devices"
     )
     @requires_capabilities(
-        Capability.distributed.fsdp,
+        Capability.distributed.fsdp1,
     )
     def test_wrap_override_defaults(self, device):
         new_process_group = DummyProcessGroup(rank=0, size=2)
@@ -528,7 +528,7 @@ class TestAutoWrap(TestCase):
         not TEST_MULTIACCELERATOR, "Requires at least 2 accelerator devices"
     )
     @requires_capabilities(
-        Capability.distributed.fsdp,
+        Capability.distributed.fsdp1,
     )
     def test_transformer_auto_wrap_policy(self, device):
         """Tests the ``transformer_auto_wrap_policy``."""
@@ -542,7 +542,7 @@ class TestAutoWrap(TestCase):
         not TEST_MULTIACCELERATOR, "Requires at least 2 accelerator devices"
     )
     @requires_capabilities(
-        Capability.distributed.fsdp,
+        Capability.distributed.fsdp1,
     )
     def test_module_wrap_policy(self, device):
         """Tests the ``ModuleWrapPolicy``."""
@@ -555,7 +555,7 @@ class TestAutoWrap(TestCase):
         not TEST_MULTIACCELERATOR, "Requires at least 2 accelerator devices"
     )
     @requires_capabilities(
-        Capability.distributed.fsdp,
+        Capability.distributed.fsdp1,
     )
     def test_module_wrap_policy_callable(self, device):
         """Tests the ``ModuleWrapPolicy`` as a ``Callable``."""
@@ -590,7 +590,7 @@ class TestAutoWrap(TestCase):
         not TEST_MULTIACCELERATOR, "Requires at least 2 accelerator devices"
     )
     @requires_capabilities(
-        Capability.distributed.fsdp,
+        Capability.distributed.fsdp1,
     )
     def test_custom_policy(self, device):
         """
@@ -698,7 +698,7 @@ class TestAutoWrap(TestCase):
         not TEST_MULTIACCELERATOR, "Requires at least 2 accelerator devices"
     )
     @requires_capabilities(
-        Capability.distributed.fsdp,
+        Capability.distributed.fsdp1,
     )
     def test_auto_wrap_api(self, device):
         """
@@ -721,7 +721,7 @@ class TestAutoWrap(TestCase):
         not TEST_MULTIACCELERATOR, "Requires at least 2 accelerator devices"
     )
     @requires_capabilities(
-        Capability.distributed.fsdp,
+        Capability.distributed.fsdp1,
     )
     def test_auto_wrap_preset_exclude_wrap(self, device):
         """
@@ -747,7 +747,7 @@ class TestAutoWrap(TestCase):
         not TEST_MULTIACCELERATOR, "Requires at least 2 accelerator devices"
     )
     @requires_capabilities(
-        Capability.distributed.fsdp,
+        Capability.distributed.fsdp1,
     )
     def test_auto_wrap_preset_exclude_wrap_include_children(self, device):
         """
@@ -771,7 +771,7 @@ class TestAutoWrap(TestCase):
         not TEST_MULTIACCELERATOR, "Requires at least 2 accelerator devices"
     )
     @requires_capabilities(
-        Capability.distributed.fsdp,
+        Capability.distributed.fsdp1,
     )
     def test_auto_wrap_preset_force_leaf(self, device):
         """
@@ -796,7 +796,7 @@ class TestAutoWrap(TestCase):
         not TEST_MULTIACCELERATOR, "Requires at least 2 accelerator devices"
     )
     @requires_capabilities(
-        Capability.distributed.fsdp,
+        Capability.distributed.fsdp1,
     )
     def test_auto_wrap_preset_force_leaf_custom(self, device):
         """
@@ -895,7 +895,7 @@ class TestAutoWrap(TestCase):
         not TEST_MULTIACCELERATOR, "Requires at least 2 accelerator devices"
     )
     @requires_capabilities(
-        Capability.distributed.fsdp,
+        Capability.distributed.fsdp1,
     )
     @parametrize("wrap_method", [WrapMethod.FSDP_CTOR, WrapMethod.WRAP_API])
     def test_always_wrap_with_ignored_modules(self, device, wrap_method: WrapMethod):
@@ -925,7 +925,7 @@ class TestAutoWrap(TestCase):
         not TEST_MULTIACCELERATOR, "Requires at least 2 accelerator devices"
     )
     @requires_capabilities(
-        Capability.distributed.fsdp,
+        Capability.distributed.fsdp1,
     )
     @parametrize("wrap_method", [WrapMethod.FSDP_CTOR, WrapMethod.WRAP_API])
     def test_auto_wrap_with_ignored_modules(self, device, wrap_method: WrapMethod):
@@ -963,7 +963,7 @@ class TestAutoWrap(TestCase):
         not TEST_MULTIACCELERATOR, "Requires at least 2 accelerator devices"
     )
     @requires_capabilities(
-        Capability.distributed.fsdp,
+        Capability.distributed.fsdp1,
     )
     def test_frozen_params(self, device):
         """
