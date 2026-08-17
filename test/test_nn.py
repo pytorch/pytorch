@@ -3213,10 +3213,16 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         target = torch.randn(7, 4, 32, device="cuda")
 
         # Consecutive training forwards on the same input must differ (dropout is
-        # actually stochastic across steps, not a fixed mask).
+        # actually stochastic across steps, not a fixed mask). Compare multiple
+        # consecutive pairs: under the original bug the first forward generated a
+        # real mask and only later steps repeated the fixed all-drop mask, so
+        # out1 != out2 held even on broken code while out2 == out3 exposed it.
         out1, _ = rnn(input)
         out2, _ = rnn(input)
+        out3, _ = rnn(input)
         self.assertNotEqual(out1, out2)
+        self.assertNotEqual(out2, out3)
+        self.assertNotEqual(out1, out3)
 
         # After a backward, the input-to-hidden gradients of the dropped layer
         # must not be entirely zero.

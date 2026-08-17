@@ -1767,8 +1767,8 @@ static PyObject* THCPModule_cudnnClearDropoutState_wrap(
     PyObject* noargs) {
   HANDLE_TH_ERRORS
 #if defined(USE_ROCM)
-  // On ROCm, RNNs dispatch to MIOpen, which caches its dropout state buffer in
-  // thread-local storage separate from the cuDNN path.
+  // On ROCm, RNNs dispatch to MIOpen, which caches per-device dropout state
+  // buffers separate from the cuDNN path.
   at::native::_miopen_clear_dropout_state();
 #endif
   at::native::_cudnn_clear_dropout_state();
