@@ -7,7 +7,11 @@ import torch
 from torch import nn
 from torch.ao.pruning._experimental.data_scheduler import BaseDataScheduler
 from torch.ao.pruning._experimental.data_sparsifier import DataNormSparsifier
-from torch.testing._internal.common_utils import raise_on_run_directly, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    raise_on_run_directly,
+    TestCase,
+)
 
 
 class ImplementedDataScheduler(BaseDataScheduler):
@@ -25,6 +29,8 @@ class ImplementedDataScheduler(BaseDataScheduler):
 
 
 class TestBaseDataScheduler(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _get_data(self):
         tensor1, param1, emb1 = (
             torch.randn(5, 5),
