@@ -7,9 +7,7 @@ from torch.distributed.fsdp._shard_utils import (
     _create_chunk_sharded_tensor,
 )
 from torch.testing._internal.common_device_type import (
-    Capability,
     instantiate_device_type_tests,
-    requires_capabilities,
 )
 from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import HardwareClassification, run_tests
@@ -36,11 +34,6 @@ class TestShardUtilsDistributed(FSDPTest):
         return torch.rand(*size).to(device=device_type)
 
     @skip_if_lt_x_gpu(2)
-    @requires_capabilities(
-        Capability.distributed.backend,
-        Capability.distributed.fsdp1,
-        Capability.distributed.sharded_tensor,
-    )
     def test_create_chunk_sharded_tensor(self, device):
         for size in ((1,), (1, 6), (12,), (12, 6), (25,), (25, 6)):
             tensor = self._create_tensor(*size)
@@ -74,11 +67,6 @@ class TestShardUtilsDistributedDTensor(DTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(2)
-    @requires_capabilities(
-        Capability.distributed.backend,
-        Capability.distributed.dtensor,
-        Capability.distributed.fsdp1,
-    )
     def test_create_chunk_dtensor(self, device):
         device_mesh = self.build_device_mesh()
 
