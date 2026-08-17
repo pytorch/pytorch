@@ -90,7 +90,6 @@ jobs:
       # from trunk. Also use a memory-intensive runner here because memory is
       # usually the bottleneck
       runner: l-x86iavx512-48-384
-      flash-attention-large-memory-build: true
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       build-environment: linux-jammy-cuda13.0-py3.12-gcc11-sm100
       docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3.12-gcc11-inductor-benchmarks

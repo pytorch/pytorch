@@ -23,7 +23,6 @@ from unittest.mock import patch
 import torch
 import torch.nn as nn
 from torch._dynamo.testing import CompileCounterWithBackend, normalize_gm
-from torch._higher_order_ops.inline_asm_elementwise import inline_asm_elementwise
 from torch._inductor import config, metrics
 from torch._inductor.exc import InductorError
 from torch._inductor.runtime.triton_compat import HAS_WARP_SPEC
@@ -54,6 +53,7 @@ from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_BF16,
     PLATFORM_SUPPORTS_FP8,
+    TEST_MULTIGPU,
 )
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -80,7 +80,6 @@ from torch.testing._internal.common_utils import (  # noqa: F401
     serialTest,
     skipIfRocm,
     skipIfRocmArch,
-    TEST_MULTIACCELERATOR,
     TEST_WITH_ROCM,
     TEST_WITH_SLOW,
 )
@@ -2070,114 +2069,6 @@ class TestFlexAttention(InductorTestCase):
 
     @supported_platform
     @skip_on_cpu
-    @skip_on_xpu
-    @skip_on_mps
-    @skip_on_rocm
-    def test_inline_asm_score_mod(self, device):
-        """score_mod using the inline_asm_elementwise HOP lowers to
-        tl.inline_asm_elementwise inside the flex kernel. Forward only:
-        the HOP has no autograd formula."""
-        bias = torch.randn(S, device=device)
-
-        def asm_score_mod(score, b, h, q, kv):
-            return inline_asm_elementwise(
-                score,
-                bias[kv],
-                asm_str="fma.rn.f32 $0, $1, 0f40000000, $2;",
-                constraints="=f,f,f",
-                dtype=torch.float32,
-            )
-
-        def ref_score_mod(score, b, h, q, kv):
-            return score * 2.0 + bias[kv]
-
-        q, k, v = [
-            torch.randn(B, H, S, D, device=device, dtype=torch.float16)
-            for _ in range(3)
-        ]
-        compiled = torch.compile(flex_attention)
-        out = compiled(q, k, v, score_mod=asm_score_mod)
-        ref = compiled(q, k, v, score_mod=ref_score_mod)
-        self.assertEqual(out, ref)
-
-        # The eager (unfused) path applies score_mod under vmap and runs the
-        # asm via the Jiterator.
-        eager_out = flex_attention(q, k, v, score_mod=asm_score_mod)
-        eager_ref = flex_attention(q, k, v, score_mod=ref_score_mod)
-        self.assertEqual(eager_out, eager_ref)
-
-    @supported_platform
-    @skip_on_cpu
-    @skip_on_xpu
-    @skip_on_mps
-    @skip_on_rocm
-    def test_inline_asm_score_mod_pack2(self, device):
-        def asm_score_mod(score, b, h, q, kv):
-            return inline_asm_elementwise(
-                score,
-                asm_str="add.f32 $0, $2, $2; add.f32 $1, $3, $3;",
-                constraints="=f,=f,f,f",
-                dtype=torch.float32,
-                pack=2,
-            )
-
-        def ref_score_mod(score, b, h, q, kv):
-            return score * 2.0
-
-        q, k, v = [
-            torch.randn(B, H, S, D, device=device, dtype=torch.float16)
-            for _ in range(3)
-        ]
-        compiled = torch.compile(flex_attention)
-        out = compiled(q, k, v, score_mod=asm_score_mod)
-        ref = compiled(q, k, v, score_mod=ref_score_mod)
-        self.assertEqual(out, ref)
-
-    @supported_platform
-    @skip_on_cpu
-    @skip_on_xpu
-    @skip_on_mps
-    @skip_on_rocm
-    def test_inline_asm_mask_mod(self, device):
-        """mask_mod using the inline_asm_elementwise HOP: the multi-line PTX
-        predicate is exercised both when building the block mask (eager vmap +
-        Jiterator, and compiled) and inside the kernel on partial blocks."""
-        asm_str = "{\n.reg .pred p;\nsetp.ge.s32 p, $1, $2;\nselp.u32 $0, 1, 0, p;\n}"
-
-        def asm_causal_mask(b, h, q_idx, kv_idx):
-            pred = inline_asm_elementwise(
-                q_idx.to(torch.int32),
-                kv_idx.to(torch.int32),
-                asm_str=asm_str,
-                constraints="=r,r,r",
-                dtype=torch.int32,
-            )
-            return pred != 0
-
-        def ref_causal_mask(b, h, q_idx, kv_idx):
-            return q_idx >= kv_idx
-
-        bm = create_block_mask(asm_causal_mask, B, H, S, S, device=device)
-        bm_ref = create_block_mask(ref_causal_mask, B, H, S, S, device=device)
-        self.assertEqual(bm.kv_num_blocks, bm_ref.kv_num_blocks)
-        self.assertEqual(bm.kv_indices, bm_ref.kv_indices)
-
-        bm_compiled = torch.compile(create_block_mask)(
-            asm_causal_mask, B, H, S, S, device=device
-        )
-        self.assertEqual(bm_compiled.kv_num_blocks, bm_ref.kv_num_blocks)
-
-        q, k, v = [
-            torch.randn(B, H, S, D, device=device, dtype=torch.float16)
-            for _ in range(3)
-        ]
-        compiled = torch.compile(flex_attention)
-        out = compiled(q, k, v, block_mask=bm)
-        ref = compiled(q, k, v, block_mask=bm_ref)
-        self.assertEqual(out, ref)
-
-    @supported_platform
-    @skip_on_cpu
     @expected_not_implemented_on_mps
     def test_bf16_score_mod_captured_grad_dtype(self, device):
         """
@@ -2517,12 +2408,12 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         torch._dynamo.reset()
         gc.collect()
         if torch.cuda.is_available():
-            torch._C._cuda_clearCublasWorkspaces()
+            torch.cuda._clear_cublas_workspaces()
         torch.accelerator.empty_cache()
         torch._dynamo.reset()
         gc.collect()
         if torch.cuda.is_available():
-            torch._C._cuda_clearCublasWorkspaces()
+            torch.cuda._clear_cublas_workspaces()
         torch.accelerator.empty_cache()
 
     @supported_platform
@@ -5816,12 +5707,12 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
 
     @supported_platform
-    @unittest.skipUnless(TEST_MULTIACCELERATOR, "detected only one GPU")
+    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
     def test_qkv_and_block_mask_on_the_same_device(self, device):
         make_tensor = functools.partial(
             torch.ones,
             (2, 2, 256, 32),
-            device=0,
+            device="cuda:0",
             dtype=torch.float32,
             requires_grad=True,
         )
@@ -5830,7 +5721,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         def mask_mod(b, h, q, kv):
             return q >= kv
 
-        block_mask = create_block_mask(mask_mod, 1, 1, 256, 256, device=1)
+        block_mask = create_block_mask(mask_mod, 1, 1, 256, 256, device="cuda:1")
         with self.assertRaisesRegex(
             RuntimeError, "Expect q/k/v and block_mask to be on the same device"
         ):
@@ -6653,26 +6544,26 @@ class GraphModule(torch.nn.Module):
         with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
             compiled_flex(q, k, v)
 
-    @unittest.skipUnless(TEST_MULTIACCELERATOR, "detected only one GPU")
+    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
     def test_device_cuda_1(self, device):
         class TestModule(torch.nn.Module):
             def forward(self, q, k, v, block_mask):
                 return flex_attention(q, k, v, block_mask=block_mask)
 
-        q = torch.randn(1, 1, 256, 32, device=1, dtype=torch.bfloat16)
-        k = torch.randn(1, 1, 256, 32, device=1, dtype=torch.bfloat16)
-        v = torch.randn(1, 1, 256, 32, device=1, dtype=torch.bfloat16)
+        q = torch.randn(1, 1, 256, 32, device="cuda:1", dtype=torch.bfloat16)
+        k = torch.randn(1, 1, 256, 32, device="cuda:1", dtype=torch.bfloat16)
+        v = torch.randn(1, 1, 256, 32, device="cuda:1", dtype=torch.bfloat16)
         mask = create_block_mask(
             lambda b, h, q_idx, kv_idx: q_idx >= kv_idx,
             B=None,
             H=None,
             Q_LEN=256,
             KV_LEN=256,
-            device=1,
+            device="cuda:1",
         )
         mod = torch.compile(TestModule())
         attn_output = mod(q, k, v, mask)
-        self.assertEqual(attn_output.device, torch.device(1))
+        self.assertEqual(attn_output.device, torch.device("cuda:1"))
 
     @supported_platform
     @skip_on_cpu
