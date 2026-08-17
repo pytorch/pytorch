@@ -4122,6 +4122,64 @@ def classify_nodes(
     )
 
 
+def _cat_log_softmax_tensor_bytes(node: fx.Node) -> int | torch.SymInt | None:
+    value = node.meta.get("val")
+    if not isinstance(value, torch.Tensor):
+        return None
+    return value.numel() * value.dtype.itemsize
+
+
+def _has_linear_equal_byte_cat_path(
+    node: fx.Node,
+    cat: fx.Node,
+    input_ancestry: OrderedSet[fx.Node],
+    fwd_dependencies: OrderedSet[fx.Node],
+) -> bool:
+    """Return whether ``node`` has one equal-byte forward path to ``cat``."""
+    boundary_bytes = _cat_log_softmax_tensor_bytes(node)
+    if boundary_bytes is None:
+        return False
+
+    current = node
+    seen: OrderedSet[fx.Node] = OrderedSet()
+    while current not in seen:
+        seen.add(current)
+        fwd_users = [user for user in current.users if user in fwd_dependencies]
+        if len(fwd_users) != 1:
+            return False
+        user = fwd_users[0]
+        if user is cat:
+            return True
+        if user not in input_ancestry:
+            return False
+        user_bytes = _cat_log_softmax_tensor_bytes(user)
+        if user_bytes is None or not statically_known_true(
+            user_bytes == boundary_bytes
+        ):
+            return False
+        current = user
+    return False
+
+
+def _is_profitable_cat_log_softmax_recompute(
+    added_bytes: list[int | torch.SymInt | None],
+    recomputed_bytes: list[int | torch.SymInt | None],
+) -> bool:
+    """Return whether the proposed cut is smaller than every tagged spine cut."""
+    if (
+        not recomputed_bytes
+        or any(value is None for value in added_bytes)
+        or any(value is None for value in recomputed_bytes)
+    ):
+        return False
+
+    total_added_bytes = sum(cast(list[int | torch.SymInt], added_bytes))
+    return all(
+        statically_known_true(total_added_bytes < value)
+        for value in cast(list[int | torch.SymInt], recomputed_bytes)
+    )
+
+
 def _prefer_recompute_cat_log_softmax(
     joint_module: fx.GraphModule, num_fwd_outputs: int
 ) -> None:
@@ -4294,6 +4352,85 @@ def _prefer_recompute_cat_log_softmax(
             input_ancestry.add(node)
             pending.extend(node.all_input_nodes)
         if not supported_ancestry:
+            continue
+
+        def has_only_compute_source(output: fx.Node, source: fx.Node) -> bool:
+            pending = [output]
+            seen: OrderedSet[fx.Node] = OrderedSet()
+            found_source = False
+            while pending:
+                current = pending.pop()
+                if current in seen:
+                    continue
+                seen.add(current)
+                if current.op == "call_function" and op_types.is_compute_intensive(
+                    current
+                ):
+                    if current is not source:
+                        return False
+                    found_source = True
+                    continue
+                pending.extend(current.all_input_nodes)
+            return found_source
+
+        def has_full_size_gather(node: fx.Node) -> bool:
+            boundary_bytes = _cat_log_softmax_tensor_bytes(node)
+            if boundary_bytes is None:
+                return False
+            pending = [node]
+            seen: OrderedSet[fx.Node] = OrderedSet([node])
+            while pending:
+                current = pending.pop()
+                for user in current.users:
+                    if (
+                        user in input_ancestry
+                        or user in spine
+                        or user not in fwd_dependencies
+                    ):
+                        continue
+                    if (
+                        current is not node
+                        and user in gathers
+                        and user.args
+                        and user.args[0] is current
+                        and has_only_compute_source(current, node)
+                    ):
+                        return True
+                    user_bytes = _cat_log_softmax_tensor_bytes(user)
+                    if (
+                        user in bwd_dependencies
+                        and user not in seen
+                        and user_bytes is not None
+                        and statically_known_true(user_bytes >= boundary_bytes)
+                    ):
+                        seen.add(user)
+                        pending.append(user)
+            return False
+
+        compute_boundaries = [
+            node
+            for node in input_ancestry
+            if node.op == "call_function" and op_types.is_compute_intensive(node)
+        ]
+        new_boundaries = [
+            node for node in compute_boundaries if not has_full_size_gather(node)
+        ]
+        # The byte model counts every new compute boundary once. Reject paths
+        # where min-cut could instead retain a larger value or multiple values.
+        if not all(
+            _has_linear_equal_byte_cat_path(node, cat, input_ancestry, fwd_dependencies)
+            for node in new_boundaries
+        ):
+            continue
+        added_bytes = [
+            _cat_log_softmax_tensor_bytes(node)
+            for node in (*new_boundaries, row_max, log_sum)
+        ]
+        recomputed_bytes = [_cat_log_softmax_tensor_bytes(node) for node in spine]
+        # A dtype conversion can make another full-size spine node cheaper than
+        # the cat. The proposed outside cut must beat every spine cut that these
+        # tags remove, not just the cat itself.
+        if not _is_profitable_cat_log_softmax_recompute(added_bytes, recomputed_bytes):
             continue
 
         metadata_nodes = (
