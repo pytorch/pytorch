@@ -51,12 +51,18 @@ from torch.utils._triton import has_triton_package
 
 try:
     from triton_constexpr_configs import (
+        UserDefinedAttrsLikeConfig,
+        UserDefinedPydanticLikeConfig,
         UserDefinedTritonKernelConfigNamespace,
+        UserDefinedTritonKernelHiddenConfig,
         UserDefinedTritonKernelNestedConfig,
     )
 except ImportError:
     from test.inductor.triton_constexpr_configs import (
+        UserDefinedAttrsLikeConfig,
+        UserDefinedPydanticLikeConfig,
         UserDefinedTritonKernelConfigNamespace,
+        UserDefinedTritonKernelHiddenConfig,
         UserDefinedTritonKernelNestedConfig,
     )
 
@@ -188,6 +194,57 @@ class TestCodegenTriton(InductorTestCase):
                 ),
             ],
         )
+
+    def test_importable_constexpr_types_sibling_nested_classes(self):
+        namespace = UserDefinedTritonKernelConfigNamespace
+        type_specs = get_importable_constexpr_types(
+            [namespace.Nested(offset=1), namespace.Sibling(offset=2)]
+        )
+        self.assertEqual(len(type_specs), 1)
+        self.assertEqual(type_specs[0].module, namespace.__module__)
+        self.assertEqual(type_specs[0].root_name, namespace.__name__)
+
+    def test_importable_constexpr_types_bare_nested_class_repr(self):
+        nested_type = UserDefinedTritonKernelConfigNamespace.BareNested
+        value = nested_type(offset=2)
+        with self.assertRaisesRegex(ImportError, "uses the bare name BareNested"):
+            get_importable_constexpr_types([value])
+
+    def test_importable_constexpr_types_skip_hidden_dataclass_field(self):
+        @dataclasses.dataclass
+        class LocalHiddenValue:
+            offset: int
+
+        type_specs = get_importable_constexpr_types(
+            [UserDefinedTritonKernelHiddenConfig(2, LocalHiddenValue(3))]
+        )
+        self.assertEqual(len(type_specs), 1)
+        self.assertEqual(
+            type_specs[0].qualname,
+            UserDefinedTritonKernelHiddenConfig.__qualname__,
+        )
+
+    def test_importable_constexpr_types_set(self):
+        nested_type = UserDefinedTritonKernelConfigNamespace.Nested
+        type_specs = get_importable_constexpr_types([{nested_type(offset=2)}])
+        self.assertEqual(len(type_specs), 1)
+        self.assertEqual(type_specs[0].qualname, nested_type.__qualname__)
+
+    def test_importable_constexpr_types_repr_protocols(self):
+        nested_type = UserDefinedTritonKernelConfigNamespace.Nested
+
+        @dataclasses.dataclass
+        class LocalHiddenValue:
+            offset: int
+
+        for config_type in (UserDefinedAttrsLikeConfig, UserDefinedPydanticLikeConfig):
+            type_specs = get_importable_constexpr_types(
+                [config_type(nested_type(offset=2), LocalHiddenValue(3))]
+            )
+            self.assertEqual(
+                [type_spec.qualname for type_spec in type_specs],
+                [config_type.__qualname__, nested_type.__qualname__],
+            )
 
     def test_importable_constexpr_types_local_class_error(self):
         @dataclasses.dataclass(frozen=True)

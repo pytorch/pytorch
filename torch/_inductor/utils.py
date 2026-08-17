@@ -213,11 +213,12 @@ def _collect_importable_constexpr_types(
     value_type = type(value)
     type_module = getattr(value_type, "__module__", None)
     type_qualname = getattr(value_type, "__qualname__", None)
+    repr_prefix = _constexpr_type_repr_prefix(value)
     if (
         type_module is not None
         and type_qualname is not None
         and type_module != "builtins"
-        and _constexpr_type_repr_prefix(value) is not None
+        and repr_prefix is not None
     ):
         if type_module == "__main__" or "<locals>" in type_qualname:
             raise ImportError(
@@ -225,10 +226,21 @@ def _collect_importable_constexpr_types(
                 f"{type_module}.{type_qualname} is not importable. "
                 "Define constexpr config classes at module scope in an importable module."
             )
+        repr_qualname = repr_prefix.removesuffix("(")
+        if repr_qualname != type_qualname:
+            raise ImportError(
+                "Triton constexpr nested value type "
+                f"{type_module}.{type_qualname} uses the bare name "
+                f"{repr_qualname} in its repr, which generated code cannot import. "
+                "Use the type's qualified name in its repr."
+            )
         root_name = type_qualname.split(".", 1)[0]
         existing = result.get(root_name)
-        if existing is not None and (
-            existing.module != type_module or existing.qualname != type_qualname
+        # Generated imports bind the root, so sibling nested types from the
+        # same module intentionally share one entry.
+        if existing is not None and (existing.module, existing.root_name) != (
+            type_module,
+            root_name,
         ):
             raise ImportError(
                 "Triton constexpr values require conflicting imports for "
@@ -243,14 +255,28 @@ def _collect_importable_constexpr_types(
 
     if dataclasses.is_dataclass(value) and not isinstance(value, type):
         for field in dataclasses.fields(value):
+            if not field.repr:
+                continue
             _collect_importable_constexpr_types(
                 getattr(value, field.name), result, seen
             )
+    elif attrs_fields := getattr(value_type, "__attrs_attrs__", None):
+        # attrs exposes the fields used by its generated repr without requiring
+        # torch to depend on attrs at runtime.
+        for field in attrs_fields:
+            if getattr(field, "repr", True) is not False:
+                _collect_importable_constexpr_types(
+                    getattr(value, field.name), result, seen
+                )
+    elif callable(repr_args := getattr(value, "__repr_args__", None)):
+        # Pydantic exposes the values selected for repr through this protocol.
+        for _, item in repr_args():
+            _collect_importable_constexpr_types(item, result, seen)
     elif isinstance(value, Mapping):
         for key, item in value.items():
             _collect_importable_constexpr_types(key, result, seen)
             _collect_importable_constexpr_types(item, result, seen)
-    elif isinstance(value, (list, tuple, OrderedSet, frozenset)):
+    elif isinstance(value, (list, tuple, set, OrderedSet, frozenset)):
         for item in value:
             _collect_importable_constexpr_types(item, result, seen)
 
