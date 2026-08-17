@@ -13,7 +13,6 @@
 
 #include <algorithm>
 #include <optional>
-#include <string>
 #include <unordered_set>
 
 extern "C" {
@@ -267,15 +266,20 @@ static py::object dynamo_call_callback(
     py::handle callback,
     THP_EVAL_API_FRAME_OBJECT* _frame,
     FrameLocalsMapping* locals,
-    const py::object& cache_entry,
+    CacheEntry* cache_entry,
     FrameState* frame_state) {
   THPPyInterpreterFrame* frame = THPPyInterpreterFrame_New(_frame);
   TORCH_CHECK(
       frame, "Dynamo failed to initialize CPython interpreter frame wrapper");
   frame->locals = (PyObject*)framelocals_mapping_to_dict(locals);
 
+  py::object cache_entry_obj = py::none();
+  if (cache_entry) {
+    cache_entry_obj = py::cast(cache_entry, py::return_value_policy::reference);
+  }
+
   py::object result = callback(
-      py::handle((PyObject*)frame), cache_entry, py::handle(frame_state));
+      py::handle((PyObject*)frame), cache_entry_obj, py::handle(frame_state));
   Py_DECREF(frame);
   return result;
 }
@@ -407,8 +411,7 @@ PyObject* dynamo__custom_eval_frame(
 
   // callback to run on recursively invoked frames
   py::handle recursive_callback = callback; // borrowed
-  CacheLookupResult cache_lookup_result;
-  PyCodeObject* cached_code = nullptr; // owned by cache_lookup_result
+  PyCodeObject* cached_code = nullptr; // borrowed
   const char* trace_annotation = "";
   PyObject* eval_result = nullptr; // strong reference
 
@@ -464,7 +467,7 @@ PyObject* dynamo__custom_eval_frame(
     // DebugContextGuard calls __enter__ on construction and __exit__ on
     // destruction, so the debug session is scoped to this eval_custom call.
     std::optional<DebugContextGuard> debug_guard;
-    if (breakpoint_code_objects.contains(cached_code) &&
+    if (breakpoint_code_objects.count(cached_code) &&
         bytecode_debugger_callback_obj == nullptr) {
       auto ctx = py::module_::import("torch._dynamo.bytecode_debugger")
                      .attr("_DebugContext")();
@@ -551,12 +554,14 @@ PyObject* dynamo__custom_eval_frame(
   DEBUG_CHECK(PyDict_CheckExact(frame->f_globals));
   DEBUG_CHECK(PyDict_CheckExact(frame->f_builtins));
 
+  PyObject* maybe_cached_code = nullptr;
   std::unique_ptr<FrameLocalsMapping> locals;
   if (!try_lookup_without_guard_eval(
           extra,
           backend,
           isolate_recompiles_id,
-          &cache_lookup_result,
+          &maybe_cached_code,
+          &trace_annotation,
           is_skip_guard_eval_unsafe)) {
     locals = std::make_unique<FrameLocalsMapping>(frame);
     _PytorchRecordFunctionState* rf =
@@ -566,7 +571,8 @@ PyObject* dynamo__custom_eval_frame(
         locals.get(),
         backend,
         isolate_recompiles_id,
-        &cache_lookup_result,
+        &maybe_cached_code,
+        &trace_annotation,
         is_skip_guard_eval_unsafe);
     _pytorch_record_function_exit(rf);
   }
@@ -580,7 +586,7 @@ PyObject* dynamo__custom_eval_frame(
     DEBUG_TRACE("In run only mode %s", get_frame_name(frame));
   }
 
-  if (!cache_lookup_result.code) {
+  if (maybe_cached_code == nullptr) {
     // guard eval failed, keep propagating
     fail();
     return eval_result;
@@ -595,16 +601,14 @@ PyObject* dynamo__custom_eval_frame(
   if (guard_complete_hook != nullptr && has_relevant_entries) {
     py::handle guard_complete_hook_handle(guard_complete_hook);
     // False means force compilation (someone cache missed)
-    py::object res =
-        guard_complete_hook_handle(!cache_lookup_result.code.is_none());
+    py::object res = guard_complete_hook_handle(!Py_IsNone(maybe_cached_code));
     if (!py::cast<bool>(res)) {
-      cache_lookup_result.code = py::none();
+      maybe_cached_code = Py_None; // NB: non-owning
     }
   }
 
-  if (!cache_lookup_result.code.is_none()) {
-    cached_code = (PyCodeObject*)cache_lookup_result.code.ptr();
-    trace_annotation = cache_lookup_result.trace_annotation.c_str();
+  if (!Py_IsNone(maybe_cached_code)) {
+    cached_code = (PyCodeObject*)maybe_cached_code;
     // used cached version
     DEBUG_TRACE("cache hit %s", get_frame_name(frame));
     eval_custom();
@@ -632,8 +636,7 @@ PyObject* dynamo__custom_eval_frame(
   if (locals == nullptr) {
     locals = std::make_unique<FrameLocalsMapping>(frame);
   }
-  py::object cache_entry =
-      extract_cache_entry_snapshot(extra, isolate_recompiles_id);
+  CacheEntry* cache_entry = extract_cache_entry(extra, isolate_recompiles_id);
   py::object frame_state = py::reinterpret_steal<py::object>(
       extract_frame_state(extra, isolate_recompiles_id));
   py::object callback_result;
@@ -691,15 +694,20 @@ PyObject* dynamo__custom_eval_frame(
   if (!Py_IsNone(guarded_code)) {
     DEBUG_TRACE("create cache %s", get_frame_name(frame));
 
-    CacheEntrySnapshot new_cache_entry =
+    // NB: We could use extract_cache_entry to get the cache_entry, but
+    // extract_cache_entry returns a borrowed reference. Modifying a borrowed
+    // reference seems wrong. Therefore, we directly access the
+    // extra->cache_entry. extra won't be NULL here.
+    CacheEntry* new_cache_entry =
         create_cache_entry(extra, guarded_code, backend);
 
-    // The returned snapshot owns the Python objects needed after the cache
-    // lock is released.
-    cache_lookup_result.code = new_cache_entry.code;
-    cache_lookup_result.trace_annotation = new_cache_entry.trace_annotation;
-    cached_code = (PyCodeObject*)cache_lookup_result.code.ptr();
-    trace_annotation = cache_lookup_result.trace_annotation.c_str();
+    // Update the existing cache_entry on the extra object. This extra object
+    // is sitting on the extra scratch space, we are just changing the
+    // cache_entry ptr. As a result, extra now becomes the owner of CacheEntry
+    // object. This will be cleaned up when set_extra_state is called.
+    // Re-enable custom behavior
+    cached_code = CacheEntry_get_code(new_cache_entry),
+    trace_annotation = CacheEntry_get_trace_annotation(new_cache_entry);
     eval_custom();
   } else {
     eval_default();
