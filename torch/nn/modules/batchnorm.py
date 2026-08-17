@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import functools
 from typing import Any
 
 import torch
@@ -20,6 +21,18 @@ __all__ = [
     "LazyBatchNorm3d",
     "SyncBatchNorm",
 ]
+
+# SyncBatchNorm is built from batch_norm_stats and friends, which are registered
+# per backend rather than being composite. Ask the dispatcher which devices have
+# them instead of tracking the backend list by hand.
+_SYNC_BATCH_NORM_OP = "aten::batch_norm_stats"
+
+
+@functools.lru_cache
+def _sync_batch_norm_supported(device_type: str) -> bool:
+    return torch._C._dispatch_has_kernel_for_dispatch_key(
+        _SYNC_BATCH_NORM_OP, torch._C._dispatch_key_for_device(device_type)
+    )
 
 
 class _NormBase(Module):
@@ -841,16 +854,11 @@ class SyncBatchNorm(_BatchNorm):
             and torch.distributed.is_initialized()
         )
         if need_sync:
-            # currently only GPU/PrivateUse1 input is supported
-            if input.device.type not in [
-                "cuda",
-                "hpu",
-                "xpu",
-                torch._C._get_privateuse1_backend_name(),
-            ]:
+            if not _sync_batch_norm_supported(input.device.type):
                 raise ValueError(
-                    "SyncBatchNorm expected input tensor to be on GPU or XPU or "
-                    f"{torch._C._get_privateuse1_backend_name()}"
+                    "SyncBatchNorm expected input tensor to be on a device with a "
+                    f"{_SYNC_BATCH_NORM_OP} kernel registered, but got "
+                    f"{input.device.type}"
                 )
 
             process_group = torch.distributed.group.WORLD

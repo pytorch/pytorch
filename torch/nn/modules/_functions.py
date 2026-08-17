@@ -85,7 +85,10 @@ class SyncBatchNorm(Function):
             # world_size * (2C + 1) -> world_size * C, world_size * C, world_size * 1
             mean_all, invstd_all, count_all = torch.split(combined, num_channels, dim=1)
 
-        if not (torch.cuda.is_available() and torch.cuda.is_current_stream_capturing()):
+        _is_capturing = getattr(
+            torch.get_device_module(input.device), "is_current_stream_capturing", None
+        )
+        if _is_capturing is None or not _is_capturing():
             # The lines below force a synchronization between CUDA and CPU, because
             # the shape of the result count_all depends on the values in mask tensor.
             # Such synchronizations break CUDA Graph capturing.

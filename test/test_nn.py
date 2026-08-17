@@ -6164,6 +6164,26 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         )
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    @unittest.skipIf(not torch.distributed.is_available(), "torch.distributed not available")
+    @unittest.skipIf(not torch.distributed.is_gloo_available(), "gloo not available")
+    def test_sync_batchnorm_unsupported_device(self):
+        # SyncBatchNorm needs aten::batch_norm_stats, which is only registered for
+        # some backends. The gate rejects the rest before the collective runs.
+        from torch.nn.modules.batchnorm import _sync_batch_norm_supported
+
+        self.assertFalse(_sync_batch_norm_supported("cpu"))
+        self.assertEqual(_sync_batch_norm_supported("cuda"), TEST_CUDA)
+
+        os.environ.setdefault("MASTER_ADDR", "127.0.0.1")
+        os.environ.setdefault("MASTER_PORT", "29513")
+        torch.distributed.init_process_group("gloo", rank=0, world_size=1)
+        try:
+            module = torch.nn.SyncBatchNorm(3).train()
+            with self.assertRaisesRegex(ValueError, "batch_norm_stats kernel registered"):
+                module(torch.randn(2, 3, 4))
+        finally:
+            torch.distributed.destroy_process_group()
+
     def test_convert_sync_batchnorm(self):
         module = torch.nn.Sequential(
             torch.nn.BatchNorm1d(100),
