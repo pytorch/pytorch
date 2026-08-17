@@ -16,7 +16,6 @@
 #include <torch/csrc/utils/pybind.h>
 #include <list>
 #include <mutex>
-#include <string>
 #include <unordered_map>
 
 namespace py = pybind11;
@@ -104,11 +103,13 @@ typedef struct VISIBILITY_HIDDEN ExtraState {
   bool has_relevant_entries(int64_t isolate_recompiles_id) const;
   void move_to_front(CacheEntry* cache_entry, std::list<CacheEntry>& entries);
   void move_to_back(CacheEntry* cache_entry);
-  void reset();
   // live_guard_manager is the wrapper that OWNS cache_entry (CacheEntry's own
   // guard_manager). It is what establishes, under the lock, that the raw
   // cache_entry read before the lock is still the entry it was.
-  void invalidate(CacheEntry* cache_entry, py::object deleted_guard_manager, py::object live_guard_manager);
+  void invalidate(
+      CacheEntry* cache_entry,
+      py::object deleted_guard_manager,
+      py::object live_guard_manager);
 } ExtraState;
 
 #else
@@ -125,7 +126,9 @@ typedef struct PrecompileEntry PrecompileEntry;
 //  - isolate_recompiles_id: The scope to extract from (-1 = default)
 // return
 //  - CacheEntry: Borrowed.
-CacheEntry* extract_cache_entry(ExtraState* extra_state, int64_t isolate_recompiles_id);
+CacheEntry* extract_cache_entry(
+    ExtraState* extra_state,
+    int64_t isolate_recompiles_id);
 
 // Returns either the previously stored frame state for this compile scope or an
 // empty dict.
@@ -135,7 +138,9 @@ CacheEntry* extract_cache_entry(ExtraState* extra_state, int64_t isolate_recompi
 //  - isolate_recompiles_id: Compile scope (-1 = default)
 // return
 //  - frame state: New reference.
-FrameState* extract_frame_state(ExtraState* extra_state, int64_t isolate_recompiles_id);
+FrameState* extract_frame_state(
+    ExtraState* extra_state,
+    int64_t isolate_recompiles_id);
 
 // Returns the FrameExecStrategy stored in extra_state.
 // Ownership contract
@@ -143,29 +148,38 @@ FrameState* extract_frame_state(ExtraState* extra_state, int64_t isolate_recompi
 //  - extra_state: Borrowed
 FrameExecStrategy extra_state_get_exec_strategy(ExtraState* extra_state);
 
-uint64_t extra_state_get_exec_strategy_token(ExtraState* extra_state, FrameExecStrategy* strategy);
+uint64_t extra_state_get_exec_strategy_token(
+    ExtraState* extra_state,
+    FrameExecStrategy* strategy);
 
-uint64_t extra_state_set_exec_strategy_with_token(ExtraState* extra_state,
-                                                  FrameExecStrategy strategy,
-                                                  FrameExecStrategy* prior_strategy);
+uint64_t extra_state_set_exec_strategy_with_token(
+    ExtraState* extra_state,
+    FrameExecStrategy strategy,
+    FrameExecStrategy* prior_strategy);
 
-bool extra_state_compare_and_set_exec_strategy(ExtraState* extra_state,
-                                               uint64_t expected_generation,
-                                               FrameExecStrategy strategy);
+bool extra_state_compare_and_set_exec_strategy(
+    ExtraState* extra_state,
+    uint64_t expected_generation,
+    FrameExecStrategy strategy);
 
 // Set the FrameExecStrategy to be done to all frames with code object
 // corresponding to this extra_state. Ownership contract
 // - extra_state: Borrowed
-void extra_state_set_exec_strategy(ExtraState* extra_state, FrameExecStrategy strategy);
+void extra_state_set_exec_strategy(
+    ExtraState* extra_state,
+    FrameExecStrategy strategy);
 
 // Get the exec strategy for a specific isolate_recompiles region.
 // Falls back to the global strategy if no per-region strategy is set.
-FrameExecStrategy extra_state_get_region_exec_strategy(ExtraState* extra_state, int64_t isolate_recompiles_id);
+FrameExecStrategy extra_state_get_region_exec_strategy(
+    ExtraState* extra_state,
+    int64_t isolate_recompiles_id);
 
 // Set the exec strategy for a specific isolate_recompiles region.
-void extra_state_set_region_exec_strategy(ExtraState* extra_state,
-                                          int64_t isolate_recompiles_id,
-                                          FrameExecStrategy strategy);
+void extra_state_set_region_exec_strategy(
+    ExtraState* extra_state,
+    int64_t isolate_recompiles_id,
+    FrameExecStrategy strategy);
 
 // Ownership contract
 // args
@@ -205,11 +219,6 @@ void destroy_extra_state(void* obj);
 // scratch space.
 void set_extra_state(PyCodeObject* code, ExtraState* extra_state);
 
-// Clear a code object's existing state in place. Keeping the allocation alive
-// lets an in-flight cache lookup finish after CacheLock temporarily releases the
-// GIL while waiting or evaluating a Python guard.
-void reset_extra_state(PyCodeObject* code);
-
 // Creates a new extra state and put it on the extra scratch space of the code
 // object.
 
@@ -222,6 +231,33 @@ void reset_extra_state(PyCodeObject* code);
 // the final owner of these references.
 ExtraState* init_and_set_extra_state(PyCodeObject* code);
 
+// Lookup the cache held by extra_state.
+// Ownership contract
+// args
+//  - extra_state: Borrowed
+// return:
+//   - Py_None or PyCodeObject: Borrowed reference.
+//   - Py_None or PyObject: Trace id of the compiled code.
+void lookup(
+    ExtraState* extra_state,
+    FrameLocalsMapping* f_locals,
+    PyObject* backend,
+    int64_t isolate_recompiles_id,
+    PyObject** maybe_cached_code,
+    const char** trace_annotation,
+    bool is_skip_guard_eval_unsafe);
+
+// Try to resolve a cache lookup without materializing frame locals or running
+// guard managers. Returns true when the lookup is complete (hit or miss), and
+// false when the caller must fall back to lookup().
+bool try_lookup_without_guard_eval(
+    ExtraState* extra_state,
+    PyObject* backend,
+    int64_t isolate_recompiles_id,
+    PyObject** maybe_cached_code,
+    const char** trace_annotation,
+    bool is_skip_guard_eval_unsafe);
+
 // Create a new cache entry at extra_state holding on to guarded_code.
 // Ownership contract
 // args
@@ -229,53 +265,46 @@ ExtraState* init_and_set_extra_state(PyCodeObject* code);
 //  - guarded_code: Borrowed
 // return:
 //  - cache_entry: Borrowed reference
-CacheEntry* create_cache_entry(ExtraState* extra_state, PyObject* guraded_code, PyObject* callback);
+CacheEntry* create_cache_entry(
+    ExtraState* extra_state,
+    PyObject* guraded_code,
+    PyObject* callback);
 
 // Extracts the backend fn from the callback.
 PyObject* get_backend(PyObject* callback);
+// Turn on the cache-key lookup inside get_backend. Called once, when the first
+// backend carrying one is constructed; see cache_entry.cpp.
+void enable_precompile_cache_keys();
 
 #ifdef __cplusplus
 
 } // extern "C"
-
-struct VISIBILITY_HIDDEN CacheLookupResult {
-  // Null signals a guard error; Py_None signals a cache miss. A hit owns the
-  // code reference and annotation independently of the cache entry.
-  py::object code;
-  std::string trace_annotation;
-};
-
-void lookup(ExtraState* extra_state,
-            FrameLocalsMapping* f_locals,
-            PyObject* backend,
-            int64_t isolate_recompiles_id,
-            CacheLookupResult* result,
-            bool is_skip_guard_eval_unsafe);
-
-// Try to resolve a cache lookup without materializing frame locals or running
-// guard managers. Returns true when the lookup is complete (hit or miss), and
-// false when the caller must fall back to lookup().
-bool try_lookup_without_guard_eval(ExtraState* extra_state,
-                                   PyObject* backend,
-                                   int64_t isolate_recompiles_id,
-                                   CacheLookupResult* result,
-                                   bool is_skip_guard_eval_unsafe);
 
 // Returns the list of CacheEntry corresponding to code_obj.
 // Warning: returns references whose lifetimes are controlled by C++
 py::list _debug_get_cache_entry_list(const py::handle& code_obj);
 // Returns the list of CacheEntry for a given isolate_recompiles_id bucket.
 // Warning: returns references whose lifetimes are controlled by C++
-py::list _get_cache_entries_for_region(const py::handle& code_obj, int64_t isolate_recompiles_id);
-void _clear_cache_entries_for_region(const py::handle& code_obj, int64_t isolate_recompiles_id);
+py::list _get_cache_entries_for_region(
+    const py::handle& code_obj,
+    int64_t isolate_recompiles_id);
+void _clear_cache_entries_for_region(
+    const py::handle& code_obj,
+    int64_t isolate_recompiles_id);
 size_t _get_total_cache_entry_count(const py::handle& code_obj);
 void _reset_precompile_entries(const py::handle& code_obj);
-void _reset_precompile_entries_for_region(const py::handle& code_obj, int64_t isolate_recompiles_id);
-void _load_precompile_entry(const py::handle& code_obj,
-                            py::object guard_manager,
-                            py::object dynamo_code,
-                            int64_t isolate_recompiles_id);
+void _reset_precompile_entries_for_region(
+    const py::handle& code_obj,
+    int64_t isolate_recompiles_id);
+void _load_precompile_entry(
+    const py::handle& code_obj,
+    py::object guard_manager,
+    py::object dynamo_code,
+    int64_t isolate_recompiles_id);
 py::list _debug_get_precompile_entries(const py::handle& code_obj);
+bool _has_precompile_entries(
+    const py::handle& code_obj,
+    int64_t isolate_recompiles_id);
 void _set_lru_cache(const py::object& boolean);
 
 #endif

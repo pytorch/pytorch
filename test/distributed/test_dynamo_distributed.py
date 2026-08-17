@@ -26,7 +26,6 @@ from torch._dynamo import config
 from torch._dynamo.backends.distributed import DDPOptimizer
 from torch._dynamo.comptime import comptime
 from torch._dynamo.device_interface import CudaInterface, DeviceGuard
-from torch._dynamo.precompile_package import precompile_capture
 from torch._dynamo.testing import collect_results, CompileCounter
 from torch._dynamo.utils import same
 from torch._higher_order_ops.wrap import tag_activation_checkpoint
@@ -362,15 +361,6 @@ class FakeDDP(nn.Module):
             return self.module.forward(*inputs, **kwargs)
 
 
-class PrecompileDDPModel(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.linear = nn.Linear(10, 10)
-
-    def forward(self, x):
-        return self.linear(x).relu()
-
-
 def run_hf_bert_ddp(self, model, inputs, backend):
     reset_rng_state()
     correct_outputs = model(**inputs)
@@ -670,37 +660,6 @@ class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
             ddp_optimizer_activated,
             "DDPOptimizer should activate for compiled regions inside nested DDP",
         )
-
-    @patch.object(config, "optimize_ddp", True)
-    def test_ddp_optimizer_preserves_precompile_package(self):
-        model = PrecompileDDPModel()
-        ddp = FakeDDP(model)
-        x = torch.randn(4, 10)
-        expected = ddp(x)
-        original_forward = model.forward
-        session = precompile_capture(original_forward, backend="eager", dynamic=False)
-        ddp_optimizer_activated = False
-        orig_init = DDPOptimizer.__init__
-
-        def tracking_init(self_opt, *args, **kwargs):
-            nonlocal ddp_optimizer_activated
-            ddp_optimizer_activated = True
-            return orig_init(self_opt, *args, **kwargs)
-
-        try:
-            with patch.object(DDPOptimizer, "__init__", tracking_init):
-                with session as compiled:
-                    model.forward = compiled
-                    actual = ddp(x)
-        finally:
-            model.forward = original_forward
-
-        self.assertEqual(actual, expected)
-        self.assertTrue(ddp_optimizer_activated)
-        summary = session.summary()
-        self.assertGreater(summary.guarded_codes, 0)
-        self.assertGreater(summary.backend_graphs, 0)
-        self.assertEqual(summary.uncovered_frames, ())
 
 
 # These tests aren't really distributed, but need multiple GPUs to run
@@ -2471,9 +2430,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
                 f"""{expected_guard_source} "L['self']._modules['net']" TYPE_MATCH"""
             ).check(
                 f"""{expected_guard_source} "L['self']._modules['net']._modules['0']" TYPE_MATCH"""
-            ).run(
-                GUARDS_FILE.getvalue()
-            )
+            ).run(GUARDS_FILE.getvalue())
 
             self.assertTrue(same(correct_outputs, outputs))
 

@@ -87,15 +87,15 @@ class PySourceBuilder(IndentedBuffer):
 
     def getvalue(self) -> str:
         # Join without a trailing newline (unlike IndentedBuffer.getvalue).
-        if not all(isinstance(li, str) for li in self._lines):
-            raise AssertionError(f"expected all lines to be str, got {self._lines}")
+        assert all(isinstance(li, str) for li in self._lines)  # noqa: S101
         return "\n".join(self._lines)  # type: ignore[arg-type]
 
     def build(
         self, *, wrapped_fn: Callable[..., object] | None = None
     ) -> Callable[..., object]:
-        if self._fn_name is None or self._artifact_name is None:
-            raise AssertionError("build() requires fn_name and artifact_name")
+        assert self._fn_name is not None and self._artifact_name is not None, (  # noqa: S101
+            "build() requires fn_name and artifact_name"
+        )
         return _compile_and_exec_source(
             self.getvalue(),
             self.globals,
