@@ -621,8 +621,8 @@ class FSDPModule:
 
     def set_post_optim_event(self, event: torch.Event) -> None:
         """
-        Sets a post-optimizer-step event for the root FSDP module to wait the
-        all-gather streams on.
+        Sets a post-optimizer-step event for the root FSDP module to wait its
+        communication streams on.
 
         By default, the root FSDP module waits the all-gather streams on the
         current stream to ensure that the optimizer step has finished before
@@ -632,11 +632,21 @@ class FSDPModule:
         waits on the event, the event is discarded, so this API should be
         called with a new event each iteration.
 
+        For backends that require explicit stream ordering before device-side
+        deallocation, FSDP also retains the sharded gradient buffers through
+        the optimizer step. This method orders their allocation streams after
+        ``event`` before releasing those buffers. Such backends should call
+        this method for every optimizer step, including the final iteration,
+        to release the buffers promptly. An optimizer step-post hook is one way
+        to guarantee that the event is recorded before gradients are cleared.
+
         Args:
             event (torch.Event): Event recorded after the optimizer step
-                to wait all-gather streams on.
+                to wait communication streams on.
         """
-        self._get_fsdp_state()._state_ctx.post_optim_event = event
+        state = self._get_fsdp_state()
+        state._release_post_optim_grad_buffers(event=event)
+        state._state_ctx.post_optim_event = event
 
     @deprecated("Use `set_gradient_divide_factor` instead")
     def set_reduce_scatter_divide_factor(self, factor: float) -> None:

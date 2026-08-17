@@ -16,6 +16,7 @@ from torch.distributed.fsdp._common_utils import (
     collect_grad_tensors,
     replace_grad_tensors,
 )
+from torch.distributed.tensor import DTensor
 from torch.profiler import record_function
 from torch.utils.hooks import RemovableHandle
 
@@ -106,6 +107,11 @@ class FSDPCommContext:
         # CUDA events for synchronization
         self.all_gather_state: AllGatherState | None = None
         self.reduce_scatter_states: list[ReduceScatterState] = []
+        # Some backends execute storage deallocation as a device operation on
+        # the allocation stream. Retain the final sharded-gradient storages
+        # until that stream is ordered after the optimizer's consumer stream.
+        # The key deduplicates views into the same reduce-scatter output.
+        self._post_optim_grad_buffers: dict[int, torch.Tensor] = {}
         # Effective cap on retained reduce_scatter_states, resolved from the
         # per-group reduce_scatter_max_input_buffers in
         # FSDPState._init_shared_state. It lives here, not per group, because
@@ -125,6 +131,14 @@ class FSDPCommContext:
             return self.all_gather_copy_in_stream, self.all_gather_stream
         current_stream = self.device_handle.current_stream()
         return current_stream, current_stream
+
+    def retain_post_optim_grad_buffer(self, grad: torch.Tensor) -> None:
+        if isinstance(grad, DTensor):
+            grad = grad._local_tensor
+        if grad.device.type == "cpu":
+            return
+        storage_id = grad.untyped_storage()._cdata
+        self._post_optim_grad_buffers.setdefault(storage_id, grad)
 
 
 # See [Note: Overlapping all-gather copy-in and all-gather]
@@ -806,6 +820,11 @@ class FSDPParamGroup:
                 work.wait()
             self._all_gather_result = None
         self._post_forward_indices.clear()
+
+    def retain_post_optim_grad_buffers(self) -> None:
+        for fsdp_param in self.fsdp_params:
+            if (grad := fsdp_param.sharded_param.grad) is not None:
+                self.comm_ctx.retain_post_optim_grad_buffer(grad)
 
     def _wait_for_post_backward(self):
         if self._post_reduce_event is not None:
