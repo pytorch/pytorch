@@ -4093,6 +4093,14 @@ class TestPrecompile(TestCase):
         self.assertEqual(run.weight.grad, ref.weight.grad)
 
 
+def _graph_devices_literal(code: str) -> str:
+    """The GRAPH_DEVICES line the artifact records, for tests that assert on it."""
+    for line in code.splitlines():
+        if line.startswith("GRAPH_DEVICES"):
+            return line
+    raise AssertionError("artifact has no GRAPH_DEVICES line")
+
+
 @skipIfTorchDynamo("precompile's make_fx capture is incompatible with dynamo wrapping")
 class TestPrecompileNumerics(TestCase):
     # Numeric-correctness tests run device-generically so the same coverage
@@ -4705,6 +4713,76 @@ class TestPrecompileNumerics(TestCase):
             train_step(ref, x, t)
             self.assertEqual(run.weight.grad, ref.weight.grad)
             self.assertEqual(run.bias.grad, ref.bias.grad)
+
+    @parametrize("tracer", ("make_fx", "dynamo"))
+    @parametrize("backend", ("eager", "inductor"))
+    def test_artifact_reproduces_capture_time_autocast(self, device, tracer, backend):
+        # The artifact checks no guards, so ambient autocast in the serving
+        # process must not reach it -- in either direction. An eager graph
+        # re-dispatches wholesale; an inductor one still calls extern_kernels.
+        # Both drivers therefore pin the state the capture recorded, keyed off
+        # the GRAPH's devices (GRAPH_DEVICES), not the runtime tensors'.
+        def fn(model, xx):
+            return model(xx)
+
+        device_type = torch.device(device).type
+        model = torch.nn.Linear(8, 8).to(device).eval()
+        x = make_tensor((4, 8), device=device, dtype=torch.float32)
+
+        with torch.no_grad(), torch.autocast(device_type, dtype=torch.bfloat16):
+            hot_code, hot_cache = torch.compiler.precompile(
+                fn, model, x, backend=backend, tracer=tracer
+            )
+        with torch.no_grad():
+            cold_code, cold_cache = torch.compiler.precompile(
+                fn, model, x, backend=backend, tracer=tracer
+            )
+
+        for code, cache, captured_under_autocast in (
+            (hot_code, hot_cache, True),
+            (cold_code, cold_cache, False),
+        ):
+            loaded = torch.compiler.precompile.load(code, cache)
+            with torch.no_grad():
+                plain = loaded(model, x)
+            with torch.no_grad(), torch.autocast(device_type, dtype=torch.bfloat16):
+                under = loaded(model, x)
+            expected = torch.bfloat16 if captured_under_autocast else torch.float32
+            self.assertEqual(plain.dtype, expected)
+            # Serving under an autocast the capture did not see must change
+            # nothing at all, not merely keep the dtype.
+            self.assertEqual(under.dtype, expected)
+            self.assertEqual(plain, under)
+
+    def test_artifact_autocast_covers_a_device_no_input_lives_on(self, device):
+        # GRAPH_DEVICES comes from the captured graph: a fn that moves to
+        # another device mid-way dispatches somewhere no param or input lives,
+        # which a scan of the runtime tensors cannot see.
+        device_type = torch.device(device).type
+        if device_type == "cpu":
+            raise unittest.SkipTest("needs a second device")
+
+        def fn(model, xx):
+            y = model(xx)
+            moved = y.to(device)
+            return torch.mm(moved, moved.t())
+
+        model = torch.nn.Linear(8, 8).eval()  # stays on cpu
+        x = make_tensor((4, 8), device="cpu", dtype=torch.float32)
+        with torch.no_grad():
+            code, cache = torch.compiler.precompile(fn, model, x, backend="eager")
+        devices = _graph_devices_literal(code)
+        self.assertIn(f"'{device_type}'", devices)
+        self.assertIn("'cpu'", devices)
+
+        loaded = torch.compiler.precompile.load(code, cache)
+        with torch.no_grad():
+            plain = loaded(model, x)
+        with torch.no_grad(), torch.autocast(device_type, dtype=torch.bfloat16):
+            under = loaded(model, x)
+        self.assertEqual(plain.dtype, torch.float32)
+        self.assertEqual(under.dtype, torch.float32)
+        self.assertEqual(plain, under)
 
     def test_tracer_dynamo_eager_custom_builtins(self, device):
         # The dynamo eager emitter (_emit_dynamo_eager_subgraph) injects fx's full
