@@ -35,7 +35,7 @@ _THRIFT_TYPE_MAP = {
 }
 
 
-def _staged_schema() -> tuple[dict[str, Any], str, str]:
+def _staged_schema() -> tuple[dict[str, Any], str, str, str]:
     yaml_ret: dict[str, Any] = {}
     defs: dict[str, Any] = {}
     cpp_enum_defs: dict[str, str] = {}
@@ -304,7 +304,7 @@ class {name} {{
         cpp_json_defs.append(f"inline {from_json_decl} {from_json_def}")
         cpp_type_decls.append(f"class {name};")
 
-        def pybind_property(field_name, cpp_type):
+        def pybind_property(field_name: str, cpp_type: str) -> str:
             type_name = fields[field_name]["type"]
             getter = f"s.get_{field_name}()"
             prop = f'    .def_property_readonly("{field_name}"'
@@ -430,7 +430,7 @@ inline void parseEnum(std::string_view s, {name}::Tag& t) {{
             f'      case {name}::Tag::{n.upper()}: return "{n}";' for n in cpp_fields
         )
 
-        def _union_variant_accessor(variant_name, cpp_type):
+        def _union_variant_accessor(variant_name: str, cpp_type: str) -> str:
             getter = f"u.get_{variant_name}()"
             prop = f'    .def_property_readonly("{variant_name}"'
             if cpp_type == "F64":
@@ -458,7 +458,7 @@ inline void parseEnum(std::string_view s, {name}::Tag& t) {{
                 )
             return f"{prop}, &{name}::get_{variant_name})"
 
-        def _union_value_case(variant_name, cpp_type):
+        def _union_value_case(variant_name: str, cpp_type: str) -> str:
             tag = f"{name}::Tag::{variant_name.upper()}"
             if cpp_type == "F64":
                 return (
@@ -486,16 +486,20 @@ inline void parseEnum(std::string_view s, {name}::Tag& t) {{
         pybind_defs[name] = f"""
   py::class_<{name}>(m, "Cpp{name}")
     .def_property_readonly("type", [](const {name}& u) -> std::string {{
+      // NOLINTBEGIN(bugprone-branch-clone)
       switch (u.tag()) {{
 {type_cases}
         default: return "unknown";
       }}
+      // NOLINTEND(bugprone-branch-clone)
     }})
     .def_property_readonly("value", [](const {name}& u) -> py::object {{
+      // NOLINTBEGIN(bugprone-branch-clone)
       switch (u.tag()) {{
 {value_cases}
         default: return py::none();
       }}
+      // NOLINTEND(bugprone-branch-clone)
     }})
 {variant_accessors};
 """
@@ -705,13 +709,14 @@ template <typename T> ForwardRef<T>::~ForwardRef() = default;
 #include <torch/csrc/utils/pybind.h>
 
 // Auto-convert F64 to Python float.
-namespace pybind11 {{ namespace detail {{
+namespace pybind11::detail {{
 template <>
 struct type_caster<torch::_export::F64> {{
+  // NOLINTNEXTLINE(modernize-type-traits)
   PYBIND11_TYPE_CASTER(torch::_export::F64, const_name("float"));
-  bool load(handle, bool) {{ return false; }}
+  bool load(handle /*src*/, bool /*convert*/) {{ return false; }}
   static handle cast(const torch::_export::F64& src,
-                     return_value_policy, handle) {{
+                     return_value_policy /*policy*/, handle /*parent*/) {{
     return PyFloat_FromDouble(src.get());
   }}
 }};
@@ -720,25 +725,24 @@ struct type_caster<torch::_export::F64> {{
 template <typename T>
 struct type_caster<torch::_export::ForwardRef<T>> {{
   using value_conv = make_caster<T>;
+  // NOLINTNEXTLINE(modernize-type-traits)
   PYBIND11_TYPE_CASTER(torch::_export::ForwardRef<T>, value_conv::name);
-  bool load(handle, bool) {{ return false; }}
+  bool load(handle /*src*/, bool /*convert*/) {{ return false; }}
   static handle cast(const torch::_export::ForwardRef<T>& src,
                      return_value_policy policy, handle parent) {{
     return value_conv::cast(*src, policy, parent);
   }}
 }};
-}}}}
+}} // namespace pybind11::detail
 
-namespace torch {{
-namespace _export {{
+namespace torch::_export {{
 
 inline void registerSerializationBindings(py::module_& m) {{
 {pybind_enum_defs_str}
 {pybind_class_defs_str}
 }}
 
-}} // namespace _export
-}} // namespace torch
+}} // namespace torch::_export
 """
 
     thrift_schema = f"""

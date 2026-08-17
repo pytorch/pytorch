@@ -3354,9 +3354,9 @@ class GraphModuleDeserializer(metaclass=Final):
         if _schema_isinstance(arg, TensorArgument):
             name = arg.name
         elif _schema_isinstance(arg, SymIntArgument):
-            name = arg.as_name
+            name = arg.as_name  # pyrefly: ignore[missing-attribute]
         elif _schema_isinstance(arg, SymFloatArgument):
-            name = arg.as_name
+            name = arg.as_name  # pyrefly: ignore[missing-attribute]
         else:
             raise AssertionError(
                 f"generate_getitem got unknown argument type {type(arg)}"
