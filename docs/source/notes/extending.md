@@ -93,7 +93,7 @@ Take the following steps:
   were inputs, with each of them containing the gradient w.r.t. its
   corresponding input. If your inputs didn't require gradient
   ({attr}`~ctx.needs_input_grad` is a tuple of booleans indicating
-  whether each input needs gradient computation), or were non-{class}`Tensor`
+  whether the current backward call needs each input gradient), or were non-{class}`Tensor`
   objects, you can return {class}`python:None`. Also, if you have optional
   arguments to {meth}`~Function.forward` you can return more gradients than there
   were inputs, as long as they're all {any}`python:None`.
@@ -147,6 +147,18 @@ class attributes:
   This can reduce peak memory usage in backward passes where saved tensors are only
   needed once. The default is ``False``. Note that ``saved_tensors`` can only be
   accessed once when this is enabled; a second access will raise an error.
+
+- {attr}`~Function.saved_tensors_input_dependencies`: An optional tuple with one
+  entry per value passed to ``ctx.save_for_backward``. Each entry contains the
+  forward input indices whose gradients may use that saved tensor. Before a
+  non-retained eager backward, the engine clears saved tensors whose dependent
+  input gradients are not requested; their positions in ``ctx.saved_tensors``
+  contain ``None``. Use ``None`` for an entry that may be used by any tensor
+  input. For example, multiplication can declare ``((1,), (0,))`` when it saves
+  ``(x, y)`` because ``x`` is needed for ``grad_y`` and ``y`` is needed for
+  ``grad_x``. The backward formula must guard those uses with
+  ``ctx.needs_input_grad``. The default is ``None``, which disables selective
+  release.
 
 - {attr}`~Function.boxed_grads_call`: When set to ``True`` on the
   {class}`~Function` subclass, backward receives grads as a single mutable list

@@ -9800,6 +9800,129 @@ for shape in [(1,), ()]:
         with self.assertRaisesRegex(RuntimeError, "can only be accessed once"):
             y.sum().backward()
 
+    def test_custom_function_selective_saved_tensor_release(self):
+        saved_refs = []
+        seen_needs_input_grad = []
+
+        class Mul(Function):
+            saved_tensors_input_dependencies = ((1,), (0,))
+
+            @staticmethod
+            def forward(ctx, x, y):
+                saved_x = x.detach().clone()
+                saved_y = y.detach().clone()
+                saved_refs.extend(
+                    (
+                        torch._C._WeakTensorRef(saved_x),
+                        torch._C._WeakTensorRef(saved_y),
+                    )
+                )
+                ctx.save_for_backward(saved_x, saved_y)
+                return x * y
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                seen_needs_input_grad.append(ctx.needs_input_grad)
+                saved_x, saved_y = ctx.saved_tensors
+                self.assertIsNone(saved_x)
+                self.assertIsNotNone(saved_y)
+                self.assertTrue(saved_refs[0].expired())
+                self.assertFalse(saved_refs[1].expired())
+                return grad_output * saved_y, None
+
+        x = torch.randn(3, requires_grad=True)
+        y = torch.randn(3, requires_grad=True)
+        grad_x = torch.autograd.grad(Mul.apply(x, y).sum(), x)
+
+        self.assertEqual(grad_x, (y,))
+        self.assertEqual(seen_needs_input_grad, [(True, False)])
+        self.assertTrue(saved_refs[1].expired())
+
+    def test_custom_function_selective_release_respects_retain_graph(self):
+        saved_refs = []
+        seen = []
+
+        class Mul(Function):
+            saved_tensors_input_dependencies = ((1,), (0,))
+
+            @staticmethod
+            def forward(ctx, x, y):
+                saved_x = x.detach().clone()
+                saved_y = y.detach().clone()
+                saved_refs.extend(
+                    (
+                        torch._C._WeakTensorRef(saved_x),
+                        torch._C._WeakTensorRef(saved_y),
+                    )
+                )
+                ctx.save_for_backward(saved_x, saved_y)
+                return x * y
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                saved_x, saved_y = ctx.saved_tensors
+                seen.append((ctx.needs_input_grad, saved_x, saved_y))
+                grad_x = grad_output * saved_y if ctx.needs_input_grad[0] else None
+                grad_y = grad_output * saved_x if ctx.needs_input_grad[1] else None
+                return grad_x, grad_y
+
+        x = torch.randn(3, requires_grad=True)
+        y = torch.randn(3, requires_grad=True)
+        output = Mul.apply(x, y).sum()
+        grad_x = torch.autograd.grad(output, x, retain_graph=True)
+
+        self.assertEqual(grad_x, (y,))
+        self.assertEqual(seen[0][0], (True, False))
+        self.assertIsNotNone(seen[0][1])
+        self.assertIsNotNone(seen[0][2])
+        seen.clear()
+        self.assertFalse(saved_refs[0].expired())
+        self.assertFalse(saved_refs[1].expired())
+
+        output.backward(retain_graph=True)
+        self.assertEqual(seen[0][0], (True, True))
+        self.assertIsNotNone(seen[0][1])
+        self.assertIsNotNone(seen[0][2])
+        seen.clear()
+
+        grad_y = torch.autograd.grad(output, y)
+        self.assertEqual(grad_y, (x,))
+        self.assertEqual(seen[0][0], (False, True))
+        self.assertIsNotNone(seen[0][1])
+        self.assertIsNone(seen[0][2])
+        seen.clear()
+        self.assertTrue(saved_refs[0].expired())
+        self.assertTrue(saved_refs[1].expired())
+
+    def test_generated_backward_selective_saved_tensor_release(self):
+        saved_refs = []
+        unpack_expired_counts = []
+
+        class PackedTensor:
+            def __init__(self, tensor):
+                self.tensor = tensor
+
+        def pack(tensor):
+            packed = tensor.detach().clone()
+            saved_refs.append(torch._C._WeakTensorRef(packed))
+            return PackedTensor(packed)
+
+        def unpack(packed):
+            unpack_expired_counts.append(sum(ref.expired() for ref in saved_refs))
+            return packed.tensor
+
+        x = torch.randn(3, requires_grad=True)
+        y = torch.randn(3, requires_grad=True)
+        with torch.autograd.graph.saved_tensors_hooks(pack, unpack):
+            output = x * y
+
+        self.assertEqual(len(saved_refs), 2)
+        grad_x = torch.autograd.grad(output.sum(), x)
+
+        self.assertEqual(grad_x, (y,))
+        self.assertEqual(unpack_expired_counts, [1])
+        self.assertTrue(all(ref.expired() for ref in saved_refs))
+
     def test_autograd_node_isinstance(self):
         # Node is a "virtual" base class of codegen'd nodes. This means that
         # isinstance and issubclass are overridden, but mro is unchanged
