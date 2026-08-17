@@ -31,6 +31,7 @@ from torch.testing._internal.common_nn import (
     TestBase,
 )
 from torch.testing._internal.common_utils import (
+    ACCELERATOR_TYPE,
     freeze_rng_state,
     HardwareClassification,
     make_tensor,
@@ -880,8 +881,8 @@ class TestExpandedWeightModule(TestCase):
                 )
 
     def test_per_sample_api_failing(self, device):
-        module = nn.Linear(10, 10)
-        input = torch.randn(64, 10)
+        module = nn.Linear(10, 10).to(device)
+        input = torch.randn(64, 10, device=device)
         with self.assertRaisesRegex(RuntimeError, r"Module passed must be nn.Module"):
             call_for_per_sample_grads("fail")(input)
         with self.assertRaisesRegex(
@@ -895,7 +896,7 @@ class TestExpandedWeightModule(TestCase):
             loss.backward()  # populate grad_sample fields
             call_for_per_sample_grads(module)(input)
 
-        module = nn.Linear(10, 10)  # reset to not have grad_sample fields
+        module = nn.Linear(10, 10).to(device)  # reset to not have grad_sample fields
         with self.assertRaisesRegex(
             RuntimeError, r"Expected loss_reduction argument to be sum or mean"
         ):
@@ -910,9 +911,9 @@ class TestExpandedWeightModule(TestCase):
             def forward(self, input1, input2):
                 return self.linear(input1) + self.linear(input2)
 
-        module = CustomModule()
-        input1 = torch.randn(4, 5)
-        input2 = torch.randn(5, 5)
+        module = CustomModule().to(device)
+        input1 = torch.randn(4, 5, device=device)
+        input2 = torch.randn(5, 5, device=device)
 
         with self.assertRaisesRegex(
             RuntimeError,
@@ -920,13 +921,13 @@ class TestExpandedWeightModule(TestCase):
         ):
             call_for_per_sample_grads(module)(input1, input2)
 
-        input2 = torch.randn(4, 5)
+        input2 = torch.randn(4, 5, device=device)
         call_for_per_sample_grads(module)(input1, input2)
 
-        module = CustomModule()
+        module = CustomModule().to(device)
         call_for_per_sample_grads(module)(input1, input2=input2)
 
-        module = CustomModule()
+        module = CustomModule().to(device)
         call_for_per_sample_grads(module)(input1=input1, input2=input2)
 
     def test_per_sample_api_compute_batch_size_not_pytreeable(self, device):
@@ -943,8 +944,10 @@ class TestExpandedWeightModule(TestCase):
             def forward(self, input1, input2):
                 return self.linear(input1.elem1) + self.linear(input1.elem2)
 
-        input = NonPytreeableTuple(torch.randn(4, 5), torch.randn(4, 5))
-        model = CustomModule()
+        input = NonPytreeableTuple(
+            torch.randn(4, 5, device=device), torch.randn(4, 5, device=device)
+        )
+        model = CustomModule().to(device)
         with self.assertRaisesRegex(
             RuntimeError,
             "ExpandedWeights cannot compute the batch size from the inputs",
@@ -957,16 +960,18 @@ class TestExpandedWeightModule(TestCase):
         ):
             call_for_per_sample_grads(model)(input, torch.randn(5))
 
-        model = CustomModule()  # TODO: functional call bug, sam will fix
+        model = CustomModule().to(device)  # TODO: functional call bug, sam will fix
         call_for_per_sample_grads(model)(input, torch.randn(4, 5))
-        model = CustomModule()
+        model = CustomModule().to(device)
         call_for_per_sample_grads(model, batch_size=4)(input, torch.randn(5))
 
 
 class ContextManagerTests(TestBase):
     def __init__(self, *args, **kwargs):
         self.test_cpu = kwargs.get("test_cpu", True)
-        self.test_accelerator = kwargs.get("test_accelerator", True)
+        self.test_accelerator = kwargs.get(
+            "test_accelerator", kwargs.get("test_cuda", True)
+        )
         super().__init__(*args, **kwargs)
 
     @property
@@ -1023,6 +1028,7 @@ def filter_supported_tests(t):
 supported_tests = [
     t for t in module_tests + get_new_module_tests() if filter_supported_tests(t)
 ]
+accelerator = ACCELERATOR_TYPE._value
 for test_param in supported_tests:
     if "constructor" not in test_param:
         name = test_param.pop("module_name")
@@ -1051,13 +1057,14 @@ for test_param in supported_tests:
             ),
         )
     if TEST_ACCELERATOR and test.test_accelerator:
-        accelerator = torch.accelerator.current_accelerator().type
         # since this checks derivatives, only use double for precision
         setattr(
             TestExpandedWeightModule,
             test_name + f"_{accelerator}_double",
             decorator(
-                lambda self, test=test: test.test_context_manager(self, accelerator)
+                lambda self, test=test, acc=accelerator: test.test_context_manager(
+                    self, acc
+                )
             ),
         )
 
