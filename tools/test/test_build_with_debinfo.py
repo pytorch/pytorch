@@ -1,13 +1,9 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 
-from tools.build_with_debinfo import (
-    debugify,
-    entry_command,
-    extract_link_command,
-    index_compile_commands,
-)
+from tools.build_with_debinfo import create_build_plan, debugify
 
 
 class TestDebugify(unittest.TestCase):
@@ -27,49 +23,51 @@ class TestDebugify(unittest.TestCase):
         self.assertEqual(out, debugify(out))
 
 
-class TestEntryCommand(unittest.TestCase):
-    def test_command_form(self) -> None:
-        self.assertEqual(entry_command({"command": "cc -c a.cpp"}), "cc -c a.cpp")
-
-    def test_arguments_form_is_quoted(self) -> None:
-        entry = {"arguments": ["cc", "-c", "a b.cpp"]}
-        self.assertEqual(entry_command(entry), "cc -c 'a b.cpp'")
-
-
-class TestIndexCompileCommands(unittest.TestCase):
-    def test_maps_resolved_source_paths(self) -> None:
-        entries = [
-            {"directory": "/repo/build", "file": "../torch/csrc/Module.cpp"},
-            {"directory": "/repo/build", "file": "/repo/torch/csrc/Other.cpp"},
-        ]
-        index = index_compile_commands(entries)
-        self.assertIn("/repo/torch/csrc/Module.cpp", index)
-        self.assertIn("/repo/torch/csrc/Other.cpp", index)
-
-
-class TestExtractLinkCommand(unittest.TestCase):
-    def test_strips_ninja_wrapper(self) -> None:
-        out = ": && clang++ -shared -o lib/libtorch_python.so a.o b.o && :"
-        self.assertEqual(
-            extract_link_command(out, "libtorch_python.so"),
-            "clang++ -shared -o lib/libtorch_python.so a.o b.o",
-        )
-
-    def test_picks_link_among_compiles(self) -> None:
-        out = "\n".join(
+class TestCreateBuildPlan(unittest.TestCase):
+    def test_follows_dependent_links(self) -> None:
+        commands = "\n".join(
             [
-                "clang++ -c torch_python.dir/Module.cpp.o",
-                ": && clang++ -shared -o lib/libtorch_python.so a.o && :",
+                "c++ -O3 -o obj/other.o -c /repo/other.cpp",
+                "c++ -O3 -o obj/a.o -c /repo/a.cpp",
+                "c++ -shared -o lib/libtorch_cpu.so obj/a.o obj/other.o",
+                "c++ -shared -o lib/libunrelated.so obj/other.o",
+                "c++ -shared -o lib/libtorch_python.so lib/libtorch_cpu.so",
             ]
         )
         self.assertEqual(
-            extract_link_command(out, "libtorch_python.so"),
-            "clang++ -shared -o lib/libtorch_python.so a.o",
+            create_build_plan(["/repo/a.cpp"], commands, Path("/repo/build")),
+            [
+                ("debug rebuild", "c++ -g -o obj/a.o -c /repo/a.cpp"),
+                (
+                    "rebuild dependent",
+                    "c++ -shared -o lib/libtorch_cpu.so obj/a.o obj/other.o",
+                ),
+                (
+                    "rebuild dependent",
+                    "c++ -shared -o lib/libtorch_python.so lib/libtorch_cpu.so",
+                ),
+            ],
         )
 
-    def test_raises_when_absent(self) -> None:
+    def test_handles_metal_custom_commands(self) -> None:
+        commands = "\n".join(
+            [
+                "cd /repo/build/metal && xcrun metal -c /repo/a.metal -o a.air",
+                "cd /repo/build/metal && xcrun metallib -o a.metallib a.air",
+                "c++ -shared -Wl,-sectcreate,/repo/build/metal/a.metallib -o lib/a.so",
+            ]
+        )
+        plan = create_build_plan(["/repo/a.metal"], commands, Path("/repo/build"))
+        self.assertEqual(len(plan), 3)
+        self.assertIn("-frecord-sources -gline-tables-only", plan[0][1])
+
+    def test_raises_when_source_is_absent(self) -> None:
         with self.assertRaises(RuntimeError):
-            extract_link_command("clang++ -c a.o", "libtorch_python.so")
+            create_build_plan(
+                ["/repo/missing.cpp"],
+                "c++ -o obj/a.o -c /repo/a.cpp",
+                Path("/repo/build"),
+            )
 
 
 if __name__ == "__main__":
