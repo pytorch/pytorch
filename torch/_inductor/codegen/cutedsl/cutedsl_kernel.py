@@ -247,7 +247,7 @@ class CuteDSLTemplateKernel(Kernel):
     def create_cse_var(self, *args, **kwargs):
         return CuteDSLCSEVariable(*args, **kwargs)
 
-    def gen_imports(self) -> str:
+    def gen_imports(self, uses_inline_asm: bool = False) -> str:
         """Generate common imports for CuteDSL templates."""
         imports = IndentedBuffer()
         imports.splice(
@@ -262,6 +262,10 @@ class CuteDSLTemplateKernel(Kernel):
             from torch._inductor.codegen.cutedsl._cutedsl_utils import result_to_ssa, ssa_to_fragment, ssa_to_indexable
             """
         )
+        if uses_inline_asm:
+            imports.splice(
+                "from torch._inductor.codegen.cutedsl._inline_asm import inline_asm_elementwise_intrinsic"
+            )
         return imports.getvalue()
 
     def gen_defines(self, **kwargs) -> str:
@@ -302,8 +306,11 @@ class CuteDSLTemplateKernel(Kernel):
             **kwargs,
         )
 
-        # Always prepend the common imports
-        imports = self.gen_imports()
+        # Always prepend the common imports. The inline-asm intrinsic import is
+        # conditional so kernels without asm do not load the MLIR llvm dialects.
+        imports = self.gen_imports(
+            uses_inline_asm="inline_asm_elementwise_intrinsic(" in rendered_code
+        )
         full_code = imports + rendered_code
 
         return PartialRender(full_code, self.render_hooks)
@@ -649,6 +656,9 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
         # Maps generated CSE names to their semantic provenance so vector-load
         # analysis can reason about the source indexing semantics.
         self._index_symbol_info: dict[sympy.Symbol, IndexSymbolInfo] = {}
+        # Captured modifications are read-only, so repeated loads from the same
+        # semantic location can share the generated index and value fragments.
+        self._captured_load_cache: dict[tuple[str, sympy.Expr], CuteDSLCSEVariable] = {}
 
     def _get_input_dtype(self, name: str) -> torch.dtype:
         """Get the dtype for an input from the kernel's named_input_nodes."""
@@ -662,6 +672,11 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
         from torch._inductor.kernel.flex.flex_flash_attention import HierarchicalIndex
 
         if name not in self.fixed_inputs:
+            cache_key = (name, index)
+            cached = self._captured_load_cache.get(cache_key)
+            if cached is not None:
+                return self.kernel.cse.generate(self.kernel.body, cached)
+
             var = self._add_kernel_input(name)
             buffer = self.kernel._get_capture_input_node(name)
             if buffer is None:
@@ -707,6 +722,7 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
                 bounds=ValueRanges.unknown(),
                 shape=(1,),
             )
+            self._captured_load_cache[cache_key] = out
             return out
 
         value = self.fixed_inputs[name]
