@@ -11,8 +11,8 @@ from torch.testing._internal.common_utils import HardwareClassification
 
 class ONNXProgramRenameAxesTest(common_utils.TestCase):
     """Tests for ONNXProgram.rename_axes method."""
-
     hw_classification = HardwareClassification.GENERIC
+    
     def _create_onnx_program_with_dynamic_shapes(
         self, input_shapes: list[list[str | int]]
     ) -> torch.onnx.ONNXProgram:
