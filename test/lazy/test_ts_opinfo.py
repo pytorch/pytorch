@@ -190,7 +190,9 @@ class TestLazyTensorDevice(JitTestCase):
 instantiate_device_type_tests(TestLazyTensorDevice, globals())
 
 
-class TestLazyOpInfo(TestCase):
+class TestLazyOpInfoDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @ops(
         [
             op
@@ -244,8 +246,6 @@ class TestLazyOpInfo(TestCase):
         allowed_dtypes=(torch.float,),
     )
     def test_correctness(self, device, dtype, op):
-        test_device = get_test_device()
-
         def clone_to_device(input, dev):
             if isinstance(input, torch.Tensor):
                 return input.detach().clone().to(device=dev)
@@ -259,7 +259,7 @@ class TestLazyOpInfo(TestCase):
             if isinstance(a, torch.Tensor):
                 self.assertTrue(
                     torch.allclose(
-                        clone_to_device(a, test_device), b, atol=1e-4, equal_nan=True
+                        clone_to_device(a, device), b, atol=1e-4, equal_nan=True
                     )
                 )
 
@@ -273,7 +273,7 @@ class TestLazyOpInfo(TestCase):
 
             args = [sample.input] + list(sample.args)
             kwargs = sample.kwargs
-            copy_args = clone_to_device(args, test_device)
+            copy_args = clone_to_device(args, device)
 
             r_exp = op(*copy_args, **kwargs)
             r_actual = op(*args, **kwargs)
@@ -292,7 +292,6 @@ class TestLazyOpInfo(TestCase):
     )
     def test_correctness_with_reusing_ir(self, device, dtype, op):
         torch._lazy.config.set_reuse_ir(True)
-        test_device = get_test_device()
 
         def clone_to_device(input, dev):
             if isinstance(input, torch.Tensor):
@@ -307,7 +306,7 @@ class TestLazyOpInfo(TestCase):
             if isinstance(a, torch.Tensor):
                 self.assertTrue(
                     torch.allclose(
-                        clone_to_device(a, test_device), b, atol=1e-4, equal_nan=True
+                        clone_to_device(a, device), b, atol=1e-4, equal_nan=True
                     )
                 )
 
@@ -321,7 +320,7 @@ class TestLazyOpInfo(TestCase):
 
             args = [sample.input] + list(sample.args)
             kwargs = sample.kwargs
-            copy_args = clone_to_device(args, test_device)
+            copy_args = clone_to_device(args, device)
 
             r_exp = op(*copy_args, **kwargs)
             r_actual = op(*args, **kwargs)
@@ -335,7 +334,7 @@ class TestLazyOpInfo(TestCase):
 
 # TODO: after we move to master, add Lazy as a new Device here:
 # https://github.com/pytorch/pytorch/blob/master/torch/testing/_internal/common_device_type.py#L532
-instantiate_device_type_tests(TestLazyOpInfo, globals(), only_for="cpu")
+instantiate_device_type_tests(TestLazyOpInfoDevice, globals(), only_for="cpu")
 
 
 class TestLazyDynamicOps(TestCase):
