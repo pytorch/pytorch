@@ -624,14 +624,17 @@ def _op_namespace(tgt) -> str | None:
 # same view op as call_method "view", as torch.split, or as
 # torch.ops.aten.numpy_T, so we match on the op name and ask aten's schema.
 # This tracks the aten table instead of a hand-maintained list (e.g. it covers
-# view_as / narrow / unfold / diagonal / .T without an edit).
+# view_as / narrow / unfold / diagonal / .T without an edit). The match is by
+# name only, so a non-aten python callable whose __name__ collides with an aten
+# view op is judged against aten's table; the caller rejects non-aten
+# namespaces first, which keeps that from firing on real third-party ops.
 @functools.lru_cache(None)
 def _is_aten_view_name(name: str) -> bool:
     packet = getattr(torch.ops.aten, name, None)
     if packet is None:
         return False
-    # Iterate overloads(): select/slice/transpose/unbind have no .default.
-    return any(getattr(packet, o).is_view for o in packet.overloads())
+    # Iterate op_overloads(): select/slice/transpose/unbind have no .default.
+    return any(o.is_view for o in packet.op_overloads())
 
 
 # view / as_strided / view_as require a compatible layout and can crash on the
@@ -639,6 +642,13 @@ def _is_aten_view_name(name: str) -> bool:
 # layout and just propagate it. This is op semantics, not alias info, so it is
 # the one hand-maintained list.
 _CRASH_VIEW_OPS = OrderedSet(["view", "as_strided", "view_as"])
+
+# contiguous is alias-annotated (so is_view is True) but its output layout is
+# determined by the call, not by the incoming strides: the result is contiguous
+# for any memory_format. The fused layout does not propagate through it, so the
+# walk stops there (otherwise custom_op(lin(x).contiguous()), the canonical
+# user-side fix, loses the fusion for no correctness benefit).
+_LAYOUT_BREAKING_OPS = OrderedSet(["contiguous"])
 
 
 def _view_op_kind(user: torch.fx.Node) -> str | None:
@@ -660,8 +670,15 @@ def _view_op_kind(user: torch.fx.Node) -> str | None:
         name = user.target
     else:
         return None
+    # A call_function target without __name__ has no op name to look up; treat
+    # it as opaque and stop the walk rather than letting getattr on a non-string
+    # name raise inside _is_aten_view_name.
+    if not isinstance(name, str):
+        return None
     if name in _CRASH_VIEW_OPS:
         return "crash"
+    if name in _LAYOUT_BREAKING_OPS:
+        return None
     return "propagate" if _is_aten_view_name(name) else None
 
 
