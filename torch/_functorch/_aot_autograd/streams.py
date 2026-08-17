@@ -613,6 +613,15 @@ def _collect_sync_forward_deps(
         node_locations.add((partition, stream))
 
     for node in reversed(graph.nodes):
+        # Reaching a node's definition ends its liveness. A sync's control_deps is
+        # inserted at the sync, so a dep whose definition site is below that point
+        # would be referenced before it has been defined. Applies to every node
+        # kind, not just call_function: get_attr tensor constants are materialized
+        # next to their first user, which can be after the sync.
+        inherited_locations = locations.pop(node, _EMPTY_LOCATIONS)
+        for partition, stream in inherited_locations:
+            live_inputs[partition][stream].discard(node)
+
         if node.op == "call_function" and node.target in full_barriers:
             deps = OrderedSet(
                 dep
@@ -644,9 +653,6 @@ def _collect_sync_forward_deps(
         if node.op != "call_function" or node.target in _SYNC_OPS:
             continue
 
-        inherited_locations = locations.pop(node, _EMPTY_LOCATIONS)
-        for partition, stream in inherited_locations:
-            live_inputs[partition][stream].discard(node)
         execution_stream = get_stream(node)
         if execution_stream is None:
             execution_stream = 0
