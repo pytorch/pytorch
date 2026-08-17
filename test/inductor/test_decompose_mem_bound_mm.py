@@ -13,7 +13,7 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_device_type import (
     Capability,
     instantiate_device_type_tests,
-    onlyOn,
+    skipMPS,
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -62,112 +62,13 @@ class _TestDecomposeAddMM(torch.nn.Module):
         return torch.ops.aten.addmm.default(z, x, y)
 
 
-@torch._inductor.config.patch(
-    post_grad_fusion_options={
-        "decompose_mm_pass": {},
-    }
-)
-@instantiate_parametrized_tests
-class TestDecomposeMemMMGeneric(TestCase):
-    hw_classification = HardwareClassification.GENERIC
+class _DecomposeMemMMMixin:
+    """Shared tolerance and comparison helpers for Generic and Accelerator classes."""
 
     def __init__(self, method_name="runTest", methodName="runTest"):
         super().__init__(method_name, methodName)
         self.atol = 1e-3
         self.rtol = 1e-3
-
-    def setup_tolerance(self, rtol=None, atol=None):
-        if rtol is None:
-            rtol = self.rtol
-        if atol is None:
-            atol = self.atol
-        self.rtol = rtol
-        self.atol = atol
-
-    def compare_dict_tensors(self, ref_dict, res_dict, rtol=None, atol=None):
-        self.setup_tolerance(rtol, atol)
-        if len(set(ref_dict.keys())) != len(set(res_dict.keys())):
-            return False
-        for key1 in ref_dict:
-            key2 = "_orig_mod." + key1
-            if key2 not in res_dict:
-                raise AssertionError(f"{key1} does not exist in traced module")
-            if not torch.allclose(
-                ref_dict[key1], res_dict[key2], rtol=self.rtol, atol=self.atol
-            ):
-                return False
-        return True
-
-    def compare_pred(self, module, traced, input, rtol=None, atol=None):
-        self.setup_tolerance(rtol, atol)
-        ref = module(*input)
-        res = traced(*input)
-        self.assertEqual(ref, res, rtol=self.rtol, atol=self.atol)
-
-    @parametrize(
-        "b,m,k,n,should_decompose",
-        [(1, 2, 2, 2, True), (2, 2, 2, 2, False)],
-    )
-    def test_decompose_bmm_cpu(self, b, m, n, k, should_decompose):
-        torch._logging.set_logs(inductor=logging.DEBUG)
-        mat1 = torch.randn(b, m, k)
-        mat2 = torch.randn(b, k, n)
-
-        counters.clear()
-
-        module = MyModule2()
-        traced = torch.compile(module)
-        input = [mat1, mat2]
-        self.compare_pred(module, traced, input)
-
-        expected_val = 1 if should_decompose else 0
-        self.assertEqual(
-            counters["inductor"]["decompose_bmm"],
-            expected_val,
-        )
-        counters.clear()
-
-    @parametrize(
-        "m,k,n, should_decompose",
-        [(1, 64, 16, True), (2, 64, 16, False), (1, 64, 32, True)],
-    )
-    def test_decompose_mm_cpu(self, m, n, k, should_decompose):
-        torch._logging.set_logs(inductor=logging.DEBUG)
-        mat1 = torch.randn(m, k)
-        mat2 = torch.randn(k, n)
-        counters.clear()
-
-        module = MyModule3()
-        traced = torch.compile(module)
-        input = [mat1, mat2]
-        self.compare_pred(module, traced, input)
-
-        expected_val = 1 if should_decompose else 0
-        self.assertEqual(
-            counters["inductor"]["decompose_mm"],
-            expected_val,
-        )
-        counters.clear()
-
-
-class TestDecomposeMemMMAccelerator(TestCase):
-    hw_classification = HardwareClassification.ACCELERATOR
-
-    def __init__(self, method_name="runTest", methodName="runTest"):
-        super().__init__(method_name, methodName)
-        self.atol = 1e-3
-        self.rtol = 1e-3
-
-    def setUp(self):
-        super().setUp()
-        self._config_ctx = torch._inductor.config.patch(
-            post_grad_fusion_options={"decompose_mm_pass": {}}
-        )
-        self._config_ctx.__enter__()
-
-    def tearDown(self):
-        self._config_ctx.__exit__(None, None, None)
-        super().tearDown()
 
     def setup_tolerance(self, rtol=None, atol=None):
         if rtol is None:
@@ -216,6 +117,76 @@ class TestDecomposeMemMMAccelerator(TestCase):
                 ref_grad, res_grad, rtol=self.rtol, atol=self.atol
             )
         )
+
+
+@torch._inductor.config.patch(
+    post_grad_fusion_options={
+        "decompose_mm_pass": {},
+    }
+)
+@instantiate_parametrized_tests
+class TestDecomposeMemMMGeneric(_DecomposeMemMMMixin, TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    @parametrize(
+        "b,m,k,n,should_decompose",
+        [(1, 2, 2, 2, True), (2, 2, 2, 2, False)],
+    )
+    def test_decompose_bmm_cpu(self, b, m, n, k, should_decompose):
+        torch._logging.set_logs(inductor=logging.DEBUG)
+        mat1 = torch.randn(b, m, k)
+        mat2 = torch.randn(b, k, n)
+
+        counters.clear()
+
+        module = MyModule2()
+        traced = torch.compile(module)
+        input = [mat1, mat2]
+        self.compare_pred(module, traced, input)
+
+        expected_val = 1 if should_decompose else 0
+        self.assertEqual(
+            counters["inductor"]["decompose_bmm"],
+            expected_val,
+        )
+        counters.clear()
+
+    @parametrize(
+        "m,k,n, should_decompose",
+        [(1, 64, 16, True), (2, 64, 16, False), (1, 64, 32, True)],
+    )
+    def test_decompose_mm_cpu(self, m, n, k, should_decompose):
+        torch._logging.set_logs(inductor=logging.DEBUG)
+        mat1 = torch.randn(m, k)
+        mat2 = torch.randn(k, n)
+        counters.clear()
+
+        module = MyModule3()
+        traced = torch.compile(module)
+        input = [mat1, mat2]
+        self.compare_pred(module, traced, input)
+
+        expected_val = 1 if should_decompose else 0
+        self.assertEqual(
+            counters["inductor"]["decompose_mm"],
+            expected_val,
+        )
+        counters.clear()
+
+
+class TestDecomposeMemMMAccelerator(_DecomposeMemMMMixin, TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def setUp(self):
+        super().setUp()
+        self._config_ctx = torch._inductor.config.patch(
+            post_grad_fusion_options={"decompose_mm_pass": {}}
+        )
+        self._config_ctx.__enter__()
+
+    def tearDown(self):
+        self._config_ctx.__exit__(None, None, None)
+        super().tearDown()
 
     @parametrize(
         "b,m,k,n,should_decompose",
@@ -329,7 +300,9 @@ class TestDecomposeMemMMAccelerator(TestCase):
     def test_decompose_linear_mixed_precision(
         self, device, m, n, k, has_bias, should_decompose
     ):
-        with torch.amp.autocast(device_type=device, dtype=torch.bfloat16):
+        with torch.amp.autocast(
+            device_type=torch.device(device).type, dtype=torch.bfloat16
+        ):
             torch._logging.set_logs(inductor=logging.DEBUG)
             input = torch.randn(m, k, device=device).requires_grad_(True)
 
@@ -438,7 +411,9 @@ class TestDecomposeMemMMAccelerator(TestCase):
     def test_decompose_mm_mixed_precision(
         self, device, m, n, k, has_bias, should_decompose
     ):
-        with torch.amp.autocast(device_type=device, dtype=torch.bfloat16):
+        with torch.amp.autocast(
+            device_type=torch.device(device).type, dtype=torch.bfloat16
+        ):
             torch._logging.set_logs(inductor=logging.DEBUG)
             mat1 = torch.randn(m, k, device=device).requires_grad_(True)
             mat2 = torch.randn(k, n, device=device).requires_grad_(True)
@@ -529,7 +504,7 @@ class TestDecomposeMemMMAccelerator(TestCase):
         )
         counters.clear()
 
-    @onlyOn(["cuda", "xpu"])
+    @skipMPS
     def test_realize_input(self, device):
         m = 20480
         k = 5
@@ -600,6 +575,7 @@ instantiate_device_type_tests(
     TestDecomposeMemMMAccelerator,
     globals(),
     except_for="cpu",
+    allow_mps=True,
     allow_xpu=True,
 )
 
