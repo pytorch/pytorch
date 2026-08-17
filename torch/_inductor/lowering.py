@@ -7275,12 +7275,13 @@ def _make_reduction_inner(
             kept_idx.append(i)
             kept_sizes.append(size[i])
 
-    # For argmax/argmin compute logical indices when the tensor has non-contiguous layout.
-    should_compute_logical_index = False
+    # Compute logical indices for all supported multidimensional arg reductions.
+    # Loop reordering happens after lowering, so the input IR cannot reliably predict
+    # when the physical reduction order will differ from the logical order.
     supports_logical_index_argreduce = is_triton(x) or (
         ir.get_device_type(x) == "cpu" and config.cpu_backend == "cpp"
     )
-    if (
+    should_compute_logical_index = (
         reduction_type
         in (
             "argmax",
@@ -7292,20 +7293,7 @@ def _make_reduction_inner(
         )
         and len(reduced_sizes) > 1
         and supports_logical_index_argreduce
-    ):
-        if isinstance(x.data, PermuteView):
-            should_compute_logical_index = True
-        elif isinstance(x.data, ir.StorageBox) and isinstance(
-            x.data.data, ir.Pointwise
-        ):
-            should_compute_logical_index = True
-        elif isinstance(x.data, ir.ReinterpretView) or (
-            isinstance(x.data, ir.StorageBox) and isinstance(x.data.data, ir.Buffer)
-        ):
-            layout = x.get_layout()
-            should_compute_logical_index = (
-                layout.is_transposed() or not layout.is_contiguous()
-            )
+    )
 
     def loader(index, reduction_index):
         if len(reduction_index) != len(reduced_idx):

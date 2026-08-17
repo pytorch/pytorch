@@ -13573,20 +13573,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ],
         )
 
-    @skip_if_halide  # logical-index arg reductions are unsupported by Halide
-    def test_argmax_after_fused_reduction_noncontiguous(self):
-        def fn(x):
-            return torch.argmax(torch.mean(x, dim=-1))
-
-        torch.manual_seed(123)
-        x = (
-            torch.rand(2, 4, 4, 8, device=self.device)
-            .transpose(0, 1)
-            .contiguous()
-            .transpose(0, 1)[..., ::2]
-        )
-        self.common(fn, (x,))
-
     def test_argmax_argmin2(self):
         def fn(x):
             return (
@@ -18992,6 +18978,33 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         code = run_and_get_triton_code(f, x)
         self.assertTrue("ReductionHint.OUTER" in code)
         self.assertFalse("ReductionHint.INNER" in code)
+
+    @parametrize("slice_pointwise", (False, True))
+    @skip_if_halide  # Halide reports the physical index after loop reordering
+    def test_argmin_argmax_fused_reduction_logical_index(self, slice_pointwise):
+        def fn(x):
+            reduced = torch.mean(x, dim=-1)
+            if slice_pointwise:
+                reduced = reduced[1:]
+            return reduced.argmin(), reduced.argmax()
+
+        x = (
+            torch.zeros(2, 4, 4, 8, device=self.device)
+            .transpose(0, 1)
+            .contiguous()
+            .transpose(0, 1)[..., ::2]
+        )
+        batch = 1 if slice_pointwise else 0
+        x[batch, 1, 1] = -1
+        x[batch, 3, 0] = 1
+        expected = (
+            torch.tensor(5, device=self.device),
+            torch.tensor(12, device=self.device),
+        )
+
+        self.assertEqual(fn(x), expected)
+        compiled_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        self.assertEqual(compiled_fn(x), expected)
 
     @skip_if_halide
     @requires_gpu_and_triton
