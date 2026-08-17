@@ -80,7 +80,9 @@ def main() -> int:
 
     print(f"torch {torch.__version__} | triton {triton.__version__}")
     print(f"device {torch.cuda.get_device_name(0)}")
-    print(f"TORCHINDUCTOR_TLX_MODE={os.environ.get('TORCHINDUCTOR_TLX_MODE', '<unset>')}")
+    print(
+        f"TORCHINDUCTOR_TLX_MODE={os.environ.get('TORCHINDUCTOR_TLX_MODE', '<unset>')}"
+    )
 
     start = time.perf_counter()
     results = [

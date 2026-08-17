@@ -121,7 +121,7 @@ def upstream_spec(pkg: str, version: str | None) -> str:
     return f"{pkg}=={ver}+git{sha[:8]}"
 
 
-def clear_caches() -> None:
+def clear_caches(info: dict) -> None:
     """Drop the Inductor and Triton compile caches.
 
     Cached kernels are not keyed by which Triton produced them, so reusing a
@@ -130,25 +130,20 @@ def clear_caches() -> None:
     run). Done unconditionally on every switch; there is no reason to skip it,
     so it is not exposed as a separate command.
 
-    Paths come from torch rather than being re-derived here: default_cache_dir()
-    handles tempfile.gettempdir() vs /var/tmp under fbcode and username
-    sanitisation, and Inductor puts the Triton cache *inside* that directory
-    (cache_dir()/triton/<device>) unless TRITON_CACHE_DIR overrides it. Guessing
-    the paths risks clearing the wrong thing, which is the exact failure this is
-    meant to prevent.
+    The paths come from the probe rather than being re-derived here, both to
+    let torch report them and to keep that import out of this process -- see
+    probe(). Guessing them risks clearing the wrong thing, which is the exact
+    failure this is meant to prevent.
 
     The LLVM toolchain download cache is deliberately left alone -- unrelated to
     compiled kernels and expensive to refetch.
     """
-    from torch._inductor.runtime.cache_dir_utils import default_cache_dir
-
-    targets = [Path(os.environ.get("TORCHINDUCTOR_CACHE_DIR", default_cache_dir()))]
-    triton_cache = os.environ.get("TRITON_CACHE_DIR")
-    if triton_cache:
-        # Only a separate target when overridden; otherwise it is nested in the
-        # Inductor cache dir above and already covered.
-        targets.append(Path(triton_cache))
-    for path in targets:
+    if info.get("cache_dir_error"):
+        print(
+            f"    warning: could not resolve the cache dir from torch: "
+            f"{info['cache_dir_error']}"
+        )
+    for path in [Path(p) for p in info.get("cache_dirs", [])]:
         if path.is_dir():
             print(f"    clearing {path}")
             shutil.rmtree(path, ignore_errors=True)
@@ -175,7 +170,7 @@ def probe() -> dict:
     raise RuntimeError(f"probe failed:\n{res.stdout}\n{res.stderr}")
 
 
-def report() -> tuple[list[str], list[str]]:
+def report(info: dict | None = None) -> tuple[list[str], list[str]]:
     """Print the environment report; return (install, tlx) problems.
 
     Split because the two mean different things to different callers.
@@ -183,8 +178,11 @@ def report() -> tuple[list[str], list[str]]:
     whatever you asked for. TLX problems (not FBTriton, no registry) are
     the expected, correct outcome of `switch oai` -- reporting them is
     useful, exiting non-zero for them is not.
+
+    Takes an already-collected probe so a caller that needs other facts from
+    it (switch, for the cache paths) does not pay for a second subprocess.
     """
-    info = probe()
+    info = probe() if info is None else info
     dists = info.get("dists", {})
 
     print("=" * 72)
@@ -238,9 +236,10 @@ def report() -> tuple[list[str], list[str]]:
             "the active Triton has no TLX Inductor registry, so torchTLX will "
             "silently never engage (tlx.py swallows the ImportError). Install "
             f"an FBTriton >={FBTRITON_MIN_VERSION}, which ships "
-            "triton/language/extra/tlx/inductor. Either:  "
-            "`bringup.py switch fbtriton` (PyPI wheel)  or  "
-            "`bringup.py switch fbtriton --from-source <checkout>`"
+            "triton/language/extra/tlx/inductor:  "
+            "`bringup.py switch fbtriton --from-source <checkout>`. No "
+            "published fbtriton wheel carries the registry yet, so "
+            "`bringup.py switch fbtriton` will not fix this today."
         )
 
     if install_problems or tlx_problems:
@@ -301,7 +300,7 @@ def cmd_switch(args: argparse.Namespace) -> int:
         info = probe()
         if info.get("hip"):
             rocm = ".".join(info["hip"].split(".")[:2])
-            pkg = "pytorch-triton-rocm"
+            pkg = "triton-rocm"
             spec = upstream_spec(pkg, args.version)
             extra = [
                 "--index-url",
@@ -312,7 +311,7 @@ def cmd_switch(args: argparse.Namespace) -> int:
             label = f"upstream Triton for ROCm {rocm}: {spec}"
         elif info.get("cuda"):
             cuda = info["cuda"].replace(".", "")
-            pkg = "pytorch-triton"
+            pkg = "triton"
             spec = upstream_spec(pkg, args.version)
             extra = [
                 "--index-url",
@@ -320,9 +319,11 @@ def cmd_switch(args: argparse.Namespace) -> int:
                 "--index-strategy",
                 "unsafe-best-match",
             ]
-            # pytorch-triton, not plain `triton`: a dev torch expects the
-            # PyTorch-built wheel matching ci_commit_pins/triton.txt, and a
-            # release Triton from PyPI may not be compatible with it.
+            # Same distribution name as PyPI's triton, but --index-url points
+            # at the nightly index, which carries the PyTorch-built wheel
+            # matching ci_commit_pins/triton.txt. These are the names this repo
+            # publishes (build_triton_wheel.py, RELEASE.md); the older
+            # pytorch-triton* ones are frozen at 3.6.0.
             label = f"upstream Triton for CUDA {info['cuda']}: {spec}"
         else:
             spec = f"triton=={args.version}" if args.version else "triton"
@@ -338,8 +339,16 @@ def cmd_switch(args: argparse.Namespace) -> int:
         # to get a TLX-capable FBTriton, so it must not be the unguarded one.
         tmpdir = tempfile.mkdtemp(prefix="fbtriton-wheel-")
         print(f"--- building FBTriton wheel from {spec} (compiles Triton + LLVM, slow)")
-        build = [uv_bin(), "build", "--wheel", "--python", sys.executable,
-                 "--out-dir", tmpdir, spec]
+        build = [
+            uv_bin(),
+            "build",
+            "--wheel",
+            "--python",
+            sys.executable,
+            "--out-dir",
+            tmpdir,
+            spec,
+        ]
         if run(build).returncode != 0:
             print("error: build failed; leaving the current install alone")
             shutil.rmtree(tmpdir, ignore_errors=True)
@@ -386,10 +395,11 @@ def cmd_switch(args: argparse.Namespace) -> int:
         return res.returncode
 
     print("--- clearing compile caches (stale kernels survive a provider swap)")
-    clear_caches()
+    info = probe()
+    clear_caches(info)
 
     print()
-    install_problems, tlx_problems = report()
+    install_problems, tlx_problems = report(info)
     if install_problems:
         return 1
     # Landing on a non-TLX Triton is the whole point of `switch oai`, so those
@@ -428,7 +438,9 @@ def cmd_test(args: argparse.Namespace) -> int:
         # Keep the default fast: this is a plumbing check, not a correctness
         # suite. --full adds the 425-test Inductor/Triton suite (~2.5 min).
         print("no torchTLX tests found; running the plumbing sanity check")
-        print(f"  (looked for: {', '.join(TLX_TEST_PATTERNS)}; use --full for the suite)")
+        print(
+            f"  (looked for: {', '.join(TLX_TEST_PATTERNS)}; use --full for the suite)"
+        )
         return run(
             [sys.executable, str(Path(__file__).parent / "sanity.py")],
             cwd=REPO_ROOT,
@@ -458,7 +470,9 @@ def main() -> int:
         "--from-source", metavar="PATH", help="build FBTriton from a local checkout"
     )
     p_switch.add_argument(
-        "--editable", action="store_true", help="with --from-source, install as editable"
+        "--editable",
+        action="store_true",
+        help="with --from-source, install as editable",
     )
 
     p_test = sub.add_parser("test", help="run the torchTLX unit tests")

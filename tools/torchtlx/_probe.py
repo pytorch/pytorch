@@ -10,6 +10,7 @@ from __future__ import annotations
 import importlib
 import importlib.metadata as md
 import json
+import os
 
 
 TLX_REGISTRY = "triton.language.extra.tlx.inductor.registry"
@@ -67,6 +68,25 @@ def main() -> None:
     except Exception as e:
         out["tlx_registry"] = False
         out["tlx_error"] = repr(e)
+
+    # Resolved here rather than in bringup.py so the torch import happens in
+    # this process, which runs from / and so cannot pick up the source tree
+    # instead of the installed package. default_cache_dir() handles
+    # tempfile.gettempdir() vs /var/tmp under fbcode and username sanitisation.
+    cache_dirs = []
+    try:
+        from torch._inductor.runtime.cache_dir_utils import default_cache_dir
+
+        cache_dirs.append(
+            os.environ.get("TORCHINDUCTOR_CACHE_DIR") or default_cache_dir()
+        )
+    except Exception as e:
+        out["cache_dir_error"] = repr(e)
+    # Inductor puts the Triton cache inside the directory above, so it is a
+    # separate target only when TRITON_CACHE_DIR moves it out.
+    if os.environ.get("TRITON_CACHE_DIR"):
+        cache_dirs.append(os.environ["TRITON_CACHE_DIR"])
+    out["cache_dirs"] = cache_dirs
 
     print("<<<JSON>>>" + json.dumps(out))
 

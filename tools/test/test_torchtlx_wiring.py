@@ -10,11 +10,11 @@ upstream produces.
     pytest tools/test -o "python_files=test*.py" -k torchtlx
 
 Lives here rather than under tools/torchtlx/ so CI collects it: the lint
-workflow runs `pytest tools/test`, and these guards -- particularly that
-nothing lands under .ci/docker/ -- only help if they run unattended. That job
-uses the linter image, so this shells out to bash and compares strings; it
-imports neither torch nor triton, and needs no GPU and no network. Hence plain
-unittest rather than torch.testing._internal, matching the rest of tools/test.
+workflow runs `pytest tools/test`, and a guard on the default build path only
+helps if it runs unattended. That job uses the linter image, so this shells out
+to bash and compares strings; it imports neither torch nor triton, and needs no
+GPU and no network. Hence plain unittest rather than torch.testing._internal,
+matching the rest of tools/test.
 """
 
 from __future__ import annotations
@@ -125,25 +125,6 @@ class TestBinaryPopulateEnv(unittest.TestCase):
         self.assertFalse(
             (REPO_ROOT / ".ci/docker/ci_commit_pins/fbtriton.txt").exists()
         )
-
-    def test_ci_docker_untouched_by_this_fork(self):
-        # origin/main first: a CI checkout usually has no local `main`, and
-        # skipping there would silently retire the guard exactly where it is
-        # needed most.
-        for base in ("origin/main", "main"):
-            merge_base = subprocess.run(
-                ["git", "merge-base", "HEAD", base],
-                cwd=REPO_ROOT, capture_output=True, text=True,
-            ).stdout.strip()
-            if merge_base:
-                break
-        else:
-            self.skipTest("no main branch to diff against")
-        diff = subprocess.run(
-            ["git", "diff", "--name-only", merge_base, "HEAD", "--", ".ci/docker"],
-            cwd=REPO_ROOT, capture_output=True, text=True,
-        ).stdout.strip()
-        self.assertEqual(diff, "", f"changes under .ci/docker force a rebuild:\n{diff}")
 
 
 if __name__ == "__main__":

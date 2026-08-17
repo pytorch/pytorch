@@ -77,15 +77,16 @@ stock Inductor. `doctor` turns that silent no-op into an explicit failure, and
 ## FBTriton >= 3.8 is required
 
 torchTLX needs `triton/language/extra/tlx/inductor/`, which is absent from the
-fbtriton 3.7.x releases. Either source works:
+fbtriton 3.7.x releases. Today a source build is the only one that gets you a
+registry -- no published fbtriton wheel carries it yet:
 
 ```bash
-# published wheel (installs as the `fbtriton` distribution)
-python tools/torchtlx/bringup.py switch fbtriton
-
 # your own checkout (installs as the `triton` distribution)
 git clone https://github.com/facebookexperimental/triton ~/fbtriton
 python tools/torchtlx/bringup.py switch fbtriton --from-source ~/fbtriton
+
+# published wheel (installs as the `fbtriton` distribution) -- once one ships
+python tools/torchtlx/bringup.py switch fbtriton
 ```
 
 `doctor` reports `TLX registry : OK` once a capable build is installed.
