@@ -6,11 +6,12 @@ import torch
 import torch.distributed as dist
 from torch.distributed._shard import shard_parameter
 from torch.testing._internal.common_device_type import (
+    Capability,
     instantiate_device_type_tests,
     onlyAccelerator,
+    requires_capabilities,
 )
 from torch.testing._internal.common_distributed import (
-    requires_accelerator_dist_backend,
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
@@ -138,7 +139,7 @@ class TestShardedEmbedding(ShardedTensorTestBase):
 
     @with_comms(init_rpc=False, backend=backend)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
-    @requires_accelerator_dist_backend(["nccl", "xccl", "privateuse1"])
+    @requires_capabilities(Capability.distributed.backend)
     @onlyAccelerator
     def test_sharded_embedding_colwise(self, device):
         for spec in generate_chunk_sharding_specs_for_test(1):
@@ -178,7 +179,7 @@ class TestShardedEmbedding(ShardedTensorTestBase):
 
     @with_comms(init_rpc=False, backend=backend)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
-    @requires_accelerator_dist_backend(["nccl", "xccl", "privateuse1"])
+    @requires_capabilities(Capability.distributed.backend)
     @onlyAccelerator
     def test_sharded_embedding_rowwise(self, device):
         for spec in generate_chunk_sharding_specs_for_test(0):
