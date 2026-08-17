@@ -1292,6 +1292,37 @@ class TestBinaryUfuncsDevice(TestCase):
             actual = torch.divide(a, zero, rounding_mode=rounding_mode)
             self.assertEqual(actual, expect, exact_dtype=exact_dtype)
 
+    @dtypes(torch.bfloat16, torch.half)
+    def test_div_floor_reduced_precision(self, device, dtype):
+        # floor_divide used to compute its intermediates in the input dtype for
+        # these two, where a - fmod(a, b) can round back up to a and the
+        # quotient then comes out one too high. The scalar divisor path already
+        # widened to float, so the answer depended on the shape. Compare
+        # everything against float math narrowed once, exactly.
+        a = make_tensor((4096,), dtype=dtype, device=device, low=-1000, high=1000)
+        b = make_tensor((4096,), dtype=dtype, device=device, low=-10, high=10)
+        b[b == 0] = 1
+
+        expected = torch.floor_divide(a.float(), b.float()).to(dtype)
+        self.assertEqual(torch.floor_divide(a, b), expected, atol=0, rtol=0)
+
+        # Short tensors take the scalar loop instead of the vectorized one.
+        for n in (1, 2, 3):
+            self.assertEqual(
+                torch.floor_divide(a[:n], b[:n]), expected[:n], atol=0, rtol=0
+            )
+
+        # 560 // 3 is 186, but 560 - fmod(560, 3) is 558, which bfloat16 cannot
+        # represent. Rounded to 560 the quotient comes out as 187.
+        num = torch.full((64,), 560.0, dtype=dtype, device=device)
+        den = torch.full((64,), 3.0, dtype=dtype, device=device)
+        self.assertEqual(
+            torch.floor_divide(num, den),
+            torch.full_like(num, 186.0),
+            atol=0,
+            rtol=0,
+        )
+
     @dtypes(*all_types_and(torch.half))
     @dtypesIfXPU(*all_types())
     def test_div_rounding_numpy(self, device, dtype):

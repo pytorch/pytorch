@@ -68,9 +68,15 @@ void div_floor_kernel_cuda(TensorIteratorBase& iter) {
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND2(
         kHalf, kBFloat16, dtype, "div_floor_cuda", [&]() {
+          using accscalar_t = at::acc_type<scalar_t, true>;
           gpu_kernel_with_scalars(
               iter, [] GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-                return c10::div_floor_floating(a, b);
+                // Compute in float for Half and BFloat16, like the CPU scalar
+                // branch above. std::fmod on those types returns the same
+                // type, so without the cast every step here rounds and
+                // a - mod can round back up to a.
+                return c10::div_floor_floating(
+                    static_cast<accscalar_t>(a), static_cast<accscalar_t>(b));
               });
         });
   }
