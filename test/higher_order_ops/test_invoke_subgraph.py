@@ -39,11 +39,11 @@ from torch._subclasses.functional_tensor import (
     PythonFunctionalizeAPI,
 )
 from torch.fx.graph import _BoxedCodeGen
+from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     skipXPUIf,
 )
-from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
