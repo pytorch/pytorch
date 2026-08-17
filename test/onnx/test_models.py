@@ -63,7 +63,7 @@ class TestModels(pytorch_test_common.ExportTestCase):
 
     def test_prelu(self, device):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
-        self.exportTest(PReluNet().to(device), x.to(device))
+        self.exportTest(PReluNet(), x)
 
     @skipScriptTest()
     def test_concat(self, device):
@@ -74,17 +74,17 @@ class TestModels(pytorch_test_common.ExportTestCase):
 
     def test_permute(self, device):
         x = Variable(torch.randn(BATCH_SIZE, 3, 10, 12))
-        self.exportTest(PermuteNet().to(device), x.to(device))
+        self.exportTest(PermuteNet(), x)
 
     @skipScriptTest()
     def test_embedding_sequential_1(self, device):
         x = Variable(torch.randint(0, 10, (BATCH_SIZE, 3)))
-        self.exportTest(EmbeddingNetwork1().to(device), x.to(device))
+        self.exportTest(EmbeddingNetwork1(), x)
 
     @skipScriptTest()
     def test_embedding_sequential_2(self, device):
         x = Variable(torch.randint(0, 10, (BATCH_SIZE, 3)))
-        self.exportTest(EmbeddingNetwork2().to(device), x.to(device))
+        self.exportTest(EmbeddingNetwork2(), x)
 
     @unittest.skip("This model takes too much memory")
     def test_srresnet(self, device):
@@ -280,7 +280,7 @@ class TestModels(pytorch_test_common.ExportTestCase):
         self.exportTest(r2plus1d_18().to(device), x.to(device), rtol=1e-3, atol=1e-5)
 
 
-instantiate_device_type_tests(TestModels, globals(), allow_xpu=True, allow_mps=True)
+instantiate_device_type_tests(TestModels, globals())
 
 if __name__ == "__main__":
     common_utils.run_tests()
