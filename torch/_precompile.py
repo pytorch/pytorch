@@ -1144,6 +1144,43 @@ def _baked_tensors(value: object) -> list[torch.Tensor]:
     return found
 
 
+def _reject_ambient_mode_dependency(bytecode: types.CodeType) -> None:
+    """Refuse a capture whose transformed bytecode reads the LIVE mode stack.
+
+    Dynamo applies an active torch_function mode symbolically, so a stateless one
+    bakes into the graph and the artifact is self-contained. A mode with state is
+    different: Dynamo replays the side effect by RECONSTRUCTING the mode from the
+    runtime stack, so the bytecode calls get_torch_function_mode_stack_at and the
+    artifact silently depends on process state no guard protects (precompile
+    checks none). Served with an empty stack that is a raw IndexError-ish assert;
+    served under an unrelated mode it reads that object instead and returns a
+    wrong number. Refuse instead, the way invariant 1 refuses a baked tensor.
+    """
+    seen: set[int] = set()
+
+    def reads_mode_stack(code: types.CodeType) -> bool:
+        if id(code) in seen:
+            return False
+        seen.add(id(code))
+        if "get_torch_function_mode_stack_at" in code.co_names:
+            return True
+        return any(
+            isinstance(c, types.CodeType) and reads_mode_stack(c)
+            for c in code.co_consts
+        )
+
+    if reads_mode_stack(bytecode):
+        raise PrecompileError(
+            "precompile tracer='dynamo': fn was captured with a torch_function mode "
+            "active, and the captured bytecode reads that mode back off the RUNTIME "
+            "mode stack (it has state Dynamo has to reconstruct). The artifact checks "
+            "no guards, so it would read whatever mode the serving process happens to "
+            "have -- an assertion failure with none, and a silently wrong answer under "
+            "a different one. Capture outside the mode, or make the mode stateless so "
+            "its effect bakes into the graph."
+        )
+
+
 def _reject_baked_tensors(
     used_globals: Mapping[str, object],
     closure_contents: list[object],
@@ -1623,6 +1660,9 @@ def _decompose_subgraph(
     """
     from torch._dispatch.python import enable_python_dispatcher
     from torch._dynamo.utils import detect_fake_mode
+    from torch._dynamo.variables.torch_function import (
+        torch_function_mode_stack_state_mgr,
+    )
 
     # Take the mode off the fakes THEMSELVES rather than from BackendInput.fake_mode: the
     # two are distinct FakeTensorMode objects (they share a ShapeEnv), and running the ops
@@ -1645,7 +1685,18 @@ def _decompose_subgraph(
     # itself disappears) -- which is exactly the shape the make_fx tracer produces, and why
     # the caller re-derives ``trains`` from the returned graph rather than reusing its own.
     grad_cm = torch.enable_grad() if trains else torch.no_grad()
-    with grad_cm, fake_mode, enable_python_dispatcher():
+    # With the caller's torch_function modes CLEARED. gm is torch-level Python that
+    # Dynamo already produced WITH those modes applied symbolically, so re-tracing it
+    # while they are live applies each of them a second time and bakes a
+    # doubly-transformed graph -- the same trap as the inductor lowering below, and
+    # just as silent, since the artifact then needs no mode to reproduce the wrong
+    # number.
+    with (
+        torch_function_mode_stack_state_mgr,
+        grad_cm,
+        fake_mode,
+        enable_python_dispatcher(),
+    ):
         return make_fx(gm, decomposition_table=decompositions)(*fake_inputs)
 
 
@@ -1871,6 +1922,7 @@ def _capture_dynamo(
         *((runtime_env.kwdefaults or {}).values()),
     ]
     _reject_baked_tensors(used_globals, closure_contents, defaults)
+    _reject_ambient_mode_dependency(gco.bytecode)
 
     if trains:
         # Only PARAMETERS get a scattered gradient (invariant 5), mirroring the make_fx
@@ -2408,6 +2460,11 @@ def _build_dynamo_metadata_section(compiled: PrecompiledModule) -> list[str]:
         # left at None, which is what makes the baked accumulate form match eager on the
         # first step too (Note [precompile dynamo training grad accumulation]).
         f"GRAD_ACCUM_PARAMS = {capture.grad_accum_params!r}",
+        # The marshalled bytecode below is CPython-version specific. marshal only
+        # REJECTS a foreign blob across the 3.10/3.11 layout change; between 3.11
+        # and 3.14 it loads happily and the resulting code object segfaults when
+        # called, so the version has to be written down and checked explicitly.
+        f"_DYNAMO_PYTHON_VERSION = {tuple(sys.version_info[:2])!r}",
         f"_DYNAMO_CODE = {code_blob!r}",
         f"_DYNAMO_STATE = {state_blob!r}",
         "",
