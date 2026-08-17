@@ -32,9 +32,9 @@ PERF_SLOWDOWN_TOLERANCE = 1.05  # 5% tolerance on performance
 # Use torch.cuda.get_device_properties() to query actual device capabilities.
 
 IS_ROCM = torch.version.hip is not None
-_rocm_version = (
-    tuple(int(v) for v in torch.version.hip.split(".")[:2]) if IS_ROCM else (0, 0)
-)
+
+if IS_ROCM:
+    _rocm_version = tuple(int(v) for v in torch.version.rocm.split(".")[:2])
 ORIGAMI_ROCM_SUPPORTED = IS_ROCM and _rocm_version < (10, 0)
 
 try:
