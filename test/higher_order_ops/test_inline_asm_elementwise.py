@@ -412,9 +412,8 @@ class TestInlineAsmElementwiseInputValidation(TestCase):
             )
 
 
-@unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
-class TestInlineAsmElementwiseCUDAContract(TestCase):
-    """Tests for CUDA-specific API contracts."""
+class TestInlineAsmElementwiseErrors(TestCase):
+    """CUDA-specific tests for error handling."""
 
     hw_classification = HardwareClassification.CUDA
 
@@ -427,12 +426,6 @@ class TestInlineAsmElementwiseCUDAContract(TestCase):
                 constraints="=v,v" if torch.version.hip else "=f,f",
                 dtype=torch.float32,
             )
-
-
-class TestInlineAsmElementwiseErrors(TestCase):
-    """CUDA-specific tests for error handling."""
-
-    hw_classification = HardwareClassification.CUDA
 
     def test_error_constraint_mismatch(self, device):
         x = torch.randn(100, device=device, dtype=torch.float32)
