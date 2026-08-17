@@ -8,7 +8,6 @@ import unittest
 import torch
 import torch._dynamo.test_case
 from torch.testing._internal.common_utils import (
-    HardwareClassification,
     make_dynamo_test,
     xfailIfPy313AndEarlier,
 )
@@ -123,8 +122,6 @@ class NotReversibleNone:
 
 class TestIterators(torch._dynamo.test_case.TestCase):
     """Test iterator support in Dynamo"""
-
-    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         super().setUp()
@@ -934,8 +931,6 @@ class GeneratorIterIterable:
 class TestCustomIteratorMethods(torch._dynamo.test_case.TestCase):
     """Test custom __iter__ implementations on user-defined subclasses"""
 
-    hw_classification = HardwareClassification.GENERIC
-
     def setUp(self):
         super().setUp()
         self._u_prev = torch._dynamo.config.enable_trace_unittest
@@ -999,8 +994,6 @@ class TestIteratorMutationSemantics(torch._dynamo.test_case.TestCase):
     These tests explore whether Dynamo preserves CPython's iterator semantics
     when the underlying container is modified.
     """
-
-    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         super().setUp()
@@ -1127,8 +1120,6 @@ class Priority(enum.IntEnum):
 class TestEnumIteration(torch._dynamo.test_case.TestCase):
     """Test iteration over enum classes"""
 
-    hw_classification = HardwareClassification.GENERIC
-
     def setUp(self):
         super().setUp()
         self._u_prev = torch._dynamo.config.enable_trace_unittest
@@ -1180,8 +1171,6 @@ class TestEnumIteration(torch._dynamo.test_case.TestCase):
 
 class TestIterWithBuiltins(torch._dynamo.test_case.TestCase):
     """Test iter() with builtin iterators like zip, map, filter, reversed"""
-
-    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         super().setUp()
@@ -1416,8 +1405,6 @@ class BlockedLen:
 class TestIterErrors(torch._dynamo.test_case.TestCase):
     """Test that iter() raises the correct exceptions"""
 
-    hw_classification = HardwareClassification.GENERIC
-
     def setUp(self):
         super().setUp()
         self._u_prev = torch._dynamo.config.enable_trace_unittest
@@ -1643,8 +1630,6 @@ class TestSpecialMethodIterLookup(torch._dynamo.test_case.TestCase):
     resolved via MRO-only special lookup with descriptor binding
     (lookup_maybe_method in Objects/typeobject.c)."""
 
-    hw_classification = HardwareClassification.GENERIC
-
     def setUp(self):
         super().setUp()
         self._u_prev = torch._dynamo.config.enable_trace_unittest
@@ -1738,8 +1723,6 @@ class ColorInt(enum.IntEnum):
 class TestSpecialMethodLookupRegressions(torch._dynamo.test_case.TestCase):
     """Regressions for the special-method lookup engine: C-slot dunders must
     never recurse, and error messages must match eager."""
-
-    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         super().setUp()
