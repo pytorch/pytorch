@@ -4123,7 +4123,11 @@ def _combo_coordesc_min_block_sizes(
     combo_meta: dict[str, Any], subkernel_idx: int
 ) -> dict[str, int]:
     sub_meta = combo_meta.get(f"inductor_meta_{subkernel_idx}", {})
-    minimums = dict(sub_meta.get("tma_min_block_sizes") or {})
+    minimums = (
+        dict(sub_meta.get("tma_min_block_sizes") or {})
+        if sub_meta.get("uses_tma")
+        else {}
+    )
     for key, meta_key in (("XBLOCK", "min_xblock"), ("R0_BLOCK", "min_rblock")):
         if (minimum := sub_meta.get(meta_key)) is not None:
             minimums[key] = max(minimums.get(key, 1), minimum)
@@ -4147,19 +4151,18 @@ def _combo_coordesc_meta(
     field_order: list[str] = []
     field_limits: dict[str, int] = {}
     field_minimums: dict[str, int] = {}
+    block_arg_names = OrderedSet(combo_meta.get("block_arg_names", ()))
     for i in order:
         size_hints_i = combo_meta[f"size_hints_{i}"]
         min_block_sizes = _combo_coordesc_min_block_sizes(combo_meta, i)
         for key in block_config:
-            if key.rsplit("_", 1)[-1] != str(i):
+            if key not in block_arg_names or key.rsplit("_", 1)[-1] != str(i):
                 continue
             field_order.append(key)
             block_key = key.rsplit("_", 1)[0]
             prefix = block_key.removesuffix("BLOCK").lower()
-            if prefix in size_hints_i:
-                field_limits[key] = min(
-                    TRITON_MAX_BLOCK[prefix.upper()], size_hints_i[prefix]
-                )
+            if (max_block := TRITON_MAX_BLOCK.get(prefix.upper())) is not None:
+                field_limits[key] = min(max_block, size_hints_i.get(prefix, max_block))
             if block_key in min_block_sizes:
                 field_minimums[key] = min_block_sizes[block_key]
     return field_order, field_limits, field_minimums
