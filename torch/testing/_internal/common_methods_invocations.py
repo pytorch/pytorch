@@ -5541,7 +5541,7 @@ def sample_inputs_cutedsl_topk(op_info, device, dtype, requires_grad, **kwargs):
 
 
 def sample_inputs_flydsl_topk(op_info, device, dtype, requires_grad, **kwargs):
-    from torch._native.ops.topk.flydsl_impl import _radix_n_range, _REGISTER_N_RANGE
+    from torch._native.ops.topk.flydsl_impl import _radix_n_range, _REGISTER_N_BOUNDS
 
     def make_arg(shape):
         values = torch.randperm(math.prod(shape), dtype=torch.int64, device=device)
@@ -5557,7 +5557,7 @@ def sample_inputs_flydsl_topk(op_info, device, dtype, requires_grad, **kwargs):
         yield SampleInput(make_arg((256, N)).contiguous(), args=(K, -1))
         yield SampleInput(make_arg((4, 64, N)).contiguous(), args=(K,))
 
-    for K, N in ((2, _REGISTER_N_RANGE[0]), (16, _REGISTER_N_RANGE[1])):
+    for K, N in ((2, _REGISTER_N_BOUNDS[0]), (16, _REGISTER_N_BOUNDS[1])):
         yield SampleInput(make_arg((256, N)).contiguous(), args=(K,))
         yield SampleInput(make_arg((4, 64, N)).contiguous(), args=(K,))
 

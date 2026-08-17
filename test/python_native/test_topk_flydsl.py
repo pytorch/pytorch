@@ -4,6 +4,7 @@ import unittest
 
 import torch
 import torch.backends.python_native as pn
+from torch._native.ops.topk.flydsl_impl import _REGISTER_KS as _impl_register_ks
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import (
@@ -14,9 +15,13 @@ from torch.testing._internal.common_utils import (
 )
 
 
-_REGISTER_KS = (2, 4, 8, 16)
+# Taken from the gate rather than restated, so widening _REGISTER_KS cannot
+# leave these parametrizations silently testing the old set.
+_REGISTER_KS = tuple(sorted(_impl_register_ks))
 _RADIX_CORRECTNESS_KS = (64, 65, 128, 129, 256, 257, 383, 384, 512, 513, 831, 832, 1024)
 _CORRECTNESS_KS = _REGISTER_KS + _RADIX_CORRECTNESS_KS
+# One K per radix gate row, plus the register gate, to cover each N ceiling.
+_GATE_MAX_N_KS = (max(_REGISTER_KS), 64, 257, 384, 1024)
 
 
 def _unsupported_environment_reason() -> str | None:
@@ -42,15 +47,44 @@ def _unsupported_environment_reason() -> str | None:
 _UNSUPPORTED_REASON = _unsupported_environment_reason()
 
 
-def _test_n(k: int) -> int:
-    from torch._native.ops.topk.flydsl_impl import _radix_n_range, _REGISTER_N_RANGE
+def _gate_n_bounds(k: int) -> tuple[int, int]:
+    from torch._native.ops.topk.flydsl_impl import _radix_n_range, _REGISTER_N_BOUNDS
 
     if k in _REGISTER_KS:
-        return _REGISTER_N_RANGE[0]
+        return _REGISTER_N_BOUNDS
     n_range = _radix_n_range(k)
     if n_range is None:
         raise AssertionError(f"missing radix gate for K={k}")
-    return n_range[0]
+    return n_range
+
+
+def _test_n(k: int) -> int:
+    return _gate_n_bounds(k)[0]
+
+
+def _test_n_max(k: int) -> int:
+    return _gate_n_bounds(k)[1]
+
+
+def _special_cols(n: int) -> tuple[int, ...]:
+    """Columns to plant special values in.
+
+    Consecutive columns all land in one thread's first vector load, so they
+    exercise neither a later tile nor the scalar tail. These are spread across
+    the row and include the last column, which is where a tail lives when one
+    does.
+    """
+    return (0, n // 3 + 1, n // 2, 2 * n // 3 + 2, n - 1)
+
+
+def _expected_kernel(k: int, n: int) -> str:
+    """Which specialization the gate must pick for this shape."""
+    from torch._native.ops.topk.flydsl_impl import _kernel_for
+
+    kernel = _kernel_for(k, n)
+    if kernel is None:
+        raise AssertionError(f"K={k} N={n} is outside the FlyDSL gate")
+    return kernel
 
 
 def _test_m(device_index: int | None = None) -> int:
@@ -99,15 +133,22 @@ class TestFlyDSLTopK(TestCase):
     def _assert_topk_matches_aten(self, x: torch.Tensor, k: int) -> None:
         from torch._native.ops.topk.flydsl_kernels import topk_cache_info
 
+        kernel = _expected_kernel(k, x.shape[-1])
         with pn.flydsl.disabled():
             ref_v, _ = torch.topk(x, k, dim=-1)
         got_v, got_i = torch.topk(x, k, dim=-1)
+        # Pin the specialization, then confirm the other one stayed cold: the
+        # summed counter alone would pass even if the gate picked the wrong
+        # kernel for this shape.
+        self.assertEqual(topk_cache_info(kernel).misses, 1)
         self.assertEqual(topk_cache_info().misses, 1)
         self.assertEqual(got_v, ref_v)
         self.assertEqual(torch.gather(x, -1, got_i), got_v)
         if k >= 2:
-            diffs = got_v[..., :-1] - got_v[..., 1:]
-            self.assertTrue((diffs >= 0).all(), "output is not descending")
+            self.assertTrue(
+                (got_v[..., :-1] >= got_v[..., 1:]).all(),
+                "output is not descending",
+            )
 
     @parametrize("k", _CORRECTNESS_KS)
     def test_correctness(self, k: int):
@@ -126,11 +167,12 @@ class TestFlyDSLTopK(TestCase):
     @parametrize("k", (8, 704))
     def test_correctness_with_extreme_values(self, k: int):
         torch.manual_seed(2)
-        x = make_tensor((_test_m(), _test_n(k)), device="cuda", dtype=torch.float32)
-        x[:, 0] = float("inf")
-        x[:, 1] = float("-inf")
-        x[:, 2] = 1e38
-        x[:, 3] = -1e38
+        n = _test_n(k)
+        x = make_tensor((_test_m(), n), device="cuda", dtype=torch.float32)
+        for col, val in zip(
+            _special_cols(n), (float("inf"), float("-inf"), 1e38, -1e38, float("inf"))
+        ):
+            x[:, col] = val
         self._assert_topk_matches_aten(x, k)
 
     @parametrize("k", (8, 512))
@@ -139,16 +181,19 @@ class TestFlyDSLTopK(TestCase):
 
         torch.manual_seed(10)
         m = _test_m()
-        x = make_tensor((m, _test_n(k)), device="cuda", dtype=torch.float32)
+        n = _test_n(k)
+        x = make_tensor((m, n), device="cuda", dtype=torch.float32)
         x_bits = x.view(torch.int32)
-        x_bits[:, 0] = 0x7FC12345
-        x_bits[:, 1] = 0xFFC54321 - (1 << 32)
-        x[:, 2] = float("inf")
-        x[:, 3] = float("-inf")
+        cols = _special_cols(n)
+        x_bits[:, cols[0]] = 0x7FC12345
+        x_bits[:, cols[1]] = 0xFFC54321 - (1 << 32)
+        x[:, cols[2]] = float("inf")
+        x[:, cols[3]] = float("-inf")
+        x_bits[:, cols[4]] = 0x7FC12345
         with pn.flydsl.disabled():
             ref_v, _ = torch.topk(x, k, dim=-1)
         got_v, got_i = torch.topk(x, k, dim=-1)
-        self.assertEqual(topk_cache_info().misses, 1)
+        self.assertEqual(topk_cache_info(_expected_kernel(k, n)).misses, 1)
         gathered = torch.gather(x, -1, got_i)
         self.assertEqual(gathered.view(torch.int32), got_v.view(torch.int32))
         self.assertEqual(got_v.isnan().sum(dim=-1), ref_v.isnan().sum(dim=-1))
@@ -338,6 +383,51 @@ class TestFlyDSLTopK(TestCase):
         self.assertEqual(i1, i2)
         self.assertEqual(v1, ref_v)
         self.assertEqual(i1, ref_i)
+
+    @parametrize("k", _REGISTER_KS)
+    def test_register_tie_order_is_value_desc_index_asc(self, k: int):
+        """The register path is used in deterministic mode too, so pin its ties.
+
+        Its keys are ``(ord << 32) | ~idx``, which orders ties
+        ``(value desc, idx asc)``. That is reproducible on its own -- which is
+        why ``_run`` picks it regardless of the deterministic flag -- but it is
+        not aten's small-K index order, so compare against a stable descending
+        sort rather than against aten.
+        """
+        from torch._native.ops.topk.flydsl_kernels import topk_cache_info
+
+        torch.manual_seed(7)
+        n = _test_n(k)
+        self.assertEqual(_expected_kernel(k, n), "register")
+        # Three distinct values over a wide row: every top-K entry is tied.
+        x = torch.randint(0, 3, (_test_m(), n), device="cuda", dtype=torch.float32)
+        expected_i = torch.argsort(x, dim=-1, descending=True, stable=True)[:, :k]
+
+        prior = torch.are_deterministic_algorithms_enabled()
+        try:
+            torch.use_deterministic_algorithms(True)
+            v1, i1 = torch.topk(x, k, dim=-1)
+            v2, i2 = torch.topk(x, k, dim=-1)
+        finally:
+            torch.use_deterministic_algorithms(prior)
+
+        self.assertEqual(topk_cache_info("register").misses, 1)
+        self.assertEqual(i1, i2)
+        self.assertEqual(v1, v2)
+        self.assertEqual(i1, expected_i)
+        self.assertEqual(torch.gather(x, -1, i1), v1)
+
+    @parametrize("k", _GATE_MAX_N_KS)
+    def test_correctness_at_gate_n_ceiling(self, k: int):
+        """Cover the top of each gate row, not just the bottom.
+
+        vec_iters, LDS use and the buffer span all scale with N, so the
+        ceilings are a different specialization from the floors every other
+        test uses.
+        """
+        torch.manual_seed(12)
+        x = make_tensor((_test_m(), _test_n_max(k)), device="cuda", dtype=torch.float32)
+        self._assert_topk_matches_aten(x, k)
 
     @parametrize("k", (8, 704))
     def test_autograd_passes_through(self, k: int):

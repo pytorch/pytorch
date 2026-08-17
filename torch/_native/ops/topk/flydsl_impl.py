@@ -1,8 +1,25 @@
 """FlyDSL override registrations for ``aten::topk``.
 
-This is a conservative FlyDSL backend for topk.  The kernel currently handles
-small fp32, last-dimension, largest+sorted cases; other shapes fall through to
-the existing backends or aten.
+Two kernels, picked by (K, N) - see ``flydsl_kernels.py``:
+
+  * register: K in ``_REGISTER_KS``, N pow2 in ``_REGISTER_N_BOUNDS``. Keys
+    are ``(ord << 32) | ~idx``, so ties come out ``(value desc, idx asc)``.
+    Reproducible on its own, so ``_run`` picks it regardless of
+    ``torch.use_deterministic_algorithms``; only the gather invariant is
+    checked against aten, not the tie order.
+  * radix: (K, N) in a row of ``_RADIX_GATE_RANGES``, K padded up to a
+    power of 2 for the bitonic network. Deterministic mode gathers in
+    input order and matches aten on values and indices; otherwise indices
+    on threshold ties vary across runs.
+
+``_cond`` also requires fp32 on ``_SUPPORTED_ARCHES``, largest+sorted, a
+contiguous last-axis reduction, one CU-wave of rows, and ``M * N *
+itemsize`` inside the 32-bit span an AMD buffer descriptor addresses. The
+N bounds are closed intervals - both kernels lose to aten again at large
+N; anything outside falls through.
+
+``self`` is read through ``ConstTensorWrapper`` so a COW input dispatches
+without materialising; ``out=`` is written, so ``_out_cond`` declines COW.
 """
 
 from __future__ import annotations
@@ -24,26 +41,20 @@ _RUNTIME_AVAILABLE: bool = fu.runtime_available()
 _SUPPORTED_ARCHES = ("gfx950",)
 _REGISTER_KS: frozenset[int] = frozenset({2, 4, 8, 16})
 
-# Per-K register ranges tuned on MI355.
-_REGISTER_N_RANGE: tuple[int, int] = (1024, 8192)
+# One (min, max) N range shared by every K in _REGISTER_KS, tuned on MI355.
+_REGISTER_N_BOUNDS: tuple[int, int] = (1024, 8192)
 
-# Per-K radix ranges tuned on MI355.
+# Per-K-range (min, max) N ranges tuned on MI355.
 _RADIX_GATE_RANGES = (
     ((64, 256), (8192, 32768)),
     ((257, 383), (16384, 32768)),
     ((384, 831), (32768, 131072)),
     ((832, 1024), (32768, 262144)),
 )
-_TOPK_KERNELS = None
 
 
 def _is_pow2(x: int) -> bool:
     return x > 0 and (x & (x - 1)) == 0
-
-
-def _register_wins(k: int, n: int) -> bool:
-    n_min, n_max = _REGISTER_N_RANGE
-    return n_min <= n <= n_max
 
 
 def _radix_n_range(k: int) -> tuple[int, int] | None:
@@ -53,18 +64,12 @@ def _radix_n_range(k: int) -> tuple[int, int] | None:
     return None
 
 
-def _radix_wins(k: int, n: int) -> bool:
-    n_range = _radix_n_range(k)
-    if n_range is None:
-        return False
-    n_min, n_max = n_range
-    return n_min <= n <= n_max
-
-
 def _kernel_for(k: int, n: int) -> str | None:
-    if (k in _REGISTER_KS) and _is_pow2(n) and _register_wins(k, n):
+    register_min, register_max = _REGISTER_N_BOUNDS
+    if k in _REGISTER_KS and _is_pow2(n) and register_min <= n <= register_max:
         return "register"
-    if _radix_wins(k, n):
+    radix_range = _radix_n_range(k)
+    if radix_range is not None and radix_range[0] <= n <= radix_range[1]:
         return "radix"
     return None
 
@@ -117,25 +122,6 @@ def _eligible(
     return _kernel_for(k, N) is not None
 
 
-def _get_topk_kernels():
-    global _TOPK_KERNELS
-    if _TOPK_KERNELS is None:
-        from .flydsl_kernels import (
-            RadixSelectTopK,
-            RadixSelectTopKOut,
-            RegisterTopK,
-            RegisterTopKOut,
-        )
-
-        _TOPK_KERNELS = (
-            RadixSelectTopK,
-            RadixSelectTopKOut,
-            RegisterTopK,
-            RegisterTopKOut,
-        )
-    return _TOPK_KERNELS
-
-
 def _cond(
     self: torch.Tensor,
     k: int,
@@ -173,15 +159,15 @@ def _out_cond(
 
 
 def _run(self: torch.Tensor, k: int) -> tuple[torch.Tensor, torch.Tensor]:
-    RadixSelectTopK, _, RegisterTopK, _ = _get_topk_kernels()
+    from .flydsl_kernels import topk_radix, topk_register
 
     self_2d = flatten_last_dim(self)
     kernel = _kernel_for(k, self_2d.shape[-1])
     if kernel == "register":
-        values_2d, indices_2d = RegisterTopK(self_2d, k)
+        values_2d, indices_2d = topk_register(self_2d, k)
         return unflatten_last_dim(values_2d, indices_2d, self, k)
     deterministic = torch.are_deterministic_algorithms_enabled()
-    values_2d, indices_2d = RadixSelectTopK(self_2d, k, deterministic=deterministic)
+    values_2d, indices_2d = topk_radix(self_2d, k, deterministic=deterministic)
     return unflatten_last_dim(values_2d, indices_2d, self, k)
 
 
@@ -196,7 +182,7 @@ def _flatten_topk_out(out: torch.Tensor, k: int) -> torch.Tensor:
 def _run_out(
     self: torch.Tensor, k: int, values: torch.Tensor, indices: torch.Tensor
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    _, RadixSelectTopKOut, _, RegisterTopKOut = _get_topk_kernels()
+    from .flydsl_kernels import topk_radix_out, topk_register_out
 
     if (
         not values.is_contiguous()
@@ -214,12 +200,10 @@ def _run_out(
     indices_2d = _flatten_topk_out(indices, k)
     kernel = _kernel_for(k, self_2d.shape[-1])
     if kernel == "register":
-        RegisterTopKOut(self_2d, k, values_2d, indices_2d)
+        topk_register_out(self_2d, k, values_2d, indices_2d)
     else:
         deterministic = torch.are_deterministic_algorithms_enabled()
-        RadixSelectTopKOut(
-            self_2d, k, values_2d, indices_2d, deterministic=deterministic
-        )
+        topk_radix_out(self_2d, k, values_2d, indices_2d, deterministic=deterministic)
     return values, indices
 
 
