@@ -358,9 +358,11 @@ def check_multiple_devices_or_any_cpu_nodes(
 
         return format_default_skip_message(msg)
 
+    accelerator = torch.accelerator.current_accelerator()
     if (
         len(device_node_mapping) == 1
-        and next(iter(device_node_mapping.keys())).type == "cuda"
+        and accelerator is not None
+        and next(iter(device_node_mapping.keys())).type == accelerator.type
     ):
         return None
 
@@ -648,7 +650,7 @@ def collect_cuda_data_ptrs(obj: object) -> OrderedSet[int]:
     """Debug helper that collects the data pointers of all CUDA tensors in the object."""
     if not isinstance(obj, torch.Tensor):
         return OrderedSet()
-
+    
     ptrs: OrderedSet[int] = OrderedSet()
     for base in get_plain_tensors(obj, out=[]):
         if type(base) is not torch.Tensor:
