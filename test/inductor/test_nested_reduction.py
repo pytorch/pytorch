@@ -6,7 +6,7 @@ import re
 
 import torch
 import torch._inductor.config as inductor_config
-from torch._inductor import metrics
+from torch._inductor import inductor_prims, metrics
 from torch._inductor.choices import InductorChoices
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_inductor_cache, run_and_get_code
@@ -179,6 +179,30 @@ class _NestedReductionBase:
 
     def test_layernorm_weighted_sum_B1(self):
         self._weighted_norm_reduce_k(_layernorm, "sum", 1, 16, 1024)
+
+    def test_padded_scatter_epilogue(self):
+        rows, cols, group = 101, 3, 32
+
+        def f(x):
+            normalized = _layernorm(x)
+            block_amax = normalized.reshape(rows, cols, group).abs().amax(dim=-1)
+            scales = (block_amax > 0).to(torch.uint8) * 17
+            padded = inductor_prims.padded_blockwise_scatter(
+                scales,
+                256,
+                4,
+                96,
+                128,
+                32,
+                4,
+                2,
+                127,
+            )
+            return normalized, padded
+
+        x = torch.randn(rows, cols * group, device=GPU_TYPE)
+        self.check_numeric(f, (x,), tol=0)
+        self.check_fusion()
 
     def test_fullres_prologue_small_dim_in_x_loop_order(self):
         """Remap full-res prologue from physical [B*K, D] to logical [B, K, D]."""
@@ -1509,6 +1533,38 @@ class NestedReductionInternalsPersistentTest(_InternalsBase, TestCase):
 class NestedReductionInternalsNonPersistentTest(_InternalsBase, TestCase):
     __unittest_skip__ = not HAS_GPU
     force_persistent_outer_reduction = False
+
+
+class NestedReductionAOTITest(TestCase):
+    __unittest_skip__ = not HAS_GPU
+
+    def test_rmsnorm_block_amax(self):
+        B, D, G = 8, 1024, 32
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                normalized = _rmsnorm(x)
+                block_amax = normalized.reshape(B, D // G, G).abs().amax(dim=-1)
+                return normalized, block_amax
+
+        model = Model()
+        x = torch.randn(B, D, device=GPU_TYPE)
+        expected = model(x)
+        metrics.reset()
+        with fresh_inductor_cache():
+            exported = torch.export.export(model, (x,))
+            package_path = torch._inductor.aoti_compile_and_package(
+                exported,
+                inductor_configs={
+                    "loop_ordering_after_fusion": True,
+                    "triton.nested_reduction": True,
+                },
+            )
+            compiled = torch._inductor.aoti_load_package(package_path)
+            actual = compiled(x)
+
+        self.assertEqual(actual, expected, atol=1e-2, rtol=1e-2)
+        self.assertEqual(metrics.codegen_nested_reduction, 1)
 
 
 if __name__ == "__main__":

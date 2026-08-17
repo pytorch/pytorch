@@ -2035,6 +2035,16 @@ class _PointwiseRemapHandler(WrapperHandler):  # type: ignore[type-arg]
             value = self._load_transform.apply(value)
         return value
 
+    def index_expr(self, expr: sympy.Expr, dtype: torch.dtype) -> CSEVariable:
+        remapped_expr = self._family.remap_index(expr)
+        with self._family.ensure_active(self._kernel):
+            return self._inner.index_expr(remapped_expr, dtype)
+
+    def value_expr(self, expr: sympy.Expr, dtype: torch.dtype) -> CSEVariable:
+        remapped_expr = self._family.remap_index(expr)
+        with self._family.ensure_active(self._kernel):
+            return self._inner.value_expr(remapped_expr, dtype)
+
     def store(
         self,
         name: str,

@@ -1293,6 +1293,57 @@ class Scatter(Pointwise):
         )
 
 
+@ir_dataclass
+class PaddedScatter(Scatter):
+    padding_output_indexers: Sequence[Callable[[Sequence[Expr]], Expr]] = ()
+    padding_masks: Sequence[Callable[[Sequence[Expr]], Expr]] = ()
+    padding_value: bool | float | int = 0
+
+    def constant_to_device(self, device: torch.device) -> IRNode:
+        loader = self.make_loader()
+        loader = patch.object(ConstantBuffer, "override_device", device)(loader)
+        return PaddedScatter(
+            device=device,
+            dtype=self.dtype,
+            inner_fn=loader,
+            ranges=self.ranges,
+            output_indexer=self.output_indexer,
+            scatter_mode=self.scatter_mode,
+            padding_output_indexers=self.padding_output_indexers,
+            padding_masks=self.padding_masks,
+            padding_value=self.padding_value,
+        )
+
+    def store_output(
+        self,
+        output_name: str | None,
+        indexer: Callable[[Sequence[Expr]], Never],
+        vars: Sequence[Expr],
+    ) -> Any:
+        super().store_output(output_name, indexer, vars)
+        if output_name is None:
+            output_name = "unnamed"
+        value = ops.constant(self.padding_value, self.dtype)
+        if len(self.padding_output_indexers) != len(self.padding_masks):
+            raise AssertionError("padding output indexers and masks must match")
+        for padding_output_indexer, padding_mask in zip(
+            self.padding_output_indexers,
+            self.padding_masks,
+        ):
+            store_index = indexer(padding_output_indexer(vars))
+            mask = ops.index_expr(padding_mask(vars), torch.bool)
+
+            def store_padding(
+                output_name: str = output_name,
+                store_index: Expr = store_index,
+                value: OpsValue = value,
+            ) -> OpsValue:
+                ops.store(output_name, store_index, value)
+                return value
+
+            ops.masked(mask, store_padding, self.padding_value)
+
+
 REDUCTION_COMBINE_FN: dict[str, Callable[..., OpsValue]] = {
     "any": ops_wrapper("logical_or"),
     "max": ops_wrapper("maximum"),
