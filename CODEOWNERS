@@ -38,11 +38,11 @@
 /test/ao/ @jerryzh168
 /test/quantization/ @jerryzh168
 /torch/quantization/ @jerryzh168
-ao/quantization/ @jerryzh168
-nn/intrinsic/ @jerryzh168
-nn/quantized/ @jerryzh168
-nn/quantizable/ @jerryzh168
-nn/qat/ @jerryzh168
+/torch/ao/quantization/ @jerryzh168
+/torch/nn/intrinsic/ @jerryzh168
+/torch/nn/quantized/ @jerryzh168
+/torch/nn/quantizable/ @jerryzh168
+/torch/nn/qat/ @jerryzh168
 
 # Tensorpipe RPC Agent.
 /torch/csrc/distributed/rpc/tensorpipe_agent.cpp @jiayisuse @lw
@@ -176,10 +176,6 @@ aten/src/ATen/hip/ @jeffdaily @jithunnair-amd
 aten/src/ATen/miopen/ @jeffdaily @jithunnair-amd
 aten/src/ATen/native/miopen/ @jeffdaily @jithunnair-amd
 c10/hip @jeffdaily @jithunnair-amd
-caffe2/core/hip @jeffdaily @jithunnair-amd
-caffe2/operators/hip @jeffdaily @jithunnair-amd
-caffe2/operators/rnn/hip @jeffdaily @jithunnair-amd
-caffe2/utils/hip @jeffdaily @jithunnair-amd
 
 # XPU-specific files
 /aten/src/ATen/xpu/ @EikanWang @gujinghui
@@ -190,7 +186,7 @@ caffe2/utils/hip @jeffdaily @jithunnair-amd
 /test/xpu/ @EikanWang @gujinghui
 /test/test_xpu.py @EikanWang @gujinghui
 /third_party/xpu.txt @EikanWang @gujinghui
-/docs/source/notes/get_start_xpu.rst @EikanWang @gujinghui
+/docs/source/notes/get_start_xpu.md @EikanWang @gujinghui
 
 # torch.export
 /torch/export/ @avikchaudhuri @tugsbayasgalan @zhxchen17 @ydwu4 @angelayi
@@ -228,7 +224,6 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 # PyTree utilities
 /torch/utils/_pytree.py @XuehaiPan
 /torch/utils/_cxx_pytree.py @XuehaiPan
-/torch/utils/pytree/ @XuehaiPan
 /torch/_dynamo/polyfills/pytree.py @XuehaiPan
 
 # Relating to libtorch ABI
@@ -250,8 +245,7 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 /aten/src/ATen/native/cuda/ScaledBlas.cpp @drisspg @slayton58
 /aten/src/ATen/cuda/CUDABlas.cpp @drisspg @slayton58
 /aten/src/ATen/cuda/CUDABlas.h @drisspg @slayton58
-/aten/src/ATen/cuda/CUDAScaledBlas.cpp @drisspg @slayton58
-/aten/src/ATen/cuda/CUDAScaledBlas.h @drisspg @slayton58
+/aten/src/ATen/native/ScaledBlas* @drisspg @slayton58
 /test/test_scaled_matmul_cuda.py @drisspg @slayton58
 
 # Sparse Tensors
