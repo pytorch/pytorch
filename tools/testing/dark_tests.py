@@ -20,7 +20,6 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TEST_ROOT = REPO_ROOT / "test"
-KNOWN_DARK = REPO_ROOT / "tools" / "testing" / "known_dark_tests.json"
 
 sys.path.insert(0, str(REPO_ROOT))
 
@@ -32,28 +31,24 @@ ENUMERATION_JOBS = ["linux-cuda-sm100/default", "linux-cpu/default"]
 # span the periodic h100/b200 schedules and to absorb sharding and flakiness.
 DEFAULT_DAYS = 7
 
-# Narrow to trunk jobs before touching test_run_s3: a week of every test run in
-# PyTorch CI is far too much to scan and then filter.
+# Shaped after test-infra's testStats3d: bound test_run_s3 by time first, then join
+# up to the job, rather than collecting job ids and filtering a week of every test
+# run in PyTorch CI afterwards.
+#
+# trunk/<sha> refs are included alongside main because upload_test_stats.py's
+# should_upload_full_test_run accepts both, so restricting to main alone would
+# discard part of the observed set and make live tests look dark.
 RAN_QUERY = """
-WITH runs AS (
-    SELECT id
-    FROM default.workflow_run w FINAL
-    WHERE w.head_branch = 'main'
-      AND w.repository.'full_name' = 'pytorch/pytorch'
-      AND w.created_at > now() - INTERVAL {days: Int32} DAY
-), jobs AS (
-    SELECT id
-    FROM default.workflow_job j FINAL
-    WHERE j.run_id IN (SELECT id FROM runs)
-)
 SELECT DISTINCT
-    test_run.classname AS classname,
-    test_run.name AS name
-FROM default.test_run_s3 test_run
-WHERE test_run.job_id IN (SELECT id FROM jobs)
-  AND test_run.classname != ''
-  AND empty(test_run.skipped)
-  AND test_run.time_inserted > now() - INTERVAL {days: Int32} DAY
+    t.classname AS classname,
+    t.name AS name
+FROM default.test_run_s3 t
+INNER JOIN default.workflow_job j FINAL ON t.job_id = j.id
+INNER JOIN default.workflow_run w FINAL ON j.run_id = w.id
+WHERE t.time_inserted > now() - INTERVAL {days: Int32} DAY
+  AND t.classname != ''
+  AND empty(t.skipped)
+  AND (w.head_branch = 'main' OR match(w.head_branch, '^trunk/[0-9a-fA-F]{40}$'))
 """
 
 
@@ -88,10 +83,19 @@ def ran(days: int) -> set[str]:
     return {f"{r['classname']}::{r['name']}" for r in rows}
 
 
-def load_known_dark() -> dict[str, str]:
-    if not KNOWN_DARK.is_file():
-        return {}
-    return json.loads(KNOWN_DARK.read_text(encoding="utf-8"))
+def unscheduled(files: list[str]) -> set[str]:
+    """Files no run_test.py config can select, derived rather than declared.
+
+    discover_tests.py already decides this, so reading it keeps the answer current;
+    a checked-in list of the same files would drift the moment that one changed.
+    Files whose tests run under an aggregator (fx/ via test_fx.py, and so on) are
+    not in TESTS but their tests still appear in the observed set, so they resolve
+    through the join and are deliberately not treated as unscheduled here.
+    """
+    from tools.testing.discover_tests import TESTS
+
+    known = set(TESTS)
+    return {f for f in files if f[len("test/") : -len(".py")] not in known}
 
 
 def disabled() -> set[str]:
@@ -114,7 +118,16 @@ def disabled() -> set[str]:
 
 def test_files(paths: list[str]) -> list[str]:
     if paths:
-        return sorted({str(Path(p).resolve().relative_to(REPO_ROOT)) for p in paths})
+        out = set()
+        for p in paths:
+            try:
+                rel = str(Path(p).resolve().relative_to(REPO_ROOT))
+            except ValueError:
+                raise SystemExit(f"dark_tests: {p} is outside {REPO_ROOT}") from None
+            if not (rel.startswith("test/") and rel.endswith(".py")):
+                raise SystemExit(f"dark_tests: {p} is not a test/**/*.py file")
+            out.add(rel)
+        return sorted(out)
     return sorted(
         str(p.relative_to(REPO_ROOT))
         for p in TEST_ROOT.rglob("test_*.py")
@@ -147,18 +160,19 @@ def main() -> int:
         # An empty set would make every test look dark.
         raise SystemExit("dark_tests: no observed test runs; refusing to report")
 
-    known = load_known_dark()
     off = disabled()
+    no_config = unscheduled(files)
     defined, unreadable = existing(files)
 
     report: dict[str, list[str]] = {}
     for rel, tests in defined.items():
-        gap = sorted(t for t in tests - observed if t not in off and rel not in known)
+        gap = sorted(t for t in tests - observed if t not in off)
         if gap:
             report[rel] = gap
 
     payload = {
-        "dark": report,
+        "dark": {k: v for k, v in report.items() if k not in no_config},
+        "unscheduled": {k: v for k, v in report.items() if k in no_config},
         "unreadable": unreadable,
         "files_scanned": len(files),
     }
@@ -171,18 +185,23 @@ def main() -> int:
         print()
         return 0
 
-    total = sum(len(v) for v in report.values())
-    for rel in sorted(report):
-        print(f"\n{rel}: {len(report[rel])} test(s) never observed running")
-        for t in report[rel][:20]:
-            print(f"    {t}")
-        if len(report[rel]) > 20:
-            print(f"    ... {len(report[rel]) - 20} more")
+    dark, no_cfg = payload["dark"], payload["unscheduled"]
+    for section, title in (
+        (dark, "never observed running"),
+        (no_cfg, "no CI config selects this file"),
+    ):
+        for rel in sorted(section):
+            print(f"\n{rel}: {len(section[rel])} test(s), {title}")
+            for name in section[rel][:20]:
+                print(f"    {name}")
+            if len(section[rel]) > 20:
+                print(f"    ... {len(section[rel]) - 20} more")
     for rel in sorted(unreadable):
         print(f"\n{rel}: NOT MEASURED -- {unreadable[rel]}")
     print(
-        f"\n{total} dark test(s) across {len(report)} of {len(files)} file(s); "
-        f"{len(unreadable)} file(s) could not be enumerated"
+        f"\n{sum(len(v) for v in dark.values())} dark test(s) across {len(dark)} file(s); "
+        f"{sum(len(v) for v in no_cfg.values())} in {len(no_cfg)} unscheduled file(s); "
+        f"{len(unreadable)} file(s) could not be enumerated; {len(files)} scanned"
     )
     return 0
 

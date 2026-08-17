@@ -37,14 +37,17 @@ on:
     secrets:
       CLICKHOUSE_ENDPOINT:
         required: true
-      CLICKHOUSE_USERNAME:
+      CLICKHOUSE_READONLY_USERNAME:
         required: true
-      CLICKHOUSE_PASSWORD:
+      CLICKHOUSE_READONLY_PASSWORD:
         required: true
 
 jobs:
   dark-tests:
     if: github.repository_owner == 'pytorch'
+    # The ClickHouse credentials are scoped to this environment; without it the
+    # secrets resolve to empty strings and the query fails to authenticate.
+    environment: rockset-read-only
     runs-on: ${{ inputs.runner_prefix }}${{ inputs.runner }}
     container:
       image: ${{ inputs.docker-image }}
@@ -82,8 +85,8 @@ jobs:
         shell: bash
         env:
           CLICKHOUSE_ENDPOINT: ${{ secrets.CLICKHOUSE_ENDPOINT }}
-          CLICKHOUSE_USERNAME: ${{ secrets.CLICKHOUSE_USERNAME }}
-          CLICKHOUSE_PASSWORD: ${{ secrets.CLICKHOUSE_PASSWORD }}
+          CLICKHOUSE_USERNAME: ${{ secrets.CLICKHOUSE_READONLY_USERNAME }}
+          CLICKHOUSE_PASSWORD: ${{ secrets.CLICKHOUSE_READONLY_PASSWORD }}
           TESTINTRO_CACHE: ${{ runner.temp }}/testintro-cache
         run: |
           set -ex
