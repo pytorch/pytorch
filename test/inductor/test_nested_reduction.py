@@ -141,6 +141,24 @@ def _rmsnorm_mxfp8_scale_swizzle(x, weight, G):
 class _NestedReductionBase:
     """Tests for fusing dependent cross-axis reductions into a single kernel."""
 
+    def test_native_matmul_output_reduction(self):
+        def f(x, w1, bias1, w2, bias2):
+            hidden = torch.relu(x @ w1 + bias1)
+            return (hidden * w2).sum(dim=-1) + bias2
+
+        m, k, n = 256, 128, 16
+        dtype = torch.float16
+        args = (
+            torch.randn(m, k, device=GPU_TYPE, dtype=dtype),
+            torch.randn(k, n, device=GPU_TYPE, dtype=dtype),
+            torch.randn(n, device=GPU_TYPE, dtype=dtype),
+            torch.randn(n, device=GPU_TYPE, dtype=dtype),
+            torch.randn(1, device=GPU_TYPE, dtype=dtype),
+        )
+        with inductor_config.patch("triton.native_matmul", True):
+            self.check_nested_matches_unnested(f, args, tol=5e-2)
+        self.check_fusion()
+
     # ---- Small dim in X: norm + weighted reduce ----
 
     def _weighted_norm_reduce_k(self, norm, reduce_fn, B, K, D):

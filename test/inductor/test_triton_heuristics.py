@@ -184,6 +184,23 @@ class TestTritonHeuristics(TestCase):
         self.assertEqual(cfg.kwargs["XBLOCK"], 512)
         self.assertEqual(cfg.kwargs["R0_BLOCK"], 128)
 
+    def test_reduction_min_xblock_with_yblock(self):
+        cfg = _enforce_reduction_config_block_minimums(
+            [triton.Config({"YBLOCK": 32, "XBLOCK": 8, "R0_BLOCK": 1024})],
+            {"x": 256, "y": 256, "r0_": 4096},
+            {"min_xblock": 16},
+        )[0]
+        self.assertEqual(cfg.kwargs["YBLOCK"], 32)
+        self.assertEqual(cfg.kwargs["XBLOCK"], 16)
+        self.assertEqual(cfg.kwargs["R0_BLOCK"], 512)
+
+        with self.assertRaisesRegex(AssertionError, "do not support this config"):
+            _enforce_reduction_config_block_minimums(
+                [triton.Config({"YBLOCK": 32, "XBLOCK": 8, "R0_BLOCK": 1024})],
+                {"x": 256, "y": 256, "r0_": 4096},
+                {"min_rblock": 16},
+            )
+
     def test_cached_autotune_enforces_reduction_min_block(self):
         def triton_fn(XBLOCK: tl.constexpr, R0_BLOCK: tl.constexpr):
             pass
