@@ -110,6 +110,11 @@ from torch.testing._internal.optests import (
 )
 from torch.testing._internal.subclasses import WrapperSubclass
 from torch.testing._internal.two_tensor import TwoTensor, TwoTensorMode
+
+
+skipIfCppFakeTensor = unittest.skipIf(
+    torch._dynamo.config.use_cpp_fake_tensor, "no nestedtensor w/ cpp faketensor"
+)
 from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
     TorchDispatchMode,
@@ -4921,6 +4926,7 @@ def forward(self, tangents_1):
             except torch._dynamo.exc.BackendCompilerFailed as e:
                 raise e.inner_exception from e
 
+    @skipIfCppFakeTensor
     def test_mark_activations_dynamic_with_nested(self):
         # The flattened tensors of the nested tensor aren't
         # marked as activations, but they add some offset
@@ -11190,6 +11196,7 @@ class TestAOTModuleSimplified(AOTTestCase):
             self.assertEqual(ctx.d[torch.channels_last], 4)
             self.assertEqual(ctx.d[torch.contiguous_format], 0)
 
+    @skipIfCppFakeTensor
     def test_grads_no_force_contiguous_nested_tensor_tangent(self):
         # NestedTensor setattr could fails with AttributeError for attr "_min_seqlen_tensor"
         # Adding test to verify that it is handled.

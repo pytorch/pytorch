@@ -17,7 +17,7 @@ import torch._prims as prims
 import torch.utils._pytree as pytree
 from torch._prims.context import TorchRefsMode
 from torch._prims_common.wrappers import _maybe_remove_out_wrapper
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, is_fake_tensor
 from torch._subclasses.fake_utils import outputs_alias_inputs
 from torch.testing import make_tensor
 from torch.testing._internal import composite_compliance, opinfo
@@ -557,14 +557,14 @@ class TestCommon(TestCase):
                 continue
 
             if isinstance(result, torch.Tensor):
-                self.assertTrue(isinstance(meta_result, FakeTensor))
+                self.assertTrue(is_fake_tensor(meta_result))
                 prims.utils.compare_tensor_meta(
                     result, meta_result, check_conj=op.op not in CHECK_CONJ_SKIPS
                 )
             elif isinstance(result, Sequence):
                 for a, b in zip(result, meta_result):
                     if isinstance(a, torch.Tensor) or isinstance(b, torch.Tensor):
-                        self.assertTrue(isinstance(b, FakeTensor))
+                        self.assertTrue(is_fake_tensor(b))
                         prims.utils.compare_tensor_meta(
                             a, b, check_conj=op.op not in CHECK_CONJ_SKIPS
                         )

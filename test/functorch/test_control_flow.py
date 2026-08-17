@@ -25,6 +25,7 @@ from torch._higher_order_ops.scan import _fake_scan, scan
 from torch._higher_order_ops.schema import HopSchemaGenerator
 from torch._higher_order_ops.switch import switch
 from torch._higher_order_ops.while_loop import while_loop
+from torch._subclasses.fake_tensor import maybe_get_fake_mode
 from torch._subclasses.functional_tensor import (
     CppFunctionalizeAPI,
     FunctionalTensor,
@@ -8147,7 +8148,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
                     val = node.meta.get("val")
                     if isinstance(val, tuple):
                         for v in val:
-                            yield v.fake_mode.shape_env
+                            yield maybe_get_fake_mode(v).shape_env
                     elif isinstance(val, torch.SymInt):
                         yield val.node.shape_env
                     else:
