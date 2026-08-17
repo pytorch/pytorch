@@ -30,11 +30,12 @@ from torch.testing._internal.common_dtype import (
 from torch.testing._internal.common_device_type import (
     onlyCPU, onlyCUDA, onlyNativeDeviceTypes, disablecuDNN,
     skipCUDAIfNoCusolver, skipCPUIfNoLapack, skipCPUIfNoFFT, skipCUDAIf, precisionOverride,
-    skipCPUIfNoMklSparse, toleranceOverride, tol, skipXPU, e4m3_type, E4M3_MAX_POS, E5M2_MAX_POS,
+    skipCPUIfNoMklSparse, toleranceOverride, tol, skipXPU, e4m3_type, e5m2_type, E4M3_MAX_POS, E5M2_MAX_POS,
     skipCUDAIfNoMagmaAndNoLinalgsolver,
 )
 from torch.testing._internal.common_cuda import (
-    PLATFORM_SUPPORTS_FLASH_ATTENTION, PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+    PLATFORM_SUPPORTS_FLASH_ATTENTION, PLATFORM_SUPPORTS_FP8,
+    PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     SM53OrLater, SM80OrLater, SM89OrLater, SM90OrLater, with_tf32_off, TEST_CUDNN,
     _get_torch_cuda_version,
 )
@@ -9355,28 +9356,28 @@ def sample_inputs_scaled_mm(op_info, device, dtype, requires_grad, **kwargs):
     # Case 1: Both matrices e4m3
     scale1 = random.random()
     scale2 = random.random()
-    mat1 = make_mat((M, K), scale1, torch.float8_e4m3fn)
-    mat2 = make_mat((K, N), scale2, torch.float8_e4m3fn).t().contiguous().t()
-    scale_tensor1 = make_scale(scale1, torch.float8_e4m3fn)
-    scale_tensor2 = make_scale(scale2, torch.float8_e4m3fn)
+    mat1 = make_mat((M, K), scale1, e4m3_type)
+    mat2 = make_mat((K, N), scale2, e4m3_type).t().contiguous().t()
+    scale_tensor1 = make_scale(scale1, e4m3_type)
+    scale_tensor2 = make_scale(scale2, e4m3_type)
     samples.append(SampleInput(mat1, mat2, scale_tensor1, scale_tensor2))
 
     # Case 2: mat1 e4m3, mat2 e5m2
     scale1 = random.random()
     scale2 = random.random()
-    mat1 = make_mat((M, K), scale1, torch.float8_e4m3fn)
-    mat2 = make_mat((K, N), scale2, torch.float8_e5m2).t().contiguous().t()
-    scale_tensor1 = make_scale(scale1, torch.float8_e4m3fn)
-    scale_tensor2 = make_scale(scale2, torch.float8_e5m2)
+    mat1 = make_mat((M, K), scale1, e4m3_type)
+    mat2 = make_mat((K, N), scale2, e5m2_type).t().contiguous().t()
+    scale_tensor1 = make_scale(scale1, e4m3_type)
+    scale_tensor2 = make_scale(scale2, e5m2_type)
     samples.append(SampleInput(mat1, mat2, scale_tensor1, scale_tensor2))
 
     # Case 3: mat1 e5m2, mat2 e4m3
     scale1 = random.random()
     scale2 = random.random()
-    mat1 = make_mat((M, K), scale1, torch.float8_e5m2)
-    mat2 = make_mat((K, N), scale2, torch.float8_e4m3fn).t().contiguous().t()
-    scale_tensor1 = make_scale(scale1, torch.float8_e5m2)
-    scale_tensor2 = make_scale(scale2, torch.float8_e4m3fn)
+    mat1 = make_mat((M, K), scale1, e5m2_type)
+    mat2 = make_mat((K, N), scale2, e4m3_type).t().contiguous().t()
+    scale_tensor1 = make_scale(scale1, e5m2_type)
+    scale_tensor2 = make_scale(scale2, e4m3_type)
     samples.append(SampleInput(mat1, mat2, scale_tensor1, scale_tensor2))
 
     # Case 4: MXFP4 (float4_e2m1fn_x2) with E8M0 blockwise scaling
@@ -9409,7 +9410,7 @@ def sample_inputs_scaled_mm(op_info, device, dtype, requires_grad, **kwargs):
 
 def sample_inputs_scaled_mm_v2(op_info, device, dtype, requires_grad, **kwargs):
     from torch.nn.functional import ScalingType, SwizzleType
-    make_mat_e4m3 = partial(make_tensor, device=device, dtype=torch.float8_e4m3fn, requires_grad=requires_grad)
+    make_mat_e4m3 = partial(make_tensor, device=device, dtype=e4m3_type, requires_grad=requires_grad)
 
     make_scale = partial(make_tensor, device=device, dtype=torch.float, requires_grad=False)
 
@@ -17102,11 +17103,11 @@ op_db: list[OpInfo] = [
         'torch._scaled_mm_v2',
         sample_inputs_func=sample_inputs_scaled_mm_v2,
         dtypes=float8_types(),
-        dtypesIfCUDA=empty_types() + (torch.float8_e4m3fn,),
+        dtypesIfCUDA=empty_types() + (e4m3_type,),
         supports_out=True,
         supports_forward_ad=False,
         supports_autograd=False,
-        decorators=[onlyCUDA, skipCUDAIf(not SM89OrLater or TEST_WITH_ROCM, 'Requires CUDA SM >= 8.9')],
+        decorators=[onlyCUDA, skipCUDAIf(not PLATFORM_SUPPORTS_FP8, 'Requires FP8 support (SM >= 8.9 or MI300+)')],
         skips=(
             # Sample inputs isn't really parametrized on dtype
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes'),
@@ -17132,11 +17133,11 @@ op_db: list[OpInfo] = [
         'torch._scaled_mm',
         sample_inputs_func=sample_inputs_scaled_mm,
         dtypes=float8_types(),
-        dtypesIfCUDA=empty_types() + (torch.float8_e4m3fn,),
+        dtypesIfCUDA=empty_types() + (e4m3_type,),
         supports_out=True,
         supports_forward_ad=False,
         supports_autograd=False,
-        decorators=[skipXPU, skipCUDAIf(not SM89OrLater or TEST_WITH_ROCM, 'Requires CUDA SM >= 8.9')],
+        decorators=[skipXPU, skipCUDAIf(not PLATFORM_SUPPORTS_FP8, 'Requires FP8 support (SM >= 8.9 or MI300+)')],
         skips=(
             # Sample inputs isn't really parametrized on dtype
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes'),
