@@ -48,30 +48,36 @@ const char* get_cuda_blocking_message() noexcept {
       c10::utils::get_env("AMD_SERIALIZE_KERNEL");
   static auto effective_flag = device_blocking_flag.value_or("0");
   static std::string rocm_message;
-  static const char* rocm_message_view = [&]() -> const char* {
+  static const char* rocm_suffix = [&]() -> const char* {
     if (effective_flag == "0") {
       return default_message;
     }
     if (effective_flag == "3") {
       return "";
     }
-    if (effective_flag == "1" || effective_flag == "2") {
-      return (
-          "\nSet AMD_SERIALIZE_KERNEL=3 to wait for completion before AND after kernel enqueue."
-          "\n1/2 Only waits before or after enqueue.");
-    }
-    // rocm_message is constructed only in rare cases. Guard the allocating
-    // path so an out-of-memory exception cannot escape the noexcept callers.
+    // Both remaining cases build a dynamic message. Guard the allocating path
+    // so an out-of-memory exception cannot escape the noexcept callers.
     try {
-      rocm_message = "\nUnsupported AMD_SERIALIZE_KERNEL value ";
-      rocm_message += effective_flag;
+      if (effective_flag == "1" || effective_flag == "2") {
+        rocm_message = "\nAMD_SERIALIZE_KERNEL=";
+        rocm_message += effective_flag;
+        rocm_message += " only serializes one side of each kernel launch.";
+      } else {
+        rocm_message = "\nUnsupported AMD_SERIALIZE_KERNEL value ";
+        rocm_message += effective_flag;
+        rocm_message += ".";
+      }
+      // default_message advises CUDA_LAUNCH_BLOCKING=1 in this source file;
+      // hipify rewrites that to AMD_SERIALIZE_KERNEL=3 in the generated HIP
+      // build, so appending it restates the async-misattribution caveat and
+      // gives the correct upgrade advice.
       rocm_message += default_message;
       return rocm_message.c_str();
     } catch (...) {
       return default_message;
     }
   }();
-  return rocm_message_view;
+  return rocm_suffix;
 #endif
 }
 
