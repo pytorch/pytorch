@@ -53,6 +53,9 @@ if TYPE_CHECKING:
     USER_INPUT_DTYPES: list[str | None] = []
     USER_INPUT_DEVICES: list[str | None] = []
     USER_INPUT_BOUNDS: list[dict[int, tuple[int | None, int | None]] | None] = []
+    # Device types the captured graph dispatches on. The drivers neutralize
+    # ambient autocast on these; see _autocast_off.
+    GRAPH_DEVICES: tuple[str, ...] = ()
 
     # Dynamo-tracer calling-convention metadata, emitted (only for tracer="dynamo") by
     # torch._precompile._build_dynamo_metadata_section ahead of the driver. BACKEND_ID is
@@ -60,6 +63,7 @@ if TYPE_CHECKING:
     # the trace produced no subgraph); IMPORT_SOURCES maps each import alias the bytecode
     # references to its module name; _DYNAMO_CODE is base64(marshal(transformed bytecode));
     # _DYNAMO_STATE is base64(pickle({used_globals, closure, argdefs, kwdefaults})).
+    BACKEND: str = ""
     BACKEND_ID: str | None = None
     IMPORT_SOURCES: dict[str, str] = {}
     # (frame arg index, path from that arg to the owning module, param name) per
@@ -147,6 +151,28 @@ def _check_structure(pb, names):
             )
 
 
+def _autocast_off(devices):
+    """Neutralize ambient autocast on the devices the captured graph uses.
+
+    Whatever the capture ran under is already baked into the artifact -- ATen
+    casts for make_fx, generated kernels for inductor -- but the graph still
+    re-dispatches (an inductor artifact calls extern_kernels, which hit the
+    autocast key), so a serving process with autocast on would cast a second
+    time. ``devices`` is GRAPH_DEVICES, recorded from the captured graph rather
+    than from the runtime tensors: a graph can reach a device none of its
+    inputs live on, and one built from factory ops has no input device at all.
+    """
+    import contextlib as _contextlib
+
+    import torch as _t
+
+    stack = _contextlib.ExitStack()
+    for _dev in devices:
+        if _t.amp.is_autocast_available(_dev):
+            stack.enter_context(_t.amp.autocast(_dev, enabled=False))
+    return stack
+
+
 def _eager_forward(*args):
     """Run the captured ATen graph eagerly. Pass the same args the traced fn took --
     the module(s) in the same positions plus the runtime inputs. The module(s) must
@@ -216,23 +242,7 @@ def _eager_forward(*args):
             )
     pb, _names = _extract_param_buffers(mods)
     _check_structure(pb, _names)
-    # The eager artifact is an ATen graph that re-dispatches, so ambient autocast
-    # in the serving process would rewrite its numerics -- and any cast the
-    # capture itself ran under is already baked into the graph. Reproduce the
-    # capture by neutralizing autocast on the devices this call actually uses.
-    import contextlib as _contextlib
-
-    with _contextlib.ExitStack() as _stack:
-        _stack.enter_context(_torch.no_grad())
-        for _dev in sorted(
-            {
-                _t.device.type
-                for _t in [*pb, *user_flat]
-                if isinstance(_t, _torch.Tensor)
-            }
-        ):
-            if _torch.amp.is_autocast_available(_dev):
-                _stack.enter_context(_torch.amp.autocast(_dev, enabled=False))
+    with _autocast_off(GRAPH_DEVICES), _torch.no_grad():
         out = list(call([*pb, *user_flat]))
     if GRAD_PARAM_INDICES:
         n = len(GRAD_PARAM_INDICES)
@@ -343,7 +353,11 @@ def _inductor_forward(*args):
     pb, _names = _extract_param_buffers(mods)
     _check_structure(pb, _names)
     try:
-        out = list(call([*pb, *user_flat]))
+        # The generated code re-dispatches through extern_kernels for anything
+        # inductor did not fuse, so ambient autocast reaches it even though the
+        # casts the capture ran under are already baked into the kernels.
+        with _autocast_off(GRAPH_DEVICES):
+            out = list(call([*pb, *user_flat]))
     except AssertionError as _e:
         # Only relabel inductor's own assert_size_stride failure (a stride/memory-format
         # mismatch, or a size mismatch on an unbacked dim the static check above cannot
@@ -513,6 +527,14 @@ def _build_dynamo_forward():
             # graph input, reconstructed from its source); ``call`` takes the flat list
             # (boxed). Bridge unboxed -> boxed here so the emitted subgraph is exactly the
             # shared inductor/eager ``call`` the make_fx path already emits.
+            #
+            # The eager subgraph pins the capture-time autocast state itself (its
+            # graph is torch-level, so it must REPRODUCE that state rather than
+            # merely disable). An inductor subgraph has the casts baked and only
+            # needs ambient autocast kept off its extern_kernels calls.
+            if BACKEND == "inductor":
+                with _autocast_off(GRAPH_DEVICES):
+                    return call(list(args))
             return call(list(args))
 
         f_globals[BACKEND_ID] = _compiled_subgraph

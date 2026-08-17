@@ -627,12 +627,19 @@ void initDynamoBindings(PyObject* torch) {
       "_reset_precompile_entries_for_region",
       &_reset_precompile_entries_for_region);
   m.def(
+      "_reset_precompile_entries_for_owner",
+      &_reset_precompile_entries_for_owner,
+      py::arg("code_obj"),
+      py::arg("isolate_recompiles_id"),
+      py::arg("owner"));
+  m.def(
       "_load_precompile_entry",
       &_load_precompile_entry,
       py::arg("code_obj"),
       py::arg("guard_manager"),
       py::arg("dynamo_code"),
-      py::arg("isolate_recompiles_id") = -1);
+      py::arg("isolate_recompiles_id") = -1,
+      py::arg("owner") = py::none());
   m.def("_debug_get_precompile_entries", &_debug_get_precompile_entries);
   m.def("_has_precompile_entries", &_has_precompile_entries);
   m.def("_enable_precompile_cache_keys", &enable_precompile_cache_keys);

@@ -16,7 +16,7 @@ import torch
 import torch.fx
 from torch._dynamo.convert_frame import GraphRuntimeEnv
 from torch._dynamo.graph_utils import _graph_device_type
-from torch._dynamo.package import SystemInfo
+from torch._dynamo.package import emits_native_code, SystemInfo
 
 from . import convert_frame
 from .aot_compile_types import (
@@ -58,7 +58,9 @@ class CompileArtifacts:
 
     @property
     def emits_native_code(self) -> bool:
-        return self.backend_name != "eager"
+        from torch._dynamo.package import emits_native_code
+
+        return emits_native_code(self.backend_name)
 
     def check_compatibility(self) -> None:
         # The CACHED info is the receiver, matching _DynamoCacheEntry: the skip
@@ -517,7 +519,7 @@ def aot_compile_fullgraph(
             # every capture; only an artifact that can hold CPU native code has
             # a baked vector width to record.
             system_info=SystemInfo.current(
-                cpu_codegen=(backend_name != "eager" and device_type == "cpu")
+                cpu_codegen=(emits_native_code(backend_name) and device_type == "cpu")
             ),
         )
         aot_compiled_fn = AOTCompiledFunction(
