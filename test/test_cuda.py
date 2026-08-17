@@ -3937,19 +3937,10 @@ exit(2)
         graph.replay()
         self.assertEqual(result, expected)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/144922")
-    @unittest.skipIf(
-        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
-    )
-    @serialTest()
-    @blas_library_context("cublas")
-    def test_graph_capture_cublas_workspace_cross_thread(self):
-        if torch.cuda.get_device_capability()[0] != 9:
-            self.skipTest("The regression requires an SM90 split-K cuBLAS kernel")
-
+    def _capture_cublas_workspace_cross_thread(
+        self, x, weight, *, rtol, atol, check_allocation
+    ):
         torch._C._cuda_clearCublasWorkspaces()
-        x = torch.randn(32, 10944, device="cuda", dtype=torch.bfloat16)
-        weight = torch.randn(2048, 10944, device="cuda", dtype=torch.bfloat16)
         expected = torch.nn.functional.linear(x, weight)
         output = torch.empty_like(expected)
         torch.cuda.synchronize()
@@ -3983,6 +3974,9 @@ exit(2)
         self.assertTrue(ready.wait(timeout=30))
         if "error" in state:
             raise state["error"]
+        torch.cuda.synchronize()
+        active_before = torch.cuda.memory_stats()["active_bytes.all.current"]
+        allocated_before = torch.cuda.memory_stats()["active_bytes.all.allocated"]
 
         graph = torch.cuda.CUDAGraph()
         try:
@@ -3998,10 +3992,49 @@ exit(2)
         if "error" in state:
             raise state["error"]
 
+        stats = torch.cuda.memory_stats()
+        self.assertEqual(stats["active_bytes.all.current"], active_before)
+        if check_allocation and not TEST_CUDAMALLOCASYNC:
+            self.assertGreaterEqual(
+                stats["active_bytes.all.allocated"] - allocated_before,
+                torch.backends.cuda.cublas_workspace_size(),
+            )
+
         torch.cuda.empty_cache()
         graph.replay()
         torch.cuda.synchronize()
-        self.assertEqual(output, expected, rtol=1e-2, atol=2e-1)
+        self.assertEqual(output, expected, rtol=rtol, atol=atol)
+
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/144922")
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @serialTest()
+    @blas_library_context("cublas")
+    def test_graph_capture_cublas_workspace_cross_thread(self):
+        x = torch.randn(128, 128, device="cuda")
+        weight = torch.randn(128, 128, device="cuda")
+        self._capture_cublas_workspace_cross_thread(
+            x, weight, rtol=1.3e-6, atol=1e-5, check_allocation=True
+        )
+
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/144922")
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @serialTest()
+    @blas_library_context("cublas")
+    def test_graph_capture_cublas_workspace_cross_thread_sm90(self):
+        if torch.cuda.get_device_capability()[0] != 9:
+            self.skipTest("The regression requires an SM90 split-K cuBLAS kernel")
+
+        # This shape selects the workspace-consuming split-K kernel from the
+        # original SM90 regression.
+        x = torch.randn(32, 10944, device="cuda", dtype=torch.bfloat16)
+        weight = torch.randn(2048, 10944, device="cuda", dtype=torch.bfloat16)
+        self._capture_cublas_workspace_cross_thread(
+            x, weight, rtol=1e-2, atol=2e-1, check_allocation=False
+        )
 
     @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/144922")
     @unittest.skipIf(

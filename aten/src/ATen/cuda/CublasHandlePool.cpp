@@ -315,6 +315,30 @@ at::DataPtr getNewCUDABlasLtWorkspace() {
 
 namespace {
 
+struct CUDABlasWorkspaceContext {
+  cublasHandle_t handle;
+  at::DataPtr workspace;
+};
+
+void deleteCUDABlasWorkspaceContext(void* ptr) {
+  std::unique_ptr<CUDABlasWorkspaceContext> context(
+      static_cast<CUDABlasWorkspaceContext*>(ptr));
+  auto status = cublasSetWorkspace(context->handle, nullptr, 0);
+  if (status != CUBLAS_STATUS_SUCCESS) {
+    TORCH_WARN_ONCE(
+        "Failed to clear cuBLAS workspace: ",
+        at::cuda::blas::_cublasGetErrorEnum(status));
+  }
+}
+
+at::DataPtr getNewWorkspaceForHandle(cublasHandle_t handle) {
+  auto workspace = getNewWorkspace();
+  void* data = workspace.get();
+  auto device = workspace.device();
+  auto* context = new CUDABlasWorkspaceContext{handle, std::move(workspace)};
+  return {data, context, deleteCUDABlasWorkspaceContext, device};
+}
+
 template <typename Handle>
 auto workspaceKey(Handle handle, c10::cuda::CUDAStream stream) {
   cudaStream_t cuda_stream = stream;
@@ -324,6 +348,8 @@ auto workspaceKey(Handle handle, c10::cuda::CUDAStream stream) {
 }
 
 bool isCapturing(c10::cuda::CUDAStream stream) {
+  // The lock-free gate tracks single-device captures initiated through
+  // at::cuda::CUDAGraph. Raw CUDA stream captures are outside this path.
   return c10::cuda::CUDACachingAllocator::hasActiveCapture(
              stream.device_index()) &&
       c10::cuda::isStreamCapturingMayInitCtx(stream);
@@ -415,6 +441,8 @@ void* getCUDABlasLtWorkspace() {
 void* getCUDABlasLtWorkspace(at::DataPtr& capture_workspace) {
   auto stream = c10::cuda::getCurrentCUDAStream();
   if (isCapturing(stream)) {
+    // A persistent entry may still be referenced by an older live graph, so
+    // keep it intact and use caller-owned storage for this invocation.
     capture_workspace = getNewCUDABlasLtWorkspace();
     return capture_workspace.mutable_get();
   }
@@ -428,7 +456,9 @@ void setupCUDABlasHandle(
   TORCH_CUDABLAS_CHECK(cublasSetStream(handle, stream));
 
   if (capture_workspace != nullptr && isCapturing(stream)) {
-    *capture_workspace = getNewWorkspace();
+    // A persistent entry may still be referenced by an older live graph, so
+    // keep it intact and use caller-owned storage for this invocation.
+    *capture_workspace = getNewWorkspaceForHandle(handle);
     TORCH_CUDABLAS_CHECK(cublasSetWorkspace(
         handle, capture_workspace->get(), getChosenWorkspaceSize()));
   } else {
@@ -502,17 +532,11 @@ cublasHandle_t getCurrentCUDABlasHandle(bool setup) {
   return handle;
 }
 
-CUDABlasHandle getCurrentCUDABlasHandleWithWorkspace() {
-  CUDABlasHandle result{
-      getCurrentCUDABlasHandle(/*setup=*/false), at::DataPtr{}};
-  setupCUDABlasHandle(result.handle, &result.workspace);
-  return result;
-}
-
-CUDABlasHandle::~CUDABlasHandle() {
-  if (workspace) {
-    (void)cublasSetWorkspace(handle, nullptr, 0);
-  }
+cublasHandle_t getCurrentCUDABlasHandle(at::DataPtr& capture_workspace) {
+  TORCH_INTERNAL_ASSERT(!capture_workspace);
+  auto handle = getCurrentCUDABlasHandle(/*setup=*/false);
+  setupCUDABlasHandle(handle, &capture_workspace);
+  return handle;
 }
 
 cublasLtHandle_t getCurrentCUDABlasLtHandle() {

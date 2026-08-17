@@ -84,29 +84,14 @@ TORCH_CUDA_CPP_API c10::Allocator* getCUDADeviceAllocator();
 /* Handles */
 TORCH_CUDA_CPP_API cusparseHandle_t getCurrentCUDASparseHandle();
 TORCH_CUDA_CPP_API cublasHandle_t getCurrentCUDABlasHandle(bool setup = true);
+// capture_workspace owns an invocation-scoped workspace when the current
+// stream is captured through at::cuda::CUDAGraph. Its deleter clears the
+// thread-local handle before releasing the allocation. The owner must outlive
+// all uses of the returned handle and must not overlap another setup call on
+// the same thread and device. It remains empty outside capture.
+TORCH_CUDA_CPP_API cublasHandle_t getCurrentCUDABlasHandle(
+    at::DataPtr& capture_workspace);
 TORCH_CUDA_CPP_API cublasLtHandle_t getCurrentCUDABlasLtHandle();
-
-struct TORCH_CUDA_CPP_API CUDABlasHandle {
-  cublasHandle_t handle;
-  at::DataPtr workspace;
-
-  CUDABlasHandle(cublasHandle_t handle, at::DataPtr workspace)
-      : handle(handle), workspace(std::move(workspace)) {}
-  CUDABlasHandle(CUDABlasHandle&&) noexcept = default;
-  CUDABlasHandle& operator=(CUDABlasHandle&&) = delete;
-  CUDABlasHandle(const CUDABlasHandle&) = delete;
-  CUDABlasHandle& operator=(const CUDABlasHandle&) = delete;
-  ~CUDABlasHandle();
-
-  operator cublasHandle_t() const& {
-    return handle;
-  }
-
-  operator cublasHandle_t() && = delete;
-};
-
-TORCH_CUDA_CPP_API CUDABlasHandle
-getCurrentCUDABlasHandleWithWorkspace();
 
 TORCH_CUDA_CPP_API void clearCublasWorkspaces();
 TORCH_CUDA_CPP_API void clearCublasWorkspacesForStream(cudaStream_t stream);

@@ -5396,6 +5396,10 @@ static BackendStaticInitializer backend_static_initializer;
 
 namespace {
 static_assert(std::atomic<int>::is_always_lock_free);
+// DeviceCachingAllocator::num_active_captures_ is mutex-protected and used by
+// the native allocator. This backend-independent mirror provides a lock-free
+// gate for queries outside the allocator. Relaxed ordering is sufficient
+// because the per-stream capture query is authoritative.
 std::array<std::atomic<int>, C10_COMPILE_TIME_MAX_GPUS> active_captures{};
 
 void assertValidCaptureDevice(c10::DeviceIndex device) {
@@ -5415,7 +5419,8 @@ void markCaptureBegin(c10::DeviceIndex device) {
 void markCaptureEnd(c10::DeviceIndex device) {
   assertValidCaptureDevice(device);
   get()->markCaptureEnd(device);
-  auto previous = active_captures[device].fetch_sub(1, std::memory_order_relaxed);
+  auto previous =
+      active_captures[device].fetch_sub(1, std::memory_order_relaxed);
   TORCH_INTERNAL_ASSERT(
       previous > 0, "markCaptureEnd called with no captures in progress");
 }
