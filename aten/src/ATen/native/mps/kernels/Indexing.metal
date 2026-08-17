@@ -562,39 +562,6 @@ kernel void index_select_dim_dense(
 REGISTER_INDEX_SELECT_DIM_DENSE_OP_ALL_SIZES(int);
 REGISTER_INDEX_SELECT_DIM_DENSE_OP_ALL_SIZES(long);
 
-template <typename StridesT, typename DataT>
-kernel void kernel_index_offsets(
-    constant StridesT* strides [[buffer(0)]],
-    device DataT* data_offsets [[buffer(1)]],
-    constant uint* iter_shape [[buffer(2)]],
-    constant uint& num_dimensions [[buffer(3)]],
-    uint thread_index [[thread_position_in_grid]]) {
-  data_offsets[thread_index] = 0;
-  uint32_t idx = thread_index;
-  for (uint32_t dim = 0; dim < num_dimensions; dim++) {
-    uint32_t remainder = idx % iter_shape[dim];
-    idx /= iter_shape[dim];
-
-    data_offsets[thread_index] += remainder * DataT(strides[dim]);
-  }
-}
-
-template [[host_name("kernel_index_offsets_32")]] kernel void
-kernel_index_offsets<packed_uint3, uint3>(
-    constant packed_uint3* strides [[buffer(0)]],
-    device uint3* data_offsets [[buffer(1)]],
-    constant uint* iter_shape [[buffer(2)]],
-    constant uint& num_dimensions [[buffer(3)]],
-    uint thread_index [[thread_position_in_grid]]);
-
-template [[host_name("kernel_index_offsets_64")]] kernel void
-kernel_index_offsets<packed_uint3, ulong3>(
-    constant packed_uint3* strides [[buffer(0)]],
-    device ulong3* data_offsets [[buffer(1)]],
-    constant uint* iter_shape [[buffer(2)]],
-    constant uint& num_dimensions [[buffer(3)]],
-    uint thread_index [[thread_position_in_grid]]);
-
 template <typename T>
 kernel void masked_fill_scalar_dense(
     device T* input,
