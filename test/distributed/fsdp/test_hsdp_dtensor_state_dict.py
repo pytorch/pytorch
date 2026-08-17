@@ -17,9 +17,7 @@ from torch.distributed.fsdp.api import (
 )
 from torch.distributed.tensor import DTensor, Replicate, Shard
 from torch.testing._internal.common_device_type import (
-    Capability,
     instantiate_device_type_tests,
-    requires_capabilities,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import get_devtype
@@ -85,11 +83,6 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorContinuousTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    @requires_capabilities(
-        Capability.distributed.backend,
-        Capability.distributed.dtensor,
-        Capability.distributed.fsdp1,
-    )
     def test_hsdp_init_with_device_mesh(self, device):
         device_id = device_type
         mesh_2d = init_device_mesh(self.device_type, (2, self.world_size // 2))
@@ -124,11 +117,6 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorContinuousTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    @requires_capabilities(
-        Capability.distributed.backend,
-        Capability.distributed.dtensor,
-        Capability.distributed.fsdp1,
-    )
     @parametrize("offload_to_cpu", [True, False])
     def test_dtensor_sharded_tensor_state_dict_identical(self, device, offload_to_cpu):
         device_id = device_type
@@ -199,11 +187,6 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorContinuousTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    @requires_capabilities(
-        Capability.distributed.backend,
-        Capability.distributed.dtensor,
-        Capability.distributed.fsdp1,
-    )
     @parametrize("offload_to_cpu", [True, False])
     def test_dtensor_sharded_optim_load_state_dict(self, device, offload_to_cpu):
         device_id = device_type
@@ -259,11 +242,6 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorContinuousTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    @requires_capabilities(
-        Capability.distributed.backend,
-        Capability.distributed.dtensor,
-        Capability.distributed.fsdp1,
-    )
     @parametrize("offload_to_cpu", [True, False])
     def test_dtensor_sharded_model_load_state_dict(self, device, offload_to_cpu):
         device_id = device_type
@@ -303,11 +281,6 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorContinuousTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    @requires_capabilities(
-        Capability.distributed.backend,
-        Capability.distributed.dtensor,
-        Capability.distributed.fsdp1,
-    )
     def test_root_module_is_not_FSDP(self, device):
         device_id = device_type
 
