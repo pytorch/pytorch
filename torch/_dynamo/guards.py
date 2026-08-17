@@ -4244,6 +4244,7 @@ class GuardsStatePickler(pickle.Pickler):
         attributes: dict[str, object] | None = None,
         guarded_globals: dict[str, object] | None = None,
         snapshot_globals: bool = False,
+        annotations: dict[str, object] | None = None,
     ) -> types.FunctionType:
         if snapshot_globals:
             # Deliberately no import_module here: the snapshot IS the scope, and
@@ -4266,6 +4267,8 @@ class GuardsStatePickler(pickle.Pickler):
         )
         fn.__qualname__ = qualname
         fn.__kwdefaults__ = kwdefaults
+        if annotations is not None:
+            fn.__annotations__ = annotations
         if attributes:
             fn.__dict__.update(attributes)
         return fn
@@ -4355,6 +4358,20 @@ class GuardsStatePickler(pickle.Pickler):
             if not kwdefaults and not keep_kwdefaults:
                 kwdefaults = None
 
+        annotations = obj.__annotations__
+        keep_annotations = self._keep(annotations)
+        annotations = {
+            name: (
+                value
+                if self._keep(value)
+                else _Missing("unguarded function annotation")
+            )
+            for name, value in annotations.items()
+            if keep_annotations or self._keep(value)
+        }
+        if not annotations and not keep_annotations:
+            annotations = None
+
         closure = obj.__closure__
         if closure is not None:
             closure = tuple(self._reduce_cell(cell) for cell in closure)
@@ -4376,6 +4393,7 @@ class GuardsStatePickler(pickle.Pickler):
             attributes,
             None,
             snapshot_globals,
+            annotations,
         )
         if not snapshot_globals:
             return type(self)._unpickle_nested_function, args
