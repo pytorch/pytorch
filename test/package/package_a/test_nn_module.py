@@ -1,4 +1,4 @@
-# Owner(s): ["module: package/deploy"]
+# Owner(s): ["oncall: package/deploy"]
 
 import torch
 
