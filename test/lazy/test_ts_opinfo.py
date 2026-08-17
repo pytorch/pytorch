@@ -27,10 +27,6 @@ from torch.testing._internal.jit_utils import JitTestCase
 torch._lazy.ts_backend.init()
 
 
-def get_test_device():
-    return "cuda" if "LTC_TS_CUDA" in os.environ else "cpu"
-
-
 def remove_suffixes(l):
     return [x.split(".")[0] for x in l]
 
@@ -337,7 +333,9 @@ class TestLazyOpInfoDevice(TestCase):
 instantiate_device_type_tests(TestLazyOpInfoDevice, globals(), only_for="cpu")
 
 
-class TestLazyDynamicOps(TestCase):
+class TestLazyDynamicOpsDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @classmethod
     def setUpClass(cls) -> None:
         # Setup the dynamic shape mode
@@ -350,11 +348,10 @@ class TestLazyDynamicOps(TestCase):
         torch._C._lazy._set_symbolic_shape_mode(cls.old_ssa_mode)
         return super().tearDownClass()
 
-    def test_nonzero_dynamic(self):
+    def test_nonzero_dynamic(self, device):
         # Test that nonzero gives upper bounds sizes when symbolic shape mode is enabled
-        test_device = get_test_device()
         x1 = torch.tensor(
-            [[0, 1.0, 2.0], [3.0, 0, 0]], device=test_device, requires_grad=True
+            [[0, 1.0, 2.0], [3.0, 0, 0]], device=device, requires_grad=True
         )
         x1_lazy = clone_move(x1)
         x2_lazy = torch.nonzero(x1_lazy)
@@ -366,16 +363,18 @@ class TestLazyDynamicOps(TestCase):
         x2_eager = x2_lazy.cpu()
         self.assertEqual(tuple(x2_eager.size()), (3, 2))
 
-    def test_adaptiveavgpool3d_dynamic(self):
+    def test_adaptiveavgpool3d_dynamic(self, device):
         # Test that adaptive_avg_pool3d gives correct shapes with lazy backend
         img_cpu = torch.zeros([2, 3, 4, 5, 6], device="cpu")
         out_cpu = torch.nn.AdaptiveAvgPool3d(2).to(device="cpu")(img_cpu)
 
-        test_device = get_test_device()
-        img_lazy = torch.zeros([2, 3, 4, 5, 6], device=test_device)
-        out_lazy = torch.nn.AdaptiveAvgPool3d(2).to(test_device)(img_lazy)
+        img_lazy = torch.zeros([2, 3, 4, 5, 6], device=device)
+        out_lazy = torch.nn.AdaptiveAvgPool3d(2).to(device)(img_lazy)
 
         self.assertEqual(out_cpu.shape, out_lazy.shape)
+
+
+instantiate_device_type_tests(TestLazyDynamicOpsDevice, globals())
 
 
 if __name__ == "__main__":
