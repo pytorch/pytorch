@@ -28,6 +28,11 @@ FBTriton: every TLX template Inductor proposes must have a heuristic
 registered for the running device. Those tests skip when the active Triton has
 no TLX registry, so they are inert on upstream Triton.
 
+They are also blocklisted in `tools/testing/discover_tests.py`, so PyTorch CI
+never picks them up. No CI job installs an FBTriton, so all CI could report is
+skips -- while the file would still cost a slot in the inductor shards and show
+up in target determination. `bringup.py test` runs it by path and is unaffected.
+
 With no torchTLX tests present it falls back to `sanity.py`, a deliberately
 small plumbing check -- eager matmul
 plus compiled pointwise, reduction and backward, asserting Inductor emitted a
