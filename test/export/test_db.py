@@ -39,9 +39,8 @@ class ExampleTests(TestCase):
         name_fn=lambda name, case: f"case_{name}",
     )
     def test_exportdb_supported(self, device, name: str, case: ExportCase) -> None:
-        if name in ("optional_input", "static_if"):
-            if torch.device(device).type != "cpu":
-                self.skipTest(f"{name} constructs CPU tensors in the example")
+        if name in ("optional_input", "static_if") and torch.device(device).type != "cpu":
+            self.skipTest(f"{name} constructs CPU tensors in the example")
         model = copy.deepcopy(case.model)
         if isinstance(model, torch.nn.Module):
             model = model.to(device)
