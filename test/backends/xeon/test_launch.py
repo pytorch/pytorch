@@ -5,11 +5,18 @@ import subprocess
 import tempfile
 import unittest
 
-from torch.testing._internal.common_utils import IS_LINUX, run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    IS_LINUX,
+    run_tests,
+    TestCase,
+)
 
 
 @unittest.skipIf(not IS_LINUX, "Only works on linux")
 class TestTorchrun(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self._test_dir = tempfile.mkdtemp(prefix=self.__class__.__name__)
