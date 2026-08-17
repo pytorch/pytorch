@@ -2,6 +2,7 @@
 
 import os
 
+import torch
 import torch.distributed as dist
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
@@ -23,33 +24,40 @@ class TestMiscCollectiveUtils(TestCase):
         """
         Test device to backend mapping
         """
-        try:
-            backend = dist.get_default_backend_for_device(device)
-        except ValueError:
-            return  # device has no registered backend, nothing to verify
+        device_type = torch.device(device).type
+        if device_type not in dist.Backend.default_device_backend_map:
+            self.skipTest(f"No default backend registered for {device_type}")
 
-        expected = dist.Backend.default_device_backend_map.get(device)
-        if expected is not None and backend != expected:
-            raise AssertionError(f"Expected {expected}, got {backend}")
+        backend = dist.get_default_backend_for_device(device)
+        self.assertIn(device_type, dist.Backend.backend_capability[backend])
+        self.assertIn(backend, dist.Backend.backend_list)
 
     def test_create_pg(self, device) -> None:
         """
         Test create process group
         """
+        device_type = torch.device(device).type
+        if device_type not in dist.Backend.default_device_backend_map:
+            self.skipTest(f"No default backend registered for {device_type}")
+
         os.environ["MASTER_ADDR"] = "localhost"
         os.environ["MASTER_PORT"] = "29500"
 
-        backend = dist.get_default_backend_for_device(device)
+        backend = dist.get_default_backend_for_device(device_type)
         dist.init_process_group(
             backend=backend, rank=0, world_size=1, init_method="env://"
         )
         pg = dist.distributed_c10d._get_default_group()
         backend_pg = pg._get_backend_name()
-        # Some backends report "custom" at the process group layer while
-        # their logical backend name (from get_default_backend_for_device)
-        # is different. Accept either.
-        if backend_pg not in (backend, "custom"):
-            raise AssertionError(f"Expected {backend}, got {backend_pg}")
+        # Derive the expected name from the backend type instead of accepting
+        # any "custom" process group, which would hide a wrong-backend PG.
+        expected_type = dist.Backend.backend_type_map[backend]
+        expected_name = (
+            "custom"
+            if expected_type == dist.ProcessGroup.BackendType.CUSTOM
+            else backend
+        )
+        self.assertEqual(backend_pg, expected_name)
         dist.destroy_process_group()
 
 
