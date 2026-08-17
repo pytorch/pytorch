@@ -394,24 +394,6 @@ def _callback_from_stance(callback: DynamoCallback) -> DynamoCallback:
             if not convert_frame.has_tensor_in_frame(frame):
                 return ConvertFrameReturn()
 
-            from . import decorators
-
-            prev_frame = sys._getframe()
-            # pyrefly: ignore [bad-assignment]
-            while (
-                prev_frame
-                and "torch/_dynamo/eval_frame.py" in prev_frame.f_code.co_filename
-            ):
-                prev_frame = prev_frame.f_back  # type: ignore[assignment]
-            if (
-                prev_frame
-                and prev_frame.f_code is decorators._nonrecursive_disable_wrapper_code
-            ):
-                return ConvertFrameReturn(
-                    apply_to_code=False,
-                    skip_reason="tracing is non-recursively disabled for this frame",
-                )
-
             from torch._C._dynamo.eval_frame import (
                 _debug_get_cache_entry_list,
                 _debug_get_precompile_entries,

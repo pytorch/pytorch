@@ -253,6 +253,22 @@ class AOTCompiledFunction:
             guard_scope = self._guard_globals
             if guard_scope is None:
                 guard_scope = self.fn.__globals__
+            else:
+                # Seed the artifact's own __import_* aliases. Dynamo MINTS those
+                # at trace time (symbolic_convert.import_source writes them into
+                # the tracing process's globals) and roots guards at them -- every
+                # child nn.Module call guards its hook dicts through
+                # G['__import_torch_dot_nn_dot_modules_dot_module']. A process
+                # that only LOADS never traced, so its module dict has none and
+                # the guard KeyErrors on every call. setdefault, so only the
+                # synthetic names are added: a real global the loading process
+                # already has keeps its live value, which is the point of using
+                # the live scope at all.
+                for (
+                    alias,
+                    module_name,
+                ) in self._artifacts.runtime_env.import_sources.items():
+                    guard_scope.setdefault(alias, importlib.import_module(module_name))
             self._artifacts.guard_manager = load_guard_manager(
                 guards_state,
                 self._artifacts.original_code,
@@ -522,9 +538,7 @@ class AOTCompiledModel:
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         for result in self.compiled_results:
-            if result._guard_check_enabled and result.guard_check(
-                self.model, *args, **kwargs
-            ):
+            if result.guard_check(self.model, *args, **kwargs):
                 return result(self.model, *args, **kwargs)
         # disable_guard_check() is the escape hatch for an artifact whose guards
         # fail on the serving machine for a reason the caller judges benign. A
