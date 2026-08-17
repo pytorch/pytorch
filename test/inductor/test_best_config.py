@@ -9,8 +9,12 @@ import unittest
 
 import torch
 from torch._inductor import config
-from torch.testing._internal.common_utils import IS_LINUX
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
+)
+from torch.testing._internal.common_utils import HardwareClassification, IS_LINUX
 
 
 try:
@@ -28,7 +32,7 @@ def trivial_kernel(x):
 
 
 class TestKernelBestConfig(TestCase):
-    device_type = GPU_TYPE
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @classmethod
     def setUpClass(cls):
@@ -48,7 +52,8 @@ class TestKernelBestConfig(TestCase):
         config.max_autotune = cls.original_max_autotune
         super().tearDownClass()
 
-    def test_best_config_has_triton_cache_key(self):
+    @requires_capabilities(Capability.lib.triton)
+    def test_best_config_has_triton_cache_key(self, device):
         with tempfile.TemporaryDirectory() as tmpdir:
             os.environ["TORCHINDUCTOR_CACHE_DIR"] = tmpdir
             triton_cache_dir = os.path.join(tmpdir, "triton_cache")
@@ -59,7 +64,7 @@ class TestKernelBestConfig(TestCase):
 
             compiled_fn = torch.compile(trivial_kernel)
 
-            x = torch.randn(32, 10, device=GPU_TYPE)
+            x = torch.randn(32, 10, device=device)
             compiled_fn(x)
 
             # Search for .best_config files in the inductor cache directory.
@@ -90,6 +95,8 @@ class TestKernelBestConfig(TestCase):
                 )
 
 
+instantiate_device_type_tests(TestKernelBestConfig, globals(), allow_xpu=True, except_for="cpu")
+
 if __name__ == "__main__":
-    if IS_LINUX and HAS_GPU:
+    if IS_LINUX:
         run_tests()
