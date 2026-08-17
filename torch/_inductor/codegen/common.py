@@ -12,6 +12,7 @@ import operator
 import os
 import re
 import tempfile
+import threading
 from abc import ABC, abstractmethod
 from enum import auto, Enum
 from itertools import chain
@@ -315,6 +316,11 @@ class DeviceCodegen:
 
 KernelArgType = WorkspaceArg | TensorArg | SizeArg | TMADescriptorArg | ConstexprArg
 
+# Device index to emit into generated code: either a literal compile-time index, or a
+# code expression evaluated at run time (e.g. current_device_idx_expr() under
+# compile-on-one-rank).
+DeviceIdx = int | str
+
 device_codegens: dict[str, DeviceCodegen] = {}
 
 
@@ -322,14 +328,27 @@ class DeviceOpOverrides:
     def import_get_raw_stream_as(self, name: str) -> str:
         raise NotImplementedError
 
-    def set_device(self, device_idx: int) -> str:
+    def set_device(self, device_idx: DeviceIdx) -> str:
         raise NotImplementedError
 
     def synchronize(self) -> str:
         raise NotImplementedError
 
-    def device_guard(self, device_idx: int) -> str:
+    def device_guard(self, device_idx: DeviceIdx) -> str:
         raise NotImplementedError
+
+    def current_device_idx_expr(self) -> str:
+        # Runtime expression evaluating to the current device index. Used under
+        # compile-on-one-rank so the wrapper resolves its device at run time
+        # (rank-agnostic) instead of baking the compile-time index. Only CUDA/ROCm
+        # implements this today; raise something actionable rather than a bare
+        # NotImplementedError from deep inside device-context codegen.
+        raise RuntimeError(
+            f"compile-on-one-rank (device-as-parameter) is not supported on "
+            f"{type(self).__name__}: it has no current_device_idx_expr(), so the "
+            f"generated wrapper would bake the compile-time device index and not be "
+            f"rank-portable."
+        )
 
     def current_stream(self) -> str:
         raise NotImplementedError
@@ -380,6 +399,8 @@ class DeviceOpOverrides:
         raise NotImplementedError
 
 
+# Thread-safe lazy initialization for device op overrides
+device_op_overrides_lock = threading.RLock()
 device_op_overrides_dict: dict[str, DeviceOpOverrides] = {}
 _device_op_overrides_initialized = False
 custom_backend_passes: dict[str, CustomGraphModulePass | None] = {}
@@ -650,7 +671,8 @@ def index_prevent_reordering(
 def register_device_op_overrides(
     device: str, device_op_overrides: DeviceOpOverrides
 ) -> None:
-    device_op_overrides_dict[device] = device_op_overrides
+    with device_op_overrides_lock:
+        device_op_overrides_dict[device] = device_op_overrides
 
 
 def _initialize_device_op_overrides():
@@ -660,16 +682,20 @@ def _initialize_device_op_overrides():
     if _device_op_overrides_initialized:
         return
 
-    from . import mps_device_op_overrides  # noqa: F401
-    from .cpu_device_op_overrides import CpuDeviceOpOverrides
-    from .cuda import device_op_overrides  # noqa: F401
-    from .mtia import device_op_overrides as mtia_op_overrides  # noqa: F401
-    from .xpu import device_op_overrides as xpu_op_overrides  # noqa: F401
+    with device_op_overrides_lock:
+        if _device_op_overrides_initialized:
+            return
 
-    # TPU uses Pallas for codegen and only needs no-op overrides
-    register_device_op_overrides("tpu", CpuDeviceOpOverrides())
+        from . import mps_device_op_overrides  # noqa: F401
+        from .cpu_device_op_overrides import CpuDeviceOpOverrides
+        from .cuda import device_op_overrides  # noqa: F401
+        from .mtia import device_op_overrides as mtia_op_overrides  # noqa: F401
+        from .xpu import device_op_overrides as xpu_op_overrides  # noqa: F401
 
-    _device_op_overrides_initialized = True
+        # TPU uses Pallas for codegen and only needs no-op overrides
+        register_device_op_overrides("tpu", CpuDeviceOpOverrides())
+
+        _device_op_overrides_initialized = True
 
 
 def get_device_op_overrides(device: str) -> DeviceOpOverrides:
@@ -1742,7 +1768,7 @@ class KernelArgs:
         Returns:
             Tuple[str, str, int]: A tuple containing:
                 - "ws_ptr": A string identifier for the workspace pointer.
-                - "workspace_{i}": agraph level unique identifier for
+                - "workspace_{i}": a graph level unique identifier for
                     the workspace tensor.
                 - offset: An integer representing the item offset in the workspace.
         """
@@ -1779,13 +1805,19 @@ class KernelArgs:
         Returns:
             name of the semaphores buffer
         """
+        from torch.fx.experimental.proxy_tensor import _coor_enabled
+
         current_device = V.graph.get_current_device_or_throw()
+        # This name is emitted into the wrapper, so under compile-on-one-rank it cannot
+        # carry the rank's device index (the graph is single-device there, so the type
+        # alone still distinguishes buffers).
+        suffix = "" if _coor_enabled() else f"_{current_device.index}"
         arg = WorkspaceArg(
             count=min_size,
             zero_mode=WorkspaceZeroMode.ZERO_PER_GRAPH,
             dtype=torch.uint32,
             inner_name="sem_ptr",
-            outer_name=f"semaphores_{current_device.type}_{current_device.index}",
+            outer_name=f"semaphores_{current_device.type}{suffix}",
             device=current_device,
         )
         for existing_arg in self.workspace_args:
@@ -2331,7 +2363,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
         raise NotImplementedError
 
     def indirect_load(self, name: str, index: sympy.Expr) -> CSEVariable:
-        """A load the depends on an index we have read"""
+        """A load that depends on an index we have read"""
         prior = self.loads
         try:
             # put the load in the compute section as it might have deps

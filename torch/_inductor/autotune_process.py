@@ -97,7 +97,11 @@ class NonzeroWorkspaceNotSupportedError(Exception):
 
 
 def _cache_env_for_subprocess() -> dict[str, str | None]:
-    env_vars = ["TORCHINDUCTOR_CACHE_DIR", "TRITON_CACHE_DIR"]
+    env_vars = [
+        "TORCHINDUCTOR_CACHE_DIR",
+        "TRITON_CACHE_DIR",
+        "FLYDSL_RUNTIME_CACHE_DIR",
+    ]
     return {v: os.environ.get(v) for v in env_vars}
 
 
@@ -566,9 +570,11 @@ class BenchmarkRequest:
 
         # create args and out tensor
         if out is None:
-            if not (self.input_tensor_meta and self.output_tensor_meta):
+            if self.input_tensor_meta is None or not isinstance(
+                self.output_tensor_meta, TensorMeta
+            ):
                 raise AssertionError(
-                    "Input and output tensor meta must be populated when input_tensors is empty"
+                    "Input and output tensor meta must be populated when out is None"
                 )
             if not len(input_tensors) == 0:
                 raise AssertionError(
@@ -970,7 +976,7 @@ class ExternKernelBenchmarkRequest(BenchmarkRequest):
 
     def benchmark(self, *input_tensors: torch.Tensor, out: torch.Tensor | None = None):
         if out is not None and out.numel() == 0:
-            # no need to run the kernel of do benchmarking
+            # no need to run the kernel or do benchmarking
             return 0.0
         if self.has_out_variant or len(input_tensors) == 0:
             return super().benchmark(*input_tensors, out=out)
@@ -1347,6 +1353,53 @@ class CuteDSLBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
         return run_kernel
 
 
+# TODO: Factor out a common DSL benchmark request base shared with
+# CuteDSLBenchmarkRequest.
+class FlyDSLBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
+    """Benchmark request for FlyDSL kernels."""
+
+    def __init__(
+        self,
+        kernel_name: str,
+        input_tensor_meta: TensorMeta | list[TensorMeta],
+        output_tensor_meta: TensorMeta | list[TensorMeta],
+        extra_args: tuple[Any, ...],
+        source_code: PartialRender,
+    ) -> None:
+        super().__init__(kernel_name, input_tensor_meta, output_tensor_meta, extra_args)
+        self.source_code = source_code.finalize_all()
+        self.module_cache_key, self.module_path = PyCodeCache.write(self.source_code)
+
+    def make_run_fn(
+        self, *input_tensors: torch.Tensor, out: torch.Tensor
+    ) -> Callable[[], None]:
+        mod = PyCodeCache.load_by_key_path(
+            self.module_cache_key,
+            self.module_path,
+            set_sys_modules=False,
+        )
+
+        from .codegen.flydsl.flydsl_kernel import MAIN_SUFFIX
+
+        main_func_name = f"{self.kernel_name}_{MAIN_SUFFIX}"
+
+        if not hasattr(mod, main_func_name):
+            available = [name for name in dir(mod) if callable(getattr(mod, name))]
+            raise RuntimeError(
+                f"Could not find FlyDSL main kernel function '{main_func_name}'. "
+                f"Available callables: {available}"
+            )
+
+        kernel_func = getattr(mod, main_func_name)
+
+        def run_kernel():
+            device_interface = get_interface_for_device("cuda")
+            stream = device_interface.get_raw_stream(out.device.index)
+            return kernel_func(*input_tensors, out, *self.extra_args, stream=stream)
+
+        return run_kernel
+
+
 @functools.cache
 def get_tuning_process_pool() -> TuningProcessPool:
     pool = TuningProcessPool()
@@ -1672,7 +1725,8 @@ class AsyncAutotuner:
         Get autotuning results, blocking until complete.
 
         Args:
-            timeout: Maximum time to wait in seconds. None means wait forever.
+            choices: Candidate choices whose scheduled results should be collected.
+            inputs_key: Cache key used to identify each choice's Future.
 
         Returns:
             Dict mapping ChoiceCaller to benchmark timing
@@ -1681,5 +1735,12 @@ class AsyncAutotuner:
         timings = {}
         for choice in choices:
             choice_hash = AsyncAutotuner.get_choice_hash(choice, inputs_key)
-            timings[choice] = AsyncAutotuner.choice_hash_to_future[choice_hash].result()
+            future = AsyncAutotuner.choice_hash_to_future.get(choice_hash)
+            if future is None:
+                autotuning_log.debug(
+                    "Skipping choice without a scheduled autotuning Future: %s",
+                    choice_hash,
+                )
+                continue
+            timings[choice] = future.result()
         return timings

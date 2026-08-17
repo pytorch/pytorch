@@ -5,6 +5,7 @@
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/mps/Copy.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/native/mps/kernels/Copy.h>
 #include <ATen/ops/_copy_from_and_resize_native.h>
 #include <ATen/ops/_copy_from_native.h>
 #include <ATen/ops/imag.h>
@@ -46,7 +47,7 @@ static void copy_cast_kernel_mps(at::Tensor& dst, const at::Tensor& src) {
         .set_check_mem_overlap(false)
         .resize_outputs(false)
         .add_output(out)
-        .add_input(src_view)
+        .add_const_input(src_view)
         .build();
   };
 
@@ -66,8 +67,15 @@ static void copy_cast_kernel_mps(at::Tensor& dst, const at::Tensor& src) {
 // One dispatch per <=2GB chunk keeps chunk_bytes in uint. Callers must pass contiguous src and
 // dst with equal nbytes (both are treated as flat byte runs).
 static void contiguous_copy_kernel_mps(at::Tensor& dst, const at::Tensor& src, bool non_blocking) {
-  uint64_t profile_id = getMPSProfiler().beginProfileCopy(
-      getMTLBufferStorage(src), getMTLBufferStorage(dst), src, dst, src.nbytes(), non_blocking, /*usesBlitter=*/false);
+  MPSStream* stream = getCurrentMPSStream();
+  uint64_t profile_id = getMPSProfiler().beginProfileCopy(getMTLBufferStorage(src),
+                                                          getMTLBufferStorage(dst),
+                                                          src,
+                                                          dst,
+                                                          src.nbytes(),
+                                                          stream,
+                                                          non_blocking,
+                                                          /*usesBlitter=*/false);
   auto* kernel = lib.getCachedKernelFunctionPtr("contiguous_byte_copy");
   constexpr size_t max_chunk = 0x80000000; // 2GB
   const size_t total = src.nbytes();
@@ -84,7 +92,67 @@ static void contiguous_copy_kernel_mps(at::Tensor& dst, const at::Tensor& src, b
     }
   });
   if (profile_id) {
-    getMPSProfiler().endProfileCopy(profile_id, SyncType::NONE);
+    getMPSProfiler().endProfileCopy(profile_id, SyncType::NONE, stream);
+  }
+}
+
+template <typename I>
+static void exec_inner_contiguous_scatter(const Tensor& input,
+                                          const Tensor& output,
+                                          uint64_t slice_bytes,
+                                          uint64_t out_stride_bytes,
+                                          uint64_t off_bytes) {
+  MPSStream* stream = getCurrentMPSStream();
+  const uint64_t nbytes = input.nbytes();
+  uint64_t profile_id = getMPSProfiler().beginProfileCopy(getMTLBufferStorage(input),
+                                                          getMTLBufferStorage(output),
+                                                          input,
+                                                          output,
+                                                          nbytes,
+                                                          stream,
+                                                          /*non_blocking=*/true,
+                                                          /*usesBlitter=*/false);
+  auto* kernel = lib.getCachedKernelFunctionPtr(
+      fmt::format("inner_contiguous_scatter{}", mtlIdxSuffix(std::is_same_v<I, uint32_t>)));
+  constexpr uint64_t max_chunk = 0x80000000; // 2GB, so chunk_bytes fits the uint32 nbytes field
+  StridedBlockParams<I> params;
+  params.slice_bytes = static_cast<I>(slice_bytes);
+  params.out_stride_bytes = static_cast<I>(out_stride_bytes);
+  params.off_bytes = static_cast<I>(off_bytes);
+  kernel->runCommandBlock([&] {
+    kernel->startEncoding();
+    kernel->setArg(0, input);
+    kernel->setArg(1, output);
+    for (uint64_t base = 0; base < nbytes;) {
+      params.chunk_base = static_cast<I>(base);
+      params.nbytes = static_cast<uint32_t>(std::min(max_chunk, nbytes - base));
+      kernel->setArg(2, params);
+      kernel->dispatch((params.nbytes + 15) / 16);
+      base += params.nbytes;
+    }
+  });
+  if (profile_id) {
+    getMPSProfiler().endProfileCopy(profile_id, SyncType::NONE, stream);
+  }
+}
+
+void inner_contiguous_scatter_mps(const Tensor& input,
+                                  const Tensor& output,
+                                  uint64_t slice_bytes,
+                                  uint64_t out_stride_bytes,
+                                  uint64_t off_bytes) {
+  if (input.nbytes() == 0) { // nothing to copy; also avoids a slice_bytes==0 divide below
+    return;
+  }
+  // Largest byte index the kernel addresses on either side; use a 64-bit index
+  // only when it can't fit a 32-bit one.
+  const uint64_t num_slices = (input.nbytes() + slice_bytes - 1) / slice_bytes;
+  const uint64_t max_out = off_bytes + (num_slices ? (num_slices - 1) * out_stride_bytes + slice_bytes : 0);
+  const uint64_t bound = std::max<uint64_t>(input.nbytes(), max_out);
+  if (bound > std::numeric_limits<uint32_t>::max()) {
+    exec_inner_contiguous_scatter<uint64_t>(input, output, slice_bytes, out_stride_bytes, off_bytes);
+  } else {
+    exec_inner_contiguous_scatter<uint32_t>(input, output, slice_bytes, out_stride_bytes, off_bytes);
   }
 }
 
@@ -137,9 +205,6 @@ static std::pair<id<MTLBuffer>, NSUInteger> buffer_with_offset_from_tensor(const
 }
 
 static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool non_blocking) {
-  auto sameMemFormat =
-      src_.is_contiguous(dst_.suggest_memory_format()) && dst_.is_contiguous(dst_.suggest_memory_format());
-
   MPSStream* stream = getCurrentMPSStream();
   Tensor dst = dst_;
   Tensor src = src_;
@@ -213,8 +278,8 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
 
       // If there's anything wrong with source, we shouldn't return dst_ silently and must error out.
       TORCH_INTERNAL_ASSERT(blitSourceBuffer && dst_tensor_nbytes > 0);
-      uint64_t profile_id =
-          getMPSProfiler().beginProfileCopy(blitSourceBuffer, destBuffer, blitSource, dst, size_to_copy, non_blocking);
+      uint64_t profile_id = getMPSProfiler().beginProfileCopy(
+          blitSourceBuffer, destBuffer, blitSource, dst, size_to_copy, stream, non_blocking);
 
       stream->copy_and_sync(
           blitSourceBuffer, destBuffer, size_to_copy, blitSourceOffset, destOffset, non_blocking, profile_id);
@@ -239,7 +304,7 @@ static void copy_to_mps_stride_contig(at::Tensor& dst, const at::Tensor& src, bo
   @autoreleasepool {
     auto [sourceBuffer, sourceOffset] = buffer_with_offset_from_tensor(src, size_to_copy, non_blocking);
     uint64_t profile_id =
-        getMPSProfiler().beginProfileCopy(sourceBuffer, destBuffer, src, dst, size_to_copy, non_blocking);
+        getMPSProfiler().beginProfileCopy(sourceBuffer, destBuffer, src, dst, size_to_copy, stream, non_blocking);
 
     stream->copy_and_sync(
         sourceBuffer, destBuffer, size_to_copy, sourceOffset, dst_byte_offset, non_blocking, profile_id);
@@ -272,11 +337,11 @@ static at::Tensor& copy_to_mps_(at::Tensor& dst_, const at::Tensor& src_, bool n
 }
 
 void copy_blit_mps(void* dst, const void* src, size_t size) {
-  // we don't have tensors info for profiling here
-  uint64_t profile_id =
-      getMPSProfiler().beginProfileCopy(src, dst, at::OptionalTensorRef(), at::OptionalTensorRef(), size, false);
-
   MPSStream* stream = getCurrentMPSStream();
+  // we don't have tensors info for profiling here
+  uint64_t profile_id = getMPSProfiler().beginProfileCopy(
+      src, dst, at::OptionalTensorRef(), at::OptionalTensorRef(), size, stream, false);
+
   stream->copy_and_sync((id<MTLBuffer>)(src), (id<MTLBuffer>)(dst), size, 0, 0, true, profile_id);
 }
 
@@ -328,7 +393,7 @@ static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_, boo
       copy_cast_kernel_mps(maybeCastedSource, src);
 
       uint64_t profile_id = getMPSProfiler().beginProfileCopy(
-          maybeCastedSourceBuffer, destBuffer, maybeCastedSource, dst_, dst_.nbytes(), true);
+          maybeCastedSourceBuffer, destBuffer, maybeCastedSource, dst_, dst_.nbytes(), stream, true);
       stream->copy(maybeCastedSourceBuffer, destBuffer, dst_.nbytes(), 0, dst_byte_offset, profile_id);
     } else {
       copy_cast_kernel_mps(dst_, src);
