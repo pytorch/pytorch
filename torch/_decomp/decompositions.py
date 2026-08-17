@@ -5965,7 +5965,10 @@ def isin(elements, test_elements, *, assume_unique=False, invert=False):
 
 
 @register_decomposition(aten.divmod.Tensor)
-def divmod_tensor(self, other):
+def divmod_tensor(
+    self: torch.Tensor,
+    other: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
     return (
         aten.floor_divide(self, other),
         aten.remainder(self, other),
