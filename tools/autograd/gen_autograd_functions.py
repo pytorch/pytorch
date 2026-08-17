@@ -121,9 +121,11 @@ inline variable_list ${op}_apply_functional_ivalue(const variable_list& grads, c
 
 variable_list ${op}::apply(variable_list&& grads) {
   ${thread_lock}
+  ${compute_needs_input_grad_before}
+  ${release_unused_variables}
   ${asserts}
   ${unpacks}
-  ${compute_needs_input_grad}
+  ${compute_needs_input_grad_after}
   return ${op}_apply_functional(std::move(grads), needs_input_grad${,apply_functional_args});
 }
 
@@ -147,9 +149,10 @@ variable_list ${op}::apply_with_saved(const variable_list& grads, SwapSavedVaria
   variable_list output_result;
 
   PackedArgs packed_args;
+  ${compute_needs_input_grad_before}
   ${asserts}
   ${unpacks}
-  ${compute_needs_input_grad}
+  ${compute_needs_input_grad_after}
   packed_args.pack(needs_input_grad);
   ${get_packed_args}
 
@@ -612,6 +615,7 @@ def gen_autograd_functions_python(
 def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str:
     saved_variables: list[str] = []
     release_variables: list[str] = []
+    release_unused_variables: list[str] = []
     saved_list_sizes: list[str] = []
     unpack: list[str] = []
     asserts: list[str] = []
@@ -643,9 +647,27 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
         compute_index_ranges.append(f"auto {arg.name}_ix = gen.range({size});")
         input_name_to_idx[arg.name] = idx
 
+    def saved_variable_dependency(var: SavedAttribute) -> str | None:
+        dependent_inputs = {
+            name
+            for derivative in info.derivatives
+            if var in derivative.saved_inputs or var in derivative.saved_outputs
+            for name in derivative.var_names
+        }
+        if not dependent_inputs:
+            raise AssertionError(f"no derivative uses saved variable {var.nctype.name}")
+        if dependent_inputs == set(input_name_to_idx):
+            return None
+        return " || ".join(
+            f"needs_input_grad[{idx}]"
+            for name, idx in input_name_to_idx.items()
+            if name in dependent_inputs
+        )
+
     def save_var(var: SavedAttribute, is_output: bool) -> None:
         name = var.nctype.name
         type = var.nctype.type
+        dependency = saved_variable_dependency(var)
         should_append_getsetdef = True
         should_append_raw_getsetdef = False
         visit_name = name
@@ -662,7 +684,15 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             saved_variables.append(f"SavedVariable {name}_;")
             release_variables.append(f"{name}_.reset_data();")
             ptr = "getptr()" if is_output else ""
-            unpack.append(f"auto {name} = {name}_.unpack({ptr});")
+            if dependency:
+                release_unused_variables.append(
+                    f"if (!({dependency}) && !retain_variables) {{ {name}_.reset_data(); }}"
+                )
+                unpack.append(
+                    f"auto {name} = ({dependency}) ? {name}_.unpack({ptr}) : Tensor();"
+                )
+            else:
+                unpack.append(f"auto {name} = {name}_.unpack({ptr});")
             getter_definitions.append(
                 GETTER_DEFINITION_SAVEDVAR.substitute(
                     op=info.op, name=name, body=GETTER_BODY_SAVEDVAR
@@ -704,8 +734,21 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             release_variables.append(f"{name}_.clear();")
             release_variables.append(f"{name}_released_ = true;")
             ptr = "getptr()" if is_output else "nullptr"
-            unpack.append(f"auto {name} = unpack_list({name}_, {ptr});")
-            asserts.append(f"TORCH_CHECK(!{name}_released_, ERR_BACKWARD_TWICE);")
+            if dependency:
+                release_unused_variables.append(
+                    f"if (!({dependency}) && !retain_variables) {{ "
+                    f"{name}_.clear(); {name}_released_ = true; }}"
+                )
+                unpack.append(
+                    f"auto {name} = ({dependency}) ? "
+                    f"unpack_list({name}_, {ptr}) : std::vector<Tensor>();"
+                )
+                asserts.append(
+                    f"if ({dependency}) {{ TORCH_CHECK(!{name}_released_, ERR_BACKWARD_TWICE); }}"
+                )
+            else:
+                unpack.append(f"auto {name} = unpack_list({name}_, {ptr});")
+                asserts.append(f"TORCH_CHECK(!{name}_released_, ERR_BACKWARD_TWICE);")
             getter_definitions.append(
                 GETTER_DEFINITION_VEC_SAVEDVAR.substitute(
                     op=info.op, name=name, body=GETTER_BODY_VEC_SAVEDVAR
@@ -727,8 +770,21 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             # Because the SavedVariable owns a tensor and a grad_fn, removing the SavedVariable makes them go away as well.
             release_variables.append(f"{name}_.clear();")
             release_variables.append(f"{name}_released_ = true;")
-            unpack.append(f"auto {name} = unpack_opt_list({name}_);")
-            asserts.append(f"TORCH_CHECK(!{name}_released_, ERR_BACKWARD_TWICE);")
+            if dependency:
+                release_unused_variables.append(
+                    f"if (!({dependency}) && !retain_variables) {{ "
+                    f"{name}_.clear(); {name}_released_ = true; }}"
+                )
+                unpack.append(
+                    f"auto {name} = ({dependency}) ? unpack_opt_list({name}_) : "
+                    "torch::List<std::optional<Tensor>>();"
+                )
+                asserts.append(
+                    f"if ({dependency}) {{ TORCH_CHECK(!{name}_released_, ERR_BACKWARD_TWICE); }}"
+                )
+            else:
+                unpack.append(f"auto {name} = unpack_opt_list({name}_);")
+                asserts.append(f"TORCH_CHECK(!{name}_released_, ERR_BACKWARD_TWICE);")
             getter_definitions.append(
                 GETTER_DEFINITION_VEC_SAVEDVAR.substitute(
                     op=info.op, name=name, body=GETTER_BODY_VEC_SAVEDVAR
@@ -917,6 +973,8 @@ static PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
     if uses_retain_variables(info):
         apply_functional_args.append("retain_variables")
         apply_functional_args_ref_types.append("bool")
+
+    if uses_retain_variables(info) or release_unused_variables:
         will_release_variables = WILL_RELEASE_VARIABLES.substitute()
     else:
         will_release_variables = ""
@@ -1029,6 +1087,12 @@ static PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
     compute_needs_input_grad = COMPUTE_NEEDS_INPUT_GRAD.substitute(
         n=len(masks), compute_index_ranges=compute_index_ranges, masks=masks
     )
+    if release_unused_variables:
+        compute_needs_input_grad_before = compute_needs_input_grad
+        compute_needs_input_grad_after = ""
+    else:
+        compute_needs_input_grad_before = ""
+        compute_needs_input_grad_after = compute_needs_input_grad
     apply_functional_args_signature = [
         f"{T} {x}"
         for T, x in zip(apply_functional_args_ref_types, apply_functional_args)
@@ -1059,12 +1123,14 @@ static PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
         compute_schema="\n".join(compute_schema),
         apply_functional_args=apply_functional_args,
         apply_functional_args_signature=apply_functional_args_signature,
-        compute_needs_input_grad=compute_needs_input_grad,
+        compute_needs_input_grad_before=compute_needs_input_grad_before,
+        compute_needs_input_grad_after=compute_needs_input_grad_after,
         num_inputs=len(input_name_to_idx),
         unpack_ivalues="\n".join(unpack_ivalues),
         compute_index_ranges=compute_index_ranges,
         saved_variables=saved_variables,
         release_variables=release_variables,
+        release_unused_variables=release_unused_variables,
         saved_list_sizes=saved_list_sizes,
         asserts=asserts,
         thread_lock=thread_lock,
