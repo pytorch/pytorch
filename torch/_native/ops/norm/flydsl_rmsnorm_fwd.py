@@ -99,7 +99,6 @@ def _build_rmsnorm_module(
     block_threads = _forward_block_threads(N)
     _, elem_bits = _dtype_config(dtype_str)
     vec_width = 128 // elem_bits
-    tile_cols = block_threads * vec_width
     reduction_slots = (block_threads + WARP_SIZE - 1) // WARP_SIZE
     # block_reduce_add's second stage reads slots through one masked wave.
     if reduction_slots > WARP_SIZE:
@@ -153,153 +152,87 @@ def _build_rmsnorm_module(
             gpu.barrier()
             return reduction_buffer[0]
 
-        # ==================================================================
-        # Fast path: N is a multiple of tile_cols
-        # ==================================================================
-        if const_expr(N >= tile_cols and N % tile_cols == 0):
-            num_tiles = N // tile_cols
-            # Layout API: buffer-backed tensors with tiled access.
-            Input_buf = fx.rocdl.make_buffer_tensor(Input)
-            Output_buf = fx.rocdl.make_buffer_tensor(Output)
-            Gamma_buf = fx.rocdl.make_buffer_tensor(Gamma)
+        Input_buf = fx.rocdl.make_buffer_tensor(Input)
+        Output_buf = fx.rocdl.make_buffer_tensor(Output)
+        Gamma_buf = fx.rocdl.make_buffer_tensor(Gamma)
 
-            row_in = Input_buf[bid, None]
-            row_out = Output_buf[bid, None]
+        row_in = Input_buf[bid, None]
+        row_out = Output_buf[bid, None]
 
-            in_div = fx.logical_divide(row_in, fx.make_layout(vec_width, 1))
-            out_div = fx.logical_divide(row_out, fx.make_layout(vec_width, 1))
-            gamma_div = fx.logical_divide(Gamma_buf, fx.make_layout(vec_width, 1))
+        full_vecs = N // vec_width
+        vec_steps = (full_vecs + block_threads - 1) // block_threads
+        scalar_tail_start = full_vecs * vec_width
+        scalar_tail_elems = N - scalar_tail_start
 
-            copy_atom = fx.make_copy_atom(fx.rocdl.BufferCopy128b(), elem_bits)
+        copy_atom_v = fx.make_copy_atom(fx.rocdl.BufferCopy128b(), elem_bits)
+        in_div = fx.logical_divide(row_in, fx.make_layout(vec_width, 1))
+        out_vec_div = fx.logical_divide(row_out, fx.make_layout(vec_width, 1))
+        gamma_vec_div = fx.logical_divide(Gamma_buf, fx.make_layout(vec_width, 1))
 
-            c_zero_f = fx.Float32(0.0)
-            thread_sumsq = c_zero_f
-            in_local = []
+        c_zero_f = fx.Float32(0.0)
+        thread_sumsq = c_zero_f
+        in_local = []
+        tail_x = c_zero_f
 
-            # Pass 1: load + cache + sumsq
-            for tile_i in range_constexpr(num_tiles):
-                idx = tid + tile_i * block_threads
-                vec = _load_vec(copy_atom, vec_width, elem_dtype, in_div, idx)
-                in_local.append(vec)
-                x = vec.to(fx.Float32)
-                # Keep rstd aligned with ATen's scalar lane accumulation for backward.
-                for elem_i in range_constexpr(vec_width):
-                    x_elem = x[elem_i]
-                    thread_sumsq = thread_sumsq + x_elem * x_elem
+        for step in range_constexpr(vec_steps):
+            vec_idx = tid + step * block_threads
+            is_valid = vec_idx < full_vecs
+            vec_idx_safe = is_valid.select(vec_idx, 0)
+            vec = _load_vec(copy_atom_v, vec_width, elem_dtype, in_div, vec_idx_safe)
+            in_local.append(vec)
+            x = vec.to(fx.Float32)
+            # Keep rstd aligned with ATen's scalar lane accumulation for backward.
+            for elem_i in range_constexpr(vec_width):
+                x_elem = x[elem_i]
+                x_sumsq = is_valid.select(x_elem * x_elem, c_zero_f)
+                thread_sumsq = thread_sumsq + x_sumsq
 
-            sum_sq = block_reduce_add(thread_sumsq)
-            mean_sq = sum_sq / n_float
-            ms_eps = mean_sq + eps_c
-            rrms = fmath.rsqrt(ms_eps, fastmath="fast")
+        if const_expr(scalar_tail_elems > 0):
+            tail_valid = tid < scalar_tail_elems
+            tail_idx = scalar_tail_start + tid
+            tail_x_e = row_in[tail_valid.select(tail_idx, 0)]
+            tail_x = _to_f32(dtype_str, tail_x_e)
+            thread_sumsq = thread_sumsq + tail_valid.select(tail_x * tail_x, c_zero_f)
 
-            # The fused ATen contract returns this value for backward.
-            if tid == 0:
-                Rstd[bid] = rrms
+        sum_sq = block_reduce_add(thread_sumsq)
+        mean_sq = sum_sq / n_float
+        ms_eps = mean_sq + eps_c
+        rrms = fmath.rsqrt(ms_eps, fastmath="fast")
 
-            # Pass 2: normalize + gamma + store (reuse cached input)
-            for tile_i in range_constexpr(num_tiles):
-                idx = tid + tile_i * block_threads
+        # The fused ATen contract returns this value for backward.
+        if tid == 0:
+            Rstd[bid] = rrms
 
-                g = _load_vec(copy_atom, vec_width, elem_dtype, gamma_div, idx).to(
-                    fx.Float32
-                )
-                x = in_local[tile_i].to(fx.Float32)
-
+        for step in range_constexpr(vec_steps):
+            vec_idx = tid + step * block_threads
+            if vec_idx < full_vecs:
+                g = _load_vec(
+                    copy_atom_v,
+                    vec_width,
+                    elem_dtype,
+                    gamma_vec_div,
+                    vec_idx,
+                ).to(fx.Float32)
+                x = in_local[step].to(fx.Float32)
                 y = (x * rrms) * g
                 out_e = _to_elem(dtype_str, elem_dtype, y)
-
-                _store_vec(copy_atom, vec_width, elem_dtype, out_e, out_div, idx)
-
-        else:
-            # ==============================================================
-            # Generic path: 128-bit vector body plus scalar tail.
-            # ==============================================================
-            Input_buf = fx.rocdl.make_buffer_tensor(Input)
-            Output_buf = fx.rocdl.make_buffer_tensor(Output)
-            Gamma_buf = fx.rocdl.make_buffer_tensor(Gamma)
-
-            row_in = Input_buf[bid, None]
-            row_out = Output_buf[bid, None]
-
-            full_vecs = N // vec_width
-            vec_steps = (full_vecs + block_threads - 1) // block_threads
-            scalar_tail_start = full_vecs * vec_width
-            scalar_tail_elems = N - scalar_tail_start
-
-            copy_atom_v = fx.make_copy_atom(fx.rocdl.BufferCopy128b(), elem_bits)
-            in_div = fx.logical_divide(row_in, fx.make_layout(vec_width, 1))
-            out_vec_div = fx.logical_divide(row_out, fx.make_layout(vec_width, 1))
-            gamma_vec_div = fx.logical_divide(Gamma_buf, fx.make_layout(vec_width, 1))
-
-            c_zero_f = fx.Float32(0.0)
-            thread_sumsq = c_zero_f
-            in_local = []
-            tail_x = c_zero_f
-
-            for step in range_constexpr(vec_steps):
-                vec_idx = tid + step * block_threads
-                is_valid = vec_idx < full_vecs
-                vec_idx_safe = is_valid.select(vec_idx, 0)
-                vec = _load_vec(
-                    copy_atom_v, vec_width, elem_dtype, in_div, vec_idx_safe
-                )
-                in_local.append(vec)
-                x = vec.to(fx.Float32)
-                vec_sumsq = c_zero_f
-                # Keep rstd aligned with ATen's scalar lane accumulation for backward.
-                for elem_i in range_constexpr(vec_width):
-                    x_elem = x[elem_i]
-                    vec_sumsq = vec_sumsq + x_elem * x_elem
-                thread_sumsq = thread_sumsq + is_valid.select(vec_sumsq, c_zero_f)
-
-            if const_expr(scalar_tail_elems > 0):
-                tail_valid = tid < scalar_tail_elems
-                tail_idx = scalar_tail_start + tid
-                tail_x_e = row_in[tail_valid.select(tail_idx, 0)]
-                tail_x = _to_f32(dtype_str, tail_x_e)
-                thread_sumsq = thread_sumsq + tail_valid.select(
-                    tail_x * tail_x, c_zero_f
+                _store_vec(
+                    copy_atom_v,
+                    vec_width,
+                    elem_dtype,
+                    out_e,
+                    out_vec_div,
+                    vec_idx,
                 )
 
-            sum_sq = block_reduce_add(thread_sumsq)
-            mean_sq = sum_sq / n_float
-            ms_eps = mean_sq + eps_c
-            rrms = fmath.rsqrt(ms_eps, fastmath="fast")
-
-            # The fused ATen contract returns this value for backward.
-            if tid == 0:
-                Rstd[bid] = rrms
-
-            for step in range_constexpr(vec_steps):
-                vec_idx = tid + step * block_threads
-                if vec_idx < full_vecs:
-                    g = _load_vec(
-                        copy_atom_v,
-                        vec_width,
-                        elem_dtype,
-                        gamma_vec_div,
-                        vec_idx,
-                    ).to(fx.Float32)
-                    x = in_local[step].to(fx.Float32)
-                    y = (x * rrms) * g
-                    out_e = _to_elem(dtype_str, elem_dtype, y)
-                    _store_vec(
-                        copy_atom_v,
-                        vec_width,
-                        elem_dtype,
-                        out_e,
-                        out_vec_div,
-                        vec_idx,
-                    )
-
-            if const_expr(scalar_tail_elems > 0):
-                tail_valid = tid < scalar_tail_elems
-                tail_idx = scalar_tail_start + tid
-                if tail_valid:
-                    g_e = Gamma_buf[tail_idx]
-                    g = _to_f32(dtype_str, g_e)
-                    y = (tail_x * rrms) * g
-                    row_out[tail_idx] = _to_elem(dtype_str, elem_dtype, y)
+        if const_expr(scalar_tail_elems > 0):
+            tail_valid = tid < scalar_tail_elems
+            tail_idx = scalar_tail_start + tid
+            if tail_valid:
+                g_e = Gamma_buf[tail_idx]
+                g = _to_f32(dtype_str, g_e)
+                y = (tail_x * rrms) * g
+                row_out[tail_idx] = _to_elem(dtype_str, elem_dtype, y)
 
     @flyc.jit
     def launch_rmsnorm(
@@ -349,9 +282,10 @@ def _compile_rmsnorm_fwd(
     *,
     compile_args,
 ) -> flyc.CompiledFunction:
-    # backend/device_index are cache keys only. flyc.compile binds the resulting
-    # launcher to the active device/context, so cross-device reuse is unsafe
-    # even when two GPUs share the same architecture.
+    # These are explicit cache keys: FlyDSL reads the backend from its environment
+    # and the device from the active HIP context. It reuses compiled artifacts
+    # across devices, but the returned callable contains context-local
+    # module/function handles and must be cached per device.
     del backend, device_index
     input_2d, weight, output_2d, rstd, rows_m, eps, stream = compile_args
     launch = _build_rmsnorm_module(n, dtype, arch)
