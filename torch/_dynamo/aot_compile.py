@@ -522,7 +522,9 @@ class AOTCompiledModel:
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         for result in self.compiled_results:
-            if result.guard_check(self.model, *args, **kwargs):
+            if result._guard_check_enabled and result.guard_check(
+                self.model, *args, **kwargs
+            ):
                 return result(self.model, *args, **kwargs)
         # disable_guard_check() is the escape hatch for an artifact whose guards
         # fail on the serving machine for a reason the caller judges benign. A

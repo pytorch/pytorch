@@ -103,6 +103,7 @@ typedef struct VISIBILITY_HIDDEN ExtraState {
   bool has_relevant_entries(int64_t isolate_recompiles_id) const;
   void move_to_front(CacheEntry* cache_entry, std::list<CacheEntry>& entries);
   void move_to_back(CacheEntry* cache_entry);
+  void reset();
   // live_guard_manager is the wrapper that OWNS cache_entry (CacheEntry's own
   // guard_manager). It is what establishes, under the lock, that the raw
   // cache_entry read before the lock is still the entry it was.
@@ -219,6 +220,11 @@ void destroy_extra_state(void* obj);
 // scratch space.
 void set_extra_state(PyCodeObject* code, ExtraState* extra_state);
 
+// Clear a code object's existing state in place. Keeping the allocation alive
+// lets an in-flight cache lookup finish after CacheLock temporarily releases the
+// GIL while waiting or evaluating a Python guard.
+void reset_extra_state(PyCodeObject* code);
+
 // Creates a new extra state and put it on the extra scratch space of the code
 // object.
 
@@ -272,9 +278,6 @@ CacheEntry* create_cache_entry(
 
 // Extracts the backend fn from the callback.
 PyObject* get_backend(PyObject* callback);
-// Turn on the cache-key lookup inside get_backend. Called once, when the first
-// backend carrying one is constructed; see cache_entry.cpp.
-void enable_precompile_cache_keys();
 
 #ifdef __cplusplus
 
@@ -302,9 +305,6 @@ void _load_precompile_entry(
     py::object dynamo_code,
     int64_t isolate_recompiles_id);
 py::list _debug_get_precompile_entries(const py::handle& code_obj);
-bool _has_precompile_entries(
-    const py::handle& code_obj,
-    int64_t isolate_recompiles_id);
 void _set_lru_cache(const py::object& boolean);
 
 #endif
