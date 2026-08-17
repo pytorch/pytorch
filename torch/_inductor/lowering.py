@@ -3109,6 +3109,173 @@ def inductor_force_stride_order(input_tensor, stride):
     return ir.ExternKernel.require_stride_order(input_tensor, stride_order)
 
 
+@register_lowering(
+    inductor_prims.padded_blockwise_scatter,
+    type_promotion_kind=None,
+)
+def padded_blockwise_scatter(
+    values,
+    padded_rows,
+    padded_cols,
+    logical_row_chunk,
+    physical_row_chunk,
+    xdl,
+    col_chunk,
+    col_inner,
+    padding_value,
+):
+    values_size = list(values.get_size())
+    if len(values_size) != 2:
+        raise AssertionError("values must be two-dimensional")
+
+    device = values.get_device_or_error()
+    rows = V.graph.sizevars.guard_int(values_size[0])
+    cols = V.graph.sizevars.guard_int(values_size[1])
+    padded_rows = V.graph.sizevars.guard_int(padded_rows)
+    padded_cols = V.graph.sizevars.guard_int(padded_cols)
+    if padded_rows < rows or padded_cols < cols:
+        raise AssertionError("padded dimensions must cover values")
+    if padded_rows % (2 * xdl) or padded_cols % col_chunk:
+        raise AssertionError("padded dimensions do not satisfy the blocked layout")
+    if physical_row_chunk < logical_row_chunk or col_chunk != 2 * col_inner:
+        raise AssertionError("invalid blocked layout parameters")
+
+    output_numel = padded_rows * padded_cols
+    output = empty(
+        [output_numel],
+        dtype=values.get_dtype(),
+        device=device,
+    )
+    output.realize()
+
+    def shuffled_offset(physical_row, col):
+        row_outer = FloorDiv(physical_row, 2 * xdl)
+        row_inner = Mod(physical_row, 2 * xdl)
+        col_outer = FloorDiv(col, col_chunk)
+        col_inner_index = Mod(col, col_chunk)
+        return (
+            (((
+                (row_outer * (padded_cols // col_chunk) + col_outer) * col_inner
+                + Mod(col_inner_index, col_inner)
+            ) * xdl + Mod(row_inner, xdl)) * 2
+            + FloorDiv(col_inner_index, col_inner)) * 2
+            + FloorDiv(row_inner, xdl)
+        )
+
+    def output_indexer(index):
+        row, col = index
+        physical_row = (
+            FloorDiv(row, logical_row_chunk) * physical_row_chunk
+            + Mod(row, logical_row_chunk)
+        )
+        return [shuffled_offset(physical_row, col)]
+
+    padding_output_indexers = []
+    padding_masks = []
+    logical_numel = rows * cols
+    scale_padding_width = padded_cols - cols
+    scale_padding_numel = rows * scale_padding_width
+    logical_tail_count = (
+        (rows + logical_row_chunk - 1) // logical_row_chunk * logical_row_chunk
+        - rows
+    )
+    gap_width = physical_row_chunk - logical_row_chunk
+    tail_padding_numel = logical_tail_count * padded_cols
+    gap_padding_numel = (
+        padded_rows // physical_row_chunk * gap_width * padded_cols
+    )
+
+    for store_index in range(
+        (scale_padding_numel + logical_numel - 1) // logical_numel
+    ):
+
+        def scale_padding_output_indexer(index, store_index=store_index):
+            row, col = index
+            logical_index = row * cols + col
+            padding_index = store_index * logical_numel + logical_index
+            scale_row = FloorDiv(padding_index, scale_padding_width)
+            scale_col = cols + Mod(padding_index, scale_padding_width)
+            scale_physical_row = (
+                FloorDiv(scale_row, logical_row_chunk) * physical_row_chunk
+                + Mod(scale_row, logical_row_chunk)
+            )
+            return [shuffled_offset(scale_physical_row, scale_col)]
+
+        def scale_padding_mask(index, store_index=store_index):
+            row, col = index
+            return store_index * logical_numel + row * cols + col < scale_padding_numel
+
+        padding_output_indexers.append(scale_padding_output_indexer)
+        padding_masks.append(scale_padding_mask)
+
+    for store_index in range(
+        (tail_padding_numel + logical_numel - 1) // logical_numel
+    ):
+
+        def tail_padding_output_indexer(index, store_index=store_index):
+            row, col = index
+            logical_index = row * cols + col
+            padding_index = store_index * logical_numel + logical_index
+            invalid_row_index = FloorDiv(padding_index, padded_cols)
+            padding_col = Mod(padding_index, padded_cols)
+            logical_tail_row = rows + invalid_row_index
+            physical_tail_row = (
+                FloorDiv(logical_tail_row, logical_row_chunk) * physical_row_chunk
+                + Mod(logical_tail_row, logical_row_chunk)
+            )
+            return [shuffled_offset(physical_tail_row, padding_col)]
+
+        def tail_padding_mask(index, store_index=store_index):
+            row, col = index
+            return store_index * logical_numel + row * cols + col < tail_padding_numel
+
+        padding_output_indexers.append(tail_padding_output_indexer)
+        padding_masks.append(tail_padding_mask)
+
+    for store_index in range(
+        (gap_padding_numel + logical_numel - 1) // logical_numel
+    ):
+
+        def gap_padding_output_indexer(index, store_index=store_index):
+            row, col = index
+            logical_index = row * cols + col
+            padding_index = store_index * logical_numel + logical_index
+            gap_row_index = FloorDiv(padding_index, padded_cols)
+            padding_col = Mod(padding_index, padded_cols)
+            gap_row = (
+                FloorDiv(gap_row_index, gap_width) * physical_row_chunk
+                + logical_row_chunk
+                + Mod(gap_row_index, gap_width)
+            )
+            return [shuffled_offset(gap_row, padding_col)]
+
+        def gap_padding_mask(index, store_index=store_index):
+            row, col = index
+            return store_index * logical_numel + row * cols + col < gap_padding_numel
+
+        padding_output_indexers.append(gap_padding_output_indexer)
+        padding_masks.append(gap_padding_mask)
+
+    scatter = ir.PaddedScatter(
+        device=device,
+        dtype=values.get_dtype(),
+        inner_fn=values.make_loader(),
+        ranges=values_size,
+        output_indexer=output_indexer,
+        padding_output_indexers=padding_output_indexers,
+        padding_masks=padding_masks,
+        padding_value=padding_value,
+    )
+    buffer = ir.ComputedBuffer(
+        name=None,
+        layout=ir.MutationLayoutSHOULDREMOVE(output),
+        data=scatter,
+    )
+    buffer.name = V.graph.register_buffer(buffer)
+    V.graph.register_operation(buffer)
+    return output
+
+
 @register_lowering(inductor_prims.seed, type_promotion_kind=None)
 def inductor_seed(device: torch.device):
     raise AssertionError("should be handled in fuse_seed_creation_pass()")
