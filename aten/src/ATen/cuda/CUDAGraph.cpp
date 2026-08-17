@@ -185,7 +185,6 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*={0,0}*/, cudaStreamCaptureMode 
   // prevent potentially unsafe CUDA API calls during capture.  See
   // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html#group__CUDART__STREAM_1g9d0535d93a214cbf126835257b16ba85
   AT_CUDA_CHECK(cudaStreamBeginCapture(capture_stream_, capture_mode));
-  c10::cuda::CUDACachingAllocator::markCaptureBegin(capture_dev_);
 
   auto capture_id_opt = c10::cuda::captureIdMayInitCtx(stream);
   TORCH_INTERNAL_ASSERT(capture_id_opt.has_value(),
@@ -196,6 +195,7 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*={0,0}*/, cudaStreamCaptureMode 
     std::lock_guard<std::mutex> lock(_currently_capturing_graphs_mutex);
     _currently_capturing_graphs.emplace(capture_id_, this);
   }
+  c10::cuda::CUDACachingAllocator::markCaptureBegin(capture_dev_);
 }
 
 // capture_end is split so callers can run work on the captured cudaGraph_t
@@ -383,8 +383,7 @@ void CUDAGraph::reset() {
       capturing_to_pool_ = false;
     }
 
-    // Clean up cuBLAS workspaces allocated on the capture stream, otherwise live allocations prevent
-    // private pool cleanup
+    // Clean up workspaces from callers using the raw cuBLAS handle API.
     clearCublasWorkspacesForStream(capture_stream_.stream());
 
     // notifyCaptureDestroy may throw. How should we handle this?
@@ -585,7 +584,6 @@ getCurrentCUDAStream(), &cond_node, nullptr, 1, cudaStreamSetCaptureDependencies
       nullptr,
       0,
       capture_mode_));
-  c10::cuda::CUDACachingAllocator::markCaptureBegin(capture_dev_);
 
   auto child_capture_id_opt = c10::cuda::captureIdMayInitCtx(child_stream);
   TORCH_INTERNAL_ASSERT(child_capture_id_opt.has_value(),
@@ -599,6 +597,7 @@ getCurrentCUDAStream(), &cond_node, nullptr, 1, cudaStreamSetCaptureDependencies
     _currently_capturing_graphs.emplace(
         conditional_graph_capture_ids_.top(), this);
   }
+  c10::cuda::CUDACachingAllocator::markCaptureBegin(capture_dev_);
 }
 #endif // !defined(USE_ROCM) && (defined(CUDA_VERSION) && CUDA_VERSION >= 12040)
 
@@ -627,7 +626,7 @@ void CUDAGraph::end_capture_to_conditional_node() {
   }
 
   CUDAStream stream = conditional_node_streams_.top().current_stream();
-  AT_CUDA_CHECK(cudaStreamEndCapture(stream.stream(), nullptr));
+  cudaError_t endCaptureErr = cudaStreamEndCapture(stream.stream(), nullptr);
   c10::cuda::CUDACachingAllocator::markCaptureEnd(capture_dev_);
 
   c10::cuda::CUDACachingAllocator::endAllocateToPool(capture_dev_, mempool_id_);
@@ -652,6 +651,7 @@ void CUDAGraph::end_capture_to_conditional_node() {
       return filter(CUDAStream(CUDAStream::UNCHECKED, stream));
     });
   }
+  AT_CUDA_CHECK(endCaptureErr);
   constexpr const char* rng_with_conditional_nodes_error =
       "RNG within data-dependent conditional nodes is not supported yet.";
   TORCH_CHECK(!rng_or_generators_changed, rng_with_conditional_nodes_error);

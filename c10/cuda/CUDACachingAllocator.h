@@ -434,13 +434,9 @@ inline void endAllocateToPool(c10::DeviceIndex device, MempoolId_t mempool_id) {
   get()->endAllocateToPool(device, mempool_id);
 }
 
-inline void markCaptureBegin(c10::DeviceIndex device) {
-  get()->markCaptureBegin(device);
-}
-
-inline void markCaptureEnd(c10::DeviceIndex device) {
-  get()->markCaptureEnd(device);
-}
+C10_CUDA_API void markCaptureBegin(c10::DeviceIndex device);
+C10_CUDA_API void markCaptureEnd(c10::DeviceIndex device);
+C10_CUDA_API bool hasActiveCapture(c10::DeviceIndex device);
 
 inline void recordHistory(
     bool enabled,

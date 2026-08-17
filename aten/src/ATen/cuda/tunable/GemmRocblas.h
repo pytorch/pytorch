@@ -148,8 +148,11 @@ class RocblasGemmOp : public Callable<GemmParams<T>> {
       auto compute_type = RocBlasComputeTypeFor<T>();
       auto h_a = DoCastForHalfOrBfloat16(params->alpha);
       auto h_b = DoCastForHalfOrBfloat16(params->beta);
+      at::DataPtr cublas_workspace;
+      auto handle = (rocblas_handle)at::cuda::getCurrentCUDABlasHandle(
+          cublas_workspace);
       auto status = rocblas_gemm_ex(
-          (rocblas_handle)at::cuda::getCurrentCUDABlasHandle(),
+          handle,
           _rocblasOpFromChar(params->transa),
           _rocblasOpFromChar(params->transb),
           params->m, params->n, params->k,
@@ -175,7 +178,7 @@ class RocblasGemmOp : public Callable<GemmParams<T>> {
 
 template <typename T>
 auto GetRocBlasGemmTypeStringAndOps() {
-  rocblas_handle handle = (rocblas_handle)at::cuda::getCurrentCUDABlasHandle();
+  auto handle = (rocblas_handle)at::cuda::getCurrentCUDABlasHandle();
   rocblas_int solution_size;
   auto input_output_type = RocBlasDataTypeFor<T>();
   auto compute_type = RocBlasComputeTypeFor<T>();
@@ -221,8 +224,11 @@ class RocblasGemmStridedBatchedOp : public Callable<GemmStridedBatchedParams<T>>
       auto compute_type = RocBlasComputeTypeFor<T>();
       auto h_a = DoCastForHalfOrBfloat16(params->alpha);
       auto h_b = DoCastForHalfOrBfloat16(params->beta);
+      at::DataPtr cublas_workspace;
+      auto handle = (rocblas_handle)at::cuda::getCurrentCUDABlasHandle(
+          cublas_workspace);
       auto status = rocblas_gemm_strided_batched_ex(
-          (rocblas_handle)at::cuda::getCurrentCUDABlasHandle(),
+          handle,
           _rocblasOpFromChar(params->transa),
           _rocblasOpFromChar(params->transb),
           params->m, params->n, params->k,
@@ -249,7 +255,7 @@ class RocblasGemmStridedBatchedOp : public Callable<GemmStridedBatchedParams<T>>
 
 template <typename T>
 auto GetRocBlasGemmStridedBatchedTypeStringAndOps() {
-  rocblas_handle handle = (rocblas_handle)at::cuda::getCurrentCUDABlasHandle();
+  auto handle = (rocblas_handle)at::cuda::getCurrentCUDABlasHandle();
   rocblas_int solution_size;
   auto input_output_type = RocBlasDataTypeFor<T>();
   auto compute_type = RocBlasComputeTypeFor<T>();
