@@ -685,12 +685,12 @@ TORCH_IMPL_FUNC(index_add_mps_out)
       encodeIndexBoundsCheck(computeEncoder, stream, index_, acc_result.size(dim));
       auto pipeline_state = lib.getPipelineStateForFunc(
           fmt::format("index_add_{}_{}", scalarToMetalTypeString(acc_result), scalarToMetalTypeString(index_)));
-      getMPSProfiler().beginProfileKernel(pipeline_state, "index_add", {acc_result, index_, acc_source}, stream);
+      getMPSProfiler().beginProfileKernel(pipeline_state, "index_add", {acc_result, index_, acc_source});
       [computeEncoder setComputePipelineState:pipeline_state];
       mtl_setArgs(computeEncoder, acc_result, index_, acc_source, params);
       mtl_setBytes(computeEncoder, getMPSScalar(alpha, acc_type), 4);
       mtl_dispatch1DJob(computeEncoder, pipeline_state, num_threads);
-      getMPSProfiler().endProfileKernel(pipeline_state, stream);
+      getMPSProfiler().endProfileKernel(pipeline_state);
     }
   });
   if (needs_acc_cast) {
@@ -795,7 +795,7 @@ Tensor& index_select_out_mps(const Tensor& self, int64_t dim, const Tensor& inde
         encodeIndexBoundsCheck(computeEncoder, stream, index_, self.size(dim));
         auto pipeline_state = lib.getPipelineStateForFunc(
             fmt::format("index_select_dim_dense_{}bit_{}", copy_bytes * 8, scalarToMetalTypeString(index_)));
-        getMPSProfiler().beginProfileKernel(pipeline_state, "index_select", {self, index_}, stream);
+        getMPSProfiler().beginProfileKernel(pipeline_state, "index_select", {self, index_});
         [computeEncoder setComputePipelineState:pipeline_state];
         mtl_setArgs(computeEncoder, output, index_, self, params);
         const MTLSize grid = MTLSizeMake(inner_units, num_indices, outer);
@@ -804,7 +804,7 @@ Tensor& index_select_out_mps(const Tensor& self, int64_t dim, const Tensor& inde
         const NSUInteger tgY = std::min<NSUInteger>(num_indices, std::max<NSUInteger>(1, maxTG / tgX));
         const NSUInteger tgZ = std::min<NSUInteger>(outer, std::max<NSUInteger>(1, maxTG / (tgX * tgY)));
         [computeEncoder dispatchThreads:grid threadsPerThreadgroup:MTLSizeMake(tgX, tgY, tgZ)];
-        getMPSProfiler().endProfileKernel(pipeline_state, stream);
+        getMPSProfiler().endProfileKernel(pipeline_state);
       }
     });
     return output;
@@ -830,11 +830,11 @@ Tensor& index_select_out_mps(const Tensor& self, int64_t dim, const Tensor& inde
       encodeIndexBoundsCheck(computeEncoder, stream, index_, self.size(dim));
       auto pipeline_state = lib.getPipelineStateForFunc(
           fmt::format("index_select_dim_{}_{}", getBitSizeString(output), scalarToMetalTypeString(index_)));
-      getMPSProfiler().beginProfileKernel(pipeline_state, "index_select", {self, index_}, stream);
+      getMPSProfiler().beginProfileKernel(pipeline_state, "index_select", {self, index_});
       [computeEncoder setComputePipelineState:pipeline_state];
       mtl_setArgs(computeEncoder, output, index_, self, params);
       mtl_dispatch1DJob(computeEncoder, pipeline_state, num_threads);
-      getMPSProfiler().endProfileKernel(pipeline_state, stream);
+      getMPSProfiler().endProfileKernel(pipeline_state);
     }
   });
 
@@ -947,11 +947,11 @@ TORCH_IMPL_FUNC(index_reduce_mps_out)
       id<MTLComputeCommandEncoder> compute_encoder = stream->commandEncoder();
       auto pipeline_state = mps::lib.getPipelineStateForFunc(fmt::format(
           "index_reduce_{}_{}_{}", reduce, mps::scalarToMetalTypeString(result), mps::scalarToMetalTypeString(index)));
-      getMPSProfiler().beginProfileKernel(pipeline_state, "index_reduce", {result, index, source}, stream);
+      getMPSProfiler().beginProfileKernel(pipeline_state, "index_reduce", {result, index, source});
       [compute_encoder setComputePipelineState:pipeline_state];
       mps::mtl_setArgs(compute_encoder, result, index, source, params);
       mps::mtl_dispatch1DJob(compute_encoder, pipeline_state, num_threads);
-      getMPSProfiler().endProfileKernel(pipeline_state, stream);
+      getMPSProfiler().endProfileKernel(pipeline_state);
     }
   });
 
@@ -1079,37 +1079,6 @@ Tensor& masked_scatter__mps(Tensor& self, const Tensor& mask, const Tensor& sour
     self.squeeze_();
   }
   return self;
-}
-
-static void put_kernel_mps(TensorIterator& iter, const TensorBase& self_base, const bool accumulate) {
-  // The generic native::put_ builds `iter` with source and the reshaped index
-  // as its two inputs. put_ addresses self by its logical (C-contiguous) flat
-  // position, so recover those tensors and reuse the index_put_ MPS kernels by
-  // treating self as a 1-D tensor addressed by the flat index. When self is
-  // already contiguous the view aliases its storage and the writes land in
-  // place; otherwise copy the result back.
-  const auto& source = iter.tensor(0);
-  const auto& index = iter.tensor(1);
-  auto& self = const_cast<Tensor&>(static_cast<const Tensor&>(self_base));
-
-  auto self_contig = self.contiguous();
-  c10::List<std::optional<Tensor>> indices;
-  indices.push_back(index.reshape(-1));
-  self_contig.view(-1).index_put_(indices, source.reshape(-1), accumulate);
-  if (!self.is_contiguous()) {
-    self.copy_(self_contig.view_as(self));
-  }
-}
-
-static void take_kernel_mps(TensorIterator& iter, const TensorBase& input_base) {
-  // take reads self by its logical (C-contiguous) flat position; the generic
-  // native::take_out builds `iter` with the index-shaped output and the index
-  // as operands. Reuse the advanced-indexing MPS kernel, writing straight into
-  // the output via index.out so no intermediate result tensor is allocated.
-  const auto& index = iter.tensor(1);
-  const auto& input = static_cast<const Tensor&>(input_base);
-  auto& out = const_cast<Tensor&>(iter.tensor(0));
-  at::index_out(out, input.reshape(-1), c10::List<std::optional<Tensor>>({index}));
 }
 
 static void index_fill_mps_kernel(TensorIterator& iter,
@@ -1269,6 +1238,4 @@ static void index_fill_mps_kernel(TensorIterator& iter,
 REGISTER_DISPATCH(index_stub, &mps::index_kernel_mps)
 REGISTER_DISPATCH(index_fill_stub, &index_fill_mps_kernel)
 REGISTER_DISPATCH(index_put_stub, &mps::index_put_kernel_mps)
-REGISTER_DISPATCH(put_stub, &put_kernel_mps)
-REGISTER_DISPATCH(take_stub, &take_kernel_mps)
 } // namespace at::native

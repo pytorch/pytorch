@@ -28,11 +28,12 @@ class AliasAnalyzer {
   }
 
   bool is_alias(const Value* value) const {
-    return aliases_.contains(value);
+    return aliases_.find(value) != aliases_.end();
   }
 
   bool is_storage_associated_with_output(const Value* value) const {
-    return values_associated_with_outputs_.contains(value);
+    return values_associated_with_outputs_.find(value) !=
+        values_associated_with_outputs_.end();
   }
 
   const c10::FastSet<const Value*>& values_associated_with_output_storage()

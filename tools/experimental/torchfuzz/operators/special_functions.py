@@ -247,8 +247,7 @@ class IgammaOperator(Operator):
         return isinstance(output_spec, TensorSpec) and output_spec.dtype in FLOAT_DTYPES
 
     def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
-        if not isinstance(output_spec, TensorSpec):
-            raise AssertionError(f"expected TensorSpec, got {type(output_spec)}")
+        assert isinstance(output_spec, TensorSpec)  # noqa: S101
         spec = TensorSpec(
             size=output_spec.size,
             stride=output_spec.stride,
@@ -272,8 +271,7 @@ class IgammaOperator(Operator):
         input_names: list[str],
         output_spec: Spec,
     ) -> str:
-        if not isinstance(output_spec, TensorSpec):
-            raise AssertionError(f"expected TensorSpec, got {type(output_spec)}")
+        assert isinstance(output_spec, TensorSpec)  # noqa: S101
         a_min = _IGAMMA_A_MIN[output_spec.dtype]
         return (
             f"{output_name} = torch.igamma("
@@ -311,8 +309,7 @@ class ChebyshevPolynomialOperatorBase(Operator):
         return output_spec.dtype in (torch.float32, torch.float64)
 
     def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
-        if not isinstance(output_spec, TensorSpec):
-            raise AssertionError(f"expected TensorSpec, got {type(output_spec)}")
+        assert isinstance(output_spec, TensorSpec)  # noqa: S101
         self._n = random.randint(0, 5)
         return [
             TensorSpec(
