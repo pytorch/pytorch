@@ -88,7 +88,7 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorContinuousTestBase):
     @requires_capabilities(
         Capability.distributed.backend,
         Capability.distributed.dtensor,
-        Capability.distributed.fsdp,
+        Capability.distributed.fsdp1,
     )
     def test_hsdp_init_with_device_mesh(self, device):
         device_id = device_type
@@ -127,7 +127,7 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorContinuousTestBase):
     @requires_capabilities(
         Capability.distributed.backend,
         Capability.distributed.dtensor,
-        Capability.distributed.fsdp,
+        Capability.distributed.fsdp1,
     )
     @parametrize("offload_to_cpu", [True, False])
     def test_dtensor_sharded_tensor_state_dict_identical(self, device, offload_to_cpu):
@@ -202,7 +202,7 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorContinuousTestBase):
     @requires_capabilities(
         Capability.distributed.backend,
         Capability.distributed.dtensor,
-        Capability.distributed.fsdp,
+        Capability.distributed.fsdp1,
     )
     @parametrize("offload_to_cpu", [True, False])
     def test_dtensor_sharded_optim_load_state_dict(self, device, offload_to_cpu):
@@ -262,7 +262,7 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorContinuousTestBase):
     @requires_capabilities(
         Capability.distributed.backend,
         Capability.distributed.dtensor,
-        Capability.distributed.fsdp,
+        Capability.distributed.fsdp1,
     )
     @parametrize("offload_to_cpu", [True, False])
     def test_dtensor_sharded_model_load_state_dict(self, device, offload_to_cpu):
@@ -306,7 +306,7 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorContinuousTestBase):
     @requires_capabilities(
         Capability.distributed.backend,
         Capability.distributed.dtensor,
-        Capability.distributed.fsdp,
+        Capability.distributed.fsdp1,
     )
     def test_root_module_is_not_FSDP(self, device):
         device_id = device_type
