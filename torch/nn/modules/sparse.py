@@ -168,7 +168,7 @@ class Embedding(Module):
             )
             self.reset_parameters()
         else:
-            if _weight.shape != (num_embeddings, embedding_dim):
+            if list(_weight.shape) != [num_embeddings, embedding_dim]:
                 raise AssertionError(
                     "Shape of weight does not match num_embeddings and embedding_dim"
                 )
@@ -404,7 +404,7 @@ class EmbeddingBag(Module):
             )
             self.reset_parameters()
         else:
-            if _weight.shape != (num_embeddings, embedding_dim):
+            if list(_weight.shape) != [num_embeddings, embedding_dim]:
                 raise AssertionError(
                     "Shape of weight does not match num_embeddings and embedding_dim"
                 )
