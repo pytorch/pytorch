@@ -471,9 +471,12 @@ class TestScheduler(TestCase):
         )
         self.assertEqual(score, 1 if read_kind == "memory" else 0)
 
-    def test_nested_reduction_sub_parent_domain_preserves_group_axis(self):
+    def test_nested_reduction_sub_parent_rate_preserves_group_axis(self):
         grouped = Mock()
         grouped.get_ranges.return_value = ([3, 6], [16])
+        sub_parent = Mock()
+        sub_parent.group = (None, (144, 1))
+        sub_parent.get_ranges.return_value = ([3, 6, 8], [])
         graph = Mock(sizevars=SizeVarAllocator())
 
         with V.set_graph_handler(graph):
@@ -495,8 +498,17 @@ class TestScheduler(TestCase):
                 parent_numel=3,
                 parent_rnumel=96,
             )
-        self.assertEqual(context.sub_parent_domain, (3, 6, 8))
-        self.assertIsNone(x_grouped_context.sub_parent_domain)
+            rate = NestedReduction._nested_sub_parent_rate(sub_parent, context)
+            sub_parent.get_ranges.return_value = ([3, 8, 6], [])
+            cross_group_rate = NestedReduction._nested_sub_parent_rate(
+                sub_parent, context
+            )
+            x_grouped_rate = NestedReduction._nested_sub_parent_rate(
+                sub_parent, x_grouped_context
+            )
+        self.assertEqual(rate, (2, 1))
+        self.assertIsNone(cross_group_rate)
+        self.assertIsNone(x_grouped_rate)
 
     def test_nested_reduction_grouped_axis_from_ranges(self):
         grouped = Mock()
