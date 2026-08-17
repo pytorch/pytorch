@@ -1219,9 +1219,43 @@ def ttir_mutation_analysis_cache_key(
     kwargs: dict[str, Any],
     tma_descriptor_metadata: TMADescriptorMetadata,
 ) -> _TTIRMutationAnalysisKey | None:
-    """Key covering everything generate_ttir derives its TTIR from.
+    """Everything the TTIR, and so the analysis, depends on.
 
-    Returns None if a key cannot be built, in which case the caller recomputes.
+    Two launches with equal keys must produce the same answer, so the key has to
+    name every input generate_ttir feeds Triton, and nothing else - anything
+    extra only splits entries that could have been shared. What that comes to:
+
+    - The kernel source, as its cache_key if Triton computed one, else its src
+      text. Two kernels with the same source behave the same way.
+
+    - For an Autotuner, the first config's kwargs, because generate_ttir folds
+      them in and they are mostly constexprs that change the generated code.
+      Only the first config: that is the one generate_ttir uses.
+
+    - One entry per formal parameter, in the kernel's own arg_names order, saying
+      what generate_ttir will pass for it. Not the value itself, because
+      generate_ttir normalizes first - a SymInt becomes 2 and a tensor becomes an
+      empty tensor of the same dtype - so what survives into the TTIR is:
+
+        ("sym",)                     a symbolic int/float/bool, all alike after
+                                     being replaced by 2
+        ("tensor", dtype)            a tensor, of which only the dtype reaches
+                                     the TTIR
+        ("tma", metadata, dtype)     a TMA descriptor, whose block shape and
+                                     element size do reach the TTIR
+        ("val", repr)                anything else: a constexpr or plain scalar,
+                                     baked in, so its value matters
+
+    Note what is deliberately absent: which particular tensors were passed, their
+    shapes and strides, and the ShapeEnv. None of it survives normalization, so
+    including it would only stop launches from sharing an answer. What is
+    deliberately present is every constexpr, because a constexpr decides what
+    TTIR exists at all - see the DO_STORE example in
+    Note [TTIR mutation analysis].
+
+    Returns None rather than a partial key if any of that cannot be read - an
+    unknown arg, a value with no usable repr - in which case the caller runs the
+    analysis uncached instead of risking a key that fails to distinguish.
     """
     import sympy
     from triton.runtime.autotuner import Autotuner
