@@ -468,31 +468,22 @@ void initDynamoBindings(PyObject* torch) {
 
   auto m = py::handle(eval_frame).cast<py::module>();
 
-  py::class_<CacheEntrySnapshot>(m, "_CacheEntry")
-      .def_readonly("guard_manager", &CacheEntrySnapshot::guard_manager)
-      .def_readonly("code", &CacheEntrySnapshot::code)
-      .def_readonly("compile_id", &CacheEntrySnapshot::compile_id)
-      .def_readonly("trace_annotation", &CacheEntrySnapshot::trace_annotation)
-      .def_readonly("backend", &CacheEntrySnapshot::backend)
+  py::class_<CacheEntry>(m, "_CacheEntry")
+      .def_readonly("guard_manager", &CacheEntry::guard_manager)
+      .def_readonly("code", &CacheEntry::code)
+      .def_readonly("compile_id", &CacheEntry::compile_id)
+      .def_readonly("trace_annotation", &CacheEntry::trace_annotation)
+      .def_readonly("backend", &CacheEntry::backend)
       .def_readonly(
-          "isolate_recompiles_id", &CacheEntrySnapshot::isolate_recompiles_id)
-      .def(
-          "__eq__",
-          [](const CacheEntrySnapshot& lhs, const CacheEntrySnapshot& rhs) {
-            return lhs.identity == rhs.identity;
-          });
-
-  py::class_<CacheEntryHandle>(m, "_CacheEntryHandle")
-      .def_property_readonly("backend", &CacheEntryHandle::backend)
+          "isolate_recompiles_id", &CacheEntry::_isolate_recompiles_id)
       .def(
           "update_diff_guard_root_manager",
-          &CacheEntryHandle::update_diff_guard_root_manager);
+          &CacheEntry::update_diff_guard_root_manager);
 
-  py::class_<PrecompileEntrySnapshot>(m, "_PrecompileEntry")
-      .def_readonly("guard_manager", &PrecompileEntrySnapshot::guard_manager)
+  py::class_<PrecompileEntry>(m, "_PrecompileEntry")
+      .def_readonly("guard_manager", &PrecompileEntry::guard_manager)
       .def_readonly(
-          "isolate_recompiles_id",
-          &PrecompileEntrySnapshot::isolate_recompiles_id);
+          "isolate_recompiles_id", &PrecompileEntry::isolate_recompiles_id);
 
   py::class_<ExtraState>(m, "_ExtraState")
       .def("invalidate", &ExtraState::invalidate);
@@ -643,6 +634,8 @@ void initDynamoBindings(PyObject* torch) {
       py::arg("dynamo_code"),
       py::arg("isolate_recompiles_id") = -1);
   m.def("_debug_get_precompile_entries", &_debug_get_precompile_entries);
+  m.def("_has_precompile_entries", &_has_precompile_entries);
+  m.def("_enable_precompile_cache_keys", &enable_precompile_cache_keys);
   m.def("_set_lru_cache", &_set_lru_cache);
   m.def(
       "_get_frame_value_stack_with_depth", &_get_frame_value_stack_with_depth);

@@ -146,20 +146,6 @@ class PrecompileStack(torch.nn.Module):
         return x.sum()
 
 
-@dataclasses.dataclass
-class GeneratedPrecompileOutput:
-    value: torch.Tensor
-
-
-@torch.compiler.disable(recursive=False)
-def construct_generated_precompile_output(x):
-    return GeneratedPrecompileOutput(x).value
-
-
-def call_generated_precompile_output(x):
-    return construct_generated_precompile_output(x) + 1
-
-
 class PrecompileResumingBlock(torch.nn.Module):
     """Like PrecompileBlock, but the frame resumed after the break compiles too."""
 
@@ -432,6 +418,26 @@ class ModelTwo(torch.nn.Module):
 """
 
 
+_BUILTIN_ACROSS_BREAK_SRC = """\
+import torch
+
+
+class Model(torch.nn.Module):
+    def __init__(self, scale):
+        super().__init__()
+        self.scale = scale
+
+    def forward(self, x, cfg):
+        # `f` holds a builtin across the break, so the dynamo bytecode puts it
+        # back by READING Dynamo's builtins-dict global rather than by
+        # resolving the name again through the ordinary lookup.
+        f = len
+        y = x * self.scale
+        torch._dynamo.graph_break()
+        return y.sum() * f(cfg)
+"""
+
+
 _SHARED_FRAME_SRC = """\
 import torch
 
@@ -494,6 +500,19 @@ class PrecompileIntArg(torch.nn.Module):
         y = x * k
         torch._dynamo.graph_break()
         return (y + k).sum()
+
+
+class PrecompileBreakOnlyWhenFalse(torch.nn.Module):
+    """The uncovered branch breaks AGAIN, so a fallback compile mints new globals."""
+
+    def forward(self, x, flag):
+        y = x * 2
+        torch._dynamo.graph_break()
+        if flag:
+            return y + 1
+        z = y - 1
+        torch._dynamo.graph_break()
+        return z * 3
 
 
 class PrecompileKeysArg(torch.nn.Module):
@@ -1123,124 +1142,6 @@ class TestPackage(torch._inductor.test_case.TestCase):
         DynamoCache.clear()
         PrecompileContext.clear()
 
-    def test_code_context_marks_each_entryless_variant_uncovered(self):
-        def fn(x):
-            return x + 1
-
-        package = CompilePackage(fn)
-        with package.code_context(fn.__code__):
-            package.add_guarded_code(b"guards", fn.__code__)
-        with package.code_context(fn.__code__):
-            pass
-
-        self.assertEqual(package.guarded_code_count(fn.__code__), 1)
-        self.assertEqual(package.uncovered_frames, frozenset({"fn"}))
-
-    def test_code_context_is_isolated_across_capture_threads(self):
-        def fn(x):
-            return x + 1
-
-        package = CompilePackage(fn)
-        first_entered = threading.Event()
-        second_entered = threading.Event()
-        release = threading.Event()
-        errors = queue.SimpleQueue()
-
-        def capture(add_code, entered, wait_for=None):
-            try:
-                if wait_for is not None and not wait_for.wait(10):
-                    raise RuntimeError("timed out waiting for the first capture")
-                with package.code_context(fn.__code__):
-                    entered.set()
-                    if not release.wait(10):
-                        raise RuntimeError("timed out waiting to finish capture")
-                    if add_code:
-                        package.add_guarded_code(b"guards", fn.__code__)
-            except BaseException as error:
-                errors.put(error)
-
-        first = threading.Thread(target=capture, args=(True, first_entered))
-        second = threading.Thread(
-            target=capture, args=(False, second_entered, first_entered)
-        )
-        first.start()
-        second.start()
-        try:
-            self.assertTrue(first_entered.wait(10))
-            self.assertTrue(second_entered.wait(10))
-        finally:
-            release.set()
-            first.join(10)
-            second.join(10)
-
-        self.assertFalse(first.is_alive())
-        self.assertFalse(second.is_alive())
-        raised = []
-        while not errors.empty():
-            raised.append(errors.get_nowait())
-        self.assertEqual(raised, [])
-        self.assertEqual(package.guarded_code_count(fn.__code__), 1)
-        self.assertEqual(package.uncovered_frames, frozenset({"fn"}))
-
-    def test_capture_config_overlapping_threads_restore_on_last_exit(self):
-        first_entered = threading.Event()
-        second_entered = threading.Event()
-        first_exited = threading.Event()
-        errors = queue.SimpleQueue()
-        observed = []
-        dynamo_config = torch._dynamo.config
-        prior = (
-            functorch_config.bundled_autograd_cache,
-            dynamo_config.allow_empty_graphs,
-        )
-        functorch_config.bundled_autograd_cache = False
-        dynamo_config.allow_empty_graphs = False
-
-        def first():
-            try:
-                with dynamo_package_lint._capture_config():
-                    first_entered.set()
-                    if not second_entered.wait(10):
-                        raise RuntimeError("timed out waiting for the second capture")
-                first_exited.set()
-            except BaseException as error:
-                errors.put(error)
-
-        def second():
-            try:
-                if not first_entered.wait(10):
-                    raise RuntimeError("timed out waiting for the first capture")
-                with dynamo_package_lint._capture_config():
-                    second_entered.set()
-                    if not first_exited.wait(10):
-                        raise RuntimeError("timed out waiting for the first exit")
-                    observed.append(
-                        (
-                            functorch_config.bundled_autograd_cache,
-                            dynamo_config.allow_empty_graphs,
-                        )
-                    )
-            except BaseException as error:
-                errors.put(error)
-
-        threads = [threading.Thread(target=first), threading.Thread(target=second)]
-        try:
-            for thread in threads:
-                thread.start()
-            for thread in threads:
-                thread.join(20)
-                self.assertFalse(thread.is_alive())
-            raised = []
-            while not errors.empty():
-                raised.append(errors.get_nowait())
-            self.assertEqual(raised, [])
-            self.assertEqual(observed, [(True, True)])
-            self.assertFalse(functorch_config.bundled_autograd_cache)
-            self.assertFalse(dynamo_config.allow_empty_graphs)
-        finally:
-            functorch_config.bundled_autograd_cache = prior[0]
-            dynamo_config.allow_empty_graphs = prior[1]
-
     def _save_and_reload(self, expected_backends, expected_dynamo):
         """
         Serializes all artifacts, clears all caches, then reloads the serialized artifact
@@ -1727,11 +1628,15 @@ def add(x, y):
 
         arg = torch.randn(3, 2, device=device)
         expected = fn(arg)
-        torch.compile(fn, isolate_recompiles=isolate_recompiles)(arg)
+        torch.compile(  # noqa: UNSPECIFIED_BACKEND
+            fn, isolate_recompiles=isolate_recompiles
+        )(arg)
         DynamoCache.clear()
         self._save_and_reload(expected_backends=1, expected_dynamo=1)
 
-        warm = torch.compile(fn, isolate_recompiles=isolate_recompiles)
+        warm = torch.compile(  # noqa: UNSPECIFIED_BACKEND
+            fn, isolate_recompiles=isolate_recompiles
+        )
         with torch.compiler.set_stance("fail_on_recompile"):
             self.assertEqual(warm(arg), expected)
 
@@ -2193,40 +2098,6 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
                 self.assertEqual(loaded(x), want)
             with self.assertRaisesRegex(RuntimeError, "fail_on_recompile"):
                 loaded(torch.randn(9, 8))
-
-    def test_generated_dataclass_init_round_trip(self):
-        x = torch.randn(4)
-        session = precompile_capture(
-            call_generated_precompile_output, backend="eager", dynamic=False
-        )
-        with session as compiled:
-            expected = compiled(x)
-
-        generated = [
-            entry
-            for entry in session._package.cache_entry().codes
-            if entry.python_code.co_filename == "<string>"
-            and entry.python_code.co_name == "__init__"
-        ]
-        self.assertEqual(len(generated), 1)
-        self.assertEqual(
-            generated[0].function_names,
-            ["GeneratedPrecompileOutput.__init__"],
-        )
-        self.assertEqual(generated[0].code_source, "__code__")
-        session.save(self.path(), require_complete=False)
-
-        torch._dynamo.reset()
-        with (
-            precompile_load(
-                call_generated_precompile_output,
-                self.path(),
-                backend="eager",
-                dynamic=False,
-            ) as loaded,
-            serving(),
-        ):
-            self.assertEqual(loaded(x), expected)
 
     def test_save_refuses_incomplete_package(self):
         # 5 blocks x 3 shapes = 15 variants on one shared forward code object,
@@ -3139,6 +3010,89 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         finally:
             loaded.unload()
 
+    def test_reset_is_detected_when_another_artifact_reinstalls(self):
+        # The probe asks whether the code object still has entries for THIS
+        # package's region. Asking whether it has any entries at all lets a
+        # second artifact loaded onto the same function answer for the first:
+        # lookup() never serves across regions, so the first silently
+        # recompiles while its probe reports health.
+        x = torch.randn(4, 8)
+        session = precompile_capture(
+            staged_with_graph_breaks, backend="eager", dynamic=False
+        )
+        with session as compiled, torch.no_grad():
+            compiled(x)
+        session.save(self.path(), require_no_dropped_guards=False)
+
+        torch._dynamo.reset()
+        first = precompile_load(
+            staged_with_graph_breaks, self.path(), backend="eager", dynamic=False
+        )
+        second = None
+        try:
+            with serving(), torch.no_grad():
+                first(x)
+            torch._dynamo.reset()
+            second = precompile_load(
+                staged_with_graph_breaks, self.path(), backend="eager", dynamic=False
+            )
+            self.assertIs(
+                first._package._installed_precompile_probe,
+                second._package._installed_precompile_probe,
+            )
+            self.assertNotEqual(
+                first._isolate_recompiles_id, second._isolate_recompiles_id
+            )
+
+            self.assertTrue(first._package.installed_entries_dropped())
+            for ctx in (contextlib.nullcontext(), serving()):
+                with self.assertRaises(PackageError) as exc, ctx, torch.no_grad():
+                    first(x)
+                self.assertIn("torch._dynamo.reset()", str(exc.exception))
+
+            self.assertFalse(second._package.installed_entries_dropped())
+            with serving(), torch.no_grad():
+                second(x)
+        finally:
+            if second is not None:
+                second.unload()
+            first.unload()
+
+    def test_served_calls_do_not_walk_the_precompile_entry_list(self):
+        # The probe runs on every served call, so it must not build a list
+        # holding one pybind wrapper per installed variant: that is O(variants)
+        # allocations per inference on a path whose whole point is that it
+        # checks no guards. _debug_get_precompile_entries stays for the
+        # fail_on_recompile diagnostic, which runs only once a call has failed.
+        import torch._C._dynamo.eval_frame as eval_frame_bindings
+
+        x = torch.randn(4, 8)
+        session = precompile_capture(
+            staged_with_graph_breaks, backend="eager", dynamic=False
+        )
+        with session as compiled, torch.no_grad():
+            compiled(x)
+        session.save(self.path(), require_no_dropped_guards=False)
+
+        torch._dynamo.reset()
+        loaded = precompile_load(
+            staged_with_graph_breaks, self.path(), backend="eager", dynamic=False
+        )
+        try:
+            with (
+                mock.patch.object(
+                    eval_frame_bindings,
+                    "_debug_get_precompile_entries",
+                    side_effect=AssertionError("served call built an entry list"),
+                ),
+                serving(),
+                torch.no_grad(),
+            ):
+                loaded(x)
+                loaded(x)
+        finally:
+            loaded.unload()
+
     def test_eager_precompile_does_not_need_a_cxx_toolchain(self):
         # cpu_codegen_target only guards inductor's baked CPU vector width, but
         # computing it dry-compiles a probe, so on a host with no compiler an
@@ -3571,6 +3525,38 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             self.assertTrue(any("size=[5, 8]" in r for r in varies), varies)
             self.assertFalse(any("size=[" in r for r in rendered(frame.invariant)))
 
+    def test_invariants_hold_back_the_guards_no_fingerprint_models(self):
+        # GLOBAL_STATE and friends compare things this report cannot fingerprint,
+        # so calling two of them equal would assert a precondition that was never
+        # checked. They must land in `undetermined`, never in `invariant` --
+        # emptying _UNMODELLED_GUARD_TYPES makes them all compare equal and
+        # silently promotes them into the intersection.
+        from torch._dynamo.precompile_package import _UNMODELLED_GUARD_TYPES
+
+        session = precompile_capture(
+            PrecompileInvariantModel(),
+            backend="eager",
+            dynamic=False,
+            example_inputs=[(torch.ones(4, 8),), (torch.ones(5, 8),)],
+        )
+        with session:
+            pass
+
+        frames = {f.frame: f for f in session.invariants()}
+        entry = frames["forward"]
+        undetermined_types = {f.guard_type for f in entry.undetermined}
+        self.assertIn("GLOBAL_STATE", undetermined_types)
+        self.assertIn("TORCH_FUNCTION_STATE", undetermined_types)
+        for frame in frames.values():
+            self.assertFalse(
+                {f.guard_type for f in frame.invariant} & _UNMODELLED_GUARD_TYPES,
+                [f.render() for f in frame.invariant],
+            )
+            self.assertFalse(
+                {f.guard_type for f in frame.varying} & _UNMODELLED_GUARD_TYPES,
+                [f.render() for f in frame.varying],
+            )
+
     def test_invariants_file_is_written_and_reproducible(self):
         def capture(path):
             torch._dynamo.reset()
@@ -3615,7 +3601,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             pass
         self.assertTrue(os.path.isfile(path))
         self.assertFalse(os.path.isdir(path))
-        with open(path) as handle:
+        with open(path, encoding="utf-8") as handle:
             self.assertIn("# precompile invariants for", handle.read())
 
     def test_invariants_report_tensor_properties_that_split_a_compilation(self):
@@ -3707,7 +3693,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             any("top_saved_tensors_hooks" in f.render() for f in frame.invariant)
         )
 
-        with open(path) as handle:
+        with open(path, encoding="utf-8") as handle:
             text = handle.read()
         self.assertNotRegex(text, r"\b\d{9,}\b")
 
@@ -3915,7 +3901,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             invariants=path,
         ):
             pass
-        with open(path) as handle:
+        with open(path, encoding="utf-8") as handle:
             text = handle.read()
         self.assertIn("_<id>_c<n>", text)
         self.assertNotRegex(text, r"_\d{9,}_c\d")
@@ -4053,6 +4039,111 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         loaded.unload()
         for code in installed:
             self.assertEqual(_debug_get_precompile_entries(code), [])
+
+    def test_unload_clears_fallback_entries_on_an_inner_frame(self):
+        # install() attaches a frame reached through code_source to the LIVE
+        # code the running program resolves, a DIFFERENT object from the
+        # reconstructed twin the package holds even though the two compare
+        # equal. Uncovered calls compile into the region on the live code, so
+        # unload has to clear that object or every load/serve/unload cycle
+        # leaks a cache entry toward accumulated_recompile_limit.
+        from torch._dynamo.eval_frame import _get_total_cache_entry_count
+
+        inner = PrecompileResumingBlock.forward.__code__
+        model = PrecompileResumingStack(1)
+        session = precompile_capture(model, backend="eager", dynamic=False)
+        with session as compiled:
+            compiled(torch.randn(4, 8))
+        session.save(self.path(), require_complete=False)
+
+        torch._dynamo.reset()
+        for _ in range(3):
+            loaded = precompile_load(model, self.path(), backend="eager", dynamic=False)
+            loaded(torch.randn(5, 8))
+            self.assertGreater(_get_total_cache_entry_count(inner), 0)
+            # By identity: the reconstructed twin compares EQUAL to the live
+            # code, so a value-keyed dedupe would keep the twin, clear a region
+            # nothing runs in, and leave the live entry behind.
+            self.assertTrue(
+                any(code is inner for code in loaded._package.region_codes())
+            )
+            loaded.unload()
+            self.assertEqual(_get_total_cache_entry_count(inner), 0)
+
+    @torch._dynamo.config.patch(accumulated_recompile_limit=4)
+    def test_unload_clears_fallback_entries_on_a_live_resume_frame(self):
+        # A fallback compile mints its OWN resume code object and binds it to
+        # its own global, while the package holds only the artifact's twin,
+        # which compares EQUAL to it, so the value-keyed _codes keeps the twin
+        # and unload cleared a region nothing runs in. The live frame then kept
+        # one entry per load until accumulated_recompile_limit refused to
+        # compile that continuation again, for plain torch.compile too.
+        from torch._dynamo.eval_frame import _get_total_cache_entry_count
+        from torch._dynamo.resume_execution import ContinueExecutionCache
+
+        model = PrecompileResumingStack(1)
+        session = precompile_capture(model, backend="eager", dynamic=False)
+        with session as compiled:
+            compiled(torch.randn(4, 8))
+        session.save(self.path(), require_complete=False)
+
+        torch._dynamo.reset()
+        inner = PrecompileResumingBlock.forward.__code__
+        for n in range(5, 10):
+            loaded = precompile_load(model, self.path(), backend="eager", dynamic=False)
+            loaded(torch.randn(n, 8))
+            loaded.unload()
+
+        resumes = list(ContinueExecutionCache.cache.get(inner, {}).values())
+        self.assertTrue(resumes, "expected a live fallback resume frame")
+        for code in resumes:
+            self.assertEqual(_get_total_cache_entry_count(code), 0)
+
+        counter = torch._dynamo.testing.CompileCounter()
+        x = torch.randn(11, 8)
+        ordinary = torch.compile(model, backend=counter, dynamic=False)
+        self.assertEqual(ordinary(x), model(x))
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_unload_leaves_another_packages_region_entries_on_a_shared_frame(self):
+        # The clear above reaches the LIVE code object, which every package
+        # loaded for another instance of the same class installed onto too.
+        # Only this package's region may go: the other one is still dispatching
+        # out of its own bucket on that same code, and a fallback it already
+        # compiled is what keeps its next call from recompiling under serving().
+        from torch._dynamo.eval_frame import _get_cache_entries_for_region
+
+        covered, uncovered = torch.randn(4, 8), torch.randn(5, 8)
+        session = precompile_capture(
+            PrecompileResumingStack(1), backend="eager", dynamic=False
+        )
+        with session as compiled:
+            compiled(covered)
+        session.save(self.path(), require_complete=False)
+
+        torch._dynamo.reset()
+        inner = PrecompileResumingBlock.forward.__code__
+        first = precompile_load(
+            PrecompileResumingStack(1), self.path(), backend="eager", dynamic=False
+        )
+        second = precompile_load(
+            PrecompileResumingStack(1), self.path(), backend="eager", dynamic=False
+        )
+        try:
+            first(uncovered)
+            second(uncovered)
+            region = second._isolate_recompiles_id
+            self.assertTrue(_get_cache_entries_for_region(inner, region))
+            first.unload()
+            self.assertFalse(
+                _get_cache_entries_for_region(inner, first._isolate_recompiles_id)
+            )
+            self.assertTrue(_get_cache_entries_for_region(inner, region))
+            with serving():
+                second(uncovered)
+        finally:
+            second.unload()
+            first.unload()
 
     def test_truncation_report_is_a_lower_bound(self):
         # Hitting recompile_limit sets FrameExecStrategy(RUN_ONLY, RUN_ONLY),
@@ -4568,6 +4659,34 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             self.assertFalse(
                 [f.render() for f in frame.invariant if "self.act" in f.render()],
                 "a guard that differs between variants was called invariant",
+            )
+
+    def test_code_fingerprint_recurses_into_container_and_nested_consts(self):
+        # _code_fingerprint names a callable by its body so an ACT2FN-style table
+        # can be told apart. Two lambdas can differ ONLY inside a constant the
+        # outer co_code does not distinguish: a tuple, a frozenset, or a nested
+        # code object. Filtering those out whole -- rather than recursing -- gives
+        # both the same digest, _object_identity names them identically, and the
+        # guard that split the two compilations is reported as an invariant of
+        # each.
+        from torch._dynamo.precompile_package import _code_fingerprint
+
+        pairs = {
+            "tuple const": (lambda x: x * (1, 2), lambda x: x * (1, 3)),
+            "frozenset const": (lambda x: x in {1, 2}, lambda x: x in {1, 3}),
+            # Not called: what matters is the nested code object in co_consts.
+            "nested code": (lambda x: (lambda y: y + 1), lambda x: (lambda y: y + 2)),
+        }
+        for label, (left, right) in pairs.items():
+            self.assertEqual(
+                left.__code__.co_code,
+                right.__code__.co_code,
+                f"{label}: the pair must differ only in co_consts",
+            )
+            self.assertNotEqual(
+                _code_fingerprint(left.__code__),
+                _code_fingerprint(right.__code__),
+                f"{label}: two different bodies share a fingerprint",
             )
 
     @torch._dynamo.config.patch(caching_precompile=True)
@@ -5170,6 +5289,81 @@ def staged(x):
             for call, want in zip(loaded, expected):
                 self.assertEqual(call(x), want)
 
+    def test_two_loads_of_one_artifact_both_serve(self):
+        # A serving process holds one loaded package per model instance, so the
+        # same artifact is routinely loaded twice. Both loads install a resume
+        # function under a name derived from the resume code, which is
+        # identical by construction: the second write wins the name, and the
+        # first callable's entry frame then calls a continuation whose
+        # precompiled entries live in the other load's region.
+        x = torch.randn(3, 4)
+        expected = staged_break_then_add_one(x)
+        session = precompile_capture(
+            staged_break_then_add_one, backend="eager", dynamic=False
+        )
+        with session as compiled:
+            compiled(x)
+        session.save(self.path())
+
+        torch._dynamo.reset()
+        scope = staged_break_then_add_one.__globals__
+        before = {name for name in scope if name.startswith("__resume_at")}
+        with contextlib.ExitStack() as stack:
+            loaded = [
+                stack.enter_context(
+                    precompile_load(
+                        staged_break_then_add_one,
+                        self.path(),
+                        backend="eager",
+                        dynamic=False,
+                    )
+                )
+                for _ in range(2)
+            ]
+            stack.enter_context(serving())
+            for call in loaded:
+                self.assertEqual(call(x), expected)
+            # Backstop on the mechanism: one installed name per load, not one
+            # name both loads fought over.
+            installed = {n for n in scope if n.startswith("__resume_at")} - before
+            self.assertEqual(len(installed), 2)
+
+    def test_resume_names_from_identical_captures_do_not_collide(self):
+        # Content-addressing the resume code tells the separate-captures pair
+        # above apart, because they differ after the break. It cannot tell two
+        # instances of ONE model class apart: the same script captured in two
+        # processes mints the same __resume_at_<offset>_<n> AND byte-identical
+        # resume code, so both artifacts hash to a single installed name.
+        models = [PrecompileSelfAct(act) for act in (torch.relu, torch.sigmoid)]
+        x = torch.randn(3, 4)
+        expected = [model(x) for model in models]
+        self.assertNotEqual(expected[0], expected[1])
+
+        paths = [self.path(f"act_{i}.pt") for i in range(len(models))]
+        for model, path in zip(models, paths):
+            torch._dynamo.reset()
+            session = precompile_capture(model, backend="eager", dynamic=False)
+            with session as compiled:
+                compiled(x)
+            # self.act is a dispatch slot; this test is about the resume name.
+            session.save(path, require_no_risky_drops=False)
+
+        names = [_resume_names_in(path) for path in paths]
+        self.assertEqual(len(names[0]), 1)
+        _rename_resume_function(paths[1], names[1][0], names[0][0])
+
+        torch._dynamo.reset()
+        with contextlib.ExitStack() as stack:
+            loaded = [
+                stack.enter_context(
+                    precompile_load(model, path, backend="eager", dynamic=False)
+                )
+                for model, path in zip(models, paths)
+            ]
+            stack.enter_context(serving())
+            for call, want in zip(loaded, expected):
+                self.assertEqual(call(x), want)
+
     def test_unload_keeps_globals_a_bystander_compile_needs(self):
         # A serving process shares a module namespace with plain torch.compile.
         # Import aliases are minted from the module name, so both writers pick
@@ -5203,6 +5397,104 @@ def staged(x):
             loaded.unload()
             self.assertEqual(bystander(x), expected)
 
+    def test_a_second_load_keeps_the_builtins_key_the_first_installed(self):
+        # Two loads of one artifact -- the replica shape -- record the same
+        # builtins-dict name, and only the first finds it unbound. Unless the
+        # second joins the owner set, the first unload deletes a global the
+        # second's bytecode reads and every later call is a NameError.
+        mod = self._import_module(
+            self._write_module(
+                "builtin_break", "builtin_break", _BUILTIN_ACROSS_BREAK_SRC
+            ),
+            "builtin_break",
+        )
+        x, cfg = torch.ones(3, 4), {"a": 1, "b": 2}
+        session = precompile_capture(mod.Model(2.0), backend="eager", dynamic=False)
+        with session as compiled, torch.no_grad():
+            compiled(x, cfg)
+        session.save(self.path(), require_no_risky_drops=False)
+
+        torch._dynamo.reset()
+        # A serving process that never compiled this module holds no builtins
+        # key, so the load is what creates it. Capturing in this process bound
+        # one here, so drop it to get to that state.
+        scope = mod.__dict__
+        for name in [n for n in scope if n.startswith("__builtins_dict__")]:
+            del scope[name]
+
+        model_a, model_b = mod.Model(2.0), mod.Model(2.0)
+        with torch.no_grad():
+            expected = model_b(x, cfg)
+        first = precompile_load(model_a, self.path(), backend="eager", dynamic=False)
+        self.addCleanup(first.unload)
+        second = precompile_load(model_b, self.path(), backend="eager", dynamic=False)
+        self.addCleanup(second.unload)
+        installed = sorted(n for n in scope if n.startswith("__builtins_dict__"))
+        self.assertTrue(installed)
+
+        first.unload()
+        with torch.no_grad(), serving():
+            self.assertEqual(second(x, cfg), expected)
+        self.assertEqual(
+            sorted(n for n in scope if n.startswith("__builtins_dict__")), installed
+        )
+
+    def test_unload_keeps_a_builtins_key_a_plain_compile_minted(self):
+        # The counter naming the builtins dict is per process, so a serving
+        # process that compiles before it loads can mint exactly the name the
+        # artifact recorded. Nothing displaced that binding, so the load must
+        # leave it alone: claiming it makes this unload delete the key the
+        # plain compile's own bytecode still reads.
+        import torch._dynamo.bytecode_transformation as bytecode_transformation
+
+        mod = self._import_module(
+            self._write_module(
+                "builtin_break_local",
+                "builtin_break_local",
+                _BUILTIN_ACROSS_BREAK_SRC,
+            ),
+            "builtin_break_local",
+        )
+        x, cfg = torch.ones(3, 4), {"a": 1, "b": 2}
+        scope = mod.__dict__
+        with mock.patch.object(
+            bytecode_transformation, "_unique_id_counter", itertools.count()
+        ):
+            session = precompile_capture(mod.Model(2.0), backend="eager", dynamic=False)
+            with session as compiled, torch.no_grad():
+                compiled(x, cfg)
+            session.save(self.path(), require_no_risky_drops=False)
+
+            torch._dynamo.reset()
+            prefixes = ("__builtins_dict__", "__resume_at")
+            for name in [n for n in scope if n.startswith(prefixes)]:
+                CleanupHook.disown(scope, name)
+                del scope[name]
+
+            # Same fresh counter the capture ran on, so the plain compile mints
+            # the names the artifact recorded.
+            bytecode_transformation._unique_id_counter = itertools.count()
+            bystander = torch.compile(mod.Model(2.0), backend="eager", dynamic=False)
+            with torch.no_grad():
+                expected = bystander(x, cfg)
+            minted = sorted(n for n in scope if n.startswith("__builtins_dict__"))
+            self.assertTrue(minted)
+
+            loaded = precompile_load(
+                mod.Model(2.0), self.path(), backend="eager", dynamic=False
+            )
+            self.assertEqual(
+                sorted(n for n in scope if n.startswith("__builtins_dict__")),
+                minted,
+                "the load minted a name of its own, so nothing collided",
+            )
+            loaded.unload()
+            with torch.no_grad(), torch.compiler.set_stance("fail_on_recompile"):
+                self.assertEqual(bystander(x, cfg), expected)
+            self.assertEqual(
+                sorted(n for n in scope if n.startswith("__builtins_dict__")), minted
+            )
+
     def test_unload_removes_the_builtins_key_install_added(self):
         session = precompile_capture(
             staged_with_graph_breaks, backend="eager", dynamic=False
@@ -5230,6 +5522,43 @@ def staged(x):
         loaded.unload()
         # Import aliases are the one thing install() is expected to leave:
         # plain torch.compile installs them permanently too.
+        leftover = sorted(
+            name for name in set(scope) - before if not name.startswith("__import_")
+        )
+        self.assertEqual(leftover, [])
+
+    def test_unload_removes_globals_an_uncovered_call_installed(self):
+        # A call the artifact does not cover falls back to an ordinary Dynamo
+        # compile inside the loaded region, and that compile installs globals of
+        # its own: a compiled backend, a resume function, a builtins dict.
+        # OutputGraph writes them, so the package never sees them, and the
+        # CleanupHook anchoring them to the transformed code does not fire when
+        # the region goes away -- unclaimed, they stay in the served module for
+        # the life of the process, four more on every load.
+        model = PrecompileBreakOnlyWhenFalse()
+        x = torch.randn(3, 4)
+        with torch.no_grad():
+            expected = [model(x, flag) for flag in (True, False)]
+        session = precompile_capture(model, backend="eager", dynamic=False)
+        with session as compiled, torch.no_grad():
+            compiled(x, True)
+        session.save(self.path())
+
+        torch._dynamo.reset()
+        scope = PrecompileBreakOnlyWhenFalse.forward.__globals__
+        before = set(scope)
+        for _ in range(2):
+            loaded = precompile_load(model, self.path(), backend="eager", dynamic=False)
+            with torch.no_grad():
+                self.assertEqual(loaded(x, True), expected[0])
+                covered = set(scope)
+                self.assertEqual(loaded(x, False), expected[1])
+            # The uncovered branch breaks at a line the artifact never captured,
+            # so the fallback compile has to mint globals of its own.
+            self.assertTrue(set(scope) - covered)
+            loaded.unload()
+        # Import aliases are the one thing a load is expected to leave, exactly
+        # as in test_unload_removes_the_builtins_key_install_added above.
         leftover = sorted(
             name for name in set(scope) - before if not name.startswith("__import_")
         )
@@ -5384,7 +5713,17 @@ def staged(x):
         first = precompile_load(
             PrecompileSelfAct(torch.relu), self.path(), backend="eager", dynamic=False
         )
-        installed = {name: scope[name] for name in set(scope) - before}
+        # Ask the package what it installed rather than diffing the namespace.
+        # A diff is a GC-timing observation: the capture-time binding of the
+        # backend global is only absent from the "before" snapshot once its
+        # code object is reclaimed, which a free-threaded build does not do
+        # promptly -- so on 3.14t the diff dropped the one name that IS
+        # rebound and the assertion below failed with an empty set.
+        installed = {
+            g.name: g.value
+            for entries in first._package._installed_globals.values()
+            for g in entries
+        }
         second = precompile_load(
             PrecompileSelfAct(torch.relu), self.path(), backend="eager", dynamic=False
         )
@@ -5393,7 +5732,12 @@ def staged(x):
             for name, value in installed.items()
             if scope.get(name) is not value
         }
-        self.assertTrue(rebound)
+        # Two separate preconditions, asserted separately: an empty `rebound` can
+        # mean the first load installed nothing OR that the second load produced
+        # objects identical to the first, and those are different bugs. The
+        # py3.14t shard reports the second one, so name them.
+        self.assertTrue(installed, "the first load installed no globals")
+        self.assertTrue(rebound, f"the second load rebound none of {sorted(installed)}")
 
         first.unload()
         for name, value in rebound.items():
@@ -5404,7 +5748,9 @@ def staged(x):
         # them, so putting them back here would leave a compiled backend bound
         # in the module for the life of the process, one set per load.
         leftover = sorted(
-            name for name in set(scope) - before if not name.startswith("__import_")
+            name
+            for name in set(scope) - before
+            if not name.startswith("__import_") and name in installed
         )
         self.assertEqual(leftover, [])
 

@@ -398,7 +398,6 @@ See the docs for {class}`~torch.cuda.gds.GdsFile` for an example of how to use t
     :toctree: generated
     :nosignatures:
 
-    is_available
     gds_register_buffer
     gds_deregister_buffer
     GdsFile

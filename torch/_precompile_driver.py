@@ -62,10 +62,10 @@ if TYPE_CHECKING:
     # _DYNAMO_STATE is base64(pickle({used_globals, closure, argdefs, kwdefaults})).
     BACKEND_ID: str | None = None
     IMPORT_SOURCES: dict[str, str] = {}
-    # (frame arg index, path from that arg to the owning module, param name,
-    # expected_none) per parameter whose incoming .grad state affects the captured
-    # backward. The path is a list of ("index"|"key"|"attr", accessor) steps.
-    GRAD_PARAM_STATES: list[tuple[int, list[tuple[str, object]], str, bool]] = []
+    # (frame arg index, path from that arg to the owning module, param name) per
+    # param the captured backward accumulates a gradient into; empty for a forward
+    # capture. The path is a list of ("index"|"key"|"attr", accessor) steps.
+    GRAD_ACCUM_PARAMS: list[tuple[int, list[tuple[str, object]], str]] = []
     _DYNAMO_CODE: str = ""
     _DYNAMO_STATE: str = ""
 
@@ -77,8 +77,7 @@ def _extract_param_buffers(mods):
     """Lift the runtime modules' params then buffers, interning by identity, in the
     same order as capture, so the list lines up with the compiled/captured graph. Returns
     (pb, names) where names mirrors PARAM_NAMES + BUFFER_NAMES. This ordering AND the
-    naming must match torch._precompile._intern_param_buffers verbatim (its INVARIANT).
-    """
+    naming must match torch._precompile._intern_param_buffers verbatim (its INVARIANT)."""
     multi = len(mods) > 1
     seen = set()
     pb = []
@@ -217,7 +216,23 @@ def _eager_forward(*args):
             )
     pb, _names = _extract_param_buffers(mods)
     _check_structure(pb, _names)
-    with _torch.no_grad():
+    # The eager artifact is an ATen graph that re-dispatches, so ambient autocast
+    # in the serving process would rewrite its numerics -- and any cast the
+    # capture itself ran under is already baked into the graph. Reproduce the
+    # capture by neutralizing autocast on the devices this call actually uses.
+    import contextlib as _contextlib
+
+    with _contextlib.ExitStack() as _stack:
+        _stack.enter_context(_torch.no_grad())
+        for _dev in sorted(
+            {
+                _t.device.type
+                for _t in [*pb, *user_flat]
+                if isinstance(_t, _torch.Tensor)
+            }
+        ):
+            if _torch.amp.is_autocast_available(_dev):
+                _stack.enter_context(_torch.amp.autocast(_dev, enabled=False))
         out = list(call([*pb, *user_flat]))
     if GRAD_PARAM_INDICES:
         n = len(GRAD_PARAM_INDICES)
@@ -409,8 +424,7 @@ def _build_dynamo_forward():
     _DYNAMO_STATE's used_globals, and BACKEND_ID -> the compiled subgraph. The returned
     function takes the same args fn took (the model(s) in their positions plus the
     runtime inputs). Nothing reads an external cache: the subgraph's kernels JIT-compile
-    from the inlined source on first call (the cache, when present, only primes them).
-    """
+    from the inlined source on first call (the cache, when present, only primes them)."""
     import base64
     import importlib
     import marshal
@@ -419,6 +433,14 @@ def _build_dynamo_forward():
     import types
 
     try:
+        produced_on = globals().get("_DYNAMO_PYTHON_VERSION")
+        if produced_on is not None and tuple(produced_on) != sys.version_info[:2]:
+            # Explicit, because marshal is not the guard it looks like: only the
+            # 3.10 -> 3.11 layout change makes it raise. A 3.12 blob loads on 3.13
+            # and then segfaults when the code object is executed, so refuse first.
+            raise ValueError(
+                f"artifact was produced on Python {produced_on[0]}.{produced_on[1]}"
+            )
         code = marshal.loads(base64.b64decode(_DYNAMO_CODE))
         if not isinstance(code, types.CodeType):
             # marshal can successfully deserialize a non-code object (int, list, ...) from a
@@ -499,17 +521,20 @@ def _build_dynamo_forward():
     fn = types.FunctionType(code, f_globals, closure=cells, argdefs=state["argdefs"])
     if state["kwdefaults"]:
         fn.__kwdefaults__ = state["kwdefaults"]
-    if not GRAD_PARAM_STATES:
+    if not GRAD_ACCUM_PARAMS:
         return fn
 
     import torch
 
     def forward(*args, **kwargs):
-        # Dynamo specializes both user branches on ``p.grad is None`` and the
-        # backward's assign-vs-accumulate update. Validate the capture-time state before
-        # user code rather than manufacturing zero gradients, which would silently turn
-        # a fresh first step into a warm one.
-        for _pos, _path, _name, _expected_none in GRAD_PARAM_STATES:
+        # Training capture: the baked backward ACCUMULATES into each param's .grad in
+        # place (p.grad.add_(new)), matching eager .backward(). That needs the tensor to
+        # exist, so materialize a zero one wherever the runtime model left .grad at None
+        # (a fresh model, or the usual zero_grad(set_to_none=True)); zero + accumulate is
+        # exactly eager's first-step assign. Only the params the captured graph actually
+        # accumulates into are listed, so a frozen or non-contributing param keeps
+        # .grad = None as eager leaves it.
+        for _pos, _path, _name in GRAD_ACCUM_PARAMS:
             # Replay the exact path capture recorded, rather than searching for
             # a module that has a parameter of this name: two same-shaped
             # modules in one container are indistinguishable by name, so a
@@ -547,20 +572,8 @@ def _build_dynamo_forward():
                     f"argument(s) and nothing with that parameter is at that path. Pass "
                     f"the model in the same position and shape as at capture."
                 )
-            _actual_none = _p.grad is None
-            if _actual_none != _expected_none:
-                from torch._precompile import PrecompileError as _PrecompileError
-
-                _expected = "None" if _expected_none else "a Tensor"
-                _actual = "None" if _actual_none else "a Tensor"
-                raise _PrecompileError(
-                    f"precompile: parameter {_name!r} was captured with .grad "
-                    f"equal to {_expected}, but the runtime model has {_actual}. "
-                    "tracer='dynamo' training artifacts preserve capture-time "
-                    "branches on .grad and therefore require the same incoming "
-                    "gradient state. Call zero_grad(set_to_none=True) before a "
-                    "cold-state artifact, or recapture with the intended state."
-                )
+            if _p.grad is None:
+                _p.grad = torch.zeros_like(_p)
         return fn(*args, **kwargs)
 
     return forward

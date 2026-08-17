@@ -127,7 +127,6 @@ artifacts transparently without an explicit capture block.
 from __future__ import annotations
 
 import contextlib
-import dataclasses
 import functools
 import hashlib
 import importlib.machinery
@@ -141,6 +140,7 @@ import sysconfig
 import threading
 import types
 from collections.abc import Callable, Iterator, Sequence
+from contextvars import ContextVar
 from typing import Any, TYPE_CHECKING
 from typing_extensions import Self
 
@@ -148,6 +148,7 @@ import torch
 import torch._functorch.config as functorch_config
 from torch._guards import ChainedSource, Source
 from torch.compiler._precompile_types import (
+    ExampleInput,
     FrameInvariants,
     GuardFact as _GuardFact,
     PrecompileSummary,
@@ -164,6 +165,7 @@ from .package import (
     DynamoStore,
     PrecompileCacheEntry,
 )
+from .pgo import _use_code_state
 from .source import AttrSource, DictGetItemSource, GlobalSource
 
 
@@ -175,9 +177,16 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-_CAPTURE_CONFIG_LOCK = threading.Lock()
-_CAPTURE_CONFIG_DEPTH = 0
-_CAPTURE_CONFIG_PRIOR: tuple[bool, bool] | None = None
+# Built once: the served call path enters this on every call, and
+# config.patch() allocates a class and a ContextVar each time it is called.
+_ALLOW_EMPTY_GRAPHS = torch._dynamo.config._make_closure_patcher(
+    allow_empty_graphs=True
+)
+
+
+_CAPTURE_CONFIG_STATE: ContextVar[tuple[int, tuple[bool, bool] | None]] = ContextVar(
+    "precompile_capture_config_state", default=(0, None)
+)
 
 # Not a public surface -- see the module docstring. This exists so `from ...
 # import *` in a debugging session pulls the entry points rather than every
@@ -196,35 +205,37 @@ __all__ = [
 
 @contextlib.contextmanager
 def _capture_config() -> Iterator[None]:
-    global _CAPTURE_CONFIG_DEPTH, _CAPTURE_CONFIG_PRIOR
-
+    depth, prior = _CAPTURE_CONFIG_STATE.get()
     dynamo_config: Any = torch._dynamo.config
-    with _CAPTURE_CONFIG_LOCK:
-        if _CAPTURE_CONFIG_DEPTH == 0:
-            _CAPTURE_CONFIG_PRIOR = (
-                functorch_config.bundled_autograd_cache,
-                dynamo_config.allow_empty_graphs,
-            )
-            functorch_config.bundled_autograd_cache = True
-            dynamo_config.allow_empty_graphs = True
-        _CAPTURE_CONFIG_DEPTH += 1
+    if depth == 0:
+        prior = (
+            functorch_config.bundled_autograd_cache,
+            dynamo_config.allow_empty_graphs,
+        )
+        functorch_config.bundled_autograd_cache = True
+        dynamo_config.allow_empty_graphs = True
+    _CAPTURE_CONFIG_STATE.set((depth + 1, prior))
     try:
         yield
     finally:
-        with _CAPTURE_CONFIG_LOCK:
-            if _CAPTURE_CONFIG_DEPTH <= 0 or _CAPTURE_CONFIG_PRIOR is None:
-                raise AssertionError("precompile capture config is not active")
-            _CAPTURE_CONFIG_DEPTH -= 1
-            if _CAPTURE_CONFIG_DEPTH == 0:
-                functorch_config.bundled_autograd_cache = _CAPTURE_CONFIG_PRIOR[0]
-                dynamo_config.allow_empty_graphs = _CAPTURE_CONFIG_PRIOR[1]
-                _CAPTURE_CONFIG_PRIOR = None
+        depth, prior = _CAPTURE_CONFIG_STATE.get()
+        if depth <= 0 or prior is None:
+            raise AssertionError("precompile capture config is not active")
+        depth -= 1
+        if depth == 0:
+            functorch_config.bundled_autograd_cache = prior[0]
+            dynamo_config.allow_empty_graphs = prior[1]
+            _CAPTURE_CONFIG_STATE.set((0, None))
+        else:
+            _CAPTURE_CONFIG_STATE.set((depth, prior))
 
 
-def _clear_package_region(package: CompilePackage, isolate_recompiles_id: int) -> None:
+def _clear_package_region(
+    codes: Sequence[types.CodeType], isolate_recompiles_id: int
+) -> None:
     from .eval_frame import _clear_cache_entries_for_region
 
-    for code in package.code_objects():
+    for code in codes:
         _clear_cache_entries_for_region(code, isolate_recompiles_id)
 
 
@@ -256,14 +267,6 @@ def default_guard_filter_fn(
         and not any(d in unsupported for d in g.derived_guard_types)
         for g in guard_entries
     ]
-
-
-@dataclasses.dataclass(frozen=True)
-class ExampleInput:
-    """One call to make during capture, when args alone are not enough."""
-
-    args: tuple[object, ...] = ()
-    kwargs: dict[str, object] = dataclasses.field(default_factory=dict)
 
 
 def _owning_module(value: object) -> str | None:
@@ -849,6 +852,10 @@ class _PrecompileBackend:
         inner = torch._dynamo.lookup_backend(backend)
         self._torchdynamo_orig_backend = inner
         self._torchdynamo_cache_key = object()
+        # get_backend skips looking for that key until it knows one exists,
+        # because the lookup is a raising miss at every level of the callback
+        # chain for every torch.compile user who never precompiles.
+        torch._C._dynamo.eval_frame._enable_precompile_cache_keys()
         self.backend_ctx_ctor = getattr(
             inner, "backend_ctx_ctor", contextlib.nullcontext
         )
@@ -1132,15 +1139,32 @@ class PrecompileSession:
         fn: Callable[..., object],
         *,
         backend: str = "inductor",
-        guard_filter_fn: (
-            Callable[[Sequence[GuardFilterEntry]], Sequence[bool]] | None
-        ) = None,
+        guard_filter_fn: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]]
+        | None = None,
         recompile_limit: int = 256,
         dynamic: bool | None = None,
         example_inputs: Sequence[ExampleInput | tuple[object, ...]] | None = None,
         invariants: str | None = None,
     ) -> None:
-        self._example_inputs = tuple(example_inputs or ())
+        # Not `example_inputs or ()`: truth-testing the caller's object turns the
+        # likeliest mistake -- passing the tensors themselves instead of a
+        # sequence of call tuples -- into either a raw "Boolean value of Tensor
+        # is ambiguous" from inside torch, or, for a falsy tensor, a silently
+        # empty capture that only fails much later at save().
+        bad_container = isinstance(
+            example_inputs, (torch.Tensor, torch.nn.Module, str)
+        ) or not isinstance(example_inputs, Sequence)
+        if example_inputs is None:
+            self._example_inputs: tuple[ExampleInput | tuple[object, ...], ...] = ()
+        elif bad_container:
+            raise TypeError(
+                f"example_inputs takes a sequence of calls -- each a tuple of "
+                f"positional args, or an ExampleInput -- got "
+                f"{type(example_inputs).__name__}. A single call is "
+                f"example_inputs=[(x,)], not example_inputs=x."
+            )
+        else:
+            self._example_inputs = tuple(example_inputs)
         self._invariants_path = invariants
         self._fn = fn
         self._backend = backend
@@ -1219,7 +1243,7 @@ class PrecompileSession:
 
         isolate_recompiles_id = self._isolate_recompiles_id
         try:
-            _clear_package_region(self._package, isolate_recompiles_id)
+            _clear_package_region(self._package.region_codes(), isolate_recompiles_id)
         finally:
             _unregister_explicit_compile_region(isolate_recompiles_id)
             self._isolate_recompiles_id = None
@@ -1534,21 +1558,46 @@ class PrecompileSession:
             for fact in f.undetermined:
                 lines.append(f"  unknown   {fact.render()}")
         os.makedirs(os.path.dirname(os.path.abspath(path)) or ".", exist_ok=True)
-        with open(path, "w") as handle:
+        # UTF-8 explicitly: the report renders user identifiers (module, class and
+        # parameter names) and the ambient locale can be ASCII in a container, where
+        # a non-ASCII name would raise UnicodeEncodeError and leave a truncated file
+        # behind -- from the one call that exists to explain the artifact.
+        with open(path, "w", encoding="utf-8") as handle:
             handle.write("\n".join(lines) + "\n")
         log.info(
             "precompile: wrote invariants for %d frame(s) to %s", len(frames), path
         )
 
     def summary(self) -> PrecompileSummary:
+        # A dropped fact counts as risky through this arm only when the SAME
+        # source held DIFFERENT values across the captured variants -- i.e. the
+        # drop demonstrably distinguishes them. Merely being absent from one
+        # variant does not: a MODULE_MATCH on torch.nn.functional that one
+        # branch happens not to touch was flagging every ordinary multi-branch
+        # capture, which is precisely the shape example_inputs= exists for, and
+        # left the operator no escape but disabling the rail wholesale. Grouped
+        # by source rather than by (guard_type, source) because a rebind can
+        # change the guard type too, and that is the case worth keeping.
+        values_by_source: dict[str, set[str]] = {}
+        for frame in self.invariants():
+            for fact in frame.varying:
+                if not fact.enforced:
+                    values_by_source.setdefault(fact.source, set()).add(fact.value)
         varying_dropped = {
             (fact.guard_type, fact.source)
             for frame in self.invariants()
             for fact in frame.varying
-            if not fact.enforced
+            if not fact.enforced and len(values_by_source.get(fact.source, ())) > 1
         }
-        risky = self._risky_dropped_guards | {
-            (guard_type, name)
+        # Normalized: a Dynamo per-process counter (__builtins_dict___14) makes
+        # one logical drop appear once per compilation, under names that change
+        # every run, which inflates the count save() truncates at 8 and can push
+        # the genuinely config-selected drop out of the operator's view.
+        risky = {
+            (guard_type, _normalize(name))
+            for guard_type, name in self._risky_dropped_guards
+        } | {
+            (guard_type, _normalize(name))
             for guard_type, name in self._dropped_guards
             if (guard_type, _normalize(name)) in varying_dropped
         }
@@ -1720,9 +1769,8 @@ def precompile_capture(
     fn: Callable[..., object],
     *,
     backend: str = "inductor",
-    guard_filter_fn: (
-        Callable[[Sequence[GuardFilterEntry]], Sequence[bool]] | None
-    ) = None,
+    guard_filter_fn: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]]
+    | None = None,
     recompile_limit: int = 256,
     dynamic: bool | None = None,
     example_inputs: Sequence[ExampleInput | tuple[object, ...]] | None = None,
@@ -1766,9 +1814,8 @@ def precompile_load(
     path: str,
     *,
     backend: str = "inductor",
-    guard_filter_fn: (
-        Callable[[Sequence[GuardFilterEntry]], Sequence[bool]] | None
-    ) = None,
+    guard_filter_fn: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]]
+    | None = None,
     recompile_limit: int = 256,
     dynamic: bool | None = None,
 ) -> PrecompiledCallable:
@@ -1859,13 +1906,16 @@ class PrecompiledCallable:
         # Dynamo's ordinary eager-only SkipFrame. Otherwise one fallback call
         # permanently skips that frame and later serving() cannot detect it.
         try:
-            from .pgo import _use_code_state
-
-            with (
-                torch._dynamo.config.patch(allow_empty_graphs=True),
-                _use_code_state(self._pgo_state),
-            ):
-                return compiled(*args, **kwargs)
+            # _make_closure_patcher rather than config.patch(): patch() builds a
+            # fresh ConfigPatch class and a fresh ContextVar on every call, and
+            # this runs on every served call. The patcher is built once at import
+            # and costs a set/restore pair.
+            revert = _ALLOW_EMPTY_GRAPHS()
+            try:
+                with _use_code_state(self._pgo_state):
+                    return compiled(*args, **kwargs)
+            finally:
+                revert()
         finally:
             with self._state:
                 self._active_calls -= 1
@@ -1897,11 +1947,16 @@ class PrecompiledCallable:
                 self._state.notify_all()
                 raise
             self._loaded = False
+        # uninstall() forgets which code objects it installed onto, and a frame
+        # reached through code_source was installed onto the live code the
+        # running program resolves rather than the reconstructed twin the
+        # package holds, so the set to clear has to be taken first.
+        codes = self._package.region_codes()
         try:
             self._package.uninstall()
         finally:
             try:
-                _clear_package_region(self._package, self._isolate_recompiles_id)
+                _clear_package_region(codes, self._isolate_recompiles_id)
             finally:
                 from .eval_frame import _unregister_explicit_compile_region
 
