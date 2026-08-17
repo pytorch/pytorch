@@ -789,7 +789,20 @@ class SideEffects:
         self, tx: "InstructionTranslatorBase", item: Any
     ) -> VariableTracker:
         """Get-or-build the memoized VT for a mutable sourceless class
-        attribute (see sourceless_cls_attrs). Keyed by identity of item."""
+        attribute (see sourceless_cls_attrs). Keyed by identity of item.
+
+        If item is already tracked under a real source (e.g. it's a class
+        attribute that aliases a global read earlier in the same trace),
+        reuse that VT instead of building a second, sourceless one for the
+        same object -- this makes mutations made through the class
+        attribute correctly guard and replay onto the real object, for
+        that ordering. It only helps when the sourced read happens first;
+        if this sourceless read happens first, nothing here can add a
+        guard for the alias discovered later. See the aliasing note on the
+        isinstance check at the call sites in user_defined.py."""
+        existing = self.id_to_variable.get(id(item))
+        if existing is not None:
+            return existing
         entry = self.sourceless_cls_attrs.get(id(item))
         if entry is None:
             entry = (item, VariableTracker.build(tx, item, None))

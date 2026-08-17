@@ -868,7 +868,11 @@ class UserDefinedClassVariable(UserDefinedVariable):
             # read would be lost. In CPython cls.attr returns the same object
             # every time, so memoize to match. Does not cover a mutable
             # container nested inside an immutable one (e.g. a tuple of
-            # lists), which isn't caught by the isinstance check above.
+            # lists), which isn't caught by the isinstance check above. For
+            # a class that pre-existed the region and is only reached
+            # sourcelessly, the memo keeps in-region reads consistent with
+            # each other, but the mutation is still never replayed onto the
+            # real object -- there's no source to write it back through.
             return tx.output.side_effects.build_sourceless_cls_attr(tx, cls_attr)
         return VariableTracker.build(tx, cls_attr, source)
 

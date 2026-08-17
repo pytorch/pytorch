@@ -16213,6 +16213,39 @@ fn
         self.assertEqual(opt_fn(t), fn(t))
 
     @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test___build_class___mutable_attr_aliases_global_sourced_first(self):
+        # A class attribute can alias an object that's also reachable as a
+        # plain global (the class body runs eagerly at trace time, so
+        # `items = some_global` really does bind the same object). If the
+        # global gets a normal sourced read (LOAD_GLOBAL) before the
+        # sourceless class-attr memo is built for the same object,
+        # build_sourceless_cls_attr reuses that already-tracked, guarded VT
+        # instead of a second sourceless one -- so the mutation made
+        # through the class attribute correctly replays onto the real
+        # global. (The reverse ordering -- class attr mutated before the
+        # global is ever read directly -- isn't guarded; that's a known,
+        # separate limitation, not what this test covers.)
+        global _test_build_class_aliased_global
+        _test_build_class_aliased_global = []
+        try:
+
+            def fn(t):
+                class Holder:
+                    items = _test_build_class_aliased_global
+
+                n = len(_test_build_class_aliased_global)  # sourced read first
+                Holder.items.append(1)  # reuses that sourced VT
+                return t + n
+
+            t = torch.randn(2)
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            out = opt_fn(t)
+            self.assertEqual(out, t)  # n was 0 at read time
+            self.assertEqual(_test_build_class_aliased_global, [1])
+        finally:
+            del _test_build_class_aliased_global
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
     def test___build_class___mutable_attr_escapes_compiled_region(self):
         # The mutated container itself (not just a value derived from it)
         # is returned, so it must still be live on tx.stack when
@@ -16229,7 +16262,14 @@ fn
 
         t = torch.randn(2)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertEqual(opt_fn(t), fn(t))
+        # Assert the literal, not just equality with a second eager call --
+        # a reconstruction that returned [] would still match an equally
+        # broken eager run if we only compared the two. Call twice: the
+        # class body isn't re-traced on the second call (Dynamo caches the
+        # compiled code), so this also catches the compiled path baking in
+        # a stale value instead of reconstructing [1] fresh each time.
+        self.assertEqual(opt_fn(t), [1])
+        self.assertEqual(opt_fn(t), [1])
 
     @torch._dynamo.config.patch(enable_trace_load_build_class=True)
     def test___build_class___mutable_attr_mutation_with_hop_in_frame(self):
