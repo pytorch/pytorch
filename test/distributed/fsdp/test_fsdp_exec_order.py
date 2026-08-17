@@ -63,7 +63,7 @@ class ExecOrderTestBase(FSDPTestContinuous):
 
     @property
     def world_size(self) -> int:
-        return min(2, _get_device_module(self.device_type).device_count())
+        return _get_device_module(self.device_type).device_count()
 
 
 class Model(torch.nn.Module):
