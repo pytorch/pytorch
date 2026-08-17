@@ -33,6 +33,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     random_matrix_with_scaled_reduction_dim,
     skipIfRocm,
+    TEST_WITH_ROCM,
     xfailIf,
 )
 from torch.testing._internal.inductor_utils import (
@@ -44,6 +45,7 @@ from torch.testing._internal.inductor_utils import (
     HAS_CPU,
     HAS_CUDA_AND_TRITON,
     is_big_gpu,
+    running_on_tdm_device,
 )
 from torch.utils._sympy.symbol import SymT
 from torch.utils._triton import has_triton_tma_device
@@ -2246,6 +2248,272 @@ class TestE8M0Log2PatternBitManip(TestCase):
             msg="Bit-manipulation replacement must return the correct e8m0 ceiling "
             "for values 1 ULP above a power of 2 (gh-178045 regression).",
         )
+
+
+# These host-side tests validate ROCm-specific TDM logic; TDM hardware is not required.
+@unittest.skipUnless(
+    TEST_WITH_ROCM,
+    "ROCm-specific TDM host-side test; no TDM-capable device required",
+)
+class TestTDMScaled(TestCase):
+    def test_tdm_scaled_gate_admits_ocp_fp8_and_rejects_fnuz(self):
+        from torch._inductor.utils import use_triton_tdm_scaled_template
+        from torch._inductor.virtualized import V
+
+        class FakeSizeVars:
+            @staticmethod
+            def replace_backed_symbols_with_hints(expr):
+                return expr
+
+            @staticmethod
+            def statically_known_equals(expr, val):
+                return expr == val
+
+            @staticmethod
+            def statically_known_multiple_of(expr, val):
+                return expr % val == 0
+
+        def make_mat(name, dtype, stride):
+            mat = mock.Mock()
+            mat.get_device.return_value = torch.device("cuda")
+            mat.get_dtype.return_value = dtype
+            mat.get_size.return_value = [128, 256]
+            mat.get_stride.return_value = stride
+            mat.get_name.return_value = name
+            mat.get_layout.return_value = mock.Mock(offset=0)
+            return mat
+
+        fake_graph = mock.Mock(sizevars=FakeSizeVars(), unaligned_buffers=set())
+        with (
+            V.set_graph_handler(fake_graph),
+            mock.patch("torch._inductor.utils._gfx1250_tdm_enabled", return_value=True),
+        ):
+            for dtype in (torch.float8_e4m3fn, torch.float8_e5m2):
+                self.assertTrue(
+                    use_triton_tdm_scaled_template(
+                        make_mat("A", dtype, [256, 1]),
+                        make_mat("B", dtype, [1, 256]),
+                    )
+                )
+            self.assertFalse(
+                use_triton_tdm_scaled_template(
+                    make_mat("A", torch.float8_e4m3fnuz, [256, 1]),
+                    make_mat("B", torch.float8_e4m3fnuz, [1, 256]),
+                )
+            )
+
+    def test_scaled_descriptor_selection_uses_tdm_on_hip(self):
+        from torch._inductor.kernel import mm as mm_kernel
+
+        mat_a, mat_b, layout = mock.Mock(), mock.Mock(), mock.Mock()
+        with (
+            mock.patch("torch.version.hip", "7.14"),
+            mock.patch.object(
+                mm_kernel, "use_triton_tdm_scaled_template", return_value=True
+            ) as tdm_gate,
+            mock.patch.object(
+                mm_kernel,
+                "use_triton_tma_template",
+                side_effect=AssertionError("HIP scaled path must not use TMA gate"),
+            ),
+        ):
+            self.assertTrue(
+                mm_kernel._use_scaled_descriptor_template(mat_a, mat_b, layout)
+            )
+            tdm_gate.assert_called_once_with(mat_a, mat_b, add_guards=True)
+
+    def test_tdm_scaled_config_policy(self):
+        from torch._inductor.heuristics.template.triton import (
+            ROCmScaledTDMMainLoopScalingTemplateConfigHeuristic,
+        )
+
+        heuristic = ROCmScaledTDMMainLoopScalingTemplateConfigHeuristic()
+        self.assertTrue(heuristic.uses_tdm_configs)
+        self.assertEqual(heuristic.mm_configs, heuristic.scaled_persistent_mm_configs)
+        configs = heuristic._filter_configs(heuristic.mm_configs)
+        self.assertTrue(
+            all(config.num_stages == heuristic.default_num_stages for config in configs)
+        )
+
+    def test_tdm_scaled_config_uses_operand_orientation_probe(self):
+        from torch._inductor.heuristics.template.triton import (
+            BaseScaledMMConfigMixin,
+            ROCmScaledTDMEpilogueScalingTemplateConfigHeuristic,
+        )
+        from torch._inductor.kernel_inputs import MMKernelInputs
+
+        mat_a, mat_b = mock.Mock(), mock.Mock()
+        scale_a, scale_b = mock.Mock(), mock.Mock()
+        kernel_inputs = MMKernelInputs(
+            [mat_a, mat_b, scale_a, scale_b], mat1_idx=0, mat2_idx=1
+        )
+
+        with (
+            mock.patch(
+                "torch._inductor.heuristics.template.triton.tdm_descriptor_row_major",
+                side_effect=[True, False],
+            ),
+            mock.patch(
+                "torch._inductor.heuristics.template.triton.get_num_sms",
+                return_value=1,
+            ),
+            mock.patch.object(
+                BaseScaledMMConfigMixin,
+                "_get_template_configs_impl",
+                return_value=iter([{}]),
+            ) as base_impl,
+        ):
+            heuristic = ROCmScaledTDMEpilogueScalingTemplateConfigHeuristic()
+            [options] = heuristic._get_template_configs_impl(kernel_inputs, "scaled_mm")
+
+        self.assertEqual(options["NUM_SMS"], 1)
+        self.assertFalse(options["TMA_EXPERIMENTAL_API"])
+        self.assertEqual(base_impl.call_args.kwargs["tdm_a_row_major"], True)
+        self.assertEqual(base_impl.call_args.kwargs["tdm_b_row_major"], False)
+
+    def test_tdm_main_loop_supplies_required_tile_options(self):
+        from torch._inductor.heuristics.template.triton import (
+            ROCmScaledTDMConfigMixin,
+            ROCmScaledTDMMainLoopScalingTemplateConfigHeuristic,
+        )
+
+        kernel_inputs = mock.Mock()
+        scale_a = mock.Mock()
+        scale_b = mock.Mock()
+        scale_a.get_size.return_value = [1, 1]
+        scale_b.get_size.return_value = [1, 1]
+        kernel_inputs._input_nodes = [mock.Mock(), mock.Mock(), scale_a, scale_b]
+        base_config = {
+            "BLOCK_M": 64,
+            "BLOCK_N": 128,
+            "BLOCK_K": 64,
+        }
+
+        with (
+            mock.patch(
+                "torch._inductor.heuristics.template.triton.get_scaling_options",
+                return_value=(
+                    ScalingType.BlockWise128x128,
+                    ScalingType.BlockWise128x128,
+                ),
+            ),
+            mock.patch.object(
+                ROCmScaledTDMConfigMixin,
+                "_get_template_configs_impl",
+                return_value=iter([base_config]),
+            ),
+        ):
+            heuristic = ROCmScaledTDMMainLoopScalingTemplateConfigHeuristic()
+            [options] = heuristic._get_template_configs_impl(kernel_inputs, "scaled_mm")
+
+        self.assertEqual(options["TILE_SIZE_A"], 128)
+        self.assertEqual(options["TILE_SIZE_B"], 128)
+        self.assertEqual(options["MIN_BLOCK_TILE_AM"], 64)
+        self.assertEqual(options["MIN_BLOCK_TILE_AK"], 64)
+        self.assertEqual(options["MIN_BLOCK_TILE_BK"], 64)
+        self.assertEqual(options["MIN_BLOCK_TILE_BN"], 128)
+
+
+@unittest.skipUnless(
+    running_on_tdm_device(),
+    "requires gfx1250 with ROCm 7.14+ and TDM-capable Triton",
+)
+class TestTDMScaledEndToEnd(TestCase):
+    """Real-device scaled TDM coverage.
+
+    KNOWN FAILING on gfx1250. Both tests reach the correctness assertion and
+    fail there: the scaled TDM kernel returns an all-zero result. The codegen
+    assertions above it pass -- descriptors are emitted, the template compiles
+    and autotunes -- so "``make_tensor_descriptor`` appears in the output" is
+    NOT evidence that this path is correct. Measured on gfx1250 with ROCm/HIP
+    7.16 and Triton 3.8, ``_scaled_mm`` at 256x256x256:
+
+        enable_tdm=False -> max abs error 0.17 (bf16 rounding)
+        enable_tdm=True  -> 0 of 65536 output elements non-zero
+
+    Reproduced with scales of both 1x1 and 2x3, so it is not a scale-magnitude
+    issue. Dense (``TestTDMEndToEnd``) and flex TDM pass on the same build, so
+    this is specific to the scaled/FP8 descriptor path; the suspected cause is
+    TDM descriptors over 1-byte (FP8) elements.
+
+    Two deliberate deviations from the obvious formulation, both required just
+    to reach that assertion:
+
+    * Row-wise rather than tensor-wise scales. Both recipes live in
+      ``epilogue_scaling_types`` and select the same descriptor template, so
+      the TDM path under test is unchanged. But tensor-wise scales are rank-1,
+      and ``max_autotune`` also builds the plain ``mm_template`` choice, whose
+      ``store_output`` loads every epilogue input with the output's 2D index --
+      that combination raises inside ``FixedLayout`` indexing before any TDM
+      code runs, and does so with ``enable_tdm=False`` too. Note that
+      ``test_configs.autotune_choice_name_regex`` cannot avoid it, because
+      ``filter_choices_by_name_regex`` runs over already-constructed choices
+      while the failure happens during construction.
+
+    * An fp32 recomputation, rather than the eager op, as the oracle. Eager
+      ``_scaled_mm`` dispatches to hipBLASLt, which has no row-wise FP8
+      solution on gfx1250 and raises before the Triton result can be compared.
+    """
+
+    def _assert_close_to_reference(self, result, a, b, scale_a, scale_b):
+        # Both sides consume the same already-quantized FP8 operands, so this
+        # compares accumulation and epilogue scaling only -- quantization error
+        # cancels and does not enter the tolerance. Cross-checked against a CPU
+        # matmul, which agrees with this GPU fp32 matmul exactly.
+        expected = ((a.float() @ b.float()) * scale_a * scale_b).to(result.dtype)
+        torch.testing.assert_close(result, expected, atol=5e-2, rtol=2e-2)
+
+    def _compile_and_get_code(self, fn, *args):
+        with config.patch(
+            {
+                "max_autotune": True,
+                "triton.enable_tdm": True,
+                "test_configs.autotune_choice_name_regex": "scaled_mm_device_tma",
+            }
+        ):
+            return run_and_get_code(torch.compile(fn), *args)
+
+    def test_tdm_scaled_mm_legacy_correctness_and_selection(self):
+        def fn(a, b, scale_a, scale_b):
+            return torch._scaled_mm(
+                a,
+                b,
+                scale_a=scale_a,
+                scale_b=scale_b,
+                out_dtype=torch.bfloat16,
+            )
+
+        a = torch.randn(256, 256, device=GPU_TYPE).to(torch.float8_e4m3fn)
+        b = torch.randn(256, 256, device=GPU_TYPE).to(torch.float8_e4m3fn).t()
+        scale_a = torch.ones(256, 1, device=GPU_TYPE)
+        scale_b = torch.ones(1, 256, device=GPU_TYPE)
+        result, code = self._compile_and_get_code(fn, a, b, scale_a, scale_b)
+        joined = "\n".join(code)
+        self.assertIn("make_tensor_descriptor", joined)
+        self.assertIn("load_tensor_descriptor", joined)
+        self._assert_close_to_reference(result, a, b, scale_a, scale_b)
+
+    def test_tdm_scaled_mm_v2_correctness_and_selection(self):
+        def fn(a, b, scale_a, scale_b):
+            return scaled_mm(
+                a,
+                b,
+                scale_a=scale_a,
+                scale_recipe_a=ScalingType.RowWise,
+                scale_b=scale_b,
+                scale_recipe_b=ScalingType.RowWise,
+                output_dtype=torch.bfloat16,
+            )
+
+        a = torch.randn(256, 256, device=GPU_TYPE).to(torch.float8_e4m3fn)
+        b = torch.randn(256, 256, device=GPU_TYPE).to(torch.float8_e4m3fn).t()
+        scale_a = torch.ones(256, 1, device=GPU_TYPE)
+        scale_b = torch.ones(1, 256, device=GPU_TYPE)
+        result, code = self._compile_and_get_code(fn, a, b, scale_a, scale_b)
+        joined = "\n".join(code)
+        self.assertIn("make_tensor_descriptor", joined)
+        self.assertIn("load_tensor_descriptor", joined)
+        self._assert_close_to_reference(result, a, b, scale_a, scale_b)
 
 
 instantiate_device_type_tests(TestFP8Types, globals(), allow_xpu=True)

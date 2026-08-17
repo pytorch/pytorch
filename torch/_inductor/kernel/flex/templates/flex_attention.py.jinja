@@ -67,7 +67,7 @@
     desc_q = None
     desc_k = None
     desc_v = None
-    {%- if USE_TMA %}
+    {%- if USE_TMA or USE_TDM %}
     desc_q = tl.make_tensor_descriptor(
         base=Q,
         shape=[Q_LEN, QK_HEAD_DIM],
@@ -124,7 +124,7 @@
     sparse_full_kv_idx_offset = sparse_hz_offset * stride_full_kv_idx_h + (q_start // SPARSE_Q_MULTIPLE) * stride_full_kv_idx_m  # noqa: B950
     {%- endif %}
 
-    {%- if USE_TMA %}
+    {%- if USE_TMA or USE_TDM %}
     q = tl.load_tensor_descriptor(
         desc_q,
         [(q_start * BLOCK_M).to(tl.int32), 0],

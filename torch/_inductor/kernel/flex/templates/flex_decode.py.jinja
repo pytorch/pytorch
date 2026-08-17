@@ -145,7 +145,7 @@
 
     desc_k = None
     desc_v = None
-    {%- if USE_TMA %}
+    {%- if USE_TMA or USE_TDM %}
     desc_k = tl.make_tensor_descriptor(
         base=K,
         shape=[KV_LEN, QK_HEAD_DIM],

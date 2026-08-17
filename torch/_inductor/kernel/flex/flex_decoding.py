@@ -19,7 +19,7 @@ from ...select_algorithm import (
     SymbolicGridFn,
     TritonTemplate,
 )
-from ...utils import can_use_tma
+from ...utils import can_use_tma, use_flex_tdm_descriptor
 from .common import (
     _flex_kernel_options_example,
     _flex_kernel_tuning_options,
@@ -399,9 +399,27 @@ def create_flex_decoding_kernel(*args, **kwargs):
 
         # Intel GPU enables TMA by default
         cur_kernel_options.setdefault("USE_TMA", bool(torch.xpu.is_available()))
+        # TDM is not user-selectable; derive it only from the eligibility gate below.
+        cur_kernel_options["USE_TDM"] = False
 
         if cur_kernel_options["USE_TMA"] and not can_use_tma(query, key, value):
             cur_kernel_options["USE_TMA"] = False
+
+        if not cur_kernel_options["USE_TMA"]:
+            cur_kernel_options["USE_TDM"] = use_flex_tdm_descriptor(
+                key,
+                value,
+                block_shapes=[
+                    (
+                        cur_kernel_options["BLOCK_N"],
+                        cur_kernel_options["QK_HEAD_DIM_ROUNDED"],
+                    ),
+                    (
+                        cur_kernel_options["BLOCK_N"],
+                        cur_kernel_options["V_HEAD_DIM_ROUNDED"],
+                    ),
+                ],
+            )
 
         # Add ROCm-specific parameters if they exist in the config
         for attrib in ["kpack", "matrix_instr_nonkdim", "waves_per_eu"]:
