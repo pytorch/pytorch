@@ -21,7 +21,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 def _load_diff_sync():

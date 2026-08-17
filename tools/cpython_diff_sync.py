@@ -68,8 +68,7 @@ def normalize_bytes(data: bytes) -> bytes:
 
 
 def normalize_text(text: str) -> str:
-    if text.startswith("\ufeff"):
-        text = text[1:]
+    text = text.removeprefix("\ufeff")
     return text.replace("\r\n", "\n").replace("\r", "\n")
 
 
