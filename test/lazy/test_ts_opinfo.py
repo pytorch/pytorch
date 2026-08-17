@@ -20,7 +20,7 @@ from torch.testing._internal.common_device_type import (
     ops,
 )
 from torch.testing._internal.common_methods_invocations import op_db
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import HardwareClassification, run_tests, TestCase
 from torch.testing._internal.jit_utils import JitTestCase
 
 
@@ -121,17 +121,18 @@ def clone_move(t):
     return copy_t
 
 
-class TestLazyTensor(JitTestCase):
+class TestLazyTensorDevice(JitTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @skip("Disable until autograd supports symints")
-    def testConvolutionBackward(self):
-        test_device = get_test_device()
-        inp = torch.rand(1, 3, 128, 128, device=test_device, requires_grad=True)
+    def testConvolutionBackward(self, device):
+        inp = torch.rand(1, 3, 128, 128, device=device, requires_grad=True)
         inp_copy = clone_move(inp)
-        grad = torch.rand(1, 32, 121, 121, device=test_device)  # no requires_grad
+        grad = torch.rand(1, 32, 121, 121, device=device)  # no requires_grad
         grad_copy = clone_move(grad)
-        weight = torch.rand(32, 3, 8, 8, device=test_device, requires_grad=True)
+        weight = torch.rand(32, 3, 8, 8, device=device, requires_grad=True)
         weight_copy = clone_move(weight)
-        bias = torch.rand(32, device=test_device, requires_grad=True)
+        bias = torch.rand(32, device=device, requires_grad=True)
         bias_copy = clone_move(bias)
 
         # run eager
@@ -152,9 +153,8 @@ class TestLazyTensor(JitTestCase):
         torch.testing.assert_close(weight_copy_grad.cpu(), weight_grad.cpu())
         torch.testing.assert_close(inp_copy_grad.cpu(), inp_grad.cpu())
 
-    def test_view_mark_step_preserved(self):
-        test_device = get_test_device()
-        inp = torch.rand(4, device=test_device)
+    def test_view_mark_step_preserved(self, device):
+        inp = torch.rand(4, device=device)
         inp_lazy = clone_move(inp)
 
         def foo(x, *, mark_step):
@@ -174,9 +174,8 @@ class TestLazyTensor(JitTestCase):
         # out will have some pending mutations, which will be synced by the .cpu() call.
         torch.testing.assert_close(out_ref.cpu(), out.cpu())
 
-    def test_tensor_ctr(self):
-        test_device = get_test_device()
-        inp = torch.tensor([[1, 2, 3, 4, 5]], device=test_device)
+    def test_tensor_ctr(self, device):
+        inp = torch.tensor([[1, 2, 3, 4, 5]], device=device)
         inp_lazy = torch.tensor([[1, 2, 3, 4, 5]], device="lazy")
 
         def foo(x):
@@ -186,6 +185,9 @@ class TestLazyTensor(JitTestCase):
         out_ref = foo(inp)
         out = foo(inp_lazy)
         torch.testing.assert_close(out_ref.cpu(), out.cpu())
+
+
+instantiate_device_type_tests(TestLazyTensorDevice, globals())
 
 
 class TestLazyOpInfo(TestCase):
