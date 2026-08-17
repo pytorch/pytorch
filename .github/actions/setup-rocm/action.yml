@@ -10,7 +10,7 @@ runs:
       shell: bash
       run: |
         amd-smi version || true
-        rocminfo 2>&1 | grep -m1 -E '^Runtime Version' || true
+        rocminfo 2>&1 | grep -m1 -E '^Runtime Version' | sed 's/^/rocminfo: /' || true
 
     - name: Stop all running docker containers
       if: always()
