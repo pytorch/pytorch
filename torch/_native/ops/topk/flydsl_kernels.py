@@ -6,17 +6,7 @@ from typing import Any, cast, Protocol
 import flydsl.compiler as flyc
 import flydsl.expr as fx
 from flydsl._mlir.dialects import llvm
-from flydsl.expr import (
-    arith,
-    Array,
-    Float32,
-    gpu,
-    Int32,
-    Int64,
-    range_constexpr,
-    rocdl as fly_rocdl,
-)
-from flydsl.expr.typing import T
+from flydsl.expr import arith, Array, Float32, gpu, Int32, Int64, range_constexpr
 from flydsl.runtime.device import is_rdna_arch
 
 import torch
@@ -41,12 +31,6 @@ _RADIX_SIGN_BIT = 1 << (_RADIX_BITS - 1)
 _NUM_RADIX_PASSES = 32 // _RADIX_BITS
 _N_HIST_BINS = 1 << _RADIX_BITS
 _VEC = 4
-DPP_ROW_SHR_1 = 0x111
-DPP_ROW_SHR_2 = 0x112
-DPP_ROW_SHR_4 = 0x114
-DPP_ROW_SHR_8 = 0x118
-DPP_ROW_MASK = 0xF
-DPP_BANK_MASK = 0xF
 
 
 def _i32_const(x: int) -> int:
@@ -56,9 +40,8 @@ def _i32_const(x: int) -> int:
 def _f32_to_ord(val):
     bits = val.bitcast(Int32)
     ords = bits ^ ((bits >> fx.Int32(31)) & fx.Int32(0x7FFFFFFF))
-    abs_bits = bits & fx.Int32(0x7FFFFFFF)
-    is_nan = arith.cmpi(arith.CmpIPredicate.ugt, abs_bits, fx.Int32(0x7F800000))
-    return arith.select(is_nan, fx.Int32(0x7FFFFFFF), ords)
+    is_nan = (bits & fx.Int32(0x7FFFFFFF)) > fx.Int32(0x7F800000)
+    return is_nan.select(fx.Int32(0x7FFFFFFF), ords)
 
 
 def _make_topk_storage(k: int, sort_len: int, block_threads: int):
@@ -154,32 +137,11 @@ def _build_radix_select_topk_module(n: int, k: int, deterministic: bool, arch: s
             ).result
             return fx.Int32(old)
 
-        def unwrap_val(val):
-            return val.ir_value() if hasattr(val, "ir_value") else arith.unwrap(val)
-
         def warp_inclusive_prefix_i32(val, lane):
-            val_raw = unwrap_val(val)
-            zero_raw = unwrap_val(0)
-            for _, dpp_op, threshold in [
-                (1, DPP_ROW_SHR_1, 1),
-                (2, DPP_ROW_SHR_2, 2),
-                (4, DPP_ROW_SHR_4, 4),
-                (8, DPP_ROW_SHR_8, 8),
-            ]:
-                remote = fly_rocdl.update_dpp(
-                    T.i32, zero_raw, val_raw, dpp_op, DPP_ROW_MASK, DPP_BANK_MASK, True
-                )
-                val = (lane >= fx.Int32(threshold)).select(val + fx.Int32(remote), val)
-                val_raw = unwrap_val(val)
-
-            src_lane_16 = (lane & fx.Int32(0x30)) - 1
-            remote16 = fly_rocdl.ds_bpermute(T.i32, src_lane_16 * fx.Int32(4), val)
-            val = (lane >= fx.Int32(16)).select(val + fx.Int32(remote16), val)
-
-            if warp_size > 32:
-                src_lane_32 = (lane & fx.Int32(0x30)) - fx.Int32(17)
-                remote32 = fly_rocdl.ds_bpermute(T.i32, src_lane_32 * fx.Int32(4), val)
-                val = (lane >= fx.Int32(32)).select(val + fx.Int32(remote32), val)
+            for i in range_constexpr(int(math.log2(warp_size))):
+                offset = 1 << i
+                remote = gpu.shuffle_up(val, offset, warp_size)
+                val = (lane >= fx.Int32(offset)).select(val + remote, val)
             return val
 
         def block_excl_prefix_i32(packed_local, scan):
@@ -199,7 +161,7 @@ def _build_radix_select_topk_module(n: int, k: int, deterministic: bool, arch: s
                 warp_excl = warp_incl - warp_val
                 if lane < fx.Int32(num_warps):
                     scan[lane] = warp_excl
-                if lane == fx.Int32(num_warps - 1):
+                if lane == fx.Int32(num_warps - 1):  # Store total in the extra slot.
                     scan[num_warps] = warp_incl
             gpu.barrier()
 
@@ -278,9 +240,6 @@ def _build_radix_select_topk_module(n: int, k: int, deterministic: bool, arch: s
         if tid == 0:
             s_write_ctr[0] = 0
             s_eq_ctr[0] = 0
-        if tid < fx.Int32(sort_len):
-            s_vals[tid] = float("-inf")
-            s_idxs[tid] = 0
         gpu.barrier()
 
         if deterministic:
@@ -411,6 +370,8 @@ def _build_radix_select_topk_module(n: int, k: int, deterministic: bool, arch: s
             if active:
                 s_ords[tid] = _f32_to_ord(s_vals[sort_tid])
             else:
+                s_vals[tid] = float("-inf")
+                s_idxs[tid] = 0
                 s_ords[tid] = fx.Int32(_i32_const(1 << 31))
         gpu.barrier()
 
@@ -436,53 +397,23 @@ def _build_radix_select_topk_module(n: int, k: int, deterministic: bool, arch: s
                     self_lt_partner = (my_o < p_o) | ((my_o == p_o) & (my_i > p_i))
                     self_gt_partner = (my_o > p_o) | ((my_o == p_o) & (my_i < p_i))
                 block_dir = (tid >> fx.Int32(stage + 1)) & 1
+                if stage == num_stages - 1:
+                    block_dir = block_dir ^ 1
                 if sort_active & partner_active:
-                    if stage < num_stages - 1:
-                        if tid < partner:
-                            if block_dir == 0:
-                                if self_gt_partner:
-                                    store_entry(
-                                        s_ords, s_vals, s_idxs, tid, p_o, p_v, p_i
-                                    )
-                            else:
-                                if self_lt_partner:
-                                    store_entry(
-                                        s_ords, s_vals, s_idxs, tid, p_o, p_v, p_i
-                                    )
+                    if tid < partner:
+                        if block_dir == 0:
+                            if self_gt_partner:
+                                store_entry(s_ords, s_vals, s_idxs, tid, p_o, p_v, p_i)
                         else:
-                            if block_dir == 0:
-                                if self_lt_partner:
-                                    store_entry(
-                                        s_ords, s_vals, s_idxs, tid, p_o, p_v, p_i
-                                    )
-                            else:
-                                if self_gt_partner:
-                                    store_entry(
-                                        s_ords, s_vals, s_idxs, tid, p_o, p_v, p_i
-                                    )
+                            if self_lt_partner:
+                                store_entry(s_ords, s_vals, s_idxs, tid, p_o, p_v, p_i)
                     else:
-                        if tid < partner:
-                            if block_dir == 0:
-                                if self_lt_partner:
-                                    store_entry(
-                                        s_ords, s_vals, s_idxs, tid, p_o, p_v, p_i
-                                    )
-                            else:
-                                if self_gt_partner:
-                                    store_entry(
-                                        s_ords, s_vals, s_idxs, tid, p_o, p_v, p_i
-                                    )
+                        if block_dir == 0:
+                            if self_lt_partner:
+                                store_entry(s_ords, s_vals, s_idxs, tid, p_o, p_v, p_i)
                         else:
-                            if block_dir == 0:
-                                if self_gt_partner:
-                                    store_entry(
-                                        s_ords, s_vals, s_idxs, tid, p_o, p_v, p_i
-                                    )
-                            else:
-                                if self_lt_partner:
-                                    store_entry(
-                                        s_ords, s_vals, s_idxs, tid, p_o, p_v, p_i
-                                    )
+                            if self_gt_partner:
+                                store_entry(s_ords, s_vals, s_idxs, tid, p_o, p_v, p_i)
                 gpu.barrier()
 
         # Phase 4: results to gmem.
@@ -543,9 +474,15 @@ def _build_register_topk_module(n: int, k: int, arch: str, rows_per_cta: int = 2
             inv_idx64 = fx.Int64(~idx) & fx.Int64(0xFFFFFFFF)
             return (ord64 << fx.Int64(32)) | inv_idx64
 
-        def decode_index(key):
+        def decode_key(key):
+            ord32 = fx.Int32(key >> fx.Int64(32))
             inv_idx = fx.Int32(key & fx.Int64(0xFFFFFFFF))
-            return ~inv_idx
+            val_bits = ord32 ^ ((ord32 >> fx.Int32(31)) & fx.Int32(0x7FFFFFFF))
+            val = val_bits.bitcast(Float32)
+            idx = ~inv_idx
+            if ord32 == fx.Int32(0x7FFFFFFF):
+                val = row_input[idx]
+            return val, idx
 
         def compare_and_swap(arr, i: int, j: int, descending: bool):
             a = arr[i]
@@ -617,8 +554,8 @@ def _build_register_topk_module(n: int, k: int, arch: str, rows_per_cta: int = 2
 
         if lane == 0 and in_bounds:
             for i in range_constexpr(k):
-                idx = decode_index(topk[i])
-                row_values[i] = row_input[idx]
+                val, idx = decode_key(topk[i])
+                row_values[i] = val
                 row_indices[i] = fx.Int64(idx)
 
     @flyc.jit
