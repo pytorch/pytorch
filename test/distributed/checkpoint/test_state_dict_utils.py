@@ -196,7 +196,7 @@ class TestStateDictUtils(_CpuStateDictTestMixin, DTensorTestBase):
     )
     def test_cpu_and_ranks_only(self, device):
         device_type = torch.device(device).type
-        device = torch.device(device)
+        device = torch.device(device_type)
         state_dict = {
             "tensor1": torch.arange(10, device=device),
             "tensor2": torch.ones(10, device=device),
