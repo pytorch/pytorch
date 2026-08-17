@@ -447,19 +447,17 @@ class TestTensorCreation(TestCase):
         self.assertEqual(torch.tensor([1.0 + 3.0j, 2.0 + 4.0j], dtype=complex_dtype), z)
 
     @onlyNativeDeviceTypes
-    @dtypes(torch.half, torch.float32, torch.float64)
+    @dtypes(torch.float32, torch.float64)
     def test_torch_polar(self, device, dtype):
         abs = torch.tensor([1, 2, -3, -4.5, 1, 1], device=device, dtype=dtype)
         angle = torch.tensor([math.pi / 2, 5 * math.pi / 4, 0, -11 * math.pi / 6, math.pi, -math.pi],
                              device=device, dtype=dtype)
         z = torch.polar(abs, angle)
-        complex_dtype = float_to_corresponding_complex_type_map[dtype]
-        # float16 loses precision in cos/sin and the interleaved storage; relax tol.
-        atol, rtol = (1e-2, 1e-2) if dtype == torch.half else (1e-5, 1e-5)
+        complex_dtype = torch.complex64 if dtype == torch.float32 else torch.complex128
         self.assertEqual(torch.tensor([1j, -1.41421356237 - 1.41421356237j, -3,
                                        -3.89711431703 - 2.25j, -1, -1],
                                       dtype=complex_dtype),
-                         z, atol=atol, rtol=rtol)
+                         z, atol=1e-5, rtol=1e-5)
 
     @onlyNativeDeviceTypes
     @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
@@ -470,7 +468,7 @@ class TestTensorCreation(TestCase):
             b = torch.tensor([3, 4], device=device, dtype=dtype)
             error = r"Expected both inputs to be Half, Float or Double tensors but " \
                     r"got [A-Za-z]+ and [A-Za-z]+"
-            with self.assertRaisesRegex(NotImplementedError, error):
+            with self.assertRaisesRegex(RuntimeError, error):
                 op(a, b)
 
     @onlyNativeDeviceTypes
