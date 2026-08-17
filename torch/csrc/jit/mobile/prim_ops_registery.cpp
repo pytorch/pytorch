@@ -16,7 +16,7 @@ void registerPrimOpsFunction(
 }
 
 bool hasPrimOpsFn(const std::string& name) {
-  return primOpsFnTable().count(name);
+  return primOpsFnTable().contains(name);
 }
 
 std::function<void(Stack&)>& getPrimOpsFn(const std::string& name) {
