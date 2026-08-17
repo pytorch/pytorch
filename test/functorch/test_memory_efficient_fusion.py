@@ -10,7 +10,7 @@ import torch.fx as fx
 import torch.nn as nn
 from functorch import make_fx
 from functorch.compile import memory_efficient_fusion
-from torch._functorch.compile_utils import fx_graph_cse, fx_graph_cse_replacements
+from torch._functorch.compile_utils import fx_graph_cse
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import run_tests, TestCase
 
@@ -309,31 +309,36 @@ class NoChangeTestCase(TestCase):
         fx_g = gms[0]
         check(fx_g, None, 0, check_val=False, graph_input=True)
 
+    def test_neg_nan_not_merged(self):
+        def f(x):
+            a = torch.full_like(x, float("nan"))
+            b = torch.full_like(x, -float("nan"))
+            return a + b
+
+        t = torch.randn(2, 2)
+        check(f, t, 0, check_val=False)
+
+    def test_neg_zero_not_merged(self):
+        def f(x):
+            a = torch.full_like(x, 0.0)
+            b = torch.full_like(x, -0.0)
+            return torch.stack([a.reciprocal(), b.reciprocal()])
+
+        t = torch.randn(2, 2)
+        check(f, t, 0)
+
+    def test_complex_neg_zero_not_merged(self):
+        def f(x):
+            y = x.to(torch.cfloat)
+            a = torch.full_like(y, complex(0.0, 0.0))
+            b = torch.full_like(y, complex(-0.0, 0.0))
+            return torch.stack([a.real.reciprocal(), b.real.reciprocal()])
+
+        t = torch.randn(2, 2)
+        check(f, t, 0)
+
 
 class ReduceTestCase(TestCase):
-    def test_replacements_preserve_graph(self):
-        def fn(x):
-            first = torch.cos(x)
-            second = torch.cos(x)
-            return first + second
-
-        gm = make_fx(fn)(torch.randn(2))
-        nodes_before = tuple(gm.graph.nodes)
-        cos_nodes = [
-            node for node in gm.graph.nodes if node.target == torch.ops.aten.cos.default
-        ]
-
-        replacements = fx_graph_cse_replacements(gm.graph)
-
-        self.assertEqual(tuple(gm.graph.nodes), nodes_before)
-        self.assertIs(replacements[cos_nodes[1]], cos_nodes[0])
-        self.assertEqual(
-            fx_graph_cse_replacements(
-                gm.graph, node_filter=lambda node: node is not cos_nodes[0]
-            ),
-            {},
-        )
-
     def test_immutable_list_type(self):
         def f(x):
             a = x.sum(dim=1)
@@ -428,6 +433,43 @@ class ReduceTestCase(TestCase):
 
         t = torch.randn(2, 2)
         check(f, t, 1)
+
+    def test_nan_full_deduplication(self):
+        def f(x):
+            a = torch.full_like(x, float("nan"))
+            b = torch.full_like(x, float("nan"))
+            return a + b
+
+        t = torch.randn(2, 2)
+        check(f, t, 1, check_val=False)
+
+    def test_nan_dedup_non_factory_op(self):
+        def f(x):
+            a = x.clamp(min=float("nan"))
+            b = x.clamp(min=float("nan"))
+            return a + b
+
+        t = torch.randn(2, 2)
+        check(f, t, 1, check_val=False)
+
+    def test_nan_dedup_constant_pad(self):
+        def f(x):
+            a = torch.nn.functional.pad(x, (1, 1, 1, 1), value=float("nan"))
+            b = torch.nn.functional.pad(x, (1, 1, 1, 1), value=float("nan"))
+            return a + b
+
+        t = torch.randn(2, 2)
+        check(f, t, 1, check_val=False)
+
+    def test_complex_nan_full_deduplication(self):
+        def f(x):
+            y = x.to(torch.cfloat)
+            a = torch.full_like(y, complex(float("nan"), 0.0))
+            b = torch.full_like(y, complex(float("nan"), 0.0))
+            return a + b
+
+        t = torch.randn(2, 2)
+        check(f, t, 1, check_val=False)
 
 
 class RandomOpTestCase(TestCase):
