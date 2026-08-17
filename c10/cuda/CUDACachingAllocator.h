@@ -423,6 +423,12 @@ inline DataPtr allocateWithAddress(size_t size, void* addr) {
 }
 
 // CUDAGraph interactions
+// Temporarily skip one private-pool routing scope on the calling thread.
+C10_CUDA_API void withPoolRoutingDisabled(
+    c10::DeviceIndex device,
+    MempoolId_t mempool_id,
+    const std::function<void()>& fn);
+
 inline void beginAllocateToPool(
     c10::DeviceIndex device,
     MempoolId_t mempool_id,

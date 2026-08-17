@@ -1533,6 +1533,12 @@ class DeviceCachingAllocator {
   // intentional: metadata labels a region of source code, not a device.
   static thread_local std::string user_metadata;
 
+  // Private-pool routes temporarily disabled by the calling thread. Include
+  // the allocator instance so a scope for one device cannot affect another.
+  static thread_local std::vector<
+      std::pair<const DeviceCachingAllocator*, MempoolId_t>>
+      disabled_pool_routes;
+
  public:
   explicit DeviceCachingAllocator(c10::DeviceIndex id)
       : device_id(id),
@@ -3097,6 +3103,21 @@ class DeviceCachingAllocator {
 
   // See Note [Interaction with CUDA graph capture]
 
+  void withPoolRoutingDisabled(
+      MempoolId_t mempool_id,
+      const std::function<void()>& fn) {
+    disabled_pool_routes.emplace_back(this, mempool_id);
+    auto restore = c10::make_scope_exit([this, mempool_id]() {
+      TORCH_INTERNAL_ASSERT(
+          !disabled_pool_routes.empty() &&
+              disabled_pool_routes.back().first == this &&
+              disabled_pool_routes.back().second == mempool_id,
+          "Pool routing scopes must end in LIFO order on their creating thread.");
+      disabled_pool_routes.pop_back();
+    });
+    fn();
+  }
+
   // Routes allocations matching `filter` into the private mempool
   // identified by `mempool_id` for the duration of the matching
   // endAllocateToPool call. Callers include CUDAGraph::capture_begin (during
@@ -3638,6 +3659,14 @@ class DeviceCachingAllocator {
         cudaStreamCaptureStatusNone;
   }
 
+  bool isPoolRoutingDisabled(MempoolId_t pool_id) const {
+    return std::find(
+               disabled_pool_routes.begin(),
+               disabled_pool_routes.end(),
+               std::pair<const DeviceCachingAllocator*, MempoolId_t>{
+                   this, pool_id}) != disabled_pool_routes.end();
+  }
+
   BlockPool& get_pool(size_t size, cudaStream_t stream) {
     // allocation_scopes_ tracks active mempool diversions (real captures or
     // user-managed pools via use_mem_pool / NCCL registration / inductor
@@ -3646,7 +3675,7 @@ class DeviceCachingAllocator {
     if (C10_UNLIKELY(!allocation_scopes_.empty())) {
       // Search allocation_scopes_ in LIFO order.
       for (auto& [pool_id, scope] : std::views::reverse(allocation_scopes_)) {
-        if (scope(stream)) {
+        if (scope(stream) && !isPoolRoutingDisabled(pool_id)) {
           auto it1 = graph_pools.find(pool_id);
           TORCH_INTERNAL_ASSERT(it1 != graph_pools.end());
           if (size <= kSmallSize) {
@@ -4522,6 +4551,8 @@ static void local_raw_delete(void* ptr);
 // NOLINTBEGIN(misc-use-internal-linkage)
 thread_local std::stack<std::string> DeviceCachingAllocator::compile_context;
 thread_local std::string DeviceCachingAllocator::user_metadata;
+thread_local std::vector<std::pair<const DeviceCachingAllocator*, MempoolId_t>>
+    DeviceCachingAllocator::disabled_pool_routes;
 // NOLINTEND(misc-use-internal-linkage)
 
 class NativeCachingAllocator : public CUDAAllocator {
@@ -5084,6 +5115,14 @@ class NativeCachingAllocator : public CUDAAllocator {
     device_allocator[device]->endAllocateToPool(mempool_id);
   }
 
+  void withPoolRoutingDisabled(
+      c10::DeviceIndex device,
+      MempoolId_t mempool_id,
+      const std::function<void()>& fn) {
+    assertValidDevice(device);
+    device_allocator[device]->withPoolRoutingDisabled(mempool_id, fn);
+  }
+
   void markCaptureBegin(c10::DeviceIndex device) override {
     assertValidDevice(device);
     device_allocator[device]->markCaptureBegin();
@@ -5322,6 +5361,16 @@ void local_raw_delete(void* ptr) {
 }
 
 } // namespace Native
+
+void withPoolRoutingDisabled(
+    c10::DeviceIndex device,
+    MempoolId_t mempool_id,
+    const std::function<void()>& fn) {
+  TORCH_INTERNAL_ASSERT(
+      get()->name() == "native",
+      "Disabling pool routing is only supported by the native CUDA allocator.");
+  Native::allocator.withPoolRoutingDisabled(device, mempool_id, fn);
+}
 
 namespace CudaMallocAsync {
 // If this is put in its own header file, it gets incorrectly renamed in HIPify.
