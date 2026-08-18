@@ -40,11 +40,11 @@ log = logging.getLogger(__name__)
 def torch_layout_to_ck_layouts(torch_layout):
     # logically, torch tensors are always NCHW,
     # and channels-last memory layout is visible in the strides
-    if V.graph.sizevars.statically_known_equals(torch_layout.stride[-1], 1):
+    if V.graph.sizevars.statically_known_equals(torch_layout.stride_hint()[-1], 1):
         # when input or output is NCHW
         # NB: torch.conv2d result is always NCHW
         return ["NGCHW", "GKCYX", "NGKHW"]
-    elif V.graph.sizevars.statically_known_equals(torch_layout.stride[-3], 1):
+    elif V.graph.sizevars.statically_known_equals(torch_layout.stride_hint()[-3], 1):
         # when input or output or weight is channels-last
         return ["NHWGC", "GKYXC", "NHWGK"]
     else:
@@ -52,27 +52,27 @@ def torch_layout_to_ck_layouts(torch_layout):
 
 
 def torch_layout_to_ck_input_layout(torch_layout):
-    if V.graph.sizevars.statically_known_equals(torch_layout.stride[-1], 1):
+    if V.graph.sizevars.statically_known_equals(torch_layout.stride_hint()[-1], 1):
         return "NGCHW"
-    elif V.graph.sizevars.statically_known_equals(torch_layout.stride[-3], 1):
+    elif V.graph.sizevars.statically_known_equals(torch_layout.stride_hint()[-3], 1):
         return "NHWGC"
     else:
         return None
 
 
 def torch_layout_to_ck_weight_layout(torch_layout):
-    if V.graph.sizevars.statically_known_equals(torch_layout.stride[-1], 1):
+    if V.graph.sizevars.statically_known_equals(torch_layout.stride_hint()[-1], 1):
         return "GKCYX"
-    elif V.graph.sizevars.statically_known_equals(torch_layout.stride[-3], 1):
+    elif V.graph.sizevars.statically_known_equals(torch_layout.stride_hint()[-3], 1):
         return "GKYXC"
     else:
         return None
 
 
 def torch_layout_to_ck_output_layout(torch_layout):
-    if V.graph.sizevars.statically_known_equals(torch_layout.stride[-1], 1):
+    if V.graph.sizevars.statically_known_equals(torch_layout.stride_hint()[-1], 1):
         return "NGKHW"
-    elif V.graph.sizevars.statically_known_equals(torch_layout.stride[-3], 1):
+    elif V.graph.sizevars.statically_known_equals(torch_layout.stride_hint()[-3], 1):
         return "NHWGK"
     else:
         return None

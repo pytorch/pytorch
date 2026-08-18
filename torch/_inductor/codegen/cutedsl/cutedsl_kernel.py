@@ -819,7 +819,7 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
         ):
             return False
         sizes = buffer.get_size()
-        strides = buffer.get_stride()
+        strides = buffer.get_stride_hint()
         vector_size = (
             1 if self.vector_load_config is None else self.vector_load_config.vec_size
         )

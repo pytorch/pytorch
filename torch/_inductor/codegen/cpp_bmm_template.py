@@ -206,7 +206,7 @@ class CppBmmTemplate(CppGemmTemplate):
         options["b_index"] = self.b_index
         options["BY_sizevars"] = [
             s
-            for sym in itertools.chain(BY.get_size(), BY.get_stride())
+            for sym in itertools.chain(BY.get_size(), BY.get_stride_hint())
             if isinstance(sym, sympy.Expr)
             for s in sym.free_symbols
         ]

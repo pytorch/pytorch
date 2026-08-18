@@ -119,7 +119,7 @@ class TestSubgraphChoice(TestCase):
             mat1_layout = mat1.layout
             if not isinstance(mat1_layout, FlexibleLayout):
                 raise AssertionError
-            mat1_stride = mat1_layout.stride
+            mat1_stride = mat1_layout.stride_hint()
 
             choices = []
 
@@ -146,7 +146,7 @@ class TestSubgraphChoice(TestCase):
                 raise AssertionError
 
             for example_stride, layout_stride in zip(
-                choice.example_inputs[0].stride(), mat1.layout.stride
+                choice.example_inputs[0].stride(), mat1.layout.stride_hint()
             ):
                 # Example inputs should have same stride as current layout
                 if example_stride != layout_stride:

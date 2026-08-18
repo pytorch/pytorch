@@ -433,8 +433,8 @@ def _tuned_grouped_mm_common(
         and can_use_triton_kernel(mat_a, mat_b, offs, bias, scale_result)
         and (not scaled or has_scaled_grouped_mm_triton_support(mat_a, mat_b))
     ):
-        a_is_k_major = mat_a.get_stride()[-1] == 1
-        b_is_k_major = mat_b.get_stride()[-2] == 1
+        a_is_k_major = mat_a.get_stride_hint()[-1] == 1
+        b_is_k_major = mat_b.get_stride_hint()[-2] == 1
 
         triton_has_make_tensor_descriptor = hasattr(tl, "make_tensor_descriptor")
         triton_has_experimental_make_tensor_descriptor = hasattr(

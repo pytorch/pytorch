@@ -196,14 +196,14 @@ def check_supported_striding(mat_a, mat_b) -> None:
 
     # Check mat_a (self) stride requirements
     torch._check(
-        is_row_major(mat_a.get_stride()) or has_zero_dim(mat_a.get_size()),
-        lambda: f"mat_a must be row_major, got stride {mat_a.get_stride()}",
+        is_row_major(mat_a.get_stride_hint()) or has_zero_dim(mat_a.get_size()),
+        lambda: f"mat_a must be row_major, got stride {mat_a.get_stride_hint()}",
     )
 
     # Check mat_b stride requirements
     torch._check(
-        is_col_major(mat_b.get_stride()) or has_zero_dim(mat_b.get_size()),
-        lambda: f"mat_b must be col_major, got stride {mat_b.get_stride()}",
+        is_col_major(mat_b.get_stride_hint()) or has_zero_dim(mat_b.get_size()),
+        lambda: f"mat_b must be col_major, got stride {mat_b.get_stride_hint()}",
     )
 
 
@@ -711,7 +711,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     if use_aten_gemm_kernels():
         aten_templates: list[ExternKernelChoice | KernelTemplate] = [aten_addmm]
         if (
-            inp.get_stride()[0] == 0
+            inp.get_stride_hint()[0] == 0
             and len(inp.get_size()) == 2
             and inductor_config.triton.autotune_cublasLt
             and not V.graph.cpp_wrapper  # bias_addmm only has a Python implementation
@@ -1434,8 +1434,8 @@ def get_size_hints(mat1, mat2, m, n, k):
 
 
 def get_size_hints_strides(mat1, mat2):
-    mat1_stride = mat1.layout.stride
-    mat2_stride = mat2.layout.stride
+    mat1_stride = mat1.layout.stride_hint()
+    mat2_stride = mat2.layout.stride_hint()
     strides = [mat1_stride, mat2_stride]
     strides_hints = []
     for stride in strides:
