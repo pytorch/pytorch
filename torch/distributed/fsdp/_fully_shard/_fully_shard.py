@@ -638,6 +638,39 @@ class FSDPModule:
         """
         self._get_fsdp_state()._state_ctx.post_optim_event = event
 
+    def gate_sharded_grad_free_on(self, event: torch.Event) -> None:
+        """
+        Gates sharded-gradient frees on a post-optimizer-step event.
+
+        This method immediately makes every possible sharded-gradient
+        allocation/free stream wait on ``event``. It also uses the event for
+        the next-forward all-gather ordering provided by
+        :meth:`set_post_optim_event`.
+
+        This method must be called after optimizer work is enqueued and before
+        any operation that may clear or replace the gradients. This is required
+        for every optimizer step, including the final iteration. An optimizer
+        step-post hook is one way to record and set the event before
+        ``zero_grad``. ``event`` must be ordered after every optimizer stream
+        that consumes the gradients. This cannot protect a gradient cleared
+        inside the optimizer step or by an optimizer-in-backward hook before
+        this method is called.
+
+        Args:
+            event (torch.Event): Event recorded after the optimizer step to
+                wait sharded-gradient allocation/free streams on.
+        """
+        state = self._get_fsdp_state()
+        if state._is_root is not True:
+            raise RuntimeError(
+                "gate_sharded_grad_free_on() must be called on the root FSDP "
+                "module after lazy initialization"
+            )
+        self.set_post_optim_event(event)
+        if state._state_ctx.sharded_grad_free_streams is None:
+            state._state_ctx.sharded_grad_free_streams = set()
+        state._wait_post_optim_event_on_grad_free_streams(event)
+
     @deprecated("Use `set_gradient_divide_factor` instead")
     def set_reduce_scatter_divide_factor(self, factor: float) -> None:
         """Use :py:meth:`set_gradient_divide_factor` instead"""

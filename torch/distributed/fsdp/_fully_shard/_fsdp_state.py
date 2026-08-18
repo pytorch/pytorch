@@ -54,6 +54,12 @@ class FSDPStateContext(Generic[_StateType]):
         # Optional user-provided event recorded after optimizer for the
         # all-gather streams to wait on in the root pre-forward
         self.post_optim_event: torch.Event | None = None
+        # Track candidate streams on which a sharded-gradient storage may be
+        # freed. Keeping historical streams covers persistent ``param.grad``
+        # storage if communication or custom post-reduce streams change before
+        # a later clear. ``None`` means the user has not opted in by calling
+        # ``gate_sharded_grad_free_on``.
+        self.sharded_grad_free_streams: set[torch.Stream] | None = None
 
 
 class FSDPState(_State):
@@ -324,6 +330,25 @@ class FSDPState(_State):
                         FSDPParamGroup._prefetch_unshard(target_param_group, "forward")
             return args, kwargs
 
+    def _sharded_grad_free_streams(self) -> set[torch.Stream]:
+        streams = {
+            self._comm_ctx.reduce_scatter_stream,
+            self._comm_ctx.all_reduce_stream,
+        }
+        for state in self._state_ctx.all_states:
+            for fsdp_param_group in state._fsdp_param_groups:
+                if (stream := fsdp_param_group._all_reduce_hook_stream) is not None:
+                    streams.add(stream)
+        return streams
+
+    def _wait_post_optim_event_on_grad_free_streams(self, event: torch.Event) -> None:
+        streams = self._state_ctx.sharded_grad_free_streams
+        if streams is None:
+            raise AssertionError("Expected post-optimizer free-stream ordering")
+        streams.update(self._sharded_grad_free_streams())
+        for stream in streams:
+            stream.wait_event(event)
+
     @_dynamo_disable
     def _post_forward(self, module: nn.Module, input: Any, output: Any) -> Any:
         with _spmd_no_typecheck():
@@ -435,6 +460,8 @@ class FSDPState(_State):
                     if rs_state.event is not None:
                         self._device_handle.current_stream().wait_event(rs_state.event)
                 self._comm_ctx.reduce_scatter_states.clear()
+                if (streams := self._state_ctx.sharded_grad_free_streams) is not None:
+                    streams.update(self._sharded_grad_free_streams())
             self._state_ctx.post_backward_final_callback_queued = False
 
     def _register_pre_backward_hook(self, output: Any) -> Any:
