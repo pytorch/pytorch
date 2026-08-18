@@ -2618,15 +2618,36 @@ class TestFullyShardWorldSize1(FSDPTest):
     def world_size(self) -> int:
         return 1
 
-    def test_post_optim_grad_buffer_lifetime(self):
+    @skip_if_lt_x_gpu(1)
+    def test_set_post_optim_event_before_lazy_init(self):
         device_module = torch.get_device_module(device_type)
-        for use_post_optim_event in (True, False):
+        with patch.object(
+            device_module,
+            "_needs_explicit_stream_ordered_free",
+            True,
+            create=True,
+        ):
+            model = nn.Linear(8, 8, bias=False).to(device_type)
+            fully_shard(model)
+            state = model._get_fsdp_state()
+            self.assertFalse(hasattr(state._comm_ctx, "reduce_scatter_stream"))
+
+            event = MagicMock()
+            model.set_post_optim_event(event)
+
+            self.assertIs(state._state_ctx.post_optim_event, event)
+            self.assertFalse(hasattr(state._comm_ctx, "reduce_scatter_stream"))
+
+    @skip_if_lt_x_gpu(1)
+    def test_post_optim_event_orders_grad_free_streams(self):
+        device_module = torch.get_device_module(device_type)
+        for needs_explicit_ordering in (True, False):
             with (
-                self.subTest(use_post_optim_event=use_post_optim_event),
+                self.subTest(needs_explicit_ordering=needs_explicit_ordering),
                 patch.object(
                     device_module,
                     "_needs_explicit_stream_ordered_free",
-                    True,
+                    needs_explicit_ordering,
                     create=True,
                 ),
             ):
@@ -2640,45 +2661,59 @@ class TestFullyShardWorldSize1(FSDPTest):
 
                 state = model._get_fsdp_state()
                 comm_ctx = state._comm_ctx
-                grad = next(model.parameters()).grad
-                self.assertIsInstance(grad, DTensor)
-                grad_storage_id = grad.to_local().untyped_storage()._cdata
-                self.assertEqual(
-                    set(comm_ctx._post_optim_grad_buffers), {grad_storage_id}
-                )
-
-                # The FSDP keepalive must survive clearing ``param.grad`` until
-                # the free streams are ordered after the optimizer stream.
-                model.zero_grad(set_to_none=True)
-                self.assertTrue(comm_ctx._post_optim_grad_buffers)
+                state_ctx = state._state_ctx
+                param = next(model.parameters())
+                self.assertIsNotNone(param.grad)
+                device_module.synchronize()
+                if needs_explicit_ordering:
+                    self.assertIn(
+                        comm_ctx.reduce_scatter_stream,
+                        state_ctx.post_optim_free_streams,
+                    )
+                    self.assertIn(
+                        comm_ctx.all_reduce_stream,
+                        state_ctx.post_optim_free_streams,
+                    )
+                else:
+                    self.assertFalse(state_ctx.post_optim_free_streams)
 
                 reduce_scatter_stream = MagicMock()
                 all_reduce_stream = MagicMock()
+                custom_free_stream = MagicMock()
+                historical_free_stream = MagicMock()
                 comm_ctx.reduce_scatter_stream = reduce_scatter_stream
                 comm_ctx.all_reduce_stream = all_reduce_stream
-                free_streams = (reduce_scatter_stream, all_reduce_stream)
+                state._fsdp_param_groups[0]._all_reduce_hook_stream = custom_free_stream
+                state_ctx.post_optim_free_streams.clear()
+                state_ctx.post_optim_free_streams.add(historical_free_stream)
+                free_streams = (
+                    reduce_scatter_stream,
+                    all_reduce_stream,
+                    custom_free_stream,
+                    historical_free_stream,
+                )
 
-                def assert_keepalive(*args, **kwargs):
-                    self.assertTrue(comm_ctx._post_optim_grad_buffers)
+                def assert_grad_is_live(*args, **kwargs):
+                    self.assertIsNotNone(param.grad)
 
-                if use_post_optim_event:
-                    event = MagicMock()
-                    for stream in free_streams:
-                        stream.wait_event.side_effect = assert_keepalive
-                    model.set_post_optim_event(event)
+                event = MagicMock()
+                for stream in free_streams:
+                    stream.wait_event.side_effect = assert_grad_is_live
+                model.set_post_optim_event(event)
+
+                if needs_explicit_ordering:
                     for stream in free_streams:
                         stream.wait_event.assert_called_once_with(event)
-                    self.assertIs(state._state_ctx.post_optim_event, event)
+                    self.assertEqual(
+                        state_ctx.post_optim_free_streams, set(free_streams)
+                    )
                 else:
-                    current_stream = device_module.current_stream()
                     for stream in free_streams:
-                        stream.wait_stream.side_effect = assert_keepalive
-                    with torch.no_grad():
-                        model(inp)
-                    for stream in free_streams:
-                        stream.wait_stream.assert_called_once_with(current_stream)
+                        stream.wait_event.assert_not_called()
+                self.assertIs(state_ctx.post_optim_event, event)
 
-                self.assertFalse(comm_ctx._post_optim_grad_buffers)
+                model.zero_grad(set_to_none=True)
+                self.assertIsNone(param.grad)
 
     def test_train_parity_single_worldsize1(self):
         """

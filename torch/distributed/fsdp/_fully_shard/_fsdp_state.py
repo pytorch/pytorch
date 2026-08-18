@@ -54,6 +54,12 @@ class FSDPStateContext(Generic[_StateType]):
         # Optional user-provided event recorded after optimizer for the
         # all-gather streams to wait on in the root pre-forward
         self.post_optim_event: torch.Event | None = None
+        # Keep every candidate stream on which a sharded-gradient storage may
+        # be freed. This is root-scoped since roots sharing communication
+        # streams may use independent optimizers and custom post-reduce
+        # streams. Keep historical streams since ``param.grad`` may continue
+        # to alias an older allocation across optimizer steps.
+        self.post_optim_free_streams: set[torch.Stream] = set()
 
 
 class FSDPState(_State):
@@ -150,7 +156,6 @@ class FSDPState(_State):
                 self._state_ctx.post_optim_event = None
             else:
                 current_stream = self._device_handle.current_stream()
-                self._release_post_optim_grad_buffers(current_stream=current_stream)
                 self._comm_ctx.all_gather_copy_in_stream.wait_stream(current_stream)
                 self._comm_ctx.all_gather_stream.wait_stream(current_stream)
             if self._device.type in [
@@ -330,7 +335,7 @@ class FSDPState(_State):
             self._device_handle, "_needs_explicit_stream_ordered_free", False
         )
 
-    def _post_optim_grad_streams(self) -> set[torch.Stream]:
+    def _post_optim_free_streams(self) -> set[torch.Stream]:
         streams = {
             self._comm_ctx.reduce_scatter_stream,
             self._comm_ctx.all_reduce_stream,
@@ -341,24 +346,13 @@ class FSDPState(_State):
                     streams.add(stream)
         return streams
 
-    def _release_post_optim_grad_buffers(
-        self,
-        *,
-        event: torch.Event | None = None,
-        current_stream: torch.Stream | None = None,
-    ) -> None:
+    def _wait_post_optim_event_on_grad_free_streams(self, event: torch.Event) -> None:
         if not self._needs_explicit_stream_ordered_free():
             return
-        buffers = self._comm_ctx._post_optim_grad_buffers
-        if event is not None:
-            for stream in self._post_optim_grad_streams():
-                stream.wait_event(event)
-        elif buffers:
-            if current_stream is None:
-                raise AssertionError("Expected a current stream without an event")
-            for stream in self._post_optim_grad_streams():
-                stream.wait_stream(current_stream)
-        buffers.clear()
+        streams = self._state_ctx.post_optim_free_streams
+        streams.update(self._post_optim_free_streams())
+        for stream in streams:
+            stream.wait_event(event)
 
     @_dynamo_disable
     def _post_forward(self, module: nn.Module, input: Any, output: Any) -> Any:
@@ -472,9 +466,9 @@ class FSDPState(_State):
                         self._device_handle.current_stream().wait_event(rs_state.event)
                 self._comm_ctx.reduce_scatter_states.clear()
                 if self._needs_explicit_stream_ordered_free():
-                    for state in self._state_ctx.all_states:
-                        for fsdp_param_group in state._fsdp_param_groups:
-                            fsdp_param_group.retain_post_optim_grad_buffers()
+                    self._state_ctx.post_optim_free_streams.update(
+                        self._post_optim_free_streams()
+                    )
             self._state_ctx.post_backward_final_callback_queued = False
 
     def _register_pre_backward_hook(self, output: Any) -> Any:
@@ -540,7 +534,6 @@ class FSDPState(_State):
         for event in self._comm_ctx._last_post_reduce_events.values():
             current_stream.wait_event(event)
         self._comm_ctx._last_post_reduce_events.clear()
-        self._comm_ctx._post_optim_grad_buffers.clear()
         self._comm_ctx.post_forward_order.clear()
         for state in self._state_ctx.all_states:
             state._modules_to_run_forward.clear()
