@@ -35,7 +35,6 @@ NVPRIM_ATEN_FALLBACK_WARNING = "fallback to aten executor"
 GET_ISOLATED_GRAPHMODULE_ERROR = "get_isolated_graphmodule failed on decomposition"
 
 class TestPrims(TestCase):
-    @onlyCUDA
     @dtypes(torch.float32)
     def test_broadcast_in_dim(self, device, dtype):
         def _wrapper(a, b, broadcast_dimensions):
@@ -84,7 +83,6 @@ class TestPrims(TestCase):
             self.assertEqual(result.shape, b.shape)
             self.assertEqual(a.unsqueeze(2), result)
 
-    @onlyCUDA
     @dtypes(torch.float32)
     def test_broadcast_in_dim_sum(self, device, dtype):
         def _wrapper(a):
@@ -175,7 +173,6 @@ class TestPrims(TestCase):
         )
         self.assertTrue(all_prims_namespace)
 
-    @onlyCUDA
     @dtypes(torch.float32)
     @parametrize("correction", [0, 1])
     def test_var(self, device, dtype, correction):
