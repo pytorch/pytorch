@@ -298,8 +298,7 @@ def helper(x):
             g2 = torch.cat([q2, k2, v2a + v2b], dim=-1)
             return torch.cat([g1, g2], dim=-1)
 
-        def make_inputs(rows, wide, narrow):
-            widths = [wide, narrow, narrow, narrow] * 2
+        def make_inputs(rows, widths):
             return [
                 torch.randn(rows, width, device=GPU_TYPE, dtype=torch.bfloat16)
                 for width in widths
@@ -308,7 +307,7 @@ def helper(x):
         counter = CompileCounterWithBackend("inductor")
         compiled = torch.compile(fn, backend=counter, dynamic=True, fullgraph=True)
 
-        aligned = make_inputs(16, 32, 16)
+        aligned = make_inputs(16, [16, 32, 48, 48, 64, 80, 96, 96])
         actual, code = run_and_get_code(compiled, *aligned)
         self.assertEqual(actual, fn(*aligned))
 
@@ -319,15 +318,64 @@ def helper(x):
         self.assertNotIn("runtime_divisible_body", source)
         self.assertEqual(source.count("def triton_"), 2)
 
-        unaligned = make_inputs(17, 33, 17)
+        unaligned = make_inputs(17, [17, 31, 49, 49, 65, 79, 95, 95])
         self.assertEqual(compiled(*unaligned), fn(*unaligned))
         self.assertEqual(counter.frame_count, 1)
 
         with inductor_config.patch("force_disable_caches", True):
-            unaligned_compiled = torch.compile(fn, dynamic=True, fullgraph=True)
+            unaligned_counter = CompileCounterWithBackend("inductor")
+            unaligned_compiled = torch.compile(
+                fn, backend=unaligned_counter, dynamic=True, fullgraph=True
+            )
             actual, code = run_and_get_code(unaligned_compiled, *unaligned)
         self.assertEqual(actual, fn(*unaligned))
+        self.assertEqual(unaligned_compiled(*aligned), fn(*aligned))
+        self.assertEqual(unaligned_counter.frame_count, 1)
         source = "\n".join(code)
+        self.assertIn("runtime_divisible_multi_kernel", source)
+        self.assertEqual(source.count("async_compile.triton("), 2)
+
+    @unittest.skipUnless(
+        HAS_CUDA_AND_TRITON and torch.version.hip is None and GPU_TYPE == "cuda",
+        "requires NVIDIA CUDA and Triton",
+    )
+    @inductor_config.patch("triton.divisible_by_16", True)
+    @inductor_config.patch("triton.unique_kernel_names", False)
+    @inductor_config.patch("force_disable_caches", True)
+    def test_runtime_divisibility_skips_flat_dynamic_kernel(self):
+        def fn(a, b, c, d):
+            return a + b + c + d + a.shape[1]
+
+        inputs = [torch.randn(16, 32, device=GPU_TYPE) for _ in range(4)]
+        actual, code = run_and_get_code(
+            torch.compile(fn, dynamic=True, fullgraph=True), *inputs
+        )
+        self.assertEqual(actual, fn(*inputs))
+
+        source = "\n".join(code)
+        self.assertIn("ks0", source)
+        self.assertNotIn("runtime_divisible_multi_kernel", source)
+        self.assertEqual(source.count("async_compile.triton("), 1)
+
+    @unittest.skipUnless(
+        HAS_CUDA_AND_TRITON and torch.version.hip is None and GPU_TYPE == "cuda",
+        "requires NVIDIA CUDA and Triton",
+    )
+    @inductor_config.patch("triton.divisible_by_16", True)
+    @inductor_config.patch("triton.unique_kernel_names", False)
+    @inductor_config.patch("force_disable_caches", True)
+    def test_runtime_divisibility_skips_strided_dynamic_kernel(self):
+        def fn(a, b, c, d):
+            return a[:, 0] + b[:, 0] + c[:, 0] + d[:, 0]
+
+        inputs = [torch.randn(4096, 32, device=GPU_TYPE) for _ in range(4)]
+        actual, code = run_and_get_code(
+            torch.compile(fn, dynamic=True, fullgraph=True), *inputs
+        )
+        self.assertEqual(actual, fn(*inputs))
+
+        source = "\n".join(code)
+        self.assertIn("ks0", source)
         self.assertNotIn("runtime_divisible_multi_kernel", source)
         self.assertEqual(source.count("async_compile.triton("), 1)
 

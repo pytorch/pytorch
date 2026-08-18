@@ -31,6 +31,7 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import (
     CeilDiv,
     FloorDiv,
+    Identity,
     Min,
     ModularIndexing,
     TruncToFloat,
@@ -49,6 +50,7 @@ from .. import config, ir, metrics, utils
 from ..async_compile import AsyncCompile
 from ..codecache import code_hash, get_path, PyCodeCache, write_atomic
 from ..debug import set_kernel_post_grad_provenance_tracing
+from ..dependencies import MemoryDep
 from ..ops_handler import DefaultHandler
 from ..runtime import triton_heuristics
 from ..runtime.benchmarking import benchmarker
@@ -7257,8 +7259,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         # pyrefly: ignore [bad-assignment]
         mutated_args = sorted(mutated_args)
 
+        numel_arg_indices: list[int] = []
         for tree in self.active_range_trees():
             sizearg = SizeArg(f"{tree.prefix}numel", tree.numel)
+            numel_arg_indices.append(len(signature))
             signature.append(sizearg)
             argdefs.append(ArgName(sizearg.name))
             # constexpr version causes issues, see
@@ -7392,22 +7396,47 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             and not self.atomic_add_found
             and self.num_load >= 4
         ):
-            candidates = tuple(
+            # Range numels alone can vectorize flat accesses, but the benefit is
+            # inconsistent. Require a dynamic size in a nontrivial unit-stride
+            # access, then include range numels because their hints enable tail
+            # vectorization.
+            memory_index_exprs = []
+            for node in self.features.scheduler_nodes():
+                for dep in node.read_writes.reads:
+                    if not isinstance(dep, MemoryDep) or not dep.var_names:
+                        continue
+                    index = dep.index.replace(Identity, lambda value: value)
+                    strides = V.graph.sizevars.stride_vars(index, dep.var_names)
+                    if not V.graph.sizevars.statically_known_equals(strides[-1], 1):
+                        continue
+                    memory_index_exprs.append(dep.index)
+                    if len(dep.size) > 1:
+                        memory_index_exprs.extend(dep.size)
+            relevant_candidates = tuple(
                 (i, arg.expr)
                 for i, arg in enumerate(signature)
                 if isinstance(arg, SizeArg)
+                and i not in numel_arg_indices
                 and arg.expr is not None
                 and triton_meta_signature[argdefs[i].name] in ("i32", "i64")
                 and not arg.name.startswith("load_seed_offset")
                 and bool(getattr(arg.expr, "free_symbols", ()))
                 and not V.graph.sizevars.statically_known_multiple_of(arg.expr, 16)
+                and any(expr.has(arg.expr) for expr in memory_index_exprs)
             )
-            # Optimization hints do not add guards. Avoid paying for a specialization
-            # on workloads whose observed dynamic sizes cannot take its fast path.
-            if 0 < len(candidates) <= 4 and all(
-                V.graph.sizevars.optimization_hint(expr, fallback=1) % 16 == 0
-                for _, expr in candidates
-            ):
+            numel_candidates = tuple(
+                (i, signature[i].expr)
+                for i in numel_arg_indices
+                if isinstance(signature[i], SizeArg)
+                and signature[i].expr is not None
+                and triton_meta_signature[argdefs[i].name] in ("i32", "i64")
+                and bool(getattr(signature[i].expr, "free_symbols", ()))
+                and not V.graph.sizevars.statically_known_multiple_of(
+                    signature[i].expr, 16
+                )
+            )
+            candidates = relevant_candidates + numel_candidates
+            if relevant_candidates:
                 self.runtime_divisible_by_16 = tuple(i for i, _ in candidates)
 
         # Compute configs after codegen_body() so we know if the kernel
