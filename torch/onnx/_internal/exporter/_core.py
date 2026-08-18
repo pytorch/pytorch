@@ -1045,6 +1045,12 @@ def _prepare_exported_program_for_export(
     with (
         # Support the dynamism with 0/1 input dim
         torch.fx.experimental._config.patch(backed_size_oblivious=True),  # type: ignore[attr-defined]
+        # RNN ops are preserved for ONNX, but decomposition retraces the graph and
+        # recomputes their meta values. Keep the while_loop based decompositions so
+        # that dynamic sequence lengths are not specialized to the example length.
+        _capture_strategies.patch_dynamic_shape_rnn_decompositions(
+            exported_program.range_constraints
+        ),
     ):
         # Decompose the graph given the implemented torch ops in ONNX
         exported_program = _fx_passes.decompose_with_registry(
