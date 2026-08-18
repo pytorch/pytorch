@@ -18,7 +18,10 @@ import types
 
 import torch
 import torch._dynamo.test_case
-from torch.testing._internal.common_utils import HardwareClassification, make_dynamo_test
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    make_dynamo_test,
+)
 
 
 class _BaseSequenceLen:
