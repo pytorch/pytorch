@@ -705,6 +705,99 @@ them directly via `torch.ops.symm_mem.<op_name>`.
     :param str group_name: Name of the group to perform all-reduce on.
 
 
+.. py:function:: nvshmem_broadcast(input: Tensor, root: int, group_name: str) -> Tensor
+
+    Broadcasts the `input` tensor from the `root` rank to all ranks in the group
+    using NVSHMEM, in place. This op is host/stream-initiated and works both
+    intra-node and across nodes. On non-root ranks the contents of `input` are
+    overwritten with the data from the root; on the root rank they are unchanged.
+    The operation is issued on the current CUDA stream and returns `input`.
+
+    :param Tensor input: Tensor to broadcast (on the root) or receive into (on other ranks). Must be symmetric.
+    :param int root: Rank within the group that holds the source data. Must be smaller than the group size.
+    :param str group_name: Name of the group to perform the broadcast on.
+
+
+.. py:function:: nvshmem_put(tensor: Tensor, peer: int) -> None
+
+    Performs a one-sided, host/stream-initiated put over NVSHMEM: copies the
+    local `tensor` into the same symmetric allocation on `peer`. Works both
+    intra-node and across nodes (e.g. over RDMA/RoCE). The op only issues the
+    transfer on the current CUDA stream; it does not wait for remote completion,
+    so you must provide your own synchronization (e.g. `nvshmem_put_with_signal`
+    / `nvshmem_wait_for_signal`) before consuming the data on the peer.
+
+    :param Tensor tensor: Symmetric, contiguous tensor whose data is sent, and which also names the destination allocation on the peer.
+    :param int peer: Rank to send the data to. Must be smaller than the world size.
+
+
+.. py:function:: nvshmem_get(tensor: Tensor, peer: int) -> None
+
+    Performs a one-sided, host/stream-initiated get over NVSHMEM: copies the data
+    from the same symmetric allocation on `peer` into the local `tensor`. Works
+    both intra-node and across nodes. The transfer is issued on the current CUDA
+    stream.
+
+    :param Tensor tensor: Symmetric, contiguous tensor that receives the data, and which also names the source allocation on the peer.
+    :param int peer: Rank to read the data from. Must be smaller than the world size.
+
+
+.. py:function:: nvshmem_get_out(dst: Tensor, hdl: SymmetricMemory, offset: int, size: int, peer: int) -> None
+
+    Low-level, host/stream-initiated get that copies `size` elements starting at
+    element `offset` from the peer's symmetric allocation (the one backing `hdl`)
+    into `dst`. This is the primitive backing the higher-level
+    :func:`~torch.distributed._symmetric_memory.get` helper; most users should
+    prefer that helper. The copy is issued on the current CUDA stream.
+
+    :param Tensor dst: Local CUDA tensor to receive the data. Must be contiguous, on the same device as `hdl`, and hold at least `size` elements.
+    :param SymmetricMemory hdl: Handle returned by `rendezvous`, identifying the peer's symmetric allocation to read from.
+    :param int offset: Starting element (in `dst`'s dtype) within the peer allocation. Must be non-negative.
+    :param int size: Number of elements to copy. Must be non-negative.
+    :param int peer: Rank to read the data from. Must be a valid rank in the group.
+
+
+.. py:function:: nvshmem_put_with_signal(tensor: Tensor, sigpad: Tensor, signal: int, peer: int) -> None
+
+    Performs a one-sided put of `tensor` to the same symmetric allocation on
+    `peer`, and atomically sets the peer's signal location `sigpad` to `signal`
+    once the data transfer has completed. This lets the peer detect arrival of
+    the data via `nvshmem_wait_for_signal`. Issued on the current CUDA stream.
+
+    :param Tensor tensor: Symmetric tensor whose data is sent, and which also names the destination allocation on the peer.
+    :param Tensor sigpad: Symmetric signal pad on the peer to set once the transfer completes.
+    :param int signal: Value to set the peer's `sigpad` to.
+    :param int peer: Rank to send the data to.
+
+
+.. py:function:: nvshmem_wait_for_signal(sigpad: Tensor, signal: int, peer: int) -> None
+
+    Blocks the current CUDA stream until the local signal location `sigpad`
+    equals `signal`. Typically paired with `nvshmem_put_with_signal` on the
+    sender side to wait for incoming data.
+
+    :param Tensor sigpad: Local signal pad to poll.
+    :param int signal: Value to wait for.
+    :param int peer: Reserved for future use.
+
+
+.. py:function:: nvshmem_all_to_all(input: Tensor, out: Tensor, group_name: str) -> Tensor
+
+    Performs an equal-split all-to-all operation using NVSHMEM. Unlike the
+    pointer-based collectives, this op is host/stream-initiated and runs over the
+    NVSHMEM transport, so it works both intra-node and across nodes (e.g. over
+    RDMA/RoCE) without requiring peer buffers to be directly addressable from the
+    GPU.
+
+    The input is divided into `group_size` equal-sized chunks; chunk `i` is sent
+    to rank `i`, and the chunk received from rank `i` is placed at position `i` in
+    the output.
+
+    :param Tensor input: Input tensor to perform all-to-all on. Must be symmetric and contiguous. Its number of elements must be divisible by the group size.
+    :param Tensor out: Output tensor to store the result of the all-to-all operation. Must be symmetric and contiguous, and have the same number of elements and dtype as `input`.
+    :param str group_name: Name of the group to perform all-to-all on.
+
+
 .. py:function:: all_to_all_vdev(input: Tensor, out: Tensor, in_splits: Tensor, out_splits_offsets: Tensor, group_name: str) -> None
 
     Performs an all-to-all-v operation using NVSHMEM, with split information provided on device.

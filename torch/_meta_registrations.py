@@ -302,6 +302,13 @@ def logcumsumexp(self, dim):
 # Although the actual FFT launch is different, all the permuting code appears
 # to be the same
 def _exec_fft(out, self, out_sizes, dim, *, forward):
+    # Empty batches are short-circuited by the eager kernels (cuFFT/MKL/MPS all
+    # reject zero-element transforms); mirror that here so tracing does not call
+    # resize_ on a functionalized tensor.
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+    if guard_or_false(out.numel() == 0):
+        return out.new_empty(out_sizes)
     ndim = self.ndim
     signal_ndim = len(dim)
     batch_dims = ndim - signal_ndim
@@ -899,9 +906,10 @@ def meta__cslt_sparse_mm(
         torch.bfloat16,
         torch.int8,
         torch.float8_e4m3fn,
+        torch.float8_e4m3fnuz,
     }:
         raise AssertionError(
-            f"_cslt_sparse_mm only supports fp16, bf16, int8, and fp8e4m3, got {dense_B.dtype}"
+            f"_cslt_sparse_mm only supports fp16, bf16, int8, fp8e4m3, and fp8e4m3fnuz, got {dense_B.dtype}"
         )
     if compressed_A.dtype != dense_B.dtype:
         raise AssertionError(
@@ -912,7 +920,11 @@ def meta__cslt_sparse_mm(
             f"_cslt_sparse_mm only supports 2d inputs, got {len(dense_B.shape)}D"
         )
 
-    is_8bit_input_type = compressed_A.dtype in [torch.int8, torch.float8_e4m3fn]
+    is_fp8_input_type = compressed_A.dtype in [
+        torch.float8_e4m3fn,
+        torch.float8_e4m3fnuz,
+    ]
+    is_8bit_input_type = compressed_A.dtype == torch.int8 or is_fp8_input_type
 
     n = dense_B.size(1)
     m = compressed_A.size(0)
@@ -937,6 +949,16 @@ def meta__cslt_sparse_mm(
             raise AssertionError(
                 f"out_dtype is not supported for {compressed_A.dtype} x {dense_B.dtype} -> {out_dtype} matmul!"
             )
+        if is_fp8_input_type and torch.version.hip and out_dtype != torch.float32:
+            # Match the eager TORCH_CHECK in _cslt_sparse_mm_impl so compile
+            # rejects at trace time what eager rejects at call time.
+            raise AssertionError(
+                f"out_dtype must be float32 for fp8 inputs on ROCm, got {out_dtype}"
+            )
+    if out_dtype is None and is_fp8_input_type and torch.version.hip:
+        # hipSparseLt only produces fp32 for fp8 inputs, so _cslt_sparse_mm
+        # forces the result dtype to fp32 when out_dtype is omitted.
+        out_dtype = torch.float32
     output_shape = (n, m) if transpose_result else (m, n)
     return dense_B.new_empty(output_shape, dtype=out_dtype)
 
