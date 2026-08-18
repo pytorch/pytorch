@@ -434,7 +434,11 @@ class ConfigModule(ModuleType):
                 config.user_override.set(value)
                 self._hash_dirty_var.set(True)
                 self._mark_get_dict_dirty(name)
-                config.hide = False
+                # Avoid a redundant instance-__dict__ write: hide defaults to False on
+                # the class and is only ever set True by __delattr__ (the mock.patch
+                # workaround), so only clear it when it is actually set.
+                if config.hide:
+                    config.hide = False
 
     def __getattr__(self, name: str) -> Any:
         try:

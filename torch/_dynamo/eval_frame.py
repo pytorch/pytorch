@@ -976,6 +976,9 @@ class _TorchDynamoContext:
         return None
 
     def __call__(self, fn: Any) -> Any:
+        if isinstance(fn, staticmethod):
+            return staticmethod(self(fn.__func__))
+
         # public api for compiler config/options
         def get_compiler_config() -> CompilerConfig | None:
             return self.compiler_config
