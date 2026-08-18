@@ -1,6 +1,9 @@
 # Owner(s): ["module: inductor"]
+import ast
 import contextlib
 import unittest
+from collections import namedtuple
+from enum import Enum, IntEnum
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -17,10 +20,12 @@ from torch._inductor.codegen.simd import IterationRangesRoot
 from torch._inductor.codegen.simd_kernel_features import SIMDKernelFeatures
 from torch._inductor.codegen.triton import (
     _materialize_trunc_to_float_expr,
+    get_triton_reduction_function,
     TritonKernel,
     TritonKernelOverrides,
     TritonSymbols,
 )
+from torch._inductor.codegen.wrapper import _escape_triton_kernel_source_for_wrapper
 from torch._inductor.dtype_propagation import DtypePropagationOpsHandler, promote_types
 from torch._inductor.graph import GraphLowering
 from torch._inductor.runtime.hints import DeviceProperties
@@ -59,6 +64,47 @@ class TestCodegenTriton(InductorTestCase):
     def tearDown(self):
         self._stack.close()
         super().tearDown()
+
+    def test_strict_signed_zero_reduction_function(self):
+        for reduction_type in ("min", "max"):
+            self.assertEqual(
+                get_triton_reduction_function(reduction_type),
+                f"triton_helpers.{reduction_type}2",
+            )
+            with inductor_config.patch(strict_signed_zero=True):
+                self.assertEqual(
+                    get_triton_reduction_function(reduction_type),
+                    f"triton_helpers.{reduction_type}2_strict",
+                )
+
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    def test_strict_signed_zero_unrolled_reduction(self):
+        def fn(x):
+            return torch.amin(x, dim=1), torch.amax(x, dim=1)
+
+        x = torch.tensor(
+            [
+                [0.0, -0.0, -0.0, -0.0],
+                [-0.0, 0.0, 0.0, 0.0],
+                [1.0, float("nan"), -1.0, 0.0],
+            ],
+            device=GPU_TYPE,
+        )
+        expected_min, expected_max = fn(x)
+        with inductor_config.patch(strict_signed_zero=True):
+            (actual_min, actual_max), code = run_and_get_code(
+                torch.compile(fn, fullgraph=True), x
+            )
+
+        actual_min_bits = actual_min[:2].view(torch.int32)
+        actual_max_bits = actual_max[:2].view(torch.int32)
+        expected_min_bits = expected_min[:2].view(torch.int32)
+        expected_max_bits = expected_max[:2].view(torch.int32)
+        self.assertEqual(actual_min_bits, expected_min_bits)
+        self.assertEqual(actual_max_bits, expected_max_bits)
+        self.assertTrue(torch.isnan(actual_min[2]).item())
+        self.assertTrue(torch.isnan(actual_max[2]).item())
+        self.assertIn("tl.where", " ".join(code))
 
     def test_range_tree_entry_ownership_uses_root_identity(self):
         class AlternateR0Root(IterationRangesRoot):
@@ -102,6 +148,31 @@ class TestCodegenTriton(InductorTestCase):
                 )
             finally:
                 kernel.range_trees = saved_range_trees
+
+    def test_escape_triton_kernel_source_for_wrapper(self):
+        source = """\
+@triton.jit
+def helper(x):
+    s = "slash \\\\"
+    t = '''quoted'''
+    \"\"\"doc\"\"\"
+    return x
+"""
+
+        for cpp_wrapper in (False, True):
+            with inductor_config.patch("cpp_wrapper", cpp_wrapper):
+                escaped = _escape_triton_kernel_source_for_wrapper(source)
+
+            wrapper_src = f"async_compile.triton('helper', '''{escaped}''')"
+            compile(wrapper_src, "<test-wrapper-source>", "exec")
+
+            if cpp_wrapper:
+                nested_src = f'wrapper_src = r"""{wrapper_src}"""'
+                compile(nested_src, "<test-nested-wrapper-source>", "exec")
+                wrapper_src = ast.literal_eval(ast.parse(nested_src).body[0].value)
+
+            call = ast.parse(wrapper_src).body[0].value
+            self.assertEqual(ast.literal_eval(call.args[1]), source)
 
     def test_persistent_reduction_choice_two_arg_override(self):
         seen_scores = []
@@ -673,6 +744,90 @@ class TestCodegenTriton(InductorTestCase):
             compile(imports, "<benchmark_kernel_imports>", "exec")
             self.assertIn("\nfrom torch._dynamo.testing import rand_strided\n", imports)
             self.assertIn("\nimport torch\n", imports)
+
+    def test_sanitize_for_repr(self):
+        from torch._inductor.codegen.wrapper import _sanitize_for_repr
+
+        class Color(Enum):
+            RED = "red"
+            BLUE = "blue"
+
+        class Priority(IntEnum):
+            LOW = 0
+            HIGH = 1
+
+        # Enum -> value
+        self.assertEqual(_sanitize_for_repr(Color.RED), "red")
+        self.assertEqual(_sanitize_for_repr(Priority.HIGH), 1)
+
+        # Recursion into containers
+        self.assertEqual(
+            _sanitize_for_repr({"a": Color.RED, "b": [Priority.LOW, 42]}),
+            {"a": "red", "b": [0, 42]},
+        )
+
+        # Tuples
+        self.assertEqual(
+            _sanitize_for_repr((Color.BLUE, 1)),
+            ("blue", 1),
+        )
+
+        # Namedtuples
+        Pair = namedtuple("Pair", ["x", "y"])
+        result = _sanitize_for_repr(Pair(Color.RED, Priority.HIGH))
+        self.assertIsInstance(result, Pair)
+        self.assertEqual(result, Pair("red", 1))
+
+        # Enum as dict key
+        self.assertEqual(
+            _sanitize_for_repr({Color.RED: 1}),
+            {"red": 1},
+        )
+
+        # Nested enum value
+        class Outer(Enum):
+            INNER = Color.RED
+
+        self.assertEqual(_sanitize_for_repr(Outer.INNER), "red")
+
+        # Non-enum passthrough
+        self.assertEqual(_sanitize_for_repr(42), 42)
+        self.assertEqual(_sanitize_for_repr("hello"), "hello")
+
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    def test_enum_constexpr_in_user_defined_triton_kernel(self):
+        """Custom Triton kernel with IntEnum constexpr generates valid code."""
+        import triton
+        import triton.language as tl
+
+        class Mode(IntEnum):
+            ADD = 1
+            MUL = 2
+
+        @triton.jit
+        def enum_kernel(
+            in_ptr, out_ptr, numel, MODE: tl.constexpr, BLOCK_SIZE: tl.constexpr
+        ):
+            offsets = tl.arange(0, BLOCK_SIZE)
+            mask = offsets < numel
+            x = tl.load(in_ptr + offsets, mask=mask)
+            if MODE == 1:
+                output = x + 1
+            else:
+                output = x * 2
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        def fn(x):
+            y = torch.empty_like(x)
+            enum_kernel[(1,)](x, y, x.numel(), Mode.ADD, 256)
+            return y
+
+        x = torch.randn(128, device=GPU_TYPE)
+        fn_c = torch.compile(fn)
+        res, code = run_and_get_code(fn_c, x)
+        self.assertEqual(fn(x), res)
+        # Verify generated code doesn't contain invalid Enum repr like <Mode.ADD: 1>
+        self.assertNotIn("<Mode.", code[0])
 
 
 if __name__ == "__main__":

@@ -299,8 +299,10 @@ static optional_variable_list _process_backward_mode_ad(
     const c10::intrusive_ptr<Node>& cdata,
     const std::unordered_set<at::TensorImpl*>& to_save_if_setup_context,
     const _view_as_self_fn_t& view_as_self_fn,
-    bool pure_view) {
+    bool pure_view,
+    c10::intrusive_ptr<Node>& attached_node) {
   auto num_outputs = raw_outputs.size();
+  attached_node = cdata;
 
 #ifndef STRIP_ERROR_MESSAGES
   const char* error_msg_input_returned_as_is =
@@ -378,7 +380,10 @@ static optional_variable_list _process_backward_mode_ad(
       }
       // This repeats the mutation of leaf variables check already done above
       check_inplace(var, true);
-      impl::rebase_history(var, {cdata, output_nr});
+      // For a dirty view input the history is rebased onto a CopySlices
+      // node wrapping cdata; report that composed node so node creation
+      // hooks fire on it instead of cdata.
+      attached_node = impl::rebase_history(var, {cdata, output_nr});
     } else if (is_input) {
       TORCH_CHECK(!is_saved_and_setup_context, error_msg_input_returned_as_is)
       var = _view_as_self_with_no_grad(var, view_as_self_fn);
@@ -457,7 +462,7 @@ static optional_variable_list _process_backward_mode_ad(
     if (maybe_output_impls) {
       maybe_output_impls->insert(out_tensor_impl);
     }
-    outputs.emplace_back(var);
+    outputs.emplace_back(std::move(var));
   }
 
   // If multiple differentiable outputs are returned, we do not allow views to
@@ -497,7 +502,8 @@ static optional_variable_list _wrap_outputs_impl(
     const _jvp_fn_t& jvp_user_function,
     const std::unordered_set<at::TensorImpl*>& to_save_if_setup_context,
     const _view_as_self_fn_t& view_as_self_fn,
-    bool pure_view) {
+    bool pure_view,
+    c10::intrusive_ptr<Node>& attached_node) {
   std::unordered_map<at::TensorImpl*, size_t> inputs_mapping;
   inputs_mapping.reserve(input_vars.size());
   for (const auto i : c10::irange(input_vars.size())) {
@@ -521,7 +527,8 @@ static optional_variable_list _wrap_outputs_impl(
       cdata,
       to_save_if_setup_context,
       view_as_self_fn,
-      pure_view);
+      pure_view,
+      attached_node);
 
   // This must happen after the backward processing as we expect the
   // computations happening here to track backward mode gradients.
@@ -549,7 +556,8 @@ optional_variable_list _wrap_outputs(
     const _jvp_fn_t& jvp_user_function,
     const std::unordered_set<at::TensorImpl*>& to_save_if_setup_context,
     const _view_as_self_fn_t& view_as_self_fn,
-    bool pure_view) {
+    bool pure_view,
+    c10::intrusive_ptr<Node>& attached_node) {
   return _wrap_outputs_impl(
       input_vars,
       non_differentiable,
@@ -559,7 +567,8 @@ optional_variable_list _wrap_outputs(
       jvp_user_function,
       to_save_if_setup_context,
       view_as_self_fn,
-      pure_view);
+      pure_view,
+      attached_node);
 }
 
 // NOLINTNEXTLINE(misc-use-internal-linkage)
@@ -572,7 +581,8 @@ optional_variable_list _wrap_outputs(
     const _jvp_fn_t& jvp_user_function,
     const std::unordered_set<at::TensorImpl*>& to_save_if_setup_context,
     const _view_as_self_fn_t& view_as_self_fn,
-    bool pure_view) {
+    bool pure_view,
+    c10::intrusive_ptr<Node>& attached_node) {
   return _wrap_outputs_impl(
       input_vars,
       non_differentiable,
@@ -582,7 +592,8 @@ optional_variable_list _wrap_outputs(
       jvp_user_function,
       to_save_if_setup_context,
       view_as_self_fn,
-      pure_view);
+      pure_view,
+      attached_node);
 }
 
 void check_variable_result(

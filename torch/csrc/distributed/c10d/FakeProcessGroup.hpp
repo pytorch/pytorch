@@ -29,6 +29,10 @@ class FakeProcessGroup : public Backend {
   struct Options : Backend::Options {
     explicit Options() : Backend::Options("fake") {}
 
+    c10::intrusive_ptr<Backend::Options> clone() const override {
+      return c10::make_intrusive<Options>(*this);
+    }
+
     int fake_option = 0;
     bool error_on_collective = false;
   };
