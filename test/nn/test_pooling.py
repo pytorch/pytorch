@@ -408,8 +408,56 @@ class TestPoolingNN(NNTestCase):
                 input, (1, 1, 1), (1, 1, 1), (0, 0, 0), (-3, 1, 1)
             )
 
+    def test_pool_large_spatial_dim_undilated(self):
+        # The dilation-overflow fix must stay inside the CUDA kernels. Nothing may put a
+        # new bound on input size into the shared shape checks, where it would also hit
+        # avg_pool and the int64-clean CPU kernels, which have no overflow to prevent.
+        # Checked on meta so nothing is allocated.
+        # See https://github.com/pytorch/pytorch/issues/189664
+        big = 2**31 + 1
+        x2d = torch.empty(1, 1, big, 4, device="meta")
+        x3d = torch.empty(1, 1, big, 4, 4, device="meta")
+
+        self.assertEqual(F.avg_pool2d(x2d, 1).shape, torch.Size([1, 1, big, 4]))
+        self.assertEqual(F.avg_pool3d(x3d, 1).shape, torch.Size([1, 1, big, 4, 4]))
+        self.assertEqual(F.max_pool2d(x2d, 1).shape, torch.Size([1, 1, big, 4]))
+        self.assertEqual(F.max_pool3d(x3d, 1).shape, torch.Size([1, 1, big, 4, 4]))
+
 
 class TestPoolingNNDeviceType(NNTestCase):
+    @onlyCUDA
+    def test_max_pool2d_large_dilation_no_overflow(self, device):
+        # A dilation near INT_MAX used to overflow the plain-int window counters in the
+        # CUDA max_pool2d kernels and read out of bounds. The int32 instantiation is no
+        # longer selected for such inputs, so the op must return the right answer rather
+        # than raise. kernel_size 1 keeps the output size positive for any dilation.
+        # See https://github.com/pytorch/pytorch/issues/189664
+        int_max = 2**31 - 1
+        for memory_format in (torch.contiguous_format, torch.channels_last):
+            x = torch.randn(2, 3, 24, 24, device=device).to(memory_format=memory_format)
+            # kernel_size 1 makes the window a single element, so pooling is the identity
+            # whatever the dilation is.
+            for dilation in (int_max, (1, int_max), (int_max, 1)):
+                self.assertEqual(F.max_pool2d(x, kernel_size=1, dilation=dilation), x)
+
+    @onlyCUDA
+    def test_max_pool3d_large_dilation_rejected(self, device):
+        # max_pool3d's CUDA kernels take their extents as int and have no int64
+        # instantiation to fall back to (gh-52822), so an overflow-scale dilation is
+        # rejected instead of being widened.
+        # See https://github.com/pytorch/pytorch/issues/189664
+        int_max = 2**31 - 1
+        x = torch.randn(1, 1, 8, 8, 8, device=device)
+        for dilation in (int_max, (1, 1, int_max)):
+            with self.assertRaisesRegex(
+                RuntimeError, "dilation is too large for the 32-bit indexing"
+            ):
+                F.max_pool3d(x, kernel_size=1, dilation=dilation)
+
+        # The largest dilation that still fits must stay accepted, so that a later
+        # tightening of the bound cannot silently narrow the supported range.
+        self.assertEqual(F.max_pool3d(x, kernel_size=1, dilation=int_max - 7), x)
+
     @expectedFailureMPS  # MPS adaptive avg pool requires divisible input/output sizes
     def test_adaptive_pooling_avg_nhwc(self, device):
         input = torch.randint(1, 10, (4, 8, 8, 8), dtype=torch.float32).to(device)

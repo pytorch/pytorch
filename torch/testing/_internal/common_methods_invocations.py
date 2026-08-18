@@ -3915,16 +3915,6 @@ def error_inputs_max_pool2d(op_info, device, **kwargs):
                                  kwargs={'kernel_size': 2}),
                      error_regex='Output size is too small')
 
-    # error: dilation large enough to overflow the int32 window index (see gh-189664).
-    # kernel_size must be 1 here, otherwise 'Output size is too small' fires first.
-    err_msg = 'dilation should be smaller than or equal to INT_MAX - input size'
-    yield ErrorInput(SampleInput(make_arg((1, 1, 24, 24)),
-                                 kwargs={'kernel_size': 1, 'dilation': 2147483647}),
-                     error_regex=err_msg)
-    yield ErrorInput(SampleInput(make_arg((1, 1, 24, 24)),
-                                 kwargs={'kernel_size': 1, 'dilation': (1, 2147483647)}),
-                     error_regex=err_msg)
-
 
 def error_inputs_max_pool3d(op_info, device, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=torch.float, requires_grad=False)
@@ -3962,15 +3952,19 @@ def error_inputs_max_pool3d(op_info, device, **kwargs):
                                  kwargs={'kernel_size': 2}),
                      error_regex='Output size is too small')
 
-    # error: dilation large enough to overflow the int32 window index (see gh-189664).
+    # error: on CUDA only, dilation large enough to overflow the 32-bit window indexing
+    # in the max_pool3d kernels (see gh-189664). Those kernels take their extents as int
+    # and have no int64 instantiation to fall back to (gh-52822), so the input is
+    # rejected; CPU indexes in int64 and has nothing to reject.
     # kernel_size must be 1 here, otherwise 'Output size is too small' fires first.
-    err_msg = 'dilation should be smaller than or equal to INT_MAX - input size'
-    yield ErrorInput(SampleInput(make_arg((1, 1, 8, 8, 8)),
-                                 kwargs={'kernel_size': 1, 'dilation': 2147483647}),
-                     error_regex=err_msg)
-    yield ErrorInput(SampleInput(make_arg((1, 1, 8, 8, 8)),
-                                 kwargs={'kernel_size': 1, 'dilation': (1, 1, 2147483647)}),
-                     error_regex=err_msg)
+    if torch.device(device).type == 'cuda':
+        err_msg = 'dilation is too large for the 32-bit indexing'
+        yield ErrorInput(SampleInput(make_arg((1, 1, 8, 8, 8)),
+                                     kwargs={'kernel_size': 1, 'dilation': 2147483647}),
+                         error_regex=err_msg)
+        yield ErrorInput(SampleInput(make_arg((1, 1, 8, 8, 8)),
+                                     kwargs={'kernel_size': 1, 'dilation': (1, 1, 2147483647)}),
+                         error_regex=err_msg)
 
 
 
