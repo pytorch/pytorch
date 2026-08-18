@@ -661,6 +661,15 @@ if(PYTORCH_QNNPACK_BUILD_TESTS)
   target_link_libraries(q8gavgpool-test PRIVATE pytorch_qnnpack cpuinfo fp16 gtest gtest_main)
   add_test(q8gavgpool-test q8gavgpool-test)
 
+  add_executable(requantization-test test/requantization.cc)
+  set_target_properties(requantization-test PROPERTIES
+    CXX_STANDARD 14
+    CXX_STANDARD_REQUIRED YES
+    CXX_EXTENSIONS NO)
+  target_include_directories(requantization-test PRIVATE src test)
+  target_link_libraries(requantization-test PRIVATE pytorch_qnnpack cpuinfo fp16 gtest gtest_main)
+  add_test(requantization-test requantization-test)
+
   add_executable(u8maxpool-test test/u8maxpool.cc)
   set_target_properties(u8maxpool-test PROPERTIES
     CXX_STANDARD 14

@@ -117,7 +117,7 @@ class Dim:
     ``Dim("name", min=1, max=2)``).
 
     Dim hints provide the lowest barrier to exportability, with the user only
-    needing to specify if a dimension if dynamic, static, or left for the
+    needing to specify if a dimension is dynamic, static, or left for the
     compiler to decide (``Dim.AUTO``). The export process will automatically
     infer the remaining constraints on min/max ranges and relationships between
     dimensions.

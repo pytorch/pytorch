@@ -578,11 +578,6 @@ class TORCH_API Tensor: public TensorBase {
   // Hooks
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-  template <typename T>
-  using hook_return_void_t = std::enable_if_t<std::is_void<typename std::invoke_result_t<T&, Tensor>>::value, unsigned>;
-  template <typename T>
-  using hook_return_var_t = std::enable_if_t<std::is_same_v<typename std::invoke_result_t<T&, Tensor>, Tensor>, unsigned>;
-
   /// Registers a backward hook.
   ///
   /// The hook will be called every time a gradient with respect to the Tensor is computed.
@@ -614,9 +609,7 @@ class TORCH_API Tensor: public TensorBase {
   /// v.remove_hook(h);  // removes the hook
   /// @endcode
   template <typename T>
-  hook_return_void_t<T> register_hook(T&& hook) const;
-  template <typename T>
-  hook_return_var_t<T> register_hook(T&& hook) const;
+  unsigned register_hook(T&& hook) const;
 
   // Variable methods
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

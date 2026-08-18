@@ -40,7 +40,7 @@ from .bytecode_transformation import (
     get_code_keys,
     is_compiled_fn_name,
 )
-from .utils import counters, dynamo_timed, increment_frame
+from .utils import CleanupHook, counters, dynamo_timed, increment_frame
 
 
 logger = logging.getLogger(__name__)
@@ -853,7 +853,13 @@ class CompilePackage:
                 "First code entry does not match _innermost_fn.__code__"
             )
 
-    def _install_global(self, module: types.ModuleType, name: str, value: Any) -> None:
+    def _install_global(
+        self, module: types.ModuleType, name: str, value: object
+    ) -> None:
+        # A pre-reset compile in this process may still own `name` via a
+        # CleanupHook that hasn't fired yet. We're taking over the binding now,
+        # so that hook must not delete it once its code object is collected.
+        CleanupHook.disown(module.__dict__, name)
         module.__dict__[name] = value
         self._installed_globals.setdefault(module, []).append(name)
 
@@ -864,7 +870,7 @@ class CompilePackage:
             raise AssertionError("_innermost_fn is not set in uninstall")
         for module, names in self._installed_globals.items():
             for name in names:
-                module.__dict__.pop(name)
+                module.__dict__.pop(name, None)
 
         self._installed_globals = {}
 
@@ -879,6 +885,7 @@ class CompilePackage:
         """
         from torch._C._dynamo.eval_frame import _load_precompile_entry
 
+        from .convert_frame import input_codes
         from .output_graph import get_builtins_dict
 
         self.uninstall()
@@ -928,6 +935,7 @@ class CompilePackage:
                     # or guarded codes.
                     continue
 
+                input_codes.add(target_code)
                 for backend_id in entry.backend_ids:
                     if backend_id not in backends:
                         raise RuntimeError(
@@ -958,6 +966,11 @@ class CompilePackage:
                         builtin_dict_name
                         := guards_state.output_graph.name_of_builtins_dict_key_in_fglobals
                     ):
+                        # A pre-reset compile's CleanupHook may still own this
+                        # name even when we're about to leave its value alone
+                        # below (same dict object every compile in this
+                        # module), so it must not delete it once collected.
+                        CleanupHook.disown(runtime_global_scope, builtin_dict_name)
                         builtins_dict = get_builtins_dict(runtime_global_scope)
                         if builtin_dict_name in runtime_global_scope:
                             if (
