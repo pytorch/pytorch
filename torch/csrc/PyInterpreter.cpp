@@ -172,9 +172,6 @@ struct ConcretePyInterpreterVTable final
   c10::intrusive_ptr<c10::TensorImpl> to_meta_tensor(
       const c10::intrusive_ptr<c10::TensorImpl>& real) const override;
   bool allow_non_fake_inputs() const override;
-  std::shared_ptr<c10::SafePyObject> strong_ref_from_weakref(
-      const c10::SafePyObject& weakref) const override;
-
   static ConcretePyInterpreterVTable* instance() {
     static ConcretePyInterpreterVTable s;
     return &s;
@@ -1299,16 +1296,6 @@ bool ConcretePyInterpreterVTable::allow_non_fake_inputs() const {
   auto mode = c10::impl::FakeTensorModeTLS::get_state();
   TORCH_CHECK(mode != nullptr, "FakeTensorMode must be active");
   return mode->allow_non_fake_inputs_;
-}
-
-std::shared_ptr<c10::SafePyObject> ConcretePyInterpreterVTable::
-    strong_ref_from_weakref(const c10::SafePyObject& weakref) const {
-  py::gil_scoped_acquire gil;
-  PyObject* obj = nullptr;
-  if (PyWeakref_GetRef(weakref.ptr(getPyInterpreter()), &obj) <= 0) {
-    return nullptr;
-  }
-  return std::make_shared<c10::SafePyObject>(obj, getPyInterpreter());
 }
 
 PyInterpreterHolder self_interpreter;
