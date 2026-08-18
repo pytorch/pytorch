@@ -58,7 +58,7 @@ class FSDPStateContext(Generic[_StateType]):
         # freed. Keeping historical streams covers persistent ``param.grad``
         # storage if communication or custom post-reduce streams change before
         # a later clear. ``None`` means the user has not opted in by calling
-        # ``set_post_optim_grad_free_event``.
+        # ``gate_sharded_grad_free_on``.
         self.sharded_grad_free_streams: set[torch.Stream] | None = None
 
 

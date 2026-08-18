@@ -787,7 +787,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         not hasattr(torch.get_device_module(device_type), "_sleep"),
         "Sleep is not supported on this device",
     )
-    def test_post_optim_grad_free_event(self):
+    def test_gate_sharded_grad_free_on(self):
         device_module = torch.get_device_module(device_type)
         dim, delay_ms = 16, 500
         for target_stream_name in ("reduce_scatter", "all_reduce", "custom"):
@@ -846,7 +846,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                     )
                     optim.step()
                     optim_done = device_module.current_stream().record_event()
-                    model.set_post_optim_grad_free_event(optim_done)
+                    model.gate_sharded_grad_free_on(optim_done)
                     self.assertFalse(optim_done.query())
 
                     optim.zero_grad(set_to_none=True)
