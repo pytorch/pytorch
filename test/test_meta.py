@@ -20,8 +20,8 @@ from torch.testing._internal.common_utils import unMarkDynamoStrictTest
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     TestCase,
+    instantiate_parametrized_tests,
     skipIfCrossRef,
-    skipIfMPS,
     skipIfTorchDynamo,
     suppress_warnings,
     TEST_WITH_TORCHDYNAMO,
@@ -33,8 +33,6 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.common_device_type import (
     ops,
     instantiate_device_type_tests,
-    onlyAccelerator,
-    onlyCUDA,
     OpDTypes,
     skipOps,
     xfail,
@@ -1159,7 +1157,7 @@ class MetaCrossRefDispatchMode(torch.utils._python_dispatch.TorchDispatchMode):
 # with the inconsistencies but this takes time.
 @unMarkDynamoStrictTest
 class TestMeta(TestCase):
-    hw_classification = HardwareClassification.ACCELERATOR
+    hw_classification = HardwareClassification.CUDA
 
     # Copies inputs to inplace operations to avoid inplace modifications
     #   to leaves requiring gradient
@@ -1564,7 +1562,6 @@ class TestMeta(TestCase):
     ))
     @ops(itertools.chain(op_db, foreach_op_db), dtypes=OpDTypes.any_common_cpu_cuda_one)
     # Only test on CUDA, as CUDA kernel's stride is the reference
-    @onlyCUDA
     def test_dispatch_symbolic_meta_outplace_all_strides(self, device, dtype, op):
         self._run_dispatch_meta_test(device, dtype, op, symbolic_meta=True, inplace=False, all_stride_variants=True)
 
@@ -1589,7 +1586,6 @@ class TestMeta(TestCase):
     ))
     @ops(itertools.chain(op_db, foreach_op_db), dtypes=OpDTypes.any_common_cpu_cuda_one)
     # Only test on CUDA, as CUDA kernel's stride is the reference
-    @onlyCUDA
     def test_dispatch_symbolic_meta_inplace_all_strides(self, device, dtype, op):
         self._run_dispatch_meta_test(device, dtype, op, symbolic_meta=True, inplace=True, all_stride_variants=True)
 
@@ -1609,7 +1605,6 @@ class TestMeta(TestCase):
     ))
     @ops(binary_ufuncs, allowed_dtypes=(torch.float32,))
     # Only test on CUDA, as CUDA kernel's stride is the reference
-    @onlyCUDA
     def test_binary_ufuncs_mixed_dtype(self, device, dtype, op):
         make_arg = partial(
             make_tensor,
@@ -1626,6 +1621,115 @@ class TestMeta(TestCase):
 
         self._run_dispatch_meta_test(device, dtype, op, symbolic_meta=True, inplace=False)
 
+    # opinfo test is using aten.fill_, it's not testing aten.fill
+    def test_fill_stride(self, device):
+        to_meta = MetaConverter()
+        sample_args = [torch.rand(2, 2, 2, 2, device=device), 1.0]
+
+        for args in get_strided_args(sample_args):
+            meta_args = to_meta(args)
+            ref_out = torch.ops.aten.fill(*args)
+            meta_out = torch.ops.aten.fill(*meta_args)
+            self.assertEqual(ref_out.size(), meta_out.size())
+            self.assertEqual(ref_out.stride(), meta_out.stride())
+
+    def test_stride_for_index_Tensor(self, device):
+        from torch._subclasses import FakeTensorMode
+        x = torch.randn((24, 16, 32, 32), device=device).to(memory_format=torch.channels_last)
+        x = x.view(2, 12, 16, 32, 32)
+
+        i1 = torch.arange(2, device=device).unsqueeze(-1)
+        i2 = torch.argsort(torch.rand(2, 12, device=device), dim=-1)[:, :3]
+
+        out = x[i1, i2]
+
+        mode = FakeTensorMode()
+        with mode:
+            f_x = mode.from_tensor(x)
+            f_i1 = mode.from_tensor(i1)
+            f_i2 = mode.from_tensor(i2)
+            f_out = f_x[f_i1, f_i2]
+
+        self.assertEqual(out.stride(), f_out.stride())
+
+    def _assert_fft_meta_stride_matches_eager(self, op, *args):
+        to_meta = MetaConverter()
+        meta_args = tree_map_only(torch.Tensor, to_meta, args)
+        ref_out = op(*args)
+        meta_out = op(*meta_args)
+        self.assertEqual(ref_out.size(), meta_out.size())
+        self.assertEqual(ref_out.stride(), meta_out.stride())
+
+    @unittest.skipIf(torch.version.hip, "cuFFT-specific stride behavior")
+    def test_fft_multi_dim_cufft_stride_matches_meta(self, device):
+        self._assert_fft_meta_stride_matches_eager(
+            aten._fft_c2c.default,
+            torch.randn((5, 5, 5, 5, 5), device=device, dtype=torch.complex64),
+            [1, 2, 3, 4],
+            0,
+            True,
+        )
+        self._assert_fft_meta_stride_matches_eager(
+            aten._fft_c2r.default,
+            torch.randn((5, 5, 5, 5, 3), device=device, dtype=torch.complex64),
+            [0, 1, 2, 3, 4],
+            0,
+            5,
+        )
+
+    def test_meta__fused_moving_avg_obs_fq_helper(self, device):
+        from torch.ao.quantization import FusedMovingAvgObsFakeQuantize
+        to_meta = MetaConverter()
+
+        x = torch.randn(5, 5, device=device)
+        running_min_op = torch.tensor(float("inf"), device=device)
+        running_max_op = torch.tensor(float("-inf"), device=device)
+        avg_const = 0.01
+        scale = torch.tensor([1.0], device=device)
+        zero_point = torch.tensor([0], dtype=torch.int, device=device)
+
+        mod = FusedMovingAvgObsFakeQuantize()
+        torch.ao.quantization.enable_fake_quant(mod)
+        torch.ao.quantization.enable_observer(mod)
+        mod.to(device)
+
+        meta_x = to_meta(x)
+
+        args = [
+            x,
+            mod.observer_enabled,
+            mod.fake_quant_enabled,
+            running_min_op,
+            running_max_op,
+            scale,
+            zero_point,
+            avg_const,
+            0,
+            255,
+            0,
+        ]
+
+        meta_args = args.copy()
+        meta_args[0] = meta_x
+
+        kwargss = [
+            {},
+            {"per_row_fake_quant": False, "symmetric_quant": False},
+            {"per_row_fake_quant": False, "symmetric_quant": True},
+        ]
+
+        for kwargs in kwargss:
+            ref_out = aten._fused_moving_avg_obs_fq_helper.default(*args, **kwargs)
+            meta_out = aten._fused_moving_avg_obs_fq_helper.default(*meta_args, **kwargs)
+
+            self.assertEqual(ref_out[0].size(), meta_out[0].size())
+            self.assertEqual(ref_out[0].stride(), meta_out[0].stride())
+            self.assertEqual(ref_out[1].size(), meta_out[1].size())
+            self.assertEqual(ref_out[1].stride(), meta_out[1].stride())
+
+@instantiate_parametrized_tests
+class TestMetaCore(TestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     def test_empty_quantized(self):
         r = torch.empty(2 ** 52, device='meta', dtype=torch.qint8)
@@ -1764,6 +1868,18 @@ class TestMeta(TestCase):
                 self._norm_backwards_test_helper(torch.ops.aten.native_group_norm_backward,
                                                  args, output_mask, expected_shapes)
 
+    def test_group_norm_channels_last(self):
+        input = torch.empty((2, 32, 8, 8), device="meta").contiguous(
+            memory_format=torch.channels_last
+        )
+        output, mean, rstd = torch.native_group_norm(input, None, None, 2, 32, 64, 4, 1e-5)
+        self.assertTrue(output.is_contiguous(memory_format=torch.channels_last))
+
+        grad_input, _, _ = torch.ops.aten.native_group_norm_backward(
+            torch.empty_like(output), input, mean, rstd, None, 2, 32, 64, 4, (True, False, False)
+        )
+        self.assertTrue(grad_input.is_contiguous(memory_format=torch.channels_last))
+
     @parametrize("output_mask", list(itertools.product([True], [True, False], [True, False])))
     def test_batch_norm_backward(self, output_mask):
         from torch.testing._internal.common_methods_invocations import sample_inputs_batch_norm
@@ -1806,55 +1922,6 @@ class TestMeta(TestCase):
         r2 = torch.ops.aten.fill(inps, 1.0)
         self.assertNotEqual(id(inps), id(r2))
 
-    def test_meta__fused_moving_avg_obs_fq_helper(self, device):
-        from torch.ao.quantization import FusedMovingAvgObsFakeQuantize
-        to_meta = MetaConverter()
-
-        x = torch.randn(5, 5, device=device)
-        running_min_op = torch.tensor(float("inf"), device=device)
-        running_max_op = torch.tensor(float("-inf"), device=device)
-        avg_const = 0.01
-        scale = torch.tensor([1.0], device=device)
-        zero_point = torch.tensor([0], dtype=torch.int, device=device)
-
-        mod = FusedMovingAvgObsFakeQuantize()
-        torch.ao.quantization.enable_fake_quant(mod)
-        torch.ao.quantization.enable_observer(mod)
-        mod.to(device)
-
-        meta_x = to_meta(x)
-
-        args = [
-            x,
-            mod.observer_enabled,
-            mod.fake_quant_enabled,
-            running_min_op,
-            running_max_op,
-            scale,
-            zero_point,
-            avg_const,
-            0,
-            255,
-            0,
-        ]
-
-        meta_args = args.copy()
-        meta_args[0] = meta_x
-
-        kwargss = [
-            {},
-            {"per_row_fake_quant": False, "symmetric_quant": False},
-            {"per_row_fake_quant": False, "symmetric_quant": True},
-        ]
-
-        for kwargs in kwargss:
-            ref_out = aten._fused_moving_avg_obs_fq_helper.default(*args, **kwargs)
-            meta_out = aten._fused_moving_avg_obs_fq_helper.default(*meta_args, **kwargs)
-
-            self.assertEqual(ref_out[0].size(), meta_out[0].size())
-            self.assertEqual(ref_out[0].stride(), meta_out[0].stride())
-            self.assertEqual(ref_out[1].size(), meta_out[1].size())
-            self.assertEqual(ref_out[1].stride(), meta_out[1].stride())
 
     def test_cdist_forward(self, device):
         to_meta = MetaConverter()
@@ -1987,47 +2054,6 @@ class TestMeta(TestCase):
         )
         self.assertEqual(grad_weight.to('meta'), meta_grad_weight)
 
-    def _assert_fft_meta_stride_matches_eager(self, op, *args):
-        to_meta = MetaConverter()
-        meta_args = tree_map_only(torch.Tensor, to_meta, args)
-        ref_out = op(*args)
-        meta_out = op(*meta_args)
-        self.assertEqual(ref_out.size(), meta_out.size())
-        self.assertEqual(ref_out.stride(), meta_out.stride())
-
-    @onlyCUDA
-    @unittest.skipIf(torch.version.hip, "cuFFT-specific stride behavior")
-    def test_fft_multi_dim_cufft_stride_matches_meta(self, device):
-        self._assert_fft_meta_stride_matches_eager(
-            aten._fft_c2c.default,
-            torch.randn((5, 5, 5, 5, 5), device=device, dtype=torch.complex64),
-            [1, 2, 3, 4],
-            0,
-            True,
-        )
-        self._assert_fft_meta_stride_matches_eager(
-            aten._fft_c2r.default,
-            torch.randn((5, 5, 5, 5, 3), device=device, dtype=torch.complex64),
-            [0, 1, 2, 3, 4],
-            0,
-            5,
-        )
-
-    # opinfo test is using aten.fill_, it's not testing aten.fill
-    @onlyAccelerator
-    @skipIfMPS
-    def test_fill_stride(self, device):
-        to_meta = MetaConverter()
-        sample_args = [torch.rand(2, 2, 2, 2, device=device), 1.0]
-
-        for args in get_strided_args(sample_args):
-            meta_args = to_meta(args)
-            ref_out = torch.ops.aten.fill(*args)
-            meta_out = torch.ops.aten.fill(*meta_args)
-            self.assertEqual(ref_out.size(), meta_out.size())
-            self.assertEqual(ref_out.stride(), meta_out.stride())
-
-
     def test_map_location_deserialize(self):
         import io
 
@@ -2128,27 +2154,6 @@ class TestMeta(TestCase):
         self.assertEqual(nz.shape, torch.Size([24, 3]))
         self.assertEqual(nz.stride(), torch.Size([1, 24]))
 
-
-    def test_stride_for_index_Tensor(self):
-        from torch._subclasses import FakeTensorMode
-        x = torch.randn((24, 16, 32, 32)).to(memory_format=torch.channels_last)
-        x = x.view(2, 12, 16, 32, 32)
-
-        i1 = torch.arange(2).unsqueeze(-1)
-        i2 = torch.argsort(torch.rand(2, 12), dim=-1)[:, :3]
-
-        out = x[i1, i2]
-
-        mode = FakeTensorMode()
-        with mode:
-            f_x = mode.from_tensor(x)
-            f_i1 = mode.from_tensor(i1)
-            f_i2 = mode.from_tensor(i2)
-            f_out = f_x[f_i1, f_i2]
-
-        self.assertEqual(out.stride(), f_out.stride())
-
-
     @parametrize("in_dtype", [torch.float32, torch.float16])
     @parametrize("bias_dtype", [torch.float32, torch.float16, None])
     def test_mixed_dtype_for_native_layer_norm_backward(self, in_dtype, bias_dtype):
@@ -2204,6 +2209,31 @@ class TestMeta(TestCase):
 
         self.assertEqual(cpu_output_dtype, meta_output_dtype)
         self.assertEqual(cpu_logsumexp_dtype, meta_logsumexp_dtype)
+
+    def test_flash_attention_mixed_head_dim_metadata(self):
+        q_bshd = torch.empty(1, 128, 2, 192, device="meta", dtype=torch.float16)
+        k_bshd = torch.empty_like(q_bshd)
+        v_bshd = torch.empty(1, 128, 2, 128, device="meta", dtype=torch.float16)
+        q, k, v = (tensor.transpose(1, 2) for tensor in (q_bshd, k_bshd, v_bshd))
+
+        output = torch.ops.aten._scaled_dot_product_flash_attention(q, k, v)[0]
+        self.assertEqual(output.shape, v.shape)
+        self.assertEqual(output.stride(), v.stride())
+
+        expanded_q = q[:1, :1].expand(2, 4, -1, -1)
+        expanded_k = k[:1, :1].expand(2, 4, -1, -1)
+        expanded_v = v[:1, :1].expand(2, 4, -1, -1)
+        output = torch.ops.aten._scaled_dot_product_flash_attention(
+            expanded_q, expanded_k, expanded_v
+        )[0]
+        self.assertEqual(output.shape, expanded_v.shape)
+        self.assertEqual(output.stride(), (16384, 32768, 128, 1))
+
+        output = torch.ops.aten._flash_attention_forward(
+            q_bshd, k_bshd, v_bshd, None, None, 128, 128, 0.0, False, False
+        )[0]
+        self.assertEqual(output.shape, v_bshd.shape)
+        self.assertEqual(output.stride(), v_bshd.stride())
 
 class TestMetaKernelConv(TestCase):
     hw_classification = HardwareClassification.GENERIC
@@ -2751,7 +2781,7 @@ class TestMetaKernelRegistrations(TestCase):
         self.assertEqual(diff_b2.shape, expected_bias_shape)
 
 
-instantiate_device_type_tests(TestMeta, globals())
+instantiate_device_type_tests(TestMeta, globals(), only_for='cuda')
 
 
 def print_op_str_if_not_supported(op_str):
