@@ -280,7 +280,7 @@ def _get_weights_and_functional_call_with_buffers(net, mechanism):
 
 
 @markDynamoStrictTest
-class TestGradTransform(TestCase):
+class TestGradTransformDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     def test_primitive(self, device):
@@ -1284,7 +1284,7 @@ class TestGradTransform(TestCase):
 
 
 @markDynamoStrictTest
-class TestAutogradFunction(TestCase):
+class TestAutogradFunctionDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @skipIfTorchDynamo("internal API test")
@@ -1539,7 +1539,7 @@ class TestAutogradFunction(TestCase):
 
 
 @markDynamoStrictTest
-class TestAutogradFunctionVmapAPI(TestCase):
+class TestAutogradFunctionVmapAPIDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     def test_no_vmap_staticmethod_and_no_generate_vmap_rule(self, device):
@@ -1843,7 +1843,7 @@ class TestAutogradFunctionVmapAPI(TestCase):
 
 
 @markDynamoStrictTest
-class TestVmapOfGrad(TestCase):
+class TestVmapOfGradDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     def test_per_sample_grads_inplace_view(self, device):
@@ -1992,7 +1992,7 @@ FIXME_jacrev_only = parametrize("jacapi", [subtest(jacrev, name="jacrev")])
 
 
 @markDynamoStrictTest
-class TestJac(VmapTearDownMixin, TestCase):
+class TestJacDevice(VmapTearDownMixin, TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @jacrev_and_jacfwd
@@ -2675,7 +2675,7 @@ class TestJac(VmapTearDownMixin, TestCase):
 
 
 @markDynamoStrictTest
-class TestHessian(TestCase):
+class TestHessianDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     def _test_against_reference(self, f, inputs):
@@ -2719,10 +2719,11 @@ class TestHessian(TestCase):
         y = torch.randn(3, device=device)
         self._test_against_reference(f, (x, y))
 
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO and sys.version_info[:2] < (3, 14),
-        "Frame Handling Difference between Python versions",
-    )
+    # Pre-3.14 the skip is a frame handling difference; on 3.14+ the test hits
+    # https://github.com/pytorch/pytorch/issues/192284. That issue disables the
+    # test by its old class name, which this file's Device suffix no longer
+    # matches, so skip here instead of relying on the disabled-tests list.
+    @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "see pytorch/pytorch#192284")
     def test_jacfwd_different_levels(self, device):
         # Test case from:
         # https://github.com/pytorch/functorch/issues/597
@@ -2745,7 +2746,7 @@ class TestHessian(TestCase):
 
 
 @markDynamoStrictTest
-class TestJvp(TestCase):
+class TestJvpDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     def test_inplace_on_captures(self, device):
@@ -3101,7 +3102,7 @@ class TestJvp(TestCase):
 
 
 @markDynamoStrictTest
-class TestLinearize(TestCase):
+class TestLinearizeDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @dtypes(torch.float)
@@ -3247,7 +3248,7 @@ class TestLinearize(TestCase):
 # The tests here follow the cases in [Forward Grad View/inplace]
 # https://github.com/pytorch/pytorch/blob/master/torch/csrc/autograd/autograd_meta.cpp#L18-L43
 @markDynamoStrictTest
-class TestVmapJvpInplaceView(TestCase):
+class TestVmapJvpInplaceViewDevice(TestCase):
     # Case 1 in [Forward Grad View/inplace]
     hw_classification = HardwareClassification.ACCELERATOR
 
@@ -3409,7 +3410,7 @@ class TestVmapJvpInplaceView(TestCase):
 
 # Use for testing miscellaneous helper functions
 @markDynamoStrictTest
-class TestHelpers(TestCase):
+class TestHelpersDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     def test_CtxWithSavedTensors_error_if_name_collision(self, device):
@@ -3619,7 +3620,7 @@ class TestHelpers(TestCase):
 
 
 @markDynamoStrictTest
-class TestComposability(TestCase):
+class TestComposabilityDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     def test_deprecation_vmap(self, device):
@@ -4371,7 +4372,7 @@ class TestMakeFunctional(TestCase):
 
 
 @markDynamoStrictTest
-class TestExamplesCorrectness(TestCase):
+class TestExamplesCorrectnessDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     def _update_params(self, params, grads, alpha, mechanism):
@@ -4941,7 +4942,7 @@ def normalize_devices(fx_g):
 
 
 @markDynamoStrictTest
-class TestFunctionalize(TestCase):
+class TestFunctionalizeDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     def _check_functionalize_correctness(self, f, inpt, *, skip_vmap=False):
@@ -5391,7 +5392,7 @@ sum_pyop = construct_sum_pyop()
 
 
 @markDynamoStrictTest
-class TestHigherOrderOperatorInteraction(TestCase):
+class TestHigherOrderOperatorInteractionDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     def test_basic_sum(self, device):
@@ -5479,7 +5480,7 @@ def traceable(f):
 
 
 @markDynamoStrictTest
-class TestCompileTransforms(TestCase):
+class TestCompileTransformsDevice(TestCase):
     # torch.compile is not supported on Windows CUDA.
     # Triton only supports GPU with SM70 or later.
     hw_classification = HardwareClassification.ACCELERATOR
@@ -5748,85 +5749,85 @@ class TestGradTrackingTensorToList(TestCase):
 
 only_for = ("cpu", "cuda", "xpu")
 instantiate_device_type_tests(
-    TestGradTransform,
+    TestGradTransformDevice,
     globals(),
     only_for=only_for,
     allow_xpu=True,
 )
 instantiate_device_type_tests(
-    TestVmapOfGrad,
+    TestVmapOfGradDevice,
     globals(),
     only_for=only_for,
     allow_xpu=True,
 )
 instantiate_device_type_tests(
-    TestJac,
+    TestJacDevice,
     globals(),
     only_for=only_for,
     allow_xpu=True,
 )
 instantiate_device_type_tests(
-    TestJvp,
+    TestJvpDevice,
     globals(),
     only_for=only_for,
     allow_xpu=True,
 )
 instantiate_device_type_tests(
-    TestLinearize,
+    TestLinearizeDevice,
     globals(),
     only_for=only_for,
     allow_xpu=True,
 )
 instantiate_device_type_tests(
-    TestVmapJvpInplaceView,
+    TestVmapJvpInplaceViewDevice,
     globals(),
     only_for=only_for,
     allow_xpu=True,
 )
 instantiate_device_type_tests(
-    TestHessian,
+    TestHessianDevice,
     globals(),
     only_for=only_for,
     allow_xpu=True,
 )
 instantiate_device_type_tests(
-    TestComposability,
+    TestComposabilityDevice,
     globals(),
     only_for=only_for,
     allow_xpu=True,
 )
 instantiate_device_type_tests(
-    TestExamplesCorrectness,
+    TestExamplesCorrectnessDevice,
     globals(),
     only_for=only_for,
     allow_xpu=True,
 )
 instantiate_device_type_tests(
-    TestHigherOrderOperatorInteraction,
+    TestHigherOrderOperatorInteractionDevice,
     globals(),
     only_for=only_for,
     allow_xpu=True,
 )
 instantiate_device_type_tests(
-    TestFunctionalize,
+    TestFunctionalizeDevice,
     globals(),
     only_for=only_for,
     allow_xpu=True,
 )
 instantiate_device_type_tests(
-    TestAutogradFunction,
+    TestAutogradFunctionDevice,
     globals(),
     only_for=only_for,
     allow_xpu=True,
 )
 instantiate_device_type_tests(
-    TestAutogradFunctionVmapAPI,
+    TestAutogradFunctionVmapAPIDevice,
     globals(),
     only_for=only_for,
     allow_xpu=True,
 )
 instantiate_device_type_tests(
-    TestHelpers,
+    TestHelpersDevice,
     globals(),
     only_for=only_for,
     allow_xpu=True,
@@ -5835,7 +5836,7 @@ instantiate_parametrized_tests(
     TestMakeFunctional,
 )
 instantiate_device_type_tests(
-    TestCompileTransforms,
+    TestCompileTransformsDevice,
     globals(),
     only_for=only_for,
     allow_xpu=True,
