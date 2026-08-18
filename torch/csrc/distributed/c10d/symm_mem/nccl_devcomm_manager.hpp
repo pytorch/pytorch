@@ -192,6 +192,21 @@ class TORCH_API NCCLDevCommManager {
 #endif
   }
 
+  // Identity-safe unregister: drop the entry only if the currently-registered
+  // comm is still `comm`. A stale producer whose comm was already replaced by a
+  // successor under the same `group_name` becomes a no-op, so it cannot clobber
+  // the successor -- no isAborted()-style discipline needed at the call site.
+  void unregister_comm(const std::string& group_name, ncclComm_t comm) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto it = group_to_comm_.find(group_name);
+    if (it != group_to_comm_.end() && it->second == comm) {
+      group_to_comm_.erase(it);
+#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+      devcomm_registry_.erase(group_name);
+#endif
+    }
+  }
+
   // Destructor: Clean up all registered device communicators.
   // This is a best-effort cleanup. If the CUDA context has already been
   // destroyed, the cleanup will be skipped. All errors are caught and ignored

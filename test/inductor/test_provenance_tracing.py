@@ -165,22 +165,14 @@ class TestProvenanceTracingArtifact(TestCase):
                     self.assertTrue(m)
                     filepath = Path(m.group(1))
                     if device == "cuda" or device == "xpu":
-                        # aot_inductor uses export (no canonicalization),
-                        # so pre-graph names stay as original.
-                        # inductor uses torch.compile (canonicalization runs),
-                        # so pre-graph names become canonical.
-                        if backend == "aot_inductor":
-                            pre_mul, pre_addmm, pre_gelu = (
-                                "mul",
-                                "addmm",
-                                "gelu",
-                            )
-                        else:
-                            pre_mul, pre_addmm, pre_gelu = (
-                                "mul_tensor",
-                                "addmm_default",
-                                "gelu_default",
-                            )
+                        # Both inductor (torch.compile) and aot_inductor (export)
+                        # canonicalize node order, so pre-graph names become
+                        # canonical for both.
+                        pre_mul, pre_addmm, pre_gelu = (
+                            "mul_tensor",
+                            "addmm_default",
+                            "gelu_default",
+                        )
                         expected_mapping = [
                             (
                                 "cppCodeToPost",
@@ -793,14 +785,18 @@ class TestProvenanceTracingStackTraces(TestCase):
                         "x = self.relu(x)",
                     ],
                     "post_grad_nodes": ["sigmoid", "relu", "add_tensor_1"],
-                    "pre_grad_nodes": ["sigmoid", "relu", "linear"],
+                    "pre_grad_nodes": [
+                        "sigmoid_default",
+                        "relu_default",
+                        "linear_default",
+                    ],
                 },
                 "triton_poi_fused_mul_1:3": {
                     "stack_traces": [
                         "d = a * 3.14",
                     ],
                     "post_grad_nodes": ["mul"],
-                    "pre_grad_nodes": ["mul"],
+                    "pre_grad_nodes": ["mul_tensor"],
                 },
                 "triton_poi_fused_addmm_gelu_2:5": {
                     "stack_traces": [
@@ -815,21 +811,21 @@ class TestProvenanceTracingStackTraces(TestCase):
                         "erf",
                         "mul_2",
                     ],
-                    "pre_grad_nodes": ["gelu", "addmm"],
+                    "pre_grad_nodes": ["gelu_default", "addmm_default"],
                 },
                 f"aoti_torch_{GPU_TYPE}_mm_out:1": {
                     "stack_traces": [
                         "x = self.fc1(x)",
                     ],
                     "post_grad_nodes": ["mm_default_1"],
-                    "pre_grad_nodes": ["linear"],
+                    "pre_grad_nodes": ["linear_default"],
                 },
                 f"aoti_torch_{GPU_TYPE}_mm_out:4": {
                     "stack_traces": [
                         "y = torch.addmm(c, d, b)",
                     ],
                     "post_grad_nodes": ["mm_default"],
-                    "pre_grad_nodes": ["addmm"],
+                    "pre_grad_nodes": ["addmm_default"],
                 },
             }
 
@@ -858,8 +854,8 @@ class TestProvenanceTracingStackTraces(TestCase):
             self.assertIsNone(triton_poi_0["extern_semantic_key"])
 
             mm_out_1 = kernel_info[f"aoti_torch_{GPU_TYPE}_mm_out:1"]
-            # Single pre_grad_node "linear" → extern_semantic_key fallback
-            self.assertEqual(mm_out_1["extern_semantic_key"], "linear")
+            # Single pre_grad_node "linear_default" -> extern_semantic_key fallback
+            self.assertEqual(mm_out_1["extern_semantic_key"], "linear_default")
             self.assertEqual(mm_out_1["input_shapes"], [[8, 10], [10, 16]])
             self.assertEqual(
                 mm_out_1["input_dtypes"], ["torch.float32", "torch.float32"]
@@ -868,7 +864,7 @@ class TestProvenanceTracingStackTraces(TestCase):
             self.assertEqual(mm_out_1["output_dtype"], "torch.float32")
 
             mm_out_4 = kernel_info[f"aoti_torch_{GPU_TYPE}_mm_out:4"]
-            self.assertEqual(mm_out_4["extern_semantic_key"], "addmm")
+            self.assertEqual(mm_out_4["extern_semantic_key"], "addmm_default")
             self.assertEqual(mm_out_4["input_shapes"], [[10, 20], [20, 30]])
             self.assertEqual(
                 mm_out_4["input_dtypes"], ["torch.float32", "torch.float32"]
