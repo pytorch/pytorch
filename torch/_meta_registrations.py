@@ -302,6 +302,13 @@ def logcumsumexp(self, dim):
 # Although the actual FFT launch is different, all the permuting code appears
 # to be the same
 def _exec_fft(out, self, out_sizes, dim, *, forward):
+    # Empty batches are short-circuited by the eager kernels (cuFFT/MKL/MPS all
+    # reject zero-element transforms); mirror that here so tracing does not call
+    # resize_ on a functionalized tensor.
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+    if guard_or_false(out.numel() == 0):
+        return out.new_empty(out_sizes)
     ndim = self.ndim
     signal_ndim = len(dim)
     batch_dims = ndim - signal_ndim
