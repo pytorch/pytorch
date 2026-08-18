@@ -87,13 +87,15 @@ def get_with_pytest_shard(
     tests: Sequence[TestRun],
     test_file_times: dict[str, float],
     test_class_times: dict[str, dict[str, float]] | None,
+    *,
+    allow_pytest_sharding: bool = True,
 ) -> list[ShardedTest]:
     sharded_tests: list[ShardedTest] = []
 
     for test in tests:
         duration = get_duration(test, test_file_times, test_class_times or {})
 
-        if duration and duration > THRESHOLD:
+        if allow_pytest_sharding and duration and duration > THRESHOLD:
             num_shards = math.ceil(duration / THRESHOLD)
             for i in range(num_shards):
                 sharded_tests.append(
@@ -208,6 +210,7 @@ def calculate_shards(
     test_class_times: dict[str, dict[str, float]] | None,
     must_serial: Callable[[str], bool] | None = None,
     sort_by_time: bool = True,
+    allow_pytest_sharding: bool = True,
 ) -> list[tuple[float, list[ShardedTest]]]:
     must_serial = must_serial or (lambda x: True)
     test_class_times = test_class_times or {}
@@ -222,13 +225,26 @@ def calculate_shards(
         unknown_tests = [x for x in tests if x not in known_tests]
 
         pytest_sharded_tests = sorted(
-            get_with_pytest_shard(known_tests, test_file_times, test_class_times),
+            get_with_pytest_shard(
+                known_tests,
+                test_file_times,
+                test_class_times,
+                allow_pytest_sharding=allow_pytest_sharding,
+            ),
             key=lambda j: j.get_time(),
             reverse=True,
-        ) + get_with_pytest_shard(unknown_tests, test_file_times, test_class_times)
+        ) + get_with_pytest_shard(
+            unknown_tests,
+            test_file_times,
+            test_class_times,
+            allow_pytest_sharding=allow_pytest_sharding,
+        )
     else:
         pytest_sharded_tests = get_with_pytest_shard(
-            tests, test_file_times, test_class_times
+            tests,
+            test_file_times,
+            test_class_times,
+            allow_pytest_sharding=allow_pytest_sharding,
         )
     del tests
 
