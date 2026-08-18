@@ -4,6 +4,7 @@ import argparse
 import importlib
 import json
 import os
+import platform
 import re
 import subprocess
 import sys
@@ -224,6 +225,80 @@ def find_pypi_package_version(package: str) -> str | None:
     return None
 
 
+def find_torch_cuda_toolkit_metadata_version() -> str | None:
+    from importlib import metadata
+
+    try:
+        requirements = metadata.distribution("torch").requires or []
+    except metadata.PackageNotFoundError:
+        return None
+
+    for requirement in requirements:
+        package, _, _ = requirement.partition(";")
+        if not package.strip().lower().startswith("cuda-toolkit"):
+            continue
+        match = re.search(r"==\s*(\d+\.\d+\.\d+)", package)
+        if match:
+            return match.group(1)
+    return None
+
+
+def get_expected_cuda_toolkit_version_windows(cuda_version: str) -> str | None:
+    bat_file = (
+        PYTORCH_ROOT / ".ci" / "pytorch" / "windows" / "internal" / "cuda_install.bat"
+    )
+    if not bat_file.exists():
+        print(f"Warning: {bat_file} not found, skipping CUDA toolkit version check")
+        return None
+
+    cuda_ver_nodot = cuda_version.replace(".", "")
+    pattern = (
+        rf":cuda{re.escape(cuda_ver_nodot)}\s*"
+        r"[\s\S]*?set CUDA_INSTALL_EXE=cuda_(\d+\.\d+\.\d+)"
+        r"(?:_[0-9.]+)?_windows\.exe"
+    )
+    match = re.search(pattern, bat_file.read_text())
+    if match:
+        return match.group(1)
+    return None
+
+
+# CUPTI DLL names vary between CTK patch releases. Verify that the runtime CTK
+# matches the build CTK; future CTK versions fix this naming mismatch.
+def check_cuda_toolkit_version(
+    cuda_version: str, cuda_toolkit_metadata_version: str | None
+) -> None:
+    if sys.platform != "win32":
+        print(
+            f"CUDA toolkit patch version check not required / supported on platform {sys.platform}"
+        )
+        return
+    expected = get_expected_cuda_toolkit_version_windows(cuda_version)
+    source = "cuda_install.bat"
+
+    if cuda_toolkit_metadata_version is None:
+        raise RuntimeError(
+            "Can't find cuda-toolkit requirement in torch wheel metadata "
+            f"for CUDA {cuda_version}"
+        )
+    if expected is None:
+        print(
+            f"Warning: Could not determine expected CUDA toolkit version for CUDA "
+            f"{cuda_version} from {source}, skipping validation"
+        )
+        return
+    if cuda_toolkit_metadata_version != expected:
+        raise RuntimeError(
+            f"CUDA toolkit version mismatch for CUDA {cuda_version}. "
+            f"Wheel metadata: {cuda_toolkit_metadata_version} "
+            f"Expected: {expected} (from {source})"
+        )
+    print(
+        f"CUDA toolkit version check passed: {cuda_toolkit_metadata_version} "
+        f"matches expected {expected} from {source}"
+    )
+
+
 def get_expected_cudnn_version_linux(cuda_version: str) -> str | None:
     """Parse expected cuDNN version from generate_binary_build_matrix.py for Linux.
 
@@ -241,7 +316,7 @@ def get_expected_cudnn_version_linux(cuda_version: str) -> str | None:
     # Match the full cudnn package version like nvidia-cudnn-cu12==9.10.2.21
     # and extract major.minor.patch (dropping the build number)
     pattern = (
-        rf'"{re.escape(cuda_version)}":\s*\(\s*'
+        rf'"{re.escape(cuda_version)}":\s*\{{\s*"linux":\s*\(\s*'
         r"[\s\S]*?nvidia-cudnn-cu\d+==(\d+\.\d+\.\d+)\.\d+"
     )
     match = re.search(pattern, content)
@@ -399,8 +474,22 @@ def smoke_test_cuda(
             torch_nccl_version = ".".join(str(v) for v in torch.cuda.nccl.version())
             print(f"Torch nccl; version: {torch_nccl_version}")
 
-        # Pypi dependencies are installed on linux only and nccl is available only on Linux.
-        if pypi_pkg_check == "enabled" and sys.platform in ["linux", "linux2"]:
+        if (
+            pypi_pkg_check == "enabled"
+            and sys.platform == "win32"
+            and platform.machine().lower() in ("amd64", "x86_64")
+        ):
+            cuda_toolkit_metadata_version = find_torch_cuda_toolkit_metadata_version()
+            check_cuda_toolkit_version(gpu_arch_ver, cuda_toolkit_metadata_version)
+            compare_pypi_to_torch_versions(
+                "cuda-toolkit",
+                find_pypi_package_version("cuda-toolkit"),
+                cuda_toolkit_metadata_version,
+            )
+            compare_pypi_to_torch_versions(
+                "cudnn", find_pypi_package_version("nvidia-cudnn"), torch_cudnn_version
+            )
+        if pypi_pkg_check == "enabled" and (sys.platform in ["linux", "linux2"]):
             compare_pypi_to_torch_versions(
                 "cudnn", find_pypi_package_version("nvidia-cudnn"), torch_cudnn_version
             )
@@ -664,7 +753,7 @@ def parse_args():
     )
     parser.add_argument(
         "--pypi-pkg-check",
-        help="Check pypi package versions cudnn and nccl",
+        help="Check pypi package versions cuda-toolkit, cudnn, and nccl",
         type=str,
         choices=["enabled", "disabled"],
         default="enabled",
