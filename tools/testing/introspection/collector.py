@@ -17,6 +17,7 @@ import importlib.util
 import inspect
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -438,30 +439,71 @@ class _Recorder(unittest.TestResult):
         self.skipped_reasons[self._key(test)] = reason
 
 
-# Predicates that AND the simulated capability with a library probe. The descriptor
-# fixes the capability term and inherits the other from the image, so where the library
-# is missing these read False at every capability and no requirement is observable.
-LIBRARY_PROBES = [
-    "has_triton_tma_device",
-    "has_triton_stable_tma_api",
-    "has_triton_tensor_descriptor_host_tma",
-    "has_triton_experimental_host_tma",
-    "has_datacenter_blackwell_tma_device",
-]
+def _hidden_gates(path: str) -> dict[str, list[str]]:
+    """{Class::method or Class::setUp: [names its skip depends on]}.
 
+    setUp, tearDown and test bodies are gutted before the suite runs, so a skip
+    raised inside one is never observed and the test looks unconditionally live.
+    Recording which names those skips read lets a consumer say which tests it
+    could not judge, instead of reporting them as having no requirement.
+    """
+    try:
+        tree = ast.parse(Path(path).read_text(encoding="utf-8"), filename=path)
+    except (OSError, SyntaxError):
+        return {}
 
-def _probes() -> dict[str, bool]:
-    from torch.utils import _triton
-
-    out = {}
-    for name in LIBRARY_PROBES:
-        fn = getattr(_triton, name, None)
-        if fn is None:
+    out: dict[str, list[str]] = {}
+    for cls in ast.walk(tree):
+        if not isinstance(cls, ast.ClassDef):
             continue
-        if hasattr(fn, "cache_clear"):
-            fn.cache_clear()
+        for fn in cls.body:
+            if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            if not (fn.name.startswith("test") or fn.name in _GUT_METHODS):
+                continue
+            names: set[str] = set()
+            for node in ast.walk(ast.Module(body=fn.body, type_ignores=[])):
+                # Only what guards a skip. A test body mentions plenty of names
+                # that have nothing to do with whether it runs.
+                if not isinstance(node, ast.If):
+                    continue
+                src = ast.unparse(node)
+                if "skipTest" not in src and "SkipTest" not in src:
+                    continue
+                for ref in ast.walk(node.test):
+                    if isinstance(ref, ast.Name):
+                        names.add(ref.id)
+                    elif isinstance(ref, ast.Attribute):
+                        names.add(ref.attr)
+            if names:
+                out[f"{cls.name}::{fn.name}"] = sorted(names)
+    return out
+
+
+def _probe_values(mod: ModuleType, names: set[str]) -> dict[str, bool]:
+    """Evaluate each name in the module's namespace, at this capability.
+
+    Discovered from the source rather than declared in a list here: a predicate
+    the file gates on is a predicate worth knowing the value of, and a checked-in
+    list of them would go stale the moment a new one appeared.
+    """
+    out: dict[str, bool] = {}
+    for name in sorted(names):
+        value = getattr(mod, name, None)
+        if isinstance(value, bool):
+            out[name] = value
+            continue
+        # Calling is restricted to zero-argument predicates named like one. A test
+        # module's namespace holds plenty of callables -- Triton kernels among them
+        # -- that must not be invoked to answer a question about gating.
+        if not callable(value) or not re.match(r"^(has_|is_|supports_)", name):
+            continue
         try:
-            out[name] = bool(fn())
+            if inspect.signature(value).parameters:
+                continue
+            if hasattr(value, "cache_clear"):
+                value.cache_clear()
+            out[name] = bool(value())
         except Exception:
             out[name] = False
     return out
@@ -481,11 +523,13 @@ def _status(mod: ModuleType) -> dict:
     # Reported so a caller can tell a file with no requirements from one whose suite
     # was abandoned partway: an aborted run leaves the remaining tests in neither
     # bucket, which is indistinguishable from their having no requirement at all.
+    gates = _hidden_gates(str(mod.__file__))
     return {
         "ran": sorted(result.ran),
         "skipped": sorted(result.skipped_reasons.items()),
         "loadable": loadable,
-        "probes": _probes(),
+        "hidden_gates": gates,
+        "probes": _probe_values(mod, {n for ns in gates.values() for n in ns}),
     }
 
 
