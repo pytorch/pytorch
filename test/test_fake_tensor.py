@@ -75,6 +75,7 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     parametrize,
     run_tests,
+    skipIfCppFakeTensor,
     skipIfCrossRef,
     skipIfTorchDynamo,
     skipIfWindows,
@@ -103,10 +104,6 @@ torch._dynamo.config.fake_tensor_cache_crosscheck_enabled = True
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
 CPP_FAKETENSOR = torch._dynamo.config.use_cpp_fake_tensor
-
-skipIfCppFakeTensor = unittest.skipIf(
-    CPP_FAKETENSOR, "this is not testing cpp fake functionality"
-)
 
 if CPP_FAKETENSOR:
     raise NotImplementedError("c++ faketensor not implemented yet")
@@ -499,7 +496,7 @@ class FakeTensorTest(TestCase):
             y = torch.nn.parameter.Parameter(x)
             self.assertTrue(isinstance(y, torch.nn.Parameter))
 
-    @skipIfCppFakeTensor
+    @skipIfCppFakeTensor("no Python FakeTensor reconstruction support")
     def test_parameter_state_reconstruction_from_dict(self):
         with FakeTensorMode():
             param = torch.nn.Conv2d(3, 4, 1).weight
@@ -521,7 +518,7 @@ class FakeTensorTest(TestCase):
         self.assertNotIn("fake_device", reconstructed.__dict__)
         self.assertEqual(reconstructed.to("meta").fake_device, torch.device("meta"))
 
-    @skipIfCppFakeTensor
+    @skipIfCppFakeTensor("no Python FakeTensor reconstruction support")
     def test_parameter_state_reconstruction_rejects_device_conflict(self):
         with FakeTensorMode() as mode:
             elem = torch.empty(2, 2, device="meta")
@@ -533,7 +530,7 @@ class FakeTensorTest(TestCase):
                     fake_device=torch.device("cuda:0"),
                 )
 
-    @skipIfCppFakeTensor
+    @skipIfCppFakeTensor("no Python FakeTensor reconstruction support")
     def test_parameter_state_reconstruction_accepts_normalized_device_aliases(self):
         with FakeTensorMode() as mode:
             elem = torch.empty(2, 2, device="meta")
@@ -546,7 +543,7 @@ class FakeTensorTest(TestCase):
 
         self.assertEqual(fake.fake_device, torch.device("cuda:0"))
 
-    @skipIfCppFakeTensor
+    @skipIfCppFakeTensor("no Python FakeTensor reconstruction support")
     @parametrize("device_kwarg_name", ["fake_device", "device"])
     def test_parameter_state_reconstruction_device_names(self, device_kwarg_name):
         with FakeTensorMode():
@@ -618,7 +615,7 @@ class FakeTensorTest(TestCase):
             self.checkType(out, "cuda", [36])
             self.assertEqual(out.dtype, dtype)
 
-    @skipIfCppFakeTensor
+    @skipIfCppFakeTensor("no Python scalar memoization support")
     @skipIfTorchDynamo("test directly checks FakeTensorMode outputs")
     def test_scalar_tensor_index(self):
         for dtype in (torch.int8, torch.int16, torch.int32, torch.int64):
@@ -631,7 +628,7 @@ class FakeTensorTest(TestCase):
                     out = x[idx]
                 self.checkType(out, "cpu", [4])
 
-    @skipIfCppFakeTensor
+    @skipIfCppFakeTensor("no Python scalar memoization support")
     def test_static_scalar_tensor_with_shape_env_has_no_concrete_item_memo(self):
         shape_env = ShapeEnv()
         for dtype in (torch.int64, torch.float64):
@@ -644,7 +641,7 @@ class FakeTensorTest(TestCase):
                     )
                     self.assertIsNone(scalar.item_memo)
 
-    @skipIfCppFakeTensor
+    @skipIfCppFakeTensor("no Python scalar memoization support")
     def test_scalar_tensor_item_memo_invalidates_on_epoch(self):
         shape_env = ShapeEnv()
         scalar = torch.tensor(2, dtype=torch.int64)
@@ -676,7 +673,7 @@ class FakeTensorTest(TestCase):
             x = torch.empty(2, 2, device="meta")
             self.assertEqual(repr(x), f"{name}(..., device='meta', size=(2, 2))")
 
-    @skipIfCppFakeTensor
+    @skipIfCppFakeTensor("no fake_device support")
     def test_fake_device_property_normalization(self):
         """Test that fake_device property normalizes device on assignment."""
         with FakeTensorMode() as mode:
@@ -810,7 +807,7 @@ class FakeTensorTest(TestCase):
                     x, w, b, [1, 1], [1, 1], [1, 1], False, [0, 0], 1
                 )
 
-    @skipIfCppFakeTensor
+    @skipIfCppFakeTensor("no unspecified fake device index support")
     def test_conv_allows_unspecified_fake_device_index(self):
         with FakeTensorMode() as mode:
             x = FakeTensor(
@@ -1842,7 +1839,7 @@ def forward(self, x_1):
     # TODO: Support NJT.  There's also some funny business with dynamic shapes
     # which would need to be dealt with as well
     @expectedFailurePropagateRealTensors
-    @skipIfCppFakeTensor
+    @skipIfCppFakeTensor("no nested tensor support")
     def test_jagged_fake_to_fake_preserved(self):
         from torch.nested._internal.nested_tensor import jagged_from_list
 
@@ -2525,8 +2522,7 @@ def make_propagate_real_tensors_cls(cls):
         xfail_prop="_expected_failure_propagate_real_tensors",
         decorator=skipIfTorchDynamo("propagate_real_tensors affects Dynamo"),
     )
-    # skip in C++ for now
-    cls = skipIfCppFakeTensor(cls)
+    cls = skipIfCppFakeTensor("no propagate_real_tensors support")(cls)
     cls.__file__ = __file__
     cls.__module__ = __name__
     globals()[cls.__name__] = cls
@@ -2662,7 +2658,7 @@ class FakeTensorConverterTest(TestCase):
         mode = FakeTensorMode()
         self.assertTrue(mode.from_tensor(x) is mode.from_tensor(x))
 
-    @skipIfCppFakeTensor
+    @skipIfCppFakeTensor("no Python converter memoization support")
     def test_memoized_conversion_from_meta(self):
         x = torch.rand(2, 2).to(device="meta")
         mode = FakeTensorMode()
@@ -2862,7 +2858,7 @@ class FakeTensorConverterTest(TestCase):
             y = torch.empty(2, 2, device="cpu")
         self.assertRaises(Exception, lambda: x, y)
 
-    @skipIfCppFakeTensor
+    @skipIfCppFakeTensor("no Python FakeTensor reference-cycle support")
     @xfailIfTorchDynamo
     def test_no_ref_cycle(self):
         x = torch.rand([4])
@@ -3583,7 +3579,7 @@ class FakeTensorSerialization(TestCase):
 
 
 # The dispatch cache is a Python FakeTensorMode feature with no C++ equivalent.
-@skipIfCppFakeTensor
+@skipIfCppFakeTensor("no Python dispatch cache support")
 class FakeTensorDispatchCache(TestCase):
     def test_shape_env_settings(self):
         """
@@ -3729,7 +3725,7 @@ class FakeTensorDispatchCache(TestCase):
         else:
             self.assertNotIn(reason, info.bypasses)
 
-    @skipIfCppFakeTensor
+    @skipIfCppFakeTensor("no Python dispatch cache support")
     def test_cache_hit(self):
         """
         Test that cache hit/miss counters are updated correctly.
@@ -3764,7 +3760,7 @@ class FakeTensorDispatchCache(TestCase):
 
             self.assertBypasses("prims.as_strided", 2)
 
-    @skipIfCppFakeTensor
+    @skipIfCppFakeTensor("no Python dispatch cache support")
     def test_cache_bypass(self):
         """
         Test that cache bypass counters are updated correctly.
@@ -3778,7 +3774,7 @@ class FakeTensorDispatchCache(TestCase):
             x.unsqueeze_(0)
             self.assertBypasses("inplace view", 1)
 
-    @skipIfCppFakeTensor
+    @skipIfCppFakeTensor("no Python dispatch cache support")
     def test_cache_default_dtype(self):
         """
         Test that the default dtype is respected when serving cached results.
@@ -3805,7 +3801,7 @@ class FakeTensorDispatchCache(TestCase):
             self.assertHitsMisses(1, 2)
 
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    @skipIfCppFakeTensor
+    @skipIfCppFakeTensor("no Python dispatch cache support")
     def test_cache_default_device(self):
         """
         Test that the default device is respected when serving cached results.
@@ -3835,7 +3831,7 @@ class FakeTensorDispatchCache(TestCase):
             finally:
                 torch.set_default_device(None)
 
-    @skipIfCppFakeTensor
+    @skipIfCppFakeTensor("no Python dispatch cache support")
     def test_cache_inplace_op(self):
         """
         Test that inplace ops served from the cache correctly reference the
@@ -3881,7 +3877,7 @@ class FakeTensorDispatchCache(TestCase):
             z1 = x1.mul_(2)
             self.assertFalse(z1._is_view())
 
-    @skipIfCppFakeTensor
+    @skipIfCppFakeTensor("no Python dispatch cache support")
     def test_cache_dispatch_key_set(self):
         """
         Test that operations that change the dispatch key set bypass caching.
@@ -3916,7 +3912,7 @@ class FakeTensorDispatchCache(TestCase):
             r = torch._C._fft.fft_hfft2(x, **kwargs, out=out)
             self.assertEqual(r.shape, out.shape)
 
-    @skipIfCppFakeTensor
+    @skipIfCppFakeTensor("no Python dispatch cache support")
     def test_inference_mode(self):
         """
         Test that caching handles inference mode correctly.
@@ -4064,7 +4060,7 @@ class FakeTensorDispatchCache(TestCase):
         self.assertTrue(is_fake_tensor(x_cpu))
         self.assertEqual(x_cpu.device, torch.device("cpu"))
 
-    @skipIfCppFakeTensor
+    @skipIfCppFakeTensor("no Python dispatch cache support")
     def test_cache_tuple_outputs(self):
         """
         Test to check that ops with tuple outputs work.
@@ -4088,7 +4084,7 @@ class FakeTensorDispatchCache(TestCase):
                     extract_tensor_metadata(b),
                 )
 
-    @skipIfCppFakeTensor
+    @skipIfCppFakeTensor("no Python dispatch cache support")
     def test_cache_aten_index(self):
         with FakeTensorMode():
             x = torch.randn(4, 4, 4)
@@ -4123,7 +4119,7 @@ class FakeTensorDispatchCache(TestCase):
         msg="weird bug - cache may not be cleared after https://github.com/pytorch/pytorch/pull/154283"
     )
     @skipIfTorchDynamo("cache hit/miss changes with invoke_subgraph caching")
-    @skipIfCppFakeTensor
+    @skipIfCppFakeTensor("no Python dispatch cache support")
     def test_invoke_subgraph(self):
         """
         Tests invoke subgraph
@@ -4206,7 +4202,7 @@ class FakeTensorDispatchCache(TestCase):
         self.assertTrue(count_invoke_subgraph_keys() == 0)
 
     @skipIfTorchDynamo("cache hit/miss changes with invoke_subgraph caching")
-    @skipIfCppFakeTensor
+    @skipIfCppFakeTensor("no Python dispatch cache support")
     def test_invoke_subgraph_cacheable_inplace(self):
         invoke_subgraph = torch._higher_order_ops.invoke_subgraph
 
@@ -4255,7 +4251,7 @@ class FakeTensorDispatchCache(TestCase):
                 )
 
     @skipIfTorchDynamo("cache hit/miss changes with invoke_subgraph caching")
-    @skipIfCppFakeTensor
+    @skipIfCppFakeTensor("no Python dispatch cache support")
     def test_unbacked_output(self):
         # The point of this test is to have an op which has no symbols as input
         # but a symbol as an output and make sure that we skip caching it.
