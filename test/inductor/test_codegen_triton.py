@@ -39,6 +39,7 @@ from torch._inductor.virtualized import V
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
+    HAS_CUDA_AND_TRITON,
     HAS_GPU,
     HAS_GPU_AND_TRITON,
 )
@@ -248,6 +249,11 @@ def helper(x):
         )
 
         _check_divisibility(
+            (0,),
+            triton_utils.config_of([SizeArg("A", s0)], divisible_by_16_extra=(0,)),
+        )
+
+        _check_divisibility(
             (0, 2, 4, 5, 6),
             triton_utils.config_of(
                 [
@@ -277,6 +283,216 @@ def helper(x):
         self.assertTrue(
             V.graph.sizevars.statically_known_multiple_of(s2, 16),
         )
+
+    @unittest.skipUnless(
+        HAS_CUDA_AND_TRITON and torch.version.hip is None and GPU_TYPE == "cuda",
+        "requires NVIDIA CUDA and Triton",
+    )
+    @inductor_config.patch("triton.divisible_by_16", True)
+    def test_runtime_divisibility_specializes_dynamic_kernel(self):
+        from torch._dynamo.testing import CompileCounterWithBackend
+
+        def fn(q1, k1, v1a, v1b, q2, k2, v2a, v2b):
+            g1 = torch.cat([q1, k1, v1a + v1b], dim=-1)
+            g2 = torch.cat([q2, k2, v2a + v2b], dim=-1)
+            return torch.cat([g1, g2], dim=-1)
+
+        def make_inputs(rows, widths):
+            return [
+                torch.randn(rows, width, device=GPU_TYPE, dtype=torch.bfloat16)
+                for width in widths
+            ]
+
+        counter = CompileCounterWithBackend("inductor")
+        compiled = torch.compile(fn, backend=counter, dynamic=True, fullgraph=True)
+
+        aligned = make_inputs(16, [16, 32, 48, 48, 64, 80, 96, 96])
+        actual, code = run_and_get_code(compiled, *aligned)
+        self.assertEqual(actual, fn(*aligned))
+
+        source = "\n".join(code)
+        self.assertIn("runtime_divisible_multi_kernel", source)
+        self.assertEqual(source.count("async_compile.triton("), 2)
+        self.assertNotIn("async_compile.triton_multi(", source)
+        self.assertNotIn("runtime_divisible_body", source)
+        self.assertEqual(source.count("def triton_"), 2)
+
+        unaligned = make_inputs(17, [17, 31, 49, 49, 65, 79, 95, 95])
+        self.assertEqual(compiled(*unaligned), fn(*unaligned))
+        self.assertEqual(counter.frame_count, 1)
+
+        with inductor_config.patch("force_disable_caches", True):
+            unaligned_counter = CompileCounterWithBackend("inductor")
+            unaligned_compiled = torch.compile(
+                fn, backend=unaligned_counter, dynamic=True, fullgraph=True
+            )
+            actual, code = run_and_get_code(unaligned_compiled, *unaligned)
+        self.assertEqual(actual, fn(*unaligned))
+        self.assertEqual(unaligned_compiled(*aligned), fn(*aligned))
+        self.assertEqual(unaligned_counter.frame_count, 1)
+        source = "\n".join(code)
+        self.assertIn("runtime_divisible_multi_kernel", source)
+        self.assertEqual(source.count("async_compile.triton("), 2)
+
+    @unittest.skipUnless(
+        HAS_CUDA_AND_TRITON and torch.version.hip is None and GPU_TYPE == "cuda",
+        "requires NVIDIA CUDA and Triton",
+    )
+    @inductor_config.patch("triton.divisible_by_16", True)
+    @inductor_config.patch("force_pointwise_cat", True)
+    def test_runtime_divisibility_skips_many_checks(self):
+        def fn(*inputs):
+            return torch.cat(inputs, dim=1) + 1
+
+        inputs = [
+            torch.randn(16, 16 * (i + 1), device=GPU_TYPE, dtype=torch.bfloat16)
+            for i in range(9)
+        ]
+        source = self._check_runtime_divisibility_no_specialization(fn, inputs)
+        self.assertIn("ks8", source)
+
+    @unittest.skipUnless(
+        HAS_CUDA_AND_TRITON and torch.version.hip is None and GPU_TYPE == "cuda",
+        "requires NVIDIA CUDA and Triton",
+    )
+    @inductor_config.patch("triton.divisible_by_16", True)
+    def test_runtime_divisibility_skips_flat_dynamic_kernel(self):
+        def fn(a, b, c, d):
+            return a + b + c + d + a.shape[1]
+
+        inputs = [torch.randn(16, 32, device=GPU_TYPE) for _ in range(4)]
+        source = self._check_runtime_divisibility_no_specialization(fn, inputs)
+        self._assert_has_dynamic_integer_size_arg(source)
+
+    @unittest.skipUnless(
+        HAS_CUDA_AND_TRITON and torch.version.hip is None and GPU_TYPE == "cuda",
+        "requires NVIDIA CUDA and Triton",
+    )
+    @inductor_config.patch("triton.divisible_by_16", True)
+    def test_runtime_divisibility_skips_strided_dynamic_kernel(self):
+        def fn(a, b, c, d):
+            return a[:, 0] + b[:, 0] + c[:, 0] + d[:, 0]
+
+        inputs = [torch.randn(4096, 32, device=GPU_TYPE) for _ in range(4)]
+        source = self._check_runtime_divisibility_no_specialization(fn, inputs)
+        self._assert_has_dynamic_integer_size_arg(source)
+
+    def _check_runtime_divisibility_specialization(self, fn, inputs):
+        actual, code = run_and_get_code(
+            torch.compile(fn, dynamic=True, fullgraph=True), *inputs
+        )
+        self.assertEqual(actual, fn(*inputs))
+
+        source = "\n".join(code)
+        self.assertIn("runtime_divisible_multi_kernel", source)
+        self.assertEqual(source.count("async_compile.triton("), 2)
+
+    def _check_runtime_divisibility_no_specialization(self, fn, inputs):
+        actual, code = run_and_get_code(
+            torch.compile(fn, dynamic=True, fullgraph=True), *inputs
+        )
+        self.assertEqual(actual, fn(*inputs))
+
+        source = "\n".join(code)
+        self.assertNotIn("runtime_divisible_multi_kernel", source)
+        self.assertEqual(source.count("async_compile.triton("), 1)
+        return source
+
+    def _assert_has_dynamic_integer_size_arg(self, source):
+        self.assertRegex(
+            source,
+            r"'signature': \{[^}]*'ks\d+': 'i(?:32|64)'",
+            "expected a dynamic integer SizeArg in the Triton signature",
+        )
+
+    @unittest.skipUnless(
+        HAS_CUDA_AND_TRITON and torch.version.hip is None and GPU_TYPE == "cuda",
+        "requires NVIDIA CUDA and Triton",
+    )
+    @inductor_config.patch("triton.divisible_by_16", True)
+    def test_runtime_divisibility_specializes_unfold(self):
+        def fn(a, b):
+            unfold = torch.nn.functional.unfold
+            return unfold(a, 3, padding=1) + unfold(b, 3, padding=1)
+
+        # H100, fp32, [1, 4, 256, 256]: 0.0739 ms generic, 0.0539 ms aligned.
+        inputs = [torch.randn(1, 4, 16, 16, device=GPU_TYPE) for _ in range(2)]
+        self._check_runtime_divisibility_specialization(fn, inputs)
+
+    @unittest.skipUnless(
+        HAS_CUDA_AND_TRITON and torch.version.hip is None and GPU_TYPE == "cuda",
+        "requires NVIDIA CUDA and Triton",
+    )
+    @inductor_config.patch("triton.divisible_by_16", True)
+    def test_runtime_divisibility_ignores_fused_internal_reads(self):
+        def fn(a, b):
+            unfold = torch.nn.functional.unfold
+            result = unfold(a, 3, padding=1) + unfold(b, 3, padding=1)
+            return result, result * 2
+
+        inputs = [torch.randn(1, 4, 16, 16, device=GPU_TYPE) for _ in range(2)]
+        self._check_runtime_divisibility_specialization(fn, inputs)
+
+    @unittest.skipUnless(
+        HAS_CUDA_AND_TRITON and torch.version.hip is None and GPU_TYPE == "cuda",
+        "requires NVIDIA CUDA and Triton",
+    )
+    @inductor_config.patch("triton.divisible_by_16", True)
+    def test_runtime_divisibility_specializes_diag_embed(self):
+        def fn(a, b):
+            return torch.diag_embed(a) + torch.diag_embed(b)
+
+        # H100, fp32, [256, 256]: 0.1799 ms generic, 0.0684 ms aligned.
+        inputs = [torch.randn(16, 16, device=GPU_TYPE) for _ in range(2)]
+        self._check_runtime_divisibility_specialization(fn, inputs)
+
+    @unittest.skipUnless(
+        HAS_CUDA_AND_TRITON and torch.version.hip is None and GPU_TYPE == "cuda",
+        "requires NVIDIA CUDA and Triton",
+    )
+    @inductor_config.patch("triton.divisible_by_16", True)
+    def test_runtime_divisibility_specializes_block_diag(self):
+        def fn(a, b, c, d):
+            return torch.block_diag(a, b, c, d)
+
+        # H100, bf16, [512, 512]: 0.0406 ms generic, 0.0314 ms aligned.
+        inputs = [
+            torch.randn(16, 16, device=GPU_TYPE, dtype=torch.bfloat16) for _ in range(4)
+        ]
+        self._check_runtime_divisibility_specialization(fn, inputs)
+
+    @unittest.skipUnless(
+        HAS_CUDA_AND_TRITON and torch.version.hip is None and GPU_TYPE == "cuda",
+        "requires NVIDIA CUDA and Triton",
+    )
+    @inductor_config.patch("triton.divisible_by_16", True)
+    def test_runtime_divisibility_skips_low_reuse_kernel(self):
+        def fn(a, b, c, d):
+            return torch.cat((a, b, c, d), dim=1) + 1
+
+        # H100, bf16, [4096, 64]: 0.0318 ms generic, 0.0332 ms aligned.
+        inputs = [
+            torch.randn(16, 16, device=GPU_TYPE, dtype=torch.bfloat16) for _ in range(4)
+        ]
+        self._check_runtime_divisibility_no_specialization(fn, inputs)
+
+    @unittest.skipUnless(
+        HAS_CUDA_AND_TRITON and torch.version.hip is None and GPU_TYPE == "cuda",
+        "requires NVIDIA CUDA and Triton",
+    )
+    @inductor_config.patch("triton.divisible_by_16", True)
+    def test_runtime_divisibility_skips_mixed_access_kernel(self):
+        def fn(a, b, c, d):
+            return torch.cat((a, b), dim=1) + c[:, None] + d[:, None]
+
+        # H100, fp32: 0.0329 ms generic, 0.0330 ms aligned.
+        inputs = [
+            torch.randn(16, 16, device=GPU_TYPE),
+            torch.randn(16, 16, device=GPU_TYPE),
+            torch.randn(16, device=GPU_TYPE),
+            torch.randn(16, device=GPU_TYPE),
+        ]
+        self._check_runtime_divisibility_no_specialization(fn, inputs)
 
     @inductor_config.patch("triton.divisible_by_16", True)
     def test_config_of_skips_graph_input_tensor_divisibility_for_cpp_wrapper_jit(self):

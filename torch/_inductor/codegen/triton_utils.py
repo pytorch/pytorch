@@ -304,6 +304,7 @@ def config_of(
     indices: list[int] | None = None,
     pointer_range_override: tuple[int, ...] | None = None,
     skip_cpp_wrapper_input_tensor_alignment: bool = False,
+    divisible_by_16_extra: tuple[int, ...] = (),
 ) -> Any:
     if indices is None:
         indices = list(range(len(args)))
@@ -356,7 +357,7 @@ def config_of(
         return input_idx not in (V.graph.inputs_to_check or ())
 
     if config.triton.divisible_by_16:
-        divisible_by_16 = tuple(
+        known_divisible_by_16 = tuple(
             i
             for i, arg in zip(indices, args)
             if is_aligned(
@@ -364,6 +365,11 @@ def config_of(
                 alignment=16,
                 include_tensor=include_tensor_alignment(arg),
             )
+        )
+        divisible_by_16 = tuple(
+            i
+            for i in indices
+            if i in known_divisible_by_16 or i in divisible_by_16_extra
         )
     else:
         divisible_by_16 = ()
