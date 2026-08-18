@@ -6345,7 +6345,10 @@ class ChoiceCaller:
     def benchmark(self, *args: Any, out: torch.Tensor) -> float:
         algo = self.to_callable()
         if self._benchmark_with_cudagraphs:
-            return benchmarker.benchmark_gpu_with_cuda_graph(lambda: algo(*args))
+            device = benchmarker.infer_device(*args, out)
+            return benchmarker.benchmark_gpu_with_graph(
+                lambda: algo(*args), device=device
+            )
         if config.profile_bandwidth_with_do_bench_using_profiling:
             return do_bench_using_profiling(lambda: algo(*args))  # type: ignore[arg-type]
         return benchmarker.benchmark(algo, args, {"out": out}, device=None)
