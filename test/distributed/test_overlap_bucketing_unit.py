@@ -47,6 +47,17 @@ aten = torch.ops.aten
 from torch.testing._internal.common_fsdp import get_devtype
 
 
+
+import torch
+import torch._dynamo
+import torch._dynamo.logging
+import torch._dynamo.test_case
+
+
+# for some reason importing functional collectives after dynamo breaks collectives handling!
+
+
+@requires_accelerator_dist_backend(["nccl", "xccl"])
 def build_collective_info(graph, hiding_annotations):
     """
     Build CollectiveInfo dict from manual hiding annotations.
