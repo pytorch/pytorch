@@ -257,64 +257,6 @@ def _fail_on_recompile_depth() -> int:
     return _fail_on_recompile_override.depth
 
 
-_PRECOMPILE_ENTRIES_REPORTED = 5
-
-
-def _precompile_no_match_message(
-    entries: Sequence[Any], f_locals: dict[str, Any], isolate_recompiles_id: int
-) -> str:
-    """
-    Why each precompiled variant rejected this call, one line apiece.
-
-    A multi-graph artifact carries one entry per captured variant, up to
-    recompile_limit, and each entry's guard_manager repr is the whole guard
-    tree. Interpolating those built a message megabytes long that a serving
-    process then logged on every uncovered request, so this reports only the
-    failing guard and caps how many entries it names.
-
-    Scoped to the caller's region, because lookup is: entries belonging to
-    another loaded artifact were never candidates for this call, and naming
-    their shapes tells the reader this artifact covers inputs it does not.
-    """
-    mine = [e for e in entries if e.isolate_recompiles_id == isolate_recompiles_id]
-    if not mine:
-        return ""
-    lines = [
-        f"\nFailed on all {len(mine)} precompiled variant(s). "
-        "If this call is served from a torch.compiler.precompile artifact, it "
-        "is not covered by the capture: exercise it inside precompile.capture() "
-        "or add it to example_inputs."
-    ]
-    shown = 0
-    for i, entry in enumerate(mine):
-        if shown >= _PRECOMPILE_ENTRIES_REPORTED:
-            break
-        # A guard that raises while being re-evaluated for this report must not
-        # replace the report; the call did not match, and that is what the
-        # caller has to hear.
-        try:
-            reason = entry.guard_manager.check_verbose(f_locals)
-        except Exception as e:
-            lines.append(f"  [{i}] <guard check raised {type(e).__name__}: {e}>")
-            shown += 1
-            continue
-        # A guard manager that PASSES leaves verbose_code_parts empty, and this
-        # report is a list of rejection reasons -- so an entry that matched on
-        # re-evaluation (the call raced an install, or the guard is not
-        # deterministic) is named as such rather than rendered as a raw
-        # multi-line GuardDebugInfo repr.
-        if getattr(reason, "result", False):
-            lines.append(f"  [{i}] <matched on re-check; not a rejection reason>")
-            shown += 1
-            continue
-        parts = getattr(reason, "verbose_code_parts", None) or [str(reason)]
-        lines.append(f"  [{i}] {'; '.join(str(p) for p in parts)}")
-        shown += 1
-    if len(mine) > shown:
-        lines.append(f"  ... and {len(mine) - shown} more variant(s) not shown.")
-    return "\n".join(lines)
-
-
 @contextlib.contextmanager
 def _use_eager_on_nested_compile() -> Generator[None, None, None]:
     """Run torch.compile wrappers eagerly inside compiler-internal tracing."""
@@ -452,6 +394,24 @@ def _callback_from_stance(callback: DynamoCallback) -> DynamoCallback:
             if not convert_frame.has_tensor_in_frame(frame):
                 return ConvertFrameReturn()
 
+            from . import decorators
+
+            prev_frame = sys._getframe()
+            # pyrefly: ignore [bad-assignment]
+            while (
+                prev_frame
+                and "torch/_dynamo/eval_frame.py" in prev_frame.f_code.co_filename
+            ):
+                prev_frame = prev_frame.f_back  # type: ignore[assignment]
+            if (
+                prev_frame
+                and prev_frame.f_code is decorators._nonrecursive_disable_wrapper_code
+            ):
+                return ConvertFrameReturn(
+                    apply_to_code=False,
+                    skip_reason="tracing is non-recursively disabled for this frame",
+                )
+
             from torch._C._dynamo.eval_frame import (
                 _debug_get_cache_entry_list,
                 _debug_get_precompile_entries,
@@ -480,11 +440,9 @@ def _callback_from_stance(callback: DynamoCallback) -> DynamoCallback:
                     message += f"\n{textwrap.indent(guard_failure_details, '    ')}"
             precompile_entries = _debug_get_precompile_entries(frame.f_code)
             if len(precompile_entries) > 0:
-                message += _precompile_no_match_message(
-                    precompile_entries,
-                    frame.f_locals,
-                    get_eval_frame_isolate_recompiles_id(),
-                )
+                message += "\nFailed on the following precompiled guards: "
+                for entry in precompile_entries:
+                    message += f"\n{entry.guard_manager}{entry.guard_manager.check_verbose(frame.f_locals)}"  # type: ignore[attr-defined]
             raise RecompileError(message)
 
         # to prevent cache miss due to different backend
@@ -1973,8 +1931,9 @@ def _optimize(
     error_on_graph_break: bool | None = None,
     guard_export_fn: Callable[[_guards.GuardsSet], None] | None = None,
     guard_fail_fn: Callable[[GuardFail], None] | None = None,
-    guard_filter_fn: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]]
-    | None = None,
+    guard_filter_fn: (
+        Callable[[Sequence[GuardFilterEntry]], Sequence[bool]] | None
+    ) = None,
     disable: bool = False,
     dynamic: bool | None = None,
     package: CompilePackage | None = None,
@@ -2051,11 +2010,7 @@ def _optimize(
 
     # get_compiler_fn erases the name, and torch.compile hands us a
     # _TorchCompileWrapper rather than the string the user wrote.
-    from torch._dynamo.package import emits_native_code as _emits_native_code
-
-    emits_native_code = _emits_native_code(
-        str(getattr(backend, "compiler_name", backend))
-    )
+    emits_native_code = getattr(backend, "compiler_name", backend) != "eager"
     backend = get_compiler_fn(backend)
 
     # Find if backend has any extra context manager
@@ -3005,11 +2960,7 @@ def _optimize_assert(
     Used for fullgraph=True and export, since we must always error on graph breaks and ignore
     symbolic_convert.error_on_graph_break. Can also be used for testing.
     """
-    from torch._dynamo.package import emits_native_code as _emits_native_code
-
-    emits_native_code = _emits_native_code(
-        str(getattr(backend, "compiler_name", backend))
-    )
+    emits_native_code = getattr(backend, "compiler_name", backend) != "eager"
     backend = get_compiler_fn(backend)
 
     # Find if backend has any extra context manager

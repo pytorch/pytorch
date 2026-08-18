@@ -50,7 +50,7 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 % intentionally omitted from the autosummary block above.
 
 ```{eval-rst}
-.. py:function:: precompile(fn, *example_args, backend="inductor", tracer=None, decompositions=None, example_inputs=None, guard_filter_fn=None, recompile_limit=256, dynamic=None, invariants=None)
+.. py:function:: precompile(fn, *example_args, backend="inductor", tracer="make_fx", decompositions=None, example_inputs=None, guard_filter_fn=None, recompile_limit=256, dynamic=None, invariants=None)
 
    Ahead-of-time precompile ``fn`` using one of two input forms. Positional example
    arguments select the single-graph source-artifact path and return a self-contained,
@@ -104,10 +104,8 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
    :param backend: ``"inductor"`` (default) lowers through AOTAutograd + Inductor;
        ``"eager"`` keeps the captured ATen graph (layout-flexible, no kernels; shapes
        are still specialized to the example).
-   :param tracer: capture front-end for the POSITIONAL path, where leaving it unset
-       means ``"make_fx"``. It must not be passed at all alongside ``example_inputs``,
-       which always uses Dynamo; that combination raises. ``"make_fx"`` is a non-strict
-       make_fx trace. ``"dynamo"`` analyzes the Python (bytecode) rather than tracing one path and
+   :param tracer: capture front-end. ``"make_fx"`` (default) is a non-strict make_fx
+       trace. ``"dynamo"`` analyzes the Python (bytecode) rather than tracing one path and
        inlines the transformed bytecode Dynamo produces into ``python_code``, lowering the
        compiled subgraph through the same ``backend`` choices; it honors ``mark_unbacked``
        dynamic shapes (on either backend, though ``mark_unbacked(strict=True)`` raises --
@@ -248,7 +246,7 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
    ``require_no_dropped_guards=False)``. ``require_complete`` rejects missing variants or
    frames and captures that raised. ``require_no_risky_drops`` rejects dropped identity
    guards on configuration-like slots, every custom-filter drop, and every dropped guard
-   whose SOURCE held different values across captured variants. ``require_no_dropped_guards`` rejects every
+   observed to distinguish captured variants. ``require_no_dropped_guards`` rejects every
    guard omitted from the serialized artifact; it is off by default because every model
    drops identity guards that cannot be serialized, so requiring none would refuse
    essentially every real artifact. The risky subset is the rail that is on, and it is a
@@ -268,7 +266,7 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
    Example::
 
        session = torch.compiler.precompile.capture(staged, backend="inductor")
-       with session as compiled, torch.no_grad():
+       with session as compiled:
            compiled(example_a)
            compiled(example_b)  # another guarded/recompiled variant
        session.save("model.pt")
@@ -297,10 +295,6 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
    multi-graph artifact so an input or path missing from the capture raises instead of
    silently compiling a new variant.
 
-   The scope is THREAD-LOCAL: it constrains only the thread that entered it. A serving
-   process must enter it on every request thread, or the threads that did not will
-   quietly compile the variants this is meant to catch.
-
    Example::
 
        with (
@@ -309,20 +303,6 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
            torch.compiler.precompile.serving(),
        ):
            out = compiled(runtime_input)
-
-.. py:class:: precompile.ExampleInput(args=(), kwargs={})
-
-   One capture call for ``example_inputs`` when positional arguments alone are not
-   enough. A plain tuple in ``example_inputs`` is the positional arguments of one
-   call; wrap a call that needs keyword arguments in this instead::
-
-       torch.compiler.precompile(
-           fn,
-           example_inputs=[
-               (x,),
-               torch.compiler.precompile.ExampleInput(args=(x,), kwargs={"scale": 2}),
-           ],
-       )
 
 .. autoexception:: torch.compiler.PrecompileError
 

@@ -16,7 +16,7 @@ import torch
 import torch.fx
 from torch._dynamo.convert_frame import GraphRuntimeEnv
 from torch._dynamo.graph_utils import _graph_device_type
-from torch._dynamo.package import emits_native_code, SystemInfo
+from torch._dynamo.package import SystemInfo
 
 from . import convert_frame
 from .aot_compile_types import (
@@ -56,29 +56,19 @@ class CompileArtifacts:
     backend_name: str
     system_info: SystemInfo = dataclasses.field(default_factory=SystemInfo.current)
 
-    @property
-    def emits_native_code(self) -> bool:
-        from torch._dynamo.package import emits_native_code
-
-        return emits_native_code(self.backend_name)
-
     def check_compatibility(self) -> None:
         # The CACHED info is the receiver, matching _DynamoCacheEntry: the skip
         # for an artifact predating cpu_codegen_target keys off self, and every
         # mismatch message labels self "cached" and the argument "current".
         # Determining the codegen target runs the C++ toolchain, so only pay for
         # it when this artifact actually records one to compare against.
-        check_codegen = self.emits_native_code
         current = SystemInfo.current(
             cpu_codegen=(
-                check_codegen
-                and self.device_type == "cpu"
+                self.device_type == "cpu"
                 and self.system_info.cpu_codegen_target is not None
             )
         )
-        self.system_info.check_compatibility(
-            current, self.device_type, check_codegen=check_codegen
-        )
+        self.system_info.check_compatibility(current, self.device_type)
 
 
 class AOTCompilePickler(pickle.Pickler):
@@ -263,22 +253,6 @@ class AOTCompiledFunction:
             guard_scope = self._guard_globals
             if guard_scope is None:
                 guard_scope = self.fn.__globals__
-            else:
-                # Seed the artifact's own __import_* aliases. Dynamo MINTS those
-                # at trace time (symbolic_convert.import_source writes them into
-                # the tracing process's globals) and roots guards at them -- every
-                # child nn.Module call guards its hook dicts through
-                # G['__import_torch_dot_nn_dot_modules_dot_module']. A process
-                # that only LOADS never traced, so its module dict has none and
-                # the guard KeyErrors on every call. setdefault, so only the
-                # synthetic names are added: a real global the loading process
-                # already has keeps its live value, which is the point of using
-                # the live scope at all.
-                for (
-                    alias,
-                    module_name,
-                ) in self._artifacts.runtime_env.import_sources.items():
-                    guard_scope.setdefault(alias, importlib.import_module(module_name))
             self._artifacts.guard_manager = load_guard_manager(
                 guards_state,
                 self._artifacts.original_code,
@@ -503,7 +477,6 @@ def aot_compile_fullgraph(
         for traced_code in graph_capture_output.traced_code:
             source_info.add_code(traced_code)
 
-        backend_name = getattr(backend, "compiler_name", "unknown")
         artifacts = CompileArtifacts(
             signature=convert_frame._get_signature(fn),
             guard_manager=check_fn.guard_manager,
@@ -514,13 +487,7 @@ def aot_compile_fullgraph(
             runtime_env=graph_capture_output.get_runtime_env(),
             source_info=source_info,
             device_type=device_type,
-            backend_name=backend_name,
-            # The field's default_factory would run the C++ toolchain probe on
-            # every capture; only an artifact that can hold CPU native code has
-            # a baked vector width to record.
-            system_info=SystemInfo.current(
-                cpu_codegen=(emits_native_code(backend_name) and device_type == "cpu")
-            ),
+            backend_name=getattr(backend, "compiler_name", "unknown"),
         )
         aot_compiled_fn = AOTCompiledFunction(
             _artifacts=artifacts, _extra_globals=fn.__globals__
@@ -555,7 +522,9 @@ class AOTCompiledModel:
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         for result in self.compiled_results:
-            if result.guard_check(self.model, *args, **kwargs):
+            if result._guard_check_enabled and result.guard_check(
+                self.model, *args, **kwargs
+            ):
                 return result(self.model, *args, **kwargs)
         # disable_guard_check() is the escape hatch for an artifact whose guards
         # fail on the serving machine for a reason the caller judges benign. A
