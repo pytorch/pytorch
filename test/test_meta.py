@@ -1727,6 +1727,17 @@ class TestMeta(TestCase):
             self.assertEqual(ref_out[1].size(), meta_out[1].size())
             self.assertEqual(ref_out[1].stride(), meta_out[1].stride())
 
+    def test_cdist_forward(self, device):
+        to_meta = MetaConverter()
+        x1 = torch.rand([3, 2], device=device)
+        x2 = torch.rand([2, 2], device=device)
+        p = 2.0
+        for compute_mode in (None, 1, 2):
+            ref = aten._cdist_forward.default(x1, x2, p, compute_mode)
+            res = aten._cdist_forward.default(to_meta(x1), to_meta(x2), p, compute_mode)
+            self.assertEqual(res.device.type, 'meta')
+            self.assertEqual(ref.shape, res.shape)
+
 @instantiate_parametrized_tests
 class TestMetaCore(TestCase):
     hw_classification = HardwareClassification.GENERIC
@@ -1921,18 +1932,6 @@ class TestMetaCore(TestCase):
         # aten.fill returns a new tensor
         r2 = torch.ops.aten.fill(inps, 1.0)
         self.assertNotEqual(id(inps), id(r2))
-
-
-    def test_cdist_forward(self, device):
-        to_meta = MetaConverter()
-        x1 = torch.rand([3, 2], device=device)
-        x2 = torch.rand([2, 2], device=device)
-        p = 2.0
-        for compute_mode in (None, 1, 2):
-            ref = aten._cdist_forward.default(x1, x2, p, compute_mode)
-            res = aten._cdist_forward.default(to_meta(x1), to_meta(x2), p, compute_mode)
-            self.assertEqual(res.device.type, 'meta')
-            self.assertEqual(ref.shape, res.shape)
 
     def test_quantized_embedding_bag(self):
         tab_shape = [8, 128]
