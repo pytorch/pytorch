@@ -10,7 +10,11 @@ from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import do_bench_using_profiling
 from torch.autograd import DeviceType
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
+)
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -76,6 +80,7 @@ class FakeProfilerEvent:
         self.cpu_children = cpu_children or []
 
 
+@instantiate_parametrized_tests
 class TestBenchGeneric(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -179,11 +184,8 @@ class TestBenchGeneric(TestCase):
             )
 
 
-instantiate_parametrized_tests(TestBenchGeneric)
-
-
 class TestBenchAccelerator(TestCase):
-    hw_classification = HardwareClassification.ACCELERATOR
+    hw_classification = HardwareClassification.CUDA
 
     @classmethod
     def setUpClass(cls):
@@ -195,23 +197,19 @@ class TestBenchAccelerator(TestCase):
             functools.partial(torch.nn.functional.linear, x, w)
         )
 
-    def test_benchmarker(self, device):
+    @requires_capabilities(Capability.lib.triton)
+    def test_benchmarker(self):
         res = benchmarker.benchmark_gpu(self._bench_fn)
         log.warning("do_bench result: %s", res)
         self.assertGreater(res, 0)
 
-    def test_do_bench_using_profiling(self, device):
+    def test_do_bench_using_profiling(self):
         res = do_bench_using_profiling(self._bench_fn)
         log.warning("do_bench_using_profiling result: %s", res)
         self.assertGreater(res, 0)
 
 
-instantiate_device_type_tests(
-    TestBenchAccelerator,
-    globals(),
-    allow_mps=True,
-    allow_xpu=True,
-)
+instantiate_device_type_tests(TestBenchAccelerator, globals(), only_for="cuda")
 
 
 if __name__ == "__main__":
