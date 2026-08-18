@@ -4,7 +4,7 @@
 
 include(../../cmake/public/xpu.cmake)
 
-if(NOT BUILD_LIBTORCHLESS)
+if(BUILD_LIBTORCHLESS)
   find_library(C10_XPU_LIB c10_xpu PATHS $ENV{LIBTORCH_LIB_PATH} NO_DEFAULT_PATH)
 endif()
 

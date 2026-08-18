@@ -27,7 +27,7 @@ from torch.distributed.distributed_c10d import (
 # modern collectives like _allgather_base_ got rid of the unnecessary list.
 # When in doubt, consult the code that dispatches to the collective on the PG
 # in distributed_c10d.py e.g., work = group.allgather([tensor_list], [tensor],
-# opts) indicates its always a list.
+# opts) indicates it's always a list.
 
 
 def _gcd_list(numbers: Sequence[int]) -> int:
@@ -930,6 +930,13 @@ def _local_alltoall_base_(
                     output_section = output_tensor._local_tensors[rank_j][
                         output_offset:end_offset
                     ]
+                    if split_tensor.numel() != output_section.numel():
+                        raise ValueError(
+                            f"all_to_all_single: input split from rank {rank_i} to "
+                            f"rank {rank_j} has {split_tensor.numel()} elements, but "
+                            f"the corresponding output split has "
+                            f"{output_section.numel()} elements"
+                        )
                     if output_section.numel() > 0:
                         # Reshape split_tensor to match output_section if necessary
                         if split_tensor.size() != output_section.size():
