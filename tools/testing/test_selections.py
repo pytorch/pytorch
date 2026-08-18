@@ -46,7 +46,9 @@ THRESHOLD = 60 * 10  # 10 minutes
 
 # See Note [ROCm parallel CI testing]
 # Special logic for ROCm GHA runners to query number of GPUs available.
-if IS_ROCM and not IS_MEM_LEAK_CHECK:
+if IS_ROCM and not IS_MEM_LEAK_CHECK and os.name == "nt":
+    NUM_PROCS = 1
+elif IS_ROCM and not IS_MEM_LEAK_CHECK:
     try:
         # This is the same logic used in GHA health check, see .github/templates/common.yml.j2
         lines = (
