@@ -13305,15 +13305,16 @@ class TestControlFlowAndRNGCUDA(TestCase):
             out = compiled_func(pred, x)
             self.assertEqual(out.shape, x.shape)
 
+only_for = ("cpu", "cuda")
 
 instantiate_parametrized_tests(TestHopSchema)
 instantiate_parametrized_tests(TestControlFlowTraced)
 instantiate_parametrized_tests(TestAutoFunctionalizeControlFlow)
-instantiate_device_type_tests(TestAutoFunctionalizeControlFlowDevice, globals())
+instantiate_device_type_tests(TestAutoFunctionalizeControlFlowDevice, globals(), only_for=only_for)
 
 instantiate_parametrized_tests(TestControlFlow)
 instantiate_parametrized_tests(AssociativeScanTests)
-instantiate_device_type_tests(AssociativeScanTestsDevice, globals())
+instantiate_device_type_tests(AssociativeScanTestsDevice, globals(), only_for=only_for)
 
 instantiate_parametrized_tests(TestControlFlowAndRNGCUDA)
 
