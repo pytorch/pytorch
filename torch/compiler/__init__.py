@@ -1010,21 +1010,26 @@ def export_python(
 ) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
     r"""Export the Python emitted by :func:`torch.compiler.precompile` to disk.
 
-    This exists for **hill climbing on generated kernels**, not for deployment. The
-    first call captures ``fn`` and writes a self-contained, readable Python file to
-    ``path``; later calls exec that file. Because the file is the source of truth, you
-    can open it, retune a block size or a schedule, rerun, and your edit takes effect --
-    no recapture, no cache to defeat, and the result can be committed and reviewed like
-    any other source. The artifact is read and exec'd once per decorated object per
-    process, so an edit is picked up by the next run of your script (or a freshly
-    decorated function), not by a wrapper you have already called in this process.
+    The first call captures ``fn`` and writes a self-contained, readable Python file to
+    ``path``; later calls exec that file. ``path`` is a build artifact meant to be
+    committed and shipped: what runs in production is source you can open, review and
+    diff, not a cache entry reconstructed at startup.
 
-    **The central tradeoff is that the artifact is sticky.** ``path`` is the whole cache
-    key: nothing hashes ``fn``'s body, the ambient config, or the machine. That is
-    deliberate and it is what makes the workflow above possible -- an artifact that
-    re-captured whenever something changed would throw away your edits. The cost is that
-    the artifact does not notice when it has gone stale: **edit ``fn`` and rerun, and you
-    get the old compiled code with no warning.** Delete ``path`` to recapture.
+    That is what makes it **hill-climbable**. Most generated kernels are fine as
+    generated and never touched. When one starts to matter, retune it in place -- a
+    block size, a schedule, or the whole kernel by hand -- and the tuned version is
+    reviewed, committed and deployed like any other source. There is no recapture and no
+    cache to defeat, so the edit is simply what runs from then on; you never have to
+    choose up front between generated and hand-written code. The artifact is read and
+    exec'd once per decorated object per process, so an edit takes effect on the next run
+    of the process, not in one already running.
+
+    **``path`` is the whole cache key**: nothing hashes ``fn``'s body, the ambient
+    config, or the machine. In production that is the property you want -- the artifact
+    you tested is the one that runs, nothing recompiles behind you, and a kernel someone
+    spent a week tuning is never silently thrown away by a recapture. The cost falls on
+    development: **edit ``fn`` and rerun, and you get the old compiled code with no
+    warning.** Delete ``path`` to recapture.
 
     .. warning::
         This API is experimental and subject to change.
@@ -1076,12 +1081,12 @@ def export_python(
     capture. Calling the artifact under ``torch.no_grad()`` is unaffected and is the
     ordinary inference path.
 
-    Unlike a binary artifact, ``path`` is readable, re-executable Python meant to be
-    committed and hand-edited. An engineer or agent can "hill-climb" the generated
-    kernel in place (ejectable compilation): the emitted source is always exec'd, so
-    edits always take effect. Keeping the edited source correct is the caller's
-    responsibility. The original eager function stays in source as the reference to
-    regenerate from (delete ``path`` to re-precompile).
+    Unlike a binary artifact, ``path`` is readable, re-executable Python: it can be
+    committed, reviewed, diffed across a release, and hand-edited by an engineer or an
+    agent (ejectable compilation). The emitted source is always exec'd, so edits always
+    take effect, and keeping the edited source correct is the caller's responsibility.
+    The original eager function stays in source as the reference to regenerate from
+    (delete ``path`` to re-precompile).
 
     Args:
         path: Filesystem path for the emitted Python source. Parent directories are
