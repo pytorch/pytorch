@@ -1514,6 +1514,99 @@ class PythonWrapperCodegen(CodeGen):
     def write_constant(self, name: str, hashed: str) -> None:
         self.header.writeline(f"{name} = None  # {hashed}")
 
+    def _preamble_imports(self) -> tuple[tuple[tuple[str, ...], str], ...]:
+        """The imports every graph gets, as (names bound, source line).
+
+        Named rather than written as one blob so a wrapper that cares whether the
+        emitted module is minimal can decide per entry; see write_preamble_line.
+        """
+        return (
+            (
+                ("c_void_p", "c_long", "c_int"),
+                "from ctypes import c_void_p, c_long, c_int",
+            ),
+            (("torch",), "import torch"),
+            (("math",), "import math"),
+            (("random",), "import random"),
+            (("os",), "import os"),
+            (("tempfile",), "import tempfile"),
+            (("inf", "nan"), "from math import inf, nan"),
+            (("nanj",), "from cmath import nanj"),
+            (
+                ("run_intermediate_hooks",),
+                "from torch._inductor.hooks import run_intermediate_hooks",
+            ),
+            (("maybe_profile",), "from torch._inductor.utils import maybe_profile"),
+            (
+                ("align",),
+                "from torch._inductor.codegen.memory_planning import _align as align",
+            ),
+            (("device", "empty_strided"), "from torch import device, empty_strided"),
+            (("AsyncCompile",), f"from {async_compile.__name__} import AsyncCompile"),
+            (
+                ("extern_kernels",),
+                "from torch._inductor.select_algorithm import extern_kernels",
+            ),
+        )
+
+    def _preamble_bindings(self) -> tuple[tuple[tuple[str, ...], str], ...]:
+        """The module-scope bindings every graph gets, as (names bound, source line)."""
+        return (
+            (("aten",), "aten = torch.ops.aten"),
+            (("inductor_ops",), "inductor_ops = torch.ops.inductor"),
+            (("_quantized",), "_quantized = torch.ops._quantized"),
+            (
+                ("assert_size_stride",),
+                "assert_size_stride = torch._C._dynamo.guards.assert_size_stride",
+            ),
+            (
+                ("assert_size_stride_grouped",),
+                "assert_size_stride_grouped = torch._C._dynamo.guards.assert_size_stride_grouped",
+            ),
+            (
+                ("assert_alignment",),
+                "assert_alignment = torch._C._dynamo.guards.assert_alignment",
+            ),
+            (
+                ("empty_strided_cpu",),
+                "empty_strided_cpu = torch._C._dynamo.guards._empty_strided_cpu",
+            ),
+            (
+                ("empty_strided_cpu_pinned",),
+                "empty_strided_cpu_pinned = torch._C._dynamo.guards._empty_strided_cpu_pinned",
+            ),
+            (
+                ("empty_strided_cuda",),
+                "empty_strided_cuda = torch._C._dynamo.guards._empty_strided_cuda",
+            ),
+            (
+                ("empty_strided_xpu",),
+                "empty_strided_xpu = torch._C._dynamo.guards._empty_strided_xpu",
+            ),
+            (
+                ("empty_strided_mtia",),
+                "empty_strided_mtia = torch._C._dynamo.guards._empty_strided_mtia",
+            ),
+            (
+                ("reinterpret_tensor",),
+                "reinterpret_tensor = torch._C._dynamo.guards._reinterpret_tensor",
+            ),
+            (
+                ("alloc_from_pool",),
+                "alloc_from_pool = torch.ops.inductor._alloc_from_pool",
+            ),
+        )
+
+    def write_preamble_line(
+        self, buf: IndentedBuffer, names: tuple[str, ...], line: str
+    ) -> None:
+        """Emit one preamble line binding ``names``.
+
+        The default emits every line: which of them a given graph will use is not known
+        here, since write_header runs before anything has been lowered.
+        """
+        buf.writeline(line)
+
     def write_header(self) -> None:
         """Write the header section of the generated Python wrapper code."""
         context = torch._guards.TracingContext.try_get()
@@ -1526,56 +1619,24 @@ class PythonWrapperCodegen(CodeGen):
         elif torch._inductor.config.test_configs.track_memory_lifecycle:
             inductor_debug_utils = "from torch._inductor.runtime.debug_utils import tracked_empty_strided\n"
 
-        self.imports.splice(
-            f"""
-                {aot_config_comment}
-                from ctypes import c_void_p, c_long, c_int
-                import torch
-                import math
-                import random
-                import os
-                import tempfile
-                from math import inf, nan
-                from cmath import nanj
-                from torch._inductor.hooks import run_intermediate_hooks
-                from torch._inductor.utils import maybe_profile
-                from torch._inductor.codegen.memory_planning import _align as align
-                from torch import device, empty_strided
-                from {async_compile.__name__} import AsyncCompile
-                from torch._inductor.select_algorithm import extern_kernels
-                {inductor_debug_utils}
-            """,
-            strip=True,
-        )
-        self.header.splice(
-            """
-                aten = torch.ops.aten
-                inductor_ops = torch.ops.inductor
-                _quantized = torch.ops._quantized
-                assert_size_stride = torch._C._dynamo.guards.assert_size_stride
-                assert_size_stride_grouped = torch._C._dynamo.guards.assert_size_stride_grouped
-                assert_alignment = torch._C._dynamo.guards.assert_alignment
-                empty_strided_cpu = torch._C._dynamo.guards._empty_strided_cpu
-                empty_strided_cpu_pinned = torch._C._dynamo.guards._empty_strided_cpu_pinned
-                empty_strided_cuda = torch._C._dynamo.guards._empty_strided_cuda
-                empty_strided_xpu = torch._C._dynamo.guards._empty_strided_xpu
-                empty_strided_mtia = torch._C._dynamo.guards._empty_strided_mtia
-                reinterpret_tensor = torch._C._dynamo.guards._reinterpret_tensor
-                alloc_from_pool = torch.ops.inductor._alloc_from_pool
-            """,
-            strip=True,
-        )
+        if aot_config_comment:
+            self.imports.writeline(aot_config_comment)
+        for names, line in self._preamble_imports():
+            self.write_preamble_line(self.imports, names, line)
+        if inductor_debug_utils:
+            self.imports.splice(inductor_debug_utils, strip=True)
+        for names, line in self._preamble_bindings():
+            self.write_preamble_line(self.header, names, line)
         self.write_async_compile_binding()
         try:
             # Only add empty_strided_p2p() if distributed and SymmetricMemory
             # is available
             from torch._C._distributed_c10d import _SymmetricMemory  # noqa: F401
 
-            self.header.splice(
-                """
-                empty_strided_p2p = torch._C._distributed_c10d._SymmetricMemory.empty_strided_p2p
-                """,
-                strip=True,
+            self.write_preamble_line(
+                self.header,
+                ("empty_strided_p2p",),
+                "empty_strided_p2p = torch._C._distributed_c10d._SymmetricMemory.empty_strided_p2p",
             )
         except (AttributeError, ImportError):
             pass
