@@ -2345,10 +2345,7 @@ class SliceVariable(VariableTracker):
     tp_methods = {"indices": Method(indices)}
 
 
-class ListIteratorVariable(IteratorVariable):
-    # PyListIter_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c#L3842
-    _cpython_type = type(iter([]))
-
+class BaseListIteratorVariable(IteratorVariable):
     _nonvar_fields = {
         "index",
         *IteratorVariable._nonvar_fields,
@@ -2389,9 +2386,6 @@ class ListIteratorVariable(IteratorVariable):
     ) -> ConstantVariable:
         return VariableTracker.build(tx, hasattr(iter([]), name))
 
-    def python_type(self) -> type:
-        return type(iter([]))
-
     def as_python_constant(self) -> Any:
         if self.index > 0:
             raise NotImplementedError
@@ -2420,9 +2414,20 @@ class ListIteratorVariable(IteratorVariable):
         codegen.extend_output(create_call_function(1, False))
 
 
-class TupleIteratorVariable(ListIteratorVariable):
+class ListIteratorVariable(BaseListIteratorVariable):
+    # PyListIter_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c#L3842
+    _cpython_type = type(iter([]))
+
+    def python_type(self) -> type:
+        return type(iter([]))
+
+
+class TupleIteratorVariable(BaseListIteratorVariable):
     # PyTupleIter_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/tupleobject.c#L1067
     _cpython_type = type(iter(()))
+
+    def python_type(self) -> type:
+        return type(iter(()))
 
 
 class DequeIteratorVariable(ListIteratorVariable):
