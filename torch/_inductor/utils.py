@@ -424,7 +424,9 @@ def _do_bench_using_profiling(
         may_ban_benchmarking()
 
     device_type = get_gpu_type()
-    device_type_upper = device_type.upper()
+    from torch._inductor.runtime.benchmarking import _resolve_profiler_device_types
+
+    profile_activity, profiler_device_type = _resolve_profiler_device_types(device_type)
     device_interface = get_interface_for_device(device_type)
     fn()
     device_interface.synchronize()
@@ -450,7 +452,6 @@ def _do_bench_using_profiling(
         fn()
 
     device_interface.synchronize()
-    profile_activity = getattr(torch.profiler.ProfilerActivity, device_type_upper)
     with torch.profiler.profile(
         activities=[
             torch.profiler.ProfilerActivity.CPU,
@@ -477,7 +478,7 @@ def _do_bench_using_profiling(
         p.profiler.kineto_results.events(),
         p.events(),
         n_repeat,
-        getattr(DeviceType, device_type_upper),
+        profiler_device_type,
     )
 
     log.debug("profiling time breakdown")

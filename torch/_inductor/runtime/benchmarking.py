@@ -50,6 +50,22 @@ def _normalize_gpu_device_type(device_type: str | torch.device | None) -> str:
     return torch.device(device_type).type
 
 
+def _resolve_profiler_device_types(device_type: str) -> tuple[Any, Any]:
+    from torch.autograd import DeviceType
+
+    if device_type == torch._C._get_privateuse1_backend_name():
+        return (
+            torch.profiler.ProfilerActivity.PrivateUse1,
+            DeviceType.PrivateUse1,
+        )
+
+    enum_name = device_type.upper()
+    return (
+        getattr(torch.profiler.ProfilerActivity, enum_name),
+        getattr(DeviceType, enum_name),
+    )
+
+
 _GpuBenchmarkLockContext = Callable[[], contextlib.AbstractContextManager[None]]
 _gpu_benchmark_lock_context: _GpuBenchmarkLockContext | None = None
 
@@ -873,7 +889,9 @@ class TorchProfilerBenchmarker(InductorBenchmarker):  # noqa: docstring_linter
         # Use both CPU and device activities, otherwise record_function
         # will not record the region.
         device_type_upper = device_type.upper()
-        profile_activity = getattr(torch.profiler.ProfilerActivity, device_type_upper)
+        profile_activity, profiler_device_type = _resolve_profiler_device_types(
+            device_type
+        )
         with torch.profiler.profile(
             activities=[
                 torch.profiler.ProfilerActivity.CPU,
@@ -896,9 +914,6 @@ class TorchProfilerBenchmarker(InductorBenchmarker):  # noqa: docstring_linter
         # This avoids prof.key_averages() which triggers expensive lazy
         # processing: _parse_kineto_results (wrapping every raw event in
         # a Python FunctionEvent), _build_tree, and grouping/aggregation.
-        from torch.autograd import DeviceType as _DeviceType
-
-        profiler_device_type = getattr(_DeviceType, device_type_upper)
         callable_gpu_time_us = 0.0
         for kineto_event in prof.profiler.kineto_results.events():
             if (

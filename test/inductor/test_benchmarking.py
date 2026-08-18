@@ -227,6 +227,25 @@ class TestBenchmarker(TestCase):
             _bench._BENCHMARK_DISPATCH.clear()
             _bench._BENCHMARK_DISPATCH.update(orig)
 
+    def test_profiler_device_enum_resolution(self):
+        from torch._inductor.runtime.benchmarking import _resolve_profiler_device_types
+
+        runtime_name = torch._C._get_privateuse1_backend_name()
+        activity, profiler_device_type = _resolve_profiler_device_types(runtime_name)
+        self.assertIs(activity, torch.profiler.ProfilerActivity.PrivateUse1)
+        self.assertIs(profiler_device_type, torch.autograd.DeviceType.PrivateUse1)
+
+        for device_type in ("cuda", "xpu"):
+            activity, profiler_device_type = _resolve_profiler_device_types(device_type)
+            self.assertIs(
+                activity,
+                getattr(torch.profiler.ProfilerActivity, device_type.upper()),
+            )
+            self.assertIs(
+                profiler_device_type,
+                getattr(torch.autograd.DeviceType, device_type.upper()),
+            )
+
     def test_default_profiler_benchmarker_selection_supports_xpu_only(self):
         from torch._inductor.runtime import benchmarking as _bench
 
