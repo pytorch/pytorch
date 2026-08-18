@@ -1077,7 +1077,9 @@ class NestedReduction:
         grouped_reduction = domain_context.grouped_reduction
         reduction_names = grouped_reduction.get_operation_names()
         reduction_buffer_names = grouped_reduction.get_buffer_names()
-        reduction_source_names = grouped_reduction.used_buffer_names()
+        reduction_source_names = OrderedSet(
+            dep.name for dep in grouped_reduction.read_writes.reads
+        )
         full_numel = V.graph.sizevars.simplify(
             domain_context.grouped_numel * domain_context.grouped_rnumel
         )
@@ -8687,6 +8689,11 @@ class Scheduler:
             self.mutation_renames.get(name, name)
             for name in grouped_node.get_buffer_names()
         )
+        if isinstance(producer_node, FusedNestedReductions):
+            grouped_buf_names.update(
+                self.mutation_renames.get(name, name)
+                for name in producer_node.node1.get_buffer_names()
+            )
         for sn, domain in pointwise_domains:
             if domain not in (
                 NestedReduction.PointwiseDomain.PARENT_FULL,

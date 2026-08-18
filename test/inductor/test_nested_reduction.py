@@ -808,6 +808,40 @@ class _NestedReductionBase:
             self.check_nested_matches_unnested(f, (x, weight))
         self.check_fusion(expected_kernels=None if benchmark_fusion else 1)
 
+    def test_nested_reduction_reduced_only_consumer_group_size_two(self):
+        import torch.nn.functional as F
+
+        B, D, G = 32, 1024, 2
+
+        def f(x, weight):
+            y = F.rms_norm(x, (D,), weight)
+            scale = y.view(B, D // G, G).abs().amax(dim=-1)
+            return scale * 2
+
+        x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
+        weight = torch.randn(D, device=GPU_TYPE, dtype=torch.bfloat16)
+        self.check_nested_matches_unnested(f, (x, weight))
+        self.check_fusion()
+
+    @parametrize("scale_first", (False, True))
+    def test_sub_parent_fusion_is_independent_of_nested_append_order(self, scale_first):
+        import torch.nn.functional as F
+
+        B, D, G = 32, 1024, 16
+
+        def f(x, weight):
+            y = F.rms_norm(x, (D,), weight)
+            groups = y.view(B, D // G, G)
+            scale = groups.abs().amax(dim=-1)
+            pairs = groups.view(B, D // G, G // 2, 2)
+            packed = (pairs[..., 0] + 2 * pairs[..., 1]) / scale.unsqueeze(-1)
+            return (scale, packed) if scale_first else (packed, scale)
+
+        x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
+        weight = torch.randn(D, device=GPU_TYPE, dtype=torch.bfloat16)
+        self.check_nested_matches_unnested(f, (x, weight))
+        self.check_fusion()
+
     @parametrize("dynamic_axis", ["batch", "reduction"])
     def test_dynamic_sub_parent_epilogue(self, dynamic_axis):
         import torch.nn.functional as F
@@ -1114,7 +1148,7 @@ class _NestedReductionBase:
         self.check_nested_matches_unnested(f, (x, weight))
         self.check_fusion()
 
-    def test_producer_consumer_parent_full_intermediate(self):
+    def test_producer_consumer_inlined_parent_full_source(self):
         import torch.nn.functional as F
 
         B, D, G = 32, 1024, 16
@@ -1153,7 +1187,7 @@ class _NestedReductionBase:
         self.check_nested_matches_unnested(f, (x, weight, z))
         self.check_fusion()
 
-    def test_producer_consumer_rejects_shifted_parent_full_intermediate(self):
+    def test_producer_consumer_rejects_shifted_inlined_parent_full_source(self):
         import torch.nn.functional as F
 
         B, D, G = 32, 1024, 16
@@ -2673,6 +2707,18 @@ class _InternalsBase:
             extra_checks=FileCheck().check_not("tl.split("),
         )
 
+    @inductor_config.patch("triton.multi_kernel", True)
+    def test_producer_consumer_amax_multi_kernel_form(self):
+        self.assert_single_kernel_form(
+            _capture_amax_kernel_sources,
+            128,
+            input_counts=self.looped_or_persistent({0: 2, 1: 1}, {0: 1, 1: 1}),
+            num_outputs=1,
+            meta_num_load=self.looped_or_persistent(3, 2),
+            min_rblock=16,
+            extra_checks=FileCheck().check_not("tl.split("),
+        )
+
     def test_producer_consumer_scale_kernel_form(self):
         self.assert_single_kernel_form(
             _capture_producer_scale_kernel_sources,
@@ -2836,6 +2882,37 @@ class _InternalsBase:
                 else FileCheck().check_count("tl.split(", 1, exactly=True)
             ),
         )
+
+    @inductor_config.patch("triton.multi_kernel", True)
+    def test_standalone_sub_parent_epilogue_multi_kernel_form(self):
+        self.assert_single_kernel_form(
+            _capture_standalone_sub_parent_epilogue_sources,
+            128,
+            input_counts=self.looped_or_persistent({0: 3}, {0: 1}),
+            num_outputs=3,
+            num_deallocs=2,
+            meta_num_load=self.looped_or_persistent(3, 1),
+            min_xblock=None,
+            min_rblock=2,
+            extra_checks=(
+                FileCheck().check_count("tl.split(", 0, exactly=True)
+                if self.force_persistent_outer_reduction is False
+                else FileCheck().check_count("tl.split(", 1, exactly=True)
+            ),
+        )
+
+    @inductor_config.patch(benchmark_kernel=True)
+    def test_standalone_sub_parent_epilogue_kernel_num_gb(self):
+        B, D, G = 128, 1024, 16
+        _wrapper_code, kernel_code = _capture_standalone_sub_parent_epilogue_sources(
+            B,
+            force_persistent_outer_reduction=self.force_persistent_outer_reduction,
+        )
+        match = re.search(r"'kernel_num_gb': ([\d.eE+-]+)", kernel_code)
+        if match is None:
+            raise AssertionError("staged kernel metadata is missing kernel_num_gb")
+        minimum_bytes = B * D * 2 + 2 * B * (D // 2) * 4 + B * (D // G) * 4
+        self.assertGreaterEqual(float(match.group(1)), minimum_bytes / 1e9)
 
     def test_pointwise_producer_sub_parent_kernel_form(self):
         self.assert_single_kernel_form(
