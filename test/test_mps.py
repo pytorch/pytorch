@@ -5620,6 +5620,39 @@ class TestMPS(TestCaseMPS):
         output = loss(pred, target)
         output.backward()
 
+    def test_softmax_metal_kernel_paths(self):
+        # Exercise the specialized large-shape Metal softmax kernels (looped,
+        # two-pass, and the cooperative dim=0 blocked/coalesced paths) that the
+        # small OpInfo softmax samples never reach, plus the leading-(-inf)
+        # masked-row edge case that triggers the online-softmax NaN guard.
+        configs = [
+            ((4, 8192), -1),    # looped: axis_size > 1024 * N_READS
+            ((2, 65536), -1),   # two-pass: few very long rows
+            ((8192, 128), 0),   # cooperative dim=0 (blocked/blocked2)
+            ((128, 8192), 0),   # dim=0 with large inner size
+            ((16, 4097), -1),   # just past the looped threshold
+        ]
+        for shape, dim in configs:
+            cpu_x = torch.randn(shape, dtype=torch.float32, requires_grad=True)
+            mps_x = cpu_x.detach().to("mps").requires_grad_(True)
+            cpu_y = F.softmax(cpu_x, dim=dim)
+            mps_y = F.softmax(mps_x, dim=dim)
+            self.assertEqual(cpu_y, mps_y.to("cpu"))
+            go = torch.randn_like(cpu_y)
+            cpu_y.backward(go)
+            mps_y.backward(go.to("mps"))
+            self.assertEqual(cpu_x.grad, mps_x.grad.to("cpu"))
+            cpu_h = cpu_x.detach().half()
+            self.assertEqual(F.softmax(cpu_h, dim=dim),
+                             F.softmax(cpu_h.to("mps"), dim=dim).to("cpu"))
+        # Leading-(-inf) masked long row must match CPU, never produce a NaN row.
+        for dtype in (torch.float32, torch.float16):
+            cpu_x = torch.randn(4, 8192, dtype=dtype)
+            cpu_x[0, :128] = float("-inf")
+            mps_y = F.softmax(cpu_x.to("mps"), dim=-1).to("cpu")
+            self.assertFalse(torch.isnan(mps_y).any())
+            self.assertEqual(F.softmax(cpu_x, dim=-1), mps_y)
+
     def test_log_softmax(self):
         values = [[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], [[7.0, 8.0, 9.0], [10.0, 11.0, 12.0]]]
         cpu_x = torch.tensor(values, device='cpu', requires_grad=True)
