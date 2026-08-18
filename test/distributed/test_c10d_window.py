@@ -10,6 +10,7 @@ import os
 import sys
 import unittest
 from datetime import timedelta
+from unittest import mock
 
 import torch
 import torch.distributed as dist
@@ -20,7 +21,7 @@ if not dist.is_available():
     sys.exit(0)
 
 from torch.testing._internal.common_distributed import MultiProcessTestCase
-from torch.testing._internal.common_utils import run_tests, TEST_CUDA
+from torch.testing._internal.common_utils import run_tests, TEST_CUDA, TEST_WITH_ROCM
 
 
 WINDOW_BACKENDS = [
@@ -39,12 +40,30 @@ class AbstractWindowTest:
 
     def setUp(self):
         super().setUp()
+        # Temporary ROCm CI probe: log RCCL GIN/backend selection so 7.14 vs
+        # 10 preview window skips can be compared. Children inherit this at
+        # spawn. Leave NCCL_DEBUG_FILE unset so INFO lines land in the pytest
+        # artifact. Revert after diagnosis.
+        self._nccl_debug_env_patcher = None
+        if TEST_WITH_ROCM:
+            self._nccl_debug_env_patcher = mock.patch.dict(
+                os.environ,
+                {
+                    "NCCL_DEBUG": "INFO",
+                    "NCCL_DEBUG_SUBSYS": "INIT,NET,REG",
+                },
+            )
+            self._nccl_debug_env_patcher.start()
         self._spawn_processes()
 
     def tearDown(self):
         if dist.is_initialized():
             dist.destroy_process_group()
         super().tearDown()
+        nccl_debug_env_patcher = getattr(self, "_nccl_debug_env_patcher", None)
+        if nccl_debug_env_patcher is not None:
+            nccl_debug_env_patcher.stop()
+            self._nccl_debug_env_patcher = None
         try:
             os.remove(self.file_name)
         except OSError:
