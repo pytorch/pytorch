@@ -162,46 +162,6 @@ CI_SKIP_DYNAMIC_BATCH_ONLY = {
     "llama",
 }.union(INTERNAL_CI_SKIP_DYNAMIC_BATCH_ONLY)
 
-# These models currently fail accuracy with eager Adam optimizer
-# so we use SGD when running the full benchmarks
-# https://github.com/pytorch/pytorch/issues/115966
-BENCHMARK_USE_SGD = {
-    # TorchBench
-    "BERT_pytorch",
-    "LearningToPaint",
-    "alexnet",
-    "dcgan",
-    "demucs",
-    "densenet121",
-    "dlrm",
-    "fastNLP_Bert",
-    "mobilenet_v2",
-    "phlippe_densenet",
-    "phlippe_resnet",
-    "pytorch_stargan",
-    "resnet18",
-    "shufflenet_v2_x1_0",
-    "speech_transformer",
-    "squeezenet1_1",
-    "stable_diffusion_text_encoder",
-    "vgg16",
-    # HF
-    "AlbertForMaskedLM",
-    "BartForCausalLM",
-    "ElectraForCausalLM",
-    "M2M100ForConditionalGeneration",
-    "MBartForCausalLM",
-    "OPTForCausalLM",
-    "PLBartForCausalLM",
-    "PegasusForCausalLM",
-    "TrOCRForCausalLM",
-    "XGLMForCausalLM",
-    # TIMM
-    "adv_inception_v3",
-    "ghostnet_100",
-    "tf_efficientnet_b0",
-}
-
 # These CUDA Inductor TIMM models fail fp16 training accuracy with the default
 # eager Adam reference, but this has not been validated for non-accuracy runs,
 # non-Inductor, or ROCm periodic baselines.
@@ -241,6 +201,22 @@ CI_USE_SGD = {
     "dlrm",
     "resnet50",
     "dm_nfnet_f0",
+}
+
+
+def use_sgd_optimizer(name, args):
+    return (name in CI_USE_SGD and args.ci) or (
+        torch.version.hip is None
+        and args.backend == "inductor"
+        and args.accuracy
+        and name in CUDA_INDUCTOR_ACCURACY_USE_SGD
+    )
+
+
+BITWISE_ADAM_CONFIG = {
+    "eager_numerics.division_rounding": True,
+    "eager_numerics.use_pytorch_libdevice": True,
+    "emulate_precision_casts": True,
 }
 
 
@@ -1825,6 +1801,7 @@ class BenchmarkRunner:
         self.autocast = contextlib.nullcontext
         self.autocast_arg = {}
         self.optimizer: torch.optim.Optimizer | None = None
+        self.compiled_optimizer_step = None
         self._args = None
 
     def setup_amp(self, current_device=None):
@@ -1869,18 +1846,9 @@ class BenchmarkRunner:
                 self.autocast_arg["dtype"] = amp_dtype
 
     def init_optimizer(self, name, device, params):
+        self.compiled_optimizer_step = None
         if device == "cuda" and self.args.training and name not in CI_SKIP_OPTIMIZER:
-            use_sgd = (
-                (name in CI_USE_SGD and self.args.ci)
-                or name in BENCHMARK_USE_SGD
-                or (
-                    torch.version.hip is None
-                    and self.args.backend == "inductor"
-                    and self.args.accuracy
-                    and name in CUDA_INDUCTOR_ACCURACY_USE_SGD
-                )
-            )
-            if use_sgd:
+            if use_sgd_optimizer(name, self.args):
                 self.optimizer = torch.optim.SGD(params, lr=0.01, foreach=True)
                 # Disable multi_tensor_sgd for benchmarking, there isn't a large performance benefit (~1%) to compiling
                 # this optimizer because it is a single foreach add, and increases compile time.
@@ -1892,6 +1860,28 @@ class BenchmarkRunner:
                 self.optimizer = torch.optim.Adam(
                     params, lr=0.01, capturable=True, foreach=True
                 )
+                if self.args.backend == "inductor" and not self.args.nopython:
+                    mode_options = (
+                        torch._inductor.list_mode_options(
+                            self.args.inductor_compile_mode
+                        )
+                        if self.args.inductor_compile_mode
+                        else {}
+                    )
+                    options = {**mode_options, **BITWISE_ADAM_CONFIG}
+                    self.optimizer._opt_called = True
+                    step = self.optimizer.step.__wrapped__.__wrapped__
+
+                    def optimizer_step():
+                        with torch.no_grad():
+                            step(self.optimizer)
+
+                    self.compiled_optimizer_step = torch.compile(
+                        optimizer_step,
+                        backend="inductor",
+                        fullgraph=True,
+                        options=options,
+                    )
         else:
             self.optimizer = None
 
@@ -2127,9 +2117,21 @@ class BenchmarkRunner:
         else:
             mod.zero_grad(True)
 
+    @torch._disable_dynamo(recursive=False)
+    def _run_compiled_optimizer_step(self):
+        if self.compiled_optimizer_step is None:
+            raise AssertionError("compiled optimizer step is not initialized")
+        self.compiled_optimizer_step()
+
     def optimizer_step(self):
         if self.optimizer is not None:
-            self.optimizer.step()
+            if (
+                self.compiled_optimizer_step is not None
+                and torch.compiler.is_compiling()
+            ):
+                self._run_compiled_optimizer_step()
+            else:
+                self.optimizer.step()
 
     def get_benchmark_indices(self, length):
         start = self._args.partition_id * (length // self._args.total_partitions)
