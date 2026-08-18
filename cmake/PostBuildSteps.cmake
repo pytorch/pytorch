@@ -82,7 +82,7 @@ if(WIN32 AND BUILD_PYTHON)
   endif()
 
   # CUDA runtime DLLs - only for CUDA builds.
-  if(USE_CUDA AND CUDA_TOOLKIT_ROOT_DIR)
+  if(USE_CUDA AND CUDA_TOOLKIT_ROOT_DIR AND NOT "$ENV{PYTORCH_EXTRA_INSTALL_REQUIREMENTS}" MATCHES "cuda-toolkit")
     # CUDA 13+ moves DLLs to bin/x64.
     if(IS_DIRECTORY "${CUDA_TOOLKIT_ROOT_DIR}/bin/x64")
       set(_cuda_bin "${CUDA_TOOLKIT_ROOT_DIR}/bin/x64")
