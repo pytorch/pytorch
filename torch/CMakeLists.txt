@@ -467,15 +467,11 @@ if(BUILD_PYTHON AND NOT BUILD_LIBTORCH_WHL)
       C_VISIBILITY_PRESET "default"
     )
   endif()
-  # The extension module belongs to the Python package; the import library
-  # (Windows _C.lib) is a C++ artifact and stays in the prefix's lib/,
-  # alongside the other import libs, matching the layout that setup.py used
-  # before _C moved to CMake.
+  # The extension module belongs to the Python package.
   if(SKBUILD)
     install(TARGETS _C
       RUNTIME DESTINATION "${SKBUILD_PLATLIB_DIR}/torch"
       LIBRARY DESTINATION "${SKBUILD_PLATLIB_DIR}/torch"
-      ARCHIVE DESTINATION "lib"
     )
   endif()
 
