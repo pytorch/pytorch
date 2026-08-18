@@ -3975,7 +3975,9 @@ class View(GenericView):
             return handle_unbacked_or_dynamic_reshape(x)
 
         # Try to compute valid output strides.
-        storage, old_layout = as_storage_and_layout(x, freeze=False)
+        # ReinterpretView stores an index map derived from this layout, so the
+        # backing storage must not remain flexible after the view is created.
+        storage, old_layout = as_storage_and_layout(x)
 
         old_stride = old_layout.stride
 

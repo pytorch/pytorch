@@ -211,7 +211,7 @@ static void recordCustomClassesFromOpSchemas(
     // Certain models can only run on a specific backend say metal.
     // Those ops will be present in the models root ops, but likely
     // not the tracer on linux
-    if (ops_and_schemas.find(op_name) != ops_and_schemas.end()) {
+    if (ops_and_schemas.contains(op_name)) {
       auto& schema = ops_and_schemas.at(op_name);
       for (auto& arg : schema.arguments()) {
         record_if_class(arg.type()->annotation_str());
