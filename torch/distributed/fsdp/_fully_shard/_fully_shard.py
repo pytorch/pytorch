@@ -621,8 +621,8 @@ class FSDPModule:
 
     def set_post_optim_event(self, event: torch.Event) -> None:
         """
-        Sets a post-optimizer-step event for the root FSDP module to wait its
-        communication streams on.
+        Sets a post-optimizer-step event for the root FSDP module to wait the
+        all-gather streams on.
 
         By default, the root FSDP module waits the all-gather streams on the
         current stream to ensure that the optimizer step has finished before
@@ -632,24 +632,39 @@ class FSDPModule:
         waits on the event, the event is discarded, so this API should be
         called with a new event each iteration.
 
-        Calling this method also immediately orders every possible sharded-
-        gradient allocation/free stream after ``event``. It must be called
-        after optimizer work is enqueued and before any operation that may
-        clear or replace the gradients. This is required for every optimizer
-        step, including the final iteration. An optimizer step-post hook is one
-        way to record and set the event before ``zero_grad``.
-        ``event`` must be ordered after every optimizer stream that consumes
-        the gradients. This cannot protect a gradient cleared inside the
-        optimizer step or by an optimizer-in-backward hook before this method
-        is called.
-
         Args:
             event (torch.Event): Event recorded after the optimizer step
-                to wait communication streams on.
+                to wait all-gather streams on.
         """
+        self._get_fsdp_state()._state_ctx.post_optim_event = event
+
+    def set_post_optim_grad_free_event(self, event: torch.Event) -> None:
+        """
+        Sets a post-optimizer-step event for the root FSDP module to order
+        sharded-gradient frees after.
+
+        This method opts in to immediately ordering every possible sharded-
+        gradient allocation/free stream after ``event``. It also uses the
+        event for the next-forward all-gather ordering provided by
+        :meth:`set_post_optim_event`.
+
+        This method must be called after optimizer work is enqueued and before
+        any operation that may clear or replace the gradients. This is required
+        for every optimizer step, including the final iteration. An optimizer
+        step-post hook is one way to record and set the event before
+        ``zero_grad``. ``event`` must be ordered after every optimizer stream
+        that consumes the gradients. This cannot protect a gradient cleared
+        inside the optimizer step or by an optimizer-in-backward hook before
+        this method is called.
+
+        Args:
+            event (torch.Event): Event recorded after the optimizer step to
+                wait sharded-gradient allocation/free streams on.
+        """
+        self.set_post_optim_event(event)
         state = self._get_fsdp_state()
-        state._state_ctx.post_optim_free_ordering_enabled = True
-        state._state_ctx.post_optim_event = event
+        if state._state_ctx.post_optim_free_streams is None:
+            state._state_ctx.post_optim_free_streams = set()
         if hasattr(state._comm_ctx, "reduce_scatter_stream"):
             state._wait_post_optim_event_on_grad_free_streams(event)
 

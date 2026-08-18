@@ -2619,21 +2619,21 @@ class TestFullyShardWorldSize1(FSDPTest):
         return 1
 
     @skip_if_lt_x_gpu(1)
-    def test_set_post_optim_event_before_lazy_init(self):
+    def test_set_post_optim_grad_free_event_before_lazy_init(self):
         model = nn.Linear(8, 8, bias=False).to(device_type)
         fully_shard(model)
         state = model._get_fsdp_state()
         self.assertFalse(hasattr(state._comm_ctx, "reduce_scatter_stream"))
 
         event = MagicMock()
-        model.set_post_optim_event(event)
+        model.set_post_optim_grad_free_event(event)
 
         self.assertIs(state._state_ctx.post_optim_event, event)
-        self.assertTrue(state._state_ctx.post_optim_free_ordering_enabled)
+        self.assertEqual(state._state_ctx.post_optim_free_streams, set())
         self.assertFalse(hasattr(state._comm_ctx, "reduce_scatter_stream"))
 
     @skip_if_lt_x_gpu(1)
-    def test_post_optim_event_orders_grad_free_streams(self):
+    def test_post_optim_grad_free_event_orders_free_streams(self):
         device_module = torch.get_device_module(device_type)
         model = nn.Linear(8, 8, bias=False).to(device_type)
         fully_shard(
@@ -2648,8 +2648,7 @@ class TestFullyShardWorldSize1(FSDPTest):
         param = next(model.parameters())
         self.assertIsNotNone(param.grad)
         device_module.synchronize()
-        self.assertFalse(state._state_ctx.post_optim_free_ordering_enabled)
-        self.assertFalse(state._state_ctx.post_optim_free_streams)
+        self.assertIsNone(state._state_ctx.post_optim_free_streams)
 
         reduce_scatter_stream = MagicMock()
         all_reduce_stream = MagicMock()
@@ -2658,8 +2657,6 @@ class TestFullyShardWorldSize1(FSDPTest):
         comm_ctx.reduce_scatter_stream = reduce_scatter_stream
         comm_ctx.all_reduce_stream = all_reduce_stream
         state._fsdp_param_groups[0]._all_reduce_hook_stream = custom_free_stream
-        state._state_ctx.post_optim_free_streams.clear()
-        state._state_ctx.post_optim_free_streams.add(historical_free_stream)
         free_streams = (
             reduce_scatter_stream,
             all_reduce_stream,
@@ -2673,12 +2670,19 @@ class TestFullyShardWorldSize1(FSDPTest):
         event = MagicMock()
         for stream in free_streams:
             stream.wait_event.side_effect = assert_grad_is_live
-        model.set_post_optim_event(event)
+
+        all_gather_only_event = MagicMock()
+        model.set_post_optim_event(all_gather_only_event)
+        for stream in free_streams:
+            stream.wait_event.assert_not_called()
+        self.assertIsNone(state._state_ctx.post_optim_free_streams)
+
+        state._state_ctx.post_optim_free_streams = {historical_free_stream}
+        model.set_post_optim_grad_free_event(event)
 
         for stream in free_streams:
             stream.wait_event.assert_called_once_with(event)
         self.assertIs(state._state_ctx.post_optim_event, event)
-        self.assertTrue(state._state_ctx.post_optim_free_ordering_enabled)
         self.assertEqual(state._state_ctx.post_optim_free_streams, set(free_streams))
 
         model.zero_grad(set_to_none=True)

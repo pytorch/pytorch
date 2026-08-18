@@ -54,14 +54,12 @@ class FSDPStateContext(Generic[_StateType]):
         # Optional user-provided event recorded after optimizer for the
         # all-gather streams to wait on in the root pre-forward
         self.post_optim_event: torch.Event | None = None
-        # Calling ``set_post_optim_event`` opts in to ordering gradient free
-        # streams after the optimizer event.
-        self.post_optim_free_ordering_enabled: bool = False
         # Track candidate streams on which a sharded-gradient storage may be
         # freed. Keeping historical streams covers persistent ``param.grad``
         # storage if communication or custom post-reduce streams change before
-        # a later clear.
-        self.post_optim_free_streams: set[torch.Stream] = set()
+        # a later clear. ``None`` means the user has not opted in by calling
+        # ``set_post_optim_event``; an empty set means opted in before lazy init.
+        self.post_optim_free_streams: set[torch.Stream] | None = None
 
 
 class FSDPState(_State):
@@ -345,6 +343,8 @@ class FSDPState(_State):
 
     def _wait_post_optim_event_on_grad_free_streams(self, event: torch.Event) -> None:
         streams = self._state_ctx.post_optim_free_streams
+        if streams is None:
+            raise AssertionError("Expected post-optimizer free-stream ordering")
         streams.update(self._post_optim_free_streams())
         for stream in streams:
             stream.wait_event(event)
@@ -460,10 +460,8 @@ class FSDPState(_State):
                     if rs_state.event is not None:
                         self._device_handle.current_stream().wait_event(rs_state.event)
                 self._comm_ctx.reduce_scatter_states.clear()
-                if self._state_ctx.post_optim_free_ordering_enabled:
-                    self._state_ctx.post_optim_free_streams.update(
-                        self._post_optim_free_streams()
-                    )
+                if (streams := self._state_ctx.post_optim_free_streams) is not None:
+                    streams.update(self._post_optim_free_streams())
             self._state_ctx.post_backward_final_callback_queued = False
 
     def _register_pre_backward_hook(self, output: Any) -> Any:
