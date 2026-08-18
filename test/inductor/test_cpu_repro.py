@@ -2654,6 +2654,7 @@ class CPUReproTests(TestCase):
                                 "sve_max_length": vector_bits,
                             },
                         ),
+                        config.patch({"cpp.vec_isa_ok": True}),
                     ):
                         selected_isa = cpu_vec_isa.valid_vec_isa_list()[0]
                         self.assertIsInstance(selected_isa, cpu_vec_isa.VecSVE)
@@ -2668,6 +2669,24 @@ class CPUReproTests(TestCase):
                 self.assertIsInstance(
                     cpu_vec_isa.valid_vec_isa_list()[0], cpu_vec_isa.VecNEON
                 )
+
+            cpu_vec_isa.valid_vec_isa_list.cache_clear()
+            with (
+                patch("sys.platform", "linux"),
+                patch("platform.machine", return_value="aarch64"),
+                patch(
+                    "torch.cpu.get_capabilities",
+                    return_value={
+                        "bf16": True,
+                        "sve": True,
+                        "sve2": True,
+                        "sve_max_length": 128,
+                    },
+                ),
+                config.patch({"cpp.vec_isa_ok": False}),
+            ):
+                self.assertEqual(cpu_vec_isa.valid_vec_isa_list(), [])
+                self.assertIs(cpu_vec_isa.pick_vec_isa(), cpu_vec_isa.invalid_vec_isa)
         finally:
             cpu_vec_isa.valid_vec_isa_list.cache_clear()
 

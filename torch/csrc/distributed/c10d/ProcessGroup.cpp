@@ -85,6 +85,8 @@ std::string opTypeToString(OpType opType) {
       return "_ALLREDUCE_SPARSE";
     case OpType::REDUCE_SCATTER_TENSOR_COALESCED:
       return "REDUCE_SCATTER_TENSOR_COALESCED";
+    case OpType::ALLGATHER_INTO_TENSOR_COALESCED:
+      return "ALLGATHER_INTO_TENSOR_COALESCED";
     default:
       TORCH_INTERNAL_ASSERT(false, "Unknown op type!");
   }
@@ -100,7 +102,7 @@ bool isP2POp(OpType opType, bool batchP2P /*= false*/) {
 c10::intrusive_ptr<Backend> ProcessGroup::getBackend(
     c10::DeviceType deviceType) {
   // If there is a backend associated with this device type then return it
-  if (deviceTypeToBackend_.find(deviceType) != deviceTypeToBackend_.end()) {
+  if (deviceTypeToBackend_.contains(deviceType)) {
     return deviceTypeToBackend_.at(deviceType);
   }
 
@@ -114,7 +116,7 @@ c10::intrusive_ptr<Backend> ProcessGroup::getBackend(
   }
 
   // Check if the backend has already been initialized
-  if (backendTypeToBackend_.find(backendType) != backendTypeToBackend_.end()) {
+  if (backendTypeToBackend_.contains(backendType)) {
     auto backend = backendTypeToBackend_.at(backendType);
     deviceTypeToBackend_[deviceType] = backend;
     return backend;
