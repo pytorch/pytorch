@@ -51,6 +51,7 @@ def _get_total_norm(
     norm_type: float = 2.0,
     error_if_nonfinite: bool = False,
     foreach: bool | None = None,
+    dtype: torch.dtype | None = None,
 ) -> torch.Tensor:
     r"""Compute the norm of an iterable of tensors.
 
@@ -69,6 +70,13 @@ def _get_total_norm(
             If ``None``, use the foreach implementation for CUDA and CPU native tensors and silently
             fall back to the slow implementation for other device types.
             Default: ``None``
+        dtype (torch.dtype, optional): if set, the per-tensor norms and the norm-of-norms are
+            accumulated in this dtype and the result is returned in it. Otherwise, inputs accumulate
+            in their own dtype by default, which may be undesirable for lower precision inputs
+            (e.g. ``bfloat16``). It must be a floating point dtype that the inputs promote to
+            (``torch.promote_types(input.dtype, dtype) == dtype``), the constraint
+            :func:`torch.linalg.vector_norm` places on its ``dtype``; anything else raises.
+            Default: ``None``.
 
     Returns:
         Total norm of the tensors (viewed as a single vector).
@@ -79,7 +87,7 @@ def _get_total_norm(
         tensors = list(tensors)
     norm_type = float(norm_type)
     if len(tensors) == 0:
-        return torch.tensor(0.0)
+        return torch.tensor(0.0, dtype=dtype)
     first_device = tensors[0].device
     grouped_tensors: dict[
         tuple[torch.device, torch.dtype], tuple[list[list[Tensor]], list[int]]
@@ -92,18 +100,21 @@ def _get_total_norm(
         if (foreach is None and _has_foreach_support(device_tensors, device)) or (
             foreach and _device_has_foreach_support(device)
         ):
-            norms.extend(torch._foreach_norm(device_tensors, norm_type))
+            norms.extend(torch._foreach_norm(device_tensors, norm_type, dtype=dtype))
         elif foreach:
             raise RuntimeError(
                 f"foreach=True was passed, but can't use the foreach API on {device.type} tensors"
             )
         else:
             norms.extend(
-                [torch.linalg.vector_norm(g, norm_type) for g in device_tensors]
+                [
+                    torch.linalg.vector_norm(g, norm_type, dtype=dtype)
+                    for g in device_tensors
+                ]
             )
 
     total_norm = torch.linalg.vector_norm(
-        torch.stack([norm.to(first_device) for norm in norms]), norm_type
+        torch.stack([norm.to(first_device) for norm in norms]), norm_type, dtype=dtype
     )
 
     if error_if_nonfinite and torch.logical_or(total_norm.isnan(), total_norm.isinf()):
