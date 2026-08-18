@@ -27,6 +27,7 @@ import dataclasses
 import functools
 import logging
 from collections.abc import Callable, Iterable
+from contextlib import ExitStack
 from importlib import import_module
 from typing import Any, TYPE_CHECKING
 
@@ -63,6 +64,39 @@ def eager(
     return gm.forward
 
 
+class _EagerBackendWithTorchFunctionModes:
+    """Run an eager graph under modes whose identities define backend equality."""
+
+    __name__ = "eager_with_torch_function_modes"
+
+    def __init__(self, modes: Iterable[torch.overrides.TorchFunctionMode]) -> None:
+        self.modes = tuple(modes)
+
+    def __eq__(self, other: object) -> bool:
+        return (
+            isinstance(other, _EagerBackendWithTorchFunctionModes)
+            and len(self.modes) == len(other.modes)
+            and all(lhs is rhs for lhs, rhs in zip(self.modes, other.modes))
+        )
+
+    def __hash__(self) -> int:
+        return hash(tuple(id(mode) for mode in self.modes))
+
+    def __call__(
+        self,
+        gm: torch.fx.GraphModule,
+        fake_tensor_inputs: list[torch.Tensor],
+        **kwargs: Any,
+    ) -> Callable[..., Any]:
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            with ExitStack() as stack:
+                for mode in self.modes:
+                    stack.enter_context(mode)
+                return gm.forward(*args, **kwargs)
+
+        return wrapper
+
+
 def make_eager_backend_with_torch_function_mode(
     mode: torch.overrides.TorchFunctionMode,
 ) -> Callable[..., Any]:
@@ -75,20 +109,7 @@ def make_eager_backend_with_torch_function_modes(
     """Used to trace HOPs (cond and while) for eager execution, the metadata
     TF mode mutates vars outside of the scope of the HOP, and we can't have graph breaks
     in the HOP, so we need to externally run this mode and not trace it."""
-    from contextlib import ExitStack
-
-    def fn(
-        gm: torch.fx.GraphModule, fake_tensor_inputs: list[torch.Tensor], **kwargs: Any
-    ) -> Callable[..., Any]:
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
-            with ExitStack() as stack:
-                for mode in modes:
-                    stack.enter_context(mode)
-                return gm.forward(*args, **kwargs)
-
-        return wrapper
-
-    return fn
+    return _EagerBackendWithTorchFunctionModes(modes)
 
 
 @register_backend
