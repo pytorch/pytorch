@@ -623,7 +623,6 @@ class TestPGTransportEdgeCases(TestCase):
 
     def setUp(self):
         super().setUp()
-        self.device = torch.device("cpu")
         self.pg = MagicMock()
         self.timeout = timedelta(seconds=10)
 
