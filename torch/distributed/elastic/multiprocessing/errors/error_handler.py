@@ -68,7 +68,7 @@ class ErrorHandler:
 
     def record_exception(self, e: BaseException) -> None:
         """
-        Write a structured information about the exception into an error file in JSON format.
+        Write structured information about the exception into an error file in JSON format.
 
         If the error file cannot be determined, then logs the content
         that would have been written to the error file.
@@ -86,6 +86,18 @@ class ErrorHandler:
             }
             with open(file, "w") as fp:
                 json.dump(data, fp)
+
+    def maybe_enrich_signal_failure_message(self, message: str, error_file: str) -> str:
+        """Hook to enrich a signal (no-traceback) failure message.
+
+        Called from ``ProcessFailure`` when a worker fails by signal (negative
+        exitcode). Subclasses may override this to append device-specific fault
+        context (e.g. GPU memory faults) scanned from the worker logs near
+        ``error_file``, so it surfaces in the propagated failure regardless of
+        how the failure is later handled. The base implementation is a no-op
+        that returns ``message`` unchanged.
+        """
+        return message
 
     def override_error_code_in_rootcause_data(
         self,

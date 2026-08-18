@@ -17,7 +17,7 @@ from typing_extensions import Never
 import torch
 import torch.fx.traceback as fx_traceback
 from torch._C import _fx_map_arg as map_arg
-from torch._library.opaque_object import is_opaque_value_type
+from torch._library.opaque_object import is_opaque_constant_type
 from torch._logging import getArtifactLogger
 from torch.utils._pytree import tree_map_
 from torch.utils._traceback import CapturedTraceback
@@ -467,7 +467,7 @@ class TracerBase:
         elif isinstance(a, (torch._ops.OpOverload, torch._ops.HigherOrderOperator)):
             return a  # pyrefly: ignore[bad-return]
 
-        elif is_opaque_value_type(type(a)):
+        elif is_opaque_constant_type(type(a)):
             return a
 
         elif is_dataclass(a):
@@ -513,9 +513,9 @@ class TracerBase:
 
     @compatibility(is_backward_compatible=True)
     def keys(self, obj: "Proxy") -> "Proxy":
-        """Called when a proxy object is has the keys() method called.
+        """Called when a proxy object has the keys() method called.
         This is what happens when ** is called on a proxy. This should return an
-        iterator it ** is suppose to work in your custom tracer.
+        iterator if ** is supposed to work in your custom tracer.
         """
         return Attribute(obj, "keys")()
 

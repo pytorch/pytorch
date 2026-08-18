@@ -297,6 +297,7 @@ class ContextManagerTestCase(__TestCase):
                 else:
                     self.fail(f'{stop_exc} was suppressed')
 
+    @torch._dynamo.error_on_graph_break(False)
     def test_contextmanager_except_pep479(self):
         code = """\
 from __future__ import generator_stop
@@ -495,6 +496,7 @@ class NullcontextTestCase(__TestCase):
 
 class FileContextTestCase(__TestCase):
 
+    @torch._dynamo.error_on_graph_break(False)
     def testWithOpen(self):
         tfn = tempfile.mktemp()
         try:

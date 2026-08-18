@@ -6,7 +6,7 @@ namespace detail {
 // See getCUDAHooks for some more commentary
 const MAIAHooksInterface& getMAIAHooks() {
   auto create_impl = [] {
-    auto hooks = MAIAHooksRegistry()->Create("MAIAHooks", {});
+    auto hooks = MAIAHooksRegistry()->Create("MAIAHooks");
     if (hooks) {
       return hooks;
     }
@@ -18,6 +18,6 @@ const MAIAHooksInterface& getMAIAHooks() {
 } // namespace detail
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-C10_DEFINE_REGISTRY(MAIAHooksRegistry, MAIAHooksInterface, MAIAHooksArgs)
+C10_DEFINE_REGISTRY(MAIAHooksRegistry, MAIAHooksInterface)
 
 } // namespace at

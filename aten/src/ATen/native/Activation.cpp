@@ -60,6 +60,7 @@
 #include <ATen/ops/_prelu_kernel_backward_native.h>
 #include <ATen/ops/relu6_native.h>
 #include <ATen/ops/relu_native.h>
+#include <ATen/ops/result_type.h>
 #include <ATen/ops/rrelu_native.h>
 #include <ATen/ops/rrelu_with_noise.h>
 #include <ATen/ops/rrelu_with_noise_backward_native.h>
@@ -439,7 +440,7 @@ Tensor hardtanh(const Tensor& self, const Scalar& min, const Scalar& max) {
 }
 
 Tensor& hardtanh_out(const Tensor& self, const Scalar& min, const Scalar& max, Tensor& result) {
-  TORCH_CHECK(self.scalar_type() != at::kBool,
+  TORCH_CHECK_NOT_IMPLEMENTED(self.scalar_type() != at::kBool,
   "Bool inputs not supported for hardtanh");
   //preserve legacy behavior of boundaries not causing type promotion
   Scalar min_, max_;
@@ -512,12 +513,12 @@ Tensor hardswish_backward(const Tensor& grad_output, const Tensor& self) {
 }
 
 Tensor relu(const Tensor & self) {
-  TORCH_CHECK(self.scalar_type() != at::kBool, "Boolean inputs not supported for relu");
+  TORCH_CHECK_NOT_IMPLEMENTED(self.scalar_type() != at::kBool, "Boolean inputs not supported for relu");
   return at::clamp_min(self, 0);
 }
 
 Tensor & relu_(Tensor & self) {
-  TORCH_CHECK(self.scalar_type() != at::kBool, "Boolean inputs not supported for relu");
+  TORCH_CHECK_NOT_IMPLEMENTED(self.scalar_type() != at::kBool, "Boolean inputs not supported for relu");
   return at::clamp_min_(self, 0);
 }
 
@@ -756,16 +757,20 @@ Tensor infinitely_differentiable_gelu_backward(
     const Tensor& grad,
     const Tensor& self) {
   constexpr double kAlpha = M_2_SQRTPI * M_SQRT1_2 * 0.5;
-  Tensor cdf = (1.0 + (self * M_SQRT1_2).erf_()).mul_(0.5);
-  Tensor pdf = (-0.5 * self * self).exp_();
-  return cdf.addcmul_(self, pdf, kAlpha).mul_(grad);
+  const auto result_dtype = at::result_type(grad, self);
+  const auto opmath_dtype = at::toOpMathType(result_dtype);
+  const Tensor grad_ = grad.to(opmath_dtype);
+  const Tensor self_ = self.to(opmath_dtype);
+  Tensor cdf = (1.0 + (self_ * M_SQRT1_2).erf_()).mul_(0.5);
+  Tensor pdf = (-0.5 * self_ * self_).exp_();
+  return cdf.addcmul_(self_, pdf, kAlpha).mul_(grad_).to(result_dtype);
 }
 
 std::tuple<Tensor, Tensor> log_sigmoid_forward_cpu(const Tensor& input) {
   auto result = at::empty_like(input, at::MemoryFormat::Contiguous);
   auto buffer = at::empty_like(input, at::MemoryFormat::Contiguous);
   log_sigmoid_cpu_stub(kCPU, result, buffer, input.contiguous());
-  return std::make_tuple(result, buffer);
+  return std::make_tuple(std::move(result), std::move(buffer));
 }
 
 std::tuple<Tensor&, Tensor&> log_sigmoid_forward_out_cpu(const Tensor& input, Tensor& result, Tensor& buffer) {

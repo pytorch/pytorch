@@ -140,6 +140,10 @@ def _compress_uniform_simplified(X, bit_rate, xmin, xmax, fp16_scale_bias=True):
     return Xq, loss
 
 class TestQuantizedTensor(TestCase):
+    def test_quantized_tensor_creation_deprecation_warning(self):
+        with self.assertWarnsOnceRegex(UserWarning, ".*deprecated and will be removed"):
+            torch.quantize_per_tensor(torch.randn(4), 0.1, 10, torch.quint8)
+
     def test_qtensor_equal(self):
         x = torch.rand(5)
         x_q = torch.quantize_per_tensor(x, 0.1, 10, torch.quint4x2)
@@ -294,16 +298,16 @@ class TestQuantizedTensor(TestCase):
         self.assertEqual(qr.q_zero_point(), zero_point)
         self.assertTrue(qr.is_quantized)
         self.assertFalse(r.is_quantized)
-        self.assertEqual(qr.storage().size(), rows * math.ceil(cols / elements_per_byte), f"with {dtype}, {elements_per_byte}")
+        self.assertEqual(qr.storage().size(), rows * math.ceil(cols / elements_per_byte), lambda msg: f"{msg}\nwith {dtype}, {elements_per_byte}")
 
         int_repr = qr.int_repr()
         self.assertEqual(int_repr.numel(), len(expected_packed_vals))
         for num, expected in zip(int_repr, expected_packed_vals):
-            self.assertEqual(num, expected, f"with dtype={dtype}, elements_per_byte={elements_per_byte}, rows={rows}, cols={cols}")
+            self.assertEqual(num, expected, lambda msg: f"{msg}\nwith dtype={dtype}, elements_per_byte={elements_per_byte}, rows={rows}, cols={cols}")
 
         # Test tensor creation
         q = torch._empty_affine_quantized([num_elements], scale=scale, zero_point=zero_point, dtype=dtype)
-        self.assertEqual(q.storage().size(), math.ceil(num_elements / elements_per_byte), f"with {dtype}, {elements_per_byte}")
+        self.assertEqual(q.storage().size(), math.ceil(num_elements / elements_per_byte), lambda msg: f"{msg}\nwith {dtype}, {elements_per_byte}")
 
         # Test save/load
         with tempfile.NamedTemporaryFile() as f:

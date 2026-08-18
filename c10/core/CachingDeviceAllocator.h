@@ -3,6 +3,7 @@
 #include <c10/core/Allocator.h>
 #include <c10/core/Stream.h>
 #include <c10/util/ApproximateClock.h>
+#include <c10/util/flat_hash_map.h>
 
 namespace c10::CachingDeviceAllocator {
 
@@ -24,6 +25,11 @@ struct DeviceStats {
   StatArray allocated_bytes;
   // SUM: bytes reserved by this memory allocator (both free and used)
   StatArray reserved_bytes;
+  // SUM: bytes reserved in each private memory pool (e.g. CUDA graph pools).
+  // current drops to 0 when a pool is deleted, while peak/allocated/freed are
+  // preserved until reset.
+  ska::flat_hash_map<c10::MempoolId_t, StatArray, c10::MempoolIdHash>
+      reserved_bytes_by_private_pools;
   // SUM: bytes within active memory blocks
   StatArray active_bytes;
   // SUM: bytes within inactive, split memory blocks
@@ -102,6 +108,18 @@ struct SegmentInfo {
   std::shared_ptr<GatheredContext> context_when_allocated;
 };
 
+// Flat segment info for the host caching allocator. Unlike the device
+// allocator, the host allocator never splits segments into sub-blocks,
+// so there is no need for a separate BlockInfo.
+struct HostSegmentInfo {
+  size_t address = 0;
+  size_t size = 0;
+  bool allocated = false;
+  bool active = false;
+  MempoolId_t owner_private_pool_id = {0, 0};
+  std::shared_ptr<GatheredContext> context_when_allocated;
+};
+
 union trace_time_ {
   time_t t_;
   approx_time_t approx_t_;
@@ -121,8 +139,10 @@ struct TraceEntry {
     SEGMENT_UNMAP, // unmap part of a segment (used with expandable segments)
     SNAPSHOT, // a call to snapshot, used to correlate memory snapshots to trace
               // events
-    OOM // the allocator threw an OutOfMemoryError (addr_ is the amount of free
-        // bytes reported by device memory)
+    OOM, // the allocator threw an OutOfMemoryError (addr_ is the amount of
+         // free bytes reported by device memory)
+    ANNOTATE // metadata attached post facto to a live allocation (addr_ is
+             // the allocation's base address; user_metadata_ is the payload)
   };
   TraceEntry(
       Action action,
@@ -172,6 +192,7 @@ inline TraceEntry::Action parseTraceEntryAction(std::string_view action) {
       {"segment_unmap", TraceEntry::Action::SEGMENT_UNMAP},
       {"snapshot", TraceEntry::Action::SNAPSHOT},
       {"oom", TraceEntry::Action::OOM},
+      {"annotate", TraceEntry::Action::ANNOTATE},
   };
   for (const auto& [k, v] : kActionTable) {
     if (action == k)

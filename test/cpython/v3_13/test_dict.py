@@ -325,7 +325,6 @@ class DictTest(__TestCase):
 
         self.assertRaises(ValueError, {}.update, [(1, 2, 3)])
 
-    @unittest.skip("test hangs")
     def test_fromkeys(self):
         self.assertEqual(dict.fromkeys('abc'), {'a':None, 'b':None, 'c':None})
         d = {}
@@ -899,7 +898,8 @@ class DictTest(__TestCase):
                      'd.pop(x2)',
                      'd.update({x2: 2})']:
             with self.assertRaises(CustomException):
-                exec(stmt, locals())
+                with torch._dynamo.error_on_graph_break(False):
+                    exec(stmt, locals())
 
     def test_resize1(self):
         # Dict resizing bug, found by Jack Jansen in 2.2 CVS development.

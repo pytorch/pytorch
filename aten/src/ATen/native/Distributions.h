@@ -1,9 +1,15 @@
 #pragma once
 
+#if defined(__METAL_VERSION__)
+#include <c10/metal/special_math.h>
+#include <c10/metal/utils.h>
+#include <metal_stdlib>
+#else
 #include <array>
 #include <ATen/native/Math.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/MathConstants.h>
+#endif
 
 // ROCm hip compiler doesn't work well with using std:: in kernel functions
 #if defined(__CUDA_ARCH__) || defined(__HIPCC__)
@@ -21,6 +27,15 @@
 #define compat_tan c10::cuda::compat::tan
 #define compat_abs c10::cuda::compat::abs
 #define compat_log1p c10::cuda::compat::log1p
+#elif defined(__METAL_VERSION__)
+#define compat_log ::metal::precise::log
+#define compat_exp ::metal::precise::exp
+#define compat_pow ::metal::precise::pow
+#define compat_sqrt ::metal::precise::sqrt
+#define compat_ceil ::metal::ceil
+#define compat_floor ::metal::floor
+#define compat_abs ::metal::abs
+#define compat_log1p ::c10::metal::log1p
 #else
 #define compat_exp std::exp
 #define compat_ceil std::ceil
@@ -33,13 +48,26 @@
 #define compat_log1p std::log1p
 #endif
 
+#if defined(__METAL_VERSION__)
+#define C10_HOST_DEVICE
+#define C10_DEVICE
+#define STATIC_IF_NOT_METAL
+#define METAL_THREAD thread
+#define std_size_compat(a) (sizeof(a) / sizeof(a[0]))
+#else
+#define STATIC_IF_NOT_METAL static
+#define METAL_THREAD
+#define std_size_compat std::size
+#endif
+
 namespace {
 
-#if !defined(__CUDA_ARCH__) && !defined(__HIPCC__)
+#if !defined(__CUDA_ARCH__) && !defined(__HIPCC__) && !defined(__METAL_VERSION__)
 // we cannot use std::isnan directly due to some incompatibility of
 // gcc constexpr'ing and nvcc
 using std::isnan;
 #endif
+
 
 // Here sampler_t should be function type scalar_t(void). For gpu
 // "sampler" is a device function, but since ROCM doesn't have
@@ -48,11 +76,13 @@ using std::isnan;
 template<typename scalar_t, typename sampler_t>
 struct BaseSampler {
   sampler_t sampler;
-  C10_DEVICE BaseSampler(const sampler_t& sampler): sampler(sampler) {}
+  C10_DEVICE BaseSampler(const METAL_THREAD sampler_t& sampler): sampler(sampler) {}
   C10_DEVICE scalar_t sample() {
     return sampler();
   }
 };
+
+#if !defined(__METAL_VERSION__)
 
 // The function `sample_gamma` is
 // is adapted from Numpy's distributions.c implementation.
@@ -111,6 +141,8 @@ C10_DEVICE scalar_t sample_gamma(scalar_t alpha, BaseSampler<accscalar_t, unifor
   }
 }
 
+#endif // #if !defined(__METAL_VERSION__)
+
 /* the functions stirling_approx_tail, binomial_inversion, and btrs are adapted
  * from TensorFlow's random_binomial_op.cc implementation. That code is under
  * copyright: 2019 The TensorFlow Authors.
@@ -121,7 +153,7 @@ C10_DEVICE scalar_t sample_gamma(scalar_t alpha, BaseSampler<accscalar_t, unifor
 
 template<typename scalar_t>
 C10_DEVICE scalar_t stirling_approx_tail(scalar_t k) {
-  constexpr static scalar_t kTailValues[] = {
+  constexpr STATIC_IF_NOT_METAL scalar_t kTailValues[] = {
     0.0810614667953272,
     0.0413406959554092,
     0.0276779256849983,
@@ -133,16 +165,15 @@ C10_DEVICE scalar_t stirling_approx_tail(scalar_t k) {
     0.00925546218271273,
     0.00833056343336287
   };
-  if (k < std::size(kTailValues)) {
+  if (k < std_size_compat(kTailValues)) {
     return kTailValues[static_cast<size_t>(k)];
   }
   scalar_t kp1sq = (k + 1) * (k + 1);
   return (1.0 / 12 - (1.0 / 360 - 1.0 / 1260 / kp1sq) / kp1sq) / (k + 1);
 }
 
-
 template<typename scalar_t, typename accscalar_t, typename uniform_sampler_t>
-C10_DEVICE scalar_t binomial_inversion(scalar_t count, scalar_t prob, BaseSampler<accscalar_t, uniform_sampler_t>& standard_uniform) {
+C10_DEVICE scalar_t binomial_inversion(scalar_t count, scalar_t prob, METAL_THREAD BaseSampler<accscalar_t, uniform_sampler_t>& standard_uniform) {
   accscalar_t U;
   accscalar_t geom_sum = 0;
   scalar_t num_geom = 0;
@@ -162,7 +193,7 @@ C10_DEVICE scalar_t binomial_inversion(scalar_t count, scalar_t prob, BaseSample
 }
 
 template<typename scalar_t, typename accscalar_t, typename uniform_sampler_t>
-C10_DEVICE scalar_t btrs(scalar_t count, scalar_t prob, BaseSampler<accscalar_t, uniform_sampler_t>& standard_uniform) {
+C10_DEVICE scalar_t btrs(scalar_t count, scalar_t prob, METAL_THREAD BaseSampler<accscalar_t, uniform_sampler_t>& standard_uniform) {
   scalar_t k;
   accscalar_t U, V, us;
 
@@ -215,7 +246,7 @@ C10_DEVICE scalar_t btrs(scalar_t count, scalar_t prob, BaseSampler<accscalar_t,
 }
 
 template<typename scalar_t, typename accscalar_t, typename uniform_sampler_t>
-C10_DEVICE scalar_t sample_binomial(scalar_t count, scalar_t prob, BaseSampler<accscalar_t, uniform_sampler_t>& standard_uniform) {
+C10_DEVICE scalar_t sample_binomial(scalar_t count, scalar_t prob, METAL_THREAD BaseSampler<accscalar_t, uniform_sampler_t>& standard_uniform) {
   if (count <= 0.0 || prob <= 0.0) {
     return 0;
   } else if (prob >= 1.0) {
@@ -242,6 +273,8 @@ C10_DEVICE scalar_t sample_binomial(scalar_t count, scalar_t prob, BaseSampler<a
     return static_cast<scalar_t>(NAN);
   }
 }
+
+#if !defined(__METAL_VERSION__)
 
 /*
  * This function is derived from the implementation of the digamma function in the Cephes Math Library.
@@ -295,6 +328,18 @@ C10_DEVICE inline scalar_t digamma_one(scalar_t x) {
   return static_cast<scalar_t>(
       result + compat_log(x) - (0.5f / x) - y + additional_summand);
 }
+
+
+#endif // #if !defined(__METAL_VERSION__)
+
+#if defined(__METAL_VERSION__)
+template<typename scalar_t, typename accscalar_t>
+C10_DEVICE inline scalar_t digamma_one(scalar_t x) {
+  return c10::metal::digamma(x);
+}
+#endif // #if defined(__METAL_VERSION__)
+
+#if !defined(__METAL_VERSION__)
 
 // Computes the reparameterized gradient -(d/dalpha cdf(x;alpha)) / pdf(x;alpha)
 // for random number x drawn from a standard Gamma distribution Gamma(alpha).
@@ -366,6 +411,8 @@ C10_HOST_DEVICE scalar_t standard_gamma_grad_one(scalar_t alpha_, scalar_t x_) {
   const auto q = coef_v[4] + v * (coef_v[5] + v * (coef_v[6] + v * coef_v[7]));
   return static_cast<scalar_t>(compat_exp(p / q));
 }
+
+#endif // #if !defined(__METAL_VERSION__)
 
 // Approximate reparameterized gradient of Beta(x,alpha,beta) wrt alpha.
 // Assumes x is close to zero and uses a Taylor expansion.
@@ -471,7 +518,7 @@ C10_HOST_DEVICE inline scalar_t dirichlet_grad_one(scalar_t x, scalar_t alpha, s
   }
 
   // Use a rational correction to an analytic approximation.
-  static const accscalar_t c[2][3][3][4] = {
+  STATIC_IF_NOT_METAL const accscalar_t c[2][3][3][4] = {
     {{{1.003668233, -0.01061107488, -0.0657888334, 0.01201642863},
       {0.6336835991, -0.3557432599, 0.05486251648, -0.001465281033},
       {-0.03276231906, 0.004474107445, 0.002429354597, -0.0001557569013}},
