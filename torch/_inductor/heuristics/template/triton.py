@@ -2650,9 +2650,17 @@ class TMATemplateConfigMixin(TMAWorkspaceMixin, MMTemplateConfigMixin):
         if not isinstance(kernel_inputs, MMKernelInputs):
             raise AssertionError("TMATemplateConfigMixin requires MMKernelInputs")
         mat1, mat2 = kernel_inputs.mat1mat2()
+
+        def _row_major(node) -> bool:
+            # TMA needs the contiguous dim last. Layout.is_transposed() ignores
+            # size-1 dims, so a contiguous [1, K] operand reports transposed and
+            # the descriptor is then built with a non-unit trailing stride.
+            stride = node.layout.stride
+            return bool(V.graph.sizevars.statically_known_equals(stride[-1], 1))
+
         tma_opts = {
-            "A_ROW_MAJOR": not mat1.layout.is_transposed(),
-            "B_ROW_MAJOR": not mat2.layout.is_transposed(),
+            "A_ROW_MAJOR": _row_major(mat1),
+            "B_ROW_MAJOR": _row_major(mat2),
             "NUM_SMS": get_num_sms(),
             "TMA_SIZE": TMA_DESCRIPTOR_SIZE,
             "TMA_EXPERIMENTAL_API": not has_triton_stable_tma_api(),

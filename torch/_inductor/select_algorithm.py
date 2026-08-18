@@ -963,6 +963,20 @@ class TritonTemplateKernel(TritonKernel):
             **FixedGrid.setup_grid_as_args(),
         }
         if self.host_tma_descriptor_args:
+            # This meta is repr'd into the generated module, so every value must
+            # be a plain resolved dict. Epilogue accesses register a
+            # TensorDescriptorOptions (whose block shape is still symbolic), which
+            # only TritonKernel.inductor_meta_per_kernel knows how to resolve.
+            unsupported = [
+                inner
+                for inner, info in self.host_tma_descriptor_args.items()
+                if not isinstance(info, dict)
+            ]
+            if unsupported:
+                raise NotImplementedError(
+                    "host-side TMA for template epilogue accesses is not supported "
+                    f"(unresolved descriptors: {unsupported})"
+                )
             inductor_meta["host_tma_descriptor_args"] = {
                 inner: info for inner, info in self.host_tma_descriptor_args.items()
             }
@@ -1168,14 +1182,17 @@ class TritonTemplateKernel(TritonKernel):
                     "host-side TMA descriptors for template outputs are not supported"
                 )
             arg_name = self.args.input_buffers.get(node.get_name(), input_name)
-            # Resolve dim_order to concrete shape/strides from the IR node at
-            # codegen time (same as the device-side path below); the launcher
-            # builds the descriptor over absolute dims and never re-derives
-            # layout from the runtime tensor. dim_order is not serialized.
+            # Read dims off the IR node rather than via self.size()/self.stride():
+            # those wrap the result in tl.full(...) under int64 indexing, which is
+            # kernel-side syntax the host launcher cannot resolve.
+            node_size = node.get_size()
+            node_stride = self.get_stride_and_maybe_freeze_layout(node)
             desc: dict[str, Any] = {
                 "block_shape": [int(b) for b in block_shape],
-                "shape": [self.size(input_name, d) for d in dim_order],
-                "strides": [self.stride(input_name, d) for d in dim_order],
+                "shape": [texpr(self.rename_indexing(node_size[d])) for d in dim_order],
+                "strides": [
+                    texpr(self.rename_indexing(node_stride[d])) for d in dim_order
+                ],
             }
             self.host_tma_descriptor_args[arg_name] = desc
             return f"{desc_name} = {input_name}"
