@@ -64,6 +64,7 @@ namespace at::native {
 #include <c10/hip/HIPCachingAllocator.h>
 #include <c10/hip/HIPEvent.h>
 #include <c10/hip/HIPFunctions.h>
+#include <c10/hip/HIPGraphsC10Utils.h>
 
 #include <functional>
 #include <iterator>
@@ -116,13 +117,23 @@ namespace {
             // someone could define it before we get to unlock().
             mutex.lock();
             if (event) {
-                event->block(c10::cuda::getCurrentCUDAStream());
+                // See Note [DropoutState and CUDA graph capture] in cudnn/RNN.cpp;
+                // only sync on the event if it was recorded in the same capture
+                // state (uncaptured, or the same capture) as the current stream.
+                capture_id_last_lock =
+                    c10::cuda::currentStreamCaptureIdMayInitCtx().value_or(0);
+                if (capture_id_last_lock == capture_id_last_unlock) {
+                    event->block(c10::cuda::getCurrentCUDAStream());
+                }
             }
         }
 
         void unlock() {
             if (event) {
                 event->record();
+                capture_id_last_unlock =
+                    c10::cuda::currentStreamCaptureIdMayInitCtx().value_or(0);
+                TORCH_INTERNAL_ASSERT(capture_id_last_unlock == capture_id_last_lock);
             }
             mutex.unlock();
         }
@@ -131,6 +142,10 @@ namespace {
         void* data = nullptr;
         std::mutex mutex;
         std::optional<c10::cuda::CUDAEvent> event;
+        // hipStreamGetCaptureInfo never reports a capture id of 0, so 0 serves
+        // as the sentinel for "not capturing".
+        c10::cuda::CaptureId_t capture_id_last_lock = 0;
+        c10::cuda::CaptureId_t capture_id_last_unlock = 0;
     };
 
     // Each state is ~0.75 MB and allocated lazily, so caching one per device is
@@ -326,6 +341,17 @@ struct RNNDescriptors {
             TORCH_INTERNAL_ASSERT(dropout_state != nullptr);
             bool need_alloc = dropout_state->data == nullptr;
             if (need_alloc) {
+                // Allocating the state during capture would place the buffer in
+                // the capture's private memory pool (freed with the graph), and
+                // seeding launches a PRNG init kernel that would be baked into
+                // the graph. Require a warmup iteration outside capture instead,
+                // like the cuDNN path.
+                TORCH_CHECK(
+                    c10::cuda::currentStreamCaptureStatusMayInitCtx() ==
+                        c10::cuda::CaptureStatus::None,
+                    "MIOpen RNN dropout state cannot be initialized during CUDA "
+                    "graph capture. Run the RNN once outside of capture (e.g. a "
+                    "warmup iteration) before capturing it.");
                 size_t states_size_in_bytes = 0;
                 MIOPEN_CHECK(miopenDropoutGetStatesSize(handle, &states_size_in_bytes));
                 dropout_state->ensure_buffer(states_size_in_bytes);
@@ -662,8 +688,14 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> miopen_rnn(
     // this reproducible under torch.manual_seed(). The MIOpen dropout kernel does
     // not advance its PRNG state across launches, so re-seeding here is what
     // produces mask variation step-to-step.
+    // During graph capture a host-side seed cannot be derived (the generator
+    // forbids philox_engine_inputs while capturing), so skip the reseed: the
+    // state keeps the seed from the last uncaptured forward and the captured
+    // graph replays a fixed mask, matching the cuDNN path under capture.
+    const bool capturing = c10::cuda::currentStreamCaptureStatusMayInitCtx() !=
+        c10::cuda::CaptureStatus::None;
     uint64_t dropout_seed = 0;
-    if (fn_train && fn_dropout != 0.0) {
+    if (fn_train && fn_dropout != 0.0 && !capturing) {
         auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(
             std::nullopt, at::cuda::detail::getDefaultCUDAGenerator());
         std::lock_guard<std::mutex> lock(gen->mutex_);
@@ -682,7 +714,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> miopen_rnn(
         dropout_state = &get_dropout_state(c10::cuda::current_device());
         dropout_lock = std::unique_lock<DropoutState>(*dropout_state);
     }
-    RNNDescriptors descs(fn, handle, x, y, hx, cx, dropout_state, /*reseed_dropout=*/fn_train);
+    RNNDescriptors descs(fn, handle, x, y, hx, cx, dropout_state, /*reseed_dropout=*/fn_train && !capturing);
 
     FilterDescriptor w_desc;
     auto num_weights = get_num_weights(handle, descs.rnn_desc, descs.x_descs[0], datatype);
