@@ -24,6 +24,7 @@ from torch.distributed.elastic.rendezvous import (
 )
 from torch.distributed.elastic.rendezvous.c10d_rendezvous_backend import (
     C10dRendezvousBackend,
+    _create_file_store,
     create_backend,
 )
 from torch.distributed.elastic.utils.distributed import get_free_port
@@ -273,6 +274,22 @@ class CreateBackendTest(TestCase):
             r"The file creation for C10d store has failed. See inner exception for details.",
         ):
             create_backend(self._params_filestore)
+
+    @mock.patch(
+        "torch.distributed.elastic.rendezvous.c10d_rendezvous_backend.FileStore"
+    )
+    @mock.patch("os.close")
+    @mock.patch("tempfile.mkstemp")
+    def test_create_file_store_closes_tempfile_fd(
+        self, mkstemp_mock, os_close_mock, filestore_mock
+    ) -> None:
+        mkstemp_mock.return_value = (123, self._expected_endpoint_file)
+        self._params_filestore.endpoint = ""
+
+        _create_file_store(self._params_filestore)
+
+        os_close_mock.assert_called_once_with(123)
+        filestore_mock.assert_called_once_with(self._expected_endpoint_file)
 
     @mock.patch(
         "torch.distributed.elastic.rendezvous.c10d_rendezvous_backend.FileStore"
