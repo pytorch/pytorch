@@ -43,6 +43,7 @@ import threading
 import time
 import traceback
 import types
+import unittest
 import weakref
 from collections import defaultdict, deque
 from typing import Any, cast, NoReturn, TYPE_CHECKING, TypeAlias, TypeVar
@@ -2924,7 +2925,20 @@ class InstructionTranslatorBase(
                 raise e.with_traceback(raised_exception.__traceback__) from None
 
             curr_exc = self.exn_vt_stack.get_raised_exception()
-            dynamo_exc = exc.get_dynamo_observed_exception(curr_exc.python_type())
+            exc_python_type = curr_exc.python_type()
+            if (self.one_graph or self.error_on_graph_break) and issubclass(
+                exc_python_type, unittest.SkipTest
+            ):
+                try:
+                    skip_args: list[Any] = [
+                        a.as_python_constant() for a in curr_exc.args
+                    ]
+                except NotImplementedError:
+                    skip_args = []
+                skip_exc = exc_python_type(*skip_args)
+                raise skip_exc from None
+
+            dynamo_exc = exc.get_dynamo_observed_exception(exc_python_type)
             if not isinstance(raised_exception, dynamo_exc):
                 raise AssertionError(
                     "expected isinstance(raised_exception, dynamo_exc) to be true"
@@ -5182,7 +5196,7 @@ class InstructionTranslatorBase(
         nn_modules_pattern = re.compile(r".*torch/nn/modules.*")
         return nn_modules_pattern.match(filename) is not None
 
-    def store_global_weakref_by_id(self, prefix: str, value: Any) -> str:
+    def store_global_weakref_by_id(self, prefix: str, value: object) -> str:
         global_name = self.output.install_global_by_id(prefix, weakref.ref(value))
         install_guard(
             GlobalWeakRefSource(global_name).make_guard(GuardBuilder.WEAKREF_ALIVE)
