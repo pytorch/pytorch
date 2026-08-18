@@ -1221,10 +1221,6 @@ op_db: list[OpInfo] = [
         dtypesIfMPS=floating_types_and(
             torch.half,
             torch.bfloat16,
-            torch.uint8,
-            torch.int32,
-            torch.int16,
-            torch.int8,
         ),
         sample_inputs_func=sample_inputs_masked_softmax,
         skips=(
@@ -1235,18 +1231,6 @@ op_db: list[OpInfo] = [
             ),
             DecorateInfo(
                 unittest.expectedFailure, "TestJit", "test_variant_consistency_jit"
-            ),
-            # NotImplementedError: "log_softmax_lastdim_kernel_impl" not implemented for *
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestConsistency",
-                device_type="mps",
-                dtypes=(
-                    torch.uint8,
-                    torch.int32,
-                    torch.int16,
-                    torch.int8,
-                ),
             ),
         ),
         decorators=[
