@@ -108,7 +108,9 @@ void XPUGeneratorState::register_graph(xpu::XPUGraphImpl* graph) {
     offset_extragraph_ = at::empty({1}, options);
   }
 
-  registered_graphs_.insert(graph);
+  if (registered_graphs_.find(graph) == registered_graphs_.end()) {
+    registered_graphs_.insert(graph);
+  }
 }
 
 void XPUGeneratorState::unregister_graph(xpu::XPUGraphImpl* graph) {

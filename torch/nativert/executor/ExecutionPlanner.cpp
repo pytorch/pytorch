@@ -76,7 +76,7 @@ void ExecutionPlanner::generateDeallocationPlan(ExecutionPlan& plan) {
     const auto& inputs = it->inputs();
     for (const auto& input : inputs) {
       const auto& id = input.value->id();
-      if (!lastUsedBy.contains(id)) {
+      if (lastUsedBy.find(id) == lastUsedBy.end()) {
         lastUsedBy.insert({id, nodeIdx});
       }
     }
@@ -87,7 +87,7 @@ void ExecutionPlanner::generateDeallocationPlan(ExecutionPlan& plan) {
 
   const auto& statics = staticValues(graph_);
   for (auto& [id, nodeIndex] : lastUsedBy) {
-    if (!statics.contains(id)) {
+    if (statics.find(id) == statics.end()) {
       valuesToFree[nodeIndex].push_back(id);
     }
   }

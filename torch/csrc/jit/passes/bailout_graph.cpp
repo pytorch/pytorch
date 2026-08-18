@@ -52,7 +52,7 @@ struct BailOutGraphBuilderForNode {
   }
 
   Value* getOrAddInputForValue(Value* v) {
-    if (!this->old_to_new_.contains(v)) {
+    if (this->old_to_new_.count(v) == 0) {
       return addNewInputForValue(v);
     } else {
       return this->old_to_new_[v];

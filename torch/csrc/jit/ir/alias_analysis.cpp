@@ -863,7 +863,7 @@ void AliasDb::analyzeImpl(Node* node) {
     const auto& formalAlias = formal->beforeSet();
 
     // skip if we've already bound this alias
-    if (formalToActual.contains(formalAlias)) {
+    if (formalToActual.count(formalAlias) != 0) {
       continue;
     }
 
@@ -923,7 +923,7 @@ void AliasDb::analyzeImpl(Node* node) {
 
     bool inputs_has_alias = false;
     for (const auto& formalAlias : formal->beforeSets()) {
-      if (formalToActual.contains(formalAlias)) {
+      if (formalToActual.count(formalAlias)) {
         inputs_has_alias = true;
         auto toAlias = formalToActual.at(formalAlias);
         makePointerTo(actual, toAlias);
@@ -1658,21 +1658,21 @@ class AliasDb::WorkingSet {
   bool producesFor(Node* n) const {
     // This equivalent to asking: does the total use-set of all the nodes in the
     // working set include `n`?
-    if (mover_ && moverUsers_.contains(n)) {
+    if (mover_ && moverUsers_.count(n)) {
       return true;
     }
-    return users_.contains(n);
+    return users_.count(n) != 0;
   }
 
   // Does the working set consume any values produced by `n`?
   bool consumesFrom(Node* n) const {
     const auto users = getUsersSameBlock(n);
 
-    if (mover_ && users.contains(mover_)) {
+    if (mover_ && users.count(mover_)) {
       return true;
     }
     return std::any_of(users.begin(), users.end(), [&](Node* user) {
-      return node_to_index_.contains(user);
+      return node_to_index_.find(user) != node_to_index_.end();
     });
   }
 

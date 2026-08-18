@@ -51,7 +51,7 @@ void selective_copy(
     // constants.pkl
     // bytecode.pkl
     // version
-    bool skip = excluded_files.contains(record);
+    bool skip = excluded_files.count(record) > 0;
 
     // Skip dirs, find the last '/' and compare it with record
     for (const auto& excluded_dir : excluded_dirs) {
@@ -121,7 +121,8 @@ void write_archive_current(
   for (const auto& td : data_pickle.tensorData()) {
     WriteableTensorData writable_td = getWriteableTensorData(td);
     std::string fname = tensor_dir + tensor_names[i++];
-    if (use_storage_context && pre_serialized_files.contains(fname)) {
+    if (use_storage_context &&
+        pre_serialized_files.find(fname) != pre_serialized_files.end()) {
       // storage has been serialized already, skip
       continue;
     }
@@ -585,7 +586,7 @@ BackportManager::bytecodeBackportFunctions() const {
 
 bool BackportManager::hasBytecodeBackportFunction(
     const int64_t from_version) const {
-  return bytecodeBackportFunctions().contains(from_version);
+  return bytecodeBackportFunctions().count(from_version);
 }
 
 void BackportManager::registerBytecodeBackportFunction(
