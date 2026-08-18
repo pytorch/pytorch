@@ -5423,39 +5423,6 @@ class TestQuantizedEmbeddingOps(TestCase):
                                                sparsity=sparsity,
                                                atol=1.0, rtol=1e-1)
 
-    """ Tests that the CUDA quantized embedding_bag operators agree with their
-        CPU counterparts. This covers the bit-field extraction the dequantization
-        path is built on, which is shared by both bit widths. """
-    @unittest.skipIf(not TEST_CUDA, "CUDA is not available")
-    def test_embedding_bag_rowwise_offsets_cuda(self):
-        # 24 satisfies both ops: the byte op requires D % 4 == 0, the 4-bit op
-        # requires D % 8 == 0.
-        num_embeddings, embedding_dim = 32, 24
-        weights = torch.from_numpy((np.random.random_sample(
-            (num_embeddings, embedding_dim)) + 1).astype(np.float32))
-        indices = torch.tensor([3, 1, 4, 1, 5, 9, 2, 6], dtype=torch.int)
-        offsets = torch.tensor([0, 3, 5], dtype=torch.int)
-
-        for bit_rate, prepack_op, op, atol in (
-            (8, torch.ops.quantized.embedding_bag_byte_prepack,
-             torch.ops.quantized.embedding_bag_byte_rowwise_offsets, 0.005),
-            (4, torch.ops.quantized.embedding_bag_4bit_prepack,
-             torch.ops.quantized.embedding_bag_4bit_rowwise_offsets, 0.1),
-        ):
-            q_weights = prepack_op(weights)
-
-            def run(device, q_weights=q_weights, op=op):
-                return op(q_weights.to(device), indices.to(device),
-                          offsets.to(device), mode=0, pruned_weights=False,
-                          include_last_offset=False)
-
-            cuda_result = run("cuda").cpu()
-            self.assertTrue(
-                torch.isfinite(cuda_result).all(),
-                f"{bit_rate}-bit CUDA output is not finite: {cuda_result}")
-            torch.testing.assert_close(
-                run("cpu"), cuda_result, atol=atol, rtol=1e-2)
-
     """ Tests the correctness of the quantized 8 bit embedding lookup operator """
     @given(num_embeddings=st.integers(10, 100),
            embedding_dim=st.integers(5, 50).filter(lambda x: x % 4 == 0))

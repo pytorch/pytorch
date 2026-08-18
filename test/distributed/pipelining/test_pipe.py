@@ -5,7 +5,6 @@ from model_registry import MLPModule, ModelWithParamAlias
 import torch
 from torch.distributed.pipelining import pipe_split, pipeline
 from torch.testing._internal.common_utils import (
-    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -79,8 +78,6 @@ CHECK_FQN_SET_EQUALITY = False
 
 
 class PipeTests(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
     @parametrize("ModelClass", [ExampleCode, MultiMLP, ModelWithParamAlias])
     def test_model_split(self, ModelClass):
         mod = ModelClass()

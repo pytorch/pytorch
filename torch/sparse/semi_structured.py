@@ -10,7 +10,6 @@ from torch.sparse._semi_structured_conversions import (
     sparse_semi_structured_to_dense_cutlass,
 )
 from torch.sparse._semi_structured_ops import (
-    _FP8_E4M3_DTYPES,
     fallback_dispatcher,
     semi_sparse_addmm,
     semi_sparse_clone,
@@ -561,7 +560,6 @@ class SparseSemiStructuredTensorCUSPARSELT(SparseSemiStructuredTensor):
     BACKEND = "cusparselt"
     _DTYPE_SHAPE_CONSTRAINTS = {
         torch.float8_e4m3fn: _SEMI_STRUCTURED_SPARSE_CONFIG(32, 32, 16, 16),
-        torch.float8_e4m3fnuz: _SEMI_STRUCTURED_SPARSE_CONFIG(32, 32, 16, 16),
         torch.int8: _SEMI_STRUCTURED_SPARSE_CONFIG(32, 32, 16, 16),
         torch.float16: _SEMI_STRUCTURED_SPARSE_CONFIG(16, 16, 8, 8),
         torch.bfloat16: _SEMI_STRUCTURED_SPARSE_CONFIG(16, 16, 8, 8),
@@ -681,11 +679,11 @@ class SparseSemiStructuredTensorCUSPARSELT(SparseSemiStructuredTensor):
                 "This operation is only supported when A, B and C have the same data type."
             )
         # Force fp8 mm to error to be consistent with torch
-        if self.dtype in _FP8_E4M3_DTYPES:
+        if self.dtype == torch.float8_e4m3fn:
             raise NotImplementedError(
                 f"`{self.__class__.__name__}` matmul: trying to do `A={tuple(self.shape)} @ B={tuple(B.shape)}`, "
                 f"with A.dtype=B.dtype={self.dtype}. "
-                "mm is not supported for float8_e4m3fn/float8_e4m3fnuz, please use `torch._scaled_mm` instead."
+                "mm is not supported for float8_e4m3fn, please use `torch._scaled_mm` instead."
             )
         if self.packed is None:
             raise NotImplementedError(

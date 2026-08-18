@@ -49,8 +49,7 @@ class LogicalBinaryOperatorBase(Operator):
         return isinstance(output_spec, TensorSpec) and output_spec.dtype == torch.bool
 
     def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
-        if not isinstance(output_spec, TensorSpec):
-            raise AssertionError(f"expected TensorSpec, got {type(output_spec)}")
+        assert isinstance(output_spec, TensorSpec)  # noqa: S101
         dtype = random.choice(_LOGICAL_INPUT_DTYPES)
         spec = TensorSpec(
             size=output_spec.size,
@@ -119,8 +118,7 @@ class LogicalNotOperator(Operator):
         return isinstance(output_spec, TensorSpec) and output_spec.dtype == torch.bool
 
     def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
-        if not isinstance(output_spec, TensorSpec):
-            raise AssertionError(f"expected TensorSpec, got {type(output_spec)}")
+        assert isinstance(output_spec, TensorSpec)  # noqa: S101
         dtype = random.choice(_LOGICAL_INPUT_DTYPES)
         return [
             TensorSpec(
