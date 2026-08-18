@@ -37,6 +37,12 @@ GraphAnnotationResolver = Callable[[int], "Any | None"]
 # graph node's annotation, hence its lane, is stable once baked), or None to keep the op on its
 # CUDA stream. Keyed on graph_node_id alone, so it is wrapped in functools.cache like the
 # annotation resolver; it reads the node's name via the graph annotation registry.
+# The returned lane is an ordinal in the resolver's own space -- small ints are the norm -- and
+# is offset into the reserved lane range (LOGICAL_LANE_BASE, applied by _resolve_lane_columns)
+# when the column is built, since a bare ordinal would otherwise be indistinguishable from a
+# CUDA stream id. So the ordinal, not the rendered id, is what stays stable for a given lane
+# across traces, and returning the op's own stream number still means "a logical lane that
+# happens to be numbered like that stream", not "leave it".
 LaneResolver = Callable[[int], "tuple[int, str] | None"]
 
 # graph_node_id -> predecessor graph_node_ids (or None when the node has no recorded

@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 
+# Serialize cold compiles process-wide; warm cache hits bypass this lock.
 _compiled_cache_lock = threading.Lock()
 
 
@@ -47,6 +48,7 @@ def run_cached_flydsl(
 
         compiled = compiled_cache.get(cache_key)
         if compiled is None:
+            # compile() executes this invocation; dispatching again would double-run.
             compiled = compiler(jit_func, *compile_args)
             compiled_cache[cache_key] = compiled
         else:
@@ -61,7 +63,7 @@ def _cache_dir() -> Path:
     return Path(cache_dir()) / "flydsl_compile_cache"
 
 
-def ensure_flydsl_cache_dir() -> str:
+def configure_flydsl_cache_dir() -> str:
     """Route FlyDSL's disk cache through TorchInductor's cache root by default.
 
     FlyDSL has its own disk cache controlled by ``FLYDSL_RUNTIME_CACHE_DIR``.
@@ -70,7 +72,7 @@ def ensure_flydsl_cache_dir() -> str:
     but respect an explicit ``FLYDSL_RUNTIME_CACHE_DIR`` the user already set.
     """
     existing = os.environ.get("FLYDSL_RUNTIME_CACHE_DIR")
-    if existing:
+    if existing is not None:
         return existing
     resolved = str(_cache_dir())
     os.environ["FLYDSL_RUNTIME_CACHE_DIR"] = resolved
