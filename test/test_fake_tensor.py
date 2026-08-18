@@ -67,6 +67,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_dtype import all_types_complex_float8_and
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_LINUX,
     parametrize,
@@ -2504,6 +2505,8 @@ make_propagate_real_tensors_cls(FakeTensorTest)
 
 
 class FakeTensorConstHandling(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def assertConst(self, *args):
         for arg in args:
             self.assertTrue(arg.constant is not None)
@@ -2605,6 +2608,8 @@ def contains_type(type: torch.Type, maybe_contained_type: torch.Type):
 
 
 class FakeTensorOpInfoTest(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @ops(custom_op_db, dtypes=OpDTypes.any_one)
     def test_fake(self, device, dtype, op):
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
@@ -2624,6 +2629,8 @@ instantiate_device_type_tests(
 
 
 class FakeTensorConverterTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_memoized_conversion_to_meta(self):
         x = torch.rand(2, 2, 2)
         mode = FakeTensorMode()
@@ -3525,6 +3532,8 @@ make_propagate_real_tensors_cls(FakeTensorPropTest)
 
 
 class FakeTensorSerialization(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_serialization(self):
         x = torch.tensor([0], device="cpu")
         with FakeTensorMode():
@@ -4311,6 +4320,8 @@ class FakeTensorPreferDeviceType(TestCase):
 
 
 class FakeTensorMetaDevicePropagation(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @parametrize("device", ["cpu", "cuda"])
     def test_inplace_add_with_meta_rhs_keeps_destination_device(self, device):
         if device == "cuda" and not RUN_CUDA:
@@ -4328,6 +4339,8 @@ instantiate_parametrized_tests(FakeTensorMetaDevicePropagation)
 
 
 class FakeTensorViewCopy(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_expand_then_view_copy_matches_eager_mode(self):
         x = torch.arange(7)
         y = x.expand(12, 7)
