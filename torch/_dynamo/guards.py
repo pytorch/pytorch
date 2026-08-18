@@ -39,7 +39,7 @@ import weakref
 from contextlib import contextmanager
 from copy import deepcopy
 from inspect import currentframe
-from typing import Any, NamedTuple, NoReturn, TYPE_CHECKING
+from typing import Any, cast, NamedTuple, NoReturn, TYPE_CHECKING
 from typing_extensions import LiteralString, TypeAliasType, TypeVar
 from weakref import ReferenceType
 
@@ -215,13 +215,14 @@ except ModuleNotFoundError:
 
 
 if TYPE_CHECKING:
-    from collections.abc import Generator, KeysView, Sequence
+    from collections.abc import Generator, KeysView, Sequence, Sized
 
     from sympy import Symbol
 
     from torch._C import DispatchKeySet
     from torch._dynamo.output_graph import OutputGraphCommon, OutputGraphGuardsState
     from torch._dynamo.package import SerializedCode
+    from torch.utils._python_dispatch import TraceableWrapperSubclass
 
 T = TypeVar("T")
 log = logging.getLogger(__name__)
@@ -233,18 +234,18 @@ recompiles_verbose_log = torch._logging.getArtifactLogger(
 verbose_guards_log = torch._logging.getArtifactLogger(__name__, "verbose_guards")
 
 
-def _sequence_length(value: Any) -> int:
+def _sequence_length(value: object) -> int:
     if isinstance(value, set):
         return set.__len__(value)
     if isinstance(value, frozenset):
         return frozenset.__len__(value)
-    return len(value)
+    return len(cast("Sized", value))
 
 
 _COW_TENSOR_UNSUPPORTED = object()
 
 
-def _try_is_cow_tensor(value: Any) -> bool | object:
+def _try_is_cow_tensor(value: object) -> bool | object:
     if not isinstance(value, torch.Tensor):
         return _COW_TENSOR_UNSUPPORTED
     if torch._C._dispatch_keys(value).has(torch._C.DispatchKey.Python):
@@ -252,7 +253,7 @@ def _try_is_cow_tensor(value: Any) -> bool | object:
     return torch._C._is_cow_tensor(value)  # pyrefly: ignore[missing-attribute]
 
 
-def _cow_tensor_matches(value: Any, expected: Any) -> bool:
+def _cow_tensor_matches(value: object, expected: object) -> bool:
     if not isinstance(expected, bool):
         return False
     actual = _try_is_cow_tensor(value)
@@ -979,7 +980,7 @@ def get_tensor_guard_code_part(
     return guard_str
 
 
-def get_key_index(dct: dict[Any, Any], key: Any) -> int:
+def get_key_index(dct: dict[Any, Any], key: object) -> int:
     # Ensure that we call dict.keys and not value.keys (which can call
     # overridden keys method). In the C++ guards, we relied on PyDict_Next
     # to traverse the dictionary, which uses the internal data structure and
@@ -991,7 +992,7 @@ def get_key_index_source(source: Any, index: Any) -> str:
     return f"list(dict.keys({source}))[{index}]"
 
 
-def raise_local_type_error(obj: Any) -> NoReturn:
+def raise_local_type_error(obj: object) -> NoReturn:
     raise TypeError(
         f"Type {type(obj)} for object {obj} cannot be saved "
         + "into torch.compile() package since it's defined in local scope. "
@@ -999,7 +1000,7 @@ def raise_local_type_error(obj: Any) -> NoReturn:
     )
 
 
-def should_optimize_getattr_on_nn_module(value: Any) -> bool:
+def should_optimize_getattr_on_nn_module(value: object) -> bool:
     return isinstance(value, torch.nn.Module)
 
 
@@ -1166,11 +1167,14 @@ def _validate_default_subclass_metadata_guard(metadata: Any, cls: type[Any]) -> 
     )
 
 
-# Used by TENSOR_SUBCLASS_METADATA_MATCH guard check spec
-def extract_subclass_metadata(guard: Any, value: Any) -> tuple[Any, ...]:
+# Used by TENSOR_SUBCLASS_METADATA_MATCH guard check spec.
+# Unlike check_dtensor_spec below, this pair is only reached at trace time:
+# TENSOR_SUBCLASS_METADATA_MATCH has its own inlined metadata_checker closure
+# for the C++ path, so narrowing with a typing.cast is free here.
+def extract_subclass_metadata(guard: Any, value: object) -> tuple[Any, ...]:
     cls = type(value)
     has_custom_guard = hasattr(value, "__metadata_guard__")
-    metadata = value.__tensor_flatten__()[1]
+    metadata = cast("TraceableWrapperSubclass", value).__tensor_flatten__()[1]
     if not has_custom_guard:
         _validate_default_subclass_metadata_guard(metadata, cls)
     metadata = deepcopy(metadata)
@@ -1178,25 +1182,30 @@ def extract_subclass_metadata(guard: Any, value: Any) -> tuple[Any, ...]:
 
 
 # Used by TENSOR_SUBCLASS_METADATA_MATCH guard check spec
-def check_subclass_metadata(value: Any, metadata: tuple[Any, ...]) -> bool:
+def check_subclass_metadata(value: object, metadata: tuple[Any, ...]) -> bool:
     saved_metadata, cls, has_custom_guard = metadata
+    subclass_metadata = cast("TraceableWrapperSubclass", value).__tensor_flatten__()[1]
     if has_custom_guard:
-        return cls.__metadata_guard__(saved_metadata, value.__tensor_flatten__()[1])
-    return value.__tensor_flatten__()[1] == saved_metadata
+        return cls.__metadata_guard__(saved_metadata, subclass_metadata)
+    return subclass_metadata == saved_metadata
 
 
 # Used by DTENSOR_SPEC_MATCH guard check spec
-def extract_dtensor_spec(guard: Any, value: Any) -> Any:
+def extract_dtensor_spec(guard: Any, value: object) -> Any:
     return deepcopy(value)
 
 
 # Used by DTENSOR_SPEC_MATCH guard check spec
-def check_dtensor_spec(value: Any, metadata: Any) -> bool:
+def check_dtensor_spec(value: object, metadata: Any) -> bool:
+    # DTENSOR_SPEC_MATCH's lambda guard calls this on every guard evaluation,
+    # so narrow with a suppression rather than a typing.cast, which would be a
+    # real call on the check path.
+    # pyrefly: ignore[missing-attribute]
     return value._check_equals(metadata, skip_shapes=True)
 
 
 # Used by OPAQUE_OBJ_GUARD_FN_MATCH guard check spec
-def extract_opaque_obj(guard: Any, value: Any) -> Any:
+def extract_opaque_obj(guard: Any, value: object) -> Any:
     opaque_info = get_opaque_obj_info(type(value))
     if not opaque_info or not opaque_info.guard_fn:
         return None
@@ -1204,7 +1213,7 @@ def extract_opaque_obj(guard: Any, value: Any) -> Any:
 
 
 # Used by OPAQUE_OBJ_GUARD_FN_MATCH guard check spec
-def check_opaque_obj(value: Any, metadata: Any) -> bool:
+def check_opaque_obj(value: object, metadata: Any) -> bool:
     if metadata is None:
         return True
     opaque_info = get_opaque_obj_info(type(value))
@@ -1214,20 +1223,20 @@ def check_opaque_obj(value: Any, metadata: Any) -> bool:
 
 
 # Used by CLOSURE_MATCH guard check spec
-def extract_closure(guard: Any, value: Any) -> Any:
+def extract_closure(guard: Any, value: object) -> Any:
     if type(value) is types.FunctionType and hasattr(value, "__code__"):
         return value.__code__
     return id(value)
 
 
 # Used by CLOSURE_MATCH guard check spec
-def check_closure(value: Any, metadata: Any) -> bool:
+def check_closure(value: object, metadata: Any) -> bool:
     if type(value) is types.FunctionType and hasattr(value, "__code__"):
         return value.__code__ is metadata
     return id(value) == metadata
 
 
-def _constant_subclass_base_value(value: Any) -> Any:
+def _constant_subclass_base_value(value: object) -> Any:
     """Extract the base constant value from a constant subclass instance."""
     from .variables.user_defined import _CONSTANT_BASE_TYPES
 
@@ -2466,7 +2475,7 @@ class GuardBuilder(GuardBuilderBase):
         get_metadata_fn=lambda guard, value: _guard_create_fn_keyword(guard, "key"),
         eval_fn=lambda value, metadata: metadata in value,
     )
-    def SET_CONTAINS(self, guard: Guard, key: Any) -> None:
+    def SET_CONTAINS(self, guard: Guard, key: object) -> None:
         set_ref = self.arg_ref(guard)
         item = key
 
@@ -2488,7 +2497,7 @@ class GuardBuilder(GuardBuilderBase):
         get_metadata_fn=lambda guard, value: _guard_create_fn_keyword(guard, "key"),
         eval_fn=lambda value, metadata: metadata not in value,
     )
-    def SET_NOT_CONTAINS(self, guard: Guard, key: Any) -> None:
+    def SET_NOT_CONTAINS(self, guard: Guard, key: object) -> None:
         set_ref = self.arg_ref(guard)
         item = key
 
@@ -2537,7 +2546,7 @@ class GuardBuilder(GuardBuilderBase):
         if not isinstance(expected, bool):
             raise AssertionError("COW_TENSOR_MATCH requires a plain Tensor")
 
-        def guard_fn(x: Any) -> bool:
+        def guard_fn(x: object) -> bool:
             return _cow_tensor_matches(x, expected)
 
         code = f"___cow_tensor_matches({self.arg_ref(guard)}, {expected!r})"
@@ -2616,7 +2625,7 @@ class GuardBuilder(GuardBuilderBase):
         get_metadata_fn=lambda guard, value: None,
         eval_fn=lambda value, metadata: value is not None,
     )
-    def NOT_NONE_MATCH(self, guard: Guard, value: Any | None = None) -> None:
+    def NOT_NONE_MATCH(self, guard: Guard, value: object | None = None) -> None:
         ref = self.arg_ref(guard)
         val = self.get(guard)
         if not isinstance(val, torch.Tensor):
@@ -2676,7 +2685,7 @@ class GuardBuilder(GuardBuilderBase):
         # TODO(anijain2305) - Consider this moving this guard to C++
         compare_fn = torch._functorch.pyfunctorch.compare_functorch_state
 
-        def fn(x: Any) -> bool:
+        def fn(x: object) -> bool:
             return compare_fn(states)
 
         self.guard_manager.root.add_lambda_guard(
@@ -2706,7 +2715,7 @@ class GuardBuilder(GuardBuilderBase):
         ]
         self._set_guard_export_info(guard, code)
 
-        def fn(x: Any) -> bool:
+        def fn(x: object) -> bool:
             return guard_hooks_ids == hooks_ids_fn(get_hooks())
 
         self.guard_manager.root.add_lambda_guard(
@@ -2740,16 +2749,21 @@ class GuardBuilder(GuardBuilderBase):
         original_metadata = deepcopy(
             pytree.tree_map_only(torch.SymInt, lambda _: _AnyCompare(), metadata)
         )
+        # Either arm runs on every guard evaluation, so they narrow the opaque
+        # guarded value with a suppression rather than a typing.cast, which
+        # would be a real call on the check path.
         if has_custom_guard:
 
-            def metadata_checker(x: Any) -> bool:
+            def metadata_checker(x: object) -> bool:
                 return cls.__metadata_guard__(
-                    original_metadata, x.__tensor_flatten__()[1]
+                    original_metadata,
+                    x.__tensor_flatten__()[1],  # pyrefly: ignore[missing-attribute]
                 )
 
         else:
 
-            def metadata_checker(x: Any) -> bool:
+            def metadata_checker(x: object) -> bool:
+                # pyrefly: ignore[missing-attribute]
                 return x.__tensor_flatten__()[1] == original_metadata
 
         global_name = f"___check_metadata_{id(metadata_checker)}_c{CompileContext.current_compile_id()}"
@@ -2768,7 +2782,7 @@ class GuardBuilder(GuardBuilderBase):
         # TODO - Consider moving this to C++ if stable
         expected = extract_dtensor_spec(guard, self.get(guard))
 
-        def guard_fn(x: Any) -> bool:
+        def guard_fn(x: object) -> bool:
             return check_dtensor_spec(x, expected)
 
         code = f"__dtensor_spec_{id(guard_fn)}"
@@ -2789,7 +2803,7 @@ class GuardBuilder(GuardBuilderBase):
         if original_values is None:
             return
 
-        def opaque_guard_checker(x: Any) -> bool:
+        def opaque_guard_checker(x: object) -> bool:
             return check_opaque_obj(x, original_values)
 
         global_name = f"___check_opaque_guard_fn_{id(opaque_guard_checker)}_c{CompileContext.current_compile_id()}"
@@ -2959,8 +2973,11 @@ class GuardBuilder(GuardBuilderBase):
         base_value = base_type(val)
         code = [f"{base_type.__name__}({ref}) == {base_value!r}"]
 
-        def check_fn(x: Any) -> bool:
-            return base_type(x) == base_value
+        def check_fn(x: object) -> bool:
+            # Mirrors _constant_subclass_base_value: base_type is a union of
+            # int/float/str, none of which typecheck against an opaque arg,
+            # but x is an instance of base_type by construction.
+            return base_type(x) == base_value  # pyrefly: ignore[bad-argument-type]
 
         self.get_guard_manager(guard).add_lambda_guard(
             check_fn,
@@ -3160,7 +3177,7 @@ class GuardBuilder(GuardBuilderBase):
         count_type = type(value)
         normalized_count_iter = normalize_count_iter(value)
 
-        def guard_fn(x: Any) -> bool:
+        def guard_fn(x: object) -> bool:
             return (
                 type(x) is count_type
                 and normalize_count_iter(x) == normalized_count_iter
@@ -3259,10 +3276,17 @@ class GuardBuilder(GuardBuilderBase):
         ref = self.arg_ref(guard)
         value = self.get(guard)
 
+        # SUPPORTED_NODES normally uses DICT_VERSION (PEP 509) as an O(1) fast
+        # path. That guard cannot be serialized, so when saving we fall through
+        # to keys-match and stick the choice on the Guard. Load rebuilds with
+        # save_guards=False but sees the pickled flag, so it keeps keys-match
+        # instead of re-promoting to DICT_VERSION.
         if value is torch.utils._pytree.SUPPORTED_NODES:
-            # For SUPPORTED_NODES, we can guard on the dictionary version (PEP509).
-            self.DICT_VERSION(guard)
-            return
+            if self.save_guards:
+                guard._force_dict_keys_match = True
+            if not guard._force_dict_keys_match:
+                self.DICT_VERSION(guard)
+                return
 
         self.SEQUENCE_LENGTH(guard)
 
@@ -3857,7 +3881,7 @@ class GuardBuilder(GuardBuilderBase):
         self,
         guard: Guard,
         code_list: list[str],
-        provided_guarded_object: Any | None = None,
+        provided_guarded_object: object | None = None,
         provided_func_name: str | None = None,
     ) -> None:
         # WARNING: It is important that cur_frame/caller do NOT stay in
@@ -4239,161 +4263,9 @@ class GuardsStatePickler(pickle.Pickler):
         qualname: str,
         argdefs: tuple[object, ...] | None,
         closure: tuple[types.CellType, ...] | None,
-        kwdefaults: dict[str, object] | None = None,
-        name: str | None = None,
-        attributes: dict[str, object] | None = None,
-        guarded_globals: dict[str, object] | None = None,
-        snapshot_globals: bool = False,
     ) -> types.FunctionType:
-        if snapshot_globals:
-            # Deliberately no import_module here: the snapshot IS the scope, and
-            # importing a module only to discard it is a load-time failure mode
-            # this branch does not otherwise have.
-            f_globals: dict[str, Any] = dict(guarded_globals or {})
-        else:
-            # NB obj.__module__ is not reliably the module the function LIVES in
-            # -- functools.wraps copies it from the wrapped function -- so this
-            # scope can belong to a different file. It is only reached when no
-            # guard walks __globals__, since one that does registers the dict
-            # and forces the snapshot above.
-            f_globals = importlib.import_module(module).__dict__
-        fn = types.FunctionType(
-            code,
-            f_globals,
-            name if name is not None else code.co_name,
-            argdefs,
-            closure,
-        )
-        fn.__qualname__ = qualname
-        fn.__kwdefaults__ = kwdefaults
-        if attributes:
-            fn.__dict__.update(attributes)
-        return fn
-
-    def _keep(self, value: object) -> bool:
-        """Whether a value a reconstructed function holds has to be carried.
-
-        Only values some guard tree node references: everything else becomes a
-        _Missing sentinel, so widening the set of reconstructed functions does
-        not drag unrelated -- and possibly unpicklable -- neighbours into the
-        pickle with them. Matching is by identity, which for an interned value
-        (True, None, a small int, a short str) can coincide with an unrelated
-        guarded one and keep it. That is harmless: such values are trivially
-        picklable, and a kept value is always the real one.
-        """
-        return id(value) in self.guard_tree_values
-
-    def _reduce_cell(self, cell: types.CellType) -> types.CellType:
-        """Carry a closure cell, or replace it with a sentinel one.
-
-        A carried cell is passed through UNCHANGED so that two functions
-        closing over the same variable still share it after reload, and so that
-        pickle can memoize it. Only a dropped cell is rebuilt.
-
-        An EMPTY cell -- a free variable a decorator only assigns on a path that
-        did not run -- has no contents to read at all, so presence is checked
-        before identity. Reading it unconditionally raised ValueError here,
-        which reaches the caller as a package bypass.
-        """
-        try:
-            contents = cell.cell_contents
-        except ValueError:
-            return type(self)._unpickle_cell(_Missing("empty function closure"))
-        if self._keep(cell) or self._keep(contents):
-            return cell
-        return type(self)._unpickle_cell(_Missing("unguarded function closure"))
-
-    @staticmethod
-    def _apply_function_globals(
-        fn: types.FunctionType, guarded_globals: dict[str, object]
-    ) -> None:
-        fn.__globals__.update(guarded_globals)
-
-    def _reduce_nested_function(self, obj: types.FunctionType) -> tuple[Any, ...]:
-        snapshot_globals = id(obj.__globals__) in self.guard_tree_values
-        guarded_globals = (
-            {
-                name: (
-                    value
-                    if self._keep(value)
-                    else _Missing("unguarded function global")
-                )
-                for name, value in obj.__globals__.items()
-            }
-            if snapshot_globals
-            else None
-        )
-
-        defaults = obj.__defaults__
-        if defaults is not None:
-            keep_defaults = self._keep(defaults) or any(
-                self._keep(value) for value in defaults
-            )
-            defaults = (
-                tuple(
-                    value
-                    if self._keep(value)
-                    else _Missing("unguarded function default")
-                    for value in defaults
-                )
-                if keep_defaults
-                else None
-            )
-
-        kwdefaults = obj.__kwdefaults__
-        if kwdefaults is not None:
-            keep_kwdefaults = self._keep(kwdefaults)
-            kwdefaults = {
-                name: (
-                    value
-                    if self._keep(value)
-                    else _Missing("unguarded function keyword default")
-                )
-                for name, value in kwdefaults.items()
-                if keep_kwdefaults or self._keep(value)
-            }
-            if not kwdefaults and not keep_kwdefaults:
-                kwdefaults = None
-
-        closure = obj.__closure__
-        if closure is not None:
-            closure = tuple(self._reduce_cell(cell) for cell in closure)
-        attributes = (
-            dict(obj.__dict__)
-            if self._keep(obj.__dict__)
-            else {
-                name: value for name, value in obj.__dict__.items() if self._keep(value)
-            }
-        )
-        args = (
-            obj.__code__,
-            obj.__module__,
-            obj.__qualname__,
-            defaults,
-            closure,
-            kwdefaults,
-            obj.__name__,
-            attributes,
-            None,
-            snapshot_globals,
-        )
-        if not snapshot_globals:
-            return type(self)._unpickle_nested_function, args
-        # The snapshot goes in STATE, not in the args. pickle memoizes an object
-        # only after saving its reduce args, so a snapshot passed as an arg that
-        # reaches back to obj -- the ordinary `wrapped = deco(base)` at module
-        # scope, or two functools.wraps helpers referencing each other through
-        # the module dict -- recurses until RecursionError. State is applied
-        # AFTER memoization, so those references resolve to the function pickle
-        # already built.
-        return (
-            type(self)._unpickle_nested_function,
-            args,
-            guarded_globals,
-            None,
-            None,
-            type(self)._apply_function_globals,
-        )
+        f_globals = importlib.import_module(module).__dict__
+        return types.FunctionType(code, f_globals, qualname, argdefs, closure)
 
     # pyrefly: ignore [bad-override]
     def reducer_override(
@@ -4547,15 +4419,19 @@ class GuardsStatePickler(pickle.Pickler):
 
         elif inspect.isfunction(obj):
             if "<locals>" in obj.__qualname__:
-                return self._reduce_nested_function(obj)
+                return type(self)._unpickle_nested_function, (
+                    obj.__code__,
+                    obj.__module__,
+                    obj.__qualname__,
+                    obj.__defaults__,
+                    obj.__closure__,
+                )
             if obj.__module__ in sys.modules:
                 f = sys.modules[obj.__module__]
                 for name in obj.__qualname__.split("."):
                     f = getattr(f, name, None)  # type: ignore[assignment]
                 if f is not obj:
-                    if id(obj) not in self.guard_tree_values:
-                        return _Missing, ("fqn mismatch",)
-                    return self._reduce_nested_function(obj)
+                    return _Missing, ("fqn mismatch",)
         elif inspect.ismethod(obj):
             func = obj.__func__
             method_self = obj.__self__
@@ -4566,16 +4442,7 @@ class GuardsStatePickler(pickle.Pickler):
                 return type(self)._unpickle_bound_method, (func, method_self)
 
         elif isinstance(obj, type((lambda x: lambda: x)(0).__closure__[0])):  # type: ignore[index] # noqa: PLC3002
-            # An EMPTY cell -- a free variable only assigned on a path that
-            # did not run -- has nothing to read, and reading it raised
-            # ValueError out of here, which reaches the caller as a package
-            # bypass. _reduce_cell handles the cells it builds; this is the
-            # path a cell reached directly takes.
-            try:
-                contents = obj.cell_contents
-            except ValueError:
-                contents = _Missing("empty function closure")
-            return type(self)._unpickle_cell, (contents,)
+            return type(self)._unpickle_cell, (obj.cell_contents,)
 
         if hasattr(torch.distributed, "distributed_c10d") and isinstance(
             obj, torch.distributed.distributed_c10d.Work
@@ -4684,20 +4551,8 @@ def pickle_guards_state(
 
     try:
         pickler.dump(state)
-    except torch._dynamo.exc.PackageError:
-        raise
-    except Exception as e:
-        # Deliberately broad, including AssertionError. It is tempting to let
-        # that one through as "our bug", but it is not ours to claim:
-        # GradScaler.__getstate__ asserts when pickled mid-iteration, tensor
-        # subclasses assert in __tensor_flatten__, and any user assert in a
-        # __reduce__ or a property lands here. Propagating those turns a
-        # serialization limitation into a hard torch.compile failure for a
-        # program that has nothing wrong with it.
-        # The caller turns PackageError into a package bypass, or re-raises it
-        # under strict_precompile. Name the original type so the reason stays
-        # diagnosable in the bypass message.
-        raise torch._dynamo.exc.PackageError(f"{type(e).__name__}: {e}") from e
+    except AttributeError as e:
+        raise torch._dynamo.exc.PackageError(str(e)) from e
     return buf.getvalue()
 
 
@@ -5122,6 +4977,16 @@ class CheckFunctionManager:
         )
 
         for guard in sorted_guards:
+            # guard_types/code_list are per-build export info, but they
+            # accumulate on the shared Guard objects across builds. Reset them
+            # so results from a previous build (e.g. the pre-filtering build or
+            # an earlier non-save CheckFunctionManager) don't leak into this
+            # build; serialize_guards relies on them to detect unserializable
+            # guards, and a non-save build may derive different guards (e.g.
+            # DICT_VERSION for SUPPORTED_NODES) than a save build.
+            guard.guard_types = None
+            guard.code_list = None
+
             if (
                 not guard_on_nn_modules
                 and guard.is_specialized_nn_module()
@@ -5359,9 +5224,7 @@ class CheckFunctionManager:
             reason = f"Cache line invalidated because {obj_str} got deallocated"
             deleted_guard_manager = DeletedGuardManagerWrapper(reason)
 
-            extra_state.invalidate(
-                cache_entry, deleted_guard_manager, self.guard_manager
-            )
+            extra_state.invalidate(cache_entry, deleted_guard_manager)
             self.guard_manager = deleted_guard_manager
 
     def id_ref(self, obj: object, obj_str: str) -> int:

@@ -28,14 +28,7 @@ typedef struct {
 // static int active_dynamo_threads = 0;
 
 static Py_tss_t eval_frame_callback_key = Py_tss_NEEDS_INIT;
-// Thread-local, matching eval_frame_callback_key: the compile region is a
-// property of the call in flight, and a process-global one let a region entered
-// on one thread capture unrelated frames on every other. A thread that never
-// enters a region reads the default, so worker threads do NOT inherit the
-// region of whoever spawned them -- they must enter it themselves.
-// Stored offset by 2 so that the -1 default is distinguishable from tss's
-// "unset" NULL; set_current_isolate_recompiles_id rejects anything below -1.
-static Py_tss_t isolate_recompiles_key = Py_tss_NEEDS_INIT;
+static int64_t current_isolate_recompiles_id = -1;
 
 static PyObject* eval_frame_callback_get(void) {
   void* result = PyThread_tss_get(&eval_frame_callback_key);
@@ -51,14 +44,11 @@ void eval_frame_callback_set(PyObject* obj) {
 }
 
 int64_t get_current_isolate_recompiles_id(void) {
-  void* value = PyThread_tss_get(&isolate_recompiles_key);
-  return value == NULL ? -1 : (int64_t)(intptr_t)value - 2;
+  return current_isolate_recompiles_id;
 }
 
 static void set_current_isolate_recompiles_id(int64_t id) {
-  CHECK(id >= -1);
-  PyThread_tss_set(
-      &isolate_recompiles_key, (void*)(intptr_t)(id + 2));
+  current_isolate_recompiles_id = id;
 }
 
 static PyObject* get_eval_frame_isolate_recompiles_id_py(
@@ -76,10 +66,6 @@ static PyObject* set_eval_frame_isolate_recompiles_id_py(
   }
   int64_t new_id = PyLong_AsLongLong(arg);
   if (new_id == -1 && PyErr_Occurred()) {
-    return NULL;
-  }
-  if (new_id < -1) {
-    PyErr_SetString(PyExc_ValueError, "expected an id greater than or equal to -1");
     return NULL;
   }
   int64_t old_id = get_current_isolate_recompiles_id();
@@ -865,8 +851,6 @@ PyObject* torch_c_dynamo_eval_frame_init(void) {
   }
 
   int result = PyThread_tss_create(&eval_frame_callback_key);
-  CHECK(result == 0);
-  result = PyThread_tss_create(&isolate_recompiles_key);
   CHECK(result == 0);
 
   Py_INCREF(Py_None);
