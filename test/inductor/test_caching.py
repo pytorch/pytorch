@@ -30,6 +30,7 @@ from torch._inductor.runtime.caching import (
 )
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
 )
@@ -100,6 +101,8 @@ class TestMixin:
 
 @instantiate_parametrized_tests
 class ConfigTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     FOO_THIS_VERSION: int = 0
     FOO_JK_NAME: str = "foo_jk_name"
     FOO_OSS_DEFAULT: bool = False
@@ -223,6 +226,8 @@ class ConfigTest(TestCase):
 
 @instantiate_parametrized_tests
 class ContextTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def isolation_schema_from_forms_of_context_selected(
         self,
         runtime_forms_of_context_selected: Sequence[str],
@@ -389,6 +394,8 @@ class ContextTest(TestCase):
 
 @instantiate_parametrized_tests
 class ExceptionsTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     exception_typenames: list[str] = [
         "CacheError",
         "SystemError",
@@ -433,6 +440,8 @@ class ExceptionsTest(TestCase):
 
 @instantiate_parametrized_tests
 class ImplementationsTest(TestMixin, TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @classmethod
     def sub_dir(cls) -> str:
         return f"testing-impls-instance-{cls.cls_id}"
@@ -625,6 +634,8 @@ class ImplementationsTest(TestMixin, TestCase):
 
 @instantiate_parametrized_tests
 class LocksTest(TestMixin, TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     T = TypeVar("T")
 
     @contextmanager
@@ -828,6 +839,8 @@ class LocksTest(TestMixin, TestCase):
 
 @instantiate_parametrized_tests
 class UtilsTest(TestMixin, TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_lru_cache(self) -> None:
         """Test that the LRU cache decorator works correctly with various argument types.
 
@@ -874,6 +887,8 @@ class UtilsTest(TestMixin, TestCase):
 @instantiate_parametrized_tests
 class InterfacesTest(TestMixin, TestCase):
     """Test class for Memoizer and PersistentMemoizer interfaces."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     @classmethod
     def sub_dir(cls) -> str:
@@ -1829,6 +1844,8 @@ class InterfacesTest(TestMixin, TestCase):
 class ForceDisableCachesTest(TestMixin, TestCase):
     """Test class for force_disable_caches integration with the caching module."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     @classmethod
     def sub_dir(cls) -> str:
         return f"testing-force-disable-caches-{cls.cls_id}"
@@ -1911,6 +1928,8 @@ class ForceDisableCachesTest(TestMixin, TestCase):
 @instantiate_parametrized_tests
 class FreshCacheIntegrationTest(TestMixin, TestCase):
     """Test class for fresh_cache integration with the caching module."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     @classmethod
     def sub_dir(cls) -> str:
@@ -2134,6 +2153,8 @@ class ShouldPadMemoizerTest(TestMixin, TestCase):
     correctly memoizes and replays results based on tensor metadata and
     operation parameters.
     """
+
+    hw_classification = HardwareClassification.GENERIC
 
     @classmethod
     def sub_dir(cls) -> str:
@@ -2599,6 +2620,8 @@ class ShouldPadMemoizerTest(TestMixin, TestCase):
 @instantiate_parametrized_tests
 class DeferredRecordingTest(TestMixin, TestCase):
     """Test class for DeferredRecording functionality."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     @classmethod
     def sub_dir(cls) -> str:
