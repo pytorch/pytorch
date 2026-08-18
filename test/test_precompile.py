@@ -4969,6 +4969,68 @@ class TestExportPython(TestCase):
             with torch.autocast(device_type, torch.bfloat16):
                 run(x, x)
 
+    def test_cpu_vector_isa_is_stamped_and_refused_on_mismatch(self, device):
+        # Inductor bakes the capture host's vector width into a C++ loop's stride while
+        # the ISA is re-picked at compile time, so a narrower host leaves part of the
+        # output uninitialized -- no error, no warning, and no other stamp covers it.
+        if torch.device(device).type != "cpu":
+            self.skipTest("the stamp is about C++ kernels")
+        path = self._tmp_path("isa.py")
+
+        def fn(x, y):
+            return ((x * 2.0 + y).tanh() * x).sum(dim=0)
+
+        x = make_tensor((256, 256), device=device, dtype=torch.float32)
+        y = make_tensor((256, 256), device=device, dtype=torch.float32)
+        from torch.compiler._export_python import _CPU_ISA_TAG
+
+        expected = torch.compiler.export_python(path=path)(fn)(x, y)
+        with open(path, encoding="utf-8") as f:
+            source = f.read()
+        stamp = next(l for l in source.splitlines() if l.startswith(_CPU_ISA_TAG))
+        self.assertNotEqual(stamp, f"{_CPU_ISA_TAG}None")
+        self.assertEqual(torch.compiler.export_python(path=path)(fn)(x, y), expected)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(source.replace(stamp, f"{_CPU_ISA_TAG}'sse2'"))
+        with self.assertRaisesRegex(PrecompileError, "CPU vector ISA"):
+            torch.compiler.export_python(path=path)(fn)(x, y)
+
+    def test_a_cuda_only_artifact_records_no_cpu_isa(self, device):
+        # A CUDA artifact must not start refusing to run because it moved between two
+        # hosts whose CPUs differ in a way it never depended on.
+        if torch.device(device).type != "cuda":
+            self.skipTest("needs a graph with no C++ kernel")
+        path = self._tmp_path("cuda_isa.py")
+
+        def fn(x):
+            return (x * 2).relu()
+
+        x = make_tensor((1024,), device=device, dtype=torch.float32)
+        from torch.compiler._export_python import _CPU_ISA_TAG
+
+        torch.compiler.export_python(path=path)(fn)(x)
+        with open(path, encoding="utf-8") as f:
+            source = f.read()
+        self.assertIn(f"{_CPU_ISA_TAG}None", source)
+
+    def test_loading_an_artifact_leaves_its_directory_alone(self, device):
+        # The artifact is documented as self-contained and meant to be committed, but
+        # inductor's autotune cache wrote a <hash>.best_config next to it, keyed on the
+        # file's BASENAME -- so two unrelated artifacts both called artifact.py shared an
+        # entry and could pick up each other's launch config.
+        path = self._tmp_path("artifact.py")
+        directory = os.path.dirname(path)
+
+        def fn(x, w, b):
+            return torch.nn.functional.layer_norm(x, (x.shape[-1],), w, b)
+
+        x = make_tensor((256, 1024), device=device, dtype=torch.float32)
+        w = torch.ones(1024, device=device)
+        b = torch.zeros(1024, device=device)
+        torch.compiler.export_python(path=path)(fn)(x, w, b)
+        torch.compiler.export_python(path=path)(fn)(x, w, b)
+        self.assertEqual(sorted(os.listdir(directory)), ["artifact.py"])
+
 
 instantiate_device_type_tests(TestExportPython, globals())
 

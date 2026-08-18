@@ -1087,7 +1087,11 @@ def export_python(
     with no explicit argument takes, the matmul precision a GEMM template bakes as a
     constant, and whether deterministic algorithms were enabled when inductor chose
     between a deterministic and an atomic lowering (checked one-way -- capturing with
-    determinism on and calling with it off is safe, the reverse is not). What is *not*
+    determinism on and calling with it off is safe, the reverse is not), and, for an
+    artifact containing a C++ kernel, the CPU vector ISA it was generated against (the
+    vector width is baked into the loop strides while the ISA is re-picked at compile
+    time, so a narrower host would leave part of the output uninitialized with no error
+    at all -- this one refuses to run rather than warning). What is *not*
     guarded is a change in *how* two aliased
     inputs overlap: when capture and the call both pass intersecting views, the artifact
     runs with capture's relative offsets baked in and may compute the wrong thing.
@@ -1097,7 +1101,7 @@ def export_python(
     above). Where ``torch.compile`` would recompile, an artifact cannot, so treat any
     ambient change between capture and call as needing a fresh capture unless a stamp
     covers it. A hand-edit that drops a stamp turns that one check off with a warning.
-    All six stamps (these five plus the version stamp) must stay in the artifact's
+    All seven stamps (these six plus the version stamp) must stay in the artifact's
     leading comment block: the reader stops at the first non-comment line, so inserting code above them
     turns every check off -- loudly for the checked stamps, each of which warns per
     call while it is missing, and silently for the version warning, which just
