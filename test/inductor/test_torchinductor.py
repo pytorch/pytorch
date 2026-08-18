@@ -161,6 +161,7 @@ from torch.testing._internal.inductor_utils import (  # noqa: F401
     HAS_MULTIGPU,
     HAS_TPU,
     IS_BIG_GPU,
+    requires_block_ptr,
     requires_gpu,
     RUN_CPU,
     RUN_GPU,
@@ -5889,7 +5890,10 @@ for dtype in (torch.int32, torch.int64):
     @parametrize("dim", (subtest(2), subtest(3)))
     @parametrize(
         "use_block_ptr",
-        [subtest(False), subtest(True, decorators=[skip_if_not_triton])],
+        [
+            subtest(False),
+            subtest(True, decorators=[skip_if_not_triton, requires_block_ptr]),
+        ],
     )
     def test_low_memory_max_pool(self, dilation: int, dim: int, use_block_ptr: bool):
         prims = torch.ops.prims
@@ -6625,7 +6629,10 @@ for dtype in (torch.int32, torch.int64):
 
     @parametrize(
         "use_block_ptr",
-        [subtest(False), subtest(True, decorators=[skip_if_not_triton])],
+        [
+            subtest(False),
+            subtest(True, decorators=[skip_if_not_triton, requires_block_ptr]),
+        ],
     )
     def test_conv3d_channels_last(self, use_block_ptr: bool):
         if self.device == GPU_TYPE:
@@ -13761,7 +13768,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     @parametrize(
         "use_block_ptr",
         [
-            subtest(True, decorators=[skip_if_not_triton]),
+            subtest(False),
+            subtest(True, decorators=[skip_if_not_triton, requires_block_ptr]),
         ],
     )
     def test_tmp_not_defined_issue1(self, use_block_ptr):
@@ -14832,7 +14840,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     @requires_gpu()
     @parametrize("prefer_nd_tiling", (False, True))
-    @parametrize("use_block_ptr", (False, True))
+    @parametrize(
+        "use_block_ptr",
+        (subtest(False), subtest(True, decorators=[requires_block_ptr])),
+    )
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION,
         "Does not support SDPA or pre-SM80 hardware",
@@ -17338,7 +17349,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     @largeTensorTest("1GB", inductor=True)
     @parametrize(
         "use_block_ptr",
-        [subtest(False), subtest(True, decorators=[skip_if_not_triton])],
+        [
+            subtest(False),
+            subtest(True, decorators=[skip_if_not_triton, requires_block_ptr]),
+        ],
     )
     def test_large_grid(self, use_block_ptr):
         # https://github.com/pytorch/pytorch/issues/123210
@@ -20644,7 +20658,6 @@ if RUN_GPU:
 
         # only uncoalesced without this :)
         @config.patch("triton.coalesce_tiling_analysis", False)
-        @config.patch("triton.use_block_ptr", False)
         def test_evict_last_non_coalesced_loads(self):
             @torch.compile
             def f(a, b):
@@ -20680,7 +20693,6 @@ if RUN_GPU:
             {
                 "triton.persistent_reductions": True,
                 "triton.multi_kernel": False,
-                "triton.use_block_ptr": False,
             }
         )
         def test_evict_first_for_persistent_reduction_last_use(self):
@@ -20719,7 +20731,6 @@ if RUN_GPU:
             {
                 "triton.persistent_reductions": True,
                 "triton.multi_kernel": False,
-                "triton.use_block_ptr": False,
             }
         )
         def test_evict_last_for_reused_persistent_reduction_load(self):
@@ -20792,6 +20803,7 @@ if RUN_GPU:
             finally:
                 simd_kernel_features.SIMDKernelFeatures.buffer_read_counts = orig
 
+        @requires_block_ptr
         @config.patch("triton.use_block_ptr", True)
         @config.patch("triton.coalesce_tiling_analysis", False)
         def test_evict_last_non_coalesced_loads_block_ptr(self):

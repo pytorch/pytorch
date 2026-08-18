@@ -1,10 +1,13 @@
 # mypy: allow-untyped-defs
+import functools
+import warnings
 from typing import Any
 
 import sympy
 
 import torch
 from torch.utils._sympy.symbol import symbol_is_type, SymT
+from torch.utils._triton import has_triton_block_ptr
 
 from .. import config
 from ..runtime.hints import AttrsDescriptorWrapper, DeviceProperties
@@ -24,6 +27,35 @@ from .common import (
     TMADescriptorArg,
     WorkspaceArg,
 )
+
+
+@functools.cache
+def _warn_block_ptr_unavailable() -> None:
+    # Fires only in the no-op case (flag on, API gone), so users who never set
+    # the flag -- and callers that patch it to False -- stay quiet.
+    warnings.warn(
+        "config.triton.use_block_ptr=True but the installed Triton no longer "
+        "provides the block-pointer frontend API (removed in "
+        "triton-lang/triton#10833); falling back to the default masked-indexing "
+        "path. This flag is deprecated and will be removed (#191012).",
+        FutureWarning,
+        stacklevel=2,
+    )
+
+
+def use_block_ptr_enabled() -> bool:
+    """Effective block-pointer codegen setting.
+
+    Honors ``config.triton.use_block_ptr`` only where the installed Triton still
+    provides the block-pointer frontend API. When the flag is set but the API is
+    gone the request is a no-op: warn once, then fall back to masked indexing.
+    """
+    if not config.triton.use_block_ptr:
+        return False
+    if has_triton_block_ptr():
+        return True
+    _warn_block_ptr_unavailable()
+    return False
 
 
 def should_unwrap_unspec_arg(name: str):
@@ -187,16 +219,13 @@ def signature_to_meta(
         # risky to use tl.int32 dtype since we may have ks0*ks1 later
         # for kernels like torch.mean when dynamic shape is enabled.
         #
-        # Check config.triton.use_block_ptr, since Triton block pointer
-        # does not support 64bit indexing:
-        # https://gist.github.com/shunting314/6a41c776171720ce4561f202dcde0ad6
-        #
-        # If the triton metadata is for a template, don't use tl.int64 index.
-        # Templates like flex attention/decoding uses block pointers which
-        # does not support 64 bit indexing.
+        # Block pointers do not support 64-bit indexing, so keep ks indices in
+        # tl.int32 whenever the (deprecated) block-pointer path is actually
+        # active. Templates like flex attention/decoding likewise use
+        # hand-written block pointers, so they also stay on 32-bit ks indexing.
         if (
-            not config.triton.use_block_ptr
-            and not is_template
+            not is_template
+            and not use_block_ptr_enabled()
             and isinstance(arg, SizeArg)
             and arg.name.startswith("ks")
         ):

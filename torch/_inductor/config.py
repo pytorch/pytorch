@@ -2194,7 +2194,15 @@ class triton:
     # We should revisit this once we understand more of the source of register spills.
     spill_threshold: int = 32 if torch.version.hip else 16
 
-    # Generate code containing the newer tl.make_block_ptr() API for loads/store
+    # Generate code using the tl.make_block_ptr() API for loads/stores. Block
+    # pointers were removed from the Triton frontend in triton-lang/triton#10833,
+    # so this flag is honored only where the installed Triton still provides the
+    # API; where it is gone the request is a no-op and use_block_ptr_enabled()
+    # emits a one-time FutureWarning before falling back to masked indexing.
+    #
+    # TODO(#191012): remove use_block_ptr entirely (this flag + the block-pointer
+    # codegen path in codegen/triton.py) once downstream backends still on block
+    # pointers (e.g. MTIA) migrate.
     use_block_ptr = False
 
     # (Experimental)
