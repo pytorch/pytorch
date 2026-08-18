@@ -949,8 +949,15 @@ def vector_norm_single_dim_strategy(
     norm_type = args_schema[1] if len(args_schema) > 1 else 2
     if not isinstance(norm_type, (int, float, str)):
         raise AssertionError(f"Expected int, float, or str, got {type(norm_type)}")
-    dim = args_schema[2] if len(args_schema) > 2 else None
-    keepdim = args_schema[3] if len(args_schema) > 3 else False
+    # _foreach_norm.Scalar has no dim/keepdim -- its schema is (self, ord, *, dtype), so
+    # position 2 is dtype, not dim. It reduces each tensor fully; dtype does not affect the
+    # sharding. vector_norm/norm carry dim and keepdim as usual.
+    if op == aten._foreach_norm.Scalar:
+        dim = None
+        keepdim = False
+    else:
+        dim = args_schema[2] if len(args_schema) > 2 else None
+        keepdim = args_schema[3] if len(args_schema) > 3 else False
     dims = _infer_reduction_dims(dim, ndim)
 
     return _reduction_single_dim_strategy(
