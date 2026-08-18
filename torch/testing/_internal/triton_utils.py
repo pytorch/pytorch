@@ -23,9 +23,6 @@ requires_gpu_and_triton = unittest.skipUnless(
     "requires gpu and triton",
 )
 requires_gpu = unittest.skipUnless(HAS_GPU, "requires gpu")
-requires_triton = unittest.skipUnless(
-    HAS_TRITON, "requires device supporting triton codegen"
-)
 
 if has_triton():
     import triton

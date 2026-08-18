@@ -39,7 +39,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 
 log: logging.Logger = logging.getLogger(__name__)
 
@@ -89,7 +89,6 @@ HAS_GPU_AND_TRITON = HAS_GPU
 GPU_TYPE = get_gpu_type()
 
 TRITON_TYPE: str | None = get_triton_type()
-HAS_TRITON_DEVICE: bool = TRITON_TYPE is not None
 
 HAS_MULTIGPU = any(
     getattr(torch, gpu).is_available() and getattr(torch, gpu).device_count() >= 2
@@ -506,8 +505,9 @@ def patch_custom_fallback_pass(predicate: Callable[[torch.fx.Node], bool]) -> co
     return config.patch(post_grad_custom_pre_pass=Pass())
 
 
+@contextlib.contextmanager
 def try_patch_inductor_backend_config(device: str, key: str,
-                                      value: Any) -> contextlib.ContextDecorator:
+                                      value: Any) -> Iterator[None]:
     """
     Try to patch the backend-specific Inductor config, for the codegen backend
     corresponding to the given ``device``. If that config can't be found to
@@ -533,28 +533,11 @@ def try_patch_inductor_backend_config(device: str, key: str,
         if hasattr(mod, f"{device_backend}.{key}"):
             contexts.append(mod.patch(f"{device_backend}.{key}", value))
 
-    if len(contexts) == 0:
-        return unittest.skip(
-            f"Can't patch Inductor config {key} for device {device}")
-
-    class ContextStack(contextlib.ContextDecorator):
-        def __init__(self, contexts: list[contextlib.ContextDecorator]) -> None:
-            self.contexts: list[contextlib.ContextDecorator] = contexts
-            self.es = None
-
-        def __enter__(self) -> None:
-            es = contextlib.ExitStack()
-            try:
-                es.__enter__()
-                for context in self.contexts:
-                    es.enter_context(context)
-                self.es = es
-            except Exception:
-                es.close()
-                raise
-
-        def __exit__(self, exc_type, exc_val, exc_tb):  # type: ignore[no-untyped-def]
-            if self.es:
-                self.es.__exit__(exc_type, exc_val, exc_tb)
-
-    return ContextStack(contexts)
+    with contextlib.ExitStack() as es:
+        if len(contexts) == 0:
+            raise unittest.SkipTest(
+                f"Can't patch Inductor config {key} for device {device}"
+            )
+        for ctx in contexts:
+            es.enter_context(ctx)
+        yield
