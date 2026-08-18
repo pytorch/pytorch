@@ -442,6 +442,49 @@ class TestProfilerITT(TestCase):
 
 @instantiate_parametrized_tests
 class TestProfiler(TestCase):
+    @unittest.skipUnless(IS_LINUX, "FIFO is required")
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_export_chrome_trace_releases_gil(self):
+        with profile(activities=[ProfilerActivity.CPU]) as prof:
+            torch.ones(1) + torch.ones(1)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            trace_path = os.path.join(tmpdir, "trace.json")
+            os.mkfifo(trace_path)
+            reader = subprocess.Popen(
+                [
+                    sys.executable,
+                    "-c",
+                    "import sys,time; time.sleep(1); open(sys.argv[1], 'rb').read()",
+                    trace_path,
+                ]
+            )
+            started = threading.Event()
+            export_error = []
+
+            def export_trace():
+                started.set()
+                try:
+                    prof.export_chrome_trace(trace_path)
+                except Exception as error:
+                    export_error.append(error)
+
+            export_thread = threading.Thread(target=export_trace)
+            start_time = time.monotonic()
+            export_thread.start()
+            try:
+                self.assertTrue(started.wait(timeout=1))
+                time.sleep(0.1)
+                self.assertLess(time.monotonic() - start_time, 0.5)
+            finally:
+                export_thread.join(timeout=5)
+                if reader.poll() is None:
+                    reader.terminate()
+                reader.wait(timeout=5)
+
+            self.assertFalse(export_thread.is_alive())
+            self.assertEqual(export_error, [])
+
     @unittest.skipIf(
         TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite."
     )

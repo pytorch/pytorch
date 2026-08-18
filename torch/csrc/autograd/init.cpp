@@ -419,7 +419,10 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .def("events", &ProfilerResult::events)
       .def("experimental_event_tree", &ProfilerResult::event_tree)
 #ifdef USE_KINETO
-      .def("save", &ProfilerResult::save)
+      .def(
+          "save",
+          &ProfilerResult::save,
+          py::call_guard<py::gil_scoped_release>())
       .def(
           "trace_activities",
           [](py::object self) {
