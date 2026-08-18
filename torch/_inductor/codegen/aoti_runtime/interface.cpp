@@ -138,6 +138,44 @@ AOTIRuntimeError AOTInductorModelContainerCreateWithDevice(
 }
 
 
+AOTIRuntimeError AOTInductorModelContainerCreateWithExternalConstants(
+    AOTInductorModelContainerHandle* container_handle,
+    size_t num_models,
+    const char* device_str,
+    const char* cubin_dir,
+    const AOTInductorConstantMapEntry* constant_entries,
+    size_t num_constant_entries) {
+  if (num_models == 0) {
+    std::cerr << "Error: num_models must be positive, but got 0\n";
+    return AOTI_RUNTIME_FAILURE;
+  }
+  if (num_constant_entries != 0 && constant_entries == nullptr) {
+    std::cerr << "Error: constant_entries is null but num_constant_entries is "
+              << num_constant_entries << "\n";
+    return AOTI_RUNTIME_FAILURE;
+  }
+  CONVERT_EXCEPTION_TO_ERROR_CODE({
+    std::optional<std::string> cubin_dir_opt;
+    if (cubin_dir != nullptr) {
+      cubin_dir_opt.emplace(cubin_dir);
+    }
+    // Rebuild the std map on the DSO side of the boundary so no std container
+    // crosses the ABI; the entries are C-compatible (name + AtenTensorHandle).
+    std::unordered_map<std::string, AtenTensorHandle> constants;
+    constants.reserve(num_constant_entries);
+    for (size_t i = 0; i < num_constant_entries; ++i) {
+      constants.emplace(constant_entries[i].name, constant_entries[i].handle);
+    }
+    auto* container = new torch::aot_inductor::AOTInductorModelContainer(
+        num_models,
+        std::string(device_str),
+        constants,
+        cubin_dir_opt);
+    *container_handle =
+        reinterpret_cast<AOTInductorModelContainerHandle>(container);
+  })
+}
+
 AOTIRuntimeError AOTInductorModelContainerDelete(
     AOTInductorModelContainerHandle container_handle) {
   CONVERT_EXCEPTION_TO_ERROR_CODE({
@@ -637,6 +675,16 @@ AOTIRuntimeError AOTInductorModelContainerGetConstantsBlobSize(
       { *ret_size = container->constant_blob_size(); })
 }
 
+AOTIRuntimeError AOTInductorModelContainerDidCallLoadConstants(
+    AOTInductorModelContainerHandle container_handle,
+    bool* did_call_load_constants) {
+  auto* container =
+      reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
+          container_handle);
+  CONVERT_EXCEPTION_TO_ERROR_CODE(
+      { *did_call_load_constants = container->did_call_load_constants(); })
+}
+
 
 // Load weights from a single blob in weight_blob_ptr
 AOTIRuntimeError AOTInductorModelUpdateConstantsFromBlob(
@@ -649,6 +697,18 @@ AOTIRuntimeError AOTInductorModelUpdateConstantsFromBlob(
       {container->update_constants_from_blob(weight_blob_ptr); })
     }
 
+AOTIRuntimeError AOTInductorSetUsePinnedAsyncConstantsCopy(bool enabled) {
+  CONVERT_EXCEPTION_TO_ERROR_CODE({
+    torch::aot_inductor::setUsePinnedAsyncConstantsCopy(enabled);
+  })
+}
+
+AOTIRuntimeError AOTInductorSetPinnedAsyncConstantsCopyStageBufferBytes(
+    size_t bytes) {
+  CONVERT_EXCEPTION_TO_ERROR_CODE({
+    torch::aot_inductor::setPinnedAsyncConstantsCopyStageBufferBytes(bytes);
+  })
+}
 
 AOTIRuntimeError AOTInductorGetLastError(
     const char** error_msg) {

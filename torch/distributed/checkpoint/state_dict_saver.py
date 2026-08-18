@@ -106,7 +106,7 @@ def save(
     save will call ``state_dict`` before serialization.
 
     .. warning::
-        There is no guarantees of Backwards Compatibility across PyTorch versions
+        There are no guarantees of Backwards Compatibility across PyTorch versions
         for saved state_dicts.
 
     .. warning::
