@@ -46,6 +46,7 @@ L2:
   - TorchedHat/pytorch-redhat-ci
   - Ascend/pytorch
   - torch-spyre/torch-spyre
+  - vllm-project/vllm
 
 L3:
   # Canonical test repos for CRCR.
