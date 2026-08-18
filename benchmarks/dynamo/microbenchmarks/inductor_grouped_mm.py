@@ -86,13 +86,50 @@ def _parse_gmnk(value):
     return values
 
 
-def _generate_offsets(total, groups, device, align=1):
+def _generate_offsets(total, groups, device, mode="random", align=1):
     if total <= 0:
         return torch.zeros(groups, device=device, dtype=torch.int32)
     if align < 1:
         raise ValueError(f"align must be >= 1, got {align}")
+    if mode not in ("balanced", "random"):
+        raise ValueError(f"mode must be 'balanced' or 'random', got {mode}")
 
-    if align == 1:
+    if mode == "balanced":
+        if align == 1:
+            base = total // groups
+            remainder = total - base * groups
+            if remainder != 0:
+                warnings.warn(
+                    f"grouping='balanced' with M={total}, G={groups}: "
+                    f"using base size {base} and placing tail "
+                    f"{remainder} in the last group",
+                    stacklevel=2,
+                )
+            counts = torch.full((groups,), base, device=device, dtype=torch.int64)
+            if remainder > 0:
+                counts[-1] += remainder
+        else:
+            units = total // align
+            remainder = total - units * align
+            base_units = units // groups
+            extra_units = units - base_units * groups
+            counts = torch.full(
+                (groups,), base_units * align, device=device, dtype=torch.int64
+            )
+            if extra_units > 0:
+                counts[-extra_units:] += align
+            if remainder != 0 or extra_units != 0:
+                warnings.warn(
+                    f"grouping='balanced' with M={total}, G={groups}, "
+                    f"align={align}: using aligned base size "
+                    f"{base_units * align} and placing "
+                    f"{extra_units * align + remainder} values in the "
+                    "last groups",
+                    stacklevel=2,
+                )
+            if remainder > 0:
+                counts[-1] += remainder
+    elif align == 1:
         probs = torch.full((groups,), 1.0 / groups, device=device)
         counts = torch.distributions.Multinomial(
             total_count=total, probs=probs
@@ -215,6 +252,9 @@ def _maybe_wrap_cuda_graph(fn, label, use_cuda_graphs):
         return fn
 
 
+BACKEND_CHOICES = ["aten", "triton", "cutedsl", "gluon"]
+
+
 def benchmark_grouped_mm(
     gmnk=None,
     a_dim=2,
@@ -226,8 +266,14 @@ def benchmark_grouped_mm(
     rtol=1e-2,
     atol=1e-2,
     use_cuda_graphs=False,
+    backends=None,
+    warmup=10,
+    rep=100,
+    grouping="random",
 ):
     torch.manual_seed(seed)
+    if backends is None:
+        backends = BACKEND_CHOICES
 
     device = "cuda"
     if dtype is None:
@@ -303,12 +349,12 @@ def benchmark_grouped_mm(
 
         if a_is_2d and b_is_2d:
             offs_align = 1 if (not a_k_major and not b_k_major) else align
-            offs = _generate_offsets(K, G, device, align=offs_align)
+            offs = _generate_offsets(K, G, device, mode=grouping, align=offs_align)
         elif a_is_2d and not b_is_2d:
             offs_align = 1 if a_k_major else align
-            offs = _generate_offsets(M, G, device, align=offs_align)
+            offs = _generate_offsets(M, G, device, mode=grouping, align=offs_align)
         elif not a_is_2d and b_is_2d:
-            offs = _generate_offsets(N, G, device, align=align)
+            offs = _generate_offsets(N, G, device, mode=grouping, align=align)
         else:
             offs = None
 
@@ -328,55 +374,68 @@ def benchmark_grouped_mm(
 
         C_ref = torch._grouped_mm(A, B.transpose(-2, -1), offs)
 
-        fn_aten = lambda: torch._grouped_mm(A, B.transpose(-2, -1), offs)  # noqa: E731
-        bench_aten = _do_bench_cuda(
-            _maybe_wrap_cuda_graph(fn_aten, "aten", use_cuda_graphs)
-        )
-        us_aten = bench_aten["median_us"]
-        tflops_aten = flops * 1e-12 / (us_aten * 1e-6)
-        print(
-            f"  ATen: {us_aten:.2f} us ({tflops_aten:.2f} TFLOPS; "
-            f"min={bench_aten['min_us']:.2f}, max={bench_aten['max_us']:.2f})"
-        )
-        result["ATen (us)"] = us_aten
-        gc.collect()
-        torch.cuda.empty_cache()
-
-        try:
-            torch._dynamo.reset()
-            compiled_triton = torch.compile(
-                torch._grouped_mm,
-                options={"max_autotune": True, "max_autotune_gemm_backends": "TRITON"},
-                dynamic=False,
-            )
-            fn_triton = lambda: compiled_triton(  # noqa: E731
+        us_aten = None
+        if "aten" in backends:
+            fn_aten = lambda: torch._grouped_mm(  # noqa: E731
                 A, B.transpose(-2, -1), offs
             )
-            bench_triton = _do_bench_cuda(
-                _maybe_wrap_cuda_graph(fn_triton, "triton", use_cuda_graphs)
+            bench_aten = _do_bench_cuda(
+                _maybe_wrap_cuda_graph(fn_aten, "aten", use_cuda_graphs),
+                warmup=warmup,
+                rep=rep,
             )
-            us_triton = bench_triton["median_us"]
-            tflops_triton = flops * 1e-12 / (us_triton * 1e-6)
+            us_aten = bench_aten["median_us"]
+            tflops_aten = flops * 1e-12 / (us_aten * 1e-6)
             print(
-                f"  Triton: {us_triton:.2f} us ({tflops_triton:.2f} TFLOPS; "
-                f"min={bench_triton['min_us']:.2f}, max={bench_triton['max_us']:.2f})"
+                f"  ATen: {us_aten:.2f} us ({tflops_aten:.2f} TFLOPS; "
+                f"min={bench_aten['min_us']:.2f}, max={bench_aten['max_us']:.2f})"
             )
-            result["Triton (us)"] = us_triton
-            result["Triton speedup"] = us_aten / us_triton
+            result["ATen (us)"] = us_aten
+            gc.collect()
+            torch.cuda.empty_cache()
 
+        if "triton" in backends:
             try:
-                C_triton = compiled_triton(A, B.transpose(-2, -1), offs)
-                torch.testing.assert_close(C_triton, C_ref, rtol=rtol, atol=atol)
-                print("  ✓ Triton correctness check passed")
-            except AssertionError:
-                print("  ✗ Triton correctness check FAILED")
-        except Exception as e:
-            print(f"  Triton: Failed ({e})")
-        gc.collect()
-        torch.cuda.empty_cache()
+                torch._dynamo.reset()
+                compiled_triton = torch.compile(
+                    torch._grouped_mm,
+                    options={
+                        "max_autotune": True,
+                        "max_autotune_gemm_backends": "TRITON",
+                    },
+                    dynamic=False,
+                )
+                fn_triton = lambda: compiled_triton(  # noqa: E731
+                    A, B.transpose(-2, -1), offs
+                )
+                bench_triton = _do_bench_cuda(
+                    _maybe_wrap_cuda_graph(fn_triton, "triton", use_cuda_graphs),
+                    warmup=warmup,
+                    rep=rep,
+                )
+                us_triton = bench_triton["median_us"]
+                tflops_triton = flops * 1e-12 / (us_triton * 1e-6)
+                print(
+                    f"  Triton: {us_triton:.2f} us ({tflops_triton:.2f} TFLOPS; "
+                    f"min={bench_triton['min_us']:.2f}, max={bench_triton['max_us']:.2f})"
+                )
+                result["Triton (us)"] = us_triton
+                if us_aten is not None:
+                    result["Triton speedup"] = us_aten / us_triton
+
+                try:
+                    C_triton = compiled_triton(A, B.transpose(-2, -1), offs)
+                    torch.testing.assert_close(C_triton, C_ref, rtol=rtol, atol=atol)
+                    print("  ✓ Triton correctness check passed")
+                except AssertionError:
+                    print("  ✗ Triton correctness check FAILED")
+            except Exception as e:
+                print(f"  Triton: Failed ({e})")
+            gc.collect()
+            torch.cuda.empty_cache()
 
         if is_blackwell():
-            if a_dim == 2 and b_dim == 3:
+            if a_dim == 2 and b_dim == 3 and "cutedsl" in backends:
                 try:
                     torch._dynamo.reset()
                     compiled_cutedsl = torch.compile(
@@ -391,7 +450,9 @@ def benchmark_grouped_mm(
                         A, B.transpose(-2, -1), offs
                     )
                     bench_cutedsl = _do_bench_cuda(
-                        _maybe_wrap_cuda_graph(fn_cutedsl, "cutedsl", use_cuda_graphs)
+                        _maybe_wrap_cuda_graph(fn_cutedsl, "cutedsl", use_cuda_graphs),
+                        warmup=warmup,
+                        rep=rep,
                     )
                     us_cutedsl = bench_cutedsl["median_us"]
                     tflops_cutedsl = flops * 1e-12 / (us_cutedsl * 1e-6)
@@ -401,7 +462,8 @@ def benchmark_grouped_mm(
                         f"max={bench_cutedsl['max_us']:.2f})"
                     )
                     result["CuTeDSL (us)"] = us_cutedsl
-                    result["CuTeDSL speedup"] = us_aten / us_cutedsl
+                    if us_aten is not None:
+                        result["CuTeDSL speedup"] = us_aten / us_cutedsl
 
                     try:
                         C_cutedsl = compiled_cutedsl(A, B.transpose(-2, -1), offs)
@@ -416,41 +478,45 @@ def benchmark_grouped_mm(
                 gc.collect()
                 torch.cuda.empty_cache()
 
-            try:
-                torch._dynamo.reset()
-                compiled_gluon = torch.compile(
-                    torch._grouped_mm,
-                    options={
-                        "max_autotune": True,
-                        "max_autotune_gemm_backends": "GLUON",
-                    },
-                    dynamic=False,
-                )
-                fn_gluon = lambda: compiled_gluon(  # noqa: E731
-                    A, B.transpose(-2, -1), offs
-                )
-                bench_gluon = _do_bench_cuda(
-                    _maybe_wrap_cuda_graph(fn_gluon, "gluon", use_cuda_graphs)
-                )
-                us_gluon = bench_gluon["median_us"]
-                tflops_gluon = flops * 1e-12 / (us_gluon * 1e-6)
-                print(
-                    f"  Gluon: {us_gluon:.2f} us ({tflops_gluon:.2f} TFLOPS; "
-                    f"min={bench_gluon['min_us']:.2f}, max={bench_gluon['max_us']:.2f})"
-                )
-                result["Gluon (us)"] = us_gluon
-                result["Gluon speedup"] = us_aten / us_gluon
-
+            if "gluon" in backends:
                 try:
-                    C_gluon = compiled_gluon(A, B.transpose(-2, -1), offs)
-                    torch.testing.assert_close(C_gluon, C_ref, rtol=rtol, atol=atol)
-                    print("  ✓ Gluon correctness check passed")
-                except AssertionError:
-                    print("  ✗ Gluon correctness check FAILED")
-            except Exception as e:
-                print(f"  Gluon: Failed ({e})")
-            gc.collect()
-            torch.cuda.empty_cache()
+                    torch._dynamo.reset()
+                    compiled_gluon = torch.compile(
+                        torch._grouped_mm,
+                        options={
+                            "max_autotune": True,
+                            "max_autotune_gemm_backends": "GLUON",
+                        },
+                        dynamic=False,
+                    )
+                    fn_gluon = lambda: compiled_gluon(  # noqa: E731
+                        A, B.transpose(-2, -1), offs
+                    )
+                    bench_gluon = _do_bench_cuda(
+                        _maybe_wrap_cuda_graph(fn_gluon, "gluon", use_cuda_graphs),
+                        warmup=warmup,
+                        rep=rep,
+                    )
+                    us_gluon = bench_gluon["median_us"]
+                    tflops_gluon = flops * 1e-12 / (us_gluon * 1e-6)
+                    print(
+                        f"  Gluon: {us_gluon:.2f} us ({tflops_gluon:.2f} TFLOPS; "
+                        f"min={bench_gluon['min_us']:.2f}, max={bench_gluon['max_us']:.2f})"
+                    )
+                    result["Gluon (us)"] = us_gluon
+                    if us_aten is not None:
+                        result["Gluon speedup"] = us_aten / us_gluon
+
+                    try:
+                        C_gluon = compiled_gluon(A, B.transpose(-2, -1), offs)
+                        torch.testing.assert_close(C_gluon, C_ref, rtol=rtol, atol=atol)
+                        print("  ✓ Gluon correctness check passed")
+                    except AssertionError:
+                        print("  ✗ Gluon correctness check FAILED")
+                except Exception as e:
+                    print(f"  Gluon: Failed ({e})")
+                gc.collect()
+                torch.cuda.empty_cache()
 
         results.append(result)
         print()
@@ -529,6 +595,35 @@ if __name__ == "__main__":
             "dispatcher overhead."
         ),
     )
+    parser.add_argument(
+        "--backends",
+        nargs="+",
+        choices=BACKEND_CHOICES,
+        default=BACKEND_CHOICES,
+        help="Which backends to benchmark (space-separated). Default: all.",
+    )
+    parser.add_argument(
+        "--warmup",
+        type=int,
+        default=10,
+        help="Number of warmup iterations per shape/backend.",
+    )
+    parser.add_argument(
+        "--iterations",
+        type=int,
+        default=100,
+        help="Number of measured iterations per shape/backend.",
+    )
+    parser.add_argument(
+        "--grouping",
+        choices=["random", "balanced"],
+        default="random",
+        help=(
+            "How to split the ragged dimension across groups: 'random' "
+            "(default, non-equal via a multinomial draw) or 'balanced' "
+            "(equal-sized groups, remainder in the last group(s))."
+        ),
+    )
     args = parser.parse_args()
     a_dim, a_k_major = args.a_spec
     b_dim, b_k_major = args.b_spec
@@ -545,4 +640,8 @@ if __name__ == "__main__":
         rtol=args.rtol,
         atol=args.atol,
         use_cuda_graphs=args.use_cuda_graphs,
+        backends=args.backends,
+        warmup=args.warmup,
+        rep=args.iterations,
+        grouping=args.grouping,
     )
