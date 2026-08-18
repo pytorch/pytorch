@@ -1917,7 +1917,7 @@ class TestTensorCreation(TestCase):
         dtypes = get_all_dtypes(include_half=False, include_bfloat16=False, include_complex32=True)
         if device_type == 'cpu':
             do_test_empty_full(self, dtypes, torch.strided, torch_device)
-        if device_type == torch.accelerator.current_accelerator().type:
+        if torch.accelerator.is_available() and device_type == torch.accelerator.current_accelerator().type:
             do_test_empty_full(self, dtypes, torch.strided, None)
             do_test_empty_full(self, dtypes, torch.strided, torch_device)
 
@@ -1935,7 +1935,7 @@ class TestTensorCreation(TestCase):
             self.assertEqual('cpu',
                              torch.tensor(torch.ones((2, 3), dtype=torch.float32), device='cpu:0').device.type)
             self.assertEqual('cpu', torch.tensor(np.random.randn(2, 3), device='cpu').device.type)
-        if device_type == torch.accelerator.current_accelerator().type:
+        if torch.accelerator.is_available() and device_type == torch.accelerator.current_accelerator().type:
             self.assertEqual(f'{device_type}:0', str(getattr(torch.tensor(5), device_type)(0).device))
             self.assertEqual(f'{device_type}:0', str(getattr(torch.tensor(5), device_type)(f'{device_type}:0').device))
             self.assertEqual(f'{device_type}:0',
@@ -2550,7 +2550,7 @@ class TestTensorCreation(TestCase):
                 self.assertEqual(op(values).device, torch_device)
                 self.assertEqual(op(values, dtype=torch.float64).device, torch_device)
 
-                if self.device_type == torch.accelerator.current_accelerator().type:
+                if torch.accelerator.is_available() and self.device_type == torch.accelerator.current_accelerator().type:
                     with torch.device(device):
                         self.assertEqual(op(values.cpu()).device, torch.device('cpu'))
 
@@ -2566,7 +2566,7 @@ class TestTensorCreation(TestCase):
         sparse_with_dtype = torch.sparse_coo_tensor(indices, values, sparse_size, dtype=torch.float64)
         self.assertEqual(sparse_with_dtype.device, torch_device)
 
-        if self.device_type == torch.accelerator.current_accelerator().type:
+        if torch.accelerator.is_available() and self.device_type == torch.accelerator.current_accelerator().type:
             with torch.device(device):
                 sparse_with_dtype = torch.sparse_coo_tensor(indices.cpu(), values.cpu(),
                                                             sparse_size, dtype=torch.float64)
