@@ -272,7 +272,7 @@ bool IValue::overlaps(const IValue& rhs) const {
   rhs.getSubValues(rhsSubValues);
   getSubValues(thisSubValues);
   for (auto& sub : thisSubValues) {
-    if (rhsSubValues.contains(sub)) {
+    if (rhsSubValues.count(sub)) {
       return true;
     }
   }
@@ -898,7 +898,7 @@ IValue IValue::deepcopy(std::optional<at::Device> device) const {
 IValue IValue::deepcopy(
     IValue::HashIdentityIValueMap& memo,
     std::optional<at::Device> device) const {
-  if (memo.contains(*this)) {
+  if (memo.count(*this)) {
     return memo.at(*this);
   }
   IValue copy;

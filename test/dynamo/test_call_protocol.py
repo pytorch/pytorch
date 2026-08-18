@@ -1,7 +1,6 @@
 # Owner(s): ["module: dynamo"]
 """Tests for tp_call: callable() (PyCallable_Check) and the __call__ slot."""
 
-import binascii
 import functools
 import operator
 import types
@@ -9,10 +8,7 @@ import types
 import torch
 from torch._dynamo.exc import Unsupported
 from torch._dynamo.test_case import run_tests, TestCase
-from torch.testing._internal.common_utils import (
-    HardwareClassification,
-    make_dynamo_test,
-)
+from torch.testing._internal.common_utils import make_dynamo_test
 
 
 _NOT_CALLABLE_OBJECT = object()
@@ -36,12 +32,10 @@ class _WithCallChild(_WithCall):
 class _WithUntraceableCall:
     # __call__ is a C builtin with no traceable Python body; the type has a
     # tp_call slot (callable) but Dynamo cannot trace the call -> graph break.
-    __call__ = binascii.b2a_base64
+    __call__ = operator.add
 
 
 class TpCallTests(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
     @make_dynamo_test
     def test_callable_builtin(self):
         assert callable(len)  # noqa: S101

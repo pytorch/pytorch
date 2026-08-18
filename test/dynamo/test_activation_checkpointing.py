@@ -1849,7 +1849,6 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
             res = opt_gn(*args)
             self.assertEqual(ref, res)
 
-    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/4911")
     @requires_gpu_and_triton
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
@@ -1989,7 +1988,9 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         cudnn_version = (
             torch.backends.cudnn.version() if torch.backends.cudnn.is_available() else 0
         )
-        prefer_cudnn = cudnn_version > 91500 and dprops.major in (9, 10)
+        prefer_cudnn = (
+            cudnn_version > 91500 and dprops.major in (9, 10) and dprops.minor in (0, 3)
+        )
         if prefer_cudnn and torch.version.cuda and TEST_CUDA:
             sdpa_op = torch.ops.aten._scaled_dot_product_cudnn_attention.default
         else:
@@ -3404,7 +3405,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
 
 instantiate_device_type_tests(
-    ActivationCheckpointingViaTagsTests, globals(), except_for="cpu", allow_xpu=True
+    ActivationCheckpointingViaTagsTests, globals(), except_for="cpu"
 )
 
 

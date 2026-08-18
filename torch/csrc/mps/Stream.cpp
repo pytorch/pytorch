@@ -118,14 +118,12 @@ void THPMPSStream_init(PyObject* module) {
   THPMPSStreamType.tp_base = THPStreamClass;
   THPMPSStreamClass = (PyObject*)&THPMPSStreamType;
   if (PyType_Ready(&THPMPSStreamType) < 0) {
-    // @allow-raw-throw: rethrows the error PyType_Ready has already set
-    throw python_error();
+    throw python_error(); // @allow-raw-throw
   }
   Py_INCREF(&THPMPSStreamType);
   if (PyModule_AddObject(
           module, "_MPSStreamBase", (PyObject*)&THPMPSStreamType) < 0) {
-    // @allow-raw-throw: rethrows the error PyModule_AddObject has already set
-    throw python_error();
+    throw python_error(); // @allow-raw-throw
   }
 }
 

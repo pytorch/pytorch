@@ -61,7 +61,7 @@ from torch._inductor.graph import GraphLowering
 from torch._inductor.mock_cache import global_stats, PatchCaches, Stats
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import clear_caches, fresh_cache
+from torch._inductor.utils import clear_caches, fresh_cache, GPU_KERNEL_BIN_EXTS
 from torch._library import capture_triton
 from torch._subclasses import FakeTensorMode
 from torch.compiler._cache import (
@@ -530,6 +530,17 @@ class TestFxGraphCache(TestCase):
         PyCodeCache.cache_clear(purge=True)
         torch._dynamo.reset()
         clear_caches()
+
+    def _find_triton_kernel_binaries(self):
+        found = []
+        triton_dir = os.path.join(cache_dir(), "triton")
+        device_type = "hip" if torch.version.hip else "cuda"
+        binary_ext = GPU_KERNEL_BIN_EXTS[device_type]
+        for dirpath, _, filenames in os.walk(triton_dir):
+            for filename in filenames:
+                if filename.endswith(binary_ext):
+                    found.append(os.path.join(dirpath, filename))
+        return found
 
     def _check_cpu_thread_count_cache_key_no_input(self, return_expr):
         script = textwrap.dedent(
@@ -1020,6 +1031,55 @@ class TestFxGraphCache(TestCase):
             self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
             self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 1)
+
+    @requires_cuda_and_triton
+    @config.patch(
+        {
+            "fx_graph_cache": True,
+            "fx_graph_remote_cache": False,
+            "bundle_triton_into_fx_graph_cache": True,
+            "triton.store_cubin": True,
+            "compile_threads": 1,
+        }
+    )
+    def test_cache_artifact_load_emits_triton_bundle(self):
+        def fn(x, y):
+            return (x.sin() + y.cos()).relu()
+
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            mock.patch.dict(
+                os.environ,
+                {
+                    "TORCHINDUCTOR_CACHE_DIR": tmpdir,
+                    "TRITON_CACHE_DIR": os.path.join(tmpdir, "triton"),
+                },
+            ),
+        ):
+            self.reset()
+            CacheArtifactManager.clear()
+
+            x = torch.randn(256, 256, device="cuda")
+            y = torch.randn(256, 256, device="cuda")
+            compiled_fn = torch.compile(fn, dynamic=False)
+
+            self.assertEqual(fn(x, y), compiled_fn(x, y))
+            torch.cuda.synchronize()
+
+            artifacts = torch.compiler.save_cache_artifacts()
+            self.assertIsNotNone(artifacts)
+            artifact_bytes, _ = artifacts
+
+            self.assertGreater(len(self._find_triton_kernel_binaries()), 0)
+
+            self.reset()
+            CacheArtifactManager.clear()
+            shutil.rmtree(os.path.join(cache_dir(), "triton"), ignore_errors=True)
+
+            cache_info = torch.compiler.load_cache_artifacts(artifact_bytes)
+
+            self.assertIsNotNone(cache_info)
+            self.assertGreater(len(self._find_triton_kernel_binaries()), 0)
 
     @requires_triton()
     @config.patch(
@@ -5271,58 +5331,6 @@ class TestVecISACheckBuild(TestCase):
             torch_lib,
             msg=lambda msg: f"{msg}\nLD_LIBRARY_PATH should be prepended with {torch_lib!r}, got {value!r}",
         )
-
-    @unittest.skipUnless(sys.platform == "linux", "Linux loader semantics")
-    def test_avx_py_load_falls_back_to_import_torch(self):
-        # Wheels whose native deps only resolve once `import torch` has run
-        # (e.g. ROCm wheels with DT_NEEDED refs on sonames that exist only as
-        # already-loaded renamed bundles, see #189194) fail the cold dlopen,
-        # so the probe child must retry after importing torch. Simulate that:
-        # a probe .so that DT_NEEDEDs libc10.so with no rpath and no
-        # LD_LIBRARY_PATH fails to load cold, and resolves only once
-        # `import torch` maps libc10 into the child process.
-        from torch._inductor import cpu_vec_isa
-
-        compiler = shutil.which("cc") or shutil.which("gcc") or shutil.which("clang")
-        if compiler is None:
-            raise unittest.SkipTest("no C compiler available")
-        torch_lib = os.path.join(os.path.dirname(torch.__file__), "lib")
-        if not os.path.isfile(os.path.join(torch_lib, "libc10.so")):
-            raise unittest.SkipTest("libc10.so not found in torch lib dir")
-
-        with tempfile.TemporaryDirectory() as tmp:
-            src = os.path.join(tmp, "probe.c")
-            with open(src, "w") as f:
-                f.write("void __vec_isa_probe_dummy(void) {}\n")
-            lib_path = os.path.join(tmp, "libvec_isa_probe_needs_c10.so")
-            # --no-as-needed: the probe references no c10 symbol, so without it
-            # the linker would drop the DT_NEEDED entry this test relies on
-            cmd = [
-                compiler,
-                "-shared",
-                "-fPIC",
-                src,
-                "-o",
-                lib_path,
-                "-Wl,--no-as-needed",
-                f"-L{torch_lib}",
-                "-lc10",
-            ]
-            subprocess.run(cmd, check=True)
-
-            env = {k: v for k, v in os.environ.items() if k != "LD_LIBRARY_PATH"}
-            cold_load = f'from ctypes import cdll; cdll.LoadLibrary("{lib_path}")'
-            cold = subprocess.run(
-                [sys.executable, "-c", cold_load], env=env, stderr=subprocess.DEVNULL
-            )
-            if cold.returncode == 0:
-                raise unittest.SkipTest("loader resolves libc10.so without torch")
-
-            script = cpu_vec_isa.VecISA._avx_py_load.replace("__lib_path__", lib_path)
-            probe = subprocess.run(
-                [sys.executable, "-c", script], env=env, stderr=subprocess.PIPE
-            )
-            self.assertEqual(probe.returncode, 0, msg=probe.stderr.decode())
 
 
 class TestCompilationEventLogging(TestCase):

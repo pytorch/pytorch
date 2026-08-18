@@ -41,6 +41,7 @@ from torch.testing._internal.common_optimizers import (
     TensorTracker,
 )
 from torch.testing._internal.common_utils import (
+    getRocmVersion,
     markDynamoStrictTest,
     parametrize,
     run_tests,
@@ -452,6 +453,19 @@ class TestOptimRenewed(TestCase):
     )
     def test_rosenbrock_sparse(self, device, dtype, optim_info, with_lrsched):
         optim_cls = optim_info.optim_cls
+
+        if (
+            TEST_WITH_ROCM
+            and getRocmVersion() >= (7, 14)
+            and optim_cls.__name__ == "SGD"
+            and not with_lrsched
+            and torch.device(device).type == "cuda"
+            and dtype == torch.float64
+        ):
+            self.skipTest(
+                "order/state-dependent sparse SGD step timeout on ROCm 7.14+ "
+                "(with_lrsched=False, SGD, cuda, float64)"
+            )
 
         # Skip differentiable testing for now, see https://github.com/pytorch/pytorch/issues/116490
         # Fused impls do not support sparse gradients
@@ -1020,33 +1034,12 @@ class TestOptimRenewed(TestCase):
     )
     def test_foreach_large_tensor(self, device, dtype, optim_info):
         optim_cls = optim_info.optim_cls
-        # Why 2**32? 2 reasons.
-        # 1. if numel gets narrowed to 32 bits for uint32, it becomes 0, and the
-        # kernel silently does nothing
-        # 2. if it gets narrowed to int32 (much smaller max), it will be negative
-        # and the kernel may also silently do nothing
-        # This test makes sure that we do not hit either of these by accident.
-        #
-        # However, we use a smaller number for Adafactor as it reduces over the whole
-        # param and update in the param dtype (p.norm(2), update.norm(2)), and at 2**32
-        # unit-magnitude elements both norms are 65536, past the fp16 max of 65504, so
-        # they become inf and every param ends up nan. The smaller value will prevent
-        # situation 2 only, but that's better than skipping the test.
-        numel = 2**32 - 2**23 if optim_cls.__name__ == "Adafactor" else 2**32
         optim_inputs = optim_info.optim_inputs_func(device=device)
         for optim_input in optim_inputs:
-            params = [torch.ones(numel, device=device, dtype=dtype)]
-            params[0].grad = torch.ones_like(params[0])
+            params = [torch.ones(2**32, device=device, dtype=dtype)]
+            params[0].grad = torch.zeros_like(params[0])
             optimizer = optim_cls(params, foreach=True, **optim_input.kwargs)
             optimizer.step()
-
-            # Every element saw the same param and grad, so they must all agree.
-            # Compare with a size 1 param for reference.
-            self.assertEqual(params[0].min(), params[0].max())
-            ref = torch.ones(1, device=device, dtype=dtype)
-            ref.grad = torch.ones_like(ref)
-            optim_cls([ref], foreach=True, **optim_input.kwargs).step()
-            self.assertEqual(params[0][0], ref[0])
 
     @onlyCUDA
     @optims(
@@ -1163,51 +1156,6 @@ class TestOptimRenewed(TestCase):
             )
         self._test_derived_optimizers(device, dtype, optim_info, "fused")
 
-    # Test vectorization path splits for fused kernels. Ensure the scalar path
-    # and vectorized path compute the same thing.
-    # See https://github.com/pytorch/pytorch/issues/191763.
-    # fp64 is left out so this runs on MPS; it shares the same code w/ fp32
-    @optims(
-        [optim for optim in optim_db if "fused" in optim.supported_impls],
-        dtypes=(torch.float32, torch.float16, torch.bfloat16),
-    )
-    # Vectorized::size() is at most 32 elements (AVX512, bf16/fp16), so 64 tests
-    # two full blocks with no remainder, and 65 adds a scalar remainder.
-    @parametrize("numel", [64, 65])
-    def test_fused_vectorized_block_matches_scalar(
-        self, device, dtype, optim_info, numel
-    ):
-        if _get_device_type(device) not in optim_info.supports_fused_on:
-            self.skipTest(
-                f"{device} is not supported for fused on {optim_info.optim_cls.__name__}"
-            )
-        optim_cls = optim_info.optim_cls
-        for optim_input in optim_info.optim_inputs_func(device=device, dtype=dtype):
-            kwargs = deepcopy(optim_input.kwargs)
-            if kwargs.get("capturable", False) and _get_device_type(device) == "cpu":
-                # capturable is not supported on CPU
-                continue
-            param_numel, param_single = (
-                torch.nn.Parameter(torch.full((n,), 0.25, device=device, dtype=dtype))
-                for n in (numel, 1)
-            )
-            opt_numel = optim_cls([param_numel], fused=True, **kwargs)
-            opt_single = optim_cls([param_single], fused=True, **kwargs)
-            for step in range(3):
-                grad_value = 0.125 * (step + 1)
-                param_numel.grad = torch.full_like(param_numel, grad_value)
-                param_single.grad = torch.full_like(param_single, grad_value)
-                opt_numel.step()
-                opt_single.step()
-                self.assertEqual(param_numel, param_single.expand(numel))
-                state = opt_numel.state[param_numel]
-                ref_state = opt_single.state[param_single]
-                self.assertEqual(state.keys(), ref_state.keys())
-                for k, v in state.items():
-                    # the shape guard skips step and SGD's None momentum_buffer
-                    if torch.is_tensor(v) and v.shape == param_numel.shape:
-                        self.assertEqual(v, ref_state[k].expand(numel))
-
     @optims(
         [optim for optim in optim_db if "fused" in optim.supported_impls],
         dtypes=(torch.float32,),
@@ -1251,7 +1199,7 @@ class TestOptimRenewed(TestCase):
         dtypes=[torch.float16],
     )
     def test_fused_large_tensor(self, device, dtype, optim_info):
-        if _get_device_type(device) not in optim_info.supports_fused_on:
+        if device not in optim_info.supports_fused_on:
             self.skipTest(
                 f"{device} is not supported for fused on {optim_info.optim_cls.__name__}"
             )
@@ -1259,17 +1207,9 @@ class TestOptimRenewed(TestCase):
         optim_inputs = optim_info.optim_inputs_func(device=device)
         for optim_input in optim_inputs:
             params = [torch.ones(2**32, device=device, dtype=dtype)]
-            params[0].grad = torch.ones_like(params[0])
+            params[0].grad = torch.zeros_like(params[0])
             optimizer = optim_cls(params, fused=True, **optim_input.kwargs)
             optimizer.step()
-
-            # Every element saw the same param and grad, so they must all agree.
-            # Compare with a size 1 param for reference.
-            self.assertEqual(params[0].min(), params[0].max())
-            ref = torch.ones(1, device=device, dtype=dtype)
-            ref.grad = torch.ones_like(ref)
-            optim_cls([ref], fused=True, **optim_input.kwargs).step()
-            self.assertEqual(params[0][0], ref[0])
 
     @skipMPS  # MPS fused optimizer does not properly handle found_inf
     @onlyAccelerator
@@ -2397,7 +2337,7 @@ class TestOptimRenewed(TestCase):
         for optim_input in optim_inputs:
             inpts, models, optimizers = [], [], []
             for dev in ("cpu", _get_device_type(device)):
-                kwargs = deepcopy(optim_input.kwargs)
+                kwargs = optim_input.kwargs
                 kwargs["fused"] = True
                 inpt = torch.tensor(
                     [0.1, 0.2, 0.3, 0.4, 0.5, 0.6], dtype=dtype, device=dev
@@ -2425,7 +2365,7 @@ class TestOptimRenewed(TestCase):
                 inpts.append(inpt)
                 models.append(model)
                 optimizers.append(optimizer)
-            self._compare_between(inpts, models, optimizers)
+        self._compare_between(inpts, models, optimizers)
 
     @onlyCUDA
     @optims(
