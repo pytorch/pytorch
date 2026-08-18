@@ -1448,7 +1448,6 @@ torch.cuda.synchronize()
         )
 
     @expectedFailureMPS  # TODO: Fixme
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/4731")
     @dtypes(torch.half, torch.bfloat16, torch.float, torch.double)
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @gcIfJetson
