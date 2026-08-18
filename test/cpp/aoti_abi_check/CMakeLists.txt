@@ -35,6 +35,12 @@ set(AOTI_ABI_CHECK_VEC_TEST_SRCS
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_vec_half.cpp
 )
 
+if(USE_CUDA)
+  list(APPEND AOTI_ABI_CHECK_TEST_SRCS
+    ${AOTI_ABI_CHECK_TEST_ROOT}/cuda/test_kernel_utils.cu
+  )
+endif()
+
 add_executable(test_aoti_abi_check
   ${AOTI_ABI_CHECK_TEST_SRCS}
 )
@@ -45,6 +51,9 @@ target_compile_definitions(test_aoti_abi_check PRIVATE USE_GTEST)
 # WARNING: DO NOT LINK torch!!!
 # The purpose is to check if the used aten/c10 headers are written in a header-only way
 target_link_libraries(test_aoti_abi_check PRIVATE gtest_main sleef)
+if(USE_CUDA)
+  target_link_libraries(test_aoti_abi_check PRIVATE torch::cudart)
+endif()
 target_include_directories(test_aoti_abi_check PRIVATE ${ATen_CPU_INCLUDE})
 if(NOT USE_SYSTEM_SLEEF)
   target_include_directories(test_aoti_abi_check PRIVATE ${CMAKE_BINARY_DIR}/include)

@@ -1308,6 +1308,39 @@ If you are running single node training, it may be convenient to interactively b
 .. autofunction:: torch.distributed.breakpoint
 ```
 
+## Watchdog (Experimental)
+
+The ``torch.distributed._watchdog`` module provides a pure-Python watchdog for
+detecting hung operations in Python-based distributed backends and related
+distributed primitives. It monitors both CPU-side hangs (e.g., a stuck
+rendezvous) and GPU-side hangs (e.g., a kernel that never completes) by running
+an asyncio event loop on a background daemon thread. By default, timeouts dump
+all thread stack traces and abort the process.
+
+:::{warning}
+This module is experimental and subject to change.
+:::
+
+```{eval-rst}
+.. currentmodule:: torch.distributed._watchdog
+```
+
+```{eval-rst}
+.. autofunction:: shutdown
+```
+
+```{eval-rst}
+.. autofunction:: stream_timeout
+```
+
+```{eval-rst}
+.. autofunction:: cpu_timeout
+```
+
+```{eval-rst}
+.. autofunction:: op_timeout
+```
+
 % Distributed modules that are missing specific entries.
 
 % Adding them here for tracking purposes until they are more permanently fixed.

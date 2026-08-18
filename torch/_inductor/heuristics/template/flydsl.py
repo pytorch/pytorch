@@ -129,9 +129,9 @@ def get_exhaustive_gemm_configs() -> list[FlyDSLGemmConfig]:
             if mma_m_iters > 4 or mma_n_iters > 4:
                 continue
         try:
-            config = FlyDSLGemmConfig(**cast(FlyDSLGemmConfigDict, gemm_config))
-            _make_gemm_param(asdict(config))
-            valid_configs.append(config)
+            candidate = FlyDSLGemmConfig(**cast(FlyDSLGemmConfigDict, gemm_config))
+            _make_gemm_param(asdict(candidate))
+            valid_configs.append(candidate)
         except Exception as e:
             log.debug(
                 "Skipping invalid exhaustive FlyDSL config %s: %s", gemm_config, e
