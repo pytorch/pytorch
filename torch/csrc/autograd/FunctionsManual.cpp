@@ -4685,18 +4685,33 @@ static Tensor masked_fmap(
 Tensor linalg_det_jvp(
     const Tensor& dA,
     const Tensor& det,
+    const Tensor& A,
     const Tensor& LU,
     const Tensor& pivots,
     const bool use_A_T) {
   // (d det)_A(E) = tr(A^{-1}E)*det
   // We use that the determinant is C^1 to approximate the gradient of singular
-  // inputs Since we never differentiate over forward AD, we don't need to deal
-  // with further gradients, as we do in grad_backward
-  auto eps = at::native::_get_epsilon(c10::toRealValueType(LU.scalar_type()));
-  auto LU_ =
-      LU + at::diag_embed(at::where(LU.diagonal(0, -2, -1) == 0., eps, 0.));
-  auto AinvE =
-      at::linalg_lu_solve(LU_, pivots, dA, /*left=*/true, /*adjoint=*/use_A_T);
+  // inputs.
+  // Recompute A^{-1}dA via linalg_solve when the result may be differentiated
+  // again, so autograd sees the dependence of A^{-1} on A (cf. the analogous
+  // branch in linalg_det_backward). The subclass check makes every functorch
+  // transform, even a single jvp, take this branch: the primal here still
+  // carries a functorch wrapper, which is indistinguishable from a pending
+  // higher-order differentiation. Only plain forward-mode AD (make_dual
+  // without functorch) reaches the fast saved-LU path below.
+  // Under no_grad() or inference mode, the tangent cannot be reverse-
+  // differentiated, so the saved-LU path is safe regardless of requires_grad.
+  Tensor AinvE;
+  if ((at::GradMode::is_enabled() && A.requires_grad()) ||
+      areAnyTensorSubclassLike({A, dA})) {
+    AinvE = at::linalg_solve(A, dA);
+  } else {
+    auto eps = at::native::_get_epsilon(c10::toRealValueType(LU.scalar_type()));
+    auto LU_ =
+        LU + at::diag_embed(at::where(LU.diagonal(0, -2, -1) == 0., eps, 0.));
+    AinvE = at::linalg_lu_solve(
+        LU_, pivots, dA, /*left=*/true, /*adjoint=*/use_A_T);
+  }
   return AinvE.diagonal(0, -2, -1).sum(-1) * det;
 }
 
@@ -4770,7 +4785,22 @@ Tensor linalg_det_backward(
     // in the result.
 
     if (areAnyTensorSubclassLike({A, d, grad})) {
-      return singular(A, d, grad);
+      // We can't call masked_fmap here as it calls index({mask}) which needs
+      // item(). Instead we select between the singular (SVD adjugate) and
+      // non-singular (solve) formulas with where. To keep each branch's
+      // derivative finite where it is not selected, we feed the SVD a matrix
+      // with distinct singular values off the singular set (so svd_backward's
+      // 1/(S_i^2 - S_j^2) terms stay finite) and the solve the identity on it.
+      // Always using the SVD formula instead poisons non-singular inputs with
+      // clustered singular values.
+      auto singular_mask = (det.abs() < 100. * eps).unsqueeze(-1).unsqueeze(-1);
+      auto ones = at::ones_like(A.diagonal(0, -2, -1));
+      auto identity = at::diag_embed(ones);
+      auto distinct = at::diag_embed(ones.cumsum(-1));
+      auto sing = singular(at::where(singular_mask, A, distinct), d, grad);
+      auto non_sing =
+          non_singular(at::where(singular_mask, identity, A), d, grad);
+      return at::where(singular_mask, sing, non_sing);
     } else {
       return masked_fmap(
           det.abs() < 100. * eps, singular, non_singular, A, d, grad);
@@ -4782,13 +4812,28 @@ std::tuple<Tensor, Tensor> slogdet_jvp(
     const Tensor& LU,
     const Tensor& pivots,
     const Tensor& dA,
+    const Tensor& A,
     const Tensor& sign,
     const bool use_A_T) {
   // No need to handle the singular case separately as we do in det since
   // this function is not differentiable on singular matrices
-  auto trAinvE = at::linalg_lu_solve(LU, pivots, dA, /*left*/ true, use_A_T)
-                     .diagonal(0, -2, -1)
-                     .sum(-1);
+  // Recompute A^{-1}dA via linalg_solve when the result may be differentiated
+  // again (cf. linalg_det_jvp): the subclass check makes every functorch
+  // transform, even a single jvp, take this branch, since the primal still
+  // carries a functorch wrapper indistinguishable from a pending higher-order
+  // differentiation. Plain forward-mode AD (make_dual without functorch)
+  // keeps the fast LU path.
+  // Under no_grad() or inference mode, the tangent cannot be reverse-
+  // differentiated, so the saved-LU path is safe regardless of requires_grad.
+  Tensor trAinvE;
+  if ((at::GradMode::is_enabled() && A.requires_grad()) ||
+      areAnyTensorSubclassLike({A, dA})) {
+    trAinvE = at::linalg_solve(A, dA).diagonal(0, -2, -1).sum(-1);
+  } else {
+    trAinvE = at::linalg_lu_solve(LU, pivots, dA, /*left*/ true, use_A_T)
+                  .diagonal(0, -2, -1)
+                  .sum(-1);
+  }
   if (LU.is_complex()) {
     auto i = c10::complex<double>{0.0, 1.0};
     return std::make_tuple(at::imag(trAinvE) * (i * sign), at::real(trAinvE));
@@ -6512,6 +6557,7 @@ Tensor linalg_solve_jvp(
     const Tensor& dA,
     const Tensor& dB,
     const Tensor& X,
+    const Tensor& A,
     const Tensor& LU,
     const Tensor& pivots,
     const bool left) {
@@ -6536,7 +6582,21 @@ Tensor linalg_solve_jvp(
   auto X_ = vector_to_matrix(X);
   auto dB_ = vector_to_matrix(dB);
   auto R_ = left ? dA.matmul(X_) : X_.matmul(dA);
-  auto dX_ = at::linalg_lu_solve(LU, pivots, dB_ - R_, left);
+  // Recompute A^{-1}(dB - dAX) via linalg_solve when the result may be
+  // differentiated again (cf. linalg_solve_backward). The subclass check over
+  // A, dA, and dB makes every functorch transform, even a single jvp, take
+  // this branch: the primal still carries a functorch wrapper that is
+  // indistinguishable from a pending higher-order differentiation. Plain
+  // forward-mode AD (make_dual without functorch) keeps the fast LU path.
+  // Under no_grad() or inference mode, the tangent cannot be reverse-
+  // differentiated, so the saved-LU path is safe regardless of requires_grad.
+  Tensor dX_;
+  if ((at::GradMode::is_enabled() && A.requires_grad()) ||
+      areAnyTensorSubclassLike({A, dA, dB})) {
+    dX_ = at::linalg_solve(A, dB_ - R_, left);
+  } else {
+    dX_ = at::linalg_lu_solve(LU, pivots, dB_ - R_, left);
+  }
   return matrix_to_vector(dX_);
 }
 

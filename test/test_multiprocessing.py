@@ -25,7 +25,6 @@ from torch.testing._internal.common_utils import (
     load_tests,
     run_tests,
     skipIfRocm,
-    skipIfRocmVersionAtLeast,
     slowTest,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
@@ -647,8 +646,6 @@ class TestMultiprocessing(_MultiprocessingTestMixin, TestCase):
     def test_fd_pool(self):
         self._test_pool(repeat=TEST_REPEATS)
 
-    # torch_shm_manager cannot resolve librocprofiler-sdk.so.1 in CI child processes.
-    @skipIfRocmVersionAtLeast([7, 14])
     @unittest.skipIf(
         TEST_WITH_ASAN,
         "seems to hang with ASAN, see https://github.com/pytorch/pytorch/issues/5326",
@@ -660,17 +657,14 @@ class TestMultiprocessing(_MultiprocessingTestMixin, TestCase):
             repeat = 1 if IS_MACOS else TEST_REPEATS
             self._test_sharing(repeat=repeat)
 
-    @skipIfRocmVersionAtLeast([7, 14])
     def test_fs_preserve_sharing(self):
         with fs_sharing():
             self._test_preserve_sharing(repeat=TEST_REPEATS)
 
-    @skipIfRocmVersionAtLeast([7, 14])
     def test_fs_pool(self):
         with fs_sharing():
             self._test_pool(repeat=TEST_REPEATS)
 
-    @skipIfRocmVersionAtLeast([7, 14])
     @unittest.skipIf(not HAS_SHM_FILES, "don't not how to check if shm files exist")
     def test_fs(self):
         def queue_put():
@@ -1082,8 +1076,6 @@ if __name__ == "__main__":
     def test_is_shared(self):
         self._test_is_shared()
 
-    # torch_shm_manager cannot resolve librocprofiler-sdk.so.1 in CI child processes.
-    @skipIfRocmVersionAtLeast([7, 14])
     def test_fs_is_shared(self):
         with fs_sharing():
             self._test_is_shared()
