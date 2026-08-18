@@ -7371,6 +7371,36 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         self._filter_pdl(self.body)
 
+        runtime_divisible_by_16: tuple[int, ...] = ()
+        # Keep runtime specialization to two paths in memory-heavy pointwise kernels.
+        if (
+            config.triton.divisible_by_16
+            and torch.version.hip is None
+            and props_device.type == "cuda"
+            and not self.features.is_reduction()
+            and not self.is_combo_kernel
+            and not self.uses_tma
+            and not self.atomic_add_found
+            and self.num_load >= 4
+        ):
+            candidates = tuple(
+                (i, arg.expr)
+                for i, arg in enumerate(signature)
+                if isinstance(arg, SizeArg)
+                and arg.expr is not None
+                and triton_meta_signature[argdefs[i].name] in ("i32", "i64")
+                and not arg.name.startswith("load_seed_offset")
+                and bool(getattr(arg.expr, "free_symbols", ()))
+                and not V.graph.sizevars.statically_known_multiple_of(arg.expr, 16)
+            )
+            # Optimization hints do not add guards. Avoid paying for a specialization
+            # on workloads whose observed dynamic sizes cannot take its fast path.
+            if candidates and all(
+                V.graph.sizevars.optimization_hint(expr, fallback=1) % 16 == 0
+                for _, expr in candidates
+            ):
+                runtime_divisible_by_16 = tuple(i for i, _ in candidates)
+
         # Compute configs after codegen_body() so we know if the kernel
         # uses atomic ops. On HIP, buffer ops don't support atomics, so
         # we must not tag any args with pointer_range_32 in that case.
@@ -7393,6 +7423,41 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         for helper in self.helper_functions:
             code.writeline("")
             code.splice(helper)
+
+        runtime_divisible_names = tuple(
+            argdefs[i].name for i in runtime_divisible_by_16
+        )
+
+        def codegen_kernel_body() -> None:
+            self.codegen_static_numels(code)
+            for old, new in self.args.aliases():
+                code.writeline(f"{old} = {new}")
+            code.splice(self.body)
+
+        kernel_name = name or str(Placeholder.KERNEL_NAME)
+        aligned_body_name = f"{kernel_name}_aligned"
+        fallback_body_name = f"{kernel_name}_fallback"
+        if runtime_divisible_by_16:
+            for body_name, aligned in (
+                (aligned_body_name, True),
+                (fallback_body_name, False),
+            ):
+                code.writeline("")
+                code.writeline("@triton.jit(noinline=True)")
+                code.writeline(
+                    f"def {body_name}({', '.join(x.full_name() for x in argdefs)}):"
+                )
+                with code.indent():
+                    if aligned:
+                        # The outer branch guarantees every predicate is true. The
+                        # fallback 16 makes each tl.where a fresh always-divisible SSA
+                        # value; Triton drops hints on noinline function parameters.
+                        for arg_name in runtime_divisible_names:
+                            code.writeline(
+                                f"{arg_name} = tl.multiple_of("
+                                f"tl.where({arg_name} % 16 == 0, {arg_name}, 16), 16)"
+                            )
+                    codegen_kernel_body()
 
         if self.fixed_config:
             heuristics_line = f"""
@@ -7430,17 +7495,27 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 @triton.jit
             """
         code.splice(heuristics_line)
-        kernel_name = name or str(Placeholder.KERNEL_NAME)
         code.writeline(
             f"def {kernel_name}({', '.join(x.full_name() for x in argdefs)}):"
         )
         with code.indent():
             if config.triton.proton_profiling:
                 code.writeline(f'pl.enter_scope("{kernel_name}")')
-            self.codegen_static_numels(code)
-            for old, new in self.args.aliases():
-                code.writeline(f"{old} = {new}")
-            code.splice(self.body)
+            if runtime_divisible_by_16:
+                for arg_name in runtime_divisible_names:
+                    code.writeline(f"{arg_name}_is_aligned = {arg_name} % 16 == 0")
+                condition = " and ".join(
+                    f"{arg_name}_is_aligned" for arg_name in runtime_divisible_names
+                )
+                call_args = ", ".join(arg.name for arg in argdefs)
+                code.writeline(f"if {condition}:")
+                with code.indent():
+                    code.writeline(f"{aligned_body_name}({call_args})")
+                code.writeline("else:")
+                with code.indent():
+                    code.writeline(f"{fallback_body_name}({call_args})")
+            else:
+                codegen_kernel_body()
             if config.triton.proton_profiling:
                 code.writeline(f'pl.exit_scope("{kernel_name}")')
 
