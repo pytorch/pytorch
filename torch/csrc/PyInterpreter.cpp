@@ -1296,8 +1296,9 @@ bool ConcretePyInterpreterVTable::allow_non_fake_inputs() const {
   if (!override_val.is_none()) {
     return override_val.cast<bool>();
   }
-  auto active = get_active_fake_mode();
-  return active.py_fake_mode.attr("allow_non_fake_inputs").cast<bool>();
+  auto mode = c10::impl::FakeTensorModeTLS::get_state();
+  TORCH_CHECK(mode != nullptr, "FakeTensorMode must be active");
+  return mode->allow_non_fake_inputs_;
 }
 
 std::shared_ptr<c10::SafePyObject> ConcretePyInterpreterVTable::
