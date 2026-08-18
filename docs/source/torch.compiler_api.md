@@ -64,10 +64,8 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 
       With the default ``make_fx`` tracer, capture is non-strict. Control flow is
       specialized to the example inputs, and shapes are static -- each size is baked in.
-      The exception is a tensor dim explicitly marked unbacked with
-      ``torch._dynamo.decorators.mark_unbacked`` on the inputs before the call (with
-      ``make_fx`` this requires the inductor backend; with ``tracer="dynamo"`` either
-      backend works); such
+      The exception is a tensor dim explicitly marked unbacked (inductor backend only)
+      with ``torch._dynamo.decorators.mark_unbacked`` on the inputs before the call; such
       a dim is captured as an unbacked symint, so one artifact serves any runtime size of
       it, and a graph that needs to guard on it fails at capture. Each input's dtype and
       device are specialized too (a runtime mismatch is rejected), and the inductor backend
@@ -91,33 +89,14 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
        ``"eager"`` keeps the captured ATen graph (layout-flexible, no kernels; shapes
        are still specialized to the example).
    :param tracer: capture front-end. ``"make_fx"`` (default) is a non-strict make_fx
-       trace. ``"dynamo"`` analyzes the Python (bytecode) rather than tracing one path and
-       inlines the transformed bytecode Dynamo produces into ``python_code``, lowering the
-       compiled subgraph through the same ``backend`` choices; it honors ``mark_unbacked``
-       dynamic shapes (on either backend, though ``mark_unbacked(strict=True)`` raises --
-       Dynamo captures a strict mark as a guardable backed dim), ``decompositions``, and
-       training steps (a ``.backward()`` / ``torch.autograd.grad`` is traced into the graph
-       and the parameter gradients are accumulated onto the runtime model like eager). A
-       ``fn`` whose Python graph-breaks for other reasons
-       raises. Unlike ``make_fx``, the dynamo driver does NOT re-validate the
-       runtime model/inputs, so on the eager backend a drifted model (broken weight tying,
-       a retyped/reshaped weight) or a broadcast-compatible input-shape mismatch can
-       silently miscompute where ``make_fx`` would raise; pass a model and inputs matching
-       the example. The dynamo artifact inlines marshalled bytecode plus a pickled state
-       blob, so it is locked to the Python version that produced it AND, because its import
-       aliases can reference private ``torch._dynamo`` modules, to a compatible torch build,
-       unlike ``make_fx`` source (Python-version portable on either backend; use
-       ``backend='eager'`` for portability across torch builds too, since the default
-       ``make_fx`` inductor artifact inlines private ``torch._inductor`` modules).
+       trace and the only tracer implemented today; ``"dynamo"`` is planned and raises
+       ``NotImplementedError`` for now.
    :param decompositions: Optional decomposition table (``dict`` of ``OpOverload`` to a
-       decomposition function) controlling how ATen ops are broken down in the captured
-       graph; defaults to ``None``. ``tracer="make_fx"`` forwards it to ``make_fx`` during
-       capture; ``tracer="dynamo"`` applies the same table by re-tracing Dynamo's captured
-       subgraph with it.
+       decomposition function) forwarded to ``make_fx``; defaults to ``None``.
    :returns: ``(python_code, cache)`` -- a self-contained Python source string (the
        single source of truth for the calling convention) and a binary acceleration
        cache (no weights, no calling-convention metadata; it carries a small
-       format/version/backend/tracer/code_hash integrity tag that ``load`` verifies).
+       format/version/backend/code_hash integrity tag that ``load`` verifies).
    :raises PrecompileError: if capture, lowering, or a runtime call violates the
        contract (see the exception below).
 
@@ -153,8 +132,8 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
        calling conventions are not supported.
    :raises PrecompileError: if ``python_code`` is not a valid precompile artifact (it
        fails to parse or is missing its calling-convention metadata), if ``cache`` is
-       paired with a different ``python_code`` (mismatched ``backend`` tag, ``tracer``
-       tag, or ``code_hash``), or if a runtime call violates the precompile contract.
+       paired with a different ``python_code`` (mismatched ``backend`` tag or
+       ``code_hash``), or if a runtime call violates the precompile contract.
 
 .. autoexception:: torch.compiler.PrecompileError
 ```
