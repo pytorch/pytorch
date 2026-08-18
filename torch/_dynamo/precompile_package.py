@@ -9,58 +9,36 @@ recompiled variant of each -- into a single serializable artifact.
 
 Usage::
 
-    session = torch.compiler.precompile.capture(model, backend="inductor")
-    with session as compiled:
-        for variant in variants:  # every path you want covered
-            with variant:
-                compiled(*args)
-    session.save("snapshots/model.pt")
-
-``example_inputs`` runs the calls for you, under ``torch.no_grad()``, so an
-inference capture with nothing conditional in it is one statement, and
-``invariants`` writes a readable report of what the capture established::
-
-    with torch.compiler.precompile.capture(
-        model,
+    python_code, cache = torch.compiler.precompile(
+        step,  # e.g. lambda model, x: model(x)
         backend="inductor",
-        example_inputs=[(x1,), (x2,)],
-        invariants="model.invariants",
-    ) as compiled:
-        pass
-
-Calls in the block body run in the caller's grad mode rather than under
-no_grad, so a training capture -- one that calls ``.backward()`` -- goes there
-rather than in ``example_inputs``, and passing one call both ways compiles it
-twice, once per grad mode.
-
-Live capture retains every runtime guard so later examples trigger the same
-recompilations as ordinary ``torch.compile``. ``guard_filter_fn`` applies only
-to the serialized copy. If serialization drops a configuration-dependent guard,
-``save()`` refuses by default rather than writing variants whose dispatch would
-be ambiguous after load.
-
-Per frame, that report separates the guards that held in EVERY compiled variant
-from the ones that differed. The first set are the preconditions the artifact is
-only valid under -- a call violating one cannot be served by any graph in it --
-and each is marked enforced or dropped, so a precondition nothing rechecks at
-load is visible rather than implied. The second set is what tells the compiled
-graphs apart. Intersection is per frame because guards from different frames are
-not comparable: the entry frame guards its arguments, a resume frame guards
-whatever crossed the break. See ``PrecompileSession.invariants``.
-
-Both path kwargs name a FILE and write exactly it, creating parent directories:
-``snapshots/invariants.txt`` is a text file you can commit and diff, and
-``save("snapshots/model.pt")`` is the artifact itself, handed straight back to
-``precompile_load``. That is deliberately unlike ``DiskDynamoStore``, whose path
-is a directory it fills, because a content-addressed cache owns its layout while
-an artifact you name is a file you move around.
+        example_inputs=[(model, x1), (model, x2)],
+    )
 
     # later, in a fresh process
-    compiled = torch.compiler.precompile.load_package(
-        model, path, backend="inductor"
-    )
-    with torch.no_grad(), torch.compiler.precompile.serving():
-        compiled(*args)
+    compiled = torch.compiler.precompile.load(python_code, cache)
+    with compiled, torch.no_grad():
+        compiled(model, x1)
+
+The examples ARE the capture: each one is run for you and every frame, break
+continuation and guarded variant it exercises is recorded. There is no manual
+capture block -- driving the calls yourself is not part of the public surface.
+
+Calls run under ``torch.no_grad()``. ``training=True`` runs them with grad
+enabled and lowers the backward eagerly instead, so the artifact carries one
+and a served output can be backpropagated. No loss is needed for that: the
+joint trace synthesizes tangents from the forward outputs' own metadata.
+
+Live capture retains every runtime guard, so later examples trigger the same
+recompilations as ordinary ``torch.compile``. ``guard_filter_fn`` applies only
+to the serialized copy. If serialization drops a configuration-dependent guard,
+the artifact is refused by default rather than written with variants whose
+dispatch would be ambiguous after load. ``invariants`` writes a readable report
+that separates, per frame, the guards holding in EVERY variant from the ones
+that differed: the first are preconditions the artifact is only valid under,
+the second are what tell its graphs apart. Guards from different frames are not
+comparable -- an entry frame guards its arguments, a resume frame guards
+whatever crossed the break -- so the intersection is per frame.
 
 Capture is by execution: a resume function only exists once the frame ahead of
 it has actually run, so every variant must be exercised. Whatever you do not
@@ -70,17 +48,16 @@ call that raises marks the session incomplete even if caller code catches it.
 
 Know these before relying on an artifact in production:
 
-* Capture inference artifacts under ``torch.no_grad()`` or
-  ``torch.inference_mode()``. With ``backend="inductor"`` and parameters that
-  require grad, AOTAutograd only records a bundled backend once the BACKWARD
-  compiles, so a forward-only capture with grad enabled -- the default, and what
-  ``model.eval()`` still leaves you in -- records no backends and cannot be
-  saved. Capturing a training step that calls ``.backward()`` works too.
+* An inference artifact is the default: examples run under ``torch.no_grad()``.
+  For a training artifact pass ``training=True``, which traces with grad on and
+  lowers the backward eagerly -- without it, AOTAutograd defers the backward to
+  the first ``.backward()`` call, so a grad-enabled capture that never makes one
+  records no backends and cannot be written.
 * A non-tensor argument, and any value that crosses a graph break, is guarded
   by equality, so an int/bool/str argument or a break coming from ``.item()``
   yields an artifact that only serves calls reproducing those exact values.
   ``summary().wont_generalize`` lists them; exercise every value you need to
-  serve inside the capture block, or expect poor coverage on new data.
+  serve through ``example_inputs``, or expect poor coverage on new data.
   ``dynamic=True`` helps with shapes but not with pinned values.
 * Identity guards cannot be serialized, so precompiling gives up on noticing
   that a guarded object was rebound. ``summary().dropped_guards`` is the
@@ -114,11 +91,10 @@ Know these before relying on an artifact in production:
 This wraps CompilePackage, which is the low-level component and is not meant to
 be used directly.
 
-The public surface is ``torch.compiler.precompile`` with ``example_inputs``,
-``torch.compiler.precompile.capture``,
-``torch.compiler.precompile.load_package``, and
-``torch.compiler.precompile.serving``. The helpers in this module implement that
-surface and remain internal. The positional ``torch.compiler.precompile`` form
+The public surface is ``torch.compiler.precompile`` -- with ``example_inputs``
+for this multi-graph form -- and ``torch.compiler.precompile.load``. The
+helpers in this module, including the capture session, implement that surface
+and remain internal. The positional ``torch.compiler.precompile`` form
 produces a self-contained Python source artifact from one example call. Both are distinct from
 ``torch._dynamo.config.caching_precompile``, which caches ``torch.compile``
 artifacts transparently without an explicit capture block.
