@@ -12,6 +12,7 @@ from ..utils import (
     _type_of,
     device_supports_fp64,
     expr_fits_within_32bit,
+    is_triton_fp8_dtype_supported,
     triton_version_uses_attrs_dict,
 )
 from ..virtualized import V
@@ -37,15 +38,23 @@ def should_unwrap_unspec_arg(name: str):
     return False
 
 
-def use_uint8_triton_storage_for_cuda_float8_e4m3fn(
+def use_uint8_triton_storage_for_cuda_fp8(
     dtype: torch.dtype,
     arg_name: str | None = None,
     *,
     device: torch.device | None = None,
 ) -> bool:
-    # Triton rejects fp8e4nv pointer types before sm89, but eager CUDA can
-    # still dequantize float8_e4m3fn values by treating storage as raw bytes.
-    if dtype != torch.float8_e4m3fn or torch.version.hip is not None:
+    # Triton rejects these pointer types on CUDA targets where they are not
+    # supported, but eager CUDA can still dequantize them from raw bytes.
+    if (
+        dtype
+        not in (
+            torch.float8_e4m3fn,
+            torch.float8_e4m3fnuz,
+            torch.float8_e5m2fnuz,
+        )
+        or torch.version.hip is not None
+    ):
         return False
     if arg_name is not None and not arg_name.startswith("in_ptr"):
         return False
@@ -59,7 +68,17 @@ def use_uint8_triton_storage_for_cuda_float8_e4m3fn(
     if device.type != "cuda":
         return False
 
-    return DeviceProperties.create(device).cc < 89
+    properties = DeviceProperties.create(device)
+    if dtype == torch.float8_e4m3fn:
+        # Preserve the established precursor behavior even if a mismatched
+        # Triton build does not expose target capability metadata.
+        return properties.cc < 89
+    return not is_triton_fp8_dtype_supported(
+        dtype,
+        triton_backend="cuda",
+        triton_arch=properties.cc,
+        warp_size=32,
+    )
 
 
 def signature_of(arg: KernelArgType, *, size_dtype: str | None) -> str:
@@ -72,7 +91,7 @@ def signature_of(arg: KernelArgType, *, size_dtype: str | None) -> str:
                 return "fp32"
             else:
                 return new_typ
-        elif use_uint8_triton_storage_for_cuda_float8_e4m3fn(arg.dtype, arg.name):
+        elif use_uint8_triton_storage_for_cuda_fp8(arg.dtype, arg.name):
             return "*u8"
         else:
             return typ
