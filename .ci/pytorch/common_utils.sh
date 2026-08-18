@@ -193,6 +193,19 @@ function install_torchvision() {
     # Not sure if both are needed, but why not
     export FORCE_CUDA=1
     export WITH_CUDA=1
+  elif [[ "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
+    # Build jobs run on headless CPU runners, so torch.cuda.is_available() is
+    # false even with a ROCm PyTorch wheel. Without FORCE_CUDA, torchvision
+    # picks CppExtension while hipify still emits *_hip.cpp beside the
+    # originals, and both vision.cpp and vision_hip.cpp define
+    # vision::cuda_version() -> link failure. FORCE_CUDA selects
+    # CUDAExtension, which deduplicates hip sources. See pytorch/vision#9298.
+    export FORCE_CUDA=1
+    local target_arch
+    target_arch=$(rocm_target_arch)
+    if [[ -n "${target_arch}" ]]; then
+      export PYTORCH_ROCM_ARCH="${target_arch}"
+    fi
   fi
   retry pip_build_and_install "git+https://github.com/pytorch/vision.git@${commit}" dist/vision
 
