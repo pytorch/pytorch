@@ -13288,7 +13288,9 @@ class TestControlFlowAndRNG(TestCase):
 
 instantiate_parametrized_tests(TestHopSchema)
 instantiate_parametrized_tests(TestControlFlowTraced)
-instantiate_device_type_tests(TestControlFlowTracedDevice, globals(), only_for=("cpu", "cuda"))
+instantiate_device_type_tests(
+    TestControlFlowTracedDevice, globals(), only_for=("cpu", "cuda")
+)
 instantiate_parametrized_tests(TestAutoFunctionalizeControlFlow)
 
 instantiate_parametrized_tests(TestControlFlow)
