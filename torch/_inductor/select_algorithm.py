@@ -64,11 +64,11 @@ from .codegen.common import (
     WorkspaceArg,
     WorkspaceZeroMode,
 )
-from .codegen.simd import constant_repr
+from .codegen.simd import CantSplit, constant_repr
 from .codegen.simd_kernel_features import SIMDKernelFeatures
 from .codegen.subgraph import SubgraphChoiceCaller
 from .codegen.triton import (
-    get_triton_reduction_function,
+    TemplateLocalReduction,
     TemplateLocalReductionPlan,
     texpr,
     TMACompatibilityChecker,
@@ -525,6 +525,142 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
         return f"tl.broadcast_to({index_str}, {shape})"
 
 
+class _TemplateLocalReductionOpsHandler(V.WrapperHandler):  # type: ignore[name-defined]
+    def __init__(
+        self,
+        inner,
+        kernel: "TritonTemplateKernel",
+        reduction: TemplateLocalReduction,
+        *,
+        source_name: str,
+        source_index: sympy.Expr,
+        store_index: sympy.Expr,
+        tile: tuple[int, int],
+        block: tuple[int, int],
+        reduction_mask: str,
+        output_index: str,
+        output_mask: str,
+        result_name: str,
+    ) -> None:
+        super().__init__(inner)
+        self.kernel = kernel
+        self.spec = reduction
+        self.source_name = source_name
+        self.source_index = source_index
+        self.store_index = store_index
+        self.tile = tile
+        self.block = block
+        self.reduction_mask = reduction_mask
+        self.output_index = output_index
+        self.output_mask = output_mask
+        self.result_name = result_name
+        self.value: CSEVariable | None = None
+        self.reduction_seen = False
+
+    def load(self, name: str, index: sympy.Expr) -> CSEVariable:
+        if name != self.source_name or sympy.simplify(index - self.source_index) != 0:
+            raise CantSplit(index, self.source_index)
+        if self.value is None:
+            value = self._inner.load(name, index)
+            if value.dtype is None:
+                raise AssertionError("template accumulator must have a known dtype")
+            tile_m, tile_n = self.tile
+            block_m, block_n = self.block
+            shape = (tile_m // block_m, block_m, tile_n // block_n, block_n)
+            self.value = self.kernel.emit_reshape(value, shape, value.dtype)
+        return self.value
+
+    def index_expr(self, expr: sympy.Expr, dtype: torch.dtype):
+        raise CantSplit(expr, dtype)
+
+    def to_dtype_bitcast(self, x, dtype: torch.dtype, src_dtype: torch.dtype):
+        raise CantSplit(dtype, src_dtype)
+
+    def reduction(
+        self,
+        dtype: torch.dtype,
+        src_dtype: torch.dtype,
+        reduction_type: str,
+        value: CSEVariable,
+    ) -> CSEVariable:
+        if self.reduction_seen or reduction_type != self.spec.reduction_type:
+            raise CantSplit(reduction_type, self.spec.reduction_type)
+        self.reduction_seen = True
+
+        tile_m, tile_n = self.tile
+        block_m, block_n = self.block
+        groups_m = tile_m // block_m
+        groups_n = tile_n // block_n
+        input_shape = (groups_m, block_m, groups_n, block_n)
+        expr = self.kernel.create_cse_var(
+            f"({value}).to({self.kernel.dtype_to_str(src_dtype)})",
+            ValueRanges.unknown(),
+            dtype=src_dtype,
+            shape=input_shape,
+        )
+        result_dtype = src_dtype
+        if src_dtype.is_floating_point and src_dtype.itemsize < 4:
+            result_dtype = torch.float32
+            expr = self.kernel.create_cse_var(
+                f"({expr}).to(tl.float32)",
+                ValueRanges.unknown(),
+                dtype=result_dtype,
+                shape=input_shape,
+            )
+
+        mask = self.kernel.create_cse_var(
+            self.reduction_mask,
+            ValueRanges.unknown(),
+            dtype=torch.bool,
+            shape=self.tile,
+        )
+        mask = self.kernel.emit_reshape(mask, input_shape, torch.bool)
+        neutral = constant_repr(
+            cast(
+                int | float,
+                ir.Reduction.default_accumulator(reduction_type, src_dtype),
+            )
+        )
+        value = self.kernel.create_cse_var(
+            f"tl.where({mask}, {expr}, {neutral})",
+            ValueRanges.unknown(),
+            dtype=result_dtype,
+            shape=input_shape,
+        )
+        value = self.kernel.emit_reduce(
+            value,
+            reduction_type,
+            3,
+            result_dtype,
+            (groups_m, block_m, groups_n),
+        )
+        result = self.kernel.emit_reduce(
+            value,
+            reduction_type,
+            1,
+            result_dtype,
+            (groups_m, groups_n),
+        )
+        self.kernel.compute.writeline(f"{self.result_name} = {result}")
+        return self.kernel.cse.namedvar(
+            self.result_name,
+            dtype=result_dtype,
+            shape=(groups_m, groups_n),
+        )
+
+    def store_reduction(self, name: str, index: sympy.Expr, value: CSEVariable) -> None:
+        if (
+            name != self.spec.output_name
+            or sympy.simplify(index - self.store_index) != 0
+            or not self.reduction_seen
+        ):
+            raise CantSplit(index, self.store_index)
+        output_ptr = self.kernel.args.output(name)
+        self.kernel.stores.writeline(
+            f"tl.store({output_ptr} + {self.output_index}, {value}, {self.output_mask})"
+        )
+
+
 # Function name, followed by args and kwargs.
 RecordedEventsType = list[tuple[str, list[Any], dict[str, Any]]]
 
@@ -716,9 +852,7 @@ class TritonTemplateKernel(TritonKernel):
         nodes = [node for epilogue in epilogue_nodes for node in epilogue.get_nodes()]
         return TritonScheduling._template_local_reduction_plan(self.output_node, nodes)
 
-    def _codegen_template_local_reductions(
-        self, epilogue_result, output_dtype, mask
-    ) -> None:
+    def _codegen_template_local_reductions(self) -> None:
         plan = self.template_local_reduction_plan
         if plan is None:
             return
@@ -729,104 +863,65 @@ class TritonTemplateKernel(TritonKernel):
         block_m, block_n = plan.block
         groups_m = tile_m // block_m
         groups_n = tile_n // block_n
-        output_index = None
-        if (groups_m, groups_n) != (1, 1):
-            output_m = self.index_to_str(plan.output_size[0])
-            output_n = self.index_to_str(plan.output_size[1])
-            pid_m = "_block_local_pid_m"
-            pid_n = "_block_local_pid_n"
-            self.body.writeline(
-                f"{pid_m} = (pid_m * {groups_m} + tl.arange(0, {groups_m}))[:, None]"
-            )
-            self.body.writeline(
-                f"{pid_n} = (pid_n * {groups_n} + tl.arange(0, {groups_n}))[None, :]"
-            )
-            self.body.writeline(
-                f"_block_local_store_mask = ({pid_m} < {output_m}) & ({pid_n} < {output_n})"
-            )
-            output_index = f"{pid_m} * {output_n} + {pid_n}"
+        template_m, template_n = self.output_node.get_size()
+        output_m = self.index_to_str(template_m // block_m)
+        output_n = self.index_to_str(template_n // block_n)
+        reduction_mask = self.template_mask or "(xmask & ymask)"
+        pid_m = "_block_local_pid_m"
+        pid_n = "_block_local_pid_n"
+        output_mask = "_block_local_store_mask"
+        self.compute.writeline(
+            f"{pid_m} = (pid_m * {groups_m} + tl.arange(0, {groups_m}))[:, None]"
+        )
+        self.compute.writeline(
+            f"{pid_n} = (pid_n * {groups_n} + tl.arange(0, {groups_n}))[None, :]"
+        )
+        self.compute.writeline(
+            f"{output_mask} = ({pid_m} < {output_m}) & ({pid_n} < {output_n})"
+        )
+        output_index = f"{pid_m} * {output_n} + {pid_n}"
 
-        output_type = self.dtype_to_str(output_dtype)
-        reduction_mask = mask or self.template_mask or "(xmask & ymask)"
-        for reduction_index, reduction in enumerate(plan.reductions):
-            output_ptr = self.args.output(reduction.output_name)
-            expr = f"({epilogue_result}).to({output_type})"
-            expr = self.create_cse_var(
-                expr,
-                ValueRanges.unknown(),
-                dtype=output_dtype,
-                shape=(str(tile_m), str(tile_n)),
-            )
-            with patch.object(self, "compute", self.body):
-                expr = self._lower_template_local_reduction_expr(reduction.source, expr)
-            source_type = self.dtype_to_str(reduction.source_dtype)
-            expr = f"({expr}).to({source_type})"
-            if (
-                reduction.source_dtype.is_floating_point
-                and reduction.source_dtype.itemsize < 4
+        for reduction_number, reduction in enumerate(plan.reductions):
+            buffer = V.graph.get_buffer(reduction.reduction_name)
+            output = V.graph.get_buffer(reduction.output_name)
+            if not isinstance(buffer, ir.ComputedBuffer) or not isinstance(
+                output, ir.ComputedBuffer
             ):
-                expr = f"({expr}).to(tl.float32)"
-            neutral = constant_repr(
-                cast(
-                    int | float,
-                    ir.Reduction.default_accumulator(
-                        reduction.reduction_type, reduction.source_dtype
-                    ),
+                raise CantSplit(reduction.reduction_name, reduction.output_name)
+            with buffer.with_original_inner_fn():
+                if not isinstance(buffer.data, ir.Reduction):
+                    raise AssertionError("expected the original reduction body")
+                index, reduction_index = buffer.data.inner_fn_args()
+                if len(index) != 2 or len(reduction_index) != 2:
+                    raise CantSplit(index, reduction_index)
+                source_index = self.output_node.make_indexer()(
+                    (
+                        index[0] * block_m + reduction_index[0],
+                        index[1] * block_n + reduction_index[1],
+                    )
                 )
-            )
-            value = f"tl.where({reduction_mask}, {expr}, {neutral})"
-            reduce_fn = get_triton_reduction_function(reduction.reduction_type)
-            result = f"_block_local_reduction_{reduction_index}"
-            if (groups_m, groups_n) == (1, 1):
-                self.body.writeline(
-                    f"{result} = {reduce_fn}({reduce_fn}({value}, 1), 0)"
+                output_index_expr = output.make_indexer()(index)
+                handler = _TemplateLocalReductionOpsHandler(
+                    V.get_ops_handler(),
+                    self,
+                    reduction,
+                    source_name=self.output_node.get_name(),
+                    source_index=source_index,
+                    store_index=output_index_expr,
+                    tile=self.template_local_reduction_tile,
+                    block=plan.block,
+                    reduction_mask=reduction_mask,
+                    output_index=output_index,
+                    output_mask=output_mask,
+                    result_name=f"_block_local_reduction_{reduction_number}",
                 )
-                self.body.writeline(
-                    f"tl.store({output_ptr} + pid_m * grid_n + pid_n, {result})"
-                )
-            else:
-                if output_index is None:
-                    raise AssertionError("expected a template-local output index")
-                value = (
-                    f"tl.reshape({value}, ({groups_m}, {block_m}, "
-                    f"{groups_n}, {block_n}))"
-                )
-                self.body.writeline(
-                    f"{result} = {reduce_fn}({reduce_fn}({value}, 3), 1)"
-                )
-                self.body.writeline(
-                    f"tl.store({output_ptr} + {output_index}, {result}, "
-                    "_block_local_store_mask)"
-                )
-
-    def _lower_template_local_reduction_expr(self, value: Any, expr: Any) -> Any:
-        from torch._inductor.kernel.loop_ir_epilogue_lowering import (
-            GemmEpilogueIRExpression,
-        )
-
-        if isinstance(value, tuple):
-            return tuple(
-                self._lower_template_local_reduction_expr(item, expr) for item in value
-            )
-        if isinstance(value, list):
-            return [
-                self._lower_template_local_reduction_expr(item, expr) for item in value
-            ]
-        if not isinstance(value, GemmEpilogueIRExpression):
-            return value
-        if value.op == "load":
-            return expr
-        if value.op == "identity":
-            return self._lower_template_local_reduction_expr(value.args[0], expr)
-        op = getattr(V.ops, value.op)
-        args = tuple(
-            self._lower_template_local_reduction_expr(arg, expr) for arg in value.args
-        )
-        kwargs = {
-            key: self._lower_template_local_reduction_expr(arg, expr)
-            for key, arg in value.kwargs
-        }
-        return op(*args, **kwargs)
+                with V.set_ops_handler(handler):
+                    buffer.data.store_reduction(
+                        reduction.output_name,
+                        output.make_indexer(),
+                        index,
+                        reduction_index,
+                    )
 
     @property
     def index_dtype(self) -> str:
@@ -1819,8 +1914,6 @@ class TritonTemplateKernel(TritonKernel):
                     epilogue_result, acc_dtype, src_dtype=output_dtype
                 )
 
-            self._codegen_template_local_reductions(epilogue_result, output_dtype, mask)
-
             V.ops.store(
                 self.output_node.get_name(),
                 output_index,
@@ -2125,11 +2218,18 @@ class TritonTemplateKernel(TritonKernel):
             partial_code = render()
 
             num_store_subgraphs = self.get_store_output_count()
+            if (
+                self.template_local_reduction_plan is not None
+                and num_store_subgraphs != 1
+            ):
+                raise CantSplit(num_store_subgraphs, 1)
             for i in range(num_store_subgraphs):
                 subgraph_name = self._get_store_output_subgraph_name(i)
                 with self.set_subgraph_body(subgraph_name):
                     for node in self._epilogue_nodes_by_subgraph[i]:
                         node.codegen(self.split_and_set_ranges(node.get_ranges()))
+                    if self.template_local_reduction_plan is not None:
+                        self._codegen_template_local_reductions()
                     self.cse.invalidate(OrderedSet())
 
             self.codegen_prologues_in_subgraphs(

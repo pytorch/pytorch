@@ -57,7 +57,13 @@ from torch._inductor.heuristics.template.triton import (
     XPUMMTemplateConfigHeuristic,
     XPUPersistentTMATemplateConfigHeuristic,
 )
-from torch._inductor.ir import Buffer, ChoiceCaller, FixedLayout, FlexibleLayout
+from torch._inductor.ir import (
+    Buffer,
+    ChoiceCaller,
+    FixedLayout,
+    FlexibleLayout,
+    MultiTemplateBuffer,
+)
 from torch._inductor.kernel.mm_plus_mm import aten_mm_plus_mm
 from torch._inductor.runtime.hints import DeviceProperties
 from torch._inductor.runtime.triton_heuristics import CachingAutotuner, pointwise
@@ -211,6 +217,7 @@ class TestMaxAutotune(TestCase):
             "sum",
             "min",
             "nan",
+            "signed_zero",
             "multiple",
             "permute",
             "relu",
@@ -237,6 +244,9 @@ class TestMaxAutotune(TestCase):
                 return blocked.sum((1, 3))
             if case == "min":
                 return blocked.amin((1, 3))
+            if case == "signed_zero":
+                zeroed = blocked * 0.0
+                return zeroed.amax((1, 3)), zeroed.amin((1, 3))
             if case == "multiple":
                 return (
                     blocked.amax((1, 3)),
@@ -294,6 +304,7 @@ class TestMaxAutotune(TestCase):
             "sum",
             "min",
             "nan",
+            "signed_zero",
             "multiple",
             "relu",
             "chain",
@@ -310,6 +321,17 @@ class TestMaxAutotune(TestCase):
             FileCheck().check("tl.sum").run(code[0])
         elif case == "nan":
             self.assertEqual(torch.isnan(actual), torch.isnan(f(a, b)))
+        elif case == "signed_zero":
+
+            def reduce(mm):
+                zeroed = mm.view(groups, block, groups, block) * 0.0
+                return zeroed.amax((1, 3)), zeroed.amin((1, 3))
+
+            expected = torch.compile(reduce)(a @ b)
+            self.assertEqual(
+                tuple(torch.signbit(x) for x in actual),
+                tuple(torch.signbit(x) for x in expected),
+            )
         elif case == "multiple":
             FileCheck().check("_block_local_reduction_2").run(code[0])
         if case in ("relu", "larger_tile_relu"):
@@ -5365,9 +5387,8 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
             actual, code = run_and_get_code(torch.compile(f), a, b)
 
         self.assertEqual(actual, f(a, b))
-        FileCheck().check("extern_kernels.mm").check_not("_block_local_reduction").run(
-            code[0]
-        )
+        FileCheck().check("extern_kernels.mm").run(code[0])
+        FileCheck().check_not("_block_local_reduction").run(code[0])
 
     @unittest.skipIf(
         not has_triton_tma_device(), "Need device-side TMA support in Triton"
@@ -5383,9 +5404,17 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
         def benchmark_choice(choice, _):
             if isinstance(choice, ExternKernelCaller):
                 return 10.0
+            hint_override = getattr(choice, "hint_override", None)
             if getattr(choice, "template_local_reduction_tile", None) == (128, 128):
-                return 0.1
-            return 1.0
+                return 1.0 if hint_override == 64 else 0.1
+            return 0.1 if hint_override == 64 else 1.0
+
+        selected_callers = {}
+        original_finalize = MultiTemplateBuffer.finalize_as_triton_callers
+
+        def finalize_as_triton_callers(buffer, callers):
+            selected_callers.update(callers)
+            original_finalize(buffer, callers)
 
         a = torch.randn(256, 64, device=GPU_TYPE, dtype=torch.bfloat16)
         b = torch.randn(64, 256, device=GPU_TYPE, dtype=torch.bfloat16)
@@ -5395,10 +5424,18 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
             mock.patch.object(
                 AlgorithmSelectorCache, "benchmark_choice", benchmark_choice
             ),
+            mock.patch.object(
+                MultiTemplateBuffer,
+                "finalize_as_triton_callers",
+                finalize_as_triton_callers,
+            ),
         ):
             actual, code = run_and_get_code(torch.compile(f), a, b)
 
         self.assertEqual(actual, f(a, b))
+        self.assertEqual(set(selected_callers), {None, 64})
+        for choice in selected_callers.values():
+            self.assertEqual(choice.template_local_reduction_tile, (128, 128))
         FileCheck().check("_block_local_reduction").run(code[0])
 
     @contextlib.contextmanager
@@ -5961,9 +5998,6 @@ class TestMaxAutotuneAsyncPipelined(TestMaxAutotune, TestEpilogueFusionStaticAna
         "test_autotune_device_guard": "Flaky on trunk",
         "test_template_bad_epilogue_fusion": "Benchmarking path is different",
         "test_persistent_tma_epilogue_fusion_store_cache": "Epilogue fusion disabled in async pipelining",
-        "test_persistent_tma_block_local_reduction_epilogue": (
-            "Covered by synchronous template-choice filtering"
-        ),
         "test_persistent_tma_block_local_reduction_cases": (
             "Covered by synchronous template-choice filtering"
         ),

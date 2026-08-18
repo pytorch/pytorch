@@ -1018,6 +1018,11 @@ class TestFP8Lowering(TestCase):
             actual, code = run_and_get_code(torch.compile(linear), *args)
 
         self.assertEqual(actual, expected)
+        FileCheck().check(
+            f"SCALE_RECIPE_A : tl.constexpr = {ScalingType.TensorWise.value}"
+        ).check(f"SCALE_RECIPE_B : tl.constexpr = {ScalingType.TensorWise.value}").run(
+            code[0]
+        )
         FileCheck().check_not("_block_local_reduction").run(code[0])
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)

@@ -49,6 +49,7 @@ from .. import config, ir, metrics, utils
 from ..async_compile import AsyncCompile
 from ..codecache import code_hash, get_path, PyCodeCache, write_atomic
 from ..debug import set_kernel_post_grad_provenance_tracing
+from ..dependencies import MemoryDep
 from ..ops_handler import DefaultHandler
 from ..runtime import triton_heuristics
 from ..runtime.benchmarking import benchmarker
@@ -144,9 +145,6 @@ if TYPE_CHECKING:
     from types import ModuleType
 
     from torch._inductor.dtype_propagation import DtypePropagationOpsHandler
-    from torch._inductor.kernel.loop_ir_epilogue_lowering import (
-        GemmEpilogueIRExpression,
-    )
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
     from ..ir import IRNode
@@ -164,17 +162,15 @@ async_compile = AsyncCompile()
 
 @dataclasses.dataclass(frozen=True)
 class TemplateLocalReduction:
+    reduction_name: str
     output_name: str
     reduction_type: str
-    source: GemmEpilogueIRExpression
-    source_dtype: torch.dtype
 
 
 @dataclasses.dataclass(frozen=True)
 class TemplateLocalReductionPlan:
     reductions: tuple[TemplateLocalReduction, ...]
     block: tuple[int, int]
-    output_size: tuple[sympy.Expr, sympy.Expr]
 
 
 def get_triton_reduction_function(reduction_type):
@@ -8257,46 +8253,10 @@ class TritonScheduling(SIMDScheduling):
         )
 
     @staticmethod
-    def _template_local_reduction_source_is_supported(value: Any) -> bool:
-        from torch._inductor.kernel.loop_ir_epilogue_lowering import (
-            GemmEpilogueIRExpression,
-        )
-
-        if isinstance(value, (tuple, list)):
-            return all(
-                TritonScheduling._template_local_reduction_source_is_supported(item)
-                for item in value
-            )
-        if not isinstance(value, GemmEpilogueIRExpression):
-            return True
-        if value.op == "load":
-            return True
-        if value.op == "identity":
-            return TritonScheduling._template_local_reduction_source_is_supported(
-                value.args[0]
-            )
-        return (
-            value.op not in ("index_expr", "reduction", "to_dtype_bitcast")
-            and callable(getattr(TritonOverrides, value.op, None))
-            and all(
-                TritonScheduling._template_local_reduction_source_is_supported(arg)
-                for arg in value.args
-            )
-            and all(
-                TritonScheduling._template_local_reduction_source_is_supported(arg)
-                for _, arg in value.kwargs
-            )
-        )
-
-    @staticmethod
     def _template_local_reduction_plan(
         template: ir.TritonTemplateBuffer,
         nodes: Sequence[BaseSchedulerNode],
     ) -> TemplateLocalReductionPlan | None:
-        from torch._inductor.kernel.loop_ir_epilogue_lowering import (
-            template_local_reduction_ir,
-        )
-
         if len(template.get_size()) != 2:
             return None
 
@@ -8330,33 +8290,88 @@ class TritonScheduling(SIMDScheduling):
         reductions_out = []
         block = None
         for reductions in chains:
-            if any(reduction._split_size is None for reduction in reductions[:-1]):
+            first = reductions[0]
+            if (
+                first._split_size is None
+                or first._original_inner_fn is None
+                or first._original_ranges is None
+                or first._original_reduction_ranges is None
+                or len(first._original_ranges) != 2
+                or len(first._original_reduction_ranges) != 2
+            ):
                 return None
-            matched = template_local_reduction_ir(reductions[0], template)
-            if matched is None or matched.reduction_type not in {
+            reduction_type = first.get_reduction_type()
+            if reduction_type not in {
                 "max",
                 "min",
-                "prod",
                 "sum",
             }:
                 return None
-            if not TritonScheduling._template_local_reduction_source_is_supported(
-                matched.source
-            ):
+            if any(reduction._split_size is None for reduction in reductions[:-1]):
                 return None
             if any(
-                reduction.get_reduction_type() != matched.reduction_type
+                reduction.get_reduction_type() != reduction_type
                 for reduction in reductions
             ):
                 return None
 
-            matched_block = (matched.block_m, matched.block_n)
+            try:
+                block_m = V.graph.sizevars.optimization_hint(
+                    first._original_reduction_ranges[0]
+                )
+                block_n = V.graph.sizevars.optimization_hint(
+                    first._original_reduction_ranges[1]
+                )
+            except (TypeError, ValueError):
+                return None
+            matched_block = (block_m, block_n)
+            if not (
+                V.graph.sizevars.statically_known_equals(sympy.Mod(m, block_m), 0)
+                and V.graph.sizevars.statically_known_equals(sympy.Mod(n, block_n), 0)
+            ):
+                return None
             if block is None:
                 block = matched_block
             elif block != matched_block:
                 return None
 
-            expected_output = (m // matched.block_m, n // matched.block_n)
+            expected_output = (m // block_m, n // block_n)
+            if not V.graph.sizevars.statically_known_list_equals(
+                first._original_ranges, expected_output
+            ):
+                return None
+            with first.with_original_inner_fn():
+                read_writes = first.get_read_writes()
+                used_ops = first.data.inner_fn_opcount().used_ops
+                if any(
+                    op not in {"constant", "identity", "load", "to_dtype"}
+                    and not callable(getattr(TritonOverrides, op, None))
+                    for op in used_ops
+                ) or used_ops.intersection(
+                    {"index_expr", "reduction", "to_dtype_bitcast"}
+                ):
+                    return None
+                source_reads = [
+                    dep
+                    for dep in read_writes.reads
+                    if isinstance(dep, MemoryDep) and dep.name == template.get_name()
+                ]
+                if (
+                    len(source_reads) != 1
+                    or len(read_writes.reads) != 1
+                    or read_writes.index_exprs
+                    or len(read_writes.range_vars) != 4
+                ):
+                    return None
+                index_m, index_n, reduction_m, reduction_n = read_writes.range_vars
+                expected_source_index = template.make_indexer()(
+                    (
+                        index_m * block_m + reduction_m,
+                        index_n * block_n + reduction_n,
+                    )
+                )
+                if sympy.simplify(source_reads[0].index - expected_source_index) != 0:
+                    return None
             final = reductions[-1]
             expected_stride = ir.FlexibleLayout.contiguous_strides(expected_output)
             if not (
@@ -8373,17 +8388,14 @@ class TritonScheduling(SIMDScheduling):
                 return None
             reductions_out.append(
                 TemplateLocalReduction(
+                    first.get_name(),
                     final.get_name(),
-                    matched.reduction_type,
-                    matched.source,
-                    matched.source_dtype,
+                    reduction_type,
                 )
             )
         if block is None:
             raise AssertionError("expected a template-local reduction block")
-        return TemplateLocalReductionPlan(
-            tuple(reductions_out), block, (m // block[0], n // block[1])
-        )
+        return TemplateLocalReductionPlan(tuple(reductions_out), block)
 
     @classmethod
     def _template_supports_local_reduction_block(
