@@ -11209,6 +11209,136 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         self.assertEqual(counter.frame_count, 1)
 
+    @torch.compiler.config.patch(static_sources="L['x']")
+    def test_static_sources_tensor(self):
+        builder._STATIC_SOURCES = None
+
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter)
+        def fn(x):
+            return x * x
+
+        # Without static-sources automatic dynamic would kick in on the second
+        # call and give us 2 frames; here every size specializes.
+        fn(torch.randn(2))
+        fn(torch.randn(3))
+        fn(torch.randn(4))
+
+        self.assertEqual(counter.frame_count, 3)
+
+    @torch.compiler.config.patch(static_sources="L['x']")
+    def test_static_sources_int(self):
+        builder._STATIC_SOURCES = None
+
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter)
+        def fn(x):
+            return torch.randn(5) * x
+
+        fn(1)
+        fn(2)
+        fn(3)
+
+        self.assertEqual(counter.frame_count, 3)
+
+    @torch.compiler.config.patch(static_sources="L['x']")
+    def test_static_sources_dynamic_override(self):
+        builder._STATIC_SOURCES = None
+
+        counter = CompileCounter()
+
+        @torch.compile(dynamic=True, backend=counter)
+        def fn(x):
+            return x * x
+
+        fn(torch.randn(2))
+        fn(torch.randn(3))
+        fn(torch.randn(4))
+
+        self.assertEqual(counter.frame_count, 3)
+
+    @torch.compiler.config.patch(static_sources="L\\['x.*'\\]")
+    def test_static_sources_regex(self):
+        builder._STATIC_SOURCES = None
+
+        counter = CompileCounter()
+
+        @torch.compile(dynamic=True, backend=counter)
+        def fn(x1):
+            return x1 * x1
+
+        fn(torch.randn(2))
+        fn(torch.randn(3))
+
+        self.assertEqual(counter.frame_count, 2)
+
+    @torch.compiler.config.patch(static_sources="L['x']:1")
+    def test_static_sources_per_dim(self):
+        builder._STATIC_SOURCES = None
+
+        counter = CompileCounter()
+
+        @torch.compile(dynamic=True, backend=counter)
+        def fn(x):
+            return x * x
+
+        # Dim 0 stays dynamic, so varying it does not recompile.
+        fn(torch.randn(2, 4))
+        fn(torch.randn(3, 4))
+        self.assertEqual(counter.frame_count, 1)
+
+        # Dim 1 is static, so varying it does.
+        fn(torch.randn(3, 5))
+        self.assertEqual(counter.frame_count, 2)
+
+    @torch.compiler.config.patch(
+        dynamic_values="1111",
+        static_sources="L['x']",
+    )
+    def test_static_sources_beat_dynamic_values_tensor(self):
+        builder._DYNAMIC_VALUES = None
+        builder._STATIC_SOURCES = None
+
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter)
+        def fn(x):
+            return x * x
+
+        # Same shapes as test_dynamic_values_tensor, which gets 1 frame: the
+        # sentinel dim 1111 marks the dim dynamic. static-sources undoes that,
+        # so every size specializes instead.
+        fn(torch.randn(1111))
+        fn(torch.randn(3))
+        fn(torch.randn(4))
+
+        self.assertEqual(counter.frame_count, 3)
+
+    @torch.compiler.config.patch(
+        dynamic_values="1111",
+        static_sources="L['x']",
+    )
+    def test_static_sources_beat_dynamic_values_int(self):
+        builder._DYNAMIC_VALUES = None
+        builder._STATIC_SOURCES = None
+
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter)
+        def fn(x):
+            return torch.randn(5) * x
+
+        # Same values as test_dynamic_values_int, which gets 1 frame. Unlike the
+        # tensor path, precedence here comes from is_static_source being checked
+        # before is_dynamic_value in wrap_literal -- this pins that ordering.
+        fn(1111)
+        fn(2)
+        fn(3)
+
+        self.assertEqual(counter.frame_count, 3)
+
     @torch.compiler.config.patch(unbacked_sources="L['x']:0")
     def test_unbacked_sources_per_dim(self):
         builder._UNBACKED_SOURCES = None
