@@ -6,7 +6,7 @@ import warnings
 import weakref
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-from typing import Any, cast
+from typing import Any
 
 import torch
 import torch.distributed as dist
@@ -39,7 +39,7 @@ from torch.distributed.pipelining._utils import (
     validate_tensors_metadata,
 )
 from torch.distributed.tensor import DTensor
-from torch.fx.node import Argument, map_aggregate
+from torch.fx.node import map_aggregate
 from torch.nn.parallel import DistributedDataParallel
 
 from ._backward import (
@@ -104,7 +104,6 @@ class _RecvInfo:
         self,
         input_name: str,
         source: int | None,
-        buffer: torch.Tensor | None,
         tensor_meta: TensorMeta | None,
         *,
         is_root_arg: bool = False,
@@ -113,19 +112,57 @@ class _RecvInfo:
         self.input_name = input_name
         # Stage index of the source of this input (None for root args)
         self.source = source
-        # Buffer to receive the input into (None for root args)
-        self.buffer = buffer
+        # Allocated immediately before recv and consumed by microbatch compute
+        self.buffer: torch.Tensor | None = None
         # Tensor metadata for validation and DTensor reconstruction
         self.tensor_meta = tensor_meta
         # Whether this is a root-level model input (no recv needed)
         self.is_root_arg = is_root_arg
 
+    def allocate_buffer(self, device: torch.device | str) -> torch.Tensor | None:
+        if self.is_root_arg or self.tensor_meta is None:
+            return None
+        if self.buffer is not None:
+            raise PipeliningMetadataError(
+                f"Receive buffer for '{self.input_name}' is already allocated"
+            )
+        self.buffer = _make_tensor_from_meta(self.tensor_meta, device)
+        return self.buffer
+
+    def set_buffer(self, buffer: torch.Tensor) -> None:
+        if self.is_root_arg or self.tensor_meta is None:
+            raise PipeliningMetadataError(
+                f"Receive buffer for '{self.input_name}' is not expected"
+            )
+        if self.buffer is not None:
+            raise PipeliningMetadataError(
+                f"Receive buffer for '{self.input_name}' is already set"
+            )
+        self.buffer = buffer
+
+    def take_buffer(self) -> torch.Tensor | None:
+        buffer = self.buffer
+        self.buffer = None
+        if buffer is None and self.tensor_meta is not None:
+            raise PipeliningMetadataError(
+                f"Receive buffer for '{self.input_name}' has not been set"
+            )
+        if buffer is not None and self.tensor_meta is None:
+            raise PipeliningMetadataError(
+                f"Receive buffer for '{self.input_name}' is not expected"
+            )
+        return buffer
+
     def __repr__(self):
         if self.is_root_arg:
             return f"_RecvInfo(input={self.input_name}, root_arg=True)"
         meta_type = type(self.tensor_meta).__name__ if self.tensor_meta else "None"
-        buffer_shape = self.buffer.size() if self.buffer is not None else "None"
-        return f"_RecvInfo(input={self.input_name}, source={self.source}, shape={buffer_shape}, meta={meta_type})"
+        shape = self.tensor_meta.shape if self.tensor_meta is not None else "None"
+        buffer_state = "allocated" if self.buffer is not None else "unallocated"
+        return (
+            f"_RecvInfo(input={self.input_name}, source={self.source}, "
+            f"shape={shape}, meta={meta_type}, buffer={buffer_state})"
+        )
 
 
 # Cache of per-direction P2P communicators, keyed (weakly) by the PP process
@@ -444,16 +481,14 @@ class _PipelineStageBase(ABC):
             if info.is_root_arg:
                 # Root args don't need recv operations
                 continue
-            # Skip entries with None buffer (None gradients)
-            if info.buffer is None:
-                if info.tensor_meta is not None:
-                    raise AssertionError("expected info.tensor_meta to be None")
+            buffer = info.allocate_buffer(self.device)
+            # Skip entries with no metadata (None gradients)
+            if buffer is None:
                 continue
-            # At this point, source and buffer are guaranteed non-None
             if info.source is None:
                 raise AssertionError("expected info.source to be not None")
             peer_global_rank = self._resolve_peer_global_rank(info.source)
-            ops.append(dist.P2POp(dist.irecv, info.buffer, peer_global_rank, group))
+            ops.append(dist.P2POp(dist.irecv, buffer, peer_global_rank, group))
 
         return ops
 
@@ -494,7 +529,7 @@ class _PipelineStageBase(ABC):
 
             # Pass the activation tensor directly (same rank for local execution).
             # Detach to create a new autograd leaf for the fresh autograd graph.
-            info.buffer = to_local_if_dtensor(tensor, detach=True)
+            info.set_buffer(to_local_if_dtensor(tensor, detach=True))
 
     def get_local_bwd_output(self, mb_index):
         """
@@ -530,8 +565,9 @@ class _PipelineStageBase(ABC):
         recv_infos = self.grad_recv_info[mb_index]
         for info, tensor in zip(recv_infos, next_stage_bwd_outputs, strict=True):
             if tensor is None:
-                if info.buffer is not None:
-                    info.buffer.zero_()
+                buffer = info.allocate_buffer(self.device)
+                if buffer is not None:
+                    buffer.zero_()
                 continue
             if not isinstance(tensor, torch.Tensor):
                 raise AssertionError(
@@ -543,7 +579,7 @@ class _PipelineStageBase(ABC):
                 )
 
             # Extract local tensor for the buffer (handles DTensor or plain tensor)
-            info.buffer = to_local_if_dtensor(tensor)
+            info.set_buffer(to_local_if_dtensor(tensor))
 
     def get_fwd_recv_ops(self, fwd_chunk_id: int) -> list[dist.P2POp]:
         """
@@ -702,32 +738,6 @@ class _PipelineStageBase(ABC):
         # Caching chunk outputs for final output merge or reduction
         self.output_chunks.clear()
 
-        # Clear grad of input buffers in between schedule steps. This is because
-        # `torch.autograd.backward()` will accumulate gradients into leaf
-        # tensors by default. For gradients to pass back to previous stages, we
-        # don't want such accumulation.
-        for recv_tuple in self.args_recv_info.values():  # iterate over all chunks
-            for a in recv_tuple:  # iterate over all input args
-                if not a.is_root_arg and a.buffer is not None:
-                    # Set to None is the newer and recommended way to clear grads, compared to `zero_()`.
-                    # See https://github.com/pytorch/pytorch/pull/92731
-                    a.buffer.grad = None
-
-    def _map_tensor_from_recv_info(
-        self,
-        recv_infos: tuple[_RecvInfo, ...],
-    ):
-        """
-        Map tensors from recv infos to a list.
-        """
-
-        def get_recv_tensor(info):
-            if info.is_root_arg:
-                raise PipeliningMetadataError("Cannot get recv tensor from root arg")
-            return info.buffer
-
-        return map_aggregate(cast(Argument, recv_infos), get_recv_tensor)
-
     def _retrieve_recv_activations(
         self,
         fwd_chunk_id: int,
@@ -742,11 +752,13 @@ class _PipelineStageBase(ABC):
         activations = []
         for i, info in enumerate(recv_infos):
             if not info.is_root_arg:
-                # Non-root args have valid buffer and tensor_meta
-                if info.buffer is None or info.tensor_meta is None:
+                if info.tensor_meta is None:
                     raise PipeliningMetadataError(
-                        f"Non-root arg '{info.input_name}' has None buffer or tensor_meta"
+                        f"Non-root arg '{info.input_name}' has no tensor metadata"
                     )
+                buffer = info.take_buffer()
+                if buffer is None:
+                    raise AssertionError("expected receive buffer to be not None")
                 # Effective requires_grad: metadata captures what the model
                 # produced, but the runtime context (has_backward, grad mode)
                 # determines whether we actually need gradients.
@@ -758,7 +770,7 @@ class _PipelineStageBase(ABC):
                 if isinstance(info.tensor_meta, _DTensorMeta):
                     # Buffer must not require grad so from_local stays out
                     # of the autograd graph (no grad_placements needed).
-                    if info.buffer.requires_grad:
+                    if buffer.requires_grad:
                         raise PipeliningMetadataError(
                             f"Stage {self.stage_index}: recv buffer "
                             f"'{info.input_name}' unexpectedly requires grad "
@@ -766,7 +778,7 @@ class _PipelineStageBase(ABC):
                         )
                     mesh = self._mesh_cache.get_mesh(info.tensor_meta.mesh_cache_key)
                     activation = DTensor.from_local(
-                        info.buffer,
+                        buffer,
                         device_mesh=mesh,
                         placements=info.tensor_meta.placements,
                         shape=info.tensor_meta.global_shape,
@@ -774,7 +786,7 @@ class _PipelineStageBase(ABC):
                         run_check=False,
                     ).requires_grad_(effective_requires_grad)
                 else:
-                    activation = info.buffer.requires_grad_(effective_requires_grad)
+                    activation = buffer.requires_grad_(effective_requires_grad)
                 # Activation must be a leaf so backward terminates here.
                 if effective_requires_grad and not activation.is_leaf:
                     warnings.warn(
@@ -811,12 +823,8 @@ class _PipelineStageBase(ABC):
                     f"Expected _RecvInfo but got {type(info)}"
                 )
             if not info.is_root_arg:
-                # Gradients can be None for non-differentiable outputs
-                if info.buffer is None:
-                    if info.tensor_meta is not None:
-                        raise PipeliningMetadataError(
-                            f"Grad recv '{info.input_name}': buffer is None but tensor_meta is not None"
-                        )
+                buffer = info.take_buffer()
+                if buffer is None:
                     grads.append(None)
                     continue
                 if info.tensor_meta is None:
@@ -827,7 +835,7 @@ class _PipelineStageBase(ABC):
                     # Reconstruct DTensor gradient from local tensor + metadata
                     mesh = self._mesh_cache.get_mesh(info.tensor_meta.mesh_cache_key)
                     grad = DTensor.from_local(
-                        info.buffer,
+                        buffer,
                         device_mesh=mesh,
                         placements=info.tensor_meta.placements,
                         shape=info.tensor_meta.global_shape,
@@ -835,7 +843,7 @@ class _PipelineStageBase(ABC):
                         run_check=False,
                     )
                 else:
-                    grad = info.buffer
+                    grad = buffer
                 grads.append(grad)
             else:
                 raise PipeliningMetadataError(
@@ -1474,7 +1482,7 @@ class _PipelineStage(_PipelineStageBase):
         Note: DTensors are NOT supported in the traced frontend.
         """
 
-        def create_recv_tensor(placeholder, arg_node):
+        def create_recv_info(placeholder, arg_node):
             example_value = placeholder.meta["val"]
 
             # Reject DTensors in traced frontend
@@ -1492,7 +1500,6 @@ class _PipelineStage(_PipelineStageBase):
                 return _RecvInfo(
                     input_name=f"root_input_{placeholder.name}",
                     source=None,
-                    buffer=None,
                     tensor_meta=_TensorMeta.from_tensor(example_value),
                     is_root_arg=True,
                 )
@@ -1517,20 +1524,16 @@ class _PipelineStage(_PipelineStageBase):
             )
 
             logger.debug(
-                "%s Creating recv buffer for input '%s' : %s, %s",
+                "%s Creating recv info for input '%s' : %s, %s",
                 self.log_prefix,
                 placeholder.name,
                 tensor_meta.shape,
                 tensor_meta.dtype,
             )
-            buffer = _make_tensor_from_meta(tensor_meta, self.device)
-            if self.has_backward and example_value.is_floating_point():
-                buffer.requires_grad_(True)
 
             return _RecvInfo(
                 arg_node.name,
                 src_stage,
-                buffer,
                 tensor_meta,
             )
 
@@ -1543,7 +1546,7 @@ class _PipelineStage(_PipelineStageBase):
         # `self.node.args` are dependency nodes in the outer graph.
         # The two are 1:1.
         for placeholder, arg_node in zip(placeholders, self.node.args, strict=True):
-            args_recv_info.append(create_recv_tensor(placeholder, arg_node))
+            args_recv_info.append(create_recv_info(placeholder, arg_node))
 
         logger.debug(
             "%s Activation recv / args info: %s", self.log_prefix, args_recv_info
@@ -1660,7 +1663,6 @@ class _PipelineStage(_PipelineStageBase):
                     _RecvInfo(
                         input_name=f"recv_grad_for_{self.stage_index}_none_{out_idx}",
                         source=grad_src,
-                        buffer=None,
                         tensor_meta=None,
                     )
                 )
@@ -1680,7 +1682,7 @@ class _PipelineStage(_PipelineStageBase):
                     )
 
                 logger.debug(
-                    "%s Creating grad recv buffer for output %s : %s, %s",
+                    "%s Creating grad recv info for output %s : %s, %s",
                     self.log_prefix,
                     out_idx,
                     grad_meta.shape,
@@ -1691,7 +1693,6 @@ class _PipelineStage(_PipelineStageBase):
                     _RecvInfo(
                         input_name=f"recv_grad_for_{self.stage_index}_from_{grad_src}",
                         source=grad_src,
-                        buffer=_make_tensor_from_meta(grad_meta, self.device),
                         tensor_meta=grad_meta,
                     )
                 )
@@ -2389,7 +2390,6 @@ class PipelineStage(_PipelineStageBase):
                     _RecvInfo(
                         input_name=f"root_input_{idx}",
                         source=None,
-                        buffer=None,
                         tensor_meta=meta,
                         is_root_arg=True,
                     )
@@ -2401,7 +2401,6 @@ class PipelineStage(_PipelineStageBase):
                     _RecvInfo(
                         input_name=f"recv_for_{self.stage_index}_from_{self.stage_index - 1}",
                         source=self.stage_index - 1,
-                        buffer=_make_tensor_from_meta(meta, self.device),
                         tensor_meta=meta,
                     )
                     for meta in self._stage_meta.inputs
@@ -2445,9 +2444,6 @@ class PipelineStage(_PipelineStageBase):
                     _RecvInfo(
                         input_name=f"recv_grad_for_{self.stage_index}_from_{src}",
                         source=src,
-                        buffer=_make_tensor_from_meta(grad_meta, self.device)
-                        if grad_meta
-                        else None,
                         tensor_meta=grad_meta,
                     )
                 )

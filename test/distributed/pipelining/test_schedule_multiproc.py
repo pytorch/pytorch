@@ -539,6 +539,14 @@ class ScheduleTest(MultiProcContinuousTest):
             else:
                 schedule.step()
 
+            for recv_info_by_chunk in (
+                stage.args_recv_info,
+                stage.grad_recv_info,
+            ):
+                for recv_infos in recv_info_by_chunk.values():
+                    for info in recv_infos:
+                        self.assertIsNone(info.buffer)
+
         dist.barrier(device_ids=[self.rank])
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
