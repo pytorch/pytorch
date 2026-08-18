@@ -36,11 +36,12 @@ runs:
       run: |
         dpkg -l | grep -E "  amdgpu"
 
-    - name: Runner health check rocm-smi
+    - name: Runner health check amd-smi
       if: always()
       shell: bash
       run: |
-        rocm-smi
+        amd-smi monitor -ptumv
+        amd-smi list
 
     - name: Runner health check rocminfo
       if: always()

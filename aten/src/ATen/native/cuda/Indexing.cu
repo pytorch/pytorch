@@ -27,6 +27,7 @@
 #include <ATen/ops/aminmax.h>
 #include <ATen/ops/arange.h>
 #include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
 #include <ATen/ops/zeros_like.h>
 #include <ATen/ops/ones_like.h>
 #include <ATen/ops/empty_quantized.h>
@@ -1910,8 +1911,8 @@ Tensor index_select_sparse_cuda(const Tensor& self, int64_t dim, const Tensor& i
     Tensor intrsc_counts_nneg_index;
     Tensor intrsc_first_match_nneg_index;
     std::tie(intrsc_counts_nneg_index, intrsc_first_match_nneg_index) = [&]() -> std::tuple<Tensor, Tensor> {
-      auto intrsc_counts_nneg_index = at::zeros_like(nneg_index);
-      auto intrsc_first_match_nneg_index = at::zeros_like(nneg_index);
+      auto intrsc_counts_nneg_index = at::empty_like(nneg_index);
+      auto intrsc_first_match_nneg_index = at::empty_like(nneg_index);
 
       auto iter = TensorIteratorConfig()
         .add_output(intrsc_first_match_nneg_index)
