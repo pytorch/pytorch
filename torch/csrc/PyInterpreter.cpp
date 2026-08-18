@@ -1050,13 +1050,6 @@ std::function<py::object(py::object)> make_fake_device_stamp(
   };
 }
 
-// Python dispatch keys that op-impl / fast-op-impl callbacks must run beneath
-// so their own tensor ops don't re-enter the Python dispatcher. Named so the
-// two call sites can't drift.
-constexpr c10::DispatchKeySet kFakeCallbackExcludeKeys =
-    c10::DispatchKeySet(c10::DispatchKey::Python) |
-    c10::DispatchKeySet(c10::DispatchKey::PythonTLSSnapshot);
-
 // Apply `convert` to each returned tensor (tuple/list/single). Lists are
 // mutated in place (e.g. the _foreach_* ops hand back raw meta tensors to
 // stamp).
@@ -1200,7 +1193,9 @@ bool ConcretePyInterpreterVTable::fake_try_op_impl(
     }
     py::object result;
     {
-      c10::impl::ExcludeDispatchKeyGuard guard(kFakeCallbackExcludeKeys);
+      c10::impl::ExcludeDispatchKeyGuard guard(
+          c10::DispatchKeySet(c10::DispatchKey::Python) |
+          c10::DispatchKeySet(c10::DispatchKey::PythonTLSSnapshot));
       result = op_impl(
           active.py_fake_mode, py_op, *args_kwargs.first, **args_kwargs.second);
     }
@@ -1236,7 +1231,9 @@ bool ConcretePyInterpreterVTable::fake_try_fast_op_impls(
       op,
       stack,
       [&](const py::object& args, const py::dict& kwargs) {
-        c10::impl::ExcludeDispatchKeyGuard guard(kFakeCallbackExcludeKeys);
+        c10::impl::ExcludeDispatchKeyGuard guard(
+            c10::DispatchKeySet(c10::DispatchKey::Python) |
+            c10::DispatchKeySet(c10::DispatchKey::PythonTLSSnapshot));
         return fast_impl(active.py_fake_mode, *args, **kwargs);
       },
       make_fake_device_stamp(common_device, active.mode, /*skip_fake=*/false),
