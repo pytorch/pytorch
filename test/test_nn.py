@@ -35,7 +35,7 @@ from torch.nn import Buffer, Parameter
 from torch.nn.parallel._functions import Broadcast
 from torch.testing._internal.common_dtype import integral_types, get_all_math_dtypes, floating_types
 from torch.testing._internal.common_utils import dtype_name, freeze_rng_state, run_tests, TestCase, \
-    skipIfNoLapack, skipIfRocm, skipIfRocmVersionLessThan, TEST_NUMPY, TEST_SCIPY, TEST_WITH_CROSSREF, TEST_WITH_ROCM, TEST_MULTIACCELERATOR, \
+    skipIfNoLapack, skipIfRocm, skipIfRocmVersionLessThan, getRocmVersion, TEST_NUMPY, TEST_SCIPY, TEST_WITH_CROSSREF, TEST_WITH_ROCM, TEST_MULTIACCELERATOR, \
     download_file, get_function_arglist, load_tests, skipIfMPS, MACOS_VERSION, \
     IS_PPC, IS_ARM64, IS_MACOS, IS_WINDOWS, IS_CPU_CAPABILITY_SVE, IS_CPU_EXT_SVE_SUPPORTED, xfailIf, \
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, \
@@ -47,7 +47,7 @@ from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, Criteri
     ctcloss_reference, get_new_module_tests, single_batch_reference_fn, _test_bfloat16_ops, _test_module_empty_input
 from torch.testing._internal.common_device_type import dtypesIfMPS, instantiate_device_type_tests, dtypes, \
     dtypesIfCUDA, precisionOverride, onlyCUDA, onlyCPU, onlyAccelerator, \
-    skipCUDAIf, skipMPSIf, skipMPS, \
+    skipCUDAIf, skipCUDAIfRocm, skipMPSIf, skipMPS, \
     onlyNativeDeviceTypes, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, expectedFailureMPS, \
     skipMeta, get_all_device_types
 from torch.testing._internal.common_modules import module_inputs_torch_nn_LinearCrossEntropyLoss
@@ -7368,6 +7368,30 @@ def _buildEquivalentAffineTransforms3d(device, input_size, output_size, angle_ra
 
 
 class TestNNDeviceType(NNTestCase):
+
+    def test_grid_sample_backward_error_checking(self, device):
+        input = torch.empty(1, 1, 2, 2, device=device)
+        grid = torch.empty(1, 1, 1, 2, device=device)
+        grad_output = torch.empty(1, 1, 1, 1, device=device)
+
+        # assert no error
+        torch.ops.aten.grid_sampler_2d_backward(grad_output, input, grid, 0, 0, False, (True, True))
+
+        with self.assertRaisesRegex(ValueError, "expected grad_output to have sizes"):
+            invalid_grad_output = torch.empty(2, 1, 1, 1, device=device)
+            torch.ops.aten.grid_sampler_2d_backward(invalid_grad_output, input, grid, 0, 0, False, (True, True))
+
+        input = torch.empty(1, 1, 2, 2, 2, device=device)
+        grid = torch.empty(1, 1, 1, 1, 3, device=device)
+        grad_output = torch.empty(1, 1, 1, 1, 1, device=device)
+
+        # assert no error
+        torch.ops.aten.grid_sampler_3d_backward(grad_output, input, grid, 0, 0, False, (True, True))
+
+        with self.assertRaisesRegex(ValueError, "expected grad_output to have sizes"):
+            invalid_grad_output = torch.empty(2, 1, 1, 1, 1, device=device)
+            torch.ops.aten.grid_sampler_3d_backward(invalid_grad_output, input, grid, 0, 0, False, (True, True))
+
     def _get_mixed_dtypes(self, device):
         """Get appropriate mixed dtype pair (param_dtype, input_dtype) for the device.
         Returns lower precision for params and higher precision for input to test
@@ -10282,6 +10306,45 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(out[0], out[-1])
 
     @onlyCUDA
+    @skipCUDAIfRocm
+    @dtypes(torch.half, torch.bfloat16)
+    @largeTensorTest('40GB')
+    def test_upsampling_64bit_indexing_bilinear_channels_last(self, device, dtype):
+        # Output has 2**31 elements, exercising the 64-bit indexed channels_last forward kernel.
+        x = torch.rand((8, 64, 128, 128), dtype=dtype, device=device)
+        out = torch.nn.functional.interpolate(
+            x.to(memory_format=torch.channels_last),
+            scale_factor=16, mode='bilinear'
+        )
+        out_ref = torch.nn.functional.interpolate(x, scale_factor=16, mode='bilinear')
+        del x
+        self.assertEqual(out.numel(), 2**31)
+        self.assertTrue(torch.allclose(out, out_ref))
+        x = torch.ones((8, 64, 128, 128), dtype=dtype, device=device).to(memory_format=torch.channels_last)
+        out = torch.nn.functional.interpolate(x, scale_factor=16, mode='bilinear')
+        self.assertEqual(out[0], out[-1])
+
+    @onlyCUDA
+    @skipCUDAIfRocm
+    @dtypes(torch.half, torch.bfloat16)
+    @largeTensorTest('10GB')
+    def test_upsampling_64bit_indexing_bilinear_channels_last_backward(self, device, dtype):
+        # Output has 2**31 elements, exercising the 64-bit indexed channels_last backward
+        # kernel. The backward accumulates with atomicAdd (nondeterministic in low precision),
+        # so we only verify that the kernel runs without the launch-config overflow and
+        # produces finite, non-trivial gradients in the right memory format; rigorous
+        # nhwc-vs-contiguous numerics are checked by the small-tensor interpolate tests.
+        x = torch.ones((8, 64, 128, 128), dtype=dtype, device=device).to(
+            memory_format=torch.channels_last).requires_grad_(True)
+        out = torch.nn.functional.interpolate(x, scale_factor=16, mode='bilinear')
+        self.assertEqual(out.numel(), 2**31)
+        out.backward(torch.ones_like(out))
+        self.assertTrue(torch.isfinite(x.grad).all())
+        self.assertGreater(x.grad.abs().sum().item(), 0)
+        self.assertTrue(x.grad.is_contiguous(memory_format=torch.channels_last))
+
+
+    @onlyCUDA
     @dtypes(torch.half)
     @largeTensorTest('40GB')
     def test_replicatepad_64bit_indexing(self, device, dtype):
@@ -13024,6 +13087,17 @@ if __name__ == '__main__':
     @dtypesIfMPS(torch.float32)
     @dtypes(torch.float32, torch.float64)
     def test_module_to_empty(self, device, dtype):
+        if (
+            TEST_WITH_ROCM
+            and getRocmVersion() >= (7, 14)
+            and torch.device(device).type == "cuda"
+            and dtype == torch.float32
+        ):
+            self.skipTest(
+                "order/state-dependent NotImplementedError regex mismatch on "
+                "ROCm 7.14+ (cuda, float32)"
+            )
+
         class MyModule(nn.Module):
             def __init__(self, in_features, out_features, device=None, dtype=None):
                 super().__init__()
@@ -14133,6 +14207,16 @@ if __name__ == '__main__':
     @parametrize_test("bias", [False, True])
     @dtypes(torch.float32)
     def test_linear_cross_entropy_loss_default(self, device, dtype, bias):
+        if (
+            TEST_WITH_ROCM
+            and getRocmVersion() >= (7, 14)
+            and not bias
+            and dtype == torch.float32
+        ):
+            self.skipTest(
+                "input-grad ULP worst case exceeds tolerance on ROCm 7.14+ "
+                "(bias=False, float32)"
+            )
         self._test_linear_cross_entropy_loss(device=device, dtype=dtype, bias=bias)
 
     @parametrize_test("prob_target", [False, True])
@@ -16182,6 +16266,15 @@ class TestFusedRMSNormOverrideRouting(TestCase):
         w = torch.randn(128, dtype=torch.float32, device="cuda")
         self.assertTrue(_fused_rms_norm_cond(x, [128], w, 1e-5))
 
+    def test_fwd_cond_fires_without_materializing_cow(self):
+        from torch._native.ops.norm.rmsnorm_impl import _fused_rms_norm_cond
+
+        x = torch.randn(8, 128, dtype=torch.float16, device="cuda")._lazy_clone()
+        w = torch.randn(128, dtype=torch.float16, device="cuda")._lazy_clone()
+        self.assertTrue(_fused_rms_norm_cond(x, [128], w, 1e-5))
+        self.assertTrue(torch._C._is_cow_tensor(x))
+        self.assertTrue(torch._C._is_cow_tensor(w))
+
     def test_fwd_cond_false_on_unsupported_dtype(self):
         # fp64 is outside the override's supported dtype set.
         from torch._native.ops.norm.rmsnorm_impl import _fused_rms_norm_cond
@@ -16365,6 +16458,21 @@ class TestFusedRMSNormOverrideRouting(TestCase):
             )
         )
 
+    def test_bwd_cond_fires_without_materializing_cow(self):
+        from torch._native.ops.norm.rmsnorm_impl import _fused_rms_norm_backward_cond
+
+        shape = (8, 128)
+        x = torch.randn(*shape, dtype=torch.float16, device="cuda")._lazy_clone()
+        w = torch.randn(128, dtype=torch.float16, device="cuda")._lazy_clone()
+        gout = torch.randn(*shape, dtype=torch.float16, device="cuda")._lazy_clone()
+        rstd = torch.empty(shape[0], dtype=torch.float32, device="cuda")._lazy_clone()
+        tensors = (gout, x, rstd, w)
+        self.assertTrue(
+            _fused_rms_norm_backward_cond(gout, x, [128], rstd, w, [True, True])
+        )
+        for tensor in tensors:
+            self.assertTrue(torch._C._is_cow_tensor(tensor))
+
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available")
 @skipIfNoCuteDSL
@@ -16382,6 +16490,34 @@ class TestFusedRMSNormOverrideNumerics(TestCase):
     Generic per-dtype numerics across many shapes are covered by the OpInfo
     entry in torch/testing/_internal/common_methods_invocations.py.
     """
+
+    def test_fwd_preserves_cow_inputs(self):
+        x = torch.randn(8, 128, dtype=torch.float16, device="cuda")._lazy_clone()
+        w = torch.randn(128, dtype=torch.float16, device="cuda")._lazy_clone()
+        torch.ops.aten._fused_rms_norm(x, [128], w, 1e-5)
+        self.assertTrue(torch._C._is_cow_tensor(x))
+        self.assertTrue(torch._C._is_cow_tensor(w))
+
+    def test_bwd_preserves_cow_inputs(self):
+        shape = (8, 128)
+        x_base = torch.randn(*shape, dtype=torch.float16, device="cuda")
+        w_base = torch.randn(128, dtype=torch.float16, device="cuda")
+        with torch.backends.python_native.operations_disabled("_fused_rms_norm"):
+            _, rstd_base = torch.ops.aten._fused_rms_norm(
+                x_base, [128], w_base, 1e-5
+            )
+        tensors = (
+            torch.randn(*shape, dtype=torch.float16, device="cuda")._lazy_clone(),
+            x_base._lazy_clone(),
+            rstd_base._lazy_clone(),
+            w_base._lazy_clone(),
+        )
+        gout, x, rstd, w = tensors
+        torch.ops.aten._fused_rms_norm_backward(
+            gout, x, [128], rstd, w, [True, True]
+        )
+        for tensor in tensors:
+            self.assertTrue(torch._C._is_cow_tensor(tensor))
 
     def test_weight_none(self):
         dtype = torch.float16

@@ -32,6 +32,7 @@
 #include <ATen/ops/vdot_native.h>
 #include <ATen/ops/_scaled_mm_native.h>
 #include <ATen/ops/_scaled_mm_v2_native.h>
+#include <ATen/ops/_scaled_grouped_mm_v2_native.h>
 #include <ATen/ops/mul.h>
 #include <ATen/ops/matmul.h>
 #endif
@@ -114,6 +115,40 @@ TORCH_META_FUNC(_scaled_mm_v2)(
       {self.size(0), mat2.size(1)},
       {},
       self.options().dtype(out_dtype_));
+}
+
+// V2: Grouped scaled matrix multiply. Shape inference + output allocation runs
+// here; recipe-independent input validation runs here too (in eager, before
+// TORCH_IMPL_FUNC, and during `torch.compile` tracing). Per-recipe scale-shape
+// checks, the device-capability gate, and kernel dispatch live in the CUDA
+// TORCH_IMPL_FUNC. Output is bf16 only.
+//
+// `self`/`mat2` may be 2D or 3D; `offs` carries group boundaries when either
+// operand is 2D. The output size/stride mirror `create_grouped_gemm_output_tensor`.
+TORCH_META_FUNC(_scaled_grouped_mm_v2)(
+    const Tensor& self,
+    const Tensor& mat2,
+    const at::ITensorListRef& scale_a,
+    at::IntArrayRef recipe_a,
+    at::IntArrayRef swizzle_a,
+    const at::ITensorListRef& scale_b,
+    at::IntArrayRef recipe_b,
+    at::IntArrayRef swizzle_b,
+    at::OptionalTensorRef offs,
+    at::OptionalTensorRef bias,
+    std::optional<c10::ScalarType> out_dtype,
+    at::IntArrayRef contraction_dim,
+    bool use_fast_accum) {
+  scaled_blas::validate_scaled_grouped_mm_v2_inputs(
+      self, mat2, offs, bias, contraction_dim, out_dtype);
+
+  const auto out_dtype_ = out_dtype.value_or(kBFloat16);
+  std::optional<Tensor> offs_opt =
+      offs.has_value() ? std::optional<Tensor>{*offs} : std::nullopt;
+  auto [out_size, out_stride] =
+      at::native::compute_grouped_gemm_output_size_stride(self, mat2, offs_opt, out_dtype_);
+  set_output_raw_strided(
+      0, out_size, out_stride, self.options().dtype(out_dtype_));
 }
 
 } // namespace at::meta

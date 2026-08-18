@@ -240,7 +240,9 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         """FXIR does not emit deferred alignment copies.
         Alignment is handled by the runtime wrapper."""
 
-    def codegen_deferred_alignment_copies(self, input_names: Iterable[str]) -> None:
+    def codegen_deferred_alignment_copies(
+        self, input_names: Iterable[str], stream: int = 0
+    ) -> None:
         """FXIR does not emit deferred alignment copies."""
 
     @classmethod
@@ -1337,10 +1339,15 @@ class FxConverter:
             else:
                 raise NotImplementedError(f"Unrecognized entry type: {type(entry)}")
 
-        root_node = self.buffer_to_node[line.output_name]
         unbacked_bindings = line.unbacked_bindings
         if unbacked_bindings is None:
             raise AssertionError("line.unbacked_bindings must not be None")
+        # Kernels with no unbacked symbols aren't recorded in buffer_to_node, so
+        # return before the output-buffer lookup to avoid a KeyError. Mirrors
+        # the non-FX wrapper's early return.
+        if not unbacked_bindings:
+            return
+        root_node = self.buffer_to_node[line.output_name]
         for s, keypath in unbacked_bindings.items():
             # Check if we already generated this symbol.
             if s.name in self.buffer_to_node:

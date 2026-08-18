@@ -308,7 +308,6 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
             ],
         )
 
-    @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_nested_resume_del_releases_tensor(self):
         refs = []
         events = []
