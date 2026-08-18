@@ -1335,11 +1335,10 @@ class TestPassesDevice(TestCase):
 
     def test_move_device_to(self, device):
         device_type = torch.device(device).type
-        device0 = f"{device_type}:0"
 
         class M(torch.nn.Module):
             def forward(self, x):
-                x = torch.ops.aten.to.device(x, device=device0, dtype=torch.float32)
+                x = torch.ops.aten.to.device(x, device=device, dtype=torch.float32)
                 return x + x
 
         ep = torch.export.export(M(), (torch.ones(3),))
@@ -1358,12 +1357,11 @@ def forward(self, x):
 
     def test_move_device_submod(self, device):
         device_type = torch.device(device).type
-        device0 = f"{device_type}:0"
 
         class M(torch.nn.Module):
             def forward(self, x):
                 with torch.autocast(device_type=device_type, dtype=torch.bfloat16):
-                    x = x.to(device=device0)
+                    x = x.to(device=device)
                     return x + x
 
         ep = torch.export.export(M(), (torch.ones(3),))
@@ -1381,8 +1379,7 @@ def forward(self, arg0_1):
         )
 
     def test_move_device_example_inputs(self, device):
-        device_type = torch.device(device).type
-        device0 = f"{device_type}:0"
+        target_device = torch.device(device)
 
         class Model(torch.nn.Module):
             def __init__(self):
@@ -1406,17 +1403,15 @@ def forward(self, arg0_1):
         self.assertEqual(ep.example_inputs[1]["z"].device, torch.device("cpu"))
 
         # Move to accelerator
-        location = torch.device(device0)
-        ep_moved = move_to_device_pass(ep, location=location)
+        ep_moved = move_to_device_pass(ep, location=target_device)
 
         # Verify example_inputs moved
-        self.assertEqual(ep_moved.example_inputs[0][0].device, torch.device(device0))
-        self.assertEqual(ep_moved.example_inputs[0][1].device, torch.device(device0))
-        self.assertEqual(ep_moved.example_inputs[1]["z"].device, torch.device(device0))
+        self.assertEqual(ep_moved.example_inputs[0][0].device, target_device)
+        self.assertEqual(ep_moved.example_inputs[0][1].device, target_device)
+        self.assertEqual(ep_moved.example_inputs[1]["z"].device, target_device)
 
     def test_move_to_device_pass(self, device):
-        device_type = torch.device(device).type
-        device0 = f"{device_type}:0"
+        target_device = torch.device(device)
 
         class Model(torch.nn.Module):
             def __init__(self, size=4, h_dim=10):
@@ -1427,16 +1422,15 @@ def forward(self, arg0_1):
                 _, states = self.rnn(x)
                 return states
 
-        # move the exported program from cpu to accelerator:0
+        # move the exported program from cpu to accelerator
         mod = Model()
         example_inputs = (torch.rand(1, 10, 4),)
         ep = export(mod, example_inputs, strict=True)
-        location = torch.device(device0)
-        ep = move_to_device_pass(ep, location=location)
+        ep = move_to_device_pass(ep, location=target_device)
         gm = ep.module()
-        test_inputs = (torch.rand(1, 10, 4).to(device0),)
+        test_inputs = (torch.rand(1, 10, 4).to(target_device),)
         outputs = gm(*test_inputs)
-        self.assertEqual(outputs.device, torch.device(device0))
+        self.assertEqual(outputs.device, target_device)
         # move it back to cpu
         location = "cpu"
         ep = move_to_device_pass(ep, location=location)
@@ -1444,16 +1438,18 @@ def forward(self, arg0_1):
         test_inputs = (torch.rand(1, 10, 4).to("cpu"),)
         outputs = gm(*test_inputs)
         self.assertEqual(outputs.device, torch.device("cpu"))
-        # move it to accelerator:0 again
-        location = {"cpu": device0}
+        # move it to accelerator again
+        location = {"cpu": str(target_device)}
         ep = move_to_device_pass(ep, location=location)
         gm = ep.module()
-        test_inputs = (torch.rand(1, 10, 4).to(device0),)
+        test_inputs = (torch.rand(1, 10, 4).to(target_device),)
         outputs = gm(*test_inputs)
-        self.assertEqual(outputs.device, torch.device(device0))
+        self.assertEqual(outputs.device, target_device)
 
 
-instantiate_device_type_tests(TestPassesDevice, globals(), except_for="cpu")
+instantiate_device_type_tests(
+    TestPassesDevice, globals(), except_for="cpu", allow_xpu=True
+)
 
 
 if __name__ == "__main__":
