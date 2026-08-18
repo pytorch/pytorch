@@ -978,7 +978,7 @@ class OptimizeForInferenceTemplate(TestCase):
         def debug_inductor_force_stride_order(orig_fn, input_tensor, stride):
             nonlocal num_same_stride, num_diff_stride
             input_tensor.realize()
-            if tuple(input_tensor.get_stride()) == tuple(stride):
+            if tuple(input_tensor.get_stride_hint()) == tuple(stride):
                 num_same_stride += 1
             else:
                 num_diff_stride += 1
@@ -1009,16 +1009,10 @@ class OptimizeForInferenceTemplate(TestCase):
 
         # we don't change the stride of y returned by forward. So there will
         # be no extra copy
-        self.assertTrue(
-            num_same_stride == 1,
-            lambda msg: f"{msg}\nnum_same_stride is {num_same_stride}",
-        )
+        self.assertTrue(num_same_stride == 1, f"num_same_stride is {num_same_stride}")
         # we changed the stride of self.conv(x) returned by forward. So there
         # may be an extra copy
-        self.assertTrue(
-            num_diff_stride == 1,
-            lambda msg: f"{msg}\nnum_diff_stride is {num_diff_stride}",
-        )
+        self.assertTrue(num_diff_stride == 1, f"num_diff_stride is {num_diff_stride}")
 
 
 if TEST_WITH_ROCM:
