@@ -139,7 +139,6 @@ if TYPE_CHECKING:
     CompiledModule = ModuleType | FileBackedGraphModule
 
 from torch._inductor.codecache import output_code_log
-from torch._inductor.utils import is_gpu
 
 
 log = logging.getLogger(__name__)
@@ -2595,7 +2594,7 @@ class GraphLowering(torch.fx.Interpreter):
         `cpp_wrapper_cpu.py`).
         """
         self.validate_can_generate_cpp_wrapper()
-        has_gpu = any(ir.is_triton(device) for device in self.device_types)
+        has_gpu = any(device in self.device_types for device in ["cuda", "xpu"])
         # CPU + user-defined Triton + AOTI + autotune block disabled is the
         # only CPU configuration that needs the two-pass dance: the autotune
         # block normally populates CpuTritonKernelCache, but here it doesn't run.
@@ -2905,7 +2904,7 @@ class GraphLowering(torch.fx.Interpreter):
         # A "cpu" device would precompile cpp_wrapper/cpu.h, which does not
         # include the CUDA headers needed to compile the kernel call sites.
         device_type = next(
-            (d for d in self.device_types if is_gpu(d)),
+            (d for d in self.device_types if d in ("cuda", "xpu")),
             next((d for d in self.device_types if d != "meta"), "cpu"),
         )
 
@@ -3201,6 +3200,8 @@ class SubgraphLowering(GraphLowering):
     def __init__(self, parent: GraphLowering, *args: Any, **kwargs: Any) -> None:
         self.parent = parent
         super().__init__(*args, **kwargs)
+        # Donation indices use the parent graph's placeholder ordering, not ours.
+        self.bw_donated_idxs = None
 
     def allocate_non_dup_const_name(self, name: str | None, data: Tensor) -> str:
         name = super().allocate_non_dup_const_name(name, data)
