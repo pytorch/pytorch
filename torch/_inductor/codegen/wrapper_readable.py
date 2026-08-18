@@ -18,6 +18,9 @@ import torch._inductor.config as config
 from torch.utils._indented_buffer import DeferredLineBase, IndentedBuffer
 
 from .. import ir
+from ..runtime import triton_heuristics
+from ..utils import cache_on_self
+from ..virtualized import V
 from .wrapper import PythonWrapperCodegen, SubgraphPythonWrapperCodegen
 
 
@@ -141,6 +144,29 @@ class ReadablePythonWrapperCodegen(PythonWrapperCodegen):
         )
 
     @override
+    @cache_on_self
+    def write_triton_header_once(self) -> None:
+        if config.triton.autotune_at_compile_time or V.graph.cpp_wrapper:
+            # Those paths splice into buffers this mode does not prune; leave them be.
+            super().write_triton_header_once()
+            return
+        # `import triton` / `import triton.language as tl` are duplicated by every
+        # hoisted kernel's own import block, and `start_graph`/`end_graph` are only used
+        # under profile_bandwidth. Emit each only if the wrapper's own code wants it.
+        for names, line in (
+            (("triton",), "import triton"),
+            (("tl",), "import triton.language as tl"),
+            (
+                ("start_graph", "end_graph"),
+                f"from {triton_heuristics.__name__} import start_graph, end_graph",
+            ),
+        ):
+            self.write_preamble_line(self.imports, names, line)
+        self.imports.writeline(
+            V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")
+        )
+
+    @override
     def add_benchmark_harness(self, output: IndentedBuffer) -> None:
         # The harness (get_args/benchmark_compiled_module/__main__) is a runnable
         # benchmark script bolted onto the module. This mode emits a module to be read
@@ -162,6 +188,16 @@ class ReadablePythonWrapperCodegen(PythonWrapperCodegen):
         # @triton.jit def. Spliced at module level it binds kernel_name to the same
         # object async_compile.triton would have returned, so the launch site
         # (KERNEL.run(...)) is unchanged.
+        # The provenance comment leads with "# kernel path: /tmp/torchinductor_.../x.py",
+        # which is where the kernel WOULD have been compiled from. It is defined right
+        # here instead, and pointing a reader at a cache file is the exact confusion this
+        # mode exists to remove. The source-op mapping below it is worth keeping.
+        if metadata:
+            metadata = "\n".join(
+                line
+                for line in metadata.splitlines()
+                if not line.startswith("# kernel path:")
+            )
         self.define_kernel(
             kernel_name,
             src_code,
