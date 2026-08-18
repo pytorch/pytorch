@@ -158,6 +158,8 @@ class cuBLASModule:
     def __getattr__(self, name):
         if name == "allow_tf32":
             return torch._C._get_cublas_allow_tf32()
+        elif name == "prefer_cublaslt_grouped_gemm":
+            return torch._C._get_cublaslt_prefer_grouped_gemm()
         elif name == "allow_fp16_reduced_precision_reduction":
             allow_reduced_precision, _ = (
                 torch._C._get_cublas_allow_fp16_reduced_precision_reduction()
@@ -187,6 +189,8 @@ class cuBLASModule:
     def __setattr__(self, name, value):
         if name == "allow_tf32":
             return torch._C._set_cublas_allow_tf32(value)
+        elif name == "prefer_cublaslt_grouped_gemm":
+            return torch._C._set_cublaslt_prefer_grouped_gemm(value)
         elif name == "allow_fp16_reduced_precision_reduction":
             allow_reduced_precision, allow_splitk = self._parse_reduction_setting(
                 value, "allow_fp16_reduced_precision_reduction"
@@ -258,7 +262,7 @@ def preferred_linalg_library(
     * :func:`torch.linalg.lu_solve`
     * :func:`torch.linalg.qr`
     * :func:`torch.linalg.eigh`
-    * :func:`torch.linalg.eighvals`
+    * :func:`torch.linalg.eigvals`
     * :func:`torch.linalg.svd`
     * :func:`torch.linalg.svdvals`
     """

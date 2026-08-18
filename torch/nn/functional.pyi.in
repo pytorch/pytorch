@@ -26,7 +26,7 @@ __all__ = [
 ]
 
 # 'TypedDict' is a new accepted type that represents a dictionary with a fixed set of allowed keys.
-# It is standards-track but not in `typing` yet. We leave this hear to be uncommented once the feature
+# It is standards-track but not in `typing` yet. We leave this here to be uncommented once the feature
 # is wide-spread.
 
 # from mypy_extensions import TypedDict
@@ -43,7 +43,7 @@ GRID_SAMPLE_PADDING_MODES: TypeAlias = dict[str, int]
 # This was necessary since the JIT uses BroadcastingList* types but static checking with mypy etc requires a `Sequence`
 # type. There is no way to express the expected lengths of these lists in the current Python typing system.
 #
-# Functions created via `_add_docstr` in `functional.py` where merely typed as `Any` by `stubgen`, so those were
+# Functions created via `_add_docstr` in `functional.py` were merely typed as `Any` by `stubgen`, so those were
 # deleted from the stub and replaced by generated declarations. See `gen_pyi` for the implementation of the code
 # generation logic for those functions. In the future, it might be worth looking into using the mypy plugin system
 # to encode the type semantics of `_add_docstr`, should that system ever become widespread.

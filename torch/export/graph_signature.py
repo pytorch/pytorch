@@ -5,7 +5,7 @@ from enum import auto, Enum
 from typing import TYPE_CHECKING
 
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.opaque_object import get_opaque_type_name, is_opaque_type
+from torch._library.opaque_object import get_opaque_type_name, is_custom_class
 from torch._subclasses.fake_tensor import is_fake
 
 
@@ -619,7 +619,7 @@ def _make_argument_spec(node, token_names) -> ArgumentSpec:
         return CustomObjArgument(
             name=node.name, class_fqn=val.script_class_name, fake_val=val
         )
-    elif is_opaque_type(type(val)):
+    elif is_custom_class(type(val)):
         return CustomObjArgument(
             name=node.name, class_fqn=get_opaque_type_name(type(val)), fake_val=val
         )
