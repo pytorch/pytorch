@@ -2452,6 +2452,21 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
 
     @supported_platform
+    def test_make_fx_reuses_internal_eager_backend(self, device):
+        from torch._dynamo.utils import counters
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        query = torch.randn(1, 1, 32, 8, device=device)
+
+        def attention(q):
+            flex_attention(q, q, q)
+            return flex_attention(q, q, q)
+
+        initial_graphs = counters["stats"]["unique_graphs"]
+        make_fx(attention)(query)
+        self.assertEqual(counters["stats"]["unique_graphs"] - initial_graphs, 1)
+
+    @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
