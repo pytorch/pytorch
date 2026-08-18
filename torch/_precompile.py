@@ -1762,10 +1762,17 @@ class PrecompiledModule:
         # readable_wrapper is what makes the emitted kernels module-level code the
         # reader can edit, instead of source strings handed to AsyncCompile. It also
         # trims the preamble to the bindings this graph actually uses.
+        # autotune_local_cache off: with it on, loading the artifact drops a
+        # <hash>.best_config next to it -- into the directory the artifact is meant to be
+        # committed from -- and that sidecar is keyed on basename(__file__), so two
+        # unrelated artifacts both named artifact.py share one entry and can pick up each
+        # other's launch config. The docs already promise autotuning is re-run on load
+        # rather than recorded; this makes that true.
         options: dict[str, Any] = {
             "size_asserts": True,
             "cpp.dynamic_threads": True,
             "readable_wrapper": True,
+            "autotune_local_cache": False,
         }
         if capture.fake_mode is not None and hasattr(_ind_config, "scalar_asserts"):
             options["scalar_asserts"] = True

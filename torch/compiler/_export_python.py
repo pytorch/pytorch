@@ -44,7 +44,7 @@ _R = TypeVar("_R")
 # by a different torch (see _warn_on_version_skew). It is a comment, so it does not
 # affect exec; a hand-edit that drops it just disables the skew warning, so
 # hill-climbing an artifact never triggers a spurious version warning.
-# All six stamps must stay in the artifact's LEADING comment block: the reader stops
+# All seven stamps must stay in the artifact's LEADING comment block: the reader stops
 # at the first line that is not a comment, so inserting code above them turns every
 # check off -- each checked stamp warns per call while it is missing, and the version
 # warning is the only one that goes quiet.
@@ -70,6 +70,15 @@ _AUTOCAST_TAG = "# torch.compiler.export_python autocast: "
 # deterministic algorithms were on when inductor chose between a deterministic and an
 # atomic lowering.
 _GLOBAL_STATE_TAG = "# torch.compiler.export_python global-state: "
+# The CPU vector ISA the artifact's C++ kernels were generated against. Inductor bakes
+# the host's vector width into a C++ loop's stride -- a reduction emitted on AVX-512
+# steps and stores 16 floats at a time -- while the ISA itself is re-picked when the
+# artifact is compiled on whichever machine loads it. Replay under a narrower vector unit
+# and each store covers half of its own step, leaving the rest of the output as whatever
+# the allocator held: no error, no warning, and a result that is not close to anything.
+# Unlike the CUDA case there is no kernel-image error to fall back on, and no other stamp
+# covers it, so this one raises rather than warns.
+_CPU_ISA_TAG = "# torch.compiler.export_python cpu-vec-isa: "
 
 # os.link failures that mean the filesystem cannot do hard links at all, as opposed to
 # a real I/O problem (a full disk, a bad permission) that must not be swallowed.
@@ -427,6 +436,20 @@ def _autocast_state(
     ]
 
 
+def _cpu_vec_isa(code: str) -> str | None:
+    """The CPU vector ISA a C++ kernel in ``code`` was generated against, or None.
+
+    None for an artifact with no C++ kernel, where the question does not arise -- a CUDA
+    artifact must not start refusing to run because it moved between two hosts whose CPUs
+    differ in a way it never depended on.
+    """
+    if not re.search(r"cpp_pybinding|cpp_fused", code):
+        return None
+    from torch._inductor.cpu_vec_isa import pick_vec_isa
+
+    return str(pick_vec_isa())
+
+
 def _global_state() -> list[list[Any]]:
     """Ambient globals the emitted code resolves against, as sorted [key, value] pairs.
 
@@ -483,6 +506,7 @@ class ExportedPythonArtifact:
         self._input_overlaps: list[list[int]] | None = None
         self._input_duplicates: list[list[int]] | None = None
         self._global_state: list[list[str]] | None = None
+        self._cpu_isa: str | None = None
         self._code_devices: set[str] = set()
         self._autocast: list[list[Any]] | None = None
         self._loaded: Callable[..., Any] | None = None
@@ -551,7 +575,8 @@ class ExportedPythonArtifact:
             f"{_INPUT_DUPLICATE_TAG}{_input_duplicates(example, example_tensors)!r}\n"
             f"{_AUTOCAST_TAG}"
             f"{_autocast_state(example, example_tensors, _code_devices(code))!r}\n"
-            f"{_GLOBAL_STATE_TAG}{_global_state()!r}\n{code}"
+            f"{_GLOBAL_STATE_TAG}{_global_state()!r}\n"
+            f"{_CPU_ISA_TAG}{_cpu_vec_isa(code)!r}\n{code}"
         )
         if _atomic_publish(self._path, code.encode("utf-8")):
             return code, False
@@ -725,6 +750,18 @@ class ExportedPythonArtifact:
                     "Autocast dtypes are baked into the artifact; capture under the "
                     "same autocast context you call it in."
                 )
+        if self._cpu_isa is not None:
+            live_isa = _cpu_vec_isa("cpp_fused")
+            if live_isa is not None and live_isa != self._cpu_isa:
+                raise _precompile_error(
+                    "torch.compiler.export_python: this machine's CPU vector ISA is "
+                    f"{live_isa!r} but the artifact's C++ kernels were generated for "
+                    f"{self._cpu_isa!r}. The vector width is baked into their loop "
+                    "strides while the ISA is re-picked at compile time, so running "
+                    "them here would write past the end of an output or leave part of "
+                    f"it uninitialized. Delete {self._path} to regenerate on this "
+                    "machine, or run where the captured ISA is available."
+                )
 
     def _check_module_training(self, args: tuple[Any, ...]) -> None:
         actual = _module_training_state(args)
@@ -835,6 +872,7 @@ class ExportedPythonArtifact:
         self._input_duplicates = self._read_stamp(code, _INPUT_DUPLICATE_TAG)
         self._autocast = self._read_stamp(code, _AUTOCAST_TAG)
         self._global_state = self._read_stamp(code, _GLOBAL_STATE_TAG)
+        self._cpu_isa = self._read_stamp(code, _CPU_ISA_TAG)
         self._code_devices = _code_devices(code)
         entry = self._load(code, from_disk=from_disk)
         self._example_inputs = None
