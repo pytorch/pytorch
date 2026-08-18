@@ -101,6 +101,21 @@ def cuda_rpaths(gpu_arch_version: str) -> str:
     )
 
 
+def rocm_rpaths() -> str:
+    """RPATH list for the TheRock wheel-based ROCm layout.
+
+    ROCm libs come from the `rocm` pip package, which unpacks under
+    <site-packages>/_rocm_sdk_core (a sibling of torch/), so point at it
+    $ORIGIN-relatively, mirroring cuda_rpaths(). No ROCm libs are bundled into
+    the wheel in this layout.
+    """
+    return (
+        "$ORIGIN/../../_rocm_sdk_core/lib"
+        ":$ORIGIN/../../_rocm_sdk_core/lib/rocm_sysdeps/lib"
+        ":$ORIGIN/../../_rocm_sdk_libraries/lib"
+    )
+
+
 def aarch64_extra_deps(use_cuda: bool) -> list[Path]:
     """Libraries to bundle into torch/lib/ on aarch64.
 
@@ -145,7 +160,7 @@ ROCM_SO_FILES: list[str] = [
     "librccl.so",
     "librocblas.so",
     "librocfft.so",
-    "librocm_smi64.so",
+    "libamd_smi.so",
     "librocrand.so",
     "librocsolver.so",
     "librocsparse.so",
@@ -222,7 +237,9 @@ def rocm_lib_kernels(
     return files
 
 
-def rocm_bundle(rocm_home: Path) -> tuple[list[BundledLib], list[AuxFile]]:
+def rocm_bundle(
+    rocm_home: Path, gpu_arch_version: str
+) -> tuple[list[BundledLib], list[AuxFile]]:
     """Build the ROCm bundle spec: shared libs and auxiliary kernel/db files.
 
     Versioned ROCm sonames (libfoo.so.6) get renamed to bare .so to match the
@@ -231,7 +248,11 @@ def rocm_bundle(rocm_home: Path) -> tuple[list[BundledLib], list[AuxFile]]:
     rewritten to the renamed copies via patchelf in repair_wheel().
     """
     libs: list[BundledLib] = []
-    for stem in ROCM_SO_FILES:
+    so_files = list(ROCM_SO_FILES)
+    # librocm_smi64.so is only needed for ROCm7.2 and earlier
+    if gpu_arch_version and tuple(map(int, gpu_arch_version.split(".")[:2])) <= (7, 2):
+        so_files.append("librocm_smi64.so")
+    for stem in so_files:
         path = find_rocm_lib(rocm_home, stem)
         if path is None:
             sys.exit(f"Required ROCm library not found: {stem}")
@@ -408,10 +429,21 @@ def main() -> None:
         force_rpath = True
     elif is_rocm:
         rocm_home = Path(os.environ.get("ROCM_HOME", "/opt/rocm"))
-        bundled_libs, aux_files = rocm_bundle(rocm_home)
-        c_so_rpath = "$ORIGIN:$ORIGIN/lib"
-        lib_so_rpath = "$ORIGIN"
-        force_rpath = True
+        if "_rocm_sdk" in str(rocm_home):
+            # TheRock wheel layout (rocm7.14): ROCm ships as the `rocm` pip
+            # package (_rocm_sdk_core, a sibling of torch/). Resolve libs via
+            # RPATH instead of bundling them, mirroring the CUDA/XPU wheels.
+            rpaths = rocm_rpaths()
+            c_so_rpath = f"{rpaths}:$ORIGIN:$ORIGIN/lib"
+            lib_so_rpath = f"{rpaths}:$ORIGIN"
+            force_rpath = True
+        else:
+            # Legacy OS/tarball layout (/opt/rocm, e.g. rocm7.2): bundle the
+            # ROCm libs into the wheel so it stays self-contained.
+            bundled_libs, aux_files = rocm_bundle(rocm_home, gpu_arch_version)
+            c_so_rpath = "$ORIGIN:$ORIGIN/lib"
+            lib_so_rpath = "$ORIGIN"
+            force_rpath = True
     else:
         c_so_rpath = "$ORIGIN:$ORIGIN/lib"
         lib_so_rpath = "$ORIGIN"

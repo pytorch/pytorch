@@ -31,6 +31,7 @@ from torch.testing._internal.common_utils import (
     get_gcc_major_version,
     instantiate_parametrized_tests,
     IS_ARM64,
+    IS_CI,
     IS_CPU_EXT_SVE_SUPPORTED,
     IS_FBCODE,
     IS_MACOS,
@@ -41,6 +42,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     skipIfRocmArch,
     slowTest,
+    TEST_CUDA,
     TEST_WITH_ROCM,
     xfailIf,
     xfailIfS390X,
@@ -2525,6 +2527,28 @@ class CPUReproTests(TestCase):
         if not same(x2, x3):
             raise AssertionError("x2 and x3 are not the same")
 
+    @parametrize("dtype", (torch.int8, torch.int16, torch.int32, torch.int64))
+    def test_signed_int_overflow_wraps(self, dtype):
+        def add(x, y):
+            return (x + y).to(torch.int64)
+
+        def sub(x, y):
+            return (x - y).to(torch.int64)
+
+        def mul(x, y):
+            return (x * y).to(torch.int64)
+
+        info = torch.iinfo(dtype)
+        n = 67
+        two = torch.full((n,), 2, dtype=dtype)
+        for fn, v in ((add, info.max), (sub, info.min), (mul, info.max)):
+            x = torch.full((n,), v, dtype=dtype)
+            for simdlen in simd_lengths_to_test():
+                with config.patch({"cpp.simdlen": simdlen}):
+                    torch._dynamo.reset()
+                    metrics.reset()
+                    self.common(fn, (x, two))
+
     def test_int_div(self):
         def fn(x, y):
             s3 = x.size(1)
@@ -3348,6 +3372,19 @@ class CPUReproTests(TestCase):
 
     @requires_vectorization
     @patch("torch.cuda.is_available", lambda: False)
+    def test_vec_expm1_small_values(self):
+        def fn(x):
+            return torch.expm1(x)
+
+        x = torch.linspace(-1e-6, 1e-6, 1024)
+        with config.patch({"cpp.simdlen": None}):
+            torch._dynamo.reset()
+            metrics.reset()
+            self.common(fn, (x,), atol=1e-9, rtol=1e-6)
+            check_metrics_vec_kernel_count(1)
+
+    @requires_vectorization
+    @patch("torch.cuda.is_available", lambda: False)
     def test_vec_cpu_only_for_all_available_isa(self):
         def fn(x):
             return torch.sin(torch.cos(torch.erf(x)))
@@ -3558,8 +3595,11 @@ class CPUReproTests(TestCase):
         eps = torch.tensor(0.9, dtype=torch.float64)
         self.common(fn, (input, eps))
 
+    @slowTest
+    # Pure CPU vec codegen; running it on a GPU CI runner leaves the GPU idle
+    # for the ~1h this test takes.
+    @unittest.skipIf(IS_CI and TEST_CUDA, "CPU-only test, skip on GPU runners")
     @requires_vectorization
-    @patch("torch.cuda.is_available", lambda: False)
     def test_vec_compare_op_cpu_only(self):
         def fn(x):
             y1 = torch.eq(x, 1.0)

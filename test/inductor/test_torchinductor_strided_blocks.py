@@ -8,6 +8,7 @@ import math
 import unittest
 from collections.abc import Callable
 from typing import Any
+from unittest import mock
 
 import torch
 import torch.utils._pytree as pytree
@@ -2363,6 +2364,41 @@ class TritonHostSideTMATestCUDA(BlockDescriptorTestBase):
         result, code_list = run_and_get_code(torch.compile(fn), x)
         self.assertTrue(torch.allclose(result, fn(x)))
         self.assertIn("tl.load", "\n".join(code_list))
+
+    @config.patch("use_static_triton_launcher", True)
+    def test_static_launcher_runs_for_host_tma(self):
+        import torch._inductor.runtime.triton_heuristics as triton_heuristics
+
+        feature_calls = []
+        orig_set_feature_use = triton_heuristics.set_feature_use
+
+        def tracking_set_feature_use(feature, usage):
+            feature_calls.append((feature, usage))
+            return orig_set_feature_use(feature, usage)
+
+        def fn(x):
+            return torch.nn.functional.silu(x)
+
+        x = torch.randn(1024, 1024, device=self.device, dtype=torch.bfloat16)
+        eager_out = fn(x)
+        with mock.patch.object(
+            triton_heuristics, "set_feature_use", tracking_set_feature_use
+        ):
+            compiled_out, code_list = run_and_get_code(torch.compile(fn), x)
+
+        code = "\n".join(code_list)
+        self.assertIn(
+            "host_tma_descriptor_args",
+            code,
+            "host-side TMA descriptors were not generated for this kernel",
+        )
+        self.assertNotIn("tl.make_tensor_descriptor", code)
+        self.assertIn(
+            ("static_triton_launcher", True),
+            feature_calls,
+            "static Triton launcher path was not taken for host-side TMA kernel",
+        )
+        self.assertTrue(torch.allclose(compiled_out, eager_out))
 
 
 test_torchinductor.copy_tests(CommonTemplate, TritonHostSideTMATestCUDA, GPU_TYPE)

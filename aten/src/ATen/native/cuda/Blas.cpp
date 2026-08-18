@@ -229,6 +229,67 @@ static bool isInputCompliesAddmmCudaLt(
   );
 }
 
+#ifndef USE_ROCM
+// A 2D tensor can be handed to cuBLASLt as long as it is row-major, possibly
+// with padding between rows, which the leading dimension expresses.
+static bool isRowMajorWithValidLeadingDim(const Tensor& t) {
+  return t.dim() == 2 && t.stride(1) == 1 && t.stride(0) >= t.sizes()[1];
+}
+#endif
+
+static bool canUseAddmmCudaLtWithDistinctCAndD(
+    Tensor& result,
+    const Tensor& self,
+    const Tensor& mat1,
+    const Tensor& mat2,
+    bool disable_addmm_cuda_lt) {
+#ifdef USE_ROCM
+  // isInputCompliesAddmmCudaLt() deliberately keeps 2D `self` away from
+  // hipBLASLt, and this path has no ROCm coverage, so stay off it entirely.
+  return false;
+#else
+  if (disable_addmm_cuda_lt) {
+    return false;
+  }
+  // Taking this path would silently skip TunableOp for a shape that is tuned
+  // today through the non-Lt gemm.
+  if (at::cuda::tunable::getTuningContext()->IsTunableOpEnabled()) {
+    return false;
+  }
+  if (result.is_same(self) || self.dim() != 2 || result.dim() != 2) {
+    return false;
+  }
+  if (self.sizes()[0] != result.sizes()[0] || self.sizes()[1] != result.sizes()[1]) {
+    return false;
+  }
+  if (!isRowMajorWithValidLeadingDim(self) ||
+      !isRowMajorWithValidLeadingDim(result)) {
+    return false;
+  }
+  if (self.is_conj() || result.is_conj() || self.is_neg() || result.is_neg()) {
+    return false;
+  }
+  // Conservative: any shared storage between C and D falls back. Note that
+  // at::get_overlap_status() cannot be used here, as it reports TooHard for the
+  // padded (non-dense) layouts this path accepts.
+  if (self.is_alias_of(result)) {
+    return false;
+  }
+  if (self.scalar_type() != mat1.scalar_type() || result.scalar_type() != mat1.scalar_type()) {
+    return false;
+  }
+  const auto scalar_type = mat1.scalar_type();
+  if (scalar_type != at::ScalarType::Double &&
+      scalar_type != at::ScalarType::Float &&
+      scalar_type != at::ScalarType::Half &&
+      scalar_type != at::ScalarType::BFloat16) {
+    return false;
+  }
+  // Match the existing cuBLASLt shape guard.
+  return mat2.sizes()[0] > 1 && mat2.sizes()[1] > 1;
+#endif
+}
+
 template <typename scalar_t>
 void launchTunableGemmAndBias(cublasCommonArgs &args, const Scalar& alpha, const scalar_t* bias, cuda::blas::GEMMAndBiasActivationEpilogue activation) {
   bool transa_ = ((args.transa != 'n') && (args.transa != 'N'));
@@ -336,6 +397,37 @@ bool launchGemmCublas(
   return true; // success!
 }
 
+template <typename scalar_t>
+bool launchGemmWithDistinctCAndDCublasLt(
+    cublasCommonArgs& args,
+    const Tensor& self,
+    const Scalar& alpha,
+    const Scalar& beta) {
+  // `self` is row-major (guarded), so its leading dimension is stride(0), which
+  // is the same convention cublasCommonArgs uses to derive result_ld for the
+  // row-major result this path requires.
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(self.stride(1) == 1);
+  return at::cuda::blas::gemm_and_bias<scalar_t>(
+    args.transa == 't',
+    args.transb == 't',
+    args.m,
+    args.n,
+    args.k,
+    alpha.to<at::opmath_type<scalar_t>>(),
+    args.mata->const_data_ptr<scalar_t>(),
+    args.lda,
+    args.matb->const_data_ptr<scalar_t>(),
+    args.ldb,
+    /*bias=*/nullptr,
+    args.result->data_ptr<scalar_t>(),
+    args.result_ld,
+    at::cuda::blas::GEMMAndBiasActivationEpilogue::None,
+    self.const_data_ptr<scalar_t>(),
+    self.stride(0),
+    beta.to<at::opmath_type<scalar_t>>()
+  );
+}
+
 Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, Activation activation=Activation::None, bool disable_addmm_cuda_lt_override=false) {
   // Shape checks {
   // Make sure to keep addmm_cuda below in sync with this code; it
@@ -367,6 +459,9 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   // Conditioned on the device index, which is not persistent
   disable_addmm_cuda_lt = disable_addmm_cuda_lt || isGloballyDisabledAddmmCudaLt(self.device());
   #endif
+  // Everything above is a property of the build/device rather than the inputs.
+  // The distinct-C/D path applies its own input checks, so it keys off this.
+  const bool disable_addmm_cuda_lt_for_device = disable_addmm_cuda_lt;
   // Condition on the input
   disable_addmm_cuda_lt = disable_addmm_cuda_lt || !isInputCompliesAddmmCudaLt(result, self, mat1, mat2, beta, alpha, activation);
 
@@ -387,6 +482,43 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
 
       // We do not copy bias only when we need the bias ptr
     if (beta.toComplexDouble() != 0.0 && !use_bias_ptr_lt) {
+      // alpha == 0 must not take this path. When alpha is 0 and beta is 1 the
+      // operation reduces to D = C, and cuBLASLt then skips the write entirely:
+      // a valid shortcut while C had already been copied into D and the two
+      // pointers aliased, but it silently drops the term once they are
+      // distinct. cuBLASLt does write beta * C for every other beta, so only
+      // beta == 1 is actually affected; excluding all of alpha == 0 costs
+      // nothing (there is no matmul to overlap with the avoided copy) and does
+      // not rely on which algorithm the heuristic happens to return.
+      const bool distinct_c_and_d_candidate =
+          result.numel() != 0 && activation == Activation::None &&
+          alpha.toComplexDouble() != 0.0 &&
+          canUseAddmmCudaLtWithDistinctCAndD(
+              result, self, mat1, mat2, disable_addmm_cuda_lt_for_device);
+      if (distinct_c_and_d_candidate) {
+        cublasCommonArgs args(mat1, mat2, result);
+        // Returning early below skips the `result.copy_(*args.result)`
+        // writeback, which is only correct because the guard keeps `result`
+        // row-major and non-conj, so prepare_matrix_for_cublas() borrows it
+        // instead of handing back an owned copy.
+        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+            !args.result->is_conj() && args.result->is_same(result) &&
+            args.result_ld == result.stride(0));
+        bool distinct_c_and_d_lt_success = false;
+        AT_DISPATCH_FLOATING_TYPES_AND2(
+          at::ScalarType::Half,
+          at::ScalarType::BFloat16,
+          scalar_type,
+          "addmm_cuda_lt_distinct_c_and_d",
+          [&] {
+            distinct_c_and_d_lt_success = launchGemmWithDistinctCAndDCublasLt<scalar_t>(
+                args, self, alpha, beta);
+          }
+        );
+        if (distinct_c_and_d_lt_success) {
+          return result;
+        }
+      }
       // NOTE: self should broadcast over result
       at::native::copy_(result, *expand_size(self, result.sizes(), "addmm"));
     }

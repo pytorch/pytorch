@@ -95,6 +95,8 @@ if torch.backends.mps.is_available():
             "istft",
             "item",
             "kron",
+            "linalg.cholesky",
+            "linalg.cholesky_ex",
             "linalg.cond",
             "linalg.cross",
             "linalg.diagonal",
@@ -867,8 +869,6 @@ if torch.backends.mps.is_available():
             "linalg.lstsq": [torch.float32],
             "linalg.lstsqgrad_oriented": [torch.float32],
             "geqrf": None,
-            # linalg.polar does not have an autograd implementation yet.
-            "linalg.polar": None,
             "unique_consecutive": [torch.float16, torch.float32],
             "scalar_tensor": [torch.float16, torch.float32],
             "igamma": None,  # currently not supported for any device

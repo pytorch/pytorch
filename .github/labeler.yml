@@ -189,6 +189,9 @@
 "ciflow/docker":
 - .ci/docker/**
 - .github/workflows/docker-builds.yml
+- .github/workflows/build-manywheel-images.yml
+- .github/workflows/build-almalinux-images.yml
+- .github/actions/binary-docker-build/**
 - .lintrunner.toml
 
 "ciflow/torchtitan":

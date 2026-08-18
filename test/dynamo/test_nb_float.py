@@ -179,6 +179,23 @@ class NbFloatTests(TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
         self.assertIn("__float__ returned non-float", result)
 
+    def test_float_returning_int_raises(self):
+        # A numeric-but-wrong-type return (int is not float) must still raise.
+        class Bad:
+            def __float__(self):
+                return 3
+
+        obj = Bad()
+
+        def fn(x):
+            try:
+                return float(obj)
+            except TypeError as e:
+                return str(e)
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
+        self.assertIn("__float__ returned non-float (type int)", result)
+
     def test_float_raising_exception_propagates(self):
         class RaisingFloat:
             def __float__(self):

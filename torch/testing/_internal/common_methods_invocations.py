@@ -388,15 +388,6 @@ def sample_inputs_cosine_similarity(op_info, device, dtype, requires_grad, **kwa
     yield SampleInput(make_arg((1, 2, 3)), args=(make_arg((2, 1, 3)),), kwargs={'dim': -1})
     yield SampleInput(make_arg((1, 2, 3)), args=(make_arg((2, 1, 3)),), kwargs={'dim': -2})
     yield SampleInput(make_arg((2, 3)), args=(make_arg((2, 1, 3)),), kwargs={'dim': -1})
-    # Test for keepdim
-    yield SampleInput(make_arg((S, S)), args=(make_arg((S, S)),), kwargs={'dim': 1, 'keepdim': True})
-    yield SampleInput(make_arg((S, S, M)), args=(make_arg((S, S, M)),), kwargs={'dim': 2, 'keepdim': True})
-    # keepdim with negative dim
-    yield SampleInput(make_arg((S, S)), args=(make_arg((S, S)),), kwargs={'dim': -1, 'keepdim': True})
-    yield SampleInput(make_arg((S, S, M)), args=(make_arg((S, S, M)),), kwargs={'dim': -2, 'keepdim': True})
-    # keepdim with broadcasting
-    yield SampleInput(make_arg((1, 2, 3)), args=(make_arg((2, 1, 3)),), kwargs={'dim': -1, 'keepdim': True})
-    yield SampleInput(make_arg((2, 3)), args=(make_arg((2, 1, 3)),), kwargs={'dim': -1, 'keepdim': True})
 
 
 def sample_inputs_item(op_info, device, dtype, requires_grad, **kwargs):
@@ -792,6 +783,27 @@ def sample_inputs_add_sub(op, device, dtype, requires_grad, **kwargs):
         yield SampleInput(lhs, args=(rhs,), kwargs={'alpha': neg_alpha})
     else:
         yield SampleInput(lhs, args=(rhs,), kwargs={'alpha': False})
+
+
+def sample_inputs_ldexp(op_info, device, dtype, requires_grad, **kwargs):
+    yield from sample_inputs_elementwise_binary(
+        op_info, device, dtype, requires_grad, **kwargs
+    )
+
+    if dtype.is_floating_point or dtype.is_complex:
+        x = make_tensor(
+            (5,),
+            device=device,
+            dtype=dtype,
+            requires_grad=requires_grad,
+        )
+        exponent = torch.tensor(
+            [-2, -1, 0, 1, 3],
+            device=device,
+            dtype=torch.int32,
+        )
+        yield SampleInput(x, args=(exponent,))
+
 
 def error_inputs_arange(op, device, **kwargs):
     yield ErrorInput(SampleInput(0, args=(3, 0)), error_type=RuntimeError, error_regex='step must be nonzero')
@@ -3589,7 +3601,8 @@ def sample_inputs_adaptive_max_pool1d(op_info, device, dtype, requires_grad, **k
         # ((0, 8, 8), (5,)),
         # 0 batch size doesn't work,  cannot reshape tensor of 0 elements into shape [0, 8, -1]
         ((3, 4, 4), 3),
-        ((3, 4, 4), 1)
+        ((3, 4, 4), 1),
+        ((2, 3, 7), 4),
     )
 
     for shapes, return_idx in product(cases, (True, False)):
@@ -3623,6 +3636,8 @@ def sample_inputs_adaptive_max_pool2d(op_info, device, dtype, requires_grad, **k
         ((1, 4, 4, 3), (3, None)),
         ((1, 4, 4, 3), (None, None)),
         ((1, 4, 4, 3), (3)),
+        ((2, 3, 7, 11), (4, 5)),
+        ((2, 3, 4, 10), (8, 5)),
     )
 
     for shapes, return_idx in product(cases, (True, False)):
@@ -3630,6 +3645,12 @@ def sample_inputs_adaptive_max_pool2d(op_info, device, dtype, requires_grad, **k
         yield SampleInput(make_arg(shapes[0]), args=(shapes[1], return_idx))
         # Unbatched
         yield SampleInput(make_arg(shapes[0][1:]), args=(shapes[1], return_idx))
+
+    for return_idx in (True, False):
+        yield SampleInput(
+            make_arg((2, 3, 7, 7), memory_format=torch.channels_last),
+            args=((4, 4), return_idx),
+        )
 
 def error_inputs_adaptive_max_pool2d(opinfo, device, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=torch.float32)
@@ -4748,6 +4769,16 @@ def error_inputs_group_norm(opinfo, device, **kwargs):
     err_msg2 = "Expected number of channels in input to be divisible by num_groups, but got input of shape"
     s2 = SampleInput(make_arg((2, 7, 4)), args=(2,))
     yield ErrorInput(s2, error_regex=err_msg2)
+
+    # check that channels are non-zero
+    err_msg3 = "Expected number of channels to be greater than 0, got "
+    s3 = SampleInput(make_arg((1, 0, 2)), args=(1,))
+    yield ErrorInput(s3, error_regex=err_msg3)
+
+    # check that HxW is non-zero
+    err_msg4 = "Expected HxW to be greater than 0, got "
+    s4 = SampleInput(make_arg((1, 2, 0)), args=(1,))
+    yield ErrorInput(s4, error_regex=err_msg4)
 
 def error_inputs_native_layer_norm(opinfo, device, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=torch.float32, requires_grad=False)
@@ -11537,11 +11568,11 @@ def reference_rms_norm(inp: npt.NDArray, normalized_shape: tuple[int, ...], weig
 
 
 def reference_native_group_norm(input: npt.NDArray, weight: npt.NDArray | None, bias: npt.NDArray | None, N: int, C: int, HxW: int, group: int, eps: float) -> tuple[npt.NDArray, npt.NDArray, npt.NDArray]:
-    if math.prod(input.shape) == 0:
+    if N == 0:
         return (
             np.empty_like(input),
-            np.full((input.shape[0], group), np.nan, dtype=input.dtype),
-            np.full((input.shape[0], group), np.nan, dtype=input.dtype),
+            np.empty((N, group), dtype=input.dtype),
+            np.empty((N, group), dtype=input.dtype),
         )
 
     input_view = input.reshape((N, group, C // group * HxW))
@@ -14225,6 +14256,7 @@ op_db: list[OpInfo] = [
                    reference_numerics_filter=NumericsFilter(condition=lambda x: torch.abs(x) < 0.1, safe_val=1)),
     BinaryUfuncInfo('ldexp',
                     dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                    sample_inputs_func=sample_inputs_ldexp,
                     # Runs very slowly on slow gradcheck - alternatively reduce input sizes
                     gradcheck_fast_mode=True,
                     supports_forward_ad=True,
@@ -15327,14 +15359,8 @@ op_db: list[OpInfo] = [
         reference_inputs_func=reference_inputs_native_group_norm,
         sample_inputs_func=sample_inputs_native_group_norm,
         skips=(
-            # native_group_norm expects contiguous inputs
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples", device_type="cpu"),
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples", device_type="cuda"),
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples", device_type="mps"),
             # likely due to dispatching through infinitely_differentiable_native_group_norm_backward
             DecorateInfo(unittest.expectedFailure, "TestConsistency", "test_output_grad_match", device_type="mps", dtypes=(torch.float32,)),
-            # native_group_norm expects contiguous inputs on CUDA
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides", device_type="cuda"),
         ),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
@@ -15856,7 +15882,11 @@ op_db: list[OpInfo] = [
                ),
                DecorateInfo(
                    toleranceOverride({torch.half: tol(atol=9e-3, rtol=2e-1), }),
-                   'TestInductorOpInfo', 'test_comprehensive', device_type='cpu')],
+                   'TestInductorOpInfo', 'test_comprehensive', device_type='cpu'),
+               # OneDNN deterministic issue, https://github.com/intel/torch-xpu-ops/issues/3650
+               DecorateInfo(
+                   toleranceOverride({torch.float32: tol(atol=3e-05, rtol=3e-06), }),
+                   'TestCompositeCompliance', 'test_backward', device_type='xpu')],
            skips=(
                # RuntimeError: !lhs.isAliasOf(rhs)INTERNAL ASSERT FAILED at
                # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":104, please report a bug to PyTorch.
@@ -16078,12 +16108,6 @@ op_db: list[OpInfo] = [
                # RuntimeError: Cannot insert a Tensor that requires grad as a constant.
                # Consider making it a parameter or input, or detaching the gradient
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
-               DecorateInfo(
-                   toleranceOverride({torch.float32: tol(atol=5e-05, rtol=3e-03)}),
-                   "TestDecomp",
-                   "test_comprehensive",
-                   device_type="cpu"
-               ),
            ],
            sample_inputs_func=sample_inputs_group_norm,
            reference_inputs_func=reference_inputs_group_norm,
@@ -16354,8 +16378,6 @@ op_db: list[OpInfo] = [
                # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":185,
                # please report a bug to PyTorch.
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-               # https://github.com/pytorch/pytorch/issues/147057
-               DecorateInfo(skipIfRocm, "TestInductorOpInfo", "test_comprehensive", dtypes=(torch.float64,)),
            ),
            supports_out=False),
     OpInfo('nn.functional.interpolate',
@@ -16662,8 +16684,6 @@ op_db: list[OpInfo] = [
            aten_name='max_pool2d',
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
            gradcheck_fast_mode=True,
-           # Vmap is not happy with non-contiguous (channels_last) inputs
-           check_batched_gradgrad=False,
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -18507,9 +18527,6 @@ op_db: list[OpInfo] = [
                     skips=(
                         DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                         DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit',),
-                        # TODO: FIXME tolerance is too high
-                        # https://github.com/pytorch/pytorch/issues/165296
-                        DecorateInfo(skipIfRocm, "TestInductorOpInfo", "test_comprehensive", dtypes=(torch.float32,)),
                     ),
                     assert_autodiffed=True,
                     autodiff_nonfusible_nodes=['aten::pow'],),
@@ -18920,11 +18937,11 @@ op_db: list[OpInfo] = [
     UnaryUfuncInfo('angle',
                    ref=np.angle,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
-                   dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool),
+                   dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
                    decorators=(precisionOverride({torch.float16: 1e-2,
                                                   torch.bfloat16: 1e-2}),),
                    backward_dtypes=floating_and_complex_types_and(torch.bfloat16, torch.float16),
-                   backward_dtypesIfCUDA=floating_and_complex_types_and(torch.chalf),
+                   backward_dtypesIfCUDA=floating_and_complex_types_and(torch.chalf, torch.half, torch.bfloat16),
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
                    supports_sparse_csr=True,
@@ -19411,6 +19428,9 @@ op_db: list[OpInfo] = [
              skips=(
                  DecorateInfo(toleranceOverride({torch.float16: tol(atol=2e-3, rtol=3e-3)}),
                               'TestInductorOpInfo', 'test_comprehensive'),
+                 # Exception: Backward is not reentrant, #2359
+                 DecorateInfo(unittest.skip("Skipped!"), 'TestBwdGradients', 'test_fn_gradgrad', device_type='xpu'),
+                 DecorateInfo(unittest.skip("Skipped!"), 'TestBwdGradients', 'test_inplace_gradgrad', device_type='xpu'),
              ),
              supports_out=True,
              sample_inputs_func=sample_inputs_index_reduce,
@@ -20984,7 +21004,11 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
            # See https://github.com/pytorch/pytorch/pull/78358
            check_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_inner,
-           ),
+           skips=(
+               # "dot_xpu_mkl" not implemented for 'Long', torch-xpu-ops: #3247
+               DecorateInfo(unittest.expectedFailure, "TestInductorOpInfo", "test_comprehensive",
+                            device_type="xpu", dtypes=(torch.int64,)),
+           )),
     OpInfo('tensordot',
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
@@ -25796,13 +25820,11 @@ python_ref_db = [
     ),
     PythonRefInfo(
         "_refs.native_group_norm",
-        skips=(
-            # The torch implementation does not return a view, while the reference does
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref"),
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref_executor"),
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref_torch_fallback"),
+        decorators=(
+            DecorateInfo(precisionOverride({torch.float32: 5e-5}), "TestCommon", "test_python_ref", device_type="mps"),
         ),
         torch_opinfo_name="native_group_norm",
+        validate_view_consistency=False,
     ),
     PythonRefInfo(
         "_refs.native_layer_norm",
@@ -26592,8 +26614,7 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta',
-                device_type='mps', dtypes=(torch.float16,)
-            ),
+                device_type='mps', dtypes=(torch.float16,)),
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
                 device_type='mps', dtypes=(torch.float16,)

@@ -31,7 +31,7 @@ Lots of missing collectives.
 Collectives validation.
 Make timeout robust by making collectives respect the test deadline.
 Make tests robust by making collectives interruptible.
-We need some synchronization around cleanup to ensure that timedout ranks don't cause spurious failures.
+We need some synchronization around cleanup to ensure that timed out ranks don't cause spurious failures.
 
 """
 

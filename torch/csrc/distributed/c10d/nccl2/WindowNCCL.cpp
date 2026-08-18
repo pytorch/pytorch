@@ -4,6 +4,7 @@
 
 #include <torch/csrc/distributed/c10d/nccl2/WindowNCCL.hpp>
 
+#include <c10/cuda/CUDAGuard.h>
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.hpp>
 
@@ -31,6 +32,7 @@ void WindowNCCL::tensor_register(const at::Tensor& tensor, bool owning) {
   checkDeviceAndThrow(tensor);
   TORCH_CHECK(win_ == nullptr, "WindowNCCL: double registration");
   TORCH_CHECK(tensor.is_contiguous(), "WindowNCCL: contiguous tensor required");
+  c10::cuda::CUDAGuard device_guard(pg_->getDevice());
 
   // Each segment from the NCCL mempool is tracked by the allocator hook.
   // Register the underlying segment as a NCCL_WIN_COLL_SYMMETRIC window
@@ -59,7 +61,7 @@ void WindowNCCL::tensor_register(const at::Tensor& tensor, bool owning) {
 
 void WindowNCCL::tensor_deregister() {
   // Segment-level deregistration happens automatically when the mempool frees
-  // the segment (via NcclCachingAllocatorHook). Here we just forget the
+  // the segment (via NCCLCachingAllocatorHook). Here we just forget the
   // tensor; the barriers keep ranks aligned around the collective contract.
   pg_->barrier();
   TORCH_CHECK(win_ != nullptr, "WindowNCCL: double deregistration");
@@ -92,6 +94,7 @@ c10::intrusive_ptr<::c10d::Work> WindowNCCL::put(
       " bytes) exceeds the window size (",
       win_size_,
       " bytes)");
+  c10::cuda::CUDAGuard device_guard(pg_->getDevice());
 
   // Ensure the source tensor's underlying segment is registered as a
   // symmetric window -- NCCL's ncclPutSignal looks it up internally. This is
@@ -105,12 +108,10 @@ c10::intrusive_ptr<::c10d::Work> WindowNCCL::put(
       "mempool (e.g. torch.cuda.MemPool(backend.mem_allocator))");
 
   cudaStream_t stream = pg_->getOperationStream(asyncOp);
-  auto work =
-      pg_->createWork(stream, pg_->operationTimeout(opts.timeout), tensor);
+  auto timeout = pg_->operationTimeout(opts.timeout);
+  auto work = pg_->createWork(stream, timeout, tensor);
   work->recordStart("put");
-  NCCL_CHECK(
-      nccl_api_,
-      nccl_comm_,
+  pg_->waitForNcclOperation(
       nccl_api_->putSignal(
           tensor.data_ptr(),
           tensor.numel(),
@@ -123,6 +124,7 @@ c10::intrusive_ptr<::c10d::Work> WindowNCCL::put(
           kFlags,
           nccl_comm_,
           stream),
+      timeout,
       "WindowNCCL::put ncclPutSignal failed");
   work->recordEnd();
   pg_->enqueueWork(work, stream);
@@ -134,12 +136,12 @@ c10::intrusive_ptr<::c10d::Work> WindowNCCL::signal(
     bool asyncOp,
     const ::c10d::SignalOptions& opts) {
   checkWindowAndThrow();
+  c10::cuda::CUDAGuard device_guard(pg_->getDevice());
   cudaStream_t stream = pg_->getOperationStream(asyncOp);
-  auto work = pg_->createWork(stream, pg_->operationTimeout(opts.timeout));
+  auto timeout = pg_->operationTimeout(opts.timeout);
+  auto work = pg_->createWork(stream, timeout);
   work->recordStart("signal");
-  NCCL_CHECK(
-      nccl_api_,
-      nccl_comm_,
+  pg_->waitForNcclOperation(
       nccl_api_->signal(
           static_cast<int>(peerRank),
           kSigIdx,
@@ -147,6 +149,7 @@ c10::intrusive_ptr<::c10d::Work> WindowNCCL::signal(
           kFlags,
           nccl_comm_,
           stream),
+      timeout,
       "WindowNCCL::signal ncclSignal failed");
   work->recordEnd();
   pg_->enqueueWork(work, stream);
@@ -158,12 +161,12 @@ c10::intrusive_ptr<::c10d::Work> WindowNCCL::wait_signal(
     bool asyncOp,
     const ::c10d::WaitSignalOptions& opts) {
   checkWindowAndThrow();
+  c10::cuda::CUDAGuard device_guard(pg_->getDevice());
   cudaStream_t stream = pg_->getOperationStream(asyncOp);
-  auto work = pg_->createWork(stream, pg_->operationTimeout(opts.timeout));
+  auto timeout = pg_->operationTimeout(opts.timeout);
+  auto work = pg_->createWork(stream, timeout);
   work->recordStart("wait_signal");
-  NCCL_CHECK(
-      nccl_api_,
-      nccl_comm_,
+  pg_->waitForNcclOperation(
       nccl_api_->waitSignal(
           static_cast<int>(peerRank),
           kSigIdx,
@@ -171,6 +174,7 @@ c10::intrusive_ptr<::c10d::Work> WindowNCCL::wait_signal(
           /*opCnt=*/1,
           nccl_comm_,
           stream),
+      timeout,
       "WindowNCCL::wait_signal ncclWaitSignal failed");
   work->recordEnd();
   pg_->enqueueWork(work, stream);

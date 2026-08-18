@@ -294,6 +294,20 @@ class _KinetoProfile:
             self._cupti_async_export = bool(
                 self._custom_profiler_config.get("cupti_monitor_async_export", False)
             )
+            # Arm graph-dependency recording now, at profiler construction -- before the
+            # training loop captures its CUDA graphs. The recording hook must observe each
+            # graph's one-time instantiate(); the per-window ProfilerObserver registers it
+            # too late (at prepare_trace, after warm-up capture) to catch replay-only graphs.
+            if self._custom_profiler_config.get("enable_graph_dependencies"):
+                from torch.profiler._cupti._graph_deps import _GraphDependencyRecorder
+
+                _GraphDependencyRecorder().arm()
+            # Same early-arm rationale for the CUDA_EVENT -> graph event-record node bridge:
+            # the recorder reads each graph's event nodes at its one-time instantiate().
+            if self._custom_profiler_config.get("enable_event_node_ids"):
+                from torch.profiler._cupti._event_nodes import _EventNodeRecorder
+
+                _EventNodeRecorder().arm()
         elif "cupti_monitor_async_export" in self._custom_profiler_config:
             raise ValueError(
                 "cupti_monitor_async_export is only supported with the cupti_monitor "
@@ -347,13 +361,33 @@ class _KinetoProfile:
                 enable_cuda_sync=bool(
                     self._custom_profiler_config.get("enable_cuda_sync_events")
                 ),
+                # GPU environment counters (power/clock/thermal/cooling) are periodically
+                # sampled; opt-in since the sampling adds overhead.
+                enable_environment_counters=bool(
+                    self._custom_profiler_config.get("enable_environment_counters")
+                ),
                 # PM sampling (true SM-active % + DRAM-throughput % counters) is a CUPTI-monitor
-                # feature, opt-in (not always-on like env counters). The metrics are per-profile
+                # feature, opt-in like the env counters. The metrics are per-profile
                 # (custom_profiler_config["pm_metrics"], a list of CUPTI metric names).
                 enable_pm_sampling=bool(
                     self._custom_profiler_config.get("enable_pm_sampling")
                 ),
                 pm_metrics=self._custom_profiler_config.get("pm_metrics"),
+                # Node->node CUDA-graph dependency arrows are opt-in (extra work at graph
+                # instantiate + arrow rendering); off unless the config requests them.
+                enable_graph_dependencies=bool(
+                    self._custom_profiler_config.get("enable_graph_dependencies")
+                ),
+                # Join CUDA_EVENT records (graph event-record nodes, e.g. NCCL under
+                # NCCL_GRAPH_MIXING_SUPPORT) back to their graph_node_id. Opt-in: pulls in the
+                # CUDA_EVENT record kind.
+                enable_event_node_ids=bool(
+                    self._custom_profiler_config.get("enable_event_node_ids")
+                ),
+                # gzip level for the native .pftrace encoder (0-9; 1 = fast, the default).
+                pftrace_compression_level=int(
+                    self._custom_profiler_config.get("pftrace_compression_level", 1)
+                ),
                 # Synchronous export finalizes on the calling thread, so skip the poll thread.
                 defer_export=self._cupti_async_export,
             )

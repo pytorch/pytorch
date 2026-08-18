@@ -643,12 +643,16 @@ bool check_cudnn_tensor_shapes(sdp_params const& params, bool debug) {
   auto dprops = at::cuda::getCurrentDeviceProperties();
   const bool is_sm90_or_sm10x =
       (dprops->major == 9 && !dprops->minor) || dprops->major == 10;
-  if (is_sm90_or_sm10x) {
-    if (cudnn_version > 92200 && kCuDNNFrontendSupportsD256) {
-      head_dim_limit = 256;
-    } else if (cudnn_version >= 91100 && d_qk == 192 && d_v == 128) {
-      head_dim_limit = 192;
-    }
+  const bool is_unsupported_sm107 =
+      dprops->major == 10 && dprops->minor == 7 &&
+      cudnn_version <= 92500;
+  if (is_sm90_or_sm10x && !is_unsupported_sm107 && cudnn_version > 92200 &&
+      kCuDNNFrontendSupportsD256) {
+    head_dim_limit = 256;
+  } else if (
+      is_sm90_or_sm10x && cudnn_version >= 91100 && d_qk == 192 &&
+      d_v == 128) {
+    head_dim_limit = 192;
   }
   if (d_qk > head_dim_limit || d_v > head_dim_limit) {
     if (debug) {
@@ -741,9 +745,12 @@ bool check_cudnn_d256_bprop_head_dim(
   const auto d_v = params.value.sym_size(3);
   const bool is_sm90_or_sm10x =
       (dprops->major == 9 && !dprops->minor) || dprops->major == 10;
+  const bool is_unsupported_sm107 =
+      dprops->major == 10 && dprops->minor == 7 &&
+      cudnn_version <= 92500;
   const bool supports_d256 =
       cudnn_version > 92200 && kCuDNNFrontendSupportsD256 &&
-      is_sm90_or_sm10x;
+      is_sm90_or_sm10x && !is_unsupported_sm107;
   if (supports_d256) {
     const bool supports_bprop = (d_qk <= 128 && d_v <= 128) ||
         (d_qk == 192 && d_v == 128) || (d_qk == 256 && d_v == 256);
@@ -965,7 +972,7 @@ bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
       std::to_array<bool (*)(sdp_params const&, bool)>({
       check_nonzero_sequence_lengths_dense,
       check_last_dim_stride_equals_1_dense<true /*ignore_singleton_dim=*/>,
-      check_batch_size_and_num_heads_dense<true /*enable_gqa*/, false /*requires_same_num_heads*/>,
+      check_batch_size_and_num_heads_dense<true /*supports_gqa*/, false /*requires_same_num_heads*/, true /*supports_mqa*/>,
       check_cudnn_tensor_shapes,
       check_cudnn_d256_bprop_head_dim
   });
@@ -1038,7 +1045,7 @@ bool can_use_flash_attention(sdp_params const& params, bool debug) {
   constexpr bool backend_supports_grouped_query_attention = true;
   if (has_only_dense_inputs(params)) {
     constexpr auto dense_constraints = std::to_array<bool (*)(sdp_params const&, bool)>({
-        check_batch_size_and_num_heads_dense<backend_supports_grouped_query_attention>,
+        check_batch_size_and_num_heads_dense<backend_supports_grouped_query_attention, true, true /*supports_mqa*/>,
         check_nonzero_sequence_lengths_dense,
         check_last_dim_stride_equals_1_dense<true /*ignore_singleton_dim=*/>});
     for (auto& constraint : dense_constraints) {
@@ -1098,10 +1105,17 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
     }
   }
   if (has_only_dense_inputs(params)) {
+#ifdef USE_ROCM
+    constexpr bool supports_gqa = false;
+    constexpr bool supports_mqa = false;
+#else
+    constexpr bool supports_gqa = true;
+    constexpr bool supports_mqa = true;
+#endif
     constexpr auto dense_constraints = std::to_array<bool (*)(sdp_params const&, bool)>({
         check_nonzero_sequence_lengths_dense,
         check_last_dim_stride_equals_1_dense<false /*ignore_singleton_dim=*/>,
-        check_batch_size_and_num_heads_dense<false /*supports_grouped_query_attention=*/>});
+        check_batch_size_and_num_heads_dense<supports_gqa, true, supports_mqa>});
     for (auto& constraint : dense_constraints) {
       if (!constraint(params, debug)) {
         return false;

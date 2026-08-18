@@ -43,6 +43,9 @@ FORBIDDEN_PATTERNS = [
 FORBIDDEN_EXACT = [
     "actionable",
     "merge blocking",
+    "needs design",
+    "needs reproduction",
+    "needs research",
     "oncall: releng",  # Not a triage redirect target; use module: ci instead
 ]
 

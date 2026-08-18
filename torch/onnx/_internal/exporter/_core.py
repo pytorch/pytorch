@@ -1015,7 +1015,7 @@ def exported_program_to_ir(
     """Convert an exported program to an ONNX IR model.
 
     Reference:
-        - ExportedProgram spec: https://pytorch.org/docs/stable/export.ir_spec.html
+        - ExportedProgram spec: https://pytorch.org/docs/stable/export.html
 
     Args:
         exported_program: The exported program to convert.
@@ -1098,7 +1098,7 @@ def _exported_program_to_onnx_program(
     decompositions have been applied.
 
     Reference:
-        - ExportedProgram spec: https://pytorch.org/docs/stable/export.ir_spec.html
+        - ExportedProgram spec: https://pytorch.org/docs/stable/export.html
 
     Args:
         exported_program: The exported program to convert. The exported program

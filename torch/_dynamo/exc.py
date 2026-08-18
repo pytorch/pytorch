@@ -495,6 +495,10 @@ class ObservedTypeError(ObservedException):
     pass
 
 
+class FakeTensorObservedException(ObservedException):
+    pass
+
+
 observed_exception_map = {
     StopIteration: ObservedUserStopIteration,
     LookupError: ObservedLookupError,

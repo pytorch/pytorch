@@ -104,6 +104,38 @@ class DecoratorTests(PytreeRegisteringTestCase):
             finally:
                 torch.ops.foo.custom = orig_custom
 
+    def test_disable_not_traced_and_correct(self):
+        # disable must keep Dynamo from tracing into the function while still
+        # returning correct results (exercises the non-export hot path).
+        @torch._dynamo.disable
+        def inner(x):
+            return x + 1
+
+        def fn(x):
+            return torch.cos(inner(torch.sin(x)))
+
+        x = torch.randn(4)
+        ref = fn(x)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        res = torch.compile(fn, backend=cnts)(x)
+        self.assertEqual(ref, res)
+        # inner is disabled -> graph break around it -> two compiled frames.
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_disable_under_eager_on_recompile_stance(self):
+        # A disabled function honors the stance for its body: under
+        # eager_on_recompile the stance callback is False (run-only), not fully
+        # off. Pin that it still returns correct results.
+        @torch._dynamo.disable
+        def inner(x):
+            return x + 1
+
+        x = torch.randn(4)
+        with torch.compiler.set_stance("eager_on_recompile"):
+            self.assertEqual(inner(x), x + 1)
+            self.assertEqual(inner(x), x + 1)
+
     def test_disable_ignores_outer_wraps(self):
         def orig_inner():
             pass
@@ -1403,6 +1435,54 @@ class DecoratorTests(PytreeRegisteringTestCase):
 
     def test_mark_static_address_unguarded(self):
         self._test_mark_static_address(guarded=False)
+
+    @parametrize("compile_outer", [False, True])
+    @parametrize("fullgraph", [False, True])
+    def test_compile_staticmethod(self, compile_outer, fullgraph):
+        cnt = torch._dynamo.testing.CompileCounter()
+        compile_decorator = torch.compile(backend=cnt, fullgraph=fullgraph)
+
+        if compile_outer:
+
+            class Foo:
+                @compile_decorator
+                @staticmethod
+                def bar(x):
+                    return x.sin()
+
+        else:
+
+            class Foo:
+                @staticmethod
+                @compile_decorator
+                def bar(x):
+                    return x.sin()
+
+        x = torch.randn(4)
+        expected = x.sin()
+        self.assertEqual(Foo.bar(x), expected)
+        self.assertEqual(Foo().bar(x), expected)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 1)
+
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_compile_staticmethod_caching_precompile(self):
+        from torch._dynamo.package import DynamoCache
+
+        DynamoCache.clear()
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        class Foo:
+            @torch.compile(backend=cnt)
+            @staticmethod
+            def bar(x):
+                return x.sin()
+
+        x = torch.randn(4)
+        expected = x.sin()
+        self.assertEqual(Foo.bar(x), expected)
+        self.assertEqual(Foo().bar(x), expected)
+        self.assertEqual(cnt.frame_count, 1)
 
     def test_class_methods(self):
         class A:

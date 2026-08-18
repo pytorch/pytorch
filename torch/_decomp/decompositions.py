@@ -1744,8 +1744,8 @@ def native_group_norm_backward(
     )
 
     # Compute Internal gradients
-    ds = torch.mul(grad_output, input).view(N, C, HxW).sum(dim=[2])
-    db = grad_output.view(N, C, HxW).sum(dim=[2])
+    ds = torch.mul(grad_output, input).reshape(N, C, HxW).sum(dim=[2])
+    db = grad_output.reshape(N, C, HxW).sum(dim=[2])
 
     d_input: Tensor | None = None
     d_gamma: Tensor | None = None
@@ -1766,7 +1766,7 @@ def native_group_norm_backward(
                 rstd.unsqueeze(-1),
                 torch.ones((1, group, cpg), device=rstd.device),
             )
-        c2 = (db_val * mean - ds_val) * rstd * rstd * rstd * s
+        c2 = torch.addcmul(-ds_val, db_val, mean) * rstd * rstd * rstd * s
         c3 = -c2 * mean - db_val * rstd * s
 
         c1 = c1.unsqueeze(-1)
@@ -3191,11 +3191,12 @@ def _max_unpoolnd(
             ),
         )
 
-    # The native CPU kernel preserves the input's memory format
-    # (aten/src/ATen/native/MaxUnpooling.cpp uses suggest_memory_format),
-    # while the CUDA kernel and the 3d kernels always return contiguous output.
+    # The native CPU kernel (aten/src/ATen/native/MaxUnpooling.cpp) and the XPU
+    # kernel (torch-xpu-ops MaxUnpoolingKernels.cpp) preserve the input's memory
+    # format via suggest_memory_format, while the CUDA kernel and the 3d kernels
+    # always return contiguous output.
     def _restride(t: TensorLike) -> TensorLike:
-        if dim == 2 and self.device.type == "cpu":
+        if dim == 2 and self.device.type in ("cpu", "xpu"):
             return t.contiguous(memory_format=utils.suggest_memory_format(self))
         return t
 

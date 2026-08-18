@@ -588,7 +588,7 @@ static void appendValueInfo(
     std::vector<std::string>& strides,
     std::vector<std::string>& types,
     std::vector<std::string>& values) {
-  auto tuple = convertIValue(
+  auto [tensor_shape, tensor_stride, tensor_type, tensor_value] = convertIValue(
       ob,
       functionName,
       opId,
@@ -597,10 +597,10 @@ static void appendValueInfo(
       isInput,
       val,
       true);
-  shapes.push_back(std::get<0>(tuple));
-  strides.push_back(std::get<1>(tuple));
-  types.push_back(std::get<2>(tuple));
-  values.push_back(std::get<3>(tuple));
+  shapes.push_back(std::move(tensor_shape));
+  strides.push_back(std::move(tensor_stride));
+  types.push_back(std::move(tensor_type));
+  values.push_back(std::move(tensor_value));
 }
 
 static void handleKernelBackendInfo(

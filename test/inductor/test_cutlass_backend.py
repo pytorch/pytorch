@@ -1506,7 +1506,6 @@ class TestCutlassBackend(TestCase):
 
     @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
-    @xfailIfSM120OrLater
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_cutlass_backend_op_denylist(
         self,
@@ -1561,7 +1560,6 @@ class TestCutlassBackend(TestCase):
 
     @skipXPUIf(True, "Intel cutlass doesn't have pingpong kernels yet")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
-    @xfailIfSM120OrLater
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_cutlass_backend_op_allowlist(
         self,
@@ -1617,7 +1615,6 @@ class TestCutlassBackend(TestCase):
 
     @skipXPUIf(True, "fp8 not supported on xpu cutlass backend yet")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
-    @xfailIfSM120OrLater
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_cutlass_backend_fp8_scaled_mm_fast_accum_filtering(
         self,
@@ -1710,7 +1707,6 @@ class TestCutlassBackend(TestCase):
 
     @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
-    @xfailIfSM120OrLater
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_cutlass_backend_shape_coverage_mm(
         self,
@@ -1943,7 +1939,6 @@ class TestCutlassBackend(TestCase):
 
     @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
-    @xfailIfSM120OrLater
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_cutlass_backend_integration(self):
         """
@@ -2348,6 +2343,47 @@ class TestCutlassBackend(TestCase):
                 return op(res, *extra_args)
 
         self.run_evt_test(TestModel(), op, shape)
+
+    @skipXPUIf(not Xe2_Or_Later, "")
+    @skipCUDAIf(not SM90OrLater, "need sm_90")
+    @xfailIfSM120OrLater
+    @use_evt_config
+    def test_evt_reshaped_external_read_fusion(self):
+        """
+        Regression test: when an epilogue node reads an external buffer whose
+        shape is a compatible reshape of the GEMM output (e.g. [128, 128, 128]
+        vs the 2D template output [16384, 128] where 128*128 == 16384), the
+        CUTLASS EVT shape propagation used to raise a dimension mismatch:
+            RuntimeError: Dimension mismatch between accum(1, 16384, 128),
+            arg(128, 128, 128).
+        The external read is now normalized to the 2D template shape (valid
+        because the read is contiguous, so the row-major flatten is
+        memory-equivalent), allowing the epilogue to be fused and producing
+        correct results.
+        """
+        torch._dynamo.utils.counters.clear()
+        M, N, K = 16384, 128, 256
+        reshaped = (128, 128, N)  # 128 * 128 == M
+
+        class TestModel(torch.nn.Module):
+            def forward(self, a, b, bias3d):
+                out = a @ b  # (M, N)
+                out = out.reshape(*reshaped)  # (128, 128, N)
+                out = out + bias3d  # external read with the reshaped shape
+                return out.relu()
+
+        a = torch.randn(M, K, device=GPU_TYPE, dtype=torch.float16)
+        b = torch.randn(K, N, device=GPU_TYPE, dtype=torch.float16)
+        bias3d = torch.randn(*reshaped, device=GPU_TYPE, dtype=torch.float16)
+
+        model = TestModel().to(GPU_TYPE)
+        ref = model(a, b, bias3d)
+        result = torch.compile(model, fullgraph=True)(a, b, bias3d)
+        torch.testing.assert_close(result, ref, atol=1e-2, rtol=1e-2)
+        self.assertEqual(
+            torch._dynamo.utils.counters["inductor"]["cutlass_epilogue_fusion_counter"],
+            1,
+        )
 
     @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")

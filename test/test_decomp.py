@@ -224,6 +224,10 @@ op_assert_ref_tol_table = {
     (torch.float16, torch.ops.aten.dot.default): 2e-6,
     (torch.float16, torch.ops.aten._softmax_backward_data.default): 3e-7,
     (torch.bfloat16, torch.ops.aten._softmax_backward_data.default): 2e-7,
+    # decomp for addcmul is x + y * z, but it typically compiles into an FMA for the
+    # eager operator, causing a significant difference on float16
+    (torch.bfloat16, torch.ops.aten.addcmul.default): 1e-5,
+    (torch.float16, torch.ops.aten.addcmul.default): 1e-5,
 }
 
 
@@ -513,7 +517,6 @@ def any_unsupported(args, kwargs):
 
 core_backward_failures = {
     skip("_softmax_backward_data"),  # slow: fails with --timeout=360 secs
-    skip("addcmul"),  # slow: fails with --timeout=360 secs
     skip("deg2rad"),  # slow: fails with --timeout=360 secs
     skip("diag_embed"),  # slow: fails with --timeout=360 secs
     skip("frac"),  # slow: fails with --timeout=360 secs

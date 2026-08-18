@@ -545,76 +545,11 @@ class ExportMetaData:
     ] = dc_field(default_factory=dict)
 
 
-_IN_PLACE_OPERATORS = frozenset(
-    {
-        "iadd",
-        "iand",
-        "iconcat",
-        "ifloordiv",
-        "ilshift",
-        "imatmul",
-        "imod",
-        "imul",
-        "ior",
-        "ipow",
-        "irshift",
-        "isub",
-        "itruediv",
-        "ixor",
-    }
-)
-
-
-def _is_safe_to_reorder(node: fx.Node) -> bool:
-    """Check if a node is safe to reorder during graph canonicalization.
-
-    Builds on Node.is_impure() (used by DCE) with two additional checks for
-    cases it doesn't cover: in-place call_method nodes and non-OpOverload
-    state-changing functions detected by a no-node-arguments heuristic.
-    """
-    if node.op == "call_method":
-        return not node.target.endswith("_")  # pyrefly: ignore[missing-attribute]
-    if node.op == "call_module":
-        return not node.is_impure()
-    if node.op != "call_function":
-        return True
-    if node.is_impure():
-        return False
-    if not isinstance(node.target, torch._ops.OpOverload):
-        name = getattr(node.target, "__name__", "")
-        if name.endswith("_"):
-            return False
-        if (
-            getattr(node.target, "__module__", "") == "_operator"
-            and name in _IN_PLACE_OPERATORS
-        ):
-            return False
-        if isinstance(node.kwargs.get("out"), fx.Node):
-            return False
-        # triton_kernel_wrapper_mutation mutates tensors via kwargs but
-        # is not detected by is_impure() or trailing-underscore checks.
-        if name == "triton_kernel_wrapper_mutation":
-            return False
-        # Non-OpOverload targets with no FX Node arguments are likely
-        # state-changing (e.g., _vmap_increment_nesting,
-        # _set_fwd_grad_enabled). This is intentionally conservative:
-        # pure constant-producing ops would also be treated as barriers,
-        # but those are rare in Dynamo output graphs (constants are
-        # typically lifted as placeholders or get_attr nodes).
-        if not node.all_input_nodes:
-            return False
-        # functorch batch dim ops modify the vmap interpreter stack.
-        if name in ("_add_batch_dim", "_remove_batch_dim"):
-            return False
-    return True
-
-
 def _canonical_key(node: fx.Node, canonical_idx: dict[fx.Node, int]) -> object:
     """Canonical heap key for Dynamo output graph nodes.
 
-    - Placeholders sorted by grapharg source name
-    - get_attr nodes sorted by target
-    - Computation nodes sorted by (target, canonical indices of inputs)
+    Placeholders are sorted by grapharg source name; all other ops delegate
+    to the shared ``_canonical_node_key``.
     """
     if node.op == "placeholder":
         grapharg = node.meta.get("grapharg")
@@ -623,24 +558,20 @@ def _canonical_key(node: fx.Node, canonical_idx: dict[fx.Node, int]) -> object:
         else:
             source_name = ""
         return (0, source_name)
-    elif node.op == "get_attr":
-        return (1, str(node.target))
-    elif node.op == "output":
-        return (3,)
-    else:
-        input_indices = tuple(canonical_idx[n] for n in node.all_input_nodes)
-        return (2, node.graph._target_to_str(node.target), input_indices)
+    from torch.fx.passes.canonicalize import _canonical_node_key
+
+    return _canonical_node_key(node, canonical_idx)
 
 
-def _canonicalize_graph(graph: fx.Graph) -> fx.Graph:
+def _canonicalize_graph(graph: fx.Graph) -> None:
     """Canonicalize a Dynamo output graph's node order and names.
 
     Delegates to ``torch.fx.passes.canonicalize.canonicalize_graph`` with
     Dynamo-specific key generation and barrier detection.
     """
-    from torch.fx.passes.canonicalize import canonicalize_graph
+    from torch.fx.passes.canonicalize import _is_safe_to_reorder, canonicalize_graph
 
-    return canonicalize_graph(graph, _canonical_key, _is_safe_to_reorder)
+    canonicalize_graph(graph, _canonical_key, _is_safe_to_reorder)
 
 
 def get_builtins_dict(global_scope: Scope) -> dict[str, Any]:
@@ -1998,6 +1929,12 @@ class OutputGraph(OutputGraphCommon):
 
         meta.num_stack = len(stack_values)
 
+        # Cells are codegen'd by codegen_cells from the symbolic_cellvars
+        # registry. A symbolic_locals entry whose name is also a cell/free var
+        # is either the cell itself (shared slot) or a colliding fast local
+        # (e.g. an inlined comprehension iteration variable shadowing a
+        # nonlocal); both are skipped here, consistent with resume argname
+        # generation in create_call_resume_at.
         cell_and_freevars = set(tx.cellvars() + tx.freevars())
 
         # NB: Typically (i.e., for graph compile from RETURN_VALUE),
@@ -2024,7 +1961,9 @@ class OutputGraph(OutputGraphCommon):
                 and tx is self.root_tx
             ):
                 continue
-            # Do not load cell/free vars
+            # Do not load cell/free vars (real cells are handled by
+            # codegen_cells; a colliding fast local sharing a cell's name is
+            # skipped to match resume argname generation).
             if k in cell_and_freevars:
                 continue
             # Do not load variable if it is NULL.
@@ -2942,6 +2881,9 @@ class OutputGraph(OutputGraphCommon):
             # CA backward graphs have side-effecting ops (call_accumulate_grad,
             # call_hook) that is_impure() doesn't flag, and a fixed positional
             # placeholder layout that must not be reordered.
+            #
+            # Export canonicalizes in torch.export._trace._produce_aten_artifact
+            # so both strict and non-strict export produce the same node order.
             if (
                 config.canonicalize_output_graph_node_order
                 and not self.export
@@ -3739,14 +3681,43 @@ class DynamoTracerOutput:
     def _cleanup_output_graph(self) -> None:
         output_graph = self.output_graph_for_cleanup
         if output_graph:
+            # Lazy import to avoid a circular import (convert_frame imports
+            # output_graph at module load time).
+            from .convert_frame import _clear_fake_mode_weakrefs
+
+            # A discarded restart/skip attempt fakified real tensors and built
+            # guards on them, leaving weakrefs on the real params that block
+            # torch.utils.swap_tensors after compile (issue #186796): guard
+            # create_fn partials hold a TensorWeakRef, and tensor_to_context /
+            # the describer memos / grapharg examples hold WeakIdRef/weakref.
+            # The end-of-compile clear_compile_context_weakrefs only clears the
+            # final attempt's tracing_context, never these discarded attempts,
+            # and never touches guards. Unlike that final clear (which is gated
+            # by config.invalidate_compile_context_weakrefs), the discard-path
+            # clear is unconditional: a discarded attempt has no consumers, so
+            # dropping its weakrefs can never break anything downstream.
+            # Drop grapharg examples first, before clearing nodes drops the meta.
+            for node in output_graph.graph.nodes:
+                if "grapharg" in node.meta:
+                    del node.meta["grapharg"]
             for tracer in output_graph.tracers:
                 tracer.graph._clear_nodes()
-            # Also clear tracked_fakes to break FakeTensorMode → ShapeEnv → TrackedFake → FakeTensor cycle
-            if (
-                output_graph.tracing_context.fake_mode
-                and output_graph.tracing_context.fake_mode.shape_env
-            ):
-                output_graph.tracing_context.fake_mode.shape_env.tracked_fakes = None
+            output_graph.guards.clear()
+            tc = output_graph.tracing_context
+            tc.tensor_to_context.clear()
+            # Clear the describer weakrefs from both the current tracing_context
+            # fake_mode and the _old_fake_mode saved during compile: on a
+            # backend-raised restart (e.g. TensorifyScalarRestartAnalysis),
+            # tracing_context.fake_mode has already been swapped to a fresh
+            # empty backend fake_mode, so the real-param weakrefs live on
+            # _old_fake_mode instead.
+            _clear_fake_mode_weakrefs(tc.fake_mode)
+            if hasattr(output_graph, "_old_fake_mode"):
+                _clear_fake_mode_weakrefs(output_graph._old_fake_mode)
+            # Also clear tracked_fakes to break the
+            # FakeTensorMode -> ShapeEnv -> TrackedFake -> FakeTensor cycle.
+            if tc.fake_mode and tc.fake_mode.shape_env:
+                tc.fake_mode.shape_env.tracked_fakes = None
 
 
 err_epilogue = (

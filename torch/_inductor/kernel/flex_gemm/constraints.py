@@ -5,11 +5,10 @@ import dataclasses
 from collections.abc import Sequence
 from typing import Any, Final
 
-import sympy
-
-from torch._inductor.virtualized import V
-from torch.fx.experimental.symbolic_shapes import (
-    statically_known_true as fx_statically_known_true,
+from torch._inductor.kernel.gemm_epilogue import GemmReductionGeometry
+from torch._inductor.kernel.gemm_epilogue_utils import (
+    statically_known,
+    statically_known_shape_equal,
 )
 
 
@@ -127,35 +126,35 @@ LOCAL_REDUCE_OUT_SHAPE_ERROR = "local_reduce_out shape must be {expected}, got {
 LOCAL_REDUCE_CALLBACKS_REQUIRED_ERROR = (
     "physical local reductions require generated local-reduce callbacks"
 )
-
-
-def statically_known(expr: Any) -> bool:
-    """Return whether a symbolic predicate is known true without adding guards."""
-    if isinstance(expr, bool):
-        return expr
-    if isinstance(expr, sympy.Basic):
-        return V.graph.sizevars.statically_known_true(expr)
-    return fx_statically_known_true(expr)
-
-
-def statically_known_equal(lhs: Any, rhs: Any) -> bool:
-    """Return whether symbolic shape values are known equal without adding guards."""
-    return statically_known(lhs == rhs)
+FLEX_GEMM_OUTPUT_CONTRACTION_COMPOSITION_ERROR = (
+    "FlexGEMM output contractions do not compose with aux outputs, local "
+    "reductions, C, alpha/beta, or batched GEMMs yet"
+)
+FLEX_GEMM_OUTPUT_CONTRACTION_CAPTURE_ERROR = (
+    "FlexGEMM output contractions currently support only numeric [1, 1] and "
+    "[M, 1] captured tensors"
+)
+FLEX_GEMM_CHUNKED_OUTPUT_CONTRACTION_REDUCE_ERROR = (
+    "FlexGEMM concat-layout output contractions do not compose with grouped "
+    "reductions because concat layout permutes accumulator columns"
+)
+FLEX_GEMM_CHUNKED_CONTIGUOUS_B_ERROR = (
+    "FlexGEMM concat-layout output contractions require B's output dimension to "
+    "be non-contiguous, as in linear weight.t()"
+)
+FLEX_GEMM_OUTPUT_CONTRACTION_SHAPE_ERROR = (
+    "unsupported FlexGEMM epilogue: contracted output shape must equal the "
+    "physical GEMM output shape with N divided by the contraction group"
+)
+FLEX_GEMM_MAIN_OUTPUT_SHAPE_ERROR = (
+    "unsupported FlexGEMM epilogue: main output shape must equal the physical "
+    "GEMM output shape"
+)
 
 
 def statically_known_multiple(value: Any, divisor: int) -> bool:
     """Return whether a symbolic shape value is known divisible without guards."""
     return statically_known(value % divisor == 0)
-
-
-def statically_known_shape_equal(
-    actual_shape: Sequence[Any], expected_shape: Sequence[Any]
-) -> bool:
-    """Compare possibly symbolic shape tuples without adding guards."""
-    return len(actual_shape) == len(expected_shape) and all(
-        statically_known_equal(actual, expected)
-        for actual, expected in zip(actual_shape, expected_shape)
-    )
 
 
 def is_flex_gemm_partial_reduction_shape(
@@ -310,14 +309,24 @@ def validate_local_reduce_no_c_alpha_beta(
 
 
 def validate_flex_gemm_local_reduce_config(config: Any, group: int, axis: int) -> bool:
-    """Return whether a QuACK config can keep grouped reductions inside one CTA.
+    """Return whether a QuACK config has a validated grouped-reduction layout.
 
-    This host gate covers tile and cluster fields available on ``GemmConfig``.
-    SM100 128x128 two-CTA configs expose only 16 contiguous N values per
-    epilogue fragment; other accepted configs expose the full 32-wide fragment.
-    Lane/warp ownership is derived later from QuACK's tiled-copy layout, where
-    ``GroupedLocalReduce`` asserts the remaining lane-count, divisibility, and
-    stride invariants. Forced-config tests cover the accepted SM100 extremes.
+    This matches ``GemmConfig`` fields against layout families covered by forced
+    kernel tests; tile divisibility alone is not sufficient. Axis-1 groups within
+    one 32-value epilogue fragment need no cross-fragment combine. Some SM100
+    two-CTA layouts expose only 16 contiguous N values, reducing that local limit.
+
+    Axis-0 groups and larger axis-1 groups use ``GroupedLocalReduce``'s physical
+    callback path, which combines epilogue fragments inside one CTA and directly
+    stores one value per ``(row, group)``. For two-CTA ``tile_m=128`` kernels, each
+    CTA has a 64-row epilogue tile whose warps are split 2x2 across M and N. An
+    axis-1 group spanning the full N tile therefore crosses N-warp ownership that
+    the temporal fragment combine does not stitch; strict subgroups remain valid.
+
+    Two-CTA ``tile_m=256`` kernels instead have a 128-row epilogue tile with a 4x1
+    warp layout, so one N-warp partition owns each row's full N tile. Their axis-1
+    temporal fragment combine supports a full-tile group without cross-CTA state.
+    Axis-0 full groups still exceed the per-CTA M tile and remain unsupported.
     """
     match axis:
         case 0:
@@ -328,29 +337,37 @@ def validate_flex_gemm_local_reduce_config(config: Any, group: int, axis: int) -
             return False
     if group <= 0 or config.swap_ab:
         return False
-    if config.tile_n < 128 or config.tile_n % 64 != 0:
+    if config.tile_n % LOCAL_REDUCE_FRAGMENT_WIDTH != 0 or tile % group != 0:
         return False
-    if tile % group != 0:
-        return False
+
     fragment_width = LOCAL_REDUCE_FRAGMENT_WIDTH
-    if (
+    has_half_n_fragment = (
         axis == 1
         and config.tile_m == 128
-        and config.tile_n == 128
+        and config.tile_n in (128, 160, 224)
         and config.cluster_m > 1
-    ):
+    )
+    if has_half_n_fragment:
         fragment_width //= 2
-    match group:
-        case _ if group <= LOCAL_REDUCE_FRAGMENT_WIDTH:
-            return fragment_width % group == 0 and group < tile
-        case _:
-            return (
-                group % LOCAL_REDUCE_FRAGMENT_WIDTH == 0
-                and group <= tile
-                and config.tile_m == 128
-                and config.cluster_m == 1
-                and config.cluster_n == 1
-            )
+    if group <= LOCAL_REDUCE_FRAGMENT_WIDTH:
+        return fragment_width % group == 0 and group < tile
+
+    if group % LOCAL_REDUCE_FRAGMENT_WIDTH != 0 or config.cluster_n != 1:
+        return False
+
+    is_single_cta_layout = config.tile_m == 128 and config.cluster_m == 1
+    is_wide_m_two_cta_layout = config.tile_m == 256 and config.cluster_m == 2
+    is_split_n_warp_two_cta_layout = (
+        axis == 1
+        and config.tile_m == 128
+        and config.tile_n == 256
+        and config.cluster_m == 2
+    )
+    if is_single_cta_layout:
+        return True
+    if is_wide_m_two_cta_layout:
+        return axis == 1 or group < tile
+    return is_split_n_warp_two_cta_layout and group < tile
 
 
 def flex_gemm_local_reduce_candidate_groups(config: Any, axis: int) -> tuple[int, ...]:
@@ -391,25 +408,87 @@ def flex_gemm_local_reduce_config_error(
     )
 
 
+# NOTE [Non-shape-preserving FlexGEMM outputs]
+# FlexGEMM normally returns one value per physical GEMM accumulator. Output
+# contraction is the current exception: it exposes grouped physical N values to
+# the ordinary FX epilogue, requires the main expression to consume the complete
+# group, and stores one logical value per group. Interleaved groups use
+# ``view(M, logical_N, group)``; chunked groups use
+# ``view(M, group, logical_N)`` or ``split(logical_N, dim=-1)``. This covers
+# SwiGLU-like pointwise combinations without claiming to support arbitrary slices,
+# permutations, expansions, or M-axis contraction.
+#
+# Numeric ``[1, 1]`` and ``[M, 1]`` captures are N-invariant. QuACK loads their
+# one value per epilogue thread and lets generated pointwise code broadcast it in
+# either the physical or contracted layout. N-varying ``[1, N]`` and ``[M, N]``
+# captures need the same concat-to-interleave mapping as B for chunked outputs.
 @dataclasses.dataclass(frozen=True)
-class FlexGemmLocalReduceGeometry:
-    """Describe the grouped output axis shared by local-reduce consumers.
+class FlexGemmOutputContraction:
+    """Describe the contraction in NOTE [Non-shape-preserving FlexGEMM outputs].
 
     Attributes:
-        group: Number of contiguous M or N elements in each local group.
-        axis: GEMM output axis being grouped: 0 for M, 1 for N.
+        group: Number of physical N values contracted into each logical output.
+        chunked: Whether group values are contiguous N chunks rather than interleaved.
     """
 
     group: int
-    axis: int
+    chunked: bool = False
 
     def __post_init__(self) -> None:
-        """Reject geometry outside the GEMM tile's M/N grouping model."""
-        validate_local_reduce_group_axis(self.group, self.axis)
+        if self.group <= 0:
+            raise ValueError("output-contraction group must be positive")
 
     @property
-    def needs_physical_callbacks(self) -> bool:
-        return local_reduce_needs_physical_callbacks(self.axis, self.group)
+    def concat_layout(self) -> tuple[str, ...]:
+        """Return the QuACK ABI tag that interleaves chunked B columns."""
+        return ("B",) if self.chunked else ()
+
+    def validate_quack(self, device_capacity: int) -> None:
+        if device_capacity == 12:
+            raise NotImplementedError(
+                "FlexGEMM output contractions are not yet supported on SM120"
+            )
+        if device_capacity not in (10, 11):
+            raise NotImplementedError(
+                "FlexGEMM output contractions are currently validated only on "
+                "SM100 and SM110"
+            )
+        if self.group == 2 or (
+            self.group == 4 and not self.chunked and device_capacity == 10
+        ):
+            return
+        raise NotImplementedError(
+            "FlexGEMM output-contraction stores support group 2 on SM100 and "
+            "SM110, plus interleaved group 4 on SM100"
+        )
+
+
+def output_contraction_capture_supported(kind: str, is_boolean: bool) -> bool:
+    """Return whether output-contraction codegen can broadcast a captured tensor."""
+    return kind in ("scalar", "col") and not is_boolean
+
+
+def output_contraction_config_supported(config: Any, n: Any) -> bool:
+    """Return whether a config has validated output-contraction store ownership.
+
+    Keep the physical M/N orientation, one CTA per cluster along N, and require
+    the physical N tile not to exceed the problem. Admit only M-cluster families
+    whose row ownership has been validated: a single M CTA or the wide-M two-CTA
+    layout. Multiple N tiles and partial final tiles are supported by the ordinary
+    tile scheduler and store predicates.
+    """
+    supported_m_cluster = config.cluster_m == 1 or (
+        config.tile_m == 256 and config.cluster_m == 2
+    )
+    return (
+        not config.swap_ab
+        and supported_m_cluster
+        and config.cluster_n == 1
+        and statically_known(config.tile_n <= n)
+    )
+
+
+FlexGemmLocalReduceGeometry = GemmReductionGeometry
 
 
 @dataclasses.dataclass(frozen=True)

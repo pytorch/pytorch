@@ -196,7 +196,7 @@ class ConstantVariable(VariableTracker):
     ) -> VariableTracker:
         # unicode_getitem: https://github.com/python/cpython/blob/62a6e898e01/Objects/unicodeobject.c#L13777
         # bytes_item: https://github.com/python/cpython/blob/62a6e898e01/Objects/bytesobject.c#L319
-        # CPython's sq_item takes Py_ssize_t (already int from vt_getitem's
+        # CPython's sq_item takes Py_ssize_t (already int from generic_getitem's
         # nb_index_impl).  Unlike mp_subscript, sq_item never handles slices.
         index = key.as_python_constant()
         try:
@@ -705,7 +705,7 @@ class ConstantVariable(VariableTracker):
     ) -> VariableTracker:
         # Only str / bytes are reachable via ConstantVariable since list, tuple,
         # bytearray have their own VTs.  ``count`` was already validated as an
-        # index by sequence_repeat -> nb_index_impl.
+        # index by pysequence_repeat -> nb_index_impl.
         # https://github.com/python/cpython/blob/v3.13.0/Objects/unicodeobject.c#L12371 (unicode_repeat)
         # https://github.com/python/cpython/blob/v3.13.0/Objects/bytesobject.c#L1448 (bytes_repeat)
         if not isinstance(self.value, (str, bytes)):

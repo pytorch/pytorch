@@ -677,7 +677,7 @@ def _expand_single_dim_strategy_to_mesh(
     output_tensor_meta: TensorMeta | Sequence[TensorMeta | None] | None,
 ) -> _ExpandedSingleDimStrategyFunc:
     """
-    Expands the single_mesh_dim impl across all mesh dims, and expands ShardingPlacholder into all
+    Expands the single_mesh_dim impl across all mesh dims, and expands ShardingPlaceholder into all
     sharding types used by inputs.
 
     This supports functional correctness but will generate all possible combinations, which is prohibitively expensive

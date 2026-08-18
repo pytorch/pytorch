@@ -544,7 +544,7 @@ class TestCustomOpAutoTune(TestCase):
         test_weight = torch.randn(32, device=self.device, dtype=self.dtype)
 
         def find_shape_dispatch(code_list):
-            pattern = re.compile(r"if\s+s\d+\s*[<>=]")
+            pattern = re.compile(r"if\s+s\d+\s*[<>=]|_selector\s*=\s*int\(.*\bs\d+")
             return [
                 line.strip()
                 for code in code_list

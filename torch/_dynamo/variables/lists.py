@@ -40,6 +40,7 @@ from ..exc import (
 )
 from ..source import AttrSource
 from ..utils import (
+    check_positional,
     cmp_name_to_op_mapping,
     get_fake_value,
     guard_if_dyn,
@@ -52,7 +53,12 @@ from ..utils import (
     unpack_and_apply_fn,
     unpack_iterable,
 )
-from .base import AsPythonConstantNotImplementedError, ValueMutationNew, VariableTracker
+from .base import (
+    AsPythonConstantNotImplementedError,
+    Method,
+    ValueMutationNew,
+    VariableTracker,
+)
 from .constant import ConstantVariable
 from .functions import UserFunctionVariable
 from .iter import IteratorVariable
@@ -213,6 +219,8 @@ class BaseListVariable(VariableTracker):
         """Sequence length for lists, tuples, and range objects."""
         return VariableTracker.build(tx, len(self.items))
 
+    mp_length = sq_length
+
     def sq_contains(
         self, tx: "InstructionTranslatorBase", item: VariableTracker
     ) -> VariableTracker:
@@ -328,7 +336,7 @@ class BaseListVariable(VariableTracker):
     ) -> VariableTracker:
         # list_item: https://github.com/python/cpython/blob/62a6e898e01/Objects/listobject.c#L335-L351
         # tuple_item: https://github.com/python/cpython/blob/62a6e898e01/Objects/tupleobject.c#L421-L430
-        # CPython's sq_item takes Py_ssize_t (already int from vt_getitem's
+        # CPython's sq_item takes Py_ssize_t (already int from generic_getitem's
         # nb_index_impl).  Unlike mp_subscript, sq_item never handles slices.
         index = key.as_python_constant()
         try:
@@ -710,6 +718,9 @@ class RangeVariable(BaseListVariable):
             raise_observed_exception(OverflowError, tx)
         return VariableTracker.build(tx, length)
 
+    def mp_length(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return self.sq_length(tx)
+
     def reconstruct(self, codegen: "PyCodegen") -> None:
         if "range" in codegen.tx.f_globals:
             raise AssertionError("'range' must not be shadowed in f_globals")
@@ -793,7 +804,7 @@ class RangeVariable(BaseListVariable):
         key: VariableTracker,
     ) -> VariableTracker:
         # range_item: https://github.com/python/cpython/blob/62a6e898e01/Objects/rangeobject.c#L405-L416
-        # CPython's sq_item takes Py_ssize_t (already int from vt_getitem's
+        # CPython's sq_item takes Py_ssize_t (already int from generic_getitem's
         # nb_index_impl).  Unlike mp_subscript (range_subscript), no slices.
         index = key.as_python_constant()
         return self.apply_index(tx, index)
@@ -1362,7 +1373,6 @@ _deque_state_mutating_methods = frozenset(
         "insert",
         "remove",
         "clear",
-        "rotate",
     }
 )
 
@@ -1377,6 +1387,36 @@ class DequeVariable(CommonListMethodsVariable):
         "state",
         *CommonListMethodsVariable._nonvar_fields,
     }
+
+    def _rotate(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        # deque_rotate: https://github.com/python/cpython/blob/v3.13.0/Modules/_collectionsmodule.c#L927
+        # rotate(n=1, /) shifts n steps to the right (left if n < 0). n is
+        # resolved through nb_index. A deque of length <= 1 is a no-op. A
+        # non-mutable deque declines (returns None) so dispatch falls through
+        # to the object protocol, matching the old is_mutable() guard.
+        if not self.is_mutable():
+            return None
+        # deque.rotate is METH_FASTCALL, so the flags derived from ml_flags
+        # reject kwargs but cannot bound the positional count; deque_rotate
+        # does that itself with _PyArg_CheckPositional.
+        check_positional(tx, "rotate", len(args), 0, 1)
+        n_vt = args[0] if args else ConstantVariable.create(1)
+        n = n_vt.nb_index_impl(tx).as_python_constant()
+        length = len(self.items)
+        if length > 1:
+            tx.output.side_effects.mutation(self)
+            k = n % length
+            if k != 0:
+                self.items[:] = self.items[-k:] + self.items[:-k]
+            self.state += 1
+        return ConstantVariable.create(None)
+
+    tp_methods = {"rotate": Method(_rotate)}
 
     def richcompare_impl(
         self,
@@ -1437,7 +1477,7 @@ class DequeVariable(CommonListMethodsVariable):
         key: VariableTracker,
     ) -> VariableTracker:
         # deque_item: https://github.com/python/cpython/blob/v3.13.0/Modules/_collectionsmodule.c#L1888
-        # CPython's sq_item takes Py_ssize_t (already int from vt_getitem's
+        # CPython's sq_item takes Py_ssize_t (already int from generic_getitem's
         # nb_index_impl).  deque has no mp_subscript, so this is the real path.
         index = key.as_python_constant()
         try:
@@ -2177,7 +2217,7 @@ class SliceVariable(VariableTracker):
                     tx,
                     "slice indices must be integers or None or have an __index__ method",
                 )
-            members.append(member.nb_index_impl(tx).as_python_constant())
+            members.append(pynumber_index(tx, member).as_python_constant())
         return slice(*members)
 
     def is_hashable(self) -> bool:

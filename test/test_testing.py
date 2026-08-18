@@ -1,6 +1,7 @@
 # Owner(s): ["module: tests"]
 
 import collections
+import dataclasses
 import doctest
 import functools
 import importlib
@@ -1223,6 +1224,123 @@ class TestAssertCloseContainer(TestCase):
 
         with self.assertRaisesRegex(AssertionError, re.escape("item ['b']")):
             torch.testing.assert_close(actual, expected)
+
+    def test_dataclass_with_tensor_fields(self):
+        # Python 3.13+ removed the same-object shortcut in dataclass __eq__, so
+        # Foo(t, 1) == Foo(t, 1) raises when t is a multi-element tensor. assertEqual
+        # / assert_close should still succeed by comparing fields directly.
+        @dataclasses.dataclass
+        class Foo:
+            t: torch.Tensor
+            i: int
+
+        t = torch.zeros(2)
+        actual = Foo(t, 1)
+        expected = Foo(t, 1)
+
+        self.assertEqual(actual, expected)
+        for fn in assert_close_with_inputs(actual, expected):
+            fn()
+
+        # Distinct equal tensor values should also compare equal.
+        self.assertEqual(Foo(torch.zeros(2), 1), Foo(torch.zeros(2), 1))
+
+    def test_dataclass_compare_false_fields_ignored(self):
+        @dataclasses.dataclass
+        class Foo:
+            t: torch.Tensor
+            ignored: int = dataclasses.field(compare=False, default=0)
+
+        self.assertEqual(Foo(torch.zeros(2), 1), Foo(torch.zeros(2), 2))
+
+    def test_dataclass_mismatching_tensor_field_msg(self):
+        @dataclasses.dataclass
+        class Foo:
+            t: torch.Tensor
+            i: int
+
+        # Multi-element tensors force the field-recursion path (scalar tensors
+        # can make dataclass __eq__ return a bool and fall through to ObjectPair).
+        actual = Foo(torch.zeros(2), 0)
+        expected = Foo(torch.ones(2), 0)
+
+        with self.assertRaisesRegex(AssertionError, re.escape("item ['t']")):
+            torch.testing.assert_close(actual, expected)
+
+    def test_nested_dataclass_with_tensor_fields(self):
+        @dataclasses.dataclass
+        class Inner:
+            t: torch.Tensor
+
+        @dataclasses.dataclass
+        class Outer:
+            inner: Inner
+            i: int
+
+        t = torch.ones(3)
+        self.assertEqual(Outer(Inner(t), 1), Outer(Inner(t), 1))
+
+    def test_dataclass_custom_eq_respected(self):
+        # eq=False dataclasses with custom __eq__ must not be forced through
+        # field-by-field comparison (which would ignore their semantics).
+        @dataclasses.dataclass(eq=False)
+        class ByShape:
+            t: torch.Tensor
+            tag: str
+
+            def __eq__(self, other: object) -> bool:
+                if not isinstance(other, ByShape):
+                    return NotImplemented
+                return self.t.shape == other.t.shape and self.tag == other.tag
+
+        # Values differ but shape/tag match: custom __eq__ says equal.
+        self.assertEqual(
+            ByShape(torch.zeros(2), "a"),
+            ByShape(torch.ones(2), "a"),
+        )
+        with self.assertRaises(AssertionError):
+            self.assertEqual(
+                ByShape(torch.zeros(2), "a"),
+                ByShape(torch.zeros(3), "a"),
+            )
+
+    def test_dataclass_union_like_getattr_raises(self):
+        # Mimics torch._export.serde.union._Union: unset fields raise on access,
+        # and equality is defined by an active variant only.
+        @dataclasses.dataclass(eq=False, repr=False)
+        class UnionLike:
+            as_int: int | None = None
+            as_tensor: torch.Tensor | None = None
+            _type: str = dataclasses.field(default="", repr=False, compare=False)
+
+            def __post_init__(self) -> None:
+                if self.as_int is not None:
+                    self._type = "as_int"
+                elif self.as_tensor is not None:
+                    self._type = "as_tensor"
+
+            def __getattribute__(self, name: str) -> object:
+                attr = super().__getattribute__(name)
+                field_names = {"as_int", "as_tensor"}
+                if attr is None and name in field_names and name != self._type:
+                    raise AttributeError(f"Field {name} is not set.")
+                return attr
+
+            def __eq__(self, other: object) -> bool:
+                if not isinstance(other, UnionLike):
+                    return False
+                return self._type == other._type and getattr(self, self._type) == getattr(
+                    other, other._type
+                )
+
+            def __repr__(self) -> str:
+                return f"UnionLike({self._type}={getattr(self, self._type)})"
+
+        actual = UnionLike(as_int=1)
+        expected = UnionLike(as_int=1)
+        self.assertEqual(actual, expected)
+        with self.assertRaises(AssertionError):
+            self.assertEqual(UnionLike(as_int=1), UnionLike(as_int=2))
 
 
 class TestAssertCloseSparseCOO(TestCase):

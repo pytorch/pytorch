@@ -3,6 +3,7 @@
 """Tests for sequence protocol operations (sq_*) in PyTorch Dynamo."""
 
 import collections
+import unittest
 
 import torch
 import torch._dynamo.test_case
@@ -54,6 +55,16 @@ class UserDefinedSequence:
 
     def __repr__(self):
         return f"UserDefinedSequence({self.items})"
+
+
+class IndexLike:
+    """Object usable wherever an integer index is expected (defines __index__)."""
+
+    def __init__(self, value):
+        self.value = value
+
+    def __index__(self):
+        return self.value
 
 
 class TestSqConcat(torch._dynamo.test_case.TestCase):
@@ -182,6 +193,24 @@ class TestSqConcat(torch._dynamo.test_case.TestCase):
         b = [3, 4]
         result = a + b
         self.assertEqual(list(result), [1, 2, 3, 4])
+
+    @make_dynamo_test
+    def test_user_defined_list_concat_returns_plain_list(self):
+        # out-of-place C sq_concat constructs a fresh base-type object
+        result = UserDefinedList([1]) + UserDefinedList([2])
+        self.assertIs(type(result), list)
+
+    @unittest.expectedFailure
+    @make_dynamo_test
+    def test_user_defined_list_inplace_concat(self):
+        # in-place C sq_inplace_concat mutates and returns self: subclass
+        # type and identity preserved
+        a = UserDefinedList([1])
+        b = a
+        a += [2]
+        self.assertEqual(list(a), [1, 2])
+        self.assertIs(type(a), UserDefinedList)
+        self.assertIs(a, b)
 
     # --- User-defined tuple subclass concatenation ---
 
@@ -326,6 +355,65 @@ class TestSqConcat(torch._dynamo.test_case.TestCase):
         d = collections.deque([1, 2, 3])
         d *= -1
         self.assertEqual(list(d), [])
+
+    # --- deque.rotate ---
+
+    @make_dynamo_test
+    def test_deque_rotate_default(self):
+        d = collections.deque([1, 2, 3, 4, 5])
+        d.rotate()
+        self.assertEqual(list(d), [5, 1, 2, 3, 4])
+
+    @make_dynamo_test
+    def test_deque_rotate_positive(self):
+        d = collections.deque([1, 2, 3, 4, 5])
+        d.rotate(2)
+        self.assertEqual(list(d), [4, 5, 1, 2, 3])
+
+    @make_dynamo_test
+    def test_deque_rotate_negative(self):
+        d = collections.deque([1, 2, 3, 4, 5])
+        d.rotate(-2)
+        self.assertEqual(list(d), [3, 4, 5, 1, 2])
+
+    @make_dynamo_test
+    def test_deque_rotate_wraps(self):
+        d = collections.deque([1, 2, 3, 4, 5])
+        d.rotate(7)
+        self.assertEqual(list(d), [4, 5, 1, 2, 3])
+
+    @make_dynamo_test
+    def test_deque_rotate_index_arg(self):
+        d = collections.deque([1, 2, 3, 4, 5])
+        d.rotate(IndexLike(2))
+        self.assertEqual(list(d), [4, 5, 1, 2, 3])
+
+    @make_dynamo_test
+    def test_deque_rotate_short(self):
+        d = collections.deque([1])
+        d.rotate(3)
+        self.assertEqual(list(d), [1])
+        d = collections.deque([])
+        d.rotate(2)
+        self.assertEqual(list(d), [])
+
+    @make_dynamo_test
+    def test_deque_rotate_with_maxlen(self):
+        d = collections.deque([1, 2, 3], maxlen=3)
+        d.rotate(1)
+        d.append(9)
+        self.assertEqual(list(d), [1, 2, 9])
+
+    @make_dynamo_test
+    def test_deque_rotate_noop_bumps_state(self):
+        # rotate() bumps the iteration-state counter whenever len > 1, even when
+        # n is a multiple of len (no element actually moves), so mutation during
+        # iteration is still detected.
+        for n in (0, 4):
+            d = collections.deque([1, 2, 3, 4])
+            with self.assertRaises(RuntimeError):
+                for _ in d:
+                    d.rotate(n)
 
     # --- list re-init (list.__init__) ---
 
@@ -638,6 +726,51 @@ class TestSqConcat(torch._dynamo.test_case.TestCase):
 
 
 instantiate_parametrized_tests(TestSqConcat)
+
+
+class TestSqRepeat(torch._dynamo.test_case.TestCase):
+    """Tests for sq_repeat (*) and sq_inplace_repeat (*=) on sequences."""
+
+    def setUp(self):
+        super().setUp()
+        self._u_prev = torch._dynamo.config.enable_trace_unittest
+        torch._dynamo.config.enable_trace_unittest = True
+
+    def tearDown(self):
+        super().tearDown()
+        torch._dynamo.config.enable_trace_unittest = self._u_prev
+
+    # --- User-defined subclasses: the inherited C sq_repeat slot ---
+
+    @make_dynamo_test
+    def test_user_defined_list_repeat(self):
+        # CPython runs list's inherited C sq_repeat: result is a plain list,
+        # not the subclass
+        result = UserDefinedList([1, 2]) * 2
+        self.assertEqual(result, [1, 2, 1, 2])
+        self.assertIs(type(result), list)
+
+    @make_dynamo_test
+    def test_user_defined_list_repeat_reflected(self):
+        result = 2 * UserDefinedList([5])
+        self.assertEqual(result, [5, 5])
+        self.assertIs(type(result), list)
+
+    @make_dynamo_test
+    def test_user_defined_tuple_repeat(self):
+        result = UserDefinedTuple([1, 2]) * 2
+        self.assertEqual(result, (1, 2, 1, 2))
+        self.assertIs(type(result), tuple)
+
+    @make_dynamo_test
+    def test_user_defined_list_inplace_repeat(self):
+        # in-place repeat mutates the object: type and identity preserved
+        a = UserDefinedList([1])
+        b = a
+        a *= 3
+        self.assertEqual(list(a), [1, 1, 1])
+        self.assertIs(type(a), UserDefinedList)
+        self.assertIs(a, b)
 
 
 # ---------------------------------------------------------------------------

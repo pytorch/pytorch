@@ -499,6 +499,28 @@ class TestCompileOnOneRankLegacyCollective(TestCase):
             Options(ops_filter=None, node_metadata_key_filter=_drop_distributed_meta),
         )
 
+    @staticmethod
+    def _rs_fn(t, mesh):
+        out = torch.empty_like(t)
+        group = mesh.get_group()
+        dist.reduce_scatter(out, [t, t + 1], op=dist.ReduceOp.MAX, group=group)
+        return out + 1
+
+    @dist_config.patch(compile_on_one_rank=True)
+    def test_legacy_reduce_scatter_serializes_under_coor(self):
+        gm = make_fx(self._rs_fn, tracing_mode="fake")(torch.arange(4.0), self.mesh)
+        targets = _call_targets(gm)
+
+        self.assertIn("_dtensor.mesh_get_process_group.default", targets)
+        self.assertIn("_c10d_functional.reduce_scatter_tensor.default", targets)
+        self.assertNotIn("c10d.reduce_scatter_.default", targets)
+        self.assertEqual(_baked_pg_constants(gm), [])
+
+        GraphPickler.dumps(
+            gm,
+            Options(ops_filter=None, node_metadata_key_filter=_drop_distributed_meta),
+        )
+
     def test_default_path_bakes_pg(self):
         # Without compile_on_one_rank the legacy in-place op is unchanged and bakes
         # the ProcessGroup as a torchbind constant (the gated-against behavior).
