@@ -2,6 +2,8 @@
 
 #pragma once
 
+#ifdef USE_C10D_NCCL
+
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -18,3 +20,5 @@ T env_to_value(std::string_view env_key, const T& default_value);
 std::pair<int, int> query_ranksize();
 
 } // namespace c10d::nccl2
+
+#endif // USE_C10D_NCCL

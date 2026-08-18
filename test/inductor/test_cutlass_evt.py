@@ -28,8 +28,13 @@ def _is_cuda_sm90_or_sm10x():
     return bool(IS_SM90) or bool(IS_SM10X)
 
 
-def _expect_cuda_evt_key_error():
-    return GPU_TYPE == "cuda" and bool(IS_SM10X) and int(cutlass_arch(GPU_TYPE)) > 100
+def _cuda_evt_arch_supported():
+    if GPU_TYPE != "cuda":
+        return True
+
+    from cutlass_cppgen.backend.evt.passes.util import cc_map
+
+    return int(cutlass_arch(GPU_TYPE)) in cc_map
 
 
 if try_import_cutlass():
@@ -516,10 +521,8 @@ return D""",
                 lambda x: int(x),
             )[0]
 
-        if _expect_cuda_evt_key_error():
-            with self.assertRaises(KeyError):
-                render_code()
-            return
+        if not _cuda_evt_arch_supported():
+            self.skipTest(f"CUTLASS EVT does not support arch {arch}")
 
         code = render_code()
         if GPU_TYPE == "xpu":
@@ -606,10 +609,8 @@ def fn(accum, bias):
                 lambda x: int(x),
             )[0]
 
-        if _expect_cuda_evt_key_error():
-            with self.assertRaises(KeyError):
-                render_code()
-            return
+        if not _cuda_evt_arch_supported():
+            self.skipTest(f"CUTLASS EVT does not support arch {arch}")
 
         code = render_code()
 
@@ -659,10 +660,8 @@ def fn(accum, bias):
                 device_type=GPU_TYPE,
             )[2]
 
-        if _expect_cuda_evt_key_error():
-            with self.assertRaises(KeyError):
-                render_code()
-            return
+        if not _cuda_evt_arch_supported():
+            self.skipTest(f"CUTLASS EVT does not support arch {cutlass_arch(GPU_TYPE)}")
 
         code = render_code()
         if IS_SM90:
