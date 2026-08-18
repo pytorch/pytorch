@@ -168,11 +168,22 @@ torch.xpu.synchronize()
 if out[0] != 1:
     raise AssertionError(f"Expected out[0] == 1, got {out[0]}")
 """
-        subprocess.check_call(
+        proc = subprocess.run(
             [sys.executable, "-c", script],
             text=True,
             timeout=120,
+            capture_output=True,
         )
+        if proc.returncode != 0:
+            # Native graph recording needs SYCL compiler >= 2026.1.0 on
+            # non-PVC architectures (aten/src/ATen/xpu/XPUGraph.cpp);
+            # older builds can fail to finalize the graph on the driver side.
+            if "Failed to instantiate native UR executable graph" in proc.stderr:
+                self.skipTest(
+                    "torch.xpu.graphs requires oneAPI SYCL compiler >= 2026.1.0 "
+                    "for native graph recording on this architecture"
+                )
+            self.fail(f"subprocess failed (exit {proc.returncode}):\n{proc.stderr}")
 
 
 if __name__ == "__main__":
