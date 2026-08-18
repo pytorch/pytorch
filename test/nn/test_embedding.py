@@ -1241,25 +1241,25 @@ torch.cuda.synchronize()
             text=True,
             errors="replace",
         )
-        stderr = proc.stderr
+        output = proc.stdout + "\n" + proc.stderr
         expected_assert = (
             "embedding_idx >= 0 && embedding_idx < num_embeddings"
             if target == "indices"
             else "bag_idx >= 0 && bag_idx < num_bags"
         )
         has_cuda_assert = (
-            "device-side assert triggered" in stderr
-            and "EmbeddingBag.cu" in stderr
-            and expected_assert in stderr
+            "device-side assert triggered" in output
+            and "EmbeddingBag.cu" in output
+            and expected_assert in output
         )
         has_hip_assert = (
-            "hipErrorLaunchFailure" in stderr
-            or "unspecified launch failure" in stderr
-            or "HSA_STATUS_ERROR_EXCEPTION" in stderr
+            "hipErrorLaunchFailure" in output
+            or "unspecified launch failure" in output
+            or "HSA_STATUS_ERROR_EXCEPTION" in output
         )
         self.assertTrue(
             has_cuda_assert or has_hip_assert,
-            lambda msg: f"{msg}\nExpected device assert error in stderr, got: {stderr}",
+            lambda msg: f"{msg}\nExpected device assert error in output, got: {output}",
         )
 
     # https://github.com/pytorch/pytorch/issues/192445
