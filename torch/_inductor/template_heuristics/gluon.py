@@ -18,29 +18,24 @@ def compute_stage_variants_gluon(
     BLOCK_K: int,
     dtype,
     tmem_max_columns: int = 512,
-    exhaustive: bool = False,
-    max_configs: int = 4,
+    max_configs: int = 1,
 ):
     """
-    Compute valid buffer configurations for given block dimensions.
-    Returns list of (num_load_buffers, num_acc_buffers) tuples.
-
-    Args:
-        exhaustive: If False, limit to max_configs best configurations
-        max_configs: Maximum number of configs to return when not exhaustive
+    Compute valid (NUM_LOAD_BUFFERS, NUM_ACC_BUFFERS) pairs for given block
+    dimensions, sampled evenly across the whole valid range so the result
+    isn't biased toward the largest NUM_LOAD_BUFFERS that happens to fit.
+    Returns at most max_configs pairs.
     """
     import torch
 
     dtype_bytes = torch.tensor([], dtype=dtype).element_size()
     smem_limit = 227 * 1024  # hardware limit
 
-    # Calculate SMEM usage
     a_bytes_per_stage = BLOCK_M * BLOCK_K * dtype_bytes
     b_bytes_per_stage = BLOCK_N * BLOCK_K * dtype_bytes
     c_bytes_per_stage = BLOCK_M * BLOCK_N * dtype_bytes
     ab_bytes_per_stage = a_bytes_per_stage + b_bytes_per_stage
 
-    # Check minimum config fits
     min_load_buffers = 1
     min_acc_buffers = 1
     compiler_overhead = 256
@@ -56,9 +51,7 @@ def compute_stage_variants_gluon(
     if min_smem > smem_limit:
         return []
 
-    valid_configs = []
-
-    # Try all combinations of load/acc buffers
+    all_valid = []
     for num_load_buffers in range(8, 0, -1):
         ab_smem = ab_bytes_per_stage * num_load_buffers
         c_smem = c_bytes_per_stage
@@ -69,7 +62,6 @@ def compute_stage_variants_gluon(
         if base_smem > smem_limit:
             continue
 
-        # Try different acc buffer counts
         max_acc_by_tmem = tmem_max_columns // BLOCK_N
         remaining_smem = smem_limit - base_smem
         max_acc_by_smem = remaining_smem // (8 * 2)
@@ -82,13 +74,13 @@ def compute_stage_variants_gluon(
             tmem_cols = BLOCK_N * num_acc_buffers
 
             if total_smem <= smem_limit and tmem_cols <= tmem_max_columns:
-                valid_configs.append((num_load_buffers, num_acc_buffers))
+                all_valid.append((num_load_buffers, num_acc_buffers))
 
-                # Limit configs for non-exhaustive search
-                if not exhaustive and len(valid_configs) >= max_configs:
-                    return valid_configs
+    if len(all_valid) <= max_configs:
+        return all_valid
 
-    return valid_configs
+    stride = len(all_valid) / max_configs
+    return [all_valid[int(i * stride)] for i in range(max_configs)]
 
 
 def get_grouped_mm_configs(
@@ -96,7 +88,10 @@ def get_grouped_mm_configs(
     exhaustive: bool = False,
 ) -> list[GluonGroupedMMConfig]:
     """
-    Returns the configuration set for the Gluon Grouped MM kernel.
+    Returns the configuration set for the Gluon Grouped MM kernel. Sized to
+    land in the same ballpark as the CuTeDSL grouped-gemm heuristic's config
+    counts (torch/_inductor/heuristics/template/cutedsl.py): ~22 for DEFAULT,
+    ~800 for EXHAUSTIVE.
 
     Args:
         dtype_AB: Data type for A and B matrices
@@ -105,20 +100,13 @@ def get_grouped_mm_configs(
     Returns:
         List of GluonGroupedMMConfig objects
     """
-    configs = []
-
     if exhaustive:
-        # Full ranges for exhaustive search
-        BLOCK_M_vals = [64, 128]
-        BLOCK_N_vals = [64, 128, 256]
-        block_mn_pairs = []
+        block_combos = list(itertools.product([64, 128], [32, 64, 128, 256]))
         BLOCK_K_vals = [64, 128, 256]
-        NUM_STORE_WARP_vals = [4, 8]
+        NUM_STORE_WARP_vals = [4, 8, 16]
+        buffer_configs_per_combo = 15
     else:
-        # Default configs.
-        BLOCK_M_vals = []
-        BLOCK_N_vals = []
-        block_mn_pairs = [
+        block_combos = [
             (64, 32),
             (64, 64),
             (64, 128),
@@ -128,60 +116,33 @@ def get_grouped_mm_configs(
             (128, 256),
         ]
         BLOCK_K_vals = [64]
-        NUM_STORE_WARP_vals = [4, 8]
+        NUM_STORE_WARP_vals = [4, 8, 16]
+        buffer_configs_per_combo = 1
 
-    if exhaustive:
-        # Exhaustive: iterate over all combinations
-        for BLOCK_M, BLOCK_N, BLOCK_K, num_store_warps in itertools.product(
-            BLOCK_M_vals,
-            BLOCK_N_vals,
-            BLOCK_K_vals,
-            NUM_STORE_WARP_vals,
-        ):
-            buffer_variants = compute_stage_variants_gluon(
-                BLOCK_M,
-                BLOCK_N,
-                BLOCK_K,
-                dtype=dtype_AB,
-                exhaustive=True,
-            )
+    configs = []
+    for (BLOCK_M, BLOCK_N), BLOCK_K, num_store_warps in itertools.product(
+        block_combos,
+        BLOCK_K_vals,
+        NUM_STORE_WARP_vals,
+    ):
+        buffer_variants = compute_stage_variants_gluon(
+            BLOCK_M,
+            BLOCK_N,
+            BLOCK_K,
+            dtype=dtype_AB,
+            max_configs=buffer_configs_per_combo,
+        )
 
-            for num_load_buffers, num_acc_buffers in buffer_variants:
-                configs.append(
-                    GluonGroupedMMConfig(
-                        BLOCK_M=BLOCK_M,
-                        BLOCK_N=BLOCK_N,
-                        BLOCK_K=BLOCK_K,
-                        NUM_LOAD_BUFFERS=num_load_buffers,
-                        NUM_ACC_BUFFERS=num_acc_buffers,
-                        NUM_STORE_WARPS=num_store_warps,
-                    )
+        for num_load_buffers, num_acc_buffers in buffer_variants:
+            configs.append(
+                GluonGroupedMMConfig(
+                    BLOCK_M=BLOCK_M,
+                    BLOCK_N=BLOCK_N,
+                    BLOCK_K=BLOCK_K,
+                    NUM_LOAD_BUFFERS=num_load_buffers,
+                    NUM_ACC_BUFFERS=num_acc_buffers,
+                    NUM_STORE_WARPS=num_store_warps,
                 )
-    else:
-        # Default: use handpicked (BLOCK_M, BLOCK_N) pairs
-        for (BLOCK_M, BLOCK_N), BLOCK_K, num_store_warps in itertools.product(
-            block_mn_pairs,
-            BLOCK_K_vals,
-            NUM_STORE_WARP_vals,
-        ):
-            buffer_variants = compute_stage_variants_gluon(
-                BLOCK_M,
-                BLOCK_N,
-                BLOCK_K,
-                dtype=dtype_AB,
-                exhaustive=False,
             )
-
-            for num_load_buffers, num_acc_buffers in buffer_variants:
-                configs.append(
-                    GluonGroupedMMConfig(
-                        BLOCK_M=BLOCK_M,
-                        BLOCK_N=BLOCK_N,
-                        BLOCK_K=BLOCK_K,
-                        NUM_LOAD_BUFFERS=num_load_buffers,
-                        NUM_ACC_BUFFERS=num_acc_buffers,
-                        NUM_STORE_WARPS=num_store_warps,
-                    )
-                )
 
     return configs
