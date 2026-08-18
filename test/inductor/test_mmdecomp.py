@@ -14,15 +14,20 @@ from torch.fx.experimental.symbolic_shapes import (
     StatelessSymbolicContext,
 )
 from torch.testing._internal.common_cuda import SM80OrLater
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    onlyAccelerator,
+    requires_capabilities,
+)
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_WINDOWS,
     parametrize,
     run_tests,
     TEST_XPU,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
 default_atol = {
@@ -116,10 +121,10 @@ ts_list = [
 
 
 class TestDecomp(NNTestCase):
-    _do_cuda_memory_leak_check = GPU_TYPE == "cuda"
-    _do_cuda_non_default_stream = GPU_TYPE == "cuda"
+    hw_classification = HardwareClassification.ACCELERATOR
 
-    @unittest.skipIf(not HAS_GPU, "GPU tests require triton")
+    @onlyAccelerator
+    @requires_capabilities(Capability.lib.triton)
     @parametrize("dtype", [torch.float, torch.bfloat16])
     def test_simple_mm(self, device, dtype):
         fudge = 10
@@ -136,7 +141,8 @@ class TestDecomp(NNTestCase):
             run_comp_nocomp(torch_mm, t1, t2, rtol=rtol, atol=atol)
             run_comp_nocomp(torch_addmm, tadd, t1, t2, rtol=rtol, atol=atol)
 
-    @unittest.skipIf(not HAS_GPU, "GPU tests require triton")
+    @onlyAccelerator
+    @requires_capabilities(Capability.lib.triton)
     @parametrize(
         "dtype",
         [torch.float, torch.float16, torch.bfloat16]
@@ -162,7 +168,8 @@ class TestDecomp(NNTestCase):
             run_comp_nocomp(torch_mm, t1, t2, rtol=rtol, atol=atol)
         self.assertEqual(counters["inductor"]["decompose_mm_pointwise"], 1)
 
-    @unittest.skipIf(not HAS_GPU, "GPU tests require triton")
+    @onlyAccelerator
+    @requires_capabilities(Capability.lib.triton)
     @parametrize(
         "dtype",
         [torch.float, torch.float16, torch.bfloat16]
@@ -208,7 +215,8 @@ class TestDecomp(NNTestCase):
             run_comp_nocomp(fn, t1, t2, rtol=rtol, atol=atol)
         self.assertEqual(counters["inductor"]["decompose_mm_pointwise"], 1)
 
-    @unittest.skipIf(not HAS_GPU, "GPU tests require triton")
+    @onlyAccelerator
+    @requires_capabilities(Capability.lib.triton)
     def test_small_mm_no_pointwise_for_large_dims(self, device):
         if device == "cpu":
             self.skipTest("GPU-only test")
@@ -224,7 +232,8 @@ class TestDecomp(NNTestCase):
         torch.compile(fn)(a, b)
         self.assertEqual(counters["inductor"]["decompose_mm_pointwise"], 0)
 
-    @unittest.skipIf(not HAS_GPU, "GPU tests require triton")
+    @onlyAccelerator
+    @requires_capabilities(Capability.lib.triton)
     @config.patch(max_autotune_gemm=True)
     def test_small_mm_no_pointwise_under_max_autotune(self, device):
         if device == "cpu":
@@ -241,7 +250,8 @@ class TestDecomp(NNTestCase):
         torch.compile(fn)(a, b)
         self.assertEqual(counters["inductor"]["decompose_mm_pointwise"], 0)
 
-    @unittest.skipIf(not HAS_GPU, "GPU tests require triton")
+    @onlyAccelerator
+    @requires_capabilities(Capability.lib.triton)
     @parametrize(
         "dtype",
         [torch.float, torch.bfloat16] if SM80OrLater or TEST_XPU else [torch.float],
@@ -267,7 +277,8 @@ class TestDecomp(NNTestCase):
                         torch_baddbmm, tadd, t1, t2, alpha, beta, rtol=rtol, atol=atol
                     )
 
-    @unittest.skipIf(not HAS_GPU, "GPU tests require triton")
+    @onlyAccelerator
+    @requires_capabilities(Capability.lib.triton)
     @config.patch(coordinate_descent_tuning=True)
     def test_bmm_batch2_last_dim_size_is_one(self, device):
         fudge = 3
@@ -290,11 +301,8 @@ class TestDecomp(NNTestCase):
         self.assertIsNot(out, NotImplemented)
         self.assertEqual(expected, out)
 
-    @unittest.skipIf(not HAS_GPU, "GPU tests require triton")
+    @onlyAccelerator
     def test_bmm_outer_product_k_is_one_with_unbacked_k(self, device):
-        if device == "cpu":
-            self.skipTest("unbacked symints require GPU fake tensors")
-
         shape_env = ShapeEnv()
         with FakeTensorMode(shape_env=shape_env):
             b, m, n = [shape_env.create_unbacked_symint() for _ in range(3)]
@@ -357,12 +365,13 @@ class TestDecomp(NNTestCase):
             self.assertIsNot(out, NotImplemented)
             self.assertEqual(expected, out, exact_stride=True)
 
-    @unittest.skipIf(not HAS_GPU, "GPU tests require triton")
+    @onlyAccelerator
+    @requires_capabilities(Capability.lib.triton)
     @parametrize("dtype", [torch.float, torch.bfloat16, torch.int])
     def test_some(self, device, dtype):
         # this Pytorch data type is not fully supported on cuda today
         # - unfortunately we can't skipIf because we don't see the actual params in skipIf
-        if device.startswith(GPU_TYPE) and dtype == torch.int:
+        if dtype == torch.int:
             return
 
         run_comp_nocomp(
@@ -376,13 +385,14 @@ class TestDecomp(NNTestCase):
             init_tensor([[1], [2], [3], [4]], dtype=dtype, device=device),
         )
 
-    @unittest.skipIf(not HAS_GPU, "GPU tests require triton")
+    @onlyAccelerator
+    @requires_capabilities(Capability.lib.triton)
     @parametrize("dtype", [torch.float, torch.bfloat16, torch.int])
     @parametrize("bs", [1, 2, 4, 10])
     def test_some_batched(self, device, dtype, bs):
         # this Pytorch data type is not fully supported on cuda today
         # - unfortunately we can't skipIf because we don't see the actual params in skipIf
-        if device.startswith(GPU_TYPE) and dtype == torch.int:
+        if dtype == torch.int:
             return
 
         run_comp_nocomp(
@@ -462,9 +472,8 @@ class TestDecomp(NNTestCase):
                 self.assertTrue(r_expr_types[1] == og_t2_expr_types[1])
 
 
-device_types = ("cpu", GPU_TYPE)
 instantiate_device_type_tests(
-    TestDecomp, globals(), only_for=device_types, allow_xpu=True
+    TestDecomp, globals(), allow_mps=True, allow_xpu=True
 )
 
 if __name__ == "__main__":
