@@ -112,6 +112,16 @@ def _precompile_closure_entry_factory():
     return entry
 
 
+class _PrecompileTrainMod(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.a = torch.nn.Linear(8, 8)
+        self.b = torch.nn.Linear(8, 8)
+
+    def forward(self, x):
+        return torch.relu(self.b(torch.relu(self.a(x))))
+
+
 def _precompile_scaled(x, k):
     return x * k
 
@@ -3001,6 +3011,54 @@ class TestPrecompile(TestCase):
             self.assertEqual(loaded(x), _precompile_unreachable_helper_caller(x))
             # Served, not recompiled: the whole point of installing.
             self.assertEqual(counters["stats"]["unique_graphs"], 0)
+
+    @parametrize("backend", ("eager", "inductor"))
+    def test_training_capture_serves_a_backward_without_a_loss(self, backend):
+        # The capture never sees a loss and never calls .backward(). The joint
+        # trace synthesizes tangents from the forward outputs, and the backward
+        # is lowered eagerly, so a served output is still wired to
+        # AOTAutograd's CompiledFunction and .backward() runs precompiled code.
+        model = _PrecompileTrainMod()
+        xs = [torch.randn(n, 8) for n in (4, 6)]
+        expected = []
+        for x in xs:
+            model.zero_grad(set_to_none=True)
+            _precompile_call_model(model, x).sum().backward()
+            expected.append([p.grad.clone() for p in model.parameters()])
+        model.zero_grad(set_to_none=True)
+
+        code, cache = torch.compiler.precompile(
+            _precompile_call_model,
+            backend=backend,
+            dynamic=False,
+            example_inputs=[(model, x) for x in xs],
+            training=True,
+        )
+        torch._dynamo.reset()
+        loaded = torch.compiler.precompile.load(code, cache)
+        for x, grads in zip(xs, expected):
+            model.zero_grad(set_to_none=True)
+            out = loaded(model, x)
+            self.assertTrue(out.requires_grad)
+            out.sum().backward()
+            for want, param in zip(grads, model.parameters()):
+                self.assertEqual(want, param.grad)
+
+    def test_inference_capture_stays_grad_free(self):
+        # The default is unchanged: examples run under no_grad, so a served
+        # output carries no autograd history.
+        model = _PrecompileTrainMod()
+        x = torch.randn(4, 8)
+        code, cache = torch.compiler.precompile(
+            _precompile_call_model,
+            backend="eager",
+            dynamic=False,
+            example_inputs=[(model, x)],
+        )
+        torch._dynamo.reset()
+        loaded = torch.compiler.precompile.load(code, cache)
+        with torch.no_grad():
+            self.assertFalse(loaded(model, x).requires_grad)
 
     def test_guard_policy_varying_drops_guards_that_never_varied(self):
         # k is the same in every example, so nothing depends on its guard to
