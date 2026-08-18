@@ -3024,7 +3024,6 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
             dist.all_reduce,
             dist.reduce_scatter,
             dist.reduce_scatter_single,
-            # pyrefly: ignore [deprecated]
             dist.reduce_scatter_tensor,
             # pyrefly: ignore [deprecated]
             dist._reduce_scatter_base,
