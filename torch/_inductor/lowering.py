@@ -14,7 +14,6 @@ from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Any, cast, Literal, TYPE_CHECKING, TypeGuard, TypeVar
 from typing_extensions import ParamSpec
-from unittest.mock import patch
 
 import sympy
 
@@ -7823,7 +7822,7 @@ def get_constant_value(x: ir.IRNode) -> ir.Constant | None:
     handler = torch._inductor.ops_handler.ExtractConstantsHandler(x.get_device())
     with (
         V.set_ops_handler(handler),
-        patch.object(ir.FlexibleLayout, "allow_indexing", True),
+        ir.allow_layout_analysis(),
     ):
         out = x.inner_fn(*x.inner_fn_args())
 

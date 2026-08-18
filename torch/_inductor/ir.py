@@ -1147,7 +1147,7 @@ class Loops(IRNode):
         opcounter = OpCounterCSE(V.MockHandler())
         with (
             V.set_ops_handler(opcounter),
-            patch.object(FlexibleLayout, "allow_indexing", True),
+            allow_layout_analysis(),
         ):
             self.inner_fn(*self.inner_fn_args())
             return opcounter.getvalue()
@@ -1197,7 +1197,7 @@ class Loops(IRNode):
         return handler.usages
 
     def get_reads(self) -> OrderedSet[Dep]:
-        with patch.object(FlexibleLayout, "allow_indexing", True):
+        with allow_layout_analysis():
             if self.get_reduction_type():
                 return extract_read_writes(
                     self.make_loader(),
@@ -1576,7 +1576,7 @@ class Reduction(Loops):
                 # No need to split.
                 return ReductionHint.INNER, split
             if input_node is not None and isinstance(input_node, TensorBox):
-                with patch.object(FlexibleLayout, "allow_indexing", True):
+                with allow_layout_analysis():
                     (
                         new_ranges,
                         new_reduction_ranges,
@@ -1984,7 +1984,7 @@ class Reduction(Loops):
         if split == -1:
             if input_node is None:
                 raise AssertionError("Expected input_node is not None")
-            with patch.object(FlexibleLayout, "allow_indexing", True):
+            with allow_layout_analysis():
                 new_ranges, new_reduction_ranges = extract_input_node_reduction_ranges(
                     input_node
                 )
@@ -3513,6 +3513,9 @@ def freeze_storage_layout(x: IRNode) -> None:
         freeze_storage_layout(x.data)
     elif isinstance(x, BaseView):
         freeze_storage_layout(x.unwrap_view())
+    elif isinstance(x.maybe_get_layout(), MutationLayoutSHOULDREMOVE):
+        # strides delegate to the mutation target's layout; freeze that
+        freeze_storage_layout(x.get_layout().target)  # type: ignore[attr-defined]
     else:
         as_storage_and_layout(x)
 
@@ -3620,7 +3623,7 @@ class BaseView(IRNode):
         return self.data.get_read_names()
 
     def get_reads(self) -> OrderedSet[Dep]:
-        with patch.object(FlexibleLayout, "allow_indexing", True):
+        with allow_layout_analysis():
             return extract_read_writes(
                 self.make_loader(),
                 self.get_size(),
@@ -4930,6 +4933,9 @@ class FlexibleLayout(Layout):
     """
 
     allow_indexing = False
+    # Permit reading provisional strides without freezing or erroring; only
+    # set within analysis extents (see allow_layout_analysis).
+    allow_stride_reads = False
 
     def get_fixed_layout_without_freezing(self) -> FixedLayout:
         """
@@ -5037,7 +5043,10 @@ class FlexibleLayout(Layout):
 
     @property
     def stride(self) -> Sequence[Expr]:
-        if config.strict_flexible_layout_strides:
+        if (
+            config.strict_flexible_layout_strides
+            and not FlexibleLayout.allow_stride_reads
+        ):
             raise AssertionError(
                 "Reading strides of an unfrozen FlexibleLayout. These strides "
                 "are provisional and may change when the layout is frozen "
@@ -5158,6 +5167,21 @@ class FlexibleLayout(Layout):
         # record the initial free symbols to check that we do not add new free symbols
         # later when modifying sizes, strides, and offsets.
         self.initial_free_symbols = self.get_initial_free_symbol_uses()
+
+
+def allow_layout_analysis() -> contextlib.ExitStack:
+    """
+    Context for analysis extents (op counting, dep extraction, constant
+    evaluation) that trace loop bodies without persisting anything: permits
+    indexing and provisional stride reads on FlexibleLayouts, without
+    freezing them. The flags are separate so tests can, e.g., combine
+    allow_stride_reads with a patched _stride to evaluate a body against
+    hypothetical strides.
+    """
+    stack = contextlib.ExitStack()
+    stack.enter_context(patch.object(FlexibleLayout, "allow_indexing", True))
+    stack.enter_context(patch.object(FlexibleLayout, "allow_stride_reads", True))
+    return stack
 
 
 class NonOwningLayout(Layout):
@@ -5700,7 +5724,7 @@ class ComputedBuffer(OperationBuffer):
                 index_exprs=OrderedSet(),
             )
 
-        with patch.object(FlexibleLayout, "allow_indexing", True):
+        with allow_layout_analysis():
             if self.data.get_reduction_type():
                 return extract_read_writes(
                     self.get_store_function(),

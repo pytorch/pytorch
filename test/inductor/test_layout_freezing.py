@@ -43,6 +43,21 @@ class TestLayoutFreezing(TestCase):
             buf.freeze_layout()
             self.assertEqual(list(buf.get_stride()), [128, 1])
 
+    def test_analysis_mode_allows_stride_reads(self):
+        from unittest.mock import patch
+
+        buf = self._flexible_buffer()
+        layout = buf.get_layout()
+        with inductor_config.patch(strict_flexible_layout_strides=True):
+            with ir.allow_layout_analysis():
+                self.assertEqual(list(layout.stride), [128, 1])
+                # compositional: evaluate a region against hypothetical strides
+                with patch.object(layout, "_stride", [1, 8]):
+                    self.assertEqual(list(layout.stride), [1, 8])
+            self.assertIsInstance(buf.get_layout(), ir.FlexibleLayout)
+            with self.assertRaisesRegex(AssertionError, "unfrozen FlexibleLayout"):
+                layout.stride
+
     @requires_gpu()
     def test_noncontiguous_reshape_of_padded_buffer(self):
         # Regression test for #192575: View.create baked an unfrozen buffer's
