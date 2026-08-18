@@ -585,6 +585,8 @@ class PersistentDenseGemmEFCKernel:
         local_reduce_combine: cutlass.Constexpr,
         local_reduce_source_op: cutlass.Constexpr,
         local_reduce_finalize: cutlass.Constexpr,
+        local_reduce_consumer: cutlass.Constexpr,
+        local_reduce_secondary_consumer: cutlass.Constexpr,
         *supplemental_parameters,
     ):
         """Execute the GEMM operation in steps:
@@ -721,6 +723,8 @@ class PersistentDenseGemmEFCKernel:
         self.local_reduce_combine = local_reduce_combine
         self.local_reduce_source_op = local_reduce_source_op
         self.local_reduce_finalize = local_reduce_finalize
+        self.local_reduce_consumer = local_reduce_consumer
+        self.local_reduce_secondary_consumer = local_reduce_secondary_consumer
         self.has_local_reduce_tensor = local_reduce_tensor is not None
         # Identify parameters that are remap_modes sources (broadcast tensors).
         # These skip add_batch_mode + permute entirely — they are passed as-is
@@ -1624,9 +1628,6 @@ class PersistentDenseGemmEFCKernel:
                                     reduced_flt[i], other
                                 )
                                 rows //= 2
-                            reduced_flt[i] = self.local_reduce_finalize(
-                                reduced_flt[i], group
-                            )
                         groups_per_cta = cutlass.const_expr(
                             self.cta_tile_shape_mnk[0] // group
                         )
@@ -1714,12 +1715,18 @@ class PersistentDenseGemmEFCKernel:
                                         group_value = self.local_reduce_combine(
                                             group_value, other
                                         )
+                            consumer_value = group_value
+                            group_value = self.local_reduce_finalize(group_value, group)
                             if cutlass.const_expr(self.local_reduce_feeds_main):
                                 if row_idx % group == 0 and (
                                     group <= lanes_in_m
                                     or warp_m_idx == group_warp_start
                                 ):
-                                    feed_flt[i] = group_value
+                                    feed_flt[i] = (
+                                        consumer_value
+                                        if self.local_reduce_consumer is not None
+                                        else group_value
+                                    )
                             if cutlass.const_expr(local_reduce_tensor is not None):
                                 if (
                                     row_idx % group == 0
@@ -1764,6 +1771,12 @@ class PersistentDenseGemmEFCKernel:
                                 cute.size(normalized_flt), unroll_full=True
                             ):
                                 if cutlass.const_expr(
+                                    self.local_reduce_consumer is not None
+                                ):
+                                    normalized_flt[i] = self.local_reduce_consumer(
+                                        normalized_flt[i], reduced_flt[i], 0.0
+                                    )
+                                elif cutlass.const_expr(
                                     self.local_reduce_type == "mean_linear"
                                 ):
                                     normalized_flt[i] = (
@@ -1825,6 +1838,28 @@ class PersistentDenseGemmEFCKernel:
                                 output_m = cute.size(mA_mkl, mode=[0])
                                 output_n = cute.size(mB_nkl, mode=[0])
                                 if cutlass.const_expr(
+                                    self.local_reduce_secondary_consumer is not None
+                                ):
+                                    secondary_fragment = cute.make_rmem_tensor_like(
+                                        acc_fragment, self.acc_dtype
+                                    )
+                                    secondary_fragment.store(
+                                        primary_acc_vec.to(self.acc_dtype)
+                                    )
+                                    secondary_flt = cute.filter_zeros(
+                                        secondary_fragment
+                                    )
+                                    for i in cutlass.range(
+                                        cute.size(secondary_flt), unroll_full=True
+                                    ):
+                                        secondary_flt[i] = (
+                                            self.local_reduce_secondary_consumer(
+                                                secondary_flt[i],
+                                                reduced_flt[i],
+                                                0.0,
+                                            )
+                                        )
+                                elif cutlass.const_expr(
                                     self.local_reduce_secondary_reuses_primary
                                 ):
                                     secondary_flt = normalized_flt
@@ -2076,8 +2111,15 @@ class PersistentDenseGemmEFCKernel:
                                         + self.local_reduce_variance_bias
                                     )
                                 elif cutlass.const_expr(group <= fragment_n):
+                                    if cutlass.const_expr(
+                                        self.local_reduce_consumer is not None
+                                    ):
+                                        reduced_flt[i] = reduced
                                     reduced = self.local_reduce_finalize(reduced, group)
-                                if cutlass.const_expr(self.local_reduce_feeds_main):
+                                if cutlass.const_expr(
+                                    self.local_reduce_feeds_main
+                                    and self.local_reduce_consumer is None
+                                ):
                                     reduced_flt[i] = reduced
                                 if cutlass.const_expr(group > fragment_n):
                                     wide_partial_flt[i] = reduced
@@ -2141,7 +2183,9 @@ class PersistentDenseGemmEFCKernel:
                                         + sum_row_idx * limit_groups,
                                         cute.make_layout(1),
                                     )
-                                    output_element[0] = shared_element[0]
+                                    output_element[0] = self.local_reduce_finalize(
+                                        shared_element[0], group
+                                    )
                         if cutlass.const_expr(
                             group > fragment_n and self.local_reduce_type != "sum"
                         ):
@@ -2224,20 +2268,29 @@ class PersistentDenseGemmEFCKernel:
                             for i in cutlass.range(
                                 cute.size(acc_flt), unroll_full=True
                             ):
-                                denominator = (
-                                    reduced_flt[i] * self.local_reduce_denominator_scale
-                                    + self.local_reduce_denominator_bias
-                                )
                                 if cutlass.const_expr(
-                                    self.local_reduce_type == "normalize_sum"
+                                    self.local_reduce_consumer is not None
                                 ):
-                                    value = acc_flt[i] / denominator
+                                    value = self.local_reduce_consumer(
+                                        acc_flt[i], reduced_flt[i], 0.0
+                                    )
                                 else:
-                                    value = denominator / acc_flt[i]
-                                acc_flt[i] = (
-                                    value * self.local_reduce_affine_scale
-                                    + self.local_reduce_affine_bias
-                                )
+                                    denominator = (
+                                        reduced_flt[i]
+                                        * self.local_reduce_denominator_scale
+                                        + self.local_reduce_denominator_bias
+                                    )
+                                    if cutlass.const_expr(
+                                        self.local_reduce_type == "normalize_sum"
+                                    ):
+                                        value = acc_flt[i] / denominator
+                                    else:
+                                        value = denominator / acc_flt[i]
+                                    value = (
+                                        value * self.local_reduce_affine_scale
+                                        + self.local_reduce_affine_bias
+                                    )
+                                acc_flt[i] = value
                             if cutlass.const_expr(local_reduce_feed_tensor is not None):
                                 output_m = cute.size(mA_mkl, mode=[0])
                                 output_n = cute.size(mB_nkl, mode=[0])

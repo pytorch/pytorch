@@ -362,6 +362,23 @@ class TestNVUniversalGemm(TestCase):
 
         torch.testing.assert_close(result, expected, rtol=1.6e-2, atol=1e-1)
 
+    def test_direct_dense_epilogue_support_check(self):
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
+            CuTeDSLEpilogueArguments,
+        )
+        from torch._inductor.kernel.gemm_epilogue import GemmReductionArguments
+        from torch._inductor.kernel.vendored_templates.cutedsl.wrappers.dense_gemm_efc_kernel import (
+            VendoredDenseGemmEFCOperator,
+        )
+
+        operator = object.__new__(VendoredDenseGemmEFCOperator)
+        args = MagicMock()
+        args.epilogue = CuTeDSLEpilogueArguments(
+            "def epilogue(accum, D):\n    return D", D=torch.empty(1)
+        )
+        args.local_reduce = GemmReductionArguments()
+        self.assertTrue(operator._supports(args))
+
     @unittest.skipIf(IS_FBCODE, "CUTLASS Operator API is not available in fbcode")
     def test_vendored_dense_efc_replacement_has_unique_names(self):
         from cutlass import Float32
