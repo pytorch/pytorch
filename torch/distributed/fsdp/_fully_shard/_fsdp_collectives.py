@@ -614,13 +614,6 @@ def foreach_reduce(
             dtype=reduce_dtype,
             device=device,
         )
-        # reduce_output backs the sharded gradient (via the as_strided below) and
-        # is produced on reduce_scatter_stream but consumed on the caller's stream.
-        # On backends whose "free" is a device op & releases the underlying device 
-        # memory record the consumer stream so the free is ordered behind that read. 
-        # Backends opt in via a device-module flag; absent by default.
-        if getattr(device_handle, "_needs_record_stream_on_free", False):
-            reduce_output.record_stream(current_stream)
         _div_if_needed(reduce_scatter_input, predivide_factor)
         if world_size > 1:
             reduce_scatter_comm(
@@ -701,6 +694,15 @@ def foreach_reduce(
         # FSDPParamGroup._all_reduce_state (captured above) to prevent
         # this. See PR #140044, regression test PR #180900.
         reduce_output = _to_dtype_if_needed(reduce_output, orig_dtype)
+        # reduce_output now backs the sharded gradient (via the as_strided below):
+        # produced on the reduce-scatter / all-reduce stream but consumed on the
+        # caller's stream. When reduce_dtype != orig_dtype the cast above rebinds
+        # reduce_output to a *new* orig_dtype tensor, so this must run post-cast to
+        # record the buffer the gradient actually aliases. On backends whose free
+        # is a device op that releases the underlying memory, record the consumer
+        # stream so the free is ordered behind that read; opt in via device flag.
+        if getattr(device_handle, "_needs_record_stream_on_free", False):
+            reduce_output.record_stream(current_stream)
         # View out and accumulate sharded gradients
         flat_grad_offset = 0  # [0, reduce_scatter_output_numel - 1]
         for padded_unsharded_size, fsdp_param in zip(
