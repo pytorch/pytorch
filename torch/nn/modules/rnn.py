@@ -1737,6 +1737,12 @@ class LSTMCell(RNNCellBase):
                 f"LSTMCell: Expected input to be 1D or 2D, got {input.dim()}D instead"
             )
         if hx is not None:
+            if not isinstance(hx, tuple):
+                raise TypeError("LSTMCell: Expected hx to be a tuple of two tensors")
+            if len(hx) != 2:
+                raise ValueError(
+                    f"LSTMCell: Expected hx to contain two tensors, got {len(hx)}"
+                )
             for idx, value in enumerate(hx):
                 if value.dim() not in (1, 2):
                     raise ValueError(
