@@ -4,11 +4,13 @@ import operator
 import torch
 import torch.fx as fx
 from torch._inductor.augmented_graph_helper import AugmentedGraphHelper
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import HardwareClassification, TestCase
 
 
 class TestAugmentedGraphHelper(TestCase):
     """Test suite for AugmentedGraphHelper dependency and merge management."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         """Create a simple graph structure for testing."""
