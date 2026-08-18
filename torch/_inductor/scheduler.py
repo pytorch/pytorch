@@ -524,13 +524,14 @@ class NestedReduction:
     may re-read the outer reduction's large input, consume its full-resolution
     output, or both.
 
-    This is deliberately limited to same-total-numel pairs:
-    both reductions must traverse the same number of logical elements.
-    General output-size-reducing nested reductions, including split reductions,
-    need different grid ownership and are rejected here.
+    This is deliberately limited to same-total-numel pairs, plus native matmuls
+    whose complete static output-column tile is consumed by the grouped
+    reduction. General output-size-reducing nested reductions, including split
+    reductions, need different grid ownership and are rejected here.
 
     Example:
     - layernorm + block amax: amax over groups of G after layer_norm
+    - native matmul + output reduction: sum over the complete static N tile
     """
 
     MAX_INNER_R_GROUP_SIZE = 512
@@ -811,6 +812,8 @@ class NestedReduction:
 
         if not isinstance(outer_node, (SchedulerNode, FusedSchedulerNode)):
             return True
+        if outer_node.is_native_matmul() and grouped_axis is cls.GroupedAxis.X:
+            return group_size > cls.MAX_NON_INNER_GROUP_SIZE
         coalesce_analysis = (
             outer_node.get_coalesce_analysis()
             if config.triton.coalesce_tiling_analysis
@@ -903,7 +906,14 @@ class NestedReduction:
         # TODO: teach sizevars to infer Mod(s, G)==0 from Mod(s, s//G)==0
         outer_total = V.graph.sizevars.simplify(outer_numel * outer_rnumel)
         grouped_total = V.graph.sizevars.simplify(grouped_numel * grouped_rnumel)
-        if not V.graph.sizevars.statically_known_equals(outer_total, grouped_total):
+        native_matmul_output_reduction = (
+            outer_node.is_native_matmul()
+            and V.graph.sizevars.statically_known_equals(outer_numel, grouped_total)
+        )
+        if not (
+            V.graph.sizevars.statically_known_equals(outer_total, grouped_total)
+            or native_matmul_output_reduction
+        ):
             return False
 
         grouped_reduction, group_size = grouped_reduction_info
@@ -974,6 +984,26 @@ class NestedReduction:
         """Return which parent axis is split by the grouped local reduction."""
         sizevars = V.graph.sizevars
         iter_ranges, reduce_ranges = grouped_reduction.get_ranges()
+        if outer_node is not None and outer_node.is_native_matmul():
+            outer_reductions = [
+                sn for sn in outer_node.get_nodes() if sn.is_reduction()
+            ]
+            if len(outer_reductions) == 1 and isinstance(
+                outer_reductions[0], SchedulerNode
+            ):
+                outer_iter_ranges, _ = outer_reductions[0].get_ranges()
+                if (
+                    len(outer_iter_ranges) == 2
+                    and len(iter_ranges) == 1
+                    and len(reduce_ranges) == 1
+                    and sizevars.statically_known_equals(
+                        outer_iter_ranges[0], iter_ranges[0]
+                    )
+                    and sizevars.statically_known_equals(
+                        outer_iter_ranges[1], group_size
+                    )
+                ):
+                    return cls.GroupedAxis.X
         if len(iter_ranges) != 2 or len(reduce_ranges) != 1:
             if len(iter_ranges) == 1 and len(reduce_ranges) == 1:
                 if not sizevars.statically_known_equals(reduce_ranges[0], group_size):
