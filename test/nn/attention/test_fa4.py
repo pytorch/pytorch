@@ -11,7 +11,12 @@ import torch.nn.functional as F
 from torch.backends.cuda import SDPBackend
 from torch.nn.attention import activate_flash_attention_impl, sdpa_kernel
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    parametrize,
+    run_tests,
+    TestCase,
+)
 
 
 def _fa4_dependencies_available() -> bool:
@@ -28,6 +33,8 @@ def _fa4_dependencies_available() -> bool:
 
 
 class TestFlashAttentionFA4(FlashAttentionTestMixin, TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     # Mixin configuration
     impl_name = "FA4"
     fwd_kernel_patterns = ["flash_attncute", "flash_fwd"]

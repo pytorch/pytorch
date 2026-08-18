@@ -257,6 +257,10 @@ memory_planning = os.environ.get("TORCHINDUCTOR_MEMORY_PLANNING", "0") == "1"
 # Enable to allow using ftz variant of exponenet instruction in triton codegen.
 use_fast_math = os.environ.get("TORCHINDUCTOR_USE_FAST_MATH") == "1"
 
+# Use slower compare/select reductions for their ordered signed-zero tie behavior.
+# NaNs are propagated regardless of this setting.
+strict_signed_zero = False
+
 # How to organize memory under memory_planning=True:
 # - "none": do not try to pool storage, just reuse
 # - "intermediates": all non-outputs share storage, outputs each get unique storage
@@ -1055,6 +1059,12 @@ deterministic = os.getenv("TORCHINDUCTOR_DETERMINISTIC") == "1"
 # Batch-invariant mode: stable per-sample compiled kernel across batch sizes. Implies deterministic.
 batch_invariant = os.getenv("TORCHINDUCTOR_BATCH_INVARIANT") == "1"
 
+# Use eager's opt-in INNER_TREE order for eligible NVIDIA CUDA sums.
+# pyrefly: ignore [bad-assignment]
+numerics: Literal["default", "strict"] = os.environ.get(
+    "TORCHINDUCTOR_NUMERICS", "default"
+)  # type: ignore[assignment]
+
 # When we do split reduction, this number control the minimum value for
 # num_split. Too small num_split make the split reduction less efficient.
 # It's a much bigger problem when we compile a dynamic shape kernel with
@@ -1231,20 +1241,49 @@ _fuse_ddp_communication_passes: list[Callable[..., None] | str] = [
 _micro_pipeline_tp: bool = False
 
 
-# Enable/disable partitioned scatter optimization for atomic add kernels
-# this will improve kernel performance at cost of memory usage.
+# Enable/disable partitioned scatter optimization for atomic add kernels.
+# Improves kernel performance for high-contention index_put(accumulate=True)
+# at the cost of temporary memory for expanded partition buffers.
+_partitioned_scatter_default = "1" if torch.version.hip else "0"
 partitioned_scatter_enabled = (
-    os.environ.get("TORCHINDUCTOR_PARTITIONED_SCATTER_ENABLED", "0") == "1"
+    os.environ.get(
+        "TORCHINDUCTOR_PARTITIONED_SCATTER_ENABLED", _partitioned_scatter_default
+    )
+    == "1"
 )
 
-# Min partitions for scatter optimization
+# Power-of-2 bounds for num_partitions (bitwise AND partition assignment requires pow2).
+# Capped at 64: contention relief saturates before that while the expanded buffer keeps
+# growing, and P=128 measured slower than P=64 at every contention level on MI308X.
 partitioned_scatter_min_partitions: int = 2
+partitioned_scatter_max_partitions: int = 64
 
-# Max partitions for scatter optimization
-partitioned_scatter_max_partitions: int = 128
+# Skip ops with fewer writes than this — small scatters don't generate meaningful contention.
+partitioned_scatter_min_index_size: int = 4096
 
-# Memory budget fraction for scatter buffers
-partitioned_scatter_memory_budget: float = 0.10
+# Skip ops where index_numel / scatter_dim_size is below this ratio.
+# Contention is measured per scatter-dim slot; low density means most slots get ≤1 write.
+# The partitioned form pays a zero-fill and reduce over the expanded buffer plus a
+# slower scatter kernel (atomics over P copies lose cache residency), whether or not
+# contention was actually relieved. Assumes indices spread uniformly over all slots;
+# the real distribution is a runtime property, so concentrated indices are
+# under-estimated here.
+partitioned_scatter_min_contention_ratio: float = 4.0
+
+# GPU memory reserved for state invisible to the FX profile: CUDA driver context,
+# PyTorch caching allocator pool, and kernel scratch (cuBLAS/Triton). Subtracted from
+# total GPU memory to compute available headroom for expanded partition buffers.
+# 1.5 GB is conservative for MI300 (206 GB total); tune down to allow more partitions.
+partitioned_scatter_non_model_floor_bytes: int = 1_500_000_000
+
+# Bypass the heuristic skip gates (min_index_size, min_contention_ratio, and the
+# diminishing-returns cap on num_partitions). Correctness gates and the hard memory
+# budget are still enforced. Useful for benchmarking or skewed-index workloads where
+# static estimates undercount real contention.
+# Enable via: TORCHINDUCTOR_PARTITIONED_SCATTER_FORCE=1
+partitioned_scatter_force: bool = (
+    os.environ.get("TORCHINDUCTOR_PARTITIONED_SCATTER_FORCE", "0") == "1"
+)
 
 
 class _collective:
@@ -2203,6 +2242,10 @@ class triton:
     # assume_aligned_inputs to also be enabled (no effect otherwise).
     enable_host_side_tma = os.environ.get("ENABLE_HOST_SIDE_TMA", "0") == "1"
 
+    # Expand the Blackwell GEMM search space with Meta Triton autoWS knobs
+    # (no-op on archs/Triton builds without meta-WS).
+    enable_template_autows = os.environ.get("ENABLE_TEMPLATE_AUTOWS", "0") == "1"
+
     # Skip L1 cache for buffers that are used only once.  Disabled by default
     skip_l1_cache = os.environ.get("TORCHINDUCTOR_SKIP_L1", "0") == "1"
 
@@ -3126,6 +3169,7 @@ class eager_numerics:
 emulate_precision_casts: bool = (
     os.environ.get("TORCHINDUCTOR_EMULATE_PRECISION_CASTS", "0") == "1"
 )
+
 
 # Targeted variant of emulate_precision_casts for saved low-precision outputs.
 # When a low-precision pointwise result is saved for backward and also used by

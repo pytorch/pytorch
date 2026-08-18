@@ -249,7 +249,7 @@ def _single_tensor_adadelta(
     acc_deltas: list[Tensor],
     state_steps: list[Tensor],
     *,
-    lr: float,
+    lr: float | Tensor,
     rho: float,
     eps: float,
     weight_decay: float,
@@ -299,7 +299,7 @@ def _single_tensor_adadelta(
 
         if torch.is_complex(param):
             delta = torch.view_as_complex(delta)
-        param.add_(delta, alpha=-lr)
+        param.add_(delta, alpha=-lr)  # type: ignore[arg-type]
 
 
 def _multi_tensor_adadelta(
@@ -309,7 +309,7 @@ def _multi_tensor_adadelta(
     acc_deltas: list[Tensor],
     state_steps: list[Tensor],
     *,
-    lr: float,
+    lr: float | Tensor,
     rho: float,
     eps: float,
     weight_decay: float,
@@ -405,7 +405,7 @@ def _multi_tensor_adadelta(
             torch._foreach_mul_(deltas, -lr)
             torch._foreach_add_(device_params, deltas)
         else:
-            torch._foreach_add_(device_params, deltas, alpha=-lr)
+            torch._foreach_add_(device_params, deltas, alpha=-lr)  # type: ignore[arg-type]
 
 
 @_disable_dynamo_if_unsupported(single_tensor_fn=_single_tensor_adadelta)
@@ -422,7 +422,7 @@ def adadelta(
     differentiable: bool = False,
     has_complex: bool = False,
     *,
-    lr: float,
+    lr: float | Tensor,
     rho: float,
     eps: float,
     weight_decay: float,
