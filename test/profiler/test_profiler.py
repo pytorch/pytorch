@@ -51,7 +51,6 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
     onlyOn,
-    skipIf,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -65,6 +64,7 @@ from torch.testing._internal.common_utils import (
     serialTest,
     skipIfRocm,
     skipIfTorchDynamo,
+    skipIfXpu,
     TemporaryFileName,
     TEST_WITH_CROSSREF,
     TEST_WITH_ROCM,
@@ -88,18 +88,21 @@ def get_profiler_activities(device_type):
 
 
 def setUpModule():
-    if (
-        kineto_available()
-        and torch.cuda.is_available()
-        and ProfilerActivity.CUDA in supported_activities()
-    ):
-        # Kineto's process-global profiler cannot currently upgrade from a
-        # CPU-only first initialization to CUDA-capable profiling. Prime it with
-        # CUDA so CPU-only tests do not poison later CUDA profiler tests.
-        x = torch.ones(1, device="cuda")
-        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]):
+    if not kineto_available():
+        return
+    device = torch.accelerator.current_accelerator(check_available=True)
+    # Only CUDA and XPU priming is validated; other backends stay no-op.
+    if device is None or device.type not in ("cuda", "xpu"):
+        return
+    activities = get_profiler_activities(device.type)
+    if len(activities) > 1:
+        # Kineto's process-global profiler cannot currently upgrade from a CPU-only
+        # first init to accelerator profiling (#186036, #186970). Prime the
+        # accelerator so CPU-only tests don't poison later device tests.
+        x = torch.ones(1, device=device)
+        with profile(activities=activities):
             x + x
-            torch.cuda.synchronize()
+            torch.accelerator.synchronize()
 
 
 # if tqdm is not shutdown properly, it will leave the monitor thread alive.
@@ -2275,7 +2278,7 @@ class TestProfilerDevice(TestCase):
                 report = json.load(f)
                 self._validate_basic_json(report["traceEvents"], device_available)
 
-    @onlyOn(["cpu", "cuda"])
+    @onlyOn(["cpu", "cuda", "xpu"])
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_kineto(self, device):
         device_type = device.split(":")[0]
@@ -2714,11 +2717,6 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
 
         event_list.table()
 
-    @skipIf(
-        True,
-        "XPU Trace event ends too late! Refer https://github.com/intel/torch-xpu-ops/issues/2263",
-        device_type="xpu",
-    )
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
     def test_basic_chrome_trace(self, device):
@@ -2790,6 +2788,10 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
     @onlyOn("cpu")
     @unittest.skipIf(IS_WINDOWS, "can't use os.fork() on Windows")
+    @skipIfXpu(
+        msg="setUpModule initializes the XPU runtime, and forking after "
+        "Level Zero init deadlocks the child"
+    )
     def test_forked_process(self, device):
         device_type = device.split(":")[0]
 
@@ -2991,11 +2993,19 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
             self.assertGreater(
                 len(kernel_events), 0, "Error: No kernel events in trace"
             )
+            if device_type == "xpu":
+                # XPU Kineto emits "sycl queue" rather than "stream", and no
+                # grid/block launch geometry.
+                required_keys = ["device", "sycl queue", "correlation"]
+                require_launch_geometry = False
+            else:
+                required_keys = ["device", "stream", "correlation"]
+                require_launch_geometry = True
             has_kernel_launch_metadata = False
             for ke in kernel_events:
                 args = ke.get("args", {})
                 name = ke.get("name", "<unknown>")
-                for key in ["device", "stream", "correlation"]:
+                for key in required_keys:
                     self.assertIn(
                         key, args, lambda msg: f"{msg}\nkernel '{name}' missing '{key}'"
                     )
@@ -3007,10 +3017,11 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
                     lambda msg: f"{msg}\nkernel '{name}' should provide grid and block together",
                 )
                 has_kernel_launch_metadata |= has_grid
-            self.assertTrue(
-                has_kernel_launch_metadata,
-                "Error: No kernel events in trace contained grid/block metadata",
-            )
+            if require_launch_geometry:
+                self.assertTrue(
+                    has_kernel_launch_metadata,
+                    "Error: No kernel events in trace contained grid/block metadata",
+                )
 
     @onlyAccelerator
     @skipIfRocm(msg="ROCm does not emit OVERHEAD activity records")
@@ -3045,7 +3056,7 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
             )
 
 
-instantiate_device_type_tests(TestProfilerDevice, globals())
+instantiate_device_type_tests(TestProfilerDevice, globals(), allow_xpu=True)
 
 
 class TestExperimentalUtils(TestCase):
