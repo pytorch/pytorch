@@ -16,6 +16,7 @@ from torch._dynamo.graph_bytecode_inputs import (
 )
 from torch._dynamo.testing import extract_graph, remove_trailing_space
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_LINUX,
     IS_MACOS,
     IS_WINDOWS,
@@ -44,6 +45,8 @@ def strip_annotation_desc(gm_str: str) -> str:
 
 
 class TestStreams(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
@@ -89,11 +92,6 @@ class TestStreams(torch._dynamo.test_case.TestCase):
     def test_cuda_stream_event_weakref_callback(self):
         self._assert_weakref_callback_fires(torch.cuda.Stream)
         self._assert_weakref_callback_fires(torch.cuda.Event)
-
-    @unittest.skipUnless(TEST_XPU, "xpu only")
-    def test_xpu_stream_event_weakref_callback(self):
-        self._assert_weakref_callback_fires(torch.xpu.Stream)
-        self._assert_weakref_callback_fires(torch.xpu.Event)
 
     @requires_cuda
     def test_dynamo_registry_no_dangling_weakref(self):
@@ -250,16 +248,6 @@ class <lambda>(torch.nn.Module):
         # Stream should be newly allocated on each call
         self.assertNotEqual(s0, s1)
 
-    def test_event_subclass_python_type(self):
-        class MyEvent(torch.Event):
-            pass
-
-        def fn(e):
-            return torch.ones(2) if type(e) is MyEvent else torch.zeros(2)
-
-        res = torch.compile(fn, backend="eager", fullgraph=True)(MyEvent())
-        self.assertEqual(res, torch.ones(2))
-
     @requires_cuda
     def test_get_current_stream_return(self):
         def fn(x, s):
@@ -287,18 +275,6 @@ class <lambda>(torch.nn.Module):
         compiled = torch.compile(fn_cuda_stream, backend="eager", fullgraph=True)
         self.assertEqual(compiled(x), fn_cuda_stream(x))
 
-    @unittest.skipIf(not TEST_XPU, "XPU is not available")
-    def test_xpu_current_stream_attrs(self):
-        """Verify that torch.xpu.current_stream() attributes are accessible
-        under torch.compile and match eager behavior."""
-
-        def fn_xpu_stream(x):
-            return torch.xpu.current_stream().sycl_queue
-
-        x = torch.zeros(1, device="xpu")
-        compiled = torch.compile(fn_xpu_stream, backend="eager", fullgraph=True)
-        self.assertEqual(compiled(x), fn_xpu_stream(x))
-
     @requires_cuda
     def test_cuda_current_stream_with_entered_stream(self):
         """Verify that torch.cuda.current_stream().cuda_stream returns the
@@ -310,20 +286,6 @@ class <lambda>(torch.nn.Module):
 
         s = torch.cuda.Stream()
         x = torch.zeros(1, device="cuda")
-        compiled = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertEqual(compiled(x, s), fn(x, s))
-
-    @unittest.skipIf(not TEST_XPU, "XPU is not available")
-    def test_xpu_current_stream_with_entered_stream(self):
-        """Verify that torch.xpu.current_stream().sycl_queue returns the
-        correct value when inside a stream context for a user-created stream."""
-
-        def fn(x, s):
-            with s:
-                return torch.xpu.current_stream().sycl_queue
-
-        s = torch.xpu.Stream()
-        x = torch.zeros(1, device="xpu")
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(compiled(x, s), fn(x, s))
 
@@ -372,14 +334,6 @@ class <lambda>(torch.nn.Module):
         return (add_1, add_2)
 """,
         )
-
-    @unittest.skip("Needs graph break support with annotation context")
-    def test_stream_enter_exit_graph_break(self):
-        pass
-
-    @unittest.skip("Needs graph break support with annotation context")
-    def test_nested_stream_enter_exit_graph_break(self):
-        pass
 
     @requires_cuda
     def test_local_stream_enter_exit(self):
@@ -1834,157 +1788,6 @@ class <lambda>(torch.nn.Module):
 
         graph.lint()
 
-    def test_full_barrier_forward_deps_respect_partition(self) -> None:
-        from torch._functorch._aot_autograd.streams import _collect_sync_forward_deps
-
-        graph = torch.fx.Graph()
-        fw_input = graph.placeholder("fw_input")
-        fw_input.meta["val"] = torch.ones(1)
-        bw_input = graph.placeholder("bw_input")
-        bw_input.meta["val"] = torch.ones(1)
-        barrier = graph.call_function(
-            torch.ops.streams.synchronize_stream.default, (0,)
-        )
-        fw_node = graph.call_function(torch.ops.aten.add.Tensor, (fw_input, 1))
-        fw_node.meta["val"] = torch.ones(1)
-        bw_node = graph.call_function(torch.ops.aten.add.Tensor, (bw_input, 1))
-        bw_node.meta["val"] = torch.ones(1)
-        bw_node.meta["partitioner_tag"] = "is_backward"
-        graph.output((fw_node, bw_node))
-
-        _, deps = _collect_sync_forward_deps(graph)
-        self.assertEqual(list(deps[barrier]), [fw_input])
-
-    def test_backward_full_barrier_filters_forward_sync_deps(self) -> None:
-        from torch._functorch._aot_autograd.streams import _collect_full_barrier_deps
-
-        graph = torch.fx.Graph()
-        inp = graph.placeholder("inp")
-        fw_compute = graph.call_function(torch.ops.aten.add.Tensor, (inp, 1))
-        fw_sync = graph.call_function(torch.ops.streams.record_event.default, (0, 0))
-        bw_sync = graph.call_function(torch.ops.streams.record_event.default, (1, 0))
-        bw_sync.meta["partitioner_tag"] = "is_backward"
-        graph.output(fw_compute)
-
-        deps = _collect_full_barrier_deps(
-            {0: [fw_compute]}, {0: [fw_sync, bw_sync]}, bwd=True
-        )
-        self.assertEqual(deps, [fw_compute, bw_sync])
-
-    def test_wait_stream_forward_deps_are_transitive(self) -> None:
-        from torch._functorch._aot_autograd.streams import (
-            _collect_sync_forward_deps,
-            set_stream,
-        )
-
-        graph = torch.fx.Graph()
-        inp = graph.placeholder("inp")
-        inp.meta["val"] = torch.ones(1)
-        wait = graph.call_function(torch.ops.streams.wait_stream.default, (1, 0))
-        producer = graph.call_function(torch.ops.aten.add.Tensor, (inp, 1))
-        producer.meta["val"] = torch.ones(1)
-        set_stream(producer, 0)
-        consumer = graph.call_function(torch.ops.aten.mul.Tensor, (producer, 2))
-        consumer.meta["val"] = torch.ones(1)
-        set_stream(consumer, 1)
-        graph.output(consumer)
-
-        wait_deps, _ = _collect_sync_forward_deps(graph)
-        self.assertEqual(list(wait_deps[wait]), [inp])
-
-    def test_wait_stream_forward_deps_respect_partition(self) -> None:
-        from torch._functorch._aot_autograd.streams import (
-            _collect_sync_forward_deps,
-            set_stream,
-        )
-
-        graph = torch.fx.Graph()
-        fw_input = graph.placeholder("fw_input")
-        fw_input.meta["val"] = torch.ones(1)
-        bw_input = graph.placeholder("bw_input")
-        bw_input.meta["val"] = torch.ones(1)
-        fw_wait = graph.call_function(torch.ops.streams.wait_stream.default, (1, 0))
-        fw_node = graph.call_function(torch.ops.aten.add.Tensor, (fw_input, 1))
-        fw_node.meta["val"] = torch.ones(1)
-        set_stream(fw_node, 1)
-        bw_wait = graph.call_function(torch.ops.streams.wait_stream.default, (1, 0))
-        bw_wait.meta["partitioner_tag"] = "is_backward"
-        bw_node = graph.call_function(torch.ops.aten.add.Tensor, (bw_input, 1))
-        bw_node.meta["val"] = torch.ones(1)
-        bw_node.meta["partitioner_tag"] = "is_backward"
-        set_stream(bw_node, 1)
-        graph.output((fw_node, bw_node))
-
-        wait_deps, _ = _collect_sync_forward_deps(graph)
-        self.assertEqual(list(wait_deps[fw_wait]), [fw_input])
-        self.assertEqual(list(wait_deps[bw_wait]), [bw_input])
-
-    def _assert_empty_sync_anchors_record(
-        self, sync_target: torch._ops.OpOverload, sync_args: tuple[int, ...]
-    ) -> None:
-        from torch._functorch._aot_autograd.streams import (
-            wrap_all_sync_nodes_with_control_deps,
-        )
-        from torch._inductor.fx_passes.control_dependencies import control_deps
-
-        graph = torch.fx.Graph()
-        inp = graph.placeholder("inp")
-        sync = graph.call_function(sync_target, sync_args)
-        graph.call_function(torch.ops.streams.record_event.default, (1, 1))
-        graph.output(inp)
-        gm = torch.fx.GraphModule({}, graph)
-
-        wrap_all_sync_nodes_with_control_deps(gm)
-
-        ctrl_nodes = graph.find_nodes(op="call_function", target=control_deps)
-        self.assertEqual(len(ctrl_nodes), 1)
-        self.assertIn(sync, ctrl_nodes[0].args[0])
-        graph.lint()
-
-    def test_empty_synchronize_stream_anchors_record(self) -> None:
-        self._assert_empty_sync_anchors_record(
-            torch.ops.streams.synchronize_stream.default, (0,)
-        )
-
-    def test_empty_synchronize_device_anchors_record(self) -> None:
-        self._assert_empty_sync_anchors_record(
-            torch.ops.streams.synchronize_device.default, ()
-        )
-
-    def test_empty_wait_stream_anchors_record(self) -> None:
-        self._assert_empty_sync_anchors_record(
-            torch.ops.streams.wait_stream.default, (1, 0)
-        )
-
-    def test_external_wait_event_anchors_record(self) -> None:
-        self._assert_empty_sync_anchors_record(
-            torch.ops.streams.wait_event.default, (0, 1)
-        )
-
-    def test_external_wait_event_orders_following_work(self) -> None:
-        from torch._functorch._aot_autograd.streams import (
-            set_stream,
-            wrap_all_sync_nodes_with_control_deps,
-        )
-        from torch._inductor.fx_passes.control_dependencies import control_deps
-
-        graph = torch.fx.Graph()
-        inp = graph.placeholder("inp")
-        inp.meta["val"] = torch.ones(1)
-        graph.call_function(torch.ops.streams.wait_event.default, (0, 1))
-        add = graph.call_function(torch.ops.aten.add.Tensor, (inp, 1))
-        add.meta["val"] = torch.ones(1)
-        set_stream(add, 1)
-        graph.output(add)
-        gm = torch.fx.GraphModule({}, graph)
-
-        wrap_all_sync_nodes_with_control_deps(gm)
-
-        ctrl_nodes = graph.find_nodes(op="call_function", target=control_deps)
-        self.assertEqual(len(ctrl_nodes), 1)
-        self.assertIs(add.args[0].args[0], ctrl_nodes[0])
-        graph.lint()
-
     @requires_cuda
     def test_captured_external_wait_event_orders_following_work(self) -> None:
         event = torch.cuda.Event()
@@ -2006,90 +1809,6 @@ class <lambda>(torch.nn.Module):
         self.assertEqual(len(wait_ctrl), 1)
         add = graph.find_nodes(op="call_function", target=torch.ops.aten.add.Tensor)[0]
         self.assertIs(add.args[0].args[0], wait_ctrl[0])
-        graph.lint()
-
-    def test_external_wait_event_preserves_copy_destination(self) -> None:
-        from torch._functorch._aot_autograd.streams import (
-            set_stream,
-            wrap_all_sync_nodes_with_control_deps,
-        )
-        from torch._inductor.fx_passes.control_dependencies import control_deps
-
-        graph = torch.fx.Graph()
-        dst = graph.placeholder("dst")
-        dst.meta["val"] = torch.ones(1)
-        src = graph.placeholder("src")
-        src.meta["val"] = torch.ones(1)
-        graph.call_function(torch.ops.streams.wait_event.default, (0, 1))
-        copy = graph.call_function(torch.ops.aten.copy_.default, (dst, src))
-        copy.meta["val"] = torch.ones(1)
-        set_stream(copy, 1)
-        graph.output(copy)
-        gm = torch.fx.GraphModule({}, graph)
-
-        wrap_all_sync_nodes_with_control_deps(gm)
-
-        ctrl = graph.find_nodes(op="call_function", target=control_deps)[0]
-        self.assertIs(copy.args[0], dst)
-        self.assertIs(copy.args[1].args[0], ctrl)
-        graph.lint()
-
-    def test_empty_synchronize_event_anchors_record(self) -> None:
-        self._assert_empty_sync_anchors_record(
-            torch.ops.streams.synchronize_event.default, (0,)
-        )
-
-    def test_wait_stream_depends_on_prior_waiting_stream_work(self) -> None:
-        from torch._functorch._aot_autograd.streams import (
-            set_stream,
-            wrap_all_sync_nodes_with_control_deps,
-        )
-        from torch._inductor.fx_passes.control_dependencies import control_deps
-
-        graph = torch.fx.Graph()
-        inp = graph.placeholder("inp")
-        inp.meta["val"] = torch.ones(1)
-        prior_work = graph.call_function(torch.ops.aten.add.Tensor, (inp, 1))
-        prior_work.meta["val"] = torch.ones(1)
-        set_stream(prior_work, 1)
-        graph.call_function(torch.ops.streams.wait_stream.default, (1, 0))
-        graph.output(prior_work)
-        gm = torch.fx.GraphModule({}, graph)
-
-        wrap_all_sync_nodes_with_control_deps(gm)
-
-        ctrl_nodes = graph.find_nodes(op="call_function", target=control_deps)
-        self.assertEqual(len(ctrl_nodes), 1)
-        self.assertIn(prior_work, ctrl_nodes[0].args[0])
-        graph.lint()
-
-    def test_wait_stream_self_wait_orders_work_once(self) -> None:
-        from torch._functorch._aot_autograd.streams import (
-            set_stream,
-            wrap_all_sync_nodes_with_control_deps,
-        )
-        from torch._inductor.fx_passes.control_dependencies import control_deps
-
-        graph = torch.fx.Graph()
-        x = graph.placeholder("x")
-        x.meta["val"] = torch.ones(1)
-        y = graph.placeholder("y")
-        y.meta["val"] = torch.ones(1)
-        prior_work = graph.call_function(torch.ops.aten.add.Tensor, (x, 1))
-        prior_work.meta["val"] = torch.ones(1)
-        set_stream(prior_work, 1)
-        graph.call_function(torch.ops.streams.wait_stream.default, (1, 1))
-        following_work = graph.call_function(torch.ops.aten.mul.Tensor, (y, 2))
-        following_work.meta["val"] = torch.ones(1)
-        set_stream(following_work, 1)
-        graph.output((prior_work, following_work))
-        gm = torch.fx.GraphModule({}, graph)
-
-        wrap_all_sync_nodes_with_control_deps(gm)
-
-        ctrl = graph.find_nodes(op="call_function", target=control_deps)[0]
-        self.assertEqual(ctrl.args[0].count(prior_work), 1)
-        self.assertIs(following_work.args[0].args[0], ctrl)
         graph.lint()
 
     @requires_cuda
@@ -2190,26 +1909,6 @@ class GraphModule(torch.nn.Module):
             inp = (torch.ones(2, 2, device="cuda"),)
             fn(*inp)
 
-    def test_is_marked_side_effectful(self):
-        self.assertIn(
-            torch.ops.streams.fork.default, torch.fx.node._side_effectful_functions
-        )
-        self.assertIn(
-            torch.ops.streams.join.default, torch.fx.node._side_effectful_functions
-        )
-        self.assertIn(
-            torch.ops.streams.wait_event.default,
-            torch.fx.node._side_effectful_functions,
-        )
-        self.assertIn(
-            torch.ops.streams.record_event.default,
-            torch.fx.node._side_effectful_functions,
-        )
-        self.assertIn(
-            torch.ops.streams.synchronize_event.default,
-            torch.fx.node._side_effectful_functions,
-        )
-
     @requires_cuda
     def test_backward_sync_control_deps_e2e(self) -> None:
         """
@@ -2260,28 +1959,6 @@ class GraphModule(torch.nn.Module):
             0,
             "Expected control_deps nodes in backward graph for stream synchronization",
         )
-
-    def test_sync_dealloc_has_fake_impl(self):
-        """Test that sync_dealloc has a registered fake impl.
-
-        Without a fake impl, Inductor's backward compilation crashes when the
-        backward graph contains cross-stream sync_dealloc ops.
-        """
-        from torch._subclasses.fake_tensor import FakeTensorMode
-
-        with FakeTensorMode():
-            t = torch.randn(4)
-            # Should not raise "no fake impl registered"
-            torch.ops.streams.sync_dealloc.default(0, 1, t)
-
-    def test_record_stream_has_fake_impl(self):
-        """Test that record_stream's fake impl has the correct signature."""
-        from torch._subclasses.fake_tensor import FakeTensorMode
-
-        with FakeTensorMode():
-            t = torch.randn(4)
-            # Should not raise due to signature mismatch
-            torch.ops.streams.record_stream.default(t, 0)
 
     @requires_cuda
     def test_record_stream(self):
@@ -2923,6 +2600,305 @@ class <lambda>(torch.nn.Module):
         self.assertEqual(actual_s2, expected_s2)
         self.assertEqual(actual_default, default_s.cuda_stream)
 
+
+class TestStreamsGeneric(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_event_subclass_python_type(self):
+        class MyEvent(torch.Event):
+            pass
+
+        def fn(e):
+            return torch.ones(2) if type(e) is MyEvent else torch.zeros(2)
+
+        res = torch.compile(fn, backend="eager", fullgraph=True)(MyEvent())
+        self.assertEqual(res, torch.ones(2))
+
+    @unittest.skip("Needs graph break support with annotation context")
+    def test_stream_enter_exit_graph_break(self):
+        pass
+
+    @unittest.skip("Needs graph break support with annotation context")
+    def test_nested_stream_enter_exit_graph_break(self):
+        pass
+
+    def test_full_barrier_forward_deps_respect_partition(self) -> None:
+        from torch._functorch._aot_autograd.streams import _collect_sync_forward_deps
+
+        graph = torch.fx.Graph()
+        fw_input = graph.placeholder("fw_input")
+        fw_input.meta["val"] = torch.ones(1)
+        bw_input = graph.placeholder("bw_input")
+        bw_input.meta["val"] = torch.ones(1)
+        barrier = graph.call_function(
+            torch.ops.streams.synchronize_stream.default, (0,)
+        )
+        fw_node = graph.call_function(torch.ops.aten.add.Tensor, (fw_input, 1))
+        fw_node.meta["val"] = torch.ones(1)
+        bw_node = graph.call_function(torch.ops.aten.add.Tensor, (bw_input, 1))
+        bw_node.meta["val"] = torch.ones(1)
+        bw_node.meta["partitioner_tag"] = "is_backward"
+        graph.output((fw_node, bw_node))
+
+        _, deps = _collect_sync_forward_deps(graph)
+        self.assertEqual(list(deps[barrier]), [fw_input])
+
+    def test_backward_full_barrier_filters_forward_sync_deps(self) -> None:
+        from torch._functorch._aot_autograd.streams import _collect_full_barrier_deps
+
+        graph = torch.fx.Graph()
+        inp = graph.placeholder("inp")
+        fw_compute = graph.call_function(torch.ops.aten.add.Tensor, (inp, 1))
+        fw_sync = graph.call_function(torch.ops.streams.record_event.default, (0, 0))
+        bw_sync = graph.call_function(torch.ops.streams.record_event.default, (1, 0))
+        bw_sync.meta["partitioner_tag"] = "is_backward"
+        graph.output(fw_compute)
+
+        deps = _collect_full_barrier_deps(
+            {0: [fw_compute]}, {0: [fw_sync, bw_sync]}, bwd=True
+        )
+        self.assertEqual(deps, [fw_compute, bw_sync])
+
+    def test_wait_stream_forward_deps_are_transitive(self) -> None:
+        from torch._functorch._aot_autograd.streams import (
+            _collect_sync_forward_deps,
+            set_stream,
+        )
+
+        graph = torch.fx.Graph()
+        inp = graph.placeholder("inp")
+        inp.meta["val"] = torch.ones(1)
+        wait = graph.call_function(torch.ops.streams.wait_stream.default, (1, 0))
+        producer = graph.call_function(torch.ops.aten.add.Tensor, (inp, 1))
+        producer.meta["val"] = torch.ones(1)
+        set_stream(producer, 0)
+        consumer = graph.call_function(torch.ops.aten.mul.Tensor, (producer, 2))
+        consumer.meta["val"] = torch.ones(1)
+        set_stream(consumer, 1)
+        graph.output(consumer)
+
+        wait_deps, _ = _collect_sync_forward_deps(graph)
+        self.assertEqual(list(wait_deps[wait]), [inp])
+
+    def test_wait_stream_forward_deps_respect_partition(self) -> None:
+        from torch._functorch._aot_autograd.streams import (
+            _collect_sync_forward_deps,
+            set_stream,
+        )
+
+        graph = torch.fx.Graph()
+        fw_input = graph.placeholder("fw_input")
+        fw_input.meta["val"] = torch.ones(1)
+        bw_input = graph.placeholder("bw_input")
+        bw_input.meta["val"] = torch.ones(1)
+        fw_wait = graph.call_function(torch.ops.streams.wait_stream.default, (1, 0))
+        fw_node = graph.call_function(torch.ops.aten.add.Tensor, (fw_input, 1))
+        fw_node.meta["val"] = torch.ones(1)
+        set_stream(fw_node, 1)
+        bw_wait = graph.call_function(torch.ops.streams.wait_stream.default, (1, 0))
+        bw_wait.meta["partitioner_tag"] = "is_backward"
+        bw_node = graph.call_function(torch.ops.aten.add.Tensor, (bw_input, 1))
+        bw_node.meta["val"] = torch.ones(1)
+        bw_node.meta["partitioner_tag"] = "is_backward"
+        set_stream(bw_node, 1)
+        graph.output((fw_node, bw_node))
+
+        wait_deps, _ = _collect_sync_forward_deps(graph)
+        self.assertEqual(list(wait_deps[fw_wait]), [fw_input])
+        self.assertEqual(list(wait_deps[bw_wait]), [bw_input])
+
+    def _assert_empty_sync_anchors_record(
+        self, sync_target: torch._ops.OpOverload, sync_args: tuple[int, ...]
+    ) -> None:
+        from torch._functorch._aot_autograd.streams import (
+            wrap_all_sync_nodes_with_control_deps,
+        )
+        from torch._inductor.fx_passes.control_dependencies import control_deps
+
+        graph = torch.fx.Graph()
+        inp = graph.placeholder("inp")
+        sync = graph.call_function(sync_target, sync_args)
+        graph.call_function(torch.ops.streams.record_event.default, (1, 1))
+        graph.output(inp)
+        gm = torch.fx.GraphModule({}, graph)
+
+        wrap_all_sync_nodes_with_control_deps(gm)
+
+        ctrl_nodes = graph.find_nodes(op="call_function", target=control_deps)
+        self.assertEqual(len(ctrl_nodes), 1)
+        self.assertIn(sync, ctrl_nodes[0].args[0])
+        graph.lint()
+
+    def test_empty_synchronize_stream_anchors_record(self) -> None:
+        self._assert_empty_sync_anchors_record(
+            torch.ops.streams.synchronize_stream.default, (0,)
+        )
+
+    def test_empty_synchronize_device_anchors_record(self) -> None:
+        self._assert_empty_sync_anchors_record(
+            torch.ops.streams.synchronize_device.default, ()
+        )
+
+    def test_empty_wait_stream_anchors_record(self) -> None:
+        self._assert_empty_sync_anchors_record(
+            torch.ops.streams.wait_stream.default, (1, 0)
+        )
+
+    def test_external_wait_event_anchors_record(self) -> None:
+        self._assert_empty_sync_anchors_record(
+            torch.ops.streams.wait_event.default, (0, 1)
+        )
+
+    def test_external_wait_event_orders_following_work(self) -> None:
+        from torch._functorch._aot_autograd.streams import (
+            set_stream,
+            wrap_all_sync_nodes_with_control_deps,
+        )
+        from torch._inductor.fx_passes.control_dependencies import control_deps
+
+        graph = torch.fx.Graph()
+        inp = graph.placeholder("inp")
+        inp.meta["val"] = torch.ones(1)
+        graph.call_function(torch.ops.streams.wait_event.default, (0, 1))
+        add = graph.call_function(torch.ops.aten.add.Tensor, (inp, 1))
+        add.meta["val"] = torch.ones(1)
+        set_stream(add, 1)
+        graph.output(add)
+        gm = torch.fx.GraphModule({}, graph)
+
+        wrap_all_sync_nodes_with_control_deps(gm)
+
+        ctrl_nodes = graph.find_nodes(op="call_function", target=control_deps)
+        self.assertEqual(len(ctrl_nodes), 1)
+        self.assertIs(add.args[0].args[0], ctrl_nodes[0])
+        graph.lint()
+
+    def test_external_wait_event_preserves_copy_destination(self) -> None:
+        from torch._functorch._aot_autograd.streams import (
+            set_stream,
+            wrap_all_sync_nodes_with_control_deps,
+        )
+        from torch._inductor.fx_passes.control_dependencies import control_deps
+
+        graph = torch.fx.Graph()
+        dst = graph.placeholder("dst")
+        dst.meta["val"] = torch.ones(1)
+        src = graph.placeholder("src")
+        src.meta["val"] = torch.ones(1)
+        graph.call_function(torch.ops.streams.wait_event.default, (0, 1))
+        copy = graph.call_function(torch.ops.aten.copy_.default, (dst, src))
+        copy.meta["val"] = torch.ones(1)
+        set_stream(copy, 1)
+        graph.output(copy)
+        gm = torch.fx.GraphModule({}, graph)
+
+        wrap_all_sync_nodes_with_control_deps(gm)
+
+        ctrl = graph.find_nodes(op="call_function", target=control_deps)[0]
+        self.assertIs(copy.args[0], dst)
+        self.assertIs(copy.args[1].args[0], ctrl)
+        graph.lint()
+
+    def test_empty_synchronize_event_anchors_record(self) -> None:
+        self._assert_empty_sync_anchors_record(
+            torch.ops.streams.synchronize_event.default, (0,)
+        )
+
+    def test_wait_stream_depends_on_prior_waiting_stream_work(self) -> None:
+        from torch._functorch._aot_autograd.streams import (
+            set_stream,
+            wrap_all_sync_nodes_with_control_deps,
+        )
+        from torch._inductor.fx_passes.control_dependencies import control_deps
+
+        graph = torch.fx.Graph()
+        inp = graph.placeholder("inp")
+        inp.meta["val"] = torch.ones(1)
+        prior_work = graph.call_function(torch.ops.aten.add.Tensor, (inp, 1))
+        prior_work.meta["val"] = torch.ones(1)
+        set_stream(prior_work, 1)
+        graph.call_function(torch.ops.streams.wait_stream.default, (1, 0))
+        graph.output(prior_work)
+        gm = torch.fx.GraphModule({}, graph)
+
+        wrap_all_sync_nodes_with_control_deps(gm)
+
+        ctrl_nodes = graph.find_nodes(op="call_function", target=control_deps)
+        self.assertEqual(len(ctrl_nodes), 1)
+        self.assertIn(prior_work, ctrl_nodes[0].args[0])
+        graph.lint()
+
+    def test_wait_stream_self_wait_orders_work_once(self) -> None:
+        from torch._functorch._aot_autograd.streams import (
+            set_stream,
+            wrap_all_sync_nodes_with_control_deps,
+        )
+        from torch._inductor.fx_passes.control_dependencies import control_deps
+
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        x.meta["val"] = torch.ones(1)
+        y = graph.placeholder("y")
+        y.meta["val"] = torch.ones(1)
+        prior_work = graph.call_function(torch.ops.aten.add.Tensor, (x, 1))
+        prior_work.meta["val"] = torch.ones(1)
+        set_stream(prior_work, 1)
+        graph.call_function(torch.ops.streams.wait_stream.default, (1, 1))
+        following_work = graph.call_function(torch.ops.aten.mul.Tensor, (y, 2))
+        following_work.meta["val"] = torch.ones(1)
+        set_stream(following_work, 1)
+        graph.output((prior_work, following_work))
+        gm = torch.fx.GraphModule({}, graph)
+
+        wrap_all_sync_nodes_with_control_deps(gm)
+
+        ctrl = graph.find_nodes(op="call_function", target=control_deps)[0]
+        self.assertEqual(ctrl.args[0].count(prior_work), 1)
+        self.assertIs(following_work.args[0].args[0], ctrl)
+        graph.lint()
+
+    def test_is_marked_side_effectful(self):
+        self.assertIn(
+            torch.ops.streams.fork.default, torch.fx.node._side_effectful_functions
+        )
+        self.assertIn(
+            torch.ops.streams.join.default, torch.fx.node._side_effectful_functions
+        )
+        self.assertIn(
+            torch.ops.streams.wait_event.default,
+            torch.fx.node._side_effectful_functions,
+        )
+        self.assertIn(
+            torch.ops.streams.record_event.default,
+            torch.fx.node._side_effectful_functions,
+        )
+        self.assertIn(
+            torch.ops.streams.synchronize_event.default,
+            torch.fx.node._side_effectful_functions,
+        )
+
+    def test_sync_dealloc_has_fake_impl(self):
+        """Test that sync_dealloc has a registered fake impl.
+
+        Without a fake impl, Inductor's backward compilation crashes when the
+        backward graph contains cross-stream sync_dealloc ops.
+        """
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        with FakeTensorMode():
+            t = torch.randn(4)
+            # Should not raise "no fake impl registered"
+            torch.ops.streams.sync_dealloc.default(0, 1, t)
+
+    def test_record_stream_has_fake_impl(self):
+        """Test that record_stream's fake impl has the correct signature."""
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        with FakeTensorMode():
+            t = torch.randn(4)
+            # Should not raise due to signature mismatch
+            torch.ops.streams.record_stream.default(t, 0)
+
     def test_expand_dict_returning_deps_triton_kernel(self) -> None:
         """Triton kernel dicts must not be passed through control_deps.
 
@@ -3003,6 +2979,64 @@ class <lambda>(torch.nn.Module):
         # The old getitem_out should have been erased; add_node now uses new_gi
         self.assertNotIn(getitem_out, set(graph.nodes))
         self.assertIn(new_gi, add_node.all_input_nodes)
+
+
+class TestStreamsXPU(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.XPU
+
+    def _assert_weakref_callback_fires(self, factory):
+        """Backend Stream/Event tp_dealloc overrides must call
+        PyObject_ClearWeakRefs so that weakrefs to destroyed instances
+        are properly cleared.  Without it, the weakref's wr_object is
+        left dangling and any later access (e.g. the dynamo external-
+        object registry being cleared at interpreter finalization)
+        hits a use-after-free.
+
+        The callback firing is the only reliable Python-level signal —
+        `weakref.ref(s)() is None` can return True even with the bug
+        present, because other CPython paths may null wr_object
+        without invoking callbacks (Objects/weakrefobject.c).
+        """
+        called = []
+        obj = factory()
+        # `_weakref_keepalive` must outlive `del obj` so the callback
+        # has a chance to fire; the binding is load-bearing.
+        _weakref_keepalive = weakref.ref(obj, lambda _ref: called.append(True))
+        del obj
+        gc.collect()
+        self.assertEqual(called, [True])
+        del _weakref_keepalive
+
+    @unittest.skipUnless(TEST_XPU, "xpu only")
+    def test_xpu_stream_event_weakref_callback(self):
+        self._assert_weakref_callback_fires(torch.xpu.Stream)
+        self._assert_weakref_callback_fires(torch.xpu.Event)
+
+    @unittest.skipIf(not TEST_XPU, "XPU is not available")
+    def test_xpu_current_stream_attrs(self):
+        """Verify that torch.xpu.current_stream() attributes are accessible
+        under torch.compile and match eager behavior."""
+
+        def fn_xpu_stream(x):
+            return torch.xpu.current_stream().sycl_queue
+
+        x = torch.zeros(1, device="xpu")
+        compiled = torch.compile(fn_xpu_stream, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x), fn_xpu_stream(x))
+
+    @unittest.skipIf(not TEST_XPU, "XPU is not available")
+    def test_xpu_current_stream_with_entered_stream(self):
+        """Verify that torch.xpu.current_stream().sycl_queue returns the
+        correct value when inside a stream context for a user-created stream."""
+
+        def fn(x, s):
+            with s:
+                return torch.xpu.current_stream().sycl_queue
+
+        s = torch.xpu.Stream()
+        x = torch.zeros(1, device="xpu")
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x, s), fn(x, s))
 
 
 if __name__ == "__main__":
