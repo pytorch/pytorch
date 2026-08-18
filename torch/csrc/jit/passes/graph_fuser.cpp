@@ -337,7 +337,7 @@ struct GraphFuser {
     // (as a legacy from tensors only)
     WithInsertPoint guard(*subgraph.nodes().begin());
     for (auto input : n->inputs()) {
-      if (!inputs_map.contains(input)) {
+      if (inputs_map.count(input) == 0) {
         if (input->type()->isSubtypeOf(*TensorType::get())) {
           auto in_group = subgraph.insertInput(tensor_insert_idx);
           in_group->setType(input->type());
@@ -1012,7 +1012,7 @@ struct GraphFuser {
     for (int64_t i = static_cast<int64_t>(outputs.size()) - 1; i >= 0; --i) {
       auto output = outputs[i];
       auto soutput = soutputs[i];
-      if (usedOnlyInSize(output) && shape_of.contains(soutput)) {
+      if (usedOnlyInSize(output) && shape_of.count(soutput) > 0) {
         auto uses = output->uses();
         for (Use u : uses) {
           AT_ASSERT(u.user->matches("aten::size(Tensor self) -> int[]"));

@@ -56,6 +56,7 @@ class NCCLCopyEngineCollectives(MultiProcContinuousTest):
             ],
             record_shapes=True,
             with_stack=True,
+            with_modules=True,
         )
         return group_name, prof
 

@@ -253,7 +253,7 @@ static std::string encodeRHS(const Node* n) {
 
   at::jit::TemplateEnv env;
 
-  if (!simple_map_ops.contains(n->kind())) {
+  if (simple_map_ops.find(n->kind()) == simple_map_ops.end()) {
     return encodeSpecialRHS(n, env);
   } else {
     size_t i = 0;

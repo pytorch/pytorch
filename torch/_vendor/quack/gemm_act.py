@@ -60,34 +60,9 @@ from .activation import act_fn_map, gate_fn_map
 from .rounding import RoundingMode, convert_f32_to_bf16_sr, epilogue_aux_out_sr_seed
 
 
-class OutputLayoutSpec(NamedTuple):
-    """CuTe view and physical carrier contract registered under a stable key."""
-
-    tensor_fn: Callable
-    fake_shape_fn: Callable
-    carrier_ndim: int
-
-
 _tensor_epilogue_fns: dict[str, Callable] = {}
 _local_reduce_combine_fns: dict[str, Callable] = {}
 _local_reduce_finalize_fns: dict[str, Callable] = {}
-_output_layout_specs: dict[str, OutputLayoutSpec] = {}
-
-
-def register_output_layout(
-    key: str, tensor_fn: Callable, fake_shape_fn: Callable, carrier_ndim: int
-) -> None:
-    """Register a cache-stable physical output-layout implementation.
-
-    Args:
-        key: Stable identifier included in the compiled-kernel cache key.
-        tensor_fn: CuTeDSL callable mapping the physical carrier to its logical view.
-        fake_shape_fn: Callable producing the symbolic physical carrier shape.
-        carrier_ndim: Required rank of the runtime carrier tensor.
-    """
-    _output_layout_specs[key] = OutputLayoutSpec(
-        tensor_fn, fake_shape_fn, carrier_ndim
-    )
 
 
 def power_of_2_divisibility(value: int, max_divisibility: int) -> int:
@@ -164,21 +139,6 @@ def validate_grouped_n_contract_device(
     )
 
 
-def normalize_local_reduce_output_layout(
-    layout: str | None, has_local_reduce_output: bool
-) -> str | None:
-    """Validate the optional physical layout for the local-reduction store."""
-    if layout is None:
-        return None
-    if not has_local_reduce_output:
-        raise RuntimeError(
-            "local_reduce_output_layout requires a local_reduce_out tensor"
-        )
-    if layout not in _output_layout_specs:
-        raise NotImplementedError(f"unsupported output layout: {layout!r}")
-    return layout
-
-
 class GemmActMixin(ComposableEpiMixin):
     grouped_n_contract_group = 1
     _epi_ops = (
@@ -216,7 +176,6 @@ class GemmActMixin(ComposableEpiMixin):
         local_reduce_feeds_main: cutlass.Constexpr[bool] = False
         local_reduce_group: cutlass.Constexpr[int] = 0
         local_reduce_axis: cutlass.Constexpr[int] = 1
-        local_reduce_output_layout: cutlass.Constexpr[Optional[Callable]] = None
         local_reduce_combine_fn: cutlass.Constexpr[Optional[Callable]] = None
         local_reduce_finalize_fn: cutlass.Constexpr[Optional[Callable]] = None
         alpha: Optional[Float32 | cute.Tensor] = None
@@ -501,7 +460,7 @@ class GemmActMixin(ComposableEpiMixin):
                 tRS_rEpilogueIn.load(), *tuple(epilogue_aux_values)
             )
             if const_expr(params.tensor_epilogue_returns_aux):
-                tRS_rD.store(epilogue_result[0].to(self.acc_dtype))
+                tRS_rD.store(epilogue_result[0])
                 aux_results = []
                 for i, _ in enumerate(params.mAuxOut):
                     aux_result = epilogue_result[i + 1]
@@ -526,10 +485,11 @@ class GemmActMixin(ComposableEpiMixin):
                     tDrLocalReduce.store(epilogue_result[1])
                     main_result = epilogue_result[0]
                     if const_expr(self.grouped_n_contract_group == 1):
-                        tRS_rD.store(main_result.to(self.acc_dtype))
-                tRS_rAuxOut = cute.make_rmem_tensor(
-                    main_result.shape, main_result.element_type
-                )
+                        tRS_rD.store(main_result)
+                result_dtype = self.acc_dtype
+                if const_expr(self.grouped_n_contract_group != 1):
+                    result_dtype = main_result.element_type
+                tRS_rAuxOut = cute.make_rmem_tensor(main_result.shape, result_dtype)
                 tRS_rAuxOut.store(main_result)
         elif const_expr(params.act_fn is not None):
             tRS_rAuxOut = cute.make_rmem_tensor(tRS_rD.layout.shape, self.acc_dtype)
@@ -593,7 +553,6 @@ class GemmGroupedNContractMixin(GemmActMixin):
         ColVecTupleLoad("mTensorEpilogueColVecBroadcasts"),
         ScalarTupleLoad("mTensorEpilogueScalars"),
         # TODO: Add row/tile captures after chunked N-sensitive loads are remapped.
-        GroupedLocalReduce("mLocalReduce"),
         TileStore("mAuxOut", epi_tile_fn=_grouped_n_contract_epi_tile_fn),
     )
 
@@ -621,7 +580,6 @@ class GemmGroupedNContract4Sm100(GemmGroupedNContractMixin, GemmSm100):
         ColVecLoad("mColVecBroadcast"),
         ColVecTupleLoad("mTensorEpilogueColVecBroadcasts"),
         ScalarTupleLoad("mTensorEpilogueScalars"),
-        GroupedLocalReduce("mLocalReduce"),
         TileStore("mAuxOut", epi_tile_fn=_grouped_n_contract4_epi_tile_fn),
     )
 
@@ -791,7 +749,6 @@ def _compile_gemm_act(
     local_reduce_ndim,
     local_reduce_group,
     local_reduce_axis,
-    local_reduce_output_layout,
     local_reduce_stride_divisibility,
     local_reduce_combine_key,
     local_reduce_finalize_key,
@@ -906,11 +863,7 @@ def _compile_gemm_act(
         fake_tensor(dtype, (1,), leading_dim=0, divisibility=1)
         for dtype in tensor_epilogue_scalar_dtypes
     ) or None
-    if local_reduce_output_layout is not None:
-        local_reduce_shape = _output_layout_specs[
-            local_reduce_output_layout
-        ].fake_shape_fn(l, m, n, local_reduce_axis, local_reduce_ndim)
-    elif local_reduce_dtype is not None and local_reduce_axis == 0:
+    if local_reduce_dtype is not None and local_reduce_axis == 0:
         local_reduce_shape = (
             (l, cute.sym_int(), n) if local_reduce_ndim == 3 else (cute.sym_int(), n)
         )
@@ -926,7 +879,7 @@ def _compile_gemm_act(
     ):
         mLocalReduce = None
     else:
-        local_reduce_leading_dim = local_reduce_ndim - 1
+        local_reduce_leading_dim = 2 if local_reduce_ndim == 3 else 1
         mLocalReduce = fake_tensor(
             local_reduce_dtype,
             local_reduce_shape,
@@ -971,11 +924,6 @@ def _compile_gemm_act(
         local_reduce_feeds_main=local_reduce_feeds_main,
         local_reduce_group=local_reduce_group,
         local_reduce_axis=local_reduce_axis,
-        local_reduce_output_layout=(
-            None
-            if local_reduce_output_layout is None
-            else _output_layout_specs[local_reduce_output_layout].tensor_fn
-        ),
         local_reduce_combine_fn=local_reduce_combine_fn,
         local_reduce_finalize_fn=local_reduce_finalize_fn,
         alpha=fake_scalar(alpha_mode, Float32),
@@ -1056,7 +1004,6 @@ def gemm_act(
     local_reduce_out: Optional[Tensor] = None,
     local_reduce_group: int = 0,
     local_reduce_axis: int = 1,
-    local_reduce_output_layout: str | None = None,
     local_reduce_combine_key: Optional[str] = None,
     local_reduce_finalize_key: Optional[str] = None,
     main_output_transform_group: int | None = None,
@@ -1070,8 +1017,7 @@ def gemm_act(
     M and writes ``local_reduce_out`` with shape ``[L, M / group, N]``; axis 1
     groups N and writes ``[L, M, N / group]``. ``local_reduce_group`` must be
     positive, divide the selected dimension, and fit the selected GEMM tile.
-    ``local_reduce_out`` is normally 3-D; a registered output layout may use a
-    different physical carrier rank.
+    ``local_reduce_out`` is always 3-D at this QuACK boundary.
 
     When ``tensor_epilogue_returns_local_reduce`` is true, the generated tensor
     epilogue's final return value, after the main result and any same-shape aux
@@ -1085,10 +1031,6 @@ def gemm_act(
     mode requires a tensor epilogue and both callback keys, and currently accepts
     only axis-0 groups that fit within one warp. The callback omission described
     below applies only to store-only reductions.
-
-    ``local_reduce_output_layout`` optionally selects a registered physical view
-    for ``local_reduce_out``. The registered callback is already specialized for
-    the physical GEMM orientation.
 
     ``local_reduce_combine_key`` and ``local_reduce_finalize_key`` identify
     CuTeDSL callbacks registered with ``register_local_reduce_fns``. The binary
@@ -1126,9 +1068,9 @@ def gemm_act(
             )
         if tensor_epilogue_fn is None and tensor_epilogue_key is None:
             raise RuntimeError("grouped_n_contract requires a generated tensor epilogue")
-        if tensor_epilogue_returns_aux:
+        if tensor_epilogue_returns_aux or tensor_epilogue_returns_local_reduce:
             raise NotImplementedError(
-                "grouped_n_contract does not compose with full-shape auxiliary outputs"
+                "grouped_n_contract does not compose with auxiliary outputs"
             )
         gemm_cls_name = "grouped_n_contract"
 
@@ -1258,9 +1200,6 @@ def gemm_act(
         raise RuntimeError(
             "tensor_epilogue_returns_local_reduce requires local_reduce_out and vice versa"
         )
-    local_reduce_output_layout = normalize_local_reduce_output_layout(
-        local_reduce_output_layout, local_reduce_out is not None
-    )
     if local_reduce_feeds_main:
         if local_reduce_axis != 0:
             raise NotImplementedError("local_reduce_feeds_main currently supports only axis 0")
@@ -1303,15 +1242,8 @@ def gemm_act(
             raise RuntimeError(
                 "physical local reductions require generated local-reduce callback keys"
             )
-        expected_local_reduce_ndim = (
-            3
-            if local_reduce_output_layout is None
-            else _output_layout_specs[local_reduce_output_layout].carrier_ndim
-        )
-        if local_reduce_out.ndim != expected_local_reduce_ndim:
-            raise NotImplementedError(
-                f"QUACK local_reduce_out must be {expected_local_reduce_ndim}-D"
-            )
+        if local_reduce_out.ndim != 3:
+            raise NotImplementedError("QUACK local_reduce_out must be 3-D")
     concat_layout = tuple(sorted(concat_layout)) if concat_layout else ()
     local_reduce_dtype = (
         torch2cute_dtype_map[local_reduce_out.dtype]
@@ -1319,7 +1251,7 @@ def gemm_act(
         else (Float32 if local_reduce_feeds_main else None)
     )
     local_reduce_leading_dim = (
-        local_reduce_out.ndim - 1 if local_reduce_out is not None else 1
+        2 if local_reduce_out is not None and local_reduce_out.ndim == 3 else 1
     )
     local_reduce_stride_divisibility = (
         tensor_stride_divisibility(
@@ -1360,7 +1292,6 @@ def gemm_act(
         local_reduce_out.ndim if local_reduce_out is not None else 0,
         local_reduce_group,
         local_reduce_axis,
-        local_reduce_output_layout,
         local_reduce_stride_divisibility,
         local_reduce_combine_key,
         local_reduce_finalize_key,
@@ -1405,7 +1336,6 @@ def gemm_act(
         local_reduce_feeds_main=None,
         local_reduce_group=None,
         local_reduce_axis=None,
-        local_reduce_output_layout=None,
         local_reduce_combine_fn=None,
         local_reduce_finalize_fn=None,
         alpha=scalar_arg(alpha, alpha_mode, Float32),

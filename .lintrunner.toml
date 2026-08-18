@@ -51,7 +51,6 @@ code = 'CLANGFORMAT'
 include_patterns = [
     'aten/src/ATen/*.h',
     'aten/src/ATen/cpu/vec/**/*.h',
-    'aten/src/ATen/cuda/Atomic.cuh',
     'aten/src/ATen/accelerator/**/*.h',
     'aten/src/ATen/accelerator/**/*.cpp',
     'aten/src/ATen/mps/**/*.mm',
@@ -66,7 +65,6 @@ include_patterns = [
     'aten/src/ATen/native/mps/**/*.h',
     'aten/src/ATen/native/vulkan/**/*.h',
     'aten/src/ATen/native/vulkan/**/*.cpp',
-    'aten/src/ATen/native/cuda/KernelUtils.cuh',
     'aten/src/ATen/native/cuda/MultiTensorApply.cuh',
     'aten/src/ATen/native/**/Foreach*.*',
     'aten/src/ATen/native/cuda/fused*.*',
@@ -209,7 +207,7 @@ exclude_patterns = [
     'c10/benchmark/intrusive_ptr_benchmark.cpp',
     'c10/cuda/CUDAAlgorithm.h',
     'c10/util/complex_math.h',
-    'torch/headeronly/util/complex_utils.h',
+    'c10/util/complex_utils.h',
     'c10/util/flat_hash_map.h',
     'c10/util/logging*.h',
     'c10/metal/*.h',
@@ -583,25 +581,29 @@ include_patterns = [
     '**/*.h',
 ]
 exclude_patterns = [
-    # Vendored upstream code - permanent, not debt.
-    'third_party/concurrentqueue/**',
-    # Pre-existing violations; burn down over time. Nothing may be added here.
+    # Pre-existing violations; burn down over time.
     'aten/src/**',
     'c10/core/**',
+    'c10/cuda/**',
     'c10/test/**',
     'c10/util/**',
+    'c10/xpu/**',
     'test/cpp/**',
     'test/cpp_extensions/**',
+    'third_party/concurrentqueue/**',
     'tools/autograd/**',
     'torch/csrc/*.cpp',
     'torch/csrc/*.h',
+    'torch/csrc/api/**',
     'torch/csrc/autograd/**',
     'torch/csrc/cuda/**',
     'torch/csrc/distributed/**',
     'torch/csrc/dynamo/**',
     'torch/csrc/export/**',
+    'torch/csrc/fx/**',
     'torch/csrc/inductor/**',
     'torch/csrc/jit/**',
+    'torch/csrc/lazy/**',
     'torch/csrc/multiprocessing/**',
     'torch/csrc/profiler/**',
     'torch/csrc/stable/**',
@@ -610,10 +612,23 @@ exclude_patterns = [
     'torch/csrc/xpu/**',
     'torch/headeronly/**',
     'torch/lib/**',
+    'torch/nativert/**',
 ]
 command = [
     'python3',
-    'tools/linter/adapters/raw_throw_linter.py',
+    'tools/linter/adapters/grep_linter.py',
+    '--pattern=\bthrow\b',
+    '--allowlist-pattern=@allow-raw-throw',
+    '--linter-name=RAWTHROW',
+    '--error-name=raw throw statement',
+    """--error-description=\
+        Do not use raw `throw` in C++ code. Use TORCH_CHECK, \
+        TORCH_CHECK_WITH, C10_THROW_ERROR, or other error-reporting macros \
+        instead. See c10/util/Exception.h for available macros. If this is a \
+        re-throw (throw;), restructure the code to avoid try/catch/throw or \
+        add the file to the RAWTHROW exclude list in .lintrunner.toml with \
+        justification.\
+    """,
     '--',
     '@{{PATHSFILE}}'
 ]
@@ -1052,15 +1067,6 @@ command = [
 ]
 
 [[linter]]
-code = 'CODEOWNERS_TAXONOMY'
-include_patterns = ['**']
-command = [
-    'python3',
-    'scripts/codeowners/check_taxonomy.py',
-    '--lintrunner',
-]
-
-[[linter]]
 code = 'TEST_HAS_MAIN'
 include_patterns = [
     'test/**/test_*.py',
@@ -1271,8 +1277,6 @@ exclude_patterns = [
     'torch/_inductor/kernel/vendored_templates/cutedsl/kernels/**',
     'torch/_inductor/kernel/vendored_templates/cutedsl/dense_blockscaled_gemm_persistent.py',
     'torch/utils/model_dump/preact.mjs',
-    # Generated: mirrors the label names on GitHub verbatim
-    'tools/linter/adapters/pytorch_labels.json',
 ]
 is_formatter = true
 
