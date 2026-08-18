@@ -102,6 +102,28 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
 
   // Event-related functions
 #if SYCL_COMPILER_VERSION >= 20260200
+  /**
+   * Note [Reusable Event Usage]
+   *
+   * Starting with SYCL 2026.2, reusable events are available and required for
+   * IPC support. Profiling and IPC capabilities for reusable events are
+   * device-specific, whereas regular events always support profiling but never
+   * IPC (inter process communication). The following table summarizes the
+   * capabilities of each event type:
+   *
+   *   Event Type | Reusable | Profiling       | IPC
+   *   -----------|----------|-----------------|----------------
+   *   Regular    | No       | Yes             | No
+   *   Reusable   | Yes      | device-specific | device-specific
+   *
+   * We use reusable events when the device (Xe2+) supports both
+   * `ext_oneapi_per_event_profiling` and `ext_oneapi_ipc_event` aspects.
+   * Since `ext_oneapi_per_event_profiling` is stricter than
+   * `ext_oneapi_ipc_event`, only checking the former one is also sufficient in
+   * practice. Otherwise we fall back to regular events for backward
+   * compatibility.
+   */
+
   void createEvent(sycl::event** xpu_event, const EventFlag flag) const {
     namespace syclex = sycl::ext::oneapi::experimental;
     TORCH_CHECK(
@@ -156,6 +178,7 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     bool reusable = false;
 #if SYCL_COMPILER_VERSION >= 20260200
     auto& device = c10::xpu::get_raw_device(stream.device_index());
+    // See Note [Reusable Event Usage]
     reusable = device.has(sycl::aspect::ext_oneapi_per_event_profiling) &&
         device.has(sycl::aspect::ext_oneapi_ipc_event);
 #endif
@@ -203,6 +226,7 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     bool reusable = false;
 #if SYCL_COMPILER_VERSION >= 20260200
     auto& device = c10::xpu::get_raw_device(stream.device_index());
+    // See Note [Reusable Event Usage]
     reusable = device.has(sycl::aspect::ext_oneapi_per_event_profiling) &&
         device.has(sycl::aspect::ext_oneapi_ipc_event);
 #endif
@@ -274,6 +298,7 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
         "Cannot create IPC handle for event with timing enabled.");
 #if SYCL_COMPILER_VERSION >= 20260200
     auto& device = c10::xpu::get_raw_device(device_index);
+    // See Note [Reusable Event Usage]
     bool reusable = device.has(sycl::aspect::ext_oneapi_per_event_profiling) &&
         device.has(sycl::aspect::ext_oneapi_ipc_event);
     TORCH_CHECK(reusable, "Event must be reusable to support IPC.");
@@ -298,6 +323,7 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
       const std::string& handle_string) const override {
 #if SYCL_COMPILER_VERSION >= 20260200
     auto& device = c10::xpu::get_raw_device(device_index);
+    // See Note [Reusable Event Usage]
     bool reusable = device.has(sycl::aspect::ext_oneapi_per_event_profiling) &&
         device.has(sycl::aspect::ext_oneapi_ipc_event);
     TORCH_CHECK(reusable, "Event must be reusable to support IPC.");
