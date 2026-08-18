@@ -31,16 +31,12 @@ from torch.testing._internal.common_utils import (
     make_dynamo_test,
     NestedTensorTestCase,
     parametrize,
+    skipIfCppFakeTensor,
     subtest,
 )
 from torch.testing._internal.triton_utils import requires_gpu_and_triton
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._python_dispatch import return_and_correct_aliasing
-
-
-skipIfCppFakeTensor = unittest.skipIf(
-    torch._dynamo.config.use_cpp_fake_tensor, "no nestedtensor w/ cpp faketensor"
-)
 
 
 def nontraceable_subclass(c):
@@ -4531,7 +4527,7 @@ class TestIssubclass(torch._dynamo.test_case.TestCase):
         self.assertEqual(result_eager, result_compiled)
 
 
-@skipIfCppFakeTensor
+@skipIfCppFakeTensor("no nested tensor support")
 class TestNestedTensor(
     _SubclassCompileCheckMixin,
     torch._dynamo.test_case.TestCase,
