@@ -7424,18 +7424,20 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 and not V.graph.sizevars.statically_known_multiple_of(arg.expr, 16)
                 and any(expr.has(arg.expr) for expr in memory_index_exprs)
             )
-            numel_candidates = tuple(
-                (i, signature[i].expr)
-                for i in numel_arg_indices
-                if isinstance(signature[i], SizeArg)
-                and signature[i].expr is not None
-                and triton_meta_signature[argdefs[i].name] in ("i32", "i64")
-                and bool(getattr(signature[i].expr, "free_symbols", ()))
-                and not V.graph.sizevars.statically_known_multiple_of(
-                    signature[i].expr, 16
-                )
-            )
-            candidates = relevant_candidates + numel_candidates
+            numel_candidates: list[tuple[int, sympy.Expr]] = []
+            for i in numel_arg_indices:
+                arg = signature[i]
+                if not isinstance(arg, SizeArg):
+                    continue
+                expr = arg.expr
+                if (
+                    expr is not None
+                    and triton_meta_signature[argdefs[i].name] in ("i32", "i64")
+                    and bool(getattr(expr, "free_symbols", ()))
+                    and not V.graph.sizevars.statically_known_multiple_of(expr, 16)
+                ):
+                    numel_candidates.append((i, expr))
+            candidates = relevant_candidates + tuple(numel_candidates)
             if relevant_candidates:
                 self.runtime_divisible_by_16 = tuple(i for i, _ in candidates)
 
