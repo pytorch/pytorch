@@ -32,8 +32,6 @@
 #include <optional>
 #include <string>
 #include <thread>
-#include <unordered_map>
-#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -171,18 +169,6 @@ class TORCH_API CuptiMonitorDecoder {
       uint64_t flush_period_ns,
       uintptr_t flush_fn);
 
-  // Drop noisy RUNTIME/DRIVER records by cbid during decode, so the noise (e.g.
-  // cudaGetDevice / cuDevicePrimaryCtxGetState) never reaches the columns.
-  // CUPTI's own per-cbid activity filter is NOT_COMPATIBLE under user-defined
-  // records, so it is done here. ``cbid_field_id`` is the field carrying the
-  // cbid; ``filters`` maps a kind to (keep_mode, cbids): keep_mode true keeps
-  // only the listed cbids (the driver allowlist), false drops the listed cbids
-  // (the runtime blocklist).
-  void set_cbid_filter(
-      int cbid_field_id,
-      std::unordered_map<
-          uint32_t,
-          std::pair<bool, std::unordered_set<uint32_t>>> filters);
   void start();
   void stop();
 
@@ -238,12 +224,6 @@ class TORCH_API CuptiMonitorDecoder {
   bool self_flush_ = false;
   uint64_t flush_period_ns_ = 0;
   uintptr_t flush_fn_ = 0;
-  // Noisy-cbid filter (see set_cbid_filter): the field carrying the cbid and,
-  // per kind, (keep_mode, cbids). Read-only during decode after configure, so
-  // unguarded.
-  int cbid_field_id_ = -1;
-  std::unordered_map<uint32_t, std::pair<bool, std::unordered_set<uint32_t>>>
-      cbid_filters_;
 };
 
 // Process-global store of per-annotation metadata. A producer on the training

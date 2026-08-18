@@ -67,6 +67,7 @@ inline void delete_c10_value_object(void* ptr) {
 
 class RAIIAtenRecordFunctionHandle {
  public:
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   RAIIAtenRecordFunctionHandle() : handle_(nullptr, noop_deleter) {}
   RAIIAtenRecordFunctionHandle(const RAIIAtenRecordFunctionHandle& other) =
       delete;
@@ -103,6 +104,7 @@ class RAIIAtenRecordFunctionHandle {
   RAIIAtenRecordFunctionHandle(AtenRecordFunctionHandle handle)
       : handle_(handle, delete_record_function_object) {}
 
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~RAIIAtenRecordFunctionHandle() {
     handle_.reset();
   }
@@ -132,6 +134,7 @@ class RAIIAtenRecordFunctionHandle {
 // RAIIAtenTensorHandle steals the tensor objects created by the libtorch C ABI
 class RAIIAtenTensorHandle {
  public:
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   RAIIAtenTensorHandle() : handle_(nullptr, noop_deleter) {}
   RAIIAtenTensorHandle(const RAIIAtenTensorHandle& other) = delete;
   RAIIAtenTensorHandle& operator=(const RAIIAtenTensorHandle& other) = delete;
@@ -144,6 +147,7 @@ class RAIIAtenTensorHandle {
   RAIIAtenTensorHandle(AtenTensorHandle handle)
       : handle_(handle, delete_tensor_object) {}
 
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~RAIIAtenTensorHandle() {
     handle_.reset();
   }
@@ -212,6 +216,7 @@ class RAIIAtenTensorHandle {
 // RAIIC10IValueHandle steals the IValue objects created by the libtorch C ABI
 class RAIIC10IValueHandle {
  public:
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   RAIIC10IValueHandle() : handle_(nullptr, noop_deleter) {}
   RAIIC10IValueHandle(const RAIIC10IValueHandle& other) = delete;
   RAIIC10IValueHandle& operator=(const RAIIC10IValueHandle& other) = delete;
@@ -224,6 +229,7 @@ class RAIIC10IValueHandle {
   RAIIC10IValueHandle(C10IValueHandle handle)
       : handle_(handle, delete_c10_value_object) {}
 
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~RAIIC10IValueHandle() {
     handle_.reset();
   }
@@ -266,10 +272,12 @@ class MaybeOwningAtenTensorHandle {
       default;
 
   // Steal the ownership from another RAIIAtenTensorHandle using std::move
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,cppcoreguidelines-rvalue-reference-param-not-moved)
   MaybeOwningAtenTensorHandle(RAIIAtenTensorHandle&& other)
       : raii_handle_(std::move(other)) {
     handle_ = raii_handle_.get();
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
   MaybeOwningAtenTensorHandle& operator=(RAIIAtenTensorHandle&& other) {
     raii_handle_ = std::move(other);
     handle_ = raii_handle_.get();
@@ -277,11 +285,13 @@ class MaybeOwningAtenTensorHandle {
   }
 
   // By default, steal the ownership from raw AtenTensorHandle
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   MaybeOwningAtenTensorHandle(AtenTensorHandle handle) : raii_handle_(handle) {
     handle_ = raii_handle_.get();
   }
 
   // If user_managed is true, we do not steal the ownership.
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   MaybeOwningAtenTensorHandle(AtenTensorHandle handle, bool user_managed) {
     if (user_managed) {
       aoti_torch_new_tensor_handle(handle, &handle_);
@@ -291,6 +301,7 @@ class MaybeOwningAtenTensorHandle {
     }
   }
 
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~MaybeOwningAtenTensorHandle() {
     // This is no-op if we don't hold raii_handle with the
     // MaybeOwningAtenTensorHandle.
@@ -416,8 +427,11 @@ inline DevicePtr allocate_scratch_tensor(
     RAIIAtenTensorHandle& scratch_tensor) {
   DevicePtr scratch_ptr = 0;
   if (numel > 0) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
     int64_t scratch_size[] = {numel};
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
     int64_t scratch_stride[] = {1};
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     AtenTensorHandle scratch_handle;
     AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_empty_strided(
         1,
@@ -479,6 +493,7 @@ inline void assert_size_stride(
     std::initializer_list<int64_t> expected_sizes,
     std::initializer_list<int64_t> expected_strides,
     const char* op_name = nullptr) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t ndim;
   AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_dim(tensor, &ndim));
   int64_t expected_ndim = static_cast<int64_t>(expected_sizes.size());
@@ -488,13 +503,16 @@ inline void assert_size_stride(
       "expected ndim " + std::to_string(expected_ndim) + " but got " +
           std::to_string(ndim) + op_msg);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t numel;
   AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_numel(tensor, &numel));
   if (numel == 0) {
     return;
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t* sizes;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t* strides;
   AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_sizes(tensor, &sizes));
   AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_strides(tensor, &strides));
@@ -527,6 +545,40 @@ inline void assert_size_stride(
   }
 }
 
+inline void assert_size_stride(
+    AtenTensorHandle tensor,
+    std::initializer_list<int64_t> expected_sizes,
+    std::initializer_list<int64_t> expected_strides,
+    const char* op_name,
+    int32_t expected_dtype,
+    const char* expected_dtype_name) {
+  bool is_defined = true;
+  AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_is_defined(tensor, &is_defined));
+  if (!is_defined) {
+    return;
+  }
+
+  int32_t dtype = 0;
+  AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_dtype(tensor, &dtype));
+  if (dtype != expected_dtype) {
+    std::string op_msg =
+        op_name ? std::string("\nError in op: ") + op_name : "";
+    std::string dtype_name = expected_dtype_name
+        ? std::string(expected_dtype_name)
+        : std::to_string(expected_dtype);
+    AOTI_RUNTIME_CHECK(
+        false,
+        "expected dtype " + dtype_name + " but got dtype code " +
+            std::to_string(dtype) + op_msg +
+            "\nThis error most often comes from an incorrect fake (aka meta) "
+            "kernel for a custom op."
+            "\nUse torch.library.opcheck to test your custom op."
+            "\nSee https://pytorch.org/docs/stable/library.html#torch.library.opcheck");
+  }
+
+  assert_size_stride(tensor, expected_sizes, expected_strides, op_name);
+}
+
 inline void* get_data_ptr_wrapper(const ConstantHandle& constant) {
   return constant.data_ptr();
 }
@@ -545,6 +597,7 @@ inline AtenTensorHandle wrap_with_raii_handle_if_needed(
 // This should only be called in cases where the C-shim API expects an optional
 // input argument (passed by pointer), and a temporary needs to be passed to it.
 template <class T>
+// NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
 T& temporary_reference(T&& t) {
   return t;
 }
