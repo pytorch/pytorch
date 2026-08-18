@@ -65,7 +65,7 @@ from ..exc import (
 )
 from ..external_utils import call_hook_from_backward_state
 from ..guards import GuardBuilder, install_guard
-from ..source import AttrSource, TypeSource
+from ..source import AttrSource, SyntheticLocalSource, TypeSource
 from ..utils import (
     cmp_name_to_op_mapping,
     fqn,
@@ -103,6 +103,7 @@ except ModuleNotFoundError:
 if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.output_graph import OutputGraph
+    from torch._dynamo.side_effects import SideEffects
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
     from .functions import UserFunctionVariable
@@ -165,6 +166,27 @@ _VIEW_ATTR_TO_ATEN_OP = {
     "H": torch.ops.aten.matrix_H,
     "mH": torch.ops.aten.mH,
 }
+
+
+def _contains_graph_intermediate(
+    value: Any, side_effects: "SideEffects | None" = None
+) -> bool:
+    """Return whether value contains a differentiable current-graph tensor."""
+    found = False
+
+    def visit(vt: VariableTracker) -> None:
+        nonlocal found
+        if (
+            isinstance(vt, TensorVariable)
+            # Sources can describe in-graph views (for example, x.real), so an
+            # FX placeholder is the authoritative graph-input boundary.
+            and (vt.source is None or vt.proxy.node.op != "placeholder")
+            and (vt.requires_grad or vt.has_grad_fn)
+        ):
+            found = True
+
+    VariableTracker.visit(visit, value, side_effects=side_effects)
+    return found
 
 
 def _is_sym_arith_operand(vt: VariableTracker) -> bool:
@@ -1421,8 +1443,6 @@ class TensorVariable(VariableTracker):
         Deduplicates by proxy.node.
         Returns list of unique leaf tensor variables.
         """
-        from ..source import SyntheticLocalSource
-
         result = []
         seen_nodes: set[torch.fx.Node] = set()
         for var in vars_iter:
@@ -1496,11 +1516,21 @@ class TensorVariable(VariableTracker):
         TODO: Support non-leaf tensors by fixing .grad access on non-leaf in Dynamo.
         """
         if not config.trace_autograd_ops:
+            backward_inputs = (
+                inputs if inputs is not None else tx.output.leaf_var_creation_order
+            )
+            skip_frame = (
+                _contains_graph_intermediate(backward_inputs)
+                or tx.has_live_graph_intermediate()
+            )
             unimplemented(
                 gb_type="Unsupported Tensor.backward() call",
                 context=f"call_method {self} backward {gradient} {retain_graph} {create_graph} {inputs}",
                 explanation="Dynamo currently does not support tracing `Tensor.backward()` when trace_autograd_ops is off.",
                 hints=["Set torch._dynamo.trace_autograd_ops=True"],
+                skip_frame=skip_frame,
+                preserve_skip_frame_after_inline=skip_frame,
+                apply_to_code=not skip_frame,
             )
 
         if not self.requires_grad and not self.has_grad_fn:

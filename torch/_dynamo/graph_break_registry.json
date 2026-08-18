@@ -4071,6 +4071,16 @@
       ]
     }
   ],
+  "GB3960": [
+    {
+      "Gb_type": "Unsupported torch.autograd.backward() call",
+      "Context": "args={args}, kwargs={kwargs}",
+      "Explanation": "Dynamo currently does not support tracing `torch.autograd.backward()`.",
+      "Hints": [
+        "Use `Tensor.backward()` instead."
+      ]
+    }
+  ],
   "GB0254": [
     {
       "Gb_type": "non-const setattr name on user-defined object",
