@@ -254,15 +254,12 @@ void PyFunctionTensorPostAccGradHooks::apply_with_saved(
     torch::dynamo::autograd::SwapSavedVariables& saved) {
   for (const auto hook : saved.get_curr_node_call().post_acc_grad_hooks) {
     THPObjectPtr py_var(THPVariable_Wrap(tensor));
-    THPObjectPtr res(PyObject_CallMethod(
+    PyObject_CallMethod(
         saved.get_py_compiler(),
         "post_acc_grad_hook",
         "Oi",
         py_var.get(),
-        hook));
-    if (!res) {
-      throw python_error();
-    }
+        hook);
   }
 }
 

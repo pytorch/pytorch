@@ -136,11 +136,11 @@ struct TORCH_API DispatchKeyExtractor final {
   }
 
   void registerSchema(const FunctionSchema& schema) {
-    TORCH_INTERNAL_ASSERT(dispatch_arg_indices_reverse_.none());
+    TORCH_INTERNAL_ASSERT(dispatch_arg_indices_reverse_.is_entirely_unset());
     dispatch_arg_indices_reverse_ = makeBitsetForDispatchArgs(schema);
   }
   void deregisterSchema() {
-    dispatch_arg_indices_reverse_.reset();
+    dispatch_arg_indices_reverse_ = c10::utils::bitset();
   }
 
   C10_ALWAYS_INLINE DispatchKeySet getDispatchKeySetFromRawDispatchKeySet(
@@ -162,31 +162,30 @@ struct TORCH_API DispatchKeyExtractor final {
 
   DispatchKeySet getDispatchKeySetBoxed(const torch::jit::Stack* stack) const {
     DispatchKeySet ks;
-    c10::utils::for_each_set_bit(
-        dispatch_arg_indices_reverse_, [&](size_t reverse_arg_index) {
-          const auto& ivalue =
-              torch::jit::peek(*stack, 0, reverse_arg_index + 1);
-          if (C10_LIKELY(ivalue.isTensor())) {
-            // NB: Take care not to introduce a refcount bump (there's
-            // no safe toTensorRef method, alas)
-            ks = ks | ivalue.unsafeToTensorImpl()->key_set();
-          } else if (C10_UNLIKELY(ivalue.isTensorList())) {
-            // NB: use toListRef as it doesn't induce refcount bumps
-            // (toTensorListRef is not a thing)
-            for (const auto& nv : ivalue.toListRef()) {
-              auto* tensor = nv.unsafeToTensorImpl();
-              ks = ks | tensor->key_set();
-            }
+    dispatch_arg_indices_reverse_.for_each_set_bit([&](size_t
+                                                           reverse_arg_index) {
+      const auto& ivalue = torch::jit::peek(*stack, 0, reverse_arg_index + 1);
+      if (C10_LIKELY(ivalue.isTensor())) {
+        // NB: Take care not to introduce a refcount bump (there's
+        // no safe toTensorRef method, alas)
+        ks = ks | ivalue.unsafeToTensorImpl()->key_set();
+      } else if (C10_UNLIKELY(ivalue.isTensorList())) {
+        // NB: use toListRef as it doesn't induce refcount bumps
+        // (toTensorListRef is not a thing)
+        for (const auto& nv : ivalue.toListRef()) {
+          auto* tensor = nv.unsafeToTensorImpl();
+          ks = ks | tensor->key_set();
+        }
+      }
+      // Tensor?[] translates to a c10::List<IValue> so we need to peek inside
+      else if (C10_UNLIKELY(ivalue.isList())) {
+        for (const auto& elt : ivalue.toListRef()) {
+          if (elt.isTensor()) {
+            ks = ks | elt.toTensor().key_set();
           }
-          // Tensor?[] translates to c10::List<IValue> so we need to peek inside
-          else if (C10_UNLIKELY(ivalue.isList())) {
-            for (const auto& elt : ivalue.toListRef()) {
-              if (elt.isTensor()) {
-                ks = ks | elt.toTensor().key_set();
-              }
-            }
-          }
-        });
+        }
+      }
+    });
     return getDispatchKeySetFromRawDispatchKeySet(ks);
   }
 
@@ -233,13 +232,13 @@ struct TORCH_API DispatchKeyExtractor final {
   }
   static c10::utils::bitset makeBitsetForDispatchArgs(
       const FunctionSchema& schema) {
-    c10::utils::bitset dispatch_arg_indices_reverse;
     TORCH_CHECK(
-        schema.arguments().size() <= dispatch_arg_indices_reverse.size(),
+        schema.arguments().size() <= c10::utils::bitset::NUM_BITS(),
         "The function schema has ",
         schema.arguments().size(),
         " arguments but this PyTorch build only supports ",
-        dispatch_arg_indices_reverse.size());
+        c10::utils::bitset::NUM_BITS());
+    c10::utils::bitset dispatch_arg_indices_reverse;
     for (const auto index : c10::irange(schema.arguments().size())) {
       if (isDispatchType(*schema.arguments()[index].type())) {
         dispatch_arg_indices_reverse.set(schema.arguments().size() - 1 - index);

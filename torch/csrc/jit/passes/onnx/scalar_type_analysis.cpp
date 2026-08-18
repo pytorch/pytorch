@@ -73,15 +73,15 @@ static const std::unordered_set<NodeKind> comparisonOps = {
 static const std::unordered_set<NodeKind> selectorOps = {onnx::Where};
 
 static bool IsStandardOp(const NodeKind& nkind) {
-  return standardOps.contains(nkind);
+  return standardOps.find(nkind) != standardOps.end();
 }
 
 static bool IsComparisonOp(const NodeKind& nkind) {
-  return comparisonOps.contains(nkind);
+  return comparisonOps.find(nkind) != comparisonOps.end();
 }
 
 static bool IsSelectorOp(const NodeKind& nkind) {
-  return selectorOps.contains(nkind);
+  return selectorOps.find(nkind) != selectorOps.end();
 }
 
 static TensorTypePtr CreateProfiledTensorTypeWithScalarType(
