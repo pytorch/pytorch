@@ -27,7 +27,11 @@ from ...ir import (
     Pointwise,
     Reduction,
 )
-from ...kernel.gemm_epilogue import GemmReductionConfig, GemmReductionPlan
+from ...kernel.gemm_epilogue import (
+    GEMM_ACCUMULATOR_ARG_NAME,
+    GemmReductionConfig,
+    GemmReductionPlan,
+)
 from ...kernel.loop_ir_cutedsl_codegen import LoopIRCuteDSLCodegen
 from ...kernel.loop_ir_epilogue_lowering import (
     centered_mean_consumer_type_unrolled_ir,
@@ -43,7 +47,7 @@ from ...scheduler import (
 )
 from ...virtualized import V
 from ..common import BackendFeature, IndentedBuffer
-from ..cutlass.python_evt import _ACCUMULATOR_ARG_NAME, CutlassEVTCodegen
+from ..cutlass.python_evt import CutlassEVTCodegen
 from .nv_universal_gemm import NVUniversalGemmCaller
 
 
@@ -609,13 +613,13 @@ class NVUniversalGemmScheduling(BaseScheduling):
             if feed_main is not None:
                 evt_nodes = []
             if evt_nodes:
-                trial_reads, trial_writes, _, _ = (
-                    CutlassEVTCodegen.ir_to_evt_python_code(
-                        ir_node.get_name(),
-                        evt_nodes,
-                        trial_removed_buffers,
-                    )
+                trial_epilogue = CutlassEVTCodegen.ir_to_evt_python_code(
+                    ir_node.get_name(),
+                    evt_nodes,
+                    trial_removed_buffers,
                 )
+                trial_reads = list(trial_epilogue.reads)
+                trial_writes = list(trial_epilogue.writes)
             if scaled_epilogue:
                 if len(trial_reads) > 4 or len(trial_writes) > 4:
                     return False
@@ -780,7 +784,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
                     )
                     epilogue_writes = [feed_main.output_name]
                     epilogue_var_renames = {
-                        _ACCUMULATOR_ARG_NAME: original_buffer_name,
+                        GEMM_ACCUMULATOR_ARG_NAME: original_buffer_name,
                         "D": feed_main.output_name,
                     }
                 evt_nodes = [] if feed_main is not None else plan.evt_nodes
@@ -801,28 +805,24 @@ class NVUniversalGemmScheduling(BaseScheduling):
                         if isinstance(node.node, ComputedBuffer)
                     ]
                     try:
-                        reads, writes, var_renames, evt_code = (
-                            LoopIRCuteDSLCodegen.from_buffers(
-                                original_buffer_name,
-                                evt_buffers,
-                                removed_buffers_with_gemm,
-                                EPILOGUE_FN_NAME,
-                            )
+                        lowered_epilogue = LoopIRCuteDSLCodegen.from_buffers(
+                            original_buffer_name,
+                            evt_buffers,
+                            removed_buffers_with_gemm,
+                            EPILOGUE_FN_NAME,
                         )
                     except NotImplementedError:
-                        reads, writes, var_renames, evt_code = (
-                            CutlassEVTCodegen.ir_to_evt_python_code(
-                                original_buffer_name,
-                                list(evt_nodes),
-                                removed_buffers_with_gemm,
-                                fn_name=EPILOGUE_FN_NAME,
-                                as_standalone_function=True,
-                            )
+                        lowered_epilogue = CutlassEVTCodegen.ir_to_evt_python_code(
+                            original_buffer_name,
+                            list(evt_nodes),
+                            removed_buffers_with_gemm,
+                            fn_name=EPILOGUE_FN_NAME,
+                            as_standalone_function=True,
                         )
-                    epilogue_fn_code = evt_code
-                    epilogue_reads = reads
-                    epilogue_writes = writes
-                    epilogue_var_renames = var_renames
+                    epilogue_fn_code = lowered_epilogue.source
+                    epilogue_reads = list(lowered_epilogue.reads)
+                    epilogue_writes = list(lowered_epilogue.writes)
+                    epilogue_var_renames = lowered_epilogue.renames
 
                 if not only_gen_src_code:
                     write_bufs = OrderedSet(epilogue_writes)
@@ -997,17 +997,15 @@ class NVUniversalGemmScheduling(BaseScheduling):
                 removed_buffers_with_gemm.add(original_buffer_name)
             try:
                 if evt_nodes:
-                    reads, writes, var_renames, _ = (
-                        CutlassEVTCodegen.ir_to_evt_python_code(
-                            original_buffer_name,
-                            evt_nodes,
-                            removed_buffers_with_gemm,
-                        )
+                    lowered_epilogue = CutlassEVTCodegen.ir_to_evt_python_code(
+                        original_buffer_name,
+                        evt_nodes,
+                        removed_buffers_with_gemm,
                     )
-                    epilogue_reads = reads
-                    d_buf = var_renames.get("D")
+                    epilogue_reads = list(lowered_epilogue.reads)
+                    d_buf = lowered_epilogue.renames.get("D")
                     output_bufs = ([d_buf] if d_buf else []) + [
-                        w for w in writes if w != d_buf
+                        w for w in lowered_epilogue.writes if w != d_buf
                     ]
                 if plan.reductions:
                     output_bufs = [

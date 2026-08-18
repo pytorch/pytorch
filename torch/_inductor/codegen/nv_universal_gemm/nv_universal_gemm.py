@@ -26,9 +26,10 @@ from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
     _current_target_sm,
     _get_scaled_gemm_modes,
     _make_disk_config_key,
-    _nvgemm_bias_add_epilogue,
+    _NVGEMM_BIAS_ADD_EPILOGUE_SOURCE,
     _rewrap_efc_compiled_obj,
     _unwrap_efc_compiled_obj,
+    CuTeDSLEpilogueArguments,
 )
 from torch._inductor.heuristics.template.nv_universal_gemm import get_nvgemm_heuristics
 from torch._inductor.ir import (
@@ -39,6 +40,7 @@ from torch._inductor.ir import (
     PermuteView,
     TensorBox,
 )
+from torch._inductor.kernel.gemm_epilogue import GemmReductionPlan
 from torch._inductor.kernel_inputs import MMKernelInputs
 from torch._inductor.utils import ensure_nv_universal_gemm_available
 from torch._inductor.virtualized import V
@@ -67,6 +69,18 @@ class GemmVariant(Enum):
         if self == GemmVariant.SCALED_GEMM:
             return "nv_universal_scaled_gemm"
         return "nv_universal_gemm"
+
+    def supports_reduction(self, plan: GemmReductionPlan) -> bool:
+        """Whether this variant can lower a recognized reduction contract."""
+        if self == GemmVariant.SCALED_GEMM:
+            from .epilogue_capabilities import BLOCK_SCALED_GEMM_REDUCTION_CAPABILITIES
+
+            return BLOCK_SCALED_GEMM_REDUCTION_CAPABILITIES.supports_contract(plan)
+        if self == GemmVariant.GEMM:
+            from .epilogue_capabilities import DENSE_GEMM_REDUCTION_CAPABILITIES
+
+            return DENSE_GEMM_REDUCTION_CAPABILITIES.supports_contract(plan)
+        return False
 
 
 class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
@@ -256,14 +270,15 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
         precompile (which writes the same key) hands off to the benchmark
         instead of recompiling serially.
         """
-        from cutlass.operators.arguments import EpilogueArguments
         from cutlass.operators.artifact import CompiledArtifact
 
         from torch._inductor.runtime.cutedsl_cache import disk_cache_get, disk_cache_set
 
         *gemm_tensors, bias = input_tensors
         gemm_tensors = tuple(gemm_tensors)
-        epilogue_args = EpilogueArguments(_nvgemm_bias_add_epilogue, bias=bias, D=out)
+        epilogue_args = CuTeDSLEpilogueArguments(
+            _NVGEMM_BIAS_ADD_EPILOGUE_SOURCE, bias=bias, D=out
+        )
 
         kernel_name = self.kernel.metadata.operator_name
         cache_key = _create_gemm_cache_key(
@@ -301,7 +316,7 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
             self.accumulator_type,
             kernel_name=kernel_name,
             epilogue_args=epilogue_args,
-            epilogue_source="nvgemm_addmm_bias_v1",
+            epilogue_source="nvgemm_addmm_bias_v2",
             fallback_fn=disk_fallback,
             base_kernel=self.kernel,
         )
@@ -502,6 +517,7 @@ class NVUniversalGemmCaller(ChoiceCaller):
         return info
 
     def get_make_kernel_render(self):
+        """Create the callable that renders this NVGEMM choice."""
         from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
             NVUniversalGemmKernel,
         )
@@ -526,6 +542,7 @@ class NVUniversalGemmCaller(ChoiceCaller):
             out_node,
             hint_override=None,
             epilogue_fn_code=None,
+            epilogue_is_cutedsl=False,
             epilogue_reads=None,
             epilogue_writes=None,
             epilogue_var_renames=None,
@@ -564,6 +581,7 @@ class NVUniversalGemmCaller(ChoiceCaller):
                 swizzle_type_a=swizzle_type_a,
                 swizzle_type_b=swizzle_type_b,
                 epilogue_fn_code=epilogue_fn_code,
+                epilogue_is_cutedsl=epilogue_is_cutedsl,
                 epilogue_reads=epilogue_reads,
                 epilogue_writes=epilogue_writes,
                 epilogue_var_renames=epilogue_var_renames,
@@ -587,21 +605,29 @@ def _create_dummy_tensor_from_layout(
     """
     Create a FakeTensor from a Layout for kernel filtering.
 
-    Uses Layout.get_example() which creates FakeTensors within V.fake_mode,
-    avoiding real CUDA memory allocation. cutlass.operators only needs shape/stride/dtype
-    metadata for its supports() checks.
+    Prefer optimization-hinted concrete metadata for symbolic layouts, then
+    fall back to Layout.get_example(). Neither path allocates real CUDA memory.
     """
     try:
-        result = layout.get_example()
-        if dtype_override is not None and result.dtype != dtype_override:
-            result = result.view(dtype_override)
-        return result
+        size = V.graph.sizevars.optimization_hints(layout.size)
+        stride = V.graph.sizevars.optimization_hints(layout.stride)
+        with V.fake_mode:
+            return torch.empty_strided(
+                size,
+                stride,
+                dtype=dtype_override or layout.dtype,
+                device=layout.device,
+            )
     except Exception:
-        # Broad: layout.get_example()/torch.empty_strided under fake mode can
-        # raise a variety of unexpected errors (TypeError, AssertionError, etc.)
-        # depending on stride/symint state. Failing to materialize a dummy
-        # should never abort autotune — just skip this candidate.
-        return None
+        try:
+            result = layout.get_example()
+            if dtype_override is not None and result.dtype != dtype_override:
+                result = result.view(dtype_override)
+            return result
+        except Exception:
+            # Capability filtering is optional; an unusable representative
+            # tensor must not abort lowering.
+            return None
 
 
 _TILE_RE = re.compile(r"tile(\d+)x\d+x\d+")
@@ -773,7 +799,7 @@ def _add_nv_gemm_choices_impl(
         candidate_source=candidate_source,
         classifier_key="nvgemm_efc_partition_v1",
     )
-    if not config.epilogue_fusion or swap_ab:
+    if not config.epilogue_fusion or (swap_ab and variant == GemmVariant.SCALED_GEMM):
         efc_kernels = []
     if bias_node is not None:
         non_efc_kernels = []
@@ -786,12 +812,26 @@ def _add_nv_gemm_choices_impl(
     )
     if variant in (GemmVariant.GEMM, GemmVariant.SCALED_GEMM) and mm_inputs is not None:
         heuristics = get_nvgemm_heuristics()
+        unfiltered_efc_kernels = efc_kernels
         non_efc_kernels = heuristics.filter_kernels(
             non_efc_kernels, mm_inputs, max_configs, accumulator_type
         )
         efc_kernels = heuristics.filter_kernels(
             efc_kernels, mm_inputs, max_configs, accumulator_type
         )
+        if variant in (GemmVariant.GEMM, GemmVariant.SCALED_GEMM):
+            wide_tile_ns = (64, 128) if variant == GemmVariant.GEMM else (128, 256)
+            for tile_n in wide_tile_ns:
+                wide_kernels = [
+                    kernel
+                    for kernel in unfiltered_efc_kernels
+                    if kernel.metadata.design.tile_shape[1] == tile_n
+                ]
+                ranked = heuristics.filter_kernels(
+                    wide_kernels, mm_inputs, 1, accumulator_type
+                )
+                if ranked and ranked[0] not in efc_kernels:
+                    efc_kernels.append(ranked[0])
     else:
         # TODO(nikhilap): Enable heuristics for grouped GEMM
         # when nvMatmulHeuristics adds support
@@ -997,7 +1037,7 @@ def add_nv_universal_scaled_gemm_choices(
     if not ensure_nv_universal_gemm_available():
         return
 
-    from torch._inductor.utils import infer_scale_swizzle_ir
+    from torch._inductor.utils import infer_scale_swizzle, infer_scale_swizzle_ir
 
     if len(input_nodes) < 4:
         return
@@ -1008,6 +1048,30 @@ def add_nv_universal_scaled_gemm_choices(
     scale_type_b, swizzle_type_b = infer_scale_swizzle_ir(
         mat_b, scale_b, transpose=True
     )
+
+    if scale_type_a is None or scale_type_b is None:
+        mat_a_hint = _create_dummy_tensor_from_layout(
+            mat_a.get_layout(), dtype_override=mat_a.get_dtype()
+        )
+        mat_b_hint = _create_dummy_tensor_from_layout(
+            mat_b.get_layout(), dtype_override=mat_b.get_dtype()
+        )
+        scale_a_hint = _create_dummy_tensor_from_layout(scale_a.get_layout())
+        scale_b_hint = _create_dummy_tensor_from_layout(scale_b.get_layout())
+        if (
+            mat_a_hint is not None
+            and mat_b_hint is not None
+            and scale_a_hint is not None
+            and scale_b_hint is not None
+        ):
+            if scale_type_a is None:
+                scale_type_a, swizzle_type_a = infer_scale_swizzle(
+                    mat_a_hint, scale_a_hint
+                )
+            if scale_type_b is None:
+                scale_type_b, swizzle_type_b = infer_scale_swizzle(
+                    mat_b_hint.t(), scale_b_hint
+                )
 
     if scale_type_a is None or scale_type_b is None:
         return
