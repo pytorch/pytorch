@@ -782,6 +782,86 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         for ref_loss, loss in zip(ref_losses, losses):
             self.assertEqual(ref_loss, loss)
 
+    @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(
+        not hasattr(torch.get_device_module(device_type), "_sleep"),
+        "Sleep is not supported on this device",
+    )
+    def test_gate_sharded_grad_free_on(self):
+        device_module = torch.get_device_module(device_type)
+        dim, delay_ms = 16, 500
+        for target_stream_name in ("reduce_scatter", "all_reduce", "custom"):
+            with self.subTest(target_stream=target_stream_name):
+                torch.manual_seed(42)
+                model = nn.Sequential(
+                    nn.Linear(dim, dim),
+                    nn.ReLU(),
+                    nn.Linear(dim, dim),
+                )
+                ref_model = replicate(copy.deepcopy(model).to(device_type.type))
+                model = model.to(device_type)
+                fully_shard(model)
+                custom_stream = device_module.Stream()
+                model.set_all_reduce_hook(lambda output: None, stream=custom_stream)
+                ref_optim = torch.optim.AdamW(ref_model.parameters(), lr=1e-2)
+                optim = torch.optim.AdamW(model.parameters(), lr=1e-2)
+
+                torch.manual_seed(42 + self.rank)
+                inp = torch.randn(4, dim, device=device_type.type)
+
+                # Warm up optimizer state and FSDP lazy initialization.
+                for train_model, train_optim in (
+                    (ref_model, ref_optim),
+                    (model, optim),
+                ):
+                    train_model(inp).sum().backward()
+                    train_optim.step()
+                    train_optim.zero_grad(set_to_none=True)
+                device_module.synchronize()
+                check_sharded_parity(self, ref_model, model)
+
+                for _ in range(2):
+                    ref_loss = ref_model(inp).sum()
+                    ref_loss.backward()
+                    ref_optim.step()
+                    ref_optim.zero_grad(set_to_none=True)
+
+                    loss = model(inp).sum()
+                    loss.backward()
+                    state = model._get_fsdp_state()
+                    comm_ctx = state._comm_ctx
+                    target_stream = {
+                        "reduce_scatter": comm_ctx.reduce_scatter_stream,
+                        "all_reduce": comm_ctx.all_reduce_stream,
+                        "custom": custom_stream,
+                    }[target_stream_name]
+
+                    # Start from idle streams, then delay the real optimizer
+                    # kernels so the host reaches zero_grad while they are
+                    # still consuming the sharded gradients.
+                    device_module.synchronize()
+                    device_sleep(
+                        device_type.type,
+                        int(delay_ms * get_cycles_per_ms(device_type.type)),
+                    )
+                    optim.step()
+                    optim_done = device_module.current_stream().record_event()
+                    model.gate_sharded_grad_free_on(optim_done)
+                    self.assertFalse(optim_done.query())
+
+                    optim.zero_grad(set_to_none=True)
+                    for param in model.parameters():
+                        self.assertIsNone(param.grad)
+
+                    # The marker can complete only after the target stream's
+                    # wait on optim_done, proving the read-before-free edge.
+                    free_done = target_stream.record_event()
+                    free_done.synchronize()
+                    self.assertTrue(optim_done.query())
+                    self.assertEqual(ref_loss, loss)
+
+                check_sharded_parity(self, ref_model, model)
+
 
 class TestFullyShard1DTrainingCompose(FSDPTest):
     @property
