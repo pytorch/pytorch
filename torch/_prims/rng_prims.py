@@ -147,6 +147,38 @@ def get_device(args, kwargs):
     return None
 
 
+# CPU exposes its RNG state accessors at the top level; every accelerator follows
+# the torch.<device_type>.get_rng_state / set_rng_state convention. PrivateUse1
+# covers every out-of-tree backend, so registering a new one needs no entry here.
+_RNG_STATE_DISPATCH_KEYS = (
+    DispatchKey.CPU,
+    DispatchKey.CUDA,
+    DispatchKey.HPU,
+    DispatchKey.XPU,
+    DispatchKey.PrivateUse1,
+)
+
+
+def _rng_state_fns(device_type):
+    """Return ``(get_rng_state, set_rng_state)`` for ``device_type``."""
+    if device_type is None:
+        raise RuntimeError(
+            "Functionalizing an RNG operator requires a device, but none of the "
+            "arguments carried one."
+        )
+    if device_type == "cpu":
+        return torch.get_rng_state, torch.set_rng_state
+    device_module = getattr(torch, device_type, None)
+    get_state = getattr(device_module, "get_rng_state", None)
+    set_state = getattr(device_module, "set_rng_state", None)
+    if get_state is None or set_state is None:
+        raise RuntimeError(
+            f"Functionalizing an RNG operator on {device_type} requires "
+            f"torch.{device_type} to provide get_rng_state and set_rng_state."
+        )
+    return get_state, set_state
+
+
 def register_run_and_save_rng_state_op():
     class RunAndSaveRngState(HigherOrderOperator):
         def __init__(self):
@@ -162,37 +194,13 @@ def register_run_and_save_rng_state_op():
         autograd_not_implemented(run_and_save_rng_state, deferred_error=True)
     )
 
-    @run_and_save_rng_state.py_impl(DispatchKey.CUDA)
-    def impl_cuda(op, *args, **kwargs):
-        return torch.cuda.get_rng_state(), op(*args, **kwargs)
-
-    @run_and_save_rng_state.py_impl(DispatchKey.CPU)
-    def impl_cpu(op, *args, **kwargs):
-        return torch.get_rng_state(), op(*args, **kwargs)
-
-    @run_and_save_rng_state.py_impl(DispatchKey.HPU)
-    def impl_hpu(op, *args, **kwargs):
-        if hasattr(torch, "hpu"):
-            return torch.hpu.get_rng_state(), op(*args, **kwargs)
-        raise RuntimeError("functionalize a hpu RNG operator is not supported.")
-
-    @run_and_save_rng_state.py_impl(DispatchKey.XPU)
-    def impl_xpu(op, *args, **kwargs):
-        return torch.xpu.get_rng_state(), op(*args, **kwargs)
-
     @run_and_save_rng_state.py_impl(DispatchKey.BackendSelect)
     def impl_backend_select(op, *args, **kwargs):
-        impl_map = {
-            "cuda": impl_cuda,
-            "cpu": impl_cpu,
-            "hpu": impl_hpu,
-            "xpu": impl_xpu,
-        }
-        device = get_device(args, kwargs)
-        if device not in impl_map:
-            raise AssertionError(f"Backend not supported for {device}")
-        impl = impl_map[device]
-        return impl(op, *args, **kwargs)
+        get_rng_state, _ = _rng_state_fns(get_device(args, kwargs))
+        return get_rng_state(), op(*args, **kwargs)
+
+    for _key in _RNG_STATE_DISPATCH_KEYS:
+        run_and_save_rng_state.py_impl(_key)(impl_backend_select)
 
     @register_fake(run_and_save_rng_state, skip_cache=True)
     def impl_fake_tensor_mode(op, *args, **kwargs):
@@ -227,39 +235,20 @@ def register_run_with_rng_state_op():
         autograd_not_implemented(run_with_rng_state, deferred_error=True)
     )
 
-    @run_with_rng_state.py_impl(DispatchKey.CUDA)
-    def impl_cuda(rng_state, op, *args, **kwargs):
-        current_state = torch.cuda.get_rng_state()
-        torch.cuda.set_rng_state(rng_state.cpu())
-        out = op(*args, **kwargs)
-        torch.cuda.set_rng_state(current_state)
-        return out
+    @run_with_rng_state.py_impl(DispatchKey.BackendSelect)
+    def impl_backend_select(rng_state, op, *args, **kwargs):
+        get_state, set_state = _rng_state_fns(get_device(args, kwargs))
+        current_state = get_state()
+        # Generators reject a non-CPU state (at::detail::check_rng_state), and the
+        # saved state may have been placed on the device by the caller.
+        set_state(rng_state.cpu())
+        try:
+            return op(*args, **kwargs)
+        finally:
+            set_state(current_state)
 
-    @run_with_rng_state.py_impl(DispatchKey.CPU)
-    def impl_cpu(rng_state, op, *args, **kwargs):
-        current_state = torch.get_rng_state()
-        torch.set_rng_state(rng_state)
-        out = op(*args, **kwargs)
-        torch.set_rng_state(current_state)
-        return out
-
-    @run_with_rng_state.py_impl(DispatchKey.HPU)
-    def impl_hpu(rng_state, op, *args, **kwargs):
-        if hasattr(torch, "hpu"):
-            current_state = torch.hpu.get_rng_state()
-            torch.hpu.set_rng_state(rng_state)
-            out = op(*args, **kwargs)
-            torch.hpu.set_rng_state(current_state)
-            return out
-        raise RuntimeError("functionalize a hpu RNG operator is not supported.")
-
-    @run_with_rng_state.py_impl(DispatchKey.XPU)
-    def impl_xpu(rng_state, op, *args, **kwargs):
-        current_state = torch.xpu.get_rng_state()
-        torch.xpu.set_rng_state(rng_state)
-        out = op(*args, **kwargs)
-        torch.xpu.set_rng_state(current_state)
-        return out
+    for _key in _RNG_STATE_DISPATCH_KEYS:
+        run_with_rng_state.py_impl(_key)(impl_backend_select)
 
     @run_with_rng_state.py_impl(ProxyTorchDispatchMode)
     def impl_proxy_dispatch_mode(mode, rng_state, op, *args, **kwargs):
@@ -273,20 +262,6 @@ def register_run_with_rng_state_op():
             "call_function", run_with_rng_state, proxy_args, proxy_kwargs
         )
         return track_tensor_tree(out, out_proxy, constant=None, tracer=mode.tracer)
-
-    @run_with_rng_state.py_impl(DispatchKey.BackendSelect)
-    def impl_backend_select(rng_state, op, *args, **kwargs):
-        impl_map = {
-            "cuda": impl_cuda,
-            "cpu": impl_cpu,
-            "hpu": impl_hpu,
-            "xpu": impl_xpu,
-        }
-        device = get_device(args, kwargs)
-        if device not in impl_map:
-            raise AssertionError(f"Backend not supported for {device}")
-        impl = impl_map[device]
-        return impl(rng_state, op, *args, **kwargs)
 
     @register_fake(run_with_rng_state, skip_cache=True)
     def impl_fake_tensor_mode(rng_state, op, *args, **kwargs):
