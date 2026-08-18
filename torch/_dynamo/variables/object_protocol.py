@@ -85,7 +85,7 @@ def vt_identity_compare(
     from .dicts import ConstDictVariable
     from .lists import ListVariable
     from .misc import ExceptionVariable, TracebackVariable
-    from .sets import SetVariable
+    from .sets import FrozensetVariable, SetVariable
 
     if isinstance(
         left,
@@ -93,6 +93,7 @@ def vt_identity_compare(
             ConstDictVariable,
             ListVariable,
             SetVariable,
+            FrozensetVariable,
             TracebackVariable,
             ExceptionVariable,
         ),
@@ -137,6 +138,15 @@ def type_implements_mp_slot(obj_type: type, slot: int) -> bool:
     """Check whether obj_type implements the given mp slot."""
     _, map_slots, _, _ = _get_cached_slots(obj_type)
     return has_slot(map_slots, slot)
+
+
+# Flag Include/object.h
+Py_TPFLAGS_DISALLOW_INSTANTIATION = 1 << 7
+
+
+def type_disallows_instantiation(obj_type: type) -> bool:
+    """Check whether obj_type's tp_new is NULL (see CPython's type_call)."""
+    return bool(obj_type.__flags__ & Py_TPFLAGS_DISALLOW_INSTANTIATION)
 
 
 # PySequenceSlots
