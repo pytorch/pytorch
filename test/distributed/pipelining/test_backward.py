@@ -1,6 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 import copy
+import weakref
 
 from model_registry import MLPModule, MultiInterMediateModel
 
@@ -328,6 +329,143 @@ class StageBackwardTests(TestCase):
         for name, p in mod.named_parameters():
             ref_p = ref_mod.get_parameter(name)
             torch.testing.assert_close(p.grad, ref_p.grad)
+
+    def test_stage_backward_from_gradient_edge(self, device):
+        """Match tensor-rooted backward after releasing the output."""
+        mod = MLPModule(d_hid).to(device)
+        x = torch.randn(batch_size, d_hid, device=device, requires_grad=True)
+        output_grad = torch.randn(batch_size, d_hid, device=device)
+
+        ref_mod = copy.deepcopy(mod).to(device)
+        ref_x = x.detach().clone().requires_grad_(True)
+
+        out = mod(x)
+        edge = torch.autograd.graph.get_gradient_edge(out)
+        # The edge must not keep the activation alive.
+        released = weakref.ref(out)
+        del out
+        self.assertIsNone(released())
+
+        grad_inputs = stage_backward(
+            stage_output=(edge,),
+            output_grads=(output_grad,),
+            input_values=(x,),
+        )
+
+        ref_out = ref_mod(ref_x)
+        ref_out.backward(output_grad)
+
+        torch.testing.assert_close(grad_inputs[0], ref_x.grad)
+        for name, p in mod.named_parameters():
+            torch.testing.assert_close(p.grad, ref_mod.get_parameter(name).grad)
+
+    def test_stage_backward_mixed_edge_and_tensor_outputs(self, device):
+        """Handle edge, tensor, and non-grad outputs together."""
+
+        class TwoOutputModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.net1 = torch.nn.Linear(d_hid, d_hid)
+                self.net2 = torch.nn.Linear(d_hid, d_hid)
+
+            def forward(self, x):
+                return self.net1(x), self.net2(x), torch.ones(1, device=x.device)
+
+        mod = TwoOutputModule().to(device)
+        x = torch.randn(batch_size, d_hid, device=device, requires_grad=True)
+        grads = (
+            torch.randn(batch_size, d_hid, device=device),
+            torch.randn(batch_size, d_hid, device=device),
+            None,
+        )
+
+        ref_mod = copy.deepcopy(mod).to(device)
+        ref_x = x.detach().clone().requires_grad_(True)
+
+        first, second, no_grad_out = mod(x)
+        edge = torch.autograd.graph.get_gradient_edge(first)
+        del first
+
+        self.assertFalse(no_grad_out.requires_grad)
+        grad_inputs = stage_backward(
+            stage_output=(edge, second, None),
+            output_grads=grads,
+            input_values=(x,),
+        )
+
+        ref_first, ref_second, _ = ref_mod(ref_x)
+        torch.autograd.backward((ref_first, ref_second), (grads[0], grads[1]))
+
+        torch.testing.assert_close(grad_inputs[0], ref_x.grad)
+        for name, p in mod.named_parameters():
+            torch.testing.assert_close(p.grad, ref_mod.get_parameter(name).grad)
+
+    def test_stage_backward_edge_keeps_python_autograd_function_alive(self, device):
+        """Keep a Python autograd graph alive through its edge."""
+
+        class ScaleBy(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, factor):
+                ctx.factor = factor
+                return x * factor
+
+            @staticmethod
+            def backward(ctx, grad_out):
+                return grad_out * ctx.factor, None
+
+        x = torch.randn(batch_size, d_hid, device=device, requires_grad=True)
+        output_grad = torch.randn(batch_size, d_hid, device=device)
+
+        out = ScaleBy.apply(x, 3.0)
+        edge = torch.autograd.graph.get_gradient_edge(out)
+        del out
+
+        grad_inputs = stage_backward(
+            stage_output=(edge,),
+            output_grads=(output_grad,),
+            input_values=(x,),
+        )
+        torch.testing.assert_close(grad_inputs[0], output_grad * 3.0)
+
+    def test_stage_backward_input_from_gradient_edge(self, device):
+        """Match tensor-rooted split backward."""
+        mod = MLPModule(d_hid).to(device)
+        x = torch.randn(batch_size, d_hid, device=device, requires_grad=True)
+        output_grad = torch.randn(batch_size, d_hid, device=device)
+
+        ref_mod = copy.deepcopy(mod).to(device)
+        ref_x = x.detach().clone().requires_grad_(True)
+
+        out = mod(x)
+        edge = torch.autograd.graph.get_gradient_edge(out)
+        del out
+
+        dinputs, param_groups = stage_backward_input(
+            stage_outputs_or_loss=[edge],
+            output_grads=[output_grad],
+            input_values=[x],
+            weights=mod.parameters(),
+        )
+        stage_backward_weight(mod.parameters(), param_groups)
+
+        ref_mod(ref_x).backward(output_grad)
+
+        torch.testing.assert_close(dinputs[0], ref_x.grad)
+        for name, p in mod.named_parameters():
+            torch.testing.assert_close(p.grad, ref_mod.get_parameter(name).grad)
+
+    def test_stage_backward_input_edge_requires_output_grads(self, device):
+        mod = MLPModule(d_hid).to(device)
+        x = torch.randn(batch_size, d_hid, device=device, requires_grad=True)
+        edge = torch.autograd.graph.get_gradient_edge(mod(x))
+
+        with self.assertRaisesRegex(AssertionError, "requires output gradients"):
+            stage_backward_input(
+                stage_outputs_or_loss=[edge],
+                output_grads=None,
+                input_values=[x],
+                weights=mod.parameters(),
+            )
 
 
 instantiate_device_type_tests(StageBackwardTests, globals(), allow_xpu=True)

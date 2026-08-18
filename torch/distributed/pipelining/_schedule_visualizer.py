@@ -67,6 +67,8 @@ def get_schedule_ops(
     mock_pipeline_stage.group_rank = 0
     mock_pipeline_stage.group_size = pp_degree
     mock_pipeline_stage.submod = None
+    # autospec cannot see this instance attribute.
+    mock_pipeline_stage.early_send_release = False
 
     # Check num_stages_per_rank is valid
     if issubclass(schedule_class, PipelineScheduleSingle):
