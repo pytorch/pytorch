@@ -394,7 +394,10 @@ def conv_layout(
     # convolution() above, but we guard all four here so conv_layout is
     # self-contained and doesn't rely on callers.
     guard = V.graph.sizevars.guard_int_seq
-    with V.graph.fake_mode:
+    # the fake run only decides the output memory format; callers require the
+    # inputs to the derived stride order right after, so provisional stride
+    # reads here are self-healing (see require_stride_order below)
+    with V.graph.fake_mode, ir.allow_layout_analysis():
         output = torch.ops.aten.convolution(
             ir.ir_node_to_tensor(x),
             ir.ir_node_to_tensor(weight),

@@ -9,10 +9,10 @@ from torch._prims_common import make_channels_last_strides_for, StrideType
 from torch.utils._ordered_set import OrderedSet
 
 from .ir import (
+    allow_layout_analysis,
     ExternKernelAlloc,
     FixedLayout,
     FlexibleLayout,
-    freeze_storage_layout,
     get_device_type,
     ir_node_to_tensor,
     IRNode,
@@ -119,11 +119,11 @@ def _prepare_convolution_fusion_create(
     weight.realize()
     if bias is not None:
         bias.realize()
-    # the fake run below derives the persisted output layout from input
-    # strides, so they must be final (see also ExternKernel.process_kernel)
-    freeze_storage_layout(x)
-    freeze_storage_layout(weight)
-    with V.graph.fake_mode:
+    # the fake run below only decides the memory format; x and weight are
+    # required to the derived stride order below, so provisional stride reads
+    # here are self-healing and must not freeze (an early freeze would stop
+    # require_stride_order from imposing the order in place, forcing copies)
+    with V.graph.fake_mode, allow_layout_analysis():
         # TODO <Leslie> cleaned up the fake_tensor trace as Linear implementation
         x_fake = ir_node_to_tensor(x)
         weight_fake = ir_node_to_tensor(weight)
