@@ -1,6 +1,7 @@
 //  Copyright © 2022 Apple Inc.
 
 #include <ATen/mps/MPSDevice.h>
+#include <ATen/mps/MPSEvent.h>
 #include <ATen/mps/MPSGuardImpl.h>
 
 namespace at::mps {
