@@ -35,3 +35,13 @@ struct CTCLossBackwardCollectParams {
   index_t grad_out_batch_stride;
   bool zero_infinity;
 };
+
+// Shared by LossOps.metal (Metal kernels) and LossOps.mm (dispatch).
+// The binary layout must stay identical on both sides.
+struct NLLParams {
+  int64_t ignore_index; // int64 so any Python-level value compares exactly
+  uint32_t N;
+  uint32_t C;
+  uint32_t reduction;
+  uint32_t has_weight;
+};
