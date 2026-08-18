@@ -1299,6 +1299,26 @@ class SubclassTests(_SubclassCompileCheckMixin, torch._dynamo.test_case.TestCase
                 fake_out = torch.ops.aten.add.Tensor(fake_inp, 1)
         self.assertIsInstance(fake_out, FakeTensor)
 
+    def test_inplace_op_preserves_subclass_type(self):
+        # An inplace op resyncs the VariableTracker metadata from the fake tensor,
+        # which no longer carries a non-traceable subclass type.
+        class MySubclass(torch.Tensor):
+            pass
+
+        def fn(x):
+            y = torch.empty_like(x)
+            y.copy_(x)
+            return y
+
+        x = torch.randn(2, 2).as_subclass(MySubclass)
+
+        fn_opt = compile_full_eager(fn)
+
+        res_exp = fn(x)
+        res_act = fn_opt(x)
+        self.assertIsInstance(res_act, MySubclass)
+        self.assertEqual(res_exp, res_act)
+
     # ACT (AsyncCollectiveTensor) can be constructed directly, so the guard
     # relaxation for ACT inputs is exercised here on CPU without a process group.
     # The end-to-end path with a real collective + inductor is covered by
