@@ -282,8 +282,7 @@ def _precompile_no_match_message(
     lines = [
         f"\nFailed on all {len(mine)} precompiled variant(s). "
         "If this call is served from a torch.compiler.precompile artifact, it "
-        "is not covered by the capture: exercise it inside precompile.capture() "
-        "or add it to example_inputs."
+        "is not covered by the capture: add it to example_inputs."
     ]
     shown = 0
     for i, entry in enumerate(mine):
