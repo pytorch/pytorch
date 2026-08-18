@@ -178,6 +178,10 @@ if(USE_ROCM)
     if(USE_HIPSPARSELT)
         list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_HIPSPARSELT)
     endif()
+    if(USE_CUFILE)
+        list(APPEND TORCH_PYTHON_LINK_LIBRARIES hip::hipfile)
+        list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_CUFILE)
+    endif()
 endif()
 
 if(USE_XPU)
@@ -319,10 +323,6 @@ add_dependencies(torch_python onnx_proto)
 if(USE_NUMPY)
   target_link_libraries(torch_python PRIVATE Python::NumPy)
   target_compile_definitions(torch_python PRIVATE USE_NUMPY)
-endif()
-
-if(USE_CUFILE AND NOT USE_ROCM)
-  target_compile_definitions(torch_python PRIVATE USE_CUFILE)
 endif()
 
 if(BUILD_LAZY_TS_BACKEND)
@@ -490,9 +490,9 @@ if(BUILD_PYTHON AND NOT BUILD_LIBTORCH_WHL)
     Python_add_library(_nccl_ep MODULE WITH_SOABI
       "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/nccl_ep.cu"
       "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/nccl_ep_pybind.cpp")
-    target_compile_definitions(_nccl_ep PRIVATE USE_NCCL_EP USE_C10D_NCCL)
+    target_compile_definitions(_nccl_ep PRIVATE USE_NCCL_EP USE_C10D_NCCL USE_NCCL)
     # torch_python: pybind + Tensor/ProcessGroup casters; torch_cuda:
-    # ProcessGroupNCCL::getCommPtr, getNcclDataType, CUDA stream, embedded NCCL;
+    # NCCL communicator registry, getNcclDataType, CUDA stream, embedded NCCL;
     # __caffe2_nccl_ep: libnccl_ep (static .a or shared .so) + nccl_ep headers.
     target_link_libraries(_nccl_ep PRIVATE
       torch_python torch_cuda __caffe2_nccl_ep pybind::pybind11)
