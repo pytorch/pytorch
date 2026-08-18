@@ -12140,6 +12140,21 @@ for shape in [(1,), ()]:
 
         b.backward()
 
+    def test_reentrant_checkpoint_preserves_device_context(self):
+        devices = []
+
+        def fn(x):
+            devices.append(torch.empty(1).device.type)
+            return x.sin()
+
+        x = torch.randn(4, requires_grad=True)
+        with torch.device("meta"):
+            y = checkpoint(fn, x, use_reentrant=True)
+
+        self.assertEqual(devices, ["meta"])
+        y.sum().backward()
+        self.assertEqual(devices, ["meta", "meta"])
+
     def test_save_on_cpu_and_checkpoint(self):
         a = torch.randn(2, 2, requires_grad=True)
 

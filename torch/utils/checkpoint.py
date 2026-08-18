@@ -242,6 +242,19 @@ class CheckpointFunction(torch.autograd.Function):
         check_backward_validity(args)
         ctx.run_function = run_function
         ctx.preserve_rng_state = preserve_rng_state
+
+        from torch.overrides import _get_current_function_mode_stack
+        from torch.utils._device import DeviceContext
+
+        ctx.device_context_device = next(
+            (
+                mode.device
+                for mode in reversed(_get_current_function_mode_stack())
+                if isinstance(mode, DeviceContext)
+            ),
+            None,
+        )
+
         # Accommodates the (remote) possibility that autocast is enabled for cpu AND gpu.
         ctx.device_type = _infer_device_type(*args)
         ctx.device_autocast_kwargs, ctx.cpu_autocast_kwargs = _get_autocast_kwargs(
@@ -314,7 +327,21 @@ class CheckpointFunction(torch.autograd.Function):
             device_autocast_ctx = torch.amp.autocast(
                 device_type=ctx.device_type, **ctx.device_autocast_kwargs
             ) if torch.amp.is_autocast_available(ctx.device_type) else contextlib.nullcontext()
-            with torch.enable_grad(), device_autocast_ctx, torch.amp.autocast("cpu", **ctx.cpu_autocast_kwargs):  # type: ignore[attr-defined]
+
+            from torch.utils._device import DeviceContext
+
+            device_ctx = (
+                DeviceContext(ctx.device_context_device)
+                if ctx.device_context_device is not None
+                else contextlib.nullcontext()
+            )
+
+            with (
+                torch.enable_grad(),
+                device_autocast_ctx,
+                torch.amp.autocast("cpu", **ctx.cpu_autocast_kwargs),
+                device_ctx,
+            ):  # type: ignore[attr-defined]
                 outputs = ctx.run_function(*detached_inputs)
 
         if isinstance(outputs, torch.Tensor):
