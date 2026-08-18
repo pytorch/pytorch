@@ -16101,7 +16101,7 @@ class TestNNCUDA(NNTestCase):
         self.assertEqual(weight_data, all_vars[4].data)
 
     @skipCUDAIfNoCudnn
-    @tf32_on_and_off()
+    @tf32_on_and_off(0.005)
     @parametrize_test('mode,proj_size', [('LSTM', 0), ('LSTM', 10), ('GRU', 0), ('RNN', 0)])
     def test_cudnn_weight_tying(self, device, mode, proj_size):
         rnn_kwargs = {'proj_size': proj_size} if proj_size else {}
@@ -16135,7 +16135,7 @@ class TestNNCUDA(NNTestCase):
         self.assertEqual(output_device, output_cpu)
 
     @skipCUDAIfNoCudnn
-    @tf32_on_and_off()
+    @tf32_on_and_off(0.005)
     def test_RNN_cudnn_weight_norm(self, device):
         input_size = 10
         hidden_size = 6
