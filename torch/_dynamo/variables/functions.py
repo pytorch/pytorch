@@ -2861,6 +2861,153 @@ def _traceable_collectives_source(
     return AttrSource(path_source, inner_name)
 
 
+class _BatchP2PWaitState:
+    def __init__(self) -> None:
+        self.waited = False
+
+
+class BatchP2PWorkVariable(VariableTracker):
+    _nonvar_fields = {
+        "wait_kind",
+        "wait_target",
+        "wait_op_list",
+        "wait_tensors",
+        "wait_state",
+        *VariableTracker._nonvar_fields,
+    }
+
+    def __init__(
+        self,
+        *,
+        wait_kind: Literal["single", "batch"],
+        wait_target: VariableTracker,
+        wait_op_list: "variables.ListVariable | None" = None,
+        wait_tensors: "variables.ListVariable | None" = None,
+        wait_state: _BatchP2PWaitState | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        self.wait_kind = wait_kind
+        self.wait_target = wait_target
+        self.wait_op_list = wait_op_list
+        self.wait_tensors = wait_tensors
+        self.wait_state = wait_state or _BatchP2PWaitState()
+
+    def python_type(self) -> type:
+        import torch.distributed as dist
+
+        return dist.Work
+
+    def call_method(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if name == "wait":
+            if args or kwargs:
+                raise torch._dynamo.exc.InternalTorchDynamoError(
+                    "`wait` does not take any arguments"
+                )
+            if self.wait_state.waited:
+                return ConstantVariable.create(True)
+            self.wait_state.waited = True
+            if self.wait_kind == "single":
+                tx.output.create_proxy(
+                    "call_function",
+                    torch.ops._c10d_functional.wait_tensor.default,
+                    (self.wait_target.as_proxy(),),
+                    {},
+                )
+            else:
+                if self.wait_op_list is None or self.wait_tensors is None:
+                    raise AssertionError("batch wait requires op and tensor metadata")
+                tx.output.create_proxy(
+                    "call_function",
+                    torch.ops._c10d_functional.wait_batch_p2p.default,
+                    (
+                        self.wait_target.as_proxy(),
+                        self.wait_op_list.as_proxy(),
+                        self.wait_tensors.as_proxy(),
+                    ),
+                    {},
+                )
+            return ConstantVariable.create(True)
+
+        if name == "is_completed" and not args and not kwargs:
+            return ConstantVariable.create(self.wait_state.waited)
+
+        return super().call_method(tx, name, args, kwargs)
+
+
+def _get_batch_p2p_group_name_and_mode(
+    group_var: VariableTracker, tensor_var: VariableTracker
+) -> tuple[str, bool]:
+    from torch.distributed.distributed_c10d import (
+        _get_default_group,
+        _resolve_process_group,
+        GroupName,
+    )
+
+    try:
+        group = group_var.as_python_constant()
+    except NotImplementedError:
+        unimplemented(
+            gb_type="dynamic ProcessGroup in batch_isend_irecv",
+            context=str(group_var),
+            explanation="torch.compile requires the ProcessGroup used by batch_isend_irecv to be constant.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
+    if group is None:
+        group = _get_default_group()
+
+    if isinstance(group, str):
+        group_name = group
+        group = _resolve_process_group(GroupName(group_name))
+    else:
+        group_name = group.group_name
+
+    if not hasattr(tensor_var, "device"):
+        raise torch._dynamo.exc.InternalTorchDynamoError(
+            f"expected tensor-like P2P argument, got {tensor_var}"
+        )
+    backend = group._get_backend(tensor_var.device)
+    return group_name, bool(getattr(backend, "supports_coalescing", False))
+
+
+def _trace_raw_p2p_work(
+    tx: "InstructionTranslatorBase",
+    op_name: str,
+    tensor: VariableTracker,
+    peer: VariableTracker,
+    tag: VariableTracker,
+    group_name: VariableTracker,
+) -> VariableTracker:
+    from .builder import wrap_fx_proxy
+
+    target = (
+        torch.ops._c10d_functional.isend.default
+        if op_name == "isend"
+        else torch.ops._c10d_functional.irecv.default
+    )
+    return wrap_fx_proxy(
+        tx,
+        tx.output.create_proxy(
+            "call_function",
+            target,
+            (
+                tensor.as_proxy(),
+                peer.as_proxy(),
+                tag.as_proxy(),
+                group_name.as_proxy(),
+            ),
+            {},
+        ),
+    )
+
+
 class CollectiveFunctionRewriteVariable(UserFunctionVariable):
     """
     Some of the torch.distributed.* collective APIs are possible to rewrite to 'traceable' collectives.
@@ -2997,15 +3144,61 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
 
             if group_var is None:
                 raise AssertionError("group_var must be set from P2POp items")
-            new_args: list[VariableTracker] = []
-            new_kwargs: dict[str, VariableTracker] = {
-                "op_list": variables.ListVariable(ops),
-                "peer_list": variables.ListVariable(peers),
-                "tag_list": variables.ListVariable(tags),
-                "tensors": variables.ListVariable(tensors),
-                "group_name": group_var,
-            }
-            return self.replacement_var.call_function(tx, new_args, new_kwargs)
+            group_name, should_coalesce = _get_batch_p2p_group_name_and_mode(
+                group_var, tensors[0]
+            )
+            group_name_var = VariableTracker.build(tx, group_name)
+
+            if should_coalesce:
+                from .builder import wrap_fx_proxy
+
+                op_list_var = variables.ListVariable(ops)
+                peer_list_var = variables.ListVariable(peers)
+                tag_list_var = variables.ListVariable(tags)
+                tensor_list_var = variables.ListVariable(tensors)
+                token = wrap_fx_proxy(
+                    tx,
+                    tx.output.create_proxy(
+                        "call_function",
+                        torch.ops._c10d_functional.batch_p2p_start.default,
+                        (
+                            op_list_var.as_proxy(),
+                            peer_list_var.as_proxy(),
+                            tag_list_var.as_proxy(),
+                            tensor_list_var.as_proxy(),
+                            group_name_var.as_proxy(),
+                        ),
+                        {},
+                    ),
+                )
+                return variables.ListVariable(
+                    [
+                        BatchP2PWorkVariable(
+                            wait_kind="batch",
+                            wait_target=token,
+                            wait_op_list=op_list_var,
+                            wait_tensors=tensor_list_var,
+                        )
+                    ],
+                    mutation_type=ValueMutationNew(),
+                )
+
+            work_items: list[VariableTracker] = []
+            for op_var, peer_var, tag_var, tensor_var in zip(ops, peers, tags, tensors):
+                work_items.append(
+                    BatchP2PWorkVariable(
+                        wait_kind="single",
+                        wait_target=_trace_raw_p2p_work(
+                            tx,
+                            op_var.as_python_constant(),
+                            tensor_var,
+                            peer_var,
+                            tag_var,
+                            group_name_var,
+                        ),
+                    )
+                )
+            return variables.ListVariable(work_items, mutation_type=ValueMutationNew())
 
         if self.fn in (dist.isend, dist.irecv):
             if not config.enable_p2p_compilation:

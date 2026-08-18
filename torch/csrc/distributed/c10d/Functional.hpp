@@ -185,4 +185,16 @@ C10_EXPORT std::vector<at::Tensor> batch_p2p_ops(
     std::vector<at::Tensor> tensors_for_op,
     std::string group_name);
 
+C10_EXPORT at::Tensor batch_p2p_start(
+    const std::vector<std::string>& op_list,
+    const std::vector<int64_t>& peer_list,
+    const std::vector<int64_t>& tag_list,
+    const std::vector<at::Tensor>& tensors_for_op,
+    const std::string& group_name);
+
+C10_EXPORT void wait_batch_p2p(
+    const at::Tensor& token,
+    const std::vector<std::string>& op_list,
+    const std::vector<at::Tensor>& tensors_for_op);
+
 } // namespace c10d

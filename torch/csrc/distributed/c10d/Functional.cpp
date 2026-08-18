@@ -1,4 +1,5 @@
 #include <c10/core/DispatchKey.h>
+#include <c10/util/TypeCast.h>
 #include <torch/csrc/autograd/custom_function.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/distributed/c10d/Functional.hpp>
@@ -507,6 +508,53 @@ std::vector<at::Tensor> batch_p2p_ops(
   return result_tensors;
 }
 
+at::Tensor batch_p2p_start(
+    const std::vector<std::string>& op_list,
+    const std::vector<int64_t>& peer_list,
+    const std::vector<int64_t>& tag_list,
+    const std::vector<at::Tensor>& tensors,
+    const std::string& group_name) {
+  const uint64_t N = op_list.size();
+  TORCH_CHECK(tensors.size() == N, "");
+  TORCH_CHECK(peer_list.size() == N, "");
+  TORCH_CHECK(tag_list.size() == N, "");
+  TORCH_CHECK(N > 0, "batch_p2p_start expects at least one P2P op");
+
+  auto group = c10d::resolve_process_group(group_name);
+  auto device = tensors[0].device().type();
+  group->startCoalescing(device);
+  for (uint32_t i = 0; i < N; ++i) {
+    const at::Tensor& t = tensors[i];
+    std::vector<at::Tensor> tensor_wrap{t};
+    const auto peer = c10::checked_convert<int>(peer_list[i], "peer");
+    const auto tag = c10::checked_convert<int>(tag_list[i], "tag");
+    if (op_list[i] == "isend") {
+      group->send(tensor_wrap, peer, tag);
+    } else if (op_list[i] == "irecv") {
+      group->recv(tensor_wrap, peer, tag);
+    } else {
+      TORCH_CHECK(false, "Unsupported async op ", op_list[i]);
+    }
+  }
+
+  auto work = group->endCoalescing(device);
+  TORCH_CHECK(
+      work,
+      "The coalesced work object returned from group->endCoalescing() is empty");
+  auto token = at::empty({0}, tensors[0].options());
+  c10d::register_work(token, work);
+  return token;
+}
+
+void wait_batch_p2p(
+    const at::Tensor& token,
+    const std::vector<std::string>& op_list,
+    const std::vector<at::Tensor>& tensors) {
+  (void)op_list;
+  (void)tensors;
+  c10d::wait_tensor(token);
+}
+
 } // namespace c10d
 
 namespace {
@@ -771,6 +819,18 @@ TORCH_LIBRARY(_c10d_functional, m) {
       "-> Tensor[]",
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd, c10d::batch_p2p_ops),
+      {at::Tag::pt2_compliant_tag});
+  m.def(
+      "batch_p2p_start(str[] op_list, int[] peer_list,"
+      "int[] tag_list, Tensor[] tensors, str group_name)"
+      "-> Tensor",
+      torch::dispatch(
+          c10::DispatchKey::CompositeExplicitAutograd, c10d::batch_p2p_start),
+      {at::Tag::pt2_compliant_tag});
+  m.def(
+      "wait_batch_p2p(Tensor token, str[] op_list, Tensor[] tensors) -> ()",
+      torch::dispatch(
+          c10::DispatchKey::CompositeExplicitAutograd, c10d::wait_batch_p2p),
       {at::Tag::pt2_compliant_tag});
 }
 

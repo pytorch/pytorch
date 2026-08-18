@@ -2277,6 +2277,16 @@
       "Hints": []
     }
   ],
+  "GB5589": [
+    {
+      "Gb_type": "dynamic ProcessGroup in batch_isend_irecv",
+      "Context": "str(group_var)",
+      "Explanation": "torch.compile requires the ProcessGroup used by batch_isend_irecv to be constant.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB9672": [
     {
       "Gb_type": "unsupported type.__dict__['{attr_name}'].__get__ call",

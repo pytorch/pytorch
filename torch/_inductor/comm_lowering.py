@@ -472,6 +472,78 @@ def register_comm_lowerings():
                 results.append(ir.TensorBox.create(placeholder))
         return results
 
+    @register_comm_lowering(c10d.batch_p2p_start)  # type: ignore[misc]
+    def _batch_p2p_start(op_list, peer_list, tag_list, tensors, group_name):
+        tensors = [ir.ExternKernel.require_contiguous(t) for t in tensors]
+        kernel = c10d.batch_p2p_start.default
+        with V.graph.fake_mode:
+            result = ir._CollectiveKernel.process_kernel(
+                kernel,
+                op_list,
+                peer_list,
+                tag_list,
+                tensors,
+                group_name,
+            )
+        example_output = result.example_output
+        tensor_args = result.tensor_args
+        non_tensor_args = result.non_tensor_args
+        unflatten_args = result.unflatten_args
+        if result.unbacked_bindings:
+            raise AssertionError(f"{kernel} {result.unbacked_bindings}")
+        for op, tensor_arg in zip(op_list, tensor_args):
+            tensor_arg.realize()
+            if op == "irecv":
+                V.graph.mark_buffer_mutated(tensor_arg.get_name())
+
+        packed = ir._CollectiveKernel(
+            ir._CollectiveKernel.tensor_to_layout(example_output),
+            kernel,
+            tensor_args,
+            non_tensor_args,
+            unflatten_args,
+        )
+        device = packed.get_device()
+        for op, tensor_arg in zip(op_list, tensor_args):
+            if op == "irecv":
+                packed.mutation_outputs.append(
+                    ir.MutationOutput(ir.NoneLayout(device=device), tensor_arg, packed)
+                )
+        return ir.TensorBox.create(packed)
+
+    @register_comm_lowering(c10d.wait_batch_p2p)  # type: ignore[misc]
+    def _wait_batch_p2p(token, op_list, tensors):
+        token = ir.ExternKernel.require_contiguous(token)
+        tensors = [ir.ExternKernel.require_contiguous(t) for t in tensors]
+        kernel = c10d.wait_batch_p2p.default
+        with V.graph.fake_mode:
+            result = ir._CollectiveKernel.process_kernel(
+                kernel, token, op_list, tensors
+            )
+        tensor_args = result.tensor_args
+        non_tensor_args = result.non_tensor_args
+        unflatten_args = result.unflatten_args
+        if result.unbacked_bindings:
+            raise AssertionError(f"{kernel} {result.unbacked_bindings}")
+        for tensor_arg in tensor_args:
+            tensor_arg.realize()
+
+        device = token.get_device()
+        packed = ir._CollectiveKernel(
+            ir.NoneLayout(device=device),
+            kernel,
+            tensor_args,
+            non_tensor_args,
+            unflatten_args,
+        )
+        for op, tensor_arg in zip(op_list, tensor_args[1:]):
+            if op == "irecv":
+                V.graph.mark_buffer_mutated(tensor_arg.get_name())
+                packed.mutation_outputs.append(
+                    ir.MutationOutput(ir.NoneLayout(device=device), tensor_arg, packed)
+                )
+        return None
+
 
 def register_symm_mem_lowerings():
     """

@@ -1520,6 +1520,16 @@ def _batch_p2p_ops_meta(op_list, peer_list, tag_list, tensors, group_name):
     ]
 
 
+def _batch_p2p_start_meta(op_list, peer_list, tag_list, tensors, group_name):
+    if len(tensors) == 0:
+        raise AssertionError("batch_p2p_start expects at least one tensor")
+    return torch.empty(0, dtype=tensors[0].dtype, device=tensors[0].device)
+
+
+def _wait_batch_p2p_meta(token, op_list, tensors):
+    return None
+
+
 def _all_gather_into_tensor_meta(shard, tag, rankset, group_size):
     return _make_all_gather_out_tensor(shard, group_size)
 
@@ -1622,6 +1632,8 @@ lib_impl.impl("wait_tensor", _wait_tensor_meta, "Meta")
 lib_impl.impl("isend", _isend_meta, "Meta")
 lib_impl.impl("irecv", _irecv_meta, "Meta")
 lib_impl.impl("batch_p2p_ops", _batch_p2p_ops_meta, "Meta")
+lib_impl.impl("batch_p2p_start", _batch_p2p_start_meta, "Meta")
+lib_impl.impl("wait_batch_p2p", _wait_batch_p2p_meta, "Meta")
 
 lib_impl.impl(
     "all_gather_into_tensor_out", _all_gather_into_tensor_out_native_meta, "Meta"
@@ -1667,6 +1679,10 @@ torch.fx.node.has_side_effect(torch.ops._c10d_functional.irecv.default)  # type:
 torch.fx.node.has_side_effect(torch.ops._c10d_functional.irecv)  # type: ignore[has-type]
 torch.fx.node.has_side_effect(torch.ops._c10d_functional.batch_p2p_ops.default)  # type: ignore[has-type]
 torch.fx.node.has_side_effect(torch.ops._c10d_functional.batch_p2p_ops)  # type: ignore[has-type]
+torch.fx.node.has_side_effect(torch.ops._c10d_functional.batch_p2p_start.default)  # type: ignore[has-type]
+torch.fx.node.has_side_effect(torch.ops._c10d_functional.batch_p2p_start)  # type: ignore[has-type]
+torch.fx.node.has_side_effect(torch.ops._c10d_functional.wait_batch_p2p.default)  # type: ignore[has-type]
+torch.fx.node.has_side_effect(torch.ops._c10d_functional.wait_batch_p2p)  # type: ignore[has-type]
 
 
 # Register legacy ops for backward compatibility

@@ -3,12 +3,14 @@ from unittest import skipIf
 
 import torch
 import torch.distributed as dist
+from torch._C._distributed_c10d import _create_work_from_future
 from torch._dynamo.test_case import TestCase as DynamoTestCase
 from torch._dynamo.testing import (
     AotEagerAndRecordGraphs,
     EagerAndRecordGraphs,
     normalize_gm,
 )
+from torch.futures import Future
 from torch.testing._internal.common_utils import instantiate_parametrized_tests
 
 
@@ -23,6 +25,59 @@ if dist.is_available():
 
 def normalize_graph(gm):
     return normalize_gm(gm.print_readable(print_output=False))
+
+
+def create_work(result):
+    future = Future()
+    future.set_result(result)
+    return _create_work_from_future(future)
+
+
+class CoalescingProcessGroup(dist.ProcessGroup):
+    def __init__(self, rank, world):
+        super().__init__(rank, world)
+        self._rank = rank
+        self._world = world
+        self._group_name = ""
+        self._group_desc = ""
+
+    @property
+    def supports_coalescing(self):
+        return True
+
+    def _get_backend(self, device):
+        return self
+
+    def getBackendName(self):
+        return "coalescing"
+
+    def setGroupName(self, name) -> None:
+        self._group_name = name
+
+    def getGroupName(self) -> str:
+        return self._group_name
+
+    def setGroupDesc(self, group_desc) -> None:
+        self._group_desc = group_desc
+
+    def getGroupDesc(self) -> str:
+        return self._group_desc
+
+    def send(self, tensor_list, dst, tag=0):
+        for tensor in tensor_list:
+            tensor.add_(1)
+        return create_work(tensor_list)
+
+    def recv(self, tensor_list, src, tag=0):
+        for tensor in tensor_list:
+            tensor.add_(2)
+        return create_work(tensor_list)
+
+    def start_coalescing(self, device):
+        pass
+
+    def end_coalescing(self, device):
+        return create_work([])
 
 
 @skipIf(not dist.is_available(), "requires distributed")
@@ -232,12 +287,17 @@ instantiate_parametrized_tests(TestFakeDistributed)
 
 @skipIf(not dist.is_available(), "requires distributed")
 class TestFakeDistributedP2P(DynamoTestCase):
+    @staticmethod
+    def create_coalescing_backend(store, group_rank, group_size, timeout):
+        return CoalescingProcessGroup(group_rank, group_size)
+
     def setUp(self):
         super().setUp()
         dist.init_process_group(backend="fake", rank=0, world_size=2)
 
     def tearDown(self):
-        dist.destroy_process_group()
+        if dist.is_initialized():
+            dist.destroy_process_group()
 
     @torch._dynamo.config.patch(enable_p2p_compilation=True)
     def test_compiled_isend_graph(self):
@@ -343,14 +403,57 @@ class GraphModule(torch.nn.Module):
         l_recv_tensor_ = L_recv_tensor_
         l_send_tensor_ = L_send_tensor_
 
-        batch_p2p_ops = torch.ops._c10d_functional.batch_p2p_ops(['isend', 'irecv'], [1, 1], [0, 0], [l_send_tensor_, l_recv_tensor_], '0');  l_send_tensor_ = l_recv_tensor_ = None
-        getitem: "f32[0]" = batch_p2p_ops[0]
-        getitem_1: "f32[10]" = batch_p2p_ops[1];  batch_p2p_ops = None
+        isend_default: "f32[0]" = torch.ops._c10d_functional.isend.default(l_send_tensor_, 1, 0, '0');  l_send_tensor_ = None
+        irecv_default: "f32[10]" = torch.ops._c10d_functional.irecv.default(l_recv_tensor_, 1, 0, '0');  l_recv_tensor_ = None
 
-        wait_tensor: "f32[10]" = torch.ops._c10d_functional.wait_tensor(getitem_1);  getitem_1 = None
+        wait_tensor_default = torch.ops._c10d_functional.wait_tensor.default(isend_default);  isend_default = wait_tensor_default = None
+        wait_tensor_default_1 = torch.ops._c10d_functional.wait_tensor.default(irecv_default);  irecv_default = wait_tensor_default_1 = None
+        return ()
+""",
+        )
 
-        wait_tensor_1: "f32[0]" = torch.distributed._functional_collectives.wait_tensor(getitem);  getitem = wait_tensor_1 = None
-        wait_tensor_2: "f32[10]" = torch.distributed._functional_collectives.wait_tensor(wait_tensor);  wait_tensor = wait_tensor_2 = None
+    @torch._dynamo.config.patch(enable_p2p_compilation=True)
+    def test_compiled_batch_isend_irecv_coalesced_graph(self):
+        dist.destroy_process_group()
+        if "compile_coalescing" not in dist.Backend.backend_list:
+            dist.Backend.register_backend(
+                "compile_coalescing",
+                TestFakeDistributedP2P.create_coalescing_backend,
+                devices="cpu",
+            )
+        dist.init_process_group(
+            backend="compile_coalescing",
+            store=dist.HashStore(),
+            rank=0,
+            world_size=2,
+        )
+        backend = EagerAndRecordGraphs()
+
+        @torch.compile(fullgraph=True, backend=backend)
+        def fn(send_tensor, recv_tensor):
+            work = dist.batch_isend_irecv(
+                [
+                    dist.P2POp(dist.isend, send_tensor, 1),
+                    dist.P2POp(dist.irecv, recv_tensor, 1),
+                ]
+            )
+            for w in work:
+                w.wait()
+
+        fn(torch.ones(10), torch.zeros(10))
+        self.assertEqual(len(backend.graphs), 1)
+        self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
+        self.assertExpectedInline(
+            normalize_graph(backend.graphs[0]),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_recv_tensor_: "f32[10]", L_send_tensor_: "f32[10]"):
+        l_recv_tensor_ = L_recv_tensor_
+        l_send_tensor_ = L_send_tensor_
+
+        batch_p2p_start_default: "f32[0]" = torch.ops._c10d_functional.batch_p2p_start.default(['isend', 'irecv'], [1, 1], [0, 0], [l_send_tensor_, l_recv_tensor_], '0')
+
+        wait_batch_p2p_default = torch.ops._c10d_functional.wait_batch_p2p.default(batch_p2p_start_default, ['isend', 'irecv'], [l_send_tensor_, l_recv_tensor_]);  batch_p2p_start_default = l_send_tensor_ = l_recv_tensor_ = wait_batch_p2p_default = None
         return ()
 """,
         )
@@ -417,32 +520,26 @@ class GraphModule(torch.nn.Module):
         l_y0_ = L_y0_
         l_y1_ = L_y1_
 
-        batch_p2p_ops = torch.ops._c10d_functional.batch_p2p_ops(['isend', 'irecv'], [1, 1], [0, 0], [l_x0_, l_y0_], '0')
-        getitem: "f32[0]" = batch_p2p_ops[0]
-        getitem_1: "f32[64, 64]" = batch_p2p_ops[1];  batch_p2p_ops = None
-
-        wait_tensor: "f32[64, 64]" = torch.ops._c10d_functional.wait_tensor(getitem_1);  getitem_1 = None
+        isend_default: "f32[0]" = torch.ops._c10d_functional.isend.default(l_x0_, 1, 0, '0')
+        irecv_default: "f32[64, 64]" = torch.ops._c10d_functional.irecv.default(l_y0_, 1, 0, '0')
 
         mul: "f32[64, 64]" = l_x0_ * 2;  l_x0_ = None
         add: "f32[64, 64]" = mul + 1;  mul = None
 
+        wait_tensor_default = torch.ops._c10d_functional.wait_tensor.default(isend_default);  isend_default = wait_tensor_default = None
+        wait_tensor_default_1 = torch.ops._c10d_functional.wait_tensor.default(irecv_default);  irecv_default = wait_tensor_default_1 = None
+
         add_1: "f32[64, 64]" = l_y0_ + add;  l_y0_ = add = None
 
-        wait_tensor_1: "f32[0]" = torch.distributed._functional_collectives.wait_tensor(getitem);  getitem = wait_tensor_1 = None
-        wait_tensor_2: "f32[64, 64]" = torch.distributed._functional_collectives.wait_tensor(wait_tensor);  wait_tensor = wait_tensor_2 = None
-
-        batch_p2p_ops_1 = torch.ops._c10d_functional.batch_p2p_ops(['isend', 'irecv'], [1, 1], [0, 0], [add_1, l_y1_], '0')
-        getitem_2: "f32[0]" = batch_p2p_ops_1[0]
-        getitem_3: "f32[64, 64]" = batch_p2p_ops_1[1];  batch_p2p_ops_1 = None
-
-        wait_tensor_3: "f32[64, 64]" = torch.ops._c10d_functional.wait_tensor(getitem_3);  getitem_3 = None
+        isend_default_1: "f32[0]" = torch.ops._c10d_functional.isend.default(add_1, 1, 0, '0')
+        irecv_default_1: "f32[64, 64]" = torch.ops._c10d_functional.irecv.default(l_y1_, 1, 0, '0')
 
         mul_1: "f32[64, 64]" = add_1 * 1.000244140625;  add_1 = None
 
-        add_2: "f32[64, 64]" = l_y1_ + mul_1;  l_y1_ = mul_1 = None
+        wait_tensor_default_2 = torch.ops._c10d_functional.wait_tensor.default(isend_default_1);  isend_default_1 = wait_tensor_default_2 = None
+        wait_tensor_default_3 = torch.ops._c10d_functional.wait_tensor.default(irecv_default_1);  irecv_default_1 = wait_tensor_default_3 = None
 
-        wait_tensor_4: "f32[0]" = torch.distributed._functional_collectives.wait_tensor(getitem_2);  getitem_2 = wait_tensor_4 = None
-        wait_tensor_5: "f32[64, 64]" = torch.distributed._functional_collectives.wait_tensor(wait_tensor_3);  wait_tensor_3 = wait_tensor_5 = None
+        add_2: "f32[64, 64]" = l_y1_ + mul_1;  l_y1_ = mul_1 = None
         return (add_2,)
 """,
         )
