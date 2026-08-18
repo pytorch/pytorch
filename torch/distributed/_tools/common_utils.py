@@ -1,7 +1,7 @@
 import warnings
 
 import torch
-from torch._opaque_base import OpaqueBase
+from torch._custom_class_base import CustomClassBase
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 
@@ -25,11 +25,11 @@ def get_untyped_storages(t: torch.Tensor) -> set[torch.UntypedStorage]:
                 match getattr(obj, attr):
                     case torch.Tensor() as v:
                         unflattened_tensors.append(v)
-                    case OpaqueBase():
+                    case CustomClassBase():
                         pass
                     case unexpected:
                         raise AssertionError(
-                            f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                            f"expected Tensor or CustomClassBase, got {type(unexpected)}"
                         )
         else:
             if not hasattr(obj, "untyped_storage"):

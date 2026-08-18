@@ -78,7 +78,7 @@ Graph print out is straight forward and you should look for `prim::CudaFusionGro
     return (%o.5)
 ```
 
-Note that one thing that could prevents fusion when you are running training is autodiff. Fusion pass only runs within `prim::DifferentiableGraph`, so the first thing you should check is to that targeted ops are within differentiable graph subgraphs.
+Note that one thing that could prevents fusion when you are running training is autodiff. Fusion pass only runs within `prim::DifferentiableGraph`, so the first thing you should check is that targeted ops are within differentiable graph subgraphs.
 Graph dump could be quite confusing to look at, since it naively dumps all graphs executed by profiling executor and differentiable graphs are executed via a nested graph executor. So for each graph, you might see a few segmented `Optimized Graph` where each corresponds to a differentiable node in the original graph.
 
 #### 2. Cuda Fusion Graphs
@@ -150,7 +150,7 @@ Without going into too much details about how the integration is done, a few not
 
 ### General ideas of debug nvfuser mal-functioning
 
-Assuming we have ProfilingExecutor things worked out properly, that is, you see a region that's supposed to be fused but did not ended up in a fused kernel, here's ways to dig deeper:
+Assuming we have ProfilingExecutor things worked out properly, that is, you see a region that's supposed to be fused but did not end up in a fused kernel, here's ways to dig deeper:
 
 1. Dump fusion pass result:
     `PYTORCH_JIT_LOG_LEVEL=graph_fuser python your_script.py &> log`
@@ -179,7 +179,7 @@ Assuming we have ProfilingExecutor things worked out properly, that is, you see 
 
     This logs all TorchScript IR parsed to codegen IR as well as kernel generated and executed by nvfuser. Since fallback path is disabled, it's likely that the last log would indicate the failing fusion.
 
-    Hint: look for last `Before Compilation:` that indicates a parsing failure, or `running GraphCache: xxxxx`, which indicates jit compilation/execution failure (also search for the GraphCache address, which would should have dumped a TorchScript IR earlier.
+    Hint: look for last `Before Compilation:` that indicates a parsing failure, or `running GraphCache: xxxxx`, which indicates jit compilation/execution failure (also search for the GraphCache address, which should have dumped a TorchScript IR earlier.
 
 ### Query nvfuser codegen kernels
 
