@@ -775,8 +775,9 @@ class TensorVariable(VariableTracker):
                 # for a pending `p.grad = None`. Writing a source onto it left
                 # every LATER compile in the process reconstructing a local from
                 # THIS frame and dying in create_load. Only grad/requires_grad
-                # reach here as constants; the rest keep the in-place label,
-                # which .data's identity-tracking depends on.
+                # reach here as constants; the rest keep the in-place write,
+                # which is what lets .data through -- its tracker is freshly
+                # created, and the constructor refuses a source on one of those.
                 result = result.clone(source=AttrSource(self.source, name))
             else:
                 result.source = AttrSource(self.source, name)
