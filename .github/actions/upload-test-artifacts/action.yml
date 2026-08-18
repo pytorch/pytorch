@@ -211,7 +211,7 @@ runs:
     # GHA upload (fallback path if S3 failed)
     # ===========================================
     - name: Store Test Downloaded JSONs on Github (fallback)
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
       if: steps.check-s3.outputs.s3-failed == 'true'
       continue-on-error: true
       with:
@@ -222,7 +222,7 @@ runs:
         path: test/**/*.json
 
     - name: Store Test Reports on Github (fallback)
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
       if: steps.check-s3.outputs.s3-failed == 'true'
       continue-on-error: true
       with:
@@ -235,7 +235,7 @@ runs:
           test/**/*.csv
 
     - name: Store Usage Logs on Github (fallback)
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
       if: steps.check-s3.outputs.s3-failed == 'true'
       continue-on-error: true
       with:
@@ -248,7 +248,7 @@ runs:
           test/**/*.log
 
     - name: Store Profiler Traces on Github
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
       continue-on-error: true
       with:
         name: profiler-traces-runattempt${{ github.run_attempt }}-${{ inputs.file-suffix }}
@@ -257,7 +257,7 @@ runs:
         path: test/test-reports/profiler_traces/**/*
 
     - name: Store TLParse Output on Github
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
       continue-on-error: true
       with:
         name: tlparse-runattempt${{ github.run_attempt }}-${{ inputs.file-suffix }}
