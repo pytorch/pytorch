@@ -324,7 +324,7 @@ class CUDAGraph(_CUDAGraph):
     # Read-only property exposed from the C++ _CUDAGraph base via pybind;
     # annotated (not assigned) so the type checker sees it without shadowing it.
     _has_graph_exec: bool
-    # Stays None unless maybe_stamp_capture_graph_id stamps it during capture_end
+    # Stays None unless maybe_stamp_capture_root stamps it at capture_begin
     # (requires annotations enabled and cudaGraphNodeGetToolsId available).
     _capture_graph_id: int | None
     # Exec graph id the recorded annotations are currently keyed to, or None
@@ -647,14 +647,11 @@ class CUDAGraph(_CUDAGraph):
         which call ``capture_end`` internally.
         """
         self.capture_end_pre()
-        # Run the in-window work (stamp, then user capture-end hooks) while the
-        # template is live (both keep_graph modes). Errors here are unexpected
-        # (stamp) or user bugs (hooks) and propagate -- we deliberately don't
-        # wrap them in a finally that calls capture_end_post(), since a failing
-        # finalize would mask the real error.
-        from torch.cuda._graph_annotations import maybe_stamp_capture_graph_id
-
-        maybe_stamp_capture_graph_id(self)
+        # Run the capture-end hooks while the template is live (both keep_graph modes). The
+        # capture graph id is NOT read here: maybe_stamp_capture_root already stamped it at
+        # capture_begin, and the template keeps that id for its whole life. Errors are user
+        # bugs and propagate -- we deliberately don't wrap them in a finally that calls
+        # capture_end_post(), since a failing finalize would mask the real error.
         if _global_capture_end_hooks:
             _run_global_hooks(_global_capture_end_hooks, self)
         for hook in list(self._capture_end_hooks.values()):
@@ -853,7 +850,10 @@ class CUDAGraph(_CUDAGraph):
         # Serve the shared cache when instantiate() has it live (see _caching_graph_data).
         if self._instantiate_graph_data is not None:
             return self._instantiate_graph_data
-        from torch.cuda._graph_annotations import _is_tools_id_unavailable
+        from torch.cuda._graph_annotations import (
+            _get_node_type,
+            _is_tools_id_unavailable,
+        )
 
         _require_cuda_bindings()
         # Narrow for the type checker (cuda bindings are present past the check).
@@ -869,23 +869,25 @@ class CUDAGraph(_CUDAGraph):
                 "(or cuda-compat >= 13.1 in LD_LIBRARY_PATH)"
             )
 
+        node_types = _cuda_driver.CUgraphNodeType
         node_type_names = {
-            _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeKernel: "kernel",
-            _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeMemcpy: "memcpy",
-            _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeMemset: "memset",
-            _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeHost: "host",
-            _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeGraph: "child_graph",
-            _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeEmpty: "empty",
-            _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeWaitEvent: "wait_event",
-            _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeEventRecord: "event_record",
-            _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeMemAlloc: "mem_alloc",
-            _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeMemFree: "mem_free",
-            _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeConditional: "conditional",
+            node_types.CU_GRAPH_NODE_TYPE_KERNEL: "kernel",
+            node_types.CU_GRAPH_NODE_TYPE_MEMCPY: "memcpy",
+            node_types.CU_GRAPH_NODE_TYPE_MEMSET: "memset",
+            node_types.CU_GRAPH_NODE_TYPE_HOST: "host",
+            node_types.CU_GRAPH_NODE_TYPE_GRAPH: "child_graph",
+            node_types.CU_GRAPH_NODE_TYPE_EMPTY: "empty",
+            node_types.CU_GRAPH_NODE_TYPE_WAIT_EVENT: "wait_event",
+            node_types.CU_GRAPH_NODE_TYPE_EVENT_RECORD: "event_record",
+            node_types.CU_GRAPH_NODE_TYPE_MEM_ALLOC: "mem_alloc",
+            node_types.CU_GRAPH_NODE_TYPE_MEM_FREE: "mem_free",
+            node_types.CU_GRAPH_NODE_TYPE_BATCH_MEM_OP: "batch_mem_op",
+            node_types.CU_GRAPH_NODE_TYPE_CONDITIONAL: "conditional",
         }
         # Node types whose work lives in a separate cudaGraph_t (see the warning below).
         nested_graph_types = {
-            _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeGraph,
-            _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeConditional,
+            node_types.CU_GRAPH_NODE_TYPE_GRAPH,
+            node_types.CU_GRAPH_NODE_TYPE_CONDITIONAL,
         }
         nested_node_types: set[str] = set()
 
@@ -903,7 +905,7 @@ class CUDAGraph(_CUDAGraph):
             node = nodes[i]
             handle_to_idx[int(node)] = i
 
-            ntype = _check_cuda_bindings(_cuda_runtime.cudaGraphNodeGetType(node))
+            ntype = _get_node_type(node)
             if ntype in nested_graph_types:
                 nested_node_types.add(node_type_names.get(ntype, ntype))
             tools_id = _check_cuda_bindings(_cuda_runtime.cudaGraphNodeGetToolsId(node))
@@ -911,7 +913,7 @@ class CUDAGraph(_CUDAGraph):
             node_id = tools_id & 0xFFFFFFFF
 
             kernel_name = None
-            if ntype == _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeKernel:
+            if ntype == node_types.CU_GRAPH_NODE_TYPE_KERNEL:
                 cu_node = _cuda_driver.CUgraphNode(init_value=int(node))
                 err, params = _cuda_driver.cuGraphKernelNodeGetParams(cu_node)
                 if err == _cuda_driver.CUresult.CUDA_SUCCESS and int(params.func):
@@ -927,13 +929,13 @@ class CUDAGraph(_CUDAGraph):
             # expected to succeed. Swallowing a failure would leave event_ptr 0 and make the
             # record/wait match quietly wrong rather than loud.
             event_ptr = 0
-            if ntype == _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeEventRecord:
+            if ntype == node_types.CU_GRAPH_NODE_TYPE_EVENT_RECORD:
                 event_ptr = int(
                     _check_cuda_bindings(
                         _cuda_runtime.cudaGraphEventRecordNodeGetEvent(node)
                     )
                 )
-            elif ntype == _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeWaitEvent:
+            elif ntype == node_types.CU_GRAPH_NODE_TYPE_WAIT_EVENT:
                 event_ptr = int(
                     _check_cuda_bindings(
                         _cuda_runtime.cudaGraphEventWaitNodeGetEvent(node)
@@ -945,7 +947,7 @@ class CUDAGraph(_CUDAGraph):
             # _resolve_host_fn_name). Both are None/0 for other node types.
             host_fn_addr = 0
             host_fn_name = None
-            if ntype == _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeHost:
+            if ntype == node_types.CU_GRAPH_NODE_TYPE_HOST:
                 err, params = _cuda_runtime.cudaGraphHostNodeGetParams(node)
                 if err == _cuda_runtime.cudaError_t.cudaSuccess:
                     host_fn_addr = int(params.fn)
@@ -1078,6 +1080,40 @@ def export_graph_data(path: str) -> Callable[[CUDAGraph], None]:
     return _hook
 
 
+# Recognized keys of graph()'s annotation_config, each mapped to its allowed values.
+# Annotation options live in that dict rather than as separate arguments so later ones do
+# not each widen the signature; validating here means a typo raises instead of silently
+# leaving the default in place.
+# Recognized keys of graph()'s annotation_config, each mapped to (default, allowed values).
+_ANNOTATION_CONFIG_KEYS: dict[str, tuple[typing.Any, tuple[typing.Any, ...]]] = {
+    "backend": ("auto", ("auto", "cupti", "edge_walk")),
+}
+
+
+def _parse_annotation_config(
+    config: dict[str, typing.Any] | None,
+) -> dict[str, typing.Any]:
+    """Validate ``graph(annotation_config=...)`` and resolve it against the defaults, so an
+    unrecognized key or value raises instead of silently doing nothing."""
+    resolved = {key: default for key, (default, _) in _ANNOTATION_CONFIG_KEYS.items()}
+    if config is None:
+        return resolved
+    unknown = set(config) - set(_ANNOTATION_CONFIG_KEYS)
+    if unknown:
+        raise ValueError(
+            f"unrecognized annotation_config key(s) {sorted(unknown)}; "
+            f"supported: {sorted(_ANNOTATION_CONFIG_KEYS)}"
+        )
+    for key, value in config.items():
+        allowed = _ANNOTATION_CONFIG_KEYS[key][1]
+        if value not in allowed:
+            raise ValueError(
+                f"annotation_config[{key!r}] must be one of {list(allowed)}, got {value!r}"
+            )
+        resolved[key] = value
+    return resolved
+
+
 class graph:
     r"""Context-manager that captures CUDA work into a :class:`torch.cuda.CUDAGraph` object for later replay.
 
@@ -1103,6 +1139,18 @@ class graph:
             the capture ends.  Annotations are **not** cleared on exit so that multiple
             graphs in the same workload can accumulate annotations.
             Requires ``cuda.bindings`` package and cuda-compat >= 13.1 or CUDA driver >= 13.1.
+            Requires single-threaded autograd; wrap the capture in
+            ``torch.autograd.grad_mode.set_multithreading_enabled(False)``.
+        annotation_config (dict, optional): Options for annotation recording, used when
+            ``enable_annotations=True``. An unrecognized key or value raises. Currently
+            supports ``"backend"``, which selects how ``mark_kernels`` scopes discover their
+            nodes: ``"auto"`` (default) uses CUPTI node-creation callbacks when the CUPTI
+            monitor already holds a subscription and otherwise walks the capture graph's
+            dependent edges; ``"cupti"`` requires the CUPTI path, bringing the monitor up if
+            needed -- which prevents kineto from initializing, so a later
+            :class:`torch.profiler.profile` records no GPU activity; ``"edge_walk"`` forces
+            the walk, which cannot see nodes created while the current stream was not yet
+            capturing.
         check_input_liveness (bool, optional): If ``True``, tracks external tensor inputs during graph capture and
             raises an error if any are deallocated before replay. This helps debug "use after free" errors
             where input tensors are garbage collected between capture and replay. Default: ``False``.
@@ -1131,8 +1179,10 @@ class graph:
         stream: torch.cuda.Stream | None = None,
         capture_error_mode: str = "global",
         enable_annotations: bool = False,
+        annotation_config: dict[str, typing.Any] | None = None,
         check_input_liveness: bool = False,
     ):
+        self._annotation_config = _parse_annotation_config(annotation_config)
         # Lazy-init of default_capture_stream helps avoid circular-import errors.
         # Not thread safe, but graphs already have the general (explicitly documented)
         # restriction that only one capture may be underway at a time in the process.
@@ -1170,10 +1220,46 @@ class graph:
         # pyrefly: ignore [missing-attribute]
         torch._C._host_emptyCache()
 
-        # Scope annotation recording to this capture: stamp/mark_kernels gate on
-        # this flag, and __exit__ always clears it.
-        from torch.cuda._graph_annotations import _set_annotations_enabled
+        # Pick the annotation backend before capture_begin, so that failing to obtain CUPTI
+        # raises without a capture already underway.
+        from torch.cuda import _graph_node_callbacks
+        from torch.cuda._graph_annotations import (
+            _set_annotation_backend,
+            _set_annotations_enabled,
+            maybe_stamp_capture_root,
+        )
 
+        backend = "edge_walk"
+        requested = self._annotation_config["backend"]
+        if self._enable_annotations and requested != "edge_walk":
+            force = requested == "cupti"
+            # The CUPTI backend attributes each node to the mark_kernels scope open on the
+            # thread that created it, so multithreaded autograd would mis-attribute the nodes
+            # its engine worker threads create -- their scope state is not the capturing
+            # thread's. (capture_error_mode is NOT the gate: it scopes capture's safety
+            # checks, not which threads contribute nodes.) The edge walk reads no ambient
+            # scope, so it is unaffected and remains the fallback.
+            if torch._C._is_multithreading_enabled():
+                if force:
+                    raise RuntimeError(
+                        "annotation_config={'backend': 'cupti'} requires single-threaded "
+                        "autograd, so that graph nodes are created on the capturing thread and "
+                        "attributed to the right mark_kernels scope. Wrap the capture in "
+                        "torch.autograd.grad_mode.set_multithreading_enabled(False)."
+                    )
+            elif _graph_node_callbacks.register(force=force):
+                backend = "cupti"
+            elif force:
+                raise RuntimeError(
+                    "annotation_config={'backend': 'cupti'} could not register CUPTI "
+                    "node-creation callbacks. This needs the cupti-python package and a "
+                    "CUPTI monitor able to subscribe; use 'auto' to fall back to the "
+                    "dependent-edge walk instead."
+                )
+
+        # Scope annotation recording to this capture: the capture-root stamp and
+        # mark_kernels both gate on this flag, and __exit__ always clears it. It has to be
+        # set before capture_begin so maybe_stamp_capture_root below is not a no-op.
         _set_annotations_enabled(self._enable_annotations)
 
         # Stackoverflow seems comfortable with this pattern
@@ -1188,19 +1274,33 @@ class graph:
             # pyrefly: ignore [bad-keyword-argument]
             check_input_liveness=self.check_input_liveness,
         )
-        # The capture stream is now capturing into the top-level graph; remember it so
-        # mark_kernels can tell a conditional-node body apart from this graph.
-        from torch.cuda._graph_annotations import maybe_stamp_capture_root
+        # The capture stream is now capturing into the top-level graph, and this is the only
+        # point where its id is readable (the cudaGraph_t itself does not exist until
+        # capture_end). One read serves everything downstream: mark_kernels telling a
+        # conditional-node body apart from this graph, the CUPTI backend's body-node filter,
+        # and the stamp remap_to_exec_graph later rekeys from.
+        maybe_stamp_capture_root(self.cuda_graph)
 
-        maybe_stamp_capture_root(torch.cuda.current_stream())
+        # Arming needs the capture live. If it does not work out, settle on the edge walk
+        # before any mark_kernels scope runs rather than recording keys that would match
+        # nothing -- which is why the backend is published only now.
+        if backend == "cupti" and not _graph_node_callbacks.arm():
+            _graph_node_callbacks.disarm()
+            backend = "edge_walk"
+        _set_annotation_backend(backend)
 
     def __exit__(self, *args: object) -> None:
+        from torch.cuda import _graph_node_callbacks
         from torch.cuda._graph_annotations import (
             _set_annotations_enabled,
             resolve_pending_annotations,
         )
 
         try:
+            # Stop recording before capture_end: the CUPTI backend has already attributed
+            # every node as it was created, and leaving the callback enabled would also pick
+            # up nodes created while instantiating.
+            _graph_node_callbacks.disarm()
             if self._enable_annotations:
                 resolve_pending_annotations()
 
@@ -1210,7 +1310,10 @@ class graph:
             self.cuda_graph.capture_end()
             self.stream_ctx.__exit__(*args)
         finally:
-            # Annotation recording is capture-scoped; clear it unconditionally.
+            # Annotation recording is capture-scoped; clear it unconditionally. disarm() is
+            # idempotent, so repeating it here just covers a capture that raised before the
+            # call above (it must not stay armed past this context either way).
+            _graph_node_callbacks.disarm()
             _set_annotations_enabled(False)
         # returning None should propagate exceptions from either capture_end or stream_ctx.__exit__()
 
