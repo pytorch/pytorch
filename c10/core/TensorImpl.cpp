@@ -328,7 +328,6 @@ void TensorImpl::release_resources() {
     extra_meta_->fake_constant_.reset();
     extra_meta_->real_tensor_.reset();
     extra_meta_->fake_tensor_mode_.reset();
-    extra_meta_->fake_mode_pyobj_.reset();
   }
 }
 
@@ -1088,20 +1087,6 @@ AutogradMetaFactory* GetAutogradMetaFactory() {
 }
 
 } // namespace impl
-
-std::shared_ptr<c10::SafePyObject> FakeTensorMode::cache_pyobj_cpp_fake_mode() {
-  std::lock_guard<std::mutex> lock(pyobj_cpp_fake_mode_mutex_);
-  if (auto pyobj_cpp_fake_mode = pyobj_cpp_fake_mode_.lock()) {
-    return pyobj_cpp_fake_mode;
-  }
-  if (fake_mode_pyobj_ == nullptr) {
-    return nullptr;
-  }
-  auto pyobj_cpp_fake_mode = (*c10::impl::getGlobalPyInterpreter())
-                                 ->strong_ref_from_weakref(*fake_mode_pyobj_);
-  pyobj_cpp_fake_mode_ = pyobj_cpp_fake_mode;
-  return pyobj_cpp_fake_mode;
-}
 
 void FakeTensorMode::set_constant(
     const c10::intrusive_ptr<c10::TensorImpl>& fake_impl,
