@@ -3277,6 +3277,8 @@ make_propagate_real_tensors_cls(FakeTensorOperatorInvariants)
 
 
 class FakeTensorPropTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_fake_tensor_prop_on_nn_module(self):
         class ToyNnModuleWithParameters(torch.nn.Module):
             def __init__(self) -> None:
@@ -3413,90 +3415,6 @@ class FakeTensorPropTest(TestCase):
 
         self.assertEqual(x.size(), y.size())
         self.assertEqual(x.stride(), y.stride())
-
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_torch_load_with_fake_mode(self):
-        model = torch.nn.Linear(5, 10)
-        sd = model.state_dict()
-        sd["tt"] = TwoTensor(torch.randn(2), torch.randn(2))
-
-        def _read_tensor_and_check(key, sd_loaded, sd_orig, all_bytes, device):
-            dtype = torch.float32
-            t = sd_loaded[key]
-            self.assertEqual(t.device.type, device)
-            if isinstance(t, TwoTensor):
-                untyped_storage_a, untyped_storage_b = (
-                    t.a.untyped_storage(),
-                    t.b.untyped_storage(),
-                )
-                self.assertEqual(
-                    untyped_storage_a.nbytes(),
-                    sd_orig[key].a.untyped_storage().nbytes(),
-                )
-                self.assertEqual(
-                    untyped_storage_b.nbytes(),
-                    sd_orig[key].b.untyped_storage().nbytes(),
-                )
-                offset_a, offset_b = (
-                    untyped_storage_a._checkpoint_offset,
-                    untyped_storage_b._checkpoint_offset,
-                )
-                nbytes_a, nbytes_b = (
-                    untyped_storage_a.nbytes() // 4,
-                    untyped_storage_b.nbytes() // 4,
-                )
-                result_a = torch.frombuffer(
-                    all_bytes, dtype=dtype, count=nbytes_a, offset=offset_a
-                ).resize_(t.a.size())
-                result_b = torch.frombuffer(
-                    all_bytes, dtype=dtype, count=nbytes_b, offset=offset_b
-                ).resize_(t.b.size())
-                self.assertEqual(TwoTensor(result_a, result_b), sd_orig[key])
-            else:
-                untyped_storage = t.untyped_storage()
-                self.assertEqual(
-                    untyped_storage.nbytes(), sd_orig[key].untyped_storage().nbytes()
-                )
-                offset = untyped_storage._checkpoint_offset
-                nbytes = untyped_storage.nbytes() // 4
-                result = torch.frombuffer(
-                    all_bytes, dtype=dtype, count=nbytes, offset=offset
-                ).resize_(t.size())
-                self.assertEqual(result, sd_orig[key])
-
-        with TemporaryFileName() as f, torch.serialization.safe_globals([TwoTensor]):
-            # Create state_dict to be loaded later
-            torch.save(sd, f)
-            with open(f, "rb") as g:
-                all_bytes = g.read()
-
-            fake_mode = FakeTensorMode()
-            with fake_mode:
-                sd_loaded = torch.load(f)
-            for k in sd:
-                _read_tensor_and_check(k, sd_loaded, sd, all_bytes, "cpu")
-            with fake_mode:
-                sd_loaded = torch.load(f, map_location="cuda")
-            for k in sd:
-                _read_tensor_and_check(k, sd_loaded, sd, all_bytes, "cuda")
-
-        for k in sd:
-            sd[k] = sd[k].to("cuda")
-
-        with TemporaryFileName() as f, torch.serialization.safe_globals([TwoTensor]):
-            torch.save(sd, f)
-            with open(f, "rb") as g:
-                all_bytes = g.read()
-
-            fake_mode = FakeTensorMode()
-            with fake_mode:
-                sd_loaded = torch.load(f)
-            for k in sd:
-                _read_tensor_and_check(k, sd_loaded, sd, all_bytes, "cuda")
-            with fake_mode:
-                sd_loaded = torch.load(f, map_location="cpu")
-            for k in sd:
-                _read_tensor_and_check(k, sd_loaded, sd, all_bytes, "cpu")
 
     def test_inference_mode_nonzero_memo(self):
         """D106102842: nonzero() memo must be stored for inference FakeTensors.
@@ -4392,6 +4310,99 @@ class FakeTensorPreferDeviceTypeCUDA(TestCase):
             ):
                 mixed_device_op(cuda_tensor, None)
 
+
+
+class FakeTensorPropTestCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_torch_load_with_fake_mode(self):
+        model = torch.nn.Linear(5, 10)
+        sd = model.state_dict()
+        sd["tt"] = TwoTensor(torch.randn(2), torch.randn(2))
+
+        def _read_tensor_and_check(key, sd_loaded, sd_orig, all_bytes, device):
+            dtype = torch.float32
+            t = sd_loaded[key]
+            self.assertEqual(t.device.type, device)
+            if isinstance(t, TwoTensor):
+                untyped_storage_a, untyped_storage_b = (
+                    t.a.untyped_storage(),
+                    t.b.untyped_storage(),
+                )
+                self.assertEqual(
+                    untyped_storage_a.nbytes(),
+                    sd_orig[key].a.untyped_storage().nbytes(),
+                )
+                self.assertEqual(
+                    untyped_storage_b.nbytes(),
+                    sd_orig[key].b.untyped_storage().nbytes(),
+                )
+                offset_a, offset_b = (
+                    untyped_storage_a._checkpoint_offset,
+                    untyped_storage_b._checkpoint_offset,
+                )
+                nbytes_a, nbytes_b = (
+                    untyped_storage_a.nbytes() // 4,
+                    untyped_storage_b.nbytes() // 4,
+                )
+                result_a = torch.frombuffer(
+                    all_bytes, dtype=dtype, count=nbytes_a, offset=offset_a
+                ).resize_(t.a.size())
+                result_b = torch.frombuffer(
+                    all_bytes, dtype=dtype, count=nbytes_b, offset=offset_b
+                ).resize_(t.b.size())
+                self.assertEqual(TwoTensor(result_a, result_b), sd_orig[key])
+            else:
+                untyped_storage = t.untyped_storage()
+                self.assertEqual(
+                    untyped_storage.nbytes(), sd_orig[key].untyped_storage().nbytes()
+                )
+                offset = untyped_storage._checkpoint_offset
+                nbytes = untyped_storage.nbytes() // 4
+                result = torch.frombuffer(
+                    all_bytes, dtype=dtype, count=nbytes, offset=offset
+                ).resize_(t.size())
+                self.assertEqual(result, sd_orig[key])
+
+        with TemporaryFileName() as f, torch.serialization.safe_globals([TwoTensor]):
+            # Create state_dict to be loaded later
+            torch.save(sd, f)
+            with open(f, "rb") as g:
+                all_bytes = g.read()
+
+            fake_mode = FakeTensorMode()
+            with fake_mode:
+                sd_loaded = torch.load(f)
+            for k in sd:
+                _read_tensor_and_check(k, sd_loaded, sd, all_bytes, "cpu")
+            with fake_mode:
+                sd_loaded = torch.load(f, map_location="cuda")
+            for k in sd:
+                _read_tensor_and_check(k, sd_loaded, sd, all_bytes, "cuda")
+
+        for k in sd:
+            sd[k] = sd[k].to("cuda")
+
+        with TemporaryFileName() as f, torch.serialization.safe_globals([TwoTensor]):
+            torch.save(sd, f)
+            with open(f, "rb") as g:
+                all_bytes = g.read()
+
+            fake_mode = FakeTensorMode()
+            with fake_mode:
+                sd_loaded = torch.load(f)
+            for k in sd:
+                _read_tensor_and_check(k, sd_loaded, sd, all_bytes, "cuda")
+            with fake_mode:
+                sd_loaded = torch.load(f, map_location="cpu")
+            for k in sd:
+                _read_tensor_and_check(k, sd_loaded, sd, all_bytes, "cpu")
+
+
+
+
+make_propagate_real_tensors_cls(FakeTensorPropTestCUDA)
 
 if __name__ == "__main__":
     run_tests()
