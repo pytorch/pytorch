@@ -82,6 +82,8 @@ def _attach_aoti_template_tests(
             return value(self)
 
         new_test.__dict__ = copy.deepcopy(value.__dict__)
+        # Template parametrization was expanded before this module imported it.
+        new_test.__dict__.pop("parametrize_fn", None)
 
         tf = test_failures and test_failures.get(name)
         if tf and failure_suffix in tf.suffixes:
