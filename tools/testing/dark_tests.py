@@ -130,7 +130,6 @@ def unscheduled(files: list[str]) -> set[str]:
     return {f for f in files if f[len("test/") : -len(".py")] not in known}
 
 
-
 def disabled() -> set[str]:
     """Tests the disable bot turned off everywhere; dark on purpose, not a gap.
 
@@ -227,7 +226,6 @@ def main() -> int:
         gap = sorted(t for t in tests - observed if t not in exempt)
         if gap:
             report[rel] = gap
-
 
     payload = {
         "dark": {k: v for k, v in report.items() if k not in no_config},
