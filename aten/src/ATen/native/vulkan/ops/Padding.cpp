@@ -98,6 +98,10 @@ Tensor reflection_pad2d(const Tensor& self_arg, IntArrayRef padding) {
   return pad2d(self_arg, padding, VK_KERNEL(reflection_pad2d));
 }
 
+Tensor symmetric_pad2d(const Tensor& self_arg, IntArrayRef padding) {
+  return pad2d(self_arg, padding, VK_KERNEL(symmetric_pad2d));
+}
+
 Tensor replication_pad2d(const Tensor& self_arg, IntArrayRef padding) {
   return pad2d(self_arg, padding, VK_KERNEL(replication_pad2d));
 }
@@ -108,6 +112,9 @@ TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl(
       TORCH_SELECTIVE_NAME("aten::reflection_pad2d"),
       TORCH_FN(reflection_pad2d));
+  m.impl(
+      TORCH_SELECTIVE_NAME("aten::symmetric_pad2d"),
+      TORCH_FN(symmetric_pad2d));
   m.impl(
       TORCH_SELECTIVE_NAME("aten::replication_pad2d"),
       TORCH_FN(replication_pad2d));

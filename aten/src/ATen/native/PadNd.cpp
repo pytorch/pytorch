@@ -22,6 +22,9 @@
 #include <ATen/ops/replication_pad1d.h>
 #include <ATen/ops/replication_pad2d.h>
 #include <ATen/ops/replication_pad3d.h>
+#include <ATen/ops/symmetric_pad1d.h>
+#include <ATen/ops/symmetric_pad2d.h>
+#include <ATen/ops/symmetric_pad3d.h>
 #endif
 
 namespace at::native {
@@ -199,6 +202,8 @@ static std::string_view padding_mode_string(padding_mode m) {
       return "circular";
     case padding_mode::constant:
       return "constant";
+    case padding_mode::symmetric:
+      return "symmetric";
   }
   TORCH_CHECK(false, "Invalid padding mode (", static_cast<int64_t>(m), ")");
 }
@@ -223,6 +228,7 @@ Tensor _pad_enum_symint(const Tensor &self, c10::SymIntArrayRef pad, int64_t mod
       case at::padding_mode::reflect: return at::reflection_pad1d_symint(self, pad);
       case at::padding_mode::replicate: return at::replication_pad1d_symint(self, pad);
       case at::padding_mode::circular: return at::_pad_circular_symint(self, pad);
+      case at::padding_mode::symmetric: return at::symmetric_pad1d_symint(self, pad);
       default: {}
     }
   } else if(pad.size() == 4 && (input_dim == 3 || input_dim == 4)) {
@@ -230,6 +236,7 @@ Tensor _pad_enum_symint(const Tensor &self, c10::SymIntArrayRef pad, int64_t mod
       case at::padding_mode::reflect: return at::reflection_pad2d_symint(self, pad);
       case at::padding_mode::replicate: return at::replication_pad2d_symint(self, pad);
       case at::padding_mode::circular: return at::_pad_circular_symint(self, pad);
+      case at::padding_mode::symmetric: return at::symmetric_pad2d_symint(self, pad);
       default: {}
     }
   } else if (pad.size() == 6 && (input_dim == 4 || input_dim == 5)) {
@@ -237,6 +244,7 @@ Tensor _pad_enum_symint(const Tensor &self, c10::SymIntArrayRef pad, int64_t mod
       case at::padding_mode::reflect: return at::reflection_pad3d_symint(self, pad);
       case at::padding_mode::replicate: return at::replication_pad3d_symint(self, pad);
       case at::padding_mode::circular: return at::_pad_circular_symint(self, pad);
+      case at::padding_mode::symmetric: return at::symmetric_pad3d_symint(self, pad);
       default: {}
     }
   }
@@ -261,6 +269,8 @@ Tensor pad_symint(const Tensor &self, c10::SymIntArrayRef pad, std::string_view 
       return at::padding_mode::replicate;
     } else if (mode == "circular") {
       return at::padding_mode::circular;
+    } else if (mode == "symmetric") {
+      return at::padding_mode::symmetric;
     }
     C10_THROW_ERROR(NotImplementedError,
                     c10::str("Unrecognised padding mode ", mode));

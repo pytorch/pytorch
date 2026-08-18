@@ -20,6 +20,12 @@
 #include <ATen/ops/replication_pad2d_native.h>
 #include <ATen/ops/replication_pad3d_backward_native.h>
 #include <ATen/ops/replication_pad3d_native.h>
+#include <ATen/ops/symmetric_pad1d_backward_native.h>
+#include <ATen/ops/symmetric_pad1d_native.h>
+#include <ATen/ops/symmetric_pad2d_backward_native.h>
+#include <ATen/ops/symmetric_pad2d_native.h>
+#include <ATen/ops/symmetric_pad3d_backward_native.h>
+#include <ATen/ops/symmetric_pad3d_native.h>
 #endif
 
 namespace at::native {
@@ -452,6 +458,29 @@ TORCH_IMPL_FUNC(reflection_pad1d_backward_out_mps)
                         "reflection_pad1d_backward_out_mps");
 }
 
+TORCH_IMPL_FUNC(symmetric_pad1d_out_mps)
+(const Tensor& input, IntArrayRef padding, const Tensor& output) {
+  mps::pad_out_template(const_cast<Tensor&>(output),
+                        input,
+                        padding,
+                        std::nullopt,
+                        MPSGraphPaddingModeSymmetric,
+                        0.0,
+                        "symmetric_pad1d_out_mps");
+}
+
+TORCH_IMPL_FUNC(symmetric_pad1d_backward_out_mps)
+(const Tensor& grad_output, const Tensor& input, IntArrayRef padding, const Tensor& grad_input) {
+  grad_input.resize_as_(input).zero_();
+  mps::pad_out_template(const_cast<Tensor&>(grad_input),
+                        input,
+                        padding,
+                        grad_output,
+                        MPSGraphPaddingModeSymmetric,
+                        0.0,
+                        "symmetric_pad1d_backward_out_mps");
+}
+
 TORCH_IMPL_FUNC(replication_pad1d_out_mps)
 (const Tensor& input, IntArrayRef padding, const Tensor& output) {
   mps::replication_pad1d_kernel_mps(input, padding, output);
@@ -483,6 +512,28 @@ Tensor& reflection_pad2d_backward_out_mps(const Tensor& grad_output,
 Tensor reflection_pad2d_backward_mps(const Tensor& grad_output, const Tensor& input, IntArrayRef padding) {
   auto grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   return mps::pad_out_template(grad_input, input, padding, grad_output, MPSGraphPaddingModeReflect, 0.0, __func__);
+}
+
+Tensor& symmetric_pad2d_out_mps(const Tensor& input, IntArrayRef padding, Tensor& output) {
+  return mps::pad_out_template(output, input, padding, std::nullopt, MPSGraphPaddingModeSymmetric, 0.0, __func__);
+}
+
+Tensor symmetric_pad2d_mps(const Tensor& input, IntArrayRef padding) {
+  Tensor output = at::empty({0}, input.options());
+  return mps::pad_out_template(output, input, padding, std::nullopt, MPSGraphPaddingModeSymmetric, 0.0, __func__);
+}
+
+Tensor& symmetric_pad2d_backward_out_mps(const Tensor& grad_output,
+                                          const Tensor& input,
+                                          IntArrayRef padding,
+                                          Tensor& grad_input) {
+  grad_input.resize_as_(input).zero_();
+  return mps::pad_out_template(grad_input, input, padding, grad_output, MPSGraphPaddingModeSymmetric, 0.0, __func__);
+}
+
+Tensor symmetric_pad2d_backward_mps(const Tensor& grad_output, const Tensor& input, IntArrayRef padding) {
+  auto grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  return mps::pad_out_template(grad_input, input, padding, grad_output, MPSGraphPaddingModeSymmetric, 0.0, __func__);
 }
 
 TORCH_IMPL_FUNC(replication_pad2d_out_mps)
@@ -531,6 +582,29 @@ TORCH_IMPL_FUNC(reflection_pad3d_backward_out_mps)
                         MPSGraphPaddingModeReflect,
                         0.0,
                         "reflection_pad3d_backward_out_mps");
+}
+
+TORCH_IMPL_FUNC(symmetric_pad3d_out_mps)
+(const Tensor& input, IntArrayRef padding, const Tensor& output) {
+  mps::pad_out_template(const_cast<Tensor&>(output),
+                        input,
+                        padding,
+                        std::nullopt,
+                        MPSGraphPaddingModeSymmetric,
+                        0.0,
+                        "symmetric_pad3d_out_mps");
+}
+
+TORCH_IMPL_FUNC(symmetric_pad3d_backward_out_mps)
+(const Tensor& grad_output, const Tensor& input, IntArrayRef padding, const Tensor& grad_input) {
+  grad_input.resize_as_(input).zero_();
+  mps::pad_out_template(const_cast<Tensor&>(grad_input),
+                        input,
+                        padding,
+                        grad_output,
+                        MPSGraphPaddingModeSymmetric,
+                        0.0,
+                        "symmetric_pad3d_backward_out_mps");
 }
 
 TORCH_IMPL_FUNC(replication_pad3d_out_mps)
