@@ -60,7 +60,7 @@ TEST(safeConvTest, UnsignedToSignedOverflowThrows) {
 }
 
 // unsafe_wrapping_convert preserves the historical signed->unsigned
-// two's-complement wrap that safe_conv rejects.
+// two's-complement wrap that safe_conv/checked_convert reject.
 TEST(safeConvTest, UnsafeWrappingConvertPreservesWrap) {
   EXPECT_EQ(unsafe_wrapping_convert<uint8_t>(int64_t{-1}, "uint8_t"), 255);
   EXPECT_EQ(unsafe_wrapping_convert<uint16_t>(int64_t{-1}, "uint16_t"), 65535);
@@ -70,6 +70,17 @@ TEST(safeConvTest, UnsafeWrappingConvertPreservesWrap) {
   constexpr int64_t tooBig = int64_t{std::numeric_limits<int32_t>::max()} + 1;
   EXPECT_THROW(
       unsafe_wrapping_convert<int32_t>(tooBig, "int32_t"), std::runtime_error);
+}
+
+// checked_convert delegates integer->integer to safe_conv (strict), and
+// range-checks floating-point sources while allowing a lossy-but-in-range cast.
+TEST(safeConvTest, CheckedConvertStrictForIntegers) {
+  EXPECT_THROW(
+      checked_convert<uint8_t>(int64_t{-1}, "uint8_t"), std::runtime_error);
+  EXPECT_EQ(checked_convert<int32_t>(int64_t{5}, "int32_t"), 5);
+  EXPECT_EQ(
+      checked_convert<int32_t>(3.9, "int32_t"), 3); // truncation is allowed
+  EXPECT_THROW(checked_convert<int32_t>(1e18, "int32_t"), std::runtime_error);
 }
 
 } // namespace

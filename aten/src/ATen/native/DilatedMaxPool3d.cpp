@@ -2,6 +2,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/Pool.h>
+#include <c10/util/safe_conv.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -30,29 +31,29 @@ void max_pool3d_with_indices_out_cpu_template(
   // #20866, #22032: Guarantee this for the official C++ API?
   TORCH_CHECK(kernel_size.size() == 1 || kernel_size.size() == 3,
     "max_pool3d: kernel_size must either be a single int, or a tuple of three ints")
-  const int kT = c10::checked_convert<int>(kernel_size[0], "int");
-  const int kH = kernel_size.size() == 1 ? kT : c10::checked_convert<int>(kernel_size[1], "int");
-  const int kW = kernel_size.size() == 1 ? kT : c10::checked_convert<int>(kernel_size[2], "int");
+  const int kT = c10::safe_conv<int>(kernel_size[0]);
+  const int kH = kernel_size.size() == 1 ? kT : c10::safe_conv<int>(kernel_size[1]);
+  const int kW = kernel_size.size() == 1 ? kT : c10::safe_conv<int>(kernel_size[2]);
 
   TORCH_CHECK(stride.empty() || stride.size() == 1 || stride.size() == 3,
     "max_pool3d: stride must either be omitted, a single int, or a tuple of three ints")
-  const int dT = stride.empty() ? kT : c10::checked_convert<int>(stride[0], "int");
+  const int dT = stride.empty() ? kT : c10::safe_conv<int>(stride[0]);
   const int dH = stride.empty() ? kH :
-                 stride.size() == 1 ? dT : c10::checked_convert<int>(stride[1], "int");
+                 stride.size() == 1 ? dT : c10::safe_conv<int>(stride[1]);
   const int dW = stride.empty() ? kW :
-                 stride.size() == 1 ? dT : c10::checked_convert<int>(stride[2], "int");
+                 stride.size() == 1 ? dT : c10::safe_conv<int>(stride[2]);
 
   TORCH_CHECK(padding.size() == 1 || padding.size() == 3,
     "max_pool3d: padding must either be a single int, or a tuple of three ints");
-  const int pT = c10::checked_convert<int>(padding[0], "int");
-  const int pH = padding.size() == 1 ? pT : c10::checked_convert<int>(padding[1], "int");
-  const int pW = padding.size() == 1 ? pT : c10::checked_convert<int>(padding[2], "int");
+  const int pT = c10::safe_conv<int>(padding[0]);
+  const int pH = padding.size() == 1 ? pT : c10::safe_conv<int>(padding[1]);
+  const int pW = padding.size() == 1 ? pT : c10::safe_conv<int>(padding[2]);
 
   TORCH_CHECK(dilation.size() == 1 || dilation.size() == 3,
     "max_pool3d: dilation must be either a single int, or a tuple of three ints");
-  const int dilationT = c10::checked_convert<int>(dilation[0], "int");
-  const int dilationH = dilation.size() == 1 ? dilationT : c10::checked_convert<int>(dilation[1], "int");
-  const int dilationW = dilation.size() == 1 ? dilationT : c10::checked_convert<int>(dilation[2], "int");
+  const int dilationT = c10::safe_conv<int>(dilation[0]);
+  const int dilationH = dilation.size() == 1 ? dilationT : c10::safe_conv<int>(dilation[1]);
+  const int dilationW = dilation.size() == 1 ? dilationT : c10::safe_conv<int>(dilation[2]);
 
   const auto memory_format = input.suggest_memory_format();
   if (memory_format == at::MemoryFormat::ChannelsLast3d) {
@@ -122,29 +123,29 @@ Tensor& max_pool3d_with_indices_backward_out_cpu_template(
   // #20866, #22032: Guarantee this for the official C++ API?
   TORCH_CHECK(kernel_size.size() == 1 || kernel_size.size() == 3,
     "max_pool3d: kernel_size must either be a single int, or a tuple of three ints")
-  const int kT = c10::checked_convert<int>(kernel_size[0], "int");
-  const int kH = kernel_size.size() == 1 ? kT : c10::checked_convert<int>(kernel_size[1], "int");
-  const int kW = kernel_size.size() == 1 ? kT : c10::checked_convert<int>(kernel_size[2], "int");
+  const int kT = c10::safe_conv<int>(kernel_size[0]);
+  const int kH = kernel_size.size() == 1 ? kT : c10::safe_conv<int>(kernel_size[1]);
+  const int kW = kernel_size.size() == 1 ? kT : c10::safe_conv<int>(kernel_size[2]);
 
   TORCH_CHECK(stride.empty() || stride.size() == 1 || stride.size() == 3,
     "max_pool3d: stride must either be omitted, a single int, or a tuple of three ints")
-  const int dT = stride.empty() ? kT : c10::checked_convert<int>(stride[0], "int");
+  const int dT = stride.empty() ? kT : c10::safe_conv<int>(stride[0]);
   const int dH = stride.empty() ? kH :
-                 stride.size() == 1 ? dT : c10::checked_convert<int>(stride[1], "int");
+                 stride.size() == 1 ? dT : c10::safe_conv<int>(stride[1]);
   const int dW = stride.empty() ? kW :
-                 stride.size() == 1 ? dT : c10::checked_convert<int>(stride[2], "int");
+                 stride.size() == 1 ? dT : c10::safe_conv<int>(stride[2]);
 
   TORCH_CHECK(padding.size() == 1 || padding.size() == 3,
     "max_pool3d: padding must either be a single int, or a tuple of three ints");
-  const int pT = c10::checked_convert<int>(padding[0], "int");
-  const int pH = padding.size() == 1 ? pT : c10::checked_convert<int>(padding[1], "int");
-  const int pW = padding.size() == 1 ? pT : c10::checked_convert<int>(padding[2], "int");
+  const int pT = c10::safe_conv<int>(padding[0]);
+  const int pH = padding.size() == 1 ? pT : c10::safe_conv<int>(padding[1]);
+  const int pW = padding.size() == 1 ? pT : c10::safe_conv<int>(padding[2]);
 
   TORCH_CHECK(dilation.size() == 1 || dilation.size() == 3,
     "max_pool3d: dilation must be either a single int, or a tuple of three ints");
-  const int dilationT = c10::checked_convert<int>(dilation[0], "int");
-  const int dilationH = dilation.size() == 1 ? dilationT : c10::checked_convert<int>(dilation[1], "int");
-  const int dilationW = dilation.size() == 1 ? dilationT : c10::checked_convert<int>(dilation[2], "int");
+  const int dilationT = c10::safe_conv<int>(dilation[0]);
+  const int dilationH = dilation.size() == 1 ? dilationT : c10::safe_conv<int>(dilation[1]);
+  const int dilationW = dilation.size() == 1 ? dilationT : c10::safe_conv<int>(dilation[2]);
 
   TORCH_CHECK(input.dtype() == gradOutput.dtype(),
     "expected dtype ", input.dtype(), " for `gradOutput` but got dtype ", gradOutput.dtype());

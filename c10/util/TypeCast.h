@@ -327,20 +327,11 @@ C10_HOST_DEVICE To convert(From f) {
 // Define separately to avoid being inlined and prevent code-size bloat
 [[noreturn]] C10_API void report_overflow(const char* name);
 
-template <typename To, typename From>
-To checked_convert(From f, const char* name) {
-  // Converting to bool can't overflow so we exclude this case from checking.
-  if (!std::is_same_v<To, bool> && overflows<To, From>(f)) {
-    report_overflow(name);
-  }
-  return convert<To, From>(f);
-}
-
 // Range-checked conversion that PERMITS signed->unsigned two's-complement
 // wraparound (via overflows() with its default strict_unsigned=false). Retained
 // only to preserve the historical behavior of the few call sites that relied on
 // the wrap. DO NOT use in new code: use c10::safe_conv (strict integer
-// narrowing, c10/util/safe_conv.h) or c10::checked_convert (general, above).
+// narrowing, c10/util/safe_conv.h) or c10::checked_convert (general, below).
 template <typename To, typename From>
 To unsafe_wrapping_convert(From f, const char* name) {
   // Converting to bool can't overflow so we exclude this case from checking.
@@ -348,6 +339,29 @@ To unsafe_wrapping_convert(From f, const char* name) {
     report_overflow(name);
   }
   return convert<To, From>(f);
+}
+
+// Range-checked narrowing conversion.
+//
+// For integer->integer this delegates to the strict c10::safe_conv, which
+// rejects ANY value not representable in To (including negative->unsigned;
+// there is no two's-complement wraparound). For floating-point/complex sources
+// it range-checks via c10::overflows and then converts (a lossy-but-in-range
+// cast such as 3.9 -> 3 is permitted). If you deliberately want modular wrap,
+// use c10::unsafe_wrapping_convert.
+template <typename To, typename From>
+To checked_convert(From f, const char* name) {
+  if constexpr (
+      std::is_integral_v<From> && !std::is_same_v<From, bool> &&
+      std::is_integral_v<To> && !std::is_same_v<To, bool>) {
+    return safe_conv<To, From>(f, name);
+  } else {
+    // Converting to bool can't overflow so we exclude this case from checking.
+    if (!std::is_same_v<To, bool> && overflows<To, From>(f)) {
+      report_overflow(name);
+    }
+    return convert<To, From>(f);
+  }
 }
 
 } // namespace c10

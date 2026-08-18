@@ -11,6 +11,7 @@
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/ReduceOps.h>
 #include <c10/util/irange.h>
+#include <c10/util/safe_conv.h>
 #include <algorithm>
 #include <bit>
 #include <numeric>
@@ -1295,12 +1296,12 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
       if (collapsed_ndim <= 2 || (collapsed_ndim == 3 && collapsed_dim == 1)) {
         const auto has_outer = collapsed_dim > 0;
         const auto has_inner = collapsed_dim < collapsed_ndim - 1;
-        const auto outer_size = has_outer ? safe_downcast<uint32_t, int64_t>(sizes[0]) : 1u;
-        const auto dim_size = safe_downcast<uint32_t, int64_t>(sizes[collapsed_dim]);
-        const auto inner_size = has_inner ? safe_downcast<uint32_t, int64_t>(sizes[collapsed_dim + 1]) : 1u;
-        const auto dim_stride = safe_downcast<uint32_t, int64_t>(strides[collapsed_dim]);
-        const auto inner_stride = has_inner ? safe_downcast<uint32_t, int64_t>(strides[collapsed_dim + 1]) : 0u;
-        const auto outer_stride = has_outer ? safe_downcast<uint32_t, int64_t>(strides[0]) : 0u;
+        const auto outer_size = has_outer ? c10::safe_conv<uint32_t, int64_t>(sizes[0]) : 1u;
+        const auto dim_size = c10::safe_conv<uint32_t, int64_t>(sizes[collapsed_dim]);
+        const auto inner_size = has_inner ? c10::safe_conv<uint32_t, int64_t>(sizes[collapsed_dim + 1]) : 1u;
+        const auto dim_stride = c10::safe_conv<uint32_t, int64_t>(strides[collapsed_dim]);
+        const auto inner_stride = has_inner ? c10::safe_conv<uint32_t, int64_t>(strides[collapsed_dim + 1]) : 0u;
+        const auto outer_stride = has_outer ? c10::safe_conv<uint32_t, int64_t>(strides[0]) : 0u;
         const auto natural_tgs = outer_size * c10::metal::ceil_div(inner_size, OUTER_TG_WIDTH);
         const auto use_small_dim = dim_size <= OUTER_SMALL_DIM_MAX_SIZE && natural_tgs >= SPLIT_MIN_TGS;
         // Only the sum family has narrow_strided kernels; value ops fall
@@ -1380,10 +1381,10 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
     const auto non_innermost = num_reduced == 1 && reduced_dim != nd - 1 && canUse32BitIndexMath(input_orig);
     if (non_innermost) {
       const auto outer_size =
-          safe_downcast<uint32_t, int64_t>(c10::multiply_integers(input_orig.sizes().slice(0, reduced_dim)));
-      const auto dim_size = safe_downcast<uint32_t, int64_t>(input_orig.size(reduced_dim));
+          c10::safe_conv<uint32_t, int64_t>(c10::multiply_integers(input_orig.sizes().slice(0, reduced_dim)));
+      const auto dim_size = c10::safe_conv<uint32_t, int64_t>(input_orig.size(reduced_dim));
       const auto inner_size =
-          safe_downcast<uint32_t, int64_t>(input_orig.numel() / (static_cast<int64_t>(outer_size) * dim_size));
+          c10::safe_conv<uint32_t, int64_t>(input_orig.numel() / (static_cast<int64_t>(outer_size) * dim_size));
       const auto natural_tgs = outer_size * c10::metal::ceil_div(inner_size, OUTER_TG_WIDTH);
       const auto use_small_dim = dim_size <= OUTER_SMALL_DIM_MAX_SIZE && natural_tgs >= SPLIT_MIN_TGS;
       // inner_size narrower than a threadgroup row: the narrow layout is the
@@ -1467,8 +1468,8 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
     }
     // The inner kernels index in 32 bits.
     if (num_reduced == 1 && reduced_dim == input_orig.dim() - 1 && canUse32BitIndexMath(input_orig)) {
-      const auto row_len = safe_downcast<uint32_t, int64_t>(input_orig.size(-1));
-      const auto num_rows = safe_downcast<uint32_t, int64_t>(input_orig.numel() / row_len);
+      const auto row_len = c10::safe_conv<uint32_t, int64_t>(input_orig.size(-1));
+      const auto num_rows = c10::safe_conv<uint32_t, int64_t>(input_orig.numel() / row_len);
       // Tensors too small to fill the GPU gain nothing from packing rows
       // into simdgroups; keep them on the inner kernel below (the pre-chunk
       // routing, whose enqueue floor measures ~10% lower there).

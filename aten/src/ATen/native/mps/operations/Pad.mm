@@ -2,6 +2,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <c10/util/safe_conv.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -355,14 +356,12 @@ static void replication_pad1d_kernel_mps(const Tensor& input_, IntArrayRef paddi
   }
   TORCH_INTERNAL_ASSERT(input.dim() == 3 && output_c.dim() == 3);
 
-  const auto nbatch = c10::checked_convert<int32_t>(input.size(0), "int32_t");
-  const auto nplane = c10::checked_convert<int32_t>(input.size(1), "int32_t");
-  const auto input_W = c10::checked_convert<int32_t>(input.size(2), "int32_t");
-  const auto output_W = c10::checked_convert<int32_t>(output_c.size(2), "int32_t");
-  const std::array<int32_t, 4> sizes_pad = {input_W,
-                                            output_W,
-                                            c10::checked_convert<int32_t>(padding[0], "int32_t"),
-                                            c10::checked_convert<int32_t>(padding[1], "int32_t")};
+  const auto nbatch = c10::safe_conv<int32_t>(input.size(0));
+  const auto nplane = c10::safe_conv<int32_t>(input.size(1));
+  const auto input_W = c10::safe_conv<int32_t>(input.size(2));
+  const auto output_W = c10::safe_conv<int32_t>(output_c.size(2));
+  const std::array<int32_t, 4> sizes_pad = {
+      input_W, output_W, c10::safe_conv<int32_t>(padding[0]), c10::safe_conv<int32_t>(padding[1])};
 
   auto pso = lib.getPipelineStateForFunc("replication_pad1d_forward_" + scalarToMetalTypeString(input));
   auto stream = getCurrentMPSStream();
@@ -399,14 +398,12 @@ static void replication_pad1d_backward_kernel_mps(const Tensor& grad_output_,
   }
   TORCH_INTERNAL_ASSERT(grad_output.dim() == 3 && grad_input_c.dim() == 3);
 
-  const auto nbatch = c10::checked_convert<int32_t>(grad_input_c.size(0), "int32_t");
-  const auto nplane = c10::checked_convert<int32_t>(grad_input_c.size(1), "int32_t");
-  const auto input_W = c10::checked_convert<int32_t>(grad_input_c.size(2), "int32_t");
-  const auto output_W = c10::checked_convert<int32_t>(grad_output.size(2), "int32_t");
-  const std::array<int32_t, 4> sizes_pad = {input_W,
-                                            output_W,
-                                            c10::checked_convert<int32_t>(padding[0], "int32_t"),
-                                            c10::checked_convert<int32_t>(padding[1], "int32_t")};
+  const auto nbatch = c10::safe_conv<int32_t>(grad_input_c.size(0));
+  const auto nplane = c10::safe_conv<int32_t>(grad_input_c.size(1));
+  const auto input_W = c10::safe_conv<int32_t>(grad_input_c.size(2));
+  const auto output_W = c10::safe_conv<int32_t>(grad_output.size(2));
+  const std::array<int32_t, 4> sizes_pad = {
+      input_W, output_W, c10::safe_conv<int32_t>(padding[0]), c10::safe_conv<int32_t>(padding[1])};
 
   auto pso = lib.getPipelineStateForFunc("replication_pad1d_backward_" + scalarToMetalTypeString(grad_input_c));
   auto stream = getCurrentMPSStream();
