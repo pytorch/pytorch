@@ -1809,10 +1809,10 @@ class TritonTemplateKernel(TritonKernel):
         block_ptr=False,
         tma_compatibility_checker: TMACompatibilityChecker | None = None,
         mask_constant_index=False,
+        allow_reduction_invariant_indexing=False,
     ):
         """
-        Override the default indexing to use our custom mask and force
-        dense indexing.
+        Override the default indexing to use our custom mask and output shape.
         """
         return super().indexing(
             index,
@@ -1824,6 +1824,7 @@ class TritonTemplateKernel(TritonKernel):
             block_ptr=block_ptr,
             tma_compatibility_checker=tma_compatibility_checker,
             mask_constant_index=mask_constant_index,
+            allow_reduction_invariant_indexing=allow_reduction_invariant_indexing,
         )
 
     def codegen_range_tree(self):
@@ -4140,6 +4141,10 @@ class AlgorithmSelectorCache(PersistentCache):
                     # Await autotuning in subproc pool
                     autotune_start_ts = time.time()
                     results = AsyncAutotuner.get_results(final_choices, inputs_key)
+                    if not any(math.isfinite(timing) for timing in results.values()):
+                        raise self.create_no_valid_choices(
+                            name, "All choices failed to benchmark for backend."
+                        )
                     autotune_wait_ts = time.time() - autotune_start_ts
                     AlgorithmSelectorCache.log_results(
                         name,
