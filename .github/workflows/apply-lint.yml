@@ -25,11 +25,12 @@ jobs:
           PR_NUM: ${{ github.event.client_payload.pr_num }}
         run: |
           HEAD_REF=$(gh pr view "$PR_NUM" --json headRefName -q .headRefName)
+          BASE_BRANCH=$(gh pr view "$PR_NUM" --json baseRefName -q .baseRefName)
+          echo "BASE_BRANCH=$BASE_BRANCH" >> "$GITHUB_ENV"
           if [[ "$HEAD_REF" =~ ^gh/[^/]+/[0-9]+/head$ ]]; then
             echo "IS_GHSTACK=true" >> "$GITHUB_ENV"
             ORIG_REF="${HEAD_REF/%head/orig}"
             echo "ORIG_REF=$ORIG_REF" >> "$GITHUB_ENV"
-            BASE_BRANCH=$(gh pr view "$PR_NUM" --json baseRefName -q .baseRefName)
             git fetch origin "$ORIG_REF" "$BASE_BRANCH"
             git checkout -b "$ORIG_REF" "origin/$ORIG_REF"
           else
@@ -59,20 +60,23 @@ jobs:
             git config --global user.name "PyTorch MergeBot"
           fi
 
+      - name: Run lintrunner
+        run: |
+          set -x
+
+          # Only run linters that produce auto-fixable patches (is_formatter = true).
+          # This step runs untrusted formatter code from the PR, so it is
+          # deliberately kept free of any credentials (e.g. GITHUB_TOKEN).
+          lintrunner -a \
+            --take "$LINTERS" \
+            -m "origin/${BASE_BRANCH}" 2>/dev/null || true
+
       - name: Apply lint patches
         env:
           GITHUB_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
           PR_NUM: ${{ github.event.client_payload.pr_num }}
         run: |
           set -x
-
-          # Determine the base branch for this PR
-          BASE_BRANCH=$(gh pr view "$PR_NUM" --json baseRefName -q .baseRefName)
-
-          # Only run linters that produce auto-fixable patches (is_formatter = true)
-          lintrunner -a \
-            --take "$LINTERS" \
-            -m "origin/${BASE_BRANCH}" 2>/dev/null || true
 
           if git diff --quiet; then
             echo "No lint changes to apply"
