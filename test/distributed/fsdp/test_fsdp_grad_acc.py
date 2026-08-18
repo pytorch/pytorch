@@ -18,6 +18,7 @@ from torch.testing._internal.common_fsdp import (
     DEVICEInitMode,
     FSDPInitMode,
     FSDPTestContinuous,
+    get_devtype,
     TransformerWithSharedParams,
 )
 from torch.testing._internal.common_utils import (
@@ -133,7 +134,7 @@ class TestGradAcc(FSDPTestContinuous):
             deterministic=True,
             add_bn=False,  # disable BN since the test uses varying batch sizes
         )
-        device = torch.device("cuda")
+        device = torch.device(get_devtype())
         optim = torch.optim.SGD(
             fsdp_model.parameters(),
             lr=0.01,

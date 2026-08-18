@@ -7,6 +7,7 @@ from contextlib import contextmanager
 import torch
 import torch.distributed as dist
 from torch.testing._internal.common_device_type import (
+    Capability,
     dtypes,
     instantiate_device_type_tests,
     onlyCUDA,
@@ -14,6 +15,7 @@ from torch.testing._internal.common_device_type import (
     ops,
     precisionOverride,
     PrivateUse1TestBase,
+    requires_capabilities,
 )
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.opinfo.core import DecorateInfo, OpInfo
@@ -299,6 +301,75 @@ with _temp_test_configs(
     instantiate_device_type_tests(
         TestSupportedOpsWithOverrides, globals(), only_for=("openreg",)
     )
+
+
+class TestCapabilityGating(TestCase):
+    """Verify that @requires_capabilities gates tests on PrivateUse1 backends."""
+
+    executed_count = 0
+    setup_count = 0
+
+    @classmethod
+    def tearDownClass(cls):
+        expected_runs = 1
+        if cls.executed_count != expected_runs:
+            raise AssertionError(
+                f"Capability gating failed! "
+                f"Expected {expected_runs} tests to run, "
+                f"but {cls.executed_count} tests executed."
+            )
+        if cls.setup_count != expected_runs:
+            raise AssertionError(
+                f"Capability preflight failed! Expected setUp to run "
+                f"{expected_runs} time, but it ran {cls.setup_count} times."
+            )
+        super().tearDownClass()
+
+    @requires_capabilities(Capability.lib.triton)
+    def test_capability_supported(self, device):
+        type(self).executed_count += 1
+        self.assertEqual(torch.device(device).type, "openreg")
+
+    @requires_capabilities(Capability.dtype.bf16)
+    def test_capability_unsupported(self, device):
+        type(self).executed_count += 1
+        self.fail("Expected skip: dtype.bf16 is unsupported on this device")
+
+    @requires_capabilities(Capability.attention.flash_attention)
+    def test_capability_missing(self, device):
+        type(self).executed_count += 1
+        self.fail("Expected skip: attention.flash_attention is not declared")
+
+    @requires_capabilities(
+        Capability.lib.triton,
+        Capability.dtype.bf16,
+        Capability.attention.flash_attention,
+    )
+    def test_capability_combined(self, device):
+        type(self).executed_count += 1
+        self.fail(
+            "Expected skip: attention.flash_attention is not declared and dtype.bf16 is not supported"
+        )
+
+
+def _openreg_test_capabilities(_cls):
+    capabilities = PrivateUse1TestBase._capabilities()
+    capabilities[Capability.lib].update({Capability.lib.triton: lambda: True})
+    capabilities[Capability.dtype] = {Capability.dtype.bf16: lambda: False}
+    return capabilities
+
+
+def _openreg_capability_test_setup(self):
+    PrivateUse1TestBase.setUp(self)
+    type(self).setup_count += 1
+
+
+instantiate_device_type_tests(TestCapabilityGating, globals(), only_for="openreg")
+_capability_test_cls = globals()["TestCapabilityGatingOPENREG"]
+_capability_test_cls._capabilities = classmethod(_openreg_test_capabilities)
+_capability_test_cls.setUp = _openreg_capability_test_setup
+_capability_test_cls.get_capabilities.cache_clear()
+del _capability_test_cls
 
 
 @unittest.skipIf(not dist.is_available(), "Distributed not available, skipping tests")
