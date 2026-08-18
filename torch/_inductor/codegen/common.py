@@ -500,7 +500,22 @@ def get_wrapper_codegen_for_device(
                     return CppWrapperCpuArrayRef
             return cpp_wrapper_codegen
         else:
-            return wrapper_codegen_obj.wrapper_codegen
+            python_wrapper_codegen = wrapper_codegen_obj.wrapper_codegen
+            # readable_wrapper is a per-compile config, so like allow_stack_allocation
+            # above it is resolved here rather than at registration. The identity guard
+            # keeps an out-of-tree python wrapper (or PythonWrapperMtia) from being
+            # silently replaced by one that knows nothing about that backend.
+            from .wrapper import PythonWrapperCodegen
+            from .wrapper_readable import readable_wrapper_requested
+
+            if (
+                python_wrapper_codegen is PythonWrapperCodegen
+                and readable_wrapper_requested()
+            ):
+                from .wrapper_readable import ReadablePythonWrapperCodegen
+
+                return ReadablePythonWrapperCodegen
+            return python_wrapper_codegen
     return None
 
 

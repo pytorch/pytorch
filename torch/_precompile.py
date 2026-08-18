@@ -1236,9 +1236,9 @@ _GENERATED_HEADER = """\
 #     exec(compile(open(path).read(), path, "exec"), ns)
 #     out = ns["forward"](model, my_input)      # same args as the traced fn
 #
-# Compile with the real path rather than exec'ing the string: a @triton.jit kernel
-# looks up its own source by filename, so a bare exec(open(...).read()) breaks any
-# artifact whose kernel has been hoisted to module level by hand.
+# Compile with the real path rather than exec'ing the string: the Triton kernels are
+# defined at module level and @triton.jit looks up its own source by filename, so a
+# bare exec(open(...).read()) cannot load this artifact.
 #
 # The runtime model must be STRUCTURALLY IDENTICAL to the one precompile traced
 # (same parameter/buffer names, order, and weight tying); only the weight VALUES
@@ -1249,9 +1249,9 @@ _GENERATED_HEADER = """\
 # example). See Note [precompile programming model] in torch/_precompile.py.
 #
 # It contains, in order:
-#   1. The composed graph module from aot_autograd.compile_to_python: the inlined
-#      Inductor kernels (JIT-compiled from the embedded source on first use -- no
-#      external cache required) plus AOTAutograd's own codegen'd prelude/epilogue
+#   1. The composed graph module from aot_autograd.compile_to_python: the Inductor
+#      kernels as module-level source (JIT-compiled on first use -- no external cache
+#      required) plus AOTAutograd's own codegen'd prelude/epilogue
 #      (tensor-subclass wrap/unwrap, input-mutation reflection, output aliasing),
 #      exposing ``call(flat_inputs) -> outputs``.
 #   2. Calling-convention metadata.
@@ -1449,9 +1449,9 @@ _EAGER_GENERATED_HEADER = """\
 #     exec(compile(open(path).read(), path, "exec"), ns)
 #     out = ns["forward"](model, my_input)      # same args as the traced fn
 #
-# Compile with the real path rather than exec'ing the string: a @triton.jit kernel
-# looks up its own source by filename, so a bare exec(open(...).read()) breaks any
-# artifact whose kernel has been hoisted to module level by hand.
+# Compile with the real path rather than exec'ing the string: the Triton kernels are
+# defined at module level and @triton.jit looks up its own source by filename, so a
+# bare exec(open(...).read()) cannot load this artifact.
 #
 # The runtime model must be structurally identical to the traced one (only weight
 # VALUES may differ), and control flow / shapes are specialized to the example inputs.
@@ -1759,7 +1759,14 @@ class PrecompiledModule:
         # pin and not a sixth stamp on purpose: a stamp is droppable by hand-edit and a
         # dropped stamp degrades to warn-and-continue, which here would silently restore
         # a memory-safety bug rather than a wrong number.
-        options: dict[str, Any] = {"size_asserts": True, "cpp.dynamic_threads": True}
+        # readable_wrapper is what makes the emitted kernels module-level code the
+        # reader can edit, instead of source strings handed to AsyncCompile. It also
+        # trims the preamble to the bindings this graph actually uses.
+        options: dict[str, Any] = {
+            "size_asserts": True,
+            "cpp.dynamic_threads": True,
+            "readable_wrapper": True,
+        }
         if capture.fake_mode is not None and hasattr(_ind_config, "scalar_asserts"):
             options["scalar_asserts"] = True
         try:
@@ -1866,8 +1873,13 @@ class PrecompiledModule:
         return buf.getvalue()
 
 
+# What ``filename`` says when the caller has no file on disk to point at, i.e. loading
+# from a code string rather than from an artifact path.
+_ANONYMOUS_FILENAME = "<precompile>"
+
+
 def _make_inlined_forward(
-    python_code: str, *, warn: bool = True, filename: str = "<precompile>"
+    python_code: str, *, warn: bool = True, filename: str = _ANONYMOUS_FILENAME
 ) -> Callable[..., object]:
     """Fallback: execute the self-contained python string (JITs kernels).
 
@@ -1891,9 +1903,17 @@ def _make_inlined_forward(
     # artifact names the file a reader can open. Under the anonymous default a hand-edit
     # that raises at call time produced a frame with no path and no source line, which
     # is the wrong diagnostic for source whose whole purpose is being edited in place.
-    # __file__ as well as __name__: a kernel hoisted to module level carries
+    # __file__ as well as __name__: a kernel is defined at module level and carries
     # filename=__file__ from its heuristics decorator, and @triton.jit resolves its own
     # source by that path, so a namespace without it cannot load such an artifact.
+    if filename == _ANONYMOUS_FILENAME and "@triton.jit" in python_code:
+        # A caller that had no file to name (precompile.load on a code string) still
+        # has to give triton one: @triton.jit reads its own source off disk and rejects
+        # a function whose module has no file. Park a copy in the inductor cache dir,
+        # which is where every kernel source already lives.
+        from torch._inductor.codecache import write
+
+        _key, filename = write(python_code, "py")
     module_ns: dict[str, object] = {
         "__name__": "_precompiled_artifact",
         "__file__": filename,
