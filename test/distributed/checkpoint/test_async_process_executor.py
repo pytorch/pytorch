@@ -15,9 +15,7 @@ from torch.distributed.checkpoint.api import CheckpointException
 from torch.distributed.checkpoint.storage import StorageWriter
 from torch.distributed.elastic.utils.distributed import get_free_port
 from torch.testing._internal.common_device_type import (
-    Capability,
     instantiate_device_type_tests,
-    requires_capabilities,
 )
 from torch.testing._internal.common_distributed import skip_if_win32
 from torch.testing._internal.common_utils import (
@@ -119,9 +117,6 @@ class TestAsyncProcessExecutor(DTensorTestBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @with_comms
-    @requires_capabilities(
-        Capability.distributed.backend,
-    )
     def test_checkpoint_save_failure_continues_serving(self, device) -> None:
         """Test that checkpoint save failure doesn't exit process, continues serving."""
 
@@ -233,9 +228,6 @@ class TestProcessGroupInitInfo(DTensorTestBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @with_comms
-    @requires_capabilities(
-        Capability.distributed.backend,
-    )
     def test_process_group_init_info_with_default_pg(self, device) -> None:
         """Test that ProcessGroupInitInfo correctly initializes."""
         with patch.dict(os.environ, {}, clear=False):
@@ -250,9 +242,6 @@ class TestProcessGroupInitInfo(DTensorTestBase):
             self.assertEqual(pg_init_info.use_prefix_store, False)
 
     @with_comms
-    @requires_capabilities(
-        Capability.distributed.backend,
-    )
     def test_process_group_init_info_with_prefix_store_env_var(self, device) -> None:
         """Test that ProcessGroupInitInfo handles DCP_USE_PREFIX_STORE environment variable."""
 
@@ -293,9 +282,6 @@ class TestProcessGroupInitInfo(DTensorTestBase):
                 pg_init_info = _ProcessGroupInitInfo()
 
     @with_comms
-    @requires_capabilities(
-        Capability.distributed.backend,
-    )
     def test_process_group_init_info_without_prefix_store_env_var(self, device) -> None:
         """Test that ProcessGroupInitInfo defaults to not using prefix store."""
 
@@ -328,9 +314,6 @@ class TestProcessGroupInitInfo(DTensorTestBase):
             self.assertFalse(pg_init_info.use_prefix_store)
 
     @with_comms
-    @requires_capabilities(
-        Capability.distributed.backend,
-    )
     def test_process_group_init_info_gc_env_vars(self, device) -> None:
         """Test that ProcessGroupInitInfo correctly reads GC-related environment variables."""
 
