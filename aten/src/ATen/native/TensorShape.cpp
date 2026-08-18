@@ -4328,6 +4328,7 @@ Tensor numpy_T(const Tensor& self) {
         "Tensor.T is deprecated on 0-D tensors. This function is the identity in these cases.");
   }
   DimVector transpose_dims;
+  transpose_dims.reserve(n);
   for (int64_t i = n - 1; i >= 0; --i) {
     transpose_dims.push_back(i);
   }
