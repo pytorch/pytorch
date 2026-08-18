@@ -161,6 +161,13 @@ class TestE2ESaveAndLoad(DTensorContinuousTestBase, VerifyStateDictMixin):
     def world_size(self) -> int:
         return NUM_DEVICES
 
+    @classmethod
+    def backend_str(cls) -> str:
+        # async_save requires a CPU backend for staging, so include cpu:gloo
+        # alongside the accelerator backend.
+        curr_backend = dist.get_default_backend_for_device(device_type)
+        return f"cpu:gloo,{device_type}:{curr_backend}"
+
     def _create_model(self, compile, model_type, state_dict_options=None):
         dummy_model = TestDummyModel().to(self.device_type)
 
