@@ -41,7 +41,15 @@ def _disable_remat_for_regional_subcompile() -> Iterator[None]:
 
 
 def _canonicalize_region_for_aot_cache(gm: torch.fx.GraphModule) -> None:
-    """Normalize generated names that do not affect regional compilation."""
+    """Normalize generated names that do not affect regional compilation.
+
+    This is safe for the AOTAutograd cache key: the key pickles the whole
+    GraphModule, including submodule contents, so regions can only share a
+    cache entry when they are byte-identical after renaming; a skipped
+    rename (name collision, dotted target) only costs a cache miss.
+    Placeholders are renamed too, unlike export's canonicalization, because
+    standalone_compile binds inputs positionally rather than by name.
+    """
     module_refs = [
         node
         for node in gm.graph.nodes
