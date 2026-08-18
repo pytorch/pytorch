@@ -4723,6 +4723,8 @@ def should_fallback_by_default(node: torch.fx.Node) -> bool:
         [
             torch.ops.aten._assert_scalar.default,
             torch.ops.aten.lift_fresh_copy.default,
+            # `x.size(dim)` returns a SymInt, which cannot be serialized as a generic
+            # fallback kernel; route it to its symbolic (no-kernel) handling.
             torch.ops.aten.sym_size.int,
             # `.item()` returns a Scalar, which cannot be serialized as a generic
             # fallback kernel; route it to its dedicated DynamicScalar lowering.
