@@ -337,10 +337,11 @@ class Capability:
     """
 
     class dtype:
-        """Data type capabilities (fp8, bf16, etc.)."""
+        """Data type capabilities (fp8, bf16, fp64, etc.)."""
 
         fp8 = "dtype.fp8"
         bf16 = "dtype.bf16"
+        fp64 = "dtype.fp64"
 
     class lib:
         """Third-party library capabilities (triton, etc.)."""
@@ -881,6 +882,7 @@ class CPUTestBase(DeviceTypeTestBase):
                 Capability.dtype: {
                     Capability.dtype.fp8: lambda: True,
                     Capability.dtype.bf16: lambda: False,
+                    Capability.dtype.fp64: lambda: True,
                 },
                 Capability.attention: {
                     Capability.attention.flash_attention: lambda: False,
@@ -937,6 +939,7 @@ class CUDATestBase(DeviceTypeTestBase):
                 Capability.dtype: {
                     Capability.dtype.fp8: lambda: PLATFORM_SUPPORTS_FP8,
                     Capability.dtype.bf16: lambda: SM80OrLater,
+                    Capability.dtype.fp64: lambda: True,
                 },
                 Capability.attention: {
                     Capability.attention.flash_attention: lambda: PLATFORM_SUPPORTS_FLASH_ATTENTION,
@@ -1064,6 +1067,7 @@ class XPUTestBase(DeviceTypeTestBase):
                 Capability.dtype: {
                     Capability.dtype.fp8: lambda: True,
                     Capability.dtype.bf16: lambda: True,
+                    Capability.dtype.fp64: lambda: torch.xpu.get_device_properties().has_fp64,
                 },
                 Capability.attention: {
                     Capability.attention.flash_attention: lambda: PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU,
@@ -1127,6 +1131,26 @@ class XPUTestBase(DeviceTypeTestBase):
 class HPUTestBase(DeviceTypeTestBase):
     device_type = "hpu"
     primary_device: ClassVar[str]
+
+    @classmethod
+    def _capabilities(cls):
+        capabilities = super()._capabilities()
+        capabilities.setdefault(Capability.dtype, {}).update(
+            {
+                Capability.dtype.fp64: lambda: False,
+            }
+        )
+        capabilities.setdefault(Capability.distributed, {}).update(
+            {
+                Capability.distributed.backend: lambda: _distributed_backend_available(
+                    cls.device_type
+                ),
+                Capability.distributed.fsdp: lambda: _distributed_backend_available(
+                    cls.device_type
+                ),
+            }
+        )
+        return capabilities
 
     @classmethod
     def get_primary_device(cls):

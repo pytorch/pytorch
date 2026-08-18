@@ -3,12 +3,17 @@
 import unittest
 from collections import defaultdict
 from contextlib import contextmanager
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import torch
 import torch.distributed as dist
 from torch.testing._internal.common_device_type import (
     Capability,
+    CPUTestBase,
+    CUDATestBase,
     dtypes,
+    HPUTestBase,
     instantiate_device_type_tests,
     onlyCUDA,
     onlyOn,
@@ -16,6 +21,7 @@ from torch.testing._internal.common_device_type import (
     precisionOverride,
     PrivateUse1TestBase,
     requires_capabilities,
+    XPUTestBase,
 )
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.opinfo.core import DecorateInfo, OpInfo
@@ -331,10 +337,10 @@ class TestCapabilityGating(TestCase):
         type(self).executed_count += 1
         self.assertEqual(torch.device(device).type, "openreg")
 
-    @requires_capabilities(Capability.dtype.bf16)
+    @requires_capabilities(Capability.dtype.fp64)
     def test_capability_unsupported(self, device):
         type(self).executed_count += 1
-        self.fail("Expected skip: dtype.bf16 is unsupported on this device")
+        self.fail("Expected skip: dtype.fp64 is unsupported on this device")
 
     def test_capability_missing(self, device):
         """@requires_capabilities raises AssertionError for undeclared capabilities."""
@@ -373,7 +379,10 @@ class TestCapabilityGating(TestCase):
 def _openreg_test_capabilities(_cls):
     capabilities = PrivateUse1TestBase._capabilities()
     capabilities[Capability.lib].update({Capability.lib.triton: lambda: True})
-    capabilities[Capability.dtype] = {Capability.dtype.bf16: lambda: False}
+    capabilities[Capability.dtype] = {
+        Capability.dtype.bf16: lambda: False,
+        Capability.dtype.fp64: lambda: False,
+    }
     return capabilities
 
 
@@ -387,6 +396,49 @@ _capability_test_cls = globals()["TestCapabilityGatingOPENREG"]
 _capability_test_cls._capabilities = classmethod(_openreg_test_capabilities)
 _capability_test_cls.setUp = _openreg_capability_test_setup
 del _capability_test_cls
+
+
+class TestFP64CapabilityDeclarations(TestCase):
+    def test_static_fp64_capabilities(self):
+        for test_base, expected in (
+            (CPUTestBase, True),
+            (CUDATestBase, True),
+            (HPUTestBase, False),
+        ):
+            predicate = test_base._capabilities()[Capability.dtype][
+                Capability.dtype.fp64
+            ]
+            self.assertEqual(predicate(), expected)
+
+    def test_hpu_distributed_capabilities_follow_backend_availability(self):
+        nested_capabilities = HPUTestBase._capabilities()
+        self.assertEqual(
+            set(nested_capabilities[Capability.distributed]),
+            {
+                Capability.distributed.backend,
+                Capability.distributed.fsdp,
+            },
+        )
+
+        for expected in (True, False):
+            with patch(
+                "torch.testing._internal.common_device_type._distributed_backend_available",
+                return_value=expected,
+            ) as backend_available:
+                capabilities = HPUTestBase.get_capabilities()
+                self.assertEqual(capabilities[Capability.distributed.backend], expected)
+                self.assertEqual(capabilities[Capability.distributed.fsdp], expected)
+                self.assertEqual(backend_available.call_count, 2)
+                backend_available.assert_called_with("hpu")
+
+    def test_xpu_fp64_capability_tracks_device_properties(self):
+        predicate = XPUTestBase._capabilities()[Capability.dtype][Capability.dtype.fp64]
+        for expected in (True, False):
+            properties = SimpleNamespace(has_fp64=expected)
+            with patch.object(
+                torch.xpu, "get_device_properties", return_value=properties
+            ):
+                self.assertEqual(predicate(), expected)
 
 
 @unittest.skipIf(not dist.is_available(), "Distributed not available, skipping tests")
