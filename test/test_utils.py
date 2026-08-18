@@ -674,14 +674,16 @@ class TestCollectEnv(TestCase):
         info_output = pretty_str(env_info)
         self.assertTrue(info_output.count("\n") >= 17)
 
+        # Formatting-only check: inject placeholder values so this assertion
+        # does not depend on a ROCm build or specific SDK/HIP numbers.
         rocm_info = pretty_str(
             env_info._replace(
-                rocm_compiled_version="10.1.0",
-                hip_compiled_version="7.15.26306",
+                rocm_compiled_version="sdk-version",
+                hip_compiled_version="hip-version",
             )
         )
-        self.assertIn("ROCm SDK used to build PyTorch: 10.1.0", rocm_info)
-        self.assertIn("HIP used to build PyTorch: 7.15.26306", rocm_info)
+        self.assertIn("ROCm SDK used to build PyTorch: sdk-version", rocm_info)
+        self.assertIn("HIP used to build PyTorch: hip-version", rocm_info)
 
 
 class TestHipify(TestCase):
