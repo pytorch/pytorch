@@ -109,6 +109,9 @@ from torch.distributions.utils import (
 from torch.nn.functional import softmax
 from torch.testing._internal.common_device_type import (
     dtypes,
+    dtypesIfCUDA,
+    dtypesIfMPS,
+    dtypesIfXPU,
     expectedFailureMPS,
     instantiate_device_type_tests,
     onlyAccelerator,
@@ -4781,8 +4784,10 @@ class TestDistributionsDevice(DistributionsTestCase):
             )
             self.assertEqual(actual_log_prob[i], expected_log_prob, atol=1e-3, rtol=0)
 
-    @onlyAccelerator
     @dtypes(torch.float, torch.double)
+    @dtypesIfMPS(torch.float)
+    @dtypesIfCUDA(torch.double)
+    @dtypesIfXPU(torch.double)
     @skipMPS
     def test_beta_underflow(self, dtype, device):
         # For low values of (alpha, beta), the gamma samples can underflow
