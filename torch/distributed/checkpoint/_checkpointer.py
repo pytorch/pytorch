@@ -43,7 +43,7 @@ class _Checkpointer:
         """Initializes the Checkpointer instance.
 
         Args:
-            storage_writer: Instance of StorageWrite use to perform writes.
+            storage_writer: Instance of StorageWrite used to perform writes.
             storage_reader: StorageReader used to load data from.
             process_group: ProcessGroup to be used for cross-rank synchronization.
             coordinator_rank: Rank to use to coordinate the checkpoint. rank0 is used by default.

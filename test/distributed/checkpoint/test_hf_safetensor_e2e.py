@@ -253,14 +253,14 @@ class TestSingleRankSaveLoad(TestCase):
             self.assertEqual(
                 original.shape,
                 loaded.shape,
-                f"Shape mismatch for {tensor_name}: {original.shape} vs {loaded.shape}",
+                lambda msg: f"{msg}\nShape mismatch for {tensor_name}: {original.shape} vs {loaded.shape}",
             )
 
             # Verify dtypes match
             self.assertEqual(
                 original.dtype,
                 loaded.dtype,
-                f"Dtype mismatch for {tensor_name}: {original.dtype} vs {loaded.dtype}",
+                lambda msg: f"{msg}\nDtype mismatch for {tensor_name}: {original.dtype} vs {loaded.dtype}",
             )
 
             # Verify dequantized values match original values

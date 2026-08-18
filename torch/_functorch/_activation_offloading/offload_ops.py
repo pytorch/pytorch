@@ -38,6 +38,81 @@ def _get_or_create_transfer_stream(device: torch.device) -> torch.Stream:
     return _transfer_streams[device]
 
 
+# --- Pinned memory pool (avoids per-offload cudaHostAlloc overhead) ---
+# Keyed by (numel, dtype) to prevent cross-dtype reuse.
+# Not keyed by device: pinned CPU memory is host-side and accessible from
+# any GPU. Cross-device reuse is safe because wait_tensor synchronizes the
+# transfer (via wait_event) before _pool_free returns the buffer — the
+# buffer is never in-flight when reused.
+_pinned_pool: dict[tuple[int, torch.dtype], list[torch.Tensor]] = {}
+_pool_enabled: bool = False
+_pool_managed_ptrs: set[int] = set()
+
+
+def _maybe_pool_alloc(numel: int, dtype: torch.dtype) -> torch.Tensor:
+    """Get a pinned CPU buffer from the pool (if enabled), or allocate fresh."""
+    if _pool_enabled:
+        key = (numel, dtype)
+        bucket = _pinned_pool.get(key)
+        if bucket:
+            buf = bucket.pop()
+            _pool_managed_ptrs.add(buf.data_ptr())
+            return buf
+        buf = torch.empty(numel, dtype=dtype, device="cpu", pin_memory=True)
+        _pool_managed_ptrs.add(buf.data_ptr())
+        return buf
+    return torch.empty(numel, dtype=dtype, device="cpu", pin_memory=True)
+
+
+def _pool_free(buf: torch.Tensor) -> None:
+    """Return a pinned buffer to the pool, or free its storage if pool disabled."""
+    ptr = buf.data_ptr()
+    if ptr in _pool_managed_ptrs:
+        key = (buf.nelement(), buf.dtype)
+        _pinned_pool.setdefault(key, []).append(buf)
+    else:
+        storage = buf.untyped_storage()
+        if storage.size() > 0:
+            storage.resize_(0)
+
+
+def _pool_clear() -> None:
+    """Free all cached pinned buffers."""
+    _pinned_pool.clear()
+    _pool_managed_ptrs.clear()
+
+
+import contextlib
+
+
+@contextlib.contextmanager
+def pinned_memory_pool(enabled: bool = True):
+    """Context manager that controls pinned memory pooling for offload ops.
+
+    Without this context manager, ``ao.offload`` allocates a fresh pinned
+    buffer every call and ``ao.wait_tensor`` does not cache freed buffers.
+    Inside the context with ``enabled=True``, buffers are reused across
+    calls, avoiding the ~3 ms per-tensor ``cudaHostAlloc`` overhead::
+
+        with pinned_memory_pool():
+            for step in range(num_steps):
+                train_step()  # ao.offload/reload reuse pooled buffers
+        # pinned buffers freed here
+
+    Nestable: inner contexts save and restore the outer state.
+    Pass ``enabled=False`` to temporarily disable pooling.
+    """
+    global _pool_enabled
+    saved = _pool_enabled
+    _pool_enabled = enabled
+    try:
+        yield
+    finally:
+        if not saved:
+            _pool_clear()
+        _pool_enabled = saved
+
+
 # --- Wait registry: maps data_ptr() -> (completion_event, device) ---
 # Created by ao.offload / ao.reload, consumed (popped) by ao.wait_tensor.
 # Not thread-safe — graph execution is single-threaded Python.
@@ -85,7 +160,7 @@ def offload(tensor: torch.Tensor) -> torch.Tensor:
     transfer_stream.wait_stream(current_stream)
 
     torch.accelerator.set_stream(transfer_stream)
-    result = torch.empty_like(tensor, device="cpu", pin_memory=True)
+    result = _maybe_pool_alloc(tensor.nelement(), tensor.dtype).view(tensor.shape)
     completion_event = _register_wait(result, device)
     result.copy_(tensor, non_blocking=True)
     transfer_stream.record_event(completion_event)
@@ -96,25 +171,32 @@ def offload(tensor: torch.Tensor) -> torch.Tensor:
 
 @offload.register_fake
 def _(tensor: torch.Tensor) -> torch.Tensor:
-    return torch.empty_like(tensor, device="cpu")
+    return torch.empty(tensor.shape, dtype=tensor.dtype, device="cpu")
 
 
 @custom_op("ao::reload", mutates_args=())
 def reload(
     tensor: torch.Tensor,
     device: torch.device,
+    original_size: list[int] | None = None,
+    original_stride: list[int] | None = None,
 ) -> torch.Tensor:
     """Async reload a CPU tensor to GPU on the dedicated transfer stream.
 
     The GPU tensor is allocated on the compute stream to avoid cross-stream
     allocator ownership issues. The H2D copy runs on the transfer stream.
     The completion event is keyed by the output tensor's data_ptr.
+
+    ``original_size`` and ``original_stride`` restore the GPU tensor's
+    original layout (which may be non-contiguous, e.g. from transpose).
+    When None, the tensor's own size/stride are used.
     """
+    size = original_size if original_size is not None else list(tensor.shape)
+    stride = original_stride if original_stride is not None else list(tensor.stride())
     transfer_stream = _get_or_create_transfer_stream(device)
     current_stream = torch.accelerator.current_stream(device)
 
-    # Allocate on compute stream so the allocator tracks ownership correctly
-    result = torch.empty_like(tensor, device=device)
+    result = torch.empty_strided(size, stride, dtype=tensor.dtype, device=device)
     completion_event = _register_wait(result, device)
 
     transfer_stream.wait_stream(current_stream)
@@ -131,8 +213,12 @@ def reload(
 def _(
     tensor: torch.Tensor,
     device: torch.device,
+    original_size: list[int] | None = None,
+    original_stride: list[int] | None = None,
 ) -> torch.Tensor:
-    return torch.empty_like(tensor, device=device)
+    size = original_size if original_size is not None else list(tensor.shape)
+    stride = original_stride if original_stride is not None else list(tensor.stride())
+    return torch.empty_strided(size, stride, dtype=tensor.dtype, device=device)
 
 
 # ao::wait_tensor is defined via torch.library with an aliasing schema so the
@@ -179,9 +265,13 @@ def _ao_wait_tensor(
 
     current_stream.wait_event(completion_event)
     if keepalive is not None:
-        storage = keepalive.untyped_storage()
-        if storage.size() > 0:
-            storage.resize_(0)
+        if keepalive.is_pinned():
+            # Return CPU pinned buffer to pool for reuse
+            _pool_free(keepalive.view(-1))
+        else:
+            storage = keepalive.untyped_storage()
+            if storage.size() > 0:
+                storage.resize_(0)
     return tensor
 
 

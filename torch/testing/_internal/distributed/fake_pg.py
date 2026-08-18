@@ -1,14 +1,14 @@
 # mypy: allow-untyped-defs
 
 import torch.distributed as dist
-from torch._C._distributed_c10d import FakeProcessGroup
+from torch._C._distributed_c10d import FakeProcessGroup, FakeStore
 
 
-class FakeStore(dist.Store):
-    """
-    A fake store is a fake Key-Value store simply for initialization usage
-    the of fake process group, one can either use FakeStore or HashStore.
-    """
+# FakeStore is a no-op Key-Value store (implemented in C++) for initialization
+# of the fake process group; one can either use FakeStore or HashStore. It used
+# to be a Python class defined here, so it is re-exported to keep
+# `from ...fake_pg import FakeStore` working.
+__all__ = ["FakeProcessGroup", "FakeStore"]
 
 
 def _create_fake_pg(common_opts, backend_opts):

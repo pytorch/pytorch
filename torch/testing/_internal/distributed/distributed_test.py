@@ -168,7 +168,11 @@ PROFILING_SUPPORTED_BACKENDS = [
     dist.Backend.UCC,
 ]
 
-# Allowlist of distributed backends where profiling is supported with use_cuda=True
+# Allowlist of distributed backends where profiling collectives with a CUDA
+# device is supported. This filters nothing today. The one branch that consults
+# it is reachable only from the three CUDA all_reduce tests, and all three skip
+# unless the backend is Gloo or NCCL, so the MPI and UCC entries below are
+# unreachable and the membership test always passes.
 CUDA_PROFILING_SUPPORTED_BACKENDS = [
     dist.Backend.GLOO,
     dist.Backend.MPI,
@@ -2095,7 +2099,7 @@ class DistributedTest:
 
         @skip_but_pass_in_sandcastle_if(
             BACKEND != "gloo" and BACKEND != "nccl",
-            "Only Gloo and Nccl backend supports CUDA allReduce",
+            "Only Gloo and Nccl backends support CUDA allReduce",
         )
         @skip_if_no_gpu
         def test_broadcast_cuda(self):
@@ -2605,7 +2609,7 @@ class DistributedTest:
                 op_calls.append(secondary_op_call)
 
             autograd_profiler_ctx = torch.autograd.profiler.profile(
-                use_cuda=profile_cuda, record_shapes=True
+                use_device="cuda" if profile_cuda else None, record_shapes=True
             )
 
             # TODO: move this test to use torch.profiler once kineto issues are
@@ -2677,7 +2681,8 @@ class DistributedTest:
                     async_op=async_op,
                     tensor_shapes=tensor_shapes,
                 )
-                # Currently, only Gloo backend has profiling tested with CUDA enabled.
+                # Gloo and NCCL are the only backends that reach here; every other
+                # backend skips the enclosing tests.
                 # Only run cuda profiling test for one rank to speed up since
                 # running with different src_rank does not affect the correctness.
                 if (
@@ -2976,13 +2981,13 @@ class DistributedTest:
                 self.assertEqual(tensors[0], outputs[0])
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND != "gloo", "Only Gloo backend support sparse all reduce"
+            BACKEND != "gloo", "Only Gloo backend supports sparse all reduce"
         )
         def test_sparse_all_reduce_sum(self):
             self._test_sparse_all_reduce_sum(lambda t: t)
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND != "gloo", "Only Gloo backend support sparse all reduce"
+            BACKEND != "gloo", "Only Gloo backend supports sparse all reduce"
         )
         @skip_if_no_gpu
         def test_sparse_all_reduce_sum_cuda(self):
@@ -4136,7 +4141,7 @@ class DistributedTest:
 
         @skip_if_no_gpu
         @skip_but_pass_in_sandcastle_if(
-            BACKEND == "mpi", "MPI doesn't supports GPU barrier"
+            BACKEND == "mpi", "MPI doesn't support GPU barrier"
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND == "ucc" and IS_SANDCASTLE, "Skipped internally"
@@ -4149,7 +4154,7 @@ class DistributedTest:
         @skip_if_small_worldsize
         @skip_if_no_gpu
         @skip_but_pass_in_sandcastle_if(
-            BACKEND == "mpi", "MPI doesn't supports GPU barrier"
+            BACKEND == "mpi", "MPI doesn't support GPU barrier"
         )
         def test_barrier_group_cuda(self):
             group, group_id, rank = self._init_group_test()
@@ -4159,7 +4164,7 @@ class DistributedTest:
         @skip_if_small_worldsize
         @skip_if_no_gpu
         @skip_but_pass_in_sandcastle_if(
-            BACKEND == "mpi", "MPI doesn't supports GPU barrier"
+            BACKEND == "mpi", "MPI doesn't support GPU barrier"
         )
         def test_barrier_full_group_cuda(self):
             group, group_id, rank = self._init_full_group_test()
@@ -6216,7 +6221,7 @@ class DistributedTest:
                 self._model_step_with_zero_grad(model_DDP)
 
                 # Verify DDP logging data is sampled as expected
-                # If it has ran more than 10 iterations and this is
+                # If it has run more than 10 iterations and this is
                 # the sampled iteration for measuring run time stats,
                 # the run time stats for this idx-th iteration will not
                 # be zeros.
@@ -6546,7 +6551,7 @@ class DistributedTest:
         @skipIfNoTorchVision
         def test_SyncBatchNorm_process_group(self):
             # When adopting `convert_sync_batchnorm` to convert a `nn.modules`,
-            # it need to recursively pass the `process_group` in the module when the `SyncBatchNorm`
+            # it needs to recursively pass the `process_group` in the module when the `SyncBatchNorm`
             # is nested in a sub-module or sub-sub-module (e.g. resnet50 in torchvision.models).
 
             process_ids = 0
@@ -7706,7 +7711,7 @@ class DistributedTest:
 
             # Single object test with device specified. Backend="gloo", device=current_device+1
             # The test is gated by the fact GPU count is the same as world size to avoid the case
-            # when backend is gloo but there is no multiple GPU devices.
+            # when backend is gloo but there are no multiple GPU devices.
             if backend != "nccl" and torch.cuda.device_count() == int(self.world_size):
                 single_obj_list = [objects[0]]
                 if self.rank != src_rank:

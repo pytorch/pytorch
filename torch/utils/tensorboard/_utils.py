@@ -42,7 +42,7 @@ def _prepare_video(V):
     """
     Convert a 5D tensor into 4D tensor.
 
-    Convesrion is done from [batchsize, time(frame), channel(color), height, width]  (5D tensor)
+    Conversion is done from [batchsize, time(frame), channel(color), height, width]  (5D tensor)
     to [time(frame), new_width, new_height, channel] (4D tensor).
 
     A batch of images are spread to a grid, which forms a frame.
