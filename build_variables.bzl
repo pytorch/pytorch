@@ -1347,6 +1347,7 @@ aten_native_source_codegen_list = [
     "aten/src/ATen/native/cpu/int4mm_kernel.cpp",
     "aten/src/ATen/native/cpu/int8mm_kernel.cpp",
     "aten/src/ATen/native/cpu/layer_norm_kernel.cpp",
+    "aten/src/ATen/native/cpu/mxfp_mm_kernel.cpp",
     "aten/src/ATen/native/cpu/AmpGradScalerKernels.cpp",
     "aten/src/ATen/native/cpu/scaled_modified_bessel_k0.cpp",
     "aten/src/ATen/native/cpu/scaled_modified_bessel_k1.cpp",
