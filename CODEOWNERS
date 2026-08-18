@@ -117,6 +117,7 @@
 # /aten/src/ATen/native/TriangularOpsUtils.h
 /test/test_linalg.py @lezcano @nikitaved
 # /test/test_matmul_cuda.py
+# /test/test_scaled_matmul_cpu.py
 /torch/linalg/ @lezcano @nikitaved
 # /aten/src/ATen/native/Distance.cpp
 # /aten/src/ATen/native/Distance.h
