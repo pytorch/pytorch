@@ -733,8 +733,15 @@ def randint(
 
         With ``q = 2 ** nbits // (high - low)``, the most frequent value occurs
         ``1 + 1 / q`` times as often as the least frequent, so the worst case
-        grows with the range. Exact powers of two are unbiased, so the figures
-        below bound every range up to the listed size, for a 32-bit dtype:
+        grows with the range::
+
+            q = 2**nbits // (high - low)
+            bias = 0.0 if 2**nbits % (high - low) == 0 else 1.0 / q
+
+        Away from the exact cases this is close to ``(high - low) / 2 ** nbits``.
+        It is a step function of the range, changing only where ``q`` does.
+        Exact powers of two are unbiased, so the figures below bound every range
+        up to the listed size, for a 32-bit dtype:
 
         ==============  ==================
         Range up to     Max relative bias
