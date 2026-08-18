@@ -1791,8 +1791,9 @@ class GraphModule(torch.nn.Module):
         opt_fn = torch.compile(fn, backend="eager")
         self.assertEqual(fn(inp), opt_fn(inp))
 
-    def test_store_attr_graph_break_key_error(self):
-        # STORE_ATTR on dummy should result in graph break
+    def test_store_attr_on_function(self):
+        # setattr on a function object is traced as a generic attribute
+        # mutation and replayed at runtime -- no graph break.
         def dummy():
             pass
 
@@ -1803,9 +1804,12 @@ class GraphModule(torch.nn.Module):
             return x + 4
 
         inp = torch.ones(3)
-        opt_fn = torch.compile(fn, backend="eager")
-        self.assertEqual(fn(inp), opt_fn(inp))
-        self.assertGreater(len(counters["graph_break"]), 0)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        # Check the compiled run applied the mutation before the eager run
+        # below overwrites dummy.attr1.
+        compiled_res = opt_fn(inp)
+        self.assertEqual(dummy.attr1, inp + 2)
+        self.assertEqual(fn(inp), compiled_res)
 
     @parametrize("gb", (True, False))
     def test_functorch_low_level(self, gb):
@@ -2067,6 +2071,17 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(y, retraced_out)
         retraced_graph = normalize_gm(eager.graphs[0].print_readable(False))
         self.assertEqual(first_graph, retraced_graph)
+
+    def test_context_wrapping_variable_rejects_dict_target_values(self):
+        # target_values must be None or a Sequence; a dict silently iterates
+        # only its keys, which is the bug pattern we want to catch early.
+        from torch._dynamo.variables.ctx_manager import ContextWrappingVariable
+
+        with self.assertRaisesRegex(
+            TypeError,
+            "ContextWrappingVariable.target_values must be None or a Sequence",
+        ):
+            ContextWrappingVariable(target_values={"key": "val"})
 
 
 class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):

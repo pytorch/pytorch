@@ -1614,6 +1614,84 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         result = fn(t)
         self.assertEqual(result, ref_result)
 
+    @make_dynamo_test
+    def test_exception_custom_attribute(self):
+        e = RuntimeError("boom")
+        e.foo = 42
+        assert e.foo == 42  # noqa: S101
+
+    @make_dynamo_test
+    def test_exception_set_args_from_iterable(self):
+        e = RuntimeError("boom")
+        e.args = [1, 2, 3]
+        assert e.args == (1, 2, 3)  # noqa: S101
+
+    @make_dynamo_test
+    def test_exception_set_args_not_iterable(self):
+        e = RuntimeError("boom")
+        try:
+            e.args = 2
+        except TypeError as exc:
+            assert "object is not iterable" in str(exc)  # noqa: S101
+        else:
+            raise AssertionError
+
+    @make_dynamo_test
+    def test_exception_setstate_dict(self):
+        e = RuntimeError("boom")
+        e.__setstate__({"foo": 7})
+        assert e.foo == 7  # noqa: S101
+
+    @make_dynamo_test
+    def test_exception_setstate_none_noop(self):
+        e = RuntimeError("boom")
+        assert e.__setstate__(None) is None  # noqa: S101
+
+    @make_dynamo_test
+    def test_exception_setstate_not_dict(self):
+        e = RuntimeError("boom")
+        try:
+            e.__setstate__(2)
+        except TypeError as exc:
+            assert "state is not a dictionary" in str(exc)  # noqa: S101
+        else:
+            raise AssertionError
+
+    def test_exception_custom_attribute_side_effect_replayed(self):
+        # The exception escapes the compiled region, so the custom attributes
+        # set during tracing must be replayed onto the real object handed back
+        # to eager (exercises the side-effects codegen, not just tracing).
+        def fn(x):
+            e = RuntimeError("boom")
+            e.foo = 42
+            e.__setstate__({"bar": 7})
+            return e, x + 1
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        e, y = opt_fn(x)
+        self.assertIsInstance(e, RuntimeError)
+        self.assertEqual(e.foo, 42)
+        self.assertEqual(e.bar, 7)
+        self.assertEqual(y, x + 1)
+
+    def test_exception_setstate_non_string_key_diverges_from_eager(self):
+        # Eager's BaseException.__setattr__ requires string names, so
+        # __setstate__ with a non-string key raises TypeError. Dynamo currently
+        # stores non-string constant keys in the side-effect dict without error
+        # -- a known divergence from eager, to be fixed alongside tp_setattro.
+        def fn(x):
+            e = RuntimeError("boom")
+            e.__setstate__({1: 2})
+            return x + 1
+
+        x = torch.randn(4)
+        with self.assertRaisesRegex(TypeError, "attribute name must be string"):
+            fn(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        opt_fn(x)  # diverges: Dynamo does not raise
+
 
 instantiate_parametrized_tests(ExceptionTests)
 
