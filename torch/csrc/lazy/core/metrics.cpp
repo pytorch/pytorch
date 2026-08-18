@@ -324,7 +324,7 @@ std::string MetricFnValue(double value) {
   std::stringstream ss;
   ss.precision(2);
   ss << std::fixed << value;
-  return ss.str();
+  return std::move(ss).str();
 }
 
 std::string MetricFnBytes(double value) {
@@ -337,7 +337,7 @@ std::string MetricFnBytes(double value) {
   std::stringstream ss;
   ss.precision(2);
   ss << std::fixed << value << kSizeSuffixes[sfix];
-  return ss.str();
+  return std::move(ss).str();
 }
 
 std::string MetricFnTime(double value) {
@@ -385,7 +385,7 @@ std::string CreateMetricReport() {
 
   // Append the backend metrics report
   ss << getBackend()->CreateMetricReport();
-  return ss.str();
+  return std::move(ss).str();
 }
 
 std::string CreateMetricReport(
@@ -397,7 +397,7 @@ std::string CreateMetricReport(
       metric_names.begin(), metric_names.end());
   arena->ForEachMetric(
       [&ss, &metric_name_set](const std::string& name, MetricData* data) {
-        if (metric_name_set.find(name) != metric_name_set.end()) {
+        if (metric_name_set.contains(name)) {
           EmitMetricInfo(name, data, &ss);
         }
       });
@@ -405,7 +405,7 @@ std::string CreateMetricReport(
       counter_names.begin(), counter_names.end());
   arena->ForEachCounter(
       [&ss, &counter_name_set](const std::string& name, CounterData* data) {
-        if (counter_name_set.find(name) != counter_name_set.end()) {
+        if (counter_name_set.contains(name)) {
           EmitCounterInfo(name, data, &ss);
         }
       });
@@ -418,7 +418,7 @@ std::string CreateMetricReport(
       EmitCounterInfo(name, data, &ss);
     }
   });
-  return ss.str();
+  return std::move(ss).str();
 }
 
 std::vector<std::string> GetMetricNames() {

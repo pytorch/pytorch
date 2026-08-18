@@ -366,7 +366,7 @@ struct AutogradZeroSpecializer {
           // its input may have undefinedness info
           // otherwise it should be Unknown
           if (!n->inputs().empty()) {
-            state_[n->output()] = !state_.count(n->input())
+            state_[n->output()] = !state_.contains(n->input())
                 ? State::Unknown
                 : state_[n->output()] = state_[n->input()];
           }
@@ -444,12 +444,12 @@ struct AutogradZeroSpecializer {
     for (auto it = b->nodes().begin(); it != b->nodes().end(); ++it) {
       Node* n = *it;
       if (n->kind() == aten::_grad_sum_to_size) {
-        bool profiled_none_flag = profiled_none_.count(n->input(1));
+        bool profiled_none_flag = profiled_none_.contains(n->input(1));
         const Node* node = n->input(1)->node();
         // propagate profiled none through other profile_ivalue nodes;
         while (!profiled_none_flag && node->kind() == prim::profile_ivalue) {
           profiled_none_flag =
-              profiled_none_flag || profiled_none_.count(node->input(0));
+              profiled_none_flag || profiled_none_.contains(node->input(0));
           node = node->input(0)->node();
         }
         if (n->input(1)->mustBeNone() || profiled_none_flag) {

@@ -818,6 +818,7 @@ class PallasKernelOverrides(OpOverrides):
     def load_seed(name: str, offset: str) -> str:
         """Load the random seed value from a buffer."""
         # Load the seed from the buffer and add offset for uniqueness
+        # pyrefly: ignore[bad-argument-type]
         seed_offset = V.kernel.args.seed_offset("load_seed_offset", offset)
         return f"({V.kernel.args.input(name)}[0] + {seed_offset})"
 
@@ -2393,9 +2394,10 @@ class PallasKernel(SIMDKernel):
                     # Fused nodes may re-visit the same indirect load (e.g.
                     # a reduction + pointwise over the same embedding).
                     # Allow that, but reject truly different indirect accesses.
-                    assert indirect == self.indirect_access, (
-                        "only one indirect access per kernel supported"
-                    )
+                    if indirect != self.indirect_access:
+                        raise AssertionError(
+                            "only one indirect access per kernel supported"
+                        )
                 self.indirect_access = indirect
                 return f"{buf}[0]"
 
@@ -3300,7 +3302,8 @@ class PallasKernel(SIMDKernel):
 
         The reduction happens over the loaded block of data.
         """
-        assert self.inside_reduction
+        if not self.inside_reduction:
+            raise AssertionError("expected to be inside a reduction")
 
         # Handle welford_reduce using the fallback (computes via sum reductions)
         if reduction_type == "welford_reduce":
@@ -3912,7 +3915,8 @@ class PallasKernel(SIMDKernel):
         kernel_body: IndentedBuffer,
     ) -> None:
         """Emit kernel, JIT wrapper, and main entry for scalar prefetch."""
-        assert self.indirect_access is not None
+        if self.indirect_access is None:
+            raise AssertionError("expected indirect_access to be set")
         indirect = self.indirect_access
         code = ctx.code
 

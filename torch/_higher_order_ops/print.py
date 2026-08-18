@@ -2,8 +2,8 @@ import builtins
 
 import torch
 import torch.utils._pytree as pytree
+from torch._higher_order_ops.utils import register_fake
 from torch._ops import HigherOrderOperator
-from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
 
 
@@ -85,9 +85,9 @@ def print_proxy_torch_dispatch_mode(
     )
 
 
-@print.py_impl(FakeTensorMode)
+@register_fake(print, skip_cache=True)
 # pyre-ignore
-def print_fake_tensor_mode(mode, format_str: str, *args: object, **kwargs: object):
+def print_fake_tensor_mode(format_str: str, *args: object, **kwargs: object):
     return None
 
 

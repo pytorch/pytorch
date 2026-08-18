@@ -96,7 +96,7 @@ if __name__ == "__main__":
             def payload():
                 x = None
                 with torch.autograd.profiler.profile(
-                    use_cuda=args.with_cuda,
+                    use_device="cuda" if args.with_cuda else None,
                     with_stack=args.with_stack,
                     use_kineto=args.use_kineto,
                     use_cpu=not args.cuda_only,

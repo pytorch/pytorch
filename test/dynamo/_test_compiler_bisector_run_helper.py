@@ -48,7 +48,7 @@ def vq(x):
 
 def test_fn():
     with patch_exp_decomp():
-        vq_compiled = torch.compile(vq)
+        vq_compiled = torch.compile(vq)  # noqa: UNSPECIFIED_BACKEND
         x = torch.randn(4, 400, 256, device=GPU_TYPE)
         out_compiled = vq_compiled(x)
 
