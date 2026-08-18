@@ -2,6 +2,7 @@
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/util/Logging.h>
 #include <c10/util/UniqueVoidPtr.h>
 #include <c10/util/flat_hash_map.h>
 
@@ -355,6 +356,33 @@ void mallocAsync(
     err = cudaErrorMemoryAllocation;
   } else {
     err = cudaMallocAsync(devPtr, size, stream);
+    if (err == cudaErrorMemoryAllocation) {
+      // Before declaring OOM, reclaim freed-but-cached pool backing and retry
+      // once. PyTorch sets the pool's releaseThreshold to UINT64_MAX, so freed
+      // blocks stay cached instead of returning to the OS; a true peak-live OOM
+      // has nothing to reclaim and falls through to the error below.
+      (void)cudaGetLastError(); // clear the OOM before retrying
+      cudaMemPool_t mempool = nullptr;
+      if (cudaDeviceGetDefaultMemPool(&mempool, device) == cudaSuccess) {
+        // Sync first: cudaMemPoolTrimTo only releases backing whose frees have
+        // completed. Use the raw API rather than c10::cuda::stream_synchronize
+        // to avoid taking the GIL while holding the allocator lock. A sync
+        // failure is a device fault, not a recoverable OOM, so surface it
+        // instead of retrying.
+        cudaError_t sync_err = cudaStreamSynchronize(stream);
+        if (sync_err == cudaSuccess) {
+          (void)cudaMemPoolTrimTo(mempool, 0);
+          err = cudaMallocAsync(devPtr, size, stream);
+          if (err == cudaSuccess) {
+            LOG(WARNING)
+                << "[cudaMallocAsync] recovered from an allocation failure by "
+                   "trimming the pool and retrying.";
+          }
+        } else {
+          err = sync_err;
+        }
+      }
+    }
   }
 
   if (err == cudaErrorMemoryAllocation) {
@@ -732,6 +760,39 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
 
       C10_CUDA_CHECK(cudaMemPoolGetAttribute(
           mempool, cudaMemPoolAttrUsedMemHigh, &used_mem_peak));
+
+      // Allocations captured into a CUDA graph live in the device's
+      // graph-memory pool, not the default mempool, so add that pool's stats
+      // here -- otherwise memory_reserved() undercounts any graph-capturing
+      // workload. Tolerate cudaErrorNotSupported on drivers without graph-mem
+      // attributes (treat as 0).
+      auto get_graph_attr =
+          [device](cudaGraphMemAttributeType attr) -> uint64_t {
+        uint64_t value = 0;
+        cudaError_t err = cudaDeviceGetGraphMemAttribute(device, attr, &value);
+        if (err == cudaErrorNotSupported) {
+          (void)cudaGetLastError(); // clear the sticky error
+          return 0;
+        }
+        C10_CUDA_CHECK(err);
+        return value;
+      };
+      uint64_t graph_reserved_current =
+          get_graph_attr(cudaGraphMemAttrReservedMemCurrent);
+      uint64_t graph_reserved_peak =
+          get_graph_attr(cudaGraphMemAttrReservedMemHigh);
+      uint64_t graph_used_current =
+          get_graph_attr(cudaGraphMemAttrUsedMemCurrent);
+      uint64_t graph_used_peak = get_graph_attr(cudaGraphMemAttrUsedMemHigh);
+
+      // Current counters are instantaneous, so they sum exactly.
+      reserved_mem_current += graph_reserved_current;
+      used_mem_current += graph_used_current;
+
+      // The two high-water marks need not peak at the same instant, so their
+      // sum is a conservative upper bound on the true simultaneous peak.
+      reserved_mem_peak += graph_reserved_peak;
+      used_mem_peak += graph_used_peak;
     }
 
     // Many stat types are specific to the native allocator. We leave these
@@ -788,6 +849,23 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
         mempool, cudaMemPoolAttrReservedMemHigh, &zero));
     C10_CUDA_CHECK(
         cudaMemPoolSetAttribute(mempool, cudaMemPoolAttrUsedMemHigh, &zero));
+
+    // Also reset the graph-mem pool high-water marks, to match the term
+    // getDeviceStats adds for graph-captured allocations. Setting High to 0
+    // resets it to Current (same as the default-pool attributes above).
+    uint64_t graph_zero = 0;
+    auto reset_graph_high = [device,
+                             &graph_zero](cudaGraphMemAttributeType attr) {
+      cudaError_t err =
+          cudaDeviceSetGraphMemAttribute(device, attr, &graph_zero);
+      if (err == cudaErrorNotSupported) {
+        (void)cudaGetLastError(); // clear the sticky error
+        return;
+      }
+      C10_CUDA_CHECK(err);
+    };
+    reset_graph_high(cudaGraphMemAttrReservedMemHigh);
+    reset_graph_high(cudaGraphMemAttrUsedMemHigh);
   }
 
   SnapshotInfo snapshot(MempoolId_t mempool_id, bool include_traces) override {

@@ -20,7 +20,7 @@ from torch.testing._internal.common_fsdp import get_devtype
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 
 
-device_type = str(get_devtype())
+device_type = get_devtype().type
 
 if TEST_WITH_DEV_DBG_ASAN:
     print(

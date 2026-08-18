@@ -30,7 +30,7 @@ inline std::ostream& operator<<(std::ostream& out, const Match& match) {
     const Node* patternNode = kv.first;
     Node* targetNode = kv.second;
     out << "  Pattern Node: " << *patternNode
-        << " -> Target Node: " << *targetNode << "\n";
+        << " -> Target Node: " << *targetNode << '\n';
   }
 
   out << "Value mapping:\n";
@@ -38,7 +38,7 @@ inline std::ostream& operator<<(std::ostream& out, const Match& match) {
     const Value* patternValue = kv.first;
     Value* targetValue = kv.second;
     out << "  Pattern Value: " << *patternValue
-        << " -> Target Value: " << *targetValue << "\n";
+        << " -> Target Value: " << *targetValue << '\n';
   }
 
   return out;

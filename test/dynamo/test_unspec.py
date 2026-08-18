@@ -5,6 +5,7 @@ import random
 import time
 import unittest
 import warnings
+from unittest import mock
 
 import numpy as np
 
@@ -163,6 +164,21 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         for i in range(1, 5):
             self.assertFalse(same(res[i - 1], res[i]))
 
+    def test_module_random_random_fullgraph(self):
+        # random.random is a C builtin method bound to the module-global
+        # Random instance (unlike randint/randrange/uniform, which are Python
+        # methods); it must still route through the RandomValueSource path
+        # rather than graph-breaking on a skipped builtin.
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            return (x + 1) * random.random()
+
+        res = []
+        for _ in range(5):
+            res.append(fn(torch.ones(2)))
+        for i in range(1, 5):
+            self.assertFalse(same(res[i - 1], res[i]))
+
     def test_time_time_unused_no_warning(self):
         def fn():
             time.time()
@@ -176,24 +192,40 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
             any("time.time" in str(warning.message) for warning in caught_warnings)
         )
 
-    def test_time_time_runtime_value(self):
-        def fn(x):
-            return x + time.time()
+    def test_time_time_preserves_call_order(self):
+        def backend(gm, _):
+            def run(*args):
+                time.sleep(0.05)
+                return gm(*args)
 
-        cnts = CompileCounter()
-        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+            return run
+
+        def fn(x):
+            before = time.time()
+            y = x + 1
+            after = time.time()
+            return y, before, after
+
+        opt_fn = torch.compile(fn, backend=backend)
         x = torch.zeros(())
 
-        before = time.time()
-        res1 = opt_fn(x)
-        between = time.time()
-        res2 = opt_fn(x)
-        after = time.time()
+        opt_fn(x)
+        result, before, after = opt_fn(x)
 
-        self.assertTrue(before <= res1.item() <= between)
-        self.assertTrue(between <= res2.item() <= after)
-        self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 1)
+        self.assertEqual(result, x + 1)
+        self.assertGreaterEqual(after - before, 0.04)
+
+    def test_time_time_does_not_bypass_disable(self):
+        @torch.compiler.disable
+        def disabled_time():
+            return 0.0
+
+        with mock.patch.object(time, "time", disabled_time):
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported,
+                "Skip calling `torch.compiler.disable\\(\\)`d function",
+            ):
+                torch.compile(lambda: time.time(), backend="eager", fullgraph=True)()
 
     def test_random_call_with_while_loop(self):
         def fn(x):
@@ -272,6 +304,96 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(rand1_1.getstate(), rand1_2.getstate())
         self.assertEqual(rand2_1.getstate(), rand2_2.getstate())
         self.assertEqual(rand3_1.getstate(), rand3_2.getstate())
+
+    def test_random_object_shuffle(self):
+        # shuffle on an explicit Random object is an exact, reproducible,
+        # index-only permutation, so it also works for non-constant (tensor)
+        # elements. The trailing draw checks the RNG state advanced correctly.
+        def fn(x):
+            r = random.Random(42)
+            items = list(range(10))
+            r.shuffle(items)
+            tensors = [x + i for i in range(5)]
+            r.shuffle(tensors)
+            return items, tensors, r.random()
+
+        x = torch.randn(3)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        ref_items, ref_tensors, ref_r = fn(x)
+        res_items, res_tensors, res_r = opt_fn(x)
+        self.assertEqual(ref_items, res_items)
+        self.assertEqual(ref_tensors, res_tensors)
+        self.assertEqual(ref_r, res_r)
+
+    def test_random_object_sample(self):
+        # sample selects index positions, so it is exact/reproducible for an
+        # explicit Random object and works over sequence populations (ranges,
+        # strings) as well as non-constant (tensor) elements.
+        def fn(x):
+            r = random.Random(42)
+            from_range = r.sample(range(100), 5)
+            from_str = r.sample("abcdefghij", 3)
+            tensors = [x + i for i in range(8)]
+            from_tensors = r.sample(tensors, 3)
+            return from_range, from_str, from_tensors, r.random()
+
+        x = torch.randn(3)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref[0], res[0])
+        self.assertEqual(ref[1], res[1])
+        self.assertEqual(ref[2], res[2])
+        self.assertEqual(ref[3], res[3])
+
+    def test_random_object_sample_raises(self):
+        # A sample larger than the population raises ValueError like eager.
+        def fn():
+            r = random.Random(0)
+            return r.sample([1, 2, 3], 5)
+
+        opt_fn = torch.compile(fn, backend="eager")
+        with self.assertRaises(ValueError):
+            opt_fn()
+
+    def test_random_module_shuffle_sample(self):
+        # Module-level random.shuffle/random.sample must trace under fullgraph
+        # (exercised by the CPython dict/list tests). Like an explicit Random
+        # object, the global RNG state is snapshotted at compile time, so assert
+        # structural correctness rather than cross-run reproducibility.
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            items = list(range(10))
+            random.shuffle(items)
+            picks = random.sample("abcdefghij", 4)
+            return items, picks, x + 1
+
+        random.seed(0)
+        items, picks, _ = fn(torch.zeros(2))
+        self.assertEqual(sorted(items), list(range(10)))
+        self.assertEqual(len(picks), 4)
+        self.assertEqual(len(set(picks)), 4)
+        self.assertTrue(all(p in "abcdefghij" for p in picks))
+
+    def test_random_module_seed_shuffle(self):
+        # Module-level random.seed is bound to the global random.Random instance
+        # and must trace under fullgraph rather than graph-breaking on a skipped
+        # function. A seed() inside the compiled region makes the subsequent
+        # shuffle deterministic, matching the CPython test_sort
+        # TestOptimizedCompares pattern (seed(0) then shuffle).
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            items = list(range(10))
+            random.seed(0)
+            random.shuffle(items)
+            return items, x + 1
+
+        compiled_items, _ = fn(torch.zeros(2))
+
+        expected = list(range(10))
+        random.seed(0)
+        random.shuffle(expected)
+        self.assertEqual(compiled_items, expected)
 
     def test_random_object_overridden_methods(self):
         # these will result in graph breaks, but we shouldn't crash
@@ -540,7 +662,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(20)
         torch._dynamo.mark_dynamic(x, 0)
 
-        @torch.compile()
+        @torch.compile()  # noqa: UNSPECIFIED_BACKEND
         def fn(x):
             y = x * 2
             comptime.graph_break()
@@ -899,12 +1021,9 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
             f(torch.randn(80, 100), 80)
 
         out = "\n".join(log_stream.getvalue().strip().split("\n")[3:]).strip()
-        self.assertExpectedInline(
-            out,
-            """\
-def forward(self):
-        return ()""",
-        )
+        self.assertEqual(out.count("torch.ops.aten._assert_scalar.default"), 2)
+        self.assertRegex(out, r"l_(y|args_1)_ \+ 5")
+        self.assertRegex(out, r"l_(x|args_0)_\.size\(0\)")
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_split_aot_autograd(self):
@@ -938,7 +1057,7 @@ def forward(self):
                 return x * 2
 
         main_model = TestModel()
-        opt_model = torch.compile(main_model, mode="max-autotune", dynamic=True)
+        opt_model = torch.compile(main_model, mode="max-autotune", dynamic=True)  # noqa: UNSPECIFIED_BACKEND
 
         x1 = torch.rand(3, 5, 4, 8)
         x2 = torch.rand(1, 5, 4, 8)
@@ -981,7 +1100,7 @@ def forward(self):
                 return x * 2
 
         main_model = TestModel()
-        opt_model = torch.compile(main_model, mode="max-autotune", dynamic=True)
+        opt_model = torch.compile(main_model, mode="max-autotune", dynamic=True)  # noqa: UNSPECIFIED_BACKEND
 
         x1 = torch.rand(3, 5, 4, 8).to(memory_format=torch.channels_last)
         x2 = torch.rand(1, 5, 4, 8).to(memory_format=torch.channels_last)
@@ -1015,7 +1134,7 @@ def forward(self):
         log_stream, ctx = logs_to_string("torch._dynamo.guards", "guards")
         with ctx():
             for key in [1.0, 2.0, 3.0]:
-                model = torch.compile(Module(key))
+                model = torch.compile(Module(key))  # noqa: UNSPECIFIED_BACKEND
                 model(x)
 
         guard_log = log_stream.getvalue()

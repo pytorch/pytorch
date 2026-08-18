@@ -19,9 +19,11 @@ from ..utils._sympy.symbol import make_symbol, SymT
 from .codegen.common import index_prevent_reordering
 from .ops_handler import DefaultHandler
 from .utils import (
+    decompose_index,
     get_dtype_size,
     reduction_num_outputs,
     sympy_index_symbol,
+    sympy_product,
     sympy_subs,
     VarRanges,
 )
@@ -74,6 +76,8 @@ class Dep(abc.ABC):
 
 @dataclasses.dataclass(frozen=True)
 class MemoryDep(Dep):
+    r"""A memory access dependency indexed over an iteration domain."""
+
     # pyrefly: ignore [bad-override]
     name: str
     # pyrefly: ignore [bad-override]
@@ -105,7 +109,10 @@ class MemoryDep(Dep):
         """
         Can return None if not able to decide loop orders.
         """
-        assert self.num_vars == other.num_vars
+        if self.num_vars != other.num_vars:
+            raise AssertionError(
+                f"expected num_vars to match, got {self.num_vars} and {other.num_vars}"
+            )
 
         # ignore broadcast for now since broadcast causes extra 0 strides
         # which makes it hard to decide the correct loop orders.
@@ -118,9 +125,9 @@ class MemoryDep(Dep):
         # For size == 0, it's an empty tensor, any strides for that dimension
         # are equivalent. Skip for simplicity and it may not matter that much.
         #
-        # For size == 1, it cause cause tie for strides of different dimensions.
+        # For size == 1, it cause tie for strides of different dimensions.
         # Also when we first time create LoopBody in ComputedBuffer.simplify_and_reorder
-        # we can dependencies.index_vars_squeeze which should already sqeeuze
+        # we can dependencies.index_vars_squeeze which should already squeeze
         # the size == 1 dimensions.
         if any(s == 0 or s == 1 for s in itertools.chain(self.size, other.size)):
             return None
@@ -155,7 +162,10 @@ class MemoryDep(Dep):
         stride_to_index = {s: i for i, s in enumerate(self_strides)}
         order = [stride_to_index[s] for s in other_strides]
 
-        assert OrderedSet(order) == OrderedSet(range(self.num_vars))
+        if OrderedSet(order) != OrderedSet(range(self.num_vars)):
+            raise AssertionError(
+                f"expected order to be a permutation of range({self.num_vars}), got {order}"
+            )
         return order
 
     def get_offset(self) -> sympy.Expr:
@@ -175,6 +185,54 @@ class MemoryDep(Dep):
             *_RecordLoadStoreInner._normalize(self.index, self.ranges),  # type: ignore[arg-type]
             self.mode,
         )
+
+    def normalize_with_ranges(
+        self,
+        var_names: tuple[sympy.Symbol, ...],
+        sizes: tuple[sympy.Expr, ...],
+    ) -> "MemoryDep | None":
+        """Reindex this access over a new iteration domain.
+
+        Both domains list dimensions outermost-first and correspond by linearized
+        iteration order; this places no restriction on the access's memory layout.
+        Return ``None`` when that correspondence cannot be recovered.
+        """
+        if len(var_names) != len(sizes):
+            raise AssertionError("var_names and sizes must have equal length")
+        if self.is_indirect():
+            return None
+        if not self.var_names:
+            # A loop-invariant access is unchanged in every target domain.
+            return MemoryDep(self.name, self.index, var_names, sizes, self.mode)
+        # TODO: Retain dropped dimension positions during dependency
+        # normalization so broadcast accesses can also be reindexed.
+        if not V.graph.sizevars.statically_known_equals(
+            sympy_product(self.size), sympy_product(sizes)
+        ):
+            return None
+
+        from .codegen.simd import CantSplit, SIMDKernel
+
+        def split_values(
+            *new_ranges: Sequence[sympy.Expr],
+        ) -> list[list[sympy.Expr]]:
+            return [
+                decompose_index(value, ranges)
+                for value, ranges in zip(var_names, new_ranges, strict=True)
+            ]
+
+        try:
+            (source_indices,) = SIMDKernel.map_kernel_groups_to_node_sizes(
+                sizes, (self.size,), split_values
+            )
+        except CantSplit:
+            return None
+        replacements = dict(zip(self.var_names, source_indices, strict=True))
+        var_ranges = dict(zip(var_names, sizes, strict=True))
+        index = V.graph.sizevars.simplify_with_ranges(
+            sympy_subs(self.index, replacements), var_ranges
+        )
+        return MemoryDep(self.name, index, var_names, sizes, self.mode)
 
     def normalize_with_stride_order(self, prefix: str = "t") -> "MemoryDep":
         r"""
@@ -446,7 +504,10 @@ class ReadWrites:
         )
 
     def with_read(self, dep: Dep | OrderedSet[Dep]) -> "ReadWrites":
-        assert isinstance(dep, (WeakDep, StarDep, OrderedSet))
+        if not isinstance(dep, (WeakDep, StarDep, OrderedSet)):
+            raise AssertionError(
+                f"expected WeakDep, StarDep, or OrderedSet, got {type(dep)}"
+            )
         if not isinstance(dep, OrderedSet):
             dep = OrderedSet([dep])
         return ReadWrites(
@@ -582,7 +643,8 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
         self._reads.add(MemoryDep(name, *self.canonicalize(index)))
 
     def load_seed(self, name: str, index: int) -> None:
-        assert isinstance(index, int)
+        if not isinstance(index, int):
+            raise AssertionError(f"expected index to be int, got {type(index)}")
         self.load(name, sympy.Integer(index))
 
     def store(
@@ -838,7 +900,10 @@ class FreeSymbolsOpsHandler(DefaultHandler):
         check: bool = True,
         wrap_neg: bool = True,
     ) -> sympy.Symbol:
-        assert not isinstance(index_var, (sympy.Expr, sympy.logic.boolalg.Boolean))
+        if isinstance(index_var, (sympy.Expr, sympy.logic.boolalg.Boolean)):
+            raise AssertionError(
+                f"index_var must not be a sympy Expr or Boolean, got {type(index_var)}"
+            )
         self.symbols |= self.get_symbols(size)
         return sympy_index_symbol(f"({str(index_var)})")
 
@@ -866,7 +931,8 @@ class FreeSymbolsOpsHandler(DefaultHandler):
         return (None,) * num_values if num_values > 1 else None
 
     def masked(self, mask: Any, body: Callable[..., Any], other: Any) -> None:
-        assert callable(body), "masked body must always be callable."
+        if not callable(body):
+            raise AssertionError("masked body must always be callable.")
         # The body can make additional calls, for e.g. ops.indirect_indexing
         body()
 

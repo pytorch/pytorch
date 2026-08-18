@@ -48,8 +48,8 @@ def find_csv_files(path, perf_compare):
 def main(directory, amp, float32, perf_compare):
     """
     Given a directory containing multiple CSVs from --performance benchmark
-    runs, aggregates and generates summary statistics similar to the web UI at
-    https://torchci-git-fork-huydhn-add-compilers-bench-74abf8-fbopensource.vercel.app/benchmark/compilers
+    runs, aggregates and generates summary statistics similar to the compilers
+    benchmark web UI.
 
     This is most useful if you've downloaded CSVs from CI and need to quickly
     look at aggregate stats.  The CSVs are expected to follow exactly the same
