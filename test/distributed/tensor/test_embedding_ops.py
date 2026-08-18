@@ -1,7 +1,5 @@
 # Owner(s): ["oncall: distributed"]
 
-import sys
-
 import torch
 from torch.distributed.tensor import (
     distribute_module,
@@ -11,26 +9,19 @@ from torch.distributed.tensor import (
     Shard,
 )
 from torch.distributed.tensor.debug import CommDebugMode
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
+from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
-    DTensorTestBase,
+    DTensorOpTestBase,
+    LocalDTensorOpTestBase,
     with_comms,
 )
-
-
-if TEST_WITH_DEV_DBG_ASAN:
-    print(
-        "Skip dev-asan as torch + multiprocessing spawn have known issues",
-        file=sys.stderr,
-    )
-    sys.exit(0)
 
 
 funcol = torch.ops.c10d_functional
 
 
-class TestEmbeddingOp(DTensorTestBase):
+class TestEmbeddingOp(DTensorOpTestBase):
     def _apply_sharding(self, embedding_mod, shard_dim, device_mesh):
         def shard_embedding_fn(name, module, device_mesh):
             for name, param in module.named_parameters():
@@ -261,7 +252,7 @@ class TestEmbeddingOp(DTensorTestBase):
 
 
 TestEmbeddingOpWithLocalTensor = create_local_tensor_test_class(
-    TestEmbeddingOp,
+    TestEmbeddingOp, base_class=LocalDTensorOpTestBase
 )
 
 if __name__ == "__main__":
