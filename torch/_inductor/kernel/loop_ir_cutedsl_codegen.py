@@ -128,6 +128,34 @@ class LoopIRCuteDSLCodegen:
         ):
             return codegen.render(buffers, fn_name)
 
+    @staticmethod
+    def online_softmax(output_name: str, group: int, fn_name: str) -> GemmEpiloguePlan:
+        source = f"""def {fn_name}(accum):
+    fragment_n = cutlass.const_expr(cute.size(accum.shape, mode=[0]))
+    if cutlass.const_expr(fragment_n % {group} != 0):
+        raise AssertionError("expected softmax group to divide fragment width")
+    repeats = cutlass.const_expr(fragment_n // {group})
+    grouped = accum.to(cutlass.Float32).reshape(((1, {group}, repeats), 1, 1))
+    maximum = grouped.reduce(
+        cute.ReductionOp.MAX,
+        init_val=-cutlass.Float32.inf,
+        reduction_profile=((None, 1, None), 1, 1),
+    ).reshape(((1, 1, repeats), 1, 1))
+    numerator = cute.math.exp(grouped - maximum.broadcast_to(grouped.shape))
+    denominator = numerator.reduce(
+        cute.ReductionOp.ADD,
+        init_val=0.0,
+        reduction_profile=((None, 1, None), 1, 1),
+    ).reshape(((1, 1, repeats), 1, 1))
+    D = (numerator / denominator.broadcast_to(grouped.shape)).reshape(accum.shape)
+    return D"""
+        return GemmEpiloguePlan(
+            source=source,
+            is_cutedsl=True,
+            writes=(output_name,),
+            renames={"D": output_name},
+        )
+
     @classmethod
     def finalizer_from_buffer(
         cls, source_name: str, buffer: ComputedBuffer, fn_name: str

@@ -67,11 +67,14 @@ def _direct_cutedsl_epilogue(metadata):
     parameter_names = metadata.epilogue.parameter_names
     tensors = metadata.epilogue.tensors
     output_shape = tuple(tensors[outputs[-1]].shape)
+    scalar_broadcast_names = schema.scalar_broadcast_names
 
     def source_mode_map(name):
         shape = tuple(tensors[name].shape)
         if not shape or len(shape) > 3:
             raise NotImplementedError(f"unsupported dense EFC broadcast shape: {shape}")
+        if name in scalar_broadcast_names:
+            return _build_source_mode_map((0, 0, 0), len(shape))
         stride: Any = tensors[name].stride
         if callable(stride):
             stride = stride()

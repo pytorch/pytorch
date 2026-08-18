@@ -4,6 +4,8 @@ from __future__ import annotations
 import logging
 from typing import Any, TYPE_CHECKING
 
+import torch
+
 from ..ir import MultiTemplateBuffer
 from ..scheduler import (
     BaseSchedulerNode,
@@ -15,12 +17,16 @@ from ..scheduler import (
 from .cutedsl.cutedsl_scheduling import CuteDSLScheduling
 from .cutlass.scheduling import CUTLASSScheduling
 from .flydsl.flydsl_scheduling import FlyDSLScheduling
-from .nv_universal_gemm.nv_universal_gemm_scheduling import NVUniversalGemmScheduling
+from .nv_universal_gemm.nv_universal_gemm_scheduling import (
+    NVGemmVerticalFusionDecision,
+    NVUniversalGemmScheduling,
+)
 from .rocm.rocm_cpp_scheduling import ROCmCPPScheduling
 from .triton import TritonScheduling
 
 
 log = logging.getLogger(__name__)
+fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
 
 
 if TYPE_CHECKING:
@@ -29,7 +35,6 @@ if TYPE_CHECKING:
 
     from sympy import Expr
 
-    import torch
     from torch.utils._ordered_set import OrderedSet
 
     from .common import BackendFeature
@@ -98,13 +103,18 @@ class CUDACombinedScheduling(BaseScheduling):
         # Only intercept when node1 is the NVGEMM template (epilogue direction).
         # Prologue direction (node1=pointwise, node2=template) must fall through to
         # Triton, or NVGEMM-winning MTBs silently lose Triton prologue fusion.
-        # For MTBs, if NVGEMM can't fuse, fall through to Triton scheduling so
+        # For MTBs, defer NVGEMM-specific failures to Triton scheduling so
         # Triton choices in the same MTB can still attempt epilogue fusion.
         elif self._nv_universal_gemm_scheduling.is_nv_universal_gemm_template(node1):
-            if self._nv_universal_gemm_scheduling.can_fuse_vertical(node1, node2):
+            decision = self._nv_universal_gemm_scheduling.vertical_fusion_decision(
+                node1, node2
+            )
+            if decision is NVGemmVerticalFusionDecision.FUSE:
                 return True
-            if isinstance(node1, SchedulerNode) and isinstance(
-                node1.node, MultiTemplateBuffer
+            if (
+                decision is NVGemmVerticalFusionDecision.DEFER
+                and isinstance(node1, SchedulerNode)
+                and isinstance(node1.node, MultiTemplateBuffer)
             ):
                 return self._triton_scheduling.can_fuse_vertical(node1, node2)
             return False
@@ -288,10 +298,13 @@ class CUDACombinedScheduling(BaseScheduling):
             try:
                 call(args)
             except Exception as e:
-                log.debug(
-                    "Exception (%s) in compiling NVGEMM fused kernel",
+                fusion_log.warning(
+                    "NVGEMM fused kernel compilation failed for %s: %s: %s",
+                    module.__file__,
+                    type(e).__name__,
                     e,
                 )
+                log.debug("NVGEMM fused kernel compilation failed", exc_info=True)
                 return float("inf"), module.__file__ or ""
 
             device = V.graph.get_current_device_or_throw()
@@ -301,10 +314,13 @@ class CUDACombinedScheduling(BaseScheduling):
                     device=device,
                 )
             except Exception as e:
-                log.debug(
-                    "Exception (%s) while benchmarking NVGEMM fused kernel",
+                fusion_log.warning(
+                    "NVGEMM fused kernel benchmark failed for %s: %s: %s",
+                    module.__file__,
+                    type(e).__name__,
                     e,
                 )
+                log.debug("NVGEMM fused kernel benchmark failed", exc_info=True)
                 return float("inf"), module.__file__ or ""
 
             return ms, module.__file__ or ""
