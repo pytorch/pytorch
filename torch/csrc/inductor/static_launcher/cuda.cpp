@@ -4,7 +4,9 @@
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <torch/csrc/autograd/python_variable.h>
+#include <torch/csrc/inductor/static_launcher/common.h>
 #include <torch/csrc/inductor/static_launcher/cuda.h>
+#include <array>
 #include <cstdint>
 
 #include <torch/csrc/utils/python_numbers.h>
@@ -380,6 +382,20 @@ void parseKernelArgs(
       case 'K':
         convertType<uint64_t>(THPUtils_unpackUInt64, "uint64", slot, item);
         break;
+      case 'e':
+        convertType<uint16_t>(
+            torch::inductor::static_launcher::unpackTritonFp16,
+            "float16",
+            slot,
+            item);
+        break;
+      case 'y':
+        convertType<uint16_t>(
+            torch::inductor::static_launcher::unpackTritonBf16,
+            "bfloat16",
+            slot,
+            item);
+        break;
       case 'f':
         convertType<float>(THPUtils_unpackDouble, "float", slot, item);
         break;
@@ -642,11 +658,14 @@ PyObject* launch_kernel(PyObject* self, PyObject* args) {
 
 PyObject* unload_kernel(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
-  uint64_t mod_ptr = 0;
-  if (!PyArg_ParseTuple(args, "K", &mod_ptr)) {
+  PyObject* mod_obj = nullptr;
+  if (!PyArg_ParseTuple(args, "O", &mod_obj)) {
     return nullptr;
   }
-  CUmodule mod = reinterpret_cast<CUmodule>(mod_ptr);
+  CUmodule mod = static_cast<CUmodule>(PyLong_AsVoidPtr(mod_obj));
+  if (PyErr_Occurred()) {
+    return nullptr;
+  }
   if (mod) {
 #if defined(USE_ROCM)
     AT_CUDA_DRIVER_CHECK(hipModuleUnload(mod));
@@ -771,6 +790,9 @@ inline CUdeviceptr getPointerFast(PyObject* obj) {
 // Skips:     cuCtxGetCurrent, cuPointerGetAttribute, PyArg_ParseTuple for
 //            kernel metadata.
 // ---------------------------------------------------------------------------
+// Instances are allocated and zero-initialized by PyTypeObject::tp_alloc;
+// their C++ default constructor is intentionally not invoked.
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct FastCudaLauncherObject {
   PyObject_HEAD
   vectorcallfunc vectorcall;
@@ -779,7 +801,7 @@ struct FastCudaLauncherObject {
   uint32_t sharedMemBytes;
   int numKernelArgs; // args passed from Python
   int numTotalArgs; // numKernelArgs + nScratch
-  char argTypes[MAX_ARGS + 1]; // null-terminated
+  std::array<char, MAX_ARGS + 1> argTypes; // null-terminated
   // Thread safety: argStorage/kernelArgs are shared across calls but safe
   // because the GIL is held throughout fast_launcher_vectorcall (no
   // Py_BEGIN_ALLOW_THREADS).  cuLaunchKernel copies arg values from the
@@ -788,8 +810,8 @@ struct FastCudaLauncherObject {
   // TODO(T000000): Not safe under free-threaded Python (PEP 703, nogil).
   // If two threads call the same instance concurrently without the GIL,
   // they will corrupt argStorage/kernelArgs.  Revisit when nogil is stable.
-  uint64_t argStorage[MAX_ARGS];
-  void* kernelArgs[MAX_ARGS];
+  std::array<uint64_t, MAX_ARGS> argStorage;
+  std::array<void*, MAX_ARGS> kernelArgs;
 };
 
 static PyObject* fast_launcher_vectorcall(
@@ -835,7 +857,7 @@ static PyObject* FastCudaLauncher_new(
 
   self->numKernelArgs = nKernel;
   self->numTotalArgs = nTotal;
-  std::memcpy(self->argTypes, argTypes, nKernel);
+  std::memcpy(self->argTypes.data(), argTypes, nKernel);
   // Scratch slots are pointer type ('O')
   for (int i = nKernel; i < nTotal; ++i) {
     self->argTypes[i] = 'O';
@@ -843,7 +865,7 @@ static PyObject* FastCudaLauncher_new(
   self->argTypes[nTotal] = '\0';
 
   // Pre-compute kernelArgs pointers and zero all storage.
-  std::memset(self->argStorage, 0, sizeof(self->argStorage));
+  self->argStorage.fill(0);
   for (int i = 0; i < nTotal; ++i) {
     self->kernelArgs[i] = &self->argStorage[i];
   }
@@ -943,6 +965,20 @@ static PyObject* fast_launcher_vectorcall(
       case 'K':
         convertType<uint64_t>(THPUtils_unpackUInt64, "uint64", slot, item);
         break;
+      case 'e':
+        convertType<uint16_t>(
+            torch::inductor::static_launcher::unpackTritonFp16,
+            "float16",
+            slot,
+            item);
+        break;
+      case 'y':
+        convertType<uint16_t>(
+            torch::inductor::static_launcher::unpackTritonBf16,
+            "bfloat16",
+            slot,
+            item);
+        break;
       case 'f':
         convertType<float>(THPUtils_unpackDouble, "float", slot, item);
         break;
@@ -966,7 +1002,7 @@ static PyObject* fast_launcher_vectorcall(
       static_cast<uint32_t>(gridZ),
       self->numWarps,
       self->sharedMemBytes,
-      self->kernelArgs,
+      self->kernelArgs.data(),
       reinterpret_cast<cudaStream_t>(stream)); // NOLINT
 
   Py_RETURN_NONE;
