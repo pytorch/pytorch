@@ -354,7 +354,7 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
           !std::is_same_v<std::decay_t<First>, std::decay_t<const char (&)[]>>>>
   void push_back(First&& first, Second&& second, Rest&&... rest) {
     push_back(std::forward<First>(first));
-    // Recursively calls this method, until the parameter pack only thas this
+    // Recursively calls this method, until the parameter pack only has this
     // entry left. Then calls `push_back()` a final time (above).
     push_back(std::forward<Second>(second), std::forward<Rest>(rest)...);
   }
