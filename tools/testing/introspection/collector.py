@@ -366,6 +366,23 @@ def _enumerate(mod: ModuleType) -> dict[str, list[str]]:
     return out
 
 
+def _expected_failures(mod: ModuleType) -> list[str]:
+    """Class::method for tests decorated expectedFailure.
+
+    They run in full but JUnit records them as <skipped>, so a consumer counting
+    skips as "did not run" would call them dark forever. Read from the decorator
+    rather than from the skip message, whose text differs between the xmlrunner
+    and pytest writers.
+    """
+    out = []
+    for name, cls in _testcase_classes(mod).items():
+        for method in unittest.defaultTestLoader.getTestCaseNames(cls):
+            fn = getattr(cls, method, None)
+            if getattr(fn, "__unittest_expecting_failure__", False):
+                out.append(f"{name}::{method}")
+    return sorted(out)
+
+
 def _locate(mod: ModuleType) -> dict[str, list]:
     """{"Class::method": [relfile, lineno]} for tests whose definition lives in the
     test tree (TESTINTRO_ROOT). Generated/parametrized variants resolve to their
@@ -504,7 +521,7 @@ def _select(job: Job) -> dict:
 def _collect_one(relpath: str, op: str, mod_name: str) -> dict:
     if op in ("enumerate", "enumloc"):
         mod = _import_target(relpath, gut=False, mod_name=mod_name)
-        out = {"classes": _enumerate(mod)}
+        out = {"classes": _enumerate(mod), "xfail": _expected_failures(mod)}
         if op == "enumloc":
             out["locations"] = _locate(mod)
         return out
