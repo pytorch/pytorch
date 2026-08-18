@@ -2917,38 +2917,58 @@ def _build_multigraph_python_source(
 
 
 def _reject_unreachable_frames(frames: list[dict[str, Any]], entry: Any) -> None:
-    """Refuse a capture a standalone artifact could only serve partially.
+    """Check what a standalone artifact will actually be able to dispatch.
 
     Dispatch here is explicit: the caller invokes the entry frame, and a
     continuation is reached by LOAD_GLOBAL from the frame ahead of it. A frame
     Dynamo compiled that is entered by an ordinary Python call -- an inner
-    ``nn.Module.__call__`` wrapper, a separately-compiled callee -- is reachable
-    only through the frame evaluator, which a source artifact does not use. It
-    would silently run eager instead of serving, so refuse at capture rather
-    than emit an artifact that covers less than it appears to.
+    ``nn.Module.__call__`` wrapper, an un-inlinable helper -- is reachable only
+    through the frame evaluator, which a source artifact does not use.
+
+    Such a frame runs EAGER when served. That is a coverage and performance
+    gap, not a correctness one: eager is what the graph was traced from, so the
+    answer is the same. It is therefore a warning. An entry frame with no
+    guarded code at all is different -- the artifact would serve nothing -- and
+    is refused.
     """
+    from torch._dynamo.package import SerializedCode
+
+    if not any(f["is_entry"] and f["variants"] for f in frames):
+        # Nothing to dispatch at all: the artifact would run the whole call
+        # eager. That is not an artifact, so refuse rather than ship it.
+        raise PrecompileError(
+            f"precompile captured no dispatchable graph for {entry.fn_name!r}. The "
+            f"entry frame produced no guarded code, so a self-contained artifact "
+            f"would run the entire call eager. This happens when the captured "
+            f"callable is a thin wrapper -- an nn.Module whose forward immediately "
+            f"delegates, where Dynamo compiles the wrapper's inner frame instead. "
+            f"Capture the function that CALLS the model, e.g. "
+            f"precompile(lambda m, x: m(x), example_inputs=[(model, x)])."
+        )
+
     unreachable = [
         f
         for f in frames
         if not f["is_entry"] and not f["resume_names"] and f["variants"]
     ]
     if unreachable:
-        from torch._dynamo.package import SerializedCode
-
-        names = [SerializedCode.to_code_object(f["code"]).co_name for f in unreachable]
-        raise PrecompileError(
-            f"precompile captured {len(names)} frame(s) a self-contained artifact "
-            f"cannot dispatch: {names}. They are entered by an ordinary call rather "
-            f"than from the captured callable, so only Dynamo's frame evaluator "
-            f"reaches them. This happens when the captured callable is a thin "
-            f"wrapper -- capturing an nn.Module whose forward immediately delegates "
-            f"-- so capture the function that CALLS the model instead, e.g. "
-            f"precompile(lambda m, x: m(x), example_inputs=[(model, x)])."
+        # Correct but under-compiled. A frame Dynamo compiled that is entered by
+        # an ORDINARY call -- an un-inlinable helper, a separately-compiled
+        # callee -- is reached only through the frame evaluator, which a source
+        # artifact does not use. It runs eager instead, so the answer stays
+        # right and the compiled variant simply goes unused. Say so, rather than
+        # let summary() imply coverage the artifact will not deliver.
+        names = sorted(
+            SerializedCode.to_code_object(f["code"]).co_name for f in unreachable
         )
-    if not any(f["is_entry"] for f in frames):
-        raise PrecompileError(
-            f"precompile could not identify the entry frame for {entry.fn_name!r} "
-            f"among the captured frames. Capture the function that calls the model."
+        log.warning(
+            "precompile: %d captured frame(s) will run EAGER when served, because a "
+            "self-contained artifact reaches only the entry frame and the "
+            "continuations its bytecode names: %s. The result stays correct; those "
+            "graphs are simply unused. Inline them into the captured callable to "
+            "get their compiled versions.",
+            len(names),
+            names,
         )
 
 

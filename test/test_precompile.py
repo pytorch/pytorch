@@ -93,6 +93,16 @@ class _PrecompileBreakingModule(torch.nn.Module):
         return y.sum() + 1
 
 
+def _precompile_unreachable_helper(y):
+    z = y * 3
+    torch._dynamo.graph_break()
+    return z.sum()
+
+
+def _precompile_unreachable_helper_caller(x):
+    return _precompile_unreachable_helper(x * 2)
+
+
 def _precompile_call_model(model, x):
     return model(x)
 
@@ -2942,11 +2952,29 @@ class TestPrecompile(TestCase):
                 z = torch.randn(n)
                 self.assertEqual(loaded(model, fixed, z), model(fixed, z))
 
+    def test_multi_graph_unreachable_frame_warns_but_still_serves(self):
+        # A frame Dynamo compiled that is entered by an ORDINARY call -- an
+        # un-inlinable helper -- is reached only through the frame evaluator,
+        # which a source artifact does not use, so it runs eager when served.
+        # That is a coverage gap, not a wrong answer, so it warns and the
+        # artifact stays usable.
+        with self.assertLogs("torch._precompile", level="WARNING") as logs:
+            code, cache = torch.compiler.precompile(
+                _precompile_unreachable_helper_caller,
+                backend="eager",
+                dynamic=False,
+                example_inputs=[(torch.randn(4),)],
+            )
+        self.assertTrue(any("run EAGER when served" in m for m in logs.output))
+        x = torch.randn(4)
+        torch._dynamo.reset()
+        loaded = torch.compiler.precompile.load(code, cache)
+        with torch.no_grad():
+            self.assertEqual(loaded(x), _precompile_unreachable_helper_caller(x))
+
     def test_multi_graph_wrapper_only_capture_is_refused(self):
-        # A self-contained artifact dispatches the entry frame and, from it,
-        # continuations reached by name. A frame entered by an ordinary call is
-        # reachable only through the frame evaluator, so an artifact would
-        # silently run it eager -- refuse instead.
+        # The entry frame producing NO guarded code is different: the artifact
+        # would run the whole call eager, which is not an artifact at all.
         model = torch.nn.Linear(8, 4).eval()
         session = torch.compiler.precompile.capture(
             model,
@@ -2956,7 +2984,7 @@ class TestPrecompile(TestCase):
         )
         with session:
             pass
-        with self.assertRaisesRegex(PrecompileError, "cannot dispatch"):
+        with self.assertRaisesRegex(PrecompileError, "no dispatchable graph"):
             session.artifact()
 
     def test_precompile_rejects_mixed_example_input_forms(self):
