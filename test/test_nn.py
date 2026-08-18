@@ -3028,6 +3028,33 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         hidden_c_shape = update_shape(correct_hidden_c_shape, 0, bad_size)
         test(input_shape, hidden_h_shape, hidden_c_shape)
 
+    def test_lstm_hidden_state_layer_mismatch(self):
+        # float64 keeps this on the native path: oneDNN claims CPU LSTM for
+        # float32, bfloat16 and float16 and returns before _lstm_impl runs.
+        dtype = torch.float64
+        hidden_size = 8
+        num_layers = 3
+        params = [torch.randn(4 * hidden_size, hidden_size, dtype=dtype),
+                  torch.randn(4 * hidden_size, hidden_size, dtype=dtype)] * num_layers
+        hx = torch.randn(num_layers + 1, 2, hidden_size, dtype=dtype)
+        cx = torch.randn(num_layers, 2, hidden_size, dtype=dtype)
+
+        input = torch.randn(5, 2, hidden_size, dtype=dtype)
+        with self.assertRaisesRegex(RuntimeError, "same size at dim 0"):
+            torch.ops.aten.lstm.input(input, [hx, cx], params, False, num_layers,
+                                      0.0, False, False, False)
+
+        data = torch.randn(10, hidden_size, dtype=dtype)
+        batch_sizes = torch.tensor([10], dtype=torch.int64)
+        with self.assertRaisesRegex(RuntimeError, "same size at dim 0"):
+            torch.ops.aten.lstm.data(data, batch_sizes, [hx, cx], params, False,
+                                     num_layers, 0.0, False, False)
+
+        # The longer cell state was previously dropped without an error.
+        with self.assertRaisesRegex(RuntimeError, "same size at dim 0"):
+            torch.ops.aten.lstm.input(input, [cx, hx], params, False, num_layers,
+                                      0.0, False, False, False)
+
     def test_rnn_initial_hidden_state(self):
         rnn_modes = ['RNN', 'GRU', 'LSTM']
         for mode in rnn_modes:
