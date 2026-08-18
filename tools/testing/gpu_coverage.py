@@ -14,6 +14,7 @@ import shlex
 import subprocess
 import sys
 from pathlib import Path
+from typing import NamedTuple
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -81,19 +82,20 @@ def selects(patterns: list[str | None], test_id: str) -> bool:
     return False
 
 
-def measure(
-    files: list[str],
-) -> tuple[dict[str, dict[str, set[str]]], dict[str, str], set[str]]:
-    """-> (
-        {file: {label: concrete tests needing it}},
-        {file: why not measured},
-        predicates that read False at every capability in this image,
-    )"""
+class Measured(NamedTuple):
+    needs: dict[str, dict[str, set[str]]]  # {file: {label: concrete tests}}
+    errors: dict[str, str]  # {file: why it was not measured}
+    gates: dict[str, dict[str, list[str]]]  # {file: {test: names its skip reads}}
+    probes: dict[str, dict[str, bool]]  # {job: {name: value at that capability}}
+
+
+def measure(files: list[str]) -> Measured:
     from tools.testing.introspection import collector, platforms
 
     ran: dict[str, dict[str, set[str]]] = {}
     errors: dict[str, str] = {}
-    observable: set[str] = set()
+    gates: dict[str, dict[str, list[str]]] = {}
+    probes: dict[str, dict[str, bool]] = {}
     for job in [BASELINE_JOB] + [j for _, j, _ in TARGETS]:
         for rel, payload in collector.collect(
             platforms.get_job(job), "status", files
@@ -112,7 +114,8 @@ def measure(
                 )
                 continue
             ran.setdefault(rel, {})[job] = set(payload["ran"])
-            observable |= {p for p, v in payload["probes"].items() if v}
+            gates.setdefault(rel, {}).update(payload["hidden_gates"])
+            probes.setdefault(job, {}).update(payload["probes"])
 
     needs = {}
     for rel, by_job in ran.items():
@@ -123,7 +126,43 @@ def measure(
         needs[rel] = {
             label: by_job[job] - by_job[BASELINE_JOB] for label, job, _ in TARGETS
         }
-    return needs, errors, set(collector.LIBRARY_PROBES) - observable
+    return Measured(needs=needs, errors=errors, gates=gates, probes=probes)
+
+
+def unjudged(rel: str, m: Measured) -> list[tuple[str, str, str]]:
+    """(test, cause, action) for tests in this file whose gating was not observed.
+
+    A skip inside setUp or a test body never runs here, so the test is recorded as
+    having executed at every capability and drops out of the difference. The causes
+    want different things from different people, so they are reported apart.
+    """
+    out = []
+    for test, names in sorted(m.gates.get(rel, {}).items()):
+        seen = [
+            (n, [m.probes.get(j, {}).get(n) for j in m.probes])
+            for n in names
+            if any(n in p for p in m.probes.values())
+        ]
+        dark = [n for n, vals in seen if not any(vals)]
+        if dark:
+            out.append(
+                (
+                    test,
+                    f"{', '.join(dark)} reads False at every simulated capability "
+                    f"in this image, so nothing distinguishes the runners",
+                    "not yours to fix: the image lacks what the predicate probes",
+                )
+            )
+        else:
+            out.append(
+                (
+                    test,
+                    "its skip is inside setUp or the test body, which is not run here",
+                    "declare the requirement in a decorator if the shape allows it, "
+                    "otherwise add the --include/-k line by hand",
+                )
+            )
+    return out
 
 
 def locations(files: list[str]) -> dict[str, dict[str, list]]:
@@ -290,7 +329,8 @@ def main() -> int:
         if base_text is not None
         else {}
     )
-    needs, errors, unobservable = measure(files)
+    m = measure(files)
+    needs, errors = m.needs, m.errors
     locs = locations(sorted(needs)) if needs else {}
 
     gaps = 0
@@ -336,20 +376,20 @@ def main() -> int:
         print(f"::warning file={rel},title=GPU coverage not measured::{err}")
         print(f"gpu_coverage: could not measure {rel}: {err}")
 
+    # Only for files this PR touched. A file pulled in because test.sh changed is
+    # not the author's to answer for, and an unactionable warning is noise that
+    # teaches people to ignore the actionable ones.
     incomplete = 0
-    for rel in files:
-        src = (REPO_ROOT / rel).read_text(encoding="utf-8", errors="ignore")
-        blind = sorted(p for p in unobservable if p in src)
-        if not blind:
-            continue
-        incomplete += 1
-        print(
-            f"::warning file={rel},title=GPU coverage incomplete::"
-            f"{', '.join(blind)} read False at every simulated capability in this "
-            f"image; tests gated on them cannot be classified, so coverage for "
-            f"{rel} is incomplete."
-        )
-        print(f"gpu_coverage: {rel} gates on unobservable {', '.join(blind)}")
+    for rel in direct:
+        for test, cause, action in unjudged(rel, m):
+            incomplete += 1
+            print(
+                f"::warning file={rel},title=GPU coverage incomplete::"
+                f"{test} could not be classified: {cause}. {action}."
+            )
+            print(f"\ngpu_coverage: {rel}::{test} not classified")
+            print(f"    why:  {cause}")
+            print(f"    fix:  {action}")
 
     if args.write:
         TEST_SH.write_text(text, encoding="utf-8")
