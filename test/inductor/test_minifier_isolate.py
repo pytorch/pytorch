@@ -54,7 +54,7 @@ inner(torch.randn(2, 2).to("{device}"))
             self._test_after_aot_runtime_error("cpu", "")
 
     @skipIfRocmWithoutDebugAsserts
-    @requires_triton
+    @requires_triton()
     def test_after_aot_triton_runtime_error(self):
         # CUDA's __assertfail surfaces through PyTorch as "device-side assert";
         # ROCm's Triton AMD lowering prints the injected assertion text before trapping.
