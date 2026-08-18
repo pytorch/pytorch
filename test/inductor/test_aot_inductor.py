@@ -5145,6 +5145,23 @@ class AOTInductorTestsTemplate:
         m = M()
         self.check_model(m, example_args)
 
+    def test_proxy_executor_scalar_tensor_arg(self):
+        # A Python float bound to a Tensor-typed schema arg ("scalar in place of a
+        # tensor", a wrapped number) on a no-c-shim op. complex64 forces div.Tensor to
+        # fall back to the AOT ProxyExecutor (Inductor has no complex lowering and there
+        # is no c-shim), and 2.0 lands in div.Tensor's Tensor-typed `other` slot.
+        # Exercises FallbackKernel._materialize_scalar_tensor_args: the scalar is
+        # materialized into a constant tensor buffer so the proxy-executor path can
+        # serialize it (this previously raised AssertionError: got <class 'float'> in
+        # fill_args).
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.aten.div.Tensor(x, 2.0)
+
+        example_args = (torch.randn((1, 300, 201), dtype=torch.complex64),)
+        m = M()
+        self.check_model(m, example_args)
+
     def test_proxy_executor_error_message_preserved(self):
         @torch.library.custom_op("aoti_test::validate_input", mutates_args=())
         def validate_input(x: torch.Tensor) -> torch.Tensor:
