@@ -4276,6 +4276,26 @@ class SourcelessGraphModuleVariable(UserDefinedObjectVariable):
         )
 
 
+def _base_exception_member(name: str) -> Member:
+    """BaseException attribute of a user-defined exception, delegated to the
+    wrapped base-exception VT that owns the state."""
+
+    def getter(
+        self: "UserDefinedExceptionObjectVariable", tx: "InstructionTranslatorBase"
+    ) -> VariableTracker:
+        return self._base_vt.tp_getattro_impl(tx, name)  # type: ignore[missing-attribute]
+
+    def setter(
+        self: "UserDefinedExceptionObjectVariable",
+        tx: "InstructionTranslatorBase",
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        name_vt = variables.ConstantVariable.create(name)
+        return self._base_vt.tp_setattro_impl(tx, name_vt, value)  # type: ignore[missing-attribute]
+
+    return Member(getter, setter)
+
+
 class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
     def __init__(self, value: object, **kwargs: Any) -> None:
         super().__init__(value, **kwargs)
@@ -4343,19 +4363,17 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
     }
 
     # BaseException args/__cause__/__context__/__suppress_context__/__traceback__
-    # are members/getsets; delegate each to the wrapped base exception VT.
+    # are members/getsets; delegate each to the wrapped base exception VT. All
+    # five are writable in CPython.
     tp_members = {
-        "args": Member(lambda s, tx: s._base_vt.tp_getattro_impl(tx, "args")),
-        "__cause__": Member(lambda s, tx: s._base_vt.tp_getattro_impl(tx, "__cause__")),
-        "__context__": Member(
-            lambda s, tx: s._base_vt.tp_getattro_impl(tx, "__context__")
-        ),
-        "__suppress_context__": Member(
-            lambda s, tx: s._base_vt.tp_getattro_impl(tx, "__suppress_context__")
-        ),
-        "__traceback__": Member(
-            lambda s, tx: s._base_vt.tp_getattro_impl(tx, "__traceback__")
-        ),
+        name: _base_exception_member(name)
+        for name in (
+            "args",
+            "__cause__",
+            "__context__",
+            "__suppress_context__",
+            "__traceback__",
+        )
     }
 
     @property
@@ -4810,10 +4828,27 @@ class DefaultDictVariable(UserDefinedDictVariable):
             f"{tracked_repr(tx, self._base_vt)})",
         )
 
+    def _set_default_factory(
+        self, tx: "InstructionTranslatorBase", value: VariableTracker | None
+    ) -> VariableTracker:
+        # PyMember_SetOne on a T_OBJECT member: deleting stores NULL, which
+        # reads back as None. CPython type-checks the factory at __missing__
+        # time, not on assignment, so anything is accepted here.
+        if value is None:
+            value = variables.ConstantVariable.create(None)
+        self.default_factory = value
+        se = tx.output.side_effects
+        if not se.is_attribute_mutation(self):
+            se.track_attribute_mutation_new(self)
+        se.store_attr(self, "default_factory", value)
+        return variables.ConstantVariable.create(None)
+
     # ref: defdict_members[] in CPython Modules/_collectionsmodule.c
     # {"default_factory", T_OBJECT, offsetof(defdictobject, default_factory)}
     tp_members = {
-        "default_factory": Member(getset_read(lambda s: s.default_factory)),
+        "default_factory": Member(
+            getset_read(lambda s: s.default_factory), _set_default_factory
+        ),
     }
 
     def _missing_impl(
