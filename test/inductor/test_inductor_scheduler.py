@@ -42,7 +42,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, IS_BIG_GPU
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._sympy.functions import FloorDiv
+from torch.utils._sympy.functions import FloorDiv, Identity
 
 
 def FlopCounterMode(*args, **kwargs):
@@ -509,6 +509,15 @@ class TestScheduler(TestCase):
         self.assertEqual(rate, (2, 1))
         self.assertIsNone(cross_group_rate)
         self.assertIsNone(x_grouped_rate)
+
+    def test_sub_parent_contiguous_lane_ignores_identity(self):
+        r0 = sympy.Symbol("r0", integer=True, nonnegative=True)
+        graph = Mock(sizevars=SizeVarAllocator())
+        with V.set_graph_handler(graph):
+            lane = NestedReduction.sub_parent_contiguous_lane(
+                Identity(r0 + 8), factor=2, parent_extent=16
+            )
+        self.assertTrue(graph.sizevars.statically_known_equals(lane, 1))
 
     def test_nested_reduction_grouped_axis_from_ranges(self):
         grouped = Mock()

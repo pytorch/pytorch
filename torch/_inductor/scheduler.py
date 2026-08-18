@@ -723,6 +723,11 @@ class NestedReduction:
         )
         if not source_layouts:
             return None
+        if any(
+            layout is cls.SubParentSourceLayout.CONTIGUOUS
+            for _name, layout in source_layouts
+        ) and any(node.has_strict_reduction() for node in parent_nodes):
+            return None
         planned_source_names = OrderedSet(name for name, _layout in source_layouts)
         ordered_parent_nodes = cls._order_sub_parent_parent_nodes(
             parent_nodes,
@@ -825,7 +830,10 @@ class NestedReduction:
         )
         if any(node.ancestors & deferred_names for node in leading_nodes):
             return None
-        return (*leading_nodes, *deferred_nodes), len(leading_nodes)
+        deferred_start = len(leading_nodes)
+        if not 0 < deferred_start < len(parent_nodes):
+            return None
+        return (*leading_nodes, *deferred_nodes), deferred_start
 
     @classmethod
     def _sub_parent_epilogue_candidate_nodes(
@@ -850,6 +858,8 @@ class NestedReduction:
                 ):
                     return None
                 continue
+            # Reduced/full-parent domains win when a small R extent also matches
+            # a sub-parent rate; generic scheduling needs no derived stage.
             if cls._pointwise_node_matches_domain(node, numel, (numel,)):
                 continue
             if cls._pointwise_node_matches_domain(node, full_numel, (numel, rnumel)):
@@ -1034,6 +1044,7 @@ class NestedReduction:
         parent_extent: sympy.Expr,
     ) -> sympy.Expr:
         """Select a contiguous lane from an index's constant offset."""
+        index = index.replace(Identity, lambda x: x)
         child_extent = FloorDiv(parent_extent, factor)
         index_vars = {
             symbol: 0
@@ -1343,7 +1354,9 @@ class NestedReduction:
         grouped_reduction = domain_context.grouped_reduction
         reduction_names = grouped_reduction.get_operation_names()
         reduction_buffer_names = grouped_reduction.get_buffer_names()
-        reduction_source_names = grouped_reduction.used_buffer_names()
+        reduction_source_names = OrderedSet(
+            dep.name for dep in grouped_reduction.read_writes.reads
+        )
         full_numel = V.graph.sizevars.simplify(
             domain_context.grouped_numel * domain_context.grouped_rnumel
         )
@@ -1963,6 +1976,10 @@ class StagedReductionPlan:
             raise AssertionError("staged reduction plan must contain a derived stage")
         if len(self.sub_parent_stages) > 1:
             raise AssertionError("multiple sub-parent stages are not supported yet")
+        if self.deferred_parent_start is not None and not (
+            0 < self.deferred_parent_start < len(self.parent_nodes)
+        ):
+            raise AssertionError("deferred parent stage must split the parent schedule")
 
 
 @dataclasses.dataclass
@@ -9088,6 +9105,8 @@ class Scheduler:
         if order is None:
             return False
 
+        # This is planner-local canonicalization needed to prove the fusion,
+        # not the optional post-fusion loop-ordering optimization.
         try:
             if order != tuple(range(len(order))):
                 consumer.apply_new_loop_order(order)
@@ -9194,6 +9213,10 @@ class Scheduler:
             self._producer_output_names_read_by_consumer(grouped_node, other)
             & derived_domain_names
         )
+        if isinstance(producer_node, FusedNestedReductions):
+            index_equivalent_dep_names |= self._producer_output_names_read_by_consumer(
+                producer_node.node1, other
+            )
         return self._can_fuse(
             producer_node if producer_node is not None else grouped_node,
             other,
