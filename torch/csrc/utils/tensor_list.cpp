@@ -14,6 +14,11 @@ namespace torch::utils {
 // A fake tensor has no real storage, so the default tolist() (which reads the
 // data pointer) does not work. Recurse with item() instead, which dispatches
 // through the active fake mode rather than touching storage.
+// returns python object matching item(), constant int/float or
+// symint/symfloat/symbool depending on input
+//
+// non constant data will return unbacked symint if allow_scalar_outputs else
+// raise error
 PyObject* fake_tensor_to_list(const Tensor& tensor) {
   if (tensor.dim() == 0) {
     return py::cast(tensor.item()).release().ptr();
