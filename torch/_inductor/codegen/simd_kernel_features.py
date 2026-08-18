@@ -14,6 +14,7 @@ import torch
 from ...utils._ordered_set import OrderedSet
 from ...utils._sympy.functions import FloorDiv, Min, ModularIndexing
 from ...utils._sympy.symbol import make_symbol, SymT
+from .. import ir
 from ..dependencies import Dep, extract_loop_body_with_args, MemoryDep
 from ..runtime.hints import ReductionHint
 from ..runtime.runtime_utils import next_power_of_2
@@ -143,6 +144,32 @@ class SIMDKernelFeatures:
 
     def reduction_nodes(self) -> list[SchedulerNode]:
         return [n for n in self.scheduler_nodes() if n.is_reduction()]
+
+    @cache_on_self
+    def strict_sum_reductions(self) -> tuple[ir.Reduction, ...]:
+        return tuple(
+            node.node.data
+            for node in self.reduction_nodes()
+            if isinstance(node.node, ir.ComputedBuffer)
+            and isinstance(node.node.data, ir.Reduction)
+            and node.node.data.strict_sum_rblock is not None
+        )
+
+    def has_strict_sum_multirow_reduction(self) -> bool:
+        return any(r.strict_sum_multirow for r in self.strict_sum_reductions())
+
+    @cache_on_self
+    def strict_sum_rblock(self) -> int | None:
+        rblocks = OrderedSet(
+            reduction.strict_sum_rblock for reduction in self.strict_sum_reductions()
+        )
+        if not rblocks:
+            return None
+        if len(rblocks) != 1:
+            raise AssertionError(
+                f"strict sums require one reduction block size, got {rblocks}"
+            )
+        return next(iter(rblocks))
 
     @cache_on_self
     def buf_accesses(self) -> dict[str, list[Dep]]:

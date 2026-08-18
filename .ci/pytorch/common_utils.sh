@@ -42,7 +42,7 @@ declare -f -t trap_add
 function assert_git_not_dirty() {
     # TODO: we should add an option to `build_amd.py` that reverts the repo to
     #       an unmodified state.
-    if [[ "$BUILD_ENVIRONMENT" != *rocm* ]] && [[ "$BUILD_ENVIRONMENT" != *xla* ]] ; then
+    if [[ "$BUILD_ENVIRONMENT" != *rocm* ]] && [[ "$BUILD_ENVIRONMENT" != *xla* ]] && [[ "$BUILD_ENVIRONMENT" != *xpu* ]] ; then
         git_status=$(git status --porcelain | grep -v '?? third_party' || true)
         if [[ $git_status ]]; then
             echo "Build left local git repository checkout dirty"
@@ -117,6 +117,19 @@ function pip_install() {
 function pip_uninstall() {
   # uninstall 2 times
   pip3 uninstall -y "$@" || pip3 uninstall -y "$@"
+}
+
+function get_pkg_versions() {
+  python3 -c "
+import importlib.metadata as metadata
+import sys
+
+for pkg in sys.argv[1:]:
+    try:
+        print(f'{pkg}=={metadata.version(pkg)}')
+    except metadata.PackageNotFoundError:
+        print(f'{pkg}==NOT_INSTALLED')
+" "$@"
 }
 
 function get_exit_code() {

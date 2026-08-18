@@ -190,7 +190,7 @@ jobs:
           set -euo pipefail
           suffix=""
           registry_host=""
-          if [[ "${GITHUB_REF}" == refs/tags/ciflow/binaries/* ]]; then
+          if [[ "${GITHUB_REF}" == refs/tags/ciflow/binaries* ]]; then
             # PR test run: the content-addressed image lives in ECR.
             suffix="-$(git rev-parse HEAD:.ci/docker)"
             registry_host="308535385114.dkr.ecr.us-east-1.amazonaws.com/"
@@ -205,11 +205,11 @@ jobs:
       # on the same PR. Log in (read-only) and wait for the content-addressed
       # tags to appear before the build/test jobs try to pull them.
       - name: Login to ECR
-        if: ${{ startsWith(github.ref, 'refs/tags/ciflow/binaries/') }}
+        if: ${{ startsWith(github.ref, 'refs/tags/ciflow/binaries') }}
         uses: pytorch/pytorch/.github/actions/ecr-login@main
 {%- if ns.groups %}
       - name: Wait for content-addressed builder image in ECR
-        if: ${{ startsWith(github.ref, 'refs/tags/ciflow/binaries/') }}
+        if: ${{ startsWith(github.ref, 'refs/tags/ciflow/binaries') }}
         env:
           DOCKER_IMAGE_SUFFIX: ${{ steps.calc.outputs.docker_image_suffix }}
         shell: bash
@@ -543,7 +543,7 @@ jobs:
     needs: [manywheel-build]
     runs-on: "mt-l-x86iavx512-16-128"
     container:
-      image: python:3.11
+      image: pytorch/${{ matrix.container_image }}:${{ matrix.container_image_tag_prefix }}
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -557,6 +557,10 @@ jobs:
             libtorch_config: "!{{ lt_config['libtorch_config'] }}"
             source_wheel_build_name: "!{{ lt_config['source_wheel_build_name'] }}"
             build_name: "!{{ lt_config['build_name'] }}"
+          {%- if 'container_image' in lt_config %}
+            container_image: "!{{ lt_config['container_image'] }}"
+            container_image_tag_prefix: "!{{ lt_config['container_image_tag_prefix'] }}"
+          {%- endif %}
         {%- endfor %}
     env:
       DESIRED_CUDA: ${{ matrix.desired_cuda }}
@@ -574,24 +578,31 @@ jobs:
         name: Download Wheel Artifact
         with:
           name: ${{ matrix.source_wheel_build_name }}
-          path: "${{ runner.temp }}/wheel_artifact/"
+          path: "${{ github.workspace }}/wheel_artifact/"
       - name: Extract libtorch from wheel
         run: |
           set -eux
-          mkdir -p "${RUNNER_TEMP}/libtorch_output"
+          # In container jobs the github.workspace context is the host path; the
+          # mount is at $GITHUB_WORKSPACE. Use the env var so run steps and the
+          # translated download/upload action paths resolve to the same dir.
+          mkdir -p "${GITHUB_WORKSPACE}/libtorch_output"
           python3 .ci/libtorch/extract_libtorch_from_wheel.py \
-            --wheel-dir "${RUNNER_TEMP}/wheel_artifact" \
-            --output-dir "${RUNNER_TEMP}/libtorch_output" \
+            --wheel-dir "${GITHUB_WORKSPACE}/wheel_artifact" \
+            --output-dir "${GITHUB_WORKSPACE}/libtorch_output" \
             --platform linux \
             --desired-cuda "$DESIRED_CUDA" \
             --libtorch-variant "$LIBTORCH_VARIANT"
+      - name: Smoke test extracted libtorch
+        run: |
+          python3 .ci/libtorch/smoke_test_extract_libtorch.py \
+            --output-dir "${GITHUB_WORKSPACE}/libtorch_output"
       - uses: !{{ common.upload_artifact_action }}
         if: always()
         with:
           name: ${{ matrix.build_name }}
           retention-days: 14
           if-no-files-found: error
-          path: "${{ runner.temp }}/libtorch_output/"
+          path: "${{ github.workspace }}/libtorch_output/"
 
 {%- if branches == "nightly" %}
 

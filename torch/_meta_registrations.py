@@ -610,6 +610,18 @@ def meta_philox_key_fold_in_tensor(key, data):
     return torch.empty_like(key)
 
 
+_PHILOX_RANDINT_DTYPES = (
+    torch.uint8,
+    torch.uint16,
+    torch.uint32,
+    torch.uint64,
+    torch.int8,
+    torch.int16,
+    torch.int32,
+    torch.int64,
+)
+
+
 def _check_philox_gen_args(op_name, self, key):
     torch._check(
         key.dtype == torch.uint64,
@@ -666,13 +678,29 @@ def meta_philox_uniform_(self, key, low=0.0, high=1.0):
     return self
 
 
-@register_meta(aten._philox_bits_.default)
-def meta_philox_bits_(self, key):
+@register_meta(aten._philox_randint_.default)
+def meta_philox_randint_(self, key, low=None, high=None):
     torch._check(
-        self.dtype in (torch.uint32, torch.uint64, torch.int32, torch.int64),
-        lambda: f"_philox_bits_: self must have dtype int32, int64, uint32, or uint64, got {self.dtype}",
+        self.dtype in _PHILOX_RANDINT_DTYPES,
+        lambda: f"_philox_randint_: self must have an integer dtype, got {self.dtype}",
     )
-    _check_philox_gen_args("_philox_bits_", self, key)
+    if self.dtype.itemsize == 4 and (low is not None or high is not None):
+        # Must match the kernels' 32-bit sample range limit; see kMaxRange32.
+        # A range dividing 2**32 evenly is exact at any size, so only guard the
+        # ranges that actually skew.
+        dtype_low = -(2**31) if self.dtype.is_signed else 0
+        lo = dtype_low if low is None else low
+        hi = (dtype_low + 2**32) if high is None else high
+        rng = (hi - lo) % 2**32
+        torch._check(
+            rng == 0 or 2**32 % rng == 0 or rng < 2**28,
+            lambda: f"_philox_randint_: range (high - low = {rng}) does not divide 2^32 "
+            f"evenly and is too large for the output dtype {self.dtype}. Each element draws "
+            "only 32 random bits, so a non-dividing range >= 2^28 gives a significantly biased "
+            "distribution. Use a range that divides 2^32 (a power of two), or a 64-bit dtype "
+            "(torch.int64 or torch.uint64).",
+        )
+    _check_philox_gen_args("_philox_randint_", self, key)
     return self
 
 
@@ -4629,6 +4657,9 @@ def _get_reduction_dtype(input, dtype, promote_int_to_long=True):
 @out_wrapper()
 def meta_nansum(input, dims=None, keepdim=False, *, dtype=None):
     output_dtype = _get_reduction_dtype(input, dtype, promote_int_to_long=True)
+    # reduces over all dimensions if dims=() is passed
+    if dims == () or dims == []:
+        dims = None
     dims = utils.reduction_dims(input.shape, dims)
     output_shape = _compute_reduction_shape(input, dims, keepdim)
     return input.new_empty(output_shape, dtype=output_dtype)
@@ -5822,6 +5853,17 @@ class GridSamplerInterpolation(Enum):
     BICUBIC = 2
 
 
+def check_grid_sampler_2d(input: Tensor, grid: Tensor):
+    torch._check(
+        input.ndim == 4 and input.ndim == grid.ndim,
+        lambda: (
+            f"grid_sampler(): expected 4D input and grid with same number of "
+            f"dimensions, but got input with sizes {input.shape}"
+            f" and grid with sizes {grid.shape}"
+        ),
+    )
+
+
 def check_grid_sampler_3d(input: Tensor, grid: Tensor, interpolation_mode: int):
     torch._check(
         input.ndim == 5 and input.ndim == grid.ndim,
@@ -5838,6 +5880,47 @@ def check_grid_sampler_3d(input: Tensor, grid: Tensor, interpolation_mode: int):
         ),
         lambda: "grid_sampler(): bicubic interpolation only supports 4D input",
     )
+
+
+# torch._grid_sampler_2d_cpu_fallback is CompositeExplicitAutograd, so without a
+# meta kernel the real CPU kernel runs under FakeTensorMode and fails on
+# unallocated data ("the tensor has a non-zero number of elements, but its data is
+# not allocated yet"), making the op uncapturable. These mirror both the checks the
+# C++ impls run (they call check_grid_sampler_common/_2d themselves, since they can
+# be called instead of grid_sampler) and the shapes they allocate --
+# aten/src/ATen/native/GridSampler.cpp.
+@register_meta(aten._grid_sampler_2d_cpu_fallback)
+@out_wrapper()
+def _grid_sampler_2d_cpu_fallback_meta(
+    input,
+    grid,
+    interpolation_mode,
+    padding_mode,
+    align_corners,
+):
+    check_grid_sampler_common(input, grid)
+    check_grid_sampler_2d(input, grid)
+    N = input.shape[0]
+    C = input.shape[1]
+    out_H = grid.shape[1]
+    out_W = grid.shape[2]
+    return input.new_empty((N, C, out_H, out_W))
+
+
+@register_meta(aten._grid_sampler_2d_cpu_fallback_backward)
+def _grid_sampler_2d_cpu_fallback_backward_meta(
+    grad_output,
+    input,
+    grid,
+    interpolation_mode,
+    padding_mode,
+    align_corners,
+):
+    check_grid_sampler_common(input, grid)
+    check_grid_sampler_2d(input, grid)
+    grad_input = torch.zeros_like(input, memory_format=torch.contiguous_format)
+    grad_grid = torch.empty_like(grid, memory_format=torch.contiguous_format)
+    return (grad_input, grad_grid)
 
 
 @register_meta(aten.grid_sampler_2d_backward.default)
@@ -8709,6 +8792,29 @@ def meta_scaled_grouped_mm(
         out_dtype=out_dtype,
         use_fast_accum=use_fast_accum,
     )
+
+
+@register_meta([aten._scaled_grouped_mm_v2.default])
+def meta_scaled_grouped_mm_v2(
+    mat_a: torch.Tensor,
+    mat_b: torch.Tensor,
+    scale_a: list[torch.Tensor],
+    scale_recipe_a: list[int],
+    swizzle_a: list[int],
+    scale_b: list[torch.Tensor],
+    scale_recipe_b: list[int],
+    swizzle_b: list[int],
+    offs: torch.Tensor | None = None,
+    bias: torch.Tensor | None = None,
+    out_dtype: torch.dtype | None = None,
+    contraction_dim: list[int] | None = None,
+    use_fast_accum: bool = False,
+):
+    """Shape inference only, since the structured C++ meta doesn't support
+    dynamic shapes. Input validation lives there; same pattern as meta_mm.
+    """
+    _out_dtype = out_dtype or torch.bfloat16
+    return _create_grouped_mm_output_tensor(mat_a, mat_b, offs, _out_dtype)
 
 
 @register_meta(aten._foreach_norm.Scalar)
