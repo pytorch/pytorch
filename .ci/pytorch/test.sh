@@ -1149,7 +1149,8 @@ test_better_benchmark() {
   benchmark_dir="$(mktemp -d "${RUNNER_TEMP:-/tmp}/better-benchmark.XXXXXX")"
   mkdir -p "${test_reports_dir}" "${debug_dir}"
 
-  git clone --depth 1 --branch main https://github.com/eellison/better-benchmark.git "${benchmark_dir}"
+  git clone --depth 1 --branch better-benchmark-dashboard \
+    https://github.com/karthickai/better-benchmark.git "${benchmark_dir}"
   pushd "${benchmark_dir}"
 
   local gpu_indices
@@ -1170,11 +1171,11 @@ PY
     --all-shapes \
     --gpus "${gpu_indices}" \
     --output "${debug_dir}/current.json"
-  # TODO: Add a single-input CI export mode to bench_report.py. For now it
-  # requires --compare, so compare the result with itself and export the
-  # unchanged head values as PyTorch v3 dashboard records.
-  python scripts/bench_report.py \
-    --compare "${debug_dir}/current.json" "${debug_dir}/current.json" \
+  python scripts/dashboard_export.py \
+    --input "${debug_dir}/current.json" \
+    --model-accounting benchmarks/model_accounting_b200.json \
+    --timing auto \
+    --arch "NVIDIA B200" \
     --ci-json "${test_reports_dir}/inductor_kernel_benchmark.json"
   popd
 }
