@@ -8872,14 +8872,11 @@ BACKWARD_SKIPS_AND_XFAILS = [
         ),
         name="clone_wrong_nested_int_for_gradient",
     ),
-    # some min / max ops use masked_fill_ underneath sometimes, which isn't implemented
+    # copysign uses masked_fill_ underneath, which isn't implemented
     XFailRule(
         error_type=NotImplementedError,
         error_msg="aten.masked_fill_.Scalar",
-        op_match_fn=lambda device, op: (
-            op.full_name
-            in {"max.binary", "min.binary", "minimum", "maximum", "copysign"}
-        ),
+        op_match_fn=lambda device, op: op.full_name == "copysign",
         name="unimplemented_masked_fill",
     ),
     XFailRule(
