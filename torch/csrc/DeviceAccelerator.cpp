@@ -113,6 +113,14 @@ void initModule(PyObject* module) {
         !torch::utils::is_device_in_bad_fork(device_type.value());
   });
 
+  m.def("_accelerator_isInBadFork", []() {
+    const auto device_type = at::accelerator::getAccelerator();
+    if (!device_type.has_value()) {
+      return false;
+    }
+    return torch::utils::is_device_in_bad_fork(device_type.value());
+  });
+
   m.def("_accelerator_emptyCache", []() { at::accelerator::emptyCache(); });
 
   m.def("_accelerator_emptyHostCache", []() {
@@ -199,6 +207,11 @@ void initModule(PyObject* module) {
   m.def("_accelerator_getDefaultGenerator", [](c10::DeviceIndex device_index) {
     const auto device_type = at::accelerator::getAccelerator(true).value();
     torch::utils::maybe_initialize_device(device_type);
+    // Non-lazy-init backends (e.g. MPS) must register the fork handler here.
+    // See Note: [Lazy initialization of device runtime].
+    if (!torch::utils::is_device_lazy_init_supported(device_type)) {
+      torch::utils::register_fork_handler_for_device_init(device_type);
+    }
     return at::accelerator::getDefaultGenerator(device_index);
   });
 
