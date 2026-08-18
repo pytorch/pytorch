@@ -5539,12 +5539,6 @@ class SimpleNamespaceVariable(UserDefinedObjectVariable):
     def is_matching_cls(cls: type) -> bool:
         return isinstance(cls, type) and issubclass(cls, types.SimpleNamespace)
 
-    def _has_c_slot(self, name: str) -> bool:
-        """True while a subclass has not replaced the C slot with Python code."""
-        return getattr(type(self.value), name, None) is getattr(
-            types.SimpleNamespace, name
-        )
-
     def _repr_name(self) -> str:
         # namespace_repr prints "namespace" for the exact type, tp_name otherwise.
         cls = type(self.value)
@@ -5590,41 +5584,54 @@ class SimpleNamespaceVariable(UserDefinedObjectVariable):
             for key, value in self.get_dict_vt(tx).items.items()
         ]
 
-    def call_method(
+    def _replace(
         self,
         tx: "InstructionTranslatorBase",
-        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        # __replace__ landed in 3.13 (gh-108751).
+        if sys.version_info < (3, 13):
+            return None
+        replace = types.SimpleNamespace.__replace__  # type: ignore[missing-attribute]
+        if self._maybe_get_baseclass_method("__replace__") is not replace:
+            return None
+        if args:
+            raise_type_error(tx, "__replace__() takes no positional arguments")
+        cls_vt = VariableTracker.build(tx, type(self.value), self.cls_source)
+        new_vt = tx.output.side_effects.track_new_user_defined_object(
+            cls_vt, cls_vt, [], tx=tx
+        )
+        attrs = dict(self._attr_items(tx))
+        attrs.update(kwargs)
+        for attr, value in attrs.items():
+            tx.output.side_effects.store_instance_dict_attr(new_vt, attr, value)
+        return new_vt
+
+    tp_methods = {"__replace__": Method(_replace)}
+
+    def tp_init_impl(
+        self,
+        tx: "InstructionTranslatorBase",
         args: list[Any],
         kwargs: dict[str, Any],
     ) -> VariableTracker:
-        if name == "__init__" and self._has_c_slot("__init__"):
-            if len(args) > 1:
-                raise_type_error(
-                    tx,
-                    f"{type(self.value).__name__} expected at most "
-                    f"1 argument, got {len(args)}",
-                )
-            for attr, value in self._merge_args(tx, args, kwargs).items():
-                tx.output.side_effects.store_instance_dict_attr(self, attr, value)
-            return variables.ConstantVariable.create(None)
-
-        if name == "__replace__" and self._has_c_slot("__replace__"):
-            if args:
-                raise_type_error(tx, "__replace__() takes no positional arguments")
-            cls_vt = VariableTracker.build(tx, type(self.value), self.cls_source)
-            new_vt = tx.output.side_effects.track_new_user_defined_object(
-                cls_vt, cls_vt, [], tx=tx
+        # namespace_init grew its optional positional argument in 3.13 (gh-108191).
+        if args and sys.version_info < (3, 13):
+            raise_type_error(tx, "no positional arguments expected")
+        if len(args) > 1:
+            raise_type_error(
+                tx,
+                f"{type(self.value).__name__} expected at most "
+                f"1 argument, got {len(args)}",
             )
-            attrs = dict(self._attr_items(tx))
-            attrs.update(kwargs)
-            for attr, value in attrs.items():
-                tx.output.side_effects.store_instance_dict_attr(new_vt, attr, value)
-            return new_vt
-
-        return super().call_method(tx, name, args, kwargs)
+        for attr, value in self._merge_args(tx, args, kwargs).items():
+            tx.output.side_effects.store_instance_dict_attr(self, attr, value)
+        return variables.ConstantVariable.create(None)
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        if not self._has_c_slot("__repr__"):
+        repr_slot = types.SimpleNamespace.__repr__
+        if self._maybe_get_baseclass_method("__repr__") is not repr_slot:
             return super().tp_repr_impl(tx)
         contents = ", ".join(
             f"{attr}={tracked_repr(tx, value)}" for attr, value in self._attr_items(tx)
@@ -5634,7 +5641,8 @@ class SimpleNamespaceVariable(UserDefinedObjectVariable):
     def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
     ) -> VariableTracker:
-        if not self._has_c_slot(op):
+        op_slot = getattr(types.SimpleNamespace, op)
+        if self._maybe_get_baseclass_method(op) is not op_slot:
             return super().tp_richcompare_impl(tx, other, op)
         # namespace_richcompare requires a real namespace on both sides
         # (PyObject_TypeCheck, so a spoofed __class__ does not count) and hands

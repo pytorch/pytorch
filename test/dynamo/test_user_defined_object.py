@@ -2,6 +2,7 @@
 
 import copy
 import dataclasses
+import sys
 import types
 import unittest
 
@@ -1248,6 +1249,14 @@ class _Namespace(types.SimpleNamespace):
     pass
 
 
+class _OverridingNamespace(types.SimpleNamespace):
+    def __repr__(self) -> str:
+        return "overridden"
+
+    def __eq__(self, other: object) -> bool:
+        return True
+
+
 @torch._dynamo.config.patch(enable_trace_unittest=True)
 class TestSimpleNamespace(TestCase):
     """types.SimpleNamespace, ported from CPython's SimpleNamespaceTests."""
@@ -1261,6 +1270,20 @@ class TestSimpleNamespace(TestCase):
 
         check(types.SimpleNamespace(), {})
         check(types.SimpleNamespace(x=1, y=2), {"x": 1, "y": 2})
+
+    @make_dynamo_test
+    def test_constructor_positional(self):
+        # namespace_init grew its optional positional argument in 3.13.
+        if sys.version_info < (3, 13):
+            with self.assertRaises(TypeError):
+                types.SimpleNamespace({"x": 1})
+            return
+
+        def check(ns, expected):
+            self.assertEqual(len(ns.__dict__), len(expected))
+            self.assertEqual(vars(ns), expected)
+            self.assertEqual(list(vars(ns).items()), list(expected.items()))
+
         check(
             types.SimpleNamespace({"x": 1, "y": 2}, x=4, z=3), {"x": 4, "y": 2, "z": 3}
         )
@@ -1275,7 +1298,10 @@ class TestSimpleNamespace(TestCase):
             types.SimpleNamespace(1)  # not a mapping or iterable
         with self.assertRaises(TypeError):
             types.SimpleNamespace([1])  # non-iterable element
-        with self.assertRaises(ValueError):
+        # Below 3.13 no positional argument is accepted at all, so the pair
+        # check never runs and the argument count TypeError comes out instead.
+        pair_error = ValueError if sys.version_info >= (3, 13) else TypeError
+        with self.assertRaises(pair_error):
             types.SimpleNamespace([["x"]])  # not a pair
         with self.assertRaises(TypeError):
             types.SimpleNamespace({1: 2})  # non-string key
@@ -1382,6 +1408,13 @@ class TestSimpleNamespace(TestCase):
         self.assertEqual(vars(spam), {"ham": 8, "eggs": 9})
 
     @make_dynamo_test
+    def test_subclass_overrides_c_slots(self):
+        # A Python __repr__/__eq__ on the subclass replaces the C slot.
+        self.assertEqual(repr(_OverridingNamespace(a=1)), "overridden")
+        self.assertTrue(_OverridingNamespace(a=1) == 1)
+
+    @unittest.skipIf(sys.version_info < (3, 13), "copy.replace added in 3.13")
+    @make_dynamo_test
     def test_replace(self):
         ns = types.SimpleNamespace(x=11, y=22)
         ns2 = copy.replace(ns)
@@ -1393,6 +1426,7 @@ class TestSimpleNamespace(TestCase):
         self.assertEqual(vars(copy.replace(ns, x=1)), {"x": 1, "y": 22})
         self.assertEqual(vars(copy.replace(ns, x=1, y=2)), {"x": 1, "y": 2})
 
+    @unittest.skipIf(sys.version_info < (3, 13), "copy.replace added in 3.13")
     @make_dynamo_test
     def test_replace_subclass(self):
         spam2 = copy.replace(_Namespace(ham=8, eggs=9), ham=5)
@@ -1419,7 +1453,19 @@ class TestSimpleNamespace(TestCase):
         def fn(ns, x):
             before = repr(ns)
             ns.total = ns.scale * x
-            return before, ns.total, ns == copy.replace(ns, total=ns.total)
+            return before, ns.total, ns == types.SimpleNamespace(name="cfg", scale=2)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(3)
+        expected = fn(types.SimpleNamespace(name="cfg", scale=2), x)
+        got = opt_fn(types.SimpleNamespace(name="cfg", scale=2), x)
+        self.assertEqual(expected, got)
+
+    @unittest.skipIf(sys.version_info < (3, 13), "copy.replace added in 3.13")
+    def test_replace_from_outside(self):
+        def fn(ns, x):
+            ns.total = ns.scale * x
+            return ns == copy.replace(ns, total=ns.total)
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         x = torch.randn(3)
