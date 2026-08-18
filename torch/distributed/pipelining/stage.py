@@ -2,10 +2,12 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import logging
 import operator
+import os
 import warnings
 import weakref
 from abc import ABC, abstractmethod
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any, cast
 
 import torch
@@ -14,6 +16,7 @@ import torch.distributed.config as dist_config
 import torch.fx as fx
 import torch.nn as nn
 from torch._subclasses.fake_tensor import is_fake_tensor
+from torch.autograd.graph import get_gradient_edge, GradientEdge
 from torch.distributed._composable.replicate_with_fsdp import replicate, ReplicateModule
 from torch.distributed.fsdp import FSDPModule, fully_shard
 from torch.distributed.pipelining._utils import (
@@ -90,6 +93,38 @@ def _normalize_model_output_as_tuple(output: Any) -> tuple[Any]:
     # `act_send_info`
     output_tuple = output if type(output) is tuple else (output,)
     return output_tuple
+
+
+def _early_send_release_default() -> bool:
+    """Return the early-release setting, on unless opted out.
+
+    Set ``TORCH_PIPELINING_EARLY_SEND_RELEASE=0`` to keep sent activations until
+    the end of the step. Configurations whose backward needs the output tensor
+    itself are already declined by :meth:`_output_slot_is_releasable`, so the
+    opt-out is for diagnosing a suspected regression rather than for correctness.
+    """
+    return os.environ.get("TORCH_PIPELINING_EARLY_SEND_RELEASE", "1") != "0"
+
+
+@dataclass
+class _ForwardCacheEntry:
+    """Forward state retained per microbatch.
+
+    Releasable outputs use ``backward_roots`` after their consumers retire.
+    """
+
+    backward_roots: tuple[GradientEdge | None, ...]
+    input_values: list[torch.Tensor]
+    live_outputs: list[torch.Tensor | None]
+    releasable: tuple[bool, ...]
+    pending_consumers: list[int]
+
+    def stage_output_for_backward(self) -> tuple[Any, ...]:
+        """Return each live tensor or its saved gradient edge."""
+        return tuple(
+            live if live is not None else root
+            for live, root in zip(self.live_outputs, self.backward_roots, strict=True)
+        )
 
 
 class _RecvInfo:
@@ -266,8 +301,8 @@ class _PipelineStageBase(ABC):
             )
 
         # Run time states
-        # map microbatch ID to list of forward tensor args
-        self.fwd_cache: dict[int, tuple[Any, list[torch.Tensor]]] = {}
+        # Forward state by microbatch.
+        self.fwd_cache: dict[int, _ForwardCacheEntry] = {}
         # map microbatch ID to list of backward grad tensor args
         self.bwd_cache: dict[int, tuple[torch.Tensor | None, ...]] = {}
         # Caching chunk outputs for final output merge or reduction
@@ -278,6 +313,11 @@ class _PipelineStageBase(ABC):
         self.has_backward = False
         # Log prefix
         self.log_prefix = f"[Stage {self.stage_index}]"
+
+        # Release sent activations and buffers before the step ends.
+        self.early_send_release = _early_send_release_default()
+        # Reason the stage kept an output tensor, logged once per stage.
+        self._retained_output_reason: str | None = None
 
         # Forward infra
         self.args_recv_info: dict[int, tuple[_RecvInfo, ...]] = {}
@@ -565,22 +605,77 @@ class _PipelineStageBase(ABC):
         recv_infos = self.grad_recv_info[bwd_chunk_id]
         return self._get_recv_ops(recv_infos, self._upstream_group)
 
+    def _output_slot_is_releasable(self, output: Any) -> tuple[bool, str]:
+        """Return whether an output may be released after sending."""
+        if not self.early_send_release:
+            return False, "early release disabled"
+        if self.is_last:
+            return False, "last-stage output"
+        if type(output) is not torch.Tensor:
+            # Gradient-edge backward is only validated for plain tensors.
+            return False, f"output type {type(output).__name__}"
+        if isinstance(self.submod, DistributedDataParallel):
+            # DDP builds its reducer from the output tensors.
+            return False, "DDP reducer requires live outputs"
+        if self.dw_builder is not None:
+            return False, "custom dw_builder may require live outputs"
+        return True, ""
+
+    def _make_fwd_cache_entry(
+        self, output_tuple: tuple[Any, ...], input_values: list[torch.Tensor]
+    ) -> _ForwardCacheEntry:
+        releasable: list[bool] = []
+        backward_roots: list[GradientEdge | None] = []
+        for out in output_tuple:
+            can_release, reason = self._output_slot_is_releasable(out)
+            releasable.append(can_release)
+            # Avoid retaining an autograd root in forward-only schedules.
+            backward_roots.append(
+                get_gradient_edge(out)
+                if self.has_backward and can_release and out.requires_grad
+                else None
+            )
+            if not can_release and self._retained_output_reason is None:
+                self._retained_output_reason = reason
+                logger.debug(
+                    "%s keeping output tensors alive until backward: %s",
+                    self.log_prefix,
+                    reason,
+                )
+
+        return _ForwardCacheEntry(
+            backward_roots=tuple(backward_roots),
+            input_values=input_values,
+            live_outputs=list(output_tuple),
+            releasable=tuple(releasable),
+            pending_consumers=[0] * len(output_tuple),
+        )
+
     def get_fwd_send_ops(self, fwd_chunk_id: int) -> list[dist.P2POp]:
         """
         Get the activation send ops for current stage's forward.
         Handles DTensor outputs by extracting local tensors.
+
+        Sent slots hold a lease until :meth:`retire_fwd_sends`.
         """
-        output_tuple, _ = self.fwd_cache[fwd_chunk_id]
+        entry = self.fwd_cache[fwd_chunk_id]
 
         ops: list[dist.P2POp] = []
 
-        for idx, out in enumerate(output_tuple):
-            dst_stages = self.act_send_info[idx]
+        for idx, out in enumerate(entry.live_outputs):
+            dst_stages = [dst for dst in self.act_send_info[idx] if dst is not None]
+            if not dst_stages:
+                continue
+            if out is None:
+                raise AssertionError(
+                    f"{self.log_prefix} output {idx} of chunk {fwd_chunk_id} was "
+                    "released before its send was issued"
+                )
+            # One lease covers the slot's batched sends.
+            entry.pending_consumers[idx] += 1
+            # Extract local tensor if DTensor
+            send_tensor = to_local_if_dtensor(out, detach=True)
             for dst in dst_stages:
-                if dst is None:
-                    continue
-                # Extract local tensor if DTensor
-                send_tensor = to_local_if_dtensor(out, detach=True)
                 logger.debug(
                     "%s Sending tensor to Stage %s: %s",
                     self.log_prefix,
@@ -598,6 +693,22 @@ class _PipelineStageBase(ABC):
                 )
 
         return ops
+
+    def retire_fwd_sends(self, fwd_chunk_id: int) -> None:
+        """Retire send leases and release unused output tensors.
+
+        A missing entry means backward already consumed it.
+        """
+        entry = self.fwd_cache.get(fwd_chunk_id)
+        if entry is None:
+            return
+
+        for idx, pending in enumerate(entry.pending_consumers):
+            if pending == 0:
+                continue
+            entry.pending_consumers[idx] = pending - 1
+            if entry.pending_consumers[idx] == 0 and entry.releasable[idx]:
+                entry.live_outputs[idx] = None
 
     def _get_grad_send_meta(self, input_idx: int) -> TensorMeta | None:
         """Return gradient metadata for ``input_idx`` if a recv was allocated."""
@@ -1002,9 +1113,8 @@ class _PipelineStageBase(ABC):
         flat_args = flatten_args(composite_args)
         flat_kwargs = flatten_args(composite_kwargs)
         flatten_input_tensors = flat_args + flat_kwargs
-        self.fwd_cache[fwd_chunk_id] = (
-            output_tuple,  # stage_output
-            flatten_input_tensors,  # input_values
+        self.fwd_cache[fwd_chunk_id] = self._make_fwd_cache_entry(
+            output_tuple, flatten_input_tensors
         )
 
         logger.debug(
@@ -1052,10 +1162,10 @@ class _PipelineStageBase(ABC):
 
         self._check_chunk_id(bwd_chunk_id)
 
-        (
-            stage_output,
-            input_values,
-        ) = self.fwd_cache.pop(bwd_chunk_id)
+        entry = self.fwd_cache.pop(bwd_chunk_id)
+        # Released slots use gradient edges as backward roots.
+        stage_output = entry.stage_output_for_backward()
+        input_values = entry.input_values
 
         # Compute backward
         if self.is_last:
@@ -1117,6 +1227,13 @@ class _PipelineStageBase(ABC):
                     # when the "stage_ouput" is a loss, then it is a tensor, otherwise it is a tuple of tensors
                     grads_input, param_groups = self.backward_maybe_with_nosync(
                         "input", bwd_kwargs, last_backward=last_backward
+                    )
+
+                    # Edges cannot be detached, so drop them before weight backward.
+                    # The first stage skips this path; tensor roots remain for DDP.
+                    bwd_kwargs["stage_output"] = tuple(
+                        None if isinstance(root, GradientEdge) else root
+                        for root in cast(tuple[Any, ...], bwd_kwargs["stage_output"])
                     )
 
                 # TODO: we don't need to save this, add to dw_runner?
