@@ -33,6 +33,8 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_utils import HardwareClassification
 from torch.utils import _pytree as pytree
+from torch.utils._triton import has_triton
+
 
 
 GLOBAL_LIST = []
@@ -1450,173 +1452,10 @@ class TestExperimentDevice(TestCase):
         ):
             _dynamo_graph_capture_for_export(module)(x)
 
-    def test_dynamo_graph_capture_fx_graph_annotate_overlap_pass(self, device):
-        class DummyOp(torch.autograd.Function):
-            @staticmethod
-            def forward(ctx, x, scalar):
-                ctx.save_for_backward(x)
-                return x + scalar
-
-            @staticmethod
-            def backward(ctx, grad_out):
-                return grad_out, None
-
-        def mock_fw_compute(x):
-            with fx_traceback.annotate({"compute": 0}):
-                return DummyOp.apply(x, 10)
-
-        def mock_bw_comm(x):
-            with fx_traceback.annotate({"comm": 0}):
-                return DummyOp.apply(x, 20)
-
-        def mock_bw_compute(x):
-            return DummyOp.apply(x, 30)
-
-        class Model(torch.nn.Module):
-            def forward(self, fw_in, bw_in):
-                fw_out = mock_fw_compute(fw_in)
-                # bw_in blocks bw_out
-                bw_in = mock_bw_comm(bw_in)
-                bw_out = mock_bw_compute(bw_in)
-                return fw_out, bw_out
-
-        def input_fn():
-            inputs = (torch.rand(2, 128, device=device, requires_grad=True),)
-            grad_ins = (torch.rand(2, 128, device=device),)
-            return (
-                *inputs,
-                *grad_ins,
-            )
-
-        with torch.device("meta"):
-            model = Model()
-
-        import torch.fx.traceback as fx_traceback
-
-        with fx_traceback.preserve_node_meta():
-            gm = dynamo_graph_capture_for_export(model)(*input_fn())
-
-        """
-        def forward(self, args_0, args_1):
-            _tree_leaf_0, _tree_leaf_1, _tree_leaf_2, = pytree.tree_leaves((self, args_0, args_1,))
-            L_fw_in_ , L_bw_in_ , = self._in_shuffle_graph(_tree_leaf_0, _tree_leaf_1, _tree_leaf_2)
-            l_fw_in_ = L_fw_in_
-            l_bw_in_ = L_bw_in_
-            fwd_body_0 = self.fwd_body_0
-            bwd_body_0 = self.bwd_body_0
-            fw_out = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_fw_in_, args_tensor_mask = [True, False], non_differentiable_idx = []);  fwd_body_0 = bwd_body_0 = l_fw_in_ = None
-            bw_in = l_bw_in_ + 20;  l_bw_in_ = None
-            bw_out = bw_in + 30;  bw_in = None
-            return pytree.tree_unflatten(self._out_shuffle_graph(_tree_leaf_0, _tree_leaf_1, _tree_leaf_2, fw_out, bw_out), self._out_spec)
-        """
-        test_inputs = input_fn()
-        self.assertEqual(gm(*test_inputs), model(*test_inputs))
-
-    def test_aot_export_blockmask_closure_spec_mismatch(self, device):
-        """BlockMasks with same closure structure produce equal TreeSpecs.
-
-        Closure values are extracted into pytree leaves, so two BlockMasks
-        whose mask_mod closures have the same code + structure but different
-        captured values have the same spec (values differ in the leaves, not
-        the context).  BlockMasks with different closure *structure* (e.g.
-        different code) must still produce different specs.
-        """
-        from torch.nn.attention.flex_attention import create_block_mask
-
-        _register_blockmask_pytree()
-
-        def make_mask_fn(offset):
-            def fn(b, h, q, k):
-                return q >= k + offset
-
-            return fn
-
-        mask_a = create_block_mask(
-            make_mask_fn(4), B=1, H=1, Q_LEN=64, KV_LEN=64, device=device
-        )
-        mask_b = create_block_mask(
-            make_mask_fn(8), B=1, H=1, Q_LEN=64, KV_LEN=64, device=device
-        )
-        mask_a_same = create_block_mask(
-            make_mask_fn(4), B=1, H=1, Q_LEN=64, KV_LEN=64, device=device
-        )
-
-        _, spec_a = pytree.tree_flatten(mask_a)
-        _, spec_b = pytree.tree_flatten(mask_b)
-        _, spec_a_same = pytree.tree_flatten(mask_a_same)
-
-        # Same closure code + same captured value -> same spec
-        self.assertEqual(spec_a, spec_a_same)
-        # Same closure code + different captured value -> same spec
-        # (values are in the leaves, not the context)
-        self.assertEqual(spec_a, spec_b)
-
-        # Different closure *code* -> different spec
-        def different_mask(b, h, q, k):
-            return q > k
-
-        mask_c = create_block_mask(
-            different_mask, B=1, H=1, Q_LEN=64, KV_LEN=64, device=device
-        )
-        _, spec_c = pytree.tree_flatten(mask_c)
-        self.assertNotEqual(spec_a, spec_c)
-
-    def test_blockmask_and_masks_closure_extraction(self, device):
-        """and_masks closure tensors are recursively extracted into pytree leaves.
-
-        and_masks(fn1, fn2) returns a closure capturing a tuple of functions.
-        _extract_callable_pytree must recursively process these functions
-        (extracting their closure tensors) rather than emitting the functions
-        themselves as leaves, since functions are not supported export input
-        types.
-        """
-        from torch.nn.attention.flex_attention import (
-            and_masks,
-            BlockMask,
-            create_block_mask,
-        )
-
-        _register_blockmask_pytree()
-
-        def causal(b, h, q_idx, kv_idx):
-            return q_idx >= kv_idx
-
-        offset = torch.tensor(3, device=device)
-
-        def offset_mask(b, h, q_idx, kv_idx):
-            return q_idx >= kv_idx + offset
-
-        mask_mod = and_masks(causal, offset_mask)
-        block_mask = create_block_mask(
-            mask_mod, B=1, H=None, Q_LEN=128, KV_LEN=128, device=device
-        )
-
-        leaves, spec = pytree.tree_flatten(block_mask)
-
-        # Present BlockMask tensor attrs + offset extracted from
-        # offset_mask's closure
-        n_regular = sum(
-            getattr(block_mask, attr) is not None for attr in BlockMask._TENSOR_ATTRS
-        )
-        self.assertEqual(len(leaves), n_regular + 1)
-        self.assertTrue(all(isinstance(l, torch.Tensor) for l in leaves))
-        self.assertIs(leaves[n_regular], offset)
-
-        # Leaves must all pass check_user_input_output
-        from torch._dynamo.eval_frame import check_user_input_output
-        from torch._dynamo.exc import UserErrorType
-
-        check_user_input_output(leaves, UserErrorType.INVALID_INPUT)
-
-        # Round-trip: unflatten should reconstruct a working mask_mod
-        restored = pytree.tree_unflatten(leaves, spec)
-        self.assertTrue(callable(restored.mask_mod))
-
-
     @requires_capabilities(
-        Capability.lib.triton,
         Capability.attention.flash_attention
-   )
+    )
+    @unittest.skipUnless(has_triton() and not torch.version.hip, "Requires Triton and not ROCm",) 
     def test_aot_export_flex_attention_callable_mask_mod(self, device):
         """Test flex_attention AOT export with callable class as mask_mod.
 
@@ -1686,12 +1525,9 @@ class TestExperimentDevice(TestCase):
         self.assertTrue(torch.allclose(out_eager, out_export, atol=1e-5))
 
     @requires_capabilities(
-        Capability.lib.triton,
         Capability.attention.flash_attention
     )
-    @unittest.skipIf(
-        torch.version.hip, "Requires not ROCm",
-    )
+    @unittest.skipUnless(has_triton() and not torch.version.hip, "Requires Triton and not ROCm",)
     def test_aot_export_flex_attention_with_blockmask_placeholders(self, device):
         from torch._subclasses.fake_tensor import FakeTensorMode
         from torch.nn.attention.flex_attention import create_block_mask, flex_attention
@@ -1747,6 +1583,68 @@ class TestExperimentDevice(TestCase):
             joint_with_descriptors = aot_export_joint_with_descriptors(stack, gm, (x,))
 
         self.assertIsNotNone(joint_with_descriptors.graph_module)
+
+    def test_dynamo_graph_capture_fx_graph_annotate_overlap_pass(self, device):
+        class DummyOp(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, scalar):
+                ctx.save_for_backward(x)
+                return x + scalar
+
+            @staticmethod
+            def backward(ctx, grad_out):
+                return grad_out, None
+
+        def mock_fw_compute(x):
+            with fx_traceback.annotate({"compute": 0}):
+                return DummyOp.apply(x, 10)
+
+        def mock_bw_comm(x):
+            with fx_traceback.annotate({"comm": 0}):
+                return DummyOp.apply(x, 20)
+
+        def mock_bw_compute(x):
+            return DummyOp.apply(x, 30)
+
+        class Model(torch.nn.Module):
+            def forward(self, fw_in, bw_in):
+                fw_out = mock_fw_compute(fw_in)
+                # bw_in blocks bw_out
+                bw_in = mock_bw_comm(bw_in)
+                bw_out = mock_bw_compute(bw_in)
+                return fw_out, bw_out
+
+        def input_fn():
+            inputs = (torch.rand(2, 128, device=device, requires_grad=True),)
+            grad_ins = (torch.rand(2, 128, device=device),)
+            return (
+                *inputs,
+                *grad_ins,
+            )
+
+        with torch.device("meta"):
+            model = Model()
+
+        import torch.fx.traceback as fx_traceback
+
+        with fx_traceback.preserve_node_meta():
+            gm = dynamo_graph_capture_for_export(model)(*input_fn())
+
+        """
+        def forward(self, args_0, args_1):
+            _tree_leaf_0, _tree_leaf_1, _tree_leaf_2, = pytree.tree_leaves((self, args_0, args_1,))
+            L_fw_in_ , L_bw_in_ , = self._in_shuffle_graph(_tree_leaf_0, _tree_leaf_1, _tree_leaf_2)
+            l_fw_in_ = L_fw_in_
+            l_bw_in_ = L_bw_in_
+            fwd_body_0 = self.fwd_body_0
+            bwd_body_0 = self.bwd_body_0
+            fw_out = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_fw_in_, args_tensor_mask = [True, False], non_differentiable_idx = []);  fwd_body_0 = bwd_body_0 = l_fw_in_ = None
+            bw_in = l_bw_in_ + 20;  l_bw_in_ = None
+            bw_out = bw_in + 30;  bw_in = None
+            return pytree.tree_unflatten(self._out_shuffle_graph(_tree_leaf_0, _tree_leaf_1, _tree_leaf_2, fw_out, bw_out), self._out_spec)
+        """
+        test_inputs = input_fn()
+        self.assertEqual(gm(*test_inputs), model(*test_inputs))
 
     def test_aot_export_blockmask_with_new_closure(self, device):
         import contextlib
@@ -1884,6 +1782,106 @@ def forward(self, arg0_1):
             compiled_fn = aot_compile_joint_with_descriptors(joint_with_descriptors)
             # Shouldn't crash
             self.assertIsNotNone(compiled_fn)
+
+    def test_aot_export_blockmask_closure_spec_mismatch(self, device):
+        """BlockMasks with same closure structure produce equal TreeSpecs.
+
+        Closure values are extracted into pytree leaves, so two BlockMasks
+        whose mask_mod closures have the same code + structure but different
+        captured values have the same spec (values differ in the leaves, not
+        the context).  BlockMasks with different closure *structure* (e.g.
+        different code) must still produce different specs.
+        """
+        from torch.nn.attention.flex_attention import create_block_mask
+
+        _register_blockmask_pytree()
+
+        def make_mask_fn(offset):
+            def fn(b, h, q, k):
+                return q >= k + offset
+
+            return fn
+
+        mask_a = create_block_mask(
+            make_mask_fn(4), B=1, H=1, Q_LEN=64, KV_LEN=64, device=device
+        )
+        mask_b = create_block_mask(
+            make_mask_fn(8), B=1, H=1, Q_LEN=64, KV_LEN=64, device=device
+        )
+        mask_a_same = create_block_mask(
+            make_mask_fn(4), B=1, H=1, Q_LEN=64, KV_LEN=64, device=device
+        )
+
+        _, spec_a = pytree.tree_flatten(mask_a)
+        _, spec_b = pytree.tree_flatten(mask_b)
+        _, spec_a_same = pytree.tree_flatten(mask_a_same)
+
+        # Same closure code + same captured value -> same spec
+        self.assertEqual(spec_a, spec_a_same)
+        # Same closure code + different captured value -> same spec
+        # (values are in the leaves, not the context)
+        self.assertEqual(spec_a, spec_b)
+
+        # Different closure *code* -> different spec
+        def different_mask(b, h, q, k):
+            return q > k
+
+        mask_c = create_block_mask(
+            different_mask, B=1, H=1, Q_LEN=64, KV_LEN=64, device=device
+        )
+        _, spec_c = pytree.tree_flatten(mask_c)
+        self.assertNotEqual(spec_a, spec_c)
+
+    def test_blockmask_and_masks_closure_extraction(self, device):
+        """and_masks closure tensors are recursively extracted into pytree leaves.
+
+        and_masks(fn1, fn2) returns a closure capturing a tuple of functions.
+        _extract_callable_pytree must recursively process these functions
+        (extracting their closure tensors) rather than emitting the functions
+        themselves as leaves, since functions are not supported export input
+        types.
+        """
+        from torch.nn.attention.flex_attention import (
+            and_masks,
+            BlockMask,
+            create_block_mask,
+        )
+
+        _register_blockmask_pytree()
+
+        def causal(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        offset = torch.tensor(3, device=device)
+
+        def offset_mask(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx + offset
+
+        mask_mod = and_masks(causal, offset_mask)
+        block_mask = create_block_mask(
+            mask_mod, B=1, H=None, Q_LEN=128, KV_LEN=128, device=device
+        )
+
+        leaves, spec = pytree.tree_flatten(block_mask)
+
+        # Present BlockMask tensor attrs + offset extracted from
+        # offset_mask's closure
+        n_regular = sum(
+            getattr(block_mask, attr) is not None for attr in BlockMask._TENSOR_ATTRS
+        )
+        self.assertEqual(len(leaves), n_regular + 1)
+        self.assertTrue(all(isinstance(l, torch.Tensor) for l in leaves))
+        self.assertIs(leaves[n_regular], offset)
+
+        # Leaves must all pass check_user_input_output
+        from torch._dynamo.eval_frame import check_user_input_output
+        from torch._dynamo.exc import UserErrorType
+
+        check_user_input_output(leaves, UserErrorType.INVALID_INPUT)
+
+        # Round-trip: unflatten should reconstruct a working mask_mod
+        restored = pytree.tree_unflatten(leaves, spec)
+        self.assertTrue(callable(restored.mask_mod))
 
 instantiate_device_type_tests(TestExperimentDevice, globals(), except_for="cpu")
 
