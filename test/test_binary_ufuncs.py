@@ -79,9 +79,6 @@ if TEST_SCIPY:
     import scipy.integrate
     import scipy.special
 
-device_type = (
-    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
-)
 
 _unsigned_int_types = (torch.uint16, torch.uint32, torch.uint64)
 
@@ -1649,7 +1646,7 @@ class TestBinaryUfuncsDevice(TestCase):
         self.assertEqual(res1, res2)
 
     # TODO: refactor all these tests using opinfos properly
-    def _test_pow(self, base, exponent, np_exponent=None):
+    def _test_pow(self, device, base, exponent, np_exponent=None):
         if np_exponent is None:
             np_exponent = exponent
 
@@ -1694,7 +1691,7 @@ class TestBinaryUfuncsDevice(TestCase):
                 ):
                     regex = (
                         f"Expected all tensors to be on the same device, "
-                        f"but found at least two devices, {device_type}.* and cpu!"
+                        f"but found at least two devices, {device}.* and cpu!"
                     )
                     self.assertRaisesRegex(RuntimeError, regex, base.pow_, exponent)
                 elif torch.can_cast(torch.result_type(base, exponent), base.dtype):
@@ -1760,8 +1757,8 @@ class TestBinaryUfuncsDevice(TestCase):
                     exp_tensor = make_tensor(
                         exp_shape, dtype=dt, device=dev, low=low, high=high
                     )
-                self._test_pow(base_tensor, exp_scalar)
-                self._test_pow(base_tensor, exp_tensor)
+                self._test_pow(device, base_tensor, exp_scalar)
+                self._test_pow(device, base_tensor, exp_tensor)
                 # test non-contiguous tensors as well
                 base_tensor = make_tensor(
                     base_shape,
@@ -1795,8 +1792,8 @@ class TestBinaryUfuncsDevice(TestCase):
                         high=high,
                         noncontiguous=True,
                     )
-                self._test_pow(base_tensor, exp_scalar)
-                self._test_pow(base_tensor, exp_tensor)
+                self._test_pow(device, base_tensor, exp_scalar)
+                self._test_pow(device, base_tensor, exp_tensor)
 
         _test_int_and_float_pow(torch.int8, -2, 2, device)
         _test_int_and_float_pow(torch.uint8, 0, 3, device)
@@ -1851,14 +1848,14 @@ class TestBinaryUfuncsDevice(TestCase):
         neg_ints = [torch.iinfo(torch.int32).min, -3, -2, -1]
         tensor = torch.tensor(ints, dtype=torch.int32, device=device)
         for pow in neg_ints:
-            self._test_pow(tensor, pow)
+            self._test_pow(device, tensor, pow)
 
     def test_long_tensor_pow_floats(self, device):
         ints = [0, 1, 23, 4567]
         floats = [0.0, 1 / 3, 1 / 2, 1.0, 3 / 2, 2.0]
         tensor = torch.tensor(ints, dtype=torch.int64, device=device)
         for pow in floats:
-            self._test_pow(tensor, pow)
+            self._test_pow(device, tensor, pow)
 
     @dtypes(*[torch.float32, torch.float64])
     def test_float_scalar_pow_float_tensor(self, device, dtype):
@@ -1875,9 +1872,9 @@ class TestBinaryUfuncsDevice(TestCase):
         ]
         floats_tensor = torch.tensor(floats, dtype=dtype, device=device)
         for base in floats:
-            self._test_pow(base, floats_tensor)
+            self._test_pow(device, base, floats_tensor)
             for tensor in tensors:
-                self._test_pow(base, tensor)
+                self._test_pow(device, base, tensor)
 
     @onlyAccelerator
     def test_device_tensor_pow_scalar_tensor(self, device):
@@ -1891,22 +1888,22 @@ class TestBinaryUfuncsDevice(TestCase):
             torch.tensor(1),
         ]
         for base, exp in product(device_tensors, scalar_tensors):
-            self._test_pow(base, exp)
+            self._test_pow(device, base, exp)
 
     @onlyAccelerator
     def test_cpu_tensor_pow_device_scalar_tensor(self, device):
         device_tensors = [
-            torch.tensor(5.0, device=device_type),
-            torch.tensor(-3, device=device_type),
+            torch.tensor(5.0, device=device),
+            torch.tensor(-3, device=device),
         ]
         for exp in device_tensors:
             base = torch.randn((3, 3), device="cpu")
-            regex = f"Expected all tensors to be on the same device, but found at least two devices, {device_type}.* and cpu!"
+            regex = f"Expected all tensors to be on the same device, but found at least two devices, {device}.* and cpu!"
             self.assertRaisesRegex(RuntimeError, regex, torch.pow, base, exp)
         for exp in device_tensors:
             # Binary ops with a cpu + device tensor are allowed if the cpu tensor has 0 dimension
             base = torch.tensor(3.0, device="cpu")
-            self._test_pow(base, exp)
+            self._test_pow(device, base, exp)
 
     @dtypes(torch.complex64, torch.complex128)
     def test_pow_device_complex_extremal_passing(self, device, dtype):
@@ -1941,11 +1938,11 @@ class TestBinaryUfuncsDevice(TestCase):
                 with self.assertRaisesRegex(
                     RuntimeError, "not implemented for 'ComplexHalf'"
                 ):
-                    self._test_pow(base, first_exp)
-                    self._test_pow(base, second_exp)
+                    self._test_pow(device, base, first_exp)
+                    self._test_pow(device, base, second_exp)
             else:
-                self._test_pow(base, first_exp)
-                self._test_pow(base, second_exp)
+                self._test_pow(device, base, first_exp)
+                self._test_pow(device, base, second_exp)
 
     @onlyNativeDeviceTypes
     @skipMeta
@@ -1984,7 +1981,7 @@ class TestBinaryUfuncsDevice(TestCase):
             for i in range(len(values)):
                 pows = rotate(values, i)
                 pows_tensor = torch.tensor(pows, dtype=torch_type, device=device)
-                self._test_pow(vals_tensor, pows_tensor)
+                self._test_pow(device, vals_tensor, pows_tensor)
 
         ints = [0, 1, 2, 3]
         test_tensor_pow_tensor(ints, torch.uint8, np.uint8)
@@ -3204,7 +3201,7 @@ class TestBinaryUfuncsDevice(TestCase):
             x = make_tensor((10, 10), device=device, dtype=dtype, low=-9, high=9)
             zero = torch.zeros_like(x)
             # RuntimeError on CPU
-            if self.device_type == "cpu":
+            if device == "cpu":
                 with self.assertRaisesRegex(RuntimeError, "ZeroDivisionError"):
                     fn(x, zero)
             elif torch.version.hip is not None:
@@ -3373,8 +3370,8 @@ class TestBinaryUfuncsDevice(TestCase):
             actual1 = torch.hypot(x, y)
             actual2 = torch.hypot(y, x)
             expected = np.hypot(x.cpu().numpy(), 2.0)
-            self.assertTrue(actual1.device.type == device_type)
-            self.assertTrue(actual2.device.type == device_type)
+            self.assertTrue(actual1.device == torch.device(device))
+            self.assertTrue(actual2.device == torch.device(device))
             self.assertEqual(actual1, expected, exact_dtype=False)
             self.assertEqual(actual2, expected, exact_dtype=False)
 
@@ -4923,7 +4920,7 @@ class TestBinaryUfuncsDevice(TestCase):
             actual = torch.special.zeta(x, q)
 
             rtol, atol = None, None
-            if self.device_type == "cpu":
+            if device == "cpu":
                 rtol, atol = 1e-6, 1e-6
             self.assertEqual(expected, actual, rtol=rtol, atol=atol, exact_dtype=False)
 
