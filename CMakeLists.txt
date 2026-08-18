@@ -1051,6 +1051,15 @@ cmake_dependent_option(
   "(USE_CUDA AND NOT MSVC) OR USE_ROCM"
   OFF)
 
+# The USE_MSLK_DEFAULT arch check above only sets the default; a cached or
+# explicitly requested USE_MSLK=ON survives it. Force it OFF here, before
+# -DUSE_MSLK is appended to CMAKE_CXX_FLAGS below, so a ROCm build without an
+# MSLK-capable arch does not compile with the macro defined while the mslk
+# target and its include directories are skipped.
+if(USE_MSLK AND USE_ROCM AND NOT("gfx942" IN_LIST PYTORCH_ROCM_ARCH OR "gfx950" IN_LIST PYTORCH_ROCM_ARCH))
+  message(STATUS "USE_MSLK disabled: PYTORCH_ROCM_ARCH (${PYTORCH_ROCM_ARCH}) has no MI3xx arch (gfx942/gfx950)")
+  caffe2_update_option(USE_MSLK OFF)
+endif()
 
 # CAVEAT: Again, Flash Attention2 will error while building for sm52 while Mem
 # Eff Attention won't

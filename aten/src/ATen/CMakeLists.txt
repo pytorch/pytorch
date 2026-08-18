@@ -432,19 +432,17 @@ IF(USE_MSLK)
     # Add MSLK include directories for gemm_torch.h
     list(APPEND ATen_CUDA_INCLUDE ${MSLK_INCLUDE})
   elseif(USE_ROCM)
-    # MSLK only supports gfx942/gfx950. Auto-disable when none of those archs
-    # are in PYTORCH_ROCM_ARCH; otherwise the mslk target ends up with an empty
-    # HIP_ARCHITECTURES and CMake errors out.
+    # MSLK only supports gfx942/gfx950; collect the intersection for the mslk
+    # target's HIP_ARCHITECTURES. Builds with no MSLK-capable arch have
+    # USE_MSLK forced OFF in the top-level CMakeLists.txt, before -DUSE_MSLK
+    # is appended to the global CMAKE_CXX_FLAGS there, so this list is
+    # non-empty whenever USE_MSLK is still ON here.
     set(_mslk_hip_arches "")
     foreach(ARCH gfx942 gfx950)
       if(${ARCH} IN_LIST PYTORCH_ROCM_ARCH)
         list(APPEND _mslk_hip_arches ${ARCH})
       endif()
     endforeach()
-  endif()
-  if(USE_MSLK AND USE_ROCM AND _mslk_hip_arches STREQUAL "")
-    message(STATUS "USE_MSLK disabled: PYTORCH_ROCM_ARCH (${PYTORCH_ROCM_ARCH}) has no MI3xx arch (gfx942/gfx950)")
-    caffe2_update_option(USE_MSLK OFF)
   endif()
   if(USE_MSLK AND USE_ROCM)
     # Path to vendored CK
