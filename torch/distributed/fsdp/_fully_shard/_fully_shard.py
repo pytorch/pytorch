@@ -663,8 +663,8 @@ class FSDPModule:
         """
         self.set_post_optim_event(event)
         state = self._get_fsdp_state()
-        if state._state_ctx.post_optim_free_streams is None:
-            state._state_ctx.post_optim_free_streams = set()
+        if state._state_ctx.sharded_grad_free_streams is None:
+            state._state_ctx.sharded_grad_free_streams = set()
         if hasattr(state._comm_ctx, "reduce_scatter_stream"):
             state._wait_post_optim_event_on_grad_free_streams(event)
 

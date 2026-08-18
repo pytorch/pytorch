@@ -59,7 +59,7 @@ class FSDPStateContext(Generic[_StateType]):
         # storage if communication or custom post-reduce streams change before
         # a later clear. ``None`` means the user has not opted in by calling
         # ``set_post_optim_event``; an empty set means opted in before lazy init.
-        self.post_optim_free_streams: set[torch.Stream] | None = None
+        self.sharded_grad_free_streams: set[torch.Stream] | None = None
 
 
 class FSDPState(_State):
@@ -330,7 +330,7 @@ class FSDPState(_State):
                         FSDPParamGroup._prefetch_unshard(target_param_group, "forward")
             return args, kwargs
 
-    def _post_optim_free_streams(self) -> set[torch.Stream]:
+    def _sharded_grad_free_streams(self) -> set[torch.Stream]:
         streams = {
             self._comm_ctx.reduce_scatter_stream,
             self._comm_ctx.all_reduce_stream,
@@ -342,10 +342,10 @@ class FSDPState(_State):
         return streams
 
     def _wait_post_optim_event_on_grad_free_streams(self, event: torch.Event) -> None:
-        streams = self._state_ctx.post_optim_free_streams
+        streams = self._state_ctx.sharded_grad_free_streams
         if streams is None:
             raise AssertionError("Expected post-optimizer free-stream ordering")
-        streams.update(self._post_optim_free_streams())
+        streams.update(self._sharded_grad_free_streams())
         for stream in streams:
             stream.wait_event(event)
 
@@ -460,8 +460,8 @@ class FSDPState(_State):
                     if rs_state.event is not None:
                         self._device_handle.current_stream().wait_event(rs_state.event)
                 self._comm_ctx.reduce_scatter_states.clear()
-                if (streams := self._state_ctx.post_optim_free_streams) is not None:
-                    streams.update(self._post_optim_free_streams())
+                if (streams := self._state_ctx.sharded_grad_free_streams) is not None:
+                    streams.update(self._sharded_grad_free_streams())
             self._state_ctx.post_backward_final_callback_queued = False
 
     def _register_pre_backward_hook(self, output: Any) -> Any:
