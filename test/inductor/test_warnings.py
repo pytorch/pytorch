@@ -6,7 +6,11 @@ import warnings
 import torch
 import torch._inductor.compile_fx as inductor_compile_fx
 import torch._inductor.fx_passes.fuse_attention as fuse_attention
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    recover_orig_fp32_precision,
+    run_tests,
+    TestCase,
+)
 from torch.testing._internal.logging_utils import logs_to_string
 
 
@@ -23,8 +27,10 @@ def _has_cuda_sm80() -> bool:
 
 class InductorWarningTests(TestCase):
     @unittest.skipIf(not _has_cuda_sm80(), "requires CUDA SM80")
+    @recover_orig_fp32_precision
     def test_trivial_matmul_compile_no_user_warning(self):
-        orig_cuda_precision = torch.backends.cuda.matmul.fp32_precision
+        # recover_orig_fp32_precision restores the per-backend flags; the
+        # legacy enum still needs the set_float32_matmul_precision below.
         orig_matmul_precision = torch.get_float32_matmul_precision()
         try:
             torch.set_float32_matmul_precision("highest")
@@ -46,12 +52,11 @@ class InductorWarningTests(TestCase):
             self.assertIn(TF32_ADVISORY, log_stream.getvalue())
         finally:
             torch.set_float32_matmul_precision(orig_matmul_precision)
-            torch.backends.cuda.matmul.fp32_precision = orig_cuda_precision
             torch._dynamo.reset()
 
     @unittest.skipIf(not _has_cuda_sm80(), "requires CUDA SM80")
+    @recover_orig_fp32_precision
     def test_fuse_attention_tf32_advisory_no_user_warning(self):
-        orig_cuda_precision = torch.backends.cuda.matmul.fp32_precision
         orig_matmul_precision = torch.get_float32_matmul_precision()
         try:
             torch.set_float32_matmul_precision("highest")
@@ -69,7 +74,6 @@ class InductorWarningTests(TestCase):
             self.assertIn(TF32_ADVISORY, log_stream.getvalue())
         finally:
             torch.set_float32_matmul_precision(orig_matmul_precision)
-            torch.backends.cuda.matmul.fp32_precision = orig_cuda_precision
 
 
 if __name__ == "__main__":

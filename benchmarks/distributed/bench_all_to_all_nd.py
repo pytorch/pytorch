@@ -110,7 +110,8 @@ class AllToAllNdBenchmark(MultiProcContinuousTest):
         g = dist.get_world_size()
         dtype = torch.float16
         seq_len = _COL_SCATTER_BENCH_SEQ_LEN
-        assert seq_len % g == 0, f"seq_len ({seq_len}) must be divisible by G ({g})"  # noqa: S101
+        if seq_len % g != 0:
+            raise AssertionError(f"seq_len ({seq_len}) must be divisible by G ({g})")
         rows = seq_len // g
         local_cols = (
             1024  # row_bytes = local_cols * esize; must be divisible by 16 for the op
@@ -190,7 +191,8 @@ class AllToAllNdBenchmark(MultiProcContinuousTest):
         g = dist.get_world_size()
         dtype = torch.float16
         seq_len = _COL_SCATTER_BENCH_SEQ_LEN
-        assert seq_len % g == 0, f"seq_len ({seq_len}) must be divisible by G ({g})"  # noqa: S101
+        if seq_len % g != 0:
+            raise AssertionError(f"seq_len ({seq_len}) must be divisible by G ({g})")
         rows = seq_len // g
         local_cols = 1024
 
@@ -234,7 +236,6 @@ class AllToAllNdBenchmark(MultiProcContinuousTest):
             schedule=step_schedule,
             record_shapes=True,
             with_stack=True,
-            with_modules=True,
         ) as prof:
             for _ in range(profile_steps):
                 symm_mem.all_to_all_nd(

@@ -70,6 +70,10 @@ FROM cuda as cuda13.2
 RUN bash ./install_cuda.sh 13.2
 ENV DESIRED_CUDA=13.2
 
+FROM cuda as cuda13.4
+RUN bash ./install_cuda.sh 13.4
+ENV DESIRED_CUDA=13.4
+
 FROM ${ROCM_IMAGE} as rocm_base
 ARG DEVTOOLSET_VERSION=13
 ENV LC_ALL en_US.UTF-8
@@ -104,6 +108,7 @@ COPY --from=cuda12.8  /usr/local/cuda-12.8 /usr/local/cuda-12.8
 COPY --from=cuda12.9  /usr/local/cuda-12.9 /usr/local/cuda-12.9
 COPY --from=cuda13.0  /usr/local/cuda-13.0 /usr/local/cuda-13.0
 COPY --from=cuda13.2  /usr/local/cuda-13.2 /usr/local/cuda-13.2
+COPY --from=cuda13.4  /usr/local/cuda-13.4 /usr/local/cuda-13.4
 
 # Final step
 FROM ${BASE_TARGET} as final

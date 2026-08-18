@@ -500,3 +500,14 @@ TEST_F(ProcessGroupNCCLWatchdogTimeoutTest, testNCCLTimedoutDebugInfoStuck) {
 
   // Communicators might be aborted here, further operations would fail.
 }
+
+TEST_F(ProcessGroupNCCLErrorsTest, testWorkNCCLLogPrefixPerInstance) {
+  at::Device dev(at::kCUDA, 0);
+  // Two WorkNCCL instances with different ranks and PG UIDs should produce
+  // different log prefixes (verifies the static-local bug is fixed).
+  WorkNCCLSimulateErrors w0(dev, false, 0, c10d::OpType::ALLREDUCE, 1, false);
+  WorkNCCLSimulateErrors w1(dev, false, 1, c10d::OpType::ALLREDUCE, 2, false);
+  EXPECT_NE(w0.logPrefix(), w1.logPrefix());
+  EXPECT_NE(w0.logPrefix().find("Rank 0"), std::string::npos);
+  EXPECT_NE(w1.logPrefix().find("Rank 1"), std::string::npos);
+}
