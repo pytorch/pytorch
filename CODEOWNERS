@@ -691,6 +691,7 @@
 # /torch/_prims_common/
 # /torch/_python_dispatcher.py
 # /torch/_refs/
+# /torch/_rust/
 # /torch/_size_docs.py
 # /torch/_sources.py
 # /torch/_storage_docs.py
@@ -773,6 +774,7 @@
 # /test/test_nnapi.py
 # /test/test_numpy_interop.py
 # /test/test_optim.py
+# /test/test_rust.py
 # /test/test_transformers.py
 # /test/test_type_hints.py
 # /test/test_typing.py

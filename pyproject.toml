@@ -179,6 +179,11 @@ exclude = [
     # downstream AOTInductor builds (and is staged explicitly via cmake).
     "torch/csrc/**",
     "!torch/csrc/inductor/aoti_runtime/model.h",
+    # Rust crate sources are build inputs only. This matches the directory, not
+    # the built torch/_rust<EXT_SUFFIX> extension that cmake installs alongside
+    # it -- and shipping the directory would shadow that extension as a
+    # namespace package whenever the extension is absent.
+    "torch/_rust/**",
     # Source-only directories the package walk picks up but setup.py excluded.
     # Keep the .py modules nightly ships under torch/nativert/, and the
     # libshm headers consumed at runtime (torch/lib/libshm/{*.h},
