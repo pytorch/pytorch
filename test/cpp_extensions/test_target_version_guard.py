@@ -15,10 +15,8 @@ class TestTargetVersionGuard(TestCase):
         pytorch_includes = [f"-I{path}" for path in include_paths(device_type="cpu")]
         with tempfile.TemporaryDirectory(prefix="target_version_guard_") as tmp:
             src_file = Path(tmp) / "target_version_guard.cpp"
-            obj_file = Path(tmp) / "target_version_guard.o"
             src_file.write_text(
                 f"""\
-#include <torch/headeronly/version.h>
 #define TORCH_TARGET_VERSION {target_expr}
 #include <torch/csrc/stable/version.h>
 int main() {{ return 0; }}
@@ -27,12 +25,10 @@ int main() {{ return 0; }}
             result = subprocess.run(
                 [
                     get_cxx_compiler(),
-                    "-c",
+                    "-fsyntax-only",
                     "-std=c++17",
                     *pytorch_includes,
                     str(src_file),
-                    "-o",
-                    str(obj_file),
                 ],
                 capture_output=True,
                 text=True,
@@ -41,15 +37,28 @@ int main() {{ return 0; }}
             return result.returncode == 0, result.stderr
 
     @skipIfWindows(msg="uses gcc/clang compile flags")
-    def test_target_version_must_not_exceed_abi_version(self):
-        """TORCH_TARGET_VERSION must be <= TORCH_ABI_VERSION of these headers."""
+    def test_target_version_equal_to_abi_version_compiles(self):
+        """TORCH_TARGET_VERSION == TORCH_ABI_VERSION must compile."""
         success, error_msg = self._compile_target_version_snippet("TORCH_ABI_VERSION")
         self.assertTrue(
             success,
             f"Expected TORCH_TARGET_VERSION=TORCH_ABI_VERSION to compile. Error: {error_msg}",
         )
 
-        # test failure of next minor version.
+    @skipIfWindows(msg="uses gcc/clang compile flags")
+    def test_target_version_older_than_abi_version_compiles(self):
+        """TORCH_TARGET_VERSION one minor below TORCH_ABI_VERSION must compile."""
+        success, error_msg = self._compile_target_version_snippet(
+            "(TORCH_ABI_VERSION - (1ULL << 48))"
+        )
+        self.assertTrue(
+            success,
+            f"Expected TORCH_TARGET_VERSION older than TORCH_ABI_VERSION to compile. Error: {error_msg}",
+        )
+
+    @skipIfWindows(msg="uses gcc/clang compile flags")
+    def test_target_version_newer_than_abi_version_fails(self):
+        """TORCH_TARGET_VERSION one minor past TORCH_ABI_VERSION must #error."""
         success, error_msg = self._compile_target_version_snippet(
             "(TORCH_ABI_VERSION + (1ULL << 48))"
         )
