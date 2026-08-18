@@ -5115,8 +5115,9 @@ class AlgorithmSelectorCache(PersistentCache):
     def _uses_layout_preserving_inputs(choice: ChoiceCaller) -> bool:
         """Return whether benchmark inputs must preserve their original layout.
 
-        Template backends need this when generated kernels consume runtime
-        sizes, strides, or storage offsets from input views.
+        In-process template benchmarks use these tensors when generated kernels
+        consume runtime layout metadata. Subprocess reconstruction currently
+        preserves sizes and strides, but not nonzero storage offsets.
         """
         from torch._inductor.codegen.flydsl.flydsl_template import FlyDSLTemplateCaller
 

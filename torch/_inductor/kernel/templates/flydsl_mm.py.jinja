@@ -85,7 +85,16 @@ def _temporary_env(updates):
         param,
         stream,
     )
-    if os.environ.get("COMPILE_ONLY", "").lower() in ("1", "true", "yes", "on"):
+    flydsl_compile_only = os.environ.get("FLYDSL_COMPILE_ONLY") == "1"
+    compile_only = os.environ.get("COMPILE_ONLY", "").lower() in (
+        "1", "true", "yes", "on"
+    )
+    if compile_only != flydsl_compile_only:
+        raise RuntimeError(
+            "COMPILE_ONLY and FLYDSL_COMPILE_ONLY must only be enabled together "
+            "by the FlyDSL precompile path"
+        )
+    if flydsl_compile_only:
         flyc.compile(gemm_gfx950, *compile_args)
     else:
         run_cached_flydsl(
@@ -119,7 +128,7 @@ def {{kernel_name}}_precompile(
     stride_mat2 = tuple(precompile_strides["mat2"])
     stride_output = tuple(precompile_strides["output"])
 
-    env_updates = {"COMPILE_ONLY": "1"}
+    env_updates = {"COMPILE_ONLY": "1", "FLYDSL_COMPILE_ONLY": "1"}
     if flydsl_gpu_arch is not None:
         env_updates["FLYDSL_GPU_ARCH"] = flydsl_gpu_arch
 
