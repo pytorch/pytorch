@@ -328,6 +328,7 @@ def check_headeronly_symbols(install_root: Path) -> None:
     platform_specific_keywords = [
         "cpu/vec",
         "win32-headers.h",
+        "headeronly/cuda",
     ]
 
     # Headers that #error on direct inclusion and are reached via a parent header

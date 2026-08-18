@@ -42,6 +42,7 @@ from torch.testing._internal.common_quantized import (
     _bfloat16_to_float4_e2m1fn_x2,
 )
 from torch.testing._internal.common_utils import (
+    getRocmVersion,
     make_fullrank_matrices_with_distinct_singular_values,
     TEST_WITH_ROCM, IS_FBCODE, IS_LINUX, IS_WINDOWS, IS_MACOS, MACOS_VERSION, TEST_SCIPY,
     torch_to_numpy_dtype_dict, numpy_to_torch_dtype, TEST_WITH_ASAN,
@@ -6854,7 +6855,7 @@ def error_inputs_complex(op_info, device, is_ref=False, **kwargs):
         error_out = f"Expected object of scalar type Complex{other_dtype_name} but got scalar type ComplexFloat for argument 'out'"
 
     yield ErrorInput(SampleInput(make_arg(M, S), make_arg(M, S, dtype=torch.int)),
-                     error_type=RuntimeError, error_regex=error_float)
+                     error_type=NotImplementedError, error_regex=error_float)
 
     yield ErrorInput(SampleInput(make_arg(M, S), make_arg(M, S, dtype=other_dtype)),
                      error_type=RuntimeError, error_regex=error_dtype)
@@ -13234,8 +13235,6 @@ op_db: list[OpInfo] = [
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
                                     device_type='xpu',
                                     dtypes=(torch.chalf,), active_if=IS_WINDOWS),
-                       # https://github.com/pytorch/pytorch/issues/180058
-                       DecorateInfo(skipIfRocm, "TestOpInfoProperties", "test_unary_ufunc_numerical", dtypes=(torch.float32,)),
                    )),
     UnaryUfuncInfo('cosh',
                    ref=np_unary_ufunc_integer_promotion_wrapper(np.cosh),
@@ -13483,10 +13482,6 @@ op_db: list[OpInfo] = [
                                     device_type='cpu', dtypes=[torch.cfloat, torch.cdouble], active_if=IS_WINDOWS),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
                                     device_type='xpu', dtypes=(torch.chalf,), active_if=IS_WINDOWS),
-                       # https://github.com/pytorch/pytorch/issues/180041
-                       DecorateInfo(skipIfRocm, "TestOpInfoProperties", "test_eager_equivalence", dtypes=(torch.float32,)),
-                       # https://github.com/pytorch/pytorch/issues/180061
-                       DecorateInfo(skipIfRocm, "TestOpInfoProperties", "test_unary_ufunc_numerical", dtypes=(torch.float32,)),
                    ),
                    assert_autodiffed=True,
                    supports_forward_ad=True,
@@ -13816,11 +13811,16 @@ op_db: list[OpInfo] = [
            # CUDA forward supports float16 (native cuSPARSE SDDMM) and bfloat16
            # (computed in float32; cuSPARSE has no bf16 SDDMM kernel). Backward
            # routes through cuSPARSE SpMM: float16 needs CC >= 5.3, bfloat16 needs
-           # CC >= 8.0, and ROCm's hipSPARSE SpMM implements neither dtype.
+           # CC >= 8.0. hipSPARSE SpMM supports both low-precision dtypes from
+           # ROCm 7.14.
            dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
            backward_dtypesIfCUDA=floating_and_complex_types_and(
-               *([torch.half] if not TEST_WITH_ROCM else []),
-               *([torch.bfloat16] if SM80OrLater and not TEST_WITH_ROCM else [])),
+               torch.half, *([torch.bfloat16] if SM80OrLater else [])),
+           backward_dtypesIfROCM=(
+               floating_and_complex_types_and(torch.half, torch.bfloat16)
+               if TEST_WITH_ROCM and getRocmVersion() >= (7, 14)
+               else floating_and_complex_types()
+           ),
            supports_autograd=True,
            sample_inputs_func=sample_inputs_sparse_sampled_addmm,
            decorators=[
@@ -13981,10 +13981,6 @@ op_db: list[OpInfo] = [
                    skips=(
                        # https://github.com/pytorch/pytorch/issues/180040
                        DecorateInfo(skipIfRocm, "TestOpInfoProperties", "test_determinism", dtypes=(torch.float32,)),
-                       # https://github.com/pytorch/pytorch/issues/180043
-                       DecorateInfo(skipIfRocm, "TestOpInfoProperties", "test_eager_equivalence", dtypes=(torch.float32,)),
-                       # https://github.com/pytorch/pytorch/issues/180419
-                       DecorateInfo(skipIfRocm, "TestOpInfoProperties", "test_unary_ufunc_numerical", dtypes=(torch.float16,)),
                    ),
     ),
     BinaryUfuncInfo('ge',
@@ -14222,13 +14218,6 @@ op_db: list[OpInfo] = [
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                     device_type='cpu', dtypes=[torch.cfloat, torch.cdouble],
                                     active_if=IS_WINDOWS),
-                       # https://github.com/pytorch/pytorch/issues/180044
-                       # https://github.com/pytorch/pytorch/issues/180045
-                       DecorateInfo(skipIfRocm, "TestOpInfoProperties", "test_eager_equivalence", dtypes=(torch.float16, torch.float32)),
-                       # https://github.com/pytorch/pytorch/issues/179942
-                       # https://github.com/pytorch/pytorch/issues/180066
-                       # https://github.com/pytorch/pytorch/issues/180067
-                       DecorateInfo(skipIfRocm, "TestOpInfoProperties", "test_unary_ufunc_numerical"),
                    ),
                    # log(z)->-inf for |z|->0
                    reference_numerics_filter=NumericsFilter(condition=lambda x: torch.abs(x) < 0.1, safe_val=1)),
@@ -14246,8 +14235,6 @@ op_db: list[OpInfo] = [
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                     device_type='cpu', dtypes=[torch.cfloat, torch.cdouble],
                                     active_if=IS_WINDOWS),
-                       # https://github.com/pytorch/pytorch/issues/180042
-                       DecorateInfo(skipIfRocm, "TestOpInfoProperties", "test_eager_equivalence", dtypes=(torch.float32,)),
                    ),
                    # log10(z)->-inf for |z|->0
                    reference_numerics_filter=NumericsFilter(condition=lambda x: torch.abs(x) < 0.1, safe_val=1)),
@@ -17796,7 +17783,7 @@ op_db: list[OpInfo] = [
     UnaryUfuncInfo('nn.functional.hardtanh',
                    aten_name="hardtanh",
                    aten_backward_name='hardtanh_backward',
-                   dtypes=all_types_and(torch.half, torch.bfloat16),
+                   dtypes=floating_types_and(torch.int8, torch.int16, torch.int32, torch.int64, torch.half, torch.bfloat16),
                    backward_dtypes=all_types_and(torch.half, torch.bfloat16),
                    backward_dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
                    assert_autodiffed=True,
@@ -18710,8 +18697,6 @@ op_db: list[OpInfo] = [
                                     'TestSparseUnaryUfuncs', 'test_sparse_fn_grad'),
                        DecorateInfo(toleranceOverride({torch.complex64: tol(atol=3e-5, rtol=7e-6)}),
                                     "TestConsistency", "test_output_match", device_type="mps"),
-                       # https://github.com/pytorch/pytorch/issues/180057
-                       DecorateInfo(skipIfRocm, "TestOpInfoProperties", "test_eager_equivalence", dtypes=(torch.float32,)),
                    ),
                    # tan(j * pi/2 * odd_number) is nan
                    reference_numerics_filter=NumericsFilter(
@@ -18891,12 +18876,6 @@ op_db: list[OpInfo] = [
                        # Greatest relative difference: nan at index (700,) (up to 0.001 allowed)
                        DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs', 'test_reference_numerics_large',
                                     dtypes=(torch.chalf,), device_type='cuda'),
-                       # https://github.com/pytorch/pytorch/issues/180055
-                       # https://github.com/pytorch/pytorch/issues/180056
-                       DecorateInfo(skipIfRocm, "TestOpInfoProperties", "test_eager_equivalence", dtypes=(torch.float32,)),
-                       # https://github.com/pytorch/pytorch/issues/179940
-                       # https://github.com/pytorch/pytorch/issues/180071
-                       DecorateInfo(skipIfRocm, "TestOpInfoProperties", "test_unary_ufunc_numerical", dtypes=(torch.bfloat16, torch.float32)),
                    )),
     UnaryUfuncInfo('sqrt',
                    ref=np.sqrt,

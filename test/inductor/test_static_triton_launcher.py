@@ -3,6 +3,7 @@ import gc
 import os
 import random
 import tempfile
+import unittest
 import weakref
 from types import SimpleNamespace
 from unittest import mock
@@ -31,6 +32,7 @@ from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import IS_WINDOWS, skipIfRocm, skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_XPU_AND_TRITON
 from torch.testing._internal.triton_utils import requires_gpu_and_triton
+from torch.utils._triton import has_triton_tma_device
 
 
 if HAS_XPU_AND_TRITON:
@@ -48,6 +50,33 @@ def _patched_getitem(self, grid):
 
 
 class TestStaticTritonLauncherUnit(TestCase):
+    @staticmethod
+    def _global_scratch_kernel(kernel_cls=StaticallyLaunchedCudaKernel):
+        fn = SimpleNamespace(__name__="scratch_kernel", arg_names=["out"], params=[])
+        src = SimpleNamespace(fn=fn, signature={0: "*fp32"}, constants={})
+        metadata = SimpleNamespace(
+            num_warps=4,
+            shared=0,
+            num_ctas=1,
+            global_scratch_size=32,
+            global_scratch_align=16,
+        )
+
+        class FakeCompiledKernel(SimpleNamespace):
+            launch_enter_hook = None
+            launch_exit_hook = None
+
+        compiled_kernel = FakeCompiledKernel(
+            src=src,
+            metadata=metadata,
+            _cubin_path="/tmp/scratch_kernel.cubin",
+            hash="hash",
+            asm={"cubin": b"cubin"},
+        )
+        kernel = kernel_cls(compiled_kernel)
+        kernel.function = 1
+        return kernel
+
     def test_xpu_load_kernel_uses_existing_three_tuple_abi(self):
         load_calls = []
         kernel_capsule = object()
@@ -150,6 +179,57 @@ class TestStaticTritonLauncherUnit(TestCase):
         iface = get_interface_for_device("cpu")
         with DeviceGuard(iface, _resolve_load_device(None, "cpu")):
             pass
+
+    @skipIfRocm
+    def test_global_scratch_allocation(self):
+        kernel = self._global_scratch_kernel()
+        scratch = SimpleNamespace(data_ptr=lambda: 2)
+        alloc_fn = mock.Mock(return_value=scratch)
+        launch_kernel = mock.Mock()
+        kernel.C_impl = SimpleNamespace(_launch_kernel=launch_kernel)
+
+        allocator_var = SimpleNamespace(get=lambda: alloc_fn)
+        with mock.patch(
+            "torch._inductor.runtime.static_triton_launcher._triton_allocator_var",
+            return_value=allocator_var,
+        ):
+            kernel.run(2, 3, 1, 4, 5)
+
+        alloc_fn.assert_called_once_with(192, 16, 4)
+        launch_kernel.assert_called_once_with(1, 2, 3, 1, 4, 0, "OO", (5, scratch), 4)
+
+    @skipIfRocm
+    def test_fast_launcher_rejects_global_scratch(self):
+        import types
+
+        kernel = self._global_scratch_kernel()
+
+        def launcher_body(grid_0, grid_1, grid_2, stream, *args):
+            runner(grid_0, grid_1, grid_2, stream, *args)  # noqa: F821
+
+        launcher = types.FunctionType(
+            launcher_body.__code__, {"runner": kernel.run}, "launcher"
+        )
+        launcher._is_static = True
+        autotuner = object.__new__(CachingAutotuner)
+        autotuner.inductor_meta = {"use_fast_triton_launcher": True}
+        autotuner.device_props = SimpleNamespace(type="cuda")
+        with mock.patch("torch._C._FastCudaLauncher", create=True) as fast_launcher:
+            self.assertIsNone(autotuner._build_fast_launcher(launcher))
+        fast_launcher.assert_not_called()
+
+    def test_xpu_rejects_global_scratch(self):
+        with self.assertRaisesRegex(
+            NotImplementedError, "Global scratch not yet supported"
+        ):
+            self._global_scratch_kernel(StaticallyLaunchedXpuKernel)
+
+    @unittest.skipUnless(torch.version.hip, "ROCm only")
+    def test_rocm_rejects_global_scratch(self):
+        with self.assertRaisesRegex(
+            NotImplementedError, "Global scratch not yet supported"
+        ):
+            self._global_scratch_kernel()
 
     @staticmethod
     def _autotuner_with_static_cubin(cubin_raw):
@@ -973,6 +1053,110 @@ class TestFastCudaLauncherCompileResult(TestCase):
                 any(results),
                 "_FastCudaLauncher should not be built when config is disabled",
             )
+
+    @skipIfXpu(msg="Tests CUDA device-side TMA global scratch")
+    @unittest.skipIf(
+        not has_triton_tma_device(),
+        "requires Triton device-side TMA support",
+    )
+    @torch._inductor.config.patch(
+        {"compile_threads": 1, "static_launch_user_defined_triton_kernels": True}
+    )
+    def test_device_tma_gemm_falls_back_from_fast_launcher(self):
+        """A global-scratch kernel repeatedly uses the regular static launcher."""
+
+        @triton.jit
+        def device_tma_gemm(
+            a_ptr,
+            b_ptr,
+            c_ptr,
+            M: tl.constexpr,
+            N: tl.constexpr,
+            K: tl.constexpr,
+            BLOCK_M: tl.constexpr,
+            BLOCK_N: tl.constexpr,
+            BLOCK_K: tl.constexpr,
+        ):
+            a_desc = tl.make_tensor_descriptor(
+                a_ptr,
+                [M, K],
+                [K, 1],
+                [BLOCK_M, BLOCK_K],
+            )
+            b_desc = tl.make_tensor_descriptor(
+                b_ptr,
+                [N, K],
+                [K, 1],
+                [BLOCK_N, BLOCK_K],
+            )
+            c_desc = tl.make_tensor_descriptor(
+                c_ptr,
+                [M, N],
+                [N, 1],
+                [BLOCK_M, BLOCK_N],
+            )
+
+            pid_m = tl.program_id(0)
+            pid_n = tl.program_id(1)
+            offset_m = pid_m * BLOCK_M
+            offset_n = pid_n * BLOCK_N
+            accumulator = tl.zeros((BLOCK_M, BLOCK_N), tl.float32)
+            for offset_k in range(0, K, BLOCK_K):
+                a = a_desc.load([offset_m, offset_k])
+                b = b_desc.load([offset_n, offset_k])
+                accumulator = tl.dot(a, b.T, accumulator)
+            c_desc.store([offset_m, offset_n], accumulator.to(tl.bfloat16))
+
+        M = 64
+        N = 64
+        K = 32
+        BLOCK_M = 32
+        BLOCK_N = 32
+        BLOCK_K = 32
+
+        @torch.compile(fullgraph=True)
+        def gemm(a, b):
+            out = torch.empty((M, N), device=a.device, dtype=a.dtype)
+            device_tma_gemm[(M // BLOCK_M, N // BLOCK_N)](
+                a,
+                b,
+                out,
+                M=M,
+                N=N,
+                K=K,
+                BLOCK_M=BLOCK_M,
+                BLOCK_N=BLOCK_N,
+                BLOCK_K=BLOCK_K,
+            )
+            return out
+
+        from triton.runtime._allocation import _allocator
+
+        previous_allocator = _allocator.get()
+        patcher, results = self._patch_build_fast_launcher()
+        alloc_fn = mock.Mock(
+            side_effect=lambda size, _alignment, _stream: torch.empty(
+                size, dtype=torch.uint8, device="cuda"
+            )
+        )
+        triton.set_allocator(alloc_fn)
+        try:
+            with patcher:
+                for _ in range(3):
+                    a = torch.randn((M, K), device="cuda", dtype=torch.bfloat16)
+                    b = torch.randn((N, K), device="cuda", dtype=torch.bfloat16)
+                    self.assertEqual(gemm(a, b), a @ b.T, atol=1e-2, rtol=1e-2)
+        finally:
+            triton.set_allocator(previous_allocator)
+
+        self.assertGreater(alloc_fn.call_count, 0)
+        for call in alloc_fn.call_args_list:
+            self.assertGreater(call.args[0], 0)
+        self.assertTrue(results, "_build_fast_launcher was not reached")
+        self.assertFalse(
+            any(results),
+            "global-scratch kernels must use the regular static launcher",
+        )
 
 
 if __name__ == "__main__":
