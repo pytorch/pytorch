@@ -85,7 +85,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     random_matrix_with_scaled_reduction_dim,
     runOnRocm,
-    skipIfRocm,
     skipIfRocmArch,
     skipIfWindows,
     skipIfWindowsXPU,
