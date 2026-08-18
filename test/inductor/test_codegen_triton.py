@@ -289,7 +289,6 @@ def helper(x):
         "requires NVIDIA CUDA and Triton",
     )
     @inductor_config.patch("triton.divisible_by_16", True)
-    @inductor_config.patch("triton.unique_kernel_names", False)
     def test_runtime_divisibility_specializes_dynamic_kernel(self):
         from torch._dynamo.testing import CompileCounterWithBackend
 
@@ -340,9 +339,7 @@ def helper(x):
         "requires NVIDIA CUDA and Triton",
     )
     @inductor_config.patch("triton.divisible_by_16", True)
-    @inductor_config.patch("triton.unique_kernel_names", False)
     @inductor_config.patch("force_pointwise_cat", True)
-    @inductor_config.patch("force_disable_caches", True)
     def test_runtime_divisibility_skips_many_checks(self):
         def fn(*inputs):
             return torch.cat(inputs, dim=1) + 1
@@ -359,30 +356,26 @@ def helper(x):
         "requires NVIDIA CUDA and Triton",
     )
     @inductor_config.patch("triton.divisible_by_16", True)
-    @inductor_config.patch("triton.unique_kernel_names", False)
-    @inductor_config.patch("force_disable_caches", True)
     def test_runtime_divisibility_skips_flat_dynamic_kernel(self):
         def fn(a, b, c, d):
             return a + b + c + d + a.shape[1]
 
         inputs = [torch.randn(16, 32, device=GPU_TYPE) for _ in range(4)]
         source = self._check_runtime_divisibility_no_specialization(fn, inputs)
-        self.assertIn("ks0", source)
+        self._assert_has_dynamic_integer_size_arg(source)
 
     @unittest.skipUnless(
         HAS_CUDA_AND_TRITON and torch.version.hip is None and GPU_TYPE == "cuda",
         "requires NVIDIA CUDA and Triton",
     )
     @inductor_config.patch("triton.divisible_by_16", True)
-    @inductor_config.patch("triton.unique_kernel_names", False)
-    @inductor_config.patch("force_disable_caches", True)
     def test_runtime_divisibility_skips_strided_dynamic_kernel(self):
         def fn(a, b, c, d):
             return a[:, 0] + b[:, 0] + c[:, 0] + d[:, 0]
 
         inputs = [torch.randn(4096, 32, device=GPU_TYPE) for _ in range(4)]
         source = self._check_runtime_divisibility_no_specialization(fn, inputs)
-        self.assertIn("ks0", source)
+        self._assert_has_dynamic_integer_size_arg(source)
 
     def _check_runtime_divisibility_specialization(self, fn, inputs):
         actual, code = run_and_get_code(
@@ -405,13 +398,18 @@ def helper(x):
         self.assertEqual(source.count("async_compile.triton("), 1)
         return source
 
+    def _assert_has_dynamic_integer_size_arg(self, source):
+        self.assertRegex(
+            source,
+            r"'signature': \{[^}]*'ks\d+': 'i(?:32|64)'",
+            "expected a dynamic integer SizeArg in the Triton signature",
+        )
+
     @unittest.skipUnless(
         HAS_CUDA_AND_TRITON and torch.version.hip is None and GPU_TYPE == "cuda",
         "requires NVIDIA CUDA and Triton",
     )
     @inductor_config.patch("triton.divisible_by_16", True)
-    @inductor_config.patch("triton.unique_kernel_names", False)
-    @inductor_config.patch("force_disable_caches", True)
     def test_runtime_divisibility_specializes_unfold(self):
         def fn(a, b):
             unfold = torch.nn.functional.unfold
@@ -426,8 +424,6 @@ def helper(x):
         "requires NVIDIA CUDA and Triton",
     )
     @inductor_config.patch("triton.divisible_by_16", True)
-    @inductor_config.patch("triton.unique_kernel_names", False)
-    @inductor_config.patch("force_disable_caches", True)
     def test_runtime_divisibility_ignores_fused_internal_reads(self):
         def fn(a, b):
             unfold = torch.nn.functional.unfold
@@ -442,8 +438,6 @@ def helper(x):
         "requires NVIDIA CUDA and Triton",
     )
     @inductor_config.patch("triton.divisible_by_16", True)
-    @inductor_config.patch("triton.unique_kernel_names", False)
-    @inductor_config.patch("force_disable_caches", True)
     def test_runtime_divisibility_specializes_diag_embed(self):
         def fn(a, b):
             return torch.diag_embed(a) + torch.diag_embed(b)
@@ -457,8 +451,6 @@ def helper(x):
         "requires NVIDIA CUDA and Triton",
     )
     @inductor_config.patch("triton.divisible_by_16", True)
-    @inductor_config.patch("triton.unique_kernel_names", False)
-    @inductor_config.patch("force_disable_caches", True)
     def test_runtime_divisibility_specializes_block_diag(self):
         def fn(a, b, c, d):
             return torch.block_diag(a, b, c, d)
@@ -474,8 +466,6 @@ def helper(x):
         "requires NVIDIA CUDA and Triton",
     )
     @inductor_config.patch("triton.divisible_by_16", True)
-    @inductor_config.patch("triton.unique_kernel_names", False)
-    @inductor_config.patch("force_disable_caches", True)
     def test_runtime_divisibility_skips_low_reuse_kernel(self):
         def fn(a, b, c, d):
             return torch.cat((a, b, c, d), dim=1) + 1
@@ -491,8 +481,6 @@ def helper(x):
         "requires NVIDIA CUDA and Triton",
     )
     @inductor_config.patch("triton.divisible_by_16", True)
-    @inductor_config.patch("triton.unique_kernel_names", False)
-    @inductor_config.patch("force_disable_caches", True)
     def test_runtime_divisibility_skips_mixed_access_kernel(self):
         def fn(a, b, c, d):
             return torch.cat((a, b), dim=1) + c[:, None] + d[:, None]
