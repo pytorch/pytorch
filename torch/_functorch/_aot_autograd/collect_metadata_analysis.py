@@ -19,7 +19,7 @@ import torch
 import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._guards import detect_fake_mode
-from torch._library.opaque_object import is_opaque_type
+from torch._library.opaque_object import is_custom_class
 from torch._logging import getArtifactLogger
 from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode
 from torch._subclasses.meta_utils import safe_is_leaf
@@ -49,6 +49,7 @@ from .functional_utils import (
     to_fun,
     ViewMetaSequence,
     was_inductor_storage_resized,
+    was_shallow_copy_data,
 )
 from .schemas import (
     InputAliasInfo,
@@ -190,7 +191,7 @@ def run_functionalized_fw_and_collect_metadata(
     def inner(*flat_args: Any) -> ViewAndMutationMeta:
         # This function is meant to be run with the forward, which expects a flat list of tensor/symint/other args.
         if not all(
-            isinstance(a, tuple(KNOWN_TYPES)) or is_opaque_type(type(a))
+            isinstance(a, tuple(KNOWN_TYPES)) or is_custom_class(type(a))
             for a in flat_args
         ):
             raise AssertionError("all flat_args must be KNOWN_TYPES or opaque types")
@@ -208,7 +209,10 @@ def run_functionalized_fw_and_collect_metadata(
 
         # It doesn't matter if we run this under predispatch or not because it is
         # only for figuring out metadata
-        mode = FunctionalTensorMode(_allow_token_discovery=True)
+        mode = FunctionalTensorMode(
+            _allow_token_discovery=True,
+            _keep_input_mutations=keep_input_mutations,
+        )
         suppress_pending = contextlib.nullcontext()
         fake_mode = detect_fake_mode()
         if fake_mode and (shape_env := fake_mode.shape_env):
@@ -251,18 +255,10 @@ def run_functionalized_fw_and_collect_metadata(
         # Inspect the state of the input tensor functional wrapper to detect input mutation info
         # If inp[i] has a metadata-only mutation, then maybe_inputs_with_mutated_metadata[i] contains the updated version
         for arg, f_arg in zip(flat_args, flat_f_args):
-            # NB: Mutation of non-contiguous tensor subclass input can result in a mismatch in
-            # strides between the functionalized arg inner tensors and non-functionalized arg inner
-            # tensors. This is a problem as the inner tensor stride change may not be reflected
-            # correctly in the outer tensor, so disallow this for now.
             mutates_data = has_data_mutation(f_arg)
             mutates_metadata = has_metadata_mutation(
                 f_arg, arg, check_only_storage_mutation=False
             )
-            if mutates_metadata and is_traceable_wrapper_subclass(arg):
-                raise RuntimeError(
-                    "Metadata mutations are currently not allowed on tensor subclasses"
-                )
             mutates_storage_metadata = has_metadata_mutation(
                 f_arg, arg, check_only_storage_mutation=True
             )
@@ -287,6 +283,7 @@ def run_functionalized_fw_and_collect_metadata(
                     mutates_metadata=mutates_metadata,
                     mutations_hidden_from_autograd=mutations_hidden_from_autograd,
                     mutates_storage_metadata=mutates_storage_metadata,
+                    mutation_is_shallow_copy_data=was_shallow_copy_data(f_arg),
                     mutations_under_no_grad_or_inference_mode=mutations_under_no_grad_or_inference_mode,
                     mutation_inductor_storage_resize=mutation_inductor_storage_resize,
                     requires_grad=requires_grad,
@@ -321,6 +318,7 @@ def run_functionalized_fw_and_collect_metadata(
         num_aliased_tensors_that_are_multi_output_views: collections.defaultdict[
             StorageWeakRef | None, int
         ] = collections.defaultdict(int)
+        multi_output_view_tensor_ids: set[int] = set()
 
         out_storage_to_metadata_key_to_tensors: collections.defaultdict[
             StorageWeakRef | None,
@@ -417,6 +415,7 @@ def run_functionalized_fw_and_collect_metadata(
                 )
                 if is_cur_tensor_multi_out_view:
                     num_aliased_tensors_that_are_multi_output_views[curr_storage] += 1
+                    multi_output_view_tensor_ids.add(id(o))
                 if o.requires_grad:
                     out_storage_to_metadata_key_to_tensors[curr_storage][
                         MetadataKey.make(o)
@@ -426,6 +425,7 @@ def run_functionalized_fw_and_collect_metadata(
         intermediate_base_tensor_id_to_output_idx: dict[int, int] = {}
         intermediate_bases: list[torch.Tensor] = []
         intermediate_bases_descs: list[AOTInput] = []
+        input_multi_output_view_groups: dict[Any, int] = {}
         # Why Do We Care If Storage Changed?
         # It's important to understand the implications of storage changes in complex scenarios. Take this example:
         #
@@ -446,7 +446,7 @@ def run_functionalized_fw_and_collect_metadata(
         #     return out
         #
         # In this scenario, 'x' and 'out' have different shapes and are stored at different memory addresses, aka no aliasing.
-        # However, due to how set_() and more specificlaly, set is functionalized, is defined to preserve eager semantics,
+        # However, due to how set_() and more specifically, set is functionalized, is defined to preserve eager semantics,
         # the autograd engine mistakenly assumes that 'x' and 'out' are aliased, treating 'x' as 'out._base'.
         # This misinterpretation leads to an 'alias_of_input' flag, causing an unnecessary as_strided() call to be generated,
         # which could lead to issues later in the code.
@@ -641,7 +641,7 @@ from a multi-output view call"
                 #    (iii) alias_of_intermediate_base_is_user_output.
                 #
                 # No need to worry about in-place view operations here, since
-                # this functionalization step elimitates mutations.
+                # this functionalization step eliminates mutations.
                 #
                 # i.e. we have access to the actual base tensor, before the
                 # in-place operation was applied.
@@ -668,6 +668,22 @@ from a multi-output view call"
                     view_meta_sequence = ViewMetaSequence(o)
 
             requires_grad = isinstance(o, torch.Tensor) and o.requires_grad
+            multi_output_view_group = None
+            multi_output_view_index = None
+            if (
+                output_type == OutputType.alias_of_input
+                and id(o) in multi_output_view_tensor_ids
+                and grad_fn is not None
+                and view_meta_sequence is not None
+                and view_meta_sequence.sequence
+                and view_meta_sequence.sequence[-1].is_multi_output
+            ):
+                if grad_fn not in input_multi_output_view_groups:
+                    input_multi_output_view_groups[grad_fn] = len(
+                        input_multi_output_view_groups
+                    )
+                multi_output_view_group = input_multi_output_view_groups[grad_fn]
+                multi_output_view_index = int(o.output_nr)
             out_info = OutputAliasInfo(
                 output_type=output_type,
                 raw_type=type(o),
@@ -680,6 +696,8 @@ from a multi-output view call"
                 requires_grad_for_backward=requires_grad
                 and (o._base is None or grad_fn is not None),
                 view_meta_sequence=view_meta_sequence,
+                multi_output_view_group=multi_output_view_group,
+                multi_output_view_index=multi_output_view_index,
             )
             output_info.append(out_info)
 

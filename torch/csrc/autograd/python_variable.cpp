@@ -44,6 +44,7 @@
 #include <ATen/ATen.h>
 
 #include <structmember.h>
+#include <algorithm>
 #include <cstdint>
 #include <memory>
 #include <sstream>
@@ -115,10 +116,6 @@ class OperatorArgsKwargsView {
 
     bool operator==(const kwargs_iterator& rhs) const {
       return parent_ == rhs.parent_ && current_ == rhs.current_;
-    }
-
-    bool operator!=(const kwargs_iterator& rhs) {
-      return !(*this == rhs);
     }
 
    private:
@@ -575,6 +572,29 @@ static PyObject* THPVariable_view_func_unsafe(
     PyObject* args,
     PyObject* kwargs) {
   return view_func_impl(self_, args, kwargs, /*check_has_same_meta=*/false);
+}
+
+static PyObject* THPVariable_view_func_multi_output(
+    PyObject* self_,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  const auto& self = THPVariable_Unpack(self_);
+  TORCH_CHECK(
+      THPVariable_Check(arg),
+      "_view_func_multi_output expects a single argument that is a Tensor");
+  const auto& new_base = THPVariable_Unpack(arg);
+
+  torch::autograd::variable_list outs;
+  auto diff_view_meta = torch::autograd::impl::get_view_autograd_meta(self);
+  if (diff_view_meta && diff_view_meta->has_bw_view()) {
+    const auto& view_info = diff_view_meta->get_backward_view();
+    if (torch::autograd::utils::has_same_meta(new_base, view_info.base_) &&
+        view_info.has_view_fn()) {
+      outs = view_info.view_fn().call_multi_output(new_base);
+    }
+  }
+  return THPVariable_WrapList(outs);
+  END_HANDLE_TH_ERRORS
 }
 
 static PyObject* rev_view_func_impl(PyObject* self_, PyObject* arg) {
@@ -1165,7 +1185,7 @@ class NativeOpSchema {
       }
     }
     ss << ')';
-    return ss.str();
+    return std::move(ss).str();
   }
 
  private:
@@ -1229,7 +1249,7 @@ void log_sharding_prop_cache_hit(
   if (!output_spec.is_none()) {
     ss << " -> " << py::str(output_spec).cast<std::string>();
   }
-  dtensor_dispatch_logger.attr("debug")(ss.str());
+  dtensor_dispatch_logger.attr("debug")(std::move(ss).str());
 }
 } // namespace
 
@@ -1489,7 +1509,7 @@ static bool sets_intersect(
     return sets_intersect(bigger, smaller);
   }
   for (const auto& item : smaller) {
-    if (bigger.find(item) != bigger.end()) {
+    if (bigger.contains(item)) {
       return true;
     }
   }
@@ -1631,11 +1651,12 @@ py::object dispatchDTensorOp(
   // enough for now.
   const bool is_inplace_op =
       !operator_name.name.empty() && operator_name.name.back() == '_';
-  // Simple analysis of function schema to determine if this is an
-  // ou variant. It might not be entirely correct, but it's good
-  // enough for now.
+  const auto& schema_arguments = op.schema().arguments();
   const bool is_out_variant_op = !is_inplace_op &&
-      operator_name.overload_name.find("out") != std::string::npos;
+      std::any_of(
+          schema_arguments.begin(),
+          schema_arguments.end(),
+          [](const c10::Argument& argument) { return argument.is_out(); });
 
   // Fast path for default or view ops.
   const auto output_spec =
@@ -1997,7 +2018,8 @@ static PyObject* DTensor_compute_global_tensor_info_impl(
     } else if (!cpp_placement.is_replicate() && !cpp_placement.is_partial()) {
 #if IS_PYTHON_3_11_PLUS
       const auto placement_type_name =
-          py::str(py::handle(PyType_GetName(Py_TYPE(placement.ptr()))));
+          py::str(py::reinterpret_steal<py::object>(
+              PyType_GetName(Py_TYPE(placement.ptr()))));
 #else
       const auto placement_type_name =
           py::str(py::handle((PyObject*)Py_TYPE(placement.ptr()))
@@ -3528,6 +3550,10 @@ static PyMethodDef extra_methods[] = {
     {"_view_func_unsafe",
      castPyCFunctionWithKeywords(THPVariable_view_func_unsafe),
      METH_VARARGS | METH_KEYWORDS,
+     nullptr},
+    {"_view_func_multi_output",
+     THPVariable_view_func_multi_output,
+     METH_O,
      nullptr},
     {"_rev_view_func_unsafe",
      THPVariable_rev_view_func_unsafe,

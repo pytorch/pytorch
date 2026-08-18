@@ -3,6 +3,7 @@ import logging
 import multiprocessing as mp
 import os
 import random
+import re
 import sys
 
 
@@ -53,6 +54,29 @@ def _parse_supported_ops_with_weights(spec: str) -> tuple[list[str], dict[str, f
     return ops, weights
 
 
+def _resolve_generate_only_path(
+    pattern: str, seed: int, *, require_marker: bool = False
+) -> str:
+    """Resolve a --generate-only file pattern for a given seed.
+
+    A contiguous run of '?' characters is replaced by the seed, left-padded with
+    zeros to the number of '?' characters. All '?' characters must be contiguous.
+    When ``require_marker`` is True, the pattern must contain at least one '?'.
+    """
+    runs = re.findall(r"\?+", pattern)
+    if len(runs) > 1:
+        raise ValueError(
+            f"--generate-only pattern {pattern!r} must keep all '?' characters together"
+        )
+    if not runs:
+        if require_marker:
+            raise ValueError(
+                f"--generate-only pattern {pattern!r} must contain a '?' to be replaced by the seed"
+            )
+        return pattern
+    return re.sub(r"\?+", str(seed).zfill(len(runs[0])), pattern)
+
+
 def fuzz_and_execute(
     seed: int | None = None,
     max_depth: int | None = None,
@@ -60,6 +84,7 @@ def fuzz_and_execute(
     template: str = "default",
     supported_ops: list[str] | None = None,
     op_weights: dict[str, float] | None = None,
+    generate_only: str | None = None,
 ) -> None:
     """
     Generate a fuzzed operation stack, convert it to Python code, and execute it.
@@ -215,6 +240,15 @@ def fuzz_and_execute(
             len(python_code),
         )
 
+        if generate_only is not None:
+            output_path = _resolve_generate_only_path(generate_only, seed)
+            output_dir = os.path.dirname(os.path.abspath(output_path))
+            os.makedirs(output_dir, exist_ok=True)
+            with open(output_path, "w") as f:
+                f.write(python_code)
+            print(f"Generated program written to {output_path}")
+            return
+
         logger.debug("⏱️  Step 4: Executing Python code...")
         start_time = time.time()
 
@@ -314,6 +348,18 @@ def main():
         action="store_true",
         help="Pick a random seed and keep iterating until finding a failure (exits with non-zero code)",
     )
+    parser.add_argument(
+        "--generate-only",
+        type=str,
+        metavar="FILEPATTERN",
+        help=(
+            "Generate the fuzz program(s) and save to FILEPATTERN without running them. "
+            "A contiguous run of '?' in the pattern is replaced by the seed, left-padded "
+            "with zeros to the number of '?' characters (e.g. /tmp/program-?.py -> "
+            "/tmp/program-12.py). A '?' is required in multi-seed (--start/--count) mode. "
+            "Incompatible with --stop-at-first-failure."
+        ),
+    )
 
     # Legacy arguments
     parser.add_argument(
@@ -335,6 +381,21 @@ def main():
         level=getattr(logging, args.log_level), format="%(levelname)s: %(message)s"
     )
 
+    # Validate --generate-only up front (fail fast before any work).
+    if args.generate_only is not None:
+        if args.stop_at_first_failure:
+            print(
+                "❌ Error: --generate-only cannot be used with --stop-at-first-failure"
+            )
+            sys.exit(1)
+        # Multi-seed mode requires a '?' so generated files don't collide.
+        if args.start is not None or args.count is not None:
+            try:
+                _resolve_generate_only_path(args.generate_only, 0, require_marker=True)
+            except ValueError as e:
+                print(f"❌ Error: {e}")
+                sys.exit(1)
+
     # Determine execution mode
     if args.seed is not None or args.single:
         # Single seed execution mode
@@ -353,6 +414,7 @@ def main():
             template=args.template,
             supported_ops=parsed_supported_ops,
             op_weights=(parsed_weights if parsed_weights else None),
+            generate_only=args.generate_only,
         )
     elif args.stop_at_first_failure:
         # Stop-at-first-failure mode
@@ -409,6 +471,7 @@ def main():
                 verbose=args.verbose,
                 template=args.template,
                 supported_ops=args.supported_ops,
+                generate_only=args.generate_only,
             )
         except Exception as e:
             print(f"❌ Unexpected error: {str(e)}")
@@ -425,6 +488,9 @@ def main():
             "  python fuzzer.py --start 0 --count 1000       # Run multi-process fuzzing"
         )
         print("  python fuzzer.py --start 100 --count 50 -p 8  # Use 8 processes")
+        print(
+            "  python fuzzer.py --seed 12 --generate-only /tmp/program-?.py  # Save program only"
+        )
 
 
 if __name__ == "__main__":

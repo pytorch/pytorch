@@ -47,6 +47,7 @@ struct ${op} : public ${superclass} {
   virtual std::vector<at::Tensor> get_tensors() const override;
   virtual size_t num_tensors() const override;
   virtual at::Tensor operator()(const at::Tensor&) const override;
+  ${multi_output_decl}
   virtual std::unique_ptr<ViewFunc> clone_and_set(
       std::optional<std::vector<c10::SymInt>> = ::std::nullopt,
       std::optional<std::vector<at::Tensor>> = ::std::nullopt) const override;
@@ -93,6 +94,8 @@ void ${op}::set_tensors(std::vector<at::Tensor> ${tensors_vec}) {
 at::Tensor ${op}::operator()(const at::Tensor& ${call_input_name}) const {
   return ${op_call};
 }
+
+${multi_output_definition}
 
 std::unique_ptr<ViewFunc> ${op}::clone_and_set(
     std::optional<std::vector<c10::SymInt>> ${symints_vec},
@@ -252,8 +255,12 @@ def process_function(fn: NativeFunction, template: CodeTemplate) -> str:
         unpacked_args=op_call_args,
     )
 
-    # Multi-output views additionally require a view_idx for disambiguation.
-    if returns_multi_tensor(fn):
+    # Multi-output views additionally require a view_idx for disambiguation,
+    # and expose a batched replay entry point that returns all sibling views.
+    is_multi_output = returns_multi_tensor(fn)
+    multi_output_op_call = ""
+    if is_multi_output:
+        multi_output_op_call = op_call
         view_idx_name = "view_idx"
         view_idx_typename = "int64_t"
         view_idx_decl = f"{view_idx_typename} {view_idx_name}"
@@ -262,6 +269,21 @@ def process_function(fn: NativeFunction, template: CodeTemplate) -> str:
         state_variables.append(f"{view_idx_decl};")
         initializers.append(f"{view_idx_name}({view_idx_name})")
         op_call += f"[{view_idx_name}]"
+
+    multi_output_decl = (
+        "virtual std::vector<at::Tensor> call_multi_output("
+        "const at::Tensor&) const override;"
+        if is_multi_output
+        else ""
+    )
+    multi_output_definition = (
+        f"std::vector<at::Tensor> {view_func_name(fn)}::call_multi_output("
+        f"const at::Tensor& {call_input_name}) const {{\n"
+        f"  return {multi_output_op_call};\n"
+        f"}}"
+        if is_multi_output
+        else ""
+    )
 
     # Generate initializer list for the generated struct.
     initializer_list = f": {', '.join(initializers)}" if len(initializers) > 0 else ""
@@ -306,6 +328,8 @@ def process_function(fn: NativeFunction, template: CodeTemplate) -> str:
         num_tensors=num_tensors,
         call_input_name=call_input_name,
         op_call=op_call,
+        multi_output_decl=multi_output_decl,
+        multi_output_definition=multi_output_definition,
     )
 
 

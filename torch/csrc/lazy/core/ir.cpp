@@ -30,7 +30,7 @@ hash_t Output::shapeHash() const {
 std::string Output::ToString() const {
   std::stringstream ss;
   ss << node->ToString() << ", index=" << index;
-  return ss.str();
+  return std::move(ss).str();
 }
 
 bool Output::operator==(const Value& rhs) const {
@@ -160,7 +160,7 @@ std::string Node::ToString() const {
     ss << ", scope=" << metadata().scope;
   }
   EmitShortFrameInfo(ss, metadata().frame_info);
-  return ss.str();
+  return std::move(ss).str();
 }
 
 void Node::AddOperand(const NodePtr& node, size_t index) {

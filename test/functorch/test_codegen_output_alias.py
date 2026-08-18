@@ -4,11 +4,9 @@
 Tests for codegen'ing the output alias regeneration in
 _create_runtime_wrapper.
 
-The codegen'd output alias handler inlines each handler type's logic per
-output as straight-line code: NoopAliasHandler becomes a direct fw_outs[i]
-reference, IsInputHandler becomes orig_inputs[base_idx], and
-AliasOfInput/IntermediateHandler become inline gen_alias_from_base calls
-with baked-in indices and metadata.
+The codegen'd output alias handler inlines each handler type's logic as
+straight-line code. Multi-output input views are regenerated as a group so
+the underlying view op is replayed only once.
 
 Tests verify that an "output_alias_wrapper" artifact is emitted via
 trace_structured.
@@ -205,6 +203,29 @@ class TestCodegenOutputAlias(TestCase):
             1,
             "Expected output_alias_wrapper codegen artifact to be emitted",
         )
+
+    def test_multi_output_views_of_input_are_grouped(self):
+        with self._capture_codegen_source("output_alias_wrapper") as captured:
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                views = x.unbind(0)
+                return views[2], x.sin(), views[0]
+
+            x = torch.randn(4, 3, requires_grad=True)
+            outs = f(x)
+
+        self.assertEqual(outs, (x[2], x.sin(), x[0]))
+        self.assertIs(outs[0]._base, x)
+        self.assertIs(outs[2]._base, x)
+        for out in (outs[1], outs[0], outs[2]):
+            out.sum().backward()
+        expected_grad = x.detach().cos()
+        expected_grad[0].add_(1)
+        expected_grad[2].add_(1)
+        self.assertEqual(x.grad, expected_grad)
+        self.assertEqual(len(captured), 1)
+        self.assertEqual(captured[0].count("gen_aliases_from_multi_output_view("), 1)
 
     def test_training_path_view_of_input(self):
         """

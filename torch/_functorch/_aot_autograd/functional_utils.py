@@ -9,14 +9,14 @@ This file contains utilities related to functionalization in AOTAutograd:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, TypeGuard
+from typing import Any, TYPE_CHECKING, TypeGuard
 
 import torch
 from torch import Tensor
 from torch._C import _functionalization
+from torch._custom_class_base import CustomClassBase
 from torch._logging import getArtifactLogger
-from torch._opaque_base import OpaqueBase
-from torch._subclasses.fake_tensor import FakeTensor
+from torch._subclasses.fake_tensor import is_fake_tensor
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_eq, SymIntEqByExpr
@@ -25,6 +25,10 @@ from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
     transform_subclass,
 )
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 aot_joint_log = getArtifactLogger(__name__, "aot_joint_graph")
@@ -53,11 +57,11 @@ def sync_functional_tensor(t: torch.Tensor) -> None:
             match getattr(t, attr):
                 case Tensor() as inner:
                     sync_functional_tensor(inner)
-                case OpaqueBase():
+                case CustomClassBase():
                     pass
                 case unexpected:
                     raise AssertionError(
-                        f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                        f"expected Tensor or CustomClassBase, got {type(unexpected)}"
                     )
     else:
         torch._sync(t)
@@ -103,11 +107,11 @@ def is_fun(t: object) -> TypeGuard[FunctionalTensor | Tensor]:
                         raise AssertionError(
                             "mixed functional/non-functional inner tensors"
                         )
-                case OpaqueBase():
+                case CustomClassBase():
                     pass
                 case unexpected:
                     raise AssertionError(
-                        f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                        f"expected Tensor or CustomClassBase, got {type(unexpected)}"
                     )
         return got_fun or False
 
@@ -127,11 +131,11 @@ def has_data_mutation(t: object) -> bool:
                 case Tensor() as v:
                     if has_data_mutation(v):
                         return True
-                case OpaqueBase():
+                case CustomClassBase():
                     pass
                 case unexpected:
                     raise AssertionError(
-                        f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                        f"expected Tensor or CustomClassBase, got {type(unexpected)}"
                     )
         return False
     else:
@@ -151,11 +155,11 @@ def are_all_mutations_hidden_from_autograd(t: object) -> bool:
                 case Tensor() as v:
                     if not are_all_mutations_hidden_from_autograd(v):
                         return False
-                case OpaqueBase():
+                case CustomClassBase():
                     pass
                 case unexpected:
                     raise AssertionError(
-                        f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                        f"expected Tensor or CustomClassBase, got {type(unexpected)}"
                     )
         return True
     elif isinstance(t, torch.Tensor):
@@ -174,11 +178,11 @@ def are_all_mutations_under_no_grad_or_inference_mode(t: torch.Tensor) -> bool:
                 case Tensor() as v:
                     if not are_all_mutations_under_no_grad_or_inference_mode(v):
                         return False
-                case OpaqueBase():
+                case CustomClassBase():
                     pass
                 case unexpected:
                     raise AssertionError(
-                        f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                        f"expected Tensor or CustomClassBase, got {type(unexpected)}"
                     )
         return True
     else:
@@ -199,11 +203,11 @@ def was_inductor_storage_resized(t: object) -> bool:
                         raise RuntimeError(
                             f"storage resizing is not supported on tensor subclass: {type(t)}"
                         )
-                case OpaqueBase():
+                case CustomClassBase():
                     pass
                 case unexpected:
                     raise AssertionError(
-                        f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                        f"expected Tensor or CustomClassBase, got {type(unexpected)}"
                     )
         return False
     elif not isinstance(t, torch.Tensor):
@@ -214,6 +218,16 @@ def was_inductor_storage_resized(t: object) -> bool:
         return torch._functionalize_was_inductor_storage_resized(t.elem)
 
 
+def was_shallow_copy_data(t: object) -> bool:
+    if is_traceable_wrapper_subclass(t):
+        return False
+    if not isinstance(t, torch.Tensor):
+        return False
+    if not isinstance(t, FunctionalTensor):
+        raise AssertionError(f"expected FunctionalTensor, got {type(t)}")
+    return torch._functionalize_was_shallow_copy_data(t.elem)  # type: ignore[attr-defined]
+
+
 # f_arg here is either
 # (1) A FunctionalTensor(_to_functional_tensor(FakeTensor))
 # (2) A traceable tensor subclass that holds a FunctionalTensor
@@ -221,7 +235,7 @@ def was_inductor_storage_resized(t: object) -> bool:
 # Assumption: arg promises to be the "original" tensor wrapped by f_arg
 # Note: "storage mutations" coming from set_() are a type of metadata mutation. So:
 # - check_only_storage_mutation=True: only return true if there was a storage mutation
-# - check_only_storage_mutation=Flse: return true if there was any metadata mutation (including a storage mutation)
+# - check_only_storage_mutation=False: return true if there was any metadata mutation (including a storage mutation)
 def has_metadata_mutation(
     f_arg: object, arg: object, *, check_only_storage_mutation: bool
 ) -> bool:
@@ -239,11 +253,11 @@ def has_metadata_mutation(
                         check_only_storage_mutation=check_only_storage_mutation,
                     ):
                         return True
-                case OpaqueBase():
+                case CustomClassBase():
                     pass
                 case unexpected:
                     raise AssertionError(
-                        f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                        f"expected Tensor or CustomClassBase, got {type(unexpected)}"
                     )
         return False
     else:
@@ -257,7 +271,7 @@ def has_metadata_mutation(
             raise AssertionError(
                 f"expected FunctionalTensor for f_arg, got {type(f_arg)}"
             )
-        if not isinstance(arg, FakeTensor):
+        if not is_fake_tensor(arg):
             raise AssertionError(f"expected FakeTensor for arg, got {type(arg)}")
 
         arg_after = torch._from_functional_tensor(f_arg.elem)
@@ -302,6 +316,33 @@ def has_metadata_mutation(
         return has_metadata_mutation_
 
 
+def _patch_requires_grad(
+    aliased_base_tensor: Tensor, out: Tensor, target_requires_grad: bool
+) -> Tensor:
+    if aliased_base_tensor.requires_grad and not target_requires_grad:
+        out = out.detach()
+    elif not aliased_base_tensor.requires_grad and target_requires_grad:
+        out.requires_grad_(True)
+    return out
+
+
+def _reshape_base_for_view_replay(
+    aliased_base_tensor: Tensor, target_meta_tensor: Tensor
+) -> Tensor | None:
+    if target_meta_tensor._base is None:
+        return None
+    target_base = target_meta_tensor._base
+    if aliased_base_tensor is not target_base and (
+        aliased_base_tensor.size() != target_base.size()
+        or aliased_base_tensor.stride() != target_base.stride()
+        or aliased_base_tensor.storage_offset() != target_base.storage_offset()
+    ):
+        return aliased_base_tensor.as_strided(
+            target_base.size(), target_base.stride(), target_base.storage_offset()
+        )
+    return aliased_base_tensor
+
+
 def gen_alias_from_base(
     aliased_base_tensor: Tensor,
     target_meta_tensor: Tensor,
@@ -310,16 +351,6 @@ def gen_alias_from_base(
     *,
     replay_views: bool,
 ) -> Tensor:
-    # Patch the correct requires_grad field of the output tensor, depending on whether:
-    # (i) the reconstructed output (out) was came from a tensor that requires grad or not;
-    # and (ii) the concrete returned output does require grad or not.
-    def patch_requires_grad(out: Tensor) -> Tensor:
-        if aliased_base_tensor.requires_grad and not target_requires_grad:
-            out = out.detach()
-        elif not aliased_base_tensor.requires_grad and target_requires_grad:
-            out.requires_grad_(True)
-        return out
-
     # If provided, use the target functional tensor for replaying the views.
     #
     # In summary, we use the fact that FunctionalTensorWrapper saves the view
@@ -341,26 +372,14 @@ def gen_alias_from_base(
                 "incorrect out shape after application of ViewMeta sequence: "
                 f"{tuple(out.shape)} (actual) vs {tuple(target_meta_tensor.shape)} (expected)"
             )
-        return patch_requires_grad(out)
+        return _patch_requires_grad(aliased_base_tensor, out, target_requires_grad)
 
     # Try to do view-replay if possible.
     # fall back to .as_strided() if we can't.
-    if target_meta_tensor._base is not None:
-        # The base that we want to replay our view off of might have a different shape than the view's original base.
-        b = target_meta_tensor._base
-        abt = aliased_base_tensor
-        # Don't unnecessarily call as_strided if nothing changed; as_strided's
-        # backward is poorly implemented and slow
-        if abt is not b and (
-            abt.size() != b.size()
-            or abt.stride() != b.stride()
-            or abt.storage_offset() != b.storage_offset()
-        ):
-            reshaped_base_tensor = aliased_base_tensor.as_strided(
-                b.size(), b.stride(), b.storage_offset()
-            )
-        else:
-            reshaped_base_tensor = aliased_base_tensor
+    reshaped_base_tensor = _reshape_base_for_view_replay(
+        aliased_base_tensor, target_meta_tensor
+    )
+    if reshaped_base_tensor is not None:
         out = target_meta_tensor._view_func(reshaped_base_tensor)  # type: ignore[attr-defined]
         # This shape mismatch can happen due to a bug in inplace/view handling in autograd.
         # Try putting a breakpoint here and running
@@ -369,11 +388,27 @@ def gen_alias_from_base(
         #
         # As a stopgap, we'll fall back to as_strided.
         if out is not None and out.shape == target_meta_tensor.shape:
-            return patch_requires_grad(out)
+            return _patch_requires_grad(aliased_base_tensor, out, target_requires_grad)
 
     size = target_meta_tensor.size()
     stride = target_meta_tensor.stride()
     storage_offset = target_meta_tensor.storage_offset()
+    # If the target lives on a different storage than the aliased base
+    # (e.g. because inductor's copy_misaligned_inputs cloned the input to
+    # obtain an aligned buffer), ``target.storage_offset()`` is expressed in
+    # the cloned storage and would pick the wrong slice when applied via
+    # ``as_strided()`` on the original aliased base tensor. Translate the
+    # offset: the traced FakeTensor's storage_offset equals the trace-time
+    # RELATIVE offset from the input, so add back the runtime input's
+    # ``storage_offset`` to keep the alias anchored to the correct slice.
+    # Compare storages via ``_cdata`` (raw c10::Storage handle) rather than
+    # ``.data_ptr()`` so this is safe on fake/meta storages that would raise
+    # from ``.data_ptr()`` during AOT tracing.
+    if (
+        aliased_base_tensor.untyped_storage()._cdata
+        != target_meta_tensor.untyped_storage()._cdata
+    ):
+        storage_offset = aliased_base_tensor.storage_offset() + storage_offset
     if aliased_base_tensor.is_complex() and not target_meta_tensor.is_complex():
         aliased_out = torch.view_as_real(aliased_base_tensor).as_strided(
             size, stride, storage_offset
@@ -385,12 +420,102 @@ def gen_alias_from_base(
     else:
         aliased_out = aliased_base_tensor.as_strided(size, stride, storage_offset)
     # For outputs aliasing inputs, we need to check if the requires-gradness has changed.
-    aliased_out = patch_requires_grad(aliased_out)
+    aliased_out = _patch_requires_grad(
+        aliased_base_tensor, aliased_out, target_requires_grad
+    )
     # For outputs aliasing inputs, we need to check if the dtype has changed.
     # as_strided() is the "most generic" view, but it does not cover cross-dtype views
     if aliased_out.dtype != target_meta_tensor.dtype:
         aliased_out = aliased_out.view(target_meta_tensor.dtype)
     return aliased_out
+
+
+def gen_aliases_from_multi_output_view(
+    aliased_base_tensor: Tensor,
+    target_meta_tensors: Sequence[Tensor],
+    target_requires_grads: Sequence[bool],
+    target_view_meta_sequences: Sequence[ViewMetaSequence | None],
+    target_output_indices: Sequence[int],
+    *,
+    replay_views: bool,
+) -> list[Tensor]:
+    """Replay one terminal multi-output view and select the requested siblings.
+
+    The four target sequences are positionally aligned, and output indices refer
+    to the full result of the shared multi-output operation. The returned tensors
+    preserve that requested order. If batched replay is unavailable, each target
+    is regenerated independently through ``gen_alias_from_base``.
+    """
+    expected_len = len(target_meta_tensors)
+    if not (
+        len(target_requires_grads)
+        == len(target_view_meta_sequences)
+        == len(target_output_indices)
+        == expected_len
+    ):
+        raise AssertionError("multi-output view metadata lengths must match")
+    if expected_len == 0:
+        return []
+
+    def select_replayed_outputs(replayed_outs: Sequence[Tensor]) -> list[Tensor] | None:
+        if (
+            not replayed_outs
+            or min(target_output_indices) < 0
+            or max(target_output_indices) >= len(replayed_outs)
+        ):
+            return None
+        selected_outs = [replayed_outs[i] for i in target_output_indices]
+        if not all(
+            out.shape == target.shape
+            for out, target in zip(selected_outs, target_meta_tensors, strict=True)
+        ):
+            return None
+        return [
+            _patch_requires_grad(aliased_base_tensor, out, requires_grad)
+            for out, requires_grad in zip(
+                selected_outs, target_requires_grads, strict=True
+            )
+        ]
+
+    reshaped_base_tensor = _reshape_base_for_view_replay(
+        aliased_base_tensor, target_meta_tensors[0]
+    )
+    if reshaped_base_tensor is not None:
+        replayed_outs = target_meta_tensors[0]._view_func_multi_output(  # type: ignore[attr-defined]
+            reshaped_base_tensor
+        )
+        selected_outs = select_replayed_outputs(replayed_outs)
+        if selected_outs is not None:
+            return selected_outs
+
+    first_view_meta_sequence = target_view_meta_sequences[0]
+    if (
+        replay_views
+        and first_view_meta_sequence is not None
+        and not any(vm.has_symbolic_inputs for vm in first_view_meta_sequence.sequence)
+    ):
+        replayed_outs = _functionalization.apply_multi_output_view_meta_sequence(
+            aliased_base_tensor, first_view_meta_sequence.sequence
+        )
+        selected_outs = select_replayed_outputs(replayed_outs)
+        if selected_outs is not None:
+            return selected_outs
+
+    return [
+        gen_alias_from_base(
+            aliased_base_tensor,
+            target_meta_tensor,
+            target_requires_grad,
+            target_view_meta_sequence,
+            replay_views=replay_views,
+        )
+        for target_meta_tensor, target_requires_grad, target_view_meta_sequence in zip(
+            target_meta_tensors,
+            target_requires_grads,
+            target_view_meta_sequences,
+            strict=True,
+        )
+    ]
 
 
 def has_same_metadata(t1: Tensor, t2: Tensor) -> bool:
@@ -479,6 +604,21 @@ class ViewMetaSequence:
 
         return self.metadata == other.metadata
 
+    @classmethod
+    def _from_parts(
+        cls, sequence: list[_functionalization.ViewMeta], metadata: MetadataKey
+    ) -> ViewMetaSequence:
+        # Rebuild a ViewMetaSequence directly from its parts, bypassing the
+        # FunctionalTensor-based __init__. This lets the recipe be reconstructed from
+        # plain values rather than from a live FunctionalTensor or an embedded pickle.
+        # Sole caller: torch._functorch._aot_autograd.source_emit, when baking a
+        # ViewMetaSequence into standalone source; keep the attributes set here in sync
+        # with __init__ (sequence, metadata) or the reconstructed object diverges.
+        self = cls.__new__(cls)
+        self.sequence = sequence
+        self.metadata = metadata
+        return self
+
 
 # new_arg and arg here are either:
 # (1) both a FakeTensor
@@ -509,11 +649,11 @@ def was_tensor_updated(arg: torch.Tensor, new_arg: torch.Tensor) -> bool:
                 case Tensor() as v:
                     if was_tensor_updated(v, getattr(new_arg, attr)):
                         return True
-                case OpaqueBase():
+                case CustomClassBase():
                     pass
                 case unexpected:
                     raise AssertionError(
-                        f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                        f"expected Tensor or CustomClassBase, got {type(unexpected)}"
                     )
         return False
     else:
@@ -543,11 +683,11 @@ def was_tensor_metadata_updated(arg: Any, new_arg: Any) -> bool:
                 case Tensor() as v:
                     if was_tensor_metadata_updated(v, getattr(new_arg, attr)):
                         return True
-                case OpaqueBase():
+                case CustomClassBase():
                     pass
                 case unexpected:
                     raise AssertionError(
-                        f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                        f"expected Tensor or CustomClassBase, got {type(unexpected)}"
                     )
         return False
     else:
@@ -561,6 +701,7 @@ def _is_functional_graph(fx_g: torch.fx.Graph) -> tuple[str | None, int]:
     allowed_mutation_ops = [
         torch.ops.aten.copy_.default,
         torch.ops.aten.set_.source_Tensor,
+        torch.ops.aten.shallow_copy_data_.default,
     ]
     if hasattr(torch.ops.fsdp, "copy_"):
         allowed_mutation_ops.append(torch.ops.fsdp.copy_.default)

@@ -7,17 +7,17 @@ from __future__ import annotations
 
 import collections
 import functools
+from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from enum import Enum
-from typing import Any, NewType, Protocol, TYPE_CHECKING, TypeVar
+from typing import Any, NewType, Protocol, TYPE_CHECKING, TypeAlias, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
 import torch.utils._pytree as pytree
 from torch import SymInt, Tensor
-from torch._opaque_base import OpaqueBase
-from torch._subclasses import FakeTensor, FakeTensorMode
-from torch._subclasses.fake_tensor import is_fake
+from torch._custom_class_base import CustomClassBase
+from torch._subclasses.fake_tensor import is_fake, is_fake_tensor
 from torch.fx.experimental._backward_state import BackwardState
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
@@ -28,12 +28,13 @@ from .utils import strict_zip
 
 if TYPE_CHECKING:
     import contextlib
-    from collections.abc import Callable, Iterable, Sequence
+    from collections.abc import Callable, Iterable
 
     from torch._guards import Source
     from torch._inductor.output_code import OutputCode
     from torch._inductor.utils import InputType
     from torch._ops import OpOverload
+    from torch._subclasses import FakeTensorMode
     from torch.types import IntLikeType
 
     from .descriptors import AOTInput, AOTOutput
@@ -42,6 +43,9 @@ if TYPE_CHECKING:
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
 zip = strict_zip
+
+ActInputPath: TypeAlias = tuple[int, tuple[str, ...]]
+ActInputPaths: TypeAlias = Sequence[ActInputPath]
 
 
 OutputType = Enum(
@@ -120,6 +124,13 @@ class OutputAliasInfo:
     # we compare the ViewMeta elements appropriately, i.e. their type and
     # the elements returned by the `as_tuple()` call.
     view_meta_sequence: ViewMetaSequence | None = None
+    # Differentiable input aliases produced by the same multi-output view op
+    # share a group id. The output index identifies the corresponding sibling
+    # returned by that op. Runtime alias regeneration uses these fields to
+    # replay the op once for the whole group instead of once per output. The
+    # multi-output op must be terminal; descendant views use per-output replay.
+    multi_output_view_group: int | None = None
+    multi_output_view_index: int | None = None
 
 
 class MutationType(Enum):
@@ -138,6 +149,7 @@ class InputAliasInfo:
     mutations_under_no_grad_or_inference_mode: bool
     mutation_inductor_storage_resize: bool
     mutates_storage_metadata: bool
+    mutation_is_shallow_copy_data: bool
     requires_grad: bool
     keep_input_mutations: bool
 
@@ -228,6 +240,16 @@ class MemoryFormatMeta:
 class PlainTensorMeta:
     unwrapped_idx: int
     memory_format: MemoryFormatMeta | None = None
+    size_symbol_placeholders: tuple[bool, ...] = ()
+    stride_symbol_placeholders: tuple[bool, ...] = ()
+
+    @property
+    def arg_count(self) -> int:
+        return (
+            1
+            + sum(self.size_symbol_placeholders)
+            + sum(self.stride_symbol_placeholders)
+        )
 
 
 @dataclass
@@ -279,10 +301,12 @@ class SubclassCreationMeta:
     # Used at runtime to determine the subclass type, so we don't need to save the original subclass
     original_subclass_type: type | None = None
     memory_format: MemoryFormatMeta | None = None
+    outer_size_from_attr: str | None = None
+    outer_stride_from_attr: str | None = None
 
     def compute_outer_size_and_stride(
         self,
-        all_args: Sequence[torch.Tensor | IntLikeType | OpaqueBase],
+        all_args: Sequence[torch.Tensor | IntLikeType | CustomClassBase],
         *,
         curr_start_idx: int,
     ) -> tuple[
@@ -313,18 +337,20 @@ class SubclassCreationMeta:
 
     def creation_fn(
         self,
-        all_args: Sequence[torch.Tensor | IntLikeType | OpaqueBase],
+        all_args: Sequence[torch.Tensor | IntLikeType | CustomClassBase],
         *,
         is_runtime: bool,
     ) -> torch.Tensor:
-        inner_tensors: dict[str, torch.Tensor | OpaqueBase] = {}
+        inner_tensors: dict[str, torch.Tensor | CustomClassBase] = {}
 
         curr_start_idx = self.flat_tensor_start_idx
         for attr, creation_meta in self.attrs.items():
             if isinstance(creation_meta, OpaqueMeta):
                 opaque = all_args[curr_start_idx]
-                if not isinstance(opaque, OpaqueBase):
-                    raise AssertionError(f"OpaqueBase expected, got {type(opaque)}")
+                if not isinstance(opaque, CustomClassBase):
+                    raise AssertionError(
+                        f"CustomClassBase expected, got {type(opaque)}"
+                    )
                 inner_tensors[attr] = opaque
                 curr_start_idx += 1
                 continue
@@ -332,7 +358,7 @@ class SubclassCreationMeta:
                 subclass = all_args[curr_start_idx]
                 if not isinstance(subclass, Tensor):
                     raise AssertionError("Tensor expected")
-                curr_start_idx += 1
+                curr_start_idx += creation_meta.arg_count
             else:
                 subclass = creation_meta.creation_fn(
                     all_args,
@@ -355,6 +381,16 @@ class SubclassCreationMeta:
                 all_args,
                 curr_start_idx=curr_start_idx,
             )
+            if self.outer_size_from_attr is not None:
+                size_attr = inner_tensors[self.outer_size_from_attr]
+                if not isinstance(size_attr, Tensor):
+                    raise AssertionError("Tensor expected")
+                outer_size = size_attr.size()
+            if self.outer_stride_from_attr is not None:
+                stride_attr = inner_tensors[self.outer_stride_from_attr]
+                if not isinstance(stride_attr, Tensor):
+                    raise AssertionError("Tensor expected")
+                outer_stride = stride_attr.stride()
         else:
             outer_size, outer_stride = self.outer_size, self.outer_stride
 
@@ -487,6 +523,9 @@ class ViewAndMutationMeta:
 
     # Number of opaque objects saved for backward
     num_opaque_objects_saved_for_bw: int | None = None
+
+    # Whether each saved tensor is also a graph input.
+    saved_tensor_is_graph_input: list[bool] = field(default_factory=list)
     # The grad_enabled mutation that will be emitted in the runtime_wrapper epilogue
     # NOTE: AOTAutograd will assume that the ambient `is_grad_enabled` is the grad mode
     # that is intended to be in effect prior to running the graph, in keeping with
@@ -503,10 +542,11 @@ class ViewAndMutationMeta:
     # Keeps track of which input indices store parameters (which we will treat as static)
     static_input_indices: list[int] = field(default_factory=list)
 
-    # Input indices that held AsyncCollectiveTensors at compile time.
-    # Used to emit direct trigger_wait() calls at runtime instead of
+    # Input paths that held AsyncCollectiveTensors at compile time. A path is
+    # (input_index, attr_path), where an empty attr_path means the top-level
+    # input. Used to emit direct trigger_wait() calls at runtime instead of
     # scanning every arg on every graph invocation.
-    act_input_indices: list[int] = field(default_factory=list)
+    act_input_paths: list[ActInputPath] = field(default_factory=list)
 
     # Map of effect type (ex. _EffectType.ORDERED) to token.  If there are
     # side-effectful operators, FunctionalTensorMode will populate this
@@ -600,6 +640,23 @@ class ViewAndMutationMeta:
             for i, m in enumerate(self.output_info)
             if m.output_type is OutputType.unsafe_view_alias
         ]
+        multi_output_view_groups: dict[int, list[int]] = {}
+        for i, info in enumerate(self.output_info):
+            if (info.multi_output_view_group is None) != (
+                info.multi_output_view_index is None
+            ):
+                raise AssertionError(
+                    "multi-output view group and output index must be set together"
+                )
+            if info.multi_output_view_group is None:
+                continue
+            if info.output_type is not OutputType.alias_of_input:
+                raise AssertionError(
+                    "multi-output view groups are only valid for input aliases"
+                )
+            multi_output_view_groups.setdefault(
+                info.multi_output_view_group, []
+            ).append(i)
 
         # This is pre-computed in post_init for perf.
         # It contains the index of every element
@@ -612,6 +669,9 @@ class ViewAndMutationMeta:
         # of output_info that corresponds to an alias (either of an input or intermediate)
         self.aliased_out_indices = aliased_out_indices
         self.unsafe_view_out_indices = unsafe_view_out_indices
+        self.multi_output_view_groups = {
+            group: tuple(indices) for group, indices in multi_output_view_groups.items()
+        }
         self.num_outputs = len(self.output_info)
         self.num_outputs_non_aliased = len(
             [
@@ -668,8 +728,7 @@ class ViewAndMutationMeta:
         # Eventually, we should kill this and replace with real backward guards.
         # (we want to precompute the "runtime" types, so replace FakeTensor with torch.Tensor)
         self.output_types = [
-            torch.Tensor if isinstance(x, FakeTensor) else type(x)
-            for x in self.traced_tangents
+            torch.Tensor if is_fake_tensor(x) else type(x) for x in self.traced_tangents
         ]
 
         self.is_rng_op_functionalized = config.functionalize_rng_ops
@@ -1214,7 +1273,7 @@ class AOTState:
 
     # Whether or not we need to handle autograd when doing graph capture and
     # compilation.  Although the calling convention for non-autograd graph
-    # capture in AOTAutograd is simple and can be relied upon, the autograph
+    # capture in AOTAutograd is simple and can be relied upon, the autograd
     # capture calling convention is quite complicated and in general you are
     # only expected to pass to aot_stage2_compile to process.
     needs_autograd: bool
@@ -1264,7 +1323,7 @@ class AOTState:
     fake_mode: FakeTensorMode
 
 
-FxValue = Tensor | int | SymInt | BackwardState | OpaqueBase
+FxValue = Tensor | int | SymInt | BackwardState | CustomClassBase
 
 
 class CompilerWrapper:

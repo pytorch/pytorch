@@ -162,7 +162,7 @@ struct TORCH_API SimpleValue : public SugaredValue {
     std::stringstream ss;
     // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
     ss << "value of type '" << value_->type()->annotation_str() << '\'';
-    return ss.str();
+    return std::move(ss).str();
   }
   Value* asValue(const SourceRange& range, GraphFunction& m) override {
     return value_;
