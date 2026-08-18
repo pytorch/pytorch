@@ -204,7 +204,7 @@ case "$tag" in
       ANACONDA_PYTHON_VERSION=3.12
     fi
     GCC_VERSION=13
-    ROCM_VERSION=10.0.0rc2
+    ROCM_VERSION=10.0.0rc3
     THEROCK_INDEX_URL="https://rocm.prereleases.amd.com/whl-multi-arch/"
     TRITON=yes
     KATEX=yes
