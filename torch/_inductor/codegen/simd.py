@@ -1322,7 +1322,9 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
     def estimate_flops(self) -> int | None:
         flops = [
             node.estimate_flops()
-            for node in NodeScheduleMarker.only_nodes(self.features.node_schedule)
+            for node in NodeScheduleMarker.only_nodes(
+                self.features.indexing_node_schedule
+            )
         ]
         return sum(filter(None, flops))
 
@@ -1545,6 +1547,7 @@ class _DerivedIterationFamily:
     lane_index_subs: dict[sympy.Expr, sympy.Expr] = dataclasses.field(
         default_factory=dict
     )
+    lane_source_sizes: tuple[sympy.Expr, ...] = ()
     flat_index_derived_tree: DerivedIterationRangesRoot | None = None
     _headers_emitted: bool = False
 
@@ -1562,7 +1565,10 @@ class _DerivedIterationFamily:
         if not isinstance(value, tuple):
             return value
         lane = scheduler.NestedReduction.interleaved_sub_parent_lane(
-            index, len(value), self.lane_index_subs
+            index,
+            len(value),
+            self.lane_index_subs,
+            self.lane_source_sizes,
         )
         part = _select_lane(value, lane)
         if part is None:
@@ -1580,7 +1586,8 @@ class _DerivedIterationFamily:
         )
 
     def sub_parent_tree(self) -> DerivedIterationRangesRoot:
-        assert self.flat_index_derived_tree is not None  # noqa: S101
+        if self.flat_index_derived_tree is None:
+            raise AssertionError("sub-parent family must have a derived tree")
         return self.flat_index_derived_tree
 
     @contextlib.contextmanager
@@ -1932,6 +1939,7 @@ class _GroupedReductionLayout:
             range_trees=(self.x_tree, derived_tree),
             flat_index_derived_tree=derived_tree,
             lane_index_subs=lane_index_subs,
+            lane_source_sizes=(self.x_tree.numel, self.r_tree.numel),
         )
 
     def sub_parent_iteration_values(
@@ -2010,7 +2018,8 @@ class _GroupedReductionLayout:
         Registers the lanes on ``family`` so later loads of ``name`` resolve to
         a lane instead of re-reading memory.
         """
-        assert value.dtype is not None  # noqa: S101
+        if value.dtype is None:
+            raise AssertionError("sub-parent value must have a known dtype")
         shape = value.shape
         if shape is None:
             return False
@@ -2074,13 +2083,16 @@ class _GroupedReductionLayout:
         Used for values constant within a group (a scale, say) so they can be
         combined with per-element values without a reload.
         """
-        assert value.dtype is not None  # noqa: S101
-        assert value.shape is not None  # noqa: S101
+        if value.dtype is None:
+            raise AssertionError("broadcast value must have a known dtype")
+        if value.shape is None:
+            raise AssertionError("broadcast value must have a known shape")
         num_groups = self.num_groups_str
         if len(value.shape) == 1:
-            assert V.graph.sizevars.statically_known_equals(  # noqa: S101
+            if not V.graph.sizevars.statically_known_equals(
                 self.passthrough_tree.numel, 1
-            )
+            ):
+                raise AssertionError("rank-1 broadcast requires singleton passthrough")
             prefix: tuple[str, ...] = ()
         else:
             prefix = (self.passthrough_block,)
@@ -2683,13 +2695,8 @@ class SIMDScheduling(BaseScheduling):
         """Whether the parent reduction tiles into exactly one x and one r tree.
 
         Sub-parent codegen derives its range tree from the parent's R axis and
-        cannot express a y/z tiling. Tiling is otherwise chosen *after* the
-        fusion is committed, so decide it here: a 3D tiling would otherwise
-        surface as an assertion during codegen rather than a declined fusion.
-
-        This calls the same helper with the same arguments codegen will use
-        (``coalesce_analysis=None`` on this path, see ``codegen_node``) rather
-        than reasoning about which config combinations can widen the tiling.
+        cannot express a y/z tiling. The staged path force-creates the 2D tiling,
+        so decline when the normal heuristic would prefer a different one.
         """
         reduction_nodes = [node for node in nodes if node.is_reduction()]
         if not reduction_nodes:
@@ -3199,6 +3206,7 @@ class SIMDScheduling(BaseScheduling):
             "features": kernel_features,
             "override_cooperative_reduction": False,
             "tiling_scores": tiling_score,
+            "disable_multi_kernel": True,
         }
         kernel = cast(
             "TritonKernel",
@@ -3289,9 +3297,12 @@ class SIMDScheduling(BaseScheduling):
                 sub_parent_resolver,
             )
             if sub_parent_stage is not None:
-                assert sub_parent_family is not None  # noqa: S101
-                assert sub_parent_source is not None  # noqa: S101
-                assert sub_parent_resolver is not None  # noqa: S101
+                if (
+                    sub_parent_family is None
+                    or sub_parent_source is None
+                    or sub_parent_resolver is None
+                ):
+                    raise AssertionError("sub-parent stage requires its codegen state")
                 internal_names = OrderedSet.union(
                     *(sn.get_buffer_names() for sn in node.get_nodes())
                 )
@@ -3632,6 +3643,7 @@ class SIMDScheduling(BaseScheduling):
             "features": kernel_features,
             "tiling_scores": tiling_score,
             "override_cooperative_reduction": False,
+            "disable_multi_kernel": True,
         }
         kernel = cast(
             "TritonKernel",
@@ -3642,7 +3654,8 @@ class SIMDScheduling(BaseScheduling):
         parent_rnumel = plan.parent_rnumel
         sub_parent_source_layouts = dict(stage.source_layouts)
         kernel.min_rblock = sub_parent_factor
-        assert len(kernel.range_trees) == 2  # noqa: S101
+        if len(kernel.range_trees) != 2:
+            raise AssertionError("sub-parent codegen requires a 2D kernel")
         layout = _GroupedReductionLayout.from_kernel(
             kernel,
             parent_rnumel,
