@@ -3640,8 +3640,8 @@ def sdpa_constraint(fx_node, *args, **kwargs):
 
         if (
             isinstance(arg, IRNode)
-            and arg.maybe_get_stride() is not None
             and is_aligned_tensor
+            and arg.maybe_get_stride() is not None
         ):
             return ir.try_match_insignificant_strides(
                 ir.ExternKernel.realize_input(arg), meta_stride_expr
@@ -3653,7 +3653,7 @@ def sdpa_constraint(fx_node, *args, **kwargs):
             expanded_dims = []
             # We require a dense last dimension, but the other strides
             # can be expanded, which results in a smaller tensor
-            maybe_stride = arg.maybe_get_stride()
+            maybe_stride = arg.maybe_get_stride_hint()
             for i in range(len(arg.get_size()) - 1):
                 if V.graph.sizevars.statically_known_equals(meta_stride_expr[i], 0) or (
                     maybe_stride is not None
@@ -3694,8 +3694,8 @@ def sdpa_constraint(fx_node, *args, **kwargs):
 
         if (
             isinstance(arg, IRNode)
-            and arg.maybe_get_stride() is not None
             and is_aligned_tensor
+            and arg.maybe_get_stride() is not None
         ):
             return ir.try_match_insignificant_strides(
                 ir.ExternKernel.realize_input(arg), meta_stride_expr
@@ -6034,7 +6034,7 @@ def max_pool2d_with_indices_backward(
 
     # we will read this many times, so make sure it is computed
     grad_output.realize_hint()
-    gO_stride = grad_output.maybe_get_stride()
+    gO_stride = grad_output.maybe_get_stride_hint()
     x_stride: Sequence[Any] | None
     if isinstance(x, TensorBox) and isinstance(x.data.data, Pointwise):  # type: ignore[attr-defined]
         data = x.data.data  # type: ignore[attr-defined]
@@ -6053,7 +6053,7 @@ def max_pool2d_with_indices_backward(
         x_buffer.decide_layout()
         x_stride = x_buffer.get_stride()
     else:
-        x_stride = x.maybe_get_stride()
+        x_stride = x.maybe_get_stride_hint()
 
     is_channels_last = (x_stride is not None and x_stride[1] == 1) or (
         gO_stride is not None and gO_stride[1] == 1
@@ -9087,7 +9087,7 @@ def resize(x, size, *, memory_format=None):
     if V.graph.sizevars.statically_known_equals(old_numel, 0):  # type: ignore[arg-type]
         return full(size, uninitialized_val, dtype=dtype, device=device)
 
-    strides = x.maybe_get_stride()
+    strides = x.maybe_get_stride_hint()
     has_overlapping = strides is not None and any(
         V.graph.sizevars.statically_known_equals(s, 0) for s in strides
     )

@@ -120,6 +120,31 @@ class TestLayoutFreezing(TestCase):
         self.assertEqual(actual, expected)
 
     @requires_gpu()
+    def test_sdpa_computed_bias_with_reuse(self):
+        # A realized-but-flexible bias (realized by a second consumer) must
+        # take the require_* path, which freezes it into the wanted order in
+        # place; the alignment check used to peek at its unfrozen strides and
+        # skip that path.
+        from torch.nn.attention import sdpa_kernel, SDPBackend
+
+        def fn(q, k, v, b):
+            bias = (b * 2.0).sin()
+            aux = bias * 3.0
+            with sdpa_kernel([SDPBackend.EFFICIENT_ATTENTION]):
+                out = torch.nn.functional.scaled_dot_product_attention(
+                    q, k, v, attn_mask=bias
+                )
+            return out, aux
+
+        torch.manual_seed(0)
+        q, k, v = (torch.randn(2, 4, 128, 64, device=GPU_TYPE) for _ in range(3))
+        b = torch.randn(2, 4, 128, 128, device=GPU_TYPE)
+        expected = fn(q, k, v, b)
+        with inductor_config.patch(realize_opcount_threshold=1):
+            actual = torch.compile(fn)(q, k, v, b)
+        self.assertEqual(actual, expected, atol=2e-4, rtol=2e-4)
+
+    @requires_gpu()
     def test_strict_mode_end_to_end(self):
         # Common compile paths must not read unfrozen strides.
         def fn(x, y):

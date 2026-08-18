@@ -257,14 +257,14 @@ def check_supported_striding(mat_a: TensorBox, mat_b: TensorBox) -> None:
 
     # Check mat_a (self) stride requirements
     torch._check(
-        is_row_major(mat_a.get_stride()) or has_zero_dim(mat_a.get_size()),
-        lambda: f"mat_a must be row_major, got stride {mat_a.get_stride()}",
+        is_row_major(mat_a.get_stride_hint()) or has_zero_dim(mat_a.get_size()),
+        lambda: f"mat_a must be row_major, got stride {mat_a.get_stride_hint()}",
     )
 
     # Check mat_b stride requirements
     torch._check(
-        is_col_major(mat_b.get_stride()) or has_zero_dim(mat_b.get_size()),
-        lambda: f"mat_b must be col_major, got stride {mat_b.get_stride()}",
+        is_col_major(mat_b.get_stride_hint()) or has_zero_dim(mat_b.get_size()),
+        lambda: f"mat_b must be col_major, got stride {mat_b.get_stride_hint()}",
     )
 
 

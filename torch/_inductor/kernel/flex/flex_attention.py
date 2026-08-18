@@ -16,7 +16,13 @@ from torch._inductor.virtualized import V
 from torch.nn.attention.flex_attention import _Backend
 from torch.utils._sympy.functions import FloorDiv
 
-from ...ir import ComputedBuffer, ExternKernel, FixedLayout, TensorBox
+from ...ir import (
+    ComputedBuffer,
+    ExternKernel,
+    FixedLayout,
+    freeze_storage_layout,
+    TensorBox,
+)
 from ...lowering import empty, empty_strided, lowerings, register_lowering, to_dtype
 from ...runtime.runtime_utils import is_power_of_2
 from ...select_algorithm import (
@@ -387,6 +393,7 @@ def flex_attention(
 
     # NB it is okay that the v_head_dim is different
     # We are using these to match fill order of the output.
+    freeze_storage_layout(query)
     q_strides = query.get_stride()
     # Construct output layout with strides matching the query.
     out_size = [B, Hq, seq_len_q, v_head_dim]
@@ -941,6 +948,7 @@ def flex_attention_backward(*args, **kwargs):
 
     # Construct layout with stride order matching K
     key_size = [Bq, Hkv, seq_len_kv, qk_head_dim]
+    freeze_storage_layout(key)
     key_strides = infer_dense_strides(key_size, key.get_stride())
 
     layout_broadcasted_k = FixedLayout(
@@ -966,6 +974,7 @@ def flex_attention_backward(*args, **kwargs):
 
     # # see NOTE:[TritonTemplates with multiple outputs]
     query_size = [Bq, Hq, seq_len_q, qk_head_dim]
+    freeze_storage_layout(query)
     grad_query_strides = infer_dense_strides(query_size, query.get_stride())
     grad_query = empty_strided(
         query_size,
@@ -976,6 +985,7 @@ def flex_attention_backward(*args, **kwargs):
 
     # Construct output layout with stride order matching value
     value_size = [Bq, Hkv, seq_len_kv, v_head_dim]
+    freeze_storage_layout(value)
     value_strides = infer_dense_strides(value_size, value.get_stride())
 
     broadcasted_grad_value = empty_strided(

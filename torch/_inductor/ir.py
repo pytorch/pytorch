@@ -474,9 +474,15 @@ def is_cpu(x: IRNode | torch.device | None | str) -> bool:
 
 
 def is_aligned_realized_tensor(x: Buffer | TensorBox, alignment: int) -> bool:
+    if not isinstance(x, IRNode) or x.maybe_get_layout() is None:
+        return False
+    # A flexible layout has no settled strides to check. Report unaligned so
+    # the caller takes its require_* path, which freezes a flexible layout
+    # into the wanted order in place (no copy).
+    if isinstance(x.get_layout(), FlexibleLayout):
+        return False
     if (
-        not isinstance(x, IRNode)
-        or x.maybe_get_stride() is None
+        x.maybe_get_stride() is None
         or free_unbacked_symbols(x.get_stride())
         or free_unbacked_symbols(x.get_size())
     ):
@@ -532,6 +538,10 @@ def try_match_insignificant_strides(
     if not is_storage_and_layout(tensor):
         return tensor
 
+    # freeze first: the "already matches" early return below persists the
+    # decision, so it must be made against final strides
+    storage, old_layout = as_storage_and_layout(tensor)
+
     if all(
         V.graph.sizevars.statically_known_equals(s1, s2)
         for s1, s2 in zip(strides, tensor.get_stride())
@@ -540,8 +550,6 @@ def try_match_insignificant_strides(
 
     if not significant_strides_equal(strides, tensor.get_stride(), tensor.get_size()):
         return tensor
-
-    storage, old_layout = as_storage_and_layout(tensor)
     new_stride = [*old_layout.stride]
     is_empty = tensor.is_zero_elements()
     for i, s in enumerate(tensor.get_size()):
@@ -573,7 +581,7 @@ def get_symbolic_inputs(inputs: Sequence[IRNode]) -> list[Expr]:
     sym_vars: OrderedSet[Expr] = OrderedSet()
     for inp in inputs:
         sym_vars |= get_free_symbols(inp.get_size(), unbacked_only=False)
-        sym_vars |= get_free_symbols(inp.get_stride(), unbacked_only=False)
+        sym_vars |= get_free_symbols(inp.get_stride_hint(), unbacked_only=False)
 
     return list(sym_vars)
 
@@ -861,6 +869,12 @@ class IRNode:
         if layout is not None:
             return list(layout.stride_hint())
         return self.get_stride()
+
+    def maybe_get_stride_hint(self) -> Sequence[_IntLike] | None:
+        try:
+            return self.get_stride_hint()
+        except NotImplementedError:
+            return None
 
     def get_name(self) -> str:
         raise NotImplementedError(type(self).__name__)

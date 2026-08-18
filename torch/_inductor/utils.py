@@ -1086,7 +1086,7 @@ def get_kernel_metadata(
                 if layout is None:
                     return ""
                 shape_annotation = f"{stringify_shape(layout.size)}"
-                stride_annotation = f"{stringify_shape(layout.stride)}"
+                stride_annotation = f"{stringify_shape(layout.stride_hint())}"
                 # Under compile-on-one-rank, render the bare device type so this kernel
                 # provenance comment is byte-identical across ranks.
                 from torch.fx.experimental.proxy_tensor import _coor_enabled
@@ -1970,7 +1970,7 @@ def can_use_tma(
         if layout is None:
             return True
         sizes = layout.size
-        strides = layout.stride
+        strides = layout.stride_hint()
         dtype = layout.dtype
 
         # Verify the output is 16-byte aligned
@@ -1981,7 +1981,7 @@ def can_use_tma(
 
     def _is_tma_compatible_matrix(m: IRNode) -> bool:
         sizes = m.get_size()
-        strides = m.get_stride()
+        strides = m.get_stride_hint()
         dtype = m.get_dtype()
 
         # Base pointer 16-byte aligned
@@ -3119,7 +3119,7 @@ def is_dynamic(*args: Any) -> bool:
             t, (ir.TensorBox, ir.StorageBox, ir.BaseView, ir.ComputedBuffer, ir.Buffer)
         ):
             if has_free_symbols(t.maybe_get_size() or ()) or has_free_symbols(
-                t.maybe_get_stride() or ()
+                t.maybe_get_stride_hint() or ()
             ):
                 return True
         elif not isinstance(t, ir.IRNode):

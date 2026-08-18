@@ -2087,7 +2087,10 @@ class GraphLowering(torch.fx.Interpreter):
                 result.realize()
                 strides = n.meta["val"].stride()
                 sym_strides = torch._inductor.utils.any_is_symbolic(*strides)
-                if result.maybe_get_stride() != strides and not sym_strides:
+                if not sym_strides:
+                    # require_stride_order is a no-op for a fixed layout that
+                    # already has this order and freezes a flexible one into
+                    # it in place (no copy), so no need to compare first
                     stride_order = ir.get_stride_order(strides)
                     result = ir.ExternKernel.require_stride_order(result, stride_order)
             if (
