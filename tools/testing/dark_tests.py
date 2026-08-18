@@ -13,9 +13,11 @@ counts: a wrong decorator, a gate no runner satisfies, a file no config selects.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import sys
 from pathlib import Path
+from typing import NamedTuple
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -31,13 +33,9 @@ ENUMERATION_JOBS = ["linux-cuda-sm100/default", "linux-cpu/default"]
 # span the periodic h100/b200 schedules and to absorb sharding and flakiness.
 DEFAULT_DAYS = 7
 
-# Shaped after test-infra's testStats3d: bound test_run_s3 by time first, then join
-# up to the job, rather than collecting job ids and filtering a week of every test
-# run in PyTorch CI afterwards.
-#
-# trunk/<sha> refs are included alongside main because upload_test_stats.py's
-# should_upload_full_test_run accepts both, so restricting to main alone would
-# discard part of the observed set and make live tests look dark.
+# Shaped after test-infra's testStats3d. Every table is bounded by time: without a
+# bound on the job and run sides ClickHouse builds the hash side of each join from
+# their entire history under FINAL, which does not complete.
 RAN_QUERY = """
 SELECT DISTINCT
     t.classname AS classname,
@@ -46,9 +44,12 @@ FROM default.test_run_s3 t
 INNER JOIN default.workflow_job j FINAL ON t.job_id = j.id
 INNER JOIN default.workflow_run w FINAL ON j.run_id = w.id
 WHERE t.time_inserted > now() - INTERVAL {days: Int32} DAY
+  AND j.created_at > now() - INTERVAL {days: Int32} DAY
+  AND w.created_at > now() - INTERVAL {days: Int32} DAY
   AND t.classname != ''
   AND empty(t.skipped)
-  AND (w.head_branch = 'main' OR match(w.head_branch, '^trunk/[0-9a-fA-F]{40}$'))
+  AND w.head_branch = 'main'
+  AND w.head_repository.'full_name' = 'pytorch/pytorch'
 """
 
 
@@ -70,8 +71,11 @@ FROM default.test_run_s3 t
 INNER JOIN default.workflow_job j FINAL ON t.job_id = j.id
 INNER JOIN default.workflow_run w FINAL ON j.run_id = w.id
 WHERE t.time_inserted > now() - INTERVAL {{days: Int32}} DAY
+  AND j.created_at > now() - INTERVAL {{days: Int32}} DAY
+  AND w.created_at > now() - INTERVAL {{days: Int32}} DAY
   AND t.classname != ''
-  AND (w.head_branch = 'main' OR match(w.head_branch, '^trunk/[0-9a-fA-F]{{40}}$'))
+  AND w.head_branch = 'main'
+  AND w.head_repository.'full_name' = 'pytorch/pytorch'
 GROUP BY t.classname, t.name
 HAVING ran_big = 1 AND skipped_small = 1
 """.format(
@@ -93,15 +97,25 @@ def requires_big_gpu(days: int) -> set[str]:
     return {f"{r['classname']}::{r['name']}" for r in rows}
 
 
-def existing(files: list[str]) -> tuple[dict[str, set[str]], dict[str, str]]:
-    """({file: {Class::method}}, {file: why it could not be enumerated}).
+class Enumerated(NamedTuple):
+    tests: dict[str, set[str]]  # {file: {Class::method}}
+    xfail: set[str]  # expected failures: run, but recorded as skipped
+    unreadable: dict[str, str]  # no platform could import the file
+    partial: dict[str, str]  # some platform could not, so tests may be missing
 
-    A file that fails to enumerate must be reported, not treated as empty: zero
-    known tests is indistinguishable from zero dark tests.
+
+def existing(files: list[str]) -> Enumerated:
+    """What each file defines, and what could not be read.
+
+    A file that fails to enumerate must be reported rather than treated as empty:
+    zero known tests is indistinguishable from zero dark tests. Failing under only
+    some platforms is reported too, since the tests that platform would have
+    contributed are missing from the comparison with no other trace.
     """
     from tools.testing.introspection import collector, platforms
 
-    out: dict[str, set[str]] = {f: set() for f in files}
+    tests: dict[str, set[str]] = {f: set() for f in files}
+    xfail: set[str] = set()
     errors: dict[str, str] = {}
     for job in ENUMERATION_JOBS:
         for rel, payload in collector.collect(
@@ -111,10 +125,31 @@ def existing(files: list[str]) -> tuple[dict[str, set[str]], dict[str, str]]:
                 errors.setdefault(rel, f"{job}: {payload['error']}")
                 continue
             for cls, methods in payload["classes"].items():
-                out[rel].update(f"{cls}::{m}" for m in methods)
-    # Enumerating under any platform is enough; only a file no platform could
-    # read is genuinely unmeasured.
-    return out, {r: e for r, e in errors.items() if not out[r]}
+                tests[rel].update(f"{cls}::{m}" for m in methods)
+            xfail.update(payload.get("xfail", ()))
+    return Enumerated(
+        tests=tests,
+        xfail=xfail,
+        unreadable={r: e for r, e in errors.items() if not tests[r]},
+        partial={r: e for r, e in errors.items() if tests[r]},
+    )
+
+
+def ambiguous(tests: dict[str, set[str]]) -> set[str]:
+    """Keys defined by more than one file.
+
+    Observations are keyed Class::method with no file, so a live test in one file
+    marks an identically named test elsewhere live too. AOTInductorLoggingTest::
+    test_shape_env_reuse exists in both test_aot_inductor.py and
+    test_aot_inductor_custom_ops.py, for instance. Rather than key on the file --
+    which would mean trusting a format this has no way to check -- report the
+    verdicts that could be masked.
+    """
+    seen: dict[str, int] = {}
+    for owned in tests.values():
+        for key in owned:
+            seen[key] = seen.get(key, 0) + 1
+    return {k for k, n in seen.items() if n > 1}
 
 
 def ran(days: int) -> set[str]:
@@ -165,15 +200,34 @@ def unlisted(needs_big: set[str], defined: dict[str, set[str]]) -> dict[str, lis
 
 
 def disabled() -> set[str]:
-    """Tests the disable bot has turned off; dark on purpose, not a gap."""
+    """Tests the disable bot turned off everywhere; dark on purpose, not a gap.
+
+    Only unconditional disables are exempt. Most entries name the platforms they
+    apply to, and a test disabled on rocm alone that has also gone dark on every
+    other runner is a real gap, not a sanctioned one.
+    """
     from tools.stats.import_test_stats import get_disabled_tests
 
-    try:
-        raw = get_disabled_tests(dirpath=str(REPO_ROOT / ".additional_ci_files"))
-    except Exception:
+    # get_disabled_tests narrates the download on stdout, which would land in the
+    # middle of --json output.
+    with contextlib.redirect_stdout(sys.stderr):
+        try:
+            raw = get_disabled_tests(dirpath=str(REPO_ROOT / ".additional_ci_files"))
+        except Exception:
+            raw = None
+    if not raw:
+        print(
+            "dark_tests: no disabled-test set; none will be exempted", file=sys.stderr
+        )
         return set()
+
     out = set()
-    for entry in raw or {}:
+    for entry, value in raw.items():
+        platforms = (
+            value[1] if isinstance(value, (list, tuple)) and len(value) > 1 else None
+        )
+        if platforms:
+            continue
         # "test_foo (__main__.TestBar)" -> "TestBar::test_foo"
         name, _, rest = entry.partition(" (")
         cls = rest.rstrip(")").rpartition(".")[2]
@@ -228,11 +282,17 @@ def main() -> int:
 
     off = disabled()
     no_config = unscheduled(files)
-    defined, unreadable = existing(files)
+    enum = existing(files)
+
+    # Expected failures execute in full but JUnit records them as skipped, so no
+    # observation can ever show them running; excluding them beats reporting a
+    # gap nothing can close.
+    exempt = off | enum.xfail
+    masked = ambiguous(enum.tests)
 
     report: dict[str, list[str]] = {}
-    for rel, tests in defined.items():
-        gap = sorted(t for t in tests - observed if t not in off)
+    for rel, tests in enum.tests.items():
+        gap = sorted(t for t in tests - observed if t not in exempt)
         if gap:
             report[rel] = gap
 
@@ -242,8 +302,10 @@ def main() -> int:
     payload = {
         "dark": {k: v for k, v in report.items() if k not in no_config},
         "unscheduled": {k: v for k, v in report.items() if k in no_config},
-        "unlisted": unlisted(needs_big, defined),
-        "unreadable": unreadable,
+        "unlisted": unlisted(needs_big, enum.tests),
+        "unreadable": enum.unreadable,
+        "partially_enumerated": enum.partial,
+        "ambiguous": sorted({t for tests in report.values() for t in tests} & masked),
         "files_scanned": len(files),
     }
     if args.out:
@@ -270,12 +332,20 @@ def main() -> int:
                 print(f"    {name}")
             if len(section[rel]) > 20:
                 print(f"    ... {len(section[rel]) - 20} more")
-    for rel in sorted(unreadable):
-        print(f"\n{rel}: NOT MEASURED -- {unreadable[rel]}")
+    for rel in sorted(enum.unreadable):
+        print(f"\n{rel}: NOT MEASURED -- {enum.unreadable[rel]}")
+    for rel in sorted(enum.partial):
+        print(f"\n{rel}: PARTIALLY ENUMERATED -- {enum.partial[rel]}")
+    if payload["ambiguous"]:
+        print(
+            f"\n{len(payload['ambiguous'])} verdict(s) may be masked: another file "
+            f"defines the same Class::method, e.g. {payload['ambiguous'][0]}"
+        )
     print(
         f"\n{sum(len(v) for v in dark.values())} dark test(s) across {len(dark)} file(s); "
         f"{sum(len(v) for v in no_cfg.values())} in {len(no_cfg)} unscheduled file(s); "
-        f"{len(unreadable)} file(s) could not be enumerated; {len(files)} scanned"
+        f"{len(enum.unreadable)} unreadable, {len(enum.partial)} partial; "
+        f"{len(files)} scanned"
     )
     return 0
 
