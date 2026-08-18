@@ -357,7 +357,7 @@ def config_of(
         return input_idx not in (V.graph.inputs_to_check or ())
 
     if config.triton.divisible_by_16:
-        divisible_by_16 = tuple(
+        known_divisible_by_16 = tuple(
             i
             for i, arg in zip(indices, args)
             if is_aligned(
@@ -367,7 +367,9 @@ def config_of(
             )
         )
         divisible_by_16 = tuple(
-            i for i in indices if i in divisible_by_16 or i in divisible_by_16_extra
+            i
+            for i in indices
+            if i in known_divisible_by_16 or i in divisible_by_16_extra
         )
     else:
         divisible_by_16 = ()

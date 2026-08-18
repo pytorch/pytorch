@@ -118,6 +118,12 @@ class MultiKernelTest(TestCase):
                 ("generic", ("ptr", 33, 48), {"stream": "stream"}),
             ],
         )
+        with self.assertRaisesRegex(AssertionError, "expected at most 8 checks"):
+            RuntimeDivisibleMultiKernelCall(
+                "too_many_checks",
+                [Kernel("generic"), Kernel("aligned")],
+                tuple(range(9)),
+            )
 
     def test_softmax(self, expect_multi_kernel=True):
         x = torch.rand(2, 1024).to(GPU_TYPE)

@@ -20,6 +20,8 @@ from .common import TensorArg, WorkspaceArg
 
 log = logging.getLogger(__name__)
 
+MAX_RUNTIME_DIVISIBILITY_CHECKS = 8
+
 
 class MultiKernelState:
     """
@@ -559,6 +561,11 @@ class RuntimeDivisibleMultiKernelCall:
             raise AssertionError(f"expected 2 kernels, got {len(kernels)}")
         if not divisible_by_16:
             raise AssertionError("expected at least one divisibility check")
+        if len(divisible_by_16) > MAX_RUNTIME_DIVISIBILITY_CHECKS:
+            raise AssertionError(
+                f"expected at most {MAX_RUNTIME_DIVISIBILITY_CHECKS} checks, "
+                f"got {len(divisible_by_16)}"
+            )
         self._kernels = kernels
         self.multi_kernel_name = multi_kernel_name
         self.divisible_by_16 = divisible_by_16

@@ -111,6 +111,7 @@ from .common import (
     IndentedBuffer,
     InplacedBuffer,
     is_buffer_removed,
+    KernelArgType,
     OpOverrides,
     PythonPrinter,
     RemovedArg,
@@ -119,6 +120,7 @@ from .common import (
     WorkspaceArg,
     WorkspaceZeroMode,
 )
+from .multi_kernel import MAX_RUNTIME_DIVISIBILITY_CHECKS
 from .simd import (
     constant_repr,
     DerivedIterationRangesRoot,
@@ -2852,6 +2854,19 @@ class FixedTritonConfig:
         return item in self.config
 
 
+@dataclasses.dataclass(frozen=True)
+class _RuntimeDivisibleKernel:
+    aligned_source: str
+    check_indices: tuple[int, ...]
+
+
+def _remove_identities(expr: sympy.Expr) -> sympy.Expr:
+    """Strip nested Identity nodes used to preserve indexing structure."""
+    while expr.has(Identity):
+        expr = expr.replace(Identity, lambda value: value)
+    return expr
+
+
 TritonCSEKey = str | tuple[str, str]
 LoadIndexBasis = tuple[IterationRangesEntry, ...]
 LoadIndexBases = tuple[LoadIndexBasis | None, ...]
@@ -3321,6 +3336,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self._emitted_device_tma = False
         self.hint_override = hint_override
         self._load_counts: collections.Counter[str] = collections.Counter()
+        self._emitted_scheduler_load_indices: dict[
+            tuple[str, str], OrderedSet[sympy.Expr]
+        ] = collections.defaultdict(OrderedSet)
+        self._track_runtime_divisible_loads = (
+            config.triton.divisible_by_16
+            and not self.features.is_reduction()
+            and not self.is_combo_kernel
+        )
         self._pdl_load_index = 0
         self._pdl_has_wait = False
         self.op_trace: list[TritonOpTraceEntry] = []
@@ -3333,8 +3356,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         # A set of autotuning hints to pass as part of triton_meta
         self.autotune_hints = OrderedSet[AutotuneHint]()
         self.triton_meta: TritonMeta | None = None
-        self.runtime_divisible_by_16: tuple[int, ...] = ()
-        self.runtime_divisible_by_16_src: str | None = None
+        self.runtime_divisible_kernel: _RuntimeDivisibleKernel | None = None
 
         if self.inside_reduction:
             self.codegen_reduction_numels(self.body)
@@ -4768,6 +4790,20 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             PartialAccumulate(name, reduction_type, val)
         )
 
+    def _current_scheduler_load_index(self) -> sympy.Expr | None:
+        """Return the current load index before kernel iteration remapping."""
+        node = self.current_node
+        fx_node = V.interpreter.current_node
+        if node is None or fx_node is None or len(fx_node.args) < 3:
+            return None
+        index_node = fx_node.args[2]
+        if not isinstance(index_node, torch.fx.Node) or not index_node.args:
+            return None
+        index_name = index_node.args[0]
+        if not isinstance(index_name, str):
+            return None
+        return node._body.indexing_exprs.get(index_name)
+
     def load(self, name: str, index: sympy.Expr):
         """
         Load from the memory location 'name', offset by some indexing expression 'index'.
@@ -4776,6 +4812,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         load_counts = self._load_counts
         load_counts[name] += 1
         make_line: Callable[[str], str | DelayReplaceLine] = identity
+        scheduler_index = (
+            self._current_scheduler_load_index()
+            if self._track_runtime_divisible_loads
+            else None
+        )
+        if scheduler_index is not None:
+            scheduler_index = _remove_identities(scheduler_index)
         # Align a flat epilogue load with split coordinates already used in the body.
         index = self._reuse_load_index_basis(name, index)
         indirect_indexing = self.is_indirect_indexing(index)
@@ -4965,6 +5008,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self._handle_pdl_after_load(load_buffer, result_var)
         if result_var.use_count > 1:
             load_counts[name] -= 1  # don't double count cache hit
+        elif scheduler_index is not None and self.current_node is not None:
+            key = (self.current_node.get_name(), name)
+            self._emitted_scheduler_load_indices[key].add(scheduler_index)
         if not isinstance(result_var, TritonCSEVariable):
             raise AssertionError(f"expected TritonCSEVariable, got {type(result_var)}")
         result_var.mask_vars = indexing.mask_vars  # type: ignore[assignment]
@@ -7178,14 +7224,161 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 return True
         return False
 
+    def _runtime_divisibility_candidates(
+        self,
+        signature: list[KernelArgType],
+        argdefs: list[ArgName],
+        triton_meta_signature: dict[str, str],
+        numel_arg_indices: list[int],
+    ) -> tuple[tuple[int, sympy.Expr], ...]:
+        sizevars = V.graph.sizevars
+        return tuple(
+            (i, arg.expr)
+            for i, arg in enumerate(signature)
+            if isinstance(arg, SizeArg)
+            and i not in numel_arg_indices
+            and arg.expr is not None
+            and triton_meta_signature[argdefs[i].name] in ("i32", "i64")
+            and not arg.name.startswith("load_seed_offset")
+            and bool(getattr(arg.expr, "free_symbols", ()))
+            and not sizevars.statically_known_multiple_of(arg.expr, 16)
+        )
+
+    def _get_runtime_divisibility(
+        self,
+        potential_candidates: tuple[tuple[int, sympy.Expr], ...],
+        signature: list[KernelArgType],
+        argdefs: list[ArgName],
+        triton_meta_signature: dict[str, str],
+        numel_arg_indices: list[int],
+    ) -> tuple[tuple[int, ...], tuple[int, ...]] | None:
+        """Select metadata arguments and a bounded runtime alignment predicate."""
+        sizevars = V.graph.sizevars
+        if not potential_candidates:
+            return None
+
+        potential_exprs = OrderedSet([expr for _, expr in potential_candidates])
+
+        def candidates_in(expressions: Iterable[sympy.Expr]) -> OrderedSet[sympy.Expr]:
+            result = OrderedSet()
+            for expression in expressions:
+                result.update(
+                    candidate
+                    for candidate in sympy.preorder_traversal(expression)
+                    if candidate in potential_exprs
+                )
+            return result
+
+        relevant_exprs: OrderedSet[sympy.Expr] = OrderedSet()
+        relevant_reads: list[
+            tuple[MemoryDep, tuple[sympy.Expr, ...], OrderedSet[sympy.Expr]]
+        ] = []
+        for node in self.features.scheduler_nodes():
+            for dep in node.read_writes.reads:
+                if not isinstance(dep, MemoryDep) or not dep.var_names:
+                    continue
+                if len(dep.var_names) != len(node._body.iter_vars):
+                    continue
+                replacements = dict(
+                    zip(dep.var_names, node._body.iter_vars, strict=True)
+                )
+                scheduler_index = _remove_identities(dep.index)
+                index = scheduler_index.xreplace(replacements)
+                load_key = (node.get_name(), dep.name)
+                emitted_indices = self._emitted_scheduler_load_indices.get(load_key, ())
+                if index not in emitted_indices:
+                    continue
+                strides = tuple(sizevars.stride_vars(scheduler_index, dep.var_names))
+                if not sizevars.statically_known_equals(strides[-1], 1):
+                    continue
+                expressions = (
+                    (dep.index, *dep.size) if len(dep.size) > 1 else (dep.index,)
+                )
+                read_candidates = candidates_in(expressions)
+                if not read_candidates:
+                    continue
+                relevant_exprs.update(read_candidates)
+                dynamic_strides = tuple(
+                    stride for stride in strides[:-1] if candidates_in((stride,))
+                )
+                relevant_reads.append((dep, dynamic_strides, read_candidates))
+
+        relevant_candidates = tuple(
+            (i, expr) for i, expr in potential_candidates if expr in relevant_exprs
+        )
+        stride_patterns = OrderedSet(
+            strides for _, strides, _ in relevant_reads if strides
+        )
+        has_multiple_layouts = len(relevant_reads) >= 4 and len(stride_patterns) >= 2
+
+        all_reads_expanded = bool(relevant_reads) and not has_multiple_layouts
+        has_strong_expansion = False
+        if all_reads_expanded:
+            for dep, _, read_candidates in relevant_reads:
+                try:
+                    buffer_numel = V.graph.get_numel(dep.name)
+                except (KeyError, NotImplementedError):
+                    all_reads_expanded = False
+                    break
+                if sizevars.statically_known_equals(buffer_numel, 0):
+                    all_reads_expanded = False
+                    break
+                iteration_numel = sympy_product(dep.size)
+                # Avoid sympy.cancel, whose cost is unbounded on wide shapes.
+                expansion = iteration_numel / buffer_numel
+                if not sizevars.statically_known_geq(expansion, 2):
+                    all_reads_expanded = False
+                    break
+                # An aligned broadcast dimension is at least 16; otherwise
+                # require substantial reuse to justify the extra compilation.
+                has_strong_expansion |= sizevars.statically_known_geq(
+                    expansion, 8
+                ) or any(
+                    var not in dep.index.free_symbols
+                    and not sizevars.statically_known_equals(size, 1)
+                    and bool(candidates_in((size,)) & read_candidates)
+                    for var, size in zip(dep.var_names, dep.size)
+                )
+
+        if not relevant_candidates or not (
+            has_multiple_layouts or (all_reads_expanded and has_strong_expansion)
+        ):
+            return None
+
+        numel_candidates: list[tuple[int, sympy.Expr]] = []
+        for i in numel_arg_indices:
+            arg = signature[i]
+            if not isinstance(arg, SizeArg):
+                continue
+            expr = arg.expr
+            if (
+                expr is not None
+                and triton_meta_signature[argdefs[i].name] in ("i32", "i64")
+                and bool(getattr(expr, "free_symbols", ()))
+                and not sizevars.statically_known_multiple_of(expr, 16)
+            ):
+                numel_candidates.append((i, expr))
+
+        candidates = relevant_candidates + tuple(numel_candidates)
+        check_indices_by_expr: dict[sympy.Expr, int] = {}
+        for i, expr in candidates:
+            check_indices_by_expr.setdefault(expr, i)
+        # Bound the Python predicate cost paid before every kernel launch.
+        if len(check_indices_by_expr) > MAX_RUNTIME_DIVISIBILITY_CHECKS:
+            return None
+
+        return (
+            tuple(i for i, _ in candidates),
+            tuple(check_indices_by_expr.values()),
+        )
+
     def codegen_kernel(self, name=None) -> str:
         """
         Convert the TritonKernel from Inductor SIMD IR to triton code, including inductor triton heuristics, imports,
         metadata, and benchmarking infra.
         """
 
-        self.runtime_divisible_by_16 = ()
-        self.runtime_divisible_by_16_src = None
+        self.runtime_divisible_kernel = None
         code = IndentedBuffer()
 
         size_hints = {}
@@ -7353,6 +7546,25 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         for arg_num in equal_1_arg_indices(signature):  # type: ignore[index]
             triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index,union-attr]
 
+        runtime_divisibility_enabled = (
+            config.triton.divisible_by_16
+            and torch.version.hip is None
+            and props_device.type == "cuda"
+            and not V.graph.cpp_wrapper
+            and not V.graph.aot_mode
+            and not config.triton.autotune_at_compile_time
+            and not config.autotune_lookup_table
+            and not config.benchmark_kernel
+            and not self.features.is_reduction()
+            and not self.is_combo_kernel
+        )
+        runtime_divisibility_candidates = (
+            self._runtime_divisibility_candidates(
+                signature, argdefs, triton_meta_signature, numel_arg_indices
+            )
+            if runtime_divisibility_enabled
+            else ()
+        )
         self.triton_meta = triton_meta
         self.inductor_meta = inductor_meta
 
@@ -7379,67 +7591,19 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         self._filter_pdl(self.body)
 
-        # Keep runtime specialization to two variants of memory-heavy pointwise kernels.
-        # The dispatcher is only available in ordinary Python JIT wrappers.
+        runtime_divisibility = None
         if (
-            config.triton.divisible_by_16
-            and torch.version.hip is None
-            and props_device.type == "cuda"
-            and not V.graph.cpp_wrapper
-            and not V.graph.aot_mode
-            and not config.triton.autotune_at_compile_time
-            and not config.autotune_lookup_table
-            and not config.benchmark_kernel
-            and not self.features.is_reduction()
-            and not self.is_combo_kernel
+            runtime_divisibility_enabled
             and not self.uses_tma
             and not self.atomic_add_found
-            and self.num_load >= 4
         ):
-            # Range numels alone can vectorize flat accesses, but the benefit is
-            # inconsistent. Require a dynamic size in a nontrivial unit-stride
-            # access, then include range numels because their hints enable tail
-            # vectorization.
-            memory_index_exprs = []
-            for node in self.features.scheduler_nodes():
-                for dep in node.read_writes.reads:
-                    if not isinstance(dep, MemoryDep) or not dep.var_names:
-                        continue
-                    index = dep.index.replace(Identity, lambda value: value)
-                    strides = V.graph.sizevars.stride_vars(index, dep.var_names)
-                    if not V.graph.sizevars.statically_known_equals(strides[-1], 1):
-                        continue
-                    memory_index_exprs.append(dep.index)
-                    if len(dep.size) > 1:
-                        memory_index_exprs.extend(dep.size)
-            relevant_candidates = tuple(
-                (i, arg.expr)
-                for i, arg in enumerate(signature)
-                if isinstance(arg, SizeArg)
-                and i not in numel_arg_indices
-                and arg.expr is not None
-                and triton_meta_signature[argdefs[i].name] in ("i32", "i64")
-                and not arg.name.startswith("load_seed_offset")
-                and bool(getattr(arg.expr, "free_symbols", ()))
-                and not V.graph.sizevars.statically_known_multiple_of(arg.expr, 16)
-                and any(expr.has(arg.expr) for expr in memory_index_exprs)
+            runtime_divisibility = self._get_runtime_divisibility(
+                runtime_divisibility_candidates,
+                signature,
+                argdefs,
+                triton_meta_signature,
+                numel_arg_indices,
             )
-            numel_candidates: list[tuple[int, sympy.Expr]] = []
-            for i in numel_arg_indices:
-                arg = signature[i]
-                if not isinstance(arg, SizeArg):
-                    continue
-                expr = arg.expr
-                if (
-                    expr is not None
-                    and triton_meta_signature[argdefs[i].name] in ("i32", "i64")
-                    and bool(getattr(expr, "free_symbols", ()))
-                    and not V.graph.sizevars.statically_known_multiple_of(expr, 16)
-                ):
-                    numel_candidates.append((i, expr))
-            candidates = relevant_candidates + tuple(numel_candidates)
-            if relevant_candidates:
-                self.runtime_divisible_by_16 = tuple(i for i, _ in candidates)
 
         # Compute configs after codegen_body() so we know if the kernel
         # uses atomic ops. On HIP, buffer ops don't support atomics, so
@@ -7462,9 +7626,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         triton_meta_placeholder = "_runtime_divisible_triton_meta"
         triton_meta_src = (
-            triton_meta_placeholder
-            if self.runtime_divisible_by_16
-            else repr(triton_meta)
+            triton_meta_placeholder if runtime_divisibility else repr(triton_meta)
         )
 
         for helper in self.helper_functions:
@@ -7529,21 +7691,23 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             )
 
         src_code = code.getvalue()
-        if self.runtime_divisible_by_16:
+        if runtime_divisibility:
             if src_code.count(triton_meta_placeholder) != 1:
                 raise AssertionError("expected one Triton metadata placeholder")
+            metadata_indices, check_indices = runtime_divisibility
             aligned_meta = {
                 **triton_meta,
                 "configs": [
                     config_of(
                         signature,
                         skip_cpp_wrapper_input_tensor_alignment=True,
-                        divisible_by_16_extra=self.runtime_divisible_by_16,
+                        divisible_by_16_extra=metadata_indices,
                     )
                 ],
             }
-            self.runtime_divisible_by_16_src = src_code.replace(
-                triton_meta_placeholder, repr(aligned_meta)
+            self.runtime_divisible_kernel = _RuntimeDivisibleKernel(
+                src_code.replace(triton_meta_placeholder, repr(aligned_meta)),
+                check_indices,
             )
             src_code = src_code.replace(triton_meta_placeholder, repr(triton_meta))
 
@@ -8300,13 +8464,15 @@ class TritonScheduling(SIMDScheduling):
         if not isinstance(kernel, TritonKernel):
             return kernel_name
 
-        aligned_src = kernel.runtime_divisible_by_16_src
-        if aligned_src is None:
+        runtime_divisible = kernel.runtime_divisible_kernel
+        if runtime_divisible is None:
             return kernel_name
 
-        aligned_name = self._define_kernel(aligned_src, node_schedule, kernel)
+        aligned_name = self._define_kernel(
+            runtime_divisible.aligned_source, node_schedule, kernel
+        )
         return V.graph.wrapper_code.multi_kernel_state.define_runtime_divisible_kernel(
-            (kernel_name, aligned_name), kernel.runtime_divisible_by_16
+            (kernel_name, aligned_name), runtime_divisible.check_indices
         )
 
     def _define_kernel(self, src_code, node_schedule, kernel):
