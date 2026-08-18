@@ -175,7 +175,7 @@ std::pair<Option, std::string> _parseOption(
   /// XXX: this is a hack only for the out arg in TensorMethods
   auto out_pos = printable_option.find('#');
   if (out_pos != std::string::npos) {
-    if (kwargs.count("out") > 0) {
+    if (kwargs.contains("out")) {
       std::string kwonly_part = printable_option.substr(out_pos + 1);
       printable_option.erase(out_pos);
       printable_option += "*, ";
@@ -231,7 +231,7 @@ bool _argcountMatch(
   auto num_expected = option.arguments.size();
   auto num_got = arguments.size() + kwargs.size();
   // Note: variadic functions don't accept kwargs, so it's ok
-  if (option.has_out && kwargs.count("out") == 0)
+  if (option.has_out && !kwargs.contains("out"))
     num_expected--;
   return num_got == num_expected ||
       (option.is_variadic && num_got > num_expected);
@@ -337,7 +337,7 @@ std::vector<std::string> _tryMatchKwargs(
   std::vector<std::string> unmatched;
   // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   int64_t start_idx = option.arguments.size() - kwargs.size();
-  if (option.has_out && kwargs.count("out") == 0)
+  if (option.has_out && !kwargs.contains("out"))
     start_idx--;
   if (start_idx < 0)
     start_idx = 0;
