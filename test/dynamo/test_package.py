@@ -844,7 +844,6 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
         x = torch.randn(10, 10, device=device)
         compiled_fn(x)
 
-
     class _tempTensorSamplerForQualName:
         def __init__(self, val, mask, prob):
             self.val = val
@@ -885,8 +884,8 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
             with torch.device(x.device):
                 y = self.instance_method_without_args()
             # test classmethod called from class
-            sampler = (
-                TestPackageAccelerator._tempTensorSamplerForQualName.class_method_that_is_used(x)
+            sampler = TestPackageAccelerator._tempTensorSamplerForQualName.class_method_that_is_used(
+                x
             )
             x = torch.where(torch.rand_like(x) < sampler.prob, sampler.val, x) + y.sum()
             # test instance method called from instance
