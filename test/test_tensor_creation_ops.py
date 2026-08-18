@@ -22,6 +22,7 @@ from torch.testing._internal.common_utils import (
     suppress_warnings,
     torch_to_numpy_dtype_dict,
     numpy_to_torch_dtype_dict,
+    numpy_to_torch_dtype,
     slowTest,
     set_default_dtype,
     set_default_tensor_type,
@@ -417,8 +418,7 @@ class TestTensorCreation(TestCase):
 
         expected_scipy_types = [
             torch.float64,
-            # windows scipy block_diag returns int32 types
-            torch.int32 if IS_WINDOWS else torch.int64,
+            numpy_to_torch_dtype(np.array(0).dtype),
             torch.complex128,
             torch.float64
         ]
@@ -447,17 +447,19 @@ class TestTensorCreation(TestCase):
         self.assertEqual(torch.tensor([1.0 + 3.0j, 2.0 + 4.0j], dtype=complex_dtype), z)
 
     @onlyNativeDeviceTypes
-    @dtypes(torch.float32, torch.float64)
+    @dtypes(torch.half, torch.float32, torch.float64)
     def test_torch_polar(self, device, dtype):
         abs = torch.tensor([1, 2, -3, -4.5, 1, 1], device=device, dtype=dtype)
         angle = torch.tensor([math.pi / 2, 5 * math.pi / 4, 0, -11 * math.pi / 6, math.pi, -math.pi],
                              device=device, dtype=dtype)
         z = torch.polar(abs, angle)
-        complex_dtype = torch.complex64 if dtype == torch.float32 else torch.complex128
+        complex_dtype = float_to_corresponding_complex_type_map[dtype]
+        # float16 loses precision in cos/sin and the interleaved storage; relax tol.
+        atol, rtol = (1e-2, 1e-2) if dtype == torch.half else (1e-5, 1e-5)
         self.assertEqual(torch.tensor([1j, -1.41421356237 - 1.41421356237j, -3,
                                        -3.89711431703 - 2.25j, -1, -1],
                                       dtype=complex_dtype),
-                         z, atol=1e-5, rtol=1e-5)
+                         z, atol=atol, rtol=rtol)
 
     @onlyNativeDeviceTypes
     @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
@@ -468,7 +470,7 @@ class TestTensorCreation(TestCase):
             b = torch.tensor([3, 4], device=device, dtype=dtype)
             error = r"Expected both inputs to be Half, Float or Double tensors but " \
                     r"got [A-Za-z]+ and [A-Za-z]+"
-            with self.assertRaisesRegex(RuntimeError, error):
+            with self.assertRaisesRegex(NotImplementedError, error):
                 op(a, b)
 
     @onlyNativeDeviceTypes
@@ -1076,12 +1078,22 @@ class TestTensorCreation(TestCase):
         min = torch.finfo(torch.float).min
         max = torch.finfo(torch.float).max
 
-        # Note: CUDA max float -> integer conversion is divergent on some dtypes
+        # Note: CUDA/MTIA max float -> integer conversion is divergent on some dtypes
         vals = (min, -2, -1.5, -.5, 0, .5, 1.5, 2, max)
         refs = None
-        if self.device_type == 'cuda':
+        if self.device_type in ('cuda', 'mtia'):
             if torch.version.hip:
                 # HIP min float -> int64 conversion is divergent
+                vals = (-2, -1.5, -.5, 0, .5, 1.5, 2)
+            elif dtype == torch.uint8:
+                # CUDA out-of-range float -> uint8 is divergent under clang-21:
+                # out-of-range float->int is UB and codegen differs from numpy's
+                # reference. Test only in-range values so torch and numpy agree
+                # deterministically.
+                vals = (0, .5, 1.5, 2)
+            elif dtype in (torch.int8, torch.int16):
+                # CUDA min float -> int8/int16 is divergent under clang-21
+                # (out-of-range float->int is UB). Drop the out-of-range extreme.
                 vals = (-2, -1.5, -.5, 0, .5, 1.5, 2)
             else:
                 vals = (min, -2, -1.5, -.5, 0, .5, 1.5, 2)
