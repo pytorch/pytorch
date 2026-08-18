@@ -36,7 +36,6 @@ from ..exc import (
     unimplemented,
 )
 from ..source import AttrSource, Source
-from ..utils import istype
 from .base import (
     AsPythonConstantNotImplementedError,
     AttrMutationKind,
@@ -80,14 +79,23 @@ def vt_identity_compare(
     if left_known != right_known:
         return ConstantVariable.create(False)
 
-    # Objects created during tracing: VT identity = Python identity.
+    # Objects created during tracing: VT identity = Python identity. Exception
+    # instances are mutable objects built during tracing, so two distinct VTs
+    # (already known not to be `left is right`) are distinct Python objects.
     from .dicts import ConstDictVariable
     from .lists import ListVariable
-    from .misc import TracebackVariable
+    from .misc import ExceptionVariable, TracebackVariable
     from .sets import SetVariable
 
     if isinstance(
-        left, (ConstDictVariable, ListVariable, SetVariable, TracebackVariable)
+        left,
+        (
+            ConstDictVariable,
+            ListVariable,
+            SetVariable,
+            TracebackVariable,
+            ExceptionVariable,
+        ),
     ):
         return ConstantVariable.create(False)
 
@@ -97,14 +105,6 @@ def vt_identity_compare(
             return ConstantVariable.create(False)
     except NotImplementedError:
         pass
-
-    # Different exception types are never identical.
-    if (
-        istype(left, variables.ExceptionVariable)
-        and istype(right, variables.ExceptionVariable)
-        and left.exc_type is not right.exc_type  # type: ignore[attr-defined]
-    ):
-        return ConstantVariable.create(False)
 
     return None
 
@@ -137,6 +137,15 @@ def type_implements_mp_slot(obj_type: type, slot: int) -> bool:
     """Check whether obj_type implements the given mp slot."""
     _, map_slots, _, _ = _get_cached_slots(obj_type)
     return has_slot(map_slots, slot)
+
+
+# Flag Include/object.h
+Py_TPFLAGS_DISALLOW_INSTANTIATION = 1 << 7
+
+
+def type_disallows_instantiation(obj_type: type) -> bool:
+    """Check whether obj_type's tp_new is NULL (see CPython's type_call)."""
+    return bool(obj_type.__flags__ & Py_TPFLAGS_DISALLOW_INSTANTIATION)
 
 
 # PySequenceSlots
