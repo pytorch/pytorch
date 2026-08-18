@@ -20,6 +20,18 @@ namespace detail {
 
 C10_REGISTER_GUARD_IMPL(PrivateUse1, c10::impl::NoOpDeviceGuardImpl<DeviceType::PrivateUse1>);
 
+struct TORCH_API PrivateUser1Hooks : public at::PrivateUse1HooksInterface {
+  const at::Generator& getDefaultGenerator(c10::DeviceIndex device) const override {
+    static at::Generator default_gen = at::make_generator<at::CPUGeneratorImpl>();
+    return default_gen;
+  }
+};
+
+static bool register_privateuse1_hooks_flag [[maybe_unused]] = []() {
+  at::RegisterPrivateUse1HooksInterface(new PrivateUser1Hooks());
+  return true;
+}();
+
 }} // namespace at::detail
 
 // basic dummy add function
