@@ -193,6 +193,19 @@ def has_triton_stable_tma_api() -> bool:
 
 
 @functools.cache
+def has_triton_reduction_ordering() -> bool:
+    """Whether the available Triton exposes inner-tree reduction ordering."""
+    if has_triton_package():
+        try:
+            from triton.language import ReductionOrdering
+
+            return hasattr(ReductionOrdering, "INNER_TREE")
+        except ImportError:
+            pass
+    return False
+
+
+@functools.cache
 def _devices_supporting_triton(disable_device_detection: bool) -> list[str]:
     """Body of functionality for ``devices_supporting_triton``.
 
@@ -205,31 +218,28 @@ def _devices_supporting_triton(disable_device_detection: bool) -> list[str]:
     if disable_device_detection:
         return []
 
-    from torch._dynamo.device_interface import get_interface_for_device
-
-    def cuda_extra_check(device_interface: Any) -> bool:
-        return device_interface.Worker.get_device_properties().major >= 7
-
-    def cpu_extra_check(device_interface: Any) -> bool:
-        import triton.backends
-
-        return "cpu" in triton.backends.backends
-
-    def _return_true(device_interface: Any) -> bool:
-        return True
-
-    triton_supported_devices = {
-        "cuda": cuda_extra_check,
-        "xpu": _return_true,
-        "cpu": cpu_extra_check,
-        "mtia": _return_true,
-    }
+    from torch._dynamo.device_interface import get_registered_device_interfaces
+    from torch._dynamo.exc import TritonUnavailableError
 
     res: list[str] = []
-    for device, extra_check in triton_supported_devices.items():
-        device_interface = get_interface_for_device(device)
-        if device_interface.is_available() and extra_check(device_interface):
-            res.append(device)
+    # A device supports Triton if it is available, reports Triton capability, and
+    # its Triton backend is actually built. Capability is gated first so that
+    # raise_if_triton_unavailable() only surfaces missing-backend errors (and
+    # not, e.g., CUDA's GPUTooOldForTriton for sub-capable devices). We catch the
+    # specific TritonUnavailableError rather than RuntimeError so unexpected
+    # errors are not silently swallowed.
+    for name, device_interface in get_registered_device_interfaces():
+        if ":" in name:
+            continue
+        if not (
+            device_interface.is_available() and device_interface.is_triton_capable()
+        ):
+            continue
+        try:
+            device_interface.raise_if_triton_unavailable()
+        except TritonUnavailableError:
+            continue
+        res.append(name)
     return res
 
 

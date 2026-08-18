@@ -295,6 +295,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "matrix_exp",
     "linalg_matrix_exp",
     "linalg_matrix_sqrth",
+    "linalg_polar",
     "_linalg_eigh",
     "cholesky_solve",
     "linalg_qr",
