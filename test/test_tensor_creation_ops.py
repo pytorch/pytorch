@@ -4433,8 +4433,8 @@ class TestAsArray(TestCase):
     def test_unsupported_alias(self, device, dtype):
         original = make_tensor((5, 5), dtype=dtype, device=device)
 
-        if torch.accelerator.is_available():
-            other_device = get_another_device(device)
+        other_device = get_another_device(device)
+        if other_device is not None:
             with self.assertRaisesRegex(ValueError,
                                         f"from device '{device}' to '{other_device}'"):
                 torch.asarray(original, device=other_device, copy=False)
