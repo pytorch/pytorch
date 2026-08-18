@@ -1746,6 +1746,77 @@ class TestFP8Lowering(TestCase):
         self.assertEqual(y_compiled.dtype, dtype)
         torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.07)
 
+    @onlyOn(["cpu"])
+    @parametrize("api", ("v1", "v2"))
+    @parametrize("mx_format", ("mxfp4", "mxfp8"))
+    def test_cpu_mxfp_fullgraph(self, device, api, mx_format):
+        m, n, k = 3, 5, 48
+        if mx_format == "mxfp4":
+            a = torch.randint(
+                0, 256, (m, k // 2), dtype=torch.uint8, device=device
+            ).view(torch.float4_e2m1fn_x2)
+            b = (
+                torch.randint(0, 256, (n, k // 2), dtype=torch.uint8, device=device)
+                .view(torch.float4_e2m1fn_x2)
+                .t()
+            )
+        else:
+            a_raw = torch.randint(0, 256, (m, k), dtype=torch.uint8, device=device)
+            b_raw = torch.randint(0, 256, (n, k), dtype=torch.uint8, device=device)
+            a_raw[(a_raw & 0x7F) == 0x7F] = 0
+            b_raw[(b_raw & 0x7F) == 0x7F] = 0
+            a = a_raw.view(torch.float8_e4m3fn)
+            b = b_raw.view(torch.float8_e4m3fn).t()
+
+        groups = ceil_div(k, 32)
+        scale_a = torch.full((m, groups), 127, dtype=torch.uint8, device=device).view(
+            torch.float8_e8m0fnu
+        )
+        scale_b = torch.full((n, groups), 127, dtype=torch.uint8, device=device).view(
+            torch.float8_e8m0fnu
+        )
+        bias = torch.randn(n, dtype=torch.bfloat16, device=device)
+        recipe = [ScalingType.BlockWise1x32.value]
+
+        if api == "v1":
+
+            def fn(a, b, scale_a, scale_b, bias):
+                return torch._scaled_mm(
+                    a,
+                    b,
+                    scale_a,
+                    scale_b,
+                    bias=bias,
+                    out_dtype=torch.bfloat16,
+                )
+
+            args = (a, b, scale_a, scale_b, bias)
+            op_name = "extern_kernels._scaled_mm"
+        else:
+
+            def fn(a, b, scale_a, scale_b, bias):
+                return torch.ops.aten._scaled_mm_v2.default(
+                    a,
+                    b,
+                    [scale_a],
+                    recipe,
+                    [],
+                    [scale_b],
+                    recipe,
+                    [],
+                    bias,
+                    torch.bfloat16,
+                    [],
+                )
+
+            args = (a, b, scale_a, scale_b, bias)
+            op_name = "_scaled_mm_v2.default"
+
+        expected = fn(*args)
+        actual, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True), *args)
+        self.assertEqual(actual, expected)
+        FileCheck().check(op_name).run(code)
+
     @onlyOn(["cuda", "xpu"])
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_scaled_mm_v2_no_swizzle(self, device):
