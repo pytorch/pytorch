@@ -30,7 +30,7 @@ bool FunctionSchema::alias(size_t input_idx, size_t output_idx) const {
     may_contain_alias(x, idx_of(c)) and may_contain_alias(x, idx_of(d)) to throw
     an out-of-bounds exception
 
-    in this case, we can apply the worst-case aliasing to the varidic
+    in this case, we can apply the worst-case aliasing to the variadic
     inputs/outputs i.e., all outputs might alias all varargs and all inputs
     might be aliased by all varrets
   */

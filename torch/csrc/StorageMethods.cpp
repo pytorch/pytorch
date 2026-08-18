@@ -389,7 +389,7 @@ static PyObject* THPStorage_fromBuffer(
           {at::kComplexFloat, decodeWrapper<c10::complex<float>>},
           {at::kComplexDouble, decodeWrapper<c10::complex<double>>}};
 
-  // don't actually do a memcp if we are running with FakeTensorMode
+  // don't actually do a memcpy if we are running with FakeTensorMode
   if (!fake_mode_active) {
     if (is_endian_independent) {
       memcpy(storage->mutable_data(), src + offset, count);
