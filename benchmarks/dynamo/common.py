@@ -162,46 +162,6 @@ CI_SKIP_DYNAMIC_BATCH_ONLY = {
     "llama",
 }.union(INTERNAL_CI_SKIP_DYNAMIC_BATCH_ONLY)
 
-# These models currently fail accuracy with eager Adam optimizer
-# so we use SGD when running the full benchmarks
-# https://github.com/pytorch/pytorch/issues/115966
-BENCHMARK_USE_SGD = {
-    # TorchBench
-    "BERT_pytorch",
-    "LearningToPaint",
-    "alexnet",
-    "dcgan",
-    "demucs",
-    "densenet121",
-    "dlrm",
-    "fastNLP_Bert",
-    "mobilenet_v2",
-    "phlippe_densenet",
-    "phlippe_resnet",
-    "pytorch_stargan",
-    "resnet18",
-    "shufflenet_v2_x1_0",
-    "speech_transformer",
-    "squeezenet1_1",
-    "stable_diffusion_text_encoder",
-    "vgg16",
-    # HF
-    "AlbertForMaskedLM",
-    "BartForCausalLM",
-    "ElectraForCausalLM",
-    "M2M100ForConditionalGeneration",
-    "MBartForCausalLM",
-    "OPTForCausalLM",
-    "PLBartForCausalLM",
-    "PegasusForCausalLM",
-    "TrOCRForCausalLM",
-    "XGLMForCausalLM",
-    # TIMM
-    "adv_inception_v3",
-    "ghostnet_100",
-    "tf_efficientnet_b0",
-}
-
 # These CUDA Inductor TIMM models fail fp16 training accuracy with the default
 # eager Adam reference, but this has not been validated for non-accuracy runs,
 # non-Inductor, or ROCm periodic baselines.
@@ -242,6 +202,33 @@ CI_USE_SGD = {
     "resnet50",
     "dm_nfnet_f0",
 }
+
+
+def use_sgd_optimizer(name, args):
+    return (name in CI_USE_SGD and args.ci) or (
+        torch.version.hip is None
+        and args.backend == "inductor"
+        and args.accuracy
+        and name in CUDA_INDUCTOR_ACCURACY_USE_SGD
+    )
+
+
+def optimizer_config_context(name, device, args):
+    if (
+        device == "cuda"
+        and args.training
+        and name not in CI_SKIP_OPTIMIZER
+        and args.backend == "inductor"
+        and not use_sgd_optimizer(name, args)
+    ):
+        return inductor_config.patch(
+            {
+                "eager_numerics.division_rounding": True,
+                "eager_numerics.use_pytorch_libdevice": True,
+                "emulate_precision_casts": True,
+            }
+        )
+    return contextlib.nullcontext()
 
 
 DO_NOT_CAST_INPUTS = {"stable_diffusion"}
@@ -1870,17 +1857,7 @@ class BenchmarkRunner:
 
     def init_optimizer(self, name, device, params):
         if device == "cuda" and self.args.training and name not in CI_SKIP_OPTIMIZER:
-            use_sgd = (
-                (name in CI_USE_SGD and self.args.ci)
-                or name in BENCHMARK_USE_SGD
-                or (
-                    torch.version.hip is None
-                    and self.args.backend == "inductor"
-                    and self.args.accuracy
-                    and name in CUDA_INDUCTOR_ACCURACY_USE_SGD
-                )
-            )
-            if use_sgd:
+            if use_sgd_optimizer(name, self.args):
                 self.optimizer = torch.optim.SGD(params, lr=0.01, foreach=True)
                 # Disable multi_tensor_sgd for benchmarking, there isn't a large performance benefit (~1%) to compiling
                 # this optimizer because it is a single foreach add, and increases compile time.
@@ -4914,7 +4891,7 @@ def run(runner, args, original_dir=None):
             if name in runner.guard_on_nn_module_models:
                 guard_ctx = torch._dynamo.config.patch(guard_nn_modules=True)
 
-            with guard_ctx:
+            with guard_ctx, optimizer_config_context(name, device, args):
                 runner.run_one_model(
                     name,
                     model,
