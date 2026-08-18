@@ -464,9 +464,7 @@ std::vector<at::Tensor> batch_p2p_ops(
   if (should_coalesce) {
     group->startCoalescing(device);
   }
-  std::vector<c10::intrusive_ptr<c10d::Work>> works;
   std::vector<at::Tensor> result_tensors;
-  works.reserve(N);
   result_tensors.reserve(N);
   for (uint32_t i = 0; i < N; ++i) {
     c10::intrusive_ptr<c10d::Work> work;
@@ -478,10 +476,9 @@ std::vector<at::Tensor> batch_p2p_ops(
           static_cast<int64_t>(peer_list[i]),
           static_cast<int64_t>(tag_list[i]));
       auto placeholder = at::empty({0}, t.options());
-      if (work) {
+      if (!should_coalesce && work) {
         c10d::register_work(t, work);
         c10d::register_work(placeholder, work);
-        works.push_back(std::move(work));
       }
       result_tensors.push_back(std::move(placeholder));
     } else if (op_list[i] == "irecv") {
@@ -489,9 +486,8 @@ std::vector<at::Tensor> batch_p2p_ops(
           tt,
           static_cast<int64_t>(peer_list[i]),
           static_cast<int64_t>(tag_list[i]));
-      if (work) {
+      if (!should_coalesce && work) {
         c10d::register_work(t, work);
-        works.push_back(std::move(work));
       }
       result_tensors.push_back(std::move(t));
     } else {

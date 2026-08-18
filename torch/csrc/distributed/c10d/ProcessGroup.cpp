@@ -506,6 +506,10 @@ at::Tensor wait_tensor(const at::Tensor& tensor) {
   }
 
   for (const auto& work : works) {
+    RankLocal<WorkRegistry>::find_across_all([&work](WorkRegistry& registry) {
+      registry.unregister_work(work);
+      return false;
+    });
     work->wait();
   }
   return tensor;
