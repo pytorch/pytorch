@@ -14,6 +14,7 @@ from torch._inductor.kernel.flex.flex_flash_attention import (
     _flash_attention_unavailable_message,
     _hierarchical_indexer_cute,
     ensure_flash_available,
+    flash_supports_aux_scalars,
     HierarchicalIndex,
 )
 from torch._inductor.test_case import TestCase as InductorTestCase
@@ -2972,6 +2973,11 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
         )
 
     def test_dynamic_scalar_closure_in_mask_mod(self):
+        if not flash_supports_aux_scalars():
+            self.skipTest(
+                "Flash attention (CUTE) scalar capture support is not available"
+            )
+
         major, _ = torch.cuda.get_device_capability()
         if SM120OrLater:
             self.skipTest("block sparse mask_mod is not supported on SM120")
