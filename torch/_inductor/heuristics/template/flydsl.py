@@ -220,9 +220,52 @@ def get_gemm_configs() -> list[dict[str, int | bool]]:
     return [asdict(gemm_config) for gemm_config in configs]
 
 
+def _is_grouped_gemm_layout_valid(
+    tile_m: int,
+    tile_n: int,
+    m_waves: int,
+    n_waves: int,
+    use_half_tile_interleaved: bool,
+) -> bool:
+    """Return whether a config satisfies grouped B-LDS and C-shuffle layouts."""
+    divisor = 2 if use_half_tile_interleaved else 1
+    effective_tile_m = tile_m // divisor
+    effective_tile_n = tile_n // divisor
+    if (
+        effective_tile_m <= 0
+        or effective_tile_n < 64
+        or effective_tile_n & (effective_tile_n - 1)
+        or m_waves <= 0
+        or n_waves <= 0
+    ):
+        return False
+
+    cshuffle_x_threads = effective_tile_n // 8
+    block_threads = m_waves * n_waves * 64
+    if block_threads % cshuffle_x_threads != 0:
+        return False
+    return effective_tile_m % (block_threads // cshuffle_x_threads) == 0
+
+
 def get_exhaustive_grouped_gemm_configs() -> list[FlyDSLGemmConfig]:
     """Return exhaustive configs for the gfx950 FlyDSL grouped GEMM kernel."""
-    return get_exhaustive_gemm_configs()
+    return [
+        gemm_config
+        for gemm_config in get_exhaustive_gemm_configs()
+        if _is_grouped_gemm_layout_valid(
+            gemm_config.TILE_M,
+            gemm_config.TILE_N,
+            gemm_config.BLOCK_M_WARPS,
+            gemm_config.BLOCK_N_WARPS,
+            gemm_config.USE_HALF_TILE_INTERLEAVED,
+        )
+    ]
+
+
+# Baseline used when FlyDSL autotuning is disabled. The dataclass defaults
+# describe the dense kernel, whose 4x4 wave split does not apply here, so the
+# grouped baseline is named explicitly; it must stay in the candidate list below.
+DEFAULT_GROUPED_GEMM_CONFIG = FlyDSLGemmConfig(128, 128, 64, 2, 1, 4, 0)
 
 
 @functools.cache
@@ -291,6 +334,8 @@ def is_grouped_gemm_config_valid_for_shape(
     tile_n = int(gemm_config["TILE_N"])
     tile_k = int(gemm_config["TILE_K"])
     stages = int(gemm_config["STAGES"])
+    m_waves = int(gemm_config["BLOCK_M_WARPS"])
+    n_waves = int(gemm_config["BLOCK_N_WARPS"])
     use_half_tile_interleaved = bool(gemm_config["USE_HALF_TILE_INTERLEAVED"])
     has_enough_k = use_half_tile_interleaved or k // tile_k >= stages
     return (
@@ -298,6 +343,9 @@ def is_grouped_gemm_config_valid_for_shape(
         and n >= tile_n
         and n % tile_n == 0
         and has_enough_k
+        and _is_grouped_gemm_layout_valid(
+            tile_m, tile_n, m_waves, n_waves, use_half_tile_interleaved
+        )
         and is_gemm_config_valid_for_shape(m, n, k, dtype_id, gemm_config)
     )
 
@@ -306,6 +354,7 @@ def get_grouped_gemm_configs() -> list[dict[str, int | bool]]:
     """Return configs for the persistent multi-stage grouped kernel.
 
     Shape compatibility is checked in the lowering before this function is called.
+    By default, autotuning is disabled and we return only a single baseline config.
     """
     if (
         config.flydsl_enable_autotuning
@@ -315,7 +364,7 @@ def get_grouped_gemm_configs() -> list[dict[str, int | bool]]:
     else:
         candidates = get_default_grouped_gemm_configs()
         if not config.flydsl_enable_autotuning:
-            candidates = candidates[:1]
+            candidates = [c for c in candidates if c == DEFAULT_GROUPED_GEMM_CONFIG]
 
     if not candidates:
         log.warning("No valid FlyDSL grouped GEMM configuration is available")

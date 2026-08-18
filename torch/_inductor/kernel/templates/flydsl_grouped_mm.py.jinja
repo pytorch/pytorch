@@ -18,8 +18,6 @@ from torch._inductor.runtime.flydsl_cache import (
 
 _grouped_param = None
 _grouped_param_lock = threading.Lock()
-_grouped_grid_key = None
-_grouped_grid_size = None
 
 
 def _inductor_tensor_arg(tensor):
@@ -43,7 +41,7 @@ def _temporary_env(updates):
 
 
 def _flydsl_grouped_mm(output, mat1, mat2, offs, stream):
-    global _grouped_grid_key, _grouped_grid_size, _grouped_param
+    global _grouped_param
     group_count, k, n = mat2.shape
     total_m = mat1.shape[0]
     if total_m == 0:
@@ -82,26 +80,25 @@ def _flydsl_grouped_mm(output, mat1, mat2, offs, stream):
                         f"tile=({TILE_M}, {TILE_N}, {TILE_K}), stages={STAGES}"
                     )
                 _grouped_param = param
-                _grouped_grid_key = None
 
     group_count = int(group_count)
     total_m = int(total_m)
     n_int = int(n)
     k_int = int(k)
-    if os.environ.get("FLYDSL_COMPILE_ONLY"):
+    compile_only = bool(os.environ.get("FLYDSL_COMPILE_ONLY"))
+    if compile_only:
+        # Precompilation runs on fake tensors that have no device to query, and
+        # the persistent kernel reads its grid from gridDim, so the size the disk
+        # cache is warmed with does not have to match the one used at runtime.
         grid_size = 1
     else:
-        grid_key = (total_m, n_int, group_count, mat1.device)
-        if grid_key != _grouped_grid_key:
-            _grouped_grid_size = get_grouped_gemm_persistent_grid_size(
-                param,
-                total_m,
-                n_int,
-                group_count,
-                torch.cuda.get_device_properties(mat1.device),
-            )
-            _grouped_grid_key = grid_key
-        grid_size = _grouped_grid_size
+        grid_size = get_grouped_gemm_persistent_grid_size(
+            param,
+            total_m,
+            n_int,
+            group_count,
+            torch.cuda.get_device_properties(mat1.device),
+        )
     compile_args = (
         _inductor_tensor_arg(output),
         _inductor_tensor_arg(mat1),
@@ -115,7 +112,7 @@ def _flydsl_grouped_mm(output, mat1, mat2, offs, stream):
         stream,
     )
     ensure_flydsl_cache_dir()
-    if os.environ.get("FLYDSL_COMPILE_ONLY"):
+    if compile_only:
         flyc.compile(launch_gemm_gfx950_grouped, *compile_args)
     else:
         run_cached_flydsl(

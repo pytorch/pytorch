@@ -546,22 +546,66 @@ class TestFlyDSLTemplate(TestCase):
 
         flydsl_heuristics.get_default_grouped_gemm_configs.cache_clear()
         self.addCleanup(flydsl_heuristics.get_default_grouped_gemm_configs.cache_clear)
-        with mock.patch.object(flydsl_heuristics, "_make_gemm_param"):
+        default_config = flydsl_heuristics.DEFAULT_GROUPED_GEMM_CONFIG
+        with (
+            mock.patch.object(flydsl_heuristics, "_make_gemm_param"),
+            torch._inductor.config.patch(flydsl_enable_autotuning=False),
+        ):
             configs = flydsl_heuristics.get_default_grouped_gemm_configs()
+            selected = flydsl_heuristics.get_grouped_gemm_configs()
         self.assertEqual(
-            asdict(configs[0]),
+            asdict(default_config),
             {
-                "TILE_M": 16,
-                "TILE_N": 64,
+                "TILE_M": 128,
+                "TILE_N": 128,
                 "TILE_K": 64,
                 "STAGES": 2,
                 "BLOCK_M_WARPS": 1,
-                "BLOCK_N_WARPS": 2,
+                "BLOCK_N_WARPS": 4,
                 "GROUP_M": 0,
                 "USE_HALF_TILE_INTERLEAVED": False,
             },
         )
+        # The baseline must stay reachable regardless of candidate ordering.
+        self.assertIn(default_config, configs)
+        self.assertEqual(selected, [asdict(default_config)])
         self.assertTrue(any(config.USE_HALF_TILE_INTERLEAVED for config in configs))
+
+    def test_flydsl_grouped_gemm_exhaustive_layout_filter(self):
+        from torch._inductor.heuristics.template import flydsl as flydsl_heuristics
+
+        valid = flydsl_heuristics.DEFAULT_GROUPED_GEMM_CONFIG
+        small_n = flydsl_heuristics.FlyDSLGemmConfig(32, 32, 64, 2, 1, 2, 0)
+        invalid_cshuffle = flydsl_heuristics.FlyDSLGemmConfig(16, 96, 64, 2, 1, 2, 0)
+        with mock.patch.object(
+            flydsl_heuristics,
+            "get_exhaustive_gemm_configs",
+            return_value=[small_n, invalid_cshuffle, valid],
+        ):
+            configs = flydsl_heuristics.get_exhaustive_grouped_gemm_configs()
+        self.assertEqual(configs, [valid])
+
+    @parametrize(
+        "config_args,n,expected",
+        [
+            ((32, 32, 64, 2, 1, 2, 0), 32, False),
+            ((16, 96, 64, 2, 1, 2, 0), 96, False),
+            ((128, 128, 64, 2, 1, 4, 0), 128, True),
+        ],
+    )
+    def test_flydsl_grouped_gemm_layout_validation(self, config_args, n, expected):
+        from torch._inductor.heuristics.template import flydsl as flydsl_heuristics
+
+        gemm_config = asdict(flydsl_heuristics.FlyDSLGemmConfig(*config_args))
+        with mock.patch.object(
+            flydsl_heuristics,
+            "is_gemm_config_valid_for_shape",
+            return_value=True,
+        ):
+            valid = flydsl_heuristics.is_grouped_gemm_config_valid_for_shape(
+                128, n, 128, 0, gemm_config
+            )
+        self.assertEqual(valid, expected)
 
     @parametrize(
         "dtype,k,n",

@@ -1,6 +1,9 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2024-2026, Advanced Micro Devices, Inc. All rights reserved.
 
+from dataclasses import dataclass
+from typing import Any
+
 import flydsl.compiler as flyc
 import flydsl.expr as fx
 from flydsl.expr import const_expr, range_constexpr, rocdl
@@ -30,7 +33,9 @@ def _grouped_swizzle_tile(param, num_pid_m, num_pid_n, local_tile):
     )
     swizzled_m, swizzled_n = block_swizzle.swizzle(num_pid_m, num_pid_n, local_tile)
     num_workgroups = num_pid_m * num_pid_n
-    use_block_swizzle = (num_workgroups >= 256) & ((num_workgroups % 8) == 0)
+    use_block_swizzle = (num_workgroups >= block_swizzle.NUM_PIDS_THRESHOLD) & (
+        (num_workgroups % block_swizzle.NUM_XCDS) == 0
+    )
     if const_expr(isinstance(use_block_swizzle, bool)):
         if const_expr(use_block_swizzle):
             return swizzled_m, swizzled_n
@@ -105,34 +110,20 @@ def make_grouped_gemm_gfx950_kernel_name(param: GemmGfx950Param) -> str:
     return name
 
 
+@dataclass
 class _GroupedGemmGfx950Resources:
-    def __init__(
-        self,
-        a_buf,
-        b_buf,
-        out_buf,
-        offs_buf,
-        a_rsrc,
-        b_rsrc,
-        s2r_copy_atom,
-        r2g_copy_atom,
-        thr_mma,
-        thr_copy_A,
-        b_s2r_copy_atom,
-        thr_copy_B,
-    ):
-        self.a_buf = a_buf
-        self.b_buf = b_buf
-        self.out_buf = out_buf
-        self.offs_buf = offs_buf
-        self.a_rsrc = a_rsrc
-        self.b_rsrc = b_rsrc
-        self.s2r_copy_atom = s2r_copy_atom
-        self.r2g_copy_atom = r2g_copy_atom
-        self.thr_mma = thr_mma
-        self.thr_copy_A = thr_copy_A
-        self.b_s2r_copy_atom = b_s2r_copy_atom
-        self.thr_copy_B = thr_copy_B
+    """Buffer descriptors, copy atoms and thread slices shared by both kernels."""
+
+    out_buf: Any
+    offs_buf: Any
+    a_rsrc: Any
+    b_rsrc: Any
+    s2r_copy_atom: Any
+    r2g_copy_atom: Any
+    thr_mma: Any
+    thr_copy_A: Any
+    b_s2r_copy_atom: Any
+    thr_copy_B: Any
 
 
 def _grouped_gemm_gfx950_resources(out, a, b, offs, tiled_mma, elem_dtype, tid):
@@ -150,18 +141,16 @@ def _grouped_gemm_gfx950_resources(out, a, b, offs, tiled_mma, elem_dtype, tid):
     b_s2r_copy_atom = fx.make_copy_atom(rocdl.cdna4.LDSReadTrans16_64b(), elem_dtype)
     thr_copy_B = fx.make_tiled_copy_B(b_s2r_copy_atom, tiled_mma).get_slice(tid)
     return _GroupedGemmGfx950Resources(
-        a_buf,
-        b_buf,
-        out_buf,
-        offs_buf,
-        a_rsrc,
-        b_rsrc,
-        s2r_copy_atom,
-        r2g_copy_atom,
-        thr_mma,
-        thr_copy_A,
-        b_s2r_copy_atom,
-        thr_copy_B,
+        out_buf=out_buf,
+        offs_buf=offs_buf,
+        a_rsrc=a_rsrc,
+        b_rsrc=b_rsrc,
+        s2r_copy_atom=s2r_copy_atom,
+        r2g_copy_atom=r2g_copy_atom,
+        thr_mma=thr_mma,
+        thr_copy_A=thr_copy_A,
+        b_s2r_copy_atom=b_s2r_copy_atom,
+        thr_copy_B=thr_copy_B,
     )
 
 
@@ -182,82 +171,48 @@ def _grouped_gemm_gfx950_allocate_shared_storage(
     return storage.ab.a.peek().ptr, storage.ab.b.peek().ptr, storage.c.peek().ptr
 
 
+@dataclass
 class _GroupedGemmGfx950Ctx:
-    def __init__(
-        self,
-        param,
-        tid,
-        tiled_mma,
-        thr_mma,
-        smem_a,
-        smem_b,
-        a_rsrc,
-        b_rsrc,
-        a_buf,
-        b_buf,
-        out_buf,
-        offs_buf,
-        s2r_copy_atom,
-        r2g_copy_atom,
-        thr_copy_A,
-        thr_copy_B,
-        a_lds_layout,
-        b_lds_layout,
-        b_lds_s2r_layout,
-        sC,
-        frag_A,
-        frag_B,
-        frag_C,
-        frag_C_out,
-        frag_A_retile,
-        frag_B_retile,
-        thr_mma_cRow,
-        thr_mma_cCol,
-        b_s2r_copy_atom,
-        thr_copy_cshuffle,
-        thr_sC,
-        thr_cRow,
-        thr_cCol,
-        frag_C_cshuffle,
-        pred_C,
-        wave_offset,
-    ):
-        self.param = param
-        self.tid = tid
-        self.tiled_mma = tiled_mma
-        self.thr_mma = thr_mma
-        self.smem_a = smem_a
-        self.smem_b = smem_b
-        self.a_rsrc = a_rsrc
-        self.b_rsrc = b_rsrc
-        self.a_buf = a_buf
-        self.b_buf = b_buf
-        self.out_buf = out_buf
-        self.offs_buf = offs_buf
-        self.s2r_copy_atom = s2r_copy_atom
-        self.r2g_copy_atom = r2g_copy_atom
-        self.thr_copy_A = thr_copy_A
-        self.thr_copy_B = thr_copy_B
-        self.a_lds_layout = a_lds_layout
-        self.b_lds_layout = b_lds_layout
-        self.b_lds_s2r_layout = b_lds_s2r_layout
-        self.sC = sC
-        self.frag_A = frag_A
-        self.frag_B = frag_B
-        self.frag_C = frag_C
-        self.frag_C_out = frag_C_out
-        self.frag_A_retile = frag_A_retile
-        self.frag_B_retile = frag_B_retile
-        self.thr_mma_cRow = thr_mma_cRow
-        self.thr_mma_cCol = thr_mma_cCol
-        self.b_s2r_copy_atom = b_s2r_copy_atom
-        self.thr_copy_cshuffle = thr_copy_cshuffle
-        self.thr_sC = thr_sC
-        self.thr_cRow = thr_cRow
-        self.thr_cCol = thr_cCol
-        self.frag_C_cshuffle = frag_C_cshuffle
-        self.pred_C = pred_C
-        self.wave_offset = wave_offset
+    """Per-workgroup state of the non-interleaved grouped kernel.
+
+    Everything here is tile-independent, so it is built once before the
+    persistent tile loop and reused by every tile the workgroup claims.
+    """
+
+    param: Any
+    tid: Any
+    tiled_mma: Any
+    thr_mma: Any
+    smem_a: Any
+    smem_b: Any
+    a_rsrc: Any
+    b_rsrc: Any
+    out_buf: Any
+    offs_buf: Any
+    s2r_copy_atom: Any
+    r2g_copy_atom: Any
+    thr_copy_A: Any
+    thr_copy_B: Any
+    a_lds_layout: Any
+    b_lds_layout: Any
+    b_lds_s2r_layout: Any
+    sC: Any
+    frag_A: Any
+    frag_B: Any
+    frag_C: Any
+    frag_C_out: Any
+    frag_A_retile: Any
+    frag_B_retile: Any
+    thr_mma_cRow: Any
+    thr_mma_cCol: Any
+    b_s2r_copy_atom: Any
+    thr_copy_cshuffle: Any
+    thr_sC: Any
+    thr_cRow: Any
+    thr_cCol: Any
+    frag_C_cshuffle: Any
+    pred_C: Any
+    wave_offset: Any
 
 
 def _grouped_gemm_gfx950_setup(out, a, b, offs, tiled_mma, param):
@@ -333,42 +288,40 @@ def _grouped_gemm_gfx950_setup(out, a, b, offs, tiled_mma, param):
     )
 
     return _GroupedGemmGfx950Ctx(
-        param,
-        tid,
-        tiled_mma,
-        rs.thr_mma,
-        smem_a,
-        smem_b,
-        rs.a_rsrc,
-        rs.b_rsrc,
-        rs.a_buf,
-        rs.b_buf,
-        rs.out_buf,
-        rs.offs_buf,
-        rs.s2r_copy_atom,
-        rs.r2g_copy_atom,
-        rs.thr_copy_A,
-        rs.thr_copy_B,
-        a_lds_layout,
-        b_lds_layout,
-        b_lds_s2r_layout,
-        sC,
-        frag_A,
-        frag_B,
-        frag_C,
-        frag_C_out,
-        frag_A_retile,
-        frag_B_retile,
-        thr_mma_cRow,
-        thr_mma_cCol,
-        rs.b_s2r_copy_atom,
-        thr_copy_cshuffle,
-        thr_sC,
-        thr_cRow,
-        thr_cCol,
-        frag_C_cshuffle,
-        pred_C,
-        wave_offset,
+        param=param,
+        tid=tid,
+        tiled_mma=tiled_mma,
+        thr_mma=rs.thr_mma,
+        smem_a=smem_a,
+        smem_b=smem_b,
+        a_rsrc=rs.a_rsrc,
+        b_rsrc=rs.b_rsrc,
+        out_buf=rs.out_buf,
+        offs_buf=rs.offs_buf,
+        s2r_copy_atom=rs.s2r_copy_atom,
+        r2g_copy_atom=rs.r2g_copy_atom,
+        thr_copy_A=rs.thr_copy_A,
+        thr_copy_B=rs.thr_copy_B,
+        a_lds_layout=a_lds_layout,
+        b_lds_layout=b_lds_layout,
+        b_lds_s2r_layout=b_lds_s2r_layout,
+        sC=sC,
+        frag_A=frag_A,
+        frag_B=frag_B,
+        frag_C=frag_C,
+        frag_C_out=frag_C_out,
+        frag_A_retile=frag_A_retile,
+        frag_B_retile=frag_B_retile,
+        thr_mma_cRow=thr_mma_cRow,
+        thr_mma_cCol=thr_mma_cCol,
+        b_s2r_copy_atom=rs.b_s2r_copy_atom,
+        thr_copy_cshuffle=thr_copy_cshuffle,
+        thr_sC=thr_sC,
+        thr_cRow=thr_cRow,
+        thr_cCol=thr_cCol,
+        frag_C_cshuffle=frag_C_cshuffle,
+        pred_C=pred_C,
+        wave_offset=wave_offset,
     )
 
 
@@ -414,6 +367,7 @@ def _grouped_tile_store(ctx, thr_gC):
     fx.gpu.barrier()
 
 
+@flyc.jit
 def _grouped_compute_stage_from_lds(ctx, read_stage, k_tile, k):
     param = ctx.param
     block_m = param.block_m
