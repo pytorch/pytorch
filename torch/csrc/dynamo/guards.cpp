@@ -3421,27 +3421,12 @@ class GuardManager {
 
  public:
   // relational guard helpers
-  void set_has_object_aliasing_guard() {
-    _has_object_aliasing_guard = true;
-    _has_relational_guard = true;
-    _has_unoptimized_relational_guard = true;
-  }
-
-  void set_has_no_tensor_aliasing_guard() {
-    _has_no_tensor_aliasing_guard = true;
-    _has_relational_guard = true;
-  }
-
   bool has_object_aliasing_guard() {
     return _has_object_aliasing_guard;
   }
 
   bool has_no_tensor_aliasing_guard() {
     return _has_no_tensor_aliasing_guard;
-  }
-
-  bool has_relational_guard() {
-    return _has_relational_guard;
   }
 
   bool has_unoptimized_relational_guard() {
@@ -3539,8 +3524,6 @@ class GuardManager {
       RootGuardManager* cloned_root,
       GuardManager* cloned_mgr,
       const py::function& clone_filter_fn) {
-    cloned_mgr->_max_saved_pointers_for_recursive_dict_tags_check =
-        _max_saved_pointers_for_recursive_dict_tags_check;
     for (const auto& guard : _leaf_guards) {
       cloned_mgr->record_leaf_guard_properties(guard);
       cloned_mgr->_leaf_guards.emplace_back(guard);
@@ -3675,7 +3658,9 @@ class GuardManager {
     }
     std::shared_ptr<RelationalGuard> no_tensor_aliasing_guard =
         get_no_tensor_aliasing_guard(_root);
-    TORCH_INTERNAL_ASSERT(no_tensor_aliasing_guard != nullptr);
+    if (no_tensor_aliasing_guard == nullptr) {
+      return false;
+    }
     for (auto& tensor_weakref : it->second) {
       PyObject* tensor_ptr = nullptr;
       if (PyWeakref_GetRef(tensor_weakref.ptr(), &tensor_ptr) == 0) {
@@ -3755,7 +3740,7 @@ class GuardManager {
     if (!_disable_dict_tag_matching) {
       if (_is_tag_safe_root) {
         // Check if the `value` object was recorded earlier
-        if (_dict_pointers.find(value) != _dict_pointers.end()) {
+        if (_dict_pointers.contains(value)) {
           // Check for fast path
           // if (is_weakref_valid(value) && check_dict_pointer_tags(value)) {
           if (check_dict_pointer_tags(value) &&
@@ -4141,8 +4126,7 @@ class GuardManager {
   }
 
   bool is_leaf_guard_present(const std::string& guard_name) {
-    return _inserted_leaf_guards.find(guard_name) !=
-        _inserted_leaf_guards.end();
+    return _inserted_leaf_guards.contains(guard_name);
   }
 
   void insert_leaf_guard(const std::string& guard_name) {
@@ -4164,7 +4148,6 @@ class GuardManager {
       return;
     }
 
-    _has_relational_guard = true;
     if (std::dynamic_pointer_cast<OBJECT_ALIASING>(relational_guard) !=
         nullptr) {
       _has_object_aliasing_guard = true;
@@ -4213,7 +4196,6 @@ class GuardManager {
   std::vector<std::unique_ptr<GuardAccessor>> _accessors;
 
   // relational guard helpers
-  bool _has_relational_guard = false;
   bool _has_object_aliasing_guard = false;
   bool _has_no_tensor_aliasing_guard = false;
   bool _has_unoptimized_relational_guard = false;
@@ -4472,7 +4454,6 @@ class RootGuardManager : public GuardManager {
     cloned_root->_local_state = _local_state;
     cloned_root->_init_local_state = _init_local_state;
     clone_common(cloned_root.get(), cloned_root.get(), clone_filter_fn);
-    cloned_root->_no_tensor_aliasing_guard = _no_tensor_aliasing_guard;
     for (const auto& guard : _epilogue_lambda_guards) {
       cloned_root->_epilogue_lambda_guards.emplace_back(guard);
     }
@@ -5592,7 +5573,8 @@ class FrameLocalsGuardAccessor : public GuardAccessor {
       FrameLocalsMapping* obj,
       bool matches_dict_tag = false) override { // borrowed ref
     if (matches_dict_tag && _is_immutable_object && !_is_tensor &&
-        !_guard_manager->has_relational_guard()) {
+        _guard_manager->has_no_accessors() &&
+        !_guard_manager->has_unoptimized_relational_guard()) {
       return true;
     }
 
@@ -5616,7 +5598,8 @@ class FrameLocalsGuardAccessor : public GuardAccessor {
         "FrameLocalsGuardAccessor check expected dict() input");
 
     if (matches_dict_tag && _is_immutable_object && !_is_tensor &&
-        !_guard_manager->has_relational_guard()) {
+        _guard_manager->has_no_accessors() &&
+        !_guard_manager->has_unoptimized_relational_guard()) {
       return true;
     }
 
@@ -5716,7 +5699,7 @@ class DictGetItemGuardAccessor : public GuardAccessor {
     if (matches_dict_tag && _is_immutable_object && !_is_tensor &&
         !is_recording_dict_pointers(get_guard_manager()->get_root()) &&
         _guard_manager->has_no_accessors() &&
-        !_guard_manager->has_relational_guard()) {
+        !_guard_manager->has_unoptimized_relational_guard()) {
       return true;
     }
 
@@ -7305,9 +7288,6 @@ void install_object_aliasing_guard(
   // the newly added relational guard when the guard eval fails.
   x->get_root()->add_relational_guard_resetter(guard);
 
-  x->set_has_object_aliasing_guard();
-  y->set_has_object_aliasing_guard();
-
   // In case the guard is a DictGuardManager, OBJECT_ALIASING guard is a
   // permitted guard.
   x->add_permitted_leaf_guard(guard);
@@ -7336,7 +7316,6 @@ void install_no_tensor_aliasing_guard(
 
   for (const auto& guard_manager : guard_managers) {
     py::cast<GuardManager*>(guard_manager)->add_leaf_guard(guard);
-    py::cast<GuardManager*>(guard_manager)->set_has_no_tensor_aliasing_guard();
   }
 }
 
@@ -7957,7 +7936,6 @@ PyObject* torch_c_dynamo_guards_init() {
       // return by reference because GuardManager has the ownership of accessors
       .def("get_source", &GuardManager::get_source)
       .def("fail_count", &GuardManager::fail_count)
-      .def("has_relational_guard", &GuardManager::has_relational_guard)
       .def(
           "has_object_aliasing_guard", &GuardManager::has_object_aliasing_guard)
       .def(

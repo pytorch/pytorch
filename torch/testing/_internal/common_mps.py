@@ -169,6 +169,7 @@ if torch.backends.mps.is_available():
             "permute",
             "permute_copy",
             "positive",
+            "put",
             "randn",
             "ravel",
             "real",
@@ -213,6 +214,7 @@ if torch.backends.mps.is_available():
             "svd",
             "t",
             "t_copy",
+            "take",
             "take_along_dim",
             "tanh",
             "tan",
@@ -309,6 +311,8 @@ if torch.backends.mps.is_available():
             "logical_not",
             "logical_or",
             "logical_xor",
+            "logspace",
+            "logspacetensor_overload",
             "logsumexp",
             "long",
             "masked.cumsum",
@@ -367,11 +371,8 @@ if torch.backends.mps.is_available():
         # Those ops are not expected to work
         UNIMPLEMENTED_XFAILLIST: dict[str, list | None] = {
             # Failures due to lack of op implementation on MPS backend
-            "logspace": None,
-            "logspacetensor_overload": None,
             "linalg.eig": None,
             "linalg.eigvals": None,
-            "put": None,
             "frexp": None,
             "hash_tensor": None,
             "heaviside": None,
@@ -594,7 +595,6 @@ if torch.backends.mps.is_available():
             "special.ndtri": None,
             "stft": [torch.float16, torch.bfloat16],
             "svd_lowrank": None,
-            "take": None,
             "to": None,
             "_upsample_bilinear2d_aa": [torch.uint8],  # uint8 is for CPU only
             "_upsample_bicubic2d_aa": [torch.uint8],  # uint8 is for CPU only
@@ -1016,4 +1016,10 @@ else:
         xfail_exclusion: list[str] | None = None,
         sparse: bool = False,
     ) -> Sequence[OpInfo]:
+        return ops
+
+    def mps_ops_grad_modifier(ops: Sequence[OpInfo]) -> Sequence[OpInfo]:
+        return ops
+
+    def mps_ops_error_inputs_modifier(ops: Sequence[OpInfo]) -> Sequence[OpInfo]:
         return ops

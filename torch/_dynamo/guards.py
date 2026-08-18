@@ -520,7 +520,10 @@ class GuardManagerWrapper:
                 if val_mgr:
                     is_subtree_tag_safe &= val_mgr.is_tag_safe()
 
-            if is_subtree_tag_safe and not has_unoptimized_relational_guard:
+            if has_unoptimized_relational_guard:
+                return tag_safe_roots, has_unoptimized_relational_guard
+
+            if is_subtree_tag_safe:
                 node.mark_tag_safe()
             return tag_safe_roots, has_unoptimized_relational_guard
 
@@ -551,7 +554,7 @@ class GuardManagerWrapper:
                 # are no accessors. Presence of accessors means presence of
                 # symbolic shape guards.
                 if issubclass(node.get_type_of_guarded_value(), torch.Tensor):
-                    if node.has_no_accessors() and not node.has_object_aliasing_guard():
+                    if node.has_no_accessors():
                         node.mark_tag_safe()
                 elif any(
                     a.repr() == "PythonLambdaGuardAccessor"

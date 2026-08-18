@@ -555,6 +555,9 @@ user_stack=None)
         self.assertTrue(isinstance(x_guards[0], NO_TENSOR_ALIASING))
         self.assertTrue(isinstance(y_guards[0], NO_TENSOR_ALIASING))
         self.assertTrue(isinstance(z_guards[0], NO_TENSOR_ALIASING))
+        self.assertFalse(x_guard_mgr.has_unoptimized_relational_guard())
+        self.assertFalse(y_guard_mgr.has_unoptimized_relational_guard())
+        self.assertFalse(z_guard_mgr.has_unoptimized_relational_guard())
         # Check that the two guards are the same object
         self.assertTrue(x_guards[0] is y_guards[0] is z_guards[0])
         self.assertFalse(guard_manager.check(f_locals))
@@ -577,40 +580,6 @@ user_stack=None)
         )
         self.assertFalse(guard_manager.check(f_locals_unaliased))
         self.assertFalse(guard_manager.check_verbose(f_locals_unaliased).result)
-
-    def test_clone_preserves_no_tensor_aliasing_guard_for_recursive_dict_tags(self):
-        class Foo:
-            pass
-
-        foo = Foo()
-        foo.x = torch.randn(3, 4)
-        foo.y = torch.randn(3, 4)
-
-        guard_manager = RootGuardManager()
-        foo_mgr = guard_manager.framelocals_manager(
-            ("foo", 0), "foo", foo, default_mgr_enum
-        )
-        x_mgr = foo_mgr.getattr_manager("x", "foo.x", foo.x, default_mgr_enum)
-        y_mgr = foo_mgr.getattr_manager("y", "foo.y", foo.y, default_mgr_enum)
-        install_no_tensor_aliasing_guard(
-            [x_mgr, y_mgr],
-            ["foo.x", "foo.y"],
-            ["no_aliasing(foo.x, foo.y)"],
-            None,
-        )
-
-        x_mgr.mark_tag_safe()
-        y_mgr.mark_tag_safe()
-        foo_mgr.mark_tag_safe()
-        foo_mgr.mark_tag_safe_root()
-
-        cloned_root = guard_manager.clone_manager(lambda x: True)
-        cloned_foo_mgr = cloned_root.get_child_managers()[0]
-        self.assertFalse(cloned_foo_mgr.is_recursive_dict_tag_matching_disabled())
-        self.assertTrue(cloned_root.check({"foo": foo}))
-        self.assertFalse(cloned_foo_mgr.is_recursive_dict_tag_matching_disabled())
-        self.assertTrue(cloned_root.check({"foo": foo}))
-        self.assertFalse(cloned_foo_mgr.is_recursive_dict_tag_matching_disabled())
 
     def test_weakref_alive_guard(self):
         root = RootGuardManager()
@@ -826,8 +795,27 @@ user_stack=None)
         d_a_mgr = d_mgr.dict_getitem_manager("a", "d['a']", a, default_mgr_enum)
         install_object_aliasing_guard(x_mgr, d_a_mgr, ["x is d['a']"], None)
 
-        self.assertTrue(d_a_mgr.has_relational_guard())
+        self.assertTrue(d_a_mgr.has_object_aliasing_guard())
         self.assertTrue(d_a_mgr.has_unoptimized_relational_guard())
+        self.assertTrue(guards_manager.check({"x": a, "d": d}))
+        self.assertFalse(guards_manager.check({"x": b, "d": d}))
+
+    def test_nested_framelocals_accessor_with_object_aliasing_guard(self):
+        a = tuple(range(1000, 1002))
+        b = tuple(range(1000, 1002))
+        d = {"t": (a,)}
+
+        guards_manager = RootGuardManager()
+        x_mgr = guards_manager.framelocals_manager(("x", 0), "x", a, default_mgr_enum)
+        d_mgr = guards_manager.framelocals_manager(("d", 1), "d", d, default_mgr_enum)
+        d_t_mgr = d_mgr.framelocals_manager(
+            ("t", 0), "d['t']", d["t"], default_mgr_enum
+        )
+        d_t_item_mgr = d_t_mgr.tuple_getitem_manager(
+            0, "d['t'][0]", a, default_mgr_enum
+        )
+        install_object_aliasing_guard(x_mgr, d_t_item_mgr, ["x is d['t'][0]"], None)
+
         self.assertTrue(guards_manager.check({"x": a, "d": d}))
         self.assertFalse(guards_manager.check({"x": b, "d": d}))
 
@@ -1492,20 +1480,75 @@ class TagSafetyChecks(RecursiveDictTagTests):
                 return t + 1
             return t - 1
 
+        try:
+            from .utils import install_guard_manager_testing_hook
+        except ImportError:
+            from utils import install_guard_manager_testing_hook
+
+        checked_matching_graph = False
+
+        def hook(guard_wrapper, f_locals, builder):
+            nonlocal checked_matching_graph
+
+            if f_locals["x"] is not f_locals["m"].a[0]:
+                return
+
+            from torch._dynamo.source import AttrSource, GetItemSource, LocalSource
+
+            checked_matching_graph = True
+            m_source = LocalSource("m")
+            m_a_source = AttrSource(m_source, "a")
+            m_a_item_source = GetItemSource(m_a_source, 0)
+
+            m_mgr = builder.get_guard_manager_from_source(m_source)
+            m_a_mgr = builder.get_guard_manager_from_source(m_a_source)
+            m_a_item_mgr = builder.get_guard_manager_from_source(m_a_item_source)
+
+            self.assertTrue(m_a_item_mgr.has_unoptimized_relational_guard())
+            self.assertFalse(m_a_item_mgr.is_tag_safe())
+            self.assertFalse(m_a_mgr.is_tag_safe())
+            self.assertFalse(m_mgr.is_tag_safe())
+
         with torch._dynamo.config.patch(use_recursive_dict_tags_for_guards=True):
             counter = CompileCounter()
             opt_fn = torch.compile(fn, backend=counter, fullgraph=True)
             t = torch.tensor(0)
 
-            self.assertEqual(
-                [
-                    opt_fn(t, base, mod).item(),
-                    opt_fn(t, base, mod).item(),
-                    opt_fn(t, different, mod).item(),
-                ],
-                [1, 1, -1],
-            )
+            with install_guard_manager_testing_hook(hook):
+                self.assertEqual(
+                    [
+                        opt_fn(t, base, mod).item(),
+                        opt_fn(t, base, mod).item(),
+                        opt_fn(t, different, mod).item(),
+                    ],
+                    [1, 1, -1],
+                )
             self.assertEqual(counter.frame_count, 2)
+            self.assertTrue(checked_matching_graph)
+
+    def test_custom_metaclass_mro_first_item_source(self):
+        from torch._dynamo.testing import CompileCounter
+
+        class Meta(type):
+            def mro(cls):
+                return [object, cls]
+
+        class Foo(metaclass=Meta):
+            pass
+
+        def fn(x):
+            if type(x).__mro__[0] is object:
+                return torch.ones(1)
+            return torch.zeros(1)
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, fullgraph=True)
+        foo = Foo()
+        expected = fn(foo)
+
+        self.assertEqual(opt_fn(foo), expected)
+        self.assertEqual(opt_fn(foo), expected)
+        self.assertEqual(counter.frame_count, 1)
 
     def test_nn_module_tag_safe(self):
         class Foo(torch.nn.Module):

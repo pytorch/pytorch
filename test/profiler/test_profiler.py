@@ -758,18 +758,20 @@ class TestProfiler(TestCase):
             "TOP(C)::forward.",
         ]
         with TemporaryFileName(mode="w+") as fname:
-            with profile(
-                activities=[torch.profiler.ProfilerActivity.CPU],
-                with_modules=True,
-            ) as prof:
-                model(input_a, input_b)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", FutureWarning)
+                with profile(
+                    activities=[torch.profiler.ProfilerActivity.CPU],
+                    with_modules=True,
+                ) as prof:
+                    model(input_a, input_b)
             prof.export_chrome_trace(fname)
             with open(fname) as f:
                 trace = json.load(f)
                 if "traceEvents" not in trace:
                     raise AssertionError("Expected 'traceEvents' in trace")
                 events = trace["traceEvents"]
-                found_memory_events = False
+                checked = 0
                 for evt in events:
                     if "name" not in evt:
                         raise AssertionError("Expected 'name' in event")
@@ -778,10 +780,14 @@ class TestProfiler(TestCase):
                         if "Module Hierarchy" in evt["args"]:
                             hierarchy = evt["args"]["Module Hierarchy"]
                             if op_name in op_to_module_hierarchy:
+                                checked += 1
                                 if hierarchy not in op_to_module_hierarchy[op_name]:
                                     raise AssertionError(
                                         f"Expected hierarchy '{hierarchy}' in {op_to_module_hierarchy[op_name]}"
                                     )
+                # Without this the comparisons above are vacuous: a trace with no
+                # module hierarchy at all satisfies every branch.
+                self.assertGreater(checked, 0)
 
     def test_high_level_trace(self):
         """Checks that python side high level events are recorded."""
@@ -1018,6 +1024,23 @@ class TestProfiler(TestCase):
                     experimental_config=cfg,
                 ):
                     pass
+
+    def test_adjust_profiler_step_deprecated(self):
+        # adjust_profiler_step is a deprecated no-op: passing it must warn with
+        # FutureWarning and not error.
+        with self.assertWarnsRegex(FutureWarning, "adjust_profiler_step"):
+            with profile(
+                activities=[ProfilerActivity.CPU],
+                experimental_config=_ExperimentalConfig(adjust_profiler_step=True),
+            ):
+                pass
+
+    def test_with_modules_deprecated(self):
+        # with_modules only collects data for TorchScript models and is on its
+        # way out: passing it must warn with FutureWarning and not error.
+        with self.assertWarnsRegex(FutureWarning, "with_modules is deprecated"):
+            with profile(activities=[ProfilerActivity.CPU], with_modules=True):
+                torch.ones(1)
 
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     @parametrize("use_cuda", [False, True])
@@ -2162,23 +2185,6 @@ class TestProfilerDevice(TestCase):
             profiler_stats.function_events_build_tree_call_duration_us, 0
         )
 
-    def _step_helper_func(self, prof):
-        time.sleep(0.1)
-        torch.randn(1, 3, 224, 224)
-        prof.step()
-
-    def _partial_overlap(self, prof_step, step_helper_func):
-        p_start = prof_step["ts"]
-        p_end = prof_step["ts"] + prof_step["dur"]
-        h_start = step_helper_func["ts"]
-        h_end = step_helper_func["ts"] + step_helper_func["dur"]
-
-        if p_start < h_start and p_end < h_end and p_end > h_start:
-            return True
-        if p_start > h_start and p_start < h_end and p_end > h_end:
-            return True
-        return False
-
     def _check_all_gpu_present(self, gpu_dict, max_gpu_count):
         for i in range(max_gpu_count):
             self.assertEqual(gpu_dict["GPU " + str(i)], 1)
@@ -2718,39 +2724,6 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
     def test_basic_chrome_trace(self, device):
         device_type = device.split(":")[0]
         self._test_chrome_trace_basic_helper(device)
-
-    @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
-    def test_cpu_annotation_overlap(self, device):
-        device_type = device.split(":")[0]
-        with torch.profiler.profile(
-            activities=get_profiler_activities(device_type),
-            record_shapes=True,
-            with_stack=True,
-            schedule=torch.profiler.schedule(wait=0, warmup=0, active=5, repeat=1),
-            experimental_config=torch._C._profiler._ExperimentalConfig(
-                adjust_profiler_step=True
-            ),
-        ) as prof:
-            for _ in range(5):
-                self._step_helper_func(prof)
-        with TemporaryFileName(mode="w+") as fname:
-            prof.export_chrome_trace(fname)
-            prof_steps = []
-            step_helper_funcs = []
-            with open(fname) as f:
-                report = json.load(f)
-                for event in report["traceEvents"]:
-                    if "ProfilerStep" in event["name"]:
-                        prof_steps.append(event)
-                    if "step_helper_func" in event["name"]:
-                        step_helper_funcs.append(event)
-            self.assertEqual(len(prof_steps), 5)
-            self.assertEqual(len(step_helper_funcs), 5)
-            for i in range(len(step_helper_funcs)):
-                for j in range(len(step_helper_funcs)):
-                    self.assertTrue(
-                        not self._partial_overlap(prof_steps[i], step_helper_funcs[j])
-                    )
 
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
     def test_user_annotation(self, device):

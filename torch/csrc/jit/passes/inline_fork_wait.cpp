@@ -38,7 +38,7 @@ static void InlineForkWait(
       // If the future does not map to a prim::fork, it could be
       // returned from prim::rpc_async, which has side effect, so it shouldn't
       // be dead code eliminated.
-      if (future_remap.count(node->input())) {
+      if (future_remap.contains(node->input())) {
         node->output()->replaceAllUsesWith(future_remap.at(node->input()));
         it.destroyCurrent();
       }
