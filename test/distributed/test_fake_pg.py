@@ -462,12 +462,10 @@ class TestFakePG(TestCase):
         self.assertEqual(out_tensor, in_tensor)
 
     @parametrize("rank", [0, 1])
-    def test_alltoall_base_split_sizes_repeat(self, rank):
+    def test_alltoall_base_output_larger_than_input(self, rank):
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=rank, world_size=2, store=store)
 
-        # Slot 1 (size 6) is larger than the input buffer (size 4),
-        # so the input is repeated to fill it.
         in_tensor = torch.arange(4.0).reshape(4, 1)
         out_tensor = torch.empty(8, 1)
         dist.all_to_all_single(
@@ -477,17 +475,15 @@ class TestFakePG(TestCase):
             input_split_sizes=[1, 3],
         )
         expected = torch.tensor(
-            [[0.0], [1.0], [0.0], [1.0], [2.0], [3.0], [0.0], [1.0]]
+            [[0.0], [1.0], [2.0], [3.0], [0.0], [0.0], [0.0], [0.0]]
         )
         self.assertEqual(out_tensor, expected)
 
     @parametrize("rank", [0, 1])
-    def test_alltoall_base_split_sizes_truncate(self, rank):
+    def test_alltoall_base_output_smaller_than_input(self, rank):
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=rank, world_size=2, store=store)
 
-        # Each output slot is smaller than the input buffer, so input is
-        # truncated to slot size.
         in_tensor = torch.arange(8.0).reshape(8, 1)
         out_tensor = torch.empty(4, 1)
         dist.all_to_all_single(
@@ -496,8 +492,22 @@ class TestFakePG(TestCase):
             output_split_sizes=[1, 3],
             input_split_sizes=[4, 4],
         )
-        expected = torch.tensor([[0.0], [0.0], [1.0], [2.0]])
+        expected = torch.tensor([[0.0], [1.0], [2.0], [3.0]])
         self.assertEqual(out_tensor, expected)
+
+    def test_alltoall_base_empty_output_split_sizes(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        in_tensor = torch.arange(4.0).reshape(4, 1)
+        out_tensor = torch.empty(4, 1)
+        dist.all_to_all_single(
+            out_tensor,
+            in_tensor,
+            output_split_sizes=[],
+            input_split_sizes=[2, 2],
+        )
+        self.assertEqual(out_tensor, in_tensor)
 
     def test_alltoall_base_split_size_validation(self):
         store = FakeStore()
@@ -532,13 +542,14 @@ class TestFakePG(TestCase):
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
 
-        with self.assertRaisesRegex(RuntimeError, "inputBuffer is empty"):
-            dist.all_to_all_single(
-                torch.empty(2, 1),
-                torch.empty(0, 1),
-                output_split_sizes=[1, 1],
-                input_split_sizes=[0, 0],
-            )
+        out_tensor = torch.ones(2, 1)
+        dist.all_to_all_single(
+            out_tensor,
+            torch.empty(0, 2),
+            output_split_sizes=[0, 2],
+            input_split_sizes=[0, 0],
+        )
+        self.assertEqual(out_tensor, torch.zeros_like(out_tensor))
 
     def test_alltoall_list_size_validation(self):
         store = FakeStore()
