@@ -48,7 +48,10 @@ import torch
 import torch._library.opaque_object as opaque_object
 import torch.distributed as dist
 from torch import SymInt, Tensor
-from torch._dynamo.device_interface import get_interface_for_device
+from torch._dynamo.device_interface import (
+    get_interface_for_device,
+    get_registered_device_interfaces,
+)
 from torch._dynamo.exc import SkipFrame
 from torch._dynamo.utils import (
     CompileEventLogger,
@@ -163,6 +166,7 @@ class SystemInfo(TypedDict):
     hash: str
     device: NotRequired[SystemDeviceInfo]
     version: NotRequired[SystemVersionInfo]
+    device_interfaces: NotRequired[dict[str, Any]]
 
 
 class CacheInfo(TypedDict, total=False):
@@ -333,6 +337,8 @@ class CacheBase:
         with dynamo_timed("CacheBase.get_system.triton_key"):
             triton_version = triton_key()
 
+        hash_input: dict[str, Any] = {}
+        system: dict[str, Any] = {}
         try:
             device_info: SystemDeviceInfo = {"name": None}
             version_info: SystemVersionInfo = {"triton": triton_version}
@@ -345,18 +351,34 @@ class CacheBase:
             else:
                 device_info["name"] = device_properties.gcnArchName
                 version_info["hip"] = torch.version.hip
-            hash_input: dict[str, Any] = {
-                "device": device_info,
-                "version": version_info,
-            }
-            return {
-                "device": device_info,
-                "version": version_info,
-                "hash": SYSTEM_CACHE_KEY_STRATEGY.key_from_json(hash_input),
-            }
+            hash_input.update(
+                {
+                    "device": device_info,
+                    "version": version_info,
+                }
+            )
+            system.update(
+                {
+                    "device": device_info,
+                    "version": version_info,
+                }
+            )
         except (AssertionError, RuntimeError):
             # If cuda is not installed, none of the above config is relevant.
-            return {"hash": SYSTEM_CACHE_KEY_STRATEGY.key_from_json({})}
+            pass
+
+        device_interface_info = {
+            name: info
+            for name, interface in get_registered_device_interfaces()
+            if ":" not in name
+            if (info := interface.get_cache_system_info()) is not None
+        }
+        if device_interface_info:
+            hash_input["device_interfaces"] = device_interface_info
+            system["device_interfaces"] = device_interface_info
+
+        system["hash"] = SYSTEM_CACHE_KEY_STRATEGY.key_from_json(hash_input)
+        return cast(SystemInfo, system)
 
     @staticmethod
     @clear_on_fresh_cache

@@ -22,6 +22,7 @@ from unittest import mock
 
 import torch
 from torch._dynamo import reset
+from torch._dynamo.device_interface import DeviceInterface
 from torch._dynamo.package import DynamoCache
 from torch._dynamo.precompile_context import PrecompileContext
 from torch._dynamo.utils import counters
@@ -221,6 +222,143 @@ class TestCacheKeyStrategy(TestCase):
             },
         )
         self.assertTrue(fake_strategy.sort_keys)
+
+    def test_device_interface_cache_system_info(self):
+        self.assertIsNone(DeviceInterface.get_cache_system_info())
+
+        class FakeDeviceInterface(DeviceInterface):
+            info = None
+            calls = 0
+
+            @classmethod
+            def get_cache_system_info(cls):
+                cls.calls += 1
+                return cls.info
+
+        fake_strategy = mock.MagicMock()
+        fake_strategy.key_from_json.side_effect = lambda value: json.dumps(
+            value, sort_keys=True
+        )
+        fake_properties = types.SimpleNamespace(
+            name="test-gpu", gcnArchName="test-gcn"
+        )
+        CacheBase.get_system.cache_clear()
+        try:
+            with (
+                mock.patch(
+                    "torch._inductor.codecache.SYSTEM_CACHE_KEY_STRATEGY",
+                    fake_strategy,
+                ),
+                mock.patch("torch._inductor.runtime.triton_compat.HAS_TRITON", False),
+                mock.patch.object(torch.cuda, "current_device", return_value=0),
+                mock.patch.object(
+                    torch.cuda,
+                    "get_device_properties",
+                    return_value=fake_properties,
+                ),
+                mock.patch.object(torch.version, "cuda", "test-cuda"),
+                mock.patch(
+                    "torch._inductor.codecache.get_registered_device_interfaces",
+                    return_value=[
+                        ("fake", FakeDeviceInterface),
+                        ("fake:0", FakeDeviceInterface),
+                    ],
+                ),
+            ):
+                base = CacheBase.get_system()
+                self.assertNotIn(
+                    "device_interfaces", fake_strategy.key_from_json.call_args.args[0]
+                )
+                self.assertEqual(FakeDeviceInterface.calls, 1)
+
+                FakeDeviceInterface.info = ("runtime", "1")
+                CacheBase.get_system.cache_clear()
+                first = CacheBase.get_system()
+                self.assertEqual(
+                    first["device_interfaces"], {"fake": ("runtime", "1")}
+                )
+                self.assertEqual(FakeDeviceInterface.calls, 2)
+                FakeDeviceInterface.info = ("runtime", "2")
+                CacheBase.get_system.cache_clear()
+                second = CacheBase.get_system()
+        finally:
+            CacheBase.get_system.cache_clear()
+
+        self.assertNotEqual(first["hash"], second["hash"])
+        self.assertEqual(
+            base["hash"],
+            json.dumps(
+                {
+                    "device": {"name": "test-gpu"},
+                    "version": {"triton": None, "cuda": "test-cuda"},
+                },
+                sort_keys=True,
+            ),
+        )
+
+    def test_device_interface_cache_system_info_without_cuda(self):
+        class FakeDeviceInterface(DeviceInterface):
+            @classmethod
+            def get_cache_system_info(cls):
+                return ("runtime", "1")
+
+        strategy = mock.MagicMock()
+        strategy.key_from_json.side_effect = lambda value: json.dumps(
+            value, sort_keys=True
+        )
+        CacheBase.get_system.cache_clear()
+        try:
+            with (
+                mock.patch(
+                    "torch._inductor.codecache.SYSTEM_CACHE_KEY_STRATEGY", strategy
+                ),
+                mock.patch("torch._inductor.runtime.triton_compat.HAS_TRITON", False),
+                mock.patch.object(
+                    torch.cuda, "current_device", side_effect=RuntimeError
+                ),
+                mock.patch(
+                    "torch._inductor.codecache.get_registered_device_interfaces",
+                    return_value=[("fake", FakeDeviceInterface)],
+                ),
+            ):
+                system = CacheBase.get_system()
+        finally:
+            CacheBase.get_system.cache_clear()
+
+        self.assertEqual(
+            system["device_interfaces"], {"fake": ("runtime", "1")}
+        )
+        self.assertEqual(
+            strategy.key_from_json.call_args.args[0],
+            {"device_interfaces": {"fake": ("runtime", "1")}},
+        )
+
+    def test_cache_base_get_system_without_cuda_preserves_empty_hash(self):
+        strategy = mock.MagicMock()
+        strategy.key_from_json.side_effect = lambda value: json.dumps(
+            value, sort_keys=True
+        )
+        CacheBase.get_system.cache_clear()
+        try:
+            with (
+                mock.patch(
+                    "torch._inductor.codecache.SYSTEM_CACHE_KEY_STRATEGY", strategy
+                ),
+                mock.patch("torch._inductor.runtime.triton_compat.HAS_TRITON", False),
+                mock.patch.object(
+                    torch.cuda, "current_device", side_effect=RuntimeError
+                ),
+                mock.patch(
+                    "torch._inductor.codecache.get_registered_device_interfaces",
+                    return_value=[],
+                ),
+            ):
+                system = CacheBase.get_system()
+        finally:
+            CacheBase.get_system.cache_clear()
+
+        self.assertEqual(system, {"hash": json.dumps({}, sort_keys=True)})
+        self.assertEqual(strategy.key_from_json.call_args.args[0], {})
 
     def test_autotune_prepare_key_uses_strategy(self):
         from torch._inductor.runtime.autotune_cache import AutotuneCache
