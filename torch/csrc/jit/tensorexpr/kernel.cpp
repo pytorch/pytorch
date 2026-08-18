@@ -417,7 +417,7 @@ ExprHandle TensorExprKernel::constant(const torch::jit::Value* v) {
     }
   }
 
-  if (!scalars_.count(v)) {
+  if (!scalars_.contains(v)) {
     throw malformed_input("no scalar in Constant");
   }
 
@@ -471,7 +471,7 @@ ArgValue TensorExprKernel::toArg(const torch::jit::Value* v) const {
     }
   }
 
-  if (!scalars_.count(v)) {
+  if (!scalars_.contains(v)) {
     throw malformed_input("no scalar in Constant");
   }
   return scalars_.at(v);
@@ -509,7 +509,7 @@ std::vector<ExprHandle> TensorExprKernel::sizesFromSymbolicShape(
 
 std::vector<ExprHandle> TensorExprKernel::sizesForValue(
     const torch::jit::Value* v) {
-  if (known_sizes_.count(v)) {
+  if (known_sizes_.contains(v)) {
     return known_sizes_.at(v);
   }
 
@@ -1236,7 +1236,7 @@ Tensor TensorExprKernel::bindInput(const torch::jit::Value* input) {
 
 NNCLoweringFunction TensorExprKernel::getCustomLoweringFor(
     c10::Symbol op) const {
-  if (custom_lowerings_.count(op))
+  if (custom_lowerings_.contains(op))
     return custom_lowerings_.at(op);
   return nullptr;
 }
