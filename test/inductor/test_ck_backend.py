@@ -15,8 +15,13 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import try_import_ck_lib
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import tf32_off
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
+)
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
+    HardwareClassification,
     parametrize,
 )
 from torch.testing._internal.inductor_utils import (
@@ -37,8 +42,9 @@ log = logging.getLogger(__name__)
 _test_env = {}
 
 
-@instantiate_parametrized_tests
 class TestCKBackend(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def setUp(self):
         # The new inductor cache refresh mechanism
         # introduced with https://github.com/pytorch/pytorch/pull/122661
@@ -63,6 +69,7 @@ class TestCKBackend(TestCase):
                 old_disable_fresh_cache_envvar
             )
 
+    @requires_capabilities(Capability.lib.triton)
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @unittest.mock.patch.dict(os.environ, _test_env)
     @parametrize(
@@ -77,7 +84,7 @@ class TestCKBackend(TestCase):
     @parametrize("autotune_in_subproc", (True, False))
     @parametrize("use_aoti", (True, False))
     def test_max_autotune_precompile_matmul(
-        self, max_autotune_gemm_backends, autotune_in_subproc, use_aoti
+        self, device, max_autotune_gemm_backends, autotune_in_subproc, use_aoti
     ):
         """
         Make sure autotuning mm doesn't crash.
@@ -86,7 +93,7 @@ class TestCKBackend(TestCase):
         def mm(a, b):
             return a @ b
 
-        tensor_options = {"device": "cuda", "dtype": torch.bfloat16}
+        tensor_options = {"device": device, "dtype": torch.bfloat16}
 
         a = torch.randn(2240, 256, **tensor_options)
         b = torch.randn(256, 2048, **tensor_options)
@@ -124,6 +131,7 @@ class TestCKBackend(TestCase):
             Y = mm(a=a, b=b)
             torch.testing.assert_close(Y_compiled, Y)
 
+    @requires_capabilities(Capability.lib.triton)
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @unittest.mock.patch.dict(os.environ, _test_env)
     @parametrize(
@@ -133,13 +141,13 @@ class TestCKBackend(TestCase):
     )
     @parametrize("autotune_in_subproc", (True,))
     def test_max_autotune_precompile_matmul_dynamic(
-        self, max_autotune_gemm_backends, autotune_in_subproc
+        self, device, max_autotune_gemm_backends, autotune_in_subproc
     ):
         """
         Test matmul with dynamic shapes
         """
 
-        tensor_options = {"device": "cuda", "dtype": torch.bfloat16}
+        tensor_options = {"device": device, "dtype": torch.bfloat16}
 
         a = torch.randn(2240, 256, **tensor_options)
         b = torch.randn(256, 2048, **tensor_options)
@@ -177,17 +185,18 @@ class TestCKBackend(TestCase):
             Y1 = a1 @ b
             torch.testing.assert_close(Y1_compiled, Y1)
 
+    @requires_capabilities(Capability.lib.triton)
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @unittest.mock.patch.dict(os.environ, _test_env)
     @parametrize("num_gemms", (1, 2))
-    def test_max_autotune_ck_backend_cpp_wrapper(self, num_gemms):
+    def test_max_autotune_ck_backend_cpp_wrapper(self, device, num_gemms):
         """
         Verify that CK GEMM templates work under JIT cpp_wrapper mode.
         ``num_gemms=2`` chains a second GEMM of a different shape so the
         wrapper has to link against multiple distinct .so files.
         """
         M, N, K = 2240, 2048, 256
-        tensor_options = {"device": "cuda", "dtype": torch.bfloat16}
+        tensor_options = {"device": device, "dtype": torch.bfloat16}
 
         class MyModel(torch.nn.Module):
             def forward(self, a, b, c):
@@ -232,6 +241,7 @@ class TestCKBackend(TestCase):
             # AOT-only `kernels.` member.
             FileCheck().check("rocm_").check_not("kernels.rocm_").run(codes[0])
 
+    @requires_capabilities(Capability.lib.triton)
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @unittest.mock.patch.dict(os.environ, _test_env)
     @parametrize(
@@ -239,7 +249,7 @@ class TestCKBackend(TestCase):
         ("CK", "ATen,CK"),
         name_fn=lambda b: "standalone" if b == "CK" else "fallback",
     )
-    def test_max_autotune_precompile_preselected(self, max_autotune_gemm_backends):
+    def test_max_autotune_precompile_preselected(self, device, max_autotune_gemm_backends):
         """
         End to end test for picking preselected ck instances
         """
@@ -247,7 +257,7 @@ class TestCKBackend(TestCase):
         def mm(a, b):
             return a @ b
 
-        tensor_options = {"device": "cuda", "dtype": torch.float16}
+        tensor_options = {"device": device, "dtype": torch.float16}
 
         a = torch.randn(2240, 256, **tensor_options)
         b = torch.randn(2048, 256, **tensor_options).transpose(0, 1)
@@ -272,15 +282,16 @@ class TestCKBackend(TestCase):
             Y = mm(a, b)
             torch.testing.assert_close(Y_compiled, Y)
 
+    @requires_capabilities(Capability.lib.triton)
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @unittest.mock.patch.dict(os.environ, _test_env)
     @parametrize("max_autotune_gemm_backends", ("Aten,CK",))
-    def test_max_autotune_precompile_non_contiguous(self, max_autotune_gemm_backends):
+    def test_max_autotune_precompile_non_contiguous(self, device, max_autotune_gemm_backends):
         """
         Make sure the matmul with non-contiguous inputs can fallback
         """
 
-        tensor_options = {"device": "cuda", "dtype": torch.float16}
+        tensor_options = {"device": device, "dtype": torch.float16}
 
         a = torch.empty_strided((50257, 32768), (1, 50304), **tensor_options)
         b = torch.empty_strided((32768, 768), (768, 1), **tensor_options)
@@ -311,6 +322,7 @@ class TestCKBackend(TestCase):
             Y_eager = a @ b
             torch.testing.assert_close(Y_compiled, Y_eager, equal_nan=True)
 
+    @requires_capabilities(Capability.lib.triton)
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @unittest.mock.patch.dict(os.environ, _test_env)
     @parametrize(
@@ -328,11 +340,11 @@ class TestCKBackend(TestCase):
         (torch.float16, torch.bfloat16),
         name_fn=lambda d: {torch.float16: "float16", torch.bfloat16: "bfloat16"}[d],
     )
-    def test_max_autotune_addmm(self, max_autotune_gemm_backends, x_shape, dtype):
+    def test_max_autotune_addmm(self, device, max_autotune_gemm_backends, x_shape, dtype):
         m, k, n = 4096, 224, 2048
         alpha, beta = 1.0, 1.0
 
-        tensor_options = {"device": "cuda", "dtype": dtype}
+        tensor_options = {"device": device, "dtype": dtype}
         x = torch.ones(x_shape, **tensor_options)
         a = torch.randn(m, k, **tensor_options)
         b = torch.randn(k, n, **tensor_options)
@@ -363,6 +375,7 @@ class TestCKBackend(TestCase):
 
             torch.testing.assert_close(Y_compiled, Y_eager)
 
+    @requires_capabilities(Capability.lib.triton)
     @unittest.skip(
         "FIXME(tenpercent): kernel compilation errors on gfx942 as of 09/01/25"
     )
@@ -376,7 +389,7 @@ class TestCKBackend(TestCase):
     @parametrize("quantize_type", ("tensorwise", "rowwise"))
     @parametrize("has_bias", (True, False))
     def test_max_autotune_scaled_mm(
-        self, max_autotune_gemm_backends, quantize_type, has_bias
+        self, device, max_autotune_gemm_backends, quantize_type, has_bias
     ):
         use_fast_accum = False
         runtime_arch = torch.cuda.get_device_properties(0).gcnArchName
@@ -384,7 +397,7 @@ class TestCKBackend(TestCase):
             self.skipTest(f"Unsupported arch {runtime_arch}")
         # output dtype
         dtype = torch.bfloat16
-        tensor_options = {"device": "cuda", "dtype": dtype}
+        tensor_options = {"device": device, "dtype": dtype}
 
         M = 2240
         N = 2048
@@ -460,6 +473,7 @@ class TestCKBackend(TestCase):
 
             torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.05)
 
+    @requires_capabilities(Capability.lib.triton)
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @unittest.mock.patch.dict(
         os.environ,
@@ -470,8 +484,8 @@ class TestCKBackend(TestCase):
         ("CK", "ATEN,CK"),
         name_fn=lambda b: "standalone" if b == "CK" else "fallback",
     )
-    def test_max_autotune_conv2d(self, max_autotune_conv_backends):
-        tensor_options = {"device": "cuda", "dtype": torch.float32}
+    def test_max_autotune_conv2d(self, device, max_autotune_conv_backends):
+        tensor_options = {"device": device, "dtype": torch.float32}
 
         x = torch.randn(1, 8, 224, 224, **tensor_options)
         w = torch.randn(64, 8, 7, 7, **tensor_options)
@@ -504,6 +518,7 @@ class TestCKBackend(TestCase):
 
             torch.testing.assert_close(Y_compiled, Y_eager, atol=2e-4, rtol=2e-4)
 
+    @requires_capabilities(Capability.lib.triton)
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @unittest.mock.patch.dict(os.environ, _test_env)
     @parametrize(
@@ -513,6 +528,7 @@ class TestCKBackend(TestCase):
     )
     def test_max_autotune_precompile_bmm(
         self,
+        device,
         max_autotune_gemm_backends,
     ):
         """
@@ -522,7 +538,7 @@ class TestCKBackend(TestCase):
         def bmm(a, b):
             return torch.bmm(a, b)
 
-        tensor_options = {"device": "cuda", "dtype": torch.bfloat16}
+        tensor_options = {"device": device, "dtype": torch.bfloat16}
 
         a = torch.randn(16, 2240, 256, **tensor_options)
         b = torch.randn(16, 2048, 256, **tensor_options).transpose(1, 2)
@@ -553,9 +569,11 @@ class TestCKBackend(TestCase):
             torch.testing.assert_close(Y_compiled, Y_eager)
 
 
+instantiate_device_type_tests(TestCKBackend, globals(), only_for="cuda")
+
 if __name__ == "__main__":
     from torch._inductor.utils import is_big_gpu
 
     # Set env to make it work in CI.
-    if HAS_CUDA_AND_TRITON and HAS_CPU and is_big_gpu():
+    if HAS_CPU and is_big_gpu():
         run_tests()
