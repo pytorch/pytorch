@@ -1561,6 +1561,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
         metadata: str | None = None,
         gpu: bool = False,
         cpp_definition: str | None = None,
+        # A C++ wrapper never defines a kernel as module-level python, so the readable
+        # python wrapper's standalone form cannot reach here; accepted to keep one
+        # signature across _define_kernel_helper implementations.
+        standalone: bool = False,
+        autotune_body: str | None = None,
     ):
         # Misnomer: `gpu` actually means "is this a Triton kernel?"
         if gpu:
