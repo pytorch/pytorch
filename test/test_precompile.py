@@ -2061,6 +2061,189 @@ class TestPrecompile(TestCase):
         ref(x).sum().backward()
         self.assertEqual(run.weight.grad, ref.weight.grad)
 
+    def test_capture_leaves_the_ambient_rng_state_alone(self):
+        # Capture runs fn for real under make_fx, so a graph that draws consumes the
+        # caller's RNG stream as a side effect of asking for an artifact. Nothing about
+        # requesting a compile should advance the caller's randomness, so capture
+        # snapshots the state and rewinds it once it knows the graph drew.
+        torch.manual_seed(0)
+        before = torch.random.get_rng_state()
+        torch.compiler.precompile(
+            lambda a: torch.rand_like(a), torch.empty(4), backend="eager"
+        )
+        self.assertEqual(torch.random.get_rng_state(), before)
+
+    @unittest.skipIf(not TEST_CUDA, "needs CUDA")
+    def test_capture_leaves_the_accelerator_rng_state_alone(self):
+        # Same guarantee on the device generator: a graph that draws on the accelerator
+        # advances that device's stream, not the CPU one, so the snapshot has to cover
+        # whichever generators the graph actually touched.
+        torch.manual_seed(0)
+        before = torch.cuda.get_rng_state()
+        torch.compiler.precompile(
+            lambda a: torch.rand_like(a),
+            torch.empty(4, device="cuda"),
+            backend="eager",
+        )
+        self.assertEqual(torch.cuda.get_rng_state(), before)
+
+    def test_concurrent_captures_are_serialized(self):
+        # Capture mutates process-global state (RNG snapshots, inductor's codegen
+        # config) and runs fn for real, so two captures in flight at once would
+        # interleave those mutations. One process-wide lock is what keeps a capture
+        # atomic with respect to another; assert no two are ever inside _capture.
+        import threading
+        import time
+        from unittest.mock import patch
+
+        import torch._precompile as precompile_impl
+
+        real = precompile_impl._capture
+        state_lock = threading.Lock()
+        active = 0
+        max_active = 0
+
+        def spy(*args, **kwargs):
+            nonlocal active, max_active
+            with state_lock:
+                active += 1
+                max_active = max(max_active, active)
+            try:
+                time.sleep(0.02)
+                return real(*args, **kwargs)
+            finally:
+                with state_lock:
+                    active -= 1
+
+        barrier = threading.Barrier(4)
+        results: list = [None] * 4
+
+        def worker(i):
+            barrier.wait()
+            results[i] = torch.compiler.precompile(
+                lambda a: a + 1, torch.ones(2), backend="eager"
+            )
+
+        with patch.object(precompile_impl, "_capture", spy):
+            threads = [threading.Thread(target=worker, args=(i,)) for i in range(4)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+
+        self.assertEqual(max_active, 1)
+        for code, _cache in results:
+            self.assertIn("def forward", code)
+
+    def test_nested_capture_does_not_deadlock(self):
+        # Capture runs fn for real, so fn is free to ask for a capture of its own. The
+        # process-wide lock is therefore reentrant: a plain Lock would deadlock the
+        # thread against itself the moment a traced function precompiled anything.
+        def inner(a):
+            return a * 2
+
+        def outer(a):
+            torch.compiler.precompile(inner, torch.ones(2), backend="eager")
+            return a + 1
+
+        code, _cache = torch.compiler.precompile(outer, torch.ones(2), backend="eager")
+        self.assertIn("def forward", code)
+
+    def test_capture_lock_survives_a_fork(self):
+        # The capture lock is process-global, and fork copies it in whatever state the
+        # parent left it: a child forked while another parent thread held it inherits a
+        # lock that is held by a thread that does not exist, and its first capture
+        # blocks forever. Run out of process -- forking a worker that may already have
+        # initialized CUDA is not safe -- and bound the child with an alarm so the
+        # regression is a failure rather than a hang.
+        code = textwrap.dedent(
+            """
+            import os, signal, sys, threading, torch
+            import torch._precompile as impl
+
+            held = threading.Event()
+            release = threading.Event()
+
+            def holder():
+                with impl._CAPTURE_LOCK:
+                    held.set()
+                    release.wait(60)
+
+            t = threading.Thread(target=holder)
+            t.start()
+            if not held.wait(60):
+                sys.exit(3)
+            pid = os.fork()
+            if pid == 0:
+                signal.alarm(60)
+                try:
+                    torch.compiler.precompile(
+                        lambda a: a + 1, torch.ones(2), backend="eager"
+                    )
+                except BaseException:
+                    os._exit(2)
+                os._exit(0)
+            _, status = os.waitpid(pid, 0)
+            release.set()
+            t.join()
+            sys.exit(os.waitstatus_to_exitcode(status))
+            """
+        )
+        proc = subprocess.run(
+            [sys.executable, "-c", code], capture_output=True, text=True, timeout=600
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr[-2000:])
+
+    def test_inlined_forward_names_the_artifact_in_tracebacks(self):
+        # The emitted source is meant to be read and edited, so every code object it
+        # creates carries the caller's filename. Under the anonymous default a hand-edit
+        # that raised produced a frame with no path and no source line.
+        from torch._precompile import _make_inlined_forward
+
+        code, _cache = torch.compiler.precompile(
+            lambda a: a + 1, torch.ones(2), backend="eager"
+        )
+        forward = _make_inlined_forward(code, warn=False, filename="/tmp/artifact.py")
+        self.assertEqual(forward.__code__.co_filename, "/tmp/artifact.py")
+
+    def test_inlined_forward_can_stay_quiet_about_the_exec(self):
+        # Loading warns because it execs untrusted source, but a caller that has already
+        # established its own trust boundary and warned would otherwise emit two
+        # warnings per load, so the warning is suppressible rather than unconditional.
+        from torch._precompile import _make_inlined_forward
+
+        code, _cache = torch.compiler.precompile(
+            lambda a: a + 1, torch.ones(2), backend="eager"
+        )
+        with self.assertLogs("torch._precompile", level="WARNING"):
+            _make_inlined_forward(code)
+        with self.assertNoLogs("torch._precompile", level="WARNING"):
+            _make_inlined_forward(code, warn=False)
+
+    def test_generated_source_says_it_may_be_edited(self):
+        # The artifact's own header is the only documentation most readers will see. It
+        # used to carry a generated-code "do not edit" banner, which is exactly backwards
+        # for source whose purpose is to be tuned in place.
+        for backend in ("eager", "inductor"):
+            code, _cache = torch.compiler.precompile(
+                lambda a: a + 1, torch.ones(2), backend=backend
+            )
+            self.assertIn("Editing it is supported", code)
+
+    @unittest.skipIf(not TEST_CUDA, "needs CUDA")
+    def test_load_from_a_code_string_gives_triton_a_file(self):
+        # Kernels are module-level code, and @triton.jit reads its own source off disk:
+        # it refuses a function whose module has no file. A caller loading from a string
+        # has no path to offer, so load parks a copy where triton can find it rather
+        # than failing on every CUDA artifact.
+        code, cache = torch.compiler.precompile(
+            lambda a: (a * 2).relu(), torch.ones(64, device="cuda")
+        )
+        self.assertIn("@triton.jit", code)
+        loaded = torch.compiler.precompile.load(code, cache)
+        x = torch.randn(64, device="cuda")
+        self.assertEqual(loaded(x), (x * 2).relu())
+
 
 @skipIfTorchDynamo("precompile's make_fx capture is incompatible with dynamo wrapping")
 class TestPrecompileNumerics(TestCase):
