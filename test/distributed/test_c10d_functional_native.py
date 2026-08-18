@@ -791,6 +791,24 @@ class CrossThreadWaitTest(TestCase):
         # Verify work was removed from registry
         self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
 
+    def test_wait_tensor_shared_work_is_consumed_once(self) -> None:
+        dist.init_process_group(backend="fake", rank=0, world_size=2)
+        try:
+            outputs = torch.ops._c10d_functional.all_reduce_coalesced(
+                [torch.rand(2, 2), torch.rand(2, 2)],
+                "sum",
+                "0",
+            )
+            self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 2)
+
+            torch.ops._c10d_functional.wait_tensor(outputs[0])
+            self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
+
+            torch.ops._c10d_functional.wait_tensor(outputs[1])
+            self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
+        finally:
+            dist.destroy_process_group()
+
 
 class PyWorkTest(TestCase):
     """

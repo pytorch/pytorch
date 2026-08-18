@@ -356,6 +356,24 @@ class GraphModule(torch.nn.Module):
         )
 
     @torch._dynamo.config.patch(enable_p2p_compilation=True)
+    def test_compiled_batch_isend_irecv_waits_clear_work_registry(self):
+        @torch.compile(fullgraph=True, backend="eager")
+        def fn(send0, recv0, send1, recv1):
+            work = dist.batch_isend_irecv(
+                [
+                    dist.P2POp(dist.isend, send0, 1),
+                    dist.P2POp(dist.irecv, recv0, 1),
+                    dist.P2POp(dist.isend, send1, 1),
+                    dist.P2POp(dist.irecv, recv1, 1),
+                ]
+            )
+            for w in work:
+                w.wait()
+
+        fn(torch.ones(4), torch.zeros(4), torch.ones(4), torch.zeros(4))
+        self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
+
+    @torch._dynamo.config.patch(enable_p2p_compilation=True)
     def test_compiled_p2p_interleave_graph(self):
         backend = EagerAndRecordGraphs()
         nxt, prv = 1, 1  # rank=0 in world_size=2
