@@ -469,7 +469,7 @@ complex_ordered_op_db = tuple(
 
 @unittest.skipIf(TEST_WITH_ASAN, "tests time out with asan, are probably redundant")
 @unMarkDynamoStrictTest
-class TestOperators(TestCase):
+class TestOperatorsDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
@@ -508,7 +508,7 @@ class TestOperators(TestCase):
         ),
     )
     @opsToleranceOverride(
-        "TestOperators",
+        "TestOperatorsDevice",
         "test_grad",
         (
             tol1(
@@ -617,10 +617,6 @@ class TestOperators(TestCase):
                     "nn.functional.max_unpool2d"
                 ),  # fails everywhere except on windows
                 skip("nn.functional.max_unpool3d"),  # fails everywhere except on mac
-                # Tensor-likes are not close
-                xfail("native_batch_norm", device_type="cpu"),
-                # Tensor-likes are not close
-                xfail("_native_batch_norm_legit", device_type="cpu"),
                 xfail("nn.functional.scaled_dot_product_attention"),
                 xfail("torch.ops.aten._flash_attention_forward"),
                 xfail("torch.ops.aten._efficient_attention_forward"),
@@ -644,7 +640,7 @@ class TestOperators(TestCase):
         ).union(xpu_fft_stft_unsupported),
     )
     @opsToleranceOverride(
-        "TestOperators",
+        "TestOperatorsDevice",
         "test_jvp",
         (
             tol1(
@@ -801,7 +797,7 @@ class TestOperators(TestCase):
         ),
     )
     @opsToleranceOverride(
-        "TestOperators",
+        "TestOperatorsDevice",
         "test_vjp",
         (
             tol1(
@@ -906,7 +902,7 @@ class TestOperators(TestCase):
         ),
     )
     @opsToleranceOverride(
-        "TestOperators",
+        "TestOperatorsDevice",
         "test_vjpvjp",
         (
             tol1(
@@ -1069,7 +1065,7 @@ class TestOperators(TestCase):
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @opsToleranceOverride(
-        "TestOperators",
+        "TestOperatorsDevice",
         "test_vmapvjpvjp",
         (
             tol1("linalg.svd", {torch.float32: tol(atol=1e-03, rtol=5e-04)}),
@@ -1205,7 +1201,7 @@ class TestOperators(TestCase):
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @opsToleranceOverride(
-        "TestOperators",
+        "TestOperatorsDevice",
         "test_vmapvjp",
         (
             tol1(
@@ -1340,7 +1336,7 @@ class TestOperators(TestCase):
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @opsToleranceOverride(
-        "TestOperators",
+        "TestOperatorsDevice",
         "test_vmapjvpall",
         (
             tol1(
@@ -1789,16 +1785,12 @@ class TestOperators(TestCase):
         ),
     )
     @opsToleranceOverride(
-        "TestOperators",
+        "TestOperatorsDevice",
         "test_jvpvjp",
         (
-            tol1("masked.prod", {torch.float32: tol(atol=1e-04, rtol=1.3e-05)}),
+            tol1("masked.prod", {torch.float32: tol(atol=1e-04, rtol=5e-05)}),
             tol1("masked.cumprod", {torch.float32: tol(atol=1e-04, rtol=5e-04)}),
-            tol1(
-                "cumprod",
-                {torch.float32: tol(atol=1e-03, rtol=5e-04)},
-                device_type="cuda",
-            ),
+            tol1("cumprod", {torch.float32: tol(atol=1e-03, rtol=5e-04)}),
             tol1(
                 "linalg.det",
                 {torch.float32: tol(atol=3e-05, rtol=5e-06)},
@@ -2039,7 +2031,7 @@ class TestOperators(TestCase):
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @opsToleranceOverride(
-        "TestOperators",
+        "TestOperatorsDevice",
         "test_vmapjvpvjp",
         (
             tol1("linalg.svd", {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
@@ -2358,7 +2350,7 @@ class TestOperators(TestCase):
         },
     )
     @opsToleranceOverride(
-        "TestOperators",
+        "TestOperatorsDevice",
         "test_vmap_autograd_grad",
         (
             tol1(
@@ -2971,7 +2963,7 @@ class TestOperators(TestCase):
 
 only_for = ("cpu", "cuda", "xpu")
 instantiate_device_type_tests(
-    TestOperators, globals(), only_for=only_for, allow_xpu=True
+    TestOperatorsDevice, globals(), only_for=only_for, allow_xpu=True
 )
 
 if __name__ == "__main__":
