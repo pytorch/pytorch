@@ -88,6 +88,20 @@ DEVICE_TO_ATEN = {
     "mps": "at::kMPS",
 }
 
+
+def device_to_aten(device_type: str) -> str:
+    if device_type in DEVICE_TO_ATEN:
+        return DEVICE_TO_ATEN[device_type]
+
+    from .common import get_device_op_overrides
+
+    try:
+        overrides = get_device_op_overrides(device_type)
+    except KeyError:
+        raise KeyError(f"No ATen device type mapping for {device_type}") from None
+    return overrides.aten_device_type()
+
+
 LAYOUT_TO_ATEN = {
     torch.strided: "at::kStrided",
     torch._mkldnn: "at::kMkldnn",  # type: ignore[attr-defined]
