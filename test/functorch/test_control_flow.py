@@ -41,6 +41,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_quantization import skipIfNoDynamoSupport
 from torch.testing._internal.common_utils import (
     decorateIf,
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_WINDOWS,
     parametrize,
@@ -5279,6 +5280,8 @@ class GraphModule(torch.nn.Module):
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 @skipIfNoDynamoSupport
 class AssociativeScanTestsDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def setUp(self):
         torch._dynamo.reset()
         super().setUp()
@@ -12171,6 +12174,8 @@ class <lambda>(torch.nn.Module):
 
 
 class TestAutoFunctionalizeControlFlowDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def check(self, gen_fn, args, device, dynamic) -> torch.fx.GraphModule:
         args = pytree.tree_map(lambda t: t.to(device=device), args)
 
@@ -13236,6 +13241,8 @@ class DynamicCondModel(torch.nn.Module):
     "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
 )
 class TestControlFlowNNCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def test_cond_in_NN(self):
         model = DynamicCondModel().cuda()
 
@@ -13258,6 +13265,8 @@ class TestControlFlowNNCUDA(TestCase):
     "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
 )
 class TestControlFlowAndRNGCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @parametrize("rng_func", ["custom_generator", "default_generator"])
     def test_rng_with_conditional_nodes_errors(self, rng_func):
         pred = torch.tensor(True, device="cuda")
