@@ -4,14 +4,14 @@ This folder contains the scripts and configurations to build libmagma.so, linked
 
 ## Building
 
-Look in the `Makefile` for available targets to build. To build any target, for example `magma-rocm63`, run
+Look in the `Makefile` for available targets to build. To build any target, for example `magma-rocm72`, run
 
 ```
 # Using `docker`
-make magma-rocm63
+make magma-rocm72
 
 # Using `podman`
-DOCKER_CMD=podman make magma-rocm63
+DOCKER_CMD=podman make magma-rocm72
 ```
 
 This spawns a `pytorch/manylinux-rocm<version>` docker image, which has the required `devtoolset` and ROCm versions installed.

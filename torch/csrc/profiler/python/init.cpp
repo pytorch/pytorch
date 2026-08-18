@@ -441,8 +441,7 @@ void initPythonBindings(PyObject* module) {
           "    enable_cuda_sync_events : for CUDA profiling mode, enable adding CUDA synchronization events\n"
           "       that expose CUDA device, stream and event synchronization activities. This feature is new\n"
           "       and currently disabled by default.\n"
-          "    adjust_profiler_step (bool) : whether to adjust the profiler step to\n"
-          "       match the parent python event duration. This feature is new and currently disabled by default.\n"
+          "    adjust_profiler_step (bool) : DEPRECATED and ignored.\n"
           "    disable_external_correlation (bool) : whether to disable external correlation\n"
           "    profile_all_threads (bool) : whether to profile all threads\n"
           "    capture_overload_names (bool) : whether to include ATen overload names in the profile\n"
@@ -528,12 +527,15 @@ void initPythonBindings(PyObject* module) {
                 t.size() > 12 ? t[12].cast<bool>() : false,
                 t.size() > 13 ? t[13].cast<bool>() : false);
           }))
-      // profiler_metrics and profiler_measure_per_kernel are deprecated
-      // no-ops, exposed read-only so the Python layer can detect them and warn.
+      // profiler_metrics, profiler_measure_per_kernel and adjust_profiler_step
+      // are deprecated no-ops, exposed read-only so the Python layer can detect
+      // them and warn.
       .def_readonly("profiler_metrics", &ExperimentalConfig::profiler_metrics)
       .def_readonly(
           "profiler_measure_per_kernel",
           &ExperimentalConfig::profiler_measure_per_kernel)
+      .def_readonly(
+          "adjust_profiler_step", &ExperimentalConfig::adjust_profiler_step)
       .def_readwrite(
           "custom_profiler_config", &ExperimentalConfig::custom_profiler_config)
       .def_readwrite("trace_only", &ExperimentalConfig::trace_only);

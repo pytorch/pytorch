@@ -137,6 +137,49 @@ class FrameInitTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(real_kwargs_output, expected_kwargs_output)
             set_eval_frame(original)
 
+    def test_reset_preserves_strategy_written_by_retired_frame_state(self):
+        from torch._C._dynamo.eval_frame import (
+            get_code_exec_strategy,
+            reset_code,
+            set_code_exec_strategy,
+        )
+        from torch._dynamo.types import FrameAction, FrameExecStrategy
+
+        frame_states = []
+
+        def target(x):
+            return x + 1
+
+        def callback(frame, cache_entry, frame_state):
+            if frame.f_code is target.__code__:
+                frame_states.append(frame_state)
+            return ConvertFrameReturn()
+
+        original = set_eval_frame(callback)
+        try:
+            self.assertEqual(target(1), 2)
+        finally:
+            set_eval_frame(original)
+        self.assertEqual(len(frame_states), 1)
+
+        installed = []
+        skip = FrameExecStrategy(FrameAction.SKIP, FrameAction.SKIP)
+
+        class InstallStrategyOnDelete:
+            def __del__(self):
+                set_code_exec_strategy(target.__code__, skip)
+                installed.append(True)
+
+        frame_state = frame_states.pop()
+        frame_state["install_strategy_on_delete"] = InstallStrategyOnDelete()
+        del frame_state
+        reset_code(target.__code__)
+
+        self.assertEqual(installed, [True])
+        strategy = get_code_exec_strategy(target.__code__)
+        self.assertEqual(strategy.cur_action, FrameAction.SKIP)
+        self.assertEqual(strategy.recursive_action, FrameAction.SKIP)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

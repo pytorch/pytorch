@@ -19,6 +19,7 @@ from typing import Any, NamedTuple, Protocol, runtime_checkable
 # CacheEntry has a `guard_manager` field for the guard, and a `code` field for the code object.
 from torch._C._dynamo.eval_frame import (
     _CacheEntry as CacheEntry,
+    _CacheEntryHandle as CacheEntryHandle,
     _ExtraState as ExtraState,
     _FrameAction as FrameAction,
     _FrameExecStrategy as FrameExecStrategy,
@@ -56,7 +57,7 @@ class GuardFn(Protocol):
     verbose_code_parts: list[str]
     global_scope: dict[str, object]
     guard_fail_fn: Callable[[GuardFail], None] | None
-    cache_entry: CacheEntry | None
+    cache_entry: CacheEntryHandle | None
     extra_state: ExtraState | None
 
     # maps locals of user function to bool
