@@ -258,6 +258,92 @@ int main() { return 0; }
     _expect_compilation_failure(compile_flags_with_both, "both macros")
 
 
+def check_torch_target_version_guard(install_root: Path) -> None:
+    """
+    TORCH_TARGET_VERSION must be <= TORCH_ABI_VERSION of the headers in this
+    install. Targeting an older ABI compiles; targeting one minor past the
+    build fails with the version.h #error.
+    """
+
+    def _header_torch_version(include_dir: Path) -> tuple[int, int]:
+        version_h = include_dir / "torch" / "headeronly" / "version.h"
+        if not version_h.exists():
+            raise AssertionError(f"Expected {version_h} to be present")
+        text = version_h.read_text()
+        major_match = re.search(r"#define TORCH_VERSION_MAJOR\s+(\d+)", text)
+        minor_match = re.search(r"#define TORCH_VERSION_MINOR\s+(\d+)", text)
+        if not major_match or not minor_match:
+            raise RuntimeError(
+                f"Could not parse TORCH_VERSION_MAJOR/MINOR from {version_h}"
+            )
+        return int(major_match.group(1)), int(minor_match.group(1))
+
+    def _get_standard_version_format(packed: int | str) -> str:
+        if isinstance(packed, str):
+            packed = int(packed, 16)
+        ver_major = (packed >> 56) & 0xFF
+        ver_minor = (packed >> 48) & 0xFF
+        ver_patch = (packed >> 40) & 0xFF
+        if ver_patch:
+            return f"{ver_major}.{ver_minor}.{ver_patch}"
+        return f"{ver_major}.{ver_minor}"
+
+    include_dir = install_root / "include"
+    if not include_dir.exists():
+        raise AssertionError(f"Expected {include_dir} to be present")
+
+    major, minor = _header_torch_version(include_dir)
+    old_target = f"0x{2:02x}{10:02x}000000000000"  # TORCH_TARGET_VERSION=2.10
+    new_target = f"0x{major:02x}{minor + 1:02x}000000000000"  # TORCH_TARGET_VERSION=major.(minor+1)
+    old_target_standard_format = _get_standard_version_format(old_target)
+    new_target_standard_format = _get_standard_version_format(new_target)
+    print(
+        f"Checking TORCH_TARGET_VERSION guard against headers {major}.{minor}: "
+        f"ok={old_target} ({old_target_standard_format}) "
+        f"fail={new_target} ({new_target_standard_format})"
+    )
+
+    test_cpp_content = """
+#include <torch/csrc/stable/version.h>
+int main() { return 0; }
+"""
+    compile_flags = [
+        "g++",
+        "-std=c++17",
+        f"-I{include_dir}",
+        "-c",
+    ]
+
+    _compile_and_extract_symbols(
+        cpp_content=test_cpp_content,
+        compile_flags=compile_flags + [f"-DTORCH_TARGET_VERSION={old_target}"],
+    )
+    print(
+        f"Compilation succeeded with TORCH_TARGET_VERSION={old_target} ({old_target_standard_format})"
+    )
+
+    expected_error_msg = "TORCH_TARGET_VERSION is newer than the libtorch headers this build is compiling against."
+    try:
+        _compile_and_extract_symbols(
+            cpp_content=test_cpp_content,
+            compile_flags=compile_flags + [f"-DTORCH_TARGET_VERSION={new_target}"],
+        )
+    except RuntimeError as e:
+        if expected_error_msg not in str(e):
+            raise RuntimeError(
+                f"Expected error message to contain:\n  '{expected_error_msg}'\n"
+                f"but got:\n{str(e)[:1000]}"
+            ) from e
+    else:
+        raise RuntimeError(
+            f"Expected compilation to fail with TORCH_TARGET_VERSION={new_target} ({new_target_standard_format}), "
+            "but it succeeded"
+        )
+    print(
+        f"Compilation correctly failed with TORCH_TARGET_VERSION={new_target} ({new_target_standard_format})"
+    )
+
+
 def check_stable_api_symbols(install_root: Path) -> None:
     """
     Test that stable API headers still expose symbols with TORCH_STABLE_ONLY.
@@ -496,6 +582,7 @@ def main() -> None:
 
     # Check symbols when TORCH_STABLE_ONLY is defined
     check_stable_only_symbols(install_root)
+    check_torch_target_version_guard(install_root)
     check_stable_api_symbols(install_root)
     check_headeronly_symbols(install_root)
     check_aoti_shim_symbols(install_root)

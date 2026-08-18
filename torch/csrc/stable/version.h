@@ -21,6 +21,10 @@
 //     #include <torch/csrc/stable/library.h>
 
 #ifdef TORCH_TARGET_VERSION
+#if TORCH_TARGET_VERSION > TORCH_ABI_VERSION
+#error TORCH_TARGET_VERSION is newer than the libtorch headers this build is compiling against. \
+Lower TORCH_TARGET_VERSION to <= TORCH_ABI_VERSION, or compile against a newer PyTorch.
+#endif
 #define TORCH_FEATURE_VERSION TORCH_TARGET_VERSION
 #else
 #define TORCH_FEATURE_VERSION TORCH_ABI_VERSION
