@@ -19,10 +19,7 @@ StreamTimer::StreamTimer() {
   AT_CUDA_CHECK(cudaEventCreate(&end_));
 }
 
-StreamTimer::~StreamTimer() {
-  C10_CUDA_CHECK_WARN(cudaEventDestroy(start_));
-  C10_CUDA_CHECK_WARN(cudaEventDestroy(end_));
-}
+StreamTimer::~StreamTimer() = default;
 
 void StreamTimer::Start() {
   AT_CUDA_CHECK(cudaEventSynchronize(start_));
@@ -46,10 +43,7 @@ StreamTimerNoSync::StreamTimerNoSync() {
   AT_CUDA_CHECK(cudaEventCreate(&end_));
 }
 
-StreamTimerNoSync::~StreamTimerNoSync() {
-  C10_CUDA_CHECK_WARN(cudaEventDestroy(start_));
-  C10_CUDA_CHECK_WARN(cudaEventDestroy(end_));
-}
+StreamTimerNoSync::~StreamTimerNoSync() = default;
 
 void StreamTimerNoSync::Start() {
   AT_CUDA_CHECK(cudaEventRecord(start_, at::cuda::getCurrentCUDAStream()));

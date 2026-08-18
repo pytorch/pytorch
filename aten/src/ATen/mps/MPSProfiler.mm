@@ -125,9 +125,12 @@ MPSProfiler::MPSProfiler() : m_os_log_events(nullptr), m_os_log_intervals(nullpt
 
 MPSProfiler::~MPSProfiler() {
   // first make sure completion handlers are completed
-  if (hasPendingCompletionHandlers) {
-    at::mps::synchronizeAllMPSStreams(SyncType::COMMIT_AND_WAIT);
-  }
+  auto stream = getDefaultMPSStream();
+  dispatch_sync(stream->queue(), ^() {
+    if (hasPendingCompletionHandlers) {
+      stream->synchronize(SyncType::COMMIT_AND_WAIT);
+    }
+  });
   logProfilingStats();
 
   if (m_os_log_events) {
@@ -239,7 +242,7 @@ void MPSProfiler::StopTrace() {
   m_signpost_types = SignpostTypes::SIGNPOST_NONE;
 }
 
-void MPSProfiler::beginProfileExecution(BaseInfo& info, MPSStream* stream, bool cpuExecution) {
+void MPSProfiler::beginProfileExecution(BaseInfo& info, bool cpuExecution) {
   // see comments in isProfileInfoLoggingEnabled()
   if (isProfileInfoLoggingEnabled(info.type, /*isExecutionEnded*/ false)) {
     fmt::print(stderr, "{}\n", info.toString());
@@ -260,7 +263,7 @@ void MPSProfiler::beginProfileExecution(BaseInfo& info, MPSStream* stream, bool 
       info.completed = false;
       // for graphs, we add the scheduleHandler in beginProfileGPUInterval()
     } else if (info.type == BaseInfo::Type::KERNEL || info.type == BaseInfo::Type::COPY) {
-      addProfilerScheduledHandler(info, stream);
+      addProfilerScheduledHandler(info);
     }
   }
 }
@@ -299,10 +302,7 @@ void MPSProfiler::endProfileExecution(BaseInfo& info,
   info.completed = true;
 }
 
-uint64_t MPSProfiler::beginProfileKernel(const void* handle,
-                                         const std::string& strKey,
-                                         bool isGraph,
-                                         MPSStream* stream) {
+uint64_t MPSProfiler::beginProfileKernel(const void* handle, const std::string& strKey, bool isGraph) {
   // only do profiling if operation execution profiling or logging are enabled
   if (!isOperationProfilingEnabled()) {
     return 0;
@@ -315,34 +315,21 @@ uint64_t MPSProfiler::beginProfileKernel(const void* handle,
   auto& opInfo = *m_op_info_list[uintptr_t(handle)];
   opInfo.strKey.assign(strKey);
   opInfo.runCount++;
-  beginProfileExecution(opInfo, stream);
+  beginProfileExecution(opInfo);
 
   return opInfo.profileId;
 }
 
-uint64_t MPSProfiler::beginProfileKernel(const void* handle, const std::string& strKey, bool isGraph) {
-  TORCH_WARN_DEPRECATION("beginProfileKernel() called without a stream, may end up profiling the wrong stream");
-  return beginProfileKernel(handle, strKey, isGraph, getCurrentMPSStream());
-}
-
-uint64_t MPSProfiler::beginProfileKernel(const void* handle,
-                                         const std::string& kernelName,
-                                         const TensorList& tensors,
-                                         MPSStream* stream) {
+uint64_t MPSProfiler::beginProfileKernel(const void* handle, const std::string& kernelName, const TensorList& tensors) {
   if (isOperationProfilingEnabled()) {
     const bool includeBufferId = m_log_options & LogOptions::INCLUDE_BUFFER_ID;
     std::string profilerStrKey = OperationInfo::buildKernelString(kernelName, tensors, includeBufferId);
-    return beginProfileKernel(handle, profilerStrKey, false, stream);
+    return beginProfileKernel(handle, profilerStrKey, false);
   }
   return 0;
 }
 
-uint64_t MPSProfiler::beginProfileKernel(const void* handle, const std::string& kernelName, const TensorList& tensors) {
-  TORCH_WARN_DEPRECATION("beginProfileKernel() called without a stream, may end up profiling the wrong stream");
-  return beginProfileKernel(handle, kernelName, tensors, getCurrentMPSStream());
-}
-
-void MPSProfiler::beginProfileGPUInterval(const void* handle, MPSStream* stream) {
+void MPSProfiler::beginProfileGPUInterval(const void* handle) {
   // this function is only relevant for interval-based Signposts which exclude
   // schedule time (only includes GPU run time)
   if (!(m_profile_options & ProfileOptions::USE_INTERVALS) ||
@@ -353,26 +340,17 @@ void MPSProfiler::beginProfileGPUInterval(const void* handle, MPSStream* stream)
   auto& opInfo = *m_op_info_list[uintptr_t(handle)];
   // this begins the interval when scheduling the execution is
   // completed already (i.e., scheduling excluded from interval)
-  addProfilerScheduledHandler(opInfo, stream);
+  addProfilerScheduledHandler(opInfo);
 }
 
-void MPSProfiler::beginProfileGPUInterval(const void* handle) {
-  TORCH_WARN_DEPRECATION("beginProfileGPUInterval() called without a stream, may end up profiling the wrong stream");
-  beginProfileGPUInterval(handle, getCurrentMPSStream());
-}
-
-void MPSProfiler::endProfileKernel(const void* handle, MPSStream* stream, SyncType syncType) {
+void MPSProfiler::endProfileKernel(const void* handle, SyncType syncType) {
   // only do profiling if operation execution profiling or logging are enabled
   if (!isOperationProfilingEnabled()) {
     return;
   }
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(m_op_info_list.count(uintptr_t(handle)), "Failed to get operation information!");
   auto& opInfo = *m_op_info_list[uintptr_t(handle)];
-  addProfilerCompletedHandler(opInfo, syncType, stream);
-}
-
-void MPSProfiler::endProfileKernel(const void* handle, SyncType syncType) {
-  endProfileKernel(handle, getCurrentMPSStream(), syncType);
+  addProfilerCompletedHandler(opInfo, syncType);
 }
 
 uint64_t MPSProfiler::beginProfileCPUFallback(const std::string& opName, const TensorList& tensors) {
@@ -386,8 +364,7 @@ uint64_t MPSProfiler::beginProfileCPUFallback(const std::string& opName, const T
   const bool includeBufferId = m_log_options & LogOptions::INCLUDE_BUFFER_ID;
   cpuFbInfo.strKey = OperationInfo::buildKernelString(opName, tensors, includeBufferId);
   cpuFbInfo.updateCopyOverhead(tensors);
-  // CPU fallback ops have no MPS stream.
-  beginProfileExecution(cpuFbInfo, nullptr, true);
+  beginProfileExecution(cpuFbInfo, true);
 
   return cpuFbInfo.profileId;
 }
@@ -405,7 +382,6 @@ uint64_t MPSProfiler::beginProfileCopy(const void* srcBuffer,
                                        const OptionalTensorRef srcTensor,
                                        const OptionalTensorRef dstTensor,
                                        size_t length,
-                                       MPSStream* stream,
                                        bool isNonBlocking,
                                        bool usesBlitter) {
   if (!isCopyProfilingEnabled()) {
@@ -423,7 +399,7 @@ uint64_t MPSProfiler::beginProfileCopy(const void* srcBuffer,
   }
   // don't generate signposts if the non-blocking copy is not using the blitter
   if (usesBlitter || !isNonBlocking) {
-    beginProfileExecution(*copyInfo, stream, !usesBlitter);
+    beginProfileExecution(*copyInfo, !usesBlitter);
   }
   // this should not happen since we erase the copy info after profiling/logging it.
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(m_copy_info_list.count(profileId) == 0);
@@ -440,41 +416,25 @@ uint64_t MPSProfiler::beginProfileCopy(const void* srcBuffer,
   return profileId;
 }
 
-uint64_t MPSProfiler::beginProfileCopy(const void* srcBuffer,
-                                       const void* dstBuffer,
-                                       const OptionalTensorRef srcTensor,
-                                       const OptionalTensorRef dstTensor,
-                                       size_t length,
-                                       bool isNonBlocking,
-                                       bool usesBlitter) {
-  TORCH_WARN_DEPRECATION("beginProfileCopy() called without a stream, may end up profiling the wrong stream");
-  return beginProfileCopy(
-      srcBuffer, dstBuffer, srcTensor, dstTensor, length, getCurrentMPSStream(), isNonBlocking, usesBlitter);
-}
-
-void MPSProfiler::endProfileCopy(uint64_t profileId, SyncType syncType, MPSStream* stream) {
+void MPSProfiler::endProfileCopy(uint64_t profileId, SyncType syncType) {
   // this is just an identifier, and not used to access memory
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(m_copy_info_list.count(profileId), "Failed to get copy information!");
   auto& copyInfo = *m_copy_info_list[profileId];
   if (copyInfo.usesBlitter) {
-    addProfilerCompletedHandler(copyInfo, syncType, stream);
+    addProfilerCompletedHandler(copyInfo, syncType);
   } else {
     double cpuTime = double(BaseInfo::getTime() - copyInfo.startTime) * 1e-6;
     endProfileExecution(copyInfo, copyInfo.eventSignpostId, copyInfo.intervalSignpostId, 0, cpuTime);
   }
 }
 
-void MPSProfiler::endProfileCopy(uint64_t profileId, SyncType syncType) {
-  endProfileCopy(profileId, syncType, getCurrentMPSStream());
-}
-
-void MPSProfiler::addProfilerScheduledHandler(BaseInfo& info, MPSStream* stream) {
+void MPSProfiler::addProfilerScheduledHandler(BaseInfo& info) {
   const SignpostTypes signpostType = getSignpostType(info.type);
   const os_signpost_id_t intervalSignpostId = info.intervalSignpostId;
 
-  MPSStream* profileStream = stream ? stream : getDefaultMPSStream();
+  auto m_stream = getDefaultMPSStream();
   // NOTE: the following block isn't thread-safe
-  [profileStream->commandBuffer() addScheduledHandler:^(id<MTLCommandBuffer> cb) {
+  [m_stream->commandBuffer() addScheduledHandler:^(id<MTLCommandBuffer> cb) {
     // begin the interval once scheduling has completed (if INCLUDE_SCHEDULE_INTERVAL flag is disabled)
     beginSignpostInterval(signpostType, intervalSignpostId, info.toString());
     info.completed = false;
@@ -498,7 +458,7 @@ void MPSProfiler::updateCopyStats(const CopyInfo& copyInfo, double gpuTime, doub
   copyStat.memcpyCount += !copyInfo.usesBlitter ? 1 : 0;
 }
 
-void MPSProfiler::addProfilerCompletedHandler(BaseInfo& info, SyncType syncType, MPSStream* stream) {
+void MPSProfiler::addProfilerCompletedHandler(BaseInfo& info, SyncType syncType) {
   const os_signpost_id_t intervalSignpostId = info.intervalSignpostId;
   const os_signpost_id_t eventSignpostId = info.eventSignpostId;
 
@@ -511,9 +471,9 @@ void MPSProfiler::addProfilerCompletedHandler(BaseInfo& info, SyncType syncType,
   info.eventSignpostId = 0;
   hasPendingCompletionHandlers = true;
 
-  MPSStream* profileStream = stream ? stream : getDefaultMPSStream();
+  auto m_stream = getDefaultMPSStream();
   // NOTE: the following block isn't thread-safe
-  [profileStream->commandBuffer() addCompletedHandler:^(id<MTLCommandBuffer> cb) {
+  [m_stream->commandBuffer() addCompletedHandler:^(id<MTLCommandBuffer> cb) {
     CFTimeInterval gpuTime = cb.GPUEndTime > cb.GPUStartTime ? (cb.GPUEndTime - cb.GPUStartTime) * 1000.0 : 0.;
     CFTimeInterval schedulingTime =
         cb.kernelEndTime > cb.kernelStartTime ? (cb.kernelEndTime - cb.kernelStartTime) * 1000.0 : 0.;
@@ -522,8 +482,8 @@ void MPSProfiler::addProfilerCompletedHandler(BaseInfo& info, SyncType syncType,
     hasPendingCompletionHandlers = false;
   }];
 
-  profileStream->synchronize((m_profile_options & ProfileOptions::WAIT_UNTIL_COMPLETED) ? SyncType::COMMIT_AND_WAIT
-                                                                                        : syncType);
+  m_stream->synchronize((m_profile_options & ProfileOptions::WAIT_UNTIL_COMPLETED) ? SyncType::COMMIT_AND_WAIT
+                                                                                   : syncType);
 }
 
 void MPSProfiler::logOperationsProfilingStats(std::FILE* f) const {

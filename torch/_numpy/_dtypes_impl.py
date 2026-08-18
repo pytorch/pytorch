@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 """Dtypes/scalar type implementations with torch dtypes.
 
 Here `dtype` is always a torch.dtype, this module knows nothing about
@@ -17,10 +19,10 @@ DefaultDTypes = namedtuple(
 # a global state
 # We set it the first time we call default_dtypes() to avoid importing
 # torch._dynamo.config and create a circular reference
-_default_dtypes: DefaultDTypes | None = None
+_default_dtypes = None
 
 
-def default_dtypes() -> DefaultDTypes:
+def default_dtypes():
     global _default_dtypes
     if _default_dtypes is None:
         import torch._dynamo.config as config
@@ -45,7 +47,7 @@ def default_dtypes() -> DefaultDTypes:
     return _default_dtypes
 
 
-def get_default_dtype_for(dtype: torch.dtype) -> torch.dtype:
+def get_default_dtype_for(dtype):
     """Default scalar type given sctype category."""
     if dtype == torch.bool:
         return dtype
@@ -60,13 +62,11 @@ def get_default_dtype_for(dtype: torch.dtype) -> torch.dtype:
 from . import _casting_dicts as _cd
 
 
-def can_cast_impl(
-    from_torch_dtype: torch.dtype, to_torch_dtype: torch.dtype, casting: str
-) -> bool:
+def can_cast_impl(from_torch_dtype, to_torch_dtype, casting):
     return _cd._can_cast_dict[casting][from_torch_dtype][to_torch_dtype]
 
 
-def result_type_impl(*tensors: torch.Tensor) -> torch.dtype:
+def result_type_impl(*tensors):
     # NB: torch dtypes here
     dtyp = tensors[0].dtype
     if len(tensors) == 1:
@@ -78,7 +78,7 @@ def result_type_impl(*tensors: torch.Tensor) -> torch.dtype:
     return dtyp
 
 
-def python_type_for_torch(dtyp: torch.dtype) -> type[bool | int | float | complex]:
+def python_type_for_torch(dtyp):
     """Get a python scalar type a torch dtype"""
     if dtyp.is_floating_point:
         typ = float
@@ -119,15 +119,15 @@ _NEP50_FUNCS_TENSOR_ONLY = (
 )
 
 
-def is_scalar(x: object) -> bool:
+def is_scalar(x):
     return isinstance(x, _SCALAR_TYPES)
 
 
-def is_scalar_or_symbolic(x: object) -> bool:
+def is_scalar_or_symbolic(x):
     return isinstance(x, _SCALAR_AND_SYMBOLIC_TYPES)
 
 
-def _dtype_for_scalar(py_type: type) -> torch.dtype:
+def _dtype_for_scalar(py_type):
     return {
         bool: torch.bool,
         torch.SymBool: torch.bool,
@@ -139,23 +139,19 @@ def _dtype_for_scalar(py_type: type) -> torch.dtype:
     }[py_type]
 
 
-def _dtype_for_scalar_or_tensor(
-    x: torch.Tensor | bool | int | float | complex,
-) -> torch.dtype:
+def _dtype_for_scalar_or_tensor(x):
     return x.dtype if isinstance(x, torch.Tensor) else _dtype_for_scalar(type(x))
 
 
-def is_float_or_fp_tensor(x: torch.Tensor | bool | int | float | complex) -> bool:
+def is_float_or_fp_tensor(x):
     return _dtype_for_scalar_or_tensor(x).is_floating_point
 
 
-def is_complex_or_complex_tensor(
-    x: torch.Tensor | bool | int | float | complex,
-) -> bool:
+def is_complex_or_complex_tensor(x):
     return _dtype_for_scalar_or_tensor(x).is_complex
 
 
-def _category(dtype: torch.dtype) -> int:
+def _category(dtype):
     return {
         torch.bool: 0,
         torch.SymBool: 0,
@@ -177,21 +173,10 @@ def _category(dtype: torch.dtype) -> int:
     }[dtype]
 
 
-def nep50_to_tensors(
-    x1: torch.Tensor | bool | int | float | complex,
-    x2: torch.Tensor | bool | int | float | complex,
-    handle_weaks: bool,
-    function_name: str,
-) -> tuple[
-    torch.Tensor | bool | int | float | complex,
-    torch.Tensor | bool | int | float | complex,
-]:
+def nep50_to_tensors(x1, x2, handle_weaks, function_name):
     """If either of inputs is a python scalar, type-promote with NEP 50."""
 
-    def to_tensor(
-        scalar: torch.Tensor | bool | int | float | complex,
-        dtype: torch.dtype | None = None,
-    ) -> torch.Tensor:
+    def to_tensor(scalar, dtype=None):
         if dtype is None:
             dtype = _dtype_for_scalar(type(scalar))
             dtype = get_default_dtype_for(dtype)
@@ -211,8 +196,6 @@ def nep50_to_tensors(
         )
 
     weak, not_weak = (x1, x2) if x1_is_weak else (x2, x1)
-    if not isinstance(not_weak, torch.Tensor):
-        raise AssertionError("the non-weak operand must be a tensor")
 
     # find the dtype for the weak's type
     weak_dtype = _dtype_for_scalar(type(weak))
@@ -236,8 +219,6 @@ def nep50_to_tensors(
     if cat_weak == 1 and cat_not_weak == 1:
         # integers
         iinfo = torch.iinfo(not_weak.dtype)
-        # weak is an integer here (guaranteed by cat_weak == 1), not the full union.
-        # pyrefly: ignore[unsupported-operation]
         if not (iinfo.min <= weak <= iinfo.max):
             raise OverflowError(
                 f"Python integer {weak} out of bounds for {not_weak.dtype}"

@@ -353,13 +353,6 @@ if(USE_CUDA AND (USE_FLASH_ATTENTION OR USE_MEM_EFF_ATTENTION))
   )
 
   set_target_properties(flash_attention PROPERTIES POSITION_INDEPENDENT_CODE ON)
-
-  if(FLASH_ATTENTION_MAX_JOBS)
-    set_property(GLOBAL APPEND PROPERTY JOB_POOLS
-      flash_attention_compile=${FLASH_ATTENTION_MAX_JOBS})
-    set_property(TARGET flash_attention PROPERTY JOB_POOL_COMPILE
-      flash_attention_compile)
-  endif()
 endif()
 
 if(USE_FLASH_ATTENTION)

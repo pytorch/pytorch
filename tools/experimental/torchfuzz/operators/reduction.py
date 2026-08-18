@@ -119,8 +119,7 @@ class _CumulativeReductionBase(Operator):
         )
 
     def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
-        if not isinstance(output_spec, TensorSpec):
-            raise AssertionError(f"expected TensorSpec, got {type(output_spec)}")
+        assert isinstance(output_spec, TensorSpec)  # noqa: S101
         self._dim = random.randrange(len(output_spec.size))
         return [
             TensorSpec(
@@ -272,8 +271,7 @@ class _FullOrKeepdimReductionBase(Operator):
         return _random_input_shape()
 
     def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
-        if not isinstance(output_spec, TensorSpec):
-            raise AssertionError(f"expected TensorSpec, got {type(output_spec)}")
+        assert isinstance(output_spec, TensorSpec)  # noqa: S101
         self._input_dtype = self._pick_input_dtype(output_spec.dtype)
         if output_spec.size == ():
             self._mode = "scalar"
@@ -313,8 +311,7 @@ class _FullOrKeepdimReductionBase(Operator):
         input_names: list[str],
         output_spec: Spec,
     ) -> str:
-        if not isinstance(output_spec, TensorSpec):
-            raise AssertionError(f"expected TensorSpec, got {type(output_spec)}")
+        assert isinstance(output_spec, TensorSpec)  # noqa: S101
         mode = self._mode
         dim = self._dim
         keepdim = self._keepdim
@@ -533,8 +530,7 @@ class _DimRequiredTupleReductionBase(Operator):
         return self.supports_keepdim_false
 
     def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
-        if not isinstance(output_spec, TensorSpec):
-            raise AssertionError(f"expected TensorSpec, got {type(output_spec)}")
+        assert isinstance(output_spec, TensorSpec)  # noqa: S101
         if 1 in output_spec.size and (
             not self.supports_keepdim_false or random.random() < 0.5
         ):
@@ -651,8 +647,7 @@ class CountNonzeroOperator(Operator):
         )
 
     def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
-        if not isinstance(output_spec, TensorSpec):
-            raise AssertionError(f"expected TensorSpec, got {type(output_spec)}")
+        assert isinstance(output_spec, TensorSpec)  # noqa: S101
         self._input_size = _random_input_shape()
         self._input_dtype = random.choice(_BOOL_OR_NUMERIC_INPUT_DTYPES)
         return [
@@ -695,8 +690,7 @@ class AminmaxOperator(Operator):
         )
 
     def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
-        if not isinstance(output_spec, TensorSpec):
-            raise AssertionError(f"expected TensorSpec, got {type(output_spec)}")
+        assert isinstance(output_spec, TensorSpec)  # noqa: S101
         self._input_size = _random_input_shape()
         return [
             TensorSpec(
@@ -740,8 +734,7 @@ class VarMeanOperator(Operator):
         )
 
     def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
-        if not isinstance(output_spec, TensorSpec):
-            raise AssertionError(f"expected TensorSpec, got {type(output_spec)}")
+        assert isinstance(output_spec, TensorSpec)  # noqa: S101
         self._correction = random.choice([0, 1, 2])
         if self._correction == 0:
             self._input_size = _random_input_shape()
