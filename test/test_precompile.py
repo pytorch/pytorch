@@ -3973,6 +3973,24 @@ class TestExportPython(TestCase):
         baked = re.findall(r"_arr\[(\d+)\]", source)
         self.assertEqual(baked, [], f"artifact bakes a fixed per-thread array: {baked}")
 
+    def test_loading_an_artifact_leaves_its_directory_alone(self, device):
+        # The artifact is documented as self-contained and meant to be committed, but
+        # inductor's autotune cache wrote a <hash>.best_config next to it, keyed on the
+        # file's BASENAME -- so two unrelated artifacts both called artifact.py shared an
+        # entry and could pick up each other's launch config.
+        path = self._tmp_path("artifact.py")
+        directory = os.path.dirname(path)
+
+        def fn(x, w, b):
+            return torch.nn.functional.layer_norm(x, (x.shape[-1],), w, b)
+
+        x = make_tensor((256, 1024), device=device, dtype=torch.float32)
+        w = torch.ones(1024, device=device)
+        b = torch.zeros(1024, device=device)
+        torch.compiler.export_python(path=path)(fn)(x, w, b)
+        torch.compiler.export_python(path=path)(fn)(x, w, b)
+        self.assertEqual(sorted(os.listdir(directory)), ["artifact.py"])
+
 
 instantiate_device_type_tests(TestExportPython, globals())
 
