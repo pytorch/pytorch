@@ -1872,13 +1872,6 @@ def _optimize(
             dynamic_shapes=dynamic_shapes,
         )
 
-    # get_compiler_fn erases the name, and torch.compile hands us a
-    # _TorchCompileWrapper rather than the string the user wrote.
-    from torch._dynamo.package import emits_native_code as _emits_native_code
-
-    emits_native_code = _emits_native_code(
-        str(getattr(backend, "compiler_name", backend))
-    )
     backend = get_compiler_fn(backend)
 
     # Find if backend has any extra context manager
@@ -1893,12 +1886,7 @@ def _optimize(
     if config.caching_precompile and package is None:
         from .package import CompilePackage
 
-        package = CompilePackage(
-            fn=None,
-            dynamo=None,
-            ignore_inlined_sources=False,
-            requires_native_backend_compatibility=emits_native_code,
-        )
+        package = CompilePackage(fn=None, dynamo=None, ignore_inlined_sources=False)
 
     return _optimize_catch_errors(
         convert_frame.convert_frame(
@@ -2828,13 +2816,6 @@ def _optimize_assert(
     Used for fullgraph=True and export, since we must always error on graph breaks and ignore
     symbolic_convert.error_on_graph_break. Can also be used for testing.
     """
-    # get_compiler_fn erases the name, and torch.compile hands us a
-    # _TorchCompileWrapper rather than the string the user wrote.
-    from torch._dynamo.package import emits_native_code as _emits_native_code
-
-    emits_native_code = _emits_native_code(
-        str(getattr(backend, "compiler_name", backend))
-    )
     backend = get_compiler_fn(backend)
 
     # Find if backend has any extra context manager
@@ -2848,12 +2829,7 @@ def _optimize_assert(
         # and OptimizeContext.
         from .package import CompilePackage
 
-        package = CompilePackage(
-            fn=None,
-            dynamo=None,
-            ignore_inlined_sources=False,
-            requires_native_backend_compatibility=emits_native_code,
-        )
+        package = CompilePackage(fn=None, dynamo=None, ignore_inlined_sources=False)
 
     return _optimize_catch_errors(
         convert_frame.convert_frame_assert(
