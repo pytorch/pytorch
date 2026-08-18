@@ -1269,7 +1269,7 @@ static PyObject* any_output_is_alias_to_input_or_output(
     if (!cp) {
       return false;
     }
-    if (s.find(cp) != s.end()) {
+    if (s.contains(cp)) {
       ret = true;
       return true;
     }
