@@ -172,6 +172,12 @@ def check_node_safe(node: Node) -> None:
         "torch.sym_sum",
         "torch.autograd.grad",
         "torch.distributed.tensor._api.from_local",
+        # An autocast region entered INSIDE the graph lands as these two nodes.
+        # They are module-level torch functions with no captured state, so they
+        # serialize by reference; rejecting them bypasses the cache for the
+        # whole graph, which loses the bundled artifact a precompile needs.
+        "torch.amp.autocast_mode._enter_autocast",
+        "torch.amp.autocast_mode._exit_autocast",
     )
     SAFE_NON_TORCH_FUNCTIONS = (
         "einops.einops.rearrange",
