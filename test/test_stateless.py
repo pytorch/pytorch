@@ -9,19 +9,15 @@ import unittest
 
 import torch
 import torch.nn.utils.stateless as stateless
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
     subtest,
     TestCase,
     TEST_MULTIACCELERATOR,
-)
-
-device_type = (
-    acc.type
-    if (acc := torch.accelerator.current_accelerator(check_available=True))
-    else "cpu"
 )
 
 
@@ -49,6 +45,8 @@ class MockTiedModule(torch.nn.Module):
 
 
 class TestStatelessFunctionalAPI(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _run_call_with_mock_module(self, module, functional_call, device='cpu', prefix=''):
 
         x = torch.rand((1, 1)).to(device)
@@ -129,33 +127,6 @@ class TestStatelessFunctionalAPI(TestCase):
             r'used with Jitted modules'
         ):
             self._run_call_with_mock_module(traced_module, functional_call)
-
-    @unittest.skipIf(not TEST_MULTIACCELERATOR, 'multi-GPU not supported')
-    @unittest.skip("This doesn't work right now")
-    @parametrize("functional_call", [
-        subtest(torch.func.functional_call, "torch_func"),
-        subtest(stateless.functional_call, "stateless")
-    ])
-    def test_functional_call_with_data_parallel(self, functional_call):
-        module = MockModule()
-        module.to(device_type)
-        dp_module = torch.nn.DataParallel(module, [0, 1])
-        self._run_call_with_mock_module(dp_module, functional_call, device=device_type, prefix='module')
-
-    @unittest.skipIf(not TEST_MULTIACCELERATOR, 'multi-GPU not supported')
-    @parametrize("functional_call", [
-        subtest(torch.func.functional_call, "torch_func"),
-        subtest(stateless.functional_call, "stateless")
-    ])
-    def test_functional_call_with_data_parallel_error(self, functional_call):
-        module = MockModule()
-        module.to(device_type)
-        dp_module = torch.nn.DataParallel(module, [0, 1])
-        with self.assertRaisesRegex(RuntimeError, r'used with nn.DataParallel module'):
-            functional_call(
-                dp_module,
-                {'module.weight': torch.zeros(5, device=device_type)},
-                (torch.ones(2, 5, device=device_type),))
 
     @parametrize("functional_call", [
         subtest(torch.func.functional_call, "torch_func"),
@@ -886,7 +857,40 @@ class TestStatelessFunctionalAPI(TestCase):
         self.assertTrue(all(t1 is t2 for t1, t2 in zip(buffers, (module.buffer,))))
 
 
+class TestStatelessFunctionalAPIMultiAccelerator(TestStatelessFunctionalAPI):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @unittest.skipIf(not TEST_MULTIACCELERATOR, 'multi-GPU not supported')
+    @unittest.skip("This doesn't work right now")
+    @parametrize("functional_call", [
+        subtest(torch.func.functional_call, "torch_func"),
+        subtest(stateless.functional_call, "stateless")
+    ])
+    def test_functional_call_with_data_parallel(self, device, functional_call):
+        module = MockModule()
+        module.to(device)
+        dp_module = torch.nn.DataParallel(module, [0, 1])
+        self._run_call_with_mock_module(dp_module, functional_call, device=device, prefix='module')
+
+    @unittest.skipIf(not TEST_MULTIACCELERATOR, 'multi-GPU not supported')
+    @parametrize("functional_call", [
+        subtest(torch.func.functional_call, "torch_func"),
+        subtest(stateless.functional_call, "stateless")
+    ])
+    def test_functional_call_with_data_parallel_error(self, device, functional_call):
+        module = MockModule()
+        module.to(device)
+        dp_module = torch.nn.DataParallel(module, [0, 1])
+        with self.assertRaisesRegex(RuntimeError, r'used with nn.DataParallel module'):
+            functional_call(
+                dp_module,
+                {'module.weight': torch.zeros(5, device=device)},
+                (torch.ones(2, 5, device=device),))
+
+
 class TestStatelessDeprecation(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_private_stateless_warns(self):
         script = """
 import torch
@@ -917,6 +921,8 @@ exit(len(w))
             stateless.functional_call(m, params, x)
 
 class TestPythonOptimizeMode(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_runs_with_optimize_flag(self):
         script = "import torch; import torch._functorch.deprecated"
         try:
@@ -932,6 +938,11 @@ class TestPythonOptimizeMode(TestCase):
 
 instantiate_parametrized_tests(
     TestStatelessFunctionalAPI,
+)
+instantiate_device_type_tests(
+    TestStatelessFunctionalAPIMultiAccelerator,
+    globals(),
+    only_for=("cuda",),
 )
 
 if __name__ == '__main__':
