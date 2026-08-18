@@ -4119,7 +4119,11 @@ class GuardsStatePickler(pickle.Pickler):
             pytype,
             torch._C.DispatchKeySet.from_raw_repr(dispatch_keys_raw),
         )
-        ret.grad = grad
+        # A .grad the guards never read is pruned to the _Missing sentinel on
+        # the way in, and only a training capture has one to prune at all. It
+        # was not guarded on, so the reconstructed tensor does not need it --
+        # but assigning the sentinel raises.
+        ret.grad = grad if isinstance(grad, torch.Tensor) else None
         return ret
 
     @classmethod
@@ -4454,7 +4458,9 @@ class GuardsStatePickler(pickle.Pickler):
                 obj.device,
                 pytype,
                 torch._C._dispatch_keys(obj).raw_repr(),
-                obj.grad,
+                # Reading .grad off a non-leaf warns and is always None anyway;
+                # a training capture hits plenty of non-leaf tensors.
+                obj.grad if obj.is_leaf else None,
             )
 
         elif isinstance(obj, torch.nn.Module):
