@@ -2315,6 +2315,9 @@ class CppKernel(Kernel):
         csevar.update_on_args("load", (self, name, index), {})
         return csevar
 
+    def _use_parallel_atomic_add(self):
+        return config.cpp.dynamic_threads or self.num_threads != 1
+
     def store(self, name, index, value, mode=None):
         if "buf" not in name:
             raise AssertionError('expected "buf" in name')
@@ -2323,7 +2326,7 @@ class CppKernel(Kernel):
         if mode is None:
             line = f"{var}[{cexpr_index(index)}] = {value};"
         elif mode == "atomic_add":
-            if not config.cpp.dynamic_threads and self.num_threads == 1:
+            if not self._use_parallel_atomic_add():
                 line = f"{var}[{cexpr_index(index)}] += {value};"
             else:
                 dtype = V.graph.get_dtype(name)
@@ -3201,7 +3204,7 @@ class CppVecKernel(CppKernel):
             code = self._get_store_line(value, var, index, dtype)
             self.stores.splice(code.map(lambda x: DeferredLine(name, x)))
         elif mode == "atomic_add":
-            if not config.cpp.dynamic_threads and self.num_threads == 1:
+            if not self._use_parallel_atomic_add():
                 code = self._get_store_line(
                     f"{value}",
                     var,
@@ -3214,6 +3217,8 @@ class CppVecKernel(CppKernel):
                 n_src = self._get_num_vectors(dtype)
                 n_idx = self._get_num_vectors(torch.int64)
                 cdtype = DTYPE_TO_CPP[dtype]
+                # ops.index_expr re-applies subclass index transforms, so a caller
+                # that already transformed must pass the untransformed index
                 index = ops.index_expr(index, torch.int64).value
                 if isinstance(index, CppCSEVariable) and not index.is_vec:
                     index = self.broadcast(index)
@@ -4024,7 +4029,9 @@ class CppTile2DKernel(CppVecKernel):
                 line = f"{value}.store({storebuf});"
             self.stores.writeline(DeferredLine(name, line))
         else:
-            new_index = self.transform_indexing(index)
+            # the parallel atomic_add path re-applies transform_indexing via ops.index_expr
+            vec_atomic_add = mode == "atomic_add" and self._use_parallel_atomic_add()
+            new_index = index if vec_atomic_add else self.transform_indexing(index)
             super().store(name, new_index, value, mode)
 
     def codegen_inner_loops(self, code):

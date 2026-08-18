@@ -1059,6 +1059,12 @@ deterministic = os.getenv("TORCHINDUCTOR_DETERMINISTIC") == "1"
 # Batch-invariant mode: stable per-sample compiled kernel across batch sizes. Implies deterministic.
 batch_invariant = os.getenv("TORCHINDUCTOR_BATCH_INVARIANT") == "1"
 
+# Use eager's opt-in INNER_TREE order for eligible NVIDIA CUDA sums.
+# pyrefly: ignore [bad-assignment]
+numerics: Literal["default", "strict"] = os.environ.get(
+    "TORCHINDUCTOR_NUMERICS", "default"
+)  # type: ignore[assignment]
+
 # When we do split reduction, this number control the minimum value for
 # num_split. Too small num_split make the split reduction less efficient.
 # It's a much bigger problem when we compile a dynamic shape kernel with
@@ -1126,11 +1132,11 @@ combo_kernels_pointwise_only = False
 # kernels. When both thresholds are set, the tighter limit wins.
 combo_kernel_peak_memory_increase_gb: float | None = None  # Absolute cap in GB
 combo_kernel_peak_memory_pct_threshold: float | None = 0.05
-# Maximum baseline-index span of a single combo candidate. Groups whose
-# first-to-last baseline-index distance exceeds this are split into
-# sub-windows. Set to -1 (or any negative value) to disable splitting
-# and treat each parallel group as one window.
-combo_kernel_max_distance: int = -1
+# Maximum baseline-schedule distance scanned for a memory-gated combo candidate.
+# This is ignored when memory gating is disabled. Set to -1 (or any negative
+# value) to scan the remaining schedule. Unbounded scans can take quadratic
+# time on large schedules and are intended only for small graphs or debugging.
+combo_kernel_max_distance: int = 64
 
 # constant folding on the joint graph
 joint_graph_constant_folding = True
@@ -2188,7 +2194,15 @@ class triton:
     # We should revisit this once we understand more of the source of register spills.
     spill_threshold: int = 32 if torch.version.hip else 16
 
-    # Generate code containing the newer tl.make_block_ptr() API for loads/store
+    # Generate code using the tl.make_block_ptr() API for loads/stores. Block
+    # pointers were removed from the Triton frontend in triton-lang/triton#10833,
+    # so this flag is honored only where the installed Triton still provides the
+    # API; where it is gone the request is a no-op and use_block_ptr_enabled()
+    # emits a one-time FutureWarning before falling back to masked indexing.
+    #
+    # TODO(#191012): remove use_block_ptr entirely (this flag + the block-pointer
+    # codegen path in codegen/triton.py) once downstream backends still on block
+    # pointers (e.g. MTIA) migrate.
     use_block_ptr = False
 
     # (Experimental)
@@ -2293,9 +2307,8 @@ class triton:
         == "1"
     )
 
-    # Fuse dependent cross-axis reductions (e.g., RMSNorm over D followed
-    # by per-block amax over a small group dimension like FP8 block size)
-    # into a single kernel with two sequential reduction passes.
+    # Fuse staged reduction pipelines, including dependent cross-axis reductions
+    # and lane-resolution pointwise epilogues.
     nested_reduction = os.environ.get("TORCHINDUCTOR_NESTED_REDUCTION", "0") == "1"
 
     # Map for storing the amount of kernel runs with dumped input tensors
@@ -3019,6 +3032,10 @@ _cache_config_ignore_prefix: list[str] = [
     # not relevant
     "worker_start_method",
     "compile_threads",
+    # only controls how often the sidecar watchdog reports a still-running job;
+    # it has no effect on compiled output, so including it would change the
+    # config hash and needlessly invalidate every cache entry
+    "compile_worker_watchdog_interval_seconds",
     # see CustomGraphPass; these are handled specially
     "post_grad_custom_post_pass",
     "post_grad_custom_pre_pass",
@@ -3163,6 +3180,7 @@ class eager_numerics:
 emulate_precision_casts: bool = (
     os.environ.get("TORCHINDUCTOR_EMULATE_PRECISION_CASTS", "0") == "1"
 )
+
 
 # Targeted variant of emulate_precision_casts for saved low-precision outputs.
 # When a low-precision pointwise result is saved for backward and also used by
