@@ -5043,9 +5043,12 @@ class FlexibleLayout(Layout):
 
     @property
     def stride(self) -> Sequence[Expr]:
+        # 0-dim layouts have no strides that freezing could change, so reading
+        # them is always safe (e.g. scalar carried inputs of while_loop).
         if (
             config.strict_flexible_layout_strides
             and not FlexibleLayout.allow_stride_reads
+            and len(self._stride) > 0
         ):
             raise AssertionError(
                 "Reading strides of an unfrozen FlexibleLayout. These strides "

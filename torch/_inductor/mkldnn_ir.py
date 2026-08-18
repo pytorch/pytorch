@@ -13,6 +13,7 @@ from .ir import (
     FixedLayout,
     FlexibleLayout,
     get_device_type,
+    freeze_storage_layout,
     ir_node_to_tensor,
     IRNode,
     is_contiguous_storage_and_layout,
@@ -118,6 +119,10 @@ def _prepare_convolution_fusion_create(
     weight.realize()
     if bias is not None:
         bias.realize()
+    # the fake run below derives the persisted output layout from input
+    # strides, so they must be final (see also ExternKernel.process_kernel)
+    freeze_storage_layout(x)
+    freeze_storage_layout(weight)
     with V.graph.fake_mode:
         # TODO <Leslie> cleaned up the fake_tensor trace as Linear implementation
         x_fake = ir_node_to_tensor(x)
