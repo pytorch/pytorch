@@ -94,3 +94,5 @@ install(FILES "${TORCH_SRC_DIR}/_dynamo/graph_break_registry.json"
   DESTINATION "${_torch_pkg}/_dynamo"
   OPTIONAL
 )
+
+unset(_torch_pkg)

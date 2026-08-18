@@ -103,10 +103,11 @@ find_package(Python COMPONENTS Interpreter REQUIRED)
 # one level below platlib, and the Python-side install rules address
 # SKBUILD_PLATLIB_DIR directly instead of reaching it through the prefix.
 #
-# Those rules are guarded on SKBUILD, so a build with no wheel behind it
-# (libtorch, tools/build_libtorch.py, downstream cmake --install) installs the
-# C++ distribution alone and keeps package data out of a conventional prefix
-# (see gh-191102).
+# Those rules are guarded on SKBUILD, so a build scikit-build-core does not
+# drive (libtorch, tools/build_libtorch.py, downstream cmake --install) installs
+# the C++ distribution alone and keeps package data out of a conventional prefix
+# (see gh-191102). SKBUILD is set for every scikit-build-core configure,
+# editable installs included, where platlib is a per-build staging directory.
 #
 # The extension modules resolve the C++ tree through an $ORIGIN/lib install
 # rpath and torch/__init__.py resolves bin/ and lib/ off its own __file__, so
