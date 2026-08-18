@@ -1901,5 +1901,283 @@ class TestGraphGlobalLifecycleHooks(TestCase):
         g.reset()
 
 
+def _cupti_backend_available():
+    """Whether the CUPTI annotation backend can be exercised: cupti-python present and the
+    monitor able to subscribe. Probed by actually bringing an observer up, since
+    ``has_live_subscription`` is false until something holds a subscription."""
+    try:
+        from torch.profiler._cupti.observers.node_timer import NodeTimerObserver
+    except ImportError:
+        return False
+    try:
+        return NodeTimerObserver().available
+    except Exception:
+        return False
+
+
+@skipIfRocm
+@requires_cuda
+@requires_cuda_python_bindings
+@unittest.skipIf(
+    _is_tools_id_unavailable(),
+    "cudaGraphNodeGetToolsId not available (needs cuda-compat >= 13.1)",
+)
+@unittest.skipIf(
+    not _cupti_backend_available(), "requires a CUPTI monitor able to subscribe"
+)
+class TestCuptiAnnotationBackend(TestCase):
+    """``annotation_config={"backend": "cupti"}``: nodes are attributed as CUPTI reports their creation
+    rather than by walking the capture graph's dependent edges."""
+
+    def setUp(self):
+        clear_kernel_annotations()
+        self.addCleanup(clear_kernel_annotations)
+        # Attributing a node needs the mark_kernels scope open on the creating thread.
+        ctx = torch.autograd.grad_mode.set_multithreading_enabled(False)
+        ctx.__enter__()
+        self.addCleanup(ctx.__exit__, None, None, None)
+        # Holding an observer keeps the monitor subscribed, which is what makes the CUPTI
+        # backend selectable (and what "auto" probes for).
+        from torch.profiler._cupti.observers.node_timer import NodeTimerObserver
+
+        self.observer = NodeTimerObserver()
+        close = getattr(self.observer, "close", None)
+        if close is not None:
+            self.addCleanup(close)
+
+    @staticmethod
+    def _warm(x):
+        s = torch.cuda.Stream()
+        s.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(s):
+            for _ in range(3):
+                x = x + 1
+        torch.cuda.current_stream().wait_stream(s)
+        return x
+
+    def _annotations(self):
+        return dict(get_kernel_annotations())
+
+    def test_parity_with_edge_walk(self):
+        # Both backends must attribute the same nodes for a plain single-stream scope, and
+        # key them the same way: the node ids must match, and every key must be rekeyed to
+        # that capture's exec graph id (what lets an annotation join a trace's "graph node
+        # id"). Comparing keys rather than just counts is what catches the CUPTI handler
+        # recording into a different id space.
+        from cuda.bindings import runtime as cuda_runtime
+
+        node_ids = {}
+        for backend in ("edge_walk", "cupti"):
+            clear_kernel_annotations()
+            x = self._warm(torch.randn(64, 64, device="cuda"))
+            g = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(
+                g, enable_annotations=True, annotation_config={"backend": backend}
+            ):
+                with mark_kernels("phase"):
+                    for _ in range(4):
+                        x = x + 1
+            exec_graph_id = _check_cuda_bindings(
+                cuda_runtime.cudaGraphExecGetId(g.raw_cuda_graph_exec())
+            )
+            annotations = self._annotations()
+            for tools_id, entries in annotations.items():
+                self.assertEqual(entries, [{"name": "phase"}])
+                self.assertEqual(tools_id >> 32, exec_graph_id)
+            node_ids[backend] = {tools_id & 0xFFFFFFFF for tools_id in annotations}
+        self.assertEqual(node_ids["cupti"], node_ids["edge_walk"])
+        self.assertEqual(len(node_ids["cupti"]), 4)
+
+    def test_scope_entered_before_stream_joins_capture(self):
+        # The edge walk snapshots the CURRENT stream's capture state on scope entry, so a
+        # scope entered while that stream is not yet capturing records nothing at all --
+        # even though work inside it is captured. CUPTI reports each node as it is created,
+        # so it is unaffected.
+        def run(backend):
+            clear_kernel_annotations()
+            x = self._warm(torch.randn(64, 64, device="cuda"))
+            g = torch.cuda.CUDAGraph()
+            side = torch.cuda.Stream()
+            with torch.cuda.graph(
+                g, enable_annotations=True, annotation_config={"backend": backend}
+            ):
+                capturing = torch.cuda.current_stream()
+                joined = torch.cuda.Event()
+                joined.record(capturing)
+                with torch.cuda.stream(side):
+                    with mark_kernels("region"):
+                        # side is not capturing yet at scope entry; it joins here.
+                        side.wait_event(joined)
+                        for _ in range(3):
+                            x = x + 1
+                    done = torch.cuda.Event()
+                    done.record(side)
+                capturing.wait_event(done)
+            return len(self._annotations())
+
+        self.assertEqual(run("edge_walk"), 0)
+        self.assertEqual(run("cupti"), 3)
+
+    def test_nested_scopes_merge_inner_wins(self):
+        x = self._warm(torch.randn(64, 64, device="cuda"))
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(
+            g, enable_annotations=True, annotation_config={"backend": "cupti"}
+        ):
+            with mark_kernels({"name": "outer", "shared": "outer", "only_outer": 1}):
+                x = x + 1
+                with mark_kernels({"name": "inner", "shared": "inner"}):
+                    x = x + 1
+        annotations = sorted(self._annotations().items())
+        self.assertEqual(len(annotations), 2)
+        self.assertEqual(
+            annotations[0][1], [{"name": "outer", "shared": "outer", "only_outer": 1}]
+        )
+        # Inner wins the keys both scopes set; the outer-only key still comes through.
+        self.assertEqual(
+            annotations[1][1],
+            [{"name": "inner", "shared": "inner", "only_outer": 1}],
+        )
+
+    def test_outer_scope_restored_after_inner_exits(self):
+        # The merged annotation is cached and refreshed on scope enter/exit, so a node
+        # created after an inner scope closes must get the outer annotation back rather than
+        # the stale merge.
+        x = self._warm(torch.randn(64, 64, device="cuda"))
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(
+            g, enable_annotations=True, annotation_config={"backend": "cupti"}
+        ):
+            with mark_kernels({"name": "outer"}):
+                x = x + 1
+                with mark_kernels({"name": "inner"}):
+                    x = x + 1
+                x = x + 1
+        names = [
+            entries[0]["name"] for _, entries in sorted(self._annotations().items())
+        ]
+        self.assertEqual(names, ["outer", "inner", "outer"])
+
+    def test_conditional_body_work_warns_and_is_not_annotated(self):
+        # Parity with the edge walk's conditional-body warning, but reported on the drop
+        # rather than at scope entry: the handler cannot key body nodes to anything a trace
+        # would match, so it counts them and disarm() says how many were lost. That covers
+        # a scope *containing* a body as well as one inside it.
+        from torch._higher_order_ops.cudagraph_conditional_nodes import _if_body
+
+        x = torch.ones([2048], device="cuda")
+        pred = torch.tensor(True, device="cuda")
+        g = torch.cuda.CUDAGraph(keep_graph=True)
+        with self.assertWarnsRegex(UserWarning, "were not annotated"):
+            with torch.cuda.graph(
+                g, enable_annotations=True, annotation_config={"backend": "cupti"}
+            ):
+                with mark_kernels("region"):
+                    z = x + 1
+                    with _if_body(pred):
+                        _ = torch.sqrt(z)
+        g.instantiate()
+
+        # Whatever was annotated is top-level: every key belongs to the exec graph, so none
+        # of the body's nodes (which live in the body graph's id space) slipped in. The
+        # exact top-level count is left alone -- _if_body emits kernels of its own.
+        annotations = self._annotations()
+        self.assertGreater(len(annotations), 0)
+        exec_graph_id = g.get_graph_data()["exec_graph_id"]
+        for tools_id in annotations:
+            self.assertEqual(tools_id >> 32, exec_graph_id)
+
+    def test_no_warning_without_body_work(self):
+        # The counter must not leak across captures: a plain capture right after one that
+        # dropped body nodes has to be silent.
+        import warnings as _warnings
+
+        x = self._warm(torch.randn(64, 64, device="cuda"))
+        g = torch.cuda.CUDAGraph()
+        with _warnings.catch_warnings():
+            _warnings.simplefilter("error")
+            with torch.cuda.graph(
+                g, enable_annotations=True, annotation_config={"backend": "cupti"}
+            ):
+                with mark_kernels("region"):
+                    x = x + 1
+
+    def test_scopes_do_not_leak_across_captures(self):
+        # A capture that raises mid-scope must not leave the scope open for the next one.
+        x = self._warm(torch.randn(64, 64, device="cuda"))
+        g = torch.cuda.CUDAGraph()
+        with self.assertRaisesRegex(RuntimeError, "boom"):
+            with torch.cuda.graph(
+                g, enable_annotations=True, annotation_config={"backend": "cupti"}
+            ):
+                with mark_kernels("doomed"):
+                    x = x + 1
+                    raise RuntimeError("boom")
+
+        clear_kernel_annotations()
+        g2 = torch.cuda.CUDAGraph()
+        y = self._warm(torch.randn(64, 64, device="cuda"))
+        with torch.cuda.graph(
+            g2, enable_annotations=True, annotation_config={"backend": "cupti"}
+        ):
+            y = y + 1
+        # No scope was open, so nothing should be attributed to the doomed one.
+        self.assertEqual(self._annotations(), {})
+
+    def test_callback_disarmed_after_capture(self):
+        from torch.cuda import _graph_node_callbacks
+
+        x = self._warm(torch.randn(64, 64, device="cuda"))
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(
+            g, enable_annotations=True, annotation_config={"backend": "cupti"}
+        ):
+            with mark_kernels("phase"):
+                x = x + 1
+        self.assertIsNone(_graph_node_callbacks._handler)
+        before = len(self._annotations())
+        for _ in range(5):
+            g.replay()
+        torch.cuda.synchronize()
+        self.assertEqual(len(self._annotations()), before)
+
+    def test_cupti_backend_requires_single_threaded_autograd(self):
+        x = self._warm(torch.randn(64, 64, device="cuda"))
+        g = torch.cuda.CUDAGraph()
+        with torch.autograd.grad_mode.set_multithreading_enabled(True):
+            with self.assertRaisesRegex(RuntimeError, "single-threaded autograd"):
+                with torch.cuda.graph(
+                    g, enable_annotations=True, annotation_config={"backend": "cupti"}
+                ):
+                    x = x + 1
+
+    def test_auto_falls_back_when_multithreaded(self):
+        # "auto" must never raise: multithreaded autograd just means the edge walk.
+        from torch.cuda import _graph_annotations
+
+        x = self._warm(torch.randn(64, 64, device="cuda"))
+        g = torch.cuda.CUDAGraph()
+        seen = []
+        with torch.autograd.grad_mode.set_multithreading_enabled(True):
+            with torch.cuda.graph(g, enable_annotations=True):
+                seen.append(_graph_annotations._annotation_backend)
+                with mark_kernels("phase"):
+                    x = x + 1
+        self.assertEqual(seen, ["edge_walk"])
+        self.assertEqual(len(self._annotations()), 1)
+
+    def test_invalid_backend_rejected(self):
+        with self.assertRaisesRegex(ValueError, r"annotation_config\['backend'\]"):
+            torch.cuda.graph(
+                torch.cuda.CUDAGraph(), annotation_config={"backend": "nope"}
+            )
+        # A misspelled or unsupported key must raise rather than silently leave the default
+        # in place.
+        with self.assertRaisesRegex(ValueError, "unrecognized annotation_config key"):
+            torch.cuda.graph(
+                torch.cuda.CUDAGraph(), annotation_config={"backend_name": "cupti"}
+            )
+
+
 if __name__ == "__main__":
     run_tests()
