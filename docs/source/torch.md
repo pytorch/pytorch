@@ -928,8 +928,9 @@ False
 
 ### Private foreach compatibility functions
 
-The private `torch._foreach_*` functions remain available for compatibility.
-New code should use {mod}`torch.foreach`.
+The private `torch._foreach_*` functions remain available to support
+backwards compatibility during migration. However, we recommend the
+public foreach APIs; new code should use {mod}`torch.foreach`.
 
 ```{eval-rst}
 .. autosummary::

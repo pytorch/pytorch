@@ -1,20 +1,33 @@
 r"""Operations over lists of tensors.
 
-Each function applies the corresponding ordinary PyTorch operation to every
-position in one or more tensor lists. This API is in beta and may change based
-on user feedback.
+.. warning::
+    ``torch.foreach`` is a beta API. Its signatures may change based on user
+    feedback. Existing private ``torch._foreach_*`` functions remain available
+    for compatibility during migration.
 
-The functions may use an accelerated multi-tensor implementation when their
+Each function applies the corresponding ordinary PyTorch operation to every
+position in one or more tensor lists.
+
+The functions will use an accelerated multi-tensor implementation when their
 inputs meet its requirements. Otherwise they use a semantically equivalent
 per-tensor fallback. Calling a function in this module does not guarantee a
 single or fused kernel.
 """
 
+from __future__ import annotations
+
 import inspect
-from typing import TYPE_CHECKING
+from typing import overload, ParamSpec, TYPE_CHECKING, TypeVar
 
 import torch
+from torch import Tensor
 from torch.overrides import wrap_torch_function
+from torch.types import _complex, Number, PySymType
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from typing import Any
 
 
 __all__ = [
@@ -111,27 +124,86 @@ __all__ = [
 ]
 
 
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+_ScalarT = TypeVar("_ScalarT", bound=Number | _complex | PySymType)
+_Scalar = Number | _complex | PySymType
+_ScalarList = tuple[_ScalarT, ...] | list[_ScalarT]
+_TensorList = tuple[Tensor, ...] | list[Tensor]
+_TensorTuple = tuple[Tensor, ...]
+
+
+class _DefaultAlpha:
+    def __repr__(self) -> str:
+        return "1"
+
+
+_DEFAULT_ALPHA = _DefaultAlpha()
+
+
+def _public(doc: str) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
+    def decorator(func: Callable[_P, _R]) -> Callable[_P, _R]:
+        signature = inspect.signature(func)
+
+        def dispatcher(*args: _P.args, **kwargs: _P.kwargs) -> list[object]:
+            try:
+                bound = signature.bind(*args, **kwargs)
+            except TypeError:
+                # Preserve normal Python call errors before override dispatch.
+                func(*args, **kwargs)
+                return []
+            relevant_args = []
+            for arg in bound.arguments.values():
+                if isinstance(arg, (list, tuple)):
+                    relevant_args.extend(arg)
+                else:
+                    relevant_args.append(arg)
+            return relevant_args
+
+        parameters = [
+            parameter.replace(
+                default=1 if parameter.default is _DEFAULT_ALPHA else parameter.default,
+                annotation=inspect.Parameter.empty,
+            )
+            for parameter in signature.parameters.values()
+        ]
+        func.__doc__ = doc
+        wrapped = wrap_torch_function(dispatcher)(func)
+        wrapped.__annotations__ = {}
+        wrapped.__signature__ = signature.replace(  # type: ignore[attr-defined]
+            parameters=parameters,
+            return_annotation=inspect.Signature.empty,
+        )
+        return wrapped
+
+    return decorator
+
+
 def _result(in_place: bool) -> str:
     if in_place:
         return "the exact input list or tuple"
     return "a tuple containing one result tensor for each input tensor"
 
 
-def _common(reference: str, in_place: bool) -> str:
+def _common(reference: str, in_place: bool, *, has_aligned_lists: bool = False) -> str:
     mutation = (
         "Mutates every tensor in ``inputs`` and returns the exact input "
         "container object."
         if in_place
-        else "Does not mutate ``inputs`` and returns a tuple of result tensors."
+        else "Does not mutate its arguments and returns a tuple of result tensors."
+    )
+    length_requirement = (
+        "\nCorresponding tensor or scalar lists must have the same length."
+        if has_aligned_lists
+        else ""
     )
     return rf"""
 This is semantically equivalent to applying :func:`{reference}` independently
 at every list position. {mutation}
 
-The input tensor lists must be non-empty. Corresponding tensor or scalar lists
-must have the same length. An accelerated multi-tensor implementation is used
-only when supported by the inputs; otherwise the operation falls back to
-per-tensor execution.
+Tensor-list arguments must be non-empty.{length_requirement}
+An accelerated multi-tensor implementation is used only when supported by the
+inputs; otherwise the operation falls back to per-tensor execution.
 """
 
 
@@ -190,7 +262,7 @@ def _binary_doc(
 
 Applies :func:`{reference}` to every tensor in ``inputs``.
 
-{_common(reference, inplace)}
+{_common(reference, inplace, has_aligned_lists=True)}
 
 Supported signatures::
 
@@ -213,20 +285,20 @@ Returns:
 def _pointwise_doc(name: str, reference: str, *, inplace: bool) -> str:
     suffix = "tuple[Tensor, ...] | list[Tensor]" if inplace else "tuple[Tensor, ...]"
     return rf"""
-{name}(inputs, tensor1s, tensor2s, *, value=1) -> {suffix}
+{name}(inputs, tensor1, tensor2, *, value=1) -> {suffix}
 
 Applies :func:`{reference}` to corresponding tensors from the three input
 lists.
 
-{_common(reference, inplace)}
+{_common(reference, inplace, has_aligned_lists=True)}
 
 ``value`` may be one shared scalar, a scalar list or tuple, or a packed 1-D
 CPU tensor containing one scalar per list position.
 
 Args:
     inputs (list or tuple of Tensor): tensors to transform.
-    tensor1s (list or tuple of Tensor): first multiplicative or divisive operands.
-    tensor2s (list or tuple of Tensor): second multiplicative or divisive operands.
+    tensor1 (list or tuple of Tensor): first multiplicative or divisive operands.
+    tensor2 (list or tuple of Tensor): second multiplicative or divisive operands.
     value (Number, list or tuple of Number, or Tensor, optional): scale values.
         Default: ``1``.
 
@@ -235,1410 +307,1183 @@ Returns:
 """
 
 
-if TYPE_CHECKING:
-    from typing import overload, TypeVar
-
-    from torch import memory_format, Tensor
-    from torch.types import _bool, _complex, _dtype, Number, PySymType
-
-    _ScalarT = TypeVar("_ScalarT", bound=Number | _complex | PySymType)
-    _ScalarList = tuple[_ScalarT, ...] | list[_ScalarT]
-
-    def abs(inputs: tuple[Tensor, ...] | list[Tensor]) -> tuple[Tensor, ...]: ...
-
-    def abs_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    def acos(inputs: tuple[Tensor, ...] | list[Tensor]) -> tuple[Tensor, ...]: ...
-
-    def acos_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    @overload
-    def add(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        other: Number | _complex | PySymType,
-    ) -> tuple[Tensor, ...]: ...
-
-    @overload
-    def add(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        other: _ScalarList[_ScalarT],
-    ) -> tuple[Tensor, ...]: ...
-
-    @overload
-    def add(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        other: Tensor,
-        *,
-        alpha: Number | _complex | PySymType = 1,
-    ) -> tuple[Tensor, ...]: ...
-
-    @overload
-    def add(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        other: tuple[Tensor, ...] | list[Tensor],
-        *,
-        alpha: Number | _complex | PySymType = 1,
-    ) -> tuple[Tensor, ...]: ...
-
-    def add(*args: object, **kwargs: object) -> tuple[Tensor, ...]: ...
-
-    @overload
-    def add_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        other: Number | _complex | PySymType,
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    @overload
-    def add_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        other: _ScalarList[_ScalarT],
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    @overload
-    def add_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        other: Tensor,
-        *,
-        alpha: Number | _complex | PySymType = 1,
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    @overload
-    def add_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        other: tuple[Tensor, ...] | list[Tensor],
-        *,
-        alpha: Number | _complex | PySymType = 1,
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    def add_(*args: object, **kwargs: object) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    @overload
-    def addcdiv(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        tensor1s: tuple[Tensor, ...] | list[Tensor],
-        tensor2s: tuple[Tensor, ...] | list[Tensor],
-        *,
-        value: _ScalarList[_ScalarT],
-    ) -> tuple[Tensor, ...]: ...
-
-    @overload
-    def addcdiv(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        tensor1s: tuple[Tensor, ...] | list[Tensor],
-        tensor2s: tuple[Tensor, ...] | list[Tensor],
-        *,
-        value: Tensor,
-    ) -> tuple[Tensor, ...]: ...
-
-    @overload
-    def addcdiv(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        tensor1s: tuple[Tensor, ...] | list[Tensor],
-        tensor2s: tuple[Tensor, ...] | list[Tensor],
-        *,
-        value: Number | _complex | PySymType = 1,
-    ) -> tuple[Tensor, ...]: ...
-
-    def addcdiv(*args: object, **kwargs: object) -> tuple[Tensor, ...]: ...
-
-    @overload
-    def addcdiv_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        tensor1s: tuple[Tensor, ...] | list[Tensor],
-        tensor2s: tuple[Tensor, ...] | list[Tensor],
-        *,
-        value: _ScalarList[_ScalarT],
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    @overload
-    def addcdiv_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        tensor1s: tuple[Tensor, ...] | list[Tensor],
-        tensor2s: tuple[Tensor, ...] | list[Tensor],
-        *,
-        value: Tensor,
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    @overload
-    def addcdiv_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        tensor1s: tuple[Tensor, ...] | list[Tensor],
-        tensor2s: tuple[Tensor, ...] | list[Tensor],
-        *,
-        value: Number | _complex | PySymType = 1,
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    def addcdiv_(
-        *args: object, **kwargs: object
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    @overload
-    def addcmul(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        tensor1s: tuple[Tensor, ...] | list[Tensor],
-        tensor2s: tuple[Tensor, ...] | list[Tensor],
-        *,
-        value: _ScalarList[_ScalarT],
-    ) -> tuple[Tensor, ...]: ...
-
-    @overload
-    def addcmul(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        tensor1s: tuple[Tensor, ...] | list[Tensor],
-        tensor2s: tuple[Tensor, ...] | list[Tensor],
-        *,
-        value: Tensor,
-    ) -> tuple[Tensor, ...]: ...
-
-    @overload
-    def addcmul(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        tensor1s: tuple[Tensor, ...] | list[Tensor],
-        tensor2s: tuple[Tensor, ...] | list[Tensor],
-        *,
-        value: Number | _complex | PySymType = 1,
-    ) -> tuple[Tensor, ...]: ...
-
-    def addcmul(*args: object, **kwargs: object) -> tuple[Tensor, ...]: ...
-
-    @overload
-    def addcmul_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        tensor1s: tuple[Tensor, ...] | list[Tensor],
-        tensor2s: tuple[Tensor, ...] | list[Tensor],
-        *,
-        value: _ScalarList[_ScalarT],
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    @overload
-    def addcmul_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        tensor1s: tuple[Tensor, ...] | list[Tensor],
-        tensor2s: tuple[Tensor, ...] | list[Tensor],
-        *,
-        value: Tensor,
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    @overload
-    def addcmul_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        tensor1s: tuple[Tensor, ...] | list[Tensor],
-        tensor2s: tuple[Tensor, ...] | list[Tensor],
-        *,
-        value: Number | _complex | PySymType = 1,
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    def addcmul_(
-        *args: object, **kwargs: object
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    def asin(inputs: tuple[Tensor, ...] | list[Tensor]) -> tuple[Tensor, ...]: ...
-
-    def asin_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    def atan(inputs: tuple[Tensor, ...] | list[Tensor]) -> tuple[Tensor, ...]: ...
-
-    def atan_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    def ceil(inputs: tuple[Tensor, ...] | list[Tensor]) -> tuple[Tensor, ...]: ...
-
-    def ceil_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    @overload
-    def clamp_max(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        max: Number | _complex | PySymType,
-    ) -> tuple[Tensor, ...]: ...
-
-    @overload
-    def clamp_max(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        max: _ScalarList[_ScalarT],
-    ) -> tuple[Tensor, ...]: ...
-
-    @overload
-    def clamp_max(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        max: tuple[Tensor, ...] | list[Tensor],
-    ) -> tuple[Tensor, ...]: ...
-
-    def clamp_max(*args: object, **kwargs: object) -> tuple[Tensor, ...]: ...
-
-    @overload
-    def clamp_max_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        max: Number | _complex | PySymType,
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    @overload
-    def clamp_max_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        max: _ScalarList[_ScalarT],
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    @overload
-    def clamp_max_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        max: tuple[Tensor, ...] | list[Tensor],
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    def clamp_max_(
-        *args: object, **kwargs: object
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    @overload
-    def clamp_min(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        min: Number | _complex | PySymType,
-    ) -> tuple[Tensor, ...]: ...
-
-    @overload
-    def clamp_min(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        min: _ScalarList[_ScalarT],
-    ) -> tuple[Tensor, ...]: ...
-
-    @overload
-    def clamp_min(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        min: tuple[Tensor, ...] | list[Tensor],
-    ) -> tuple[Tensor, ...]: ...
-
-    def clamp_min(*args: object, **kwargs: object) -> tuple[Tensor, ...]: ...
-
-    @overload
-    def clamp_min_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        min: Number | _complex | PySymType,
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    @overload
-    def clamp_min_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        min: _ScalarList[_ScalarT],
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    @overload
-    def clamp_min_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        min: tuple[Tensor, ...] | list[Tensor],
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    def clamp_min_(
-        *args: object, **kwargs: object
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    def clone(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        *,
-        memory_format: memory_format | None = torch.preserve_format,
-    ) -> tuple[Tensor, ...]: ...
-
-    def copy_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        srcs: tuple[Tensor, ...] | list[Tensor],
-        non_blocking: _bool = False,
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    def cos(inputs: tuple[Tensor, ...] | list[Tensor]) -> tuple[Tensor, ...]: ...
-
-    def cos_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    def cosh(inputs: tuple[Tensor, ...] | list[Tensor]) -> tuple[Tensor, ...]: ...
-
-    def cosh_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    @overload
-    def div(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        other: _ScalarList[_ScalarT],
-    ) -> tuple[Tensor, ...]: ...
-
-    @overload
-    def div(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        other: Tensor,
-    ) -> tuple[Tensor, ...]: ...
-
-    @overload
-    def div(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        other: tuple[Tensor, ...] | list[Tensor],
-    ) -> tuple[Tensor, ...]: ...
-
-    @overload
-    def div(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        other: Number | _complex | PySymType,
-    ) -> tuple[Tensor, ...]: ...
-
-    def div(*args: object, **kwargs: object) -> tuple[Tensor, ...]: ...
-
-    @overload
-    def div_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        other: _ScalarList[_ScalarT],
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    @overload
-    def div_(
-        inputs: tuple[Tensor, ...] | list[Tensor], other: Tensor
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    @overload
-    def div_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        other: tuple[Tensor, ...] | list[Tensor],
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    @overload
-    def div_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        other: Number | _complex | PySymType,
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    def div_(*args: object, **kwargs: object) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    def erf(inputs: tuple[Tensor, ...] | list[Tensor]) -> tuple[Tensor, ...]: ...
-
-    def erf_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    def erfc(inputs: tuple[Tensor, ...] | list[Tensor]) -> tuple[Tensor, ...]: ...
-
-    def erfc_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    def exp(inputs: tuple[Tensor, ...] | list[Tensor]) -> tuple[Tensor, ...]: ...
-
-    def exp_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    def expm1(inputs: tuple[Tensor, ...] | list[Tensor]) -> tuple[Tensor, ...]: ...
-
-    def expm1_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    def floor(inputs: tuple[Tensor, ...] | list[Tensor]) -> tuple[Tensor, ...]: ...
-
-    def floor_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    def frac(inputs: tuple[Tensor, ...] | list[Tensor]) -> tuple[Tensor, ...]: ...
-
-    def frac_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    @overload
-    def lerp(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        ends: tuple[Tensor, ...] | list[Tensor],
-        weight: Number | _complex | PySymType,
-    ) -> tuple[Tensor, ...]: ...
-
-    @overload
-    def lerp(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        ends: tuple[Tensor, ...] | list[Tensor],
-        weight: _ScalarList[_ScalarT],
-    ) -> tuple[Tensor, ...]: ...
-
-    @overload
-    def lerp(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        ends: tuple[Tensor, ...] | list[Tensor],
-        weight: tuple[Tensor, ...] | list[Tensor],
-    ) -> tuple[Tensor, ...]: ...
-
-    def lerp(*args: object, **kwargs: object) -> tuple[Tensor, ...]: ...
-
-    @overload
-    def lerp_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        ends: tuple[Tensor, ...] | list[Tensor],
-        weight: Number | _complex | PySymType,
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    @overload
-    def lerp_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        ends: tuple[Tensor, ...] | list[Tensor],
-        weight: _ScalarList[_ScalarT],
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    @overload
-    def lerp_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        ends: tuple[Tensor, ...] | list[Tensor],
-        weight: tuple[Tensor, ...] | list[Tensor],
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    def lerp_(*args: object, **kwargs: object) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    def lgamma(inputs: tuple[Tensor, ...] | list[Tensor]) -> tuple[Tensor, ...]: ...
-
-    def lgamma_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    def log(inputs: tuple[Tensor, ...] | list[Tensor]) -> tuple[Tensor, ...]: ...
-
-    def log10(inputs: tuple[Tensor, ...] | list[Tensor]) -> tuple[Tensor, ...]: ...
-
-    def log10_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    def log1p(inputs: tuple[Tensor, ...] | list[Tensor]) -> tuple[Tensor, ...]: ...
-
-    def log1p_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    def log2(inputs: tuple[Tensor, ...] | list[Tensor]) -> tuple[Tensor, ...]: ...
-
-    def log2_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    def log_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    def max(inputs: tuple[Tensor, ...] | list[Tensor]) -> tuple[Tensor, ...]: ...
-
-    @overload
-    def maximum(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        other: Number | _complex | PySymType,
-    ) -> tuple[Tensor, ...]: ...
-
-    @overload
-    def maximum(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        other: _ScalarList[_ScalarT],
-    ) -> tuple[Tensor, ...]: ...
-
-    @overload
-    def maximum(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        other: tuple[Tensor, ...] | list[Tensor],
-    ) -> tuple[Tensor, ...]: ...
-
-    def maximum(*args: object, **kwargs: object) -> tuple[Tensor, ...]: ...
-
-    @overload
-    def maximum_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        other: Number | _complex | PySymType,
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    @overload
-    def maximum_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        other: _ScalarList[_ScalarT],
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    @overload
-    def maximum_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        other: tuple[Tensor, ...] | list[Tensor],
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    def maximum_(
-        *args: object, **kwargs: object
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    @overload
-    def minimum(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        other: Number | _complex | PySymType,
-    ) -> tuple[Tensor, ...]: ...
-
-    @overload
-    def minimum(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        other: _ScalarList[_ScalarT],
-    ) -> tuple[Tensor, ...]: ...
-
-    @overload
-    def minimum(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        other: tuple[Tensor, ...] | list[Tensor],
-    ) -> tuple[Tensor, ...]: ...
-
-    def minimum(*args: object, **kwargs: object) -> tuple[Tensor, ...]: ...
-
-    @overload
-    def minimum_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        other: Number | _complex | PySymType,
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    @overload
-    def minimum_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        other: _ScalarList[_ScalarT],
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    @overload
-    def minimum_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        other: tuple[Tensor, ...] | list[Tensor],
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    def minimum_(
-        *args: object, **kwargs: object
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    def mm(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        mat2s: tuple[Tensor, ...] | list[Tensor],
-    ) -> tuple[Tensor, ...]: ...
-
-    @overload
-    def mul(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        other: _ScalarList[_ScalarT],
-    ) -> tuple[Tensor, ...]: ...
-
-    @overload
-    def mul(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        other: Tensor,
-    ) -> tuple[Tensor, ...]: ...
-
-    @overload
-    def mul(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        other: tuple[Tensor, ...] | list[Tensor],
-    ) -> tuple[Tensor, ...]: ...
-
-    @overload
-    def mul(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        other: Number | _complex | PySymType,
-    ) -> tuple[Tensor, ...]: ...
-
-    def mul(*args: object, **kwargs: object) -> tuple[Tensor, ...]: ...
-
-    @overload
-    def mul_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        other: _ScalarList[_ScalarT],
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    @overload
-    def mul_(
-        inputs: tuple[Tensor, ...] | list[Tensor], other: Tensor
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    @overload
-    def mul_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        other: tuple[Tensor, ...] | list[Tensor],
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    @overload
-    def mul_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        other: Number | _complex | PySymType,
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    def mul_(*args: object, **kwargs: object) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    def neg(inputs: tuple[Tensor, ...] | list[Tensor]) -> tuple[Tensor, ...]: ...
-
-    def neg_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    def norm(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        ord: Number | _complex | PySymType = 2,
-        *,
-        dtype: _dtype | None = None,
-    ) -> tuple[Tensor, ...]: ...
-
-    @overload
-    def pow(
-        input: Number | _complex | PySymType,
-        exponent: tuple[Tensor, ...] | list[Tensor],
-    ) -> tuple[Tensor, ...]: ...
-
-    @overload
-    def pow(
-        input: tuple[Tensor, ...] | list[Tensor],
-        exponent: Number | _complex | PySymType,
-    ) -> tuple[Tensor, ...]: ...
-
-    @overload
-    def pow(
-        input: tuple[Tensor, ...] | list[Tensor],
-        exponent: _ScalarList[_ScalarT],
-    ) -> tuple[Tensor, ...]: ...
-
-    @overload
-    def pow(
-        input: tuple[Tensor, ...] | list[Tensor],
-        exponent: tuple[Tensor, ...] | list[Tensor],
-    ) -> tuple[Tensor, ...]: ...
-
-    def pow(*args: object, **kwargs: object) -> tuple[Tensor, ...]: ...
-
-    @overload
-    def pow_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        exponent: Number | _complex | PySymType,
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    @overload
-    def pow_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        exponent: _ScalarList[_ScalarT],
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    @overload
-    def pow_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        exponent: tuple[Tensor, ...] | list[Tensor],
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    def pow_(*args: object, **kwargs: object) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    def reciprocal(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-    ) -> tuple[Tensor, ...]: ...
-
-    def reciprocal_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    def round(inputs: tuple[Tensor, ...] | list[Tensor]) -> tuple[Tensor, ...]: ...
-
-    def round_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    def rsqrt(inputs: tuple[Tensor, ...] | list[Tensor]) -> tuple[Tensor, ...]: ...
-
-    def rsqrt_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    def sigmoid(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-    ) -> tuple[Tensor, ...]: ...
-
-    def sigmoid_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    def sign(inputs: tuple[Tensor, ...] | list[Tensor]) -> tuple[Tensor, ...]: ...
-
-    def sign_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    def sin(inputs: tuple[Tensor, ...] | list[Tensor]) -> tuple[Tensor, ...]: ...
-
-    def sin_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    def sinh(inputs: tuple[Tensor, ...] | list[Tensor]) -> tuple[Tensor, ...]: ...
-
-    def sinh_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    def sqrt(inputs: tuple[Tensor, ...] | list[Tensor]) -> tuple[Tensor, ...]: ...
-
-    def sqrt_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    @overload
-    def sub(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        other: Number | _complex | PySymType,
-    ) -> tuple[Tensor, ...]: ...
-
-    @overload
-    def sub(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        other: _ScalarList[_ScalarT],
-    ) -> tuple[Tensor, ...]: ...
-
-    @overload
-    def sub(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        other: tuple[Tensor, ...] | list[Tensor],
-        *,
-        alpha: Number | _complex | PySymType = 1,
-    ) -> tuple[Tensor, ...]: ...
-
-    def sub(*args: object, **kwargs: object) -> tuple[Tensor, ...]: ...
-
-    @overload
-    def sub_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        other: Number | _complex | PySymType,
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    @overload
-    def sub_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        other: _ScalarList[_ScalarT],
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    @overload
-    def sub_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-        other: tuple[Tensor, ...] | list[Tensor],
-        *,
-        alpha: Number | _complex | PySymType = 1,
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    def sub_(*args: object, **kwargs: object) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    def tan(inputs: tuple[Tensor, ...] | list[Tensor]) -> tuple[Tensor, ...]: ...
-
-    def tan_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    def tanh(inputs: tuple[Tensor, ...] | list[Tensor]) -> tuple[Tensor, ...]: ...
-
-    def tanh_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    def trunc(inputs: tuple[Tensor, ...] | list[Tensor]) -> tuple[Tensor, ...]: ...
-
-    def trunc_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-
-    def zero_(
-        inputs: tuple[Tensor, ...] | list[Tensor],
-    ) -> tuple[Tensor, ...] | list[Tensor]: ...
-else:
-
-    class _DefaultAlpha:
-        def __repr__(self):
-            return "1"
-
-    _DEFAULT_ALPHA = _DefaultAlpha()
-
-    def _wrap(func, name):
-        func.__name__ = name
-        func.__qualname__ = name
-        signature = inspect.signature(func)
-
-        def dispatcher(*args, **kwargs):
-            try:
-                bound = signature.bind(*args, **kwargs)
-            except TypeError:
-                # Preserve normal Python call errors before override dispatch.
-                return func(*args, **kwargs)
-            relevant_args = []
-            for arg in bound.arguments.values():
-                if isinstance(arg, (list, tuple)):
-                    relevant_args.extend(arg)
-                else:
-                    relevant_args.append(arg)
-            return relevant_args
-
-        parameters = [
-            parameter.replace(default=1)
-            if parameter.default is _DEFAULT_ALPHA
-            else parameter
-            for parameter in signature.parameters.values()
-        ]
-        wrapped = wrap_torch_function(dispatcher)(func)
-        wrapped.__signature__ = signature.replace(parameters=parameters)
-        return wrapped
-
-    def _set_doc(func, doc):
-        func.__doc__ = doc
-        return func
-
-    def _make_unary(name):
-        private = getattr(torch, f"_foreach_{name}")
-
-        def func(inputs):
-            result = private(inputs)
-            return inputs if name.endswith("_") else result
-
-        return _wrap(func, name)
-
-    def _make_binary(name):
-        private = getattr(torch, f"_foreach_{name}")
-
-        def func(inputs, other):
-            result = private(inputs, other)
-            return inputs if name.endswith("_") else result
-
-        return _wrap(func, name)
-
-    def _make_add(name):
-        private = getattr(torch, f"_foreach_{name}")
-
-        def func(inputs, other, *, alpha=_DEFAULT_ALPHA):
-            if alpha is _DEFAULT_ALPHA:
-                result = private(inputs, other)
-            else:
-                result = private(inputs, other, alpha=alpha)
-            return inputs if name.endswith("_") else result
-
-        return _wrap(func, name)
-
-    def _make_pointwise(name):
-        private = getattr(torch, f"_foreach_{name}")
-
-        def func(inputs, tensor1s, tensor2s, *, value=1):
-            result = private(inputs, tensor1s, tensor2s, value)
-            return inputs if name.endswith("_") else result
-
-        return _wrap(func, name)
-
-    def _make_lerp(name):
-        private = getattr(torch, f"_foreach_{name}")
-
-        def func(inputs, ends, weight):
-            result = private(inputs, ends, weight)
-            return inputs if name.endswith("_") else result
-
-        return _wrap(func, name)
-
-    def _make_pow(name, *, inplace):
-        private = getattr(torch, f"_foreach_{name}")
-
-        if inplace:
-
-            def func(inputs, exponent):
-                private(inputs, exponent)
-                return inputs
-
-        else:
-
-            def func(input, exponent):
-                return private(input, exponent)
-
-        return _wrap(func, name)
-
-    abs = _make_unary("abs")
-    abs_ = _make_unary("abs_")
-    acos = _make_unary("acos")
-    acos_ = _make_unary("acos_")
-    asin = _make_unary("asin")
-    asin_ = _make_unary("asin_")
-    atan = _make_unary("atan")
-    atan_ = _make_unary("atan_")
-    ceil = _make_unary("ceil")
-    ceil_ = _make_unary("ceil_")
-    cos = _make_unary("cos")
-    cos_ = _make_unary("cos_")
-    cosh = _make_unary("cosh")
-    cosh_ = _make_unary("cosh_")
-    erf = _make_unary("erf")
-    erf_ = _make_unary("erf_")
-    erfc = _make_unary("erfc")
-    erfc_ = _make_unary("erfc_")
-    exp = _make_unary("exp")
-    exp_ = _make_unary("exp_")
-    expm1 = _make_unary("expm1")
-    expm1_ = _make_unary("expm1_")
-    floor = _make_unary("floor")
-    floor_ = _make_unary("floor_")
-    frac = _make_unary("frac")
-    frac_ = _make_unary("frac_")
-    lgamma = _make_unary("lgamma")
-    lgamma_ = _make_unary("lgamma_")
-    log = _make_unary("log")
-    log_ = _make_unary("log_")
-    log10 = _make_unary("log10")
-    log10_ = _make_unary("log10_")
-    log1p = _make_unary("log1p")
-    log1p_ = _make_unary("log1p_")
-    log2 = _make_unary("log2")
-    log2_ = _make_unary("log2_")
-    neg = _make_unary("neg")
-    neg_ = _make_unary("neg_")
-    reciprocal = _make_unary("reciprocal")
-    reciprocal_ = _make_unary("reciprocal_")
-    round = _make_unary("round")
-    round_ = _make_unary("round_")
-    rsqrt = _make_unary("rsqrt")
-    rsqrt_ = _make_unary("rsqrt_")
-    sigmoid = _make_unary("sigmoid")
-    sigmoid_ = _make_unary("sigmoid_")
-    sign = _make_unary("sign")
-    sign_ = _make_unary("sign_")
-    sin = _make_unary("sin")
-    sin_ = _make_unary("sin_")
-    sinh = _make_unary("sinh")
-    sinh_ = _make_unary("sinh_")
-    sqrt = _make_unary("sqrt")
-    sqrt_ = _make_unary("sqrt_")
-    tan = _make_unary("tan")
-    tan_ = _make_unary("tan_")
-    tanh = _make_unary("tanh")
-    tanh_ = _make_unary("tanh_")
-    trunc = _make_unary("trunc")
-    trunc_ = _make_unary("trunc_")
-    max = _make_unary("max")
-    zero_ = _make_unary("zero_")
-
-    add = _make_add("add")
-    add_ = _make_add("add_")
-    sub = _make_add("sub")
-    sub_ = _make_add("sub_")
-    addcdiv = _make_pointwise("addcdiv")
-    addcdiv_ = _make_pointwise("addcdiv_")
-    addcmul = _make_pointwise("addcmul")
-    addcmul_ = _make_pointwise("addcmul_")
-    div = _make_binary("div")
-    div_ = _make_binary("div_")
-    lerp = _make_lerp("lerp")
-    lerp_ = _make_lerp("lerp_")
-    maximum = _make_binary("maximum")
-    maximum_ = _make_binary("maximum_")
-    minimum = _make_binary("minimum")
-    minimum_ = _make_binary("minimum_")
-    mul = _make_binary("mul")
-    mul_ = _make_binary("mul_")
-    pow = _make_pow("pow", inplace=False)
-    pow_ = _make_pow("pow_", inplace=True)
-
-    def clamp_max(inputs, max):
-        return torch._foreach_clamp_max(inputs, max)
-
-    clamp_max = _wrap(clamp_max, "clamp_max")
-
-    def clamp_max_(inputs, max):
-        torch._foreach_clamp_max_(inputs, max)
-        return inputs
-
-    clamp_max_ = _wrap(clamp_max_, "clamp_max_")
-
-    def clamp_min(inputs, min):
-        return torch._foreach_clamp_min(inputs, min)
-
-    clamp_min = _wrap(clamp_min, "clamp_min")
-
-    def clamp_min_(inputs, min):
-        torch._foreach_clamp_min_(inputs, min)
-        return inputs
-
-    clamp_min_ = _wrap(clamp_min_, "clamp_min_")
-
-    def clone(inputs, *, memory_format=torch.preserve_format):
-        return torch._foreach_clone(inputs, memory_format=memory_format)
-
-    clone = _wrap(clone, "clone")
-
-    def copy_(inputs, srcs, non_blocking=False):
-        torch._foreach_copy_(inputs, srcs, non_blocking)
-        return inputs
-
-    copy_ = _wrap(copy_, "copy_")
-
-    def mm(inputs, mat2s):
-        return torch._foreach_mm(inputs, mat2s)
-
-    mm = _wrap(mm, "mm")
-
-    def norm(inputs, ord=2, *, dtype=None):
-        return torch._foreach_norm(inputs, ord, dtype=dtype)
-
-    norm = _wrap(norm, "norm")
-
-    abs = _set_doc(abs, _unary_doc("abs", "torch.abs", inplace=False))
-    abs_ = _set_doc(abs_, _unary_doc("abs_", "torch.abs", inplace=True))
-    acos = _set_doc(acos, _unary_doc("acos", "torch.acos", inplace=False))
-    acos_ = _set_doc(acos_, _unary_doc("acos_", "torch.acos", inplace=True))
-    asin = _set_doc(asin, _unary_doc("asin", "torch.asin", inplace=False))
-    asin_ = _set_doc(asin_, _unary_doc("asin_", "torch.asin", inplace=True))
-    atan = _set_doc(atan, _unary_doc("atan", "torch.atan", inplace=False))
-    atan_ = _set_doc(atan_, _unary_doc("atan_", "torch.atan", inplace=True))
-    ceil = _set_doc(ceil, _unary_doc("ceil", "torch.ceil", inplace=False))
-    ceil_ = _set_doc(ceil_, _unary_doc("ceil_", "torch.ceil", inplace=True))
-    cos = _set_doc(cos, _unary_doc("cos", "torch.cos", inplace=False))
-    cos_ = _set_doc(cos_, _unary_doc("cos_", "torch.cos", inplace=True))
-    cosh = _set_doc(cosh, _unary_doc("cosh", "torch.cosh", inplace=False))
-    cosh_ = _set_doc(cosh_, _unary_doc("cosh_", "torch.cosh", inplace=True))
-    erf = _set_doc(erf, _unary_doc("erf", "torch.erf", inplace=False))
-    erf_ = _set_doc(erf_, _unary_doc("erf_", "torch.erf", inplace=True))
-    erfc = _set_doc(erfc, _unary_doc("erfc", "torch.erfc", inplace=False))
-    erfc_ = _set_doc(erfc_, _unary_doc("erfc_", "torch.erfc", inplace=True))
-    exp = _set_doc(exp, _unary_doc("exp", "torch.exp", inplace=False))
-    exp_ = _set_doc(exp_, _unary_doc("exp_", "torch.exp", inplace=True))
-    expm1 = _set_doc(expm1, _unary_doc("expm1", "torch.expm1", inplace=False))
-    expm1_ = _set_doc(expm1_, _unary_doc("expm1_", "torch.expm1", inplace=True))
-    floor = _set_doc(floor, _unary_doc("floor", "torch.floor", inplace=False))
-    floor_ = _set_doc(floor_, _unary_doc("floor_", "torch.floor", inplace=True))
-    frac = _set_doc(frac, _unary_doc("frac", "torch.frac", inplace=False))
-    frac_ = _set_doc(frac_, _unary_doc("frac_", "torch.frac", inplace=True))
-    lgamma = _set_doc(lgamma, _unary_doc("lgamma", "torch.lgamma", inplace=False))
-    lgamma_ = _set_doc(lgamma_, _unary_doc("lgamma_", "torch.lgamma", inplace=True))
-    log = _set_doc(log, _unary_doc("log", "torch.log", inplace=False))
-    log_ = _set_doc(log_, _unary_doc("log_", "torch.log", inplace=True))
-    log10 = _set_doc(log10, _unary_doc("log10", "torch.log10", inplace=False))
-    log10_ = _set_doc(log10_, _unary_doc("log10_", "torch.log10", inplace=True))
-    log1p = _set_doc(log1p, _unary_doc("log1p", "torch.log1p", inplace=False))
-    log1p_ = _set_doc(log1p_, _unary_doc("log1p_", "torch.log1p", inplace=True))
-    log2 = _set_doc(log2, _unary_doc("log2", "torch.log2", inplace=False))
-    log2_ = _set_doc(log2_, _unary_doc("log2_", "torch.log2", inplace=True))
-    neg = _set_doc(neg, _unary_doc("neg", "torch.neg", inplace=False))
-    neg_ = _set_doc(neg_, _unary_doc("neg_", "torch.neg", inplace=True))
-    reciprocal = _set_doc(
-        reciprocal,
-        _unary_doc("reciprocal", "torch.reciprocal", inplace=False),
+# Unary operations
+
+
+@_public(_unary_doc("abs", "torch.abs", inplace=False))
+def abs(inputs: _TensorList) -> _TensorTuple:
+    return torch._foreach_abs(inputs)
+
+
+@_public(_unary_doc("abs_", "torch.abs", inplace=True))
+def abs_(inputs: _TensorList) -> _TensorList:
+    return torch._foreach_abs_(inputs)
+
+
+@_public(_unary_doc("acos", "torch.acos", inplace=False))
+def acos(inputs: _TensorList) -> _TensorTuple:
+    return torch._foreach_acos(inputs)
+
+
+@_public(_unary_doc("acos_", "torch.acos", inplace=True))
+def acos_(inputs: _TensorList) -> _TensorList:
+    return torch._foreach_acos_(inputs)
+
+
+@_public(_unary_doc("asin", "torch.asin", inplace=False))
+def asin(inputs: _TensorList) -> _TensorTuple:
+    return torch._foreach_asin(inputs)
+
+
+@_public(_unary_doc("asin_", "torch.asin", inplace=True))
+def asin_(inputs: _TensorList) -> _TensorList:
+    return torch._foreach_asin_(inputs)
+
+
+@_public(_unary_doc("atan", "torch.atan", inplace=False))
+def atan(inputs: _TensorList) -> _TensorTuple:
+    return torch._foreach_atan(inputs)
+
+
+@_public(_unary_doc("atan_", "torch.atan", inplace=True))
+def atan_(inputs: _TensorList) -> _TensorList:
+    return torch._foreach_atan_(inputs)
+
+
+@_public(_unary_doc("ceil", "torch.ceil", inplace=False))
+def ceil(inputs: _TensorList) -> _TensorTuple:
+    return torch._foreach_ceil(inputs)
+
+
+@_public(_unary_doc("ceil_", "torch.ceil", inplace=True))
+def ceil_(inputs: _TensorList) -> _TensorList:
+    return torch._foreach_ceil_(inputs)
+
+
+@_public(_unary_doc("cos", "torch.cos", inplace=False))
+def cos(inputs: _TensorList) -> _TensorTuple:
+    return torch._foreach_cos(inputs)
+
+
+@_public(_unary_doc("cos_", "torch.cos", inplace=True))
+def cos_(inputs: _TensorList) -> _TensorList:
+    return torch._foreach_cos_(inputs)
+
+
+@_public(_unary_doc("cosh", "torch.cosh", inplace=False))
+def cosh(inputs: _TensorList) -> _TensorTuple:
+    return torch._foreach_cosh(inputs)
+
+
+@_public(_unary_doc("cosh_", "torch.cosh", inplace=True))
+def cosh_(inputs: _TensorList) -> _TensorList:
+    return torch._foreach_cosh_(inputs)
+
+
+@_public(_unary_doc("erf", "torch.erf", inplace=False))
+def erf(inputs: _TensorList) -> _TensorTuple:
+    return torch._foreach_erf(inputs)
+
+
+@_public(_unary_doc("erf_", "torch.erf", inplace=True))
+def erf_(inputs: _TensorList) -> _TensorList:
+    return torch._foreach_erf_(inputs)
+
+
+@_public(_unary_doc("erfc", "torch.erfc", inplace=False))
+def erfc(inputs: _TensorList) -> _TensorTuple:
+    return torch._foreach_erfc(inputs)
+
+
+@_public(_unary_doc("erfc_", "torch.erfc", inplace=True))
+def erfc_(inputs: _TensorList) -> _TensorList:
+    return torch._foreach_erfc_(inputs)
+
+
+@_public(_unary_doc("exp", "torch.exp", inplace=False))
+def exp(inputs: _TensorList) -> _TensorTuple:
+    return torch._foreach_exp(inputs)
+
+
+@_public(_unary_doc("exp_", "torch.exp", inplace=True))
+def exp_(inputs: _TensorList) -> _TensorList:
+    return torch._foreach_exp_(inputs)
+
+
+@_public(_unary_doc("expm1", "torch.expm1", inplace=False))
+def expm1(inputs: _TensorList) -> _TensorTuple:
+    return torch._foreach_expm1(inputs)
+
+
+@_public(_unary_doc("expm1_", "torch.expm1", inplace=True))
+def expm1_(inputs: _TensorList) -> _TensorList:
+    return torch._foreach_expm1_(inputs)
+
+
+@_public(_unary_doc("floor", "torch.floor", inplace=False))
+def floor(inputs: _TensorList) -> _TensorTuple:
+    return torch._foreach_floor(inputs)
+
+
+@_public(_unary_doc("floor_", "torch.floor", inplace=True))
+def floor_(inputs: _TensorList) -> _TensorList:
+    return torch._foreach_floor_(inputs)
+
+
+@_public(_unary_doc("frac", "torch.frac", inplace=False))
+def frac(inputs: _TensorList) -> _TensorTuple:
+    return torch._foreach_frac(inputs)
+
+
+@_public(_unary_doc("frac_", "torch.frac", inplace=True))
+def frac_(inputs: _TensorList) -> _TensorList:
+    return torch._foreach_frac_(inputs)
+
+
+@_public(_unary_doc("lgamma", "torch.lgamma", inplace=False))
+def lgamma(inputs: _TensorList) -> _TensorTuple:
+    return torch._foreach_lgamma(inputs)
+
+
+@_public(_unary_doc("lgamma_", "torch.lgamma", inplace=True))
+def lgamma_(inputs: _TensorList) -> _TensorList:
+    return torch._foreach_lgamma_(inputs)
+
+
+@_public(_unary_doc("log", "torch.log", inplace=False))
+def log(inputs: _TensorList) -> _TensorTuple:
+    return torch._foreach_log(inputs)
+
+
+@_public(_unary_doc("log_", "torch.log", inplace=True))
+def log_(inputs: _TensorList) -> _TensorList:
+    return torch._foreach_log_(inputs)
+
+
+@_public(_unary_doc("log10", "torch.log10", inplace=False))
+def log10(inputs: _TensorList) -> _TensorTuple:
+    return torch._foreach_log10(inputs)
+
+
+@_public(_unary_doc("log10_", "torch.log10", inplace=True))
+def log10_(inputs: _TensorList) -> _TensorList:
+    return torch._foreach_log10_(inputs)
+
+
+@_public(_unary_doc("log1p", "torch.log1p", inplace=False))
+def log1p(inputs: _TensorList) -> _TensorTuple:
+    return torch._foreach_log1p(inputs)
+
+
+@_public(_unary_doc("log1p_", "torch.log1p", inplace=True))
+def log1p_(inputs: _TensorList) -> _TensorList:
+    return torch._foreach_log1p_(inputs)
+
+
+@_public(_unary_doc("log2", "torch.log2", inplace=False))
+def log2(inputs: _TensorList) -> _TensorTuple:
+    return torch._foreach_log2(inputs)
+
+
+@_public(_unary_doc("log2_", "torch.log2", inplace=True))
+def log2_(inputs: _TensorList) -> _TensorList:
+    return torch._foreach_log2_(inputs)
+
+
+@_public(_unary_doc("neg", "torch.neg", inplace=False))
+def neg(inputs: _TensorList) -> _TensorTuple:
+    return torch._foreach_neg(inputs)
+
+
+@_public(_unary_doc("neg_", "torch.neg", inplace=True))
+def neg_(inputs: _TensorList) -> _TensorList:
+    return torch._foreach_neg_(inputs)
+
+
+@_public(_unary_doc("reciprocal", "torch.reciprocal", inplace=False))
+def reciprocal(inputs: _TensorList) -> _TensorTuple:
+    return torch._foreach_reciprocal(inputs)
+
+
+@_public(_unary_doc("reciprocal_", "torch.reciprocal", inplace=True))
+def reciprocal_(inputs: _TensorList) -> _TensorList:
+    return torch._foreach_reciprocal_(inputs)
+
+
+@_public(
+    _unary_doc(
+        "round",
+        "torch.round",
+        inplace=False,
+        note="The ``decimals`` argument is not supported.",
     )
-    reciprocal_ = _set_doc(
-        reciprocal_,
-        _unary_doc("reciprocal_", "torch.reciprocal", inplace=True),
+)
+def round(inputs: _TensorList) -> _TensorTuple:
+    return torch._foreach_round(inputs)
+
+
+@_public(
+    _unary_doc(
+        "round_",
+        "torch.round",
+        inplace=True,
+        note="The ``decimals`` argument is not supported.",
     )
-    round = _set_doc(
-        round,
-        _unary_doc(
-            "round",
-            "torch.round",
-            inplace=False,
-            note="The ``decimals`` argument is not supported.",
+)
+def round_(inputs: _TensorList) -> _TensorList:
+    return torch._foreach_round_(inputs)
+
+
+@_public(_unary_doc("rsqrt", "torch.rsqrt", inplace=False))
+def rsqrt(inputs: _TensorList) -> _TensorTuple:
+    return torch._foreach_rsqrt(inputs)
+
+
+@_public(_unary_doc("rsqrt_", "torch.rsqrt", inplace=True))
+def rsqrt_(inputs: _TensorList) -> _TensorList:
+    return torch._foreach_rsqrt_(inputs)
+
+
+@_public(_unary_doc("sigmoid", "torch.sigmoid", inplace=False))
+def sigmoid(inputs: _TensorList) -> _TensorTuple:
+    return torch._foreach_sigmoid(inputs)
+
+
+@_public(_unary_doc("sigmoid_", "torch.sigmoid", inplace=True))
+def sigmoid_(inputs: _TensorList) -> _TensorList:
+    return torch._foreach_sigmoid_(inputs)
+
+
+@_public(_unary_doc("sign", "torch.sign", inplace=False))
+def sign(inputs: _TensorList) -> _TensorTuple:
+    return torch._foreach_sign(inputs)
+
+
+@_public(_unary_doc("sign_", "torch.sign", inplace=True))
+def sign_(inputs: _TensorList) -> _TensorList:
+    return torch._foreach_sign_(inputs)
+
+
+@_public(_unary_doc("sin", "torch.sin", inplace=False))
+def sin(inputs: _TensorList) -> _TensorTuple:
+    return torch._foreach_sin(inputs)
+
+
+@_public(_unary_doc("sin_", "torch.sin", inplace=True))
+def sin_(inputs: _TensorList) -> _TensorList:
+    return torch._foreach_sin_(inputs)
+
+
+@_public(_unary_doc("sinh", "torch.sinh", inplace=False))
+def sinh(inputs: _TensorList) -> _TensorTuple:
+    return torch._foreach_sinh(inputs)
+
+
+@_public(_unary_doc("sinh_", "torch.sinh", inplace=True))
+def sinh_(inputs: _TensorList) -> _TensorList:
+    return torch._foreach_sinh_(inputs)
+
+
+@_public(_unary_doc("sqrt", "torch.sqrt", inplace=False))
+def sqrt(inputs: _TensorList) -> _TensorTuple:
+    return torch._foreach_sqrt(inputs)
+
+
+@_public(_unary_doc("sqrt_", "torch.sqrt", inplace=True))
+def sqrt_(inputs: _TensorList) -> _TensorList:
+    return torch._foreach_sqrt_(inputs)
+
+
+@_public(_unary_doc("tan", "torch.tan", inplace=False))
+def tan(inputs: _TensorList) -> _TensorTuple:
+    return torch._foreach_tan(inputs)
+
+
+@_public(_unary_doc("tan_", "torch.tan", inplace=True))
+def tan_(inputs: _TensorList) -> _TensorList:
+    return torch._foreach_tan_(inputs)
+
+
+@_public(_unary_doc("tanh", "torch.tanh", inplace=False))
+def tanh(inputs: _TensorList) -> _TensorTuple:
+    return torch._foreach_tanh(inputs)
+
+
+@_public(_unary_doc("tanh_", "torch.tanh", inplace=True))
+def tanh_(inputs: _TensorList) -> _TensorList:
+    return torch._foreach_tanh_(inputs)
+
+
+@_public(_unary_doc("trunc", "torch.trunc", inplace=False))
+def trunc(inputs: _TensorList) -> _TensorTuple:
+    return torch._foreach_trunc(inputs)
+
+
+@_public(_unary_doc("trunc_", "torch.trunc", inplace=True))
+def trunc_(inputs: _TensorList) -> _TensorList:
+    return torch._foreach_trunc_(inputs)
+
+
+# Binary operations
+
+
+@overload
+def add(inputs: _TensorList, other: _Scalar) -> _TensorTuple: ...
+
+
+@overload
+def add(inputs: _TensorList, other: _ScalarList[_ScalarT]) -> _TensorTuple: ...
+
+
+@overload
+def add(
+    inputs: _TensorList,
+    other: Tensor,
+    *,
+    alpha: _Scalar = 1,
+) -> _TensorTuple: ...
+
+
+@overload
+def add(
+    inputs: _TensorList,
+    other: _TensorList,
+    *,
+    alpha: _Scalar = 1,
+) -> _TensorTuple: ...
+
+
+@_public(
+    _binary_doc(
+        "add",
+        "torch.add",
+        (
+            "inputs, other: Scalar",
+            "inputs, other: ScalarList",
+            "inputs, other: TensorList, *, alpha=1",
+            "inputs, other: Tensor, *, alpha=1",
+        ),
+        inplace=False,
+        alpha=(
+            "supported only when ``other`` is a tensor list or a shared 0-D "
+            "scalar tensor. Default: ``1``."
+        ),
+        shared_tensor=True,
+    )
+)
+def add(
+    inputs: _TensorList,
+    other: Any,
+    *,
+    alpha: Any = _DEFAULT_ALPHA,
+) -> _TensorTuple:
+    if alpha is _DEFAULT_ALPHA:
+        return torch._foreach_add(inputs, other)
+    return torch._foreach_add(inputs, other, alpha=alpha)
+
+
+@overload
+def add_(inputs: _TensorList, other: _Scalar) -> _TensorList: ...
+
+
+@overload
+def add_(inputs: _TensorList, other: _ScalarList[_ScalarT]) -> _TensorList: ...
+
+
+@overload
+def add_(
+    inputs: _TensorList,
+    other: Tensor,
+    *,
+    alpha: _Scalar = 1,
+) -> _TensorList: ...
+
+
+@overload
+def add_(
+    inputs: _TensorList,
+    other: _TensorList,
+    *,
+    alpha: _Scalar = 1,
+) -> _TensorList: ...
+
+
+@_public(
+    _binary_doc(
+        "add_",
+        "torch.add",
+        (
+            "inputs, other: Scalar",
+            "inputs, other: ScalarList",
+            "inputs, other: TensorList, *, alpha=1",
+            "inputs, other: Tensor, *, alpha=1",
+        ),
+        inplace=True,
+        alpha=(
+            "supported only when ``other`` is a tensor list or a shared 0-D "
+            "scalar tensor. Default: ``1``."
+        ),
+        shared_tensor=True,
+    )
+)
+def add_(
+    inputs: _TensorList,
+    other: Any,
+    *,
+    alpha: Any = _DEFAULT_ALPHA,
+) -> _TensorList:
+    if alpha is _DEFAULT_ALPHA:
+        return torch._foreach_add_(inputs, other)
+    return torch._foreach_add_(inputs, other, alpha=alpha)
+
+
+@overload
+def sub(inputs: _TensorList, other: _Scalar) -> _TensorTuple: ...
+
+
+@overload
+def sub(inputs: _TensorList, other: _ScalarList[_ScalarT]) -> _TensorTuple: ...
+
+
+@overload
+def sub(
+    inputs: _TensorList,
+    other: _TensorList,
+    *,
+    alpha: _Scalar = 1,
+) -> _TensorTuple: ...
+
+
+@_public(
+    _binary_doc(
+        "sub",
+        "torch.sub",
+        (
+            "inputs, other: Scalar",
+            "inputs, other: ScalarList",
+            "inputs, other: TensorList, *, alpha=1",
+        ),
+        inplace=False,
+        alpha="supported only when ``other`` is a tensor list. Default: ``1``.",
+    )
+)
+def sub(
+    inputs: _TensorList,
+    other: Any,
+    *,
+    alpha: Any = _DEFAULT_ALPHA,
+) -> _TensorTuple:
+    if alpha is _DEFAULT_ALPHA:
+        return torch._foreach_sub(inputs, other)
+    return torch._foreach_sub(inputs, other, alpha=alpha)
+
+
+@overload
+def sub_(inputs: _TensorList, other: _Scalar) -> _TensorList: ...
+
+
+@overload
+def sub_(inputs: _TensorList, other: _ScalarList[_ScalarT]) -> _TensorList: ...
+
+
+@overload
+def sub_(
+    inputs: _TensorList,
+    other: _TensorList,
+    *,
+    alpha: _Scalar = 1,
+) -> _TensorList: ...
+
+
+@_public(
+    _binary_doc(
+        "sub_",
+        "torch.sub",
+        (
+            "inputs, other: Scalar",
+            "inputs, other: ScalarList",
+            "inputs, other: TensorList, *, alpha=1",
+        ),
+        inplace=True,
+        alpha="supported only when ``other`` is a tensor list. Default: ``1``.",
+    )
+)
+def sub_(
+    inputs: _TensorList,
+    other: Any,
+    *,
+    alpha: Any = _DEFAULT_ALPHA,
+) -> _TensorList:
+    if alpha is _DEFAULT_ALPHA:
+        return torch._foreach_sub_(inputs, other)
+    return torch._foreach_sub_(inputs, other, alpha=alpha)
+
+
+@overload
+def mul(inputs: _TensorList, other: _ScalarList[_ScalarT]) -> _TensorTuple: ...
+
+
+@overload
+def mul(inputs: _TensorList, other: Tensor) -> _TensorTuple: ...
+
+
+@overload
+def mul(inputs: _TensorList, other: _TensorList) -> _TensorTuple: ...
+
+
+@overload
+def mul(inputs: _TensorList, other: _Scalar) -> _TensorTuple: ...
+
+
+@_public(
+    _binary_doc(
+        "mul",
+        "torch.mul",
+        (
+            "inputs, other: Scalar",
+            "inputs, other: ScalarList",
+            "inputs, other: TensorList",
+            "inputs, other: Tensor",
+        ),
+        inplace=False,
+        shared_tensor=True,
+    )
+)
+def mul(inputs: _TensorList, other: Any) -> _TensorTuple:
+    return torch._foreach_mul(inputs, other)
+
+
+@overload
+def mul_(inputs: _TensorList, other: _ScalarList[_ScalarT]) -> _TensorList: ...
+
+
+@overload
+def mul_(inputs: _TensorList, other: Tensor) -> _TensorList: ...
+
+
+@overload
+def mul_(inputs: _TensorList, other: _TensorList) -> _TensorList: ...
+
+
+@overload
+def mul_(inputs: _TensorList, other: _Scalar) -> _TensorList: ...
+
+
+@_public(
+    _binary_doc(
+        "mul_",
+        "torch.mul",
+        (
+            "inputs, other: Scalar",
+            "inputs, other: ScalarList",
+            "inputs, other: TensorList",
+            "inputs, other: Tensor",
+        ),
+        inplace=True,
+        shared_tensor=True,
+    )
+)
+def mul_(inputs: _TensorList, other: Any) -> _TensorList:
+    return torch._foreach_mul_(inputs, other)
+
+
+@overload
+def div(inputs: _TensorList, other: _ScalarList[_ScalarT]) -> _TensorTuple: ...
+
+
+@overload
+def div(inputs: _TensorList, other: Tensor) -> _TensorTuple: ...
+
+
+@overload
+def div(inputs: _TensorList, other: _TensorList) -> _TensorTuple: ...
+
+
+@overload
+def div(inputs: _TensorList, other: _Scalar) -> _TensorTuple: ...
+
+
+@_public(
+    _binary_doc(
+        "div",
+        "torch.div",
+        (
+            "inputs, other: Scalar",
+            "inputs, other: ScalarList",
+            "inputs, other: TensorList",
+            "inputs, other: Tensor",
+        ),
+        inplace=False,
+        shared_tensor=True,
+        operand_note="The ``rounding_mode`` argument is not supported.",
+    )
+)
+def div(inputs: _TensorList, other: Any) -> _TensorTuple:
+    return torch._foreach_div(inputs, other)
+
+
+@overload
+def div_(inputs: _TensorList, other: _ScalarList[_ScalarT]) -> _TensorList: ...
+
+
+@overload
+def div_(inputs: _TensorList, other: Tensor) -> _TensorList: ...
+
+
+@overload
+def div_(inputs: _TensorList, other: _TensorList) -> _TensorList: ...
+
+
+@overload
+def div_(inputs: _TensorList, other: _Scalar) -> _TensorList: ...
+
+
+@_public(
+    _binary_doc(
+        "div_",
+        "torch.div",
+        (
+            "inputs, other: Scalar",
+            "inputs, other: ScalarList",
+            "inputs, other: TensorList",
+            "inputs, other: Tensor",
+        ),
+        inplace=True,
+        shared_tensor=True,
+        operand_note="The ``rounding_mode`` argument is not supported.",
+    )
+)
+def div_(inputs: _TensorList, other: Any) -> _TensorList:
+    return torch._foreach_div_(inputs, other)
+
+
+@overload
+def clamp_min(inputs: _TensorList, min: _Scalar) -> _TensorTuple: ...
+
+
+@overload
+def clamp_min(inputs: _TensorList, min: _ScalarList[_ScalarT]) -> _TensorTuple: ...
+
+
+@overload
+def clamp_min(inputs: _TensorList, min: _TensorList) -> _TensorTuple: ...
+
+
+@_public(
+    _binary_doc(
+        "clamp_min",
+        "torch.clamp",
+        (
+            "inputs, min: Scalar",
+            "inputs, min: ScalarList",
+            "inputs, min: TensorList",
+        ),
+        inplace=False,
+        operand="min",
+        operand_note="Only the ``min`` bound is specified.",
+    )
+)
+def clamp_min(inputs: _TensorList, min: Any) -> _TensorTuple:
+    return torch._foreach_clamp_min(inputs, min)
+
+
+@overload
+def clamp_min_(inputs: _TensorList, min: _Scalar) -> _TensorList: ...
+
+
+@overload
+def clamp_min_(inputs: _TensorList, min: _ScalarList[_ScalarT]) -> _TensorList: ...
+
+
+@overload
+def clamp_min_(inputs: _TensorList, min: _TensorList) -> _TensorList: ...
+
+
+@_public(
+    _binary_doc(
+        "clamp_min_",
+        "torch.clamp",
+        (
+            "inputs, min: Scalar",
+            "inputs, min: ScalarList",
+            "inputs, min: TensorList",
+        ),
+        inplace=True,
+        operand="min",
+        operand_note="Only the ``min`` bound is specified.",
+    )
+)
+def clamp_min_(inputs: _TensorList, min: Any) -> _TensorList:
+    return torch._foreach_clamp_min_(inputs, min)
+
+
+@overload
+def clamp_max(inputs: _TensorList, max: _Scalar) -> _TensorTuple: ...
+
+
+@overload
+def clamp_max(inputs: _TensorList, max: _ScalarList[_ScalarT]) -> _TensorTuple: ...
+
+
+@overload
+def clamp_max(inputs: _TensorList, max: _TensorList) -> _TensorTuple: ...
+
+
+@_public(
+    _binary_doc(
+        "clamp_max",
+        "torch.clamp",
+        (
+            "inputs, max: Scalar",
+            "inputs, max: ScalarList",
+            "inputs, max: TensorList",
+        ),
+        inplace=False,
+        operand="max",
+        operand_note="Only the ``max`` bound is specified.",
+    )
+)
+def clamp_max(inputs: _TensorList, max: Any) -> _TensorTuple:
+    return torch._foreach_clamp_max(inputs, max)
+
+
+@overload
+def clamp_max_(inputs: _TensorList, max: _Scalar) -> _TensorList: ...
+
+
+@overload
+def clamp_max_(inputs: _TensorList, max: _ScalarList[_ScalarT]) -> _TensorList: ...
+
+
+@overload
+def clamp_max_(inputs: _TensorList, max: _TensorList) -> _TensorList: ...
+
+
+@_public(
+    _binary_doc(
+        "clamp_max_",
+        "torch.clamp",
+        (
+            "inputs, max: Scalar",
+            "inputs, max: ScalarList",
+            "inputs, max: TensorList",
+        ),
+        inplace=True,
+        operand="max",
+        operand_note="Only the ``max`` bound is specified.",
+    )
+)
+def clamp_max_(inputs: _TensorList, max: Any) -> _TensorList:
+    return torch._foreach_clamp_max_(inputs, max)
+
+
+@overload
+def minimum(inputs: _TensorList, other: _Scalar) -> _TensorTuple: ...
+
+
+@overload
+def minimum(inputs: _TensorList, other: _ScalarList[_ScalarT]) -> _TensorTuple: ...
+
+
+@overload
+def minimum(inputs: _TensorList, other: _TensorList) -> _TensorTuple: ...
+
+
+@_public(
+    _binary_doc(
+        "minimum",
+        "torch.minimum",
+        (
+            "inputs, other: Scalar",
+            "inputs, other: ScalarList",
+            "inputs, other: TensorList",
+        ),
+        inplace=False,
+        operand_note=(
+            "Scalar and ``ScalarList`` operands use :func:`torch.clamp` with "
+            "only ``max`` specified."
         ),
     )
-    round_ = _set_doc(
-        round_,
-        _unary_doc(
-            "round_",
-            "torch.round",
-            inplace=True,
-            note="The ``decimals`` argument is not supported.",
+)
+def minimum(inputs: _TensorList, other: Any) -> _TensorTuple:
+    return torch._foreach_minimum(inputs, other)
+
+
+@overload
+def minimum_(inputs: _TensorList, other: _Scalar) -> _TensorList: ...
+
+
+@overload
+def minimum_(inputs: _TensorList, other: _ScalarList[_ScalarT]) -> _TensorList: ...
+
+
+@overload
+def minimum_(inputs: _TensorList, other: _TensorList) -> _TensorList: ...
+
+
+@_public(
+    _binary_doc(
+        "minimum_",
+        "torch.minimum",
+        (
+            "inputs, other: Scalar",
+            "inputs, other: ScalarList",
+            "inputs, other: TensorList",
+        ),
+        inplace=True,
+        operand_note=(
+            "Scalar and ``ScalarList`` operands use :func:`torch.clamp` with "
+            "only ``max`` specified."
         ),
     )
-    rsqrt = _set_doc(rsqrt, _unary_doc("rsqrt", "torch.rsqrt", inplace=False))
-    rsqrt_ = _set_doc(rsqrt_, _unary_doc("rsqrt_", "torch.rsqrt", inplace=True))
-    sigmoid = _set_doc(sigmoid, _unary_doc("sigmoid", "torch.sigmoid", inplace=False))
-    sigmoid_ = _set_doc(sigmoid_, _unary_doc("sigmoid_", "torch.sigmoid", inplace=True))
-    sign = _set_doc(sign, _unary_doc("sign", "torch.sign", inplace=False))
-    sign_ = _set_doc(sign_, _unary_doc("sign_", "torch.sign", inplace=True))
-    sin = _set_doc(sin, _unary_doc("sin", "torch.sin", inplace=False))
-    sin_ = _set_doc(sin_, _unary_doc("sin_", "torch.sin", inplace=True))
-    sinh = _set_doc(sinh, _unary_doc("sinh", "torch.sinh", inplace=False))
-    sinh_ = _set_doc(sinh_, _unary_doc("sinh_", "torch.sinh", inplace=True))
-    sqrt = _set_doc(sqrt, _unary_doc("sqrt", "torch.sqrt", inplace=False))
-    sqrt_ = _set_doc(sqrt_, _unary_doc("sqrt_", "torch.sqrt", inplace=True))
-    tan = _set_doc(tan, _unary_doc("tan", "torch.tan", inplace=False))
-    tan_ = _set_doc(tan_, _unary_doc("tan_", "torch.tan", inplace=True))
-    tanh = _set_doc(tanh, _unary_doc("tanh", "torch.tanh", inplace=False))
-    tanh_ = _set_doc(tanh_, _unary_doc("tanh_", "torch.tanh", inplace=True))
-    trunc = _set_doc(trunc, _unary_doc("trunc", "torch.trunc", inplace=False))
-    trunc_ = _set_doc(trunc_, _unary_doc("trunc_", "torch.trunc", inplace=True))
+)
+def minimum_(inputs: _TensorList, other: Any) -> _TensorList:
+    return torch._foreach_minimum_(inputs, other)
 
-    clone = _set_doc(
-        clone,
-        rf"""
-clone(inputs, *, memory_format=torch.preserve_format) -> tuple[Tensor, ...]
 
-Clones every tensor in ``inputs``.
+@overload
+def maximum(inputs: _TensorList, other: _Scalar) -> _TensorTuple: ...
 
-{_common("torch.clone", False)}
+
+@overload
+def maximum(inputs: _TensorList, other: _ScalarList[_ScalarT]) -> _TensorTuple: ...
+
+
+@overload
+def maximum(inputs: _TensorList, other: _TensorList) -> _TensorTuple: ...
+
+
+@_public(
+    _binary_doc(
+        "maximum",
+        "torch.maximum",
+        (
+            "inputs, other: Scalar",
+            "inputs, other: ScalarList",
+            "inputs, other: TensorList",
+        ),
+        inplace=False,
+        operand_note=(
+            "Scalar and ``ScalarList`` operands use :func:`torch.clamp` with "
+            "only ``min`` specified."
+        ),
+    )
+)
+def maximum(inputs: _TensorList, other: Any) -> _TensorTuple:
+    return torch._foreach_maximum(inputs, other)
+
+
+@overload
+def maximum_(inputs: _TensorList, other: _Scalar) -> _TensorList: ...
+
+
+@overload
+def maximum_(inputs: _TensorList, other: _ScalarList[_ScalarT]) -> _TensorList: ...
+
+
+@overload
+def maximum_(inputs: _TensorList, other: _TensorList) -> _TensorList: ...
+
+
+@_public(
+    _binary_doc(
+        "maximum_",
+        "torch.maximum",
+        (
+            "inputs, other: Scalar",
+            "inputs, other: ScalarList",
+            "inputs, other: TensorList",
+        ),
+        inplace=True,
+        operand_note=(
+            "Scalar and ``ScalarList`` operands use :func:`torch.clamp` with "
+            "only ``min`` specified."
+        ),
+    )
+)
+def maximum_(inputs: _TensorList, other: Any) -> _TensorList:
+    return torch._foreach_maximum_(inputs, other)
+
+
+# Pointwise operations
+
+
+@overload
+def addcmul(
+    inputs: _TensorList,
+    tensor1: _TensorList,
+    tensor2: _TensorList,
+    *,
+    value: _ScalarList[_ScalarT],
+) -> _TensorTuple: ...
+
+
+@overload
+def addcmul(
+    inputs: _TensorList,
+    tensor1: _TensorList,
+    tensor2: _TensorList,
+    *,
+    value: Tensor,
+) -> _TensorTuple: ...
+
+
+@overload
+def addcmul(
+    inputs: _TensorList,
+    tensor1: _TensorList,
+    tensor2: _TensorList,
+    *,
+    value: _Scalar = 1,
+) -> _TensorTuple: ...
+
+
+@_public(_pointwise_doc("addcmul", "torch.addcmul", inplace=False))
+def addcmul(
+    inputs: _TensorList,
+    tensor1: _TensorList,
+    tensor2: _TensorList,
+    *,
+    value: Any = 1,
+) -> _TensorTuple:
+    return torch._foreach_addcmul(inputs, tensor1, tensor2, value)
+
+
+@overload
+def addcmul_(
+    inputs: _TensorList,
+    tensor1: _TensorList,
+    tensor2: _TensorList,
+    *,
+    value: _ScalarList[_ScalarT],
+) -> _TensorList: ...
+
+
+@overload
+def addcmul_(
+    inputs: _TensorList,
+    tensor1: _TensorList,
+    tensor2: _TensorList,
+    *,
+    value: Tensor,
+) -> _TensorList: ...
+
+
+@overload
+def addcmul_(
+    inputs: _TensorList,
+    tensor1: _TensorList,
+    tensor2: _TensorList,
+    *,
+    value: _Scalar = 1,
+) -> _TensorList: ...
+
+
+@_public(_pointwise_doc("addcmul_", "torch.addcmul", inplace=True))
+def addcmul_(
+    inputs: _TensorList,
+    tensor1: _TensorList,
+    tensor2: _TensorList,
+    *,
+    value: Any = 1,
+) -> _TensorList:
+    return torch._foreach_addcmul_(inputs, tensor1, tensor2, value)
+
+
+@overload
+def addcdiv(
+    inputs: _TensorList,
+    tensor1: _TensorList,
+    tensor2: _TensorList,
+    *,
+    value: _ScalarList[_ScalarT],
+) -> _TensorTuple: ...
+
+
+@overload
+def addcdiv(
+    inputs: _TensorList,
+    tensor1: _TensorList,
+    tensor2: _TensorList,
+    *,
+    value: Tensor,
+) -> _TensorTuple: ...
+
+
+@overload
+def addcdiv(
+    inputs: _TensorList,
+    tensor1: _TensorList,
+    tensor2: _TensorList,
+    *,
+    value: _Scalar = 1,
+) -> _TensorTuple: ...
+
+
+@_public(_pointwise_doc("addcdiv", "torch.addcdiv", inplace=False))
+def addcdiv(
+    inputs: _TensorList,
+    tensor1: _TensorList,
+    tensor2: _TensorList,
+    *,
+    value: Any = 1,
+) -> _TensorTuple:
+    return torch._foreach_addcdiv(inputs, tensor1, tensor2, value)
+
+
+@overload
+def addcdiv_(
+    inputs: _TensorList,
+    tensor1: _TensorList,
+    tensor2: _TensorList,
+    *,
+    value: _ScalarList[_ScalarT],
+) -> _TensorList: ...
+
+
+@overload
+def addcdiv_(
+    inputs: _TensorList,
+    tensor1: _TensorList,
+    tensor2: _TensorList,
+    *,
+    value: Tensor,
+) -> _TensorList: ...
+
+
+@overload
+def addcdiv_(
+    inputs: _TensorList,
+    tensor1: _TensorList,
+    tensor2: _TensorList,
+    *,
+    value: _Scalar = 1,
+) -> _TensorList: ...
+
+
+@_public(_pointwise_doc("addcdiv_", "torch.addcdiv", inplace=True))
+def addcdiv_(
+    inputs: _TensorList,
+    tensor1: _TensorList,
+    tensor2: _TensorList,
+    *,
+    value: Any = 1,
+) -> _TensorList:
+    return torch._foreach_addcdiv_(inputs, tensor1, tensor2, value)
+
+
+@overload
+def lerp(inputs: _TensorList, end: _TensorList, weight: _Scalar) -> _TensorTuple: ...
+
+
+@overload
+def lerp(
+    inputs: _TensorList,
+    end: _TensorList,
+    weight: _ScalarList[_ScalarT],
+) -> _TensorTuple: ...
+
+
+@overload
+def lerp(
+    inputs: _TensorList,
+    end: _TensorList,
+    weight: _TensorList,
+) -> _TensorTuple: ...
+
+
+@_public(
+    rf"""
+lerp(inputs, end, weight) -> tuple[Tensor, ...]
+
+Applies :func:`torch.lerp` to corresponding tensors in ``inputs`` and
+``end``.
+
+{_common("torch.lerp", False, has_aligned_lists=True)}
+
+``weight`` may be one shared scalar, a scalar list or tuple, or a tensor list.
 
 Args:
-    inputs (list or tuple of Tensor): tensors to clone.
-    memory_format (:class:`torch.memory_format`, optional): desired memory
-        format. Default: :attr:`torch.preserve_format`.
+    inputs (list or tuple of Tensor): starting tensors.
+    end (list or tuple of Tensor): ending tensors.
+    weight (Number, list or tuple of Number, or list or tuple of Tensor): interpolation
+        weights.
 
 Returns:
-    a tuple containing the cloned tensors.
-""",
-    )
+    a tuple containing one result tensor per list position.
+"""
+)
+def lerp(inputs: _TensorList, end: _TensorList, weight: Any) -> _TensorTuple:
+    return torch._foreach_lerp(inputs, end, weight)
 
-    add = _set_doc(
-        add,
-        _binary_doc(
-            "add",
-            "torch.add",
-            (
-                "inputs, other: Scalar",
-                "inputs, other: ScalarList",
-                "inputs, other: TensorList, *, alpha=1",
-                "inputs, other: Tensor, *, alpha=1",
-            ),
-            inplace=False,
-            alpha=(
-                "supported only when ``other`` is a tensor list or a shared 0-D "
-                "scalar tensor. Default: ``1``."
-            ),
-            shared_tensor=True,
-        ),
-    )
-    add_ = _set_doc(
-        add_,
-        _binary_doc(
-            "add_",
-            "torch.add",
-            (
-                "inputs, other: Scalar",
-                "inputs, other: ScalarList",
-                "inputs, other: TensorList, *, alpha=1",
-                "inputs, other: Tensor, *, alpha=1",
-            ),
-            inplace=True,
-            alpha=(
-                "supported only when ``other`` is a tensor list or a shared 0-D "
-                "scalar tensor. Default: ``1``."
-            ),
-            shared_tensor=True,
-        ),
-    )
-    sub = _set_doc(
-        sub,
-        _binary_doc(
-            "sub",
-            "torch.sub",
-            (
-                "inputs, other: Scalar",
-                "inputs, other: ScalarList",
-                "inputs, other: TensorList, *, alpha=1",
-            ),
-            inplace=False,
-            alpha="supported only when ``other`` is a tensor list. Default: ``1``.",
-        ),
-    )
-    sub_ = _set_doc(
-        sub_,
-        _binary_doc(
-            "sub_",
-            "torch.sub",
-            (
-                "inputs, other: Scalar",
-                "inputs, other: ScalarList",
-                "inputs, other: TensorList, *, alpha=1",
-            ),
-            inplace=True,
-            alpha="supported only when ``other`` is a tensor list. Default: ``1``.",
-        ),
-    )
-    mul = _set_doc(
-        mul,
-        _binary_doc(
-            "mul",
-            "torch.mul",
-            (
-                "inputs, other: Scalar",
-                "inputs, other: ScalarList",
-                "inputs, other: TensorList",
-                "inputs, other: Tensor",
-            ),
-            inplace=False,
-            shared_tensor=True,
-        ),
-    )
-    mul_ = _set_doc(
-        mul_,
-        _binary_doc(
-            "mul_",
-            "torch.mul",
-            (
-                "inputs, other: Scalar",
-                "inputs, other: ScalarList",
-                "inputs, other: TensorList",
-                "inputs, other: Tensor",
-            ),
-            inplace=True,
-            shared_tensor=True,
-        ),
-    )
-    div = _set_doc(
-        div,
-        _binary_doc(
-            "div",
-            "torch.div",
-            (
-                "inputs, other: Scalar",
-                "inputs, other: ScalarList",
-                "inputs, other: TensorList",
-                "inputs, other: Tensor",
-            ),
-            inplace=False,
-            shared_tensor=True,
-            operand_note="The ``rounding_mode`` argument is not supported.",
-        ),
-    )
-    div_ = _set_doc(
-        div_,
-        _binary_doc(
-            "div_",
-            "torch.div",
-            (
-                "inputs, other: Scalar",
-                "inputs, other: ScalarList",
-                "inputs, other: TensorList",
-                "inputs, other: Tensor",
-            ),
-            inplace=True,
-            shared_tensor=True,
-            operand_note="The ``rounding_mode`` argument is not supported.",
-        ),
-    )
 
-    clamp_min = _set_doc(
-        clamp_min,
-        _binary_doc(
-            "clamp_min",
-            "torch.clamp_min",
-            (
-                "inputs, min: Scalar",
-                "inputs, min: ScalarList",
-                "inputs, min: TensorList",
-            ),
-            inplace=False,
-            operand="min",
-        ),
-    )
-    clamp_min_ = _set_doc(
-        clamp_min_,
-        _binary_doc(
-            "clamp_min_",
-            "torch.clamp_min",
-            (
-                "inputs, min: Scalar",
-                "inputs, min: ScalarList",
-                "inputs, min: TensorList",
-            ),
-            inplace=True,
-            operand="min",
-        ),
-    )
-    clamp_max = _set_doc(
-        clamp_max,
-        _binary_doc(
-            "clamp_max",
-            "torch.clamp_max",
-            (
-                "inputs, max: Scalar",
-                "inputs, max: ScalarList",
-                "inputs, max: TensorList",
-            ),
-            inplace=False,
-            operand="max",
-        ),
-    )
-    clamp_max_ = _set_doc(
-        clamp_max_,
-        _binary_doc(
-            "clamp_max_",
-            "torch.clamp_max",
-            (
-                "inputs, max: Scalar",
-                "inputs, max: ScalarList",
-                "inputs, max: TensorList",
-            ),
-            inplace=True,
-            operand="max",
-        ),
-    )
-    minimum = _set_doc(
-        minimum,
-        _binary_doc(
-            "minimum",
-            "torch.minimum",
-            (
-                "inputs, other: Scalar",
-                "inputs, other: ScalarList",
-                "inputs, other: TensorList",
-            ),
-            inplace=False,
-            operand_note=(
-                "Scalar and ``ScalarList`` operands use :func:`torch.clamp_max` "
-                "semantics."
-            ),
-        ),
-    )
-    minimum_ = _set_doc(
-        minimum_,
-        _binary_doc(
-            "minimum_",
-            "torch.minimum",
-            (
-                "inputs, other: Scalar",
-                "inputs, other: ScalarList",
-                "inputs, other: TensorList",
-            ),
-            inplace=True,
-            operand_note=(
-                "Scalar and ``ScalarList`` operands use :func:`torch.clamp_max` "
-                "semantics."
-            ),
-        ),
-    )
-    maximum = _set_doc(
-        maximum,
-        _binary_doc(
-            "maximum",
-            "torch.maximum",
-            (
-                "inputs, other: Scalar",
-                "inputs, other: ScalarList",
-                "inputs, other: TensorList",
-            ),
-            inplace=False,
-            operand_note=(
-                "Scalar and ``ScalarList`` operands use :func:`torch.clamp_min` "
-                "semantics."
-            ),
-        ),
-    )
-    maximum_ = _set_doc(
-        maximum_,
-        _binary_doc(
-            "maximum_",
-            "torch.maximum",
-            (
-                "inputs, other: Scalar",
-                "inputs, other: ScalarList",
-                "inputs, other: TensorList",
-            ),
-            inplace=True,
-            operand_note=(
-                "Scalar and ``ScalarList`` operands use :func:`torch.clamp_min` "
-                "semantics."
-            ),
-        ),
-    )
+@overload
+def lerp_(inputs: _TensorList, end: _TensorList, weight: _Scalar) -> _TensorList: ...
 
-    pow = _set_doc(
-        pow,
-        rf"""
+
+@overload
+def lerp_(
+    inputs: _TensorList,
+    end: _TensorList,
+    weight: _ScalarList[_ScalarT],
+) -> _TensorList: ...
+
+
+@overload
+def lerp_(
+    inputs: _TensorList,
+    end: _TensorList,
+    weight: _TensorList,
+) -> _TensorList: ...
+
+
+@_public(
+    rf"""
+lerp_(inputs, end, weight) -> tuple[Tensor, ...] | list[Tensor]
+
+In-place version of :func:`torch.foreach.lerp`.
+
+{_common("torch.lerp", True, has_aligned_lists=True)}
+
+``weight`` may be one shared scalar, a scalar list or tuple, or a tensor list.
+
+Args:
+    inputs (list or tuple of Tensor): starting tensors to mutate.
+    end (list or tuple of Tensor): ending tensors.
+    weight (Number, list or tuple of Number, or list or tuple of Tensor): interpolation
+        weights.
+
+Returns:
+    the exact ``inputs`` list or tuple.
+"""
+)
+def lerp_(inputs: _TensorList, end: _TensorList, weight: Any) -> _TensorList:
+    return torch._foreach_lerp_(inputs, end, weight)
+
+
+@overload
+def pow(input: _Scalar, exponent: _TensorList) -> _TensorTuple: ...
+
+
+@overload
+def pow(input: _TensorList, exponent: _Scalar) -> _TensorTuple: ...
+
+
+@overload
+def pow(input: _TensorList, exponent: _ScalarList[_ScalarT]) -> _TensorTuple: ...
+
+
+@overload
+def pow(input: _TensorList, exponent: _TensorList) -> _TensorTuple: ...
+
+
+@_public(
+    rf"""
 pow(input, exponent) -> tuple[Tensor, ...]
 
 Applies :func:`torch.pow` at each list position.
 
-{_common("torch.pow", False)}
+{_common("torch.pow", False, has_aligned_lists=True)}
 
 Supported signatures::
 
@@ -1656,16 +1501,31 @@ Args:
 
 Returns:
     a tuple containing one result tensor per list position.
-""",
-    )
-    pow_ = _set_doc(
-        pow_,
-        rf"""
+"""
+)
+def pow(input: Any, exponent: Any) -> _TensorTuple:
+    return torch._foreach_pow(input, exponent)
+
+
+@overload
+def pow_(inputs: _TensorList, exponent: _Scalar) -> _TensorList: ...
+
+
+@overload
+def pow_(inputs: _TensorList, exponent: _ScalarList[_ScalarT]) -> _TensorList: ...
+
+
+@overload
+def pow_(inputs: _TensorList, exponent: _TensorList) -> _TensorList: ...
+
+
+@_public(
+    rf"""
 pow_(inputs, exponent) -> tuple[Tensor, ...] | list[Tensor]
 
 In-place version of :func:`torch.foreach.pow`.
 
-{_common("torch.pow", True)}
+{_common("torch.pow", True, has_aligned_lists=True)}
 
 Supported signatures::
 
@@ -1682,73 +1542,42 @@ Args:
 
 Returns:
     the exact ``inputs`` list or tuple.
-""",
-    )
+"""
+)
+def pow_(inputs: _TensorList, exponent: Any) -> _TensorList:
+    return torch._foreach_pow_(inputs, exponent)
 
-    addcmul = _set_doc(
-        addcmul,
-        _pointwise_doc("addcmul", "torch.addcmul", inplace=False),
-    )
-    addcmul_ = _set_doc(
-        addcmul_,
-        _pointwise_doc("addcmul_", "torch.addcmul", inplace=True),
-    )
-    addcdiv = _set_doc(
-        addcdiv,
-        _pointwise_doc("addcdiv", "torch.addcdiv", inplace=False),
-    )
-    addcdiv_ = _set_doc(
-        addcdiv_,
-        _pointwise_doc("addcdiv_", "torch.addcdiv", inplace=True),
-    )
 
-    lerp = _set_doc(
-        lerp,
-        rf"""
-lerp(inputs, ends, weight) -> tuple[Tensor, ...]
+# Reductions and special operations
 
-Applies :func:`torch.lerp` to corresponding tensors in ``inputs`` and
-``ends``.
 
-{_common("torch.lerp", False)}
+@_public(
+    rf"""
+clone(inputs, *, memory_format=torch.preserve_format) -> tuple[Tensor, ...]
 
-``weight`` may be one shared scalar, a scalar list or tuple, or a tensor list.
+Clones every tensor in ``inputs``.
+
+{_common("torch.clone", False)}
 
 Args:
-    inputs (list or tuple of Tensor): starting tensors.
-    ends (list or tuple of Tensor): ending tensors.
-    weight (Number, list or tuple of Number, or list or tuple of Tensor): interpolation
-        weights.
+    inputs (list or tuple of Tensor): tensors to clone.
+    memory_format (:class:`torch.memory_format`, optional): desired memory
+        format. Default: :attr:`torch.preserve_format`.
 
 Returns:
-    a tuple containing one result tensor per list position.
-""",
-    )
-    lerp_ = _set_doc(
-        lerp_,
-        rf"""
-lerp_(inputs, ends, weight) -> tuple[Tensor, ...] | list[Tensor]
+    a tuple containing the cloned tensors.
+"""
+)
+def clone(
+    inputs: _TensorList,
+    *,
+    memory_format: torch.memory_format | None = torch.preserve_format,
+) -> _TensorTuple:
+    return torch._foreach_clone(inputs, memory_format=memory_format)
 
-In-place version of :func:`torch.foreach.lerp`.
 
-{_common("torch.lerp", True)}
-
-``weight`` may be one shared scalar, a scalar list or tuple, or a tensor list.
-
-Args:
-    inputs (list or tuple of Tensor): starting tensors to mutate.
-    ends (list or tuple of Tensor): ending tensors.
-    weight (Number, list or tuple of Number, or list or tuple of Tensor): interpolation
-        weights.
-
-Returns:
-    the exact ``inputs`` list or tuple.
-""",
-    )
-
-    max = _set_doc(
-        max,
-        rf"""
+@_public(
+    rf"""
 max(inputs) -> tuple[Tensor, ...]
 
 Returns the maximum value of each tensor in ``inputs``.
@@ -1763,11 +1592,14 @@ Args:
 
 Returns:
     a tuple of scalar tensors.
-""",
-    )
-    norm = _set_doc(
-        norm,
-        rf"""
+"""
+)
+def max(inputs: _TensorList) -> _TensorTuple:
+    return torch._foreach_max(inputs)
+
+
+@_public(
+    rf"""
 norm(inputs, ord=2, *, dtype=None) -> tuple[Tensor, ...]
 
 Returns the vector norm of each tensor in ``inputs``.
@@ -1784,15 +1616,22 @@ Args:
 
 Returns:
     a tuple containing one norm tensor per input tensor.
-""",
-    )
+"""
+)
+def norm(
+    inputs: _TensorList,
+    ord: _Scalar = 2,
+    *,
+    dtype: torch.dtype | None = None,
+) -> _TensorTuple:
+    return torch._foreach_norm(inputs, ord, dtype=dtype)
 
-    copy_ = _set_doc(
-        copy_,
-        r"""
-copy_(inputs, srcs, non_blocking=False) -> tuple[Tensor, ...] | list[Tensor]
 
-Copies each tensor in ``srcs`` into the corresponding tensor in
+@_public(
+    r"""
+copy_(inputs, src, non_blocking=False) -> tuple[Tensor, ...] | list[Tensor]
+
+Copies each tensor in ``src`` into the corresponding tensor in
 ``inputs``, following :meth:`torch.Tensor.copy_`.
 
 Both lists must be non-empty and have the same length. The operation mutates
@@ -1801,17 +1640,24 @@ no functional ``torch.foreach.copy`` operation.
 
 Args:
     inputs (list or tuple of Tensor): destination tensors.
-    srcs (list or tuple of Tensor): source tensors.
+    src (list or tuple of Tensor): source tensors.
     non_blocking (bool, optional): allows asynchronous host/device copies when
         supported. Default: ``False``.
 
 Returns:
     the exact ``inputs`` list or tuple.
-""",
-    )
-    zero_ = _set_doc(
-        zero_,
-        r"""
+"""
+)
+def copy_(
+    inputs: _TensorList,
+    src: _TensorList,
+    non_blocking: bool = False,
+) -> _TensorList:
+    return torch._foreach_copy_(inputs, src, non_blocking)
+
+
+@_public(
+    r"""
 zero_(inputs) -> tuple[Tensor, ...] | list[Tensor]
 
 Fills every tensor in ``inputs`` with zero.
@@ -1825,14 +1671,17 @@ Args:
 
 Returns:
     the exact ``inputs`` list or tuple.
-""",
-    )
-    mm = _set_doc(
-        mm,
-        r"""
-mm(inputs, mat2s) -> tuple[Tensor, ...]
+"""
+)
+def zero_(inputs: _TensorList) -> _TensorList:
+    return torch._foreach_zero_(inputs)
 
-Multiplies corresponding matrices from ``inputs`` and ``mat2s`` using
+
+@_public(
+    r"""
+mm(inputs, mat2) -> tuple[Tensor, ...]
+
+Multiplies corresponding matrices from ``inputs`` and ``mat2`` using
 :func:`torch.mm`.
 
 Both lists must be non-empty and have the same length. Compatible calls may use
@@ -1841,9 +1690,11 @@ loop of :func:`torch.mm`. There is no in-place ``torch.foreach.mm_`` operation.
 
 Args:
     inputs (list or tuple of Tensor): first matrices.
-    mat2s (list or tuple of Tensor): second matrices.
+    mat2 (list or tuple of Tensor): second matrices.
 
 Returns:
     a tuple containing one matrix product per list position.
-""",
-    )
+"""
+)
+def mm(inputs: _TensorList, mat2: _TensorList) -> _TensorTuple:
+    return torch._foreach_mm(inputs, mat2)

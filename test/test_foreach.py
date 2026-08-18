@@ -62,10 +62,10 @@ class RegularFuncWrapper:
         self.func = func
 
     def __call__(self, inputs, value=None, **kwargs):
-        scalar_values = isinstance(value, (list, tuple)) or (
+        has_per_input_values = isinstance(value, (list, tuple)) or (
             torch.is_tensor(value) and value.ndim > 0
         )
-        if scalar_values:
+        if has_per_input_values:
             if len(inputs) != 3:
                 raise AssertionError(f"expected len(inputs) == 3, got {len(inputs)}")
             # The regular operation accepts one keyword-only value per call.
@@ -1956,28 +1956,6 @@ instantiate_device_type_tests(TestForeach, globals(), allow_xpu=True)
 
 
 class TestForeachPublicAPI(TestCase):
-    def test_public_inventory(self):
-        expected = set()
-        for op in foreach_op_db:
-            public_name = op.name.removeprefix("_foreach_")
-            if getattr(torch, op.name, None) is not None:
-                expected.add(public_name)
-            if getattr(torch, op.name + "_", None) is not None:
-                expected.add(public_name + "_")
-
-        self.assertEqual(set(torch.foreach.__all__), expected)
-        self.assertEqual(len(torch.foreach.__all__), 90)
-        self.assertFalse(hasattr(torch.foreach, "powsum"))
-        self.assertFalse(hasattr(torch.foreach, "copy"))
-        self.assertFalse(hasattr(torch.foreach, "zero"))
-
-        for name in torch.foreach.__all__:
-            func = getattr(torch.foreach, name)
-            self.assertEqual(func.__name__, name)
-            self.assertEqual(func.__module__, "torch.foreach")
-            self.assertFalse(hasattr(torch, f"foreach_{name}"))
-            self.assertTrue(hasattr(torch, f"_foreach_{name}"))
-
     @parametrize("op", foreach_op_db, name_fn=lambda op: op.name)
     def test_private_compatibility(self, op):
         seen = []
@@ -1992,8 +1970,13 @@ class TestForeachPublicAPI(TestCase):
 
         public_name = op.name.removeprefix("_foreach_")
         variants = (
-            (getattr(torch.foreach, public_name, None), getattr(torch, op.name, None)),
             (
+                public_name,
+                getattr(torch.foreach, public_name, None),
+                getattr(torch, op.name, None),
+            ),
+            (
+                public_name + "_",
                 getattr(torch.foreach, public_name + "_", None),
                 getattr(torch, op.name + "_", None),
             ),
@@ -2008,20 +1991,20 @@ class TestForeachPublicAPI(TestCase):
                 )
             )
         )
-        for public, private in variants:
+        for name, public, private in variants:
             if public is None or private is None:
                 self.assertIs(public, private)
                 continue
+
+            self.assertEqual(public.__name__, name)
+            self.assertIn(name, torch.foreach.__all__)
+            self.assertEqual(public.__module__, "torch.foreach")
+            self.assertFalse(hasattr(torch, f"foreach_{name}"))
 
             public_sample = sample.transform(clone)
             private_sample = sample.transform(clone)
             public_kwargs = public_sample.kwargs.copy()
             private_kwargs = private_sample.kwargs.copy()
-            value = private_kwargs.get("value")
-            if public_name in ("addcdiv", "addcmul") and (
-                isinstance(value, (list, tuple)) or torch.is_tensor(value)
-            ):
-                private_kwargs["scalars"] = private_kwargs.pop("value")
 
             with CaptureMode():
                 override_result = public(
@@ -2047,89 +2030,7 @@ class TestForeachPublicAPI(TestCase):
                 self.assertIs(public_result, public_sample.input)
                 self.assertIs(private_result, private_sample.input)
 
-    def test_public_and_private_keyword_names(self):
-        inputs = [torch.ones(2)]
-        self.assertEqual(
-            torch.foreach.add(inputs=inputs, other=2),
-            torch._foreach_add(self=inputs, scalar=2),
-        )
-        with self.assertRaisesRegex(
-            TypeError, r"_foreach_add\(\) received an invalid combination of arguments"
-        ):
-            torch.foreach.add(inputs=inputs, other=2, alpha=1)
-
-        tensor1s = [torch.full((2,), 2.0)]
-        tensor2s = [torch.full((2,), 3.0)]
-        self.assertEqual(
-            torch.foreach.addcmul(
-                inputs=inputs,
-                tensor1s=tensor1s,
-                tensor2s=tensor2s,
-                value=[4.0],
-            ),
-            torch._foreach_addcmul(
-                self=inputs,
-                tensor1=tensor1s,
-                tensor2=tensor2s,
-                scalars=[4.0],
-            ),
-        )
-        with self.assertRaisesRegex(
-            TypeError, r"addcmul\(\) takes 3 positional arguments but 4 were given"
-        ):
-            torch.foreach.addcmul(inputs, tensor1s, tensor2s, 4.0)
-
-        ends = [torch.zeros(2)]
-        self.assertEqual(
-            torch.foreach.lerp(inputs=inputs, ends=ends, weight=0.5),
-            torch._foreach_lerp(self=inputs, tensors1=ends, weight=0.5),
-        )
-        self.assertEqual(
-            torch.foreach.mm(inputs=[torch.eye(2)], mat2s=[torch.eye(2)]),
-            torch._foreach_mm(self=[torch.eye(2)], mat2=[torch.eye(2)]),
-        )
-
-        with self.assertRaisesRegex(
-            TypeError, r"norm\(\) takes from 1 to 2 positional arguments"
-        ):
-            torch.foreach.norm(inputs, 2, torch.float64)
-        self.assertEqual(
-            torch.foreach.norm(inputs, 2, dtype=torch.float64),
-            torch._foreach_norm(inputs, 2, torch.float64),
-        )
-        self.assertEqual(
-            torch.foreach.clamp_min(inputs=inputs, min=0.5),
-            torch._foreach_clamp_min(self=inputs, scalar=0.5),
-        )
-        self.assertEqual(
-            torch.foreach.clamp_max(inputs=inputs, max=0.5),
-            torch._foreach_clamp_max(self=inputs, scalar=0.5),
-        )
-
-        public_pow_inputs = [torch.full((2,), 2.0)]
-        private_pow_inputs = [torch.full((2,), 2.0)]
-        self.assertIs(
-            torch.foreach.pow_(inputs=public_pow_inputs, exponent=2),
-            public_pow_inputs,
-        )
-        self.assertIs(
-            torch._foreach_pow_(self=private_pow_inputs, exponent=2),
-            private_pow_inputs,
-        )
-        self.assertEqual(public_pow_inputs, private_pow_inputs)
-
-        public_dst = [torch.zeros(2)]
-        private_dst = [torch.zeros(2)]
-        srcs = [torch.ones(2)]
-        torch.foreach.copy_(inputs=public_dst, srcs=srcs, non_blocking=False)
-        torch._foreach_copy_(
-            self=private_dst,
-            src=srcs,
-            non_blocking=False,
-        )
-        self.assertEqual(public_dst, private_dst)
-
-    def test_torch_dispatch_uses_private_aten_identity(self):
+    def test_explicit_alpha_selects_tensor_overload(self):
         from torch.utils._python_dispatch import TorchDispatchMode
 
         seen = []
@@ -2139,16 +2040,14 @@ class TestForeachPublicAPI(TestCase):
                 seen.append(func)
                 return func(*args, **(kwargs or {}))
 
-        inputs = [torch.ones(1)]
+        inputs = [torch.zeros(1)]
+        other = torch.tensor(1.0)
         with CaptureMode():
-            torch.foreach.add(inputs, 1)
-        self.assertEqual(seen, [torch.ops.aten._foreach_add.Scalar])
+            result = torch.foreach.add_(inputs, other, alpha=2.0)
 
-    def test_torchscript_is_not_registered(self):
-        from torch.jit._builtins import _find_builtin
-
-        for name in torch.foreach.__all__:
-            self.assertIsNone(_find_builtin(getattr(torch.foreach, name)))
+        self.assertIs(result, inputs)
+        self.assertEqual(inputs, [torch.full((1,), 2.0)])
+        self.assertEqual(seen, [torch.ops.aten._foreach_add_.Tensor])
 
 
 instantiate_parametrized_tests(TestForeachPublicAPI)

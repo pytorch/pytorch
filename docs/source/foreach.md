@@ -4,11 +4,6 @@
 .. automodule:: torch.foreach
 ```
 
-:::{warning}
-`torch.foreach` is a beta API. Its signatures may change based on user feedback.
-The existing private `torch._foreach_*` functions remain available for compatibility.
-:::
-
 `torch.foreach` applies familiar PyTorch operations across lists of tensors. For
 example, `torch.foreach.add(inputs, other)` is semantically equivalent to a
 Python loop that applies {func}`torch.add` at every list position. When
@@ -35,9 +30,9 @@ You can then imagine that one operation may take on various forms such as Tensor
 
 Across the supported signatures, we maintain constraints that TensorList and ScalarList arguments must be non-empty, and corresponding tensor and scalar lists must have the same length.
 
-The public foreach API does not support `out=` variants and has a higher memory footprint than the non-foreach original API.
+The public foreach API does not support `out=` variants and may have a higher memory footprint than looping through the non-foreach original API, as multiple intermediates can be alive simultaneously.
 
-## Public Migration
+## Migrating from the private API
 
 You may be familiar with the private spellings of foreach APIs, e.g., for {func}`torch.add`:
 
@@ -46,7 +41,7 @@ torch._foreach_add(inputs, other)  # Private spelling
 torch.foreach.add(inputs, other)   # Public beta spelling
 ```
 
-The private spellings are from the days of old before we were ready to make them more visible and supported in public. The private APIs will maintain their functionality and signatures to support backwards compatibility. The new public APIs will share functionality--both these APIs route to the same ATen op--but we take the opportunity to rename some arguments for better consistency with their corresponding operation's arguments. We maintain the same argument name and pluralize those that are always lists, such as `inputs`, `tensor1s`, `tensor2s`, `ends`, `srcs`, and `mat2s`. 
+The private spellings remain available with unchanged signatures for backward compatibility. Public functions call the same ATen operators but use parameter names aligned with the corresponding ordinary operation. The primary tensor-list argument is named `inputs`; other arguments retain the ordinary operation’s logical name, even when the currently supported form requires a list. This allows future overloads to accept shared operands without changing keyword names.
 
 ## Unary operations
 
