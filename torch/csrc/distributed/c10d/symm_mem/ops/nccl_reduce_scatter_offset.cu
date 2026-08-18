@@ -8,6 +8,41 @@
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_devcomm_manager.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.hpp>
 
+#if defined(NCCL_DEVICE_HAS_REDUCE_COPY) && defined(NCCL_HAS_LSA_PEER_PTR)
+#include <mutex>
+#include <unordered_map>
+
+// RCCL's device reduce/copy header expects CUDA compatibility helpers that
+// hipcc does not provide under PyTorch's compile flags. Keep the shims local to
+// this translation unit and restore the feature macro after including RCCL.
+#pragma push_macro("__CUDACC_EXTENDED_LAMBDA__")
+#ifndef __CUDACC_EXTENDED_LAMBDA__
+#define __CUDACC_EXTENDED_LAMBDA__ 1
+#endif
+static __device__ __forceinline__ unsigned int __vadd4(
+    unsigned int a,
+    unsigned int b) {
+  unsigned int result;
+  auto* out = reinterpret_cast<unsigned char*>(&result);
+  auto* lhs = reinterpret_cast<unsigned char*>(&a);
+  auto* rhs = reinterpret_cast<unsigned char*>(&b);
+#pragma unroll
+  for (int i = 0; i < 4; ++i) {
+    out[i] = static_cast<unsigned char>(lhs[i] + rhs[i]);
+  }
+  return result;
+}
+#if defined(__HIP_NO_HALF_OPERATORS__)
+static __device__ __forceinline__ __half operator+(
+    const __half& a,
+    const __half& b) {
+  return __float2half(__half2float(a) + __half2float(b));
+}
+#endif
+#include <nccl_device.h>
+#pragma pop_macro("__CUDACC_EXTENDED_LAMBDA__")
+#endif
+
 // Simultaneously reduce N blocks of a 2-D input tensor from a symmetric memory
 // buffer, routing each block to a specific destination rank (dst_ranks[i]).
 // Only the destination rank writes the reduced value to a contiguous output
@@ -121,6 +156,90 @@ __global__ void reduce_scatter_offset_kernel(
   bar.sync(coop, cuda::memory_order_release);
 }
 
+#ifdef NCCL_HAS_LSA_PEER_PTR
+// RCCL faults when CTAs concurrently reduce into different destination
+// allocations on gfx942. Launch one destination slot at a time on ROCm while
+// retaining row-tile parallelism within the slot.
+template <typename T, bool UseMultimem>
+__global__ void reduce_scatter_offset_rocm_kernel(
+    ncclWindow_t window,
+    size_t base_byte_offset,
+    T* dst_base,
+    int rows,
+    int cols,
+    int64_t outer_stride,
+    ncclDevComm devComm) {
+  const int row_tile = static_cast<int>(blockIdx.x);
+  const int row_tiles = static_cast<int>(gridDim.x);
+  const ncclCoopCta coop{};
+  ncclLsaBarrierSession<ncclCoopCta> bar{
+      coop,
+      devComm,
+      ncclTeamLsa(devComm),
+      devComm.lsaBarrier,
+      blockIdx.x};
+  bar.sync(coop, cuda::memory_order_acquire);
+  for (int row = row_tile; row < rows; row += row_tiles) {
+    const size_t row_offset =
+        base_byte_offset + static_cast<size_t>(row * outer_stride) * sizeof(T);
+    T* dst_row = dst_base + row * cols;
+    if constexpr (UseMultimem) {
+      ncclMultimemReduceSum(
+          coop, window, row_offset, dst_row, cols, devComm.lsaMultimem);
+    } else {
+      ncclLsaReduceSum(coop, window, row_offset, dst_row, cols, devComm);
+    }
+  }
+  bar.sync(coop, cuda::memory_order_release);
+}
+
+struct RSDevCommKey {
+  ncclComm_t comm;
+  std::string group_name;
+  bool use_multimem;
+
+  bool operator==(const RSDevCommKey& other) const {
+    return comm == other.comm && group_name == other.group_name &&
+        use_multimem == other.use_multimem;
+  }
+};
+
+struct RSDevCommKeyHash {
+  size_t operator()(const RSDevCommKey& key) const {
+    size_t hash = std::hash<ncclComm_t>{}(key.comm);
+    hash ^= std::hash<std::string>{}(key.group_name) + 0x9e3779b9 +
+        (hash << 6) + (hash >> 2);
+    hash ^= std::hash<bool>{}(key.use_multimem) + 0x9e3779b9 +
+        (hash << 6) + (hash >> 2);
+    return hash;
+  }
+};
+
+static std::mutex g_rs_devcomm_mutex;
+static std::unordered_map<RSDevCommKey, ncclDevComm, RSDevCommKeyHash>
+    g_rs_devcomm_cache;
+
+static ncclDevComm& get_or_create_rs_devcomm(
+    ncclComm_t comm,
+    const std::string& group_name,
+    bool use_multimem) {
+  std::lock_guard<std::mutex> lock(g_rs_devcomm_mutex);
+  RSDevCommKey key{comm, group_name, use_multimem};
+  auto it = g_rs_devcomm_cache.find(key);
+  if (it == g_rs_devcomm_cache.end()) {
+    ncclDevCommRequirements reqs = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
+    reqs.lsaBarrierCount = RS_MAX_CTA_COUNT;
+    reqs.lsaMultimem = use_multimem;
+    ncclDevComm devcomm;
+    C10D_NCCL_CHECK(
+        ncclDevCommCreate(comm, &reqs, &devcomm),
+        "ncclDevCommCreate failed in nccl_reduce_scatter_offset");
+    it = g_rs_devcomm_cache.emplace(std::move(key), devcomm).first;
+  }
+  return it->second;
+}
+#endif // NCCL_HAS_LSA_PEER_PTR
+
 #endif // NCCL_DEVICE_HAS_REDUCE_COPY
 
 // Host entry point.  Validates arguments, resolves defaults, builds the
@@ -173,10 +292,15 @@ void nccl_reduce_scatter_offset(
 
   const bool use_multimem = nccl_hdl->has_multicast_support();
 
-  // The devcomm is cached per (group, key); create it on first use.
   // lsaBarrierCount must cover the maximum number of concurrent CTAs.
-  // lsaMultimem is set when the allocation has multicast support, so that
-  // devComm.lsaMultimem is valid for ncclMultimemReduceSum in the kernel.
+  // lsaMultimem is set when the allocation has multicast support.
+#ifdef NCCL_HAS_LSA_PEER_PTR
+  // Keep RCCL's ncclDevComm in this hipcc translation unit. Include the host
+  // communicator identity and multicast requirement in the key so a recreated
+  // process group cannot reuse an incompatible device communicator.
+  ncclDevComm& devcomm =
+      get_or_create_rs_devcomm(comm, group_name, use_multimem);
+#else
   static constexpr char const kDevcommKey[] = "nccl_reduce_scatter_offset";
   auto devcomm_opt = manager.get_devcomm(group_name, kDevcommKey);
   if (!devcomm_opt) {
@@ -187,10 +311,10 @@ void nccl_reduce_scatter_offset(
     C10D_NCCL_CHECK(
         ncclDevCommCreate(comm, &reqs, &devcomm),
         "ncclDevCommCreate failed in nccl_reduce_scatter_offset");
-    // Cache the device communicator.
     devcomm_opt = manager.register_devcomm(group_name, devcomm, kDevcommKey);
   }
   ncclDevComm& devcomm = devcomm_opt->get();
+#endif
 
   const int my_rank = devcomm.rank;
   const int group_size = devcomm.nRanks;
@@ -351,24 +475,66 @@ void nccl_reduce_scatter_offset(
   auto window = nccl_hdl->get_window();
   TORCH_CHECK(window != nullptr, "nccl_reduce_scatter_offset: NCCL window is null");
 
-  // Each owned (slot, local_block) pair gets one CTA; the flat CTA index is
-  // the LSA barrier index.  All ranks launch the same total_ctas because
-  // owned_sizes[j] is consistent, so every rank's ctas_offset is identical.
   AT_DISPATCH_NV_FLOATS(
       input.scalar_type(),
       "nccl_reduce_scatter_offset",
       [&]() {
+#ifdef NCCL_HAS_LSA_PEER_PTR
+        // RCCL requires destinations to be processed serially. Stream ordering
+        // preserves the slot order while each slot still uses multiple CTAs.
+        for (int j = 0; j < n_owned; ++j) {
+          const int slot_start = j > 0 ? info.ctas_offset[j - 1] : 0;
+          const int ctas_j = info.ctas_offset[j] - slot_start;
+          const int block_size = info.dst_block_size[j];
+          const int rows = col_sharded ? fixed_dim_size : block_size;
+          const int cols = col_sharded ? block_size : fixed_dim_size;
+          auto* dst_base = static_cast<scalar_t*>(info.dst_ptrs[j]);
+          if (use_multimem) {
+            reduce_scatter_offset_rocm_kernel<scalar_t, true>
+                <<<ctas_j, RS_THREADS_PER_CTA, 0, stream>>>(
+                    window,
+                    info.byte_offsets[j],
+                    dst_base,
+                    rows,
+                    cols,
+                    outer_stride,
+                    devcomm);
+          } else {
+            reduce_scatter_offset_rocm_kernel<scalar_t, false>
+                <<<ctas_j, RS_THREADS_PER_CTA, 0, stream>>>(
+                    window,
+                    info.byte_offsets[j],
+                    dst_base,
+                    rows,
+                    cols,
+                    outer_stride,
+                    devcomm);
+          }
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
+        }
+#else
+        // CUDA retains the original fused multi-slot launch.
         if (use_multimem) {
           reduce_scatter_offset_kernel<scalar_t, true>
               <<<total_ctas, RS_THREADS_PER_CTA, 0, stream>>>(
-                  window, info, fixed_dim_size, col_sharded, outer_stride, devcomm);
-          C10_CUDA_KERNEL_LAUNCH_CHECK();
+                  window,
+                  info,
+                  fixed_dim_size,
+                  col_sharded,
+                  outer_stride,
+                  devcomm);
         } else {
           reduce_scatter_offset_kernel<scalar_t, false>
               <<<total_ctas, RS_THREADS_PER_CTA, 0, stream>>>(
-                  window, info, fixed_dim_size, col_sharded, outer_stride, devcomm);
-          C10_CUDA_KERNEL_LAUNCH_CHECK();
+                  window,
+                  info,
+                  fixed_dim_size,
+                  col_sharded,
+                  outer_stride,
+                  devcomm);
         }
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
+#endif
       });
 #else
   TORCH_CHECK(
