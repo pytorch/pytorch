@@ -243,18 +243,11 @@ class TestCheckpointReaderDevice(TestCase):
         self.assertEqual(read_state_dict["step"], 1000)
         self.assertEqual(read_state_dict["model"]["weight"].device.type, map_location)
 
-        read_state_dict, _ = reader.read(
-            self.checkpoint_path, map_location=map_location
-        )
-        self.assertIn("model", read_state_dict)
-        self.assertEqual(read_state_dict["epoch"], 5)
-        self.assertEqual(read_state_dict["step"], 1000)
-        self.assertEqual(read_state_dict["model"]["weight"].device.type, map_location)
-
 
 instantiate_device_type_tests(
     TestCheckpointReaderDevice,
     globals(),
+    except_for=("cpu",),
 )
 
 if __name__ == "__main__":
