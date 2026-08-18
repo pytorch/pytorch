@@ -3295,8 +3295,8 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
     // group name, avoiding dynamic_cast back to ProcessGroupNCCL.
     // Other producers (e.g. torchcomms' TorchCommNCCLX) populate the same
     // registry, giving symm_mem a uniform group_name -> ncclComm_t lookup
-    // regardless of backend. Gated on NCCL_HAS_SYMMEM_DEVICE_SUPPORT
-    // (excludes ROCm) since the registry has no other consumer there.
+    // regardless of backend. Gated on NCCL_HAS_SYMMEM_SUPPORT so host-side
+    // symmetric-memory users on CUDA and ROCm can consume the entry.
     // Unregistered in ~ProcessGroupNCCL.
     const std::string symmMemGroupName =
         options_->group_name.empty() ? "0" : options_->group_name;
