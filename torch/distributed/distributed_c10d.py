@@ -909,6 +909,17 @@ def _register_builtin_nccl_legacy_backend() -> None:
     )
 
 
+def _register_builtin_nccl_as_legacy() -> None:
+    _FR_SELF_RECORDING_BACKENDS.add(Backend.NCCL)
+    Backend.register_backend(
+        Backend.NCCL,
+        _create_nccl_process_group,
+        extended_api=True,
+        devices=Backend.backend_capability[Backend.NCCL],
+        _backend_type=ProcessGroup.BackendType.NCCL,
+    )
+
+
 def _register_builtin_nccl2_backend() -> None:
     Backend.register_backend(
         "nccl2",
@@ -2720,9 +2731,9 @@ def _get_split_source(pg: ProcessGroup) -> C10DBackend | None:
 # plugins -- is invisible to the flight recorder unless a hook is attached.
 #
 # Backend.NCCL is not in here by construction: which implementation the name
-# builds is a runtime choice, so _register_builtin_nccl_backend puts it in or
-# takes it out when it makes that choice, and this stays the single answer to
-# "does this backend record itself".
+# builds is a runtime choice, so its registrar puts it in or takes it out when
+# it makes that choice, and this stays the single answer to "does this backend
+# record itself".
 _FR_SELF_RECORDING_BACKENDS = {
     Backend.GLOO,
     "nccl-legacy",

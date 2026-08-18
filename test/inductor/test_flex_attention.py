@@ -23,6 +23,7 @@ from unittest.mock import patch
 import torch
 import torch.nn as nn
 from torch._dynamo.testing import CompileCounterWithBackend, normalize_gm
+from torch._higher_order_ops.inline_asm_elementwise import inline_asm_elementwise
 from torch._inductor import config, metrics
 from torch._inductor.exc import InductorError
 from torch._inductor.runtime.triton_compat import HAS_WARP_SPEC
@@ -2066,6 +2067,114 @@ class TestFlexAttention(InductorTestCase):
 
         self.run_test(all_bias, dtype, device=device)
         self.run_test_with_paged_attention(all_bias, dtype, device=device)
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_xpu
+    @skip_on_mps
+    @skip_on_rocm
+    def test_inline_asm_score_mod(self, device):
+        """score_mod using the inline_asm_elementwise HOP lowers to
+        tl.inline_asm_elementwise inside the flex kernel. Forward only:
+        the HOP has no autograd formula."""
+        bias = torch.randn(S, device=device)
+
+        def asm_score_mod(score, b, h, q, kv):
+            return inline_asm_elementwise(
+                score,
+                bias[kv],
+                asm_str="fma.rn.f32 $0, $1, 0f40000000, $2;",
+                constraints="=f,f,f",
+                dtype=torch.float32,
+            )
+
+        def ref_score_mod(score, b, h, q, kv):
+            return score * 2.0 + bias[kv]
+
+        q, k, v = [
+            torch.randn(B, H, S, D, device=device, dtype=torch.float16)
+            for _ in range(3)
+        ]
+        compiled = torch.compile(flex_attention)
+        out = compiled(q, k, v, score_mod=asm_score_mod)
+        ref = compiled(q, k, v, score_mod=ref_score_mod)
+        self.assertEqual(out, ref)
+
+        # The eager (unfused) path applies score_mod under vmap and runs the
+        # asm via the Jiterator.
+        eager_out = flex_attention(q, k, v, score_mod=asm_score_mod)
+        eager_ref = flex_attention(q, k, v, score_mod=ref_score_mod)
+        self.assertEqual(eager_out, eager_ref)
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_xpu
+    @skip_on_mps
+    @skip_on_rocm
+    def test_inline_asm_score_mod_pack2(self, device):
+        def asm_score_mod(score, b, h, q, kv):
+            return inline_asm_elementwise(
+                score,
+                asm_str="add.f32 $0, $2, $2; add.f32 $1, $3, $3;",
+                constraints="=f,=f,f,f",
+                dtype=torch.float32,
+                pack=2,
+            )
+
+        def ref_score_mod(score, b, h, q, kv):
+            return score * 2.0
+
+        q, k, v = [
+            torch.randn(B, H, S, D, device=device, dtype=torch.float16)
+            for _ in range(3)
+        ]
+        compiled = torch.compile(flex_attention)
+        out = compiled(q, k, v, score_mod=asm_score_mod)
+        ref = compiled(q, k, v, score_mod=ref_score_mod)
+        self.assertEqual(out, ref)
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_xpu
+    @skip_on_mps
+    @skip_on_rocm
+    def test_inline_asm_mask_mod(self, device):
+        """mask_mod using the inline_asm_elementwise HOP: the multi-line PTX
+        predicate is exercised both when building the block mask (eager vmap +
+        Jiterator, and compiled) and inside the kernel on partial blocks."""
+        asm_str = "{\n.reg .pred p;\nsetp.ge.s32 p, $1, $2;\nselp.u32 $0, 1, 0, p;\n}"
+
+        def asm_causal_mask(b, h, q_idx, kv_idx):
+            pred = inline_asm_elementwise(
+                q_idx.to(torch.int32),
+                kv_idx.to(torch.int32),
+                asm_str=asm_str,
+                constraints="=r,r,r",
+                dtype=torch.int32,
+            )
+            return pred != 0
+
+        def ref_causal_mask(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        bm = create_block_mask(asm_causal_mask, B, H, S, S, device=device)
+        bm_ref = create_block_mask(ref_causal_mask, B, H, S, S, device=device)
+        self.assertEqual(bm.kv_num_blocks, bm_ref.kv_num_blocks)
+        self.assertEqual(bm.kv_indices, bm_ref.kv_indices)
+
+        bm_compiled = torch.compile(create_block_mask)(
+            asm_causal_mask, B, H, S, S, device=device
+        )
+        self.assertEqual(bm_compiled.kv_num_blocks, bm_ref.kv_num_blocks)
+
+        q, k, v = [
+            torch.randn(B, H, S, D, device=device, dtype=torch.float16)
+            for _ in range(3)
+        ]
+        compiled = torch.compile(flex_attention)
+        out = compiled(q, k, v, block_mask=bm)
+        ref = compiled(q, k, v, block_mask=bm_ref)
+        self.assertEqual(out, ref)
 
     @supported_platform
     @skip_on_cpu
