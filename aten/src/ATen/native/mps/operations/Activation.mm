@@ -588,12 +588,12 @@ Tensor& hardtanh_backward_out_mps(const Tensor& grad_output,
       MPSGraphTensor* maxTensor = [mpsGraph constantWithScalar:max.to<double>()
                                                          shape:@[ @1 ]
                                                       dataType:getMPSDataType(grad_output)];
-      MPSGraphTensor* greaterThanMaxPredicateTensor = [mpsGraph greaterThanWithPrimaryTensor:inputTensor
-                                                                             secondaryTensor:maxTensor
-                                                                                        name:nil];
-      MPSGraphTensor* lesserThanMinPredicateTensor = [mpsGraph lessThanWithPrimaryTensor:inputTensor
-                                                                         secondaryTensor:minTensor
-                                                                                    name:nil];
+      MPSGraphTensor* greaterThanMaxPredicateTensor = [mpsGraph greaterThanOrEqualToWithPrimaryTensor:inputTensor
+                                                                                    secondaryTensor:maxTensor
+                                                                                               name:nil];
+      MPSGraphTensor* lesserThanMinPredicateTensor = [mpsGraph lessThanOrEqualToWithPrimaryTensor:inputTensor
+                                                                                 secondaryTensor:minTensor
+                                                                                            name:nil];
       MPSGraphTensor* greaterThanMaxGradTensor = [mpsGraph selectWithPredicateTensor:greaterThanMaxPredicateTensor
                                                                  truePredicateTensor:zeroTensor
                                                                 falsePredicateTensor:unitTensor
