@@ -9,7 +9,6 @@ import unittest
 from collections import defaultdict
 from collections.abc import Callable, Iterable
 from typing import Any
-from unittest.mock import MagicMock
 
 import torch
 import torch.distributed as dist
@@ -782,6 +781,86 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             )
         for ref_loss, loss in zip(ref_losses, losses):
             self.assertEqual(ref_loss, loss)
+
+    @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(
+        not hasattr(torch.get_device_module(device_type), "_sleep"),
+        "Sleep is not supported on this device",
+    )
+    def test_post_optim_grad_free_event(self):
+        device_module = torch.get_device_module(device_type)
+        dim, delay_ms = 16, 500
+        for target_stream_name in ("reduce_scatter", "all_reduce", "custom"):
+            with self.subTest(target_stream=target_stream_name):
+                torch.manual_seed(42)
+                model = nn.Sequential(
+                    nn.Linear(dim, dim),
+                    nn.ReLU(),
+                    nn.Linear(dim, dim),
+                )
+                ref_model = replicate(copy.deepcopy(model).to(device_type.type))
+                model = model.to(device_type)
+                fully_shard(model)
+                custom_stream = device_module.Stream()
+                model.set_all_reduce_hook(lambda output: None, stream=custom_stream)
+                ref_optim = torch.optim.AdamW(ref_model.parameters(), lr=1e-2)
+                optim = torch.optim.AdamW(model.parameters(), lr=1e-2)
+
+                torch.manual_seed(42 + self.rank)
+                inp = torch.randn(4, dim, device=device_type.type)
+
+                # Warm up optimizer state and FSDP lazy initialization.
+                for train_model, train_optim in (
+                    (ref_model, ref_optim),
+                    (model, optim),
+                ):
+                    train_model(inp).sum().backward()
+                    train_optim.step()
+                    train_optim.zero_grad(set_to_none=True)
+                device_module.synchronize()
+                check_sharded_parity(self, ref_model, model)
+
+                for _ in range(2):
+                    ref_loss = ref_model(inp).sum()
+                    ref_loss.backward()
+                    ref_optim.step()
+                    ref_optim.zero_grad(set_to_none=True)
+
+                    loss = model(inp).sum()
+                    loss.backward()
+                    state = model._get_fsdp_state()
+                    comm_ctx = state._comm_ctx
+                    target_stream = {
+                        "reduce_scatter": comm_ctx.reduce_scatter_stream,
+                        "all_reduce": comm_ctx.all_reduce_stream,
+                        "custom": custom_stream,
+                    }[target_stream_name]
+
+                    # Start from idle streams, then delay the real optimizer
+                    # kernels so the host reaches zero_grad while they are
+                    # still consuming the sharded gradients.
+                    device_module.synchronize()
+                    device_sleep(
+                        device_type.type,
+                        int(delay_ms * get_cycles_per_ms(device_type.type)),
+                    )
+                    optim.step()
+                    optim_done = device_module.current_stream().record_event()
+                    model.set_post_optim_grad_free_event(optim_done)
+                    self.assertFalse(optim_done.query())
+
+                    optim.zero_grad(set_to_none=True)
+                    for param in model.parameters():
+                        self.assertIsNone(param.grad)
+
+                    # The marker can complete only after the target stream's
+                    # wait on optim_done, proving the read-before-free edge.
+                    free_done = target_stream.record_event()
+                    free_done.synchronize()
+                    self.assertTrue(optim_done.query())
+                    self.assertEqual(ref_loss, loss)
+
+                check_sharded_parity(self, ref_model, model)
 
 
 class TestFullyShard1DTrainingCompose(FSDPTest):
@@ -2617,76 +2696,6 @@ class TestFullyShardWorldSize1(FSDPTest):
     @property
     def world_size(self) -> int:
         return 1
-
-    @skip_if_lt_x_gpu(1)
-    def test_set_post_optim_grad_free_event_before_lazy_init(self):
-        model = nn.Linear(8, 8, bias=False).to(device_type)
-        fully_shard(model)
-        state = model._get_fsdp_state()
-        self.assertFalse(hasattr(state._comm_ctx, "reduce_scatter_stream"))
-
-        event = MagicMock()
-        model.set_post_optim_grad_free_event(event)
-
-        self.assertIs(state._state_ctx.post_optim_event, event)
-        self.assertEqual(state._state_ctx.sharded_grad_free_streams, set())
-        self.assertFalse(hasattr(state._comm_ctx, "reduce_scatter_stream"))
-
-    @skip_if_lt_x_gpu(1)
-    def test_post_optim_grad_free_event_orders_free_streams(self):
-        device_module = torch.get_device_module(device_type)
-        model = nn.Linear(8, 8, bias=False).to(device_type)
-        fully_shard(
-            model,
-            mp_policy=MixedPrecisionPolicy(reduce_dtype=torch.bfloat16),
-        )
-        inp = torch.randn(2, 8, device=device_type.type)
-        model(inp).sum().backward()
-
-        state = model._get_fsdp_state()
-        comm_ctx = state._comm_ctx
-        param = next(model.parameters())
-        self.assertIsNotNone(param.grad)
-        device_module.synchronize()
-        self.assertIsNone(state._state_ctx.sharded_grad_free_streams)
-
-        reduce_scatter_stream = MagicMock()
-        all_reduce_stream = MagicMock()
-        custom_free_stream = MagicMock()
-        historical_free_stream = MagicMock()
-        comm_ctx.reduce_scatter_stream = reduce_scatter_stream
-        comm_ctx.all_reduce_stream = all_reduce_stream
-        state._fsdp_param_groups[0]._all_reduce_hook_stream = custom_free_stream
-        free_streams = (
-            reduce_scatter_stream,
-            all_reduce_stream,
-            custom_free_stream,
-            historical_free_stream,
-        )
-
-        def assert_grad_is_live(*args, **kwargs):
-            self.assertIsNotNone(param.grad)
-
-        event = MagicMock()
-        for stream in free_streams:
-            stream.wait_event.side_effect = assert_grad_is_live
-
-        all_gather_only_event = MagicMock()
-        model.set_post_optim_event(all_gather_only_event)
-        for stream in free_streams:
-            stream.wait_event.assert_not_called()
-        self.assertIsNone(state._state_ctx.sharded_grad_free_streams)
-
-        state._state_ctx.sharded_grad_free_streams = {historical_free_stream}
-        model.set_post_optim_grad_free_event(event)
-
-        for stream in free_streams:
-            stream.wait_event.assert_called_once_with(event)
-        self.assertIs(state._state_ctx.post_optim_event, event)
-        self.assertEqual(state._state_ctx.sharded_grad_free_streams, set(free_streams))
-
-        model.zero_grad(set_to_none=True)
-        self.assertIsNone(param.grad)
 
     def test_train_parity_single_worldsize1(self):
         """

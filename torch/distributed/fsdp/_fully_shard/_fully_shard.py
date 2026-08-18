@@ -661,12 +661,16 @@ class FSDPModule:
             event (torch.Event): Event recorded after the optimizer step to
                 wait sharded-gradient allocation/free streams on.
         """
-        self.set_post_optim_event(event)
         state = self._get_fsdp_state()
+        if state._is_root is not True:
+            raise RuntimeError(
+                "set_post_optim_grad_free_event() must be called on the root "
+                "FSDP module after lazy initialization"
+            )
+        self.set_post_optim_event(event)
         if state._state_ctx.sharded_grad_free_streams is None:
             state._state_ctx.sharded_grad_free_streams = set()
-        if hasattr(state._comm_ctx, "reduce_scatter_stream"):
-            state._wait_post_optim_event_on_grad_free_streams(event)
+        state._wait_post_optim_event_on_grad_free_streams(event)
 
     @deprecated("Use `set_gradient_divide_factor` instead")
     def set_reduce_scatter_divide_factor(self, factor: float) -> None:
