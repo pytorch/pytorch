@@ -70,7 +70,7 @@ void registerCustomClass(at::ClassTypePtr class_type) {
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   auto name = class_type->name()->qualifiedName();
   TORCH_CHECK(
-      !customClasses().contains(name),
+      !customClasses().count(name),
       "Custom class with name ",
       name,
       " is already registered. Ensure that registration with torch::class_ is only called once.");
@@ -79,7 +79,7 @@ void registerCustomClass(at::ClassTypePtr class_type) {
 
 at::ClassTypePtr getCustomClass(const std::string& class_name) {
   auto ret =
-      customClasses().contains(class_name) ? customClasses()[class_name] : nullptr;
+      customClasses().count(class_name) ? customClasses()[class_name] : nullptr;
   if (ret) {
     RECORD_CUSTOM_CLASS(class_name);
   }

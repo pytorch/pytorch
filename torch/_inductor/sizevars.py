@@ -281,14 +281,6 @@ class SizeVarAllocator:
         # (inv_precomputed_replacements).
         self.precomputed_replacements: dict[Expr, sympy.Symbol] = {}
         self.inv_precomputed_replacements: dict[sympy.Symbol, Expr] = {}
-        # optimization_hint is called with the same expression repeatedly
-        # while lowering (on one model, 76k calls over 388 distinct
-        # expressions) and each miss runs sympy substitution plus heuristics,
-        # none of which sympy caches. _lru_cache drops the cache whenever
-        # replacements change.
-        self._optimization_hint_cache = self._lru_cache(
-            self._optimization_hint_uncached
-        )
         self.stride_vars = self.make_stride_vars_cache()
         self.simplify_with_ranges = self.make_simplify_with_ranges_cache()
         self._simplify_loops = self.make_simplify_loops_cache()
@@ -1140,11 +1132,6 @@ class SizeVarAllocator:
         - Infinity (int_oo, sympy.oo): returns sys.maxsize.
         - NaN (sympy.nan): returns the fallback value.
         """
-        return self._optimization_hint_cache(expr, fallback)
-
-    def _optimization_hint_uncached(
-        self, expr: Expr | int, fallback: int | None
-    ) -> int:
         return _optimization_hint_base(
             self.shape_env, expr, self.inv_precomputed_replacements, fallback
         )

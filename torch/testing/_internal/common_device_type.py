@@ -55,7 +55,6 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_UBSAN,
     TEST_XPU,
     TestCase,
-    validate_test_name,
 )
 
 
@@ -718,7 +717,6 @@ class DeviceTypeTestBase(TestCase):
             test_name = (
                 f"{name}{test_suffix}{device_suffix}{_dtype_test_suffix(dtype_kwarg)}"
             )
-            validate_test_name(test_name)
 
             instantiate_test_helper(
                 cls=cls,

@@ -1809,10 +1809,10 @@ class TritonTemplateKernel(TritonKernel):
         block_ptr=False,
         tma_compatibility_checker: TMACompatibilityChecker | None = None,
         mask_constant_index=False,
-        allow_reduction_invariant_indexing=False,
     ):
         """
-        Override the default indexing to use our custom mask and output shape.
+        Override the default indexing to use our custom mask and force
+        dense indexing.
         """
         return super().indexing(
             index,
@@ -1824,7 +1824,6 @@ class TritonTemplateKernel(TritonKernel):
             block_ptr=block_ptr,
             tma_compatibility_checker=tma_compatibility_checker,
             mask_constant_index=mask_constant_index,
-            allow_reduction_invariant_indexing=allow_reduction_invariant_indexing,
         )
 
     def codegen_range_tree(self):
@@ -4141,10 +4140,6 @@ class AlgorithmSelectorCache(PersistentCache):
                     # Await autotuning in subproc pool
                     autotune_start_ts = time.time()
                     results = AsyncAutotuner.get_results(final_choices, inputs_key)
-                    if not any(math.isfinite(timing) for timing in results.values()):
-                        raise self.create_no_valid_choices(
-                            name, "All choices failed to benchmark for backend."
-                        )
                     autotune_wait_ts = time.time() - autotune_start_ts
                     AlgorithmSelectorCache.log_results(
                         name,
@@ -4963,13 +4958,8 @@ class AlgorithmSelectorCache(PersistentCache):
                 # benchmarks the expanded 2D input; keep both backed by the
                 # same values by making all rows identical.
                 global_tensor = unique_example_inputs[input_node.get_name()]
-                if global_tensor.shape[0] == 0:
-                    # No row to copy, and the 1D bias does not depend on M.
-                    bias = cls.benchmark_example_value(extern_node, hint_override)
-                else:
-                    global_tensor[:] = global_tensor[0:1].expand_as(global_tensor)
-                    bias = global_tensor[0].contiguous()
-                additional_example_inputs[extern_name] = bias
+                global_tensor[:] = global_tensor[0:1].expand_as(global_tensor)
+                additional_example_inputs[extern_name] = global_tensor[0].contiguous()
 
             return {
                 **unique_example_inputs,

@@ -50,7 +50,6 @@ from torch.testing._internal.common_utils import (
     gradcheck,
     GRADCHECK_NONDET_TOL,
     gradgradcheck,
-    HardwareClassification,
     instantiate_parametrized_tests,
     IS_ARM64,
     IS_LINUX,
@@ -89,7 +88,6 @@ if TEST_SCIPY:
 
 
 class TestConvolutionNN(NNTestCase):
-    hw_classification = HardwareClassification.GENERIC
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
 
@@ -1184,8 +1182,6 @@ class TestConvolutionNN(NNTestCase):
 
 
 class TestConvolutionNNDeviceType(NNTestCase):
-    hw_classification = HardwareClassification.ACCELERATOR
-
     @skipMPS
     @expectedFailureXPU
     def test_slow_conv_transpose3d_kernel_size_mismatch(self, device):
@@ -4103,7 +4099,6 @@ class TestConvolutionNNDeviceType(NNTestCase):
 class TestConvolutionNNCUDA(NNTestCase):
     """CUDA/cuDNN-specific convolution tests."""
 
-    hw_classification = HardwareClassification.CUDA
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
 

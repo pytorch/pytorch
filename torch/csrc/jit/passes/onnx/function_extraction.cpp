@@ -485,7 +485,7 @@ Node* FunctionExtractor::CreateFunctionDefNode(
   std::vector<std::string> final_attr_names;
 
   auto adjust_attr_name = [&](std::string attr_name) {
-    if (base_attr_name_count.contains(attr_name)) {
+    if (base_attr_name_count.find(attr_name) != base_attr_name_count.end()) {
       attr_name =
           attr_name + "." + std::to_string(base_attr_name_count[attr_name]++);
     } else {
@@ -528,7 +528,8 @@ Node* FunctionExtractor::CreateFunctionDefNode(
             names.begin(),
             names.end(),
             [&annotated_attr_names](const Symbol& name) {
-              return !annotated_attr_names.contains(name);
+              return annotated_attr_names.find(name) ==
+                  annotated_attr_names.end();
             });
         TORCH_CHECK(
             unseen_attr_name == names.end(),
@@ -615,7 +616,7 @@ Node* FunctionExtractor::CreateFunctionNode(
       auto attr_name = func_ctx.FindAttrName(ref_n, attr).value();
       copy_attr(ref_n, func_n, attr, attr_name);
       for (auto* n : scope_ctx.nlist_) {
-        if (attr_it.second.contains(n)) {
+        if (attr_it.second.find(n) != attr_it.second.end()) {
           copy_attr(n, func_n, attr, attr_name);
           break;
         }
@@ -779,8 +780,8 @@ void FunctionExtractor::ScopeContext::PopulateInputsOutputs(
   // Add initializers after inputs.
   for (auto* n : nlist) {
     for (auto* v : n->inputs()) {
-      if (!v_set.contains(v)) {
-        if (param_names.contains(v->debugName())) {
+      if (v_set.find(v) == v_set.end()) {
+        if (param_names.find(v->debugName()) != param_names.end()) {
           initializer_list.emplace_back(v);
         } else {
           input_list.emplace_back(v);
@@ -804,7 +805,7 @@ void FunctionExtractor::ScopeContext::PopulateInputsOutputs(
     for (auto* v : n->outputs()) {
       bool used_outside = false;
       for (auto use : v->uses()) {
-        used_outside |= (!n_set.contains(use.user));
+        used_outside |= (n_set.find(use.user) == n_set.end());
       }
       if (used_outside) {
         outputs_.emplace_back(v);
@@ -833,7 +834,7 @@ std::tuple<FunctionExtractor::scope_ctx_map, node_list> FunctionExtractor::
 
   auto find_or_create_scope_ctx = [](scope_ctx_map& scope_ctxs,
                                      const ScopePtr& scope) {
-    if (!scope_ctxs.contains(scope)) {
+    if (scope_ctxs.find(scope) == scope_ctxs.end()) {
       scope_ctxs.insert(std::make_pair(scope, new ScopeContext()));
     }
     return scope_ctxs[scope];
@@ -874,7 +875,7 @@ std::tuple<FunctionExtractor::scope_ctx_map, node_list> FunctionExtractor::
           PartitionNodesByScope(sub_b);
 
       for (auto& it : subblock_scope_ctxs) {
-        if (!scope_ctxs.contains(it.first)) {
+        if (scope_ctxs.find(it.first) == scope_ctxs.end()) {
           scope_ctxs.insert(std::make_pair(it.first, it.second));
         } else {
           for (auto* s_n : it.second->nlist_) {
@@ -1040,7 +1041,8 @@ NodeAttrNameMap FunctionExtractor::run() {
   // Deepest scope comes first, guaranteeing no other scope can be its child.
   auto sorted_scope_keys = SortScopesByMaxDepth(identical_scope_map);
   for (const auto& scope_key : sorted_scope_keys) {
-    if (module_names_.contains(ONNXScopeName::className(scope_key))) {
+    if (module_names_.find(ONNXScopeName::className(scope_key)) !=
+        module_names_.end()) {
       ConvertScopeToFunction(
           scope_key, identical_scope_map[scope_key], scope_ctxs, graph_);
     }
@@ -1084,7 +1086,7 @@ Node* NodeOfMostRecentScope(Node* forward_node) {
   for (auto* node : block->nodes().reverse()) {
     if (node->kind() == prim::TracedModuleForward) {
       Node* target_node = NodeOfMostRecentScope(node);
-      if (!scope_attr_map_.contains(node->scope())) {
+      if (scope_attr_map_.find(node->scope()) == scope_attr_map_.end()) {
         return target_node;
       }
     }

@@ -2912,9 +2912,9 @@ class TestOperators(TestCase):
         sample_inputs = op.sample_inputs(device, dtype)
 
         for sample_input in sample_inputs:
-            # Ordered operations either reject complex inputs or lack complex support.
+            # Check that the op raises NotImplementedError or appropriate failure
             self.assertRaises(
-                (TypeError, NotImplementedError),
+                RuntimeError,
                 op,
                 sample_input.input,
                 *sample_input.args,

@@ -2322,7 +2322,7 @@ class CppBuilder:
             Build options to the builder.
         output_dir:
             1. The output_dir the target file will output to.
-            2. The default value is empty string, and then use the current dir as output dir.
+            2. The default value is empty string, and then the use current dir as output dir.
             3. Final target file: output_dir/name.ext
     """
 

@@ -73,7 +73,7 @@ void unregisterOpaqueType(const std::string& type_name) {
 bool isRegisteredOpaqueType(const std::string& type_name) {
   std::lock_guard<std::mutex> lock(getOpaqueTypesMutex());
   auto& global_opaque_types = getOpaqueTypes();
-  return global_opaque_types.contains(type_name);
+  return global_opaque_types.find(type_name) != global_opaque_types.end();
 }
 
 TypePtr SchemaTypeParser::parseBaseType() {
