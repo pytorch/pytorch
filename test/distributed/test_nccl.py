@@ -19,6 +19,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
+    getRocmVersion,
     instantiate_parametrized_tests,
     IS_WINDOWS,
     load_tests,
@@ -239,6 +240,10 @@ class TestNCCL(TestCase):
 
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
+@skip_but_pass_in_sandcastle_if(
+    TEST_WITH_ROCM and getRocmVersion() == (7, 14),
+    "RCCL CUMEM/P2P communicator init fails on ROCm 7.14 (p2p_tmp.cc:358)",
+)
 class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
     @property
     def device(self) -> torch.device:
