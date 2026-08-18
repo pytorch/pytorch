@@ -5,6 +5,8 @@
 // ProcessGroupNCCL -- lands it in NCCLDevCommManager for symmetric memory,
 // without the backend having to depend on the manager header. This is the one
 // place the opaque void* comm from the hook is cast back to ncclComm_t.
+// Also defines NCCLDevCommManager::get() so the Meyer singleton registry
+// lives in this DSO rather than being duplicated into extension modules.
 //
 // Gated on NCCL_HAS_SYMMEM_SUPPORT (via nccl_dev_cap.hpp), matching the other
 // symm_mem NCCL translation units: the macro is only defined when NCCL is built
@@ -18,7 +20,26 @@
 #include <torch/csrc/distributed/c10d/NCCLCommRegistrationHook.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_devcomm_manager.hpp>
 
+#include <memory>
+#include <mutex>
+#include <unordered_map>
+
 namespace c10d::symmetric_memory {
+
+NCCLDevCommManager& NCCLDevCommManager::get(const c10::Device device) {
+  static std::mutex mu;
+  static std::
+      unordered_map<c10::DeviceIndex, std::unique_ptr<NCCLDevCommManager>>
+          managers;
+  std::lock_guard<std::mutex> lock(mu);
+  auto& slot = managers[device.index()];
+  if (!slot) {
+    slot = std::unique_ptr<NCCLDevCommManager>(new NCCLDevCommManager(device));
+    LOG(INFO) << "[NCCLDevCommManager] created manager for device=" << device;
+  }
+  return *slot;
+}
+
 namespace {
 
 // Installed at load time (before any process group is created).
