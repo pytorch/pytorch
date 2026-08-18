@@ -6696,7 +6696,7 @@ class ShapeEnv:
                 if any(
                     is_dim(source)
                     for s in expr.free_symbols
-                    for source in symbol_to_source.get(s, ())
+                    for source in symbol_to_source[s]
                 ):
                     if self.dim_constraints is None:
                         raise AssertionError("dim_constraints must not be None")
@@ -6713,14 +6713,7 @@ class ShapeEnv:
                 # a constraint
                 if not is_trivial and len(expr.free_symbols) == 1:
                     symbol = next(iter(expr.free_symbols))
-                    # Subclasses opting out of outer size/stride tracking leave their
-                    # outer dims out of symbol_to_source; fall back as _print_Symbol does.
-                    sources = symbol_to_source.get(symbol) or self.var_to_sources.get(
-                        symbol
-                    )
-                    if not sources:
-                        return
-                    source = sources[0]
+                    source = symbol_to_source[symbol][0]
                     constraints = symbol_to_constraints[symbol]
                     for c in constraints:
                         if isinstance(c, StrictMinMaxConstraint):
@@ -7818,10 +7811,7 @@ class ShapeEnv:
             desc = "Could not guard on data-dependent expression"
             size_oblivious_result_msg = (
                 "consider using data-dependent friendly APIs such as "
-                "guard_or_false, guard_or_true and statically_known_true. "
-                "If this was caused by Python `not` on a symbolic boolean, "
-                "use torch.sym_not() or an equivalent comparison instead; "
-                "Python `not` cannot be overloaded outside Dynamo bytecode tracing."
+                "guard_or_false, guard_or_true and statically_known_true."
             )
 
         # If the ShapesSpec/ParamsSpec dynamic-shapes API is in use, this DDE is

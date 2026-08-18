@@ -44,25 +44,6 @@ struct sdp_params {
   bool enable_gqa;
 };
 
-// Fused backends require a batch dimension. Give unbatched inputs a singleton
-// batch dimension before selecting or running a fused backend.
-inline sdp_params normalize_unbatched_input(sdp_params params) {
-  if (!params.query.is_nested() && !params.key.is_nested() &&
-      !params.value.is_nested() &&
-      params.query.layout() == at::kStrided &&
-      params.key.layout() == at::kStrided &&
-      params.value.layout() == at::kStrided && params.query.dim() == 3 &&
-      params.key.dim() == 3 && params.value.dim() == 3) {
-    params.query = params.query.unsqueeze(0);
-    params.key = params.key.unsqueeze(0);
-    params.value = params.value.unsqueeze(0);
-    while (params.attn_mask.has_value() && params.attn_mask->dim() < 4) {
-      params.attn_mask = params.attn_mask->unsqueeze(0);
-    }
-  }
-  return params;
-}
-
 SDPBackend select_sdp_backend_cpp(sdp_params const& kernel_params);
 
 inline c10::SymFloat calculate_scale(

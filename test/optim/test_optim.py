@@ -22,7 +22,6 @@ from torch.optim import (
 )
 from torch.testing._internal.common_utils import (
     gradcheck,
-    HardwareClassification,
     load_tests,
     skipIfTorchDynamo,
     TestCase,
@@ -131,8 +130,6 @@ def _multistep_backprop_diff_hyperparams_fn(
 
 @skipIfTorchDynamo("Differentiable optimizers not supported")
 class TestDifferentiableOptimizer(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
     def test_sgd(self):
         p = torch.rand(10, requires_grad=True, dtype=torch.float64)
         grad = torch.rand(10, requires_grad=True, dtype=torch.float64)

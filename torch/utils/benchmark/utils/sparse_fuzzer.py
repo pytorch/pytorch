@@ -109,7 +109,7 @@ class FuzzedSparseTensor(FuzzedTensor):
         is_hybrid = len(size[sparse_dim:]) > 0
 
         properties = {
-            "numel": tensor.numel(),
+            "numel": int(tensor.numel()),
             "shape": tensor.size(),
             "is_coalesced": tensor.is_coalesced(),
             "density": density,

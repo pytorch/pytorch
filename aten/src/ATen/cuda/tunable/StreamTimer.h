@@ -18,10 +18,6 @@ namespace at::cuda::tunable {
 class StreamTimer : public ITimer {
   public:
     StreamTimer();
-    StreamTimer(const StreamTimer&) = delete;
-    StreamTimer& operator=(const StreamTimer&) = delete;
-    StreamTimer(StreamTimer&&) = delete;
-    StreamTimer& operator=(StreamTimer&&) = delete;
     ~StreamTimer() override;
 
     void Start() override;
@@ -38,10 +34,6 @@ class StreamTimer : public ITimer {
 class StreamTimerNoSync : public ITimer {
   public:
     StreamTimerNoSync();
-    StreamTimerNoSync(const StreamTimerNoSync&) = delete;
-    StreamTimerNoSync& operator=(const StreamTimerNoSync&) = delete;
-    StreamTimerNoSync(StreamTimerNoSync&&) = delete;
-    StreamTimerNoSync& operator=(StreamTimerNoSync&&) = delete;
     ~StreamTimerNoSync() override;
 
     void Start() override;

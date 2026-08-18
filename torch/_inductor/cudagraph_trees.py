@@ -177,7 +177,7 @@ def clear_cublass_cache() -> None:
     it will be allocated to the cudagraph private pool and accounted for in the allocator for the duration of the
     program. There is no overhead to this on replay since cudagraphs removes allocation overhead.
     """
-    torch._C._cuda_clearCublasWorkspaces()
+    torch.cuda._clear_cublas_workspaces()
 
 
 @contextlib.contextmanager

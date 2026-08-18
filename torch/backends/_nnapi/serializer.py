@@ -422,7 +422,7 @@ class _NnapiSerializer:
                 f"Can't handle input with dtype '{tensor.dtype}'"
             )
         return Operand(
-            shape=tensor.shape,
+            shape=tuple(tensor.shape),
             # pyrefly: ignore [bad-argument-type]
             op_type=op_type,
             dim_order=dim_order,
