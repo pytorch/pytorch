@@ -208,11 +208,11 @@ class CublasltGemmProblemBase {
     return preference_.descriptor();
   }
 
-  void* alpha_ptr() const {
+  const void* alpha_ptr() const {
     return alpha_ptr_;
   }
 
-  void* beta_ptr() const {
+  const void* beta_ptr() const {
     return beta_ptr_;
   }
 
@@ -237,8 +237,8 @@ class CublasltGemmProblemBase {
   cudaDataType_t b_type_;
   cudaDataType_t c_type_;
   cudaDataType_t d_type_;
-  void* alpha_ptr_ = nullptr;
-  void* beta_ptr_ = nullptr;
+  const void* alpha_ptr_ = nullptr;
+  const void* beta_ptr_ = nullptr;
 };
 
 template <typename T, typename C_Dtype = T>
@@ -623,7 +623,7 @@ class CublasltScaledGemmProblem : public CublasltGemmProblemBase {
         auto pointer_mode = CUBLASLT_POINTER_MODE_DEVICE;
         compute_desc_.setAttribute(
             CUBLASLT_MATMUL_DESC_POINTER_MODE, pointer_mode);
-        alpha_ptr_ = alpha.const_data_ptr<float>();
+        alpha_ptr_ = alpha.template const_data_ptr<float>();
         beta_ptr_ = at::cuda::detail::get_cublas_device_zero();
       } else {
         alpha_val_ = alpha.template item<float>();
