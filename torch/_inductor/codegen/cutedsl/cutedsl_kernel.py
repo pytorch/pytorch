@@ -649,6 +649,9 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
         # Maps generated CSE names to their semantic provenance so vector-load
         # analysis can reason about the source indexing semantics.
         self._index_symbol_info: dict[sympy.Symbol, IndexSymbolInfo] = {}
+        # Captured modifications are read-only, so repeated loads from the same
+        # semantic location can share the generated index and value fragments.
+        self._captured_load_cache: dict[tuple[str, sympy.Expr], CuteDSLCSEVariable] = {}
 
     def _get_input_dtype(self, name: str) -> torch.dtype:
         """Get the dtype for an input from the kernel's named_input_nodes."""
@@ -662,6 +665,11 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
         from torch._inductor.kernel.flex.flex_flash_attention import HierarchicalIndex
 
         if name not in self.fixed_inputs:
+            cache_key = (name, index)
+            cached = self._captured_load_cache.get(cache_key)
+            if cached is not None:
+                return self.kernel.cse.generate(self.kernel.body, cached)
+
             var = self._add_kernel_input(name)
             buffer = self.kernel._get_capture_input_node(name)
             if buffer is None:
@@ -707,6 +715,7 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
                 bounds=ValueRanges.unknown(),
                 shape=(1,),
             )
+            self._captured_load_cache[cache_key] = out
             return out
 
         value = self.fixed_inputs[name]
