@@ -8,9 +8,7 @@ from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.nn import Linear
 from torch.optim import SGD
 from torch.testing._internal.common_device_type import (
-    Capability,
     instantiate_device_type_tests,
-    requires_capabilities,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTestContinuous, get_devtype
@@ -52,10 +50,6 @@ class TestUnevenParamShard(FSDPTestContinuous):
         return ref_forward_output_my_rank, ref_weight_out
 
     @skip_if_lt_x_gpu(2)
-    @requires_capabilities(
-        Capability.distributed.backend,
-        Capability.distributed.fsdp,
-    )
     def test_one_iteration(self, device):
         """Test FSDP with uneven divide of parameter shards."""
         model = Linear(3, 3, bias=False)
