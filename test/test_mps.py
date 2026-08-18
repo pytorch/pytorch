@@ -878,6 +878,34 @@ class TestAvgPool(TestCaseMPS):
 
 
 class TestMPS(TestCaseMPS):
+    def test_metalshaderlibrary_destructor_clean_exit(self):
+        # Regression for MetalShaderLibrary destructor crashes at process
+        # exit. On builds where the Metal runtime is finalized before
+        # libtorch_cpu (depends on dylib finalize order, not OS version),
+        # ObjC messages to Metal objects during static destruction are
+        # unsafe. The fix heap-allocates the bundled-library singleton and
+        # never frees it, so its destructor (which releases every cached
+        # MTLComputePipelineState/MTLFunction) never runs at process exit.
+        # Without the fix, the test subprocess crashes during interpreter
+        # shutdown with a non-zero return code (SIGSEGV).
+        snippet = """
+import torch
+# Touch the MPS kernel-library surface so the bundled MetalShaderLibrary
+# compiles and caches at least one pipeline state, giving its destructor
+# Metal objects to release at exit.
+x = torch.randn(8, device='mps')
+_ = x.relu()
+torch.mps.synchronize()
+"""
+        proc = subprocess.run([sys.executable, "-c", snippet],
+                              capture_output=True, text=True, timeout=60)
+        self.assertEqual(
+            proc.returncode, 0,
+            f"Interpreter exit was unclean (returncode={proc.returncode}). "
+            f"Likely MetalShaderLibrary destructor regression.\n"
+            f"stderr tail:\n{proc.stderr[-1000:]}",
+        )
+
     def ulpAssertAllClose(self, output, reference, n_ulps):
         """
         Wrapper for element-wise tolerances with known
