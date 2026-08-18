@@ -3,6 +3,8 @@ import torch
 from torch._inductor.codegen.aoti_hipify_utils import maybe_hipify_code_wrapper
 from torch._inductor.codegen.common import get_device_op_overrides
 from torch._inductor.test_case import run_tests, TestCase
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 TEST_CODES = [
@@ -26,7 +28,9 @@ HIP_CODES = [
 
 
 class TestCppWrapperHipify(TestCase):
-    def test_hipify_basic_declaration(self) -> None:
+    hw_classification = HardwareClassification.CUDA
+
+    def test_hipify_basic_declaration(self, device) -> None:
         if len(TEST_CODES) != len(HIP_CODES):
             raise AssertionError(
                 f"TEST_CODES length {len(TEST_CODES)} != HIP_CODES length {len(HIP_CODES)}"
@@ -36,8 +40,8 @@ class TestCppWrapperHipify(TestCase):
             expected = HIP_CODES[i]
             self.assertEqual(result, expected)
 
-    def test_hipify_aoti_driver_header(self) -> None:
-        cuda_codegen = get_device_op_overrides("cuda")
+    def test_hipify_aoti_driver_header(self, device) -> None:
+        cuda_codegen = get_device_op_overrides(torch.device(device).type)
         header = cuda_codegen.kernel_driver()
         expected = """
             #define CUDA_DRIVER_CHECK(EXPR)                    \\
@@ -131,7 +135,7 @@ class TestCppWrapperHipify(TestCase):
         result = maybe_hipify_code_wrapper(header, True)
         self.assertEqual(result.rstrip(), expected.rstrip())
 
-    def test_hipify_cross_platform(self) -> None:
+    def test_hipify_cross_platform(self, device) -> None:
         if len(TEST_CODES) != len(HIP_CODES):
             raise AssertionError(
                 f"TEST_CODES length {len(TEST_CODES)} != HIP_CODES length {len(HIP_CODES)}"
@@ -144,6 +148,8 @@ class TestCppWrapperHipify(TestCase):
             else:
                 self.assertEqual(result, TEST_CODES[i])
 
+
+instantiate_device_type_tests(TestCppWrapperHipify, globals(), only_for="cuda")
 
 if __name__ == "__main__":
     run_tests()
