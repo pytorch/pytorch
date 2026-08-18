@@ -20,6 +20,8 @@ from torch.distributed.pipelining import (
     ScheduleZBVZeroBubble,
 )
 from torch.distributed.pipelining._utils import (
+    _StageMeta,
+    _TensorMeta,
     generate_stage_to_rank_mapping,
     InferenceMode,
 )
@@ -147,6 +149,59 @@ def _run_adjacency_validation(stage, num_stages):
 
 
 class ScheduleTest(TestCase):
+    def test_stage_recv_buffers_allocated_just_in_time(self):
+        stage = MockPipelineStage(num_stages=3, group_size=1, group_rank=0)
+        stage.stage_index = 1
+        stage.device = torch.device("cpu")
+        stage.has_backward = True
+        stage._downstream_group = None
+        stage._upstream_group = None
+        stage.args_recv_info = {}
+        stage.grad_recv_info = {}
+
+        activation_meta = _TensorMeta.from_tensor(torch.ones(2))
+        grad_meta = _TensorMeta.from_tensor(torch.ones(2))
+        stage._stage_meta = _StageMeta(
+            inputs=(activation_meta,),
+            output_grads=(grad_meta,),
+        )
+        stage.act_send_info = {0: [2]}
+        PipelineStage._setup_forward_recv_info(stage, 2, has_backward=True)
+        for mb_index in range(2):
+            stage.grad_recv_info[mb_index] = PipelineStage._create_grad_recv_info(
+                stage, stage.act_send_info
+            )
+
+        for recv_info_by_chunk in (stage.args_recv_info, stage.grad_recv_info):
+            for recv_infos in recv_info_by_chunk.values():
+                self.assertIsNone(recv_infos[0].buffer)
+
+        with (
+            patch.object(stage, "_resolve_peer_global_rank", return_value=0),
+            patch("torch.distributed.pipelining.stage.dist.P2POp"),
+        ):
+            fwd_ops = stage.get_fwd_recv_ops(1)
+            self.assertEqual(len(fwd_ops), 1)
+            self.assertIsNone(stage.args_recv_info[0][0].buffer)
+            fwd_buffer = stage.args_recv_info[1][0].buffer
+            if fwd_buffer is None:
+                raise AssertionError("expected forward receive buffer to be allocated")
+
+            activations = stage._retrieve_recv_activations(1)
+            self.assertIs(activations[0], fwd_buffer)
+            self.assertIsNone(stage.args_recv_info[1][0].buffer)
+
+            bwd_ops = stage.get_bwd_recv_ops(0)
+            self.assertEqual(len(bwd_ops), 1)
+            bwd_buffer = stage.grad_recv_info[0][0].buffer
+            if bwd_buffer is None:
+                raise AssertionError("expected backward receive buffer to be allocated")
+            self.assertIsNone(stage.grad_recv_info[1][0].buffer)
+
+            grads = stage._retrieve_recv_grads(0)
+            self.assertIs(grads[0], bwd_buffer)
+            self.assertIsNone(stage.grad_recv_info[0][0].buffer)
+
     def test_get_schedule_class(self):
         # List of all expected schedule names
         schedule_names = [
