@@ -241,7 +241,7 @@ class PeepholeOptimizeDictIdiomsImpl {
       auto first_input = node->input(0);
 
       // only optimizing ops with unmutated inputs
-      if (mutated_dicts_.count(first_input)) {
+      if (mutated_dicts_.contains(first_input)) {
         continue;
       }
 

@@ -16,6 +16,10 @@ concurrency:
 permissions:
   id-token: write
   contents: read
+  # _linux-build.yml and _linux-test.yml both request actions: read, and a nested
+  # job cannot be granted more than its caller has. Omitting it here means
+  # actions: none, which fails the whole workflow at startup.
+  actions: read
 
 jobs:
   # There must be at least one job here to satisfy GitHub action workflow syntax
@@ -54,3 +58,108 @@ jobs:
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
+
+  # Retry-policy A/B experiment against trunk's linux-jammy-cuda13.0-py3.10-gcc11
+  # "default" shards. Everything here is deliberately identical to trunk -- same
+  # job name, build-environment, docker image, cuda-arch-list, shard count and
+  # runners -- so the only variable is the retry policy. The "_retry_experiment"
+  # config suffix is the carrier: .ci/pytorch/test.sh strips it back to "default"
+  # and exports the retry knobs, which keeps test selection, sharding and the
+  # test-times lookup key identical to the trunk arm. The two arms are told apart
+  # by workflow name (unstable vs trunk) and by the config token in the job name.
+  linux-jammy-cuda13_0-py3_10-gcc11-retry-experiment-build:
+    if: github.repository_owner == 'pytorch'
+    name: linux-jammy-cuda13.0-py3.10-gcc11
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      build-environment: linux-jammy-cuda13.0-py3.10-gcc11
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
+      cuda-arch-list: '7.5 8.9'
+      test-matrix: |
+        { include: [
+          { config: "default_retry_experiment", shard: 1, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "default_retry_experiment", shard: 2, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "default_retry_experiment", shard: 3, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "default_retry_experiment", shard: 4, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "default_retry_experiment", shard: 5, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "default_retry_experiment", shard: 6, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "default_retry_experiment", shard: 7, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "default_retry_experiment", shard: 8, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "default_retry_experiment", shard: 9, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "default_retry_experiment", shard: 10, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "default_retry_experiment", shard: 11, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "default_retry_experiment", shard: 12, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "default_retry_experiment", shard: 13, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "default_retry_experiment", shard: 14, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
+        ]}
+      python-version: "3.10"
+      compiler: gcc11
+      cuda-version: "13.0"
+    secrets: inherit
+
+  linux-jammy-cuda13_0-py3_10-gcc11-retry-experiment-test:
+    if: github.repository_owner == 'pytorch'
+    name: linux-jammy-cuda13.0-py3.10-gcc11
+    uses: ./.github/workflows/_linux-test.yml
+    needs:
+      - linux-jammy-cuda13_0-py3_10-gcc11-retry-experiment-build
+      - target-determination
+    with:
+      timeout-minutes: 360
+      build-environment: linux-jammy-cuda13.0-py3.10-gcc11
+      docker-image: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-retry-experiment-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-retry-experiment-build.outputs.test-matrix }}
+      python-version: "3.10"
+      compiler: gcc11
+      cuda-version: "13.0"
+    secrets: inherit
+
+  # Second arm of the same experiment, against pull's linux-jammy-py3.10-gcc11
+  # "default" shards. Same reasoning as above: name, build-environment, docker
+  # image, shard count, runners and tests-to-exclude all match pull exactly, so
+  # the retry policy stays the only difference.
+  linux-jammy-py3_10-gcc11-retry-experiment-build:
+    if: github.repository_owner == 'pytorch'
+    name: linux-jammy-py3.10-gcc11
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      build-environment: linux-jammy-py3.10-gcc11
+      docker-image-name: ci-image:pytorch-linux-jammy-py3.10-clang21
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
+      test-matrix: |
+        { include: [
+          { config: "default_retry_experiment", shard: 1, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+          { config: "default_retry_experiment", shard: 2, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+          { config: "default_retry_experiment", shard: 3, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+          { config: "default_retry_experiment", shard: 4, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+          { config: "default_retry_experiment", shard: 5, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+          { config: "default_retry_experiment", shard: 6, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+          { config: "default_retry_experiment", shard: 7, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+          { config: "default_retry_experiment", shard: 8, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+          { config: "default_retry_experiment", shard: 9, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+          { config: "default_retry_experiment", shard: 10, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+        ]}
+      python-version: "3.10"
+      compiler: gcc11
+    secrets: inherit
+
+  linux-jammy-py3_10-gcc11-retry-experiment-test:
+    if: github.repository_owner == 'pytorch'
+    name: linux-jammy-py3.10-gcc11
+    uses: ./.github/workflows/_linux-test.yml
+    needs:
+      - linux-jammy-py3_10-gcc11-retry-experiment-build
+      - target-determination
+    with:
+      build-environment: linux-jammy-py3.10-gcc11
+      docker-image: ${{ needs.linux-jammy-py3_10-gcc11-retry-experiment-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-py3_10-gcc11-retry-experiment-build.outputs.test-matrix }}
+      tests-to-exclude: "inductor/test_torchinductor_opinfo"
+      python-version: "3.10"
+      compiler: gcc11
+    secrets: inherit

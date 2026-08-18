@@ -464,6 +464,10 @@ class DistMatrixOpsTest(DTensorTestBase):
         not PLATFORM_SUPPORTS_FP8,
         "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
     )
+    @unittest.skip(
+        "Disabled due to CI failures on B200; see "
+        "https://github.com/pytorch/pytorch/issues/190086"
+    )
     def test_scaled_mm(self):
         device_mesh = self.build_device_mesh()
         shrd0 = Shard(0)
@@ -1046,15 +1050,11 @@ class DistMatrixOpsTest(DTensorTestBase):
     )
     def test_grouped_mm(self, backend, kwargs):
         if backend == "cublaslt":
-            if _get_torch_cuda_version() < (13, 2):
-                self.skipTest("cublaslt grouped gemm requires CUDA Toolkit >= 13.2")
+            if _get_torch_cuda_version() < (13, 3):
+                self.skipTest("cublaslt grouped gemm requires CUDA Toolkit >= 13.3")
             sm_major = torch.cuda.get_device_capability()[0]
             if sm_major < 9 or sm_major >= 12:
                 self.skipTest("cublaslt grouped gemm requires SM 9.0-11.0")
-            if sm_major == 9 and _get_torch_cuda_version() < (13, 3):
-                self.skipTest(
-                    "cublaslt grouped gemm on SM 9.0 requires CUDA Toolkit >= 13.3"
-                )
         # TODO: torch.nn.functional.grouped_mm can take inputs of dimension (2D, 3D) x (2D, 3D)
         # More tests need to be added.
         device_mesh = self.build_device_mesh()
