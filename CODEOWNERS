@@ -5,280 +5,18 @@
 
 # CODEOWNERS semantics:
 # - GitHub uses the last matching pattern for each path.
-# - A pattern without owners is valid and explicitly leaves matching paths unowned.
-# - Therefore, uncommenting the draft taxonomy before assigning owners would
-#   override existing entries and suppress their code-owner review requests.
+# - Active rules name one or more owners; commented rules mark paths whose
+#   ownership is still to be determined.
+# - Sections are ordered from broad defaults to narrower overrides.
 #
-# Each active assignment is a file pattern followed by one or more owners.
 # For module labels => owners mapping, please see https://github.com/pytorch/pytorch/issues/24422.
 
-/torch/utils/cpp_extension.py @fmassa @ezyang @malfet
-
-# Not there to strictly require the approval, but to be tagged as a reviewer
-# on the PRs to push them into a high priority inbox.
-/torch/csrc/autograd/ @albanD @soulitzer
-/torch/autograd/ @albanD @soulitzer
-/tools/autograd/ @albanD @soulitzer
-/torch/nn/ @albanD @jbschlosser @mikaylagawarecki
-/torch/optim/ @albanD @janeyx99
-/test/test_public_bindings.py @albanD
-/test/allowlist_for_publicAPI.json @albanD
-/test/forward_backward_compatibility/check_forward_backward_compatibility.py @larryliu0820
-/docs/source/conf.py @albanD
-/aten/src/ATen/native/tags.yaml @ezyang
-/.github/merge_rules.yaml @albanD @malfet
-
-# Architecture Optimization (quantization, sparsity, etc.)
-/aten/src/ATen/native/ao_sparse @salilsdesai @digantdesai @jianyuh
-/aten/src/ATen/native/quantized @jerryzh168 @salilsdesai @digantdesai @jianyuh
-/aten/src/ATen/native/quantized/cpu @jerryzh168 @salilsdesai @digantdesai @jianyuh
-/aten/src/ATen/native/quantized/cuda @jerryzh168
-/aten/src/ATen/native/quantized/cudnn @jerryzh168
-/test/test_quantization.py @jerryzh168
-/test/ao/ @jerryzh168
-/test/quantization/ @jerryzh168
-/torch/quantization/ @jerryzh168
-ao/quantization/ @jerryzh168
-nn/intrinsic/ @jerryzh168
-nn/quantized/ @jerryzh168
-nn/quantizable/ @jerryzh168
-nn/qat/ @jerryzh168
-
-# Tensorpipe RPC Agent.
-/torch/csrc/distributed/rpc/tensorpipe_agent.cpp @jiayisuse @lw
-/torch/csrc/distributed/rpc/tensorpipe_agent.h @jiayisuse @lw
-
-# Distributed
-# c10d backend APIs
-/torch/csrc/distributed/c10d @d4l3k @fduwjj @kapilsh
-/torch/csrc/distributed/c10d/Backend.* @kwen2501
-/torch/csrc/distributed/c10d/Ops.* @kwen2501
-/torch/distributed/distributed_c10d.py @d4l3k @fduwjj @kapilsh
-# FSDP, DDP
-/torch/distributed/_composable/fsdp/ @weifengpy
-/torch/distributed/_composable/replicate.py @weifengpy
-/torch/distributed/_composable/replicate_with_fsdp.py @weifengpy
-/torch/distributed/fsdp/ @weifengpy
-/torch/distributed/optim/ @weifengpy
-/torch/nn/parallel/ @weifengpy
-# DTensor view, matmul, _StridedShard
-/torch/distributed/tensor/placement_types.py @weifengpy
-/torch/distributed/tensor/_ops/_view_ops.py @weifengpy
-/torch/distributed/tensor/_ops/_matrix_ops.py @weifengpy
-
-# TVM backend
-/torch/_dynamo/backends/tvm.py @guan404ming
-
-# ONNX Export
-/torch/_dynamo/backends/onnxrt.py @titaiwangms @xadupre @justinchuby
-/torch/csrc/jit/passes/onnx.h @titaiwangms @xadupre
-/torch/csrc/jit/passes/onnx.cpp @titaiwangms @xadupre
-/torch/csrc/jit/passes/onnx/ @titaiwangms @xadupre
-/torch/onnx/ @titaiwangms @xadupre @justinchuby
-/test/onnx/  @titaiwangms @xadupre @justinchuby
-
-# CI
-/.ci  @pytorch/pytorch-dev-infra
-
-# Docker
-/.ci/docker/ubuntu-rocm/ @jeffdaily
-/.ci/docker/common/install_roc*.sh @jeffdaily
-/.ci/docker/common/install_miopen.sh @jeffdaily
-/.ci/docker/common/install_amdsmi.sh @jeffdaily
-/.ci/docker/ci_commit_pins/rocm-*.txt @jeffdaily
-/.ci/docker/ci_commit_pins/triton.txt @desertfire @Chillee @eellison @shunting314 @jeffdaily @jataylo @jithunnair-amd @pruthvistony
-/.ci/docker/ci_commit_pins/triton-xpu.txt @EikanWang @gujinghui
-
-# Github Actions
-# This list is for people wanting to be notified every time there's a change
-# related to Github Actions
-/.github/ @pytorch/pytorch-dev-infra
-
-# Custom Test Infrastructure
-/test/run_test.py @pytorch/pytorch-dev-infra
-/torch/testing/_internal/common_device_type.py @mruberry
-/torch/testing/_internal/common_utils.py @pytorch/pytorch-dev-infra
-
-# Parametrizations
-/torch/nn/utils/parametriz*.py @lezcano
-
-# torch.linalg
-# docs
-/torch/linalg/ @lezcano @nikitaved
-# code
-/aten/src/ATen/native/**/*LinearAlgebra* @lezcano @nikitaved
-# tests
-/test/test_linalg.py @lezcano @nikitaved
-
-# OpInfo-related files
-/torch/testing/_internal/common_methods_invocations.py @mruberry
-/torch/testing/_internal/common_device_type.py @mruberry
-test/test_ops.py @mruberry
-test/test_ops_gradients.py @mruberry @soulitzer
-test/test_ops_fwd_gradients.py @mruberry @soulitzer
-test/test_unary_ufuncs.py @mruberry
-test/test_binary_ufuncs.py @mruberry
-test/test_reductions.py @mruberry
-test/test_type_promotion.py @mruberry
-
-# functorch-related things
-# This list is for people wanting to be notified every time there's a change
-# Useful for e.g. auditing xfails that other folks add to tests
-test/functorch/test_ops.py @zou3519 @chillee @kshitij12345
-test/functorch/test_vmap.py @zou3519 @chillee @kshitij12345
-
-# This is the file where people can add new argument types to torch.fx.
-torch/fx/proxy.py @zou3519
-
-# HOPs
-torch/_higher_order_ops/ @zou3519 @aorenste @bohnstingl
-torch/_dynamo/variables/higher_order_ops.py @zou3519 @aorenste @bohnstingl
-docs/source/higher_order_ops/ @bohnstingl
-test/test_hop_infra.py @zou3519 @aorenste @bohnstingl
-torch/testing/_internal/hop_db.py @tugsbayasgalan @zou3519 @ydwu4 @aorenste @bohnstingl
-
-# AOTAutograd
-torch/_functorch/_aot_autograd/*.py @bdhirsh @aorenste
-torch/_functorch/aot_autograd.py @bdhirsh @aorenste
-
-# FakeTensor
-torch/_subclasses/fake_tensor.py @aorenste
-torch/_subclasses/fake_utils.py @aorenste
-
-# torch MPS
-test/test_mps.py @malfet
-c10/metal/ @malfet
-aten/src/ATen/mps/ @malfet
-aten/src/ATen/native/mps/ @malfet
-
-# MTIA
-aten/src/ATen/detail/MTIAHooksInterface.h @egienvalue
-torch/csrc/mtia/ @egienvalue
-
-# Profiler
-torch/csrc/autograd/profiler* @scotts @ryanzhang22
-torch/autograd/profiler* @scotts @ryanzhang22
-torch/csrc/profiler/ @scotts @ryanzhang22
-torch/profiler/ @scotts @ryanzhang22
-
-# AOTDispatch tests
-test/functorch/test_aotdispatch.py @ezyang @Chillee
-
-# Dataloader
-torch/utils/data/ @divyanshk @ramanishsingh @scotts @aelavender
-
-# hipify
-torch/utils/hipify/ @jeffdaily @jithunnair-amd
-tools/amd_build/ @jeffdaily @jithunnair-amd
-
-# ROCm-specific files
-aten/src/ATen/hip/ @jeffdaily @jithunnair-amd
-aten/src/ATen/miopen/ @jeffdaily @jithunnair-amd
-aten/src/ATen/native/miopen/ @jeffdaily @jithunnair-amd
-c10/hip @jeffdaily @jithunnair-amd
-caffe2/core/hip @jeffdaily @jithunnair-amd
-caffe2/operators/hip @jeffdaily @jithunnair-amd
-caffe2/operators/rnn/hip @jeffdaily @jithunnair-amd
-caffe2/utils/hip @jeffdaily @jithunnair-amd
-
-# XPU-specific files
-/aten/src/ATen/xpu/ @EikanWang @gujinghui
-/aten/src/ATen/native/mkldnn/xpu/ @EikanWang @gujinghui
-/c10/xpu/ @EikanWang @gujinghui
-/torch/csrc/xpu/ @EikanWang @gujinghui
-/torch/xpu/ @EikanWang @gujinghui
-/test/xpu/ @EikanWang @gujinghui
-/test/test_xpu.py @EikanWang @gujinghui
-/third_party/xpu.txt @EikanWang @gujinghui
-/docs/source/notes/get_start_xpu.rst @EikanWang @gujinghui
-
-# torch.export
-/torch/export/ @avikchaudhuri @tugsbayasgalan @zhxchen17 @ydwu4 @angelayi
-/torch/_export/ @avikchaudhuri @tugsbayasgalan @zhxchen17 @ydwu4 @angelayi
-/torch/_export/serde/schema.py @SherlockNoMad @zhxchen17
-
-# Dynamic Shapes
-/torch/fx/experimental/symbolic_shapes.py @laithsakka
-/torch/fx/experimental/sym_node.py @laithsakka
-/torch/fx/experimental/recording.py @laithsakka
-
-# ProxyTorchDispatchMode
-torch/fx/experimental/proxy_tensor.py @aorenste
-
-# serialization-related files
-/aten/src/ATen/MapAllocator* @mikaylagawarecki
-/caffe2/serialize/ @mikaylagawarecki
-/torch/serialization.py @mikaylagawarecki
-/torch/storage.py @mikaylagawarecki
-/torch/csrc/Storage* @mikaylagawarecki
-# subscribing for PyTorchFileWriter/PyTorchFileReader changes
-/torch/csrc/jit/python/init.cpp @mikaylagawarecki
-
-# CUDA and CUDA math libraries
-aten/src/ATen/cuda/ @eqy @syed-ahmed @Aidyn-A
-aten/src/ATen/cudnn/ @eqy @syed-ahmed @Aidyn-A
-aten/src/ATen/native/cuda/ @eqy @syed-ahmed @Aidyn-A
-aten/src/ATen/native/cudnn/ @eqy @syed-ahmed @Aidyn-A
-c10/cuda @eqy @syed-ahmed @Aidyn-A
-torch/cuda/ @eqy @syed-ahmed @Aidyn-A
-torch/csrc/cuda/ @eqy @syed-ahmed @Aidyn-A
-torch/backends/cuda/ @eqy @syed-ahmed @Aidyn-A
-torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
-
-# PyTree utilities
-/torch/utils/_pytree.py @XuehaiPan
-/torch/utils/_cxx_pytree.py @XuehaiPan
-/torch/utils/pytree/ @XuehaiPan
-/torch/_dynamo/polyfills/pytree.py @XuehaiPan
-
-# Relating to libtorch ABI
-/torch/csrc/stable/ @janeyx99 @mikaylagawarecki
-/torch/headeronly/ @janeyx99
-/torch/header_only_apis.txt @janeyx99
-
-# FlexAttention
-/torch/nn/attention/flex_attention.py @drisspg
-/torch/_higher_order_ops/flex_attention.py @drisspg
-/torch/_inductor/kernel/flex/ @drisspg
-/torch/_inductor/codegen/cpp_flex_attention_template.py @drisspg
-/test/inductor/test_flex_attention.py @drisspg
-/test/inductor/test_flex_decoding.py @drisspg
-
-# Low Precision & Grouped GEMMs
-/aten/src/ATen/native/cuda/Blas.cpp @drisspg @slayton58
-/aten/src/ATen/native/cuda/GroupedBlas.cpp @drisspg @slayton58
-/aten/src/ATen/native/cuda/ScaledBlas.cpp @drisspg @slayton58
-/aten/src/ATen/cuda/CUDABlas.cpp @drisspg @slayton58
-/aten/src/ATen/cuda/CUDABlas.h @drisspg @slayton58
-/aten/src/ATen/cuda/CUDAScaledBlas.cpp @drisspg @slayton58
-/aten/src/ATen/cuda/CUDAScaledBlas.h @drisspg @slayton58
-/test/test_scaled_matmul_cuda.py @drisspg @slayton58
-
-# Sparse Tensors
-/aten/src/ATen/native/sparse/ @amjames @pearu @nikitaved
-/aten/src/ATen/SparseTensorImpl.cpp @amjames @pearu @nikitaved
-/aten/src/ATen/SparseCsrTensorImpl.cpp @amjames @pearu @nikitaved
-/torch/sparse/ @amjames @pearu @nikitaved
-/test/test_sparse.py @amjames @pearu @nikitaved
-/test/test_sparse_csr.py @amjames @pearu @nikitaved
-
-# Python/DSL native ops
-/torch/_native/ @slayton58 @drisspg
-
-# Vendored quack library
-/torch/_vendor/quack/ @slayton58 @drisspg
-
-# -----------------------------------------------------------------------------
-# Draft CODEOWNERS taxonomy
+# CODEOWNERS review-surface taxonomy
 #
-# Each tracked path resolves to one review surface. Rules stay commented until
-# owners are assigned; active rules must name valid CODEOWNERS owners.
-#
-#
-# Run `python scripts/codeowners/check_taxonomy.py` to enforce full coverage,
-# declared sections, valid owners, source order, and no duplicate, stale, or
-# ineffective patterns. This was also added to the fast lintrunner set.
-#
+# Every tracked path resolves to one review surface. Every listed pattern must
+# match at least one committed path. The fast lintrunner set enforces these
+# rules, declared sections, valid owners, source order, and no duplicate or
+# ineffective patterns.
 #
 # Review-surface hierarchy:
 # - Compiler: compiler_dynamo, compiler_inductor, compiler_export_fx, compiler_autograd, functorch
@@ -295,8 +33,9 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 # - Benchmarks: benchmark_compiler, benchmark_operator_runtime, benchmark_models
 # - Legacy: caffe2
 # - Repository-wide material: ai_agent_tooling, docs_general
+# - Protected ownership: protected_codeownership
 #
-# Draft grouped review-surface definitions:
+# Grouped review-surface definitions:
 #
 # [core_aten_native_ops]
 # /aten/
@@ -308,11 +47,13 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 # /torch/_functorch/
 # /torch/csrc/functorch/
 # /torch/func/
+/test/functorch/test_ops.py @zou3519 @chillee @kshitij12345
+/test/functorch/test_vmap.py @zou3519 @chillee @kshitij12345
 #
 # [compiler_autograd]
 # /test/compiled_autograd_skips/
 # /test/functorch/test_aot_joint_with_descriptors.py
-# /test/functorch/test_aotdispatch.py
+/test/functorch/test_aotdispatch.py @ezyang @Chillee
 # /test/functorch/test_codegen_backward_epilogue.py
 # /test/functorch/test_codegen_backward_prologue.py
 # /test/functorch/test_codegen_debug_assert.py
@@ -327,12 +68,14 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 # /test/functorch/test_subclass_codegen.py
 # /test/test_functionalization_of_rng_ops.py
 # /torch/_functorch/_aot_autograd/
-# /torch/_functorch/aot_autograd.py
+/torch/_functorch/aot_autograd.py @bdhirsh @aorenste
 # /torch/_functorch/compile_utils.py
 # /torch/_functorch/compilers.py
 # /torch/_functorch/partitioners.py
+/torch/_functorch/_aot_autograd/*.py @bdhirsh @aorenste
 #
 # [core_aten_linalg]
+/aten/src/ATen/native/**/*LinearAlgebra* @lezcano @nikitaved
 # /aten/src/ATen/native/BatchLinearAlgebra.cpp
 # /aten/src/ATen/native/BatchLinearAlgebra.h
 # /aten/src/ATen/native/BatchLinearAlgebraKernel.cpp
@@ -357,16 +100,16 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 # /aten/src/ATen/native/SpectralOpsUtils.h
 # /aten/src/ATen/native/TriangularOps.cpp
 # /aten/src/ATen/native/TriangularOpsUtils.h
-# /test/test_linalg.py
+/test/test_linalg.py @lezcano @nikitaved
 # /test/test_matmul_cuda.py
-# /test/test_scaled_matmul_cuda.py
+/test/test_scaled_matmul_cuda.py @drisspg @slayton58
 # /test/test_spectral_ops.py
-# /torch/linalg/
+/torch/linalg/ @lezcano @nikitaved
 #
 # [sparse]
 # /aten/src/ATen/native/SparseTensorUtils.cpp
 # /aten/src/ATen/native/SparseTensorUtils.h
-# /aten/src/ATen/native/sparse/
+/aten/src/ATen/native/sparse/ @amjames @pearu @nikitaved
 # /test/expect/TestSparseCPU.test_print_coalesced_cpu_float64.expect
 # /test/expect/TestSparseCPU.test_print_uncoalesced_cpu_float64.expect
 # /test/expect/TestSparseCUDA.test_print_coalesced_cuda_float64.expect
@@ -386,10 +129,16 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 # /test/expect/TestSparseMeta.test_print_meta_SparseCOO_float64.expect
 # /test/expect/TestSparseMeta.test_print_meta_SparseCSC_float64.expect
 # /test/expect/TestSparseMeta.test_print_meta_SparseCSR_float64.expect
-# /test/test_sparse.py
-# /test/test_sparse_csr.py
+/test/test_sparse.py @amjames @pearu @nikitaved
+/test/test_sparse_csr.py @amjames @pearu @nikitaved
 # /test/test_sparse_semi_structured.py
-# /torch/sparse/
+/torch/sparse/ @amjames @pearu @nikitaved
+/aten/src/ATen/native/ao_sparse/ @salilsdesai @digantdesai @jianyuh
+/aten/src/ATen/SparseCsrTensorImpl.cpp @amjames @pearu @nikitaved
+# /aten/src/ATen/SparseCsrTensorImpl.h
+# /aten/src/ATen/SparseCsrTensorUtils.h
+/aten/src/ATen/SparseTensorImpl.cpp @amjames @pearu @nikitaved
+# /aten/src/ATen/SparseTensorImpl.h
 #
 # [core_aten_optimizers]
 # /aten/src/ATen/native/ForeachOpsKernels.cpp
@@ -401,7 +150,7 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 # /aten/src/ATen/native/FusedSGD.cpp
 # /aten/src/ATen/native/FusedSGD.h
 # /test/test_functional_optim.py
-# /torch/optim/
+/torch/optim/ @albanD @janeyx99
 #
 # [core_aten_runtime]
 # /aten/CMakeLists.txt
@@ -470,6 +219,7 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 # /aten/src/ATen/LegacyVmapTransforms.cpp
 # /aten/src/ATen/LegacyVmapTransforms.h
 # /aten/src/ATen/LinalgBackend.h
+/aten/src/ATen/MapAllocator* @mikaylagawarecki
 # /aten/src/ATen/MapAllocator.cpp
 # /aten/src/ATen/MapAllocator.h
 # /aten/src/ATen/MatrixRef.h
@@ -506,11 +256,6 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 # /aten/src/ATen/SequenceNumber.cpp
 # /aten/src/ATen/SequenceNumber.h
 # /aten/src/ATen/SmallVector.h
-# /aten/src/ATen/SparseCsrTensorImpl.cpp
-# /aten/src/ATen/SparseCsrTensorImpl.h
-# /aten/src/ATen/SparseCsrTensorUtils.h
-# /aten/src/ATen/SparseTensorImpl.cpp
-# /aten/src/ATen/SparseTensorImpl.h
 # /aten/src/ATen/Storage.h
 # /aten/src/ATen/StorageUtils.cpp
 # /aten/src/ATen/StorageUtils.h
@@ -553,13 +298,11 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 # /aten/src/ATen/core/
 # /aten/src/ATen/cpp_custom_type_hack.h
 # /aten/src/ATen/cpu/
-# /aten/src/ATen/cudnn/
 # /aten/src/ATen/detail/
 # /aten/src/ATen/div_rtn.h
 # /aten/src/ATen/dlpack.h
 # /aten/src/ATen/jit_macros.h
 # /aten/src/ATen/jiterator_macros.h
-# /aten/src/ATen/miopen/
 # /aten/src/ATen/mkl/
 # /aten/src/ATen/nnapi/
 # /aten/src/ATen/ops/
@@ -577,8 +320,8 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 # /c10/
 #
 # [autograd]
-# /torch/autograd/
-# /torch/csrc/autograd/
+/torch/autograd/ @albanD @soulitzer
+/torch/csrc/autograd/ @albanD @soulitzer
 #
 # [core_csrc_misc]
 # /torch/csrc/CudaIPCTypes.cpp
@@ -618,6 +361,7 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 # /torch/csrc/README.md
 # /torch/csrc/Size.cpp
 # /torch/csrc/Size.h
+/torch/csrc/Storage* @mikaylagawarecki
 # /torch/csrc/Storage.cpp
 # /torch/csrc/Storage.h
 # /torch/csrc/StorageMethods.cpp
@@ -646,7 +390,6 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 # /torch/csrc/itt_wrapper.cpp
 # /torch/csrc/itt_wrapper.h
 # /torch/csrc/monitor/
-# /torch/csrc/mtia/
 # /torch/csrc/multiprocessing/
 # /torch/csrc/onnx/
 # /torch/csrc/python_headers.h
@@ -656,7 +399,7 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 # /torch/csrc/shim_conversion_utils.h
 # /torch/csrc/shim_exception_state.cpp
 # /torch/csrc/shim_exception_state.h
-# /torch/csrc/stable/
+/torch/csrc/stable/ @janeyx99 @mikaylagawarecki
 # /torch/csrc/stub.c
 # /torch/csrc/tensor/
 # /torch/csrc/utils.cpp
@@ -668,7 +411,7 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 #
 # [core_tests]
 # /test/HowToWriteTestsUsingFileCheck.md
-# /test/allowlist_for_publicAPI.json
+/test/allowlist_for_publicAPI.json @albanD
 # /test/backends/
 # /test/bench_mps_ops.py
 # /test/complex_tensor/
@@ -751,7 +494,6 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 # /test/pytest_shard_custom.py
 # /test/python_native/
 # /test/run_doctests.sh
-# /test/run_test.py
 # /test/simulate_nccl_errors.py
 # /test/slow_tests.json
 # /test/test_accelerator.py
@@ -760,7 +502,7 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 # /test/test_as_strided.py
 # /test/test_autocast.py
 # /test/test_autoload.py
-# /test/test_binary_ufuncs.py
+/test/test_binary_ufuncs.py @mruberry
 # /test/test_bmm_outer_product.py
 # /test/test_bundled_images.py
 # /test/test_bundled_inputs.py
@@ -785,7 +527,7 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 # /test/test_function_schema.py
 # /test/test_functionalization.py
 # /test/test_futures.py
-# /test/test_hop_infra.py
+/test/test_hop_infra.py @zou3519 @aorenste @bohnstingl
 # /test/test_hub.py
 # /test/test_img/
 # /test/test_import_stats.py
@@ -814,9 +556,9 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 # /test/test_numba_integration.py
 # /test/test_opaque_obj_v2.py
 # /test/test_openmp.py
-# /test/test_ops.py
-# /test/test_ops_fwd_gradients.py
-# /test/test_ops_gradients.py
+/test/test_ops.py @mruberry
+/test/test_ops_fwd_gradients.py @mruberry @soulitzer
+/test/test_ops_gradients.py @mruberry @soulitzer
 # /test/test_ops_jit.py
 # /test/test_ops_unbacked.py
 # /test/test_out_dtype_op.py
@@ -828,7 +570,7 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 # /test/test_pruning_op.py
 # /test/test_python_dispatch.py
 # /test/test_pytree.py
-# /test/test_reductions.py
+/test/test_reductions.py @mruberry
 # /test/test_rename_privateuse1_to_existing_device.py
 # /test/test_scatter_gather_ops.py
 # /test/test_schema_check.py
@@ -850,19 +592,21 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 # /test/test_torchfuzz_repros.py
 # /test/test_tsan.py
 # /test/test_type_info.py
-# /test/test_type_promotion.py
-# /test/test_unary_ufuncs.py
+/test/test_type_promotion.py @mruberry
+/test/test_unary_ufuncs.py @mruberry
 # /test/test_view_ops.py
 # /test/test_weak.py
+/test/forward_backward_compatibility/check_forward_backward_compatibility.py @larryliu0820
 #
 # [backend_device_runtime]
 # /test/custom_backend/
 # /torch/backends/
+/aten/src/ATen/detail/MTIAHooksInterface.h @egienvalue
+/torch/csrc/mtia/ @egienvalue
 #
 # [backend_cuda]
-# /aten/src/ATen/cuda/
-# /aten/src/ATen/native/cuda/
-# /c10/cuda/
+/aten/src/ATen/cuda/ @eqy @syed-ahmed @Aidyn-A
+/aten/src/ATen/native/cuda/ @eqy @syed-ahmed @Aidyn-A
 # /test/test_cuda.py
 # /test/test_cuda_compatibility.py
 # /test/test_cuda_expandable_segments.py
@@ -873,37 +617,48 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 # /test/test_cuda_primary_ctx.py
 # /test/test_cuda_sanitizer.py
 # /test/test_cuda_trace.py
-# /torch/backends/cuda/
-# /torch/backends/cudnn/
+/torch/backends/cuda/ @eqy @syed-ahmed @Aidyn-A
+/torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 # /torch/backends/cusparselt/
-# /torch/csrc/cuda/
-# /torch/cuda/
+/torch/csrc/cuda/ @eqy @syed-ahmed @Aidyn-A
+/torch/cuda/ @eqy @syed-ahmed @Aidyn-A
+/c10/cuda/ @eqy @syed-ahmed @Aidyn-A
+/aten/src/ATen/native/cuda/Blas.cpp @drisspg @slayton58
+/aten/src/ATen/native/cuda/GroupedBlas.cpp @drisspg @slayton58
+/aten/src/ATen/native/cuda/ScaledBlas.cpp @drisspg @slayton58
+/aten/src/ATen/cuda/CUDABlas.cpp @drisspg @slayton58
+/aten/src/ATen/cuda/CUDABlas.h @drisspg @slayton58
+/aten/src/ATen/native/cudnn/ @eqy @syed-ahmed @Aidyn-A
+/aten/src/ATen/cudnn/ @eqy @syed-ahmed @Aidyn-A
 #
 # [backend_mps]
 # /aten/src/ATen/metal/
-# /aten/src/ATen/mps/
-# /aten/src/ATen/native/mps/
-# /c10/metal/
+/aten/src/ATen/mps/ @malfet
+/aten/src/ATen/native/mps/ @malfet
+/c10/metal/ @malfet
 # /test/metal/
 # /test/test_metal.py
-# /test/test_mps.py
+/test/test_mps.py @malfet
 # /torch/backends/mps/
 # /torch/csrc/mps/
 # /torch/mps/
 #
 # [backend_xpu]
-# /aten/src/ATen/xpu/
-# /c10/xpu/
-# /test/test_xpu.py
+/aten/src/ATen/xpu/ @EikanWang @gujinghui
+/c10/xpu/ @EikanWang @gujinghui
+/test/test_xpu.py @EikanWang @gujinghui
 # /test/test_xpu_expandable_segments.py
-# /test/xpu/
-# /torch/csrc/xpu/
-# /torch/xpu/
+/test/xpu/ @EikanWang @gujinghui
+/torch/csrc/xpu/ @EikanWang @gujinghui
+/torch/xpu/ @EikanWang @gujinghui
+/aten/src/ATen/native/mkldnn/xpu/ @EikanWang @gujinghui
 #
 # [backend_rocm]
-# /aten/src/ATen/hip/
-# /c10/hip/
+/aten/src/ATen/hip/ @jeffdaily @jithunnair-amd
 # /torch/backends/miopen/
+/c10/hip/ @jeffdaily @jithunnair-amd
+/aten/src/ATen/native/miopen/ @jeffdaily @jithunnair-amd
+/aten/src/ATen/miopen/ @jeffdaily @jithunnair-amd
 #
 # [backend_vulkan]
 # /aten/src/ATen/native/vulkan/
@@ -929,7 +684,7 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 # /torch/_lobpcg.py
 # /torch/_lowrank.py
 # /torch/_meta_registrations.py
-# /torch/_native/
+/torch/_native/ @slayton58 @drisspg
 # /torch/_numpy/
 # /torch/_opaque_base.py
 # /torch/_prims/
@@ -962,8 +717,8 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 # /torch/fft/
 # /torch/functional.py
 # /torch/futures/
-# /torch/header_only_apis.txt
-# /torch/headeronly/
+/torch/header_only_apis.txt @janeyx99
+/torch/headeronly/ @janeyx99
 # /torch/hub.py
 # /torch/legacy/
 # /torch/lib/
@@ -980,16 +735,24 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 # /torch/script.h
 # /torch/signal/
 # /torch/special/
-# /torch/storage.py
+/torch/storage.py @mikaylagawarecki
 # /torch/torch_version.py
 # /torch/types.py
 # /torch/utils/
+/torch/_subclasses/fake_tensor.py @aorenste
+/torch/_subclasses/fake_utils.py @aorenste
+/torch/utils/hipify/ @jeffdaily @jithunnair-amd
+/torch/utils/_pytree.py @XuehaiPan
+/torch/utils/_cxx_pytree.py @XuehaiPan
+/torch/_vendor/quack/ @slayton58 @drisspg
 #
 # [python_nn_api]
-# /torch/nn/
+/torch/nn/ @albanD @jbschlosser @mikaylagawarecki
+/torch/nn/utils/parametriz*.py @lezcano
+/torch/nn/attention/flex_attention.py @drisspg
 #
 # [python_data_api]
-# /torch/utils/data/
+/torch/utils/data/ @divyanshk @ramanishsingh @scotts @aelavender
 #
 # [python_specialized_api]
 # /test/test_masked.py
@@ -1045,11 +808,12 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 # /test/test_tensorexpr_pybind.py
 # /torch/csrc/jit/
 # /torch/jit/
+/torch/csrc/jit/python/init.cpp @mikaylagawarecki
 #
 # [cpp_api_custom_ops]
 # /aten/src/ATen/native/native_functions.yaml
 # /aten/src/ATen/native/prim_native_functions.cpp
-# /aten/src/ATen/native/tags.yaml
+/aten/src/ATen/native/tags.yaml @ezyang
 # /aten/src/ATen/native/ts_native_functions.yaml
 # /test/cpp/jit/test_custom_operators.cpp
 # /test/cpp_extensions/
@@ -1079,28 +843,41 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 # /torch/library.h
 # /torch/library.py
 # /torch/utils/_cpp_extension_versioner.py
-# /torch/utils/cpp_extension.py
+/torch/utils/cpp_extension.py @fmassa @ezyang @malfet
 #
 # [onnx_export]
-# /test/onnx/
-# /torch/onnx/
+/test/onnx/ @titaiwangms @xadupre @justinchuby
+/torch/onnx/ @titaiwangms @xadupre @justinchuby
+/torch/csrc/jit/passes/onnx.h @titaiwangms @xadupre
+/torch/csrc/jit/passes/onnx.cpp @titaiwangms @xadupre
+/torch/csrc/jit/passes/onnx/ @titaiwangms @xadupre
 #
 # [quantization]
-# /aten/src/ATen/native/quantized/
-# /test/ao/
+/test/ao/ @jerryzh168
 # /test/onnx/test_models_quantized_onnxruntime.py
-# /test/quantization/
-# /test/test_quantization.py
+/test/quantization/ @jerryzh168
+/test/test_quantization.py @jerryzh168
 # /torch/ao/
-# /torch/quantization/
+/torch/ao/quantization/ @jerryzh168
+/torch/ao/nn/intrinsic/ @jerryzh168
+/torch/ao/nn/quantized/ @jerryzh168
+/torch/ao/nn/quantizable/ @jerryzh168
+/torch/ao/nn/qat/ @jerryzh168
+/torch/quantization/ @jerryzh168
+/aten/src/ATen/native/quantized/ @jerryzh168 @salilsdesai @digantdesai @jianyuh
+/aten/src/ATen/native/quantized/cpu/ @jerryzh168 @salilsdesai @digantdesai @jianyuh
+/aten/src/ATen/native/quantized/cuda/ @jerryzh168
+/aten/src/ATen/native/quantized/cudnn/ @jerryzh168
 #
 # [profiler]
 # /test/cpp/profiler/test_profiler_collection.cpp
 # /test/profiler/
 # /test/test_throughput_benchmark.py
+/torch/autograd/profiler* @scotts @ryanzhang22
 # /torch/autograd/profiler.py
 # /torch/autograd/profiler_legacy.py
 # /torch/autograd/profiler_util.py
+/torch/csrc/autograd/profiler* @scotts @ryanzhang22
 # /torch/csrc/autograd/profiler.h
 # /torch/csrc/autograd/profiler_kineto.cpp
 # /torch/csrc/autograd/profiler_kineto.h
@@ -1108,8 +885,8 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 # /torch/csrc/autograd/profiler_legacy.h
 # /torch/csrc/autograd/profiler_python.cpp
 # /torch/csrc/autograd/profiler_python.h
-# /torch/csrc/profiler/
-# /torch/profiler/
+/torch/csrc/profiler/ @scotts @ryanzhang22
+/torch/profiler/ @scotts @ryanzhang22
 #
 # [mobile_runtime]
 # /test/cpp/jit/test_mobile_type_parser.cpp
@@ -1131,10 +908,17 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 # /torch/csrc/jit/backends/
 #
 # [infra_ci]
-# /.ci/
+/.ci/ @pytorch/pytorch-dev-infra
+/.ci/docker/ubuntu-rocm/ @jeffdaily
+/.ci/docker/common/install_roc*.sh @jeffdaily
+/.ci/docker/common/install_miopen.sh @jeffdaily
+/.ci/docker/common/install_amdsmi.sh @jeffdaily
+/.ci/docker/ci_commit_pins/rocm-*.txt @jeffdaily
+/.ci/docker/ci_commit_pins/triton.txt @desertfire @Chillee @eellison @shunting314 @jeffdaily @jataylo @jithunnair-amd @pruthvistony
+/.ci/docker/ci_commit_pins/triton-xpu.txt @EikanWang @gujinghui
 #
 # [infra_github_automation]
-# /.github/
+/.github/ @pytorch/pytorch-dev-infra
 #
 # [infra_build_packaging]
 # /.ci/manywheel/
@@ -1150,7 +934,6 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 # /.spin/
 # /BUCK.oss
 # /CMakeLists.txt
-# /CODEOWNERS
 # /Dockerfile
 # /Makefile
 # /buckbuild.bzl
@@ -1194,7 +977,7 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 # /third_party/xnnpack_buck_shim.bzl
 # /third_party/xnnpack_src_defs.bzl
 # /third_party/xnnpack_wrapper_defs.bzl
-# /third_party/xpu.txt
+/third_party/xpu.txt @EikanWang @gujinghui
 #
 # [third_party_serialization_schema]
 # /third_party/flatbuffers
@@ -1210,6 +993,21 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 # /test/distributed/
 # /torch/csrc/distributed/
 # /torch/distributed/
+/torch/csrc/distributed/rpc/tensorpipe_agent.cpp @jiayisuse @lw
+/torch/csrc/distributed/rpc/tensorpipe_agent.h @jiayisuse @lw
+/torch/csrc/distributed/c10d/ @d4l3k @fduwjj @kapilsh
+/torch/csrc/distributed/c10d/Backend.* @kwen2501
+/torch/csrc/distributed/c10d/Ops.* @kwen2501
+/torch/distributed/distributed_c10d.py @d4l3k @fduwjj @kapilsh
+/torch/distributed/_composable/fsdp/ @weifengpy
+/torch/distributed/_composable/replicate.py @weifengpy
+/torch/distributed/_composable/replicate_with_fsdp.py @weifengpy
+/torch/distributed/fsdp/ @weifengpy
+/torch/distributed/optim/ @weifengpy
+/torch/distributed/tensor/placement_types.py @weifengpy
+/torch/distributed/tensor/_ops/_view_ops.py @weifengpy
+/torch/distributed/tensor/_ops/_matrix_ops.py @weifengpy
+/torch/nn/parallel/ @weifengpy
 #
 # [infra_developer_tools]
 # /.devcontainer/
@@ -1220,6 +1018,7 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 # /binaries/
 # /scripts/
 # /tools/
+/tools/amd_build/ @jeffdaily @jithunnair-amd
 #
 # [infra_linting]
 # /.bc-linter.yml
@@ -1246,7 +1045,7 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 # /tools/linter/
 #
 # [infra_codegen]
-# /tools/autograd/
+/tools/autograd/ @albanD @soulitzer
 # /torchgen/
 #
 # [infra_test]
@@ -1254,7 +1053,7 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 # /test/scripts/
 # /test/spincli/
 # /test/strobelight/
-# /test/test_public_bindings.py
+/test/test_public_bindings.py @albanD
 # /test/test_testing.py
 # /test/test_utils.py
 # /test/test_utils_config_module.py
@@ -1264,6 +1063,11 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 # /torch/_logging/
 # /torch/testing/
 # /torch/utils/benchmark/
+/torch/testing/_internal/common_utils.py @pytorch/pytorch-dev-infra
+/torch/testing/_internal/common_methods_invocations.py @mruberry
+/torch/testing/_internal/common_device_type.py @mruberry
+/torch/testing/_internal/hop_db.py @tugsbayasgalan @zou3519 @ydwu4 @aorenste @bohnstingl
+/test/run_test.py @pytorch/pytorch-dev-infra
 #
 # [benchmark_operator_runtime]
 # /benchmarks/framework_overhead_benchmark/
@@ -1292,12 +1096,12 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 #
 # [serialization_package]
 # /benchmarks/serialization/
-# /caffe2/serialize/
+/caffe2/serialize/ @mikaylagawarecki
 # /test/package/
 # /test/test_package.py
 # /test/test_serialization.py
 # /torch/package/
-# /torch/serialization.py
+/torch/serialization.py @mikaylagawarecki
 #
 # [compiler_export_fx]
 # /test/export/
@@ -1312,10 +1116,16 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 # /test/test_fx_graph_print.py
 # /test/test_fx_passes.py
 # /test/test_fx_reinplace_pass.py
-# /torch/_export/
-# /torch/_higher_order_ops/
-# /torch/export/
+/torch/_export/ @avikchaudhuri @tugsbayasgalan @zhxchen17 @ydwu4 @angelayi
+/torch/_higher_order_ops/ @zou3519 @aorenste @bohnstingl
+/torch/export/ @avikchaudhuri @tugsbayasgalan @zhxchen17 @ydwu4 @angelayi
 # /torch/fx/
+/torch/fx/proxy.py @zou3519
+/torch/_export/serde/schema.py @SherlockNoMad @zhxchen17
+/torch/fx/experimental/symbolic_shapes.py @laithsakka
+/torch/fx/experimental/sym_node.py @laithsakka
+/torch/fx/experimental/recording.py @laithsakka
+/torch/fx/experimental/proxy_tensor.py @aorenste
 #
 # [compiler_dynamo]
 # /test/distributed/test_dynamo_distributed.py
@@ -1326,6 +1136,10 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 # /test/onnx/exporter/test_dynamic_shapes.py
 # /torch/_dynamo/
 # /torch/csrc/dynamo/
+/torch/_dynamo/backends/tvm.py @guan404ming
+/torch/_dynamo/backends/onnxrt.py @titaiwangms @xadupre @justinchuby
+/torch/_dynamo/variables/higher_order_ops.py @zou3519 @aorenste @bohnstingl
+/torch/_dynamo/polyfills/pytree.py @XuehaiPan
 #
 # [compiler_inductor]
 # /test/distributed/test_inductor_collectives.py
@@ -1335,12 +1149,16 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 # /test/inductor_skips/
 # /test/test_precompile.py
 # /test/test_triton_utils.py
-# /torch/_higher_order_ops/flex_attention.py
+/torch/_higher_order_ops/flex_attention.py @drisspg
 # /torch/_inductor/
 # /torch/_precompile.py
 # /torch/_precompile_driver.py
 # /torch/csrc/inductor/
 # /torch/utils/_indented_buffer.py
+/torch/_inductor/kernel/flex/ @drisspg
+/torch/_inductor/codegen/cpp_flex_attention_template.py @drisspg
+/test/inductor/test_flex_attention.py @drisspg
+/test/inductor/test_flex_decoding.py @drisspg
 #
 # [nativert]
 # /test/cpp/nativert/
@@ -1373,3 +1191,13 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 # /RELEASE.md
 # /SECURITY.md
 # /docs/
+/docs/source/conf.py @albanD
+/docs/source/higher_order_ops/ @bohnstingl
+/docs/source/notes/get_start_xpu.md @EikanWang @gujinghui
+#
+# [protected_codeownership]
+# DO NOT MODIFY WITHOUT REVIEW FROM @albanD AND @malfet.
+# Keep these rules last so they override broader patterns.
+/CODEOWNERS @albanD @malfet
+/.github/merge_rules.yaml @pytorch/pytorch-dev-infra @albanD @malfet
+#

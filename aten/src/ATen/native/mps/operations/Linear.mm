@@ -69,23 +69,23 @@ static void _mps_linear_nograph(const Tensor& input, const Tensor& weight, const
         });
         auto kernel = cachedKernel->kernel<MPSNDArrayMatrixMultiplication>();
 
-        getMPSProfiler().beginProfileKernel(kernel, "mps_linear", {input, weight, bias});
+        getMPSProfiler().beginProfileKernel(kernel, "mps_linear", {input, weight, bias}, mpsStream);
         [kernel encodeToCommandEncoder:computeEncoder
                          commandBuffer:commandBuffer
                           sourceArrays:@[ inputNDArray, weightNDArray, biasNDArray ]
                       destinationArray:outNDArray];
-        getMPSProfiler().endProfileKernel(kernel);
+        getMPSProfiler().endProfileKernel(kernel, mpsStream);
       } else {
         auto cachedKernel = LookUpOrCreateCachedKernel<MPSCachedKernel>(key, [&]() {
           return [[[MPSNDArrayMatrixMultiplication alloc] initWithDevice:device sourceCount:2] autorelease];
         });
         auto kernel = cachedKernel->kernel<MPSNDArrayMatrixMultiplication>();
-        getMPSProfiler().beginProfileKernel(kernel, "mps_linear", {input, weight, bias});
+        getMPSProfiler().beginProfileKernel(kernel, "mps_linear", {input, weight, bias}, mpsStream);
         [kernel encodeToCommandEncoder:computeEncoder
                          commandBuffer:commandBuffer
                           sourceArrays:@[ inputNDArray, weightNDArray ]
                       destinationArray:outNDArray];
-        getMPSProfiler().endProfileKernel(kernel);
+        getMPSProfiler().endProfileKernel(kernel, mpsStream);
       }
     }
   });
