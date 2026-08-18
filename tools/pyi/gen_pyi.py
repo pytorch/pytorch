@@ -319,6 +319,8 @@ def generate_type_hints(sig_group: PythonSignatureGroup) -> list[str]:
     if type_hint_vararg:
         type_hints.append(type_hint_vararg)
 
+    # Keep this in sync with the Python binding return-self special case in
+    # tools/autograd/gen_python_functions.py:emit_single_dispatch.
     if (
         str(sig_group.base.func.name).startswith("_foreach_")
         and sig_group.base.func.kind() == SchemaKind.inplace
