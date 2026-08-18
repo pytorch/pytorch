@@ -2128,7 +2128,7 @@ def skipIfFreeThreaded(msg="Test doesn't work with free-threaded python"):
 
 def skipIfCppFakeTensor(reason):
     if not isinstance(reason, str):
-        raise AssertionError("Please provide a reason")
+        raise AssertionError("please provide a reason")
     from torch._dynamo import config
 
     return unittest.skipIf(config.use_cpp_fake_tensor, reason)
