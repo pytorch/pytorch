@@ -237,6 +237,8 @@ def start_processes_zombie_test(
 
 
 class _StartProcessesTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.test_dir = tempfile.mkdtemp(prefix=f"{self.__class__.__name__}_")
@@ -302,7 +304,6 @@ class _StartProcessesTest(TestCase):
 if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
 
     class StartProcessesAsFuncTest(_StartProcessesTest):
-        hw_classification = HardwareClassification.GENERIC
         def test_to_map(self):
             local_world_size = 2
             self.assertEqual(
@@ -558,7 +559,6 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
         ########################################
         # start_processes as binary tests
         ########################################
-        hw_classification = HardwareClassification.GENERIC
 
         def test_subprocess_context_close(self):
             pc = start_processes(
@@ -647,7 +647,6 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
 if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
 
     class StartProcessesListAsFuncTest(_StartProcessesTest):
-        hw_classification = HardwareClassification.GENERIC
         def test_function(self):
             for start_method, redirs in product(
                 self._start_methods, redirects_oss_test()
@@ -691,7 +690,6 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
         ########################################
         # start_processes as binary tests
         ########################################
-        hw_classification = HardwareClassification.GENERIC
 
         def test_binary(self):
             for redirs in redirects_oss_test():
@@ -802,7 +800,6 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
 if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS or IS_CI):
 
     class StartProcessesNotCIAsFuncTest(_StartProcessesTest):
-        hw_classification = HardwareClassification.GENERIC
         @skip_if_pytest
         def test_wrap_bad(self):
             none = ""
@@ -993,7 +990,6 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS or IS_CI):
                 self._test_zombie_workflow(wait_fn, s)
 
     class StartProcessesNotCIAsBinaryTest(_StartProcessesTest):
-        hw_classification = HardwareClassification.GENERIC
         def test_binary_signal(self):
             pc = start_processes(
                 name="echo",
@@ -1030,7 +1026,6 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS or IS_CI):
         StartProcessesListAsFuncTest,
         StartProcessesNotCIAsFuncTest,
     ):
-        hw_classification = HardwareClassification.GENERIC
 
         def setUp(self):
             super().setUp()
