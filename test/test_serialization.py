@@ -49,6 +49,7 @@ from torch.testing._internal.common_utils import (
     AlwaysWarnTypedStorageRemoval,
     BytesIOContext,
     download_file,
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_CI,
     IS_FBCODE,
@@ -682,6 +683,33 @@ class SerializationMixin:
             self.assertEqual(sd_meta['weight'].untyped_storage().nbytes(), sd['weight'].untyped_storage().nbytes())
             self.assertEqual(sd_meta['bias'].untyped_storage().nbytes(), sd['bias'].untyped_storage().nbytes())
 
+    def _test_load_preserves_storage_sharing(self, load_mode):
+        buf = torch.randn(16)
+        empty = torch.empty(0)
+        sd = {'a': buf[:8], 'b': buf[8:], 'empty': empty, 'empty_int': empty.view(torch.int32)}
+
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(sd, f)
+            f.seek(0)
+            if load_mode == "fake_tensor_mode":
+                with FakeTensorMode():
+                    sd_loaded = torch.load(f)
+            elif load_mode == "map_location_meta":
+                sd_loaded = torch.load(f, map_location='meta')
+            else:
+                sd_loaded = torch.load(f)
+
+        # the checkpoint holds two records: the shared buffer and the empty storage
+        storages = {t.untyped_storage()._cdata for t in sd_loaded.values()}
+        self.assertEqual(len(storages), 2)
+
+        self.assertEqual(sd_loaded['a'].untyped_storage().nbytes(), buf.untyped_storage().nbytes())
+        self.assertEqual(sd_loaded['b'].storage_offset(), 8)
+
+        # A record with no data can be saved under more than one dtype
+        self.assertEqual(sd_loaded['empty'].dtype, torch.float32)
+        self.assertEqual(sd_loaded['empty_int'].dtype, torch.int32)
+
     @unittest.skipIf(torch.cuda.is_available(), "Testing torch.load on CPU-only machine")
     def test_load_nonexistent_device(self):
         # Setup: create a serialized file object with a 'cuda:0' restore location
@@ -927,6 +955,10 @@ class TestBothSerialization(TestCase):
 
 
 class TestOldSerialization(TestCase, SerializationMixin):
+    @parametrize("load_mode", ["default", "fake_tensor_mode", "map_location_meta"])
+    def test_load_preserves_storage_sharing(self, load_mode):
+        self._test_load_preserves_storage_sharing(load_mode)
+
     # unique_key is necessary because on Python 2.7, if a warning passed to
     # the warning module is the same, it is not raised again.
     def _test_serialization_container(self, unique_key, filecontext_lambda):
@@ -1027,6 +1059,10 @@ class TestOldSerialization(TestCase, SerializationMixin):
 
 
 class TestSerialization(TestCase, SerializationMixin):
+    @parametrize("load_mode", ["default", "fake_tensor_mode", "map_location_meta"])
+    def test_load_preserves_storage_sharing(self, load_mode):
+        self._test_load_preserves_storage_sharing(load_mode)
+
     @parametrize('weights_only', (True, False))
     def test_serialization_zipfile(self, weights_only):
         data = self._test_serialization_data()
@@ -4630,6 +4666,21 @@ class TestSerialization(TestCase, SerializationMixin):
             finally:
                 serialization_config.save.storage_alignment = storage_alignment_before
 
+    def test_load_record_referenced_with_conflicting_sizes(self):
+        # skip_data lets a record be saved under two dtypes that disagree on how long
+        # it is, which save cannot reject because there is no data to compare. The two
+        # references cannot share a storage, so each keeps its own size.
+        untyped = torch.empty(6, dtype=torch.uint8, device='meta').untyped_storage()
+        as_float = torch.storage.TypedStorage(wrap_storage=untyped, dtype=torch.float32, _internal=True)
+
+        with tempfile.NamedTemporaryFile() as f:
+            with skip_data():
+                torch.save([as_float, untyped], f)
+            f.seek(0)
+            float_loaded, untyped_loaded = torch.load(f, map_location='meta', weights_only=False)
+
+        self.assertEqual(float_loaded._untyped_storage.nbytes(), 4)
+        self.assertEqual(untyped_loaded.nbytes(), 6)
 
     @parametrize('path_type', (str, Path))
     @unittest.skipIf(IS_WINDOWS, "TemporaryFileName on windows")
@@ -4844,7 +4895,9 @@ class TestSerialization(TestCase, SerializationMixin):
             return super().run(*args, **kwargs)
 
 
-class TestSerializationDeviceType(TestCase):
+class TestSerializationAccelerator(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @onlyAccelerator
     def test_serialization_map_location(self, device):
         test_file_path = download_file('https://download.pytorch.org/test_data/gpu_tensors.pt')
@@ -5054,6 +5107,24 @@ class TestSerializationDeviceType(TestCase):
             ):
                 with skip_data(), BytesIOContext() as f:
                     torch.save(ft, f)
+
+    @onlyAccelerator
+    def test_tensor_subclass_map_location(self, device):
+        t = TwoTensor(torch.randn(2, 3), torch.randn(2, 3))
+        sd = {'t': t}
+
+        with TemporaryFileName() as f:
+            torch.save(sd, f)
+            with safe_globals([TwoTensor]):
+                sd_loaded = torch.load(f, map_location=torch.device(device))
+                self.assertTrue(sd_loaded['t'].device == torch.device(device))
+                self.assertTrue(sd_loaded['t'].a.device == torch.device(device))
+                self.assertTrue(sd_loaded['t'].b.device == torch.device(device))
+                # make sure map_location is not propagated over multiple torch.load calls
+                sd_loaded = torch.load(f)
+                self.assertTrue(sd_loaded['t'].device == torch.device('cpu'))
+                self.assertTrue(sd_loaded['t'].a.device == torch.device('cpu'))
+                self.assertTrue(sd_loaded['t'].b.device == torch.device('cpu'))
 
     @onlyAccelerator
     @skipMPSIf(True, "pin memory allocator is not registered on MPS")
@@ -5293,24 +5364,6 @@ class TestSubclassSerialization(TestCase):
             l_s = torch.load(f, weights_only=True)
             self.assertEqual(l_s, s)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "map_location loads to cuda")
-    def test_tensor_subclass_map_location(self):
-        t = TwoTensor(torch.randn(2, 3), torch.randn(2, 3))
-        sd = {'t': t}
-
-        with TemporaryFileName() as f:
-            torch.save(sd, f)
-            with safe_globals([TwoTensor]):
-                sd_loaded = torch.load(f, map_location=torch.device('cuda:0'))
-                self.assertTrue(sd_loaded['t'].device == torch.device('cuda:0'))
-                self.assertTrue(sd_loaded['t'].a.device == torch.device('cuda:0'))
-                self.assertTrue(sd_loaded['t'].b.device == torch.device('cuda:0'))
-                # make sure map_location is not propagated over multiple torch.load calls
-                sd_loaded = torch.load(f)
-                self.assertTrue(sd_loaded['t'].device == torch.device('cpu'))
-                self.assertTrue(sd_loaded['t'].a.device == torch.device('cpu'))
-                self.assertTrue(sd_loaded['t'].b.device == torch.device('cpu'))
-
     @parametrize("opcode,opcode_name", [
         (b's', "SETITEM"),
         (b'u', "SETITEMS"),
@@ -5460,8 +5513,8 @@ class TestSubclassSerialization(TestCase):
             torch.load(modified_buffer, weights_only=True)
 
 
-instantiate_device_type_tests(TestBothSerialization, globals())
-instantiate_device_type_tests(TestSerializationDeviceType, globals())
+instantiate_device_type_tests(TestBothSerialization, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestSerializationAccelerator, globals(), allow_xpu=True)
 instantiate_parametrized_tests(TestSubclassSerialization)
 instantiate_parametrized_tests(TestOldSerialization)
 instantiate_parametrized_tests(TestSerialization)

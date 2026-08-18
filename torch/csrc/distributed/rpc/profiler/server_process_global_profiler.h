@@ -116,12 +116,12 @@ TORCH_API void pushResultRecursive(
 // User-facing API.
 //
 // Enter a server-side process-global profiling range.
-// Profiling range can be neste, so it's ok to call this API for multiple
+// Profiling range can be nested, so it's ok to call this API for multiple
 // times. This enables all RPC threads running server-side request callbacks.
 TORCH_API void enableServer(const ProfilerConfig& new_config);
 //
 // Exit a server-side process-global profiling range.
-// Profiling range can be neste, so it's possible that profiler is still on
+// Profiling range can be nested, so it's possible that profiler is still on
 // after calling this API.
 // This enables all RPC threads running server-side request callbacks.
 TORCH_API std::vector<thread_event_lists> disableServer();

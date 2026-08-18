@@ -440,7 +440,7 @@ Tensor hardtanh(const Tensor& self, const Scalar& min, const Scalar& max) {
 }
 
 Tensor& hardtanh_out(const Tensor& self, const Scalar& min, const Scalar& max, Tensor& result) {
-  TORCH_CHECK(self.scalar_type() != at::kBool,
+  TORCH_CHECK_NOT_IMPLEMENTED(self.scalar_type() != at::kBool,
   "Bool inputs not supported for hardtanh");
   //preserve legacy behavior of boundaries not causing type promotion
   Scalar min_, max_;
@@ -513,12 +513,12 @@ Tensor hardswish_backward(const Tensor& grad_output, const Tensor& self) {
 }
 
 Tensor relu(const Tensor & self) {
-  TORCH_CHECK(self.scalar_type() != at::kBool, "Boolean inputs not supported for relu");
+  TORCH_CHECK_NOT_IMPLEMENTED(self.scalar_type() != at::kBool, "Boolean inputs not supported for relu");
   return at::clamp_min(self, 0);
 }
 
 Tensor & relu_(Tensor & self) {
-  TORCH_CHECK(self.scalar_type() != at::kBool, "Boolean inputs not supported for relu");
+  TORCH_CHECK_NOT_IMPLEMENTED(self.scalar_type() != at::kBool, "Boolean inputs not supported for relu");
   return at::clamp_min_(self, 0);
 }
 

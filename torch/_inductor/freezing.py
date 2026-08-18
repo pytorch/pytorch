@@ -100,7 +100,7 @@ def _freeze(
     aot_autograd_gm: torch.fx.GraphModule,
     example_inputs: list[torch._subclasses.FakeTensor],
 ) -> tuple[torch.fx.GraphModule, list[int]]:
-    # We have convert conv's weight to channels last which may meet error for .view
+    # We have converted conv's weight to channels last which may meet error for .view
     # when doing fake_tensor_prop. So we need to convert view to reshape first.
     # See the details in fx_codegen_and_compile of compile_fx.py.
     view_to_reshape(aot_autograd_gm)
