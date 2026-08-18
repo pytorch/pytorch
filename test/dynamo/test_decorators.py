@@ -2813,6 +2813,35 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
         callee(torch.randn(4))
         self.assertEqual(annotations, [])
 
+    def test_untraceable_builtin_recommends_nonstrict_trace(self):
+        def forward(x):
+            return x + os.getpid()
+
+        compiled = torch.compile(forward, fullgraph=True, backend="eager")
+        with self.assertWarnsOnceRegex(
+            UserWarning,
+            r"(?s).*torch\.compiler\.nonstrict_trace.*outside the compiled region",
+        ):
+            with self.assertRaisesRegex(
+                Unsupported,
+                r"(?s).*torch\.compiler\.nonstrict_trace.*outside the compiled region",
+            ) as cm:
+                compiled(torch.ones(()))
+
+        msg = str(cm.exception)
+        self.assertNotIn("torch.compiler.allow_in_graph", msg)
+
+        traceable_getpid = torch.compiler.nonstrict_trace(os.getpid)
+
+        def wrapped_forward(x):
+            return x + traceable_getpid()
+
+        x = torch.ones(())
+        compiled_wrapped = torch.compile(
+            wrapped_forward, fullgraph=True, backend="aot_eager"
+        )
+        self.assertEqual(compiled_wrapped(x), wrapped_forward(x))
+
 
 instantiate_parametrized_tests(DecoratorTests)
 
