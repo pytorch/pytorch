@@ -185,8 +185,8 @@ _ALLOW_EMPTY_GRAPHS = torch._dynamo.config._make_closure_patcher(
 )
 
 
-_CAPTURE_CONFIG_STATE: ContextVar[tuple[int, tuple[bool, bool] | None]] = ContextVar(
-    "precompile_capture_config_state", default=(0, None)
+_CAPTURE_CONFIG_STATE: ContextVar[tuple[int, tuple[bool, bool, bool] | None]] = (
+    ContextVar("precompile_capture_config_state", default=(0, None))
 )
 
 # Not a public surface -- see the module docstring. This exists so `from ...
@@ -205,16 +205,24 @@ __all__ = [
 
 
 @contextlib.contextmanager
-def _capture_config() -> Iterator[None]:
+def _capture_config(training: bool = False) -> Iterator[None]:
     depth, prior = _CAPTURE_CONFIG_STATE.get()
     dynamo_config: Any = torch._dynamo.config
     if depth == 0:
         prior = (
             functorch_config.bundled_autograd_cache,
             dynamo_config.allow_empty_graphs,
+            functorch_config.force_non_lazy_backward_lowering,
         )
         functorch_config.bundled_autograd_cache = True
         dynamo_config.allow_empty_graphs = True
+        if training:
+            # AOTAutograd lowers the backward on the first .backward() call, so
+            # a capture that never calls one records a forward and nothing else.
+            # Lower it eagerly instead: the joint trace already synthesizes
+            # tangents from the forward outputs' metadata, so the backward graph
+            # exists without the caller having to produce a loss.
+            functorch_config.force_non_lazy_backward_lowering = True
     _CAPTURE_CONFIG_STATE.set((depth + 1, prior))
     try:
         yield
@@ -226,6 +234,7 @@ def _capture_config() -> Iterator[None]:
         if depth == 0:
             functorch_config.bundled_autograd_cache = prior[0]
             dynamo_config.allow_empty_graphs = prior[1]
+            functorch_config.force_non_lazy_backward_lowering = prior[2]
             _CAPTURE_CONFIG_STATE.set((0, None))
         else:
             _CAPTURE_CONFIG_STATE.set((depth, prior))
@@ -1125,6 +1134,7 @@ class PrecompileSession:
         example_inputs: Sequence[ExampleInput | tuple[object, ...]] | None = None,
         invariants: str | None = None,
         keep_only: frozenset[tuple[str, str]] | None = None,
+        training: bool = False,
     ) -> None:
         # Not `example_inputs or ()`: truth-testing the caller's object turns the
         # likeliest mistake -- passing the tensors themselves instead of a
@@ -1154,6 +1164,10 @@ class PrecompileSession:
         # other slot is dropped. None means the ordinary "serialize everything
         # serializable" policy.
         self._keep_only: frozenset[tuple[str, str]] | None = keep_only
+        # A training capture traces with grad on and lowers the backward
+        # eagerly, so the artifact carries AOTAutograd's CompiledFunction and
+        # calling .backward() on a served output runs precompiled code.
+        self._training = training
         self._policy_dropped_guards: set[tuple[str, str]] = set()
         self._dropped_guards: set[tuple[str, str]] = set()
         self._kept_guards: set[tuple[str, str]] = set()
@@ -1266,7 +1280,7 @@ class PrecompileSession:
         stack = contextlib.ExitStack()
         # Backends must serialize into the artifact rather than into the
         # process-local inductor cache.
-        stack.enter_context(_capture_config())
+        stack.enter_context(_capture_config(self._training))
         self._stack = stack
         try:
             if self._example_inputs:
@@ -1316,8 +1330,15 @@ class PrecompileSession:
                 for value in tree_leaves((args, kwargs)):
                     if isinstance(value, torch.nn.Module):
                         self._check_module_state(value)
-                with torch.inference_mode(False), torch.no_grad():
-                    self._call(*args, **kwargs)
+                if self._training:
+                    # Grad must be ON: the point of a training capture is that
+                    # AOTAutograd builds its CompiledFunction and the joint
+                    # graph, which it only does when the outputs require grad.
+                    with torch.inference_mode(False), torch.enable_grad():
+                        self._call(*args, **kwargs)
+                else:
+                    with torch.inference_mode(False), torch.no_grad():
+                        self._call(*args, **kwargs)
         except BaseException as e:
             self._record_capture_error(e)
             # A __enter__ that raises never gets its __exit__, so without this
@@ -1888,11 +1909,11 @@ class PrecompileSession:
                 "Precompilation captured graphs but their compiled backends were "
                 "never recorded, so there is nothing to serialize. AOTAutograd only "
                 "records the bundled artifact once the BACKWARD compiles, so a "
-                "forward-only capture with grad enabled -- the default, and what "
-                "model.eval() still leaves you in -- records nothing. Capture under "
-                "torch.no_grad() or torch.inference_mode() for an inference "
-                "artifact, or run .backward() inside the capture block for a "
-                "training one."
+                "forward-only capture with grad enabled records nothing on its own. "
+                "Pass training=True to lower the backward eagerly (the joint "
+                "trace synthesizes tangents, so no loss is needed), capture "
+                "under torch.no_grad()/torch.inference_mode() for an inference "
+                "artifact, or run .backward() inside the capture block."
             ) from e
         log.info("precompile: saved %s to %s", summary, path)
         return summary
@@ -1925,11 +1946,11 @@ class PrecompileSession:
                 "Precompilation captured graphs but their compiled backends were "
                 "never recorded, so there is nothing to serialize. AOTAutograd only "
                 "records the bundled artifact once the BACKWARD compiles, so a "
-                "forward-only capture with grad enabled -- the default, and what "
-                "model.eval() still leaves you in -- records nothing. Capture under "
-                "torch.no_grad() or torch.inference_mode() for an inference "
-                "artifact, or run .backward() inside the capture block for a "
-                "training one."
+                "forward-only capture with grad enabled records nothing on its own. "
+                "Pass training=True to lower the backward eagerly (the joint "
+                "trace synthesizes tangents, so no loss is needed), capture "
+                "under torch.no_grad()/torch.inference_mode() for an inference "
+                "artifact, or run .backward() inside the capture block."
             )
         return {str(b): collected[b] for b in entry.backend_ids}
 
@@ -2141,6 +2162,7 @@ def precompile_capture(
     example_inputs: Sequence[ExampleInput | tuple[object, ...]] | None = None,
     invariants: str | None = None,
     keep_only: frozenset[tuple[str, str]] | None = None,
+    training: bool = False,
 ) -> PrecompileSession:
     r"""Begin capturing ``fn`` into a multi-graph artifact.
 
@@ -2173,6 +2195,7 @@ def precompile_capture(
         example_inputs=example_inputs,
         invariants=invariants,
         keep_only=keep_only,
+        training=training,
     )
 
 

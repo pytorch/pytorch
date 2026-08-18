@@ -3782,6 +3782,7 @@ class _PrecompileApi:
         require_no_risky_drops: bool = True,
         require_no_dropped_guards: bool = False,
         guard_policy: str = "all",
+        training: bool = False,
     ) -> tuple[str, bytes]:
         """Ahead-of-time precompile ``fn`` against example inputs.
 
@@ -4007,6 +4008,7 @@ class _PrecompileApi:
                     recompile_limit=recompile_limit,
                     dynamic=dynamic,
                     example_inputs=example_inputs,
+                    training=training,
                 )
                 with probe:
                     pass
@@ -4021,6 +4023,7 @@ class _PrecompileApi:
                 example_inputs=example_inputs,
                 invariants=invariants,
                 keep_only=keep_only,
+                training=training,
             )
             with session:
                 pass
@@ -4070,6 +4073,7 @@ class _PrecompileApi:
         example_inputs: Sequence[ExampleInput | tuple[object, ...]] | None = None,
         invariants: str | None = None,
         keep_only: frozenset[tuple[str, str]] | None = None,
+        training: bool = False,
     ) -> PrecompileSession:
         r"""capture(fn, *, backend="inductor", guard_filter_fn=None, recompile_limit=256, dynamic=None, example_inputs=None, invariants=None) -> PrecompileSession
 
@@ -4130,6 +4134,7 @@ class _PrecompileApi:
                 example_inputs=example_inputs,
                 invariants=invariants,
                 keep_only=keep_only,
+                training=training,
             )
         except PackageError as e:
             raise PrecompileError(str(e)) from e
