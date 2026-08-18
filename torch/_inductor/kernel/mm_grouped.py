@@ -12,6 +12,7 @@ from torch._inductor.runtime.triton_compat import tl
 from torch._inductor.virtualized import V
 from torch.utils._triton import has_triton
 
+from ..codegen.wrapper import PythonWrapperCodegen
 from ..ir import ChoiceCaller, is_unaligned, Layout, TensorBox
 from ..lowering import register_lowering
 from ..select_algorithm import (
@@ -32,6 +33,7 @@ from ..utils import (
     use_triton_template,
 )
 from .mm_common import (
+    _fits_int32_buffer_span,
     _is_static_problem,
     check_supported_striding,
     load_kernel_template,
@@ -163,7 +165,10 @@ def get_flydsl_grouped_mm_template_kwargs(
     is_nonzero: bool,
 ) -> list[dict[str, object]]:
     """Return supported FlyDSL template configs for grouped matrix multiplication."""
-    from ..heuristics.template.flydsl import get_grouped_gemm_configs
+    from ..heuristics.template.flydsl import (
+        get_grouped_gemm_configs,
+        is_grouped_gemm_config_valid_for_shape,
+    )
 
     if not is_nonzero or not use_flydsl_gemm_template(layout):
         return []
@@ -219,27 +224,25 @@ def get_flydsl_grouped_mm_template_kwargs(
     ):
         return []
 
-    try:
-        n_static = int(n)
-        k_static = int(k)
-        g_static = int(g)
-        # Total M only prunes configs here; exact per-group sizes remain runtime
-        # values read from offs by the persistent kernel's on-device tile scan.
-        m_static = int(mat_a.get_size()[0])
-    except (TypeError, ValueError):
+    # Total M only prunes configs here; exact per-group sizes remain runtime
+    # values read from offs by the persistent kernel's on-device tile scan.
+    m_static = PythonWrapperCodegen.statically_known_int_or_none(mat_a.get_size()[0])
+    n_static = PythonWrapperCodegen.statically_known_int_or_none(n)
+    k_static = PythonWrapperCodegen.statically_known_int_or_none(k)
+    g_static = PythonWrapperCodegen.statically_known_int_or_none(g)
+    if m_static is None or n_static is None or k_static is None or g_static is None:
         return []
     if n_static % 32 != 0 or k_static % 32 != 0:
         return []
-    int32_max = (1 << 31) - 1
-    dimensions = (m_static, n_static, k_static, g_static)
-    if any(dim <= 0 or dim > int32_max for dim in dimensions):
-        return []
     tensor_spans = (
-        m_static * k_static,
-        g_static * k_static * n_static,
-        m_static * n_static,
+        (m_static, k_static, k_static),
+        (g_static, k_static * n_static, k_static * n_static),
+        (m_static, n_static, n_static),
     )
-    if any(span * itemsize >= 1 << 32 for span in tensor_spans):
+    if any(
+        not _fits_int32_buffer_span(rows, stride, cols, itemsize)
+        for rows, stride, cols in tensor_spans
+    ):
         return []
 
     from .vendored_templates.flydsl.kernels import GEMM_DTYPE_BF16, GEMM_DTYPE_FP16
@@ -253,8 +256,9 @@ def get_flydsl_grouped_mm_template_kwargs(
             "GEMM_N": n_static,
             "GEMM_K": k_static,
         }
-        for gemm_config in get_grouped_gemm_configs(
-            m_static, n_static, k_static, dtype_id
+        for gemm_config in get_grouped_gemm_configs()
+        if is_grouped_gemm_config_valid_for_shape(
+            m_static, n_static, k_static, dtype_id, gemm_config
         )
     ]
 

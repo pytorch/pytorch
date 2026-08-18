@@ -102,25 +102,11 @@ def _flydsl_grouped_mm(output, mat1, mat2, offs, stream):
             )
             _grouped_grid_key = grid_key
         grid_size = _grouped_grid_size
-    output_mn = output.view(-1, n)
-    mat1_mk = mat1.view(-1, k)
     compile_args = (
-        _inductor_tensor_arg(output_mn),
-        _inductor_tensor_arg(mat1_mk),
+        _inductor_tensor_arg(output),
+        _inductor_tensor_arg(mat1),
         _inductor_tensor_arg(mat2),
         _inductor_tensor_arg(offs),
-        group_count,
-        n_int,
-        k_int,
-        grid_size,
-        param,
-        stream,
-    )
-    dispatch_args = (
-        output_mn,
-        mat1_mk,
-        mat2,
-        offs,
         group_count,
         n_int,
         k_int,
@@ -137,7 +123,18 @@ def _flydsl_grouped_mm(output, mat1, mat2, offs, stream):
             *compile_args,
             constexpr_param=param,
             compiler=flyc.compile,
-            dispatch_args=dispatch_args,
+            dispatch_args=(
+                output,
+                mat1,
+                mat2,
+                offs,
+                group_count,
+                n_int,
+                k_int,
+                grid_size,
+                param,
+                stream,
+            ),
         )
     return output
 

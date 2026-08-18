@@ -40,18 +40,6 @@ class GemmGfx950Param:
     mma_k: fx.Constexpr[int]
 
 
-def _gemm_gfx950_smem_bytes(
-    block_m: int,
-    block_n: int,
-    block_k: int,
-    stages: int,
-    in_data_bytes: int,
-    out_data_bytes: int,
-) -> int:
-    staged_smem_bytes = stages * (block_m + block_n) * block_k * in_data_bytes
-    return max(staged_smem_bytes, block_m * block_n * out_data_bytes)
-
-
 def make_gemm_gfx950_param(
     dtype_id: int = GEMM_DTYPE_BF16,
     block_m: int = 256,
@@ -114,9 +102,8 @@ def make_gemm_gfx950_param(
     elif block_n % cshuffle_vec_size != 0:
         raise ValueError("block_n must be divisible by the c-shuffle vector size")
 
-    smem_bytes = _gemm_gfx950_smem_bytes(
-        block_m, block_n, block_k, stages, in_dbytes, out_dbytes
-    )
+    smem_bytes = stages * (block_m + block_n) * block_k * in_dbytes
+    smem_bytes = max(smem_bytes, block_m * block_n * out_dbytes)
     smem_capacity = {
         "gfx942": 65536,
         "gfx950": 163840,
@@ -1009,8 +996,8 @@ def gemm_gfx950(
     a_row_stride = fx.Int32(fx.get_scalar(a.stride[0]))
     b_row_stride = fx.Int32(fx.get_scalar(b.stride[0]))
     tiled_mma = _make_gemm_gfx950_tiled_mma(param)
-    num_pid_m = (m + param.block_m - 1) // param.block_m
-    num_pid_n = (n + param.block_n - 1) // param.block_n
+    num_pid_m = (m - 1) // param.block_m + 1
+    num_pid_n = (n - 1) // param.block_n + 1
     kernel_impl = (
         gemm_hti_gfx950_kernel
         if param.use_half_tile_interleaved

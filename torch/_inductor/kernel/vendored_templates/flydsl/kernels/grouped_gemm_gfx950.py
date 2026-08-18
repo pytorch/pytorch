@@ -9,7 +9,6 @@ from .gemm_gfx950 import (
     __barrier,
     __waitcnt,
     _elem_dtype,
-    _gemm_gfx950_smem_bytes,
     _make_gemm_gfx950_tiled_mma,
     BlockSwizzle,
     buffer_load_lds_inline,
@@ -53,14 +52,13 @@ def get_grouped_gemm_persistent_grid_size(
     if total_m <= 0 or n <= 0 or group_count <= 0:
         return 1
 
-    smem_bytes = _gemm_gfx950_smem_bytes(
-        param.block_m,
-        param.block_n,
-        param.block_k,
-        param.stages,
-        param.in_data_bytes,
-        param.out_data_bytes,
+    smem_bytes = (
+        param.stages
+        * (param.block_m + param.block_n)
+        * param.block_k
+        * param.in_data_bytes
     )
+    smem_bytes = max(smem_bytes, param.block_m * param.block_n * param.out_data_bytes)
     shared_memory_per_cu = getattr(
         device_properties, "shared_memory_per_multiprocessor", None
     )

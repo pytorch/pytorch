@@ -225,6 +225,7 @@ def get_exhaustive_grouped_gemm_configs() -> list[FlyDSLGemmConfig]:
     return get_exhaustive_gemm_configs()
 
 
+@functools.cache
 def get_default_grouped_gemm_configs() -> list[FlyDSLGemmConfig]:
     """Return default configs for the gfx950 FlyDSL grouped GEMM kernel.
 
@@ -278,33 +279,45 @@ def get_default_grouped_gemm_configs() -> list[FlyDSLGemmConfig]:
     return valid_configs
 
 
-def get_grouped_gemm_configs(
-    m: int, n: int, k: int, dtype_id: int
-) -> list[dict[str, object]]:
-    """Return supported configs for the persistent multi-stage grouped kernel."""
+def is_grouped_gemm_config_valid_for_shape(
+    m: int,
+    n: int,
+    k: int,
+    dtype_id: int,
+    gemm_config: dict[str, int | bool],
+) -> bool:
+    """Return whether a FlyDSL config supports this grouped GEMM shape."""
+    tile_m = int(gemm_config["TILE_M"])
+    tile_n = int(gemm_config["TILE_N"])
+    tile_k = int(gemm_config["TILE_K"])
+    stages = int(gemm_config["STAGES"])
+    use_half_tile_interleaved = bool(gemm_config["USE_HALF_TILE_INTERLEAVED"])
+    has_enough_k = use_half_tile_interleaved or k // tile_k >= stages
+    return (
+        tile_m <= max(128, m)
+        and n >= tile_n
+        and n % tile_n == 0
+        and has_enough_k
+        and is_gemm_config_valid_for_shape(m, n, k, dtype_id, gemm_config)
+    )
+
+
+def get_grouped_gemm_configs() -> list[dict[str, int | bool]]:
+    """Return configs for the persistent multi-stage grouped kernel.
+
+    Shape compatibility is checked in the lowering before this function is called.
+    """
     if (
         config.flydsl_enable_autotuning
         and config.max_autotune_gemm_search_space == "EXHAUSTIVE"
     ):
         candidates = get_exhaustive_grouped_gemm_configs()
-    elif config.flydsl_enable_autotuning:
-        candidates = get_default_grouped_gemm_configs()
     else:
         candidates = get_default_grouped_gemm_configs()
-        candidates = candidates[:1]
+        if not config.flydsl_enable_autotuning:
+            candidates = candidates[:1]
 
-    configs: list[dict[str, object]] = []
-    for grouped_config in candidates:
-        if grouped_config.TILE_M > max(128, m):
-            continue
-        if n < grouped_config.TILE_N or n % grouped_config.TILE_N != 0:
-            continue
-        if (k // grouped_config.TILE_K) < grouped_config.STAGES:
-            continue
-        gemm_config = asdict(grouped_config)
-        if not is_gemm_config_valid_for_shape(m, n, k, dtype_id, gemm_config):
-            continue
-        configs.append(gemm_config)
-    if not configs:
+    if not candidates:
         log.warning("No valid FlyDSL grouped GEMM configuration is available")
-    return configs
+        return []
+    return [asdict(gemm_config) for gemm_config in candidates]

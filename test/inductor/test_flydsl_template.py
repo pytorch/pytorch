@@ -544,6 +544,8 @@ class TestFlyDSLTemplate(TestCase):
     def test_flydsl_grouped_gemm_config_schema(self):
         from torch._inductor.heuristics.template import flydsl as flydsl_heuristics
 
+        flydsl_heuristics.get_default_grouped_gemm_configs.cache_clear()
+        self.addCleanup(flydsl_heuristics.get_default_grouped_gemm_configs.cache_clear)
         with mock.patch.object(flydsl_heuristics, "_make_gemm_param"):
             configs = flydsl_heuristics.get_default_grouped_gemm_configs()
         self.assertEqual(
