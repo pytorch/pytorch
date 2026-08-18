@@ -335,6 +335,10 @@ class DeviceOpOverrides:
         """
         return False
 
+    def aten_device_type(self) -> str:
+        """Return the C++ ATen DeviceType expression for this device."""
+        return "at::kPrivateUse1"
+
     def import_get_raw_stream_as(self, name: str) -> str:
         raise NotImplementedError
 
