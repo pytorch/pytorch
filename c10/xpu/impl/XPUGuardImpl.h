@@ -105,18 +105,17 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   /**
    * Note [Reusable Event Usage]
    *
-   * Starting with SYCL 2026.2, reusable events are available and required for
-   * IPC support. Profiling and IPC capabilities for reusable events are
-   * device-specific, whereas regular events always support profiling but never
-   * IPC (inter process communication). The following table summarizes the
-   * capabilities of each event type:
+   * Starting with 2026.2, reusable events are available and required for
+   * IPC (inter process communication) support. Profiling and IPC capabilities
+   * for reusable events are device-specific, whereas regular events always
+   * support profiling but never IPC.
    *
    *   Event Type | Reusable | Profiling       | IPC
    *   -----------|----------|-----------------|----------------
    *   Regular    | No       | Yes             | No
    *   Reusable   | Yes      | device-specific | device-specific
    *
-   * We use reusable events when the device (Xe2+) supports both
+   * We use reusable events when the device supports both
    * `ext_oneapi_per_event_profiling` and `ext_oneapi_ipc_event` aspects.
    * Since `ext_oneapi_per_event_profiling` is stricter than
    * `ext_oneapi_ipc_event`, only checking the former one is also sufficient in
