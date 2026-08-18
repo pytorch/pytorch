@@ -3033,7 +3033,7 @@ if __name__ == "__main__":
     "TSAN is not fork-safe since we're forking in a multi-threaded environment",
 )
 @unittest.skipIf(
-    int(torch.version.xpu) < 20260200,
+    torch.version.xpu is None or int(torch.version.xpu) < 20260200,
     "XPU IPC events require SYCL compiler 2026.2 or later",
 )
 class TestXPUMultiprocessing(TestCase):
@@ -3044,6 +3044,7 @@ class TestXPUMultiprocessing(TestCase):
         p2c.get()  # wait for record in parent
         e1.synchronize()
         c2p.put(1)  # notify synchronization is done in child
+        p2c.get()  # wait for parent to finish
 
     @staticmethod
     def _event_handle_exporter_consumer(event_cls, handle, p2c, c2p):
@@ -3053,6 +3054,7 @@ class TestXPUMultiprocessing(TestCase):
             torch.xpu._sleep(200_000_000)  # spin for about 200 ms
             e1.record()
             c2p.put(0)
+            p2c.get()  # wait for parent to finish
 
     @staticmethod
     def _event_multiprocess_child(event, p2c, c2p):
@@ -3081,6 +3083,7 @@ class TestXPUMultiprocessing(TestCase):
             self.assertFalse(e0.query())
             c2p.get()  # wait for synchronization in child
             self.assertTrue(e0.query())
+            p2c.put(1)  # notify child to finish
             p.join()
 
     def test_event_handle_exporter(self):
@@ -3101,6 +3104,7 @@ class TestXPUMultiprocessing(TestCase):
             self.assertFalse(e0.query())
             e0.synchronize()
             self.assertTrue(e0.query())
+            p2c.put(0)  # notify child to finish
             p.join()
 
     def test_event_multiprocess(self):
@@ -3960,6 +3964,9 @@ class TestMemPool(TestCase):
 
 
 instantiate_parametrized_tests(TestXpu)
+instantiate_device_type_tests(
+    TestXPUMultiprocessing, globals(), only_for="xpu", allow_xpu=True
+)
 instantiate_parametrized_tests(TestCachingHostAllocatorXpuGraph)
 instantiate_device_type_tests(TestXpuOptims, globals())
 
