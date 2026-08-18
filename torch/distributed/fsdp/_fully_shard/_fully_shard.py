@@ -632,15 +632,12 @@ class FSDPModule:
         waits on the event, the event is discarded, so this API should be
         called with a new event each iteration.
 
-        For backends that require explicit stream ordering before device-side
-        deallocation, this method immediately orders every possible sharded-
-        gradient allocation/free stream after ``event``. Backends opt in with
-        ``_needs_explicit_stream_ordered_free`` on their device module. This
-        method must be called after optimizer work is enqueued and before any
-        operation that may clear or replace the gradients. This is required
-        for every optimizer step, including the final iteration. An optimizer
-        step-post hook is one way to record and set the event before
-        ``zero_grad``.
+        Calling this method also immediately orders every possible sharded-
+        gradient allocation/free stream after ``event``. It must be called
+        after optimizer work is enqueued and before any operation that may
+        clear or replace the gradients. This is required for every optimizer
+        step, including the final iteration. An optimizer step-post hook is one
+        way to record and set the event before ``zero_grad``.
         ``event`` must be ordered after every optimizer stream that consumes
         the gradients. This cannot protect a gradient cleared inside the
         optimizer step or by an optimizer-in-backward hook before this method
@@ -651,6 +648,7 @@ class FSDPModule:
                 to wait communication streams on.
         """
         state = self._get_fsdp_state()
+        state._state_ctx.post_optim_free_ordering_enabled = True
         state._state_ctx.post_optim_event = event
         if hasattr(state._comm_ctx, "reduce_scatter_stream"):
             state._wait_post_optim_event_on_grad_free_streams(event)

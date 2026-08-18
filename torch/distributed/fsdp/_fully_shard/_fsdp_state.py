@@ -54,11 +54,13 @@ class FSDPStateContext(Generic[_StateType]):
         # Optional user-provided event recorded after optimizer for the
         # all-gather streams to wait on in the root pre-forward
         self.post_optim_event: torch.Event | None = None
-        # Keep every candidate stream on which a sharded-gradient storage may
-        # be freed. This is root-scoped since roots sharing communication
-        # streams may use independent optimizers and custom post-reduce
-        # streams. Keep historical streams since ``param.grad`` may continue
-        # to alias an older allocation across optimizer steps.
+        # Calling ``set_post_optim_event`` opts in to ordering gradient free
+        # streams after the optimizer event.
+        self.post_optim_free_ordering_enabled: bool = False
+        # Track candidate streams on which a sharded-gradient storage may be
+        # freed. Keeping historical streams covers persistent ``param.grad``
+        # storage if communication or custom post-reduce streams change before
+        # a later clear.
         self.post_optim_free_streams: set[torch.Stream] = set()
 
 
@@ -330,11 +332,6 @@ class FSDPState(_State):
                         FSDPParamGroup._prefetch_unshard(target_param_group, "forward")
             return args, kwargs
 
-    def _needs_explicit_stream_ordered_free(self) -> bool:
-        return getattr(
-            self._device_handle, "_needs_explicit_stream_ordered_free", False
-        )
-
     def _post_optim_free_streams(self) -> set[torch.Stream]:
         streams = {
             self._comm_ctx.reduce_scatter_stream,
@@ -347,8 +344,6 @@ class FSDPState(_State):
         return streams
 
     def _wait_post_optim_event_on_grad_free_streams(self, event: torch.Event) -> None:
-        if not self._needs_explicit_stream_ordered_free():
-            return
         streams = self._state_ctx.post_optim_free_streams
         streams.update(self._post_optim_free_streams())
         for stream in streams:
@@ -465,7 +460,7 @@ class FSDPState(_State):
                     if rs_state.event is not None:
                         self._device_handle.current_stream().wait_event(rs_state.event)
                 self._comm_ctx.reduce_scatter_states.clear()
-                if self._needs_explicit_stream_ordered_free():
+                if self._state_ctx.post_optim_free_ordering_enabled:
                     self._state_ctx.post_optim_free_streams.update(
                         self._post_optim_free_streams()
                     )
