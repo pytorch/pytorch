@@ -1706,6 +1706,15 @@ def create_selective_checkpoint_contexts(policy_fn_or_list, allow_cache_entry_mu
     Use this with `torch.utils.checkpoint.checkpoint` to control which
     operations are recomputed during the backward pass.
 
+    .. note::
+
+        If you would like to specify selective activation checkpointing
+        policies over regions of source code rather than individual ATen
+        operators, we recommend trying
+        `torch_remat <https://github.com/meta-pytorch/remat>`_. This can make
+        it easier to distinguish between different uses of the same operator
+        or to apply policies to custom kernels.
+
     Args:
         policy_fn_or_list (Callable or List):
           - If a policy function is provided, it should accept a
