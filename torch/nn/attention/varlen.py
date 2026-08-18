@@ -566,8 +566,7 @@ def varlen_attn_out(
         )
 
     query, scale = _normalize_scale(query, scale)
-    window_size_list = list(window_size)
-    is_causal = window_size_list == [-1, 0]
+    is_causal = window_size == (-1, 0)
     lse = torch.ops.torch_attn._varlen_attn_out(
         out,
         query,
@@ -579,7 +578,7 @@ def varlen_attn_out(
         max_k,
         is_causal,
         scale,
-        window_size_list,
+        list(window_size),
         enable_gqa,
         seqused_k,
         block_table,
