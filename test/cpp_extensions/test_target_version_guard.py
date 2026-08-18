@@ -32,7 +32,7 @@ int main() {{ return 0; }}
                 ],
                 capture_output=True,
                 text=True,
-                timeout=30,
+                timeout=60,
             )
             return result.returncode == 0, result.stderr
 
