@@ -12,7 +12,7 @@ from torch._inductor.runtime.triton_compat import tl
 from torch._inductor.virtualized import V
 from torch.utils._triton import has_triton
 
-from ..ir import ChoiceCaller, Layout, TensorBox
+from ..ir import ChoiceCaller, is_unaligned, Layout, TensorBox
 from ..lowering import register_lowering
 from ..select_algorithm import (
     autotune_select_algorithm,
@@ -23,6 +23,7 @@ from ..select_algorithm import (
 from ..utils import (
     get_gpu_shared_memory,
     get_num_sms,
+    GPU_ALIGN_BYTES,
     has_free_symbols,
     use_aten_gemm_kernels,
     use_blackwell_cutedsl_grouped_mm,
@@ -161,6 +162,7 @@ def get_flydsl_grouped_mm_template_kwargs(
     scale_result: TensorBox | None,
     is_nonzero: bool,
 ) -> list[dict[str, object]]:
+    """Return supported FlyDSL template configs for grouped matrix multiplication."""
     from ..heuristics.template.flydsl import get_grouped_gemm_configs
 
     if not is_nonzero or not use_flydsl_gemm_template(layout):
@@ -192,15 +194,52 @@ def get_flydsl_grouped_mm_template_kwargs(
 
     n = mat_b.get_size()[-1]
     k = mat_a.get_size()[-1]
+    g = mat_b.get_size()[0]
+    if not sizevars.statically_known_equals(mat1_stride[-2], k):
+        return []
+    if not sizevars.statically_known_equals(mat2_stride[-2], n):
+        return []
+    if not sizevars.statically_known_equals(mat2_stride[-3], k * n):
+        return []
+    if not sizevars.statically_known_equals(out_stride[-2], n):
+        return []
+
+    itemsize = dtype.itemsize
+    aligned_byte_offsets = (
+        mat_a.get_layout().offset * itemsize,
+        mat_b.get_layout().offset * itemsize,
+    )
+    if (
+        is_unaligned(mat_a)
+        or is_unaligned(mat_b)
+        or any(
+            not sizevars.statically_known_multiple_of(offset, GPU_ALIGN_BYTES)
+            for offset in aligned_byte_offsets
+        )
+    ):
+        return []
+
     try:
         n_static = int(n)
         k_static = int(k)
+        g_static = int(g)
         # Total M only prunes configs here; exact per-group sizes remain runtime
         # values read from offs by the persistent kernel's on-device tile scan.
         m_static = int(mat_a.get_size()[0])
     except (TypeError, ValueError):
         return []
     if n_static % 32 != 0 or k_static % 32 != 0:
+        return []
+    int32_max = (1 << 31) - 1
+    dimensions = (m_static, n_static, k_static, g_static)
+    if any(dim <= 0 or dim > int32_max for dim in dimensions):
+        return []
+    tensor_spans = (
+        m_static * k_static,
+        g_static * k_static * n_static,
+        m_static * n_static,
+    )
+    if any(span * itemsize >= 1 << 32 for span in tensor_spans):
         return []
 
     from .vendored_templates.flydsl.kernels import GEMM_DTYPE_BF16, GEMM_DTYPE_FP16
@@ -214,7 +253,9 @@ def get_flydsl_grouped_mm_template_kwargs(
             "GEMM_N": n_static,
             "GEMM_K": k_static,
         }
-        for gemm_config in get_grouped_gemm_configs(m_static, n_static, k_static)
+        for gemm_config in get_grouped_gemm_configs(
+            m_static, n_static, k_static, dtype_id
+        )
     ]
 
 
@@ -560,15 +601,24 @@ def _tuned_grouped_mm_common(
                 **asdict(config),
             )
 
-    for flydsl_kwargs in get_flydsl_grouped_mm_template_kwargs(
-        mat_a, mat_b, layout, a_is_2d, b_is_2d, offs, bias, scale_result, is_nonzero
-    ):
-        flydsl_grouped_mm_template.maybe_append_choice(
-            choices,
-            input_nodes=input_nodes,
-            layout=layout,
-            **flydsl_kwargs,
-        )
+    if not scaled:
+        for flydsl_kwargs in get_flydsl_grouped_mm_template_kwargs(
+            mat_a,
+            mat_b,
+            layout,
+            a_is_2d,
+            b_is_2d,
+            offs,
+            bias,
+            scale_result,
+            is_nonzero,
+        ):
+            flydsl_grouped_mm_template.maybe_append_choice(
+                choices,
+                input_nodes=input_nodes,
+                layout=layout,
+                **flydsl_kwargs,
+            )
 
     if (
         is_nonzero

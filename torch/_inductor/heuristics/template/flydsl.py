@@ -234,40 +234,53 @@ def get_default_grouped_gemm_configs() -> list[FlyDSLGemmConfig]:
     config_tuples: list[FlyDSLGemmConfigArgs] = [
         # Small-M grouped/decode configs.  These reduce wasted work when each
         # group has far fewer than 32 rows.
-        (16, 64, 64, 2, 1, 1, 2, 1, 0, True),
-        (16, 128, 64, 2, 1, 1, 2, 1, 0, True),
-        (32, 64, 64, 2, 1, 1, 2, 1, 0, True),
-        (32, 256, 64, 2, 1, 1, 4, 1, 0, True),
-        (32, 128, 64, 2, 1, 1, 4, 1, 0, True),
-        (64, 128, 64, 2, 1, 1, 4, 1, 0, True),
-        (64, 256, 64, 2, 1, 1, 4, 1, 0, True),
-        (128, 128, 64, 2, 1, 1, 4, 1, 0, True),
-        (128, 256, 64, 2, 1, 1, 4, 1, 0, True),
+        (16, 64, 64, 2, 1, 2, 0),
+        (16, 128, 64, 2, 1, 2, 0),
+        (32, 64, 64, 2, 1, 2, 0),
+        (32, 256, 64, 2, 1, 4, 0),
+        (32, 128, 64, 2, 1, 4, 0),
+        (64, 128, 64, 2, 1, 4, 0),
+        (64, 256, 64, 2, 1, 4, 0),
+        (128, 128, 64, 2, 1, 4, 0),
+        (128, 256, 64, 2, 1, 4, 0),
         # Deeper pipelines, autotuned for the multi-stage overlap.
-        (64, 128, 64, 3, 1, 1, 4, 1, 0, True),
-        (128, 128, 64, 3, 1, 1, 4, 1, 0, True),
-        (128, 256, 64, 3, 1, 1, 4, 1, 0, True),
+        (64, 128, 64, 3, 1, 4, 0),
+        (128, 128, 64, 3, 1, 4, 0),
+        (128, 256, 64, 3, 1, 4, 0),
         # Swizzled group-M variant remaps sufficiently large per-group tile grids.
-        (128, 128, 64, 2, 1, 1, 4, 1, 4, True),
+        (128, 128, 64, 2, 1, 4, 4),
     ]
     hti_config_tuples: list[FlyDSLHTIGemmConfigArgs] = [
         # 2x2 half-tile-interleaved variant (stages=2 only): four half-block
         # accumulators + per-quadrant cshuffle store for better register tiling
         # and MMA scheduling. Requires m_waves=2, n_waves>=2 and even tiles.
-        (64, 128, 64, 2, 1, 2, 2, 1, 0, True, True),
-        (128, 128, 64, 2, 1, 2, 2, 1, 0, True, True),
-        (128, 128, 64, 2, 1, 2, 2, 1, 4, True, True),
-        (128, 256, 64, 2, 1, 2, 4, 1, 0, True, True),
-        (256, 128, 64, 2, 1, 2, 2, 1, 0, True, True),
-        (256, 256, 64, 2, 1, 2, 4, 1, 0, True, True),
+        (64, 128, 64, 2, 2, 2, 0, True),
+        (128, 128, 64, 2, 2, 2, 0, True),
+        (128, 128, 64, 2, 2, 2, 4, True),
+        (128, 256, 64, 2, 2, 4, 0, True),
+        (256, 128, 64, 2, 2, 2, 0, True),
+        (256, 256, 64, 2, 2, 4, 0, True),
     ]
     # Tuple order must match the FlyDSLGemmConfig field declaration order.
     candidates = [FlyDSLGemmConfig(*args) for args in config_tuples]
     candidates.extend(FlyDSLGemmConfig(*args) for args in hti_config_tuples)
-    return candidates
+    valid_configs: list[FlyDSLGemmConfig] = []
+    for gemm_config in candidates:
+        try:
+            _make_gemm_param(asdict(gemm_config))
+            valid_configs.append(gemm_config)
+        except Exception as e:
+            log.debug(
+                "Skipping invalid default FlyDSL grouped config %s: %s",
+                gemm_config,
+                e,
+            )
+    return valid_configs
 
 
-def get_grouped_gemm_configs(m: int, n: int, k: int) -> list[dict[str, object]]:
+def get_grouped_gemm_configs(
+    m: int, n: int, k: int, dtype_id: int
+) -> list[dict[str, object]]:
     """Return supported configs for the persistent multi-stage grouped kernel."""
     if (
         config.flydsl_enable_autotuning
@@ -289,9 +302,7 @@ def get_grouped_gemm_configs(m: int, n: int, k: int) -> list[dict[str, object]]:
         if (k // grouped_config.TILE_K) < grouped_config.STAGES:
             continue
         gemm_config = asdict(grouped_config)
-        try:
-            _make_gemm_param(gemm_config)
-        except Exception:
+        if not is_gemm_config_valid_for_shape(m, n, k, dtype_id, gemm_config):
             continue
         configs.append(gemm_config)
     if not configs:

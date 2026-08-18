@@ -17,8 +17,7 @@ from torch._inductor.runtime.flydsl_cache import (
 
 
 _grouped_param = None
-_grouped_executor = None
-_grouped_init_lock = threading.Lock()
+_grouped_param_lock = threading.Lock()
 _grouped_grid_key = None
 _grouped_grid_size = None
 
@@ -44,19 +43,20 @@ def _temporary_env(updates):
 
 
 def _flydsl_grouped_mm(output, mat1, mat2, offs, stream):
-    global _grouped_executor, _grouped_grid_key, _grouped_grid_size, _grouped_param
+    global _grouped_grid_key, _grouped_grid_size, _grouped_param
     group_count, k, n = mat2.shape
     total_m = mat1.shape[0]
     if total_m == 0:
         return output
 
-    executor = _grouped_executor
     param = _grouped_param
-    if executor is None and param is None:
-        with _grouped_init_lock:
+    if param is None:
+        with _grouped_param_lock:
             param = _grouped_param
             if param is None:
                 has_k_tail = infer_has_k_tail(GEMM_K, TILE_K, STAGES)
+                if USE_HALF_TILE_INTERLEAVED:
+                    has_k_tail = has_k_tail or (((GEMM_K + TILE_K - 1) // TILE_K) % 2 != 0)
                 param = make_gemm_param_and_validate(
                     GEMM_M,
                     GEMM_N,
@@ -75,16 +75,20 @@ def _flydsl_grouped_mm(output, mat1, mat2, offs, stream):
                         "has_k_tail": has_k_tail,
                     },
                 )
-                assert param is not None, "unsupported FlyDSL grouped GEMM shape/config"
+                if param is None:
+                    raise RuntimeError(
+                        f"unsupported FlyDSL grouped GEMM shape/config: M={GEMM_M}, "
+                        f"N={GEMM_N}, K={GEMM_K}, "
+                        f"tile=({TILE_M}, {TILE_N}, {TILE_K}), stages={STAGES}"
+                    )
                 _grouped_param = param
                 _grouped_grid_key = None
-    assert param is not None
 
     group_count = int(group_count)
     total_m = int(total_m)
     n_int = int(n)
     k_int = int(k)
-    if os.environ.get("COMPILE_ONLY"):
+    if os.environ.get("FLYDSL_COMPILE_ONLY"):
         grid_size = 1
     else:
         grid_key = (total_m, n_int, group_count, mat1.device)
@@ -124,28 +128,17 @@ def _flydsl_grouped_mm(output, mat1, mat2, offs, stream):
         param,
         stream,
     )
-    if executor is not None:
-        executor(*dispatch_args)
-        return output
-
-    with _grouped_init_lock:
-        executor = _grouped_executor
-        if executor is None:
-            ensure_flydsl_cache_dir()
-            if os.environ.get("COMPILE_ONLY"):
-                flyc.compile(launch_gemm_gfx950_grouped, *compile_args)
-            else:
-                executor = run_cached_flydsl(
-                    launch_gemm_gfx950_grouped,
-                    *compile_args,
-                    constexpr_param=param,
-                    compiler=flyc.compile,
-                    dispatch_args=dispatch_args,
-                )
-                _grouped_executor = executor
-            return output
-
-    executor(*dispatch_args)
+    ensure_flydsl_cache_dir()
+    if os.environ.get("FLYDSL_COMPILE_ONLY"):
+        flyc.compile(launch_gemm_gfx950_grouped, *compile_args)
+    else:
+        run_cached_flydsl(
+            launch_gemm_gfx950_grouped,
+            *compile_args,
+            constexpr_param=param,
+            compiler=flyc.compile,
+            dispatch_args=dispatch_args,
+        )
     return output
 
 
@@ -178,7 +171,7 @@ def {{kernel_name}}_precompile(
     stride_offs = tuple(precompile_strides["offs"])
     stride_output = tuple(precompile_strides["output"])
 
-    env_updates = {"COMPILE_ONLY": "1"}
+    env_updates = {"FLYDSL_COMPILE_ONLY": "1"}
     if flydsl_gpu_arch is not None:
         env_updates["FLYDSL_GPU_ARCH"] = flydsl_gpu_arch
 
@@ -194,13 +187,4 @@ def {{kernel_name}}_precompile(
             mat2 = _fake_proxy(shape_mat2, stride_mat2, dtype_mat2)
             offs = _fake_proxy(shape_offs, stride_offs, dtype_offs)
             output = _fake_proxy(shape_output, stride_output, dtype_output)
-
-            try:
-                {{kernel_name}}_main(mat1, mat2, offs, output, stream=0)
-            finally:
-                global _grouped_executor, _grouped_grid_key, _grouped_grid_size, _grouped_param
-                with _grouped_init_lock:
-                    _grouped_executor = None
-                    _grouped_grid_key = None
-                    _grouped_grid_size = None
-                    _grouped_param = None
+            {{kernel_name}}_main(mat1, mat2, offs, output, stream=0)

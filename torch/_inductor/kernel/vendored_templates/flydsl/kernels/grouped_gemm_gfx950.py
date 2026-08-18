@@ -76,14 +76,14 @@ def get_grouped_gemm_persistent_grid_size(
         )
 
     light_tile = param.block_m <= 64 and param.block_n <= 128
-    n_tiles = (n + param.block_n - 1) // param.block_n
+    n_tiles = (n - 1) // param.block_n + 1
     if light_tile:
         for blocks_per_cu in (8, 4, 2, 1):
             if blocks_per_cu <= resource_blocks_per_cu:
                 break
         # The host only knows total M. This lower bound prevents empty CTAs
         # for uniformly small groups, even though ragged inputs have more work.
-        task_floor = (total_m + param.block_m - 1) // param.block_m * n_tiles
+        task_floor = ((total_m - 1) // param.block_m + 1) * n_tiles
         return max(1, min(num_cus * blocks_per_cu, task_floor))
 
     blocks_per_cu = 2 if resource_blocks_per_cu >= 2 else 1
@@ -215,7 +215,6 @@ class _GroupedGemmGfx950Ctx:
         frag_B_retile,
         thr_mma_cRow,
         thr_mma_cCol,
-        thr_mma_bK,
         b_s2r_copy_atom,
         thr_copy_cshuffle,
         thr_sC,
@@ -253,7 +252,6 @@ class _GroupedGemmGfx950Ctx:
         self.frag_B_retile = frag_B_retile
         self.thr_mma_cRow = thr_mma_cRow
         self.thr_mma_cCol = thr_mma_cCol
-        self.thr_mma_bK = thr_mma_bK
         self.b_s2r_copy_atom = b_s2r_copy_atom
         self.thr_copy_cshuffle = thr_copy_cshuffle
         self.thr_sC = thr_sC
@@ -297,8 +295,6 @@ def _grouped_gemm_gfx950_setup(out, a, b, offs, tiled_mma, param):
     sA = fx.make_view(smem_a, a_lds_layout)
     sC = fx.make_view(smem_c, c_lds_layout)
     frag_A = rs.thr_mma.make_fragment_A(sA)
-    bk_coords = fx.make_view(0, fx.make_layout((block_n, block_k), (0, 1)))
-    thr_mma_bK = rs.thr_mma.partition_B(bk_coords)
     sB = fx.make_view(smem_b, b_lds_s2r_layout)
     frag_B = rs.thr_mma.make_fragment_B(sB)
     frag_B_retile = rs.thr_copy_B.retile(frag_B)
@@ -367,7 +363,6 @@ def _grouped_gemm_gfx950_setup(out, a, b, offs, tiled_mma, param):
         frag_B_retile,
         thr_mma_cRow,
         thr_mma_cCol,
-        thr_mma_bK,
         rs.b_s2r_copy_atom,
         thr_copy_cshuffle,
         thr_sC,
@@ -437,20 +432,12 @@ def _grouped_compute_stage_from_lds(ctx, read_stage, k_tile, k):
     thr_sA_s2r = ctx.thr_copy_A.partition_S(sA_stage)
     thr_sB_s2r = ctx.thr_copy_B.partition_S(sB_stage)
 
-    for block_k_iter in range_constexpr(block_k // param.mma_k):
+    def compute_k_chunk(block_k_iter):
         fx.copy(
             ctx.b_s2r_copy_atom,
             thr_sB_s2r[None, None, block_k_iter],
             ctx.frag_B_retile[None, None, block_k_iter],
         )
-        if const_expr(param.has_k_tail):
-            frag_B_chunk = ctx.frag_B[None, None, block_k_iter]
-            bK_chunk = ctx.thr_mma_bK[None, None, block_k_iter]
-            for i in range_constexpr(fx.size(frag_B_chunk.shape).unpack()):
-                in_bounds = k_tile * block_k + fx.get_scalar(bK_chunk[i]) < k
-                frag_B_chunk[i] = in_bounds.select(
-                    frag_B_chunk[i], _elem_dtype(param)(0.0)
-                )
         fx.copy(
             ctx.s2r_copy_atom,
             thr_sA_s2r[None, None, block_k_iter],
@@ -464,6 +451,14 @@ def _grouped_compute_stage_from_lds(ctx, read_stage, k_tile, k):
             ctx.frag_C,
             traversal_order=fx.GemmTraversalOrder.KNM,
         )
+
+    for block_k_iter in range_constexpr(block_k // param.mma_k):
+        if const_expr(param.has_k_tail):
+            global_k_iter = k_tile * block_k + block_k_iter * param.mma_k
+            if global_k_iter < k:
+                compute_k_chunk(block_k_iter)
+        else:
+            compute_k_chunk(block_k_iter)
 
 
 def _grouped_load_a_tile_async(ctx, row_base, bid_m, m, k, k_tile, stage):
@@ -525,7 +520,10 @@ def _grouped_load_b_tile_async(ctx, bid_n, n, k, group_idx, k_tile, stage):
             % block_n
         )
         global_n_idx = bid_n * block_n + swizzled_n_idx
-        safe_global_k_idx = (global_k_idx < k).select(global_k_idx, 0)
+        if const_expr(param.has_k_tail):
+            safe_global_k_idx = (global_k_idx < k).select(global_k_idx, 0)
+        else:
+            safe_global_k_idx = global_k_idx
         global_offset = (
             group_idx * k * n + safe_global_k_idx * n + global_n_idx
         ) * in_data_bytes
@@ -553,8 +551,8 @@ def gemm_gfx950_grouped_kernel(
     stages = param.stages
     has_k_tail = param.has_k_tail
     ldg_a_iters = param.ldg_a_iters
-    num_pid_n = (n + block_n - 1) // block_n
-    k_tiles = (k + block_k - 1) // block_k
+    num_pid_n = (n - 1) // block_n + 1
+    k_tiles = (k - 1) // block_k + 1
     grid = fx.Int32(fx.grid_dim.x)
     work_idx = fx.Int32(fx.block_idx.x)
     tiles_before = fx.Int32(0)
@@ -584,7 +582,6 @@ def gemm_gfx950_grouped_kernel(
                 current_stage = k_tile % stages
                 write_stage = (current_stage + stages - 1) % stages
                 __barrier((stages - 2) * ldg_wait_count)
-                fx.gpu.barrier()
                 _grouped_load_b_tile_async(
                     ctx, bid_n, n, k, g, k_tile + (stages - 1), write_stage
                 )
@@ -595,7 +592,6 @@ def gemm_gfx950_grouped_kernel(
             current_stage = main_loop_end % stages
             for s in range_constexpr(0, stages - 1):
                 __barrier((stages - 2 - s) * ldg_wait_count)
-                fx.gpu.barrier()
                 _grouped_compute_stage_from_lds(
                     ctx, current_stage, main_loop_end + s, k
                 )
@@ -625,6 +621,7 @@ def gemm_hti_gfx950_grouped_kernel(
     block_k = param.block_k
     half_block_m = block_m // 2
     half_block_n = block_n // 2
+    has_k_tail = param.has_k_tail
     async_load_bytes = param.async_load_bytes
     in_data_bytes = param.in_data_bytes
     async_load_vec_size = async_load_bytes // in_data_bytes
@@ -635,9 +632,8 @@ def gemm_hti_gfx950_grouped_kernel(
     elem_dtype = _elem_dtype(param)
 
     tid = fx.thread_idx.x
-    num_pid_n = (n + block_n - 1) // block_n
-    k_tiles = (k + block_k - 1) // block_k
-    has_odd_k_tiles = k_tiles % 2 != 0
+    num_pid_n = (n - 1) // block_n + 1
+    k_tiles = (k - 1) // block_k + 1
 
     smem_a, smem_b, smem_c = _grouped_gemm_gfx950_allocate_shared_storage(
         block_m, block_n, block_k, 2, elem_dtype
@@ -686,7 +682,10 @@ def gemm_hti_gfx950_grouped_kernel(
             in_bounds_m = m_tile_idx < m
             safe_global_m_idx = in_bounds_m.select(row_base + m_tile_idx, 0)
             global_k_idx = k_tile * block_k + swizzled_col_idx(m_local_idx, k_local_idx)
-            safe_global_k_idx = (global_k_idx < k).select(global_k_idx, 0)
+            if const_expr(has_k_tail):
+                safe_global_k_idx = (global_k_idx < k).select(global_k_idx, 0)
+            else:
+                safe_global_k_idx = global_k_idx
             global_offset = (safe_global_m_idx * k + safe_global_k_idx) * in_data_bytes
             buffer_load_lds_inline(rs.a_rsrc, lds_ptr, global_offset, async_load_bytes)
             if i < half_ldg_a_iters - 1:
@@ -705,7 +704,10 @@ def gemm_hti_gfx950_grouped_kernel(
                 % half_block_n
             )
             global_n_idx = bid_n * block_n + n_part * half_block_n + swizzled_n_idx
-            safe_global_k_idx = (global_k_idx < k).select(global_k_idx, 0)
+            if const_expr(has_k_tail):
+                safe_global_k_idx = (global_k_idx < k).select(global_k_idx, 0)
+            else:
+                safe_global_k_idx = global_k_idx
             global_offset = (
                 group * k * n + safe_global_k_idx * n + global_n_idx
             ) * in_data_bytes
@@ -713,17 +715,26 @@ def gemm_hti_gfx950_grouped_kernel(
             if i < half_ldg_b_iters - 1:
                 lds_ptr = lds_ptr + block_threads * async_load_bytes
 
-    def load_a_fragment(m_part, read_stage):
+    def load_a_fragment(m_part, read_stage, k_tile):
         sA = fx.make_view(half_a_base(read_stage, m_part), a_lds_layout)
         frag_A = rs.thr_mma.make_fragment_A(sA)
         frag_A_retile = rs.thr_copy_A.retile(frag_A)
         thr_sA_s2r = rs.thr_copy_A.partition_S(sA)
         for block_k_iter in range_constexpr(block_k // param.mma_k):
-            fx.copy(
-                rs.s2r_copy_atom,
-                thr_sA_s2r[None, None, block_k_iter],
-                frag_A_retile[None, None, block_k_iter],
-            )
+            if const_expr(has_k_tail):
+                global_k_iter = k_tile * block_k + block_k_iter * param.mma_k
+                if global_k_iter < k:
+                    fx.copy(
+                        rs.s2r_copy_atom,
+                        thr_sA_s2r[None, None, block_k_iter],
+                        frag_A_retile[None, None, block_k_iter],
+                    )
+            else:
+                fx.copy(
+                    rs.s2r_copy_atom,
+                    thr_sA_s2r[None, None, block_k_iter],
+                    frag_A_retile[None, None, block_k_iter],
+                )
         return frag_A
 
     def load_b_fragment(n_part, read_stage, k_tile):
@@ -735,30 +746,45 @@ def gemm_hti_gfx950_grouped_kernel(
         frag_B_retile = rs.thr_copy_B.retile(frag_B)
         thr_sB_s2r = rs.thr_copy_B.partition_S(sB)
         for block_k_iter in range_constexpr(block_k // param.mma_k):
-            fx.copy(
-                rs.b_s2r_copy_atom,
-                thr_sB_s2r[None, None, block_k_iter],
-                frag_B_retile[None, None, block_k_iter],
-            )
-            if const_expr(param.has_k_tail):
-                frag_B_chunk = frag_B[None, None, block_k_iter]
-                bK_chunk = thr_mma_bK[None, None, block_k_iter]
-                for i in range_constexpr(fx.size(frag_B_chunk.shape).unpack()):
-                    in_bounds = k_tile * block_k + fx.get_scalar(bK_chunk[i]) < k
-                    frag_B_chunk[i] = in_bounds.select(frag_B_chunk[i], elem_dtype(0.0))
+            if const_expr(has_k_tail):
+                global_k_iter = k_tile * block_k + block_k_iter * param.mma_k
+                if global_k_iter < k:
+                    fx.copy(
+                        rs.b_s2r_copy_atom,
+                        thr_sB_s2r[None, None, block_k_iter],
+                        frag_B_retile[None, None, block_k_iter],
+                    )
+            else:
+                fx.copy(
+                    rs.b_s2r_copy_atom,
+                    thr_sB_s2r[None, None, block_k_iter],
+                    frag_B_retile[None, None, block_k_iter],
+                )
         return frag_B
 
-    def consume(frag_C, frag_A, frag_B):
+    def consume(k_tile, frag_C, frag_A, frag_B):
         rocdl.sched_barrier(0)
         for block_k_iter in range_constexpr(block_k // param.mma_k):
-            fx.gemm(
-                tiled_mma,
-                frag_C,
-                frag_A[None, None, block_k_iter],
-                frag_B[None, None, block_k_iter],
-                frag_C,
-                traversal_order=fx.GemmTraversalOrder.KNM,
-            )
+            if const_expr(has_k_tail):
+                global_k_iter = k_tile * block_k + block_k_iter * param.mma_k
+                if global_k_iter < k:
+                    fx.gemm(
+                        tiled_mma,
+                        frag_C,
+                        frag_A[None, None, block_k_iter],
+                        frag_B[None, None, block_k_iter],
+                        frag_C,
+                        traversal_order=fx.GemmTraversalOrder.KNM,
+                    )
+            else:
+                fx.gemm(
+                    tiled_mma,
+                    frag_C,
+                    frag_A[None, None, block_k_iter],
+                    frag_B[None, None, block_k_iter],
+                    frag_C,
+                    traversal_order=fx.GemmTraversalOrder.KNM,
+                )
         rocdl.sched_barrier(0)
 
     def half_gC(m_part, n_part, bid_m, bid_n, row_base):
@@ -792,8 +818,6 @@ def gemm_hti_gfx950_grouped_kernel(
     thr_mma_cCol = rs.thr_mma.partition_C(col_coords)
     thr_cRow = thr_copy_cshuffle.partition_S(row_coords)[(0, None), None, None]
     thr_cCol = thr_copy_cshuffle.partition_S(col_coords)[(0, None), None, None]
-    bk_coords = fx.make_view(0, fx.make_layout((half_block_n, block_k), (0, 1)))
-    thr_mma_bK = rs.thr_mma.partition_B(bk_coords)
 
     def store_half_tile(m_part, n_part, frag_C, bid_m, bid_n, m, row_base):
         gC = half_gC(m_part, n_part, bid_m, bid_n, row_base)
@@ -851,71 +875,61 @@ def gemm_hti_gfx950_grouped_kernel(
         next_k_tile = k_tile + 2
 
         b0 = load_b_fragment(0, 0, k_tile)
-        a0 = load_a_fragment(0, 0)
+        a0 = load_a_fragment(0, 0, k_tile)
         load_a_half(1, k_tile + 1, 1, bid_m, m, row_base)
         rocdl.s_barrier()
-        consume(c00, a0, b0)
+        consume(k_tile, c00, a0, b0)
         rocdl.s_barrier()
 
         b1 = load_b_fragment(1, 0, k_tile)
         if const_expr(prefetch_next):
             load_b_half(0, next_k_tile, 0, bid_n, group)
             rocdl.s_barrier()
-        consume(c01, a0, b1)
+        consume(k_tile, c01, a0, b1)
         rocdl.s_barrier()
 
-        a1 = load_a_fragment(1, 0)
+        a1 = load_a_fragment(1, 0, k_tile)
         if const_expr(prefetch_next):
             load_a_half(0, next_k_tile, 0, bid_m, m, row_base)
             rocdl.s_barrier()
-        consume(c10, a1, b0)
+        consume(k_tile, c10, a1, b0)
         rocdl.s_barrier()
 
         b0 = load_b_fragment(0, 1, k_tile + 1)
         if const_expr(prefetch_next):
             load_b_half(1, next_k_tile, 0, bid_n, group)
             __barrier(2 * half_ldg_b_iters + half_ldg_a_iters)
-        consume(c11, a1, b1)
+        consume(k_tile, c11, a1, b1)
         if const_expr(not prefetch_next):
             __waitcnt(0)
         rocdl.s_barrier()
 
-        a0 = load_a_fragment(0, 1)
+        a0 = load_a_fragment(0, 1, k_tile + 1)
         if const_expr(prefetch_next):
             load_a_half(1, next_k_tile, 0, bid_m, m, row_base)
             rocdl.s_barrier()
-        consume(c00, a0, b0)
+        consume(k_tile + 1, c00, a0, b0)
         rocdl.s_barrier()
 
         b1 = load_b_fragment(1, 1, k_tile + 1)
         if const_expr(prefetch_next):
             load_b_half(0, next_k_tile + 1, 1, bid_n, group)
             rocdl.s_barrier()
-        consume(c01, a0, b1)
+        consume(k_tile + 1, c01, a0, b1)
         rocdl.s_barrier()
 
-        a1 = load_a_fragment(1, 1)
+        a1 = load_a_fragment(1, 1, k_tile + 1)
         if const_expr(prefetch_next):
             load_a_half(0, next_k_tile + 1, 1, bid_m, m, row_base)
             rocdl.s_barrier()
-        consume(c10, a1, b0)
+        consume(k_tile + 1, c10, a1, b0)
         rocdl.s_barrier()
 
         if const_expr(prefetch_next):
             load_b_half(1, next_k_tile + 1, 1, bid_n, group)
             __barrier(half_ldg_b_iters + half_ldg_a_iters)
-        consume(c11, a1, b1)
+        consume(k_tile + 1, c11, a1, b1)
         rocdl.s_barrier()
-
-    def compute_single_tile(k_tile, read_stage):
-        b0 = load_b_fragment(0, read_stage, k_tile)
-        b1 = load_b_fragment(1, read_stage, k_tile)
-        a0 = load_a_fragment(0, read_stage)
-        consume(c00, a0, b0)
-        consume(c01, a0, b1)
-        a1 = load_a_fragment(1, read_stage)
-        consume(c10, a1, b0)
-        consume(c11, a1, b1)
 
     grid = fx.Int32(fx.grid_dim.x)
     work_idx = fx.Int32(fx.block_idx.x)
@@ -949,27 +963,11 @@ def gemm_hti_gfx950_grouped_kernel(
             load_b_half(1, 1, 1, bid_n, g)
             __barrier(half_ldg_b_iters + half_ldg_a_iters)
 
-            if has_odd_k_tiles:
-                final_double_tile = k_tiles - 3
-                for k_tile in range(0, final_double_tile, 2):
-                    compute_double_tile(k_tile, True, bid_m, bid_n, m_g, row_base, g)
-                compute_double_tile(
-                    final_double_tile, False, bid_m, bid_n, m_g, row_base, g
-                )
-                load_b_half(0, k_tiles - 1, 0, bid_n, g)
-                load_a_half(0, k_tiles - 1, 0, bid_m, m_g, row_base)
-                load_b_half(1, k_tiles - 1, 0, bid_n, g)
-                load_a_half(1, k_tiles - 1, 0, bid_m, m_g, row_base)
-                __barrier(0)
-                fx.gpu.barrier()
-                compute_single_tile(k_tiles - 1, 0)
-            else:
-                main_loop_end = (k_tiles > 2).select(k_tiles - 2, 0)
-                for k_tile in range(0, main_loop_end, 2):
-                    compute_double_tile(k_tile, True, bid_m, bid_n, m_g, row_base, g)
-                compute_double_tile(
-                    main_loop_end, False, bid_m, bid_n, m_g, row_base, g
-                )
+            final_double_tile = ((k_tiles % 2) == 0).select(k_tiles - 2, k_tiles - 1)
+            main_loop_end = (k_tiles > 2).select(final_double_tile, 0)
+            for k_tile in range(0, main_loop_end, 2):
+                compute_double_tile(k_tile, True, bid_m, bid_n, m_g, row_base, g)
+            compute_double_tile(main_loop_end, False, bid_m, bid_n, m_g, row_base, g)
 
             store_half_tile(0, 0, c00, bid_m, bid_n, m_g, row_base)
             store_half_tile(0, 1, c01, bid_m, bid_n, m_g, row_base)
