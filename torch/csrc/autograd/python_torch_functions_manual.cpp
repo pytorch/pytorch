@@ -868,6 +868,7 @@ void initTorchFunctions(PyObject* module) {
             auto new_grad_fn = c10::make_intrusive<torch::autograd::Error>(
                 "Cannot backprop through mirrored meta, file a bug in PyTorch");
             torch::autograd::set_history(dst_, new_grad_fn);
+            torch::autograd::fire_node_creation_hooks(new_grad_fn);
           }
         }
       });
