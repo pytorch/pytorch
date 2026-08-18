@@ -3005,6 +3005,8 @@ def _optimize_assert(
     Used for fullgraph=True and export, since we must always error on graph breaks and ignore
     symbolic_convert.error_on_graph_break. Can also be used for testing.
     """
+    # get_compiler_fn erases the name, and torch.compile hands us a
+    # _TorchCompileWrapper rather than the string the user wrote.
     from torch._dynamo.package import emits_native_code as _emits_native_code
 
     emits_native_code = _emits_native_code(
