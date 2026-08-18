@@ -258,32 +258,52 @@ struct hermite_polynomial_he_functor {
   }
 };
 
+// nextafter for bfloat over raw sign-magnitude bits. Kept out of the functor
+// so the bit pattern is never merged with another bfloat value: a bfloat
+// carrying a subnormal that flows through a phi node is flushed to zero when
+// the compiler materializes it through a float register.
+inline ushort nextafter_bfloat_bits(const bfloat from, const bfloat to) {
+  const ushort uf = as_type<ushort>(from);
+  const ushort ut = as_type<ushort>(to);
+  const ushort af = uf & 0x7FFF;
+  const ushort at = ut & 0x7FFF;
+  if (af > 0x7F80) {
+    return ushort(uf | 0x0040); // from is NaN -> quiet NaN
+  }
+  if (at > 0x7F80) {
+    return ushort(ut | 0x0040); // to is NaN -> quiet NaN
+  }
+  if (uf == ut) {
+    return ut;
+  }
+  if (af == 0 && at == 0) {
+    return ut; // +-0 -> +-0, sign taken from `to`
+  }
+  if (af == 0) {
+    return ushort((ut & 0x8000) | 1); // +-0 -> smallest subnormal toward `to`
+  }
+  const bool neg = (uf & 0x8000) != 0;
+  const int of = neg ? -int(af) : int(af);
+  const int ot = (ut & 0x8000) ? -int(at) : int(at);
+  const bool up = of < ot;
+  return neg ? (up ? ushort(uf - 1) : ushort(uf + 1))
+             : (up ? ushort(uf + 1) : ushort(uf - 1));
+}
+
 struct nextafter_functor {
   template <typename T>
   inline T operator()(const T a, const T b) {
     return static_cast<T>(::metal::nextafter(a, b));
   }
 
-  // Metal has no bfloat nextafter overload, so open-code the musl algorithm
-  // over the sign-magnitude bit pattern.
+  // Metal has no bfloat nextafter overload, so open-code it over the
+  // sign-magnitude bit pattern. All of the work happens in the integer
+  // domain and the result is materialized as a bfloat exactly once, at the
+  // single return below. Apple GPUs flush bf16 subnormals both in float
+  // comparisons (`from == 0` is true for a nonzero subnormal) and in the
+  // float->bfloat convert, so neither may appear on this path.
   inline bfloat operator()(const bfloat from, const bfloat to) {
-    if (from != from || to != to) {
-      return from + to;
-    }
-    if (from == to) {
-      return to;
-    }
-    ushort ufrom = as_type<ushort>(from);
-    if (from == 0) {
-      ushort r = (as_type<ushort>(to) & (ushort(1) << 15)) | ushort(1);
-      return as_type<bfloat>(r);
-    }
-    if ((from < to) == (from > 0)) {
-      ufrom++;
-    } else {
-      ufrom--;
-    }
-    return as_type<bfloat>(ufrom);
+    return as_type<bfloat>(nextafter_bfloat_bits(from, to));
   }
 };
 
