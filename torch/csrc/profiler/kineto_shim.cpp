@@ -52,10 +52,12 @@ const ActivityTypeMap kCudaTypes{
 const ActivityTypeMap kXpuTypes{
     {libkineto::ActivityType::GPU_MEMCPY,            "GPU_MEMCPY"},
     {libkineto::ActivityType::GPU_MEMSET,            "GPU_MEMSET"},
+    {libkineto::ActivityType::GPU_USER_ANNOTATION,   "GPU_USER_ANNOTATION"},
     {libkineto::ActivityType::CONCURRENT_KERNEL,     "CONCURRENT_KERNEL"},
     // XPU_RUNTIME and XPU_DRIVER appear in both kCpuTypes and kXpuTypes.
     {libkineto::ActivityType::XPU_RUNTIME,           "XPU_RUNTIME"},
     {libkineto::ActivityType::XPU_DRIVER,            "XPU_DRIVER"},
+    {libkineto::ActivityType::OVERHEAD,              "OVERHEAD"},
 };
 
 const ActivityTypeMap kMtiaTypes{
@@ -326,12 +328,12 @@ void prepareTrace(
   };
 
   const bool has_cpu_activity =
-      activities.count(torch::autograd::profiler::ActivityType::CPU);
+      activities.contains(torch::autograd::profiler::ActivityType::CPU);
 
   if (has_cpu_activity) {
     insertActivities(torch::autograd::profiler::ActivityType::CPU, kCpuTypes);
   }
-  if (activities.count(torch::autograd::profiler::ActivityType::XPU)) {
+  if (activities.contains(torch::autograd::profiler::ActivityType::XPU)) {
     const auto filter_it =
         activity_filter.find(torch::autograd::profiler::ActivityType::XPU);
     if (filter_it != activity_filter.end()) {
@@ -364,7 +366,7 @@ void prepareTrace(
       insertActivities(torch::autograd::profiler::ActivityType::XPU, kXpuTypes);
     }
   }
-  if (activities.count(torch::autograd::profiler::ActivityType::MTIA)) {
+  if (activities.contains(torch::autograd::profiler::ActivityType::MTIA)) {
     if (config.custom_profiler_config.empty()) {
       insertActivities(
           torch::autograd::profiler::ActivityType::MTIA, kMtiaTypes);
@@ -395,10 +397,10 @@ void prepareTrace(
       }
     }
   }
-  if (activities.count(torch::autograd::profiler::ActivityType::HPU)) {
+  if (activities.contains(torch::autograd::profiler::ActivityType::HPU)) {
     insertActivities(torch::autograd::profiler::ActivityType::HPU, kHpuTypes);
   }
-  if (activities.count(torch::autograd::profiler::ActivityType::CUDA)) {
+  if (activities.contains(torch::autograd::profiler::ActivityType::CUDA)) {
     insertActivities(torch::autograd::profiler::ActivityType::CUDA, kCudaTypes);
     if (config.enable_cuda_sync_events || get_cuda_sync_enabled()) {
       LOG(INFO) << "Enabling CUDA Sync Events";
@@ -408,7 +410,8 @@ void prepareTrace(
   if (collectivesProfilerExists()) {
     k_activities.insert(libkineto::ActivityType::COLLECTIVE_COMM);
   }
-  if (activities.count(torch::autograd::profiler::ActivityType::PrivateUse1)) {
+  if (activities.contains(
+          torch::autograd::profiler::ActivityType::PrivateUse1)) {
     insertActivities(
         torch::autograd::profiler::ActivityType::PrivateUse1,
         kPrivateUse1Types);
@@ -509,12 +512,12 @@ c10::DeviceType deviceTypeFromActivity(libkineto::ActivityType activity_type) {
     case libkineto::ActivityType::GPU_MEMCPY:
     case libkineto::ActivityType::GPU_MEMSET:
     case libkineto::ActivityType::CONCURRENT_KERNEL:
+    case libkineto::ActivityType::GPU_USER_ANNOTATION:
 #if defined(USE_XPU)
       return device_type_privateuse1_or(c10::DeviceType::XPU);
 #endif
       [[fallthrough]];
     case libkineto::ActivityType::CUDA_SYNC:
-    case libkineto::ActivityType::GPU_USER_ANNOTATION:
     case libkineto::ActivityType::CUDA_PROFILER_RANGE:
       return device_type_privateuse1_or(c10::DeviceType::CUDA);
     // TODO: T151322015

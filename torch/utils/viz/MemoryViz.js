@@ -853,7 +853,7 @@ function annotate_snapshot(snapshot) {
     snapshot.categories.length > 0 &&
     !snapshot.categories.includes('unknown')
   ) {
-    snapshot.categores.push('unknown');
+    snapshot.categories.push('unknown');
   }
 }
 

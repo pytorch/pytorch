@@ -41,6 +41,7 @@ from test_c10d_common import (
 )
 
 import torch.distributed as dist
+import torch.distributed._symmetric_memory as symm_mem
 import torch.distributed.algorithms.ddp_comm_hooks.default_hooks as default
 import torch.distributed.algorithms.ddp_comm_hooks.powerSGD_hook as powerSGD
 import torch.nn.functional as F
@@ -61,6 +62,7 @@ from torch.testing._internal.common_distributed import (
     requires_nccl_version,
     requires_world_size,
     skip_if_lt_x_gpu,
+    skip_if_rocm_ver_atleast_multiprocess,
     sm_is_or_higher_than,
     TEST_SKIPS,
     with_dist_debug_levels,
@@ -669,7 +671,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_gather_into_tensor(self):
+    def test_gather_single(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         c10d.init_process_group(
             backend="nccl", store=store, rank=self.rank, world_size=self.world_size
@@ -688,7 +690,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             else:
                 gather_tensor = None
 
-            dist.gather_into_tensor(tensor, gather_tensor, dst=dst)
+            dist.gather_single(tensor, gather_tensor, dst=dst)
 
             if self.rank == dst:
                 expected = torch.arange(world_size * elems, device=device).float()
@@ -701,7 +703,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         gather_tensor = (
             torch.empty(world_size, 2, 2, device=device) if self.rank == 0 else None
         )
-        dist.gather_into_tensor(tensor, gather_tensor, dst=0)
+        dist.gather_single(tensor, gather_tensor, dst=0)
         if self.rank == 0:
             expected = torch.stack(
                 [torch.ones(2, 2, device=device) * r for r in range(world_size)]
@@ -713,7 +715,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         gather_tensor = (
             torch.empty(world_size * elems, device=device) if self.rank == 0 else None
         )
-        work = dist.gather_into_tensor(tensor, gather_tensor, dst=0, async_op=True)
+        work = dist.gather_single(tensor, gather_tensor, dst=0, async_op=True)
         work.wait()
         if self.rank == 0:
             expected = torch.arange(world_size * elems, device=device).float()
@@ -726,10 +728,10 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             good_input = torch.arange(elems, device=device).float()
             with self.assertRaises((ValueError, RuntimeError)):
                 bad_size = torch.empty(world_size * elems + 1, device=device)
-                dist.gather_into_tensor(good_input, bad_size, dst=0)
+                dist.gather_single(good_input, bad_size, dst=0)
             with self.assertRaises((ValueError, RuntimeError)):
                 bad_dtype = torch.empty(world_size * elems, device=device).double()
-                dist.gather_into_tensor(good_input, bad_dtype, dst=0)
+                dist.gather_single(good_input, bad_dtype, dst=0)
         dist.barrier()
 
         # NOTE: on NVIDIA (NCCL >= 2.28.3) this exercises the native ncclGather
@@ -1079,11 +1081,11 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         )
         dist.init_process_group(**opts)
         pg = dist.distributed_c10d._get_default_group()
-        bankend = pg._get_backend(torch.device(f"cuda:{self.rank}"))
+        backend = dist.get_backend_impl(device=torch.device(f"cuda:{self.rank}"))
         w = pg.allreduce(torch.rand(10).cuda(self.rank))
-        self.assertTrue(bankend._verify_work_timeout(w, timedelta(seconds=123)))
+        self.assertEqual(w.timeout, timedelta(seconds=123))
         w.wait()
-        bankend._set_default_timeout(timedelta(seconds=3))
+        backend._set_default_timeout(timedelta(seconds=3))
         if self.rank == 0:
             # Ideally we want to sleep for a very long time, but this is not
             # feasible in unit test. So this is only a very tiny case.
@@ -1092,7 +1094,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             time.sleep(5)
             pg.allreduce(torch.rand(5).cuda(self.rank))
             w = pg.allreduce(torch.rand(10).cuda(self.rank))
-            self.assertTrue(bankend._verify_work_timeout(w, timedelta(seconds=3)))
+            self.assertEqual(w.timeout, timedelta(seconds=3))
             w.wait()
         else:
             dist.distributed_c10d._add_ephemeral_timeout_for_all_pgs(
@@ -1100,8 +1102,8 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             )
             w1 = pg.allreduce(torch.rand(10).cuda(self.rank))
             w2 = pg.allreduce(torch.rand(5).cuda(self.rank))
-            self.assertTrue(bankend._verify_work_timeout(w1, timedelta(seconds=13)))
-            self.assertTrue(bankend._verify_work_timeout(w2, timedelta(seconds=13)))
+            self.assertEqual(w1.timeout, timedelta(seconds=13))
+            self.assertEqual(w2.timeout, timedelta(seconds=13))
             w1.wait()
             dist.distributed_c10d._add_ephemeral_timeout_for_all_pgs(
                 timedelta(seconds=5)
@@ -1110,7 +1112,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             # for watchdog to reset first timeout extension.
             torch.cuda.synchronize(torch.device(f"cuda:{self.rank}"))
             w = pg.allreduce(torch.rand(10).cuda(self.rank))
-            self.assertTrue(bankend._verify_work_timeout(w, timedelta(seconds=8)))
+            self.assertEqual(w.timeout, timedelta(seconds=8))
             w.wait()
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
@@ -1221,6 +1223,50 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         ng2 = c10d.split_group(pg, [subg_ranks])
         self.assertEqual(ng2.group_desc, "default_pg:split:1")
         self.assertEqual(backend.comm_split_count(), 2)
+
+        dist.destroy_process_group()
+
+    @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    def test_comm_split_world_pg_created_after_another_nccl_pg(self):
+        # Regression test: ProcessGroupNCCL::groupRanks() used to derive the
+        # identity rank mapping only when local_id_ == 0. local_id_ is a
+        # process-global counter over every ProcessGroupNCCL constructed in the
+        # process, so a default pg built after any other nccl pg (e.g. a
+        # stateless pg, one inherited across fork, or an earlier
+        # init_process_group that was destroyed) fell through to its empty
+        # global_ranks_in_group, and split() then indexed that empty vector and
+        # segfaulted on a null data pointer.
+        store = c10d.FileStore(self.file_name, self.world_size)
+        device = torch.device(f"cuda:{self.rank}")
+        # (1) burn local_id_ == 0 on an unrelated nccl pg.
+        c10d.init_process_group(
+            "nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=c10d.PrefixStore("prior", store),
+        )
+        dist.destroy_process_group()
+        # (2) the real default pg -> global_ranks_in_group empty.
+        c10d.init_process_group(
+            "nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=c10d.PrefixStore("world", store),
+            pg_options=self.opts(),
+            device_id=device,
+        )
+        pg = c10d.distributed_c10d._get_default_group()
+
+        ranks = list(range(self.world_size))
+        ng = c10d.split_group(pg, [ranks])
+        self.assertIsNotNone(ng)
+        self.assertEqual(dist.get_process_group_ranks(ng), ranks)
+        self.assertEqual(ng._get_backend(device).options.global_ranks_in_group, ranks)
+
+        tensor = torch.full((1,), self.rank).cuda(device)
+        dist.broadcast(tensor, 0, group=ng)
+        self.assertEqual(tensor, torch.full((1,), 0))
 
         dist.destroy_process_group()
 
@@ -4780,6 +4826,82 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         self._test_pass_nccl_options(pg_opts)
 
     @requires_nccl()
+    @requires_nccl_version(
+        (2, 27, 3), "Need NCCL 2.27.3+ for testing comm_name in ncclConfig_t"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_pass_nccl_options_config_comm_name(self):
+        nccl_cfg = c10d.ProcessGroupNCCL.NCCLConfig()
+        if not hasattr(nccl_cfg, "comm_name"):
+            raise SkipTest(
+                "comm_name binding absent (PyTorch might be built against NCCL < 2.27.3)"
+            )
+        pg_opts = c10d.ProcessGroupNCCL.Options()
+        new_comm_name = "test_comm"
+        pg_opts.config.comm_name = new_comm_name
+        self.assertEqual(pg_opts.config.comm_name, new_comm_name)
+        os.environ["NCCL_DEBUG"] = "INFO"
+        with tempfile.NamedTemporaryFile() as nccl_debug_file:
+            os.environ["NCCL_DEBUG_FILE"] = nccl_debug_file.name
+            # Tests functionality when passing nccl config
+            self._test_pass_nccl_options(pg_opts)
+            nccl_debug_file_content = nccl_debug_file.read()
+        comm_name = re.search(
+            rb"Comm config Comm name set to (.*)|$", nccl_debug_file_content
+        ).group(1)
+        self.assertEqual(pg_opts.config.comm_name, comm_name.decode())
+
+    @requires_nccl()
+    @requires_nccl_version(
+        (2, 27, 3), "Need NCCL 2.27.3+ for testing comm_name in ncclConfig_t"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_comm_name_defaults_to_group_desc_and_name(self):
+        # When the user does not set config.comm_name, ProcessGroupNCCL populates
+        # it with "<group_desc>:<group_name>" so the NCCL profiler / Inspector can
+        # recover the group semantics.
+        nccl_cfg = c10d.ProcessGroupNCCL.NCCLConfig()
+        if not hasattr(nccl_cfg, "comm_name"):
+            raise SkipTest(
+                "comm_name binding absent (PyTorch might be built against NCCL < 2.27.3)"
+            )
+        store = c10d.FileStore(self.file_name, self.world_size)
+        os.environ["NCCL_DEBUG"] = "INFO"
+        with tempfile.NamedTemporaryFile() as nccl_debug_file:
+            os.environ["NCCL_DEBUG_FILE"] = nccl_debug_file.name
+            dist.init_process_group(
+                "nccl", world_size=self.world_size, rank=self.rank, store=store
+            )
+            pg = c10d.new_group([0, 1], group_desc="test_desc")
+            t = torch.tensor([self.rank + 1] * 10).cuda(self.rank)
+            pg.allreduce(t).wait()
+            dist.barrier()
+            nccl_debug_file_content = nccl_debug_file.read()
+        comm_names = [
+            n.strip().decode()
+            for n in re.findall(
+                rb"Comm config Comm name set to (.*)", nccl_debug_file_content
+            )
+        ]
+        self.assertIn(f"{pg.group_desc}:{pg.group_name}", comm_names)
+
+    @requires_nccl()
+    @requires_nccl_version(
+        (2, 31, 2), "Need NCCL 2.31.2+ for testing host_cft_mode in ncclConfig_t"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_pass_nccl_options_config_host_cft_mode(self):
+        pg_opts = c10d.ProcessGroupNCCL.Options()
+        # The binding is gated on the same NCCL version as the decorator above.
+        self.assertTrue(hasattr(pg_opts.config, "host_cft_mode"))
+        # ncclHostCftFallback: create the CFT logical endpoints if possible,
+        # silently disable host-side CFT if the hardware can't.
+        pg_opts.config.host_cft_mode = 3
+        self.assertEqual(pg_opts.config.host_cft_mode, 3)
+        # Tests functionality when passing nccl config
+        self._test_pass_nccl_options(pg_opts)
+
+    @requires_nccl()
     @skip_if_lt_x_gpu(4)
     def test_nccl_barrier(self):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -4964,6 +5086,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
+    @skip_if_rocm_ver_atleast_multiprocess([7, 14])
     @parametrize("use_python_export", [False, True])
     def test_profiler_nccl_annotations_on_gpu_kernels(self, use_python_export):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -7520,6 +7643,113 @@ class ProcessGroupNCCLLargerScaleTest(MultiProcessTestCase):
         torch.cuda.synchronize()
         # This must not hang.
         dist.destroy_process_group()
+
+
+@unittest.skipIf(TEST_WITH_ROCM, "NCCL symmetric memory is not supported on ROCm")
+class SymmMemCftHandleTest(MultiProcessTestCase):
+    """Host-side NCCL CFT logical-endpoint handles exposed on _SymmetricMemory.
+
+    These are the `(le_id, le_offset)` coordinates a custom kernel feeds to the
+    device-side `ncclCft` put/get/red family, so the handle only means anything
+    for the group it was rendezvoused with.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        # The backend has to be chosen before the child processes start.
+        # `set_backend` cannot do it: by the time a test body runs the
+        # allocator has already been handed out once and it refuses to swap.
+        # TORCH_SYMMMEM is read at static-init time instead, and spawn passes
+        # the environment down.
+        backend = "CUDA" if self._testMethodName.endswith("wrong_backend") else "NCCL"
+        os.environ["TORCH_SYMMMEM"] = backend
+        self.addCleanup(os.environ.pop, "TORCH_SYMMMEM", None)
+        self._spawn_processes()
+
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @property
+    def device(self) -> torch.device:
+        return torch.device("cuda", self.rank)
+
+    def _init_process(self):
+        # Checked here rather than with a class decorator: the p2p probe calls
+        # into torch.cuda, and at class-definition time that would initialize a
+        # CUDA context on the main process, which this file asserts against.
+        if not PLATFORM_SUPPORTS_SYMM_MEM:
+            raise SkipTest("Test requires SymmMem support")
+        for peer in range(self.world_size):
+            if peer == self.rank:
+                continue
+            if not torch._C._cuda_canDeviceAccessPeer(self.rank, peer):
+                raise SkipTest("Test requires p2p access")
+
+        torch.cuda.set_device(self.device)
+        pg_opts = dist.ProcessGroupNCCL.Options()
+        # ncclHostCftFallback: create the CFT logical endpoints if the hardware
+        # allows, otherwise silently proceed without them. The endpoints are
+        # made during window registration, i.e. inside rendezvous, so this has
+        # to be set before the communicator exists.
+        pg_opts.config.host_cft_mode = 3
+        dist.init_process_group(
+            backend="nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=dist.FileStore(self.file_name, self.world_size),
+            pg_options=pg_opts,
+            device_id=self.device,
+        )
+        self.addCleanup(dist.destroy_process_group)
+        # The NCCL backend rendezvous looks the communicator up rather than
+        # creating it, so force it into existence first (see test_nccl.py).
+        dist.all_reduce(torch.ones(1, device=self.device))
+        t = symm_mem.empty(1024, dtype=torch.float32, device=self.device)
+        return symm_mem.rendezvous(t, group=dist.group.WORLD.group_name)
+
+    @requires_nccl()
+    @requires_nccl_version((2, 31, 2), "Need NCCL 2.31.2+ for host-side CFT")
+    @skip_if_lt_x_gpu(2)
+    def test_get_cft_handle(self) -> None:
+        hdl = self._init_process()
+        self.assertEqual(symm_mem.get_backend(self.device), "NCCL")
+        _, self_le_offset = hdl.get_peer_cft_handle(self.rank)
+
+        le_ids = set()
+        for peer in range(self.world_size):
+            le_id, le_offset = hdl.get_peer_cft_handle(peer)
+            self.assertNotIn(le_id, le_ids, f"peer {peer} reuses le_id {le_id}")
+            le_ids.add(le_id)
+            # Every rank maps the buffer at the same offset in the symmetric
+            # space, so only the endpoint varies from peer to peer.
+            self.assertEqual(le_offset, self_le_offset)
+
+        with self.assertRaisesRegex(RuntimeError, "invalid peer"):
+            hdl.get_peer_cft_handle(self.world_size)
+        with self.assertRaisesRegex(RuntimeError, "invalid peer"):
+            hdl.get_peer_cft_handle(-1)
+
+        try:
+            # Collective on first call unless the endpoint was created eagerly
+            # at window registration, so every rank has to reach this.
+            _, mc_le_offset = hdl.get_multimem_cft_handle()
+            self.assertEqual(mc_le_offset, self_le_offset)
+        except RuntimeError:
+            # NCCL disables CFT multicast when NVLS is unavailable, uniformly
+            # across ranks, so nobody is left waiting in the collective above.
+            pass
+
+    @requires_nccl()
+    @requires_nccl_version((2, 31, 2), "Need NCCL 2.31.2+ for host-side CFT")
+    @skip_if_lt_x_gpu(2)
+    def test_get_cft_handle_wrong_backend(self) -> None:
+        hdl = self._init_process()
+        self.assertEqual(symm_mem.get_backend(self.device), "CUDA")
+        with self.assertRaisesRegex(RuntimeError, "only available on the NCCL"):
+            hdl.get_peer_cft_handle(0)
+        with self.assertRaisesRegex(RuntimeError, "only available on the NCCL"):
+            hdl.get_multimem_cft_handle()
 
 
 if __name__ == "__main__":
