@@ -285,6 +285,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
         self.assertIsNone(_re.search(r"\b__dunder_add_kernel_0\b", code))
         self.assertIsNotNone(_re.search(r"\b_dunder_add_kernel_0\b", code))
 
+    @inductor_config.patch(strict_signed_zero=True)
     @requires_cuda_and_triton
     def test_dim_max_min_reuse_argreduce_value(self):
         dtypes = [torch.float32, torch.float16]

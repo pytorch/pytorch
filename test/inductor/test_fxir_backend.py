@@ -7,6 +7,7 @@ import itertools
 import operator
 import unittest
 from collections.abc import Callable
+from unittest.mock import MagicMock
 
 import sympy
 
@@ -23,7 +24,7 @@ from torch._inductor import config
 from torch._inductor.async_compile import AsyncCompile, shutdown_compile_workers
 from torch._inductor.codegen.cpp import CppScheduling
 from torch._inductor.codegen.triton import TritonScheduling
-from torch._inductor.codegen.wrapper import PythonWrapperCodegen
+from torch._inductor.codegen.wrapper import PythonWrapperCodegen, UnbackedSymbolDefsLine
 from torch._inductor.codegen.wrapper_fxir import (
     FxConverter,
     replace_floor_div,
@@ -1497,6 +1498,24 @@ class TestReplaceFloorDiv(InductorTestCase):
         x, y = sympy.symbols("x y")
         expr = sympy.floor(-FloorDiv(x * y, 2) / FloorDiv(-x * y, 131070))
         self._check(expr)
+
+
+class TestUnbackedSymbolDefs(InductorTestCase):
+    """Tests for FxConverter._generate_unbacked_symbol_defs."""
+
+    def test_empty_bindings_returns_before_buffer_lookup(self):
+        # A line with no unbacked symbols must return before the output-buffer
+        # lookup: such kernels are not recorded in buffer_to_node, so the lookup
+        # would KeyError. Fails without the early-return guard, passes with it.
+        conv = MagicMock(spec=FxConverter)
+        conv.gm = MagicMock()
+        conv.buffer_to_node = {}
+        line = MagicMock(spec=UnbackedSymbolDefsLine)
+        # output_name is set so that, absent the guard, the buffer_to_node lookup
+        # is actually reached and raises KeyError (its documented failure mode).
+        line.output_name = "buf0"
+        line.unbacked_bindings = {}
+        self.assertIsNone(FxConverter._generate_unbacked_symbol_defs(conv, line))
 
 
 if __name__ == "__main__":
