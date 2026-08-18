@@ -247,7 +247,6 @@ class TestCheckpointReaderDevice(TestCase):
 instantiate_device_type_tests(
     TestCheckpointReaderDevice,
     globals(),
-    except_for=("cpu",),
 )
 
 if __name__ == "__main__":
