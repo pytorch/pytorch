@@ -3735,10 +3735,10 @@ def linear_cross_entropy(
         linear_weight (Tensor) : linear weight.
         target (Tensor) : Ground truth class indices or class probabilities.
             With ``options != None``, class probabilities use the chunked
-            path for ``reduction`` ``'mean'`` / ``'sum'`` when the target
-            dtype matches the ``input`` dtype and the target does not
-            require grad; other probability-target configurations fall
-            back to the reference implementation with a warning
+            path when the target dtype matches the ``input`` dtype and the
+            target does not require grad; other probability-target
+            configurations fall back to the reference implementation with a
+            warning
             (gradients w.r.t. the target are only available on the
             reference path).
         linear_bias (Tensor, optional): bias added to the linear
@@ -3747,7 +3747,8 @@ def linear_cross_entropy(
             With ``options != None``, K-dimensional bias
             (``out_features != ()``) falls back to the reference
             implementation with a warning; the chunked path supports
-            only ``(C,)``-shaped bias. Default: ``None``.
+            ``(C,)``-shaped bias with both class-index and probability
+            targets. Default: ``None``.
         weight (Tensor, optional): a manual rescaling weight given to each class.
         reduction (str, optional): Specifies the reduction to apply to
             the output: ``'none'`` | ``'mean'`` |
@@ -3890,12 +3891,10 @@ def linear_cross_entropy(
         )
     ignore_index = ignore_index if ignore_index is not None else -100
 
-    # Probability targets chunk on the scalar reductions only; the chunked
-    # op has no gradient slot for the target, so a target requiring grad
-    # falls back to the reference path.
+    # The chunked op has no gradient slot for the target, so a probability
+    # target requiring grad falls back to the reference path.
     chunkable_prob_target = (
         target_contains_probabilities
-        and reduction in {"mean", "sum"}
         and target.dtype == input.dtype
         and not (target.requires_grad and torch.is_grad_enabled())
     )
@@ -3911,9 +3910,8 @@ def linear_cross_entropy(
         warnings.warn(
             "linear_cross_entropy: ``options`` ignored; chunked path needs "
             "reduction in {'mean','sum','none'}, label_smoothing == 0, target.dtype"
-            " == int64 (or a probability target with reduction in {'mean','sum'},"
-            " dtype matching input, and requires_grad == False), out_features"
-            " == (). Got "
+            " == int64 (or a probability target with dtype matching input and"
+            " requires_grad == False), out_features == (). Got "
             f"reduction={reduction!r}, label_smoothing={label_smoothing}, "
             f"target.dtype={target.dtype}, out_features={tuple(out_features)}"
             f", tracing={torch.jit.is_tracing()}"
@@ -5309,6 +5307,20 @@ def interpolate(  # noqa: F811
                 align_corners,
                 scale_factors,
             )
+        # Use two nested guards so TorchScript does not analyze the runtime
+        # deterministic-algorithms query or the dynamic import below.
+        if not torch.jit.is_scripting():
+            # Select the decomposition during forward so autograd records its
+            # deterministic backward. The native CPU backward is deterministic.
+            if not input.is_cpu and torch.are_deterministic_algorithms_enabled():
+                # The decomposition accumulates through deterministic index_put.
+                # Import it lazily: a top-level import creates a cycle, while a
+                # nested import statement is unsupported by TorchScript.
+                return importlib.import_module(
+                    "torch._decomp.decompositions"
+                ).upsample_bicubic2d_vec(
+                    input, output_size, align_corners, scale_factors
+                )
         return torch._C._nn.upsample_bicubic2d(
             input,
             # pyrefly: ignore [bad-argument-type]
