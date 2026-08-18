@@ -3585,7 +3585,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         buffer_read_indices: dict[
             str, list[tuple[sympy.Expr, tuple[sympy.Symbol, ...]]]
         ] = collections.defaultdict(list)
-        for node in NodeScheduleMarker.only_nodes(self.features.node_schedule):
+        for node in NodeScheduleMarker.only_nodes(self.features.indexing_node_schedule):
             for dep in node.read_writes.reads:
                 if not hasattr(dep, "var_names"):
                     if hasattr(dep, "name"):
@@ -6259,7 +6259,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     ) -> None:
         """Split a trailing axis into a power-of-two number of lanes."""
         factor = len(names)
-        assert factor > 1 and factor & (factor - 1) == 0  # noqa: S101
+        if factor <= 1 or factor & (factor - 1) != 0:
+            raise AssertionError(f"split factor must be a power of two: {factor}")
         is_float8 = dtype in TRITON_FLOAT8_DTYPES
         if factor == 2:
             if not is_float8:
@@ -6298,7 +6299,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     ) -> None:
         """Reshape ``value`` to expose the trailing lane axis, then split it."""
         dtype = value.dtype
-        assert dtype is not None  # noqa: S101
+        if dtype is None:
+            raise AssertionError("split value must have a known dtype")
         expr = self._bitcast_reshape_expr(value, reshape_shape, dtype)
         split_shape: Sequence[sympy.Expr | int | str] = reshape_shape
         if permute_dims is not None:
@@ -8487,12 +8489,15 @@ class TritonScheduling(SIMDScheduling):
             # TODO(jansel): scan does not yet work with cooperative reductions
             kernel_kwargs["override_cooperative_reduction"] = False
 
+        disable_multi_kernel = kernel_kwargs.pop("disable_multi_kernel", False)
         kernel_type.apply_feature_required_overrides(kernel_features, kernel_kwargs)
 
         kernel_kwargs = V.choices.triton_kernel_kwargs(
             kernel_type, kernel_features, kernel_args, kernel_kwargs
         )
         kernel = kernel_type(*kernel_args, **kernel_kwargs)
+        if disable_multi_kernel:
+            return [kernel]
         return self.add_multi_kernel_choices(kernel, kernel_args, kernel_kwargs)
 
     def add_multi_kernel_choices(
