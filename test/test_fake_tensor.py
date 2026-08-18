@@ -3148,47 +3148,6 @@ class FakeTensorOperatorInvariants(TestCase):
         self.assertTrue(is_fake_tensor(out))
         self.assertEqual(out.device, gpu_device)
 
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_move_meta_tensor(self):
-        if torch._functorch.config.fake_tensor_propagate_real_tensors:
-            self.skipTest("Propagate real tensor not supported")
-
-        meta_tensor = torch.ones(2, device="meta")
-        with FakeTensorMode(allow_non_fake_inputs=True):
-            self.assertEqual(meta_tensor.to(device="cpu").device.type, "cpu")
-            self.assertEqual(meta_tensor.to(device=GPU_TYPE).device.type, GPU_TYPE)
-
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_conv_c1_backward(self):
-        class Repro(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-
-            def forward(self, arg1, arg2, arg3):
-                torch.ops.aten.convolution_backward.default(
-                    arg1,
-                    arg2,
-                    arg3,
-                    [1],
-                    [1, 1],
-                    [1, 1],
-                    [1, 1],
-                    False,
-                    [0, 0],
-                    1,
-                    [True, True, False],
-                )
-
-        args_new = [
-            ((16, 1, 128, 128), (16384, 16384, 128, 1), torch.float16, "cuda"),
-            ((16, 64, 128, 128), (1048576, 1, 8192, 64), torch.float16, "cuda"),
-            ((1, 64, 3, 3), (576, 9, 3, 1), torch.float16, "cuda"),
-        ]
-        args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args_new]
-
-        with torch._subclasses.CrossRefFakeMode():
-            Repro()(*args)
-
     def test_convolution_backward_channels_last_memory_format(self):
         """Regression test: meta convolution_backward must predict channels_last
         output strides when inputs are channels_last, matching CUDA/MPS backends.
@@ -3255,27 +3214,6 @@ class FakeTensorOperatorInvariants(TestCase):
         self.assertEqual(mode.count, 0)
 
     # PropagateRealTensors installs weakrefs
-    @unittest.skipIf(
-        IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW,
-        "https://github.com/pytorch/pytorch/issues/165387",
-    )
-    @expectedFailurePropagateRealTensors
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_module_to(self):
-        def _check_device(sd, device_type):
-            for v in sd.values():
-                self.assertEqual(v.device.type, device_type)
-
-        with FakeTensorMode():
-            m = torch.nn.Linear(2, 2)
-            _check_device(m.state_dict(), "cpu")
-            m.to("cuda")
-            _check_device(m.state_dict(), "cuda")
-
-
-make_propagate_real_tensors_cls(FakeTensorOperatorInvariants)
-
-
 class FakeTensorPropTest(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -4411,6 +4349,76 @@ class FakeTensorDispatchCacheCUDA(TestCase):
         self.assertFalse(fake_wrapped_a.inner_tensor.is_cpu)
 
 
+
+
+class FakeTensorOperatorInvariantsCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_move_meta_tensor(self):
+        if torch._functorch.config.fake_tensor_propagate_real_tensors:
+            self.skipTest("Propagate real tensor not supported")
+
+        meta_tensor = torch.ones(2, device="meta")
+        with FakeTensorMode(allow_non_fake_inputs=True):
+            self.assertEqual(meta_tensor.to(device="cpu").device.type, "cpu")
+            self.assertEqual(meta_tensor.to(device=GPU_TYPE).device.type, GPU_TYPE)
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_conv_c1_backward(self):
+        class Repro(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, arg1, arg2, arg3):
+                torch.ops.aten.convolution_backward.default(
+                    arg1,
+                    arg2,
+                    arg3,
+                    [1],
+                    [1, 1],
+                    [1, 1],
+                    [1, 1],
+                    False,
+                    [0, 0],
+                    1,
+                    [True, True, False],
+                )
+
+        args_new = [
+            ((16, 1, 128, 128), (16384, 16384, 128, 1), torch.float16, "cuda"),
+            ((16, 64, 128, 128), (1048576, 1, 8192, 64), torch.float16, "cuda"),
+            ((1, 64, 3, 3), (576, 9, 3, 1), torch.float16, "cuda"),
+        ]
+        args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args_new]
+
+        with torch._subclasses.CrossRefFakeMode():
+            Repro()(*args)
+
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW,
+        "https://github.com/pytorch/pytorch/issues/165387",
+    )
+    @expectedFailurePropagateRealTensors
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_module_to(self):
+        def _check_device(sd, device_type):
+            for v in sd.values():
+                self.assertEqual(v.device.type, device_type)
+
+        with FakeTensorMode():
+            m = torch.nn.Linear(2, 2)
+            _check_device(m.state_dict(), "cpu")
+            m.to("cuda")
+            _check_device(m.state_dict(), "cuda")
+
+
+make_propagate_real_tensors_cls(FakeTensorOperatorInvariants)
+
+
+
+
+make_propagate_real_tensors_cls(FakeTensorOperatorInvariantsCUDA)
 
 if __name__ == "__main__":
     run_tests()
