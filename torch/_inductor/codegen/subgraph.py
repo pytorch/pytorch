@@ -272,7 +272,8 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
             return bm_func([*sym_inputs, *args])
 
         if self._benchmark_with_cudagraphs:
-            return benchmarker.benchmark_gpu_with_cuda_graph(fn)
+            device = benchmarker.infer_device(*sym_inputs, *args, out)
+            return benchmarker.benchmark_gpu_with_graph(fn, device=device)
 
         if config.profile_bandwidth_with_do_bench_using_profiling:
             return do_bench_using_profiling(fn)
