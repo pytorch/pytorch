@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <optional>
+#include <string>
 #include <unordered_set>
 
 extern "C" {
@@ -266,20 +267,15 @@ static py::object dynamo_call_callback(
     py::handle callback,
     THP_EVAL_API_FRAME_OBJECT* _frame,
     FrameLocalsMapping* locals,
-    CacheEntry* cache_entry,
+    const py::object& cache_entry,
     FrameState* frame_state) {
   THPPyInterpreterFrame* frame = THPPyInterpreterFrame_New(_frame);
   TORCH_CHECK(
       frame, "Dynamo failed to initialize CPython interpreter frame wrapper");
   frame->locals = (PyObject*)framelocals_mapping_to_dict(locals);
 
-  py::object cache_entry_obj = py::none();
-  if (cache_entry) {
-    cache_entry_obj = py::cast(cache_entry, py::return_value_policy::reference);
-  }
-
   py::object result = callback(
-      py::handle((PyObject*)frame), cache_entry_obj, py::handle(frame_state));
+      py::handle((PyObject*)frame), cache_entry, py::handle(frame_state));
   Py_DECREF(frame);
   return result;
 }
@@ -411,7 +407,8 @@ PyObject* dynamo__custom_eval_frame(
 
   // callback to run on recursively invoked frames
   py::handle recursive_callback = callback; // borrowed
-  PyCodeObject* cached_code = nullptr; // borrowed
+  CacheLookupResult cache_lookup_result;
+  PyCodeObject* cached_code = nullptr; // owned by cache_lookup_result
   const char* trace_annotation = "";
   PyObject* eval_result = nullptr; // strong reference
 
@@ -467,7 +464,7 @@ PyObject* dynamo__custom_eval_frame(
     // DebugContextGuard calls __enter__ on construction and __exit__ on
     // destruction, so the debug session is scoped to this eval_custom call.
     std::optional<DebugContextGuard> debug_guard;
-    if (breakpoint_code_objects.count(cached_code) &&
+    if (breakpoint_code_objects.contains(cached_code) &&
         bytecode_debugger_callback_obj == nullptr) {
       auto ctx = py::module_::import("torch._dynamo.bytecode_debugger")
                      .attr("_DebugContext")();
@@ -554,14 +551,12 @@ PyObject* dynamo__custom_eval_frame(
   DEBUG_CHECK(PyDict_CheckExact(frame->f_globals));
   DEBUG_CHECK(PyDict_CheckExact(frame->f_builtins));
 
-  PyObject* maybe_cached_code = nullptr;
   std::unique_ptr<FrameLocalsMapping> locals;
   if (!try_lookup_without_guard_eval(
           extra,
           backend,
           isolate_recompiles_id,
-          &maybe_cached_code,
-          &trace_annotation,
+          &cache_lookup_result,
           is_skip_guard_eval_unsafe)) {
     locals = std::make_unique<FrameLocalsMapping>(frame);
     _PytorchRecordFunctionState* rf =
@@ -571,8 +566,7 @@ PyObject* dynamo__custom_eval_frame(
         locals.get(),
         backend,
         isolate_recompiles_id,
-        &maybe_cached_code,
-        &trace_annotation,
+        &cache_lookup_result,
         is_skip_guard_eval_unsafe);
     _pytorch_record_function_exit(rf);
   }
@@ -586,40 +580,31 @@ PyObject* dynamo__custom_eval_frame(
     DEBUG_TRACE("In run only mode %s", get_frame_name(frame));
   }
 
-  if (maybe_cached_code == nullptr) {
+  if (!cache_lookup_result.code) {
     // guard eval failed, keep propagating
     fail();
     return eval_result;
   }
 
-  // The lookups above hand back a BORROWED pointer and then drop the cache
-  // lock. Everything below can release the GIL -- has_relevant_entries takes
-  // CacheLock, and the guard-collective hook runs Python -- so a concurrent
-  // unload can destroy the entry that owns this code object before
-  // eval_custom() runs it. A precompile entry is often that code object's only
-  // owner, so the result is a freed pointer handed to the interpreter. Own it
-  // for the rest of the frame.
-  py::object cached_code_owner =
-      py::reinterpret_borrow<py::object>(maybe_cached_code);
-
   // NB: We only do guard collectives when there are compiled code entries
   // for the current region (or the default region); this reduces
   // overtriggering and we don't need to do guard collectives the very first
-  // time we've seen a frame in this region. Only the hook consumes this and
-  // computing it takes the cache lock, so it is not worth paying for -- nor
-  // worth opening a GIL-release window for -- on every intercepted frame.
-  if (guard_complete_hook != nullptr &&
-      extra->has_relevant_entries(isolate_recompiles_id)) {
+  // time we've seen a frame in this region.
+  bool has_relevant_entries =
+      extra->has_relevant_entries(isolate_recompiles_id);
+  if (guard_complete_hook != nullptr && has_relevant_entries) {
     py::handle guard_complete_hook_handle(guard_complete_hook);
     // False means force compilation (someone cache missed)
-    py::object res = guard_complete_hook_handle(!Py_IsNone(maybe_cached_code));
+    py::object res =
+        guard_complete_hook_handle(!cache_lookup_result.code.is_none());
     if (!py::cast<bool>(res)) {
-      maybe_cached_code = Py_None; // NB: non-owning
+      cache_lookup_result.code = py::none();
     }
   }
 
-  if (!Py_IsNone(maybe_cached_code)) {
-    cached_code = (PyCodeObject*)maybe_cached_code;
+  if (!cache_lookup_result.code.is_none()) {
+    cached_code = (PyCodeObject*)cache_lookup_result.code.ptr();
+    trace_annotation = cache_lookup_result.trace_annotation.c_str();
     // used cached version
     DEBUG_TRACE("cache hit %s", get_frame_name(frame));
     eval_custom();
@@ -647,7 +632,8 @@ PyObject* dynamo__custom_eval_frame(
   if (locals == nullptr) {
     locals = std::make_unique<FrameLocalsMapping>(frame);
   }
-  CacheEntry* cache_entry = extract_cache_entry(extra, isolate_recompiles_id);
+  py::object cache_entry =
+      extract_cache_entry_snapshot(extra, isolate_recompiles_id);
   py::object frame_state = py::reinterpret_steal<py::object>(
       extract_frame_state(extra, isolate_recompiles_id));
   py::object callback_result;
@@ -705,20 +691,15 @@ PyObject* dynamo__custom_eval_frame(
   if (!Py_IsNone(guarded_code)) {
     DEBUG_TRACE("create cache %s", get_frame_name(frame));
 
-    // NB: We could use extract_cache_entry to get the cache_entry, but
-    // extract_cache_entry returns a borrowed reference. Modifying a borrowed
-    // reference seems wrong. Therefore, we directly access the
-    // extra->cache_entry. extra won't be NULL here.
-    CacheEntry* new_cache_entry =
+    CacheEntrySnapshot new_cache_entry =
         create_cache_entry(extra, guarded_code, backend);
 
-    // Update the existing cache_entry on the extra object. This extra object
-    // is sitting on the extra scratch space, we are just changing the
-    // cache_entry ptr. As a result, extra now becomes the owner of CacheEntry
-    // object. This will be cleaned up when set_extra_state is called.
-    // Re-enable custom behavior
-    cached_code = CacheEntry_get_code(new_cache_entry),
-    trace_annotation = CacheEntry_get_trace_annotation(new_cache_entry);
+    // The returned snapshot owns the Python objects needed after the cache
+    // lock is released.
+    cache_lookup_result.code = new_cache_entry.code;
+    cache_lookup_result.trace_annotation = new_cache_entry.trace_annotation;
+    cached_code = (PyCodeObject*)cache_lookup_result.code.ptr();
+    trace_annotation = cache_lookup_result.trace_annotation.c_str();
     eval_custom();
   } else {
     eval_default();

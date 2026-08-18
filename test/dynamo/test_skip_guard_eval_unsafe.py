@@ -1,5 +1,8 @@
 # Owner(s): ["module: dynamo"]
 
+import queue
+import threading
+
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
@@ -10,6 +13,110 @@ def my_custom_function(x):
 
 
 class RunDiffGuardTests(torch._dynamo.test_case.TestCase):
+    def test_concurrent_diff_guard_replacement_rejects_stale_snapshot(self):
+        from torch._dynamo.eval_frame import _debug_get_cache_entry_list
+        from torch._dynamo.guards import RootGuardManager
+
+        def fn(x):
+            return x + 1
+
+        compiled = torch.compile(fn, backend="eager")
+        x = torch.randn(4)
+        self.assertEqual(compiled(x), fn(x))
+        guard_manager = _debug_get_cache_entry_list(fn)[0].guard_manager
+
+        guard_entered = threading.Event()
+        release_guard = threading.Event()
+
+        def blocking_guard(_locals):
+            guard_entered.set()
+            self.assertTrue(release_guard.wait(10))
+            return True
+
+        old_root = RootGuardManager()
+        old_root.add_lambda_guard(blocking_guard, [], None)
+        guard_manager.cache_entry.update_diff_guard_root_manager(old_root)
+        guard_manager.diff_guard_root = old_root
+
+        errors = queue.SimpleQueue()
+
+        def run_compiled():
+            try:
+                with torch.compiler.set_stance(skip_guard_eval_unsafe=True):
+                    compiled(x)
+            except BaseException as error:
+                errors.put(error)
+
+        worker = threading.Thread(target=run_compiled, daemon=True)
+        worker.start()
+        self.assertTrue(guard_entered.wait(10))
+        new_root = RootGuardManager()
+        new_root.add_lambda_guard(lambda _locals: False, [], None)
+        guard_manager.cache_entry.update_diff_guard_root_manager(new_root)
+        guard_manager.diff_guard_root = new_root
+        release_guard.set()
+        worker.join(10)
+        self.assertFalse(worker.is_alive())
+        raised = errors.get_nowait()
+        self.assertIsInstance(raised, RuntimeError)
+        self.assertIn("Recompilation triggered", str(raised))
+
+    def test_concurrent_false_diff_guard_replacement_rejects_stale_snapshot(self):
+        from torch._dynamo.eval_frame import _debug_get_cache_entry_list
+        from torch._dynamo.guards import RootGuardManager
+
+        def fn(x, flag):
+            return x + 1 if flag else x - 1
+
+        compiled = torch.compile(fn, backend="eager")
+        x = torch.randn(4)
+        self.assertEqual(compiled(x, False), fn(x, False))
+        self.assertEqual(compiled(x, True), fn(x, True))
+        entries = _debug_get_cache_entry_list(fn)
+        self.assertEqual(len(entries), 2)
+        first = entries[0].guard_manager
+        second = entries[1].guard_manager
+
+        guard_entered = threading.Event()
+        release_guard = threading.Event()
+
+        def blocking_false_guard(_locals):
+            guard_entered.set()
+            self.assertTrue(release_guard.wait(10))
+            return False
+
+        old_root = RootGuardManager()
+        old_root.add_lambda_guard(blocking_false_guard, [], None)
+        first.cache_entry.update_diff_guard_root_manager(old_root)
+        first.diff_guard_root = old_root
+        second_root = RootGuardManager()
+        second_root.add_lambda_guard(lambda _locals: True, [], None)
+        second.cache_entry.update_diff_guard_root_manager(second_root)
+        second.diff_guard_root = second_root
+
+        errors = queue.SimpleQueue()
+
+        def run_compiled():
+            try:
+                with torch.compiler.set_stance(skip_guard_eval_unsafe=True):
+                    compiled(x, True)
+            except BaseException as error:
+                errors.put(error)
+
+        worker = threading.Thread(target=run_compiled, daemon=True)
+        worker.start()
+        self.assertTrue(guard_entered.wait(10))
+        new_root = RootGuardManager()
+        new_root.add_lambda_guard(lambda _locals: True, [], None)
+        first.cache_entry.update_diff_guard_root_manager(new_root)
+        first.diff_guard_root = new_root
+        release_guard.set()
+        worker.join(10)
+        self.assertFalse(worker.is_alive())
+        raised = errors.get_nowait()
+        self.assertIsInstance(raised, RuntimeError)
+        self.assertIn("Recompilation triggered", str(raised))
+
     def test_bool_recompile(self):
         def fn(x, y, c):
             if c:

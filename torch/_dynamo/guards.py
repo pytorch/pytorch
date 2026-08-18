@@ -39,7 +39,7 @@ import weakref
 from contextlib import contextmanager
 from copy import deepcopy
 from inspect import currentframe
-from typing import Any, NamedTuple, NoReturn, TYPE_CHECKING
+from typing import Any, cast, NamedTuple, NoReturn, TYPE_CHECKING
 from typing_extensions import LiteralString, TypeAliasType, TypeVar
 from weakref import ReferenceType
 
@@ -169,6 +169,7 @@ from .source import (
 )
 from .types import (  # noqa: F401
     CacheEntry,
+    CacheEntryHandle,
     DynamoFrameType,
     ExtraState,
     GuardedCode,
@@ -215,13 +216,14 @@ except ModuleNotFoundError:
 
 
 if TYPE_CHECKING:
-    from collections.abc import Generator, KeysView, Sequence
+    from collections.abc import Generator, KeysView, Sequence, Sized
 
     from sympy import Symbol
 
     from torch._C import DispatchKeySet
     from torch._dynamo.output_graph import OutputGraphCommon, OutputGraphGuardsState
     from torch._dynamo.package import SerializedCode
+    from torch.utils._python_dispatch import TraceableWrapperSubclass
 
 T = TypeVar("T")
 log = logging.getLogger(__name__)
@@ -233,18 +235,18 @@ recompiles_verbose_log = torch._logging.getArtifactLogger(
 verbose_guards_log = torch._logging.getArtifactLogger(__name__, "verbose_guards")
 
 
-def _sequence_length(value: Any) -> int:
+def _sequence_length(value: object) -> int:
     if isinstance(value, set):
         return set.__len__(value)
     if isinstance(value, frozenset):
         return frozenset.__len__(value)
-    return len(value)
+    return len(cast("Sized", value))
 
 
 _COW_TENSOR_UNSUPPORTED = object()
 
 
-def _try_is_cow_tensor(value: Any) -> bool | object:
+def _try_is_cow_tensor(value: object) -> bool | object:
     if not isinstance(value, torch.Tensor):
         return _COW_TENSOR_UNSUPPORTED
     if torch._C._dispatch_keys(value).has(torch._C.DispatchKey.Python):
@@ -252,7 +254,7 @@ def _try_is_cow_tensor(value: Any) -> bool | object:
     return torch._C._is_cow_tensor(value)  # pyrefly: ignore[missing-attribute]
 
 
-def _cow_tensor_matches(value: Any, expected: Any) -> bool:
+def _cow_tensor_matches(value: object, expected: object) -> bool:
     if not isinstance(expected, bool):
         return False
     actual = _try_is_cow_tensor(value)
@@ -638,7 +640,7 @@ class GuardManagerWrapper:
                 node.mark_tag_safe_root()
 
     def populate_diff_guard_manager(self) -> None:
-        self.diff_guard_root = self.clone_with_chosen_sources(self.diff_guard_sources)
+        diff_guard_root = self.clone_with_chosen_sources(self.diff_guard_sources)
 
         # Ensure that C++ side points to the updated diff guard manager.
         # When a new GuardManagerWrapper is created, it does not have a
@@ -648,7 +650,8 @@ class GuardManagerWrapper:
         # cache_entry is visible, so we update the C++ side to point to the
         # update guard manager.
         if self.cache_entry:
-            self.cache_entry.update_diff_guard_root_manager()
+            self.cache_entry.update_diff_guard_root_manager(diff_guard_root)
+        self.diff_guard_root = diff_guard_root
 
     def clone_with_chosen_sources(
         self, chosen_sources: OrderedSet[str]
@@ -979,7 +982,7 @@ def get_tensor_guard_code_part(
     return guard_str
 
 
-def get_key_index(dct: dict[Any, Any], key: Any) -> int:
+def get_key_index(dct: dict[Any, Any], key: object) -> int:
     # Ensure that we call dict.keys and not value.keys (which can call
     # overridden keys method). In the C++ guards, we relied on PyDict_Next
     # to traverse the dictionary, which uses the internal data structure and
@@ -991,7 +994,7 @@ def get_key_index_source(source: Any, index: Any) -> str:
     return f"list(dict.keys({source}))[{index}]"
 
 
-def raise_local_type_error(obj: Any) -> NoReturn:
+def raise_local_type_error(obj: object) -> NoReturn:
     raise TypeError(
         f"Type {type(obj)} for object {obj} cannot be saved "
         + "into torch.compile() package since it's defined in local scope. "
@@ -999,7 +1002,7 @@ def raise_local_type_error(obj: Any) -> NoReturn:
     )
 
 
-def should_optimize_getattr_on_nn_module(value: Any) -> bool:
+def should_optimize_getattr_on_nn_module(value: object) -> bool:
     return isinstance(value, torch.nn.Module)
 
 
@@ -1166,11 +1169,14 @@ def _validate_default_subclass_metadata_guard(metadata: Any, cls: type[Any]) -> 
     )
 
 
-# Used by TENSOR_SUBCLASS_METADATA_MATCH guard check spec
-def extract_subclass_metadata(guard: Any, value: Any) -> tuple[Any, ...]:
+# Used by TENSOR_SUBCLASS_METADATA_MATCH guard check spec.
+# Unlike check_dtensor_spec below, this pair is only reached at trace time:
+# TENSOR_SUBCLASS_METADATA_MATCH has its own inlined metadata_checker closure
+# for the C++ path, so narrowing with a typing.cast is free here.
+def extract_subclass_metadata(guard: Any, value: object) -> tuple[Any, ...]:
     cls = type(value)
     has_custom_guard = hasattr(value, "__metadata_guard__")
-    metadata = value.__tensor_flatten__()[1]
+    metadata = cast("TraceableWrapperSubclass", value).__tensor_flatten__()[1]
     if not has_custom_guard:
         _validate_default_subclass_metadata_guard(metadata, cls)
     metadata = deepcopy(metadata)
@@ -1178,25 +1184,30 @@ def extract_subclass_metadata(guard: Any, value: Any) -> tuple[Any, ...]:
 
 
 # Used by TENSOR_SUBCLASS_METADATA_MATCH guard check spec
-def check_subclass_metadata(value: Any, metadata: tuple[Any, ...]) -> bool:
+def check_subclass_metadata(value: object, metadata: tuple[Any, ...]) -> bool:
     saved_metadata, cls, has_custom_guard = metadata
+    subclass_metadata = cast("TraceableWrapperSubclass", value).__tensor_flatten__()[1]
     if has_custom_guard:
-        return cls.__metadata_guard__(saved_metadata, value.__tensor_flatten__()[1])
-    return value.__tensor_flatten__()[1] == saved_metadata
+        return cls.__metadata_guard__(saved_metadata, subclass_metadata)
+    return subclass_metadata == saved_metadata
 
 
 # Used by DTENSOR_SPEC_MATCH guard check spec
-def extract_dtensor_spec(guard: Any, value: Any) -> Any:
+def extract_dtensor_spec(guard: Any, value: object) -> Any:
     return deepcopy(value)
 
 
 # Used by DTENSOR_SPEC_MATCH guard check spec
-def check_dtensor_spec(value: Any, metadata: Any) -> bool:
+def check_dtensor_spec(value: object, metadata: Any) -> bool:
+    # DTENSOR_SPEC_MATCH's lambda guard calls this on every guard evaluation,
+    # so narrow with a suppression rather than a typing.cast, which would be a
+    # real call on the check path.
+    # pyrefly: ignore[missing-attribute]
     return value._check_equals(metadata, skip_shapes=True)
 
 
 # Used by OPAQUE_OBJ_GUARD_FN_MATCH guard check spec
-def extract_opaque_obj(guard: Any, value: Any) -> Any:
+def extract_opaque_obj(guard: Any, value: object) -> Any:
     opaque_info = get_opaque_obj_info(type(value))
     if not opaque_info or not opaque_info.guard_fn:
         return None
@@ -1204,7 +1215,7 @@ def extract_opaque_obj(guard: Any, value: Any) -> Any:
 
 
 # Used by OPAQUE_OBJ_GUARD_FN_MATCH guard check spec
-def check_opaque_obj(value: Any, metadata: Any) -> bool:
+def check_opaque_obj(value: object, metadata: Any) -> bool:
     if metadata is None:
         return True
     opaque_info = get_opaque_obj_info(type(value))
@@ -1214,20 +1225,20 @@ def check_opaque_obj(value: Any, metadata: Any) -> bool:
 
 
 # Used by CLOSURE_MATCH guard check spec
-def extract_closure(guard: Any, value: Any) -> Any:
+def extract_closure(guard: Any, value: object) -> Any:
     if type(value) is types.FunctionType and hasattr(value, "__code__"):
         return value.__code__
     return id(value)
 
 
 # Used by CLOSURE_MATCH guard check spec
-def check_closure(value: Any, metadata: Any) -> bool:
+def check_closure(value: object, metadata: Any) -> bool:
     if type(value) is types.FunctionType and hasattr(value, "__code__"):
         return value.__code__ is metadata
     return id(value) == metadata
 
 
-def _constant_subclass_base_value(value: Any) -> Any:
+def _constant_subclass_base_value(value: object) -> Any:
     """Extract the base constant value from a constant subclass instance."""
     from .variables.user_defined import _CONSTANT_BASE_TYPES
 
@@ -1302,8 +1313,9 @@ class GuardBuilder(GuardBuilderBase):
         check_fn_manager: CheckFunctionManager,
         save_guards: bool = False,
         runtime_global_scope: dict[str, object] | None = None,
-        guard_filter_fn: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]]
-        | None = None,
+        guard_filter_fn: (
+            Callable[[Sequence[GuardFilterEntry]], Sequence[bool]] | None
+        ) = None,
     ) -> None:
         self.f_code = f_code
         self.id_ref = id_ref
@@ -1628,11 +1640,9 @@ class GuardBuilder(GuardBuilderBase):
     def get_guard_manager_type(
         self,
         source: Source,
-        example_value: KeysView[Any]
-        | set[Any]
-        | frozenset[Any]
-        | dict[Any, Any]
-        | None,
+        example_value: (
+            KeysView[Any] | set[Any] | frozenset[Any] | dict[Any, Any] | None
+        ),
     ) -> GuardManagerType:
         guard_manager_enum = GuardManagerType.GUARD_MANAGER
         if self.requires_key_order_guarding(source):
@@ -2466,7 +2476,7 @@ class GuardBuilder(GuardBuilderBase):
         get_metadata_fn=lambda guard, value: _guard_create_fn_keyword(guard, "key"),
         eval_fn=lambda value, metadata: metadata in value,
     )
-    def SET_CONTAINS(self, guard: Guard, key: Any) -> None:
+    def SET_CONTAINS(self, guard: Guard, key: object) -> None:
         set_ref = self.arg_ref(guard)
         item = key
 
@@ -2488,7 +2498,7 @@ class GuardBuilder(GuardBuilderBase):
         get_metadata_fn=lambda guard, value: _guard_create_fn_keyword(guard, "key"),
         eval_fn=lambda value, metadata: metadata not in value,
     )
-    def SET_NOT_CONTAINS(self, guard: Guard, key: Any) -> None:
+    def SET_NOT_CONTAINS(self, guard: Guard, key: object) -> None:
         set_ref = self.arg_ref(guard)
         item = key
 
@@ -2537,7 +2547,7 @@ class GuardBuilder(GuardBuilderBase):
         if not isinstance(expected, bool):
             raise AssertionError("COW_TENSOR_MATCH requires a plain Tensor")
 
-        def guard_fn(x: Any) -> bool:
+        def guard_fn(x: object) -> bool:
             return _cow_tensor_matches(x, expected)
 
         code = f"___cow_tensor_matches({self.arg_ref(guard)}, {expected!r})"
@@ -2616,7 +2626,7 @@ class GuardBuilder(GuardBuilderBase):
         get_metadata_fn=lambda guard, value: None,
         eval_fn=lambda value, metadata: value is not None,
     )
-    def NOT_NONE_MATCH(self, guard: Guard, value: Any | None = None) -> None:
+    def NOT_NONE_MATCH(self, guard: Guard, value: object | None = None) -> None:
         ref = self.arg_ref(guard)
         val = self.get(guard)
         if not isinstance(val, torch.Tensor):
@@ -2676,7 +2686,7 @@ class GuardBuilder(GuardBuilderBase):
         # TODO(anijain2305) - Consider this moving this guard to C++
         compare_fn = torch._functorch.pyfunctorch.compare_functorch_state
 
-        def fn(x: Any) -> bool:
+        def fn(x: object) -> bool:
             return compare_fn(states)
 
         self.guard_manager.root.add_lambda_guard(
@@ -2706,7 +2716,7 @@ class GuardBuilder(GuardBuilderBase):
         ]
         self._set_guard_export_info(guard, code)
 
-        def fn(x: Any) -> bool:
+        def fn(x: object) -> bool:
             return guard_hooks_ids == hooks_ids_fn(get_hooks())
 
         self.guard_manager.root.add_lambda_guard(
@@ -2740,16 +2750,21 @@ class GuardBuilder(GuardBuilderBase):
         original_metadata = deepcopy(
             pytree.tree_map_only(torch.SymInt, lambda _: _AnyCompare(), metadata)
         )
+        # Either arm runs on every guard evaluation, so they narrow the opaque
+        # guarded value with a suppression rather than a typing.cast, which
+        # would be a real call on the check path.
         if has_custom_guard:
 
-            def metadata_checker(x: Any) -> bool:
+            def metadata_checker(x: object) -> bool:
                 return cls.__metadata_guard__(
-                    original_metadata, x.__tensor_flatten__()[1]
+                    original_metadata,
+                    x.__tensor_flatten__()[1],  # pyrefly: ignore[missing-attribute]
                 )
 
         else:
 
-            def metadata_checker(x: Any) -> bool:
+            def metadata_checker(x: object) -> bool:
+                # pyrefly: ignore[missing-attribute]
                 return x.__tensor_flatten__()[1] == original_metadata
 
         global_name = f"___check_metadata_{id(metadata_checker)}_c{CompileContext.current_compile_id()}"
@@ -2768,7 +2783,7 @@ class GuardBuilder(GuardBuilderBase):
         # TODO - Consider moving this to C++ if stable
         expected = extract_dtensor_spec(guard, self.get(guard))
 
-        def guard_fn(x: Any) -> bool:
+        def guard_fn(x: object) -> bool:
             return check_dtensor_spec(x, expected)
 
         code = f"__dtensor_spec_{id(guard_fn)}"
@@ -2789,7 +2804,7 @@ class GuardBuilder(GuardBuilderBase):
         if original_values is None:
             return
 
-        def opaque_guard_checker(x: Any) -> bool:
+        def opaque_guard_checker(x: object) -> bool:
             return check_opaque_obj(x, original_values)
 
         global_name = f"___check_opaque_guard_fn_{id(opaque_guard_checker)}_c{CompileContext.current_compile_id()}"
@@ -2959,8 +2974,11 @@ class GuardBuilder(GuardBuilderBase):
         base_value = base_type(val)
         code = [f"{base_type.__name__}({ref}) == {base_value!r}"]
 
-        def check_fn(x: Any) -> bool:
-            return base_type(x) == base_value
+        def check_fn(x: object) -> bool:
+            # Mirrors _constant_subclass_base_value: base_type is a union of
+            # int/float/str, none of which typecheck against an opaque arg,
+            # but x is an instance of base_type by construction.
+            return base_type(x) == base_value  # pyrefly: ignore[bad-argument-type]
 
         self.get_guard_manager(guard).add_lambda_guard(
             check_fn,
@@ -3160,7 +3178,7 @@ class GuardBuilder(GuardBuilderBase):
         count_type = type(value)
         normalized_count_iter = normalize_count_iter(value)
 
-        def guard_fn(x: Any) -> bool:
+        def guard_fn(x: object) -> bool:
             return (
                 type(x) is count_type
                 and normalize_count_iter(x) == normalized_count_iter
@@ -3259,10 +3277,17 @@ class GuardBuilder(GuardBuilderBase):
         ref = self.arg_ref(guard)
         value = self.get(guard)
 
+        # SUPPORTED_NODES normally uses DICT_VERSION (PEP 509) as an O(1) fast
+        # path. That guard cannot be serialized, so when saving we fall through
+        # to keys-match and stick the choice on the Guard. Load rebuilds with
+        # save_guards=False but sees the pickled flag, so it keeps keys-match
+        # instead of re-promoting to DICT_VERSION.
         if value is torch.utils._pytree.SUPPORTED_NODES:
-            # For SUPPORTED_NODES, we can guard on the dictionary version (PEP509).
-            self.DICT_VERSION(guard)
-            return
+            if self.save_guards:
+                guard._force_dict_keys_match = True
+            if not guard._force_dict_keys_match:
+                self.DICT_VERSION(guard)
+                return
 
         self.SEQUENCE_LENGTH(guard)
 
@@ -3857,7 +3882,7 @@ class GuardBuilder(GuardBuilderBase):
         self,
         guard: Guard,
         code_list: list[str],
-        provided_guarded_object: Any | None = None,
+        provided_guarded_object: object | None = None,
         provided_func_name: str | None = None,
     ) -> None:
         # WARNING: It is important that cur_frame/caller do NOT stay in
@@ -4244,6 +4269,8 @@ class GuardsStatePickler(pickle.Pickler):
         attributes: dict[str, object] | None = None,
         guarded_globals: dict[str, object] | None = None,
         snapshot_globals: bool = False,
+        annotations: dict[str, object] | None = None,
+        type_params: tuple[object, ...] | None = None,
     ) -> types.FunctionType:
         if snapshot_globals:
             # Deliberately no import_module here: the snapshot IS the scope, and
@@ -4266,6 +4293,10 @@ class GuardsStatePickler(pickle.Pickler):
         )
         fn.__qualname__ = qualname
         fn.__kwdefaults__ = kwdefaults
+        if type_params is not None:
+            setattr(fn, "__type_params__", type_params)
+        if annotations is not None:
+            fn.__annotations__ = annotations
         if attributes:
             fn.__dict__.update(attributes)
         return fn
@@ -4309,6 +4340,49 @@ class GuardsStatePickler(pickle.Pickler):
     ) -> None:
         fn.__globals__.update(guarded_globals)
 
+    @staticmethod
+    def _function_annotations(obj: types.FunctionType) -> dict[str, object]:
+        if sys.version_info >= (3, 14):
+            import annotationlib
+
+            return annotationlib.get_annotations(
+                obj, format=annotationlib.Format.FORWARDREF
+            )
+        return obj.__annotations__
+
+    @staticmethod
+    def _unpickle_type_parameter(
+        kind: str, args: tuple[object, ...], kwargs: dict[str, object]
+    ) -> object:
+        import typing
+
+        constructor = getattr(typing, kind)
+        return constructor(*args, **kwargs)
+
+    @staticmethod
+    def _type_parameter_reduce_args(
+        obj: Any, kind: str
+    ) -> tuple[str, tuple[object, ...], dict[str, object]]:
+        import typing
+
+        constraints = getattr(obj, "__constraints__", ())
+        args = (obj.__name__, *constraints)
+        kwargs: dict[str, object] = {}
+        bound = getattr(obj, "__bound__", None)
+        if bound is not None:
+            kwargs["bound"] = bound
+        if kind in ("TypeVar", "ParamSpec"):
+            if obj.__infer_variance__:
+                kwargs["infer_variance"] = True
+            else:
+                kwargs["covariant"] = obj.__covariant__
+                kwargs["contravariant"] = obj.__contravariant__
+        if hasattr(obj, "__default__"):
+            default = obj.__default__
+            if default is not getattr(typing, "NoDefault", None):
+                kwargs["default"] = default
+        return kind, args, kwargs
+
     def _reduce_nested_function(self, obj: types.FunctionType) -> tuple[Any, ...]:
         snapshot_globals = id(obj.__globals__) in self.guard_tree_values
         guarded_globals = (
@@ -4331,9 +4405,11 @@ class GuardsStatePickler(pickle.Pickler):
             )
             defaults = (
                 tuple(
-                    value
-                    if self._keep(value)
-                    else _Missing("unguarded function default")
+                    (
+                        value
+                        if self._keep(value)
+                        else _Missing("unguarded function default")
+                    )
                     for value in defaults
                 )
                 if keep_defaults
@@ -4354,6 +4430,33 @@ class GuardsStatePickler(pickle.Pickler):
             }
             if not kwdefaults and not keep_kwdefaults:
                 kwdefaults = None
+
+        annotations = self._function_annotations(obj)
+        keep_annotations = self._keep(annotations)
+        annotations = {
+            name: (
+                value
+                if self._keep(value)
+                else _Missing("unguarded function annotation")
+            )
+            for name, value in annotations.items()
+            if keep_annotations or self._keep(value)
+        }
+        if not annotations and not keep_annotations:
+            annotations = None
+
+        type_params = getattr(obj, "__type_params__", ())
+        keep_type_params = self._keep(type_params)
+        type_params = tuple(
+            (
+                value
+                if self._keep(value)
+                else _Missing("unguarded function type parameter")
+            )
+            for value in type_params
+        )
+        if not type_params and not keep_type_params:
+            type_params = None
 
         closure = obj.__closure__
         if closure is not None:
@@ -4376,6 +4479,8 @@ class GuardsStatePickler(pickle.Pickler):
             attributes,
             None,
             snapshot_globals,
+            annotations,
+            type_params,
         )
         if not snapshot_globals:
             return type(self)._unpickle_nested_function, args
@@ -4522,6 +4627,16 @@ class GuardsStatePickler(pickle.Pickler):
 
         elif isinstance(obj, torch._dynamo.utils.dict_keys):
             return type(self)._unpickle_dict_keys, (list(obj),)
+
+        elif type(obj).__module__ == "typing" and type(obj).__name__ in (
+            "TypeVar",
+            "TypeVarTuple",
+            "ParamSpec",
+        ):
+            return (
+                type(self)._unpickle_type_parameter,
+                type(self)._type_parameter_reduce_args(obj, type(obj).__name__),
+            )
 
         elif isinstance(
             obj, torch._ops.OpOverloadPacket
@@ -4713,8 +4828,9 @@ class CheckFunctionManager:
         output_graph: OutputGraphCommon,
         cache_entries: list[CacheEntry] | None = None,
         guard_fail_fn: Callable[[GuardFail], None] | None = None,
-        guard_filter_fn: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]]
-        | None = None,
+        guard_filter_fn: (
+            Callable[[Sequence[GuardFilterEntry]], Sequence[bool]] | None
+        ) = None,
         shape_code_parts: ShapeCodeParts | None = None,
         runtime_global_scope: dict[str, Any] | None = None,
         save_guards: bool = False,
@@ -5074,8 +5190,9 @@ class CheckFunctionManager:
         f_code: types.CodeType,
         output_graph: OutputGraphGuardsState,
         save_guards: bool,
-        guard_filter_fn: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]]
-        | None = None,
+        guard_filter_fn: (
+            Callable[[Sequence[GuardFilterEntry]], Sequence[bool]] | None
+        ) = None,
     ) -> tuple[GuardBuilder, GuardManagerWrapper]:
         guard_manager = GuardManagerWrapper(local_state=self.guard_build_local_state)
         guard_manager.diff_guard_sources = existing_diff_guard_sources
@@ -5122,6 +5239,16 @@ class CheckFunctionManager:
         )
 
         for guard in sorted_guards:
+            # guard_types/code_list are per-build export info, but they
+            # accumulate on the shared Guard objects across builds. Reset them
+            # so results from a previous build (e.g. the pre-filtering build or
+            # an earlier non-save CheckFunctionManager) don't leak into this
+            # build; serialize_guards relies on them to detect unserializable
+            # guards, and a non-save build may derive different guards (e.g.
+            # DICT_VERSION for SUPPORTED_NODES) than a save build.
+            guard.guard_types = None
+            guard.code_list = None
+
             if (
                 not guard_on_nn_modules
                 and guard.is_specialized_nn_module()
@@ -5351,8 +5478,10 @@ class CheckFunctionManager:
             and (cache_entry := self.guard_manager.cache_entry) is not None
             and (extra_state := self.guard_manager.extra_state) is not None
         ):
-            if not isinstance(cache_entry, CacheEntry):
-                raise AssertionError(f"Expected CacheEntry, got {type(cache_entry)}")
+            if not isinstance(cache_entry, CacheEntryHandle):
+                raise AssertionError(
+                    f"Expected CacheEntryHandle, got {type(cache_entry)}"
+                )
 
             if not isinstance(extra_state, ExtraState):
                 raise AssertionError(f"Expected ExtraState, got {type(extra_state)}")

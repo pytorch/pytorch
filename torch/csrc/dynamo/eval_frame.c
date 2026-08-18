@@ -706,8 +706,7 @@ static PyObject* reset_code(PyObject* dummy, PyObject* code) {
     return NULL;
   }
 
-  // set_extra_state destroys the existing object on extra scratch space.
-  set_extra_state((PyCodeObject*)code, NULL);
+  reset_extra_state((PyCodeObject*)code);
   Py_RETURN_NONE;
 }
 

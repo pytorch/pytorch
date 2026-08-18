@@ -332,10 +332,45 @@ class AbstractFaultToleranceTest:
 
     def test_reconfigure_rejects_reused_uuid(self):
         self._init_reconfigurable_pg()
-        uuid = 1100 + self.rank
-        self._reconfigure(uuid, [dist._get_reconfigure_handle()])
-        with self.assertRaisesRegex(RuntimeError, "already used"):
+        if self.backend_name != "nccl2":
+            uuid = 1100 + self.rank
             self._reconfigure(uuid, [dist._get_reconfigure_handle()])
+            with self.assertRaisesRegex(RuntimeError, "already used"):
+                self._reconfigure(uuid, [dist._get_reconfigure_handle()])
+            return
+
+        uuid = 1100
+        handles = self._collect_handles("ft_reused_uuid_initial")
+        self._reconfigure(uuid, handles)
+        handles = self._collect_handles("ft_reused_uuid_current")
+        error = "already used" if self.rank == 0 else "Wait timeout"
+        with self.assertRaisesRegex(RuntimeError, error):
+            dist._reconfigure(
+                uuid,
+                handles,
+                timeout=timedelta(milliseconds=500),
+            ).wait()
+        self._store_barrier("ft_reused_uuid_rejected")
+        self._assert_all_reduce_sum(sum(range(1, self.world_size + 1)))
+
+    def test_reconfigure_timeout_is_retryable(self):
+        if self.backend_name != "nccl2":
+            self.skipTest("nonblocking NCCL initialization behavior")
+        self._init_reconfigurable_pg()
+        handles = self._collect_handles("ft_timeout_retry_initial")
+
+        if self.rank == 0:
+            with self.assertRaisesRegex(RuntimeError, "timed out"):
+                dist._reconfigure(
+                    1400,
+                    handles[:2],
+                    timeout=timedelta(milliseconds=500),
+                ).wait()
+        self._store_barrier("ft_timeout_retry_observed")
+
+        handles = self._collect_handles("ft_timeout_retry_current")
+        self._reconfigure(1401, handles)
+        self._assert_all_reduce_sum(sum(range(1, self.world_size + 1)))
 
 
 def _make_fault_tolerance_test_class(backend):
