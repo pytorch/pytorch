@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 
+import unittest
 from unittest import mock
 from unittest.mock import patch
 
@@ -9,6 +10,9 @@ import torch.nn.functional as F
 from torch import nn
 from torch._dynamo.utils import same
 from torch._inductor import metrics, utils
+from torch._inductor.codegen.triton import TritonKernel
+from torch._inductor.runtime.hints import DeviceProperties
+from torch._inductor.runtime.triton_heuristics import persistent_reduction
 from torch._inductor.scheduler import MixOrderReduction
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing import FileCheck
@@ -16,9 +20,11 @@ from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    recover_orig_fp32_precision,
     skipIfXpu,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.utils._triton import has_triton_tma_device
 
 
 class TestBase(TestCase):
@@ -390,6 +396,157 @@ class MixOrderReductionTest(TestBase):
             metrics.codegen_mix_order_reduction,
         )
 
+    @unittest.skipUnless(
+        has_triton_tma_device(), "Test requires Triton TMA device support"
+    )
+    @parametrize("allow_multi_stages", (False, True))
+    @inductor_config.patch(
+        {
+            "triton.use_tensor_descriptor": True,
+            "assume_aligned_inputs": True,
+        }
+    )
+    # The 1M-row input plus its grads needs a fair amount of device memory.
+    @largeTensorTest("16GB", device=GPU_TYPE, inductor=True)
+    def test_rms_norm_bwd_tma(self, allow_multi_stages):
+        """
+        Regression test for https://github.com/pytorch/pytorch/issues/186241.
+
+        With TMA enabled, the mix-order reduction loop used to leave the scalar
+        `xoffset` (which TMA descriptors index off) frozen while only advancing
+        the `xindex` tensor, so every loop iteration read/wrote the first tile
+        and produced wrong results. Triton cannot pipeline device-side tensor
+        map creation, so these kernels use one stage.
+
+        ``allow_multi_stages=True`` verifies that device-side TMA still forces
+        NUM_STAGES=1; ``False`` disables multi-staging globally as a sanity check.
+        """
+        if not inductor_config.triton.mix_order_reduction:
+            self.skipTest("Mix order reduction not enabled")
+
+        def f(x, w, eps):
+            orig_dtype = x.dtype
+            x = x.float()
+            rsqrt = torch.rsqrt((x * x).sum(dim=-1) / x.shape[-1] + eps)
+            return (x * rsqrt[:, None] * w).to(dtype=orig_dtype)
+
+        def fwd_bwd(compiled_f):
+            x.grad = None
+            w.grad = None
+            out = compiled_f(x, w, eps)
+            out.backward(dy)
+            return x.grad, w.grad
+
+        torch.manual_seed(1337)
+        # Large M so the RSPLIT loop runs many iterations per program: this is
+        # what surfaces the stale-xoffset bug (a single iteration would hide it).
+        M, N = 1000000, 256
+        x = torch.randn(M, N, dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True)
+        w = torch.randn(N, dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True)
+        dy = torch.randn_like(x)
+        eps = 1e-5
+
+        opt_f = torch.compile(
+            f,
+            options={
+                "split_reductions": False,
+                "triton.mix_order_reduction_allow_multi_stages": allow_multi_stages,
+            },
+        )
+
+        ref = fwd_bwd(f)
+        act, (_, bwd_wrapper) = utils.run_and_get_code(fwd_bwd, opt_f)
+
+        self.assertTrue(same(ref, act, tol=1e-2), f"ref:\n{ref}\nact:\n{act}")
+        self.assertEqual(
+            inductor_config.triton.mix_order_reduction,
+            metrics.codegen_mix_order_reduction,
+        )
+        if inductor_config.triton.mix_order_reduction:
+            # The fix advances the scalar xoffset inside the mix-order loop so
+            # TMA descriptors point at the right tile each iteration.
+            (
+                FileCheck()
+                .check("'uses_tma': True")
+                .check("'uses_device_tma': True")
+                .check("xoffset += XBLOCK")
+                .run(bwd_wrapper)
+            )
+
+    @unittest.skipUnless(
+        has_triton_tma_device(), "Test requires Triton TMA device support"
+    )
+    @parametrize("allow_multi_stages", (False, True))
+    @parametrize("shape", ((32768, 256), (32768 + 1023, 768)))
+    @inductor_config.patch(
+        {
+            "triton.use_tensor_descriptor": True,
+            "assume_aligned_inputs": True,
+            # Pin the split size so each program runs several loop iterations
+            # (iterations = RSPLIT_SIZE // XBLOCK) regardless of the input size
+            # and SM count. This is what lets a small input surface the
+            # stale-xoffset bug that test_rms_norm_bwd_tma reproduces at 1M rows.
+            "triton.mix_order_reduction_split_size": 64,
+        }
+    )
+    def test_rms_norm_bwd_tma_small(self, allow_multi_stages, shape):
+        """
+        Small, CI-friendly variant of test_rms_norm_bwd_tma (regression test for
+        https://github.com/pytorch/pytorch/issues/186241).
+
+        With the split size pinned, every program advances its TMA descriptor
+        offset across multiple loop iterations, so a stale xoffset still
+        produces wrong results at these sizes. The non-divisible-M shape also
+        exercises the masked tail with TMA descriptors.
+        """
+        if not inductor_config.triton.mix_order_reduction:
+            self.skipTest("Mix order reduction not enabled")
+
+        def f(x, w, eps):
+            orig_dtype = x.dtype
+            x = x.float()
+            rsqrt = torch.rsqrt((x * x).sum(dim=-1) / x.shape[-1] + eps)
+            return (x * rsqrt[:, None] * w).to(dtype=orig_dtype)
+
+        def fwd_bwd(compiled_f):
+            x.grad = None
+            w.grad = None
+            out = compiled_f(x, w, eps)
+            out.backward(dy)
+            return x.grad, w.grad
+
+        torch.manual_seed(1337)
+        M, N = shape
+        x = torch.randn(M, N, dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True)
+        w = torch.randn(N, dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True)
+        dy = torch.randn_like(x)
+        eps = 1e-5
+
+        opt_f = torch.compile(
+            f,
+            options={
+                "split_reductions": False,
+                "triton.mix_order_reduction_allow_multi_stages": allow_multi_stages,
+            },
+        )
+
+        ref = fwd_bwd(f)
+        act, (_, bwd_wrapper) = utils.run_and_get_code(fwd_bwd, opt_f)
+
+        self.assertTrue(same(ref, act, tol=1e-2), f"ref:\n{ref}\nact:\n{act}")
+        self.assertEqual(
+            inductor_config.triton.mix_order_reduction,
+            metrics.codegen_mix_order_reduction,
+        )
+        if inductor_config.triton.mix_order_reduction:
+            (
+                FileCheck()
+                .check("'uses_tma': True")
+                .check("'uses_device_tma': True")
+                .check("xoffset += XBLOCK")
+                .run(bwd_wrapper)
+            )
+
     @parametrize(
         "wbdtype",
         [
@@ -727,6 +884,8 @@ class MixOrderReductionTest(TestBase):
         mock_node_1.get_device.return_value.type = "cuda"
         mock_node_1.is_reduction.return_value = True
         mock_node_2.is_reduction.return_value = True
+        mock_node_1.has_strict_reduction.return_value = False
+        mock_node_2.has_strict_reduction.return_value = False
 
         from torch._inductor.utils import OrderedSet
 
@@ -796,6 +955,8 @@ class MixOrderReductionTest(TestBase):
         mock_node_1.get_device.return_value.type = "cuda"
         mock_node_1.is_reduction.return_value = True
         mock_node_2.is_reduction.return_value = True
+        mock_node_1.has_strict_reduction.return_value = False
+        mock_node_2.has_strict_reduction.return_value = False
 
         from torch._inductor.utils import OrderedSet
 
@@ -884,6 +1045,7 @@ class MixOrderReductionTest(TestBase):
             metrics.codegen_mix_order_reduction,
         )
 
+    @recover_orig_fp32_precision
     def test_additive_num_splits(self):
         """
         When the `num_splits` is an additive expression, a pair of
@@ -1270,6 +1432,89 @@ class OverFusionTest(TestBase):
         # max_reads should limit over-fusion, not disable mix_order entirely
         self.assertGreater(metrics.codegen_mix_order_reduction, 0)
         self.assertGreater(metrics.rejected_mix_order_reduction_fusion, 0)
+
+
+class MixOrderReductionHeuristicTest(TestBase):
+    """
+    CPU-runnable unit tests for the mix-order persistent_reduction autotuning
+    heuristic. These exercise the config generation logic directly (via
+    ``return_configs=True``) without needing a GPU.
+    """
+
+    def test_uses_tma_tracks_emitted_descriptors(self):
+        for source in (None, "host", "device"):
+            with self.subTest(source=source):
+                kernel = object.__new__(TritonKernel)
+                host_descriptors = {}
+                if source == "host":
+                    host_descriptors["arg"] = mock.sentinel.descriptor
+                kernel.host_tma_descriptor_args = host_descriptors
+                kernel._emitted_device_tma = source == "device"
+                self.assertEqual(kernel.uses_tma, source is not None)
+                self.assertEqual(kernel.uses_device_tma, source == "device")
+
+    def _gen_num_stages(
+        self, *, tma, allow_multi_stages, device_tma=False, rsplit_size=256, rnumel=256
+    ):
+        """
+        Drive the mix-order branch of persistent_reduction and return the set of
+        NUM_STAGES values across the generated configs.
+        """
+        inductor_meta = {
+            "RSPLIT_SIZE": rsplit_size,
+            "mix_order_reduction_allow_multi_stages": allow_multi_stages,
+        }
+        if tma:
+            inductor_meta["uses_tma"] = True
+        if device_tma:
+            inductor_meta["uses_device_tma"] = True
+        configs = persistent_reduction(
+            {"x": 4096, "r0_": rnumel},
+            triton_meta={
+                "device": DeviceProperties(
+                    type="cpu", index=0, multi_processor_count=1, cc=0
+                )
+            },
+            inductor_meta=inductor_meta,
+            return_configs=True,
+        )
+        self.assertTrue(configs, "expected at least one config")
+        return {c.kwargs["NUM_STAGES"] for c in configs}
+
+    def test_num_stages_support_matrix(self):
+        cases = (
+            ("no TMA", False, False, {3}),
+            ("device TMA", True, True, {1}),
+        )
+        for name, tma, device_tma, expected in cases:
+            with self.subTest(name):
+                stages = self._gen_num_stages(
+                    tma=tma,
+                    device_tma=device_tma,
+                    allow_multi_stages=True,
+                )
+                self.assertEqual(stages, expected)
+
+    def test_num_stages_single_when_multi_stage_disabled(self):
+        """
+        When multi-staging is disabled, NUM_STAGES collapses to 1 regardless of
+        whether TMA is active.
+        """
+        for tma in (False, True):
+            stages = self._gen_num_stages(tma=tma, allow_multi_stages=False)
+            self.assertEqual(stages, {1}, f"tma={tma}: expected {{1}}, got {stages}")
+
+    def test_device_tma_disables_multi_stages_across_shapes(self):
+        for rsplit_size in (16, 64, 128, 256):
+            for rnumel in (256, 1024, 8192, 16384):
+                stages = self._gen_num_stages(
+                    tma=True,
+                    device_tma=True,
+                    allow_multi_stages=True,
+                    rsplit_size=rsplit_size,
+                    rnumel=rnumel,
+                )
+                self.assertEqual(stages, {1})
 
 
 @inductor_config.patch(

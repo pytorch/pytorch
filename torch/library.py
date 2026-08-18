@@ -405,6 +405,7 @@ class Library:
         Example::
 
             >>> my_lib = Library("aten", "IMPL")
+            >>> warnings.filterwarnings("ignore", message=".*other operators may also be overridden")  # docs: hide
             >>> my_lib._impl_with_aoti_compile("div.Tensor", "CPU")
         """
 

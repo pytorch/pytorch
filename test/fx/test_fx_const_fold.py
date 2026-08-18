@@ -873,6 +873,53 @@ class TestConstFold(TestCase):
         )
         self._verify_const_fold_mod(mod_folded)
 
+    def test_const_fold_is_impure_node_preserves_dead_node(self):
+        r"""
+        Const folding runs dead-code elimination, which by default drops a node
+        with no users when ``Node.is_impure()`` is False. A caller can pass
+        ``is_impure_node`` to preserve such a node -- e.g. a destination-passing
+        op whose only effect is writing a buffer through an ``out=`` kwarg its
+        schema does not declare as mutated, so the default check treats it as
+        pure dead code.
+        """
+
+        class ConstFoldTestModule(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.attr1 = torch.nn.Parameter(torch.randn(2, 3))
+                self.attr2 = torch.nn.Parameter(torch.randn(2, 3))
+
+            def forward(self, x):
+                folded = self.attr1 + self.attr2  # const-foldable subgraph
+                _unused = torch.relu(x)  # no users -> dead-code candidate
+                return x + folded
+
+        def _num_userless_relus(gm: torch.fx.GraphModule) -> int:
+            return sum(
+                1
+                for n in gm.graph.nodes
+                if n.op == "call_function"
+                and "relu" in str(n.target)
+                and len(n.users) == 0
+            )
+
+        def _is_userless_relu(n: torch.fx.Node) -> bool:
+            return (
+                n.op == "call_function"
+                and "relu" in str(n.target)
+                and len(n.users) == 0
+            )
+
+        # Default: the user-less relu is dead-code-eliminated.
+        mod_default = const_fold.split_const_subgraphs(ConstFoldTestModule())
+        self.assertEqual(_num_userless_relus(mod_default), 0)
+
+        # With is_impure_node marking the user-less relu impure, it survives.
+        mod_kept = const_fold.split_const_subgraphs(
+            ConstFoldTestModule(), is_impure_node=_is_userless_relu
+        )
+        self.assertEqual(_num_userless_relus(mod_kept), 1)
+
 
 if __name__ == "__main__":
     raise_on_run_directly("test/test_fx.py")
