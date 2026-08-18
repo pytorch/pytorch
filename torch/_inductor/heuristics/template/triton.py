@@ -75,11 +75,13 @@ _rocm_version = (
     if torch.version.rocm is not None
     else (0, 0)
 )
+# First ROCm version where origami is not supported.
+ORIGAMI_UNSUPPORTED_ROCM_VERSION = (10, 0)
 
 
 def _origami_enabled() -> bool:
     """Check if origami GEMM optimization is enabled."""
-    return config.rocm.origami and _rocm_version < (10, 0)
+    return config.rocm.origami and _rocm_version < ORIGAMI_UNSUPPORTED_ROCM_VERSION
 
 
 # rocm-origami pip pkg is only available on ROCm builds and is only used when
@@ -87,7 +89,12 @@ def _origami_enabled() -> bool:
 # at config import). Cache the import here so the hot path never pays an exception
 # and CUDA/CPU/origami-disabled processes never attempt the import.
 # origami is not supported on ROCm 10.0+.
-if IS_ROCM and _rocm_version < (10, 0) and config.max_autotune and config.rocm.origami:
+if (
+    IS_ROCM
+    and _rocm_version < ORIGAMI_UNSUPPORTED_ROCM_VERSION
+    and config.max_autotune
+    and config.rocm.origami
+):
     try:
         import origami  # type: ignore[import-not-found]
     except ImportError:
@@ -98,6 +105,17 @@ if IS_ROCM and _rocm_version < (10, 0) and config.max_autotune and config.rocm.o
         )
 else:
     origami = None
+    if (
+        IS_ROCM
+        and config.rocm.origami
+        and _rocm_version >= ORIGAMI_UNSUPPORTED_ROCM_VERSION
+    ):
+        log.warning(
+            "ROCm origami GEMM selection is not supported on ROCm %d.%d+ "
+            "(detected %d.%d); origami disabled.",
+            *ORIGAMI_UNSUPPORTED_ROCM_VERSION,
+            *_rocm_version,
+        )
 
 
 # TODO(rocm-origami): replace these wrappers with public accessors when the
