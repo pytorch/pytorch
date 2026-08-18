@@ -728,7 +728,9 @@ class DebugFormatter:
                         layout.device,
                         dtype=layout.dtype,
                         size=V.graph.sizevars.optimization_hints(layout.size),
-                        stride=V.graph.sizevars.optimization_hints(layout.stride),
+                        stride=V.graph.sizevars.optimization_hints(
+                            layout.stride_hint()
+                        ),
                         offset=V.graph.sizevars.optimization_hint(
                             layout.offset, fallback=0
                         ),
@@ -748,7 +750,7 @@ class DebugFormatter:
                 pass
             try:
                 node_info["stride"] = str(
-                    V.graph.sizevars.optimization_hints(node.get_stride())
+                    V.graph.sizevars.optimization_hints(node.get_stride_hint())
                 )
             except Exception:
                 pass

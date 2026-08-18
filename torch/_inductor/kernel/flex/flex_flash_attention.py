@@ -17,7 +17,13 @@ import torch
 from torch.fx import GraphModule
 
 from ...codegen.cutedsl.aux_scalars import CuteDSLAuxScalarBindings
-from ...ir import FixedLayout, ShapeAsConstantBuffer, Subgraph, TensorBox
+from ...ir import (
+    FixedLayout,
+    freeze_storage_layout,
+    ShapeAsConstantBuffer,
+    Subgraph,
+    TensorBox,
+)
 from ...lowering import empty_strided
 from ...select_algorithm import autotune_select_algorithm
 from ...virtualized import V
@@ -439,6 +445,7 @@ def create_flex_flash_attention_kernel(
         raise AssertionError("Device must be specified")
 
     # Match stride pattern from query tensor
+    freeze_storage_layout(query)
     q_strides = query.get_stride()
     out_size = [batch_size, num_heads, seq_len_q, v_head_dim]
     out_strides = infer_dense_strides(out_size, q_strides)
@@ -661,6 +668,13 @@ def _use_flex_flash_attention_backward(
     return True
 
 
+def _frozen_strides(x):
+    """Freeze x's storage layout and return its (now final) strides; the
+    grad/output layouts derived from them are persisted contracts."""
+    freeze_storage_layout(x)
+    return x.get_stride()
+
+
 def create_flex_flash_attention_backward_kernel(
     query: TensorBox,
     key: TensorBox,
@@ -699,7 +713,7 @@ def create_flex_flash_attention_backward_kernel(
         raise AssertionError("Device must not be None")
 
     grad_query_strides = infer_dense_strides(
-        [batch_size, num_heads, seq_len_q, head_dim], query.get_stride()
+        [batch_size, num_heads, seq_len_q, head_dim], _frozen_strides(query)
     )
     grad_query = empty_strided(
         size=[batch_size, num_heads, seq_len_q, head_dim],
@@ -709,7 +723,7 @@ def create_flex_flash_attention_backward_kernel(
     )
 
     grad_key_strides = infer_dense_strides(
-        [batch_size, num_heads_kv, seq_len_kv, head_dim], key.get_stride()
+        [batch_size, num_heads_kv, seq_len_kv, head_dim], _frozen_strides(key)
     )
     grad_key = empty_strided(
         size=[batch_size, num_heads_kv, seq_len_kv, head_dim],
@@ -719,7 +733,7 @@ def create_flex_flash_attention_backward_kernel(
     )
 
     grad_value_strides = infer_dense_strides(
-        [batch_size, num_heads_kv, seq_len_kv, v_head_dim], value.get_stride()
+        [batch_size, num_heads_kv, seq_len_kv, v_head_dim], _frozen_strides(value)
     )
     grad_value = empty_strided(
         size=[batch_size, num_heads_kv, seq_len_kv, v_head_dim],

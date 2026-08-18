@@ -264,14 +264,14 @@ def check_supported_striding(mat_a: TensorBox, mat_b: TensorBox) -> None:
 
     # Check mat_a (self) stride requirements
     torch._check(
-        is_row_major(mat_a.get_stride()) or has_zero_dim(mat_a.get_size()),
-        lambda: f"mat_a must be row_major, got stride {mat_a.get_stride()}",
+        is_row_major(mat_a.get_stride_hint()) or has_zero_dim(mat_a.get_size()),
+        lambda: f"mat_a must be row_major, got stride {mat_a.get_stride_hint()}",
     )
 
     # Check mat_b stride requirements
     torch._check(
-        is_col_major(mat_b.get_stride()) or has_zero_dim(mat_b.get_size()),
-        lambda: f"mat_b must be col_major, got stride {mat_b.get_stride()}",
+        is_col_major(mat_b.get_stride_hint()) or has_zero_dim(mat_b.get_size()),
+        lambda: f"mat_b must be col_major, got stride {mat_b.get_stride_hint()}",
     )
 
 
@@ -280,7 +280,7 @@ def is_batch_stride_largest_or_zero(mat1, mat2, layout) -> bool:
     Checking if the batch stride is the largest in the stride.
     """
     sizes = [mat1.get_size(), mat2.get_size(), layout.size]
-    strides = [mat1.get_stride(), mat2.get_stride(), layout.stride]
+    strides = [mat1.get_stride_hint(), mat2.get_stride_hint(), layout.stride_hint()]
     for size, stride in zip(sizes, strides):
         if not (len(size) == len(stride) == 3):
             raise AssertionError("Expect 3D tensors")

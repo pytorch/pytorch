@@ -1132,6 +1132,10 @@ class TritonTemplateKernel(TritonKernel):
                 f"scatter_graph must be an instance of ComputeBuffer but got {type(scatter_graph)}"
             )
 
+        # the indexing math below is emitted into the kernel, so the scatter
+        # target's strides must be final
+        ir.freeze_storage_layout(scatter_graph)
+
         def contiguous_strides(x):
             # We always create a fresh contiguous grad for scattering into
             return sum(
@@ -6184,7 +6188,8 @@ def should_use_layout_constraints(node):
 def get_strides_with_layout_constraints(node):
     if should_use_layout_constraints(node):
         return V.graph.buffer_layout_constraints[node.get_name()].stride
-    return node.get_stride()
+    # only used for benchmark input generation and logging, so a hint is fine
+    return node.get_stride_hint()
 
 
 class SymbolicGridFn:
@@ -6220,7 +6225,7 @@ class SymbolicGridFn:
 def _autotune_metadata(input_nodes):
     """Helper function to extract autotune metadata from input nodes."""
     return {
-        "autotune_strides": ", ".join([str(n.get_stride()) for n in input_nodes]),
+        "autotune_strides": ", ".join([str(n.get_stride_hint()) for n in input_nodes]),
         "autotune_dtypes": ", ".join([str(n.get_dtype()) for n in input_nodes]),
         "autotune_shape": ", ".join(
             ["x".join(map(str, n.get_size())) for n in input_nodes]
@@ -6230,7 +6235,7 @@ def _autotune_metadata(input_nodes):
         # argument, and extracting those out there directly
         "autotune_strides_hinted": ", ".join(
             [
-                str(V.graph.sizevars.optimization_hints(n.get_stride()))
+                str(V.graph.sizevars.optimization_hints(n.get_stride_hint()))
                 for n in input_nodes
             ]
         ),

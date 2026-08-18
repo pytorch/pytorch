@@ -54,9 +54,9 @@ def is_static_int(number):
 
 
 def torch_layout_to_ck_layout(torch_layout):
-    if torch_layout.stride[-1] == 1:
+    if torch_layout.stride_hint()[-1] == 1:
         return "Row"
-    elif torch_layout.stride[-2] == 1:
+    elif torch_layout.stride_hint()[-2] == 1:
         return "Col"
     else:
         return None
@@ -1008,13 +1008,13 @@ class CKGemmTemplate(CKTemplate):
         M = X.get_size()[-2]
         K = X.get_size()[-1]
         N = W.get_size()[-1]
-        LDA = X.get_stride()[-2 if X.get_stride()[-1] == 1 else -1]
-        LDB = W.get_stride()[-2 if W.get_stride()[-1] == 1 else -1]
-        LDC = Y.get_stride()[-2 if Y.get_stride()[-1] == 1 else -1]
+        LDA = X.get_stride_hint()[-2 if X.get_stride_hint()[-1] == 1 else -1]
+        LDB = W.get_stride_hint()[-2 if W.get_stride_hint()[-1] == 1 else -1]
+        LDC = Y.get_stride_hint()[-2 if Y.get_stride_hint()[-1] == 1 else -1]
         LDD = (
             0
             if (Bias is None or len(Bias.get_size()) == 1)
-            else Bias.get_stride()[-2 if Bias.get_stride()[-1] == 1 else -1]
+            else Bias.get_stride_hint()[-2 if Bias.get_stride_hint()[-1] == 1 else -1]
         )
         if self.is_batched:
             B = X.get_size()[0]

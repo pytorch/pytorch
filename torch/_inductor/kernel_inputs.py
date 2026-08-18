@@ -135,7 +135,7 @@ class KernelInputs(ABC):
         Returns:
             A tuple of stride tuples for each input node
         """
-        return tuple(node.get_stride() for node in self._input_nodes)
+        return tuple(node.get_stride_hint() for node in self._input_nodes)
 
     def strides_hinted(self) -> tuple[tuple[int, ...], ...]:
         """
@@ -145,7 +145,7 @@ class KernelInputs(ABC):
             A tuple of stride tuples with integer hints for each input node
         """
         return tuple(
-            V.graph.sizevars.optimization_hints(node.get_stride())
+            V.graph.sizevars.optimization_hints(node.get_stride_hint())
             for node in self._input_nodes
         )
 

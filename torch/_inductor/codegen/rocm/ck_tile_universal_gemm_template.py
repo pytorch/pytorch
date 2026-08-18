@@ -111,9 +111,9 @@ def is_static_int(number):
 
 
 def torch_layout_to_ck_layout(torch_layout):
-    if torch_layout.stride[-1] == 1:
+    if torch_layout.stride_hint()[-1] == 1:
         return "Row"
-    elif torch_layout.stride[-2] == 1:
+    elif torch_layout.stride_hint()[-2] == 1:
         return "Col"
     else:
         return None
@@ -1016,9 +1016,9 @@ class CKTileGemmTemplate(CKTileTemplate):
         M = X.get_size()[0]
         K = X.get_size()[1]
         N = W.get_size()[1]
-        LDA = X.get_stride()[0 if X.get_stride()[1] == 1 else 1]
-        LDB = W.get_stride()[0 if W.get_stride()[1] == 1 else 1]
-        LDC = Y.get_stride()[0 if Y.get_stride()[1] == 1 else 1]
+        LDA = X.get_stride_hint()[0 if X.get_stride_hint()[1] == 1 else 1]
+        LDB = W.get_stride_hint()[0 if W.get_stride_hint()[1] == 1 else 1]
+        LDC = Y.get_stride_hint()[0 if Y.get_stride_hint()[1] == 1 else 1]
 
         return M, N, K, LDA, LDB, LDC
 
