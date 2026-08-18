@@ -503,12 +503,12 @@ std::pair<bool, std::variant<int, std::vector<int>>> findStartAddrForTensors(
   }
 }
 
-std::unordered_map<std::string, std::string> saveNcclMeta(
+collective_meta_t saveNcclMetaTyped(
     // @lint-ignore CLANGTIDY
     const at::RecordFunction& fn,
     // @lint-ignore CLANGTIDY
     const SaveNcclMetaConfig& config) {
-  std::unordered_map<std::string, std::string> map;
+  collective_meta_t metadata;
 #ifdef USE_DISTRIBUTED
   auto debugInfo = dynamic_cast<ParamCommsDebugInfo*>(
       c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::PARAM_COMMS_INFO));
@@ -517,72 +517,71 @@ std::unordered_map<std::string, std::string> saveNcclMeta(
     if (debugInfo == nullptr) {
       LOG(WARNING) << "ParamCommsDebugInfo not available for function: "
                    << fn.name();
-      return map;
+      return metadata;
     }
     auto& collective_name = debugInfo->getCollectiveName();
-    map.emplace(kCommsName, fmt::format("\"{}\"", collective_name));
-    map.emplace(
-        kDtype, fmt::format("\"{}\"", c10::toString(debugInfo->getDType())));
-    map.emplace(kInMsgNelems, std::to_string(debugInfo->getInMessageNelems()));
-    map.emplace(
-        kOutMsgNelems, std::to_string(debugInfo->getOutMessageNelems()));
+    metadata.emplace(kCommsName, collective_name);
+    metadata.emplace(kDtype, std::string(c10::toString(debugInfo->getDType())));
+    metadata.emplace(kInMsgNelems, debugInfo->getInMessageNelems());
+    metadata.emplace(kOutMsgNelems, debugInfo->getOutMessageNelems());
 
     auto& inSplitSizes = debugInfo->getInputSplitSizes();
-    map.emplace(kInSplit, format_list(inSplitSizes, config.truncate));
+    metadata.emplace(
+        kInSplit, format_list(inSplitSizes, config.truncate, false));
 
     auto& outSplitSizes = debugInfo->getOutputSplitSizes();
-    map.emplace(kOutSplit, format_list(outSplitSizes, config.truncate));
+    metadata.emplace(
+        kOutSplit, format_list(outSplitSizes, config.truncate, false));
 
     auto globalRankStart = debugInfo->getGlobalRankStart();
     if (globalRankStart >= 0) {
-      map.emplace(kGlobalRankStart, std::to_string(globalRankStart));
+      metadata.emplace(kGlobalRankStart, globalRankStart);
     }
     auto globalRankStride = debugInfo->getGlobalRankStride();
     if (globalRankStride > 0) {
-      map.emplace(kGlobalRankStride, std::to_string(globalRankStride));
+      metadata.emplace(kGlobalRankStride, globalRankStride);
     }
-    map.emplace(kGroupSize, std::to_string(debugInfo->getWorldSize()));
+    metadata.emplace(kGroupSize, debugInfo->getWorldSize());
     auto& group_name = debugInfo->getProcessGroupName();
     if (!group_name.empty()) {
-      map.emplace(kProcessGroupName, fmt::format("\"{}\"", group_name));
+      metadata.emplace(kProcessGroupName, group_name);
     }
     auto& group_desc = debugInfo->getProcessGroupDesc();
     if (!group_desc.empty()) {
-      map.emplace(kProcessGroupDesc, fmt::format("\"{}\"", group_desc));
+      metadata.emplace(kProcessGroupDesc, group_desc);
     }
     auto& groupRanks = debugInfo->getGroupRanks();
-    map.emplace(kGroupRanks, format_list(groupRanks, config.truncate));
+    metadata.emplace(
+        kGroupRanks, format_list(groupRanks, config.truncate, false));
 
     auto rank = debugInfo->getRank();
-    map.emplace(kRank, std::to_string(rank));
+    metadata.emplace(kRank, rank);
     int nRanks = static_cast<int>(groupRanks.size());
     if (collective_name == "send") {
       if (rank >= 0 && rank < nRanks) {
-        map.emplace(kP2pDst, std::to_string(groupRanks[rank]));
+        metadata.emplace(kP2pDst, groupRanks[rank]);
       }
     } else if (collective_name == "recv") {
       if (rank >= 0 && rank < nRanks) {
-        map.emplace(kP2pSrc, std::to_string(groupRanks[rank]));
+        metadata.emplace(kP2pSrc, groupRanks[rank]);
       }
     }
 
     auto seqNum = debugInfo->getSequenceNumber();
     if (seqNum >= 0) {
-      map.emplace(kSeqNum, std::to_string(seqNum));
+      metadata.emplace(kSeqNum, seqNum);
 
-      size_t comms_id = c10::get_hash(
+      uint64_t comms_id = static_cast<uint64_t>(c10::get_hash(
           debugInfo->getProcessGroupName(),
           seqNum,
           debugInfo->getIsP2P(),
           globalRankStart,
           globalRankStride,
-          debugInfo->getWorldSize());
-      map.emplace(kCommsId, std::to_string(comms_id));
+          debugInfo->getWorldSize()));
+      metadata.emplace(kCommsId, comms_id);
     }
   }
-
-  map.emplace(
-      kIsAsynchronizedOp, std::to_string(debugInfo->isAsynchronizedOp()));
+  metadata.emplace(kIsAsynchronizedOp, debugInfo->isAsynchronizedOp());
 
   if (get_record_tensor_addrs_enabled()) {
     std::vector<std::string> addressList;
@@ -609,7 +608,8 @@ std::unordered_map<std::string, std::string> saveNcclMeta(
           // break out of the loop here.
           break;
         }
-        map.emplace(kInTensorsStart, format_list(addressList, false));
+        metadata.emplace(
+            kInTensorsStart, format_list(addressList, false, false));
         addressList.clear();
       }
     }
@@ -631,13 +631,30 @@ std::unordered_map<std::string, std::string> saveNcclMeta(
             addressList.push_back(std::to_string(scalar_result));
           }
         }
-        map.emplace(kOutTensorsStart, format_list(addressList, false));
+        metadata.emplace(
+            kOutTensorsStart, format_list(addressList, false, false));
         addressList.clear();
       }
     }
   }
 #endif // USE_DISTRIBUTED
+  return metadata;
+}
+
+std::unordered_map<std::string, std::string> ncclMetaToStringMap(
+    // @lint-ignore CLANGTIDY
+    const collective_meta_t& metadata) {
+  std::unordered_map<std::string, std::string> map;
+  for (const auto& [key, value] : metadata) {
+    map.emplace(key, ivalueToStr(value, value.isString()));
+  }
   return map;
+}
+
+std::unordered_map<std::string, std::string> saveNcclMeta(
+    const at::RecordFunction& fn,
+    const SaveNcclMetaConfig& config) {
+  return ncclMetaToStringMap(saveNcclMetaTyped(fn, config));
 }
 
 // ----------------------------------------------------------------------------

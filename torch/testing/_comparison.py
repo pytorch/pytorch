@@ -3,6 +3,8 @@ import abc
 import cmath
 import collections.abc
 import contextlib
+import dataclasses
+import types
 from collections.abc import Callable, Collection, Sequence
 from typing import Any, NoReturn
 from typing_extensions import deprecated
@@ -17,6 +19,17 @@ try:
 except ModuleNotFoundError:
     HAS_NUMPY = False
     np = None  # type: ignore[assignment]
+
+# Types for which Dynamo can fault if we call dataclasses.is_dataclass on them.
+_IS_DATACLASS_SKIP_TYPES: tuple[type, ...] = (
+    type,
+    torch.Tensor,
+    types.UnionType,
+    types.GenericAlias,
+)
+if HAS_NUMPY:
+    # pyrefly: ignore [missing-attribute]
+    _IS_DATACLASS_SKIP_TYPES = (*_IS_DATACLASS_SKIP_TYPES, np.ndarray, np.generic)
 
 _HAS_DTENSOR = torch.distributed.is_available()
 
@@ -1155,8 +1168,9 @@ def originate_pairs(
 ) -> list[Pair]:
     """Originates pairs from the individual inputs.
 
-    ``actual`` and ``expected`` can be possibly nested :class:`~collections.abc.Sequence`'s or
-    :class:`~collections.abc.Mapping`'s. In this case the pairs are originated by recursing through them.
+    ``actual`` and ``expected`` can be possibly nested :class:`~collections.abc.Sequence`'s,
+    :class:`~collections.abc.Mapping`'s, or dataclass instances. In this case the pairs are
+    originated by recursing through them.
 
     Args:
         actual (Any): Actual input.
@@ -1242,6 +1256,50 @@ def originate_pairs(
                     sequence_types=sequence_types,
                     mapping_types=mapping_types,
                     id=(*id, key),
+                    **options,
+                )
+            )
+        return pairs
+
+    # Dataclass instances normally compare via ``==`` / ObjectPair so custom ``__eq__``
+    # (including ``eq=False`` classes) is respected. Generated dataclass ``__eq__``
+    # treats each field comparison as a Python bool, so multi-element tensor fields
+    # raise on Python 3.13+ (no same-object shortcut), or return a Tensor when that
+    # field is the sole compare=True field. Only then recurse field-by-field so
+    # tensors use the normal tensor comparison path.
+    #
+    # Skip is_dataclass for types Dynamo mishandles (Tensor, ndarray, UnionType, ...).
+    elif (
+        not isinstance(actual, _IS_DATACLASS_SKIP_TYPES)
+        and not isinstance(expected, _IS_DATACLASS_SKIP_TYPES)
+        and dataclasses.is_dataclass(actual)
+        and dataclasses.is_dataclass(expected)
+        and type(actual) is type(expected)
+    ):
+        try:
+            equal = actual == expected
+        except RuntimeError as error:
+            if "Boolean value of Tensor" not in str(error):
+                raise
+        else:
+            # Single tensor-field dataclasses can return a Tensor from __eq__
+            # without raising; only a real bool means == is usable as-is.
+            if type(equal) is bool:
+                return [ObjectPair(actual, expected, id=id, **options)]
+
+        pairs = []
+        # pyrefly: ignore [bad-argument-type]  # narrowed by is_dataclass above
+        for field in dataclasses.fields(actual):
+            if not field.compare:
+                continue
+            pairs.extend(
+                originate_pairs(
+                    getattr(actual, field.name),
+                    getattr(expected, field.name),
+                    pair_types=pair_types,
+                    sequence_types=sequence_types,
+                    mapping_types=mapping_types,
+                    id=(*id, field.name),
                     **options,
                 )
             )
