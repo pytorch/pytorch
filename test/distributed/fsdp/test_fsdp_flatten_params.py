@@ -70,6 +70,9 @@ class FlattenParamsTestBase(FSDPTestContinuous):
 
     @property
     def world_size(self) -> int:
+        # Clamp the world size to 1 since these unit tests either exercise only
+        # the flattening logic or check sharding subroutines directly without
+        # requiring multiple ranks.
         return 1
 
 
