@@ -86,8 +86,6 @@ if not torch.backends.mps.is_available():
     TestCase = NoTest
     NNTestCase = NoTest
 
-total_memory = int(subprocess.check_output(["sysctl", "-n", "hw.memsize"]))
-
 MPS_UNSUPPORTED_TYPES = [torch.double, torch.cdouble]
 MPS_DTYPES = [t for t in get_all_dtypes() if t not in MPS_UNSUPPORTED_TYPES]
 
@@ -709,6 +707,20 @@ class MatmulTest(TestCaseMPS):
         tensor_1 = torch.rand((0, 100), device="mps")
         tensor_2 = torch.rand((100, ), device="mps")
         self.assertEqual((tensor_1 @ tensor_2).cpu(), tensor_1.cpu() @ tensor_2.cpu())
+
+    # #177116: K > 2^15 silently wrong on M1/M2 (1st shape triggers fwd, 2nd triggers bwd)
+    @parametrize("shape,in_f,out_f", [((122, 40000), 40000, 128), ((32800, 128), 128, 16)])
+    def test_linear_large_K(self, shape, in_f, out_f):
+        torch.manual_seed(0)
+        x_cpu = torch.randn(*shape, requires_grad=True)
+        lin_cpu = nn.Linear(in_f, out_f, bias=False)
+        lin_mps = copy.deepcopy(lin_cpu).to("mps")
+        x_mps = x_cpu.detach().to("mps").requires_grad_(True)
+        lin_cpu(x_cpu).sum().backward()
+        lin_mps(x_mps).sum().backward()
+        self.assertEqual(lin_cpu(x_cpu), lin_mps(x_mps).cpu(), atol=1e-3, rtol=1e-4)
+        self.assertEqual(lin_cpu.weight.grad, lin_mps.weight.grad.cpu(), atol=1e-3, rtol=1e-4)
+        self.assertEqual(x_cpu.grad, x_mps.grad.cpu(), atol=1e-3, rtol=1e-4)
 
 class MPSLeakyReluTest(TestCaseMPS):
     def _npLeakyRelu(self, np_features, negative_slope=0.1):
@@ -1597,6 +1609,17 @@ class TestMPS(TestCaseMPS):
         ref = torch.mm(a.cpu(), b.cpu())
         tol = 1e-2 if dtype in (torch.float16, torch.bfloat16) else 1e-4
         self.assertEqual(out.cpu(), ref, atol=tol, rtol=tol)
+
+    def test_matmul_offset_output(self):
+        # Contiguous out= views at a nonzero storage offset; macOS < 15 dropped the write.
+        a = torch.randn(2, 16, 16, device="mps")
+        out = torch.zeros(4, 16, 16, device="mps")
+        torch.mm(a[0], a[1], out=out[1])
+        torch.addmm(a[0], a[0], a[1], out=out[2])
+        expected = torch.stack([a[0].cpu() @ a[1].cpu(), a[0].cpu() + a[0].cpu() @ a[1].cpu()])
+        self.assertEqual(out[1:3].cpu(), expected, atol=1e-5, rtol=1e-5)
+        torch.bmm(a, a, out=out.view(2, 2, 16, 16)[1])
+        self.assertEqual(out[2:].cpu(), a.cpu() @ a.cpu(), atol=1e-5, rtol=1e-5)
 
     @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
     @parametrize("case", [
@@ -4643,21 +4666,14 @@ class TestMPS(TestCaseMPS):
                 # TODO: enable memory format test
                 # self.assertEqual(cpu_result.is_contiguous(), mps_result.is_contiguous())
 
-    # Skip if a test needs more memory than the system has.
-    def _skip_if_exceeds_total_memory(self, required_memory):
-        if total_memory < required_memory:
-            self.skipTest(
-                f"Needs {required_memory / (1024**3):0.01f} GiB RAM, "
-                f"but only {total_memory / (1024**3):0.01f} GiB is available.")
-
     @parametrize("dtype", MPS_DTYPES)
+    @largeTensorTest(
+        lambda self, dtype: 1.01 * 2 * (11 + (1 << 31)) * dtype.itemsize,
+        device="mps",
+    )
     def test_cat_large_tensor(self, dtype):
         a_shape = (1, 11 + (1 << 31), 1)
         b_shape = (1, 100, 1)
-
-        # Assume up to 1% extra overhead memory might be required.
-        required_memory = 1.01 * (math.prod(a_shape) + math.prod(a_shape)) * dtype.itemsize
-        self._skip_if_exceeds_total_memory(required_memory)
 
         a_cpu = make_tensor((1,), dtype=dtype, device='cpu').expand(a_shape)
         b_cpu = make_tensor(b_shape, dtype=dtype, device='cpu')
@@ -4692,12 +4708,9 @@ class TestMPS(TestCaseMPS):
         self.assertEqual(r_mps[:, -200:, :], r_cpu_part1)
         self.assertEqual(r_mps[:, :200, :], r_cpu_part2)
 
+    @largeTensorTest("9GB", device="mps")
     def test_large_tensor_to_string(self):
         shape = (2, 1 << 31)
-
-        # Assume up to 1% extra overhead memory might be required.
-        required_memory = 1.01 * 2 * math.prod(shape)
-        self._skip_if_exceeds_total_memory(required_memory)
 
         self.assertEqual(
             str(torch.ones(shape, dtype=torch.int8, device='mps')),
@@ -4715,10 +4728,9 @@ class TestMPS(TestCaseMPS):
     # max view offset is 8 * 2^29 + 1 * 2^28 = 2^32 + 2^28.
     _OVERFLOW_SHAPE = (9, 1, 2, 1, 1 << 28)  # uint8, 4.5 GiB
 
+    @largeTensorTest("10GB", device="mps")
     def test_copy_strided_scatter_offset_overflow_n(self):
         shape = self._OVERFLOW_SHAPE
-        required_memory = 1.05 * 2 * math.prod(shape)
-        self._skip_if_exceeds_total_memory(required_memory)
 
         x_cpu = torch.zeros(shape, dtype=torch.uint8)
         x_mps = x_cpu.to('mps')
@@ -4731,10 +4743,9 @@ class TestMPS(TestCaseMPS):
 
         self.assertEqual(x_mps.cpu(), x_cpu)
 
+    @largeTensorTest("10GB", device="mps")
     def test_copy_strided_gather_offset_overflow_n(self):
         shape = self._OVERFLOW_SHAPE
-        required_memory = 1.05 * 2 * math.prod(shape)
-        self._skip_if_exceeds_total_memory(required_memory)
 
         x_cpu = torch.zeros(shape, dtype=torch.uint8)
         markers = torch.arange(1, 19, dtype=torch.uint8).view(shape[0], 1, shape[2], 1, 1)
@@ -8671,7 +8682,7 @@ class TestMPS(TestCaseMPS):
         # Test bfloat16 mm
         compare_mm(1024, 1, 32769, torch.bfloat16)
 
-    @unittest.skipIf(total_memory < 12_000_000_000, "Needs at least 12Gb RAM to run the test")
+    @largeTensorTest("12GB", device="mps")
     @unittest.skipIf(IS_CI, "May be fixes https://github.com/pytorch/pytorch/issues/149999")
     def test_copy_large(self):
         """ Test that copy of 4Gb+ tensors works """
@@ -11620,16 +11631,29 @@ class TestNNMPS(NNTestCase):
 
     def test_conv2d_discontiguous_weight(self):
         # Test for https://github.com/pytorch/pytorch/issues/55781
-        x = torch.ones(64, 16, 16, 16)
-        weight = torch.arange(0, 1.0, 1 / 2.0 ** 10).reshape(32, 16, 1, 2)[:, :, :, ::2]
+        x = torch.ones(64, 16, 16, 16, device="mps")
+        weight = torch.arange(0, 1.0, 1 / 2.0 ** 10, device="mps").reshape(32, 16, 1, 2)[:, :, :, ::2]
         self.assertFalse(weight.is_contiguous())
         y = torch.nn.functional.conv2d(x, weight, None)
-        if torch.backends.mkldnn.is_available():
-            # Disable MKLDNN explicitly, so that either NNPACK or THCNN will be used
-            with torch.backends.mkldnn.flags(enabled=False):
-                y_ = torch.nn.functional.conv2d(x, weight, None)
-                self.assertEqual(y, y_)
         self.assertEqual(y.sum(), 4186112.)
+
+        # Non-dense weight view (channel slice of a 5D weight) must match CPU for
+        # forward and backward. MPSGraph conv mishandles such strided weights, so
+        # they need to be gathered before being fed to the graph.
+        xc = torch.randn(2, 8, 16, 16)
+        wc = torch.randn(6, 8, 3, 3, 3)
+
+        def conv(dev):
+            xi = xc.detach().to(dev).requires_grad_(True)
+            wi = wc.detach().to(dev).requires_grad_(True)
+            out = torch.nn.functional.conv2d(xi, wi[:, :, 1])
+            out.sum().backward()
+            return out, xi.grad, wi.grad
+
+        ref = conv("cpu")
+        res = conv("mps")
+        for r, e in zip(res, ref):
+            self.assertEqual(r.cpu(), e)
 
     def test_invalid_conv2d(self):
         for dtype in [torch.bfloat16, torch.float, torch.double]:
@@ -12029,6 +12053,68 @@ class TestConv3dChannelsLast3dMPS(NNTestCase):
 
 
 class TestLinalgMPS(TestCaseMPS):
+    def test__int_mm(self):
+        torch.manual_seed(0)
+
+        def make_input(shape, dtype):
+            low, high = (-128, 128) if dtype == torch.int8 else (0, 256)
+            return make_tensor(shape, device="cpu", dtype=dtype, low=low, high=high)
+
+        cases = []
+        for m, k, n in ((1, 7, 5), (15, 16, 17), (16, 17, 15), (17, 15, 16), (65, 64, 65),
+                        (0, 7, 5), (3, 0, 5), (3, 7, 0)):
+            for lhs_dtype in (torch.int8, torch.uint8):
+                cases.append((make_input((m, k), lhs_dtype), make_input((k, n), torch.int8)))
+
+        cases.extend([
+            (make_input((16, 17), torch.int8).t(), make_input((15, 16), torch.int8).t()),
+            (make_input((18, 31), torch.uint8)[1:, 1::2], make_input((31, 33), torch.int8)[1::2, 1::2]),
+            (torch.full((1, 32), 127, dtype=torch.int8), torch.full((32, 1), 127, dtype=torch.int8)),
+        ])
+
+        for lhs, rhs in cases:
+            expected = torch._int_mm(lhs, rhs)
+            lhs_mps = lhs.to("mps")
+            rhs_mps = rhs.to("mps")
+            actual = torch._int_mm(lhs_mps, rhs_mps)
+
+            self.assertEqual(actual.dtype, torch.int32)
+            self.assertEqual(actual.device.type, "mps")
+            self.assertEqual(actual.cpu(), expected)
+
+            out = torch.empty(expected.shape, dtype=torch.int32, device="mps")
+            returned = torch._int_mm(lhs_mps, rhs_mps, out=out)
+            self.assertIs(returned, out)
+            self.assertEqual(out.cpu(), expected)
+
+    def test__int_mm_errors(self):
+        lhs = torch.empty((3, 7), dtype=torch.int8, device="mps")
+        rhs = torch.empty((7, 5), dtype=torch.int8, device="mps")
+
+        error_cases = [
+            ("self must be a matrix", lambda: torch._int_mm(lhs[0], rhs)),
+            ("mat2 must be a matrix",
+             lambda: torch._int_mm(
+                 lhs, rhs[:, 0], out=torch.empty((3, 5), dtype=torch.int32, device="mps"))),
+            (r"mat1 and mat2 shapes cannot be multiplied \(3x7 and 6x5\)",
+             lambda: torch._int_mm(lhs, torch.empty((6, 5), dtype=torch.int8, device="mps"))),
+            ("Expected self dtype to be int8 or uint8", lambda: torch._int_mm(lhs.float(), rhs)),
+            ("Expected mat2 dtype to be of type int8", lambda: torch._int_mm(lhs, rhs.to(torch.uint8))),
+            ("Expected result dtype to be of type kInt",
+             lambda: torch._int_mm(lhs, rhs, out=torch.empty((3, 5), device="mps"))),
+            ("Expected result to be of dimension 2",
+             lambda: torch._int_mm(lhs, rhs, out=torch.empty((3, 5, 1), dtype=torch.int32, device="mps"))),
+            (r"Expected result.size\(0\) to be 3",
+             lambda: torch._int_mm(lhs, rhs, out=torch.empty((2, 5), dtype=torch.int32, device="mps"))),
+            (r"Expected result.size\(1\) to be 5",
+             lambda: torch._int_mm(lhs, rhs, out=torch.empty((3, 4), dtype=torch.int32, device="mps"))),
+            ("Expected result to be contiguous",
+             lambda: torch._int_mm(lhs, rhs, out=torch.empty((5, 3), dtype=torch.int32, device="mps").t())),
+        ]
+        for message, operation in error_cases:
+            with self.assertRaisesRegex(RuntimeError, message):
+                operation()
+
     def _test_addmm_addmv(self, f, t, m, v, *, alpha=None, beta=None, transpose_out=False):
         dtype = t.dtype
         numpy_dtype = dtype
@@ -16000,7 +16086,7 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.interpolate',
         'nn.functional.upsample_nearest',
         'norm', 'masked.normalize',
-        'arange', 'linspace',
+        'arange', 'linspace', 'logspace',
         'special.xlog1py',
 
         # CPU accumulates sequantially, but GPU does in parallel
@@ -17256,6 +17342,23 @@ class TestMetalLibrary(TestCaseMPS):
         kernel(src, dst, [11, 35], threads=(256, 1, 2), group_size=(256, 1, 1), arg_casts="int32")
         self.assertEqual(dst, src.permute(0, 2, 1))
 
+    def test_conv_weight_to_dhwio_kernel(self):
+        path = os.path.join(_CONFORMANCE_REPO_ROOT, "aten/src/ATen/native/mps/kernels/Convolution.metal")
+        lib = torch.mps.compile_shader(embed_headers(path))
+        oc, ic, kd, kh, kw = 5, 3, 2, 2, 4
+        weight = torch.randn(oc, ic, kd, kh, kw, device="mps")
+        # contiguous, permuted, and width-sliced source strides
+        for source in (
+            weight,
+            weight.permute(2, 3, 4, 1, 0).contiguous().permute(4, 3, 0, 1, 2),
+            torch.randn(oc, ic, kd, kh, 2 * kw, device="mps")[..., ::2],
+        ):
+            destination = torch.empty(kd, kh, kw, ic, oc, dtype=source.dtype, device="mps")
+            params = [oc, ic, kh, kw, *source.stride()]
+            lib.conv_weight_to_dhwio_float(source, destination, params,
+                                           threads=(oc, ic, kd * kh), group_size=(oc, 1, 1), arg_casts="int32")
+            self.assertEqual(destination, source.permute(2, 3, 4, 1, 0))
+
 
 # TODO: Actually instantiate that test for the "mps" device to better reflect what it is doing.
 # This requires mps to be properly registered in the device generic test framework which is not the
@@ -17268,6 +17371,7 @@ instantiate_device_type_tests(TestLinalgMPS, globals(), allow_mps=True, only_for
 instantiate_device_type_tests(TestInnerContiguous, globals(), allow_mps=True, only_for="mps")
 instantiate_parametrized_tests(TestAdvancedIndexing)
 instantiate_parametrized_tests(TestAutocastMPS)
+instantiate_parametrized_tests(MatmulTest)
 instantiate_parametrized_tests(TestBinaryIteratorConformance)
 instantiate_parametrized_tests(TestLogical)
 instantiate_parametrized_tests(TestMPS)

@@ -180,6 +180,44 @@ _P = ParamSpec("_P")
 
 HAS_AVX2 = "fbgemm" in torch.backends.quantized.supported_engines
 
+_OPS_WITHOUT_GPU_LOWP: frozenset[str] = frozenset(
+    {
+        "airy_ai",
+        "bessel_i0",
+        "bessel_i1",
+        "bessel_j0",
+        "bessel_j1",
+        "bessel_y0",
+        "bessel_y1",
+        "chebyshev_polynomial_t",
+        "chebyshev_polynomial_u",
+        "chebyshev_polynomial_v",
+        "chebyshev_polynomial_w",
+        "erfcx",
+        "gammainc",
+        "gammaincc",
+        "hermite_polynomial_h",
+        "hermite_polynomial_he",
+        "i1",
+        "i1e",
+        "laguerre_polynomial_l",
+        "legendre_polynomial_p",
+        "modified_bessel_i0",
+        "modified_bessel_i1",
+        "modified_bessel_k0",
+        "modified_bessel_k1",
+        "ndtri",
+        "scaled_modified_bessel_k0",
+        "scaled_modified_bessel_k1",
+        "shifted_chebyshev_polynomial_t",
+        "shifted_chebyshev_polynomial_u",
+        "shifted_chebyshev_polynomial_v",
+        "shifted_chebyshev_polynomial_w",
+        "spherical_bessel_j0",
+        "zeta",
+    }
+)
+
 if TEST_WITH_ROCM:
     torch._inductor.config.force_layout_optimization = 1
     os.environ["PYTORCH_MIOPEN_SUGGEST_NHWC"] = "1"
@@ -11347,6 +11385,18 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         x = torch.randn(1, 2048, dtype=torch.float32)
         self.common(fn, (x,))
 
+    @skipCPUIf(True, "requires Triton atomic_or on tl.int1")
+    @skip_if_pallas
+    def test_index_put_bool_accumulate(self):
+        def fn(x, idx, values):
+            return x.index_put((idx,), values, accumulate=True)
+
+        # Exercise True + True through both duplicate writes and existing data.
+        x = torch.tensor([False, True], device=self.device)
+        idx = torch.tensor([0, 0, 1], device=self.device)
+        values = torch.tensor([True, True, True], device=self.device)
+        self.common(fn, (x, idx, values))
+
     def test_index_ops_on_expanded_tensor(self):
         def make_input(src):
             return torch.zeros(1, src.size(1), device=src.device).expand(
@@ -17022,42 +17072,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     def test_pointwise(self, name, op):
         dtype = torch.float32
         check_lowp = True
-        if self.device == GPU_TYPE and name in {
-            "airy_ai",
-            "bessel_i0",
-            "bessel_i1",
-            "bessel_j0",
-            "bessel_j1",
-            "bessel_y0",
-            "bessel_y1",
-            "erfcx",
-            "gammainc",
-            "gammaincc",
-            "i1",
-            "i1e",
-            "modified_bessel_i0",
-            "modified_bessel_i1",
-            "modified_bessel_k0",
-            "modified_bessel_k1",
-            "ndtri",
-            "scaled_modified_bessel_k0",
-            "scaled_modified_bessel_k1",
-            "spherical_bessel_j0",
-            "zeta",
-            "chebyshev_polynomial_t",
-            "chebyshev_polynomial_v",
-            "chebyshev_polynomial_u",
-            "chebyshev_polynomial_w",
-            "legendre_polynomial_p",
-            "shifted_chebyshev_polynomial_t",
-            "shifted_chebyshev_polynomial_u",
-            "shifted_chebyshev_polynomial_v",
-            "shifted_chebyshev_polynomial_w",
-            "hermite_polynomial_h",
-            "hermite_polynomial_he",
-            "laguerre_polynomial_l",
-        }:
-            # <func>_cuda not implemented for Half
+        if self.device == GPU_TYPE and (
+            name in _OPS_WITHOUT_GPU_LOWP or (GPU_TYPE == "mtia" and name == "log_ndtr")
+        ):
+            # Low-precision implementations are unavailable for these operators.
             check_lowp = False
 
         if (
@@ -17193,6 +17211,36 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         )
         with ctx:
             self.common(fn, args, check_lowp=check_lowp, atol=1e-4, rtol=1e-4)
+
+    @parametrize("dtype", [torch.float32, torch.float64])
+    def test_log_ndtr_signbit(self, dtype):
+        """Regression test for https://github.com/pytorch/pytorch/issues/187336."""
+        if not self.is_dtype_supported(dtype):
+            self.skipTest(f"dtype {dtype} not supported on {self.device}")
+        if self.device == "mps":
+            # aten::special_log_ndtr.out is not currently implemented for the MPS device
+            # See issue: https://github.com/pytorch/pytorch/issues/191339 (or a dedicated follow-up issue)
+            self.skipTest("aten::special_log_ndtr.out not implemented on MPS")
+
+        def fn(x):
+            return torch.special.log_ndtr(x)
+
+        x = torch.tensor([100.0, -5.0], dtype=dtype, device=self.device)
+
+        expected = fn(x)
+        actual = torch.compile(fn, backend="inductor")(x)
+
+        # Value must match eager
+        self.assertEqual(actual, expected)
+        # Signbit must be set for 100.0 (result is -0.0, not +0.0)
+        self.assertTrue(
+            torch.signbit(actual[0]).item(),
+            f"log_ndtr(100.0) signbit lost for {dtype} on {self.device}",
+        )
+
+    # Halide backend does not support copysign; Triton-CPU libdevice lacks erfcx
+    test_log_ndtr_signbit._expected_failure_halide = True
+    test_log_ndtr_signbit._expected_failure_triton_cpu = True
 
     # codegen test fails with no dynamic for loop in dynamic shape tests
     @expectedFailureCodegenDynamic
@@ -17821,6 +17869,34 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             FileCheck().check_regex(r"if not \(u.* >= 0\):").check_regex(
                 r"raise RuntimeError\('u.* >= 0'\)"
             ).run(code[0])
+
+    # Under cpp_wrapper, lite mode sends the surrounding aten._to_copy fallback
+    # through the AOTI proxy executor, whose codegen emits an invalid
+    # torch::stable::detail::from(nullptr, 0) and fails to compile -- a pre-existing
+    # limitation unrelated to the `.item()` -> DynamicScalar routing under test,
+    # which the default python wrapper covers.
+    @unittest.skipIf(
+        config.cpp_wrapper, "lite-mode _to_copy fallback unsupported under cpp_wrapper"
+    )
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_lite_mode_item(self):
+        # aten._local_scalar_dense (`.item()`) returns a Scalar, which cannot be
+        # serialized as a generic fallback kernel. skip_fallback_due_to_dynamic_shape
+        # routes it to its dedicated DynamicScalar lowering instead, so lite mode
+        # does not hit the "Unsupported return type torch.NumberType" wall.
+        def f(x):
+            n = x.sum().to(torch.int64).item()
+            return x + n
+
+        opt_f = torch.compile(f, mode="lite")
+        x = torch.randn(64, device=self.device)
+
+        result, code = run_and_get_code(opt_f, x)
+        self.assertEqual(result, f(x))
+
+        FileCheck().check("torch.ops.aten.sum").check(".item()").run(code[0])
+        # `.item()` took the DynamicScalar lowering, not a generic fallback kernel
+        self.assertNotIn("_local_scalar_dense", code[0])
 
     @lowering.force_fallback(aten.sort.default)
     def test_size_asserts_for_multi_output_fallback(self):
@@ -19420,6 +19496,13 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         for _ in range(4):
             self.assertEqual(compiled(x, a, b), fn(x, a, b))
 
+    def test_eye_uint16_index(self):
+        # Inductor uses uint16 indices for this size; the output remains float32.
+        def fn(x):
+            return torch.eye(x.shape[-1], device=x.device)
+
+        self.common(fn, (torch.zeros(10, 256, device=self.device),))
+
     # end of class CommonTemplate - add new tests here
 
 
@@ -19537,6 +19620,44 @@ if RUN_GPU or HAS_MPS:
     class GPUTests(TestCase):
         common = check_model_gpu
         device = GPU_TYPE
+
+        @requires_cuda_and_triton
+        def test_noncontiguous_reshape_cat_backward(self):
+            # Cross the 1024-element padding threshold with a non-aligned width.
+            width = 342
+
+            def fn(x, offset, weight):
+                query, key, value = (
+                    part.view(2, 3, 1, width) + offset
+                    for part in (x @ weight.T).chunk(3, -1)
+                )
+                query_sigmoid = torch.sigmoid(query).transpose(1, 2)
+                query_tanh = torch.tanh(query).transpose(1, 2)
+                key_sigmoid = torch.sigmoid(key).transpose(1, 2)
+                key_tanh = torch.tanh(key).transpose(1, 2)
+                scores = (
+                    query_sigmoid @ key_sigmoid.transpose(-2, -1)
+                    + query_tanh @ key_tanh.transpose(-2, -1)
+                    - query_sigmoid @ key_tanh.transpose(-2, -1)
+                )
+                return scores @ value.transpose(1, 2)
+
+            torch.manual_seed(0xC0FFEE)
+            self.common(
+                fn,
+                (
+                    torch.randn(2, 3, 1, requires_grad=True),
+                    torch.randn(2, 3, 1, width, requires_grad=True),
+                    torch.randn(3 * width, 1, requires_grad=True),
+                ),
+                atol=1e-4,
+                check_gradient=True,
+                check_lowp=False,
+                grad_atol=2e-3,
+                grad_rtol=1e-5,
+                reference_in_float=False,
+                rtol=1e-4,
+            )
 
         @requires_cuda_and_triton
         def test_special_bessel_inf_matches_eager(self):

@@ -347,6 +347,8 @@ class MixOrderReduction:
             return False
         if not node1.is_reduction() or not node2.is_reduction():
             return False
+        if node1.has_strict_reduction() or node2.has_strict_reduction():
+            return False
 
         if (node1.ancestors & node2.get_operation_names()) or (
             node2.ancestors & node1.get_operation_names()
@@ -531,6 +533,8 @@ class NestedReduction:
             config.triton.nested_reduction
             and not V.graph.cpp_wrapper
             and _is_gpu_triton_backend(outer_node, grouped_node)
+            and not outer_node.has_strict_reduction()
+            and not grouped_node.has_strict_reduction()
         )
 
     @classmethod
@@ -1443,6 +1447,16 @@ class BaseSchedulerNode:
     def get_nodes(self) -> Sequence[BaseSchedulerNode]:
         return [self]
 
+    @cache_on_self
+    def has_strict_reduction(self) -> bool:
+        return any(
+            isinstance(node, SchedulerNode)
+            and isinstance(node.node, ComputedBuffer)
+            and isinstance(node.node.data, ir.Reduction)
+            and node.node.data.strict_reduction_rblock is not None
+            for node in self.get_nodes()
+        )
+
     def get_outputs(self) -> Sequence[SchedulerBuffer]:
         return self.outputs
 
@@ -2234,6 +2248,7 @@ class SchedulerNode(BaseSchedulerNode):
     ) -> None:
         super().__init__(scheduler)
         self._loop_mutation_listener: Callable[[SchedulerNode], None] | None = None
+        self._loop_state_gen = 0
         self._init_from_node(node)
         self._compute_attrs()
 
@@ -2335,6 +2350,7 @@ class SchedulerNode(BaseSchedulerNode):
             self.group,
             self.read_writes,
             self.unmet_dependencies,
+            self._loop_state_gen,
         )
 
     def restore_loop_state(self, state: tuple[Any, ...]) -> None:
@@ -2345,12 +2361,19 @@ class SchedulerNode(BaseSchedulerNode):
             self.group,
             self.read_writes,
             self.unmet_dependencies,
+            self._loop_state_gen,
         ) = state
         self.clear_loop_body_dependent_caches(need_clear_tiling_cache=True)
 
     def _before_loop_state_mutation(self) -> None:
         if self._loop_mutation_listener is not None:
             self._loop_mutation_listener(self)
+        # Identifies the current loop state, so analyses derived from it can be
+        # cached across the O(n^2) fusion pair search. Bumped after notifying
+        # the listener, which snapshots the pre-mutation state: snapshot and
+        # restore then carry the generation, so rolling a trial reindex back
+        # also restores cache validity.
+        self._loop_state_gen += 1
 
     def apply_indexing_exprs(self, replacements: dict[str, sympy.Expr]) -> None:
         if self._body is None:
@@ -2997,6 +3020,8 @@ class FusedMixOrderReductions(FusedSchedulerNode):
         )
 
     def can_fuse_with(self, other: BaseSchedulerNode):
+        if self.has_strict_reduction() or other.has_strict_reduction():
+            return False
         # Limit tl.load() count in the fused RSPLIT loop to avoid register
         # spills. See https://github.com/pytorch/pytorch/issues/179423
         max_reads = config.triton.mix_order_reduction_max_reads
@@ -3515,6 +3540,11 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
             )
         filtered_nodes = [x for x in filtered_nodes if x not in template_nodes]
 
+        # Keep strict reductions standalone so their planned R0_BLOCK cannot change.
+        filtered_nodes = [
+            node for node in filtered_nodes if not node.has_strict_reduction()
+        ]
+
         # Filter out reduction nodes if combo_kernels_pointwise_only is enabled
         if config.combo_kernels_pointwise_only:
             reduction_nodes = [x for x in filtered_nodes if x.is_reduction()]
@@ -3627,6 +3657,17 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
     def set_group_algorithm_for_combo_kernels(
         custom_group_algorithm: Callable[[Scheduler], list[list[BaseSchedulerNode]]],
     ) -> None:
+        r"""Register the grouping callback used when memory gating is disabled.
+
+        Schedule-first memory gating does not invoke this callback. Set both
+        combo-kernel peak-memory thresholds to ``None`` to use it.
+
+        Args:
+            custom_group_algorithm: Receives the current scheduler and returns
+                disjoint groups of mutually independent nodes from
+                ``scheduler.nodes``. Nodes in each group must have compatible
+                devices, streams, and memory-pool contexts.
+        """
         ForeachKernelSchedulerNode.group_algorithm_for_combo_kernels = (
             custom_group_algorithm
         )
@@ -4197,6 +4238,10 @@ class _LoopMutationTracker:
         self.state.restore()
 
 
+# Distinguishes "not cached" from a cached None in _tiling_memory_cache.
+_TILING_MEMORY_MISS = object()
+
+
 class Scheduler:
     """
     A Scheduler is a graph of BaseSchedulerNodes. It is responsible for
@@ -4212,6 +4257,7 @@ class Scheduler:
         return sum(1 for node in nodes if not isinstance(node, NopKernelSchedulerNode))
 
     def _init(self, nodes: list[ir.Operation]) -> None:
+        self._tiling_memory_cache: dict[tuple[Any, ...], Any] = {}
         super().__init__()
         V.graph.scheduler = self
         self.backends: dict[torch.device, BaseScheduling] = {}
@@ -5757,7 +5803,11 @@ class Scheduler:
                                 ms_fused_choice = choice
                     multi_node._choice_timings[hint_override] = new_timings
                     if ms_fused_choice is not None:
-                        assert isinstance(ms_fused_choice, TritonTemplateCallerBase)  # noqa: S101
+                        if not isinstance(ms_fused_choice, TritonTemplateCallerBase):
+                            raise AssertionError(
+                                f"expected TritonTemplateCallerBase, "
+                                f"got {type(ms_fused_choice)}"
+                            )
                         hint_override_best_fusion_choice[hint_override] = (
                             ms_fused_choice
                         )
@@ -6565,6 +6615,8 @@ class Scheduler:
         region_start: int,
         region_end: int,
         max_members: int,
+        *,
+        speedup_cache: dict[tuple[BaseSchedulerNode, ...], bool] | None,
     ) -> list[list[BaseSchedulerNode]]:
         """Collect profitable, node-disjoint candidates from one region."""
         remaining = OrderedSet(
@@ -6586,7 +6638,17 @@ class Scheduler:
                 max_members,
             )
             remaining.discard(seed)
-            if len(members) < 2 or not self.speedup_by_combo_kernel(members):
+            if len(members) < 2:
+                continue
+
+            if speedup_cache is None:
+                has_speedup = self.speedup_by_combo_kernel(members)
+            else:
+                members_key = tuple(members)
+                if members_key not in speedup_cache:
+                    speedup_cache[members_key] = self.speedup_by_combo_kernel(members)
+                has_speedup = speedup_cache[members_key]
+            if not has_speedup:
                 continue
 
             candidates.append(members)
@@ -6676,6 +6738,18 @@ class Scheduler:
             )
             self.prune_redundant_deps(self.nodes)
             return
+
+        if (
+            ForeachKernelSchedulerNode.group_algorithm_for_combo_kernels
+            is not ForeachKernelSchedulerNode._default_group_nodes_for_combo_kernels
+        ):
+            torch._logging.warning_once(
+                log,
+                "Combo-kernel memory gating ignores the custom grouping algorithm "
+                "registered by set_group_algorithm_for_combo_kernels. Set both "
+                "combo_kernel_peak_memory_increase_gb and "
+                "combo_kernel_peak_memory_pct_threshold to None to use it.",
+            )
 
         mem_ctx = self._init_peak_memory_context()
         baseline_nodes = mem_ctx.baseline_nodes
@@ -6967,6 +7041,9 @@ class Scheduler:
         if mem_ctx.baseline_nodes is not baseline_nodes:
             raise AssertionError("memory context does not match baseline schedule")
         finalized_nodes: list[BaseSchedulerNode] = []
+        speedup_cache: dict[tuple[BaseSchedulerNode, ...], bool] | None = (
+            {} if config.benchmark_combo_kernel else None
+        )
         stack = [(region_start, region_end)]
         while stack:
             start, end = stack.pop()
@@ -6976,6 +7053,7 @@ class Scheduler:
                 start,
                 end,
                 config.combo_kernel_max_num_nodes,
+                speedup_cache=speedup_cache,
             )
             if not candidates:
                 finalized_nodes.extend(baseline_nodes[start:end])
@@ -7721,15 +7799,30 @@ class Scheduler:
         if any(node.is_cpu() for node in snodes):
             return None
 
+        # The fusion search asks this for the same nodes over and over while
+        # pairing them up (on one model, 1160 calls over 53 distinct nodes).
+        # The answer is a function of the nodes' loop state, which
+        # _loop_state_gen identifies, so key on that. snodes are leaf
+        # SchedulerNodes (checked above), which the scheduler keeps for its
+        # lifetime, so keying on the nodes themselves retains nothing extra.
+        # pyrefly: ignore[missing-attribute]
+        cache_key = tuple((sn, sn._loop_state_gen) for sn in snodes)
+        cached = self._tiling_memory_cache.get(cache_key, _TILING_MEMORY_MISS)
+        if cached is not _TILING_MEMORY_MISS:
+            return cached
+
         analysis = analyze_memory_coalescing_for_nodes(snodes)
         if analysis is None:
+            self._tiling_memory_cache[cache_key] = None
             return None
 
         reduction = max(snodes, key=lambda node: int(node.is_reduction()))
         _, (numel, rnumel) = reduction.group
-        return SIMDScheduling.select_tiling_with_memory(
+        result = SIMDScheduling.select_tiling_with_memory(
             snodes, numel, rnumel, analysis
         ).memory
+        self._tiling_memory_cache[cache_key] = result
+        return result
 
     def _reindexing_regresses_memory_coalescing(
         self,
@@ -8219,6 +8312,18 @@ class Scheduler:
 
         why = WhyNoFuse(node1, node2)
 
+        if node1.is_template() and node2.has_strict_reduction():
+            why("template fusion does not preserve strict reduction ordering")
+            return False
+
+        if (
+            (node1.has_strict_reduction() or node2.has_strict_reduction())
+            and node1.is_reduction()
+            and node2.is_reduction()
+        ):
+            why("reduction fusion does not preserve strict reduction ordering")
+            return False
+
         if node1.is_template() and self.get_backend(
             node1.get_device()
         ).can_fuse_multi_outputs_template(node1, node2):
@@ -8276,8 +8381,10 @@ class Scheduler:
 
             write_dep = epilogue_writes[0]
             read_dep = epilogue_reads[0]
-            assert isinstance(read_dep, MemoryDep)  # noqa: S101
-            assert isinstance(write_dep, MemoryDep)  # noqa: S101
+            if not isinstance(read_dep, MemoryDep):
+                raise AssertionError(f"expected MemoryDep, got {type(read_dep)}")
+            if not isinstance(write_dep, MemoryDep):
+                raise AssertionError(f"expected MemoryDep, got {type(write_dep)}")
             if read_dep.index != write_dep.index or read_dep.size != write_dep.size:
                 why("epilogue's read and write indices differ")
                 return False

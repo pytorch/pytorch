@@ -321,6 +321,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.device_codegen = get_device_op_overrides(self.device)
         self._included_extra_headers: OrderedSet[str] = OrderedSet()
         self.codegen_int_array_var_cache = {}
+        # codegen_int_array_var_cache keys on id() of the writeline target. CPython
+        # reuses the address of a freed object, so a short-lived target (a per-callsite
+        # IndentedBuffer) can collide with a dead one and produce a spurious cache hit,
+        # which returns a var name whose declaration was written into the dead buffer.
+        # Pin the targets for the lifetime of codegen so their ids stay unique.
+        self._int_array_writeline_targets: list[Any] = []
         self.needs_vec_isa = self.device == "cpu"
 
     @contextlib.contextmanager
@@ -2405,16 +2411,19 @@ class CppWrapperCpu(PythonWrapperCodegen):
     ) -> str:
         # Use id(graph) for caching to avoid circular references
         # Bound methods have transient IDs, so we use the ID of the bound object instead.
-        writeline_id = (
-            id(writeline.__self__) if hasattr(writeline, "__self__") else id(writeline)
+        writeline_target = (
+            writeline.__self__ if hasattr(writeline, "__self__") else writeline
         )
         cache_key = (
             int_array,
-            writeline_id,
+            id(writeline_target),
             known_statically,
             id(graph) if graph else None,
         )
         if cache_key not in self.codegen_int_array_var_cache:
+            # A cache hit emits no declaration, so the key must not alias a dead
+            # target; see _int_array_writeline_targets.
+            self._int_array_writeline_targets.append(writeline_target)
             self.codegen_int_array_var_cache[cache_key] = (
                 self._codegen_int_array_var_impl(int_array, writeline, known_statically)
             )
