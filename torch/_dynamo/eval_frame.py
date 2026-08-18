@@ -1612,119 +1612,14 @@ def _optimize_catch_errors(
     )
 
 
-# Hooks that have completed. Bound-method hooks key weakly on their owner with
-# the completed __func__s in the value, so two methods on one object do not
-# collide; plain-function hooks live in a WeakSet keyed on the function.
-# reset() intentionally does not clear either: native-library init is
-# process-global, not cache state.
-_initialized_hooks: weakref.WeakSet[Callable[..., Any]] = weakref.WeakSet()
-_initialized_methods: weakref.WeakKeyDictionary[Any, set[Callable[..., Any]]] = (
-    weakref.WeakKeyDictionary()
-)
-# (Event, initiator thread id) for in-flight inits, keyed (owner, func).
-# Waiters block until the init completes or fails; the initiator id lets a
-# re-entrant resolution from the init's own thread re-run instead of waiting
-# on itself. Entries are removed when the init finishes.
-_pending_inits: dict[tuple[Any, Callable[..., Any]], tuple[threading.Event, int]] = {}
-_init_lock = threading.Lock()
-
-
 def _maybe_fire_backend_init(backend: Callable[..., Any]) -> None:
-    # Unwrap _TorchCompileWrapper (a fresh instance per torch.compile).
-    inner = (
-        backend.compiler_fn
-        if isinstance(backend, torch._TorchCompileWrapper)
-        else backend
-    )
-    backend_init = getattr(inner, "_dynamo_backend_init", None)
-    if backend_init is None:
-        return
-    # Dedup key: (owner, func) for bound methods -- per-instance for instance
-    # methods, per-class for classmethods, and two distinct methods on one
-    # owner do not collide -- else the callable itself. Keying on the owner
-    # (not the transient bound-method object) keeps the entry alive via its
-    # owner, and distinguishes instances that share one class-level method.
-    # Bound methods are detected with inspect.ismethod, not
-    # hasattr(__self__): a C-extension function has __self__ (the module, for
-    # module-level functions) but no __func__, and keying on the module would
-    # collide across hooks.
-    if inspect.ismethod(backend_init):
-        owner, func = backend_init.__self__, backend_init.__func__  # type: ignore[attr-defined]
-        is_method = True
-    else:
-        owner, func = backend_init, backend_init
-        is_method = False
-
-    while True:
-        unhashable = False
-        try:
-            if is_method:
-                funcs = _initialized_methods.get(owner)
-                done = funcs is not None and func in funcs
-            else:
-                done = func in _initialized_hooks
-        except TypeError:
-            unhashable = True
-        if unhashable:
-            # Unhashable or non-weak-referenceable hook: cannot dedup, so fire
-            # on every resolution rather than crash. Called outside the except
-            # so a raising init does not chain onto the TypeError traceback.
-            backend_init()
-            return
-        if done:
-            return
-        with _init_lock:
-            if is_method:
-                funcs = _initialized_methods.get(owner)
-                if funcs is not None and func in funcs:
-                    return
-            elif func in _initialized_hooks:
-                return
-            entry = _pending_inits.get((owner, func))
-            if entry is None:
-                event = threading.Event()
-                _pending_inits[(owner, func)] = (event, threading.get_ident())
-                fire = True
-                reentrant = False
-            else:
-                event, initiator = entry
-                fire = False
-                # A backend whose init itself resolves this hook must not wait
-                # on its own event: re-run the init (reentrant-lock semantics);
-                # the outer init still records the result.
-                reentrant = initiator == threading.get_ident()
-        if fire:
-            try:
-                backend_init()
-            except BaseException:
-                # A failed init must not poison the dedup state: release
-                # waiters so a later compile retries the hook.
-                with _init_lock:
-                    _pending_inits.pop((owner, func), None)
-                event.set()
-                raise
-            with _init_lock:
-                _pending_inits.pop((owner, func), None)
-                try:
-                    if is_method:
-                        _initialized_methods.setdefault(owner, set()).add(func)
-                    else:
-                        _initialized_hooks.add(func)
-                except TypeError:
-                    # WeakSet.__contains__ silently returns False for
-                    # non-weak-referenceable hooks, so reaching here does not
-                    # prove weakrefability and add may still raise. The hook
-                    # has fired but cannot be recorded; it refires on the next
-                    # resolution.
-                    pass
-            event.set()
-            return
-        if reentrant:
-            backend_init()
-            return
-        # Another thread is running this init: wait for it and re-check. If it
-        # failed, this thread retries the hook itself.
-        event.wait()
+    # _TorchCompileWrapper and AotAutograd forward the attribute to the
+    # backend they wrap via a @property.
+    backend_init = getattr(backend, "_dynamo_backend_init", None)
+    if backend_init is not None:
+        # Fires on every resolution, before any invocation; backends that
+        # need one-time setup deduplicate themselves (e.g. functools.cache).
+        backend_init()
 
 
 def get_compiler_fn(
@@ -1933,10 +1828,9 @@ def _optimize(
             One can also provide additional context for the backend, like
             torch.jit.fuser("fuser2"), by setting the backend_ctx_ctor attribute.
             Backends can also define a ``_dynamo_backend_init`` no-arg callable
-            for one-time eager initialization; it fires once per hook (per
-            backend instance for instance-method hooks) when the backend is
-            resolved. See the "Eager Backend Initialization" section of
-            torch.compiler_custom_backends.md.
+            for eager initialization; it fires every time the backend is
+            resolved, before any invocation. See the "Eager Backend
+            Initialization" section of torch.compiler_custom_backends.md.
             - Or, a string backend name in `torch._dynamo.list_backends()`
         nopython: If True, graph breaks will be errors and there will
             be a single whole-program graph.

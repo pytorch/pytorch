@@ -3005,6 +3005,13 @@ class _TorchCompileWrapper:
         if hasattr(self.compiler_fn, "reset"):
             self.compiler_fn.reset()
 
+    # Forwarded so the backend's _dynamo_backend_init can be read off the
+    # wrapper (what get_compiler_fn receives); read at fire time so the hook
+    # can be set on the backend even after torch.compile() wraps it.
+    @property
+    def _dynamo_backend_init(self) -> _Any | None:
+        return getattr(self.compiler_fn, "_dynamo_backend_init", None)
+
 
 _InputT = _ParamSpec("_InputT")
 _RetT = _TypeVar("_RetT")
