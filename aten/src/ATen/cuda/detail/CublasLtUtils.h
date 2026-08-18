@@ -81,7 +81,7 @@ class CuBlasLtMatrixLayout : public CuBlasLtDescriptor<
   }
 };
 
-#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13020
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13030
 class CuBlasLtGroupedMatrixLayout : public CuBlasLtDescriptor<
                                         cublasLtMatrixLayoutOpaque_t,
                                         &cublasLtMatrixLayoutDestroy> {
@@ -120,7 +120,7 @@ class CuBlasLtGroupedMatrixLayout : public CuBlasLtDescriptor<
         descriptor(), attr, &value, sizeof(T)));
   }
 };
-#endif // !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13020
+#endif // !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13030
 
 class CuBlasLtMatmulPreference : public CuBlasLtDescriptor<
                                      cublasLtMatmulPreferenceOpaque_t,

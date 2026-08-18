@@ -26,6 +26,9 @@ jobs:
     permissions:
       contents: read
       id-token: write
+      # Needed by the advisor's `gh pr view` investigation step, since the
+      # scoped GITHUB_TOKEN below replaces the action's own app token.
+      pull-requests: read
 
     steps:
       - name: Checkout pytorch/pytorch trunk
@@ -48,6 +51,11 @@ jobs:
         id: claude
         uses: anthropics/claude-code-action@6e2bd52842c65e914eba5c8badd17560bd26b5de # v1.0.89
         with:
+          # Providing the workflow token stops the action from minting its own
+          # app token, bypassing Anthropic's OIDC app-token exchange -- the
+          # source of the observed intermittent "Workflow validation failed"
+          # 401s, which require the workflow to match the default branch.
+          github_token: ${{ secrets.GITHUB_TOKEN }}
           allowed_bots: "pytorch-auto-revert[bot],pytorch-bot[bot]"
           use_bedrock: "true"
           claude_args: |
@@ -166,6 +174,60 @@ jobs:
 
           aws s3 cp /tmp/advisor_verdict.json \
             "s3://ossci-raw-job-status/autorevert_advisor_verdicts/${{ github.repository }}/${{ github.run_id }}_${{ github.run_attempt }}.json"
+
+      # --- Debug observability: persist the exact per-job input and the full
+      # reasoning trace so a disputed verdict can be diagnosed after the fact
+      # (confabulation vs. a wrong/truncated input feed). Runs on always() so the
+      # pathological runs (empty/failed verdict) are the ones we can inspect.
+      # continue-on-error keeps logging from ever failing the advisor itself.
+      - name: Save advisor input payload
+        if: always()
+        continue-on-error: true
+        env:
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          SUSPECT_COMMIT: ${{ inputs.suspect_commit }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          SIGNAL_PATTERN: ${{ inputs.signal_pattern }}
+        run: |
+          mkdir -p /tmp/advisor_input
+          # Verbatim per-job payload the advisor was dispatched with.
+          printf '%s' "$SIGNAL_PATTERN" > /tmp/advisor_input/signal_pattern.json
+          jq -n \
+            --arg repo "$REPO" \
+            --arg run_id "$RUN_ID" \
+            --arg run_attempt "$RUN_ATTEMPT" \
+            --arg timestamp "$(date -u +%Y-%m-%dT%H:%M:%S.000)" \
+            --arg suspect_commit "$SUSPECT_COMMIT" \
+            --arg pr_number "$PR_NUMBER" \
+            '{
+              repo: $repo,
+              run_id: ($run_id | tonumber),
+              run_attempt: ($run_attempt | tonumber),
+              timestamp: $timestamp,
+              suspect_commit: $suspect_commit,
+              pr_number: $pr_number
+            }' > /tmp/advisor_input/meta.json
+          aws s3 cp --recursive /tmp/advisor_input \
+            "s3://ossci-raw-job-status/autorevert_advisor_inputs/$REPO/${RUN_ID}_${RUN_ATTEMPT}/"
+
+      - name: Save advisor reasoning trace
+        if: always() && steps.claude.outputs.execution_file != ''
+        continue-on-error: true
+        env:
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
+        run: |
+          mkdir -p /tmp/advisor_trace
+          # Full turn-by-turn trace: thinking (alwaysThinkingEnabled), every tool
+          # call (git show / gh pr view / log fetches) and its result, and the
+          # final output — i.e. everything the model saw and reasoned over.
+          cp "$EXECUTION_FILE" /tmp/advisor_trace/execution.json
+          aws s3 cp /tmp/advisor_trace/execution.json \
+            "s3://ossci-raw-job-status/autorevert_advisor_traces/$REPO/${RUN_ID}_${RUN_ATTEMPT}.json"
 
       - name: Upload usage metrics
         if: always()

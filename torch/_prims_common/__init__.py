@@ -1850,7 +1850,7 @@ def make_channels_last_1d_strides_for(
     multiplier: _IntLikeT | int = 1
     strides: list[_IntLikeT | int] = [0] * 3
     for idx in (1, -1, 0):
-        # NOTE: intentionally divergence from make_contiguous_strides_for
+        # NOTE: intentional divergence from make_contiguous_strides_for
         # This is consistent with eager
         strides[idx] = multiplier
         multiplier *= shape[idx]
@@ -1870,7 +1870,7 @@ def make_channels_last_2d_strides_for(
     multiplier: _IntLikeT | int = 1
     strides: list[_IntLikeT | int] = [0] * 4
     for idx in (1, -1, -2, 0):
-        # NOTE: intentionally divergence from make_contiguous_strides_for
+        # NOTE: intentional divergence from make_contiguous_strides_for
         # This is consistent with eager
         strides[idx] = multiplier
         multiplier *= shape[idx]
@@ -1889,7 +1889,7 @@ def make_channels_last_3d_strides_for(
     multiplier: _IntLikeT | int = 1
     strides: list[_IntLikeT | int] = [0] * 5
     for idx in (1, -1, -2, -3, 0):
-        # NOTE: intentionally divergence from make_contiguous_strides_for
+        # NOTE: intentional divergence from make_contiguous_strides_for
         # This is consistent with eager
         strides[idx] = multiplier
         multiplier *= shape[idx]

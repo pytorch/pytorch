@@ -1283,6 +1283,7 @@ void linalg_eig_kernel(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos,
   _warn_once_magma_deprecation("linalg.eig");
   linalg_eig_cusolver_xgeev(eigenvalues, eigenvectors, input, infos, compute_eigenvectors);
 #else
+  // hipSolver < 3.5.0 does not have `geev`
   _warn_once_magma_deprecation("linalg.eig", /*force_cusolver=*/false);
   linalg_eig_magma(eigenvalues, eigenvectors, infos, input, compute_eigenvectors);
 #endif
