@@ -196,6 +196,36 @@ class TestCppExtensionJIT(common.TestCase):
         # 2 * sigmoid(0) = 2 * 0.5 = 1
         self.assertEqual(z, torch.ones_like(z))
 
+    @common.skipIfRocm
+    @unittest.skipIf(IS_WINDOWS, "Windows not supported")
+    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    def test_jit_cuda_extension_with_dlink(self):
+        temp_dir = tempfile.mkdtemp()
+        try:
+            module = torch.utils.cpp_extension.load(
+                name="torch_test_cuda_dlink_extension",
+                sources=[
+                    "cpp_extensions/cuda_dlink_extension.cpp",
+                    "cpp_extensions/cuda_dlink_extension_kernel.cu",
+                    "cpp_extensions/cuda_dlink_extension_add.cu",
+                ],
+                extra_cuda_cflags=["-O2", "-rdc=true"],
+                build_directory=temp_dir,
+                verbose=True,
+                dlink=True,
+            )
+
+            x = torch.randn(8, device="cuda", dtype=torch.float32)
+            y = torch.randn(8, device="cuda", dtype=torch.float32)
+            self.assertEqual(module.add(x, y), x + y)
+
+            with open(os.path.join(temp_dir, "build.ninja")) as f:
+                ninja_file = f.read()
+            self.assertIn("cuda_devlink", ninja_file)
+            self.assertIn("-dlink", ninja_file)
+        finally:
+            shutil.rmtree(temp_dir)
+
     def _test_jit_xpu_extension(self, extra_sycl_cflags):
         # randomizing extension name and names of extension methods
         # for the case when we test building few extensions in a row
