@@ -6,7 +6,12 @@ import torch
 import torch._dynamo.trace_rules as trace_rules
 import torch._native.registry as registry_module
 from torch._subclasses.fake_tensor import FakeTensorMode
-from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    skipIfTorchDynamo,
+    TestCase,
+)
 
 
 class _CowStateWrapperTensor(torch.Tensor):
@@ -43,6 +48,8 @@ class _CowStateWrapperTensor(torch.Tensor):
 
 @skipIfTorchDynamo("Registry tests don't need dynamo compilation")
 class TestRegistry(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     """Tests for the torch._native.registry module."""
 
     def setUp(self):
@@ -352,6 +359,8 @@ class TestRegistry(TestCase):
 
 @skipIfTorchDynamo("Runtime registry tests exercise the dispatcher directly")
 class TestRegistryRuntime(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     """End-to-end runtime tests that exercise the real dispatcher.
 
     These tests register overrides on real aten ops and therefore must fully
