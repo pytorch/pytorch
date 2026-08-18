@@ -1222,7 +1222,7 @@ PY
   )
   (
     cd test
-    python inductor/test_async_compile.py -k flydsl -v
+    python -m pytest inductor/test_async_compile.py -k flydsl -v
   )
   python test/run_test.py --include inductor/test_flydsl_template.py --verbose
   assert_git_not_dirty
