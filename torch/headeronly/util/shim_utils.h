@@ -15,7 +15,7 @@ HIDDEN_NAMESPACE_BEGIN(torch, headeronly, detail)
     int64_t line) {
   std::stringstream ss;
   ss << call << " API call failed at " << file << ", line " << line;
-  throw std::runtime_error(ss.str());
+  throw std::runtime_error(std::move(ss).str());
 }
 HIDDEN_NAMESPACE_END(torch, headeronly, detail)
 

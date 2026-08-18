@@ -83,8 +83,6 @@ MUTABLE_OPS_NOT_USING_FUNCTIONALIZATION = (
 CUMULATIVE_OUT_OPS_PRESERVING_OUT_DTYPE = {
     OperatorName.parse("cumsum.out"),
     OperatorName.parse("cumprod.out"),
-    OperatorName.parse("cumsum.dimname_out"),
-    OperatorName.parse("cumprod.dimname_out"),
 }
 
 # This file contains codegen that relates to the functionalization pass.
@@ -351,7 +349,7 @@ def emit_expr_has_symbolic_values(expr: str, type: CType) -> str:
 
 # Detects whether any of the SymInt arguments are, in fact, symbolic values.
 # This is used in the constructor of ViewMeta.
-def emit_has_symbolic_inputs(sig: DispatcherSignature) -> tuple[str, str]:
+def emit_has_symbolic_inputs(sig: DispatcherSignature) -> str:
     name = "has_symbolic_inputs"
     statements = [
         f"{name} = {name} | ({emit_expr_has_symbolic_values(binding.name, binding.nctype.type)});"
@@ -362,12 +360,9 @@ def emit_has_symbolic_inputs(sig: DispatcherSignature) -> tuple[str, str]:
         )
     ]
     body = "\n      ".join(statements)
-    return (
-        name,
-        f"""
+    return f"""
       bool {name} = false;
-      {body}""",
-    )
+      {body}"""
 
 
 # Generates the Functionalization kernel for:
@@ -426,10 +421,7 @@ def emit_view_functionalization_body(
             e.expr for e in translate(meta_call_ctx, call_sig.arguments(), method=False)
         ]
 
-        (
-            symbolic_inputs_varname,
-            symbolic_inputs_check,
-        ) = emit_has_symbolic_inputs(call_sig)
+        symbolic_inputs_check = emit_has_symbolic_inputs(call_sig)
 
         if "inplace_view" in f.tags:
             # See Note [Functionalization Pass - Inplace View Ops] for more details

@@ -5,6 +5,7 @@ import unittest
 from torch.testing._internal.inductor_utils import (
     HAS_CUDA_AND_TRITON,
     HAS_GPU,
+    HAS_MTIA_AND_TRITON,
     HAS_XPU_AND_TRITON,
 )
 from torch.utils._triton import has_triton
@@ -17,7 +18,8 @@ requires_xpu_and_triton = unittest.skipUnless(
     HAS_XPU_AND_TRITON, "requires xpu and triton"
 )
 requires_gpu_and_triton = unittest.skipUnless(
-    HAS_XPU_AND_TRITON or HAS_CUDA_AND_TRITON, "requires gpu and triton"
+    HAS_XPU_AND_TRITON or HAS_CUDA_AND_TRITON or HAS_MTIA_AND_TRITON,
+    "requires gpu and triton",
 )
 requires_gpu = unittest.skipUnless(HAS_GPU, "requires gpu")
 
@@ -947,6 +949,14 @@ if has_triton():
         Make sure that codegen sanitizes the docstring.
         To prevent it from being linted to double quotes: """!!!"""
         '''
+        pid = tl.program_id(axis=0)
+        offsets = tl.arange(0, BLOCK_SIZE) + pid * BLOCK_SIZE
+        ones = tl.full([BLOCK_SIZE], 1.0, dtype=tl.float32)
+        tl.store(out_ptr + offsets, ones, mask=offsets < numel)
+
+    @triton.jit
+    def kernel_with_backslash_in_docstring(out_ptr, numel, BLOCK_SIZE: tl.constexpr):
+        """Docstring with literal backslash escapes: \n \t \\"""
         pid = tl.program_id(axis=0)
         offsets = tl.arange(0, BLOCK_SIZE) + pid * BLOCK_SIZE
         ones = tl.full([BLOCK_SIZE], 1.0, dtype=tl.float32)

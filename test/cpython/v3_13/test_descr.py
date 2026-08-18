@@ -2002,7 +2002,8 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         attrs = ", ".join(f"Z._{n:03d}" for n in range(280))
         code = f"def number_attrs(Z):\n    return [ {attrs} ]"
         ns = {}
-        exec(code, ns)
+        with torch._dynamo.error_on_graph_break(False):
+            exec(code, ns)
         number_attrs = ns["number_attrs"]
         # Warm up the function for quickening (PEP 659)
         for _ in range(30):
@@ -4618,7 +4619,8 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
                 self.subTest(expr=expr, x=x, y=y),
                 self.assertRaises(TypeError),
             ):
-                exec(expr, {'x': x, 'y': y})
+                with torch._dynamo.error_on_graph_break(False):
+                    exec(expr, {'x': x, 'y': y})
 
         N1 = sys.maxsize + 1    # might trigger OverflowErrors instead of
                                 # TypeErrors

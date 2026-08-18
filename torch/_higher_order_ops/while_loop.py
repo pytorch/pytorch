@@ -712,7 +712,7 @@ class WhileLoopStackOutputOp(HigherOrderOperator):
 #       ↓     ↓     ↓     ↓     ↓
 # x ──→ y0 ─→ y1 ─→ y2 ─→ y3 ─→ y4
 #
-# The bacwkard can be visualized as follows:
+# The backward can be visualized as follows:
 #
 #             g_additional_inputs
 #         ┌──────┬──────┼──────┬──────┐
@@ -733,7 +733,7 @@ class WhileLoopStackOutputOp(HigherOrderOperator):
 #        = ...
 #        = gy4 * bw(y4, y3) * bw(y3, y2) * bw(y2, y1) * bw(y1, y0) * bw(y0, x)
 #
-# since gy4 is the graient of the final output, which is given as the backward input, we've got a formula
+# since gy4 is the gradient of the final output, which is given as the backward input, we've got a formula
 # to compute gx. A abbr for the formula is: gy4 * bw43210x
 #
 # In a similar way, we can compute g_additional_inputs using chain rule:
@@ -857,7 +857,15 @@ class WhileLoopAutogradOp(torch.autograd.Function):
         ]
 
         init_idx = torch.zeros((), dtype=torch.int64)
-        init_grad_carries = filter_with_masks(grads, carries_tensor_masks)  # type: ignore[arg-type]
+        # Autograd can pass view gradients. The generated backward while_loop
+        # needs stable carry metadata across iterations, so canonicalize tensor
+        # gradients before they become carries.
+        init_grad_carries = tuple(
+            grad.clone(memory_format=torch.contiguous_format)
+            if isinstance(grad, torch.Tensor)
+            else grad
+            for grad in filter_with_masks(grads, carries_tensor_masks)  # type: ignore[arg-type]
+        )
         init_grad_additional_inputs = tuple(
             torch.zeros_like(t)
             for need_keep, t in zip(

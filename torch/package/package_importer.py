@@ -484,10 +484,7 @@ class PackageImporter(Importer):
                 return self.modules[name]
             parent_module = self.modules[parent]
 
-            try:
-                parent_module.__path__  # type: ignore[attr-defined]
-
-            except AttributeError:
+            if not hasattr(parent_module, "__path__"):
                 # when we attempt to import a package only containing pybinded files,
                 # the parent directory isn't always a package as defined by python,
                 # so we search if the package is actually there or not before calling the error.
@@ -751,7 +748,7 @@ inspect.getfile = _patched_getfile
 class _PackageResourceReader:
     """Private class used to support PackageImporter.get_resource_reader().
 
-    Confirms to the importlib.abc.ResourceReader interface. Allowed to access
+    Conforms to the importlib.abc.ResourceReader interface. Allowed to access
     the innards of PackageImporter.
     """
 

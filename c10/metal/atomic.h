@@ -229,6 +229,14 @@ struct AtomicType<bool> {
         ::metal::memory_order_relaxed,
         ::metal::memory_order_relaxed));
   }
+  // Generic packed-CAS supports any bool op (AND for prod/amin, OR for amax).
+  static inline void atomic_binary_op(
+      device type* data,
+      long offset,
+      bool value,
+      bool (*op)(bool, bool)) {
+    atomic_binary_op_helper<bool>(data, offset, value, op);
+  }
 };
 
 // ComplexHalf atomic op

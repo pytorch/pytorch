@@ -1088,6 +1088,32 @@ static at::Tensor linear_int8_with_onednn_weight(
     is_fp8 = true;
   }
 
+  // Fall back to fp8 reference impl on platforms without AMX FP16 support.
+  // On such platforms, `onednn_weight` is a plain (transposed) strided tensor
+  // produced by `pack_weight_to_onednn_tensor`, NOT an MKLDNN tensor.
+#if defined(__powerpc__)
+  if (is_fp8) {
+#else
+  if (is_fp8 && !cpuinfo_has_x86_amx_fp16()) {
+#endif
+    double input_scale_val;
+    if constexpr (std::is_same_v<std::decay_t<InputScaleType>, at::Tensor>) {
+      TORCH_CHECK(
+          input_scale_arg.numel() == 1,
+          "onednn fp8 linear: act scale size should be 1");
+      input_scale_val = input_scale_arg.item().toDouble();
+    } else {
+      input_scale_val = input_scale_arg;
+    }
+    // Fall back to ref impl on old platforms because not supported
+    // Transpose weight to align with behavior in oneDNN
+    return fp8_qlinear_onednn_ref(
+        input, input_scale_val, onednn_weight.t(), weight_scales, bias,
+        output_scale, output_dtype, other, other_scale,
+        binary_post_op, binary_alpha, unary_post_op,
+        unary_post_op_args, unary_post_op_algorithm);
+  }
+
   // Fast path with cache of params.
   static const char* env_var = std::getenv(CACHE_ONEDNN_CONTEXT_FLAG);
   static const std::string cache_flag_str = env_var ? std::string(env_var) : "";
@@ -1186,19 +1212,6 @@ static at::Tensor linear_int8_with_onednn_weight(
           " (same as output dtype), but got ", other.value().scalar_type()
       );
     }
-  }
-#if defined(__powerpc__)
-  if (is_fp8) {
-#else
-  if(is_fp8 && !cpuinfo_has_x86_amx_fp16()) {
-#endif
-    // Fall back to ref impl on old platforms because not supported
-    // Transpose weight to align with behavior in oneDNN
-    return fp8_qlinear_onednn_ref(
-        input, input_scale, onednn_weight.t(), weight_scales, bias,
-        output_scale, output_dtype, other, other_scale,
-        binary_post_op, binary_alpha, unary_post_op,
-        unary_post_op_args, unary_post_op_algorithm);
   }
 
   // If the input has more than two dimensions, we will reshape it to a 2-dimensional form
@@ -1338,8 +1351,8 @@ static at::Tensor linear_int8_with_onednn_weight(
     params.N = N;
     params.out_dtype = out_dtype;
     params.output_size = output_size;
-    params.primitive = primitive;
-    params.packed_weight = expected_weight;
+    params.primitive = std::move(primitive);
+    params.packed_weight = std::move(expected_weight);
     // keep a copy rather than a view of weight scales
     params.weight_scales = tensor(wei_scales_t.get_desc());
     memcpy(params.weight_scales.get_data_handle(), wei_scales_t.get_data_handle(), wei_scales_t.get_desc().get_size());
@@ -1348,9 +1361,9 @@ static at::Tensor linear_int8_with_onednn_weight(
     params.src_zero_point = input_zero_point != 0 ? std::make_optional<tensor>(src_zp_t) : std::nullopt;
     params.dst_zero_point = output_zero_point != 0 ? std::make_optional<tensor>(dst_zp_t) : std::nullopt;
     params.bias = with_bias ? std::make_optional<tensor>(onednn_bias) : std::nullopt;
-    params.scratchpad = scratchpad;
-    params.src = src;
-    params.dst = dst;
+    params.scratchpad = std::move(scratchpad);
+    params.src = std::move(src);
+    params.dst = std::move(dst);
     params.src1 = binary_post_op == "add" ? std::make_optional<tensor>(src1) : std::nullopt;
     params.init_args();
     qlinear_forward_params_map[cache_key] = params;

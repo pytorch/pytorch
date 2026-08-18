@@ -4,9 +4,9 @@
 #include <deque>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
-#include <c10/util/ssize.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/named_value.h>
@@ -500,12 +500,10 @@ void ExpandConcatAndEliminateRedundancy(const std::shared_ptr<Graph>& graph) {
 namespace {
 
 size_t determineUsageIdx(Value* value, Node* user) {
-  const auto idx =
-      std::find(user->inputs().begin(), user->inputs().end(), value) -
-      user->inputs().begin();
-  using c10::ssize;
-  TORCH_CHECK(idx != ssize(user->inputs()));
-  return idx;
+  const auto& inputs = user->inputs();
+  const auto it = std::find(inputs.begin(), inputs.end(), value);
+  TORCH_CHECK(it != inputs.end());
+  return std::distance(inputs.begin(), it);
 }
 
 std::vector<Value*> getConcatInputs(Node* concat) {

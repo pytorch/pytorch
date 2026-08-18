@@ -30,3 +30,4 @@
 #define TORCH_VERSION_2_11_0 (((0ULL + 2) << 56) | ((0ULL + 11) << 48))
 #define TORCH_VERSION_2_12_0 (((0ULL + 2) << 56) | ((0ULL + 12) << 48))
 #define TORCH_VERSION_2_13_0 (((0ULL + 2) << 56) | ((0ULL + 13) << 48))
+#define TORCH_VERSION_2_14_0 (((0ULL + 2) << 56) | ((0ULL + 14) << 48))

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <torch/csrc/Export.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 
@@ -26,8 +27,8 @@ namespace torch::utils {
 //
 // `only_lift_cpu_tensors=true` is useful to prevent CUDA initialization under
 // FakeTensorMode because it avoids moving concrete data to CUDA.
-TORCH_API bool only_lift_cpu_tensors();
-TORCH_API void set_only_lift_cpu_tensors(bool value);
+TORCH_PYTHON_API bool only_lift_cpu_tensors();
+TORCH_PYTHON_API void set_only_lift_cpu_tensors(bool value);
 
 at::Tensor base_tensor_ctor(PyObject* args, PyObject* kwargs);
 TORCH_PYTHON_API at::Tensor legacy_tensor_ctor(

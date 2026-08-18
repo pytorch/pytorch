@@ -118,6 +118,24 @@ if(WIN32)
   set(CMAKE_HIP_COMPILER_FRONTEND_VARIANT "GNU")
 endif()
 
+# CMake populates CMAKE_<LANG>_USING_LINKER_<TYPE> for C/CXX (Clang) but not for
+# HIP, so a global CMAKE_LINKER_TYPE (e.g. LLD) leaks into enable_language(HIP)'s
+# ABI probe and aborts with "LINKER_TYPE '<TYPE>' is unknown or not supported by
+# this toolchain". HIP here is the same clang++ driver as CXX, so reuse the CXX
+# linker-type mapping; fall back to the standard -fuse-ld flag if CXX has none.
+if(CMAKE_LINKER_TYPE AND NOT DEFINED CMAKE_HIP_USING_LINKER_${CMAKE_LINKER_TYPE})
+  if(DEFINED CMAKE_CXX_USING_LINKER_${CMAKE_LINKER_TYPE})
+    set(CMAKE_HIP_USING_LINKER_${CMAKE_LINKER_TYPE}
+        "${CMAKE_CXX_USING_LINKER_${CMAKE_LINKER_TYPE}}")
+    if(DEFINED CMAKE_CXX_USING_LINKER_MODE)
+      set(CMAKE_HIP_USING_LINKER_MODE "${CMAKE_CXX_USING_LINKER_MODE}")
+    endif()
+  else()
+    string(TOLOWER "${CMAKE_LINKER_TYPE}" _hip_linker_lc)
+    set(CMAKE_HIP_USING_LINKER_${CMAKE_LINKER_TYPE} "-fuse-ld=${_hip_linker_lc}")
+  endif()
+endif()
+
 enable_language(HIP)
 message(STATUS "HIP language enabled with compiler: ${CMAKE_HIP_COMPILER}")
 message(STATUS "HIP architectures: ${CMAKE_HIP_ARCHITECTURES}")
@@ -126,18 +144,35 @@ if(WIN32)
   # CMake 4.3.0+ regression: the Windows-MSVC platform module seeds
   # CMAKE_HIP_FLAGS{,_<CONFIG>} with MSVC-style defaults (/DWIN32 /D_WINDOWS,
   # /O2 /Ob2 /DNDEBUG) when C/CXX use clang-cl. clang++ (GNU frontend) for HIP
-  # rejects them. Strip them and reinstate GNU equivalents. Not needed on
-  # CMake 4.2.x, but safe to run there too.
+  # rejects them. Strip them out. Not needed on CMake 4.2.x, but safe there.
   foreach(_cfg "" _DEBUG _RELEASE _MINSIZEREL _RELWITHDEBINFO)
     if(DEFINED CMAKE_HIP_FLAGS${_cfg})
       string(REGEX REPLACE "(^| )/[a-zA-Z][a-zA-Z0-9_:=.]*" "" CMAKE_HIP_FLAGS${_cfg} "${CMAKE_HIP_FLAGS${_cfg}}")
       string(STRIP "${CMAKE_HIP_FLAGS${_cfg}}" CMAKE_HIP_FLAGS${_cfg})
     endif()
   endforeach()
-  string(APPEND CMAKE_HIP_FLAGS_RELEASE " -O3 -DNDEBUG")
-  string(APPEND CMAKE_HIP_FLAGS_RELWITHDEBINFO " -O2 -DNDEBUG -g")
-  string(APPEND CMAKE_HIP_FLAGS_MINSIZEREL " -Os -DNDEBUG")
-  string(APPEND CMAKE_HIP_FLAGS_DEBUG " -O0 -g")
+
+  # Reinstate GNU-equivalent optimization flags. The generated HIP compile
+  # rule's <FLAGS> includes CMAKE_HIP_FLAGS but, on this code path, does
+  # not include CMAKE_HIP_FLAGS_<CONFIG> (verified via build.ninja), so
+  # appending to the per-config variables is dead code. Inject the per-config
+  # flags into CMAKE_HIP_FLAGS instead, gated on CMAKE_BUILD_TYPE for
+  # single-config generators (Ninja, Makefiles). Without this, clang++
+  # falls back to -O0 and HIP kernels are unoptimized (~99% conv2d FP16
+  # perf regression on gfx1150; TheRock#5157, #183853).
+  if(NOT CMAKE_CONFIGURATION_TYPES)
+    string(TOUPPER "${CMAKE_BUILD_TYPE}" _hip_cfg)
+    if(_hip_cfg STREQUAL "DEBUG")
+      string(APPEND CMAKE_HIP_FLAGS " -O0 -g")
+    elseif(_hip_cfg STREQUAL "RELWITHDEBINFO")
+      string(APPEND CMAKE_HIP_FLAGS " -O2 -DNDEBUG -g")
+    elseif(_hip_cfg STREQUAL "MINSIZEREL")
+      string(APPEND CMAKE_HIP_FLAGS " -Os -DNDEBUG")
+    else()  # Release or unset
+      string(APPEND CMAKE_HIP_FLAGS " -O3 -DNDEBUG")
+    endif()
+    unset(_hip_cfg)
+  endif()
 endif()
 
 if(WIN32)
@@ -311,11 +346,17 @@ if(PYTORCH_FOUND_HIP)
   if(UNIX)
     find_package_and_print_version(rccl)
     find_package_and_print_version(hsa-runtime64 REQUIRED)
-    find_package_and_print_version(rocm_smi REQUIRED)
+    # hipFile is Linux-only and ships with ROCm 7.14 and later, where it is required.
+    if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "7.14.0")
+      find_package_and_print_version(hipfile REQUIRED)
+    endif()
   endif()
 
   # Optional components.
   find_package_and_print_version(hipsparselt)  # Will be required when ready.
+  # ROCm 8.0 and later requires libhipcxx! This should be marked as
+  # 'REQUIRED' once minimal ROCm version is bumped to 8.0 or later.
+  find_package_and_print_version(libhipcxx)
 
   list(REMOVE_DUPLICATES ROCM_INCLUDE_DIRS)
 

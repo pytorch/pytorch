@@ -434,28 +434,21 @@ static PyObject* THPStream_richcompare(
     PyObject* self,
     PyObject* other,
     int op) {
-  PyObject* result = nullptr;
-  if (Py_IsNone(other)) {
-    result = Py_False;
-  } else {
-    switch (op) {
-      case Py_EQ:
-        result = THPStream_eq(
-            reinterpret_cast<THPStream*>(self),
-            reinterpret_cast<THPStream*>(other));
-        break;
-      case Py_NE:
-        result = THPStream_ne(
-            reinterpret_cast<THPStream*>(self),
-            reinterpret_cast<THPStream*>(other));
-        break;
-      default:
-        result = Py_False;
-        break;
-    }
+  if (!THPStream_Check(other)) {
+    Py_RETURN_NOTIMPLEMENTED;
   }
-  Py_XINCREF(result);
-  return result;
+  switch (op) {
+    case Py_EQ:
+      return THPStream_eq(
+          reinterpret_cast<THPStream*>(self),
+          reinterpret_cast<THPStream*>(other));
+    case Py_NE:
+      return THPStream_ne(
+          reinterpret_cast<THPStream*>(self),
+          reinterpret_cast<THPStream*>(other));
+    default:
+      Py_RETURN_NOTIMPLEMENTED;
+  }
 }
 
 static const std::initializer_list<PyMemberDef> THPStream_members = {
