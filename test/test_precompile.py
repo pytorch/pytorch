@@ -2310,6 +2310,20 @@ class TestPrecompile(TestCase):
             )
             self.assertIn("Editing it is supported", code)
 
+    @unittest.skipIf(not TEST_CUDA, "needs CUDA")
+    def test_load_from_a_code_string_gives_triton_a_file(self):
+        # Kernels are module-level code, and @triton.jit reads its own source off disk:
+        # it refuses a function whose module has no file. A caller loading from a string
+        # has no path to offer, so load parks a copy where triton can find it rather
+        # than failing on every CUDA artifact.
+        code, cache = torch.compiler.precompile(
+            lambda a: (a * 2).relu(), torch.ones(64, device="cuda")
+        )
+        self.assertIn("@triton.jit", code)
+        loaded = torch.compiler.precompile.load(code, cache)
+        x = torch.randn(64, device="cuda")
+        self.assertEqual(loaded(x), (x * 2).relu())
+
 
 @skipIfTorchDynamo("precompile's make_fx capture is incompatible with dynamo wrapping")
 class TestPrecompileNumerics(TestCase):
@@ -4701,13 +4715,16 @@ class TestExportPython(TestCase):
         torch.compiler.export_python(path=path)(fn)(x, y)
         with open(path, encoding="utf-8") as f:
             source = f.read()
-        for name in set(
-            _re.findall(r"^(\w+) = async_compile\.", source, _re.MULTILINE)
-        ):
+        # Both forms: a hoisted kernel is a module-level def, a non-hoistable one is
+        # still bound by an async_compile call.
+        defined = _re.findall(r"^def (triton_\w+)\(", source, _re.MULTILINE)
+        defined += _re.findall(r"^(\w+) = async_compile\.", source, _re.MULTILINE)
+        self.assertTrue(defined, "no kernel definition found in the artifact")
+        for name in set(defined):
             self.assertEqual(
-                len(_re.findall(rf"^{name} = async_compile\.", source, _re.MULTILINE)),
+                defined.count(name),
                 1,
-                f"{name} is assigned more than once; the earlier copies are dead code",
+                f"{name} is defined more than once; the earlier copies are dead code",
             )
 
     def test_artifact_header_invites_editing_and_loads_as_documented(self, device):
@@ -4773,7 +4790,7 @@ class TestExportPython(TestCase):
         # file that is exec'd once has no use for it, and it forces every kernel to live
         # inside a string where it cannot be edited cleanly or reported against.
         if torch.device(device).type != "cuda":
-            self.skipTest("the CPU backend is not hoisted; see the bail in _lighten")
+            self.skipTest("only Triton kernels become module-level code")
         path = self._tmp_path("light.py")
 
         def fn(a, b):
@@ -4797,20 +4814,27 @@ class TestExportPython(TestCase):
         # and it still runs, from a fresh load
         self.assertEqual(torch.compiler.export_python(path=path)(fn)(x, y), expected)
 
-    def test_lighten_leaves_a_non_hoistable_backend_alone(self, device):
-        # Only Triton kernels are hoisted. A cpp_pybinding kernel still needs the
-        # AsyncCompile object, so the pass must publish the original rather than strand
-        # a live reference -- names alone cannot catch that, since such a call still
-        # binds its kernel name while its value becomes unresolvable.
-        from torch.compiler._export_python import _lighten
+    def test_non_hoistable_backend_keeps_its_compile_machinery(self, device):
+        # Only Triton kernels become module-level code. A C++ kernel cannot: the text is
+        # C++ and producing the value needs a compiler invocation, so its artifact keeps
+        # the AsyncCompile it binds through. Dropping it by mode rather than by need
+        # would strand a live reference and the artifact would not load at all.
+        if torch.device(device).type != "cpu":
+            self.skipTest("C++ kernels are the non-hoistable backend")
+        path = self._tmp_path("cpp_backend.py")
 
-        code = (
-            "async_compile = AsyncCompile()\n"
-            "cpp_fused_0 = async_compile.cpp_pybinding(['float*'], 'source')\n"
-            "async_compile.wait(globals())\n"
-            "del async_compile\n"
-        )
-        self.assertEqual(_lighten(code), code)
+        def fn(a, b):
+            return (a * 2 + b).relu().sum(dim=-1)
+
+        x = make_tensor((4096,), device=device, dtype=torch.float32)
+        y = make_tensor((4096,), device=device, dtype=torch.float32)
+        expected = torch.compiler.export_python(path=path)(fn)(x, y)
+        with open(path, encoding="utf-8") as f:
+            source = f.read()
+        if "async_compile.cpp" not in source:
+            self.skipTest("graph did not lower to a C++ kernel")
+        self.assertIn("AsyncCompile()", source)
+        self.assertEqual(torch.compiler.export_python(path=path)(fn)(x, y), expected)
 
     def test_meta_module_tensor_does_not_crash_the_autocast_stamp(self, device):
         # autocast does not model every device an input can live on, and a module can

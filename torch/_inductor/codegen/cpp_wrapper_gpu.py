@@ -1387,6 +1387,11 @@ class CppWrapperGpu(CppWrapperCpu):
         metadata: str | None = None,
         gpu: bool = True,
         cpp_definition: str | None = None,
+        # A C++ wrapper never defines a kernel as module-level python, so the readable
+        # python wrapper's standalone form cannot reach here; accepted to keep one
+        # signature across _define_kernel_helper implementations.
+        standalone: bool = False,
+        autotune_body: str | None = None,
     ):
         if gpu:
             self._kernel_name_to_body[kernel_name] = kernel_body

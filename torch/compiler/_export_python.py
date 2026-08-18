@@ -122,157 +122,6 @@ def _atomic_publish(path: str, data: bytes) -> bool:
             pass
 
 
-def _lighten(code: str) -> str:
-    """Strip inductor's build-time machinery out of a standalone artifact.
-
-    Three things it emits are for compiling, not for running, and only get in the way of
-    a file meant to be read and edited:
-
-      * each kernel is a STRING passed to async_compile.triton(...), so the source a
-        reader wants to tune is quoted, a syntax error in it is reported against an
-        opaque cache file, and a kernel emitted twice silently shadows itself;
-      * AsyncCompile exists to farm kernel compilation out to a worker pool at build
-        time, which a file that is exec'd once has no use for;
-      * a bare multi-line string holds the compile-time autotuning harness, inert here.
-
-    Hoisting each kernel to module level fixes all three at once: the kernel becomes real
-    code the reader can edit in place, Python reports errors in it against this file at
-    the right line, and duplicates become duplicate defs that this same pass drops.
-    """
-    lines = code.splitlines(True)
-    out: list[str] = []
-    i = 0
-    while i < len(lines):
-        if re.match(r"\w+ = async_compile\.triton\(", lines[i]):
-            body = close = -1
-            for j in range(i, len(lines)):
-                if body < 0 and "'''" in lines[j]:
-                    body = j
-                elif body >= 0 and lines[j].startswith("'''" + ", device_str="):
-                    close = j
-                    break
-            if close > 0:
-                out.extend(lines[body + 1 : close])
-                out.append("\n")
-                i = close + 1
-                continue
-        if lines[i].startswith(
-            (
-                "async_compile = AsyncCompile()",
-                "async_compile.wait(",
-                "del async_compile",
-                "from torch._inductor.async_compile import AsyncCompile",
-            )
-        ):
-            i += 1
-            continue
-        out.append(lines[i])
-        i += 1
-    lightened = "".join(out)
-    try:
-        tree = ast.parse(lightened)
-    except SyntaxError:
-        return code
-    # drop the inert compile-time blocks, which are bare string expressions
-    kept = lightened.splitlines(True)
-    inert = [
-        (n.lineno - 1, n.end_lineno)
-        for n in tree.body
-        if isinstance(n, ast.Expr)
-        and isinstance(n.value, ast.Constant)
-        and isinstance(n.value.value, str)
-        and n.end_lineno is not None
-        and n.end_lineno - n.lineno > 3
-    ]
-    for a, b in sorted(inert, reverse=True):
-        del kept[a:b]
-    lightened = "".join(kept)
-    # Only Triton kernels are hoisted. A cpp_pybinding (the CPU backend) or any other
-    # async_compile call still needs the object this pass removed, so if one survives,
-    # publish the original: names alone are not enough to check here, because such a
-    # call still BINDS its kernel name while its value has become unresolvable.
-    if re.search(r"\basync_compile\s*\.", lightened):
-        return code
-    # Earn the claim: the result must still parse and must still bind every name the
-    # original did, minus the build-time machinery this pass exists to remove. Anything
-    # else and we publish the original -- a bulky artifact beats a broken one.
-    try:
-        before = _module_level_names(code) - {"async_compile"}
-        if not before <= _module_level_names(lightened):
-            return code
-    except SyntaxError:
-        return code
-    return lightened
-
-
-def _prune_dead_bindings(code: str) -> str:
-    """Drop module-level imports and bindings the artifact never uses.
-
-    Inductor emits one preamble for every backend it might target, so a graph with a
-    single Triton kernel still carries ctypes, tempfile, the pooled and p2p allocators
-    and the rest. They are inert, but this file is meant to be read, and thirty lines of
-    machinery no kernel here touches is thirty lines between the reader and the kernel.
-
-    ALL-CAPS bindings are kept whatever the analysis says: the calling-convention block
-    (BACKEND, PARAM_NAMES, USER_INPUT_SHAPES, ...) is part of the artifact's documented
-    surface and is read from outside the file, not within it.
-    """
-    try:
-        tree = ast.parse(code)
-    except SyntaxError:
-        return code
-    used = {
-        node.id
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)
-    }
-    used |= {node.attr for node in ast.walk(tree) if isinstance(node, ast.Attribute)}
-    # A name can also be reached from inside an embedded string -- kernel source,
-    # metadata reconstructed by exec -- which no AST walk of this module will show.
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Constant) and isinstance(node.value, str):
-            used |= set(re.findall(r"\b\w+\b", node.value))
-
-    def is_dead(name: str) -> bool:
-        return name not in used and not name.isupper()
-
-    lines = code.splitlines(True)
-    drop: list[tuple[int, int]] = []
-    for node in tree.body:
-        if isinstance(node, (ast.Import, ast.ImportFrom)):
-            if node.names and all(
-                is_dead((a.asname or a.name).split(".")[0]) for a in node.names
-            ):
-                drop.append((node.lineno - 1, node.end_lineno or node.lineno))
-        elif (
-            isinstance(node, ast.Assign)
-            and len(node.targets) == 1
-            and isinstance(node.targets[0], ast.Name)
-            and is_dead(node.targets[0].id)
-            # only simple aliases; never drop something with a side effect
-            and isinstance(node.value, (ast.Attribute, ast.Name, ast.Constant))
-        ):
-            drop.append((node.lineno - 1, node.end_lineno or node.lineno))
-    for a, b in sorted(drop, reverse=True):
-        del lines[a:b]
-    pruned = "".join(lines)
-    try:
-        ast.parse(pruned)
-    except SyntaxError:
-        return code
-    return pruned
-
-
-def _module_level_names(code: str) -> set[str]:
-    names = set()
-    for node in ast.parse(code).body:
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            names.add(node.name)
-        elif isinstance(node, ast.Assign):
-            names.update(t.id for t in node.targets if isinstance(t, ast.Name))
-    return names
-
-
 _INNER_BANNER = (
     "# Generated by torch._functorch.aot_autograd.compile_to_python -- do not edit."
 )
@@ -290,11 +139,10 @@ def _mark_editable(code: str) -> str:
         "# Generated by torch._functorch.aot_autograd.compile_to_python. Editing it is\n"
         "# supported: this source is what runs. The kernels below are yours -- retune the\n"
         "# heuristics decorator, replace it with an explicit triton.autotune, or delete\n"
-        "# inductor's machinery and hand-write the kernel. Two things to know if you\n"
-        "# hoist a kernel out of its async_compile.triton(NAME, '''...''') call: the\n"
-        "# launch site uses KERNEL.run(...), which only exists on inductor's autotuner,\n"
-        "# so switch it to KERNEL[grid](..., XBLOCK=..., num_warps=...); and @triton.jit\n"
-        "# finds its own source by filename, so load the artifact with\n"
+        "# inductor's machinery and hand-write the kernel. Two things to know: the launch\n"
+        "# site uses KERNEL.run(...), which only exists on inductor's autotuner, so if you\n"
+        "# replace the decorator switch it to KERNEL[grid](..., XBLOCK=..., num_warps=...);\n"
+        "# and @triton.jit finds its own source by filename, so load the artifact with\n"
         "# exec(compile(src, path, 'exec'), ns) rather than exec(src, ns).",
         1,
     )
@@ -904,7 +752,7 @@ class ExportedPythonArtifact:
             tracer=self._tracer,
             decompositions=self._decompositions,
         )
-        code = _mark_editable(_prune_dead_bindings(_lighten(code)))
+        code = _mark_editable(code)
         parent = os.path.dirname(self._path)
         if parent:
             os.makedirs(parent, exist_ok=True)
