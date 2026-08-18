@@ -163,7 +163,7 @@ class OutputSlotReleaseTest(TestCase):
             **kwargs,
         )
         stage.has_backward = True
-        # Opt in to the experimental path.
+        # Explicit, so the test does not depend on the default.
         stage.early_send_release = True
         # Avoid peer-dependent forward setup.
         stage.act_send_info = {0: dst_stages or [stage_index + 1]}
@@ -216,23 +216,23 @@ class OutputSlotReleaseTest(TestCase):
         stage.retire_fwd_sends(0)
         self.assertIsNotNone(entry.live_outputs[0])
 
-    def test_early_send_release_defaults_off(self):
-        # Do not inherit the caller's opt-in.
+    def test_early_send_release_defaults_on(self):
+        # Do not inherit the caller's opt-out.
         with mock.patch.dict(os.environ):
             os.environ.pop("TORCH_PIPELINING_EARLY_SEND_RELEASE", None)
-            self.assertFalse(_early_send_release_default())
-            stage = PipelineStage(
-                torch.nn.Linear(d_hid, d_hid), 0, 2, torch.device("cpu")
-            )
-            self.assertFalse(stage.early_send_release)
-
-    def test_early_send_release_env_opt_in(self):
-        with mock.patch.dict(os.environ, {"TORCH_PIPELINING_EARLY_SEND_RELEASE": "1"}):
             self.assertTrue(_early_send_release_default())
             stage = PipelineStage(
                 torch.nn.Linear(d_hid, d_hid), 0, 2, torch.device("cpu")
             )
             self.assertTrue(stage.early_send_release)
+
+    def test_early_send_release_env_opt_out(self):
+        with mock.patch.dict(os.environ, {"TORCH_PIPELINING_EARLY_SEND_RELEASE": "0"}):
+            self.assertFalse(_early_send_release_default())
+            stage = PipelineStage(
+                torch.nn.Linear(d_hid, d_hid), 0, 2, torch.device("cpu")
+            )
+            self.assertFalse(stage.early_send_release)
 
     def test_forward_only_keeps_no_backward_root(self):
         # An unused edge would retain the forward-only graph.
@@ -279,7 +279,7 @@ class OutputSlotReleaseTest(TestCase):
 
         stage = PipelineStage(TaggedModule(), 0, 2, torch.device("cpu"))
         stage.has_backward = True
-        # Opt in so the subclass check rejects the slot.
+        # Explicit, so the subclass check is what rejects the slot.
         stage.early_send_release = True
         stage.act_send_info = {0: [1]}
         stage.forward_one_chunk(0, (torch.randn(batch_size, d_hid),))

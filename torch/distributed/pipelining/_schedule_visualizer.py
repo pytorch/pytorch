@@ -22,7 +22,10 @@ from torch.distributed.pipelining.schedules import (
     PipelineScheduleMulti,
     PipelineScheduleSingle,
 )
-from torch.distributed.pipelining.stage import PipelineStage
+from torch.distributed.pipelining.stage import (
+    _early_send_release_default,
+    PipelineStage,
+)
 
 
 class OpKey(NamedTuple):
@@ -68,7 +71,7 @@ def get_schedule_ops(
     mock_pipeline_stage.group_size = pp_degree
     mock_pipeline_stage.submod = None
     # autospec cannot see this instance attribute.
-    mock_pipeline_stage.early_send_release = False
+    mock_pipeline_stage.early_send_release = _early_send_release_default()
 
     # Check num_stages_per_rank is valid
     if issubclass(schedule_class, PipelineScheduleSingle):

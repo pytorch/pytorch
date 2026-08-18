@@ -58,6 +58,7 @@ from torch.distributed.pipelining.schedules import (
     WAIT_SEND_F,
 )
 from torch.distributed.pipelining.stage import (
+    _early_send_release_default,
     _PipelineStageBase,
     _RecvInfo,
     PipelineStage,
@@ -92,7 +93,9 @@ class MockPipelineStage(_PipelineStageBase):
         self.group_size = kwargs.get("group_size", 1)
         self.group_rank = kwargs.get("group_rank", 0)
         self.group = kwargs.get("group")
-        self.early_send_release = kwargs.get("early_send_release", False)
+        self.early_send_release = kwargs.get(
+            "early_send_release", _early_send_release_default()
+        )
 
     def _create_grad_recv_info(self, *args, **kwargs):
         return None

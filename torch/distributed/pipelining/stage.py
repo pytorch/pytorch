@@ -96,8 +96,14 @@ def _normalize_model_output_as_tuple(output: Any) -> tuple[Any]:
 
 
 def _early_send_release_default() -> bool:
-    """Return the experimental early-release opt-in setting."""
-    return os.environ.get("TORCH_PIPELINING_EARLY_SEND_RELEASE", "0") == "1"
+    """Return the early-release setting, on unless opted out.
+
+    Set ``TORCH_PIPELINING_EARLY_SEND_RELEASE=0`` to keep sent activations until
+    the end of the step. Configurations whose backward needs the output tensor
+    itself are already declined by :meth:`_output_slot_is_releasable`, so the
+    opt-out is for diagnosing a suspected regression rather than for correctness.
+    """
+    return os.environ.get("TORCH_PIPELINING_EARLY_SEND_RELEASE", "1") != "0"
 
 
 @dataclass
