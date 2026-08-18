@@ -22,9 +22,7 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import FLAT_PARAM
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 from torch.testing._internal.common_device_type import (
-    Capability,
     instantiate_device_type_tests,
-    requires_capabilities,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
@@ -225,10 +223,6 @@ class TestUnshardParams(TestUnshardParamsBase):
         return 2
 
     @skip_if_lt_x_gpu(2)
-    @requires_capabilities(
-        Capability.distributed.backend,
-        Capability.distributed.fsdp,
-    )
     def test_unshard_params_writeback(self, device):
         """Tests the ``writeback`` argument (using default for all others)."""
         self.run_subtests(
@@ -237,10 +231,6 @@ class TestUnshardParams(TestUnshardParamsBase):
         )
 
     @skip_if_lt_x_gpu(2)
-    @requires_capabilities(
-        Capability.distributed.backend,
-        Capability.distributed.fsdp,
-    )
     def test_unshard_params_param_data(self, device):
         """
         Tests that parameters are exposed correctly for ``recurse=True`` and
@@ -252,10 +242,6 @@ class TestUnshardParams(TestUnshardParamsBase):
         )
 
     @skip_if_lt_x_gpu(2)
-    @requires_capabilities(
-        Capability.distributed.backend,
-        Capability.distributed.fsdp,
-    )
     def test_unshard_singleton_param_writeback(self, device):
         """
         Tests ``writeback=True`` for a singleton parameter, which includes
@@ -282,10 +268,6 @@ class TestUnshardParams(TestUnshardParamsBase):
 
     @unittest.skipIf(TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/159348")
     @skip_if_lt_x_gpu(2)
-    @requires_capabilities(
-        Capability.distributed.backend,
-        Capability.distributed.fsdp,
-    )
     def test_unshard_params_respects_reshard(self, device):
         """
         Tests that unsharding parameters respects the expected reshard behavior
@@ -383,10 +365,6 @@ class TestUnshardParams(TestUnshardParamsBase):
         self.assertEqual(0, _get_unsharded_storage_size(inner_flat_param))
 
     @skip_if_lt_x_gpu(2)
-    @requires_capabilities(
-        Capability.distributed.backend,
-        Capability.distributed.fsdp,
-    )
     def test_unshard_params_recurse(self, device):
         """Tests the ``recurse`` argument (using default for all others)."""
         self.run_subtests(
@@ -456,10 +434,6 @@ class TestUnshardParams(TestUnshardParamsBase):
             self.assertEqual(expected_inner_numel, inner_flat_param.numel())
 
     @skip_if_lt_x_gpu(2)
-    @requires_capabilities(
-        Capability.distributed.backend,
-        Capability.distributed.fsdp,
-    )
     def test_named_parameters_and_buffers(self, device):
         """
         Tests that ``named_parameters()`` and ``named_buffers()`` for a
@@ -502,10 +476,6 @@ class TestUnshardParams(TestUnshardParamsBase):
                     self.assertEqual(p1, p2)
 
     @skip_if_lt_x_gpu(2)
-    @requires_capabilities(
-        Capability.distributed.backend,
-        Capability.distributed.fsdp,
-    )
     def test_with_grads_core(self, device):
         """
         Tests the core usage of``with_grads=True`` by comparing against DDP as
@@ -640,10 +610,6 @@ class TestUnshardParams(TestUnshardParamsBase):
             _check_grads(ddp_model, fsdp_model, old_fsdp_grads)
 
     @skip_if_lt_x_gpu(2)
-    @requires_capabilities(
-        Capability.distributed.backend,
-        Capability.distributed.fsdp,
-    )
     def test_with_grads_none_grads(self, device):
         """
         Tests that if all ranks' ``FlatParameter`` has ``None`` gradient, then
@@ -681,10 +647,6 @@ class TestUnshardParams(TestUnshardParamsBase):
                 self.assertTrue(param.grad is None)
 
     @skip_if_lt_x_gpu(2)
-    @requires_capabilities(
-        Capability.distributed.backend,
-        Capability.distributed.fsdp,
-    )
     def test_unshard_submodule(self, device):
         model = nn.Sequential(
             nn.Sequential(nn.Linear(16, 16), nn.Linear(16, 16)),
@@ -704,10 +666,6 @@ class TestUnshardParamsNoShard(TestUnshardParamsBase):
         return 1
 
     @skip_if_lt_x_gpu(1)
-    @requires_capabilities(
-        Capability.distributed.backend,
-        Capability.distributed.fsdp,
-    )
     def test_unshard_params_writeback_no_shard(self, device):
         """Tests the ``writeback`` argument (using default for all others)."""
         self.run_subtests(
@@ -716,10 +674,6 @@ class TestUnshardParamsNoShard(TestUnshardParamsBase):
         )
 
     @skip_if_lt_x_gpu(1)
-    @requires_capabilities(
-        Capability.distributed.backend,
-        Capability.distributed.fsdp,
-    )
     def test_unshard_params_param_data_no_shard(self, device):
         """
         Tests that parameters are exposed correctly for ``recurse=True`` and
@@ -741,10 +695,6 @@ class TestUnshardParamsErrors(TestUnshardParamsBase):
         return 2
 
     @skip_if_lt_x_gpu(2)
-    @requires_capabilities(
-        Capability.distributed.backend,
-        Capability.distributed.fsdp,
-    )
     def test_unshard_params_from_forward_raises(self, device):
         class MyModule(nn.Module):
             def __init__(self) -> None:
@@ -762,10 +712,6 @@ class TestUnshardParamsErrors(TestUnshardParamsBase):
             model(model)
 
     @skip_if_lt_x_gpu(2)
-    @requires_capabilities(
-        Capability.distributed.backend,
-        Capability.distributed.fsdp,
-    )
     def test_unshard_params_from_backward_raises(self, device):
         model = FSDP(nn.Linear(2, 1, device=device_type.type))
         output = model(torch.ones(2, device=device_type.type))
@@ -782,10 +728,6 @@ class TestUnshardParamsErrors(TestUnshardParamsBase):
             output.backward()
 
     @skip_if_lt_x_gpu(2)
-    @requires_capabilities(
-        Capability.distributed.backend,
-        Capability.distributed.fsdp,
-    )
     def test_rank0_only_with_writeback_raises(self, device):
         nested_wrapped_module = NestedWrappedModule.init(
             self.process_group,
@@ -799,10 +741,6 @@ class TestUnshardParamsErrors(TestUnshardParamsBase):
                 pass
 
     @skip_if_lt_x_gpu(2)
-    @requires_capabilities(
-        Capability.distributed.backend,
-        Capability.distributed.fsdp,
-    )
     def test_offload_to_cpu_no_shard_raises(self, device):
         nested_wrapped_module = NestedWrappedModule.init(
             self.process_group,
