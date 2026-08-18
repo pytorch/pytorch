@@ -215,6 +215,7 @@ def generate_dynamo_fx_repro_string(
     return textwrap.dedent(
         f"""
 {generate_env_vars_string(stable_output=stable_output)}
+import math
 from math import inf
 import torch
 from torch import tensor, device
