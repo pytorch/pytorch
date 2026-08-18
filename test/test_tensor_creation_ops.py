@@ -3197,15 +3197,16 @@ class TestTensorCreationCpuOnly(TestCase):
             self.assertIs(torch.float32, torch.get_default_dtype())
             self.assertIs(torch.FloatStorage, torch.Storage)
 
-        if torch.cuda.is_available():
-            with set_default_tensor_type(torch.cuda.FloatTensor):
+        if torch.accelerator.is_available():
+            backend = torch.accelerator.current_accelerator().type
+            with set_default_tensor_type(getattr(torch, backend).FloatTensor):
                 self.assertIs(torch.float32, torch.get_default_dtype())
-                self.assertIs(torch.float32, torch.cuda.FloatTensor.dtype)
-                self.assertIs(torch.cuda.FloatStorage, torch.Storage)
+                self.assertIs(torch.float32, getattr(torch, backend).FloatTensor.dtype)
+                self.assertIs(getattr(torch, backend).FloatStorage, torch.Storage)
 
                 with set_default_dtype(torch.float64):
                     self.assertIs(torch.float64, torch.get_default_dtype())
-                    self.assertIs(torch.cuda.DoubleStorage, torch.Storage)
+                    self.assertIs(getattr(torch, backend).DoubleStorage, torch.Storage)
 
         # don't allow passing dtype to set_default_tensor_type
         self.assertRaises(TypeError, lambda: torch.set_default_tensor_type(torch.float32))
@@ -3245,23 +3246,24 @@ class TestTensorCreationCpuOnly(TestCase):
         self.assertRaises(RuntimeError, lambda: x.new(torch.Size([2, 3, 4]), device='cuda'))
         self.assertRaises(RuntimeError, lambda: x.new((2.0, 3.0), device='cuda'))
 
-        if torch.cuda.is_available():
-            self.assertRaises(RuntimeError, lambda: torch.cuda.FloatTensor(device='cpu'))
-            self.assertRaises(RuntimeError, lambda: torch.cuda.FloatTensor(torch.Size([2, 3, 4]), device='cpu'))
-            self.assertRaises(RuntimeError, lambda: torch.cuda.FloatTensor((2.0, 3.0), device='cpu'))
+        if torch.accelerator.is_available():
+            backend = torch.accelerator.current_accelerator().type
+            self.assertRaises(RuntimeError, lambda: getattr(torch, backend).FloatTensor(device='cpu'))
+            self.assertRaises(RuntimeError, lambda: getattr(torch, backend).FloatTensor(torch.Size([2, 3, 4]), device='cpu'))
+            self.assertRaises(RuntimeError, lambda: getattr(torch, backend).FloatTensor((2.0, 3.0), device='cpu'))
 
             # Tensor constructor/new with Tensor argument shouldn't work with device specified
-            i = torch.tensor([1], device='cuda')
-            self.assertRaises(RuntimeError, lambda: torch.Tensor(i, device='cuda'))
-            self.assertRaises(RuntimeError, lambda: i.new(i, device='cuda'))
+            i = torch.tensor([1], device=backend)
+            self.assertRaises(RuntimeError, lambda: torch.Tensor(i, device=backend))
+            self.assertRaises(RuntimeError, lambda: i.new(i, device=backend))
             self.assertRaises(RuntimeError, lambda: torch.Tensor(i, device='cpu'))
             self.assertRaises(RuntimeError, lambda: i.new(i, device='cpu'))
 
-            with set_default_tensor_type(torch.cuda.FloatTensor):
+            with set_default_tensor_type(getattr(torch, backend).FloatTensor):
                 self.assertRaises(RuntimeError, lambda: torch.Tensor(device='cpu'))
                 self.assertRaises(RuntimeError, lambda: torch.Tensor(torch.Size([2, 3, 4]), device='cpu'))
                 self.assertRaises(RuntimeError, lambda: torch.Tensor((2.0, 3.0), device='cpu'))
-            x = torch.randn((3,), device='cuda')
+            x = torch.randn((3,), device=backend)
             self.assertRaises(RuntimeError, lambda: x.new(device='cpu'))
             self.assertRaises(RuntimeError, lambda: x.new(torch.Size([2, 3, 4]), device='cpu'))
             self.assertRaises(RuntimeError, lambda: x.new((2.0, 3.0), device='cpu'))
