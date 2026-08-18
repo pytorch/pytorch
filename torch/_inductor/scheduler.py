@@ -820,7 +820,10 @@ class NestedReduction:
         )
         if any(node.ancestors & deferred_names for node in leading_nodes):
             return None
-        return (*leading_nodes, *deferred_nodes), len(leading_nodes)
+        deferred_start = len(leading_nodes)
+        if not 0 < deferred_start < len(parent_nodes):
+            return None
+        return (*leading_nodes, *deferred_nodes), deferred_start
 
     @classmethod
     def _sub_parent_epilogue_candidate_nodes(
@@ -1289,7 +1292,9 @@ class NestedReduction:
         grouped_reduction = domain_context.grouped_reduction
         reduction_names = grouped_reduction.get_operation_names()
         reduction_buffer_names = grouped_reduction.get_buffer_names()
-        reduction_source_names = grouped_reduction.used_buffer_names()
+        reduction_source_names = OrderedSet(
+            dep.name for dep in grouped_reduction.read_writes.reads
+        )
         full_numel = V.graph.sizevars.simplify(
             domain_context.grouped_numel * domain_context.grouped_rnumel
         )
@@ -1908,6 +1913,10 @@ class StagedReductionPlan:
             raise AssertionError("staged reduction plan must contain a derived stage")
         if len(self.sub_parent_stages) > 1:
             raise AssertionError("multiple sub-parent stages are not supported yet")
+        if self.deferred_parent_start is not None and not (
+            0 < self.deferred_parent_start < len(self.parent_nodes)
+        ):
+            raise AssertionError("deferred parent stage must split the parent schedule")
 
 
 @dataclasses.dataclass
@@ -9033,6 +9042,8 @@ class Scheduler:
         if order is None:
             return False
 
+        # This is planner-local canonicalization needed to prove the fusion,
+        # not the optional post-fusion loop-ordering optimization.
         try:
             if order != tuple(range(len(order))):
                 consumer.apply_new_loop_order(order)
@@ -9139,6 +9150,10 @@ class Scheduler:
             self._producer_output_names_read_by_consumer(grouped_node, other)
             & derived_domain_names
         )
+        if isinstance(producer_node, FusedNestedReductions):
+            index_equivalent_dep_names |= self._producer_output_names_read_by_consumer(
+                producer_node.node1, other
+            )
         return self._can_fuse(
             producer_node if producer_node is not None else grouped_node,
             other,
