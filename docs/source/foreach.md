@@ -24,13 +24,21 @@ torch.foreach.mul_(inputs, 3)
 ## API Coverage
 
 A foreach API lifts an ordinary tensor operation over a list of inputs. This
-creates a combinatorial set of possible signatures: each argument may be treated elementwise (as a List) or be shared (as a Tensor) by every operation. For example, a tensor argument may be a Tensor or a TensorList, while a scalar argument may be a single Scalar, a ScalarList, or even a 1D Tensor.
+creates a combinatorial space of possible signatures. Depending on the
+operation, a tensor argument could be shared as a Tensor or supplied
+elementwise as a TensorList, while a scalar argument could be a Scalar, a
+ScalarList, a shared 0-D Tensor, or a packed 1-D CPU Tensor.
 
 You can then imagine that one operation may take on various forms such as TensorList/TensorList, TensorList/Tensor, TensorList/ScalarList, TensorList/Scalar, etc. Operations with more parameters would have more combinations. The public foreach APIs support a subset of these combinations based on usage. If you would like to see an implementation of a missing combination, please file an [issue](https://github.com/pytorch/pytorch/issues/new/choose)!
 
 Across the supported signatures, we maintain constraints that TensorList and ScalarList arguments must be non-empty, and corresponding tensor and scalar lists must have the same length.
 
-The public foreach API does not support `out=` variants and may have a higher memory footprint than looping through the non-foreach original API, as multiple intermediates can be alive simultaneously.
+Only signatures that explicitly list `Tensor` include it in the supported typed
+surface. A 0-D Tensor that does not require gradients may sometimes be accepted
+for a `Scalar` parameter through implicit scalar conversion. Converting an
+accelerator Tensor this way reads its value on the host, which may be expensive. On CUDA, this synchronizes eager execution and is unsupported during CUDA graph capture, so it should not be relied upon as a Tensor overload.
+
+The public foreach API also does not support `out=` variants and may have a higher memory footprint than looping through the non-foreach original API, as multiple intermediates can be alive simultaneously.
 
 ## Migrating from the private API
 
@@ -41,7 +49,7 @@ torch._foreach_add(inputs, other)  # Private spelling
 torch.foreach.add(inputs, other)   # Public beta spelling
 ```
 
-The private spellings remain available with unchanged signatures for backward compatibility. Public functions call the same ATen operators but use parameter names aligned with the corresponding ordinary operation. The primary tensor-list argument is named `inputs`; other arguments retain the ordinary operation’s logical name, even when the currently supported form requires a list. This allows future overloads to accept shared operands without changing keyword names.
+The private spellings remain available with unchanged signatures for backward compatibility. Public functions call the same ATen operators but use parameter names aligned with the corresponding ordinary operation. The primary tensor-list argument is named `inputs`; other arguments retain the ordinary operation's logical name, even when the currently supported form requires a list. This allows future overloads to accept shared operands without changing keyword names.
 
 ## Unary operations
 

@@ -334,7 +334,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
-    def test_tracing_public_foreach_api_has_no_graphbreak(self):
+    def test_public_foreach_add_inplace_does_not_graph_break(self):
         # WLOG can use any public foreach op, they're all exposed similarly
         # we use an inplace op to test aliasing on inputs being returned
         def fn(tensors):

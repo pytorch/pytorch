@@ -1968,6 +1968,14 @@ class TestForeachPublicAPI(TestCase):
         def clone(t):
             return t.detach().clone() if torch.is_tensor(t) else t
 
+        def kwargs_for_private(public_name, kwargs):
+            private_kwargs = kwargs.copy()
+            if public_name in ("addcdiv", "addcmul") and "value" in private_kwargs:
+                value = private_kwargs["value"]
+                if isinstance(value, (list, tuple)) or torch.is_tensor(value):
+                    private_kwargs["scalars"] = private_kwargs.pop("value")
+            return private_kwargs
+
         public_name = op.name.removeprefix("_foreach_")
         variants = (
             (
@@ -1981,14 +1989,12 @@ class TestForeachPublicAPI(TestCase):
                 getattr(torch, op.name + "_", None),
             ),
         )
-        sample = next(
-            iter(
-                op.sample_inputs(
-                    "cpu",
-                    torch.float32,
-                    num_input_tensors=[2],
-                    allow_higher_dtype_scalars=True,
-                )
+        samples = tuple(
+            op.sample_inputs(
+                "cpu",
+                torch.float32,
+                num_input_tensors=[2],
+                allow_higher_dtype_scalars=True,
             )
         )
         for name, public, private in variants:
@@ -2001,36 +2007,113 @@ class TestForeachPublicAPI(TestCase):
             self.assertEqual(public.__module__, "torch.foreach")
             self.assertFalse(hasattr(torch, f"foreach_{name}"))
 
-            public_sample = sample.transform(clone)
-            private_sample = sample.transform(clone)
-            public_kwargs = public_sample.kwargs.copy()
-            private_kwargs = private_sample.kwargs.copy()
-
+            # test __torch_function__ mode
+            override_sample = samples[0].transform(clone)
             with CaptureMode():
                 override_result = public(
-                    public_sample.input,
-                    *public_sample.args,
-                    **public_kwargs,
+                    override_sample.input,
+                    *override_sample.args,
+                    **override_sample.kwargs,
                 )
             self.assertEqual(override_result, "handled")
             self.assertIs(seen[-1], public)
 
-            public_result = public(
-                public_sample.input,
-                *public_sample.args,
-                **public_kwargs,
-            )
-            private_result = private(
-                private_sample.input,
-                *private_sample.args,
-                **private_kwargs,
-            )
-            self.assertEqual(public_result, private_result)
-            if public.__name__.endswith("_"):
-                self.assertIs(public_result, public_sample.input)
-                self.assertIs(private_result, private_sample.input)
+            for sample in samples:
+                public_sample = sample.transform(clone)
+                private_sample = sample.transform(clone)
+                private_kwargs = kwargs_for_private(public_name, private_sample.kwargs)
 
-    def test_explicit_alpha_selects_tensor_overload(self):
+                try:
+                    public_result = public(
+                        public_sample.input,
+                        *public_sample.args,
+                        **public_sample.kwargs,
+                    )
+                except Exception as public_error:
+                    with self.assertRaises(type(public_error)) as private_error:
+                        private(
+                            private_sample.input,
+                            *private_sample.args,
+                            **private_kwargs,
+                        )
+                    self.assertEqual(str(public_error), str(private_error.exception))
+                    continue
+
+                private_result = private(
+                    private_sample.input,
+                    *private_sample.args,
+                    **private_kwargs,
+                )
+                self.assertEqual(public_result, private_result)
+                if public.__name__.endswith("_"):
+                    self.assertIs(public_result, public_sample.input)
+                    self.assertIs(private_result, private_sample.input)
+
+    @parametrize("tensor_base", (False, True))
+    def test_pow_scalar_self_private_compatibility(self, tensor_base):
+        base = torch.tensor(2.0) if tensor_base else 2.0
+        exponents = [torch.tensor(2.0), torch.tensor(3.0)]
+        self.assertEqual(
+            torch.foreach.pow(base, exponents), torch._foreach_pow(base, exponents)
+        )
+
+    @parametrize("name", ("addcmul", "addcdiv"))
+    @parametrize("in_place", (False, True))
+    def test_pointwise_packed_tensor_private_compatibility(self, name, in_place):
+        suffix = "_" if in_place else ""
+        public = getattr(torch.foreach, name + suffix)
+        private = getattr(torch, f"_foreach_{name}{suffix}")
+        public_inputs = [torch.tensor([1.0]), torch.tensor([2.0])]
+        private_inputs = [tensor.clone() for tensor in public_inputs]
+        tensor1 = [torch.tensor([3.0]), torch.tensor([4.0])]
+        tensor2 = [torch.tensor([5.0]), torch.tensor([6.0])]
+        values = torch.tensor([0.5, 1.5])
+
+        public_result = public(public_inputs, tensor1, tensor2, values)
+        private_result = private(private_inputs, tensor1, tensor2, values)
+
+        self.assertEqual(public_result, private_result)
+        if in_place:
+            self.assertIs(public_result, public_inputs)
+            self.assertIs(private_result, private_inputs)
+
+    def test_invalid_call_precedes_torch_function_override(self):
+        seen = []
+
+        class CaptureMode(torch.overrides.TorchFunctionMode):
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                seen.append(func)
+                return "handled"
+
+        inputs = [torch.ones(1)]
+        with CaptureMode():
+            with self.assertRaisesRegex(
+                TypeError, r"add\(\) got an unexpected keyword argument 'unexpected'"
+            ):
+                torch.foreach.add(inputs, unexpected=1)
+
+        self.assertEqual(seen, [])
+
+    def test_torch_function_precedence_uses_signature_order(self):
+        class InputsTensor(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                return "inputs"
+
+        class WeightTensor(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                return "weight"
+
+        inputs = [torch.ones(1).as_subclass(InputsTensor)]
+        end = [torch.zeros(1)]
+        weight = torch.tensor(0.5).as_subclass(WeightTensor)
+
+        result = torch.foreach.lerp(weight=weight, end=end, inputs=inputs)
+        self.assertEqual(result, "inputs")
+
+    @parametrize("in_place", (False, True))
+    def test_add_shared_tensor_dispatch_requires_explicit_alpha(self, in_place):
         from torch.utils._python_dispatch import TorchDispatchMode
 
         seen = []
@@ -2040,14 +2123,31 @@ class TestForeachPublicAPI(TestCase):
                 seen.append(func)
                 return func(*args, **(kwargs or {}))
 
-        inputs = [torch.zeros(1)]
+        suffix = "_" if in_place else ""
+        public = getattr(torch.foreach, "add" + suffix)
+        op_packet = getattr(torch.ops.aten, "_foreach_add" + suffix)
         other = torch.tensor(1.0)
-        with CaptureMode():
-            result = torch.foreach.add_(inputs, other, alpha=2.0)
 
-        self.assertIs(result, inputs)
-        self.assertEqual(inputs, [torch.full((1,), 2.0)])
-        self.assertEqual(seen, [torch.ops.aten._foreach_add_.Tensor])
+        # no user alpha = Scalar overload
+        inputs = [torch.zeros(1)]
+        with CaptureMode():
+            result = public(inputs, other)
+
+        if in_place:
+            self.assertIs(result, inputs)
+        self.assertEqual(result[0], torch.ones(1))
+        self.assertIs(seen[-1], op_packet.Scalar)
+
+        # yes user alpha = Tensor overload
+        inputs = [torch.zeros(1)]
+        seen.clear()
+        with CaptureMode():
+            result = public(inputs, other, alpha=1.0)
+
+        if in_place:
+            self.assertIs(result, inputs)
+        self.assertEqual(result[0], torch.full((1,), 1.0))
+        self.assertEqual(seen, [op_packet.Tensor])
 
 
 instantiate_parametrized_tests(TestForeachPublicAPI)
