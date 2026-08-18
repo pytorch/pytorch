@@ -1,11 +1,11 @@
 # mypy: allow-untyped-defs
 """Call into FlyDSL for flex attention backward (gfx950).
 
-DRAFT scaffold: this mirrors the CuteDSL/FLASH backward path but targets the
-FlyDSL template infra. The template body is a documented placeholder; the real
-FlyDSL MFMA codegen (adapting the standalone ``build_flex_attn_bwd_module``
-kernel) lands in a follow-up. Everything here is inert unless the FlyDSL runtime
-is installed and the device is ROCm/gfx950.
+Mirrors the CuteDSL/FLASH backward path but targets the FlyDSL template infra.
+The template body calls the vendored MFMA kernels in
+``vendored_templates/flydsl/kernels/flex_attn_bwd_gfx950.py`` (delta, prologue,
+dkdv, dq). Everything here is inert unless the FlyDSL runtime is installed and
+the device is ROCm/gfx950. Identity score_mod only.
 """
 
 from collections.abc import Callable, Sequence
