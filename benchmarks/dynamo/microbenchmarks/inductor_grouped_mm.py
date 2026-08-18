@@ -1,9 +1,11 @@
 # FIXME: move this to tritonbench project.
 
 import argparse
+import gc
+import time
+import warnings
 
-import triton
-import triton.testing
+from triton import runtime
 
 import torch
 
@@ -112,6 +114,107 @@ def _generate_offsets(total, groups, device, align=1):
     return torch.cumsum(counts, dim=0).to(dtype=torch.int32)
 
 
+_BENCH_SETTLE_SECONDS = 0.1
+
+
+def _do_bench_cuda(fn, warmup=10, rep=100, settle_seconds=_BENCH_SETTLE_SECONDS):
+    """Benchmark `fn` with a fixed number of iterations, an L2 cache
+    clear before each measured call, and a settle delay before each
+    call to avoid thermal-throttling bias.
+
+    triton.testing.do_bench's warmup/rep are milliseconds, not iteration
+    counts: for slow (large-shape) calls this collapses to very few
+    measured samples (e.g. ~1 warmup, ~9 reps at ~2ms/call with the
+    warmup=2, rep=20 previously used here), which is too noisy for
+    tracking single-digit-percent speedups. Fixed iteration counts give
+    every shape the same statistical power regardless of how long it
+    takes to run.
+
+    Without a settle delay, back-to-back launches let the GPU heat up
+    over the course of the rep loop, so later iterations can run
+    measurably slower than earlier ones purely from clock throttling -
+    a directional bias, not just noise, and one that can differ by
+    backend depending on how much power each kernel draws. The delay
+    (and the synchronize before it, so it's genuine idle time rather
+    than the host stalling while queued work keeps running) gives the
+    GPU a chance to cool between measured calls.
+    """
+    di = runtime.driver.active.get_device_interface()
+    cache = runtime.driver.active.get_empty_cache_for_benchmark()
+
+    fn()
+    di.synchronize()
+
+    for _ in range(warmup):
+        time.sleep(settle_seconds)
+        fn()
+    di.synchronize()
+
+    times_ms = []
+    for _ in range(rep):
+        runtime.driver.active.clear_cache(cache)
+        time.sleep(settle_seconds)
+        start = di.Event(enable_timing=True)
+        end = di.Event(enable_timing=True)
+        start.record()
+        fn()
+        end.record()
+        di.synchronize()
+        times_ms.append(start.elapsed_time(end))
+
+    times_ms.sort()
+    mid = len(times_ms) // 2
+    median_ms = (
+        times_ms[mid] if len(times_ms) % 2 else (times_ms[mid - 1] + times_ms[mid]) / 2
+    )
+    return {
+        "median_us": median_ms * 1e3,
+        "mean_us": sum(times_ms) / len(times_ms) * 1e3,
+        "min_us": times_ms[0] * 1e3,
+        "max_us": times_ms[-1] * 1e3,
+    }
+
+
+def _maybe_wrap_cuda_graph(fn, label, use_cuda_graphs):
+    """Capture `fn` into a CUDA graph and return a closure that just
+    replays it, isolating GPU execution time from Python/dispatcher
+    overhead (guard checks, view ops like .transpose(), etc.) that
+    would otherwise be included in every measured call.
+    """
+    if not use_cuda_graphs:
+        return fn
+
+    keep_alive = [None]
+    try:
+        for _ in range(5):
+            keep_alive[0] = fn()
+        torch.cuda.synchronize()
+
+        graph = torch.cuda.CUDAGraph()
+        capture_stream = torch.cuda.Stream()
+        capture_stream.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(capture_stream):
+            with torch.cuda.graph(graph):
+                keep_alive[0] = fn()
+        torch.cuda.current_stream().wait_stream(capture_stream)
+
+        for _ in range(5):
+            graph.replay()
+        torch.cuda.synchronize()
+
+        def _replay():
+            graph.replay()
+
+        return _replay
+    except Exception as exc:
+        warnings.warn(
+            f"CUDA graph capture failed for backend '{label}', "
+            f"falling back to eager: {exc}",
+            stacklevel=2,
+        )
+        return fn
+
+
 def benchmark_grouped_mm(
     gmnk=None,
     a_dim=2,
@@ -122,6 +225,7 @@ def benchmark_grouped_mm(
     seed=0,
     rtol=1e-2,
     atol=1e-2,
+    use_cuda_graphs=False,
 ):
     torch.manual_seed(seed)
 
@@ -225,23 +329,38 @@ def benchmark_grouped_mm(
         C_ref = torch._grouped_mm(A, B.transpose(-2, -1), offs)
 
         fn_aten = lambda: torch._grouped_mm(A, B.transpose(-2, -1), offs)  # noqa: E731
-        us_aten = triton.testing.do_bench(fn_aten, warmup=2, rep=20) * 1e3
+        bench_aten = _do_bench_cuda(
+            _maybe_wrap_cuda_graph(fn_aten, "aten", use_cuda_graphs)
+        )
+        us_aten = bench_aten["median_us"]
         tflops_aten = flops * 1e-12 / (us_aten * 1e-6)
-        print(f"  ATen: {us_aten:.2f} us ({tflops_aten:.2f} TFLOPS)")
+        print(
+            f"  ATen: {us_aten:.2f} us ({tflops_aten:.2f} TFLOPS; "
+            f"min={bench_aten['min_us']:.2f}, max={bench_aten['max_us']:.2f})"
+        )
         result["ATen (us)"] = us_aten
+        gc.collect()
+        torch.cuda.empty_cache()
 
         try:
             torch._dynamo.reset()
             compiled_triton = torch.compile(
                 torch._grouped_mm,
                 options={"max_autotune": True, "max_autotune_gemm_backends": "TRITON"},
+                dynamic=False,
             )
             fn_triton = lambda: compiled_triton(  # noqa: E731
                 A, B.transpose(-2, -1), offs
             )
-            us_triton = triton.testing.do_bench(fn_triton, warmup=2, rep=20) * 1e3
+            bench_triton = _do_bench_cuda(
+                _maybe_wrap_cuda_graph(fn_triton, "triton", use_cuda_graphs)
+            )
+            us_triton = bench_triton["median_us"]
             tflops_triton = flops * 1e-12 / (us_triton * 1e-6)
-            print(f"  Triton: {us_triton:.2f} us ({tflops_triton:.2f} TFLOPS)")
+            print(
+                f"  Triton: {us_triton:.2f} us ({tflops_triton:.2f} TFLOPS; "
+                f"min={bench_triton['min_us']:.2f}, max={bench_triton['max_us']:.2f})"
+            )
             result["Triton (us)"] = us_triton
             result["Triton speedup"] = us_aten / us_triton
 
@@ -253,6 +372,8 @@ def benchmark_grouped_mm(
                 print("  ✗ Triton correctness check FAILED")
         except Exception as e:
             print(f"  Triton: Failed ({e})")
+        gc.collect()
+        torch.cuda.empty_cache()
 
         if is_blackwell():
             if a_dim == 2 and b_dim == 3:
@@ -269,12 +390,15 @@ def benchmark_grouped_mm(
                     fn_cutedsl = lambda: compiled_cutedsl(  # noqa: E731
                         A, B.transpose(-2, -1), offs
                     )
-                    us_cutedsl = (
-                        triton.testing.do_bench(fn_cutedsl, warmup=2, rep=20) * 1e3
+                    bench_cutedsl = _do_bench_cuda(
+                        _maybe_wrap_cuda_graph(fn_cutedsl, "cutedsl", use_cuda_graphs)
                     )
+                    us_cutedsl = bench_cutedsl["median_us"]
                     tflops_cutedsl = flops * 1e-12 / (us_cutedsl * 1e-6)
                     print(
-                        f"  CuTeDSL: {us_cutedsl:.2f} us ({tflops_cutedsl:.2f} TFLOPS)"
+                        f"  CuTeDSL: {us_cutedsl:.2f} us ({tflops_cutedsl:.2f} TFLOPS; "
+                        f"min={bench_cutedsl['min_us']:.2f}, "
+                        f"max={bench_cutedsl['max_us']:.2f})"
                     )
                     result["CuTeDSL (us)"] = us_cutedsl
                     result["CuTeDSL speedup"] = us_aten / us_cutedsl
@@ -289,6 +413,8 @@ def benchmark_grouped_mm(
                         print("  ✗ CuTeDSL correctness check FAILED")
                 except Exception as e:
                     print(f"  CuTeDSL: Failed ({e})")
+                gc.collect()
+                torch.cuda.empty_cache()
 
             try:
                 torch._dynamo.reset()
@@ -298,13 +424,20 @@ def benchmark_grouped_mm(
                         "max_autotune": True,
                         "max_autotune_gemm_backends": "GLUON",
                     },
+                    dynamic=False,
                 )
                 fn_gluon = lambda: compiled_gluon(  # noqa: E731
                     A, B.transpose(-2, -1), offs
                 )
-                us_gluon = triton.testing.do_bench(fn_gluon, warmup=2, rep=20) * 1e3
+                bench_gluon = _do_bench_cuda(
+                    _maybe_wrap_cuda_graph(fn_gluon, "gluon", use_cuda_graphs)
+                )
+                us_gluon = bench_gluon["median_us"]
                 tflops_gluon = flops * 1e-12 / (us_gluon * 1e-6)
-                print(f"  Gluon: {us_gluon:.2f} us ({tflops_gluon:.2f} TFLOPS)")
+                print(
+                    f"  Gluon: {us_gluon:.2f} us ({tflops_gluon:.2f} TFLOPS; "
+                    f"min={bench_gluon['min_us']:.2f}, max={bench_gluon['max_us']:.2f})"
+                )
                 result["Gluon (us)"] = us_gluon
                 result["Gluon speedup"] = us_aten / us_gluon
 
@@ -316,6 +449,8 @@ def benchmark_grouped_mm(
                     print("  ✗ Gluon correctness check FAILED")
             except Exception as e:
                 print(f"  Gluon: Failed ({e})")
+            gc.collect()
+            torch.cuda.empty_cache()
 
         results.append(result)
         print()
@@ -323,7 +458,15 @@ def benchmark_grouped_mm(
     import pandas as pd
 
     df = pd.DataFrame(results)
-    print(df.to_markdown(index=False))
+    floatfmt = tuple(
+        ".0f"
+        if pd.api.types.is_integer_dtype(dt)
+        else ".2f"
+        if pd.api.types.is_float_dtype(dt)
+        else ""
+        for dt in df.dtypes
+    )
+    print(df.to_markdown(index=False, floatfmt=floatfmt))
     return results
 
 
@@ -376,6 +519,16 @@ if __name__ == "__main__":
         default=_parse_b_spec("3d:k-major"),
         help="B spec: <2d|3d>:<k-major|n-major>.",
     )
+    parser.add_argument(
+        "--use-cuda-graphs",
+        action="store_true",
+        default=False,
+        help=(
+            "Capture each backend's call in a CUDA graph and benchmark "
+            "graph.replay(), isolating GPU execution time from Python/"
+            "dispatcher overhead."
+        ),
+    )
     args = parser.parse_args()
     a_dim, a_k_major = args.a_spec
     b_dim, b_k_major = args.b_spec
@@ -391,4 +544,5 @@ if __name__ == "__main__":
         seed=args.seed,
         rtol=args.rtol,
         atol=args.atol,
+        use_cuda_graphs=args.use_cuda_graphs,
     )

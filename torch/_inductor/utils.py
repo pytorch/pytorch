@@ -170,6 +170,13 @@ ALIGNMENT = 16
 TMA_ALIGNMENT = 16
 TMA_DESCRIPTOR_SIZE = 128
 
+TRITON_FLOAT8_DTYPES = (
+    torch.float8_e4m3fn,
+    torch.float8_e5m2,
+    torch.float8_e4m3fnuz,
+    torch.float8_e5m2fnuz,
+)
+
 # PyTorch dtypes with valid CUtensorMapDataType mappings.
 # Ref: triton/backends/nvidia/include/cuda.h (CUtensorMapDataType enum)
 #      triton/_internal_testing.py (tma_dtypes test list)
@@ -186,10 +193,7 @@ _TMA_SUPPORTED_DTYPES: OrderedSet[torch.dtype] = OrderedSet(
         torch.bfloat16,
         torch.float32,
         torch.float64,
-        torch.float8_e4m3fn,
-        torch.float8_e5m2,
-        torch.float8_e4m3fnuz,
-        torch.float8_e5m2fnuz,
+        *TRITON_FLOAT8_DTYPES,
     ]
 )
 
@@ -2139,6 +2143,29 @@ def _descriptor_shape_fits_in_int32(
     )
 
 
+def _tma_descriptor_max_offset_fits_in_int32(
+    mat: IRNode, add_guards: bool = False
+) -> bool:
+    # Unlike _descriptor_shape_fits_in_int32, catches overflow in the
+    # descriptor's max addressable offset even when every per-dim size
+    # fits.
+    int32_max = torch.iinfo(torch.int32).max
+    max_offset = sum(
+        (size - 1) * stride for size, stride in zip(mat.get_size(), mat.get_stride())
+    )
+    if isinstance(max_offset, (int, sympy.Integer)):
+        return max_offset <= int32_max
+
+    from .virtualized import V
+
+    condition = sympy.Le(max_offset, int32_max)
+    return (
+        V.graph.sizevars.guard_or_false(condition)
+        if add_guards
+        else V.graph.sizevars.statically_known_true(condition)
+    )
+
+
 def use_triton_tma_template(
     *matrices: IRNode, output_layout: Layout, add_guards: bool = False
 ) -> bool:
@@ -3516,12 +3543,7 @@ def is_triton_fp8_dtype_supported(
     triton_arch: int | str | None = None,
     warp_size: int | None = None,
 ) -> bool:
-    if dtype not in (
-        torch.float8_e4m3fn,
-        torch.float8_e5m2,
-        torch.float8_e4m3fnuz,
-        torch.float8_e5m2fnuz,
-    ):
+    if dtype not in TRITON_FLOAT8_DTYPES:
         return True
 
     triton_dtype = _type_of(dtype).removeprefix("*")
@@ -4774,6 +4796,9 @@ def should_fallback_by_default(node: torch.fx.Node) -> bool:
             torch.ops.aten._assert_scalar.default,
             torch.ops.aten.lift_fresh_copy.default,
             torch.ops.aten.sym_size.int,
+            # `.item()` returns a Scalar, which cannot be serialized as a generic
+            # fallback kernel; route it to its dedicated DynamicScalar lowering.
+            torch.ops.aten._local_scalar_dense.default,
         ]
     )
 

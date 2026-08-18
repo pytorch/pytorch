@@ -52,9 +52,6 @@ class PartitionArgs:
     offs_ptr: gl.tensor
 {%- endif %}
     c_ptr: gl.tensor
-{%- if not C_IS_2D %}
-    c_stride_g: gl.tensor
-{%- endif %}
     c_stride_m: gl.tensor
     c_stride_n: gl.tensor
 {%- if not USE_TMA_STORE %}
@@ -76,7 +73,6 @@ class PartitionArgs:
     BLOCK_N: gl.constexpr
     BLOCK_K: gl.constexpr
     NUM_BLOCKS: gl.constexpr
-    NUM_COMPUTE_WARPS: gl.constexpr
 
 
 @aggregate
@@ -359,7 +355,6 @@ def compute_partition(pargs: PartitionArgs):
     BLOCK_N: gl.constexpr = pargs.BLOCK_N
     BLOCK_K: gl.constexpr = pargs.BLOCK_K
     NUM_BLOCKS: gl.constexpr = pargs.NUM_BLOCKS
-    NUM_COMPUTE_WARPS: gl.constexpr = pargs.NUM_COMPUTE_WARPS
 
     load_buf_empty_bars = pargs.load_buf_empty_bars
     load_buf_full_bars = pargs.load_buf_full_bars
@@ -373,9 +368,9 @@ def compute_partition(pargs: PartitionArgs):
     range_layout: gl.constexpr = gl.SliceLayout(
         0,
         gl.BlockedLayout(
-            size_per_thread=[1, BLOCK_K // (32 * NUM_COMPUTE_WARPS)],
+            size_per_thread=[1, BLOCK_K // 32],
             threads_per_warp=[1, 32],
-            warps_per_cta=[1, NUM_COMPUTE_WARPS],
+            warps_per_cta=[1, 1],
             order=[1, 0],
             cga_layout=[],
         ),
@@ -428,12 +423,10 @@ def compute_partition(pargs: PartitionArgs):
                     _proton_enter_scope("mask_k_tail")
                     mask = k + gl.arange(0, BLOCK_K, layout=range_layout) < group_iter.k_size
                     a = a_smem.load(gl.AutoLayout())
-                    # Only mask A, as zeroing A's columns
-                    # makes corresponding B rows irrelevant.
+                    # Only mask A, as zeroing A's columns makes
+                    # corresponding B rows irrelevant.
                     a = gl.where(mask[None, :], a, 0)
                     a_smem.store(a)
-                    # No barrier needed, as K_IS_VARYING
-                    # requires NUM_COMPUTE_WARPS=1.
                     fence_async_shared()
                     _proton_exit_scope("mask_k_tail")
 {%- endif %}
@@ -745,9 +738,6 @@ def store_partition(pargs: PartitionArgs):
         offs_ptr,
 {%- endif %}
         c_ptr,
-{%- if not C_IS_2D %}
-        gl.to_tensor(c_stride_g),
-{%- endif %}
         gl.to_tensor(c_stride_m),
         gl.to_tensor(c_stride_n),
 {%- if not USE_TMA_STORE %}
@@ -769,7 +759,6 @@ def store_partition(pargs: PartitionArgs):
         BLOCK_N,
         BLOCK_K,
         NUM_BLOCKS,
-        NUM_COMPUTE_WARPS,
     )
 
     # Launch warp-specialized kernel
@@ -779,6 +768,6 @@ def store_partition(pargs: PartitionArgs):
             (load_partition, (pargs,)),
             (compute_partition, (pargs,)),
         ],
-        [NUM_LOAD_WARPS, NUM_COMPUTE_WARPS],
-        [NUM_LOAD_THREAD_REGISTERS, NUM_COMPUTE_THREAD_REGISTERS],
+        [1, 1],
+        [24, 24],
     )

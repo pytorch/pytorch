@@ -1062,8 +1062,8 @@ class DynamoOutput:
 
     def graph_capture_output(
         self,
-        argdefs: tuple[Any, ...] | None = None,
-        kwdefaults: dict[str, Any] | None = None,
+        argdefs: tuple[object, ...] | None = None,
+        kwdefaults: dict[str, object] | None = None,
     ) -> GraphCaptureOutput:
         output_graph = self.tracer_output.output_graph
         if output_graph is None:
@@ -1112,10 +1112,10 @@ class GraphRuntimeEnv:
     bytecode: types.CodeType
     pycode: list[list[str] | None]
     import_sources: dict[str, str]
-    used_globals: dict[str, Any]
+    used_globals: dict[str, object]
     closure: tuple[Any, ...] | None
-    argdefs: tuple[Any, ...] | None
-    kwdefaults: dict[str, Any] | None = None
+    argdefs: tuple[object, ...] | None
+    kwdefaults: dict[str, object] | None = None
     external_refs: set[str] = dataclasses.field(default_factory=set)
 
     def forward_callable(
@@ -1123,7 +1123,7 @@ class GraphRuntimeEnv:
         backend_id: str,
         compiled_fn: Callable[..., Any],
         *,
-        extra_globals: dict[str, Any] | None = None,
+        extra_globals: dict[str, object] | None = None,
         use_python_codegen: bool = False,
     ) -> Callable[..., Any]:
         import_sources = {
@@ -1229,8 +1229,8 @@ class GraphCaptureOutput:
     bytecode: CodeType
     pycode: list[list[str] | None]
     closure: tuple[Any, ...] | None
-    argdefs: tuple[Any, ...] | None
-    kwdefaults: dict[str, Any] | None
+    argdefs: tuple[object, ...] | None
+    kwdefaults: dict[str, object] | None
     f_globals: dict[str, Any]
 
     def build_guards(
@@ -1329,7 +1329,7 @@ class CaptureOutput:
         self,
         *,
         compiled_fn: Callable[..., Any] | None = None,
-        extra_globals: dict[str, Any] | None = None,
+        extra_globals: dict[str, object] | None = None,
         use_python_codegen: bool = False,
     ) -> Callable[..., Any]:
         runtime_env = self.graph_capture_output.get_runtime_env()
@@ -1487,8 +1487,8 @@ class FrameInfo:
     locals: dict[str, object]
     builtins: dict[str, object]
     closure: tuple[CellType]
-    argdefs: tuple[Any, ...] | None
-    kwdefaults: dict[str, Any] | None
+    argdefs: tuple[object, ...] | None
+    kwdefaults: dict[str, object] | None
 
 
 def _fullgraph_capture_frame(

@@ -9,11 +9,7 @@ class GluonGroupedMMConfig:
     BLOCK_K: int
     NUM_LOAD_BUFFERS: int
     NUM_ACC_BUFFERS: int
-    NUM_LOAD_WARPS: int = 1
-    NUM_COMPUTE_WARPS: int = 1
     NUM_STORE_WARPS: int = 4
-    NUM_LOAD_THREAD_REGISTERS: int = 24
-    NUM_COMPUTE_THREAD_REGISTERS: int = 24
 
 
 def compute_stage_variants_gluon(
@@ -117,8 +113,6 @@ def get_grouped_mm_configs(
         BLOCK_N_vals = [64, 128, 256]
         block_mn_pairs = []
         BLOCK_K_vals = [64, 128, 256]
-        NUM_LOAD_WARP_vals = [1, 2]
-        NUM_COMPUTE_WARP_vals = [1, 2]
         NUM_STORE_WARP_vals = [4, 8]
     else:
         # Default configs.
@@ -134,33 +128,15 @@ def get_grouped_mm_configs(
             (128, 256),
         ]
         BLOCK_K_vals = [64]
-        NUM_LOAD_WARP_vals = [1]
-        NUM_COMPUTE_WARP_vals = [1]
         NUM_STORE_WARP_vals = [4, 8]
-
-    NUM_LOAD_THREAD_REGISTERS_vals = [24]
-    NUM_COMPUTE_THREAD_REGISTERS_vals = [24]
 
     if exhaustive:
         # Exhaustive: iterate over all combinations
-        for (
-            BLOCK_M,
-            BLOCK_N,
-            BLOCK_K,
-            num_load_warps,
-            num_compute_warps,
-            num_store_warps,
-            num_load_thread_registers,
-            num_compute_thread_registers,
-        ) in itertools.product(
+        for BLOCK_M, BLOCK_N, BLOCK_K, num_store_warps in itertools.product(
             BLOCK_M_vals,
             BLOCK_N_vals,
             BLOCK_K_vals,
-            NUM_LOAD_WARP_vals,
-            NUM_COMPUTE_WARP_vals,
             NUM_STORE_WARP_vals,
-            NUM_LOAD_THREAD_REGISTERS_vals,
-            NUM_COMPUTE_THREAD_REGISTERS_vals,
         ):
             buffer_variants = compute_stage_variants_gluon(
                 BLOCK_M,
@@ -178,31 +154,15 @@ def get_grouped_mm_configs(
                         BLOCK_K=BLOCK_K,
                         NUM_LOAD_BUFFERS=num_load_buffers,
                         NUM_ACC_BUFFERS=num_acc_buffers,
-                        NUM_LOAD_WARPS=num_load_warps,
-                        NUM_COMPUTE_WARPS=num_compute_warps,
                         NUM_STORE_WARPS=num_store_warps,
-                        NUM_LOAD_THREAD_REGISTERS=num_load_thread_registers,
-                        NUM_COMPUTE_THREAD_REGISTERS=num_compute_thread_registers,
                     )
                 )
     else:
         # Default: use handpicked (BLOCK_M, BLOCK_N) pairs
-        for (
-            (BLOCK_M, BLOCK_N),
-            BLOCK_K,
-            num_load_warps,
-            num_compute_warps,
-            num_store_warps,
-            num_load_thread_registers,
-            num_compute_thread_registers,
-        ) in itertools.product(
+        for (BLOCK_M, BLOCK_N), BLOCK_K, num_store_warps in itertools.product(
             block_mn_pairs,
             BLOCK_K_vals,
-            NUM_LOAD_WARP_vals,
-            NUM_COMPUTE_WARP_vals,
             NUM_STORE_WARP_vals,
-            NUM_LOAD_THREAD_REGISTERS_vals,
-            NUM_COMPUTE_THREAD_REGISTERS_vals,
         ):
             buffer_variants = compute_stage_variants_gluon(
                 BLOCK_M,
@@ -220,11 +180,7 @@ def get_grouped_mm_configs(
                         BLOCK_K=BLOCK_K,
                         NUM_LOAD_BUFFERS=num_load_buffers,
                         NUM_ACC_BUFFERS=num_acc_buffers,
-                        NUM_LOAD_WARPS=num_load_warps,
-                        NUM_COMPUTE_WARPS=num_compute_warps,
                         NUM_STORE_WARPS=num_store_warps,
-                        NUM_LOAD_THREAD_REGISTERS=num_load_thread_registers,
-                        NUM_COMPUTE_THREAD_REGISTERS=num_compute_thread_registers,
                     )
                 )
 

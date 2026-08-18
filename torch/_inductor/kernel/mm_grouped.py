@@ -21,6 +21,8 @@ from ..select_algorithm import (
     TritonTemplate,
 )
 from ..utils import (
+    _descriptor_shape_fits_in_int32,
+    _tma_descriptor_max_offset_fits_in_int32,
     get_gpu_shared_memory,
     get_num_sms,
     has_free_symbols,
@@ -55,7 +57,6 @@ _NV_CONFIGS = [
             "BLOCK_M": block_size_m,
             "BLOCK_N": block_size_n,
             "BLOCK_K": block_size_k,
-            "NUM_CONSUMER_GROUPS": 1,
         },
         num_stages=num_stages,
         num_warps=num_warps,
@@ -76,13 +77,11 @@ def early_config_prune(g, m, dtsize, configs, named_args):
     pruned_configs = []
     for config in configs:
         kw = config.kwargs
-        BLOCK_M, BLOCK_N, BLOCK_K, num_stages, num_warps, num_consumer_groups = (
+        BLOCK_M, BLOCK_N, BLOCK_K, num_stages = (
             kw["BLOCK_M"],
             kw["BLOCK_N"],
             kw["BLOCK_K"],
             config.num_stages,
-            config.num_warps,
-            getattr(config, "num_consumer_groups", 0),
         )
 
         # 1. Prune NV configs depending on g and m.
@@ -109,25 +108,12 @@ def early_config_prune(g, m, dtsize, configs, named_args):
         if required_shared_memory > max_shared_memory:
             continue
 
-        use_warp_specialization = num_consumer_groups >= 1
-
-        # 3. make sure we can partition for ws
-        if use_warp_specialization:
-            if num_warps != 4:
-                continue
-
-            # "tritongpu-warp-spec-data-partition"
-            m_slice = BLOCK_M // num_consumer_groups
-            n_slice = BLOCK_N // num_consumer_groups
-            if m_slice < 64 and n_slice < 256:
-                continue
-
         pruned_configs.append(config)
 
     return pruned_configs
 
 
-def gluon_grouped_mm_configs(dtype_AB, a_is_2d=None, b_is_2d=None):
+def gluon_grouped_mm_configs(dtype_AB):
     import torch._inductor.config as config
     from torch._inductor.template_heuristics.gluon import get_grouped_mm_configs
 
@@ -138,16 +124,8 @@ def gluon_grouped_mm_configs(dtype_AB, a_is_2d=None, b_is_2d=None):
         exhaustive=exhaustive,
     )
 
-    def filter_configs(configs):
-        if a_is_2d and b_is_2d:
-            # Masking along K modifies shared memory before MMA, thus
-            # require NUM_COMPUTE_WARPS=1 in configs, in order to
-            # avoid intra-warp sync issues.
-            return [config for config in configs if config.NUM_COMPUTE_WARPS == 1]
-        return configs
-
     configs = []
-    for gluon_config in filter_configs(gluon_configs):
+    for gluon_config in gluon_configs:
         configs.append(
             Config(
                 kwargs={
@@ -156,11 +134,7 @@ def gluon_grouped_mm_configs(dtype_AB, a_is_2d=None, b_is_2d=None):
                     "BLOCK_K": gluon_config.BLOCK_K,
                     "NUM_LOAD_BUFFERS": gluon_config.NUM_LOAD_BUFFERS,
                     "NUM_ACC_BUFFERS": gluon_config.NUM_ACC_BUFFERS,
-                    "NUM_LOAD_WARPS": gluon_config.NUM_LOAD_WARPS,
-                    "NUM_COMPUTE_WARPS": gluon_config.NUM_COMPUTE_WARPS,
                     "NUM_STORE_WARPS": gluon_config.NUM_STORE_WARPS,
-                    "NUM_LOAD_THREAD_REGISTERS": gluon_config.NUM_LOAD_THREAD_REGISTERS,
-                    "NUM_COMPUTE_THREAD_REGISTERS": gluon_config.NUM_COMPUTE_THREAD_REGISTERS,
                     "NUM_SMS": get_num_sms(),
                 },
                 num_stages=1,  # Dummy value, the kernel uses NUM_LOAD_BUFFERS/NUM_ACC_BUFFERS for this purpose.
@@ -532,8 +506,14 @@ def _tuned_grouped_mm_common(
             tl, "_experimental_make_tensor_descriptor"
         )
         use_tma_load = (
-            triton_has_make_tensor_descriptor
-            or triton_has_experimental_make_tensor_descriptor
+            (
+                triton_has_make_tensor_descriptor
+                or triton_has_experimental_make_tensor_descriptor
+            )
+            and _descriptor_shape_fits_in_int32(mat_a.get_size(), add_guards=True)
+            and _descriptor_shape_fits_in_int32(mat_b.get_size(), add_guards=True)
+            and _tma_descriptor_max_offset_fits_in_int32(mat_a, add_guards=True)
+            and _tma_descriptor_max_offset_fits_in_int32(mat_b, add_guards=True)
         )
         kwargs = {
             "SCALED": scaled,
@@ -606,11 +586,7 @@ def _tuned_grouped_mm_common(
             "A_IS_K_MAJOR": a_is_k_major,
             "B_IS_K_MAJOR": b_is_k_major,
         }
-        for config in gluon_grouped_mm_configs(
-            dtype_AB=mat_a.get_dtype(),
-            a_is_2d=a_is_2d,
-            b_is_2d=b_is_2d,
-        ):
+        for config in gluon_grouped_mm_configs(dtype_AB=mat_a.get_dtype()):
             gluon_grouped_mm_template.maybe_append_choice(
                 choices,
                 input_nodes=input_nodes,
