@@ -73,7 +73,7 @@ class TestONNXRuntime_cuda(onnx_test_common._TestONNXRuntime):
             dtype=torch.float16,
             device=device,
         )
-        self.run_test(LayerNormModel().cuda(), x, rtol=1e-3, atol=1e-5)
+        self.run_test(LayerNormModel().to(device), x, rtol=1e-3, atol=1e-5)
 
     @skipIfUnsupportedMinOpsetVersion(12)
     @skipScriptTest()
@@ -152,6 +152,6 @@ class TestONNXRuntime_cuda(onnx_test_common._TestONNXRuntime):
         self.run_test(Model(), (x, y))
 
 
-instantiate_device_type_tests(TestONNXRuntime_cuda, globals(), only_for='cuda')
+instantiate_device_type_tests(TestONNXRuntime_cuda, globals(), only_for=("cuda",))
 if __name__ == "__main__":
     common_utils.run_tests()
