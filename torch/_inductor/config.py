@@ -206,6 +206,15 @@ cpp_wrapper_build_separate: bool = (
 
 fx_wrapper: bool = os.environ.get("TORCHINDUCTOR_FX_WRAPPER", "0") == "1"
 
+# Emit a python wrapper meant to be READ and hand-edited rather than only executed:
+# Triton kernels are defined at module level as ordinary code instead of as source
+# strings handed to AsyncCompile, and the AsyncCompile lifecycle is emitted only when
+# some backend still needs it. This trades compile throughput for legibility -- hoisted
+# kernels compile serially, in process, on first launch instead of fanning out to the
+# worker pool -- so it is for artifacts a person tunes (torch.compiler.export_python),
+# not for a normal compile.
+readable_wrapper: bool = os.environ.get("TORCHINDUCTOR_READABLE_WRAPPER", "0") == "1"
+
 # Controls automatic precompiling of common include files for codecache.CppCodeCache
 # (i.e. for cpp_wrapper mode and for cpp kernels on CPU).  AOTI header precompiling is
 # controlled by a separate flag.
