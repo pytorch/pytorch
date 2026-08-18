@@ -9231,14 +9231,21 @@ def process_subgraph_nodes(graph_module: torch.fx.GraphModule, args: list[Any]):
     - Output nodes return their result
     - Other nodes are executed via V.graph.run_node
 
+    ``args`` holds one entry per placeholder, so placeholders are counted
+    separately from nodes.  fx does not require placeholders to be a
+    contiguous prefix of the graph, and a decomposition running over the
+    subgraph can leave ops between them; indexing ``args`` by node position
+    would then read past its end.
     """
     output = _MISSING
 
-    for i, node in enumerate(graph_module.graph.nodes):
+    placeholder_idx = 0
+    for node in graph_module.graph.nodes:
         if node.op == "placeholder":
             if node in V.graph.env:
                 raise AssertionError("expected: node not in V.graph.env")
-            V.graph.env[node] = args[i]
+            V.graph.env[node] = args[placeholder_idx]
+            placeholder_idx += 1
             continue
         elif node.op == "output":
             output_args, kwargs = V.graph.fetch_args_kwargs_from_env(node)

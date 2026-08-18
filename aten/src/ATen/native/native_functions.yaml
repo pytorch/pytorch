@@ -4170,12 +4170,14 @@
   dispatch:
     CPU: _int_mm_cpu
     CUDA: _int_mm_cuda
+    MPS: _int_mm_mps
     XPU: _int_mm_xpu
 
 - func: _int_mm.out(Tensor self, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: _int_mm_out_cpu
     CUDA: _int_mm_out_cuda
+    MPS: _int_mm_out_mps
     XPU: _int_mm_out_xpu
 
 - func: _convert_weight_to_int4pack(Tensor self, int innerKTiles) -> Tensor
@@ -4192,8 +4194,8 @@
 
 - func: _weight_int4pack_mm_with_scales_and_zeros(Tensor self, Tensor mat2, int qGroupSize, Tensor qScale, Tensor qZeros) -> Tensor
   dispatch:
-
     XPU: _weight_int4pack_mm_xpu
+
 # Split int4 pack weight between cpu and other devices due to
 # https://github.com/pytorch/ao/issues/1117#issuecomment-2451252756.
 - func: _convert_weight_to_int4pack_for_cpu(Tensor self, int innerKTiles) -> Tensor
@@ -11246,7 +11248,6 @@
     CompositeExplicitAutograd: foreach_tensor_ternary_lerp_slow
     CUDA: foreach_tensor_lerp_ternary_cuda
     XPU: foreach_tensor_lerp_ternary_xpu
-  autogen: _foreach_lerp.List_out
 
 - func: _foreach_lerp_.List(Tensor(a!)[] self, Tensor[] tensors1, Tensor[] weights) -> ()
   device_check: NoCheck   # foreach kernels fall back to slow path when tensors are on different devices
@@ -11264,7 +11265,6 @@
     CompositeExplicitAutograd: foreach_tensor_lerp_list_kernel_slow
     CUDA: foreach_tensor_lerp_list_cuda
     XPU: foreach_tensor_lerp_list_xpu
-  autogen: _foreach_lerp.Scalar_out
 
 - func: _foreach_lerp_.Scalar(Tensor(a!)[] self, Tensor[] tensors1, Scalar weight) -> ()
   device_check: NoCheck   # foreach kernels fall back to slow path when tensors are on different devices
@@ -11282,7 +11282,6 @@
     CompositeExplicitAutograd: foreach_tensor_lerp_scalarlist_kernel_slow
     CUDA: foreach_tensor_lerp_scalarlist_cuda
     XPU: foreach_tensor_lerp_scalarlist_xpu
-  autogen: _foreach_lerp.ScalarList_out
 
 - func: _foreach_lerp_.ScalarList(Tensor(a!)[] self, Tensor[] tensors1, Scalar[] weight) -> ()
   device_check: NoCheck   # foreach kernels fall back to slow path when tensors are on different devices
