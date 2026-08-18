@@ -18,7 +18,7 @@ C10_CLANG_DIAGNOSTIC_IGNORE("-Wshorten-64-to-32")
 namespace torch::jit {
 
 // GraphExecutor creates specializations of Graphs for different
-// dimensionalitities and types of inputs.
+// dimensionalities and types of inputs.
 
 struct ArgumentInfo {
   friend struct ArgumentSpec;
@@ -380,7 +380,7 @@ struct CompleteArgumentInfo {
   }
 
  private:
-  // offsetinto sizes_strides() array where the sizes start for tensor j
+  // offset into sizes_strides() array where the sizes start for tensor j
   // [valid range] valid range is [0, ninputs]
   // (i.e. you can ask for the offset at ninputs, which would be the offset of
   // the next tensor if it existed)
