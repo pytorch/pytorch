@@ -306,9 +306,8 @@ struct C10_API ExtraMeta {
   // The real constant this fake was created from (via
   // FakeTensorMode::set_constant), or null.
   c10::intrusive_ptr<c10::TensorImpl> fake_constant_ = nullptr;
-  // The symbolic value returned by item() for this fake tensor. SafePyObject
-  // keeps the memo attached to TensorImpl rather than an ephemeral Python
-  // Tensor wrapper.
+  // per tensor memoization for scalars so that repeated calls on same fake
+  // scalar returns the same symint
   std::unique_ptr<c10::SafePyObject> fake_item_memo_ = nullptr;
   std::optional<uint32_t> fake_item_memo_version_ = std::nullopt;
   uint64_t fake_item_memo_epoch_ = 0;
