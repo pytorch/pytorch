@@ -16,7 +16,7 @@ from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_cache
 from torch._logging import trace_structured
-from torch.testing._internal.common_utils import skipIfRocmVersionAtLeast
+from torch.testing._internal.common_utils import getRocmVersion
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU_AND_TRITON
 
 
@@ -37,6 +37,9 @@ PERF_SLOWDOWN_TOLERANCE = 1.05  # 5% tolerance on performance
 # Use torch.cuda.get_device_properties() to query actual device capabilities.
 
 IS_ROCM = torch.version.hip is not None
+skipIfRocm714 = unittest.skipIf(
+    getRocmVersion() == (7, 14), "ROCm version 7.14: known failure"
+)
 
 ORIGAMI_ROCM_SUPPORTED = IS_ROCM and _th_rocm_version < ORIGAMI_UNSUPPORTED_ROCM_VERSION
 
@@ -188,6 +191,8 @@ class TestOrigami(TestCase):
             "triton.native_matmul": False,
         }
 
+    # TODO(AIPYTORCH-1024): Re-enable after resolving the ROCm 7.14 SIGSEGV.
+    @skipIfRocm714
     def test_origami_respects_gemm_search_space(self):
         for op_name in ("mm", "addmm", "bmm"):
             with self.subTest(op_name=op_name, search_space="DEFAULT"):
@@ -206,8 +211,8 @@ class TestOrigami(TestCase):
                 )
                 self.assertEqual(exhaustive_case["topk_calls"], 0)
 
-    # TODO(AIPYTORCH-1024): Re-enable after resolving the ROCm 7.15 SIGSEGV.
-    @skipIfRocmVersionAtLeast([7, 15])
+    # TODO(AIPYTORCH-1024): Re-enable after resolving the ROCm 7.14 SIGSEGV.
+    @skipIfRocm714
     def test_origami_reduces_compile_work_vs_regular_max_autotune(self):
         """Test that origami reduces compile work (GPU benchmarking calls) vs regular max_autotune.
 
@@ -299,6 +304,8 @@ class TestOrigami(TestCase):
                             max_autotune_runtime_ms * PERF_SLOWDOWN_TOLERANCE,
                         )
 
+    # TODO(AIPYTORCH-1024): Re-enable after resolving the ROCm 7.14 SIGSEGV.
+    @skipIfRocm714
     def test_origami_topk_edge_cases(self):
         """Test edge cases for origami_topk parameter.
 
@@ -404,8 +411,8 @@ class TestOrigami(TestCase):
                 except Exception as e:
                     self.fail(f"Compilation failed with valid topk={topk_val}: {e}")
 
-    # TODO(AIPYTORCH-1024): Re-enable after resolving the ROCm 7.15 SIGSEGV.
-    @skipIfRocmVersionAtLeast([7, 15])
+    # TODO(AIPYTORCH-1024): Re-enable after resolving the ROCm 7.14 SIGSEGV.
+    @skipIfRocm714
     def test_origami_configs_use_device_specific_values(self):
         """Verify that origami configs use architecture-specific num_stages and num_warps.
 

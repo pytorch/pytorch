@@ -65,6 +65,7 @@ from torch.testing._internal.common_dtype import floating_types_and
 from torch.testing._internal.common_methods_invocations import mask_not_all_zeros
 from torch.testing._internal.common_utils import (
     disable_gc,
+    getRocmVersion,
     gradcheck,
     gradgradcheck,
     instantiate_parametrized_tests,
@@ -79,7 +80,6 @@ from torch.testing._internal.common_utils import (
     skipCUDANonDefaultStreamIf,
     skipIfMPS,
     skipIfNoLapack,
-    skipIfRocmVersionAtLeast,
     skipIfSlowGradcheckEnv,
     skipIfTorchDynamo,
     skipIfWindows,
@@ -104,6 +104,11 @@ from torch.utils.flop_counter import FlopCounterMode
 from torch.utils.weak import WeakTensorKeyDictionary
 
 
+skipIfRocm714 = unittest.skipIf(
+    getRocmVersion() == (7, 14), "ROCm version 7.14: known failure"
+)
+
+
 if TYPE_CHECKING:
     from torch.utils.hooks import RemovableHandle
 
@@ -121,8 +126,8 @@ def graph_desc(fn):
     return result + ")"
 
 
-# TODO(AIPYTORCH-1024): Re-enable after resolving the ROCm 7.15 timeout.
-@skipIfRocmVersionAtLeast([7, 15])
+# TODO(AIPYTORCH-1024): Re-enable after resolving the ROCm 7.14 timeout.
+@skipIfRocm714
 class TestAutograd(TestCase):
     def tearDown(self):
         torch.autograd._force_original_view_tracking(False)
@@ -12895,7 +12900,7 @@ def bernoulli_scalar():
     return torch.tensor(0, dtype=torch.uint8).bernoulli_()
 
 
-@skipIfRocmVersionAtLeast([7, 15])
+@skipIfRocm714
 class TestAutogradForwardModeBatchedGrad(TestCase):
     def test_out_of_place_basic(self):
         a = torch.rand(4, 4, dtype=torch.double, requires_grad=True)
@@ -13005,7 +13010,7 @@ class TestAutogradForwardModeBatchedGrad(TestCase):
         torch._vmap_internals._vmap(jvp, 0, 0)(tangent)
 
 
-@skipIfRocmVersionAtLeast([7, 15])
+@skipIfRocm714
 class TestAutogradForwardMode(TestCase):
     def tearDown(self):
         # Ensure that a failing test won't make others fail
@@ -13706,7 +13711,7 @@ class TestAutogradForwardMode(TestCase):
 
 
 # Generic device type autograd tests.
-@skipIfRocmVersionAtLeast([7, 15])
+@skipIfRocm714
 class TestAutogradDeviceType(TestCase):
     def test_min_max_aminmax_median_backprops_to_all_values(self, device):
         # 1) Test min/max/median/nanmedian on both a non NaN and all NaN tensor
@@ -14948,7 +14953,7 @@ class TestAutogradDeviceType(TestCase):
                 )
 
 
-@skipIfRocmVersionAtLeast([7, 15])
+@skipIfRocm714
 class TestAllowMutationOnSaved(TestCase):
     def assertClonedLenEqual(self, ctx, n):
         self.assertEqual(len(list(ctx.cloned.items())), n)
@@ -15146,7 +15151,7 @@ class TestAllowMutationOnSaved(TestCase):
         self.assertEqual([a[0].grad, a[1].grad], torch._foreach_exp(a))
 
 
-@skipIfRocmVersionAtLeast([7, 15])
+@skipIfRocm714
 class TestAutogradInferenceMode(TestCase):
     def _is_inference_tensor(self, tensor):
         try:
@@ -15570,7 +15575,7 @@ def _get_device_name(idx):
 
 # Although this is written to be generic over all accelerators, non-cuda accelerators
 # are not fully tested since sleep is only supported on cuda.
-@skipIfRocmVersionAtLeast([7, 15])
+@skipIfRocm714
 class TestAutogradStreamSynchronization(TestCase):
     def get_default_streams(self, num_devices=1):
         out = []
@@ -16044,7 +16049,7 @@ class TestAutogradStreamSynchronization(TestCase):
                 do_test(suppress_warn=suppress_warn, keep_grad_acc=keep_grad_acc)
 
 
-@skipIfRocmVersionAtLeast([7, 15])
+@skipIfRocm714
 class TestMultithreadAutograd(TestCase):
     def _run_py_multithread_fn(
         self, fn, args=(), num_threads=10, kwargs=None, pass_idx=False
@@ -16484,7 +16489,7 @@ class TestMultithreadAutograd(TestCase):
         self.assertFalse(torch._C._is_key_in_tls("test_obj"))
 
 
-@skipIfRocmVersionAtLeast([7, 15])
+@skipIfRocm714
 class TestNestedCheckpoint(TestCase):
     @staticmethod
     def grad(fn):
@@ -17002,7 +17007,7 @@ class _AutoNamingMode(TorchDispatchMode):
         return out
 
 
-@skipIfRocmVersionAtLeast([7, 15])
+@skipIfRocm714
 class TestSelectiveActivationCheckpoint(TestCase):
     @unittest.skipIf(not TEST_CUDA, "requires CUDA")
     def test_flops_and_mem(self):
@@ -17627,7 +17632,7 @@ class TestSelectiveActivationCheckpoint(TestCase):
 
 
 @skipIfTorchDynamo("SAC hook interaction under compile tested elsewhere")
-@skipIfRocmVersionAtLeast([7, 15])
+@skipIfRocm714
 class TestSACAmbientSavedTensorsHooks(TestCase):
     # Characterizes how a user saved_tensors_hooks context wrapped OUTER around
     # a selective activation checkpoint (SAC) region interacts with the tensors
@@ -17869,7 +17874,7 @@ class TestSACAmbientSavedTensorsHooks(TestCase):
             )
 
 
-@skipIfRocmVersionAtLeast([7, 15])
+@skipIfRocm714
 class TestAutogradMultipleDispatch(TestCase):
     def test_autograd_multiple_dispatch_registrations(self, device):
         t = torch.randn(3, 3, device=device, requires_grad=True)
@@ -18228,7 +18233,7 @@ class TestAutogradMultipleDispatch(TestCase):
 
 
 @skipIfTorchDynamo("tests eager C++ error paths that Dynamo does not reproduce")
-@skipIfRocmVersionAtLeast([7, 15])
+@skipIfRocm714
 class TestFunctionAssertMessages(TestCase):
     # THPFunction_assert forwards to a printf-style formatter. Regression tests
     # that the dynamic content (offending type name / index) is not silently
