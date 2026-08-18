@@ -2908,9 +2908,27 @@ class TestTensorCreation(TestCase):
     def test_refs_tensor(self, device, dtype):
         self.assertEqual(torch._refs.tensor([], device=device, dtype=dtype), torch.tensor([], device=device, dtype=dtype))
 
-
 class TestTensorCreationCpuOnly(TestCase):
     hw_classification = HardwareClassification.CPU
+
+    @parametrize('shared', [True, False])
+    @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
+    def test_from_file(self, device, shared):
+        dtype = torch.float64
+        t = torch.randn(2, 5, dtype=dtype, device=device)
+        with tempfile.NamedTemporaryFile() as f:
+            expected_filename = f.name if shared else None
+            t.numpy().tofile(f)
+            t_mapped = torch.from_file(f.name, shared=shared, size=t.numel(), dtype=dtype)
+            self.assertTrue(t_mapped.untyped_storage().filename == expected_filename)
+            self.assertEqual(torch.flatten(t), t_mapped)
+
+            s = torch.UntypedStorage.from_file(f.name, shared, nbytes=t.numel() * dtype.itemsize)
+            self.assertTrue(s.filename == expected_filename)
+
+    def test_storage_filename(self, device):
+        t = torch.randn(2, 5, device=device)
+        self.assertIsNone(t.untyped_storage().filename)
 
     def _float_to_int_conversion_helper(self, vals, device, dtype, refs=None):
         if refs is None:
@@ -3300,26 +3318,6 @@ class TestTensorCreationCpuOnly(TestCase):
                       torch.arange(torch.tensor(1),
                                    torch.tensor(3),
                                    torch.tensor(1, dtype=torch.int16)).dtype)
-
-    @parametrize('shared', [True, False])
-    @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
-    def test_from_file(self, device, shared):
-        dtype = torch.float64
-        t = torch.randn(2, 5, dtype=dtype, device=device)
-        with tempfile.NamedTemporaryFile() as f:
-            expected_filename = f.name if shared else None
-            t.numpy().tofile(f)
-            t_mapped = torch.from_file(f.name, shared=shared, size=t.numel(), dtype=dtype)
-            self.assertTrue(t_mapped.untyped_storage().filename == expected_filename)
-            self.assertEqual(torch.flatten(t), t_mapped)
-
-            s = torch.UntypedStorage.from_file(f.name, shared, nbytes=t.numel() * dtype.itemsize)
-            self.assertTrue(s.filename == expected_filename)
-
-    def test_storage_filename(self, device):
-        t = torch.randn(2, 5, device=device)
-        self.assertIsNone(t.untyped_storage().filename)
-
 
 # Class for testing random tensor creation ops, like torch.randint
 class TestRandomTensorCreation(TestCase):
