@@ -79,6 +79,7 @@ from .base import (
     GetSet,
     getset_build,
     getset_read,
+    getset_set,
     Member,
     Method,
     NO_SUCH_SUBOBJ,
@@ -459,10 +460,10 @@ class FrameSummaryVariable(VariableTracker):
     # traceback.FrameSummary is pure-Python with __slots__ (Lib/traceback.py);
     # each slot is exposed as a read-only member_descriptor.
     tp_members = {
-        "lineno": Member(getset_build(lambda s: s.frame_summary.lineno)),
-        "filename": Member(getset_build(lambda s: s.frame_summary.filename)),
-        "name": Member(getset_build(lambda s: s.frame_summary.name)),
-        "line": Member(getset_build(lambda s: s.frame_summary.line)),
+        "lineno": Member(getset_build(lambda s: s.frame_summary.lineno), None),
+        "filename": Member(getset_build(lambda s: s.frame_summary.filename), None),
+        "name": Member(getset_build(lambda s: s.frame_summary.name), None),
+        "line": Member(getset_build(lambda s: s.frame_summary.line), None),
     }
 
 
@@ -570,7 +571,7 @@ class TracebackVariable(VariableTracker):
     # ref: CPython Objects/traceback.c tb_memberlist, where tb_lasti is
     # READONLY. Dynamo graph breaks on read rather than modelling the value.
     tp_members = {
-        "tb_lasti": Member(_get_tb_lasti),
+        "tb_lasti": Member(_get_tb_lasti, None),
     }
 
     def tp_richcompare_impl(
@@ -886,10 +887,23 @@ class StopIterationVariable(ExceptionVariable):
         self.value = args[0] if args else variables.ConstantVariable.create(None)
         super().__init__(exc_type, args, init_kwargs, source, mutation_type)
 
+    def _set_value(
+        self, tx: "InstructionTranslatorBase", val: VariableTracker | None
+    ) -> VariableTracker:
+        self.value = val if val is not None else ConstantVariable.create(None)
+        return variables.ConstantVariable.create(None)
+
     # ref: StopIteration_members in CPython Objects/exceptions.c
     tp_members = {
-        "value": Member(getset_read(lambda s: s.value)),
+        "value": Member(getset_read(lambda s: s.value), _set_value),
     }
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        super().reconstruct(codegen)
+        codegen.dup_top()
+        codegen(self.value)
+        codegen.extend_output(codegen.rot_n(2))
+        codegen.store_attr("value")
 
 
 class _KwargAttrExceptionVariable(ExceptionVariable):
@@ -926,15 +940,26 @@ class AttributeErrorVariable(_KwargAttrExceptionVariable):
     # https://docs.python.org/3/library/exceptions.html#AttributeError
     _kwarg_attrs = ("name", "obj")
     tp_members = {
-        "name": Member(getset_read(lambda s: s._attrs["name"])),
-        "obj": Member(getset_read(lambda s: s._attrs["obj"])),
+        "name": Member(
+            getset_read(lambda s: s._attrs["name"]),
+            getset_set(lambda s, tx, val: s._attrs.__setitem__("name", val)),
+        ),
+        "obj": Member(
+            getset_read(lambda s: s._attrs["obj"]),
+            getset_set(lambda s, tx, val: s._attrs.__setitem__("obj", val)),
+        ),
     }
 
 
 class NameErrorVariable(_KwargAttrExceptionVariable):
     # https://docs.python.org/3/library/exceptions.html#NameError
     _kwarg_attrs = ("name",)
-    tp_members = {"name": Member(getset_read(lambda s: s._attrs["name"]))}
+    tp_members = {
+        "name": Member(
+            getset_read(lambda s: s._attrs["name"]),
+            getset_set(lambda s, tx, val: s._attrs.__setitem__("name", val)),
+        )
+    }
 
 
 class UnknownVariable(VariableTracker):
@@ -2729,7 +2754,7 @@ class ContextVarVariable(VariableTracker):
             raise_observed_exception(LookupError, tx, args=[f"{self.cv_obj!r}"])
 
     # contextvars.ContextVar.name is a read-only member.
-    tp_members = {"name": Member(getset_build(lambda s: s.cv_obj.name))}
+    tp_members = {"name": Member(getset_build(lambda s: s.cv_obj.name), None)}
 
 
 class RandomClassVariable(VariableTracker):

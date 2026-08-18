@@ -95,6 +95,7 @@ from .base import (
     GetSet,
     getset_build,
     getset_read,
+    getset_set,
     Member,
     Method,
     NO_SUCH_SUBOBJ,
@@ -407,6 +408,15 @@ def fn_getattro_impl(
     return VariableTracker.build(tx, subobj)
 
 
+def _side_effect_setter(name: str) -> Callable[..., None]:
+    """Setter for a member whose getter reads through the wrapped object: record
+    the write as a side effect, which both the read path (generic_getattr checks
+    pending mutations first) and replay pick up."""
+    return getset_set(
+        lambda s, tx, val: tx.output.side_effects.store_attr(s, name, val)
+    )
+
+
 class BaseUserFunctionVariable(VariableTracker):
     # funcobject.c func_annotations: a dedicated slot, NOT a __dict__ entry.
     # Materialized per-instance once accessed/assigned.
@@ -486,9 +496,9 @@ class BaseUserFunctionVariable(VariableTracker):
     def _get_named_attr(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
-        fn_dict = self.get_dict_vt(tx)
-        if fn_dict.contains(name):
-            return fn_dict.getitem(name)
+        se = tx.output.side_effects
+        if se.has_pending_mutation_of_attr(self, name):
+            return se.load_attr(self, name)
         val = getattr(self, f"get_{name[2:-2]}")()
         return ConstantVariable.create(
             val, source=self.source and AttrSource(self.source, name)
@@ -528,9 +538,15 @@ class BaseUserFunctionVariable(VariableTracker):
         "__type_params__": GetSet(_get_type_params),
     }
     tp_members = {
-        "__doc__": Member(lambda s, tx: s._get_named_attr(tx, "__doc__")),
-        "__module__": Member(lambda s, tx: s._get_named_attr(tx, "__module__")),
-        "__closure__": Member(_get_closure),
+        "__doc__": Member(
+            lambda s, tx: s._get_named_attr(tx, "__doc__"),
+            _side_effect_setter("__doc__"),
+        ),
+        "__module__": Member(
+            lambda s, tx: s._get_named_attr(tx, "__module__"),
+            _side_effect_setter("__module__"),
+        ),
+        "__closure__": Member(_get_closure, None),
     }
 
     def lookup_instance_dict(
@@ -824,9 +840,15 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         "__type_params__": GetSet(lambda s, tx: s._fn_getattr(tx, "__type_params__")),
     }
     tp_members = {
-        "__doc__": Member(lambda s, tx: s._fn_getattr(tx, "__doc__")),
-        "__module__": Member(lambda s, tx: s._fn_getattr(tx, "__module__")),
-        "__closure__": Member(lambda s, tx: s._fn_getattr(tx, "__closure__")),
+        "__doc__": Member(
+            lambda s, tx: s._fn_getattr(tx, "__doc__"),
+            _side_effect_setter("__doc__"),
+        ),
+        "__module__": Member(
+            lambda s, tx: s._fn_getattr(tx, "__module__"),
+            _side_effect_setter("__module__"),
+        ),
+        "__closure__": Member(lambda s, tx: s._fn_getattr(tx, "__closure__"), None),
     }
 
     def tp_descr_get_impl(
@@ -1850,7 +1872,7 @@ class UserMethodVariable(UserFunctionVariable):
     # __self__ / __func__ are read-only members on method objects.
     # https://github.com/python/cpython/blob/v3.13.0/Objects/classobject.c#L20-L24
     tp_members = {
-        "__self__": Member(getset_read(lambda s: s.obj)),
+        "__self__": Member(getset_read(lambda s: s.obj), None),
         "__func__": Member(_get_func, None),
     }
 
@@ -4142,8 +4164,8 @@ class WrapperDescriptorVariable(VariableTracker):
         return self.descriptor
 
     tp_members = {
-        "__objclass__": Member(getset_build(lambda s: s.descriptor.__objclass__)),
-        "__name__": Member(getset_build(lambda s: s.descriptor.__name__)),
+        "__objclass__": Member(getset_build(lambda s: s.descriptor.__objclass__), None),
+        "__name__": Member(getset_build(lambda s: s.descriptor.__name__), None),
     }
 
     def call_function(
@@ -4230,7 +4252,7 @@ class MethodWrapperVariable(VariableTracker):
         ),
     }
     tp_members = {
-        "__self__": Member(lambda s, tx: s.obj),
+        "__self__": Member(lambda s, tx: s.obj, None),
     }
 
     def get_real_python_backed_value(self) -> types.MethodWrapperType:
@@ -4340,8 +4362,8 @@ class MethodDescriptorVariable(VariableTracker):
         return self.descriptor
 
     tp_members = {
-        "__objclass__": Member(getset_build(lambda s: s.descriptor.__objclass__)),
-        "__name__": Member(getset_build(lambda s: s.descriptor.__name__)),
+        "__objclass__": Member(getset_build(lambda s: s.descriptor.__objclass__), None),
+        "__name__": Member(getset_build(lambda s: s.descriptor.__name__), None),
     }
 
     def call_function(
@@ -4491,8 +4513,8 @@ class ClassMethodDescriptorVariable(VariableTracker):
         return self.descriptor
 
     tp_members = {
-        "__objclass__": Member(getset_build(lambda s: s.descriptor.__objclass__)),
-        "__name__": Member(getset_build(lambda s: s.descriptor.__name__)),
+        "__objclass__": Member(getset_build(lambda s: s.descriptor.__objclass__), None),
+        "__name__": Member(getset_build(lambda s: s.descriptor.__name__), None),
     }
 
     def tp_descr_get_impl(
@@ -4644,8 +4666,8 @@ class MemberDescriptorVariable(VariableTracker):
         return self.descriptor
 
     tp_members = {
-        "__objclass__": Member(getset_build(lambda s: s.descriptor.__objclass__)),
-        "__name__": Member(getset_build(lambda s: s.descriptor.__name__)),
+        "__objclass__": Member(getset_build(lambda s: s.descriptor.__objclass__), None),
+        "__name__": Member(getset_build(lambda s: s.descriptor.__name__), None),
     }
 
     def tp_descr_get_impl(
@@ -4738,8 +4760,8 @@ class GetSetDescriptorVariable(VariableTracker):
     }
 
     tp_members = {
-        "__objclass__": Member(getset_build(lambda s: s.descriptor.__objclass__)),
-        "__name__": Member(getset_build(lambda s: s.descriptor.__name__)),
+        "__objclass__": Member(getset_build(lambda s: s.descriptor.__objclass__), None),
+        "__name__": Member(getset_build(lambda s: s.descriptor.__name__), None),
     }
 
     def is_python_constant(self) -> bool:
@@ -4886,9 +4908,14 @@ class TupleGetterVariable(VariableTracker):
     def as_python_constant(self) -> "_collections._tuplegetter":
         return self.descriptor
 
-    # _tuplegetter exposes __doc__ as a T_OBJECT member.
+    # _tuplegetter exposes __doc__ as a writable T_OBJECT member.
     # https://github.com/python/cpython/blob/v3.13.0/Modules/_collectionsmodule.c#L2717-L2721
-    tp_members = {"__doc__": Member(getset_build(lambda s: s.descriptor.__doc__))}
+    tp_members = {
+        "__doc__": Member(
+            getset_build(lambda s: s.descriptor.__doc__),
+            _side_effect_setter("__doc__"),
+        )
+    }
 
     def tp_descr_get_impl(
         self,

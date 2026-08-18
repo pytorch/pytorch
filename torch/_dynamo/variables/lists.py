@@ -1117,9 +1117,9 @@ class RangeVariable(BaseListVariable):
     # range_members: start/stop/step are Py_READONLY _Py_T_OBJECT members.
     # https://github.com/python/cpython/blob/v3.13.0/Objects/rangeobject.c (range_members)
     tp_members = {
-        "start": Member(getset_read(lambda s: s.items[0])),
-        "stop": Member(getset_read(lambda s: s.items[1])),
-        "step": Member(getset_read(lambda s: s.items[2])),
+        "start": Member(getset_read(lambda s: s.items[0]), None),
+        "stop": Member(getset_read(lambda s: s.items[1]), None),
+        "step": Member(getset_read(lambda s: s.items[2]), None),
     }
 
     def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
@@ -2314,9 +2314,9 @@ class SliceVariable(VariableTracker):
     # slice_members: start/stop/step are Py_READONLY _Py_T_OBJECT members.
     # https://github.com/python/cpython/blob/v3.13.0/Objects/sliceobject.c (slice_members)
     tp_members = {
-        "start": Member(getset_read(lambda s: s.items[0])),
-        "stop": Member(getset_read(lambda s: s.items[1])),
-        "step": Member(getset_read(lambda s: s.items[2])),
+        "start": Member(getset_read(lambda s: s.items[0]), None),
+        "stop": Member(getset_read(lambda s: s.items[1]), None),
+        "step": Member(getset_read(lambda s: s.items[2]), None),
     }
 
     def indices(
