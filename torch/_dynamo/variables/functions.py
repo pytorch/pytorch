@@ -37,6 +37,7 @@ import traceback
 import types
 import typing
 from collections.abc import Callable, Sequence
+from time import time as _time_time
 from types import CellType, FunctionType
 from typing import Any, cast, Literal, Optional, TYPE_CHECKING, TypeVar
 from typing_extensions import Never
@@ -2471,6 +2472,18 @@ class SkipFunctionVariable(VariableTracker):
                 f"with `torch.compiler.disable` (reason: {msg})",
                 hints=[
                     "Remove the `torch.compiler.disable` call",
+                ],
+            )
+        elif self.value is _time_time and not args and not kwargs:
+            unimplemented(
+                gb_type="Call to `time.time()`",
+                context="Called `time.time()` inside a compiled region",
+                explanation=(
+                    "Dynamo graph breaks on `time.time()` so that the clock read "
+                    "occurs at the correct point relative to compiled operations."
+                ),
+                hints=[
+                    "Move the `time.time()` call outside the compiled function if the graph break is undesirable.",
                 ],
             )
         elif self.value is torch._dynamo.graph_break:

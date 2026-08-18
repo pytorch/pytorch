@@ -1225,6 +1225,16 @@
       ]
     }
   ],
+  "GB9193": [
+    {
+      "Gb_type": "Call to `time.time()`",
+      "Context": "Called `time.time()` inside a compiled region",
+      "Explanation": "Dynamo graph breaks on `time.time()` so that the clock read occurs at the correct point relative to compiled operations.",
+      "Hints": [
+        "Move the `time.time()` call outside the compiled function if the graph break is undesirable."
+      ]
+    }
+  ],
   "GB7596": [
     {
       "Gb_type": "Indexing torch.Size with non-scalar tensor",
