@@ -473,7 +473,8 @@ mha_varlen_bwd_ck(const at::Tensor &dout,                   // total_q x num_hea
         dout_padded = dout;
     }
 
-    at::cuda::CUDAGuard device_guard{q.get_device()};
+    // Cast to char to avoid compiler warning about narrowing
+    at::cuda::CUDAGuard device_guard{(char)q.get_device()};
 
     auto opts = q.options();
     auto softmax_d = at::empty({batch_size, num_heads, max_seqlen_q}, opts.dtype(at::kFloat));

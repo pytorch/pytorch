@@ -247,8 +247,7 @@ def _resolve_global(
     # closure as its inner. That closure is not a captured wrapper and has no import
     # path, so wire it to the single-arg orchestration entry adapter the composer emits.
     if orch_closure_id is not None and id(obj) == orch_closure_id:
-        if orch_entry_name is None:
-            raise AssertionError("expected orch_entry_name to be not None")
+        assert orch_entry_name is not None  # noqa: S101
         return orch_entry_name
     if id(obj) in fn_id_to_name:
         return fn_id_to_name[id(obj)]

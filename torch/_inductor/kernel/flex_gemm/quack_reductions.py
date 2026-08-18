@@ -30,7 +30,6 @@ from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
 from torch._inductor.kernel.flex_gemm.constraints import (
     LOCAL_REDUCE_EXPLICIT_DTYPE_ERROR,
     LOCAL_REDUCE_INNERMOST_GROUPED_DIM_ERROR,
-    local_reduce_needs_physical_callbacks,
     LOCAL_REDUCE_PARTIAL_OUTPUT_CONTRACT_ERROR,
 )
 from torch._inductor.kernel.gemm_epilogue import (
@@ -55,12 +54,6 @@ from torch.utils._ordered_set import OrderedSet
 class GroupedTensorSSALayout(GemmReductionGeometry):
     """Describe a grouped M/N TensorSSA view inside the generated epilogue."""
 
-    swapped: bool = False
-
-    @property
-    def tensorssa_axis(self) -> int:
-        return 1 - self.axis if self.swapped else self.axis
-
     def fragment_group_size_expr(self, source: Any) -> str:
         """Return the local group size available in this epilogue fragment."""
         return (
@@ -78,7 +71,7 @@ class GroupedTensorSSALayout(GemmReductionGeometry):
     def tensorssa_shape(self, source: Any) -> str:
         fragment_group_size = self.fragment_group_size_expr(source)
         repeats = self.fragment_repeat_expr(source)
-        if self.tensorssa_axis == 1:
+        if self.axis == 1:
             return f"((1, {fragment_group_size}, {repeats}), 1, 1)"
         return f"(({fragment_group_size}, 1, {repeats}), 1, 1)"
 
@@ -86,16 +79,12 @@ class GroupedTensorSSALayout(GemmReductionGeometry):
         return f"((1, 1, {self.fragment_repeat_expr(source)}), 1, 1)"
 
     @property
-    def needs_physical_callbacks(self) -> bool:
-        return local_reduce_needs_physical_callbacks(self.tensorssa_axis, self.group)
-
-    @property
     def needs_physical_combine(self) -> bool:
         return self.needs_physical_callbacks
 
     @property
     def reduction_profile(self) -> str:
-        if self.tensorssa_axis == 1:
+        if self.axis == 1:
             return "((None, 1, None), 1, 1)"
         return "((1, None, None), 1, 1)"
 
@@ -125,7 +114,6 @@ FLEX_GEMM_POINTWISE_OP_NAMES = frozenset(
         "clamp_max",
         "clamp_min",
         "convert_element_type",
-        "inline_asm_elementwise",
     )
 )
 
@@ -148,7 +136,6 @@ def _cute_arg(value: Any, env: dict[torch.fx.Node, Any]) -> Any:
             int,
             float,
             bool,
-            str,
             torch.dtype,
             torch.device,
             torch.layout,
@@ -187,37 +174,10 @@ def _keepdim_and_broadcast(
     )
 
 
-def _cute_call(
-    node: torch.fx.Node,
-    args: tuple[Any, ...],
-    kwargs: dict[str, Any],
-) -> Any:
-    """Lower one FX call through the active CuTeDSL operations handler."""
-    target = node.target
+def _cute_call(target: Any, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
     op_name = _cute_op_name(target)
     if op_name is None:
         raise NotImplementedError(f"unsupported FlexGEMM epilogue op: {target}")
-    if op_name == "inline_asm_elementwise":
-        # The HOP spells the asm text `asm_str`; the ops handler spells it `asm`.
-        kwargs = dict(kwargs)
-        kwargs["asm"] = kwargs.pop("asm_str")
-        input_values = []
-        for input_node in node.args[: len(args)]:
-            value = (
-                input_node.meta.get("val")
-                if isinstance(input_node, torch.fx.Node)
-                else None
-            )
-            if not isinstance(value, torch.Tensor):
-                raise NotImplementedError(
-                    "FlexGEMM inline asm inputs require tensor metadata"
-                )
-            input_values.append(value)
-        kwargs["input_dtypes"] = tuple(value.dtype for value in input_values)
-        kwargs["scalar_sources"] = tuple(
-            all(isinstance(dim, int) and dim == 1 for dim in value.shape)
-            for value in input_values
-        )
     try:
         op = getattr(V.get_ops_handler(), op_name)
     except AttributeError:
@@ -296,25 +256,19 @@ def lower_view_or_reshape(
 ) -> Any | None:
     """Emit an analyzed view using grouped provenance."""
     source_node = normalized.source
+    if source_node in local_reduce_store_sources:
+        local_reduce_store_sources[node] = local_reduce_store_sources[source_node]
+        return _cute_arg(source_node, env)
     source = _cute_arg(source_node, env)
     grouped_layout = grouped_tensors.get(node)
-    if (
-        grouped_layout is not None
-        and not preserve_value_layout
-        and grouped_layout in active_grouped_layouts
-    ):
-        if source_node in local_reduce_store_sources:
-            local_reduce_store_sources[node] = local_reduce_store_sources[source_node]
+    if grouped_layout is not None:
+        if preserve_value_layout or grouped_layout not in active_grouped_layouts:
+            return source
         return _generate_like(
             kernel,
             f"{source}.reshape({grouped_layout.tensorssa_shape(source)})",
             source,
         )
-    if source_node in local_reduce_store_sources:
-        local_reduce_store_sources[node] = local_reduce_store_sources[source_node]
-        return source
-    if grouped_layout is not None:
-        return source
     if source_node in grouped_tensors:
         return source
     return None
@@ -478,7 +432,7 @@ def lower_tensorssa_reduce(
         local_reduce_physical_reductions[node] = FlexGemmPhysicalReduction(
             desc.combine_expr, finalize_expr
         )
-        if layout.tensorssa_axis == 0:
+        if layout.axis == 0:
             local_reduce_store_sources[node] = source
             return source
     reduced = _generate_like(

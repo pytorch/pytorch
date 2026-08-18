@@ -206,17 +206,12 @@ def main():
             )
 
         if not clean_labels:
-            # Blocking here would abandon triage entirely: the model retries, gets
-            # blocked again, and gives up, so the issue keeps no status label and the
-            # post-hook that stamps 'bot-triaged' never runs. Fall back to flagging it
-            # for a human, matching what the forbidden-label branch above already does.
-            debug_log("No valid labels remain after filtering, using 'triage review'")
-            clean_labels = ["triage review"]
+            debug_log("No valid labels remain after filtering, blocking")
             print(
-                "All requested labels were filtered out. "
-                "Applying 'triage review' for human attention.",
+                "All requested labels were invalid. No labels to apply.",
                 file=sys.stderr,
             )
+            sys.exit(2)
 
         existing_labels = fetch_existing_labels(owner, repo, issue_number)
         debug_log(f"Existing labels on issue: {existing_labels}")
