@@ -2629,6 +2629,14 @@ np_constant_collections_map = {
 }
 
 
+def _cleanup_reset(
+    cv_obj: "contextvars.ContextVar[Any]", token_var: "ContextVarTokenVariable"
+) -> None:
+    rt = token_var._real_token
+    if rt is not None and not token_var._real_token_used:
+        cv_obj.reset(rt)
+
+
 class ContextVarVariable(VariableTracker):
     """Wraps a contextvars.ContextVar for Dynamo tracing.
 
@@ -2740,6 +2748,7 @@ class ContextVarVariable(VariableTracker):
 
     # contextvars.ContextVar.name is a read-only member.
     tp_members = {"name": Member(getset_build(lambda s: s.cv_obj.name))}
+
     def _get_unset_value(
         self,
         tx: "InstructionTranslatorBase",
@@ -2839,7 +2848,8 @@ class ContextVarVariable(VariableTracker):
         real_value = args[0].get_real_python_backed_value()
         if real_value is not NO_SUCH_SUBOBJ:
             real_token = self.cv_obj.set(real_value)
-            tx.output.add_cleanup_hook(lambda: self.cv_obj.reset(real_token))
+            token._real_token = real_token
+            tx.output.add_cleanup_hook(lambda: _cleanup_reset(self.cv_obj, token))
         return token
 
     def _handle_reset(
@@ -2928,6 +2938,20 @@ class ContextVarVariable(VariableTracker):
             old_real = token.old_value.get_real_python_backed_value()
             if old_real is not NO_SUCH_SUBOBJ:
                 self.cv_obj.set(old_real)
+        elif token.old_state_kind is _ContextVarStateKind.UNSET:
+            if token._real_token is not None:
+                self.cv_obj.reset(token._real_token)
+                token._real_token_used = True
+                for m in tx.output.side_effects.contextvar_mutations:
+                    mc, mt = m.contextvar, m.token
+                    if (
+                        m.method_name == "set"
+                        and isinstance(mc, ContextVarVariable)
+                        and mc.cv_obj is self.cv_obj
+                        and isinstance(mt, ContextVarTokenVariable)
+                        and mt is not token
+                    ):
+                        mt._real_token_used = True
 
         return ConstantVariable.create(None)
 
@@ -2942,6 +2966,8 @@ class ContextVarTokenVariable(VariableTracker):
     _nonvar_fields = {
         "old_state_kind",
         "from_tracing_set",
+        "_real_token",
+        "_real_token_used",
         *VariableTracker._nonvar_fields,
     }
 
@@ -2958,6 +2984,8 @@ class ContextVarTokenVariable(VariableTracker):
         self.old_value = old_value
         self.old_state_kind = old_state_kind
         self.from_tracing_set = from_tracing_set
+        self._real_token: contextvars.Token[Any] | None = None
+        self._real_token_used: bool = False
 
     def python_type(self) -> type:
         return contextvars.Token

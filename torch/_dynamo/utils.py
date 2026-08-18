@@ -17,6 +17,7 @@ from __future__ import annotations
 import atexit
 import collections
 import contextlib
+import contextvars
 import copy
 import dataclasses
 import datetime
@@ -6039,3 +6040,19 @@ def _make_inlined(
             )
 
     return inline_call
+
+
+_CONTEXTVAR_EXPLICIT_STATE_SENTINEL = object()
+
+
+def _contextvar_has_explicit_binding(cv: contextvars.ContextVar[Any]) -> bool:
+    return (
+        contextvars.copy_context().get(cv, _CONTEXTVAR_EXPLICIT_STATE_SENTINEL)
+        is not _CONTEXTVAR_EXPLICIT_STATE_SENTINEL
+    )
+
+
+def _contextvar_get_explicit_value_or_missing(
+    cv: contextvars.ContextVar[Any],
+) -> Any:
+    return contextvars.copy_context().get(cv, contextvars.Token.MISSING)

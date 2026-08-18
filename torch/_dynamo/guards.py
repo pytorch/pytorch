@@ -120,7 +120,6 @@ from torch.utils.weak import TensorWeakRef
 from . import config, convert_frame, exc
 from .eval_frame import set_guard_error_hook
 from .source import (
-    _contextvar_has_explicit_binding,
     AttrProxySource,
     AttrSource,
     CallFunctionNoArgsSource,
@@ -181,6 +180,7 @@ from .types import (  # noqa: F401
     GuardFn,
 )
 from .utils import (
+    _contextvar_has_explicit_binding,
     builtin_dict_keys,
     common_constant_types,
     dataclass_fields,

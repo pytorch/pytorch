@@ -1161,6 +1161,36 @@ class TestContextVars(TestCase):
             self.assertEqual(fake_reads[0], "original")
             self.assertEqual(cv.get(), "original")
 
+    def test_reset_to_unbound_eager_apply_restores_real_cv(self):
+        cv = contextvars.ContextVar("eager_reset_unbound")
+        fake_reads: list = []
+
+        with torch.library._scoped_library("_test_unbound_reset", "DEF") as lib:
+            lib.define("read_cv(Tensor x) -> Tensor")
+
+            @torch.library.register_kernel(
+                "_test_unbound_reset::read_cv", "cpu", lib=lib
+            )
+            def _(x):
+                return x.clone()
+
+            @torch.library.register_fake("_test_unbound_reset::read_cv", lib=lib)
+            def _(x):
+                try:
+                    fake_reads.append(cv.get())
+                except LookupError:
+                    fake_reads.append("UNBOUND")
+                return torch.empty_like(x)
+
+            @torch.compile(backend="eager", fullgraph=True)
+            def fn(x):
+                token = cv.set("modified")
+                cv.reset(token)
+                return torch.ops._test_unbound_reset.read_cv(x)
+
+            fn(torch.tensor(10))
+            self.assertEqual(fake_reads[0], "UNBOUND")
+
 
 if __name__ == "__main__":
     run_tests()

@@ -4010,17 +4010,6 @@
       ]
     }
   ],
-  "GB6640": [
-    {
-      "Gb_type": "ContextVar.set()/reset() with opaque runtime function calls",
-      "Context": "target={target_name}",
-      "Explanation": "Dynamo does not support mixing ContextVar.set()/reset() with opaque runtime function calls in the same compiled region because the runtime call could observe stale ContextVar state.",
-      "Hints": [
-        "Move the ContextVar mutation or the opaque runtime call outside the compiled region.",
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
-    }
-  ],
   "GB1769": [
     {
       "Gb_type": "ContextVar token escape requires side-effect replay",
