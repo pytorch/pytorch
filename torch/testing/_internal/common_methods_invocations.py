@@ -1388,7 +1388,7 @@ def sample_inputs_addbmm(op_info, device, dtype, requires_grad, **kwargs):
             yield SampleInput(make_arg(input_shape), args=(make_arg(batch1_shape), make_arg(batch2_shape)),
                               kwargs=dict(beta=beta_complex, alpha=alpha_complex), broadcasts_input=is_broadcasting)
         if beta == 0 and (dtype.is_floating_point or dtype.is_complex):
-            input = torch.full(input_shape, math.nan, device=device, dtype=dtype, requires_grad=requires_grad)
+            input = torch.full(input_shape, math.inf, device=device, dtype=dtype, requires_grad=requires_grad)
         else:
             input = make_arg(input_shape)
         yield SampleInput(input, args=(make_arg(batch1_shape), make_arg(batch2_shape)),
@@ -1477,7 +1477,7 @@ def sample_inputs_baddbmm(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad, low=None, high=None)
     for (input_shape, batch1_shape, batch2_shape, alpha, beta, broadcasts_input) in test_cases:
         if beta == 0 and (dtype.is_floating_point or dtype.is_complex):
-            input = torch.full(input_shape, math.nan, device=device, dtype=dtype, requires_grad=requires_grad)
+            input = torch.full(input_shape, math.inf, device=device, dtype=dtype, requires_grad=requires_grad)
         else:
             input = make_arg(input_shape)
         yield SampleInput(
