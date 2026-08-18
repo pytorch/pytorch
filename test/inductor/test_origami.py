@@ -411,8 +411,6 @@ class TestOrigami(TestCase):
                 except Exception as e:
                     self.fail(f"Compilation failed with valid topk={topk_val}: {e}")
 
-    # TODO(AIPYTORCH-1024): Re-enable after resolving the ROCm 7.14 SIGSEGV.
-    @skipIfRocm714
     def test_origami_configs_use_device_specific_values(self):
         """Verify that origami configs use architecture-specific num_stages and num_warps.
 

@@ -68,10 +68,6 @@ _IS_SM8X = False
 if TEST_CUDA:
     _IS_SM8X = torch.cuda.get_device_capability(0)[0] == 8
 
-skipIfRocm714 = unittest.skipIf(
-    getRocmVersion() == (7, 14), "ROCm version 7.14: known failure"
-)
-
 # Protects against includes accidentally setting the default dtype
 if torch.get_default_dtype() is not torch.float32:
     raise AssertionError("default dtype should be float32")
@@ -124,8 +120,6 @@ def sm_carveout(value: int | None):
         torch._C._set_sm_carveout_experimental(None)
 
 
-# TODO(AIPYTORCH-1024): Re-enable after resolving the ROCm 7.14 timeout.
-@skipIfRocm714
 class TestMatmulCuda(InductorTestCase):
     def setUp(self):
         super().setUp()
@@ -1453,7 +1447,6 @@ class TestMatmulCuda(InductorTestCase):
 @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
 @unittest.skipIf(IS_WINDOWS, "Windows doesn't support CUTLASS extensions")
 @unittest.skipIf(not _IS_SM8X, "mixed dtypes linear only supported on SM 8.x")
-@skipIfRocm714
 class TestMixedDtypesLinearCuda(TestCase):
     @dtypes(torch.float16, torch.bfloat16)
     def test_mixed_dtypes_linear(self, dtype: torch.dtype, device: str = "cuda"):
