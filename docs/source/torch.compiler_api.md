@@ -57,8 +57,8 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
    runnable Python source string plus an acceleration cache as ``(python_code, cache)``.
    The ``example_inputs`` keyword accepts a sequence of positional-argument tuples,
    captures every graph-break continuation and guarded recompilation exercised by those
-   calls under full runtime guards, and returns a session whose ``save(path)`` writes a
-   package for ``precompile.load_package``. This is execution-driven coverage, not an
+   calls under full runtime guards, and returns the same ``(python_code, cache)`` pair.
+   This is execution-driven coverage, not an
    exhaustive analysis: paths and values that no example executes are absent. ``fn`` is
    the whole computation, taking the model(s) as
    explicit arguments, e.g. ``lambda model, x: model(x)`` or a training step. The
@@ -116,8 +116,7 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
        and the parameter gradients are accumulated onto the runtime model like eager). A
        source-artifact path requires one full graph; pass a list of calls through the
        ``example_inputs`` keyword when Python graph-breaks or when several guarded/recompiled
-       variants must be retained, or use ``torch.compiler.precompile.capture`` below when
-       the calls must be made manually. Unlike ``make_fx``, the dynamo driver
+       variants must be retained. Unlike ``make_fx``, the dynamo driver
        does NOT re-validate the
        runtime model/inputs, so on the eager backend a drifted model (broken weight tying,
        a retyped/reshaped weight) or a broadcast-compatible input-shape mismatch can
@@ -160,17 +159,12 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
            scale = y.sum().item()  # a graph break
            return y * scale
 
-       session = torch.compiler.precompile(
+       python_code, cache = torch.compiler.precompile(
            staged,
            example_inputs=[(example_a,), (example_b,)],
        )
-       session.save("model.pt")
-
-       with (
-           torch.compiler.precompile.load_package(staged, "model.pt") as compiled,
-           torch.no_grad(),
-           torch.compiler.precompile.serving(),
-       ):
+       compiled = torch.compiler.precompile.load(python_code, cache)
+       with compiled, torch.no_grad():
            out = compiled(example_a)
 ```
 
@@ -202,114 +196,6 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
        paired with a different ``python_code`` (mismatched ``backend`` tag, ``tracer``
        tag, or ``code_hash``), or if a runtime call violates the precompile contract.
 
-.. py:method:: precompile.capture(fn, *, backend="inductor", guard_filter_fn=None, recompile_limit=256, dynamic=None, example_inputs=None, invariants=None)
-
-   Begin an execution-driven multi-graph capture. The yielded callable uses Dynamo and
-   records every graph produced by the calls made during the capture block: the entry
-   frame, resume continuations after graph breaks, and every guarded recompiled variant.
-   Capture every path and specialization the artifact must serve, then call ``save(path)``
-   on the returned session after the block exits. The yielded callable is valid only inside
-   the block, and a capture session is one-shot rather than re-enterable.
-
-   When every call is known up front, the shorter equivalent is
-   ``precompile(fn, example_inputs=[(x1,), (x2,)])``; use ``capture`` when calls must be
-   made manually or under a caller-selected grad mode.
-
-   ``example_inputs`` may be a sequence of positional-argument tuples. Those calls run
-   automatically under ordinary ``torch.no_grad()`` when the capture begins, even if the
-   caller is in inference mode; calls made explicitly in the block use the ambient grad
-   mode. Automatic inputs and module parameters/buffers must not be inference tensors;
-   create them outside inference mode, or use manual capture and serve under the matching
-   mode.
-   ``recompile_limit`` defaults to 256 because an ahead-of-time capture intentionally
-   collects variants rather than treating them as a runaway recompilation. It overrides a
-   lower ambient ``accumulated_recompile_limit`` for this capture. Exercised branches with no
-   tensor operations are still recorded as guarded empty variants rather than eager-only
-   skips.
-
-   Live capture retains all runtime guards so supplied calls cannot silently reuse the
-   wrong variant. ``guard_filter_fn`` applies only to the serialized copy: it receives a
-   sequence of guard entries and returns one boolean per entry, with ``True`` serializing
-   that guard. The default drops identity guards that cannot be serialized; ``save()``
-   refuses the risky subset by default, and every custom-filter drop counts as risky.
-   Refusing every drop is opt-in (``require_no_dropped_guards=True``).
-   ``dynamic`` is forwarded to ``torch.compile``. ``invariants`` names a report file written
-   after a successful capture.
-
-   The session's ``summary()`` reports graph, frame, coverage, and guard information.
-   ``save`` refuses incomplete captures by default; see its error and summary for capture
-   exceptions, uncovered, bypassed, or truncated frames. ``summary().complete`` is relative
-   to the calls that executed successfully and cannot detect an unexercised branch. The
-   session records a call that raises as incomplete even if the block catches the exception.
-   The callable and source it reaches must be importable on the loading host.
-
-   Save with
-   ``session.save(path, *, require_complete=True, require_no_risky_drops=True,``
-   ``require_no_dropped_guards=False)``. ``require_complete`` rejects missing variants or
-   frames and captures that raised. ``require_no_risky_drops`` rejects dropped identity
-   guards on configuration-like slots, every custom-filter drop, and every dropped guard
-   whose SOURCE held different values across captured variants. ``require_no_dropped_guards`` rejects every
-   guard omitted from the serialized artifact; it is off by default because every model
-   drops identity guards that cannot be serialized, so requiring none would refuse
-   essentially every real artifact. The risky subset is the rail that is on, and it is a
-   lint, not a proof; set ``require_no_risky_drops=False`` to accept its flagged drops.
-
-   .. warning::
-
-      Capture is by execution, so unexercised paths are absent. Non-tensor values crossing
-      a graph break are equality-guarded and may need one captured variant per value.
-      Identity guards cannot be serialized and are dropped from the artifact, which is
-      why ``require_no_dropped_guards`` is off by default: those drops can make two
-      variants match the same call and silently select the wrong graph. Explicit
-      forward-only inference calls in
-      the capture block should run under ``torch.no_grad()`` or
-      ``torch.inference_mode()``, and serving must use the same grad mode.
-
-   Example::
-
-       session = torch.compiler.precompile.capture(staged, backend="inductor")
-       with session as compiled, torch.no_grad():
-           compiled(example_a)
-           compiled(example_b)  # another guarded/recompiled variant
-       session.save("model.pt")
-
-.. py:method:: precompile.load_package(fn, path, *, backend="inductor", guard_filter_fn=None, recompile_limit=256, dynamic=None)
-
-   Load a multi-graph artifact written by ``precompile.capture(...).save(path)`` and
-   install its guarded bytecode and compiled backends on ``fn``'s code objects. The
-   returned callable is also a context manager; exit it or call ``unload()`` to remove
-   the installed entries and globals.
-
-   ``guard_filter_fn``, ``recompile_limit``, and ``dynamic`` configure any uncovered call
-   that is allowed to compile outside ``precompile.serving()``. The explicit limit overrides
-   a lower ambient accumulated-recompile limit. The filter controls the serialized copy only;
-   live runtime guards remain intact, and no-op branches compile into guarded empty variants.
-
-   Loading writes compiled and resume functions into module globals, but guarded dispatch
-   is scoped to the returned callable's isolated compile region. Multiple loaded artifacts
-   may share code objects without evicting each other; call each returned object to select
-   its artifact, and unload it when finished. Treat the artifact file as trusted input;
-   ``load_package`` warns before unpickling it.
-
-.. py:method:: precompile.serving()
-
-   Return a context manager that forbids compilation. Use it around calls to a loaded
-   multi-graph artifact so an input or path missing from the capture raises instead of
-   silently compiling a new variant.
-
-   The scope is THREAD-LOCAL: it constrains only the thread that entered it. A serving
-   process must enter it on every request thread, or the threads that did not will
-   quietly compile the variants this is meant to catch.
-
-   Example::
-
-       with (
-           torch.compiler.precompile.load_package(model, "model.pt") as compiled,
-           torch.no_grad(),
-           torch.compiler.precompile.serving(),
-       ):
-           out = compiled(runtime_input)
-
 .. py:class:: precompile.ExampleInput(args=(), kwargs={})
 
    One capture call for ``example_inputs`` when positional arguments alone are not
@@ -326,17 +212,8 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 
 .. autoexception:: torch.compiler.PrecompileError
 
-.. autoclass:: torch.compiler.PrecompileSession
-   :members:
-
 .. autoclass:: torch.compiler.PrecompiledCallable
    :members:
 
-.. autoclass:: torch.compiler.PrecompileSummary
-   :members:
 
-.. autoclass:: torch.compiler.FrameInvariants
-
-.. autoclass:: torch.compiler.GuardFact
-   :members:
 ```

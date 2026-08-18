@@ -2895,7 +2895,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
     def test_eager_artifact_accepts_cpu_codegen_target_skew(self):
         model = PrecompileEmptyGraph()
         x = torch.randn(4)
-        session = torch.compiler.precompile.capture(
+        session = precompile_capture(
             model,
             backend="eager",
             dynamic=False,
@@ -2903,7 +2903,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         )
         with session:
             pass
-        session._session.save(self.path())
+        session.save(self.path())
         captured = SystemInfo.current()
         serving_info = dataclasses.replace(
             captured,
@@ -2927,7 +2927,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         model = PrecompileEmptyGraph()
         x = torch.randn(16)
         with torch._inductor.config.patch({"cpp.simdlen": 256}):
-            session = torch.compiler.precompile.capture(
+            session = precompile_capture(
                 model,
                 backend="inductor",
                 dynamic=False,
@@ -2935,8 +2935,8 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             )
             with session:
                 pass
-            capture_target = session._session._package.cache_entry().system_info
-        session._session.save(self.path())
+            capture_target = session._package.cache_entry().system_info
+        session.save(self.path())
         saved = _SingleFileStore().read(self.path()).dynamo.system_info
 
         self.assertEqual(capture_target.cpu_codegen_target[4], 256)
@@ -3112,15 +3112,15 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         model = PrecompileEmptyGraph()
         x = torch.randn(4)
         with mock.patch.object(cpu_vec_isa, "pick_vec_isa", no_toolchain):
-            session = torch.compiler.precompile.capture(
+            session = precompile_capture(
                 model, backend="eager", dynamic=False, example_inputs=[(x,)]
             )
             with session:
                 pass
-            entry = session._session._package.cache_entry()
+            entry = session._package.cache_entry()
             self.assertFalse(entry.requires_native_backend_compatibility)
             self.assertIsNone(entry.system_info.cpu_codegen_target)
-            session._session.save(self.path())
+            session.save(self.path())
 
             torch._dynamo.reset()
             loaded = precompile_load(model, self.path(), backend="eager", dynamic=False)
@@ -3287,7 +3287,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         paths = []
         for cls, scale in ((shared.ModelOne, 3.0), (shared.ModelTwo, 7.0)):
             torch._dynamo.reset()
-            session = torch.compiler.precompile.capture(
+            session = precompile_capture(
                 cls(scale),
                 backend="eager",
                 dynamic=False,
@@ -3298,7 +3298,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             self.assertTrue(session.summary().complete)
             self.assertEqual(session.summary().risky_dropped_guards, ())
             path = self.path(f"shared_{cls.__name__}.pt")
-            session._session.save(path, require_no_dropped_guards=False)
+            session.save(path, require_no_dropped_guards=False)
             paths.append(path)
 
         torch._dynamo.reset()
