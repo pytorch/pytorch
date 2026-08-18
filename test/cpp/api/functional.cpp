@@ -1427,6 +1427,13 @@ TEST_F(FunctionalTest, LayerNorm) {
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
+TEST_F(FunctionalTest, RMSNorm) {
+  const auto input = torch::randn({2, 2});
+  auto y = F::rms_norm(input, F::RMSNormFuncOptions({2, 2}).eps(2e-5));
+  auto y_exp = torch::rms_norm(input, {2, 2}, std::nullopt, 2e-5);
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}
+
 TEST_F(FunctionalTest, GroupNorm) {
   const auto input = torch::randn({2, 2});
   auto y = F::group_norm(input, F::GroupNormFuncOptions(2).eps(2e-5));
