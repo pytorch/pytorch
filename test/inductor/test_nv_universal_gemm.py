@@ -84,6 +84,20 @@ def _create_tensor_with_layout(layout, rows, cols, dtype, device="cuda"):
         raise ValueError(f"Unknown layout: {layout}")
 
 
+def _make_nvfp4_scaled_mm_inputs(m, n, k):
+    packed_k = k // 2
+    a = _create_tensor_with_layout("contiguous", m, packed_k, torch.float4_e2m1fn_x2)
+    b = _create_tensor_with_layout("contiguous", n, packed_k, torch.float4_e2m1fn_x2).T
+    scale_k = _prep_k(k, 16)
+    scale_a = torch.rand(_round_up(m, 128) * scale_k, device="cuda").to(
+        torch.float8_e4m3fn
+    )
+    scale_b = torch.rand(_round_up(n, 128) * scale_k, device="cuda").to(
+        torch.float8_e4m3fn
+    )
+    return a, b, scale_a, scale_b
+
+
 def _nvgemm_config(**overrides):
     """Standard NVGEMM test config. Always disables ATen fallback."""
     cfg = {
@@ -776,6 +790,95 @@ class TestNVUniversalGemm(TestCase):
 class TestNVUniversalGemmHeuristics(TestCase):
     """Unit tests for NVUniversalGemmHeuristics without requiring actual libraries."""
 
+    def test_dense_reduction_capabilities(self):
+        import dataclasses
+
+        from torch._inductor.codegen.nv_universal_gemm.epilogue_capabilities import (
+            DENSE_GEMM_REDUCTION_CAPABILITIES,
+        )
+        from torch._inductor.kernel.gemm_epilogue import GemmReductionPlan
+
+        capabilities = DENSE_GEMM_REDUCTION_CAPABILITIES
+        self.assertTrue(capabilities.supports("variance_affine:1.0:0.0", "square"))
+        self.assertFalse(capabilities.supports("variance_affine:1.0", "square"))
+        self.assertTrue(capabilities.supports("max", "abs_scale"))
+        self.assertFalse(capabilities.supports("normalize_sum_affine", "identity"))
+        self.assertTrue(
+            capabilities.supports(
+                "normalize_sum_affine:1:0:1:0", "identity", feeds_main=True
+            )
+        )
+        self.assertFalse(
+            capabilities.supports(
+                "normalize_sum_affine:1:2:3", "identity", feeds_main=True
+            )
+        )
+        self.assertFalse(capabilities.supports("sum", "unsupported"))
+        self.assertFalse(capabilities.supports("unsupported", "identity"))
+
+        from torch._inductor.codegen.nv_universal_gemm import GemmVariant
+
+        plan = GemmReductionPlan(
+            reduction_output=None,
+            group=4,
+            axis=1,
+            reduction_type="sum",
+            source_type="identity",
+            primary_output="out",
+        )
+        self.assertTrue(GemmVariant.GEMM.supports_reduction(plan))
+        wide_consumer = dataclasses.replace(
+            plan,
+            group=64,
+            feeds_main=True,
+            feed_output="feed",
+            consumer_fn="generated_consumer",
+        )
+        self.assertFalse(GemmVariant.GEMM.supports_reduction(wide_consumer))
+        self.assertTrue(GemmVariant.SCALED_GEMM.supports_reduction(wide_consumer))
+        unsupported = dataclasses.replace(plan, reduction_type="unsupported")
+        self.assertFalse(GemmVariant.GEMM.supports_reduction(unsupported))
+        self.assertTrue(GemmVariant.SCALED_GEMM.supports_reduction(plan))
+        direct_bool = dataclasses.replace(plan, reduction_type="direct_bool_gt_zero")
+        self.assertFalse(GemmVariant.SCALED_GEMM.supports_reduction(direct_bool))
+        logsumexp = dataclasses.replace(plan, reduction_type="logsumexp")
+        self.assertFalse(GemmVariant.SCALED_GEMM.supports_reduction(logsumexp))
+        variance = dataclasses.replace(plan, reduction_type="variance_affine:1:0")
+        self.assertFalse(GemmVariant.SCALED_GEMM.supports_reduction(variance))
+        online_softmax = dataclasses.replace(plan, reduction_type="online_softmax")
+        self.assertFalse(GemmVariant.SCALED_GEMM.supports_reduction(online_softmax))
+        self.assertFalse(
+            GemmVariant.SCALED_GEMM.supports_reduction(
+                dataclasses.replace(online_softmax, feeds_main=True)
+            )
+        )
+        secondary = dataclasses.replace(plan, secondary_feed_output="secondary")
+        self.assertFalse(GemmVariant.GEMM.supports_reduction(secondary))
+        self.assertFalse(GemmVariant.SCALED_GEMM.supports_reduction(secondary))
+        direct_secondary = dataclasses.replace(
+            secondary, secondary_feed_type="direct_bool_gt_zero"
+        )
+        self.assertTrue(GemmVariant.GEMM.supports_reduction(direct_secondary))
+        custom_secondary = dataclasses.replace(
+            secondary, secondary_consumer_fn="generated_consumer"
+        )
+        self.assertTrue(GemmVariant.GEMM.supports_reduction(custom_secondary))
+        self.assertFalse(GemmVariant.SCALED_GEMM.supports_reduction(custom_secondary))
+        normalized_secondary = dataclasses.replace(
+            secondary,
+            axis=0,
+            feeds_main=True,
+            secondary_feed_type="normalize_sum_affine:1:0:1:0",
+        )
+        self.assertTrue(GemmVariant.GEMM.supports_reduction(normalized_secondary))
+        self.assertFalse(
+            GemmVariant.GEMM.supports_reduction(
+                dataclasses.replace(normalized_secondary, axis=1)
+            )
+        )
+        self.assertFalse(GemmVariant.SCALED_GEMM.supports_reduction(unsupported))
+        self.assertFalse(GemmVariant.GROUPED_GEMM.supports_reduction(plan))
+
     def test_grouped_reduction_conversion_contract(self):
         from torch._inductor.kernel.loop_ir_epilogue_lowering import (
             GemmEpilogueIRExpression as Expr,
@@ -815,7 +918,13 @@ class TestNVUniversalGemmHeuristics(TestCase):
 
         self.assertEqual(
             analysis.grouped_reduction("out", "gemm", 4, 1, torch.float32),
-            GemmReductionConfig("out", 4, 1, "sum", "identity"),
+            GemmReductionConfig(
+                output_name="out",
+                group=4,
+                axis=1,
+                reduction_type="sum",
+                source_type="identity",
+            ),
         )
 
     def test_grouped_reduction_rejects_ambiguous_composite(self):
@@ -844,6 +953,170 @@ class TestNVUniversalGemmHeuristics(TestCase):
         expression = GemmEpilogueIRExpression("reshape", ("value", ()))
         self.assertEqual(expression.args, ("value", ()))
         self.assertEqual(expression.kwargs, ())
+
+    def test_local_reduce_cache_specialization(self):
+        import dataclasses
+
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
+            _local_reduce_specialization,
+        )
+        from torch._inductor.kernel.gemm_epilogue import (
+            GemmReductionArguments,
+            GemmReductionPlan,
+        )
+
+        argument_fields = {
+            field.name for field in dataclasses.fields(GemmReductionArguments)
+        }
+        classified_fields = set(GemmReductionArguments.TENSOR_FIELDS) | set(
+            GemmReductionArguments.SPECIALIZATION_FIELDS
+        )
+        self.assertEqual(argument_fields, classified_fields)
+        plan_fields = {field.name for field in dataclasses.fields(GemmReductionPlan)}
+        self.assertTrue(
+            set(GemmReductionArguments.SPECIALIZATION_FIELDS).issubset(plan_fields)
+        )
+
+        base = GemmReductionArguments(group=4, reduction_type="mean")
+        mapped = dataclasses.replace(
+            base, output="output", secondary_feed_output="secondary"
+        ).map_tensors(str.upper)
+        self.assertEqual(mapped.output, "OUTPUT")
+        self.assertIsNone(mapped.feed_output)
+        self.assertEqual(mapped.secondary_feed_output, "SECONDARY")
+        self.assertEqual(mapped.group, base.group)
+
+        plan = GemmReductionPlan(
+            reduction_output=None,
+            group=8,
+            axis=0,
+            reduction_type="max",
+            source_type="abs",
+            primary_output="out",
+            feeds_main=True,
+        )
+        from_plan = GemmReductionArguments.from_plan(plan, output="output")
+        self.assertEqual(from_plan.output, "output")
+        self.assertEqual(from_plan.group, plan.group)
+        self.assertEqual(from_plan.reduction_type, plan.reduction_type)
+
+        specialization = _local_reduce_specialization({"local_reduce": base})
+        for field, value in (
+            ("group", 8),
+            ("axis", 0),
+            ("feeds_main", True),
+            ("secondary_feed_type", "direct_bool_gt_zero"),
+        ):
+            variant = dataclasses.replace(base, **{field: value})
+            self.assertNotEqual(
+                specialization,
+                _local_reduce_specialization({"local_reduce": variant}),
+            )
+
+        tensor = torch.empty((4, 8))
+        tensor_specialization = _local_reduce_specialization(
+            {"local_reduce": dataclasses.replace(base, output=tensor)}
+        )
+        self.assertNotEqual(
+            tensor_specialization,
+            _local_reduce_specialization({"local_reduce": base}),
+        )
+        self.assertNotEqual(
+            tensor_specialization,
+            _local_reduce_specialization(
+                {"local_reduce": dataclasses.replace(base, output=torch.empty((8, 4)))}
+            ),
+        )
+        self.assertNotEqual(
+            tensor_specialization,
+            _local_reduce_specialization(
+                {"local_reduce": dataclasses.replace(base, feed_output=tensor)}
+            ),
+        )
+
+    def test_reduction_compile_config_preserves_callback_group(self):
+        from torch._inductor.kernel import gemm_epilogue_codegen
+
+        reduction = mock.Mock(
+            reduce_op="reduce",
+            init_val="init",
+            combine="combine",
+            source="source",
+            finalize="finalize",
+        )
+        args = mock.Mock(
+            group=4,
+            axis=1,
+            reduction_type="sum",
+            source_type="identity",
+            feeds_main=True,
+            secondary_feed_type="direct_bool_gt_zero",
+        )
+        config = gemm_epilogue_codegen.GemmReductionCompileConfig(
+            args=args,
+            reduction=reduction,
+            consumer="consumer",
+            secondary_consumer="secondary_consumer",
+        )
+
+        self.assertIs(config.args, args)
+        common = (4, 1, "sum", "identity", True)
+        primary = ("reduce", "init", "combine", "source", "finalize", "consumer")
+        self.assertEqual(
+            config.constexprs(),
+            (*common, "direct_bool_gt_zero", *primary, "secondary_consumer"),
+        )
+
+    def test_local_reduce_plan_deduplicates_outputs(self):
+        from torch._inductor.kernel.gemm_epilogue import (
+            GemmReductionDescriptor,
+            GemmReductionPlan,
+        )
+
+        plan = GemmReductionPlan(
+            reduction_output="aux",
+            group=4,
+            axis=1,
+            reduction_type="sum",
+            source_type="identity",
+            primary_output="output",
+            feed_output="aux",
+            secondary_feed_output="output",
+        )
+        self.assertEqual(plan.auxiliary_outputs, ("aux",))
+        expression = GemmReductionDescriptor.parse("mean_linear:1:2:3")
+        self.assertEqual(expression.serialize(), "mean_linear:1:2:3")
+        expression = GemmReductionDescriptor.parse("custom_reduction:1:2")
+        self.assertEqual(expression.serialize(), "custom_reduction:1:2")
+        self.assertFalse(expression.has_valid_parameters)
+
+    def test_reduction_pattern_near_misses(self):
+        from torch._inductor.kernel.loop_ir_epilogue_lowering import (
+            GemmEpilogueIRExpression as Expr,
+            GemmEpilogueIRStore,
+            is_absmax_normalize_ir,
+            is_logsumexp_ir,
+            is_softmax_ir,
+        )
+
+        load = Expr("load", ("gemm", 0, None))
+        scale = Expr("load", ("scale", 0, None))
+        one = Expr("constant", (1.0, torch.float32))
+        near_softmax = Expr("truediv", (Expr("exp", (load,)), Expr("add", (load, one))))
+        near_absmax = Expr(
+            "mul", (load, Expr("reciprocal", (Expr("add", (scale, one)),)))
+        )
+        near_logsumexp = Expr(
+            "add", (Expr("log", (Expr("exp", (load,)),)), Expr("maximum", (load, one)))
+        )
+
+        self.assertFalse(is_softmax_ir(GemmEpilogueIRStore(0, near_softmax), "gemm", 4))
+        self.assertFalse(
+            is_absmax_normalize_ir(GemmEpilogueIRStore(0, near_absmax), "gemm", "scale")
+        )
+        self.assertFalse(
+            is_logsumexp_ir(GemmEpilogueIRStore(0, near_logsumexp), "gemm", 4)
+        )
 
     def _create_mock_kernel(self, tile_m, tile_n, tile_k, cluster_m, cluster_n):
         """Create a mock kernel with the given tile/cluster configuration."""
@@ -1125,6 +1398,8 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
             return torch.relu(result), result + 1.0
 
         result, code, epilogue_fused = self._compile_and_check(fn, a, b)
+        self.assertIn("EpilogueArguments", code)
+        self.assertNotIn("CuTeDSLEpilogueArguments", code)
         self.assertEqual(result, fn(a, b), atol=1e-2, rtol=1e-2)
         self.assertTrue(epilogue_fused)
         self.assertIn("out_ptr1", code)
@@ -1207,6 +1482,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         result, code, epilogue_fused = self._compile_and_check(
             fn, a, b, scale_a, scale_b
         )
+        self.assertIn("CuTeDSLEpilogueArguments", code)
         torch.testing.assert_close(result, fn(a, b, scale_a, scale_b), equal_nan=True)
         self.assertTrue(
             epilogue_fused, f"{operation} was NOT fused into scaled epilogue"
@@ -1261,6 +1537,32 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         self.assertTrue(epilogue_fused)
         self.assertIn("out_ptr1", code)
         self.assertIn("out_ptr2", code)
+
+    def test_scaled_mm_large_epilogue_fusion(self):
+        m, n, k = self.M, self.N, self.K
+        a, b, scale_a, scale_b = _make_nvfp4_scaled_mm_inputs(m, n, k)
+        biases = tuple(
+            torch.randn(n, device="cuda", dtype=torch.bfloat16) for _ in range(5)
+        )
+
+        def fn(a, b, scale_a, scale_b, *biases):
+            result = torch._scaled_mm(
+                a,
+                b,
+                scale_a=scale_a,
+                scale_b=scale_b,
+                out_dtype=torch.bfloat16,
+            )
+            values = tuple(result + bias for bias in biases)
+            return result, *values
+
+        result, code, epilogue_fused = self._compile_and_check(
+            fn, a, b, scale_a, scale_b, *biases
+        )
+        self.assertEqual(result, fn(a, b, scale_a, scale_b, *biases))
+        self.assertTrue(epilogue_fused)
+        for index in range(1, 6):
+            self.assertIn(f"out_ptr{index}", code)
 
     @parametrize(
         "case",
