@@ -2055,6 +2055,119 @@ class TestTensorCreation(TestCase):
 
     # TODO: this test should be updated
     @suppress_warnings
+    def test_new_tensor(self, device):
+        expected = torch.autograd.Variable(torch.ByteTensor([1, 1]))
+        # test data
+        res1 = expected.new_tensor([1, 1])
+        self.assertEqual(res1, expected)
+        res1 = expected.new_tensor([1, 1], dtype=torch.int)
+        self.assertEqual(res1, expected, exact_dtype=False)
+        self.assertIs(torch.int, res1.dtype)
+
+        # test copy
+        res2 = expected.new_tensor(expected)
+        self.assertEqual(res2, expected)
+        res2[1] = 2
+        self.assertEqual(expected, torch.ones_like(expected))
+        res2 = expected.new_tensor(expected, dtype=torch.int)
+        self.assertEqual(res2, expected, exact_dtype=False)
+        self.assertIs(torch.int, res2.dtype)
+
+        # test copy with numpy
+        a = np.array([5.])
+        res1 = torch.tensor(a)
+        res1 = res1.new_tensor(a)
+        self.assertEqual(5., res1[0].item())
+        a[0] = 7.
+        self.assertEqual(5., res1[0].item())
+
+        if torch.accelerator.device_count() >= 2:
+            backend = torch.accelerator.current_accelerator().type
+            expected = expected.to(f"{backend}:{1}")
+            res1 = expected.new_tensor([1, 1])
+            self.assertEqual(res1.get_device(), expected.get_device())
+            res1 = expected.new_tensor([1, 1], dtype=torch.int)
+            self.assertIs(torch.int, res1.dtype)
+            self.assertEqual(res1.get_device(), expected.get_device())
+
+            res2 = expected.new_tensor(expected)
+            self.assertEqual(res2.get_device(), expected.get_device())
+            res2 = expected.new_tensor(expected, dtype=torch.int)
+            self.assertIs(torch.int, res1.dtype)
+            self.assertEqual(res2.get_device(), expected.get_device())
+            res2 = expected.new_tensor(expected, dtype=torch.int, device=0)
+            self.assertIs(torch.int, res1.dtype)
+            self.assertEqual(res2.get_device(), 0)
+
+            res1 = expected.new_tensor(1)
+            self.assertEqual(res1.get_device(), expected.get_device())
+            res1 = expected.new_tensor(1, dtype=torch.int)
+            self.assertIs(torch.int, res1.dtype)
+            self.assertEqual(res1.get_device(), expected.get_device())
+
+    # TODO: this test should be updated
+    def test_as_tensor(self, device):
+        # from python data
+        x = [[0, 1], [2, 3]]
+        self.assertEqual(torch.tensor(x), torch.as_tensor(x))
+        self.assertEqual(torch.tensor(x, dtype=torch.float32), torch.as_tensor(x, dtype=torch.float32))
+
+        # python data with heterogeneous types
+        z = [0, 'torch']
+        with self.assertRaisesRegex(TypeError, "invalid data type"):
+            torch.tensor(z)
+            torch.as_tensor(z)
+
+        # python data with self-referential lists
+        z = [0]
+        z += [z]
+        with self.assertRaisesRegex(TypeError, "self-referential lists are incompatible"):
+            torch.tensor(z)
+            torch.as_tensor(z)
+
+        z = [[1, 2], z]
+        with self.assertRaisesRegex(TypeError, "self-referential lists are incompatible"):
+            torch.tensor(z)
+            torch.as_tensor(z)
+
+        # from tensor (doesn't copy unless type is different)
+        y = torch.tensor(x)
+        self.assertIs(y, torch.as_tensor(y))
+        self.assertIsNot(y, torch.as_tensor(y, dtype=torch.float32))
+
+        if torch.accelerator.is_available():
+            backend = torch.accelerator.current_accelerator().type
+            self.assertIsNot(y, torch.as_tensor(y, device=backend))
+            y_cuda = y.to(backend)
+            self.assertIs(y_cuda, torch.as_tensor(y_cuda))
+            self.assertIs(y_cuda, torch.as_tensor(y_cuda, device=backend))
+
+        # doesn't copy
+        for dtype in [np.float64, np.int64, np.int8, np.uint8]:
+            n = np.random.rand(5, 6).astype(dtype)
+            n_astensor = torch.as_tensor(n)
+            self.assertEqual(torch.tensor(n), n_astensor)
+            n_astensor[0][0] = 25.7
+            self.assertEqual(torch.tensor(n), n_astensor)
+
+        # changing dtype causes copy
+        n = np.random.rand(5, 6).astype(np.float32)
+        n_astensor = torch.as_tensor(n, dtype=torch.float64)
+        self.assertEqual(torch.tensor(n, dtype=torch.float64), n_astensor)
+        n_astensor[0][1] = 250.8
+        self.assertNotEqual(torch.tensor(n, dtype=torch.float64), n_astensor)
+
+        # changing device causes copy
+        if torch.accelerator.is_available():
+            backend = torch.accelerator.current_accelerator().type
+            n = np.random.randn(5, 6)
+            n_astensor = torch.as_tensor(n, device=backend)
+            self.assertEqual(torch.tensor(n, device=backend), n_astensor)
+            n_astensor[0][2] = 250.9
+            self.assertNotEqual(torch.tensor(n, device=backend), n_astensor)
+
+    # TODO: this test should be updated
+    @suppress_warnings
     @dtypesIfCPU(torch.float, torch.bfloat16, torch.float16)
     @dtypes(torch.float)
     def test_range(self, device, dtype):
@@ -2991,15 +3104,16 @@ class TestTensorCreationCpuOnly(TestCase):
             self.assertIs(torch.float32, torch.get_default_dtype())
             self.assertIs(torch.FloatStorage, torch.Storage)
 
-        if torch.cuda.is_available():
-            with set_default_tensor_type(torch.cuda.FloatTensor):
+        if torch.accelerator.is_available():
+            backend = torch.accelerator.current_accelerator().type
+            with set_default_tensor_type(getattr(torch, backend).FloatTensor):
                 self.assertIs(torch.float32, torch.get_default_dtype())
-                self.assertIs(torch.float32, torch.cuda.FloatTensor.dtype)
-                self.assertIs(torch.cuda.FloatStorage, torch.Storage)
+                self.assertIs(torch.float32, getattr(torch, backend).FloatTensor.dtype)
+                self.assertIs(getattr(torch, backend).FloatStorage, torch.Storage)
 
                 with set_default_dtype(torch.float64):
                     self.assertIs(torch.float64, torch.get_default_dtype())
-                    self.assertIs(torch.cuda.DoubleStorage, torch.Storage)
+                    self.assertIs(getattr(torch, backend).DoubleStorage, torch.Storage)
 
         # don't allow passing dtype to set_default_tensor_type
         self.assertRaises(TypeError, lambda: torch.set_default_tensor_type(torch.float32))
@@ -3039,23 +3153,24 @@ class TestTensorCreationCpuOnly(TestCase):
         self.assertRaises(RuntimeError, lambda: x.new(torch.Size([2, 3, 4]), device='cuda'))
         self.assertRaises(RuntimeError, lambda: x.new((2.0, 3.0), device='cuda'))
 
-        if torch.cuda.is_available():
-            self.assertRaises(RuntimeError, lambda: torch.cuda.FloatTensor(device='cpu'))
-            self.assertRaises(RuntimeError, lambda: torch.cuda.FloatTensor(torch.Size([2, 3, 4]), device='cpu'))
-            self.assertRaises(RuntimeError, lambda: torch.cuda.FloatTensor((2.0, 3.0), device='cpu'))
+        if torch.accelerator.is_available():
+            backend = torch.accelerator.current_accelerator().type
+            self.assertRaises(RuntimeError, lambda: getattr(torch, backend).FloatTensor(device='cpu'))
+            self.assertRaises(RuntimeError, lambda: getattr(torch, backend).FloatTensor(torch.Size([2, 3, 4]), device='cpu'))
+            self.assertRaises(RuntimeError, lambda: getattr(torch, backend).FloatTensor((2.0, 3.0), device='cpu'))
 
             # Tensor constructor/new with Tensor argument shouldn't work with device specified
-            i = torch.tensor([1], device='cuda')
-            self.assertRaises(RuntimeError, lambda: torch.Tensor(i, device='cuda'))
-            self.assertRaises(RuntimeError, lambda: i.new(i, device='cuda'))
+            i = torch.tensor([1], device=backend)
+            self.assertRaises(RuntimeError, lambda: torch.Tensor(i, device=backend))
+            self.assertRaises(RuntimeError, lambda: i.new(i, device=backend))
             self.assertRaises(RuntimeError, lambda: torch.Tensor(i, device='cpu'))
             self.assertRaises(RuntimeError, lambda: i.new(i, device='cpu'))
 
-            with set_default_tensor_type(torch.cuda.FloatTensor):
+            with set_default_tensor_type(getattr(torch, backend).FloatTensor):
                 self.assertRaises(RuntimeError, lambda: torch.Tensor(device='cpu'))
                 self.assertRaises(RuntimeError, lambda: torch.Tensor(torch.Size([2, 3, 4]), device='cpu'))
                 self.assertRaises(RuntimeError, lambda: torch.Tensor((2.0, 3.0), device='cpu'))
-            x = torch.randn((3,), device='cuda')
+            x = torch.randn((3,), device=backend)
             self.assertRaises(RuntimeError, lambda: x.new(device='cpu'))
             self.assertRaises(RuntimeError, lambda: x.new(torch.Size([2, 3, 4]), device='cpu'))
             self.assertRaises(RuntimeError, lambda: x.new((2.0, 3.0), device='cpu'))
@@ -3178,115 +3293,6 @@ class TestTensorCreationCpuOnly(TestCase):
         for dtype in [torch.float64, torch.float32]:
             with set_default_dtype(dtype):
                 test_inference(dtype)
-
-    # TODO: this test should be updated
-    @suppress_warnings
-    def test_new_tensor(self, device):
-        expected = torch.autograd.Variable(torch.ByteTensor([1, 1]))
-        # test data
-        res1 = expected.new_tensor([1, 1])
-        self.assertEqual(res1, expected)
-        res1 = expected.new_tensor([1, 1], dtype=torch.int)
-        self.assertEqual(res1, expected, exact_dtype=False)
-        self.assertIs(torch.int, res1.dtype)
-
-        # test copy
-        res2 = expected.new_tensor(expected)
-        self.assertEqual(res2, expected)
-        res2[1] = 2
-        self.assertEqual(expected, torch.ones_like(expected))
-        res2 = expected.new_tensor(expected, dtype=torch.int)
-        self.assertEqual(res2, expected, exact_dtype=False)
-        self.assertIs(torch.int, res2.dtype)
-
-        # test copy with numpy
-        a = np.array([5.])
-        res1 = torch.tensor(a)
-        res1 = res1.new_tensor(a)
-        self.assertEqual(5., res1[0].item())
-        a[0] = 7.
-        self.assertEqual(5., res1[0].item())
-
-        if torch.cuda.device_count() >= 2:
-            expected = expected.cuda(1)
-            res1 = expected.new_tensor([1, 1])
-            self.assertEqual(res1.get_device(), expected.get_device())
-            res1 = expected.new_tensor([1, 1], dtype=torch.int)
-            self.assertIs(torch.int, res1.dtype)
-            self.assertEqual(res1.get_device(), expected.get_device())
-
-            res2 = expected.new_tensor(expected)
-            self.assertEqual(res2.get_device(), expected.get_device())
-            res2 = expected.new_tensor(expected, dtype=torch.int)
-            self.assertIs(torch.int, res1.dtype)
-            self.assertEqual(res2.get_device(), expected.get_device())
-            res2 = expected.new_tensor(expected, dtype=torch.int, device=0)
-            self.assertIs(torch.int, res1.dtype)
-            self.assertEqual(res2.get_device(), 0)
-
-            res1 = expected.new_tensor(1)
-            self.assertEqual(res1.get_device(), expected.get_device())
-            res1 = expected.new_tensor(1, dtype=torch.int)
-            self.assertIs(torch.int, res1.dtype)
-            self.assertEqual(res1.get_device(), expected.get_device())
-
-    # TODO: this test should be updated
-    def test_as_tensor(self, device):
-        # from python data
-        x = [[0, 1], [2, 3]]
-        self.assertEqual(torch.tensor(x), torch.as_tensor(x))
-        self.assertEqual(torch.tensor(x, dtype=torch.float32), torch.as_tensor(x, dtype=torch.float32))
-
-        # python data with heterogeneous types
-        z = [0, 'torch']
-        with self.assertRaisesRegex(TypeError, "invalid data type"):
-            torch.tensor(z)
-            torch.as_tensor(z)
-
-        # python data with self-referential lists
-        z = [0]
-        z += [z]
-        with self.assertRaisesRegex(TypeError, "self-referential lists are incompatible"):
-            torch.tensor(z)
-            torch.as_tensor(z)
-
-        z = [[1, 2], z]
-        with self.assertRaisesRegex(TypeError, "self-referential lists are incompatible"):
-            torch.tensor(z)
-            torch.as_tensor(z)
-
-        # from tensor (doesn't copy unless type is different)
-        y = torch.tensor(x)
-        self.assertIs(y, torch.as_tensor(y))
-        self.assertIsNot(y, torch.as_tensor(y, dtype=torch.float32))
-        if torch.cuda.is_available():
-            self.assertIsNot(y, torch.as_tensor(y, device='cuda'))
-            y_cuda = y.to('cuda')
-            self.assertIs(y_cuda, torch.as_tensor(y_cuda))
-            self.assertIs(y_cuda, torch.as_tensor(y_cuda, device='cuda'))
-
-        # doesn't copy
-        for dtype in [np.float64, np.int64, np.int8, np.uint8]:
-            n = np.random.rand(5, 6).astype(dtype)
-            n_astensor = torch.as_tensor(n)
-            self.assertEqual(torch.tensor(n), n_astensor)
-            n_astensor[0][0] = 25.7
-            self.assertEqual(torch.tensor(n), n_astensor)
-
-        # changing dtype causes copy
-        n = np.random.rand(5, 6).astype(np.float32)
-        n_astensor = torch.as_tensor(n, dtype=torch.float64)
-        self.assertEqual(torch.tensor(n, dtype=torch.float64), n_astensor)
-        n_astensor[0][1] = 250.8
-        self.assertNotEqual(torch.tensor(n, dtype=torch.float64), n_astensor)
-
-        # changing device causes copy
-        if torch.cuda.is_available():
-            n = np.random.randn(5, 6)
-            n_astensor = torch.as_tensor(n, device='cuda')
-            self.assertEqual(torch.tensor(n, device='cuda'), n_astensor)
-            n_astensor[0][2] = 250.9
-            self.assertNotEqual(torch.tensor(n, device='cuda'), n_astensor)
 
     # TODO: this test should be updated
     def test_arange_inference(self, device):
