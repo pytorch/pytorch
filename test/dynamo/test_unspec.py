@@ -2,7 +2,10 @@
 import contextlib
 import math
 import random
+import time
 import unittest
+import warnings
+from unittest import mock
 
 import numpy as np
 
@@ -175,6 +178,54 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
             res.append(fn(torch.ones(2)))
         for i in range(1, 5):
             self.assertFalse(same(res[i - 1], res[i]))
+
+    def test_time_time_unused_no_warning(self):
+        def fn():
+            time.time()
+
+        opt_fn = torch.compile(fn, backend="eager")
+        with warnings.catch_warnings(record=True) as caught_warnings:
+            warnings.simplefilter("always")
+            self.assertIsNone(opt_fn())
+
+        self.assertFalse(
+            any("time.time" in str(warning.message) for warning in caught_warnings)
+        )
+
+    def test_time_time_preserves_call_order(self):
+        def backend(gm, _):
+            def run(*args):
+                time.sleep(0.05)
+                return gm(*args)
+
+            return run
+
+        def fn(x):
+            before = time.time()
+            y = x + 1
+            after = time.time()
+            return y, before, after
+
+        opt_fn = torch.compile(fn, backend=backend)
+        x = torch.zeros(())
+
+        opt_fn(x)
+        result, before, after = opt_fn(x)
+
+        self.assertEqual(result, x + 1)
+        self.assertGreaterEqual(after - before, 0.04)
+
+    def test_time_time_does_not_bypass_disable(self):
+        @torch.compiler.disable
+        def disabled_time():
+            return 0.0
+
+        with mock.patch.object(time, "time", disabled_time):
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported,
+                "Skip calling `torch.compiler.disable\\(\\)`d function",
+            ):
+                torch.compile(lambda: time.time(), backend="eager", fullgraph=True)()
 
     def test_random_call_with_while_loop(self):
         def fn(x):
