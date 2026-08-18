@@ -2008,15 +2008,41 @@ def precompile_load(
     store = _SingleFileStore()
     cache_entry = store.load_cache_entry(path)
     _check_artifact_matches(cache_entry.dynamo, entry_fn, path)
-    package, backends = (
-        CompilePackage(
-            entry_fn,
-            cache_entry.dynamo,
-            serialization_guard_filter_fn=(
-                default_guard_filter_fn if guard_filter_fn is None else guard_filter_fn
-            ),
+    return serve_cache_entry(
+        fn,
+        cache_entry,
+        backend=backend,
+        guard_filter_fn=guard_filter_fn,
+        recompile_limit=recompile_limit,
+        dynamic=dynamic,
+    )
+
+
+def serve_cache_entry(
+    fn: Callable[..., object],
+    cache_entry: PrecompileCacheEntry,
+    *,
+    backend: str = "inductor",
+    guard_filter_fn: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]]
+    | None = None,
+    recompile_limit: int = 256,
+    dynamic: bool | None = None,
+) -> PrecompiledCallable:
+    """Wire an already-loaded cache entry onto ``fn`` and install it.
+
+    Shared by ``precompile_load``, which reads the entry from a path, and by the
+    multi-graph artifact whose driver carries the same entry inline: the wiring
+    is order-sensitive (the package has to be attached to the optimize context
+    before its globals and guarded codes are installed), so it lives in one
+    place rather than being written twice.
+    """
+    entry_fn = _entry_fn_of(fn)
+    package = CompilePackage(
+        entry_fn,
+        cache_entry.dynamo,
+        serialization_guard_filter_fn=(
+            default_guard_filter_fn if guard_filter_fn is None else guard_filter_fn
         ),
-        cache_entry.backends,
     )
     optimize_ctx = torch._dynamo.optimize(
         _PrecompileBackend(backend),
@@ -2029,7 +2055,7 @@ def precompile_load(
     isolate_recompiles_id = getattr(optimize_ctx, "_isolate_recompiles_id", None)
     if not isinstance(isolate_recompiles_id, int):
         raise AssertionError("missing isolate_recompiles_id")
-    package.install(backends, isolate_recompiles_id=isolate_recompiles_id)
+    package.install(cache_entry.backends, isolate_recompiles_id=isolate_recompiles_id)
     return PrecompiledCallable(compiled, package, isolate_recompiles_id)
 
 

@@ -103,6 +103,15 @@ def _precompile_unreachable_helper_caller(x):
     return _precompile_unreachable_helper(x * 2)
 
 
+def _precompile_closure_entry_factory():
+    scale = 3.0
+
+    def entry(x):
+        return _precompile_unreachable_helper_caller(x) * scale
+
+    return entry
+
+
 def _precompile_call_model(model, x):
     return model(x)
 
@@ -2952,40 +2961,74 @@ class TestPrecompile(TestCase):
                 z = torch.randn(n)
                 self.assertEqual(loaded(model, fixed, z), model(fixed, z))
 
-    def test_multi_graph_unreachable_frame_warns_but_still_serves(self):
+    def test_multi_graph_unreachable_frame_is_served_by_installing(self):
         # A frame Dynamo compiled that is entered by an ORDINARY call -- an
-        # un-inlinable helper -- is reached only through the frame evaluator,
-        # which a source artifact does not use, so it runs eager when served.
-        # That is a coverage gap, not a wrong answer, so it warns and the
-        # artifact stays usable.
-        with self.assertLogs("torch._precompile", level="WARNING") as logs:
-            code, cache = torch.compiler.precompile(
-                _precompile_unreachable_helper_caller,
+        # un-inlinable helper -- is reached only through the frame evaluator. A
+        # source artifact does not use one, so such a capture is served by
+        # installing onto the live code objects instead, and the frame that a
+        # source artifact would have run eager is named in the header.
+        from torch._dynamo.utils import counters
+        from torch._precompile import _parse_artifact_metadata
+
+        code, cache = torch.compiler.precompile(
+            _precompile_unreachable_helper_caller,
+            backend="eager",
+            dynamic=False,
+            example_inputs=[(torch.randn(4),)],
+        )
+        meta = _parse_artifact_metadata(code)
+        self.assertEqual(meta["SERVING_MODE"], "installed")
+        self.assertIn(
+            _precompile_unreachable_helper.__name__,
+            meta["UNREACHABLE_WITHOUT_INSTALL"],
+        )
+
+        x = torch.randn(4)
+        torch._dynamo.reset()
+        loaded = torch.compiler.precompile.load(code, cache)
+        counters.clear()
+        with loaded, torch.no_grad():
+            self.assertEqual(loaded(x), _precompile_unreachable_helper_caller(x))
+            # Served, not recompiled: the whole point of installing.
+            self.assertEqual(counters["stats"]["unique_graphs"], 0)
+
+    def test_multi_graph_installed_entry_with_closure_is_refused(self):
+        # An installed artifact rebuilds the entry from its code object, and
+        # types.FunctionType cannot restore a closure, so the capture is refused
+        # where the closure is visible rather than on the serving machine.
+        with self.assertRaisesRegex(PrecompileError, "closes over"):
+            torch.compiler.precompile(
+                _precompile_closure_entry_factory(),
                 backend="eager",
                 dynamic=False,
                 example_inputs=[(torch.randn(4),)],
             )
-        self.assertTrue(any("run EAGER when served" in m for m in logs.output))
-        x = torch.randn(4)
+
+    def test_multi_graph_wrapper_only_capture_serves_by_installing(self):
+        # Capturing a bare nn.Module makes Dynamo compile the wrapper's INNER
+        # frame, which a source artifact cannot reach. Installed serving reaches
+        # it, so this is now a usable artifact -- called with the receiver in
+        # its original position, since the entry frame is ``forward``.
+        from torch._precompile import _parse_artifact_metadata
+
+        model = torch.nn.Linear(8, 4).eval()
+        x = torch.randn(3, 8)
+        with torch.no_grad():
+            expected = model(x)
+        code, cache = torch.compiler.precompile(
+            model, backend="eager", dynamic=False, example_inputs=[(x,)]
+        )
+        self.assertEqual(_parse_artifact_metadata(code)["SERVING_MODE"], "installed")
+
         torch._dynamo.reset()
         loaded = torch.compiler.precompile.load(code, cache)
-        with torch.no_grad():
-            self.assertEqual(loaded(x), _precompile_unreachable_helper_caller(x))
-
-    def test_multi_graph_wrapper_only_capture_is_refused(self):
-        # The entry frame producing NO guarded code is different: the artifact
-        # would run the whole call eager, which is not an artifact at all.
-        model = torch.nn.Linear(8, 4).eval()
-        session = torch.compiler.precompile.capture(
-            model,
-            backend="eager",
-            dynamic=False,
-            example_inputs=[(torch.randn(3, 8),)],
-        )
-        with session:
-            pass
-        with self.assertRaisesRegex(PrecompileError, "no dispatchable graph"):
-            session.artifact()
+        with loaded, torch.no_grad():
+            # The entry frame here is the wrapper, which captured no variant of
+            # its own; what the artifact serves is the inner frame behind it.
+            self.assertEqual(loaded(model, x), expected)
+            # Dropping the receiver is a plain TypeError, not a wrong answer.
+            with self.assertRaisesRegex(TypeError, "missing 1 required"):
+                loaded(x)
 
     def test_precompile_rejects_mixed_example_input_forms(self):
         x = torch.randn(3)
