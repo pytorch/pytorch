@@ -1040,7 +1040,13 @@ def export_python(
     it is a debug mode -- it doubles the work per call -- so turn it off in production,
     where the eager ``fn`` is the reference the artifact has already departed from for
     speed. It compares outputs *and* any input
-    the graph mutated in place. "Doubles the work" is the floor: the reference run needs a
+    the graph mutated in place, and it compares them at the working dtype's resolution:
+    it will catch an edit that changes the answer, but it is not a proof that the edit
+    computes the same function. Swapping an exact special function for an approximation
+    whose error is below the dtype's own noise passes, by construction. It also compares
+    values only, so it cannot see that the artifact's outputs carry no ``grad_fn``: a
+    capture is forward-only, and calling ``.backward()`` on an artifact's output fails
+    where the eager function would have worked. "Doubles the work" is the floor: the reference run needs a
     deep copy of every argument, so an ``nn.Module`` argument is copied -- weights and
     all -- on every checked call. ``COMPILER_EXPORT_PYTHON_CHECK_RTOL`` and ``..._ATOL``
     override the per-dtype tolerances; a ``fn`` that draws from the generator is skipped
@@ -1106,7 +1112,11 @@ def export_python(
     with no explicit argument takes, the matmul precision a GEMM template bakes as a
     constant, and whether deterministic algorithms were enabled when inductor chose
     between a deterministic and an atomic lowering (checked one-way -- capturing with
-    determinism on and calling with it off is safe, the reverse is not). What is *not*
+    determinism on and calling with it off is safe, the reverse is not), and, for an
+    artifact containing a C++ kernel, the CPU vector ISA it was generated against (the
+    vector width is baked into the loop strides while the ISA is re-picked at compile
+    time, so a narrower host would leave part of the output uninitialized with no error
+    at all -- this one refuses to run rather than warning). What is *not*
     guarded is a change in *how* two aliased
     inputs overlap: when capture and the call both pass intersecting views, the artifact
     runs with capture's relative offsets baked in and may compute the wrong thing.
@@ -1116,7 +1126,7 @@ def export_python(
     above). Where ``torch.compile`` would recompile, an artifact cannot, so treat any
     ambient change between capture and call as needing a fresh capture unless a stamp
     covers it. A hand-edit that drops a stamp turns that one check off with a warning.
-    All six stamps (these five plus the version stamp) must stay in the artifact's
+    All seven stamps (these six plus the version stamp) must stay in the artifact's
     leading comment block: the reader stops at the first non-comment line, so inserting code above them
     turns every check off -- loudly for the checked stamps, each of which warns per
     call while it is missing, and silently for the version warning, which just

@@ -5161,6 +5161,163 @@ class TestExportPython(TestCase):
             with torch.autocast(device_type, torch.bfloat16):
                 run(x, x)
 
+    def test_check_catches_an_edit_to_a_small_magnitude_output(self, device):
+        # A softmax over a wide row puts every output near 1/N. With a fixed absolute
+        # tolerance of 1e-3 for fp16 that is FOUR TIMES the size of a correct value, so
+        # the whole tensor sat inside atol and no edit to the kernel could ever fail.
+        if torch.device(device).type != "cuda":
+            self.skipTest("needs a triton kernel to edit")
+        path = self._tmp_path("small_mag.py")
+
+        def fn(x):
+            return torch.softmax(x * 0.125, dim=-1)
+
+        # Wide enough logits that the softmax has structure: outputs peak near 1.3e-3,
+        # which is still BELOW the old fp16 atol of 1e-3 plus its rtol term, so the edit
+        # below used to pass and now clears the scaled tolerance by ~3x.
+        x = make_tensor(
+            (512, 4096), device=device, dtype=torch.float16, low=-20, high=20
+        )
+        torch.compiler.export_python(path=path)(fn)(x)
+        with open(path, encoding="utf-8") as f:
+            good = f.read()
+        self.assertIn("0.125", good)
+        from torch.compiler._export_python import _CHECK_ENV
+
+        with mock.patch.dict(os.environ, {_CHECK_ENV: "1"}):
+            torch.compiler.export_python(path=path)(fn)(x)  # honest artifact passes
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(good.replace("0.125", "0.130"))
+            with self.assertRaisesRegex(PrecompileError, "does not match"):
+                torch.compiler.export_python(path=path)(fn)(x)
+
+    def test_check_names_an_unwritten_output_rather_than_calling_it_drift(self, device):
+        # An edit that leaves part of the output unwritten reads back whatever the
+        # allocator held, which surfaced as "max abs diff nan" on one run and
+        # "max abs diff 2.8e+38" on the next for the same edit. Neither reads as
+        # "your kernel did not write here".
+        path = self._tmp_path("unwritten.py")
+
+        def fn(x):
+            return x * 2.0
+
+        x = make_tensor((64,), device=device, dtype=torch.float32)
+        produced = torch.compiler.export_python(path=path)(fn)(x)
+        artifact = torch.compiler.export_python(path=path)(fn)
+        artifact(x)
+        from torch.compiler._export_python import _verify_against_eager
+
+        nonfinite = produced.clone()
+        nonfinite[0] = float("nan")
+        with self.assertRaisesRegex(PrecompileError, "where the result is finite"):
+            _verify_against_eager(
+                fn, (x,), (x,), nonfinite, path, torch.random.get_rng_state()
+            )
+
+    def test_check_does_not_report_a_relative_diff_of_1e308(self, device):
+        # The denominator was clamped to float64 tiny, so every exactly-zero reference
+        # element -- gelu and relu produce them constantly -- reported a ratio near
+        # 1e308 and swamped the statistic that tells a reader how bad the edit is.
+        path = self._tmp_path("reldiff.py")
+
+        def fn(x):
+            return torch.relu(x)
+
+        from torch.compiler._export_python import _verify_against_eager
+
+        x = make_tensor((256,), device=device, dtype=torch.float32, low=-1, high=1)
+        torch.compiler.export_python(path=path)(fn)(x)
+        wrong = torch.relu(x) + 1.0
+        with self.assertRaises(PrecompileError) as cm:
+            _verify_against_eager(
+                fn, (x,), (x,), wrong, path, torch.random.get_rng_state()
+            )
+        message = str(cm.exception)
+        self.assertIn("max rel diff", message)
+        for absurd in ("e+30", "e+29", "e+308"):
+            self.assertNotIn(absurd, message)
+
+    def test_cpu_vector_isa_is_stamped_and_refused_on_mismatch(self, device):
+        # Inductor bakes the capture host's vector width into a C++ loop's stride while
+        # the ISA is re-picked at compile time, so a narrower host leaves part of the
+        # output uninitialized -- no error, no warning, and no other stamp covers it.
+        if torch.device(device).type != "cpu":
+            self.skipTest("the stamp is about C++ kernels")
+        path = self._tmp_path("isa.py")
+
+        def fn(x, y):
+            return ((x * 2.0 + y).tanh() * x).sum(dim=0)
+
+        x = make_tensor((256, 256), device=device, dtype=torch.float32)
+        y = make_tensor((256, 256), device=device, dtype=torch.float32)
+        from torch.compiler._export_python import _CPU_ISA_TAG
+
+        expected = torch.compiler.export_python(path=path)(fn)(x, y)
+        with open(path, encoding="utf-8") as f:
+            source = f.read()
+        stamp = next(l for l in source.splitlines() if l.startswith(_CPU_ISA_TAG))
+        self.assertNotEqual(stamp, f"{_CPU_ISA_TAG}None")
+        self.assertEqual(torch.compiler.export_python(path=path)(fn)(x, y), expected)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(source.replace(stamp, f"{_CPU_ISA_TAG}'sse2'"))
+        with self.assertRaisesRegex(PrecompileError, "CPU vector ISA"):
+            torch.compiler.export_python(path=path)(fn)(x, y)
+
+    def test_a_cuda_only_artifact_records_no_cpu_isa(self, device):
+        # A CUDA artifact must not start refusing to run because it moved between two
+        # hosts whose CPUs differ in a way it never depended on.
+        if torch.device(device).type != "cuda":
+            self.skipTest("needs a graph with no C++ kernel")
+        path = self._tmp_path("cuda_isa.py")
+
+        def fn(x):
+            return (x * 2).relu()
+
+        x = make_tensor((1024,), device=device, dtype=torch.float32)
+        from torch.compiler._export_python import _CPU_ISA_TAG
+
+        torch.compiler.export_python(path=path)(fn)(x)
+        with open(path, encoding="utf-8") as f:
+            source = f.read()
+        self.assertIn(f"{_CPU_ISA_TAG}None", source)
+
+    def test_loading_an_artifact_leaves_its_directory_alone(self, device):
+        # The artifact is documented as self-contained and meant to be committed, but
+        # inductor's autotune cache wrote a <hash>.best_config next to it, keyed on the
+        # file's BASENAME -- so two unrelated artifacts both called artifact.py shared an
+        # entry and could pick up each other's launch config.
+        path = self._tmp_path("artifact.py")
+        directory = os.path.dirname(path)
+
+        def fn(x, w, b):
+            return torch.nn.functional.layer_norm(x, (x.shape[-1],), w, b)
+
+        x = make_tensor((256, 1024), device=device, dtype=torch.float32)
+        w = torch.ones(1024, device=device)
+        b = torch.zeros(1024, device=device)
+        torch.compiler.export_python(path=path)(fn)(x, w, b)
+        torch.compiler.export_python(path=path)(fn)(x, w, b)
+        self.assertEqual(sorted(os.listdir(directory)), ["artifact.py"])
+
+    def test_banner_tells_you_to_drop_the_stream_argument(self, device):
+        # The banner's migration recipe (KERNEL.run -> KERNEL[grid]) omitted the one
+        # thing that actually breaks: the line being replaced passes stream=raw_stream0,
+        # and triton rejects it. A cold agent copied it forward and got an AssertionError.
+        if torch.device(device).type != "cuda":
+            self.skipTest("the recipe is about triton launch sites")
+        path = self._tmp_path("banner.py")
+
+        def fn(x):
+            return (x * 2).relu()
+
+        x = make_tensor((1024,), device=device, dtype=torch.float32)
+        torch.compiler.export_python(path=path)(fn)(x)
+        with open(path, encoding="utf-8") as f:
+            source = f.read()
+        self.assertIn("stream=raw_stream0", source)
+        self.assertIn("delete the", source)
+        self.assertIn("stream=raw_stream0 argument", source)
+
 
 instantiate_device_type_tests(TestExportPython, globals())
 
