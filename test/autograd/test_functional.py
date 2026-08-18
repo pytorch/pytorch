@@ -10,6 +10,7 @@ from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import (
     gradcheck,
     gradgradcheck,
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -98,6 +99,8 @@ vectorized_logging_tensor = parametrize(
 
 
 class TestAutogradFunctional(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _assert_same_struct(self, res, base):
         # base and res should be Tensors or tuple of Tensors with the same size
         if isinstance(base, torch.Tensor):
@@ -649,17 +652,6 @@ class TestAutogradFunctional(TestCase):
         for inputs in test_cases:
             self._test_construct_standard_basis_for(inputs)
 
-    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
-    @base_and_logging_tensor
-    def test_construct_standard_basis_for_cuda(self, ctors):
-        test_cases = [
-            (ctors.randn(2), ctors.randn(3, device="cuda")),
-            (ctors.randn(3, device="cuda"), ctors.randn(2)),
-        ]
-
-        for inputs in test_cases:
-            self._test_construct_standard_basis_for(inputs)
-
     def _test_vectorize_raises_no_warnings(self, api, ctors):
         # vmap is an experimental prototype. When someone calls torch.vmap,
         # it raises a python warning. This test checks that
@@ -963,16 +955,6 @@ class TestAutogradFunctional(TestCase):
         x = ctors.randn([])
         y = ctors.randn(1)
         self._check_jacobian_vectorize_correctness(h, (x, y))
-
-    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
-    @base_and_logging_tensor
-    def test_jacobian_vectorize_correctness_different_devices(self, ctors):
-        def f(x, y):
-            return x * y, (x * y).cuda()
-
-        x = ctors.randn(3)
-        y = ctors.randn(3)
-        self._check_jacobian_vectorize_correctness(f, (x, y))
 
     @base_and_logging_tensor
     def test_jacobian_vectorize_correctness_different_dtype(self, ctors):
@@ -1740,7 +1722,48 @@ class TestAutogradFunctional(TestCase):
         self.assertEqual(vhp, torch.mm(v.unsqueeze(0), hes).squeeze(0))
 
 
+class TestAutogradFunctionalCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    def _test_construct_standard_basis_for(self, inputs):
+        numels = tuple(tensor.numel() for tensor in inputs)
+        results = autogradF._construct_standard_basis_for(inputs, numels)
+        for result, inp in zip(results, inputs):
+            self.assertEqual(result.dtype, inp.dtype)
+            self.assertEqual(result.device, inp.device)
+        results = torch.cat(
+            [result.to(device="cpu", dtype=torch.float) for result in results], dim=1
+        )
+        expected = torch.eye(results[0].shape[0], dtype=torch.float)
+        self.assertEqual(results, expected)
+
+    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
+    @base_and_logging_tensor
+    def test_construct_standard_basis_for_cuda(self, ctors):
+        test_cases = [
+            (ctors.randn(2), ctors.randn(3, device="cuda")),
+            (ctors.randn(3, device="cuda"), ctors.randn(2)),
+        ]
+
+        for inputs in test_cases:
+            self._test_construct_standard_basis_for(inputs)
+
+    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
+    @base_and_logging_tensor
+    def test_jacobian_vectorize_correctness_different_devices(self, ctors):
+        def f(x, y):
+            return x * y, (x * y).cuda()
+
+        x = ctors.randn(3)
+        y = ctors.randn(3)
+
+        expected = autogradF.jacobian(f, (x, y), vectorize=False)
+        result = autogradF.jacobian(f, (x, y), vectorize=True)
+        self.assertEqual(result, expected)
+
+
 instantiate_parametrized_tests(TestAutogradFunctional)
+instantiate_parametrized_tests(TestAutogradFunctionalCUDA)
 
 if __name__ == "__main__":
     run_tests()
