@@ -2413,9 +2413,7 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
                     value_node=reduced,
                     geometry=FlexGemmLocalReduceGeometry(8, 0),
                 ),
-                store=FlexGemmLocalReduceStore(
-                    node=reduced, aux_index=0, value_node=reduced
-                ),
+                store=FlexGemmLocalReduceStore(node=reduced, aux_index=0),
             ),
         )
         generated_plan = generated.reduction_plan
