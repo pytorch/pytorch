@@ -930,6 +930,13 @@ def _local_alltoall_base_(
                     output_section = output_tensor._local_tensors[rank_j][
                         output_offset:end_offset
                     ]
+                    if split_tensor.numel() != output_section.numel():
+                        raise ValueError(
+                            f"all_to_all_single: input split from rank {rank_i} to "
+                            f"rank {rank_j} has {split_tensor.numel()} elements, but "
+                            f"the corresponding output split has "
+                            f"{output_section.numel()} elements"
+                        )
                     if output_section.numel() > 0:
                         # Reshape split_tensor to match output_section if necessary
                         if split_tensor.size() != output_section.size():

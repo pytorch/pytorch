@@ -821,8 +821,8 @@ class DTensorTestBase(DTensorTestMixin, MultiProcessTestCase):
             raise RuntimeError(f"Backend {backend} not supported!")
 
         device_id = None
-        if "nccl" in backend or "xccl" in backend:
-            # set device for nccl pg for collectives
+        if requires_gpu:
+            # set device for accelerator pg for collectives (nccl/xccl/hccl)
             # TODO: if users want to enable testing across hosts, we may need
             # to change this part.
             torch.accelerator.set_device_index(self.rank)
@@ -1530,9 +1530,10 @@ def validate_sharding_rule_sample_backward(
         return None
 
     # DTensor backward
-    assert len(input_placements) == len(full_tensors), (  # noqa: S101
-        f"placement/tensor count mismatch: {len(input_placements)} vs {len(full_tensors)}"
-    )
+    if len(input_placements) != len(full_tensors):
+        raise AssertionError(
+            f"placement/tensor count mismatch: {len(input_placements)} vs {len(full_tensors)}"
+        )
     dt_tensors = [
         distribute_tensor(c, device_mesh, (p,))
         for c, p in zip(_clone_with_grad(full_tensors), input_placements, strict=True)

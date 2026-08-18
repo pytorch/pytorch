@@ -44,6 +44,7 @@ __all__ = [
     "set_stance",
     "set_enable_guard_collectives",
     "cudagraph_mark_step_begin",
+    "cudagraph_mark_warmup_incomplete",
     "load_compiled_function",
     "precompile",
     "PrecompileError",
@@ -250,7 +251,7 @@ def substitute_in_graph(
     can_constant_fold_through: bool = False,
     skip_signature_check: bool = False,
 ) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
-    """
+    r"""
     Register a polyfill handler for a function, usually a C function from the C extension, to be
     used in place of the original function when inlining the original function in the graph.
 
@@ -279,24 +280,23 @@ def substitute_in_graph(
 
     Example::
 
-        >>> import operator
-        >>> operator.indexOf([1, 2, 3, 4, 5], 3)
-        2
-        >>> torch.compile(operator.indexOf, fullgraph=True)([1, 2, 3, 4, 5], 3)
-        ... # xdoctest: +SKIP("Long tracebacks")
+        >>> import binascii
+        >>> binascii.b2a_base64(b"abc")
+        b'YWJj\n'
+        >>> torch.compile(
+        ...     binascii.b2a_base64, fullgraph=True
+        ... )(b"abc")  # xdoctest: +SKIP("Long tracebacks")
+        ...
         Traceback (most recent call last):
         ...
         torch._dynamo.exc.Unsupported: ...
+        >>> @torch.compiler.substitute_in_graph(binascii.b2a_base64)
+        ... def b2a_base64(data, /, *, newline=True):
+        ...     return b"YWJj\n"
+        ...
+        >>> torch.compile(binascii.b2a_base64, fullgraph=True)(b"abc")
+        b'YWJj\n'
 
-        >>> @torch.compiler.substitute_in_graph(operator.indexOf)
-        ... def indexOf(a, b, /):
-        ...     for i, item in enumerate(a):
-        ...         if item is b or item == b:
-        ...             return i
-        ...     raise ValueError("sequence.index(x): x not in sequence")
-        >>>
-        >>> torch.compile(operator.indexOf, fullgraph=True)([1, 2, 3, 4, 5], 3)
-        2
     """
     import torch._dynamo
 
@@ -526,6 +526,20 @@ def cudagraph_mark_step_begin():
     from torch._inductor import cudagraph_trees
 
     cudagraph_trees.mark_step_begin()
+
+
+def cudagraph_mark_warmup_incomplete():
+    """Request another warmup for the active CUDA Graph Trees function.
+
+    Call this synchronously from an autotuner or other code running during CUDA
+    Graph Trees warmup when the current function needs another warmup iteration.
+    The function will run eagerly again on its next invocation instead of being
+    recorded. This is a no-op outside CUDA Graph Trees warmup, including during
+    recording and replay or when CUDA Graph Trees are disabled.
+    """
+    from torch._inductor import cudagraph_trees
+
+    cudagraph_trees.mark_warmup_incomplete()
 
 
 def wrap_numpy(fn):
