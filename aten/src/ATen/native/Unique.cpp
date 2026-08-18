@@ -16,8 +16,6 @@
 #include <ATen/ops/_unique_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/equal.h>
-#include <ATen/ops/from_blob.h>
-#include <ATen/ops/index_select.h>
 #include <ATen/ops/narrow.h>
 #include <ATen/ops/stack.h>
 #include <ATen/ops/unbind.h>
@@ -418,11 +416,10 @@ std::tuple<Tensor, Tensor, Tensor> _unique_dim_cpu_template(
 
   Tensor input_sorted;
   if (!consecutive) {
-    const auto indices_tensor = at::from_blob(
-        indices.data(),
-        {static_cast<int64_t>(indices.size())},
-        at::kLong);
-    input_sorted = at::index_select(input_flat, 0, indices_tensor);
+    input_sorted = at::empty(input_flat.sizes(), input_flat.options());
+    for (const auto i : c10::irange(indices.size())) {
+      input_sorted[i] = input_flat[indices[i]];
+    }
   } else {
     input_sorted = std::move(input_flat);
   }

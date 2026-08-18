@@ -373,7 +373,9 @@ void pushProfilingCallbacksLegacy() {
             }
             bool record_cuda = state_ptr->config().state ==
                 torch::profiler::impl::ProfilerState::CUDA;
-            if (record_cuda && disable_cuda_profiling.contains(fn.name())) {
+            if (record_cuda &&
+                disable_cuda_profiling.find(fn.name()) !=
+                    disable_cuda_profiling.end()) {
               record_cuda = false;
             }
 
@@ -393,7 +395,9 @@ void pushProfilingCallbacksLegacy() {
             }
             bool record_cuda = state_ptr->config().state ==
                 torch::profiler::impl::ProfilerState::CUDA;
-            if (record_cuda && disable_cuda_profiling.contains(fn.name())) {
+            if (record_cuda &&
+                disable_cuda_profiling.find(fn.name()) !=
+                    disable_cuda_profiling.end()) {
               record_cuda = false;
             }
             state_ptr->popRange(fn, record_cuda);

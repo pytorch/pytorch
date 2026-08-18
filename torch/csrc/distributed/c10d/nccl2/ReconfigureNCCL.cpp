@@ -121,7 +121,6 @@ c10::intrusive_ptr<::c10d::Work> makeCompletedWork() {
 
 c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::reconfigure(
     const ::c10d::ReconfigureOptions& opts) {
-  std::lock_guard reconfigureLock(reconfigure_mutex_);
   TORCH_CHECK(
       init_state_ != InitializationState::FINALIZED,
       "ProcessGroupNCCL has been finalized");
@@ -141,13 +140,11 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::reconfigure(
 
   auto prefixedStore = c10::make_intrusive<::c10d::PrefixStore>(
       c10::str("nccl2_reconfigure/", opts.uuid), store_);
-  if (!nccl_api_) {
-    nccl_api_ = std::make_shared<DefaultNcclApi>();
-  }
 
-  // The uuid namespaces this reconfigure's rendezvous keys. Rank 0 claims it
-  // before publishing a unique ID so a reused uuid cannot overwrite a live
-  // rendezvous.
+  // The uuid namespaces this reconfigure's rendezvous keys; reusing it would
+  // read stale rendezvous state. New rank 0 atomically claims the uuid: the
+  // compareSet writes our handle only while "claimed" is unset, so a reused
+  // uuid returns the prior claimant's handle, which differs from ours.
   if (newRank == 0) {
     auto claimedBy = prefixedStore->compareSet("claimed", "", localHandle);
     TORCH_CHECK(
@@ -155,30 +152,6 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::reconfigure(
         "nccl2 reconfigure uuid ",
         opts.uuid,
         " was already used; each reconfigure() requires a unique uuid");
-  }
-
-  // Exchange the ncclUniqueId before tearing down the current communicator.
-  // Including the current rank-0 handle prevents nonzero ranks from consuming
-  // a stale ID when rank 0 rejects a reused uuid; they instead time out here.
-  const auto uniqueIdKey = c10::str("unique_id/", handles.front());
-  ncclUniqueId uniqueId{};
-  if (newRank == 0) {
-    NCCL_CHECK(
-        nccl_api_,
-        nccl_comm_,
-        nccl_api_->getUniqueId(&uniqueId),
-        "NCCL getUniqueId failed during reconfigure");
-    std::vector<uint8_t> vec(
-        reinterpret_cast<uint8_t*>(&uniqueId),
-        reinterpret_cast<uint8_t*>(&uniqueId) + sizeof(uniqueId));
-    prefixedStore->set(uniqueIdKey, vec);
-  } else {
-    prefixedStore->wait({uniqueIdKey}, timeout);
-    auto vec = prefixedStore->get(uniqueIdKey);
-    TORCH_CHECK(
-        vec.size() == sizeof(ncclUniqueId),
-        "Invalid NCCL unique ID size during reconfigure");
-    std::memcpy(&uniqueId, vec.data(), sizeof(ncclUniqueId));
   }
 
   // Tear down the previous communicator generation: revoke in-flight work,
@@ -210,17 +183,19 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::reconfigure(
     workq_.finalize();
 
     if (nccl_comm_) {
-      auto oldComm = std::exchange(nccl_comm_, nullptr);
-      init_state_ = InitializationState::UNINITIALIZED;
       waitForNcclCompletion(
           *nccl_api_,
-          oldComm,
-          nccl_api_->commAbort(oldComm),
+          nccl_comm_,
+          nccl_api_->commAbort(nccl_comm_),
           timeout,
           "NCCL commAbort failed during reconfigure");
+      nccl_comm_ = nullptr;
     }
   }
-  init_state_ = InitializationState::UNINITIALIZED;
+
+  if (!nccl_api_) {
+    nccl_api_ = std::make_shared<DefaultNcclApi>();
+  }
 
   comm_state_ = CommState::NORMAL;
   shutdown_ = false;
@@ -245,23 +220,45 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::reconfigure(
 
   c10::cuda::CUDAGuard gpuGuard(device_);
 
+  // Exchange the ncclUniqueId through the uuid-namespaced store with a fixed
+  // key. NCCLBootstrap is not reused here: its store keys embed a
+  // process-wide static counter, which diverges across ranks when disjoint
+  // groups reconfigure a different number of times (e.g. a late-joining rank).
+  static const char* kUniqueIdKey = "unique_id";
+  ncclUniqueId uniqueId{};
+  if (newRank == 0) {
+    NCCL_CHECK(
+        nccl_api_,
+        nccl_comm_,
+        nccl_api_->getUniqueId(&uniqueId),
+        "NCCL getUniqueId failed during reconfigure");
+    std::vector<uint8_t> vec(
+        reinterpret_cast<uint8_t*>(&uniqueId),
+        reinterpret_cast<uint8_t*>(&uniqueId) + sizeof(uniqueId));
+    prefixedStore->set(kUniqueIdKey, vec);
+  } else {
+    prefixedStore->wait({kUniqueIdKey}, timeout);
+    auto vec = prefixedStore->get(kUniqueIdKey);
+    TORCH_CHECK(
+        vec.size() == sizeof(ncclUniqueId),
+        "Invalid NCCL unique ID size during reconfigure");
+    std::memcpy(&uniqueId, vec.data(), sizeof(ncclUniqueId));
+  }
+
   ncclConfig_t config = options_c10d_->config;
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
   config.commName = name_.c_str();
 #endif
   populateNcclConfigFromHints(config, opts.hints, name_);
-  // ReconfigureOptions::timeout must bound initialization even when the
-  // process-group config normally uses blocking NCCL calls.
-  config.blocking = 0;
 
   ncclComm_t new_comm = nullptr;
+  auto init_status = nccl_api_->commInitRankConfig(
+      &new_comm, newSize, uniqueId, newRank, &config);
+  TORCH_CHECK(
+      new_comm,
+      "NCCL commInitRankConfig failed during reconfigure: ",
+      nccl_api_->getErrorString(init_status));
   try {
-    auto init_status = nccl_api_->commInitRankConfig(
-        &new_comm, newSize, uniqueId, newRank, &config);
-    TORCH_CHECK(
-        new_comm,
-        "NCCL commInitRankConfig failed during reconfigure: ",
-        nccl_api_->getErrorString(init_status));
     waitForNcclCompletion(
         *nccl_api_,
         new_comm,
@@ -269,21 +266,16 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::reconfigure(
         timeout,
         "NCCL commInitRankConfig failed during reconfigure");
   } catch (...) {
-    if (new_comm != nullptr) {
-      try {
-        waitForNcclCompletion(
-            *nccl_api_,
-            new_comm,
-            nccl_api_->commAbort(new_comm),
-            timeout,
-            "NCCL commAbort failed after reconfigure initialization failure");
-      } catch (const std::exception& e) {
-        LOG(ERROR) << e.what();
-      }
+    try {
+      waitForNcclCompletion(
+          *nccl_api_,
+          new_comm,
+          nccl_api_->commAbort(new_comm),
+          timeout,
+          "NCCL commAbort failed after reconfigure initialization failure");
+    } catch (const std::exception& e) {
+      LOG(ERROR) << e.what();
     }
-    comm_state_ = CommState::ERROR;
-    nccl_comm_ = nullptr;
-    init_state_ = InitializationState::UNINITIALIZED;
     throw;
   }
   nccl_comm_ = new_comm;

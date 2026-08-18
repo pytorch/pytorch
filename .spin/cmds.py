@@ -152,7 +152,6 @@ VERY_FAST_LINTERS = {
     "C10_UNUSED",
     "CALL_ONCE",
     "CMAKE_MINIMUM_REQUIRED",
-    "CODEOWNERS_TAXONOMY",
     "CONTEXT_DECORATOR",
     "COPYRIGHT",
     "CUBINCLUDE",
@@ -575,8 +574,7 @@ def develop():
 
     Runs an editable pip install using uv when available, falling back to
     regular pip.  Build configuration comes from the environment, e.g.
-    `BUILD_CONFIG spin develop`.  The build stages are documented at the top of
-    CMakeLists.txt and the supported env vars in cmake/EnvVarForwarding.cmake.
+    `BUILD_CONFIG spin develop`.
     """
     spin.util.run(_pip_install_cmd(editable=True))
 
@@ -592,8 +590,7 @@ def install():
 
     Runs a regular pip install using uv when available, falling back to
     regular pip.  Build configuration comes from the environment, e.g.
-    `BUILD_CONFIG spin install`.  The build stages are documented at the top of
-    CMakeLists.txt and the supported env vars in cmake/EnvVarForwarding.cmake.
+    `BUILD_CONFIG spin install`.
     """
     spin.util.run(_pip_install_cmd(editable=False))
 

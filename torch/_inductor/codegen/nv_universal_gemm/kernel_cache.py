@@ -118,8 +118,7 @@ def _get_kernel_cache() -> dict[str, Any]:
     """
     _ensure_caches()
     cache = _kernel_by_name_cache
-    if cache is None:
-        raise AssertionError("expected cache to be not None")
+    assert cache is not None  # noqa: S101
     return cache
 
 
