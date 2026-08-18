@@ -668,6 +668,61 @@ def bound_builtin_method_descriptor(value: Any) -> Any | None:
     return inspect.getattr_static(owner, value.__name__, None)
 
 
+def _get_tensor_descriptor_class(
+    factory: Any,
+    tensor_descriptor_class: type[Any],
+    tx: "InstructionTranslatorBase",
+    source: Source,
+) -> type[Any] | None:
+    if not (is_function(factory) or isinstance(factory, types.MethodType)):
+        return None
+    if getattr(factory, "__name__", None) != "from_tensor":
+        return None
+
+    owner = getattr(factory, "__self__", None)
+    if inspect.isclass(owner) and issubclass(owner, tensor_descriptor_class):
+        return owner
+
+    if isinstance(source, AttrSource) and source.member == "from_tensor":
+        accessed_class = tx.output.resolve_source_value(source.base)
+        if inspect.isclass(accessed_class) and issubclass(
+            accessed_class, tensor_descriptor_class
+        ):
+            for candidate in accessed_class.__mro__:
+                descriptor = candidate.__dict__.get("from_tensor")
+                if (
+                    isinstance(descriptor, staticmethod)
+                    and descriptor.__func__ is factory
+                ):
+                    return candidate
+
+    module = sys.modules.get(getattr(factory, "__module__", ""))
+    if module is None:
+        return None
+
+    # A staticmethod alias does not retain its owner. Only recover it when the
+    # defining module contains exactly one matching descriptor class.
+    matches = set()
+    for candidate in vars(module).values():
+        if not inspect.isclass(candidate):
+            continue
+        try:
+            is_descriptor_class = issubclass(candidate, tensor_descriptor_class)
+        except TypeError:
+            continue
+        candidate_factory = candidate.__dict__.get("from_tensor")
+        if isinstance(candidate_factory, (classmethod, staticmethod)):
+            candidate_factory = candidate_factory.__func__
+        if is_descriptor_class and candidate_factory is factory:
+            matches.add(candidate)
+
+    if len(matches) == 1:
+        return matches.pop()
+    # Ambiguous aliases may graph-break on the normal function path, but that
+    # avoids guessing a class that would reconstruct the wrong descriptor.
+    return None
+
+
 class _missing:
     pass
 
@@ -1832,7 +1887,32 @@ class VariableBuilder:
         elif value is create_2d_tma_descriptor:
             return CreateTMADescriptorExperimentalVariable(rank=2)
         elif value is TensorDescriptor.from_tensor:
-            return CreateTMADescriptorStableVariable()
+            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            return CreateTMADescriptorStableVariable(
+                descriptor_type=TensorDescriptor, factory=value
+            )
+        elif descriptor_class := _get_tensor_descriptor_class(
+            value, TensorDescriptor, self.tx, self.source
+        ):
+            if isinstance(value, types.MethodType):
+                install_guard(
+                    AttrSource(self.source, "__func__").make_guard(
+                        GuardBuilder.FUNCTION_MATCH
+                    )
+                )
+                owner_source = AttrSource(self.source, "__self__")
+                install_guard(owner_source.make_guard(GuardBuilder.ID_MATCH))
+                VariableTracker.build(
+                    self.tx,
+                    value.__self__,
+                    owner_source,
+                ).realize()
+            else:
+                self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            return CreateTMADescriptorStableVariable(
+                descriptor_type=descriptor_class,
+                factory=value,
+            )
         elif value is set_allocator:
             return TritonSetAllocatorVariable(value)
         elif isinstance(value, torch.amp.autocast_mode.autocast):

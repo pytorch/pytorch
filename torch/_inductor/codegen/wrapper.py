@@ -2995,7 +2995,12 @@ class PythonWrapperCodegen(CodeGen):
         if apply_size_hints:
             block_shape = V.graph.sizevars.optimization_hints(block_shape)
 
-        prefix = "triton.tools.tensor_descriptor.TensorDescriptor"
+        import_line = f"import {desc.descriptor_module}"
+        if not V.graph.cpp_wrapper:
+            self.add_import_once(import_line)
+        elif config.triton.autotune_at_compile_time:
+            self.kernel_autotune_calls.writeline(import_line)
+        prefix = f"{desc.descriptor_module}.{desc.descriptor_class}"
         fn = f"{prefix}.from_tensor"
         tensor_ref = self._tma_descriptor_tensor_ref(desc, apply_size_hints)
         args = f"{tensor_ref}, {block_shape}"

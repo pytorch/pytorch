@@ -4,6 +4,7 @@
 # Skip do not assign a lambda expression, use a def
 import contextlib
 import functools
+import inspect
 import logging
 import os
 import subprocess
@@ -19,6 +20,7 @@ import torch.utils._pytree as pytree
 from torch._dynamo import config as dynamo_config
 from torch._higher_order_ops.triton_kernel_wrap import (
     generate_ttir,
+    maybe_unpack_host_tma_descriptor,
     triton_kernel_wrapper_functional,
     triton_kernel_wrapper_mutation,
 )
@@ -2722,7 +2724,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     add_2 = arg0_1 + 256;  arg0_1 = None
     sub_1 = add_2 - 1;  add_2 = None
     floordiv = sub_1 // 256;  sub_1 = None
-    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 0, grid = [(floordiv, 1, 1)], tma_descriptor_metadata = {'in_desc_ptr0': ('stable', ([256],)), 'in_desc_ptr1': ('stable', ([256],)), 'out_desc_ptr': ('stable', ([256],))}, kwargs = {'in_desc_ptr0': arg1_1, 'in_desc_ptr1': arg2_1, 'out_desc_ptr': zeros_like}, tensors_to_clone = ['out_desc_ptr']);  floordiv = arg1_1 = arg2_1 = zeros_like = None
+    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 0, grid = [(floordiv, 1, 1)], tma_descriptor_metadata = {'in_desc_ptr0': ('stable', ([256], 'triton.tools.tensor_descriptor', 'TensorDescriptor')), 'in_desc_ptr1': ('stable', ([256], 'triton.tools.tensor_descriptor', 'TensorDescriptor')), 'out_desc_ptr': ('stable', ([256], 'triton.tools.tensor_descriptor', 'TensorDescriptor'))}, kwargs = {'in_desc_ptr0': arg1_1, 'in_desc_ptr1': arg2_1, 'out_desc_ptr': zeros_like}, tensors_to_clone = ['out_desc_ptr']);  floordiv = arg1_1 = arg2_1 = zeros_like = None
     getitem = triton_kernel_wrapper_functional_proxy['out_desc_ptr'];  triton_kernel_wrapper_functional_proxy = None
     return (getitem,)""",
                 )
@@ -2746,7 +2748,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                     """\
 def forward(self, arg0_1, arg1_1):
     zeros_like = torch.ops.aten.zeros_like.default(arg0_1, pin_memory = False)
-    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 0, grid = [(2, 1, 1)], tma_descriptor_metadata = {'in_desc_ptr0': ('stable', ([256],)), 'in_desc_ptr1': ('stable', ([256],)), 'out_desc_ptr': ('stable', ([256],))}, kwargs = {'in_desc_ptr0': arg0_1, 'in_desc_ptr1': arg1_1, 'out_desc_ptr': zeros_like}, tensors_to_clone = ['out_desc_ptr']);  arg0_1 = arg1_1 = zeros_like = None
+    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 0, grid = [(2, 1, 1)], tma_descriptor_metadata = {'in_desc_ptr0': ('stable', ([256], 'triton.tools.tensor_descriptor', 'TensorDescriptor')), 'in_desc_ptr1': ('stable', ([256], 'triton.tools.tensor_descriptor', 'TensorDescriptor')), 'out_desc_ptr': ('stable', ([256], 'triton.tools.tensor_descriptor', 'TensorDescriptor'))}, kwargs = {'in_desc_ptr0': arg0_1, 'in_desc_ptr1': arg1_1, 'out_desc_ptr': zeros_like}, tensors_to_clone = ['out_desc_ptr']);  arg0_1 = arg1_1 = zeros_like = None
     getitem = triton_kernel_wrapper_functional_proxy['out_desc_ptr'];  triton_kernel_wrapper_functional_proxy = None
     return (getitem,)""",
                 )
@@ -2953,6 +2955,57 @@ def forward(self, arg0_1, arg1_1):
                 self.assertEqual(code.count("TensorDescriptor.from_tensor("), 2)
         else:
             self.assertEqual(code.count("create_1d_tma_descriptor("), 2)
+
+    @requires_gpu
+    @unittest.skipIf(
+        not has_triton_tensor_descriptor_host_tma(),
+        "requires triton.tools.tensor_descriptor TMA support",
+    )
+    @inductor_config.patch("cpp_wrapper", False)
+    def test_tma_descriptor_subclass_codegen(self):
+        import triton.tools.tensor_descriptor as descriptor_module
+
+        class InductorTestTensorDescriptor(descriptor_module.TensorDescriptor):
+            @staticmethod
+            def from_tensor(tensor, block_shape):
+                return InductorTestTensorDescriptor(
+                    tensor, tensor.shape, tensor.stride(), block_shape
+                )
+
+        InductorTestTensorDescriptor.__module__ = descriptor_module.__name__
+        with mock.patch.object(
+            descriptor_module,
+            InductorTestTensorDescriptor.__name__,
+            InductorTestTensorDescriptor,
+            create=True,
+        ):
+
+            def f(a):
+                block_size = 256
+                out = torch.zeros_like(a)
+                desc_a = InductorTestTensorDescriptor.from_tensor(a, [block_size])
+                desc_out = InductorTestTensorDescriptor.from_tensor(out, [block_size])
+
+                grid = lambda meta: (triton.cdiv(out.numel(), meta["BLOCK_SIZE"]),)
+                add_kernel_with_tma_1d_new_api[grid](
+                    desc_a,
+                    desc_a,
+                    desc_out,
+                    BLOCK_SIZE=block_size,
+                )
+                return out
+
+            a = torch.randn(301, device=GPU_TYPE)
+            compiled_out, (code,) = run_and_get_code(
+                torch.compile(f, fullgraph=True, backend="inductor"), a
+            )
+
+        self.assertEqual(compiled_out, a + a)
+        factory = (
+            f"{descriptor_module.__name__}."
+            f"{InductorTestTensorDescriptor.__name__}.from_tensor("
+        )
+        self.assertEqual(code.count(factory), 2)
 
     @requires_gpu
     def test_wrap_tma_args_skips_constexpr(self):
@@ -5377,6 +5430,253 @@ if HAS_GPU:
 
 class CustomOpTests(torch._inductor.test_case.TestCase):
     """Tests for custom ops wrapping triton kernels"""
+
+    @unittest.skipIf(not has_triton_package(), "requires Triton")
+    @common_utils.parametrize(
+        "path_kind",
+        ["valid", "main", "missing_module", "missing_class", "rebound_class"],
+    )
+    def test_host_tma_descriptor_import_path(self, path_kind):
+        import triton.tools.tensor_descriptor as descriptor_module
+
+        class HostDescriptor(descriptor_module.TensorDescriptor):
+            @classmethod
+            def from_tensor(cls, tensor, block_shape):
+                return cls(tensor, tensor.shape, tensor.stride(), block_shape)
+
+        HostDescriptor.__module__ = descriptor_module.__name__
+        x = torch.randn(16)
+        descriptor = HostDescriptor.from_tensor(x, [16])
+        with (
+            mock.patch.object(
+                descriptor_module, "HostDescriptor", HostDescriptor, create=True
+            ),
+            mock.patch(
+                "torch.utils._triton.has_triton_tensor_descriptor_host_tma",
+                return_value=True,
+            ),
+        ):
+            if path_kind == "main":
+                HostDescriptor.__module__ = "__main__"
+            elif path_kind == "missing_module":
+                HostDescriptor.__module__ = "_missing_tma_descriptor_test_module"
+            elif path_kind == "missing_class":
+                HostDescriptor.__name__ = "MissingHostDescriptor"
+            elif path_kind == "rebound_class":
+                descriptor_module.HostDescriptor = descriptor_module.TensorDescriptor
+
+            if path_kind == "valid":
+                base, metadata = maybe_unpack_host_tma_descriptor(descriptor)
+                self.assertIs(base, x)
+                self.assertEqual(
+                    metadata,
+                    ("stable", ([16], descriptor_module.__name__, "HostDescriptor")),
+                )
+            else:
+                with self.assertRaisesRegex(RuntimeError, "class must be importable"):
+                    maybe_unpack_host_tma_descriptor(descriptor)
+
+    @unittest.skipIf(not has_triton_package(), "requires Triton")
+    @common_utils.parametrize("padding", ["zero", "nan"])
+    @common_utils.parametrize("round_f32_to_tf32", [False, True])
+    def test_host_tma_descriptor_factory_defaults(self, padding, round_f32_to_tf32):
+        import triton.tools.tensor_descriptor as descriptor_module
+
+        factory_calls = []
+
+        class HostDescriptor(descriptor_module.TensorDescriptor):
+            @classmethod
+            def from_tensor(
+                cls,
+                tensor,
+                block_shape,
+                padding=padding,
+                round_f32_to_tf32=round_f32_to_tf32,
+            ):
+                factory_calls.append(tensor)
+                return cls(
+                    tensor,
+                    tensor.shape,
+                    tensor.stride(),
+                    block_shape,
+                    padding,
+                    round_f32_to_tf32,
+                )
+
+        HostDescriptor.__module__ = descriptor_module.__name__
+        x = torch.randn(16)
+        descriptor = HostDescriptor(x, x.shape, x.stride(), [16])
+        with (
+            mock.patch.object(
+                descriptor_module, "HostDescriptor", HostDescriptor, create=True
+            ),
+            mock.patch(
+                "torch.utils._triton.has_triton_tensor_descriptor_host_tma",
+                return_value=True,
+            ),
+        ):
+            if padding == "zero" and not round_f32_to_tf32:
+                base, metadata = maybe_unpack_host_tma_descriptor(descriptor)
+                self.assertIs(base, x)
+                self.assertEqual(
+                    metadata,
+                    ("stable", ([16], descriptor_module.__name__, "HostDescriptor")),
+                )
+            else:
+                with self.assertRaisesRegex(RuntimeError, "defaults do not reproduce"):
+                    maybe_unpack_host_tma_descriptor(descriptor)
+            self.assertEqual(factory_calls, [])
+
+    @unittest.skipIf(not has_triton_package(), "requires Triton")
+    @common_utils.parametrize("signature_kind", ["wrapped", "custom_signature"])
+    @common_utils.parametrize("padding", ["zero", "nan"])
+    def test_host_tma_descriptor_signature_metadata(self, signature_kind, padding):
+        import triton.tools.tensor_descriptor as descriptor_module
+
+        factory_calls = []
+
+        class HostDescriptor(descriptor_module.TensorDescriptor):
+            pass
+
+        def from_tensor(tensor, block_shape, *, padding=padding):
+            factory_calls.append(tensor)
+            return HostDescriptor(
+                tensor, tensor.shape, tensor.stride(), block_shape, padding
+            )
+
+        original = descriptor_module.TensorDescriptor.from_tensor
+        if signature_kind == "wrapped":
+            from_tensor = functools.wraps(original)(from_tensor)
+        else:
+            from_tensor.__signature__ = inspect.signature(original)
+        HostDescriptor.from_tensor = staticmethod(from_tensor)
+        HostDescriptor.__module__ = descriptor_module.__name__
+        tensor = torch.randn(16)
+        descriptor = HostDescriptor.from_tensor(tensor, [16], padding="zero")
+        factory_calls.clear()
+        with (
+            mock.patch.object(
+                descriptor_module, "HostDescriptor", HostDescriptor, create=True
+            ),
+            mock.patch(
+                "torch.utils._triton.has_triton_tensor_descriptor_host_tma",
+                return_value=True,
+            ),
+        ):
+            if padding == "nan":
+                with self.assertRaisesRegex(RuntimeError, "defaults do not reproduce"):
+                    maybe_unpack_host_tma_descriptor(descriptor)
+            else:
+                base, metadata = maybe_unpack_host_tma_descriptor(descriptor)
+                self.assertIs(base, tensor)
+                self.assertEqual(
+                    metadata,
+                    ("stable", ([16], descriptor_module.__name__, "HostDescriptor")),
+                )
+            self.assertEqual(factory_calls, [])
+
+    @unittest.skipIf(not has_triton_package(), "requires Triton")
+    @common_utils.parametrize("keyword_only", [False, True])
+    def test_host_tma_descriptor_unmodeled_factory_option(self, keyword_only):
+        import triton.tools.tensor_descriptor as descriptor_module
+
+        factory_calls = []
+
+        class HostDescriptor(descriptor_module.TensorDescriptor):
+            pass
+
+        if keyword_only:
+
+            @classmethod
+            def from_tensor(cls, tensor, block_shape, *, padding_mode="nan"):
+                factory_calls.append(tensor)
+                return cls(
+                    tensor,
+                    tensor.shape,
+                    tensor.stride(),
+                    block_shape,
+                    padding=padding_mode,
+                )
+
+        else:
+
+            @classmethod
+            def from_tensor(cls, tensor, block_shape, padding_mode="nan"):
+                factory_calls.append(tensor)
+                return cls(
+                    tensor,
+                    tensor.shape,
+                    tensor.stride(),
+                    block_shape,
+                    padding=padding_mode,
+                )
+
+        HostDescriptor.from_tensor = from_tensor
+        HostDescriptor.__module__ = descriptor_module.__name__
+        tensor = torch.randn(16)
+        descriptor = HostDescriptor.from_tensor(tensor, [16], padding_mode="zero")
+        factory_calls.clear()
+        with (
+            mock.patch.object(
+                descriptor_module, "HostDescriptor", HostDescriptor, create=True
+            ),
+            mock.patch(
+                "torch.utils._triton.has_triton_tensor_descriptor_host_tma",
+                return_value=True,
+            ),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "unsupported optional arguments"):
+                maybe_unpack_host_tma_descriptor(descriptor)
+            self.assertEqual(factory_calls, [])
+
+    @unittest.skipIf(not has_triton_package(), "requires Triton")
+    @common_utils.parametrize(
+        "signature_kind", ["positional", "keyword_only", "uninspectable"]
+    )
+    def test_host_tma_descriptor_factory_signature(self, signature_kind):
+        import triton.tools.tensor_descriptor as descriptor_module
+
+        class HostDescriptor(descriptor_module.TensorDescriptor):
+            pass
+
+        if signature_kind == "keyword_only":
+
+            @classmethod
+            def from_tensor(cls, tensor, block_shape, *, required):
+                return cls(tensor, tensor.shape, tensor.stride(), block_shape)
+
+        else:
+
+            @classmethod
+            def from_tensor(cls, tensor, block_shape, required):
+                return cls(tensor, tensor.shape, tensor.stride(), block_shape)
+
+        HostDescriptor.__module__ = descriptor_module.__name__
+        x = torch.randn(16)
+        descriptor = HostDescriptor(x, x.shape, x.stride(), [16])
+        signature_patch = (
+            mock.patch(
+                "torch._higher_order_ops.triton_kernel_wrap.inspect.signature",
+                side_effect=ValueError("signature unavailable"),
+            )
+            if signature_kind == "uninspectable"
+            else contextlib.nullcontext()
+        )
+        with (
+            mock.patch.object(
+                descriptor_module, "HostDescriptor", HostDescriptor, create=True
+            ),
+            mock.patch.object(HostDescriptor, "from_tensor", from_tensor),
+            mock.patch(
+                "torch.utils._triton.has_triton_tensor_descriptor_host_tma",
+                return_value=True,
+            ),
+            signature_patch,
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError, "must be reconstructible with from_tensor"
+            ):
+                maybe_unpack_host_tma_descriptor(descriptor)
 
     @requires_gpu
     @common_utils.parametrize("autotuned", [False, True])
