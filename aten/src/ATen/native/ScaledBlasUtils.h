@@ -182,6 +182,30 @@ bool check_mxfp4_recipe(
     std::vector<ScalingType>& recipe_b,
     ArrayRef<Tensor>& scales_b);
 
+// Returns true if any scale has dtype Float8_e8m0fnu.
+TORCH_API
+bool has_mxfp_scale(ArrayRef<Tensor> scales);
+
+TORCH_API
+void validate_mxfp_cpu(
+    const Tensor& mat_a,
+    const Tensor& mat_b,
+    const Tensor& scale_a,
+    const Tensor& scale_b,
+    const std::optional<Tensor>& bias,
+    const Tensor& out);
+
+// Returns true when the configuration is handled as CPU MXFP.
+TORCH_API
+bool validate_cpu_mxfp_v2_inputs(
+    const Tensor& mat_a,
+    ArrayRef<Tensor> scale_a,
+    ArrayRef<ScalingType> recipe_a,
+    ArrayRef<SwizzleType> swizzle_a,
+    ArrayRef<Tensor> scale_b,
+    ArrayRef<ScalingType> recipe_b,
+    ArrayRef<SwizzleType> swizzle_b);
+
 /**
  * Validate v2 _scaled_mm inputs and per-recipe scale shapes/dtypes.
  * Centralized here so it can be called from both TORCH_META_FUNC (so
