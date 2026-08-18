@@ -8,6 +8,7 @@ import pickle
 import sys
 import tempfile
 import types
+import typing
 import unittest
 import weakref
 from collections.abc import Iterator
@@ -85,6 +86,26 @@ def keep_kwdefaults(func):
     @functools.wraps(func)
     def wrapper(self, x):
         if func.__kwdefaults__["scale"] == 2.0:
+            x = x + 1
+        return func(self, x)
+
+    return wrapper
+
+
+def keep_annotations(func):
+    @functools.wraps(func)
+    def wrapper(self, x):
+        if len(func.__annotations__) == 2:
+            x = x + 1
+        return func(self, x)
+
+    return wrapper
+
+
+def keep_type_params(func):
+    @functools.wraps(func)
+    def wrapper(self, x):
+        if func.__type_params__[0].__name__ == "T":
             x = x + 1
         return func(self, x)
 
@@ -177,6 +198,27 @@ class DecoratedKwdefaultsForwardModule(torch.nn.Module):
     @keep_kwdefaults
     def forward(self, x, *, scale=2.0):
         return x * scale
+
+
+class DecoratedAnnotationsForwardModule(torch.nn.Module):
+    @keep_annotations
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return x * 2
+
+
+class DecoratedTypeParamsForwardModule(torch.nn.Module):
+    def forward(self, x):
+        return x * 2
+
+
+if sys.version_info >= (3, 12):
+    exec(
+        "class DecoratedTypeParamsForwardModule(torch.nn.Module):\n"
+        "    @keep_type_params\n"
+        "    def forward[T](self, x):\n"
+        "        return x * 2\n",
+        globals(),
+    )
 
 
 class DecoratedAttributeForwardModule(torch.nn.Module):
@@ -810,6 +852,78 @@ class TestGuardSerialization(TestGuardSerializationBase):
             ref, loaded, {"self": mod, "x": torch.randn(3), "func": inner}, True
         )
 
+    def test_fqn_mismatched_function_preserves_annotations(self):
+        mod = DecoratedAnnotationsForwardModule()
+        ref, loaded = self._test_serialization("SEQUENCE_LENGTH", mod, torch.randn(3))
+        inner = type(mod).forward.__wrapped__
+        self._test_check_fn(
+            ref, loaded, {"self": mod, "x": torch.randn(3), "func": inner}, True
+        )
+
+    @unittest.skipIf(sys.version_info < (3, 12), "requires PEP 695 type parameters")
+    def test_fqn_mismatched_function_preserves_type_params(self):
+        mod = DecoratedTypeParamsForwardModule()
+        ref, loaded = self._test_serialization("EQUALS_MATCH", mod, torch.randn(3))
+        inner = type(mod).forward.__wrapped__
+        self._test_check_fn(
+            ref, loaded, {"self": mod, "x": torch.randn(3), "func": inner}, True
+        )
+
+    def test_type_parameter_reconstruction_preserves_configuration(self):
+        from torch._dynamo.guards import GuardsStatePickler
+
+        values = [
+            typing.TypeVar("Bound", bound=int, covariant=True),
+            typing.TypeVar("Constrained", int, str, contravariant=True),
+            typing.TypeVar("Inferred", infer_variance=True),
+            typing.ParamSpec("Params", bound=typing.Callable[..., object]),
+            typing.TypeVarTuple("Types"),
+        ]
+        if sys.version_info >= (3, 14):
+            values.extend(
+                [
+                    typing.TypeVar("Default", default=int),
+                    typing.ParamSpec("DefaultParams", default=[int, str]),
+                    typing.TypeVarTuple(
+                        "DefaultTypes", default=typing.Unpack[tuple[int, str]]
+                    ),
+                ]
+            )
+
+        buf = io.BytesIO()
+        GuardsStatePickler({}, {}, {}, buf).dump(values)
+        loaded = pickle.loads(buf.getvalue())
+        attributes = (
+            "__name__",
+            "__bound__",
+            "__constraints__",
+            "__covariant__",
+            "__contravariant__",
+            "__infer_variance__",
+            "__default__",
+        )
+        for expected, actual in zip(values, loaded):
+            for attribute in attributes:
+                self.assertEqual(
+                    getattr(actual, attribute, None),
+                    getattr(expected, attribute, None),
+                )
+
+    @unittest.skipIf(sys.version_info < (3, 14), "requires lazy annotations")
+    def test_unguarded_lazy_annotations_are_not_evaluated(self):
+        from torch._dynamo.guards import GuardsStatePickler
+
+        namespace = {"__name__": __name__}
+        source = "def unresolved(x: MissingName):\n    return x + 1\n"
+        exec(
+            compile(source, "<lazy_annotations>", "exec", dont_inherit=True), namespace
+        )
+        fn = namespace["unresolved"]
+        buf = io.BytesIO()
+        GuardsStatePickler({id(fn): fn}, {}, {}, buf).dump(fn)
+        loaded = pickle.loads(buf.getvalue())
+        self.assertEqual(loaded(3), 4)
+
     def test_fqn_mismatched_function_preserves_attributes(self):
         mod = DecoratedAttributeForwardModule()
         ref, loaded = self._test_serialization("EQUALS_MATCH", mod, torch.randn(3))
@@ -1386,14 +1500,42 @@ class TestGuardSerialization(TestGuardSerializationBase):
             ref, loaded, {"x": x, "counter": itertools.count(2, 4)}, False
         )
 
-    def test_dict_version(self):
+    def test_supported_nodes_dict_keys_match(self):
         def fn(x):
             return pytree.tree_leaves(x)[0] + 1
 
-        with self.assertRaisesRegex(
-            PackageError, "DICT_VERSION guard cannot be serialized."
-        ):
-            self._test_serialization("DICT_VERSION", fn, {"t": torch.randn(3)})
+        ref, loaded = self._test_serialization(
+            "DICT_KEYS_MATCH", fn, {"t": torch.randn(3)}
+        )
+        self._test_check_fn(ref, loaded, {"x": {"t": torch.randn(3)}}, True)
+        self._test_check_fn(ref, loaded, {"x": {}}, False)
+
+        # Sticky flag must survive pickling so load keeps keys-match instead of
+        # re-promoting SUPPORTED_NODES to DICT_VERSION.
+        guards_state = torch._dynamo.package.load_guards_state(
+            self._cached_guards_state
+        )
+        self.assertTrue(
+            any(g._force_dict_keys_match for g in guards_state.output_graph.guards)
+        )
+
+        # Loaded keys-match guard must observe SUPPORTED_NODES key changes, not
+        # only changes to the user input dict.
+        class _TmpPytreeNode:
+            def __init__(self, x):
+                self.x = x
+
+        inputs = {"x": {"t": torch.randn(3)}}
+        self.assertTrue(loaded.check(inputs))
+        try:
+            pytree.register_pytree_node(
+                _TmpPytreeNode,
+                lambda n: ([n.x], None),
+                lambda xs, _: _TmpPytreeNode(xs[0]),
+            )
+            self.assertFalse(loaded.check(inputs))
+        finally:
+            pytree._deregister_pytree_node(_TmpPytreeNode)
 
     def test_dict_contains(self):
         def fn(x):
