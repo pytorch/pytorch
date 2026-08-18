@@ -229,6 +229,16 @@ def empty_cache() -> None:
         torch._C._cuda_emptyCache()
 
 
+def _recurse_add_to_result(result, prefix, obj, format_key):
+    if isinstance(obj, dict):
+        if prefix:
+            prefix += "."
+        for key, value in obj.items():
+            _recurse_add_to_result(result, prefix + format_key(key), value, format_key)
+    else:
+        result.append((prefix, obj))
+
+
 def memory_stats(device: "Device" = None) -> dict[str, Any]:
     r"""Return a dictionary of CUDA memory allocator statistics for a given device.
 
@@ -333,18 +343,8 @@ def memory_stats(device: "Device" = None) -> dict[str, Any]:
             return "_".join(str(part) for part in key)
         return str(key)
 
-    def _recurse_add_to_result(prefix, obj):
-        if isinstance(obj, dict):
-            if len(prefix) > 0:
-                prefix += "."
-            for k, v in obj.items():
-                key = _format_key(k)
-                _recurse_add_to_result(prefix + key, v)
-        else:
-            result.append((prefix, obj))
-
     stats = memory_stats_as_nested_dict(device=device)
-    _recurse_add_to_result("", stats)
+    _recurse_add_to_result(result, "", stats, _format_key)
     result.sort()
 
     return collections.OrderedDict(result)
@@ -436,17 +436,8 @@ def host_memory_stats() -> dict[str, Any]:
     """
     result = []
 
-    def _recurse_add_to_result(prefix, obj):
-        if isinstance(obj, dict):
-            if len(prefix) > 0:
-                prefix += "."
-            for k, v in obj.items():
-                _recurse_add_to_result(prefix + k, v)
-        else:
-            result.append((prefix, obj))
-
     stats = host_memory_stats_as_nested_dict()
-    _recurse_add_to_result("", stats)
+    _recurse_add_to_result(result, "", stats, str)
     result.sort()
 
     return collections.OrderedDict(result)
