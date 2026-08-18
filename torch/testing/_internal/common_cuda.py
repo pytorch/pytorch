@@ -4,6 +4,9 @@ r"""This file is allowed to initialize CUDA context when imported."""
 
 import functools
 import threading
+from collections.abc import Callable
+from typing import Any
+
 import torch
 import torch.cuda
 from torch.testing._internal.common_utils import LazyVal, TEST_NUMBA, TEST_WITH_ROCM, TEST_CUDA, IS_WINDOWS, IS_MACOS, TEST_XPU
@@ -25,10 +28,12 @@ CUDA_DEVICE_IS_INTEGRATED = LazyVal(
 )
 
 
-def with_limited_cuda_memory_on_integrated_device(limit_mb):
-    def decorator(test):
+def with_limited_cuda_memory_on_integrated_device(
+    limit_mb: int,
+) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    def decorator(test: Callable[..., Any]) -> Callable[..., Any]:
         @functools.wraps(test)
-        def wrapped(*args, **kwargs):
+        def wrapped(*args: Any, **kwargs: Any) -> Any:
             if not CUDA_DEVICE_IS_INTEGRATED:
                 return test(*args, **kwargs)
 
