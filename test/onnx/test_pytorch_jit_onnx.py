@@ -87,7 +87,7 @@ class _TestJITIRToONNX(_JITIRToONNXTestMixin):
     creating concrete sub-types. See MakeTestCase().
     """
 
-    hw_classification = common_utils.HardwareClassification.GENERIC
+    hw_classification = common_utils.HardwareClassification.CPU
 
     def test_example_ir(self):
         graph_ir = """
@@ -190,6 +190,8 @@ class _TestJITIRToONNXCuda(_JITIRToONNXTestMixin):
     creating concrete sub-types. See MakeTestCase() and instantiate_device_type_tests().
     """
 
+    hw_classification = common_utils.HardwareClassification.CUDA
+
     def test_log_softmax_half_to_float(self, device):
         graph_ir = """
         graph(%x: Tensor):
@@ -198,30 +200,24 @@ class _TestJITIRToONNXCuda(_JITIRToONNXTestMixin):
           %y = aten::_log_softmax(%x, %dim, %half_to_float)
           return (%y)
         """
-        x = torch.randn(5, 2, device=device).half()
+        x = torch.randn(5, 2).half().to(device)
         self.run_test(graph_ir, (x,))
 
 
-def MakeTestCase(opset_version: int) -> type:
+def MakeTestCase(opset_version: int, base: type) -> type:
     name = f"TestJITIRToONNX_opset{opset_version}"
     return type(
         str(name),
         (pytorch_test_common.ExportTestCase,),
-        dict(_TestJITIRToONNX.__dict__, opset_version=opset_version),
+        dict(base.__dict__, opset_version=opset_version),
     )
 
 
-TestJITIRToONNX_opset14 = MakeTestCase(14)
+TestJITIRToONNX_opset14 = MakeTestCase(14, _TestJITIRToONNX)
+TestJITIRToONNXCUDA_opset14 = MakeTestCase(14, _TestJITIRToONNXCuda)
 
-
-class TestJITIRToONNXCUDA_opset14(
-    _TestJITIRToONNXCuda, pytorch_test_common.ExportTestCase
-):
-    hw_classification = common_utils.HardwareClassification.CUDA
-    opset_version = 14
-
-
-instantiate_device_type_tests(TestJITIRToONNXCUDA_opset14, globals(), only_for='cuda')
+instantiate_device_type_tests(TestJITIRToONNX_opset14, globals(), only_for=("cpu",))
+instantiate_device_type_tests(TestJITIRToONNXCUDA_opset14, globals(), only_for=("cuda",))
 
 if __name__ == "__main__":
     common_utils.run_tests()
