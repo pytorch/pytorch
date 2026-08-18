@@ -246,7 +246,7 @@ class ScheduleTest(TestCase):
             3,
             4,
             3,
-            {0: (_RecvInfo("x", source=0, buffer=None, tensor_meta=None),)},
+            {0: (_RecvInfo("x", source=0, tensor_meta=None),)},
             {},
         )
         with self.assertRaisesRegex(RuntimeError, "adjacent-stage communication"):
