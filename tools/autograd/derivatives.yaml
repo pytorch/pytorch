@@ -554,12 +554,12 @@
 
 - name: _linalg_det(Tensor A) -> (Tensor result, Tensor LU, Tensor pivots)
   A: linalg_det_backward(grad, result, A, LU, pivots)
-  result: linalg_det_jvp(A_t, result, LU, pivots, A_p.is_contiguous() && !A_p.is_complex())
+  result: linalg_det_jvp(A_t, result, A_p, LU, pivots, A_p.is_contiguous() && !A_p.is_complex())
   output_differentiability: [True, False, False]
 
 - name: _linalg_slogdet(Tensor A) -> (Tensor sign, Tensor logabsdet, Tensor LU, Tensor pivots)
   A: slogdet_backward(grad_sign, grad_logabsdet, A, sign, LU, pivots)
-  sign, logabsdet: slogdet_jvp(LU, pivots, A_t, sign, A_p.is_contiguous() && !A_p.is_complex())
+  sign, logabsdet: slogdet_jvp(LU, pivots, A_t, A_p, sign, A_p.is_contiguous() && !A_p.is_complex())
   output_differentiability: [True, True, False, False]
 
 - name: block_diag(Tensor[] tensors) -> Tensor
@@ -1613,7 +1613,7 @@
 
 - name: _linalg_solve_ex(Tensor A, Tensor B, *, bool left=True, bool check_errors=False) -> (Tensor result, Tensor LU, Tensor pivots, Tensor info)
   A, B: linalg_solve_backward(grad, result, A, LU, pivots, left, grad_input_mask[1])
-  result: "linalg_solve_jvp(A_t, B_t, result, LU, pivots, left)"
+  result: "linalg_solve_jvp(A_t, B_t, result, A_p, LU, pivots, left)"
   output_differentiability: [True, False, False, False]  # LU is an auxiliary tensor not exposed to the user
 
 - name: sort(Tensor self, int dim=-1, bool descending=False) -> (Tensor values, Tensor indices)

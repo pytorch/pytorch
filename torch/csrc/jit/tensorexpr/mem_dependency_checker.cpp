@@ -88,7 +88,7 @@ void AccessInfo::addDependent(const std::shared_ptr<AccessInfo>& read) {
 }
 
 bool AccessInfo::hasDependency(const std::shared_ptr<AccessInfo>& info) const {
-  return dependencies_.count(info->id()) != 0;
+  return dependencies_.contains(info->id());
 }
 
 DependencySet AccessInfo::getDirectDependencies() {
@@ -338,7 +338,7 @@ bool MemDependencyChecker::dependsDirectly(const BufPtr& O, const StmtPtr& B) {
   auto bWrites = getAllWritesWithin(B);
 
   for (auto& depPair : outputAccess->dependencies()) {
-    if (bWrites.count(depPair.second) != 0) {
+    if (bWrites.contains(depPair.second)) {
       return true;
     }
   }
@@ -351,7 +351,7 @@ bool MemDependencyChecker::dependsDirectly(const StmtPtr& A, const BufPtr& I) {
   auto inputAccess = input(I);
 
   for (auto& depPair : inputAccess->dependents()) {
-    if (aReads.count(depPair.second) != 0) {
+    if (aReads.contains(depPair.second)) {
       return true;
     }
   }
@@ -364,7 +364,7 @@ bool MemDependencyChecker::dependsDirectly(const ExprPtr& A, const BufPtr& I) {
   auto inputAccess = input(I);
 
   for (auto& depPair : inputAccess->dependents()) {
-    if (aReads.count(depPair.second) != 0) {
+    if (aReads.contains(depPair.second)) {
       return true;
     }
   }
@@ -400,7 +400,7 @@ bool MemDependencyChecker::dependsIndirectly(
 
   auto bWrites = getAllWritesWithin(B);
   for (auto& dep : dependencies) {
-    if (bWrites.count(dep) != 0) {
+    if (bWrites.contains(dep)) {
       return true;
     }
   }
@@ -416,7 +416,7 @@ bool MemDependencyChecker::dependsIndirectly(
 
   auto aDeps = getAllWriteDependencies(aReads);
 
-  return aDeps.count(inputAccess) != 0;
+  return aDeps.contains(inputAccess);
 }
 
 bool MemDependencyChecker::dependsIndirectly(
@@ -427,7 +427,7 @@ bool MemDependencyChecker::dependsIndirectly(
 
   auto aDeps = getAllWriteDependencies(aReads);
 
-  return aDeps.count(inputAccess) != 0;
+  return aDeps.contains(inputAccess);
 }
 
 bool MemDependencyChecker::dependsIndirectly(const BufPtr& O, const BufPtr& I) {
@@ -446,7 +446,7 @@ bool MemDependencyChecker::dependsIndirectly(
 
   DependencySet dependencies;
   getDependencyChain(A, dependencies);
-  if (dependencies.count(B) == 0) {
+  if (!dependencies.contains(B)) {
     return false;
   }
 
@@ -749,7 +749,7 @@ void MemDependencyChecker::visit(const ForPtr& v) {
     // index expr must depend on the loop var in some way to have a stride.
     for (const auto i : c10::irange(indices.size())) {
       VarFinder vf;
-      if (vf.find(indices[i]).count(var) == 0) {
+      if (!vf.find(indices[i]).contains(var)) {
         loopIndicesStride[i] = immLike(indices[i], 0);
       } else {
         // If we've previously swapped the start and end of this bound, we
@@ -837,7 +837,7 @@ void MemDependencyChecker::visit(const ForPtr& v) {
     }
 
     // Vars that don't carry outside this scope can't have loop self dependence.
-    if (local_intermediates.count(info->var())) {
+    if (local_intermediates.contains(info->var())) {
       continue;
     }
 
@@ -1114,7 +1114,7 @@ void MemDependencyChecker::visit(const LetPtr& v) {
   lastStmt_ = last;
 
   VarPtr var = v->var();
-  if (knownVarBounds_.count(var) != 0) {
+  if (knownVarBounds_.contains(var)) {
     currentScope_->shadowedVarBounds[var] = knownVarBounds_[var];
   }
 
