@@ -246,10 +246,9 @@ class RegionalInductorTests(torch._inductor.test_case.TestCase):
         x = torch.randn(10, requires_grad=True)
         y = torch.randn(10, requires_grad=True)
 
-        # Check that inductor compilation is called 4 times
-        # there will be 2 partitions in the fwd and 2 in the bwd, totalling 4
+        # The equivalent forward partitions share one AOTAutograd cache entry.
         _, codes = run_fw_bw_and_get_code(lambda: opt_mod(x, y))
-        self.assertEqual(len(codes), 4)
+        self.assertEqual(len(codes), 3)
 
     @parametrize("serialize", [False, True])
     def test_invoke_subgraph(self, serialize):
