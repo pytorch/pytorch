@@ -9,58 +9,36 @@ recompiled variant of each -- into a single serializable artifact.
 
 Usage::
 
-    session = torch.compiler.precompile.capture(model, backend="inductor")
-    with session as compiled:
-        for variant in variants:  # every path you want covered
-            with variant:
-                compiled(*args)
-    session.save("snapshots/model.pt")
-
-``example_inputs`` runs the calls for you, under ``torch.no_grad()``, so an
-inference capture with nothing conditional in it is one statement, and
-``invariants`` writes a readable report of what the capture established::
-
-    with torch.compiler.precompile.capture(
-        model,
+    python_code, cache = torch.compiler.precompile(
+        step,  # e.g. lambda model, x: model(x)
         backend="inductor",
-        example_inputs=[(x1,), (x2,)],
-        invariants="model.invariants",
-    ) as compiled:
-        pass
-
-Calls in the block body run in the caller's grad mode rather than under
-no_grad, so a training capture -- one that calls ``.backward()`` -- goes there
-rather than in ``example_inputs``, and passing one call both ways compiles it
-twice, once per grad mode.
-
-Live capture retains every runtime guard so later examples trigger the same
-recompilations as ordinary ``torch.compile``. ``guard_filter_fn`` applies only
-to the serialized copy. If serialization drops a configuration-dependent guard,
-``save()`` refuses by default rather than writing variants whose dispatch would
-be ambiguous after load.
-
-Per frame, that report separates the guards that held in EVERY compiled variant
-from the ones that differed. The first set are the preconditions the artifact is
-only valid under -- a call violating one cannot be served by any graph in it --
-and each is marked enforced or dropped, so a precondition nothing rechecks at
-load is visible rather than implied. The second set is what tells the compiled
-graphs apart. Intersection is per frame because guards from different frames are
-not comparable: the entry frame guards its arguments, a resume frame guards
-whatever crossed the break. See ``PrecompileSession.invariants``.
-
-Both path kwargs name a FILE and write exactly it, creating parent directories:
-``snapshots/invariants.txt`` is a text file you can commit and diff, and
-``save("snapshots/model.pt")`` is the artifact itself, handed straight back to
-``precompile_load``. That is deliberately unlike ``DiskDynamoStore``, whose path
-is a directory it fills, because a content-addressed cache owns its layout while
-an artifact you name is a file you move around.
+        example_inputs=[(model, x1), (model, x2)],
+    )
 
     # later, in a fresh process
-    compiled = torch.compiler.precompile.load_package(
-        model, path, backend="inductor"
-    )
-    with torch.no_grad(), torch.compiler.precompile.serving():
-        compiled(*args)
+    compiled = torch.compiler.precompile.load(python_code, cache)
+    with compiled, torch.no_grad():
+        compiled(model, x1)
+
+The examples ARE the capture: each one is run for you and every frame, break
+continuation and guarded variant it exercises is recorded. There is no manual
+capture block -- driving the calls yourself is not part of the public surface.
+
+Calls run under ``torch.no_grad()``. ``training=True`` runs them with grad
+enabled and lowers the backward eagerly instead, so the artifact carries one
+and a served output can be backpropagated. No loss is needed for that: the
+joint trace synthesizes tangents from the forward outputs' own metadata.
+
+Live capture retains every runtime guard, so later examples trigger the same
+recompilations as ordinary ``torch.compile``. ``guard_filter_fn`` applies only
+to the serialized copy. If serialization drops a configuration-dependent guard,
+the artifact is refused by default rather than written with variants whose
+dispatch would be ambiguous after load. ``invariants`` writes a readable report
+that separates, per frame, the guards holding in EVERY variant from the ones
+that differed: the first are preconditions the artifact is only valid under,
+the second are what tell its graphs apart. Guards from different frames are not
+comparable -- an entry frame guards its arguments, a resume frame guards
+whatever crossed the break -- so the intersection is per frame.
 
 Capture is by execution: a resume function only exists once the frame ahead of
 it has actually run, so every variant must be exercised. Whatever you do not
@@ -70,17 +48,16 @@ call that raises marks the session incomplete even if caller code catches it.
 
 Know these before relying on an artifact in production:
 
-* Capture inference artifacts under ``torch.no_grad()`` or
-  ``torch.inference_mode()``. With ``backend="inductor"`` and parameters that
-  require grad, AOTAutograd only records a bundled backend once the BACKWARD
-  compiles, so a forward-only capture with grad enabled -- the default, and what
-  ``model.eval()`` still leaves you in -- records no backends and cannot be
-  saved. Capturing a training step that calls ``.backward()`` works too.
+* An inference artifact is the default: examples run under ``torch.no_grad()``.
+  For a training artifact pass ``training=True``, which traces with grad on and
+  lowers the backward eagerly -- without it, AOTAutograd defers the backward to
+  the first ``.backward()`` call, so a grad-enabled capture that never makes one
+  records no backends and cannot be written.
 * A non-tensor argument, and any value that crosses a graph break, is guarded
   by equality, so an int/bool/str argument or a break coming from ``.item()``
   yields an artifact that only serves calls reproducing those exact values.
   ``summary().wont_generalize`` lists them; exercise every value you need to
-  serve inside the capture block, or expect poor coverage on new data.
+  serve through ``example_inputs``, or expect poor coverage on new data.
   ``dynamic=True`` helps with shapes but not with pinned values.
 * Identity guards cannot be serialized, so precompiling gives up on noticing
   that a guarded object was rebound. ``summary().dropped_guards`` is the
@@ -114,11 +91,10 @@ Know these before relying on an artifact in production:
 This wraps CompilePackage, which is the low-level component and is not meant to
 be used directly.
 
-The public surface is ``torch.compiler.precompile`` with ``example_inputs``,
-``torch.compiler.precompile.capture``,
-``torch.compiler.precompile.load_package``, and
-``torch.compiler.precompile.serving``. The helpers in this module implement that
-surface and remain internal. The positional ``torch.compiler.precompile`` form
+The public surface is ``torch.compiler.precompile`` -- with ``example_inputs``
+for this multi-graph form -- and ``torch.compiler.precompile.load``. The
+helpers in this module, including the capture session, implement that surface
+and remain internal. The positional ``torch.compiler.precompile`` form
 produces a self-contained Python source artifact from one example call. Both are distinct from
 ``torch._dynamo.config.caching_precompile``, which caches ``torch.compile``
 artifacts transparently without an explicit capture block.
@@ -184,8 +160,8 @@ _ALLOW_EMPTY_GRAPHS = torch._dynamo.config._make_closure_patcher(
 )
 
 
-_CAPTURE_CONFIG_STATE: ContextVar[tuple[int, tuple[bool, bool] | None]] = ContextVar(
-    "precompile_capture_config_state", default=(0, None)
+_CAPTURE_CONFIG_STATE: ContextVar[tuple[int, tuple[bool, bool, bool] | None]] = (
+    ContextVar("precompile_capture_config_state", default=(0, None))
 )
 
 # Not a public surface -- see the module docstring. This exists so `from ...
@@ -204,16 +180,24 @@ __all__ = [
 
 
 @contextlib.contextmanager
-def _capture_config() -> Iterator[None]:
+def _capture_config(training: bool = False) -> Iterator[None]:
     depth, prior = _CAPTURE_CONFIG_STATE.get()
     dynamo_config: Any = torch._dynamo.config
     if depth == 0:
         prior = (
             functorch_config.bundled_autograd_cache,
             dynamo_config.allow_empty_graphs,
+            functorch_config.force_non_lazy_backward_lowering,
         )
         functorch_config.bundled_autograd_cache = True
         dynamo_config.allow_empty_graphs = True
+        if training:
+            # AOTAutograd lowers the backward on the first .backward() call, so
+            # a capture that never calls one records a forward and nothing else.
+            # Lower it eagerly instead: the joint trace already synthesizes
+            # tangents from the forward outputs' metadata, so the backward graph
+            # exists without the caller having to produce a loss.
+            functorch_config.force_non_lazy_backward_lowering = True
     _CAPTURE_CONFIG_STATE.set((depth + 1, prior))
     try:
         yield
@@ -225,6 +209,7 @@ def _capture_config() -> Iterator[None]:
         if depth == 0:
             functorch_config.bundled_autograd_cache = prior[0]
             dynamo_config.allow_empty_graphs = prior[1]
+            functorch_config.force_non_lazy_backward_lowering = prior[2]
             _CAPTURE_CONFIG_STATE.set((0, None))
         else:
             _CAPTURE_CONFIG_STATE.set((depth, prior))
@@ -1093,6 +1078,7 @@ class PrecompileSession:
         dynamic: bool | None = None,
         example_inputs: Sequence[ExampleInput | tuple[object, ...]] | None = None,
         invariants: str | None = None,
+        training: bool = False,
     ) -> None:
         # Not `example_inputs or ()`: truth-testing the caller's object turns the
         # likeliest mistake -- passing the tensors themselves instead of a
@@ -1118,6 +1104,10 @@ class PrecompileSession:
         self._fn = fn
         self._backend = backend
         self._custom_guard_filter = guard_filter_fn is not None
+        # A training capture traces with grad on and lowers the backward
+        # eagerly, so the artifact carries AOTAutograd's CompiledFunction and
+        # calling .backward() on a served output runs precompiled code.
+        self._training = training
         self._dropped_guards: set[tuple[str, str]] = set()
         self._kept_guards: set[tuple[str, str]] = set()
         self._risky_dropped_guards: set[tuple[str, str]] = set()
@@ -1229,7 +1219,7 @@ class PrecompileSession:
         stack = contextlib.ExitStack()
         # Backends must serialize into the artifact rather than into the
         # process-local inductor cache.
-        stack.enter_context(_capture_config())
+        stack.enter_context(_capture_config(self._training))
         self._stack = stack
         try:
             if self._example_inputs:
@@ -1279,8 +1269,15 @@ class PrecompileSession:
                 for value in tree_leaves((args, kwargs)):
                     if isinstance(value, torch.nn.Module):
                         self._check_module_state(value)
-                with torch.inference_mode(False), torch.no_grad():
-                    self._call(*args, **kwargs)
+                if self._training:
+                    # Grad must be ON: the point of a training capture is that
+                    # AOTAutograd builds its CompiledFunction and the joint
+                    # graph, which it only does when the outputs require grad.
+                    with torch.inference_mode(False), torch.enable_grad():
+                        self._call(*args, **kwargs)
+                else:
+                    with torch.inference_mode(False), torch.no_grad():
+                        self._call(*args, **kwargs)
         except BaseException as e:
             self._record_capture_error(e)
             # A __enter__ that raises never gets its __exit__, so without this
@@ -1817,11 +1814,11 @@ class PrecompileSession:
                 "Precompilation captured graphs but their compiled backends were "
                 "never recorded, so there is nothing to serialize. AOTAutograd only "
                 "records the bundled artifact once the BACKWARD compiles, so a "
-                "forward-only capture with grad enabled -- the default, and what "
-                "model.eval() still leaves you in -- records nothing. Capture under "
-                "torch.no_grad() or torch.inference_mode() for an inference "
-                "artifact, or run .backward() inside the capture block for a "
-                "training one."
+                "forward-only capture with grad enabled records nothing on its own. "
+                "Pass training=True to lower the backward eagerly (the joint "
+                "trace synthesizes tangents, so no loss is needed), capture "
+                "under torch.no_grad()/torch.inference_mode() for an inference "
+                "artifact, or run .backward() inside the capture block."
             ) from e
         log.info("precompile: saved %s to %s", summary, path)
         return summary
@@ -1854,11 +1851,11 @@ class PrecompileSession:
                 "Precompilation captured graphs but their compiled backends were "
                 "never recorded, so there is nothing to serialize. AOTAutograd only "
                 "records the bundled artifact once the BACKWARD compiles, so a "
-                "forward-only capture with grad enabled -- the default, and what "
-                "model.eval() still leaves you in -- records nothing. Capture under "
-                "torch.no_grad() or torch.inference_mode() for an inference "
-                "artifact, or run .backward() inside the capture block for a "
-                "training one."
+                "forward-only capture with grad enabled records nothing on its own. "
+                "Pass training=True to lower the backward eagerly (the joint "
+                "trace synthesizes tangents, so no loss is needed), capture "
+                "under torch.no_grad()/torch.inference_mode() for an inference "
+                "artifact, or run .backward() inside the capture block."
             )
         return {str(b): collected[b] for b in entry.backend_ids}
 
@@ -2069,6 +2066,7 @@ def precompile_capture(
     dynamic: bool | None = None,
     example_inputs: Sequence[ExampleInput | tuple[object, ...]] | None = None,
     invariants: str | None = None,
+    training: bool = False,
 ) -> PrecompileSession:
     r"""Begin capturing ``fn`` into a multi-graph artifact.
 
@@ -2100,6 +2098,7 @@ def precompile_capture(
         dynamic=dynamic,
         example_inputs=example_inputs,
         invariants=invariants,
+        training=training,
     )
 
 

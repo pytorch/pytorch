@@ -23,11 +23,10 @@ dynamic shapes, and a ``decompositions`` table all work with it. See the ``trace
 the bottom of Note [precompile programming model].
 
 For a computation with graph breaks, or to retain several guarded/recompiled variants,
-pass a sequence of calls through ``example_inputs=[(...,), (...,)]``. That form returns
-an execution-driven session whose ``save()`` writes a package reloaded with
-``torch.compiler.precompile.load``. ``torch.compiler.precompile.capture`` remains
-available when the calls must be made manually, such as a training capture. The positional
-form above remains the self-contained source-artifact path and requires one full Dynamo
+pass a sequence of calls through ``example_inputs=[(...,), (...,)]``. That form runs the
+calls for you and returns the same ``(python_code, cache)`` pair, reloaded with
+``torch.compiler.precompile.load``; add ``training=True`` for an artifact that carries a
+backward. The positional form above remains the self-contained source-artifact path and requires one full Dynamo
 graph.
 
 Multi-graph capture keeps all live guards while running examples, then filters only the
@@ -282,8 +281,8 @@ it.
 #
 # Scope and differences from make_fx: the source-artifact call needs one transformed
 # bytecode and therefore still requires a single Dynamo graph. A graph-breaking fn raises
-# a PrecompileError pointing at ``torch.compiler.precompile.capture``, whose execution-
-# driven package preserves every graph-break continuation, guard, and recompiled variant.
+# a PrecompileError pointing at ``example_inputs``, whose execution-driven capture
+# preserves every graph-break continuation, guard, and recompiled variant.
 # The source-artifact path does NOT check Dynamo's guards at
 # runtime, NOR does
 # it reproduce the make_fx drivers' upfront runtime validation (the param/buffer structural
@@ -336,7 +335,6 @@ from torch import Tensor
 from torch.compiler._precompile_types import (
     ExampleInput,
     FrameInvariants,
-    GuardFact,
     PrecompileSummary,
 )
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -1940,7 +1938,7 @@ def _capture_dynamo(
     ``torch.autograd.grad`` rather than graph-breaking, then CAPTURES TWICE when needed so
     the accumulating form of the ``.grad`` update is the one baked (Note [precompile dynamo
     training grad accumulation]). Other graph-breaking Python still raises a
-    PrecompileError pointing at ``torch.compiler.precompile.capture``.
+    PrecompileError pointing at ``example_inputs``.
     """
     # get_traced_fn refuses anything that is not a function, bound method or
     # nn.Module -- a functools.partial, a callable object -- and Dynamo reaches
@@ -2057,8 +2055,7 @@ def _capture_dynamo(
         raise PrecompileError(
             "precompile tracer='dynamo' could not capture fn as a single full graph "
             f"({reason}). For graph-breaking code, pass example_inputs=[(...,), ...] "
-            "to torch.compiler.precompile, or use torch.compiler.precompile.capture "
-            "when the calls must be made manually; otherwise use tracer='make_fx' for "
+            "to torch.compiler.precompile; otherwise use tracer='make_fx' for "
             "a single non-strict trace."
         ) from e
     except GuardOnDataDependentSymNode as e:
@@ -3705,6 +3702,21 @@ class PrecompiledModule:
         return buf.getvalue()
 
 
+def _capture_session(fn, **kwargs):
+    """Start an internal multi-graph capture, mapping package errors to ours.
+
+    precompile() drives the capture itself -- there is no public session -- so
+    this exists to keep the error translation in one place.
+    """
+    from torch._dynamo.exc import PackageError
+    from torch._dynamo.precompile_package import precompile_capture
+
+    try:
+        return precompile_capture(fn, **kwargs)
+    except PackageError as e:
+        raise PrecompileError(str(e)) from e
+
+
 def _make_inlined_forward(python_code: str) -> Callable[..., object]:
     """Fallback: execute the self-contained python string (JITs kernels).
 
@@ -3745,7 +3757,6 @@ class _PrecompileApi:
     # The error type raised by precompile, reachable as
     # ``torch.compiler.precompile.PrecompileError``.
     PrecompileError = PrecompileError
-    PrecompileSession = PrecompileSession
 
     # One capture call carrying keyword arguments, for ``example_inputs``. A
     # plain tuple there is positional args; this is what the TypeError raised
@@ -3781,6 +3792,7 @@ class _PrecompileApi:
         require_complete: bool = True,
         require_no_risky_drops: bool = True,
         require_no_dropped_guards: bool = False,
+        training: bool = False,
     ) -> tuple[str, bytes]:
         """Ahead-of-time precompile ``fn`` against example inputs.
 
@@ -3857,8 +3869,7 @@ class _PrecompileApi:
           graph-break), and the artifact accumulates the resulting parameter gradients onto
           the runtime model exactly like eager. This source-artifact path requires one full
           graph; for graph breaks and multiple guarded/recompiled variants, pass
-          ``example_inputs=[(...,), ...]`` or use ``torch.compiler.precompile.capture``
-          when the calls must be made manually.
+          ``example_inputs=[(...,), ...]``.
           Dynamo's runtime guards are not embedded, and -- UNLIKE the ``make_fx`` tracer --
           the dynamo driver does NOT re-validate the runtime model/inputs at load: it does
           not reproduce the ``make_fx`` driver's param/buffer structural check (invariant 2)
@@ -3988,14 +3999,17 @@ class _PrecompileApi:
                     f"has no tracer choice; drop tracer={tracer!r}. It applies only to "
                     "the positional source-artifact path."
                 )
-            session = self.capture(
-                fn,
-                backend=backend,
-                guard_filter_fn=guard_filter_fn,
-                recompile_limit=recompile_limit,
-                dynamic=dynamic,
-                example_inputs=example_inputs,
-                invariants=invariants,
+            session = PrecompileSession(
+                _capture_session(
+                    fn,
+                    backend=backend,
+                    guard_filter_fn=guard_filter_fn,
+                    recompile_limit=recompile_limit,
+                    dynamic=dynamic,
+                    example_inputs=example_inputs,
+                    invariants=invariants,
+                    training=training,
+                )
             )
             with session:
                 pass
@@ -4033,80 +4047,6 @@ class _PrecompileApi:
         # sha256 over exactly the bytes returned to the caller (a matched pair loads).
         python_code = compiled.to_python_code()
         return python_code, compiled.to_cache_bytes(python_code)
-
-    def capture(
-        self,
-        fn: Callable[..., object],
-        *,
-        backend: str = "inductor",
-        guard_filter_fn: Callable[[Sequence[Any]], Sequence[bool]] | None = None,
-        recompile_limit: int = 256,
-        dynamic: bool | None = None,
-        example_inputs: Sequence[ExampleInput | tuple[object, ...]] | None = None,
-        invariants: str | None = None,
-    ) -> PrecompileSession:
-        r"""capture(fn, *, backend="inductor", guard_filter_fn=None, recompile_limit=256, dynamic=None, example_inputs=None, invariants=None) -> PrecompileSession
-
-        Begin an execution-driven multi-graph precompile capture.
-
-        Use this form when calls must be made manually. The shorter
-        ``precompile(fn, example_inputs=[...])`` form runs known inference examples for you.
-        Both preserve Dynamo graph breaks, resume continuations, and every recompiled
-        variant exercised by the supplied calls. The yielded callable is valid only inside
-        the capture block, and the session cannot be re-entered after that block exits.
-
-        Capture is by execution: call the yielded function on every path and specialization
-        the artifact must serve. ``example_inputs`` can make positional-only inference
-        calls automatically under ordinary ``torch.no_grad()``; calls in the block use the
-        ambient grad mode, so wrap forward-only inference calls in ``torch.no_grad()``.
-        Automatic inputs and an ``nn.Module``'s parameters/buffers must not be inference
-        tensors. Live capture retains all guards. The filter controls only which guards are
-        serialized, and ``save()`` rejects the risky ones by default. A complete
-        summary covers only successful calls that actually ran; unexercised paths remain
-        absent. Any captured call that raises marks the session incomplete, even when the
-        exception is caught inside the block.
-
-        Args:
-            fn (Callable): callable to capture.
-            backend (str, optional): ``torch.compile`` backend. Default: ``"inductor"``.
-            guard_filter_fn (Callable, optional): receives a sequence of guard entries and
-              returns one boolean per entry, where ``True`` serializes the guard. Live
-              capture always retains it. The default drops identity guards that cannot be
-              serialized. ``save()`` refuses only the RISKY drops by default, and every
-              custom-filter drop counts as risky; ``require_no_dropped_guards=True``
-              refuses all of them.
-              Default: ``None``.
-            recompile_limit (int, optional): maximum variants captured per frame. Default:
-              ``256``. This overrides a lower ambient accumulated-recompile limit for the
-              capture.
-            dynamic (bool, optional): dynamic-shape policy forwarded to ``torch.compile``.
-              Default: ``None``.
-            example_inputs (Sequence[tuple], optional): positional-argument tuples run
-              automatically under ``torch.no_grad()``. Inference tensors are rejected;
-              create automatic inputs outside inference mode. Default: ``None``.
-            invariants (str, optional): file receiving the invariant report after a
-              successful capture. Default: ``None``.
-
-        Returns:
-            PrecompileSession: session whose context manager yields the callable to
-            exercise and whose ``save()`` method writes the artifact.
-        """
-        from torch._dynamo.exc import PackageError
-        from torch._dynamo.precompile_package import precompile_capture
-
-        try:
-            session = precompile_capture(
-                fn,
-                backend=backend,
-                guard_filter_fn=guard_filter_fn,
-                recompile_limit=recompile_limit,
-                dynamic=dynamic,
-                example_inputs=example_inputs,
-                invariants=invariants,
-            )
-        except PackageError as e:
-            raise PrecompileError(str(e)) from e
-        return PrecompileSession(session)
 
     def load(
         self,
@@ -4278,12 +4218,6 @@ precompile.__doc__ = _PrecompileApi.__call__.__doc__
 # underlying functions.
 PrecompileError.__module__ = "torch.compiler"
 PrecompileError.__qualname__ = "precompile.PrecompileError"
-PrecompileSession.__module__ = "torch.compiler"
 PrecompiledCallable.__module__ = "torch.compiler"
-_PrecompileApi.FrameInvariants = FrameInvariants
-_PrecompileApi.GuardFact = GuardFact
-_PrecompileApi.PrecompileSummary = PrecompileSummary
 _PrecompileApi.load.__module__ = "torch.compiler"
 _PrecompileApi.load.__qualname__ = "precompile.load"
-_PrecompileApi.capture.__module__ = "torch.compiler"
-_PrecompileApi.capture.__qualname__ = "precompile.capture"

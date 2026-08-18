@@ -112,6 +112,24 @@ def _precompile_closure_entry_factory():
     return entry
 
 
+def _precompile_capture(fn, **kwargs):
+    """What the removed public ``precompile.capture`` did, for tests that need
+    to drive a capture directly rather than through ``precompile()``."""
+    from torch._precompile import _capture_session, PrecompileSession
+
+    return PrecompileSession(_capture_session(fn, **kwargs))
+
+
+class _PrecompileTrainMod(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.a = torch.nn.Linear(8, 8)
+        self.b = torch.nn.Linear(8, 8)
+
+    def forward(self, x):
+        return torch.relu(self.b(torch.relu(self.a(x))))
+
+
 def _precompile_call_model(model, x):
     return model(x)
 
@@ -1111,30 +1129,30 @@ class TestPrecompile(TestCase):
         self.assertFalse(hasattr(torch, "precompile"))
         self.assertTrue(callable(torch.compiler.precompile))
         self.assertTrue(callable(torch.compiler.precompile.load))
-        self.assertTrue(callable(torch.compiler.precompile.capture))
         self.assertIs(torch.compiler.precompile.PrecompileError, PrecompileError)
+        # Driving a capture by hand is not public: precompile() runs the
+        # examples itself, so nothing returns a session and these types are
+        # not reachable.
         for name in (
+            "capture",
             "PrecompileSession",
             "PrecompileSummary",
             "FrameInvariants",
             "GuardFact",
         ):
-            self.assertIn(name, torch.compiler.__all__)
-            self.assertIs(
-                getattr(torch.compiler.precompile, name, None),
-                getattr(torch.compiler, name),
-            )
+            self.assertFalse(hasattr(torch.compiler.precompile, name))
+            self.assertNotIn(name, torch.compiler.__all__)
         # The public location: test_public_bindings.test_correct_module_names also
         # enforces this for every torch.compiler.__all__ member.
         self.assertEqual(torch.compiler.precompile.__module__, "torch.compiler")
 
-    @parametrize("name", ["load", "capture"])
+    @parametrize("name", ["load"])
     def test_precompile_method_public_location(self, name):
         method = getattr(torch.compiler.precompile, name)
         self.assertEqual(method.__module__, "torch.compiler")
         self.assertEqual(method.__qualname__, f"precompile.{name}")
 
-    @parametrize("name", ["capture"])
+    @parametrize("name", ["load"])
     def test_precompile_method_type_hints_resolve(self, name):
         typing.get_type_hints(getattr(torch.compiler.precompile, name))
 
@@ -1148,38 +1166,36 @@ class TestPrecompile(TestCase):
 
     @parametrize("name", ["artifact", "summary", "invariants", "write_invariants"])
     def test_precompile_session_method_is_documented(self, name):
-        session_type = typing.get_type_hints(torch.compiler.precompile.capture)[
-            "return"
-        ]
-        self.assertIsNotNone(inspect.getdoc(getattr(session_type, name)))
+        from torch._precompile import PrecompileSession
+
+        self.assertIsNotNone(inspect.getdoc(getattr(PrecompileSession, name)))
 
     def test_precompile_session_save_documents_guard_requirements(self):
-        session_type = typing.get_type_hints(torch.compiler.precompile.capture)[
-            "return"
-        ]
-        doc = inspect.getdoc(session_type.artifact)
+        from torch._precompile import PrecompileSession
+
+        doc = inspect.getdoc(PrecompileSession.artifact)
         self.assertIn("require_no_risky_drops", doc)
         self.assertIn("require_no_dropped_guards", doc)
         self.assertTrue(
-            inspect.signature(session_type.artifact)
+            inspect.signature(PrecompileSession.artifact)
             .parameters["require_no_risky_drops"]
             .default
         )
 
     def test_precompile_public_result_types(self):
-        session_type = typing.get_type_hints(torch.compiler.precompile.capture)[
-            "return"
-        ]
-        self.assertIs(session_type, torch.compiler.PrecompileSession)
-        self.assertIs(
-            typing.get_type_hints(session_type.summary)["return"],
-            torch.compiler.PrecompileSummary,
+        # The public surface is the pair and the loader; the session types it
+        # is built from are internal.
+        from torch._precompile import PrecompileSession
+
+        self.assertEqual(
+            typing.get_type_hints(torch.compiler.precompile.__call__)["return"],
+            tuple[str, bytes],
         )
         self.assertEqual(
-            typing.get_type_hints(session_type.invariants)["return"],
-            tuple[torch.compiler.FrameInvariants, ...],
+            typing.get_type_hints(PrecompileSession.artifact)["return"],
+            tuple[str, bytes],
         )
-        params = inspect.signature(session_type.artifact).parameters
+        params = inspect.signature(PrecompileSession.artifact).parameters
         # The risky-drop lint is the rail that is ON by default. Requiring NO
         # dropped guards at all is not, and must not be: every model drops the
         # identity guards precompile cannot serialize, so it would refuse
@@ -1187,11 +1203,9 @@ class TestPrecompile(TestCase):
         self.assertTrue(params["require_no_risky_drops"].default)
         self.assertFalse(params["require_no_dropped_guards"].default)
 
-    @parametrize("name", ["capture"])
-    def test_precompile_package_method_documents_guard_filter(self, name):
-        doc = inspect.getdoc(getattr(torch.compiler.precompile, name))
+    def test_precompile_documents_guard_filter(self):
+        doc = inspect.getdoc(torch.compiler.precompile)
         self.assertIn("guard_filter_fn", doc)
-        self.assertIn("one boolean per", doc)
 
     def test_backend_invalid_raises(self):
         a, b = torch.randn(4, 4), torch.randn(4, 4)
@@ -2355,7 +2369,7 @@ class TestPrecompile(TestCase):
     def test_multi_graph_capture_graph_breaks_and_recompiles(self):
         inputs = [torch.randn(*shape) for shape in ((4, 8), (5, 8), (6, 8))]
         expected = [_precompile_multi_graph(x) for x in inputs]
-        session = torch.compiler.precompile.capture(
+        session = _precompile_capture(
             _precompile_multi_graph, backend="eager", dynamic=False
         )
         with session as compiled:
@@ -2366,7 +2380,7 @@ class TestPrecompile(TestCase):
     def test_multi_graph_capture_from_precompile_example_inputs(self):
         inputs = [torch.randn(*shape) for shape in ((4, 8), (5, 8), (6, 8))]
         expected = [_precompile_multi_graph(x) for x in inputs]
-        session = torch.compiler.precompile.capture(
+        session = _precompile_capture(
             _precompile_multi_graph,
             dynamic=False,
             example_inputs=[(x,) for x in inputs],
@@ -2379,7 +2393,7 @@ class TestPrecompile(TestCase):
 
     def test_multi_graph_capture_keeps_guards_while_collecting_variants(self):
         x = torch.linspace(-1, 1, 4)
-        session = torch.compiler.precompile.capture(
+        session = _precompile_capture(
             _precompile_multi_graph_callable, backend="eager", dynamic=False
         )
         with session as compiled:
@@ -2391,7 +2405,7 @@ class TestPrecompile(TestCase):
         self.assertTrue(summary.complete)
 
         torch._dynamo.reset()
-        session = torch.compiler.precompile.capture(
+        session = _precompile_capture(
             _precompile_multi_graph_callable,
             backend="eager",
             dynamic=False,
@@ -2409,7 +2423,7 @@ class TestPrecompile(TestCase):
         def drop_all(entries):
             return [False] * len(entries)
 
-        session = torch.compiler.precompile.capture(
+        session = _precompile_capture(
             _precompile_multi_graph_callable,
             backend="eager",
             dynamic=False,
@@ -2428,7 +2442,7 @@ class TestPrecompile(TestCase):
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_multi_graph_capture_keeps_guards_under_caching_precompile(self):
         x = torch.linspace(-1, 1, 4)
-        session = torch.compiler.precompile.capture(
+        session = _precompile_capture(
             _precompile_multi_graph_callable, backend="eager", dynamic=False
         )
         with session as compiled:
@@ -2442,7 +2456,7 @@ class TestPrecompile(TestCase):
         PrecompileContext.clear()
         try:
             x = torch.randn(2, 8)
-            session = torch.compiler.precompile.capture(
+            session = _precompile_capture(
                 _precompile_multi_graph, backend="eager", dynamic=False
             )
             with session as compiled:
@@ -2482,7 +2496,7 @@ class TestPrecompile(TestCase):
 
     def test_multi_graph_failed_capture_is_incomplete(self):
         x = torch.randn(4, 8)
-        session = torch.compiler.precompile.capture(
+        session = _precompile_capture(
             _precompile_multi_graph, backend="eager", dynamic=False
         )
         with self.assertRaisesRegex(KeyError, "capture failed"):
@@ -2502,7 +2516,7 @@ class TestPrecompile(TestCase):
 
     def test_multi_graph_failed_automatic_example_is_incomplete(self):
         x = torch.randn(4)
-        session = torch.compiler.precompile.capture(
+        session = _precompile_capture(
             _precompile_raises_on_flag,
             backend="eager",
             dynamic=False,
@@ -2562,7 +2576,7 @@ class TestPrecompile(TestCase):
         import torch._functorch.config as functorch_config
 
         before = functorch_config.bundled_autograd_cache
-        session = torch.compiler.precompile.capture(
+        session = _precompile_capture(
             _precompile_multi_graph,
             backend="definitely_missing_backend",
             dynamic=False,
@@ -2585,12 +2599,8 @@ class TestPrecompile(TestCase):
             functorch_config.patch("bundled_autograd_cache", False),
             torch._dynamo.config.patch(allow_empty_graphs=False),
         ):
-            first = torch.compiler.precompile.capture(
-                _precompile_multi_graph, backend="eager"
-            )
-            second = torch.compiler.precompile.capture(
-                _precompile_multi_graph, backend="eager"
-            )
+            first = _precompile_capture(_precompile_multi_graph, backend="eager")
+            second = _precompile_capture(_precompile_multi_graph, backend="eager")
             first.__enter__()
             second.__enter__()
             first.__exit__(None, None, None)
@@ -2611,9 +2621,7 @@ class TestPrecompile(TestCase):
         states = []
 
         def run(first):
-            session = torch.compiler.precompile.capture(
-                _precompile_single_graph, backend="eager"
-            )
+            session = _precompile_capture(_precompile_single_graph, backend="eager")
             try:
                 session.__enter__()
                 (first_entered if first else second_entered).set()
@@ -2668,7 +2676,7 @@ class TestPrecompile(TestCase):
             self.assertFalse(torch._dynamo.config.allow_empty_graphs)
 
     def test_multi_graph_worker_thread_inherits_capture_behavior(self):
-        session = torch.compiler.precompile.capture(
+        session = _precompile_capture(
             _precompile_identity, backend="eager", dynamic=False
         )
         errors = []
@@ -2706,7 +2714,7 @@ class TestPrecompile(TestCase):
 
         backend_name = f"precompile_exit_waits_{id(entered)}"
         register_backend(blocking_backend, name=backend_name)
-        session = torch.compiler.precompile.capture(
+        session = _precompile_capture(
             _precompile_single_graph, backend=backend_name, dynamic=False
         )
         compiled = session.__enter__()
@@ -2743,7 +2751,7 @@ class TestPrecompile(TestCase):
 
     def test_multi_graph_caught_call_failure_is_incomplete(self):
         x = torch.randn(4)
-        session = torch.compiler.precompile.capture(
+        session = _precompile_capture(
             _precompile_raises_on_flag, backend="eager", dynamic=False
         )
         with session as compiled:
@@ -2758,7 +2766,7 @@ class TestPrecompile(TestCase):
     def test_multi_graph_session_releases_examples_and_failure_tracebacks(self):
         example = torch.randn(1024)
         example_ref = weakref.ref(example)
-        completed = torch.compiler.precompile.capture(
+        completed = _precompile_capture(
             _precompile_multi_graph,
             backend="eager",
             dynamic=False,
@@ -2774,7 +2782,7 @@ class TestPrecompile(TestCase):
 
         failed = torch.randn(1024)
         failed_ref = weakref.ref(failed)
-        session = torch.compiler.precompile.capture(
+        session = _precompile_capture(
             _precompile_raises_on_flag, backend="eager", dynamic=False
         )
         with session as compiled:
@@ -2787,7 +2795,7 @@ class TestPrecompile(TestCase):
 
     def test_multi_graph_capture_callable_is_scoped_to_session(self):
         x = torch.randn(4, 8)
-        session = torch.compiler.precompile.capture(
+        session = _precompile_capture(
             _precompile_multi_graph, backend="eager", dynamic=False
         )
         with session as compiled:
@@ -2806,7 +2814,7 @@ class TestPrecompile(TestCase):
         x = torch.randn(3, 8)
         with torch.no_grad():
             expected = model(x)
-        session = torch.compiler.precompile.capture(
+        session = _precompile_capture(
             _precompile_call_model,
             backend=backend,
             dynamic=False,
@@ -2992,6 +3000,54 @@ class TestPrecompile(TestCase):
             # Served, not recompiled: the whole point of installing.
             self.assertEqual(counters["stats"]["unique_graphs"], 0)
 
+    @parametrize("backend", ("eager", "inductor"))
+    def test_training_capture_serves_a_backward_without_a_loss(self, backend):
+        # The capture never sees a loss and never calls .backward(). The joint
+        # trace synthesizes tangents from the forward outputs, and the backward
+        # is lowered eagerly, so a served output is still wired to
+        # AOTAutograd's CompiledFunction and .backward() runs precompiled code.
+        model = _PrecompileTrainMod()
+        xs = [torch.randn(n, 8) for n in (4, 6)]
+        expected = []
+        for x in xs:
+            model.zero_grad(set_to_none=True)
+            _precompile_call_model(model, x).sum().backward()
+            expected.append([p.grad.clone() for p in model.parameters()])
+        model.zero_grad(set_to_none=True)
+
+        code, cache = torch.compiler.precompile(
+            _precompile_call_model,
+            backend=backend,
+            dynamic=False,
+            example_inputs=[(model, x) for x in xs],
+            training=True,
+        )
+        torch._dynamo.reset()
+        loaded = torch.compiler.precompile.load(code, cache)
+        for x, grads in zip(xs, expected):
+            model.zero_grad(set_to_none=True)
+            out = loaded(model, x)
+            self.assertTrue(out.requires_grad)
+            out.sum().backward()
+            for want, param in zip(grads, model.parameters()):
+                self.assertEqual(want, param.grad)
+
+    def test_inference_capture_stays_grad_free(self):
+        # The default is unchanged: examples run under no_grad, so a served
+        # output carries no autograd history.
+        model = _PrecompileTrainMod()
+        x = torch.randn(4, 8)
+        code, cache = torch.compiler.precompile(
+            _precompile_call_model,
+            backend="eager",
+            dynamic=False,
+            example_inputs=[(model, x)],
+        )
+        torch._dynamo.reset()
+        loaded = torch.compiler.precompile.load(code, cache)
+        with torch.no_grad():
+            self.assertFalse(loaded(model, x).requires_grad)
+
     def test_multi_graph_installed_entry_with_closure_is_refused(self):
         # An installed artifact rebuilds the entry from its code object, and
         # types.FunctionType cannot restore a closure, so the capture is refused
@@ -3045,9 +3101,7 @@ class TestPrecompile(TestCase):
             torch.compiler.precompile(lambda: None, backend="eager", dynamic=False)
 
     def test_multi_graph_public_errors_are_precompile_errors(self):
-        session = torch.compiler.precompile.capture(
-            _precompile_multi_graph, backend="eager"
-        )
+        session = _precompile_capture(_precompile_multi_graph, backend="eager")
         with session:
             pass
         with self.assertRaisesRegex(PrecompileError, "captured no compiled code"):
@@ -3067,7 +3121,7 @@ class TestPrecompile(TestCase):
             )
 
     def test_multi_graph_manual_keep_all_filter_uses_public_error(self):
-        session = torch.compiler.precompile.capture(
+        session = _precompile_capture(
             _precompile_multi_graph,
             backend="eager",
             dynamic=False,
@@ -3078,7 +3132,7 @@ class TestPrecompile(TestCase):
                 compiled(torch.randn(2, 8))
 
     def test_multi_graph_capture_exit_wait_interrupt_is_retryable(self):
-        session = torch.compiler.precompile.capture(
+        session = _precompile_capture(
             _precompile_single_graph, backend="eager", dynamic=False
         )
         session.__enter__()
@@ -3100,7 +3154,7 @@ class TestPrecompile(TestCase):
     @torch._dynamo.config.patch(accumulated_recompile_limit=2)
     def test_multi_graph_recompile_limit_overrides_accumulated_limit(self):
         inputs = [torch.randn(n, 8) for n in (2, 3, 4)]
-        session = torch.compiler.precompile.capture(
+        session = _precompile_capture(
             _precompile_multi_graph,
             backend="eager",
             dynamic=False,
@@ -3122,7 +3176,7 @@ class TestPrecompile(TestCase):
             self.assertEqual(warm(x), _precompile_multi_graph(x))
 
         x = torch.randn(4, 8)
-        session = torch.compiler.precompile.capture(
+        session = _precompile_capture(
             _precompile_multi_graph,
             backend="eager",
             dynamic=False,
@@ -3138,7 +3192,7 @@ class TestPrecompile(TestCase):
         self.assertEqual(summary.guarded_codes, 3)
 
     def test_multi_graph_session_is_one_shot(self):
-        session = torch.compiler.precompile.capture(
+        session = _precompile_capture(
             _precompile_single_graph,
             backend="eager",
             dynamic=False,
@@ -3157,7 +3211,7 @@ class TestPrecompile(TestCase):
         from torch._dynamo.types import FrameAction
 
         torch._dynamo.reset()
-        session = torch.compiler.precompile.capture(
+        session = _precompile_capture(
             _precompile_single_graph,
             backend="eager",
             dynamic=False,
@@ -3203,7 +3257,7 @@ class TestPrecompile(TestCase):
         self.assertEqual(ordinary_frame_count(), 2)
         torch._dynamo.reset()
 
-        session = torch.compiler.precompile.capture(
+        session = _precompile_capture(
             _precompile_single_graph, backend="eager", dynamic=None
         )
         with session as compiled:
@@ -3217,7 +3271,7 @@ class TestPrecompile(TestCase):
     def test_multi_graph_round_trip_exercised_empty_resume(self, backend):
         x = torch.arange(3.0)
         expected = [_precompile_empty_resume(x, flag) for flag in (False, True)]
-        session = torch.compiler.precompile.capture(
+        session = _precompile_capture(
             _precompile_empty_resume,
             backend=backend,
             dynamic=False,
@@ -3242,7 +3296,7 @@ class TestPrecompile(TestCase):
         PrecompileContext.clear()
         try:
             x = torch.randn(2, 8)
-            session = torch.compiler.precompile.capture(
+            session = _precompile_capture(
                 _precompile_multi_graph,
                 backend=backend,
                 dynamic=False,
@@ -3274,7 +3328,7 @@ class TestPrecompile(TestCase):
 
         x = torch.randn(3)
         example_input = torch.compiler.precompile.ExampleInput
-        session = torch.compiler.precompile.capture(
+        session = _precompile_capture(
             fn,
             backend="eager",
             dynamic=False,
