@@ -59,6 +59,16 @@ class ReadablePythonWrapperCodegen(PythonWrapperCodegen):
         # @triton.jit def. Spliced at module level it binds kernel_name to the same
         # object async_compile.triton would have returned, so the launch site
         # (KERNEL.run(...)) is unchanged.
+        # The provenance comment leads with "# kernel path: /tmp/torchinductor_.../x.py",
+        # which is where the kernel WOULD have been compiled from. It is defined right
+        # here instead, and pointing a reader at a cache file is the exact confusion this
+        # mode exists to remove. The source-op mapping below it is worth keeping.
+        if metadata:
+            metadata = "\n".join(
+                line
+                for line in metadata.splitlines()
+                if not line.startswith("# kernel path:")
+            )
         self.define_kernel(
             kernel_name,
             src_code,
