@@ -1402,10 +1402,12 @@ Tensor bitwise_right_shift(const Scalar& self, const Tensor& other) {
 }
 
 std::tuple<Tensor, Tensor> divmod(const Scalar& self, const Tensor& other) {
+  // redispatch to Tensor overload
   return at::divmod(wrapped_scalar_tensor(self), other);
 }
 
 std::tuple<Tensor, Tensor> divmod(const Tensor& self, const Scalar& other) {
+  // redispatch to Tensor overload
   return at::divmod(self, wrapped_scalar_tensor(other));
 }
 
