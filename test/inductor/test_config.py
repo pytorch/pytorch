@@ -1,10 +1,12 @@
 # Owner(s): ["module: inductor"]
+import functools
 import math
 import unittest
 
 import torch
 from torch._dynamo.utils import counters
 from torch._inductor import config
+from torch._inductor.choices import InductorChoices
 from torch._inductor.pattern_matcher import PatternMatcherPass
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_TRITON
@@ -244,6 +246,111 @@ class TestInductorConfig(TestCase):
         ):
             code = torch._inductor.config.codegen_config()
             self.assertNotIn("post_grad_custom", code)
+
+    def test_codegen_serializes_inductor_choices_partial(self):
+        partial_choices = functools.partial(InductorChoices, lb=10, ub=100)
+
+        with torch._inductor.config.patch(inductor_choices_class=partial_choices):
+            code = torch._inductor.config.codegen_config()
+
+            self.assertIn("inductor_choices_class", code)
+            self.assertIn("functools.partial", code)
+            self.assertNotIn("<class ", code)
+            compile(code, "<codegen_config>", "exec")
+            namespace = {"torch": torch}
+            exec(code, namespace)
+            reconstructed = torch._inductor.config.inductor_choices_class
+            self.assertIsInstance(reconstructed, functools.partial)
+            self.assertIs(reconstructed.func, InductorChoices)
+            self.assertEqual(reconstructed.args, ())
+            self.assertEqual(reconstructed.keywords, {"lb": 10, "ub": 100})
+
+    def test_codegen_serializes_builtin_partial_with_container_arg(self):
+        partial_choices = functools.partial(max, [1, (2, {"limit": 3})])
+
+        with torch._inductor.config.patch(inductor_choices_class=partial_choices):
+            code = torch._inductor.config.codegen_config()
+            compile(code, "<codegen_config>", "exec")
+            exec(code, {"torch": torch})
+
+            reconstructed = torch._inductor.config.inductor_choices_class
+            self.assertIs(reconstructed.func, max)
+            self.assertEqual(reconstructed.args, ([1, (2, {"limit": 3})],))
+
+    def test_codegen_partial_over_non_importable_emits_comment(self):
+        non_importable = functools.partial(lambda lb=0: None, lb=5)
+
+        with torch._inductor.config.patch(inductor_choices_class=non_importable):
+            code = torch._inductor.config.codegen_config()
+
+            self.assertIn("omitted", code)
+            self.assertIn("inductor_choices_class", code)
+            self.assertNotIn("config.inductor_choices_class = functools.partial", code)
+            compile(code, "<codegen_config>", "exec")
+
+    def test_codegen_partial_with_unsupported_arg_emits_comment(self):
+        for arg in ({1, 2}, math.inf, math.nan):
+            with self.subTest(arg=arg):
+                partial_choices = functools.partial(InductorChoices, arg)
+                with torch._inductor.config.patch(
+                    inductor_choices_class=partial_choices
+                ):
+                    code = torch._inductor.config.codegen_config()
+
+                self.assertIn("omitted", code)
+                self.assertNotIn("config.inductor_choices_class =", code)
+                compile(code, "<codegen_config>", "exec")
+
+    def test_codegen_partial_with_unresolvable_identity_emits_comment(self):
+        def impostor():
+            pass
+
+        impostor.__module__ = InductorChoices.__module__
+        impostor.__qualname__ = InductorChoices.__qualname__
+        partial_choices = functools.partial(impostor)
+
+        with torch._inductor.config.patch(inductor_choices_class=partial_choices):
+            code = torch._inductor.config.codegen_config()
+
+        self.assertIn("partial callable cannot be re-imported", code)
+        compile(code, "<codegen_config>", "exec")
+
+    def test_codegen_partial_with_raising_metadata_emits_comment(self):
+        class CallableWithRaisingMetadata:
+            @property
+            def __module__(self):
+                raise RuntimeError("module metadata unavailable")
+
+            def __call__(self):
+                pass
+
+        partial_choices = functools.partial(CallableWithRaisingMetadata())
+
+        with torch._inductor.config.patch(inductor_choices_class=partial_choices):
+            code = torch._inductor.config.codegen_config()
+
+        self.assertIn("partial callable cannot be re-imported", code)
+        compile(code, "<codegen_config>", "exec")
+
+    def test_codegen_partial_with_invalid_qualname_emits_comment(self):
+        class CallableWithInvalidQualname:
+            __module__ = __name__
+            __qualname__ = "invalid name"
+
+            def __call__(self):
+                pass
+
+        callable_with_invalid_qualname = CallableWithInvalidQualname()
+        globals()["invalid name"] = callable_with_invalid_qualname
+        try:
+            partial_choices = functools.partial(callable_with_invalid_qualname)
+            with torch._inductor.config.patch(inductor_choices_class=partial_choices):
+                code = torch._inductor.config.codegen_config()
+        finally:
+            del globals()["invalid name"]
+
+        self.assertIn("partial callable cannot be re-imported", code)
+        compile(code, "<codegen_config>", "exec")
 
     def test_select_decomp_table_fallback_embedding_bag_byte_unpack(self):
         """Test that select_decomp_table removes embedding_bag_byte_unpack when fallback is enabled"""

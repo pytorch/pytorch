@@ -233,7 +233,7 @@ def get_signature_for_torch_op(
 ):
     """
     Given an operator on the `torch` namespace, return a list of `inspect.Signature`
-    objects corresponding to the overloads of that op.. May return `None` if a signature
+    objects corresponding to the overloads of that op. May return `None` if a signature
     could not be retrieved.
 
     Args:
