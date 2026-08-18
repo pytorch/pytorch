@@ -5390,7 +5390,7 @@ def is_rng_state_getter_or_setter(value: object) -> bool:
         torch.set_rng_state,
         torch.cuda.set_rng_state,
         torch.accelerator.random.set_rng_state,
-        torch._C._accelerator_getDefaultGenerator().set_state
+        torch._C._accelerator_getDefaultGenerator().set_state,
     )
     return value in (*setters, *getters)
 
