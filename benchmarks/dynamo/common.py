@@ -213,22 +213,11 @@ def use_sgd_optimizer(name, args):
     )
 
 
-def optimizer_config_context(name, device, args):
-    if (
-        device == "cuda"
-        and args.training
-        and name not in CI_SKIP_OPTIMIZER
-        and args.backend == "inductor"
-        and not use_sgd_optimizer(name, args)
-    ):
-        return inductor_config.patch(
-            {
-                "eager_numerics.division_rounding": True,
-                "eager_numerics.use_pytorch_libdevice": True,
-                "emulate_precision_casts": True,
-            }
-        )
-    return contextlib.nullcontext()
+BITWISE_ADAM_CONFIG = {
+    "eager_numerics.division_rounding": True,
+    "eager_numerics.use_pytorch_libdevice": True,
+    "emulate_precision_casts": True,
+}
 
 
 DO_NOT_CAST_INPUTS = {"stable_diffusion"}
@@ -1812,6 +1801,7 @@ class BenchmarkRunner:
         self.autocast = contextlib.nullcontext
         self.autocast_arg = {}
         self.optimizer: torch.optim.Optimizer | None = None
+        self.compiled_optimizer_step = None
         self._args = None
 
     def setup_amp(self, current_device=None):
@@ -1856,6 +1846,7 @@ class BenchmarkRunner:
                 self.autocast_arg["dtype"] = amp_dtype
 
     def init_optimizer(self, name, device, params):
+        self.compiled_optimizer_step = None
         if device == "cuda" and self.args.training and name not in CI_SKIP_OPTIMIZER:
             if use_sgd_optimizer(name, self.args):
                 self.optimizer = torch.optim.SGD(params, lr=0.01, foreach=True)
@@ -1869,6 +1860,28 @@ class BenchmarkRunner:
                 self.optimizer = torch.optim.Adam(
                     params, lr=0.01, capturable=True, foreach=True
                 )
+                if self.args.backend == "inductor" and not self.args.nopython:
+                    mode_options = (
+                        torch._inductor.list_mode_options(
+                            self.args.inductor_compile_mode
+                        )
+                        if self.args.inductor_compile_mode
+                        else {}
+                    )
+                    options = {**mode_options, **BITWISE_ADAM_CONFIG}
+                    self.optimizer._opt_called = True
+                    step = self.optimizer.step.__wrapped__.__wrapped__
+
+                    def optimizer_step():
+                        with torch.no_grad():
+                            step(self.optimizer)
+
+                    self.compiled_optimizer_step = torch.compile(
+                        optimizer_step,
+                        backend="inductor",
+                        fullgraph=True,
+                        options=options,
+                    )
         else:
             self.optimizer = None
 
@@ -2104,9 +2117,21 @@ class BenchmarkRunner:
         else:
             mod.zero_grad(True)
 
+    @torch._disable_dynamo(recursive=False)
+    def _run_compiled_optimizer_step(self):
+        if self.compiled_optimizer_step is None:
+            raise AssertionError("compiled optimizer step is not initialized")
+        self.compiled_optimizer_step()
+
     def optimizer_step(self):
         if self.optimizer is not None:
-            self.optimizer.step()
+            if (
+                self.compiled_optimizer_step is not None
+                and torch.compiler.is_compiling()
+            ):
+                self._run_compiled_optimizer_step()
+            else:
+                self.optimizer.step()
 
     def get_benchmark_indices(self, length):
         start = self._args.partition_id * (length // self._args.total_partitions)
@@ -4891,7 +4916,7 @@ def run(runner, args, original_dir=None):
             if name in runner.guard_on_nn_module_models:
                 guard_ctx = torch._dynamo.config.patch(guard_nn_modules=True)
 
-            with guard_ctx, optimizer_config_context(name, device, args):
+            with guard_ctx:
                 runner.run_one_model(
                     name,
                     model,
