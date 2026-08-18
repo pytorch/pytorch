@@ -3024,7 +3024,6 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
             dist.all_reduce,
             dist.reduce_scatter,
             dist.reduce_scatter_single,
-            # pyrefly: ignore [deprecated]
             dist.reduce_scatter_tensor,
             # pyrefly: ignore [deprecated]
             dist._reduce_scatter_base,
@@ -3731,14 +3730,12 @@ class TMADescriptorStableVariable(VariableTracker):
         )
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        codegen.add_push_null(
-            lambda: codegen.load_import_from(
-                "triton.tools.tensor_descriptor",
-                "TensorDescriptor",
-            )
+        codegen.load_import_from(
+            "triton.tools.tensor_descriptor",
+            "TensorDescriptor",
         )
         codegen.load_method("from_tensor")
-        self.tensor.reconstruct(codegen)
+        codegen(self.tensor)
         codegen(self.block_shape)
         codegen.call_method(2)
 
