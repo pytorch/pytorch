@@ -5,6 +5,7 @@
 #include <structmember.h>
 
 #include <c10/core/CPUAllocator.h>
+#include <c10/util/ScopeExit.h>
 #include <libshm.h>
 #include <torch/csrc/CudaIPCTypes.h>
 #include <torch/csrc/Device.h>
@@ -361,6 +362,25 @@ static PyObject* THPStorage_shareCuda(PyObject* self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
+#ifdef USE_CUDA
+static void releaseCudaIPCCounter(
+    const char* ref_counter_handle,
+    ptrdiff_t ref_counter_offset) {
+  try {
+    int flags = at::ALLOCATOR_MAPPED_SHAREDMEM | at::ALLOCATOR_MAPPED_NOCREATE;
+    auto sptr = at::RefcountedMapAllocator::makeDataPtr(
+        ref_counter_handle,
+        flags,
+        sizeof(int64_t) * torch::CUDA_IPC_REF_COUNTER_FILE_SIZE,
+        nullptr);
+    *(static_cast<int64_t*>(sptr.get()) + ref_counter_offset) -= 1;
+  } catch (const c10::Error&) {
+    // The producer may have exited before the consumer released its data.
+    return;
+  }
+}
+#endif
+
 static PyObject* THPStorage_releaseIPCCounter(
     PyObject* _unused,
     PyObject* args) {
@@ -379,23 +399,10 @@ static PyObject* THPStorage_releaseIPCCounter(
         "(bytes _ref_counter, int _ref_counter_offset)");
     return nullptr;
   }
-  std::string ref_counter_handle = PyBytes_AS_STRING(_ref_counter);
+  const char* ref_counter_handle = PyBytes_AS_STRING(_ref_counter);
   ptrdiff_t ref_counter_offset =
       static_cast<ptrdiff_t>(THPUtils_unpackLong(_ref_counter_offset));
-  // We don't want to break existing code, so resource deletion is best
-  // effort basis. Exception expected if producer process terminated
-  // before consumer released data.
-  int flags = at::ALLOCATOR_MAPPED_SHAREDMEM | at::ALLOCATOR_MAPPED_NOCREATE;
-  try {
-    auto sptr = at::RefcountedMapAllocator::makeDataPtr(
-        ref_counter_handle.c_str(),
-        flags,
-        sizeof(int64_t) * torch::CUDA_IPC_REF_COUNTER_FILE_SIZE,
-        nullptr);
-    *(static_cast<int64_t*>(sptr.get()) + ref_counter_offset) -= 1;
-  } catch (c10::Error&) {
-    // Already warned inside of producer process
-  }
+  releaseCudaIPCCounter(ref_counter_handle, ref_counter_offset);
   Py_RETURN_NONE;
 #else
   TORCH_CHECK(false, "CUDA is not available");
@@ -445,6 +452,11 @@ static PyObject* THPStorage_newSharedCuda(PyObject* _unused, PyObject* args) {
   size_t storage_size = THPUtils_unpackUInt64(_size_bytes) / sizeof(uint8_t);
   ptrdiff_t storage_offset_bytes =
       static_cast<ptrdiff_t>(THPUtils_unpackLong(_offset_bytes));
+  const char* ref_counter_handle = PyBytes_AS_STRING(_ref_counter);
+  ptrdiff_t ref_counter_offset =
+      static_cast<ptrdiff_t>(THPUtils_unpackLong(_ref_counter_offset));
+  auto release_counter_on_failure = c10::make_scope_exit(
+      [&]() { releaseCudaIPCCounter(ref_counter_handle, ref_counter_offset); });
 
   const auto device = c10::checked_convert<c10::DeviceIndex>(
       THPUtils_unpackLong(_device), "c10::DeviceIndex");
@@ -475,10 +487,6 @@ static PyObject* THPStorage_newSharedCuda(PyObject* _unused, PyObject* args) {
   void* devPtr = basePtr.get();
   devPtr = static_cast<char*>(devPtr) + storage_offset_bytes;
 
-  std::string ref_counter_handle = PyBytes_AS_STRING(_ref_counter);
-  ptrdiff_t ref_counter_offset =
-      static_cast<ptrdiff_t>(THPUtils_unpackLong(_ref_counter_offset));
-
   struct IpcDeleterContext {
     std::string ref_counter_handle;
     ptrdiff_t ref_counter_offset{};
@@ -487,7 +495,7 @@ static PyObject* THPStorage_newSharedCuda(PyObject* _unused, PyObject* args) {
   };
 
   auto ctx = std::make_unique<IpcDeleterContext>();
-  ctx->ref_counter_handle = std::move(ref_counter_handle);
+  ctx->ref_counter_handle = ref_counter_handle;
   ctx->ref_counter_offset = ref_counter_offset;
   ctx->device = device;
   ctx->received_data.shared_ptr_ = std::move(basePtr);
@@ -495,7 +503,7 @@ static PyObject* THPStorage_newSharedCuda(PyObject* _unused, PyObject* args) {
   auto cur_device = at::cuda::current_device();
   c10::DataPtr data_ptr(
       devPtr,
-      ctx.release(),
+      ctx.get(),
       +[](void* ctx_) {
         std::unique_ptr<IpcDeleterContext> ctx(
             static_cast<IpcDeleterContext*>(ctx_));
@@ -520,23 +528,13 @@ static PyObject* THPStorage_newSharedCuda(PyObject* _unused, PyObject* args) {
         at::cuda::stream_synchronize(
             c10::cuda::getCurrentCUDAStream(ctx->device));
 
-        // We don't want to break existing code, so resource deletion is best
-        // effort basis. Exception expected if producer process terminated
-        // before consumer released data.
-        int flags =
-            at::ALLOCATOR_MAPPED_SHAREDMEM | at::ALLOCATOR_MAPPED_NOCREATE;
-        try {
-          auto sptr = at::RefcountedMapAllocator::makeDataPtr(
-              ctx->ref_counter_handle.c_str(),
-              flags,
-              sizeof(int64_t) * torch::CUDA_IPC_REF_COUNTER_FILE_SIZE,
-              nullptr);
-          *(static_cast<int64_t*>(sptr.get()) + ctx->ref_counter_offset) -= 1;
-        } catch (c10::Error&) {
-          // Already warned inside of producer process
-        }
+        releaseCudaIPCCounter(
+            ctx->ref_counter_handle.c_str(), ctx->ref_counter_offset);
       },
       at::Device(at::DeviceType::CUDA, cur_device));
+  auto* deleter_ctx = ctx.release();
+  release_counter_on_failure.release();
+  TORCH_INTERNAL_ASSERT(deleter_ctx == data_ptr.get_context());
 
   auto base = c10::make_intrusive<at::StorageImpl>(
       c10::StorageImpl::use_byte_size_t(),
