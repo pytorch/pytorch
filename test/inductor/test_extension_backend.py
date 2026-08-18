@@ -33,6 +33,7 @@ from torch._inductor.codegen.common import (
     register_backend_for_device,
     register_device_op_overrides,
 )
+from torch._inductor.codegen.cpp_utils import device_to_aten
 from torch._inductor.codegen.cpu_device_op_overrides import CpuDeviceOpOverrides
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -41,6 +42,11 @@ from torch.testing._internal.common_utils import (
     parametrize,
     xfailIfS390X,
 )
+
+
+class ExtensionDeviceOpOverrides(CpuDeviceOpOverrides):
+    def aten_device_type(self) -> str:
+        return "at::kPrivateUse1"
 
 
 try:
@@ -125,7 +131,13 @@ class ExtensionBackendTests(BaseExtensionBackendTests):
             ExtensionWrapperCodegen,
             ExtensionCppWrapperCodegen,
         )
-        register_device_op_overrides("extension_device", CpuDeviceOpOverrides())
+        register_device_op_overrides(
+            "extension_device", ExtensionDeviceOpOverrides()
+        )
+        self.assertEqual(
+            device_to_aten("extension_device"),
+            "at::kPrivateUse1",
+        )
         self.assertTrue(
             get_scheduling_for_device("extension_device") == ExtensionScheduling
         )
