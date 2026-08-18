@@ -23,7 +23,7 @@ class CKTileTemplate(ROCmTemplate):
     }
 
     ck_dtype_to_size = {
-        "FP16": 2,
+        "F16": 2,
         "BF16": 2,
     }
 

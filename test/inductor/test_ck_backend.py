@@ -74,22 +74,22 @@ class TestCKBackend(TestCase):
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @unittest.mock.patch.dict(os.environ, _test_env)
     @parametrize(
-        "max_autotune_gemm_backends",
+        "max_autotune_gemm_backends,dtype",
         (
-            subtest("CK", decorators=[skipIfRocmVersionAtLeast([7, 14])]),
-            "CKTILE",
-            "ATen,CK",
+            subtest(
+                ("CK", torch.bfloat16),
+                name="standalone_ck",
+                decorators=[skipIfRocmVersionAtLeast([7, 14])],
+            ),
+            subtest(("CKTILE", torch.float16), name="standalone_cktile_float16"),
+            subtest(("CKTILE", torch.bfloat16), name="standalone_cktile_bfloat16"),
+            subtest(("ATen,CK", torch.bfloat16), name="fallback"),
         ),
-        name_fn=lambda b: {
-            "CK": "standalone_ck",
-            "CKTILE": "standalone_cktile",
-            "ATen,CK": "fallback",
-        }[b],
     )
     @parametrize("autotune_in_subproc", (True, False))
     @parametrize("use_aoti", (True, False))
     def test_max_autotune_precompile_matmul(
-        self, max_autotune_gemm_backends, autotune_in_subproc, use_aoti
+        self, max_autotune_gemm_backends, dtype, autotune_in_subproc, use_aoti
     ):
         """
         Make sure autotuning mm doesn't crash.
@@ -98,7 +98,7 @@ class TestCKBackend(TestCase):
         def mm(a, b):
             return a @ b
 
-        tensor_options = {"device": "cuda", "dtype": torch.bfloat16}
+        tensor_options = {"device": "cuda", "dtype": dtype}
 
         a = torch.randn(2240, 256, **tensor_options)
         b = torch.randn(256, 2048, **tensor_options)
@@ -617,11 +617,8 @@ class TestCKTileUniversalGemmTemplate(TestCase):
         # _ck_tile_universal_gemm_v2_api is functools.cache'd on the search path.
         self._ck_tile._ck_tile_universal_gemm_v2_api.cache_clear()
 
-    # ops() names the half-precision instances "FP16", but _TORCH_DTYPE_TO_CK maps
-    # torch.float16 to "F16", so check_dtypes never matches them. bfloat16 is the
-    # only dtype for which CK-Tile instances are currently reachable.
-    _DTYPE = torch.bfloat16
-    _CK_DTYPE = "BF16"
+    _DTYPE = torch.float16
+    _CK_DTYPE = "F16"
 
     def _make_template(self, m=2048, n=2048, k=2048):
         device = torch.device("cuda")
