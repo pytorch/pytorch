@@ -499,6 +499,7 @@ void nccl_reduce_scatter_offset(
                     cols,
                     outer_stride,
                     devcomm);
+            C10_CUDA_KERNEL_LAUNCH_CHECK();
           } else {
             reduce_scatter_offset_rocm_kernel<scalar_t, false>
                 <<<ctas_j, RS_THREADS_PER_CTA, 0, stream>>>(
@@ -509,8 +510,8 @@ void nccl_reduce_scatter_offset(
                     cols,
                     outer_stride,
                     devcomm);
+            C10_CUDA_KERNEL_LAUNCH_CHECK();
           }
-          C10_CUDA_KERNEL_LAUNCH_CHECK();
         }
 #else
         // CUDA retains the original fused multi-slot launch.
@@ -523,6 +524,7 @@ void nccl_reduce_scatter_offset(
                   col_sharded,
                   outer_stride,
                   devcomm);
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
         } else {
           reduce_scatter_offset_kernel<scalar_t, false>
               <<<total_ctas, RS_THREADS_PER_CTA, 0, stream>>>(
@@ -532,8 +534,8 @@ void nccl_reduce_scatter_offset(
                   col_sharded,
                   outer_stride,
                   devcomm);
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
         }
-        C10_CUDA_KERNEL_LAUNCH_CHECK();
 #endif
       });
 #else
