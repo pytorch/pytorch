@@ -43,6 +43,7 @@ import threading
 import time
 import traceback
 import types
+import unittest
 import weakref
 from collections import defaultdict, deque
 from typing import Any, cast, NoReturn, TYPE_CHECKING, TypeAlias, TypeVar
@@ -156,7 +157,13 @@ from .utils import (
     PySendResult,
     unpack_iterable,
 )
-from .variables.base import SourceLocation, typestr, ValueMutationNew, VariableTracker
+from .variables.base import (
+    AttributeMutationNew,
+    SourceLocation,
+    typestr,
+    ValueMutationNew,
+    VariableTracker,
+)
 from .variables.builder import FrameStateSizeEntry, VariableBuilder, wrap_fx_proxy
 from .variables.builtin import BuiltinVariable, DictBuiltinVariable
 from .variables.constant import ConstantVariable
@@ -205,7 +212,12 @@ from .variables.object_protocol import (
 )
 from .variables.sets import SetVariable
 from .variables.streams import SymbolicStreamState
-from .variables.tensor import supported_comparison_ops, SymNodeVariable, TensorVariable
+from .variables.tensor import (
+    _contains_graph_intermediate,
+    supported_comparison_ops,
+    SymNodeVariable,
+    TensorVariable,
+)
 from .variables.torch_function import (
     SymbolicTorchFunctionState,
     TorchFunctionModeVariable,
@@ -1113,6 +1125,9 @@ def break_graph_if_unsupported(
                     # If there is, we roll back to the checkpoint and fall back.
                     if isinstance(excp, Unsupported):
                         excp.remove_from_stats()
+                    preserve_skip_frame = (
+                        excp.skip_frame and excp.preserve_skip_frame_after_inline
+                    )
                     unimplemented(
                         gb_type="Graph break under GenericContextWrappingVariable",
                         context=f"Active generic context managers: {self.active_generic_context_managers}",
@@ -1122,11 +1137,14 @@ def break_graph_if_unsupported(
                             *graph_break_hints.CAUSED_BY_EARLIER_GRAPH_BREAK,
                         ],
                         from_exc=excp,
-                        skip_frame=excp.skip_frame,
-                        preserve_skip_frame_after_inline=excp.preserve_skip_frame_after_inline,
+                        skip_frame=preserve_skip_frame,
+                        preserve_skip_frame_after_inline=preserve_skip_frame,
+                        apply_to_code=(
+                            excp.apply_to_code if preserve_skip_frame else True
+                        ),
                     )
 
-                if getattr(excp, "skip_frame", False):
+                if excp.skip_frame:
                     raise
 
                 if not self.should_compile_partial_graph():
@@ -1609,6 +1627,73 @@ class InstructionTranslatorBase(
         self.symbolic_locals = {
             k: v for k, v in self.symbolic_locals.items() if k in normalized_reads
         }
+
+    def has_live_graph_intermediate(self) -> bool:
+        """Return whether a differentiable intermediate must cross this break."""
+
+        def get_live_values(tx: InstructionTranslatorBase) -> list[Any]:
+            values: list[Any] = [
+                tx.stack,
+                tx.symbolic_cellvars,
+                tx.symbolic_globals,
+            ]
+            instruction = tx.current_instruction
+            if instruction not in tx.instructions:
+                # Before Python 3.11, creating a local generator does not run its
+                # inline tracer, so it still points at the synthetic initial NOP.
+                instruction = tx.instructions[0]
+            reads = livevars_analysis(tx.instructions, instruction)
+            for name in reads:
+                key = name.replace(".", "implicit") if name.startswith(".") else name
+                if key in tx.symbolic_locals:
+                    values.append(tx.symbolic_locals[key])
+            return values
+
+        live_values: list[Any] = []
+        cur_tx: InstructionTranslatorBase | None = self
+        while cur_tx is not None:
+            live_values.extend(get_live_values(cur_tx))
+            cur_tx = cur_tx.parent
+
+        side_effects = self.output.side_effects
+        pre_existing_vars = [
+            var
+            for var in side_effects.id_to_variable.values()
+            if not isinstance(var.mutation_type, AttributeMutationNew)
+        ]
+        live_values.extend(
+            [pre_existing_vars, self.output.backward_state, side_effects.tensor_hooks]
+        )
+
+        # LocalGeneratorObjectVariable deliberately excludes its instruction
+        # translator from generic VariableTracker traversal. Its created or
+        # suspended frame can nevertheless keep graph intermediates live here.
+        pending_values = list(live_values)
+        visit_cache: dict[int, Any] = {}
+        seen_generator_tracers: set[int] = set()
+        while pending_values:
+            generators: list[LocalGeneratorObjectVariable] = []
+
+            def collect_generator(vt: VariableTracker) -> None:
+                if isinstance(vt, LocalGeneratorObjectVariable):
+                    generators.append(vt)
+
+            VariableTracker.visit(
+                collect_generator,
+                pending_values.pop(),
+                cache=visit_cache,
+                side_effects=side_effects,
+            )
+            for generator in generators:
+                tracer = generator.inline_tracer
+                if id(tracer) in seen_generator_tracers:
+                    continue
+                seen_generator_tracers.add(id(tracer))
+                generator_values = get_live_values(tracer)
+                live_values.extend(generator_values)
+                pending_values.extend(generator_values)
+
+        return _contains_graph_intermediate(live_values, side_effects)
 
     def call_function(
         self,
@@ -2271,11 +2356,10 @@ class InstructionTranslatorBase(
             self.is_tracing_resume_prologue = val
 
     def DELETE_FAST(self, inst: Instruction) -> None:
-        name = inst.argval
-        var = self.symbolic_locals.get(name)
+        var = self.symbolic_locals.get(inst.argval)
         if isinstance(var, TensorVariable):
             self._maybe_emit_sync_dealloc(var)
-        del self.symbolic_locals[name]
+        del self.symbolic_locals[inst.argval]
 
     def _maybe_emit_sync_dealloc(self, var: TensorVariable) -> None:
         from .variables.streams import get_current_stream, new_event
@@ -2708,7 +2792,7 @@ class InstructionTranslatorBase(
     def _attach_traceback_to_exception(self, exc: ExceptionVals) -> None:
         # based on CPython's PyTraceBack_Here impl
         frame_summary = self.frame_summary()
-        tb = exc.getattro_impl(
+        tb = exc.tp_getattro_impl(
             # pyrefly: ignore [bad-argument-type]
             self,
             "__traceback__",
@@ -2880,7 +2964,7 @@ class InstructionTranslatorBase(
                     "expected _exception_instance_check(val) to be true"
                 )
             typ = BuiltinVariable(val.exc_type)  # type: ignore[attr-defined, union-attr]
-            tb = val.getattro_impl(
+            tb = val.tp_getattro_impl(
                 # pyrefly: ignore[bad-argument-type]
                 self,
                 "__traceback__",
@@ -2899,7 +2983,7 @@ class InstructionTranslatorBase(
                 )
             typ = BuiltinVariable(val.exc_type)  # type: ignore[attr-defined]
 
-            tb = val.getattro_impl(self, "__traceback__")
+            tb = val.tp_getattro_impl(self, "__traceback__")
 
         args += [typ, val, tb]
         self.call_function(fn, args, {})
@@ -2927,7 +3011,20 @@ class InstructionTranslatorBase(
                 raise e.with_traceback(raised_exception.__traceback__) from None
 
             curr_exc = self.exn_vt_stack.get_raised_exception()
-            dynamo_exc = exc.get_dynamo_observed_exception(curr_exc.python_type())
+            exc_python_type = curr_exc.python_type()
+            if (self.one_graph or self.error_on_graph_break) and issubclass(
+                exc_python_type, unittest.SkipTest
+            ):
+                try:
+                    skip_args: list[Any] = [
+                        a.as_python_constant() for a in curr_exc.args
+                    ]
+                except NotImplementedError:
+                    skip_args = []
+                skip_exc = exc_python_type(*skip_args)
+                raise skip_exc from None
+
+            dynamo_exc = exc.get_dynamo_observed_exception(exc_python_type)
             if not isinstance(raised_exception, dynamo_exc):
                 raise AssertionError(
                     "expected isinstance(raised_exception, dynamo_exc) to be true"
@@ -3392,7 +3489,7 @@ class InstructionTranslatorBase(
 
     def _maybe_sync_dealloc_attr(self, obj: VariableTracker, name: str) -> None:
         # Only check side_effects — a pure dict lookup with no observable
-        # side effects. We intentionally avoid getattro_impl here because it
+        # side effects. We intentionally avoid tp_getattro_impl here because it
         # can trigger __getattr__, add graph nodes, or cause graph breaks.
         if self.output.side_effects.has_pending_mutation_of_attr(obj, name):
             attr_var = self.output.side_effects.load_attr(obj, name)
@@ -3946,8 +4043,7 @@ class InstructionTranslatorBase(
         #         frame N stack + locals,
         #         ...,
         #         frame 2 stack + locals,
-        #     ],
-        #     [frame 1 stack + locals],
+        #     ], *(frame 1 stack + locals)
         # ]
         cg.extend_output(
             [
@@ -3965,25 +4061,17 @@ class InstructionTranslatorBase(
         )
 
         # TOS: resume 1, remaining resumes, frames (popped), frame 1 stack + locals
-        if ContinueExecutionCache.uses_boxed_call(resume_codes[-1]):
-            cg.extend_output(
-                [
-                    # [remaining resumes, frames, [frame 1 stack + locals]]
-                    create_instruction("BUILD_LIST", arg=3),
-                ]
-            )
-        else:
-            cg.extend_output(
-                [
-                    *create_rot_n(3),
-                    create_instruction("BUILD_LIST", arg=2),
-                    *create_swap(2),
-                    # [remaining resumes, frames], frame 1 stack + locals
-                    create_instruction("LIST_EXTEND", arg=1),
-                ]
-            )
+        cg.extend_output(
+            [
+                *create_rot_n(3),
+                create_instruction("BUILD_LIST", arg=2),
+                *create_swap(2),
+                # [resumes, frames (popped)], frame 1 stack + locals
+                create_instruction("LIST_EXTEND", arg=1),
+            ]
+        )
 
-        # TOS: resume 1, resume call args
+        # TOS: resume 1, [remaining resumes, frames, *(frame 1 stack + locals)]
         cg.extend_output(create_call_function_ex(False, True))
 
     def should_compile_partial_graph(self) -> bool:
@@ -5194,7 +5282,7 @@ class InstructionTranslatorBase(
         nn_modules_pattern = re.compile(r".*torch/nn/modules.*")
         return nn_modules_pattern.match(filename) is not None
 
-    def store_global_weakref_by_id(self, prefix: str, value: Any) -> str:
+    def store_global_weakref_by_id(self, prefix: str, value: object) -> str:
         global_name = self.output.install_global_by_id(prefix, weakref.ref(value))
         install_guard(
             GlobalWeakRefSource(global_name).make_guard(GuardBuilder.WEAKREF_ALIVE)
@@ -6251,6 +6339,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 # If this graph break has skip_frame set, unset it
                 # since it refers to the current frame and not the parent.
                 e.skip_frame = False
+                e.apply_to_code = True
             raise
         except Exception:
             log.debug("FAILED INLINING %s", code)

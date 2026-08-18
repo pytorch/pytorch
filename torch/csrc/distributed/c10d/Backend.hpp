@@ -162,8 +162,25 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     return false;
   }
 
+  // Experimental collective time-estimation API. Backends that return true
+  // must simulate collectives issued between startTimeEstimate() and
+  // endTimeEstimate(), which returns the estimated duration in microseconds.
   virtual bool supportsTimeEstimation() const {
     return false;
+  }
+
+  virtual void startTimeEstimate() {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "Backend ", getBackendName(), " does not support time estimation"));
+  }
+
+  virtual float endTimeEstimate() {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "Backend ", getBackendName(), " does not support time estimation"));
   }
 
   virtual bool supportsShrinking() const {
@@ -247,7 +264,13 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   //
   // Abort hooks are invoked before the backend aborts on a timeout or error,
   // letting users capture debug information. Hooks are keyed by an opaque
-  // hook_id so they can be individually unregistered.
+  // hook_id so they can be individually unregistered. Backends that implement
+  // them must advertise it via supportsAbortHooks, so a caller can tell "this
+  // backend has no abort hooks" from a registration that genuinely failed.
+  virtual bool supportsAbortHooks() const {
+    return false;
+  }
+
   virtual void registerAbortHook(int64_t /* hook_id */, AbortHook /* hook */) {
     TORCH_CHECK(
         false,
@@ -264,6 +287,39 @@ class TORCH_API Backend : public torch::CustomClassHolder {
             "Backend ",
             getBackendName(),
             " does not support unregisterAbortHook"));
+  }
+
+  // Completion Hook API
+  //
+  // Completion hooks are invoked when the backend establishes that an operation
+  // has completed, which a backend with a watchdog already does to garbage
+  // collect its work queue. Same hook_id keying and same capability query as
+  // the abort hooks above; see Hooks.hpp for what is reported and the threading
+  // contract. A backend without them leaves its consumers to poll, so
+  // supportsCompletionHooks is what lets a caller choose a fallback rather than
+  // catch a throw.
+  virtual bool supportsCompletionHooks() const {
+    return false;
+  }
+
+  virtual void registerCompletionHook(
+      int64_t /* hook_id */,
+      CompletionHook /* hook */) {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "Backend ",
+            getBackendName(),
+            " does not support registerCompletionHook"));
+  }
+
+  virtual void unregisterCompletionHook(int64_t /* hook_id */) {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "Backend ",
+            getBackendName(),
+            " does not support unregisterCompletionHook"));
   }
 
   virtual void startCoalescing() {

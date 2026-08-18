@@ -150,12 +150,15 @@ class TorchDynamoException(RuntimeError):
             instead of the default behavior. This allows exceptions to signal specific
             execution strategies (e.g., SKIP, RUN_ONLY) without requiring separate
             exception types for control flow.
+        apply_to_code: Whether the frame execution strategy should be cached on the
+            code object and applied to future invocations.
     """
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._torch_dynamo_tracer_output: DynamoTracerOutput | None = None
         self.frame_exec_strategy: FrameExecStrategy | None = None
+        self.apply_to_code = True
 
     def __reduce__(self) -> tuple[Any, ...]:
         return (
@@ -309,6 +312,7 @@ class Unsupported(TorchDynamoException):
         case_name: str | None = None,
         real_stack: StackSummary | None = None,
         preserve_skip_frame_after_inline: bool = False,
+        apply_to_code: bool = True,
     ) -> None:
         super().__init__(msg)
         if not real_stack:
@@ -317,6 +321,7 @@ class Unsupported(TorchDynamoException):
         self.msg = msg
         self.skip_frame = skip_frame
         self.preserve_skip_frame_after_inline = preserve_skip_frame_after_inline
+        self.apply_to_code = apply_to_code
         self.category: str | None = None
         self.add_to_stats()
         self.gb_type: str | None = gb_type
@@ -748,6 +753,7 @@ def unimplemented(
     log_warning: bool = False,
     skip_frame: bool = False,
     preserve_skip_frame_after_inline: bool = False,
+    apply_to_code: bool = True,
 ) -> NoReturn:
     """
     Called within dynamo to cause a graph break.
@@ -759,41 +765,30 @@ def unimplemented(
         hints: List of user-facing hints for the graph break.
         preserve_skip_frame_after_inline: Keep skip_frame=True if this graph break
                  is raised from an inlined function and bubbles to the parent frame.
+        apply_to_code: Cache the resulting frame execution strategy on the code object.
     """
 
     msg = format_graph_break_message(gb_type, context, explanation, hints)
 
     if log_warning:
         log.warning(msg)
+    options: dict[str, Any] = {
+        "preserve_skip_frame_after_inline": preserve_skip_frame_after_inline,
+        "apply_to_code": apply_to_code,
+    }
     if from_exc is not _NOTHING:
         past_real_stack = None
         if hasattr(from_exc, "real_stack"):
             past_real_stack = from_exc.real_stack
+        options["real_stack"] = past_real_stack
         if isinstance(from_exc, Unsupported):
             msg = f"{from_exc.msg}\n\n*** While handling this graph break, another graph break occurred: ***\n\n{msg}"
             # noqa: GB_REGISTRY
-            raise Unsupported(
-                msg,
-                gb_type,
-                skip_frame,
-                real_stack=past_real_stack,
-                preserve_skip_frame_after_inline=preserve_skip_frame_after_inline,
-            )
+            raise Unsupported(msg, gb_type, skip_frame, **options)
         # noqa: GB_REGISTRY
-        raise Unsupported(
-            msg,
-            gb_type,
-            skip_frame,
-            real_stack=past_real_stack,
-            preserve_skip_frame_after_inline=preserve_skip_frame_after_inline,
-        ) from from_exc
+        raise Unsupported(msg, gb_type, skip_frame, **options) from from_exc
     # noqa: GB_REGISTRY
-    raise Unsupported(
-        msg,
-        gb_type,
-        skip_frame,
-        preserve_skip_frame_after_inline=preserve_skip_frame_after_inline,
-    )
+    raise Unsupported(msg, gb_type, skip_frame, **options)
 
 
 # KeyError has special handling for its args
