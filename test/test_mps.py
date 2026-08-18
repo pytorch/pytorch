@@ -15634,6 +15634,15 @@ class TestAdvancedIndexing(TestCaseMPS):
             self.assertEqual(na_ge_x_mps, na_ge_x_cpu)
             self.assertEqual(na, na_cpu)
 
+    def test_nextafter_bfloat16_subnormals(self, device="mps"):
+        mags = torch.arange(0, 128, dtype=torch.int16).view(torch.bfloat16)
+        x_cpu = torch.cat([mags, -mags])
+        for to in [1.0, -1.0, 0.0]:
+            y_cpu = torch.full_like(x_cpu, to)
+            ref = torch.nextafter(x_cpu, y_cpu).view(torch.int16)
+            res = torch.nextafter(x_cpu.to(device), y_cpu.to(device)).cpu().view(torch.int16)
+            self.assertEqual(res, ref, atol=0, rtol=0)
+
 
 class TestRNNMPS(TestCaseMPS):
     def _lstm_helper(self, num_layers, dtype, device, bidirectional=False, bias=True, batch_first=False,
