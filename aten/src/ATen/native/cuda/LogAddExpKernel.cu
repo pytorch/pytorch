@@ -8,7 +8,6 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/OpMathType.h>
-#include <c10/cuda/CUDAMathCompat.h>
 #include <c10/util/MathConstants.h>
 #include <c10/util/complex.h>
 
@@ -22,7 +21,7 @@ namespace at::native {
 
 // custom min and max to be used in logaddexp for  complex arguments
 template <typename scalar_t, bool min>
-__device__ c10::complex<scalar_t> _logaddexp_minmax(const c10::complex<scalar_t>& x, const c10::complex<scalar_t>& y) {
+__host__ __device__ c10::complex<scalar_t> _logaddexp_minmax(const c10::complex<scalar_t>& x, const c10::complex<scalar_t>& y) {
   scalar_t xr = std::real(x);
   scalar_t yr = std::real(y);
   if (::isnan(yr) || (::isnan(std::imag(y)))) {
@@ -37,7 +36,7 @@ __device__ c10::complex<scalar_t> _logaddexp_minmax(const c10::complex<scalar_t>
 }
 
 template <typename scalar_t>
-__device__ scalar_t _log_add_exp_helper(const scalar_t& x, const scalar_t& y) {
+__host__ __device__ scalar_t _log_add_exp_helper(const scalar_t& x, const scalar_t& y) {
   // Reference : https://www.tensorflow.org/api_docs/python/tf/math/cumulative_logsumexp
   // Using the original expression: `at::_isnan(y) ? y : std::min(x, y)` causes an error in ROCM
   const auto isnan_x = at::_isnan(x);
@@ -54,22 +53,19 @@ __device__ scalar_t _log_add_exp_helper(const scalar_t& x, const scalar_t& y) {
 }
 
 template <typename scalar_t>
-__device__ c10::complex<scalar_t> _fast_build_exp(const c10::complex<scalar_t>& x) {
+__host__ __device__ c10::complex<scalar_t> _fast_build_exp(const c10::complex<scalar_t>& x) {
   // complex exponential function, but implemented manually to get fast compilation time
   // this function only handles the case where the x is finite (not inf nor nan)
   const auto xreal = std::real(x);
   const auto ximag = std::imag(x);
   const auto exp_x_abs = std::exp(xreal);
-  scalar_t sin_ximag;
-  scalar_t cos_ximag;
-  c10::cuda::compat::sincos(ximag, &sin_ximag, &cos_ximag);
-  auto exp_x_real = exp_x_abs * cos_ximag;
-  auto exp_x_imag = exp_x_abs * sin_ximag;
+  auto exp_x_real = exp_x_abs * std::cos(ximag);
+  auto exp_x_imag = exp_x_abs * std::sin(ximag);
   return {exp_x_real, exp_x_imag};
 }
 
 template <typename scalar_t>
-__device__ c10::complex<scalar_t> _fast_build_exp_inf(const c10::complex<scalar_t>& x) {
+__host__ __device__ c10::complex<scalar_t> _fast_build_exp_inf(const c10::complex<scalar_t>& x) {
   // complex exponential function, but implemented manually to get fast compilation time
   // this function only handles the case where the real part of x is infinite
   const auto ximag = std::imag(x);
@@ -77,9 +73,8 @@ __device__ c10::complex<scalar_t> _fast_build_exp_inf(const c10::complex<scalar_
   if (!::isfinite(ximag)) {  // add this to make consistent with std::exp(x+yi)
     return {exp_x_abs, std::numeric_limits<scalar_t>::quiet_NaN()};
   }
-  scalar_t sin;
-  scalar_t cos;
-  c10::cuda::compat::sincos(ximag, &sin, &cos);
+  const auto sin = std::sin(ximag);
+  const auto cos = std::cos(ximag);
   // special case if the angle is exactly the multiple of pi/2
   auto exp_x_real = (cos == 0) ? (scalar_t)0.0 : exp_x_abs * cos;
   auto exp_x_imag = (sin == 0) ? (scalar_t)0.0 : exp_x_abs * sin;
@@ -87,7 +82,7 @@ __device__ c10::complex<scalar_t> _fast_build_exp_inf(const c10::complex<scalar_
 }
 
 template <typename scalar_t>
-__device__ c10::complex<scalar_t> _log_add_exp_helper(const c10::complex<scalar_t>& x, const c10::complex<scalar_t>& y) {
+__host__ __device__ c10::complex<scalar_t> _log_add_exp_helper(const c10::complex<scalar_t>& x, const c10::complex<scalar_t>& y) {
   c10::complex<scalar_t> min = _logaddexp_minmax<scalar_t, /*min=*/true>(x, y);
   c10::complex<scalar_t> max = _logaddexp_minmax<scalar_t, /*min=*/false>(x, y);
   scalar_t min_real = std::real(min);
@@ -242,7 +237,7 @@ void logaddexp_kernel_cuda(TensorIteratorBase& iter) {
 #else
     AT_DISPATCH_COMPLEX_TYPES_AND(at::ScalarType::ComplexHalf, iter.dtype(), "logaddexp_cuda", [&]() {
       using opmath_t = at::opmath_type<scalar_t>;
-      gpu_kernel(iter, [] C10_DEVICE (scalar_t a_, scalar_t b_) -> scalar_t {
+      gpu_kernel(iter, [] GPU_LAMBDA (scalar_t a_, scalar_t b_) -> scalar_t {
         const auto a = static_cast<opmath_t>(a_);
         const auto b = static_cast<opmath_t>(b_);
         return static_cast<scalar_t>(_log_add_exp_helper(a, b));
