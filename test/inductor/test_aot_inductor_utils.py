@@ -265,7 +265,6 @@ def check_model_with_multiple_inputs(
     list_example_inputs,
     options=None,
     dynamic_shapes=None,
-    tol: float = 1e-4,
 ):
     with (
         torch.no_grad(),
@@ -287,7 +286,7 @@ def check_model_with_multiple_inputs(
             model, list_example_inputs, options, dynamic_shapes
         )
 
-    self.assertTrue(same(list_actual, list_expected, tol=tol))
+    self.assertTrue(same(list_actual, list_expected))
 
 
 def code_check_count(

@@ -1941,13 +1941,14 @@ class AOTInductorTestsTemplate:
         model = Model()
 
         # Scale inputs so this grid-size test is not sensitive to FP16 BMM noise.
+        # Outputs stay under 0.125, where 1 fp16 ULP exceeds same()'s 1e-4 tolerance.
         def make_inputs(batch):
             return (
-                0.5
+                0.25
                 * random_matrix_with_scaled_reduction_dim(
                     M, K, batch, device=self.device, dtype=dtype, reduction_dim=-1
                 ),
-                0.5
+                0.25
                 * random_matrix_with_scaled_reduction_dim(
                     K, N, batch, device=self.device, dtype=dtype, reduction_dim=-2
                 ),
@@ -1963,9 +1964,6 @@ class AOTInductorTestsTemplate:
         # Large batch exceeding CUDA grid.y limit of 65535
         large_batch = 70000
         list_example_inputs.append(make_inputs(large_batch))
-        # ROCm Triton fp16 BMM uses a different reduction order than eager BLAS,
-        # so a few elements diff by ~1 fp16 ULP, regression would create x30 diff
-        tol = 1e-3 if TEST_WITH_ROCM else 1e-4
         self.check_model_with_multiple_inputs(
             model,
             list_example_inputs,
@@ -1974,7 +1972,6 @@ class AOTInductorTestsTemplate:
                 "max_autotune_gemm_backends": "TRITON",
             },
             dynamic_shapes=dynamic_shapes,
-            tol=tol,
         )
 
     @skipIfWindows(msg="TODO: (xuhancn) confirm, Crash: access violation")
