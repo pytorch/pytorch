@@ -9,7 +9,7 @@ from torch.testing._internal.common_cuda import (
     TEST_MULTIGPU,
     TEST_NUMBA_CUDA,
 )
-from torch.testing._internal.common_utils import TEST_NUMPY
+from torch.testing._internal.common_utils import HardwareClassification, TEST_NUMPY
 
 
 if TEST_NUMPY:
@@ -20,6 +20,8 @@ if TEST_NUMBA_CUDA:
 
 
 class TestNumbaIntegration(common.TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @unittest.skipIf(not TEST_NUMPY, "No numpy")
     @unittest.skipIf(not TEST_CUDA, "No cuda")
     def test_cuda_array_interface(self):
