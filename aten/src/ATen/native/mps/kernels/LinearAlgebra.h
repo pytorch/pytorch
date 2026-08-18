@@ -22,9 +22,26 @@ struct UnpackPivotsParams {
   uint32_t dim_size;
 };
 
-struct QrParams {
-  uint32_t m;
-  uint32_t n;
+template <unsigned N = c10::metal::max_ndim>
+struct GeqrfParams {
+  int32_t num_batch_dims;
+
+  ::c10::metal::array<uint32_t, N> A_sizes;
+  ::c10::metal::array<uint32_t, N> A_strides;
+  ::c10::metal::array<uint32_t, N> tau_strides;
+};
+
+enum class GemmEpilogue : int { None = 0, Bias = 1 };
+
+// n - output length
+// ld - matrix row stride
+// ms - matrix stride along the reduction/output dimension
+// xs - vector stride
+// bias_r/bias_c - row/col strides of the bias (for addmm)
+// 64-bit so huge operands fit; kernels narrow to their IDX template width.
+struct GemvDims {
+  int64_t n, K, ld, ms, xs;
+  int64_t bias_r, bias_c;
 };
 
 struct SvdParams {
