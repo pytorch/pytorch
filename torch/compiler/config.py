@@ -65,7 +65,7 @@ they remember it is dynamic.  This profile information, however, is sensitive
 to what workload you are running, so we require you to tell us that two jobs
 are *related* (i.e., are the same workload) before we are willing to reuse
 this information.  Notably, PGO does nothing (even if explicitly enabled)
-unless a valid ``job_id`` is available.  In some situations, PyTorch can
+unless a valid ``job_id`` is available.  In some situations, PyTorch can be
 configured to automatically compute a ``job_id`` based on the environment it
 is running in.
 

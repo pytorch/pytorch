@@ -1050,7 +1050,7 @@ def _hardtanh(
     if inplace:
         raise NotImplementedError
     if utils.is_boolean_dtype(a.dtype):
-        raise RuntimeError("Bool inputs not supported for hardtanh")
+        raise NotImplementedError("Bool inputs not supported for hardtanh")
 
     # preserve legacy behavior of boundaries not causing type promotion
     if utils.is_integer_dtype(a.dtype):

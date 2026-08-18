@@ -10,10 +10,12 @@ from unittest import mock
 import torch
 import torch._inductor.kernel.flex.flex_flash_attention as flex_flash_attention_module
 from torch._dynamo.testing import CompileCounterWithBackend, EagerAndRecordGraphs
+from torch._higher_order_ops.inline_asm_elementwise import inline_asm_elementwise
 from torch._inductor.kernel.flex.flex_flash_attention import (
     _flash_attention_unavailable_message,
     _hierarchical_indexer_cute,
     ensure_flash_available,
+    flash_supports_aux_scalars,
     HierarchicalIndex,
 )
 from torch._inductor.test_case import TestCase as InductorTestCase
@@ -979,6 +981,72 @@ class TestFlexFlash(InductorTestCase):
 
         q, k, v = create_test_tensors(seq_len=seq_len, device="cuda")
         flash_vs_triton(q, k, v, score_mod=score_mod)
+
+    @xfailIfSM120OrLater
+    def test_inline_asm_score_mod(self):
+        """score_mod using the inline_asm_elementwise HOP lowers to a PTX call
+        inside the generated CuteDSL score_mod."""
+        seq_len = 512
+        bias = torch.randn(seq_len, device="cuda")
+
+        def score_mod(score, _b, _h, _q, kv_idx):
+            return inline_asm_elementwise(
+                score,
+                bias[kv_idx],
+                asm_str="fma.rn.f32 $0, $1, 0f40000000, $2;",
+                constraints="=f,f,f",
+                dtype=torch.float32,
+            )
+
+        q, k, v = create_test_tensors(seq_len=seq_len, device="cuda")
+        flash_vs_triton(q, k, v, score_mod=score_mod)
+
+    @xfailIfSM120OrLater
+    def test_inline_asm_score_mod_pack2(self):
+        """pack=2 inline asm requires compile, so compare flash against the
+        compiled Triton backend directly."""
+
+        def score_mod(score, _b, _h, _q, _kv):
+            return inline_asm_elementwise(
+                score,
+                asm_str="add.f32 $0, $2, $2; add.f32 $1, $3, $3;",
+                constraints="=f,=f,f,f",
+                dtype=torch.float32,
+                pack=2,
+            )
+
+        q, k, v = create_test_tensors(seq_len=512, device="cuda")
+        compiled_fn = torch.compile(flex_attention)
+        out_flash = compiled_fn(
+            q, k, v, score_mod=score_mod, kernel_options={"BACKEND": "FLASH"}
+        )
+        out_triton = compiled_fn(
+            q, k, v, score_mod=score_mod, kernel_options={"BACKEND": "TRITON"}
+        )
+        torch.testing.assert_close(out_flash, out_triton, atol=2e-3, rtol=2e-3)
+
+    @xfailIfSM120OrLater
+    def test_inline_asm_mask_mod(self):
+        """mask_mod using the inline_asm_elementwise HOP: multi-line PTX
+        predicate runs in block-mask construction and on partial blocks."""
+        seq_len = 512
+        asm_str = "{\n.reg .pred p;\nsetp.ge.s32 p, $1, $2;\nselp.u32 $0, 1, 0, p;\n}"
+
+        def asm_causal_mask(_b, _h, q_idx, kv_idx):
+            pred = inline_asm_elementwise(
+                q_idx.to(torch.int32),
+                kv_idx.to(torch.int32),
+                asm_str=asm_str,
+                constraints="=r,r,r",
+                dtype=torch.int32,
+            )
+            return pred != 0
+
+        block_mask = _create_block_mask_for_device(
+            asm_causal_mask, 2, 4, seq_len, seq_len, device="cuda"
+        )
+        q, k, v = create_test_tensors(seq_len=seq_len, device="cuda")
+        flash_vs_triton(q, k, v, block_mask=block_mask)
 
     @xfailIfSM120OrLater
     @dtypes(torch.float16, torch.bfloat16)
@@ -2972,6 +3040,11 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
         )
 
     def test_dynamic_scalar_closure_in_mask_mod(self):
+        if not flash_supports_aux_scalars():
+            self.skipTest(
+                "Flash attention (CUTE) scalar capture support is not available"
+            )
+
         major, _ = torch.cuda.get_device_capability()
         if SM120OrLater:
             self.skipTest("block sparse mask_mod is not supported on SM120")
