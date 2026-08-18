@@ -3012,6 +3012,33 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
                 "Error: No kernel events in trace contained grid/block metadata",
             )
 
+    @onlyAccelerator
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_overhead_activities_own_no_device_time(self, device):
+        """
+        OVERHEAD events (profiler-internal host cost) must report zero device time
+        """
+        device_type = device.split(":")[0]
+        # Skip warm-up: the first traced launches are the ones that emit overhead records.
+        with profile(activities=get_profiler_activities(device_type)) as prof:
+            self.payload(device=device)
+
+        events = prof.events()
+        total_device_time = sum(
+            e.self_device_time_total for e in events if e.device_type != DeviceType.CPU
+        )
+
+        for e in events:
+            if e.activity_type == "overhead":
+                self.assertEqual(e.self_device_time_total, 0)
+                self.assertEqual(e.device_time_total, 0)
+
+            # No single row may own more device time than the whole trace spent on device.
+            self.assertLessEqual(
+                e.self_device_time_total,
+                total_device_time,
+            )
+
 
 instantiate_device_type_tests(TestProfilerDevice, globals())
 
