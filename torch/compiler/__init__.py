@@ -1026,6 +1026,23 @@ def export_python(
     the artifact does not notice when it has gone stale: **edit ``fn`` and rerun, and you
     get the old compiled code with no warning.** Delete ``path`` to recapture.
 
+    A handful of comment stamps (below) catch the ambient changes that would silently
+    change the answer, and they are a backstop, not a guarantee -- the list of things a
+    generated kernel bakes is longer than the list that is checked. When you are
+    iterating, set ``COMPILER_EXPORT_PYTHON_CHECK=1``: every call then re-runs ``fn``
+    eagerly on a copy of the same inputs and compares, so an edit that changes numerics
+    is reported instead of trusted. It is a debug mode -- it doubles the work per call --
+    and it is the intended way to know an edit is safe. It compares outputs *and* any input
+    the graph mutated in place. "Doubles the work" is the floor: the reference run needs a
+    deep copy of every argument, so an ``nn.Module`` argument is copied -- weights and
+    all -- on every checked call. ``COMPILER_EXPORT_PYTHON_CHECK_RTOL`` and ``..._ATOL``
+    override the per-dtype tolerances; a ``fn`` that draws from the generator is skipped
+    with a warning, since inductor's philox differs from eager's by design. Note that
+    ``fn`` runs a second time on every checked call, so any side effect it has -- writing
+    a log, appending to a list, stepping a counter -- happens twice while the check is on,
+    and a test that deliberately makes the artifact disagree with ``fn`` will fail under
+    it by construction.
+
     .. warning::
         This API is experimental and subject to change.
 

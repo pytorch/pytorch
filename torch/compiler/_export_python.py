@@ -122,6 +122,374 @@ def _atomic_publish(path: str, data: bytes) -> bool:
             pass
 
 
+def _lighten(code: str) -> str:
+    """Strip inductor's build-time machinery out of a standalone artifact.
+
+    Three things it emits are for compiling, not for running, and only get in the way of
+    a file meant to be read and edited:
+
+      * each kernel is a STRING passed to async_compile.triton(...), so the source a
+        reader wants to tune is quoted, a syntax error in it is reported against an
+        opaque cache file, and a kernel emitted twice silently shadows itself;
+      * AsyncCompile exists to farm kernel compilation out to a worker pool at build
+        time, which a file that is exec'd once has no use for;
+      * a bare multi-line string holds the compile-time autotuning harness, inert here.
+
+    Hoisting each kernel to module level fixes all three at once: the kernel becomes real
+    code the reader can edit in place, Python reports errors in it against this file at
+    the right line, and duplicates become duplicate defs that this same pass drops.
+    """
+    lines = code.splitlines(True)
+    out: list[str] = []
+    i = 0
+    while i < len(lines):
+        if re.match(r"\w+ = async_compile\.triton\(", lines[i]):
+            body = close = -1
+            for j in range(i, len(lines)):
+                if body < 0 and "'''" in lines[j]:
+                    body = j
+                elif body >= 0 and lines[j].startswith("'''" + ", device_str="):
+                    close = j
+                    break
+            if close > 0:
+                out.extend(lines[body + 1 : close])
+                out.append("\n")
+                i = close + 1
+                continue
+        if lines[i].startswith(
+            (
+                "async_compile = AsyncCompile()",
+                "async_compile.wait(",
+                "del async_compile",
+                "from torch._inductor.async_compile import AsyncCompile",
+            )
+        ):
+            i += 1
+            continue
+        out.append(lines[i])
+        i += 1
+    lightened = "".join(out)
+    try:
+        tree = ast.parse(lightened)
+    except SyntaxError:
+        return code
+    # drop the inert compile-time blocks, which are bare string expressions
+    kept = lightened.splitlines(True)
+    inert = [
+        (n.lineno - 1, n.end_lineno)
+        for n in tree.body
+        if isinstance(n, ast.Expr)
+        and isinstance(n.value, ast.Constant)
+        and isinstance(n.value.value, str)
+        and n.end_lineno is not None
+        and n.end_lineno - n.lineno > 3
+    ]
+    for a, b in sorted(inert, reverse=True):
+        del kept[a:b]
+    lightened = "".join(kept)
+    # Only Triton kernels are hoisted. A cpp_pybinding (the CPU backend) or any other
+    # async_compile call still needs the object this pass removed, so if one survives,
+    # publish the original: names alone are not enough to check here, because such a
+    # call still BINDS its kernel name while its value has become unresolvable.
+    if re.search(r"\basync_compile\s*\.", lightened):
+        return code
+    # Earn the claim: the result must still parse and must still bind every name the
+    # original did, minus the build-time machinery this pass exists to remove. Anything
+    # else and we publish the original -- a bulky artifact beats a broken one.
+    try:
+        before = _module_level_names(code) - {"async_compile"}
+        if not before <= _module_level_names(lightened):
+            return code
+    except SyntaxError:
+        return code
+    return lightened
+
+
+def _prune_dead_bindings(code: str) -> str:
+    """Drop module-level imports and bindings the artifact never uses.
+
+    Inductor emits one preamble for every backend it might target, so a graph with a
+    single Triton kernel still carries ctypes, tempfile, the pooled and p2p allocators
+    and the rest. They are inert, but this file is meant to be read, and thirty lines of
+    machinery no kernel here touches is thirty lines between the reader and the kernel.
+
+    ALL-CAPS bindings are kept whatever the analysis says: the calling-convention block
+    (BACKEND, PARAM_NAMES, USER_INPUT_SHAPES, ...) is part of the artifact's documented
+    surface and is read from outside the file, not within it.
+    """
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return code
+    used = {
+        node.id
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)
+    }
+    used |= {node.attr for node in ast.walk(tree) if isinstance(node, ast.Attribute)}
+    # A name can also be reached from inside an embedded string -- kernel source,
+    # metadata reconstructed by exec -- which no AST walk of this module will show.
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            used |= set(re.findall(r"\b\w+\b", node.value))
+
+    def is_dead(name: str) -> bool:
+        return name not in used and not name.isupper()
+
+    lines = code.splitlines(True)
+    drop: list[tuple[int, int]] = []
+    for node in tree.body:
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            if node.names and all(
+                is_dead((a.asname or a.name).split(".")[0]) for a in node.names
+            ):
+                drop.append((node.lineno - 1, node.end_lineno or node.lineno))
+        elif (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+            and is_dead(node.targets[0].id)
+            # only simple aliases; never drop something with a side effect
+            and isinstance(node.value, (ast.Attribute, ast.Name, ast.Constant))
+        ):
+            drop.append((node.lineno - 1, node.end_lineno or node.lineno))
+    for a, b in sorted(drop, reverse=True):
+        del lines[a:b]
+    pruned = "".join(lines)
+    try:
+        ast.parse(pruned)
+    except SyntaxError:
+        return code
+    return pruned
+
+
+def _module_level_names(code: str) -> set[str]:
+    names = set()
+    for node in ast.parse(code).body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.add(node.name)
+        elif isinstance(node, ast.Assign):
+            names.update(t.id for t in node.targets if isinstance(t, ast.Name))
+    return names
+
+
+_INNER_BANNER = (
+    "# Generated by torch._functorch.aot_autograd.compile_to_python -- do not edit."
+)
+
+
+def _mark_editable(code: str) -> str:
+    """Correct the inner codegen banner.
+
+    aot_autograd emits it for every compile_to_python caller and tells the reader not to
+    do the one thing this artifact exists for. Rewritten here rather than upstream,
+    because only export_python promises the source is yours to change.
+    """
+    return code.replace(
+        _INNER_BANNER,
+        "# Generated by torch._functorch.aot_autograd.compile_to_python. Editing it is\n"
+        "# supported: this source is what runs. The kernels below are yours -- retune the\n"
+        "# heuristics decorator, replace it with an explicit triton.autotune, or delete\n"
+        "# inductor's machinery and hand-write the kernel. Two things to know if you\n"
+        "# hoist a kernel out of its async_compile.triton(NAME, '''...''') call: the\n"
+        "# launch site uses KERNEL.run(...), which only exists on inductor's autotuner,\n"
+        "# so switch it to KERNEL[grid](..., XBLOCK=..., num_warps=...); and @triton.jit\n"
+        "# finds its own source by filename, so load the artifact with\n"
+        "# exec(compile(src, path, 'exec'), ns) rather than exec(src, ns).",
+        1,
+    )
+
+
+def _explain_kernel_compile_error(
+    code: str, path: str, exc: BaseException
+) -> str | None:
+    """Map a kernel compile failure back to the artifact the reader actually edited.
+
+    Reached for backends whose kernels are not hoisted to module level -- the CPU
+    cpp_pybinding path -- where the source is still compiled out of a cache file. A
+    hoisted Triton kernel needs none of this: Python reports the error against this
+    artifact at the right line by itself.
+
+    Embedded kernel source is written to a cache file and imported from there, so a
+    syntax error in it is reported against an opaque /tmp/torchinductor_*/xx/yyy.py at a
+    line number nobody can act on. Recover the artifact line by locating the cache
+    file's own text inside the artifact.
+    """
+    message = str(exc)
+    if "torchinductor" not in message:
+        return None
+    hint = f"the failure is in a kernel embedded in {path}"
+    match = re.search(r"(/\S*torchinductor\S*?\.py)", message)
+    if match is None:
+        return hint
+    try:
+        with open(match.group(1), encoding="utf-8") as handle:
+            cached = handle.read().splitlines()
+    except OSError:
+        return hint
+    line_match = re.search(r"line (\d+)", message)
+    vague = f"{hint}; edit it there, not in the cache file"
+    if line_match is None:
+        return vague
+    # Anchor on a RUN of cache lines, not one def: an artifact can embed several
+    # kernels, and matching a single line would map into whichever appears first.
+    # Without a unique anchor, say nothing about the line rather than name a wrong one.
+    failing = int(line_match.group(1)) - 1
+    window = [l for l in cached[max(0, failing - 6) : failing + 1] if l.strip()]
+    if not window:
+        return vague
+    block = "\n".join(window)
+    if code.count(block) != 1:
+        return vague
+    return (
+        f"{hint} around line {code[: code.index(block)].count(chr(10)) + len(window)}; "
+        "edit it there, not in the cache file"
+    )
+
+
+_CHECK_ENV = "COMPILER_EXPORT_PYTHON_CHECK"
+
+
+def _check_enabled() -> bool:
+    return os.environ.get(_CHECK_ENV, "") not in ("", "0")
+
+
+def _check_tolerances(dtype: torch.dtype) -> tuple[float, float]:
+    """Tolerances for comparing THIS artifact against eager, overridable by env var.
+
+    Deliberately looser than torch.testing's defaults, which are calibrated for
+    eager-vs-eager. Inductor fuses and reassociates reductions, so a correct artifact
+    differs from eager by more than that on the first call -- torch.compile produces the
+    same divergence on the same graph. Using the tight defaults rejected freshly exported,
+    never-edited artifacts, which would make the check useless.
+
+    There is a lot of headroom: an ordinary fused reduction lands near 2e-5 relative,
+    while an edit that actually changes the math (exp for exp2) lands near 4e0. Anything
+    in between is worth a look, which is what these thresholds are for.
+    """
+    per_dtype = {
+        torch.float64: (1e-7, 1e-9),
+        torch.float32: (1e-3, 1e-4),
+        torch.float16: (1e-2, 1e-3),
+        torch.bfloat16: (5e-2, 5e-3),
+    }
+    rtol, atol = per_dtype.get(dtype, (1e-3, 1e-4))
+    override_rtol = os.environ.get(f"{_CHECK_ENV}_RTOL")
+    override_atol = os.environ.get(f"{_CHECK_ENV}_ATOL")
+    return (
+        float(override_rtol) if override_rtol else rtol,
+        float(override_atol) if override_atol else atol,
+    )
+
+
+def _eager_draws(
+    fn: Callable[..., Any],
+    args: tuple[Any, ...],
+    rng: torch.Tensor,
+) -> bool:
+    """Whether fn's result depends on the generator, i.e. whether it draws.
+
+    Only consulted after a mismatch, to tell "the edit broke it" apart from "this
+    function draws". Drawing has to be detected by running from two DIFFERENT generator
+    states -- running twice from the same state proves nothing, because eager is
+    perfectly reproducible at a fixed seed. What makes the comparison meaningless is that
+    inductor lowers random ops to its own philox and differs from eager at the same seed
+    by design.
+    """
+    devices = (
+        list(range(torch.cuda.device_count())) if torch.cuda.is_available() else []
+    )
+    try:
+        # fork_rng so neither the reseed below nor anything fn draws escapes: this runs
+        # only to answer a question, and must leave the caller's streams untouched.
+        with torch.random.fork_rng(devices=devices, enabled=True):
+            torch.random.set_rng_state(rng)
+            first = pytree.tree_leaves(fn(*copy.deepcopy(args)))
+            torch.random.manual_seed(int(torch.random.initial_seed()) + 1)
+            second = pytree.tree_leaves(fn(*copy.deepcopy(args)))
+    except Exception:
+        return False
+    pairs = [
+        (a, b)
+        for a, b in zip(first, second)
+        if isinstance(a, torch.Tensor) and isinstance(b, torch.Tensor)
+    ]
+    for a, b in pairs:
+        if a.shape != b.shape or a.dtype != b.dtype:
+            return True
+        rtol, atol = _check_tolerances(a.dtype)
+        if not torch.allclose(a, b, rtol=rtol, atol=atol, equal_nan=True):
+            return True
+    return False
+
+
+def _verify_against_eager(
+    fn: Callable[..., Any],
+    args: tuple[Any, ...],
+    reference_args: tuple[Any, ...],
+    produced: Any,
+    path: str,
+    rng: torch.Tensor,
+) -> None:
+    """Re-run fn eagerly on a pre-call copy of the inputs and compare the results.
+
+    The artifact is frozen at capture and stays frozen through every hand-edit -- that is
+    the point of it -- so the way to know an edit is still correct is to ask the original
+    function. Under COMPILER_EXPORT_PYTHON_CHECK every call does exactly that.
+    """
+    expected = fn(*reference_args)
+    # Outputs AND inputs. A graph is free to mutate what it was handed, and a fn whose
+    # whole job is an in-place write returns nothing to compare -- checking only the
+    # return value rubber-stamps exactly those.
+    got_leaves = [
+        t for t in pytree.tree_leaves((produced, args)) if isinstance(t, torch.Tensor)
+    ]
+    want_leaves = [
+        t
+        for t in pytree.tree_leaves((expected, reference_args))
+        if isinstance(t, torch.Tensor)
+    ]
+    if len(got_leaves) != len(want_leaves):
+        raise _precompile_error(
+            f"{_CHECK_ENV}: the artifact at {path} returned {len(got_leaves)} tensors "
+            f"but {getattr(fn, '__name__', 'fn')} returns {len(want_leaves)}."
+        )
+    for i, (got, want) in enumerate(zip(got_leaves, want_leaves)):
+        rtol, atol = _check_tolerances(got.dtype)
+        if got.shape != want.shape or got.dtype != want.dtype:
+            raise _precompile_error(
+                f"{_CHECK_ENV}: output {i} of the artifact at {path} is "
+                f"{tuple(got.shape)}/{got.dtype} but eager gives "
+                f"{tuple(want.shape)}/{want.dtype}."
+            )
+        if torch.allclose(
+            got, want.to(got.device), rtol=rtol, atol=atol, equal_nan=True
+        ):
+            continue
+        diff = (got.double() - want.to(got.device).double()).abs()
+        scale = (
+            want.to(got.device).double().abs().clamp_min(torch.finfo(torch.double).tiny)
+        )
+        if _eager_draws(fn, reference_args, rng):
+            log.warning(
+                "%s: %s draws from the generator, and inductor lowers random ops to its "
+                "own philox, which differs from eager at the same seed by design -- so "
+                "comparing the two says nothing. Skipping the check for %s.",
+                _CHECK_ENV,
+                getattr(fn, "__name__", "fn"),
+                path,
+            )
+            return
+        raise _precompile_error(
+            f"{_CHECK_ENV}: output {i} of the artifact at {path} does not match "
+            f"{getattr(fn, '__name__', 'fn')} run eagerly on the same inputs "
+            f"(max abs diff {diff.max().item():.3e}, max rel diff "
+            f"{(diff / scale).max().item():.3e}, tolerances rtol={rtol} atol={atol}). "
+            "If you have hand-edited the artifact, the edit changed its numerics; "
+            f"otherwise delete {path} to recapture."
+        )
+
+
 def _precompile_error(msg: str) -> Exception:
     from torch._precompile import PrecompileError
 
@@ -536,6 +904,7 @@ class ExportedPythonArtifact:
             tracer=self._tracer,
             decompositions=self._decompositions,
         )
+        code = _mark_editable(_prune_dead_bindings(_lighten(code)))
         parent = os.path.dirname(self._path)
         if parent:
             os.makedirs(parent, exist_ok=True)
@@ -817,6 +1186,14 @@ class ExportedPythonArtifact:
                 "the current torch."
             ) from e
         except Exception as e:
+            # A Triton kernel is compiled out of a cache file, so a syntax error in one
+            # is reported against an opaque /tmp/torchinductor_*/xx/yyy.py at a line
+            # number the reader cannot act on. Map it back to this artifact.
+            explanation = _explain_kernel_compile_error(code, self._path, e)
+            if explanation is not None:
+                raise PrecompileError(
+                    f"torch.compiler.export_python: {explanation}."
+                ) from e
             raise PrecompileError(
                 "torch.compiler.export_python: an unexpected error occurred running "
                 f"the artifact at {self._path}. Delete it to regenerate."
@@ -962,7 +1339,37 @@ class ExportedPythonArtifact:
             loaded = self._materialize_once(args)
         self._check_capture_environment(args)
         self._check_module_training(args)
-        return loaded(*args)
+        if not _check_enabled():
+            return loaded(*args)
+        # Copy BEFORE the call: the graph may mutate its inputs in place, and the eager
+        # reference has to see what the artifact saw rather than what it left behind.
+        try:
+            reference = copy.deepcopy(args)
+        except Exception:
+            log.warning(
+                "%s is set but the arguments to %s could not be deep-copied, so an "
+                "eager comparison would see whatever the artifact mutated. Skipping "
+                "the check for this call.",
+                _CHECK_ENV,
+                self._path,
+            )
+            return loaded(*args)
+        # Three states matter here. `before` is what the artifact saw; the reference run
+        # is rewound to it so a draw is not mistaken for a bad edit. `after` is what the
+        # caller must be left with -- restoring `before` instead would discard whatever
+        # the artifact consumed and freeze the caller's stream, so a random function
+        # would return the same numbers on every checked call.
+        before = torch.random.get_rng_state()
+        produced = loaded(*args)
+        after = torch.random.get_rng_state()
+        try:
+            torch.random.set_rng_state(before)
+            _verify_against_eager(
+                self._fn, args, reference, produced, self._path, before
+            )
+        finally:
+            torch.random.set_rng_state(after)
+        return produced
 
 
 def export_python(
