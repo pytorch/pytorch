@@ -3781,6 +3781,7 @@ class _PrecompileApi:
         require_complete: bool = True,
         require_no_risky_drops: bool = True,
         require_no_dropped_guards: bool = False,
+        guard_policy: str = "all",
     ) -> tuple[str, bytes]:
         """Ahead-of-time precompile ``fn`` against example inputs.
 
@@ -3988,6 +3989,29 @@ class _PrecompileApi:
                     f"has no tracer choice; drop tracer={tracer!r}. It applies only to "
                     "the positional source-artifact path."
                 )
+            keep_only = None
+            if guard_policy == "varying":
+                # Which guards discriminate is only knowable once every variant
+                # exists, and guards are serialized per compilation, as each one
+                # is produced. So learn it from a throwaway capture first, then
+                # capture again keeping only those. The examples fully determine
+                # the capture, so the second pass reproduces the first: measured
+                # identical on a 62-frame model (53 frames, 121 variants, no
+                # frame differing in variant count).
+                from torch._dynamo.precompile_package import varying_guard_slots
+
+                probe = self.capture(
+                    fn,
+                    backend=backend,
+                    guard_filter_fn=guard_filter_fn,
+                    recompile_limit=recompile_limit,
+                    dynamic=dynamic,
+                    example_inputs=example_inputs,
+                )
+                with probe:
+                    pass
+                keep_only = varying_guard_slots(probe._session._guard_sets)
+                torch._dynamo.reset()
             session = self.capture(
                 fn,
                 backend=backend,
@@ -3996,6 +4020,7 @@ class _PrecompileApi:
                 dynamic=dynamic,
                 example_inputs=example_inputs,
                 invariants=invariants,
+                keep_only=keep_only,
             )
             with session:
                 pass
@@ -4044,6 +4069,7 @@ class _PrecompileApi:
         dynamic: bool | None = None,
         example_inputs: Sequence[ExampleInput | tuple[object, ...]] | None = None,
         invariants: str | None = None,
+        keep_only: frozenset[tuple[str, str]] | None = None,
     ) -> PrecompileSession:
         r"""capture(fn, *, backend="inductor", guard_filter_fn=None, recompile_limit=256, dynamic=None, example_inputs=None, invariants=None) -> PrecompileSession
 
@@ -4103,6 +4129,7 @@ class _PrecompileApi:
                 dynamic=dynamic,
                 example_inputs=example_inputs,
                 invariants=invariants,
+                keep_only=keep_only,
             )
         except PackageError as e:
             raise PrecompileError(str(e)) from e
