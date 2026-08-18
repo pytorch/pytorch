@@ -2308,6 +2308,20 @@ class TestPrecompile(TestCase):
             )
             self.assertIn("Editing it is supported", code)
 
+    @unittest.skipIf(not TEST_CUDA, "needs CUDA")
+    def test_load_from_a_code_string_gives_triton_a_file(self):
+        # Kernels are module-level code, and @triton.jit reads its own source off disk:
+        # it refuses a function whose module has no file. A caller loading from a string
+        # has no path to offer, so load parks a copy where triton can find it rather
+        # than failing on every CUDA artifact.
+        code, cache = torch.compiler.precompile(
+            lambda a: (a * 2).relu(), torch.ones(64, device="cuda")
+        )
+        self.assertIn("@triton.jit", code)
+        loaded = torch.compiler.precompile.load(code, cache)
+        x = torch.randn(64, device="cuda")
+        self.assertEqual(loaded(x), (x * 2).relu())
+
 
 @skipIfTorchDynamo("precompile's make_fx capture is incompatible with dynamo wrapping")
 class TestPrecompileNumerics(TestCase):
