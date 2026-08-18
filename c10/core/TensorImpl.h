@@ -306,6 +306,12 @@ struct C10_API ExtraMeta {
   // The real constant this fake was created from (via
   // FakeTensorMode::set_constant), or null.
   c10::intrusive_ptr<c10::TensorImpl> fake_constant_ = nullptr;
+  // The symbolic value returned by item() for this fake tensor. SafePyObject
+  // keeps the memo attached to TensorImpl rather than an ephemeral Python
+  // Tensor wrapper.
+  std::unique_ptr<c10::SafePyObject> fake_item_memo_ = nullptr;
+  std::optional<uint32_t> fake_item_memo_version_ = std::nullopt;
+  uint64_t fake_item_memo_epoch_ = 0;
 
   ExtraMeta() = default;
   ~ExtraMeta();
@@ -1552,6 +1558,32 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       return nullptr;
     }
     return extra_meta_->real_tensor_;
+  }
+
+  void set_fake_item_memo(
+      std::unique_ptr<c10::SafePyObject> memo,
+      uint64_t epoch) {
+    auto& extra_meta = get_extra_meta();
+    extra_meta.fake_item_memo_ = std::move(memo);
+    extra_meta.fake_item_memo_version_ = is_inference()
+        ? std::nullopt
+        : std::optional<uint32_t>(version_counter().current_version());
+    extra_meta.fake_item_memo_epoch_ = epoch;
+  }
+
+  std::pair<c10::SafePyObject*, uint64_t> fake_item_memo() {
+    if (!extra_meta_ || extra_meta_->fake_item_memo_ == nullptr) {
+      return {nullptr, 0};
+    }
+    if (extra_meta_->fake_item_memo_version_.has_value() &&
+        *extra_meta_->fake_item_memo_version_ !=
+            version_counter().current_version()) {
+      extra_meta_->fake_item_memo_.reset();
+      extra_meta_->fake_item_memo_version_.reset();
+      return {nullptr, 0};
+    }
+    return {
+        extra_meta_->fake_item_memo_.get(), extra_meta_->fake_item_memo_epoch_};
   }
 
   // the ExtraMeta backing this tensor, or nullptr if none; does not allocate.
