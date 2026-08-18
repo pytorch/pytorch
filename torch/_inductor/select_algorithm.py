@@ -750,30 +750,31 @@ class TritonTemplateKernel(TritonKernel):
         reduction_mask = mask or self.template_mask or "(xmask & ymask)"
         for reduction_index, reduction in enumerate(plan.reductions):
             output_ptr = self.args.output(reduction.output_name)
-            source = f"({epilogue_result}).to({output_type})"
-            source = self.create_cse_var(
-                source,
+            expr = f"({epilogue_result}).to({output_type})"
+            expr = self.create_cse_var(
+                expr,
                 ValueRanges.unknown(),
                 dtype=output_dtype,
                 shape=(str(tile_m), str(tile_n)),
             )
             with patch.object(self, "compute", self.body):
-                source = self._lower_template_local_reduction_source(
-                    reduction.source, source
-                )
+                expr = self._lower_template_local_reduction_expr(reduction.source, expr)
             source_type = self.dtype_to_str(reduction.source_dtype)
-            source = f"({source}).to({source_type})"
+            expr = f"({expr}).to({source_type})"
             if (
                 reduction.source_dtype.is_floating_point
                 and reduction.source_dtype.itemsize < 4
             ):
-                source = f"({source}).to(tl.float32)"
+                expr = f"({expr}).to(tl.float32)"
             neutral = constant_repr(
-                ir.Reduction.default_accumulator(
-                    reduction.reduction_type, reduction.source_dtype
+                cast(
+                    int | float,
+                    ir.Reduction.default_accumulator(
+                        reduction.reduction_type, reduction.source_dtype
+                    ),
                 )
             )
-            value = f"tl.where({reduction_mask}, {source}, {neutral})"
+            value = f"tl.where({reduction_mask}, {expr}, {neutral})"
             reduce_fn = get_triton_reduction_function(reduction.reduction_type)
             result = f"_block_local_reduction_{reduction_index}"
             if (groups_m, groups_n) == (1, 1):
@@ -798,34 +799,31 @@ class TritonTemplateKernel(TritonKernel):
                     "_block_local_store_mask)"
                 )
 
-    def _lower_template_local_reduction_source(self, value: Any, source: Any) -> Any:
+    def _lower_template_local_reduction_expr(self, value: Any, expr: Any) -> Any:
         from torch._inductor.kernel.loop_ir_epilogue_lowering import (
             GemmEpilogueIRExpression,
         )
 
         if isinstance(value, tuple):
             return tuple(
-                self._lower_template_local_reduction_source(item, source)
-                for item in value
+                self._lower_template_local_reduction_expr(item, expr) for item in value
             )
         if isinstance(value, list):
             return [
-                self._lower_template_local_reduction_source(item, source)
-                for item in value
+                self._lower_template_local_reduction_expr(item, expr) for item in value
             ]
         if not isinstance(value, GemmEpilogueIRExpression):
             return value
         if value.op == "load":
-            return source
+            return expr
         if value.op == "identity":
-            return self._lower_template_local_reduction_source(value.args[0], source)
+            return self._lower_template_local_reduction_expr(value.args[0], expr)
         op = getattr(V.ops, value.op)
         args = tuple(
-            self._lower_template_local_reduction_source(arg, source)
-            for arg in value.args
+            self._lower_template_local_reduction_expr(arg, expr) for arg in value.args
         )
         kwargs = {
-            key: self._lower_template_local_reduction_source(arg, source)
+            key: self._lower_template_local_reduction_expr(arg, expr)
             for key, arg in value.kwargs
         }
         return op(*args, **kwargs)
@@ -1941,10 +1939,10 @@ class TritonTemplateKernel(TritonKernel):
         block_ptr=False,
         tma_compatibility_checker: TMACompatibilityChecker | None = None,
         mask_constant_index=False,
+        allow_reduction_invariant_indexing=False,
     ):
         """
-        Override the default indexing to use our custom mask and force
-        dense indexing.
+        Override the default indexing to use our custom mask and output shape.
         """
         return super().indexing(
             index,
@@ -1956,6 +1954,7 @@ class TritonTemplateKernel(TritonKernel):
             block_ptr=block_ptr,
             tma_compatibility_checker=tma_compatibility_checker,
             mask_constant_index=mask_constant_index,
+            allow_reduction_invariant_indexing=allow_reduction_invariant_indexing,
         )
 
     def codegen_range_tree(self):
