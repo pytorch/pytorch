@@ -193,11 +193,6 @@ void TensorImpl::_change_backend_component_keys(c10::Device device) {
 }
 
 void TensorImpl::set_fake_device(c10::Device fake_device) {
-  // Validate against the mode that owns this tensor, like python does. The
-  // ambient mode is the wrong one to ask: it may be a different mode than the
-  // one being attached (rejecting a tensor it does not own), or absent
-  // entirely. When no mode is attached yet, set_fake_tensor_mode does the check
-  // once it knows the owner.
   if (fake_device.type() == c10::DeviceType::Meta && extra_meta_ != nullptr) {
     const auto& mode = extra_meta_->fake_tensor_mode_;
     TORCH_CHECK(
@@ -1139,7 +1134,7 @@ void FakeTensorMode::set_constant(
     auto it = constant_storage_mapping_.find(key);
     if (it == constant_storage_mapping_.end()) {
       it = constant_storage_mapping_
-               .try_emplace(key, ConstantAliases(storage.getWeakStorageImpl()))
+               .try_emplace(key, ConstantAliases{storage.getWeakStorageImpl()})
                .first;
     }
     it->second.tensors.emplace_back(fake_impl);
