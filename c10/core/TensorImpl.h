@@ -288,8 +288,6 @@ struct C10_API FakeTensorMode {
   // key = constant storage, values = all fake tensors that share this storage
   // (aliases)
   struct ConstantAliases {
-    explicit ConstantAliases(c10::weak_intrusive_ptr<c10::StorageImpl> st)
-        : storage(std::move(st)) {}
     c10::weak_intrusive_ptr<c10::StorageImpl> storage;
     std::vector<c10::weak_intrusive_ptr<c10::TensorImpl>> tensors;
   };
