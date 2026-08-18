@@ -252,10 +252,6 @@ struct C10_API PyInterpreterVTable {
   // whether the active fake mode permits non-fake (real) tensor inputs, reading
   // the live Python value (mode attr + fake_tensor_tls override)
   virtual bool allow_non_fake_inputs() const = 0;
-  // promote a Python weak reference to a strong reference to its referent, or
-  // nullptr if the referent has already been collected
-  virtual std::shared_ptr<SafePyObject> strong_ref_from_weakref(
-      const SafePyObject& weakref) const = 0;
 };
 
 struct C10_API PyInterpreter {
