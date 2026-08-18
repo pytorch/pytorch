@@ -264,7 +264,7 @@ Extensions can select the minimum abi version to be compatible with using:
 #define TORCH_TARGET_VERSION (((0ULL + major) << 56) | ((0ULL + minor) << 48))
 ```
 
-before including any stable headers or by passing the equivalent `-D` option to the compiler. Otherwise, the default will be the current `TORCH_ABI_VERSION`.
+before including any stable headers or by passing the equivalent `-D` option to the compiler. Otherwise, the default will be the current `TORCH_ABI_VERSION`. The chosen `TORCH_TARGET_VERSION` must be less than or equal to the `TORCH_ABI_VERSION` of the libtorch headers being compiled against; a larger value is a compile error.
 
 The above ensures that if a user defines `TORCH_TARGET_VERSION` to be 0x0209000000000000 (2.9) and attempts to use a C shim API `foo` that was introduced in version 2.10, a compilation error will be raised. Similarly, the C++ wrapper APIs in `torch/csrc/stable` are compatible with older libtorch binaries up to the TORCH_ABI_VERSION they are exposed in and forward compatible with newer libtorch binaries.
 
