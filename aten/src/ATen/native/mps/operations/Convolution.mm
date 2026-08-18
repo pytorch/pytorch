@@ -536,7 +536,7 @@ static void conv1d_single_output_matmul(const Tensor& input,
   const auto weight_matrix = weight.contiguous().reshape({output_channels, input_channels * kernel_size});
   auto output_matrix = output.view({batch_size, output_channels});
   if (bias_opt && bias_opt->defined()) {
-    const auto bias = bias_opt->scalar_type() == output.scalar_type() ? *bias_opt : bias_opt->to(output.scalar_type());
+    const auto bias = bias_opt->to(output.scalar_type());
     at::addmm_out(output_matrix, bias, input_matrix, weight_matrix.t());
   } else {
     at::mm_out(output_matrix, input_matrix, weight_matrix.t());
@@ -796,14 +796,12 @@ static void conv1d_matmul_forward(const Tensor& input_t,
   const auto dtype = input_t.scalar_type();
   const bool out_nlc = conv1d_is_nlc(output_t);
   // one kernel layout flag serves both operands, so coerce the input to match
-  const bool in_matches = out_nlc ? input_t.is_contiguous(MemoryFormat::ChannelsLast) : input_t.is_contiguous();
-  const auto src =
-      in_matches ? input_t : input_t.contiguous(out_nlc ? MemoryFormat::ChannelsLast : MemoryFormat::Contiguous);
+  const auto src = input_t.contiguous(out_nlc ? MemoryFormat::ChannelsLast : MemoryFormat::Contiguous);
   const auto weights = conv1d_weights_to_koc(weight_t);
   const bool has_bias = bias_opt && bias_opt->defined();
   std::optional<Tensor> bias;
   if (has_bias) {
-    bias = bias_opt->scalar_type() == dtype ? bias_opt->contiguous() : bias_opt->to(dtype).contiguous();
+    bias = bias_opt->to(dtype, /*non_blocking=*/false, /*copy=*/!bias_opt->is_contiguous(), MemoryFormat::Contiguous);
   }
 
   const int64_t L = src.size(3);
