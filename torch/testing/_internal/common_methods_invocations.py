@@ -36,7 +36,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION, PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
-    SM53OrLater, SM80OrLater, SM89OrLater, SM90OrLater, with_tf32_off, TEST_CUDNN,
+    SM53OrLater, SM80OrLater, SM90OrLater, with_tf32_off, TEST_CUDNN,
     _get_torch_cuda_version,
 )
 from torch.testing._internal.common_quantized import (
@@ -17103,11 +17103,15 @@ op_db: list[OpInfo] = [
         'torch._scaled_mm_v2',
         sample_inputs_func=sample_inputs_scaled_mm_v2,
         dtypes=float8_types(),
-        dtypesIfCUDA=empty_types() + (e4m3_type,),
+        # Deliberately e4m3fn even on gfx942 (native fnuz): this dtype only
+        # names the generated test id, which must stay stable across archs for
+        # the disable-test bot and flaky-test aggregator. Sample inputs ignore
+        # it and use e4m3_type / e5m2_type instead.
+        dtypesIfCUDA=empty_types() + (torch.float8_e4m3fn,),
         supports_out=True,
         supports_forward_ad=False,
         supports_autograd=False,
-        decorators=[onlyCUDA, skipCUDAIf(not PLATFORM_SUPPORTS_FP8, 'Requires FP8 support (SM >= 8.9 or MI300+)')],
+        decorators=[onlyCUDA, skipCUDAIf(not PLATFORM_SUPPORTS_FP8, 'Requires FP8 support')],
         skips=(
             # Sample inputs isn't really parametrized on dtype
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes'),
@@ -17133,11 +17137,12 @@ op_db: list[OpInfo] = [
         'torch._scaled_mm',
         sample_inputs_func=sample_inputs_scaled_mm,
         dtypes=float8_types(),
-        dtypesIfCUDA=empty_types() + (e4m3_type,),
+        # Deliberately e4m3fn even on gfx942 (native fnuz); see _scaled_mm_v2.
+        dtypesIfCUDA=empty_types() + (torch.float8_e4m3fn,),
         supports_out=True,
         supports_forward_ad=False,
         supports_autograd=False,
-        decorators=[skipXPU, skipCUDAIf(not PLATFORM_SUPPORTS_FP8, 'Requires FP8 support (SM >= 8.9 or MI300+)')],
+        decorators=[skipXPU, skipCUDAIf(not PLATFORM_SUPPORTS_FP8, 'Requires FP8 support')],
         skips=(
             # Sample inputs isn't really parametrized on dtype
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes'),
