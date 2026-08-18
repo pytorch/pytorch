@@ -115,6 +115,21 @@ class TestReadableWrapperCodegen(TestCase):
         self.assertEqual(got[0], expected)
 
     @requires_cuda_and_triton
+    def test_no_stale_pointer_to_a_cache_file(self):
+        # Inductor stamps each kernel "# kernel path: /tmp/torchinductor_.../x.py",
+        # naming where the kernel WOULD have been compiled from. It is defined in this
+        # file instead, and pointing a reader at a cache file is the confusion this mode
+        # exists to remove.
+        def fn(x):
+            return torch.softmax(x * 2, dim=-1)
+
+        x = torch.randn(64, 128, device="cuda")
+        _, code = _code_for(fn, x, readable_wrapper=True)
+        self.assertNotIn("# kernel path:", code)
+        # the rest of the provenance comment is still worth having
+        self.assertIn("Original ATen:", code)
+
+    @requires_cuda_and_triton
     def test_default_wrapper_still_uses_async_compile(self):
         def fn(x):
             return torch.softmax(x * 2, dim=-1)
