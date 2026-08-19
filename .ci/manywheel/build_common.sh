@@ -94,9 +94,6 @@ fi
 export PYTORCH_BUILD_VERSION=$build_version
 export PYTORCH_BUILD_NUMBER=$build_number
 
-export CMAKE_LIBRARY_PATH="/opt/intel/lib:/lib:$CMAKE_LIBRARY_PATH"
-export CMAKE_INCLUDE_PATH="/opt/intel/include:$CMAKE_INCLUDE_PATH"
-
 mkdir -p /tmp/$WHEELHOUSE_DIR
 
 export PATCHELF_BIN=/usr/local/bin/patchelf
