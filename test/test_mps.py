@@ -14216,6 +14216,51 @@ class TestConvolutionMPS(TestCaseMPS):
         max_tolerance = {torch.float32: 1e-4, torch.float16: 5e-3, torch.bfloat16: 5e-2}[dtype]
         return max_tolerance * math.sqrt(reduction_size / reference_reduction_size)
 
+    @parametrize("column_major_weight", [False, True], name_fn=lambda value: "column_weight" if value else "weight")
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_conv1d_nlc_input(self, dtype, column_major_weight):
+        input_tensor = torch.randn(2, 7, 257).to(dtype).float()
+        weight = torch.randn(33, 7, 3).to(dtype).float()
+        bias = torch.randn(33).to(dtype).float()
+        expected = F.conv1d(input_tensor, weight, bias, padding=1)
+
+        mps_input = input_tensor.transpose(1, 2).contiguous().to(device="mps", dtype=dtype).transpose(1, 2)
+        if column_major_weight:
+            mps_weight = weight.transpose(1, 2).contiguous().to(device="mps", dtype=dtype).transpose(1, 2)
+        else:
+            mps_weight = weight.to(device="mps", dtype=dtype)
+        actual = F.conv1d(mps_input, mps_weight, bias.to(device="mps", dtype=dtype), padding=1)
+
+        tol = self._conv1d_tolerance(dtype, weight.size(1) * weight.size(2))
+        self.assertEqual(actual.float().cpu(), expected, atol=tol, rtol=tol)
+        self.assertTrue(actual.transpose(1, 2).is_contiguous())
+
+    def test_conv1d_nlc_backward(self):
+        input_tensor = torch.randn(2, 7, 257, requires_grad=True)
+        weight = torch.randn(33, 7, 3, requires_grad=True)
+        bias = torch.randn(33, requires_grad=True)
+        expected = F.conv1d(input_tensor, weight, bias, padding=1)
+        expected.sum().backward()
+
+        mps_input = input_tensor.detach().transpose(1, 2).contiguous().to("mps").transpose(1, 2).requires_grad_()
+        mps_weight = weight.detach().to("mps").requires_grad_()
+        mps_bias = bias.detach().to("mps").requires_grad_()
+        actual = F.conv1d(mps_input, mps_weight, mps_bias, padding=1)
+        actual.sum().backward()
+
+        self.assertEqual(actual.detach().cpu(), expected.detach(), atol=1e-4, rtol=1e-4)
+        self.assertEqual(mps_input.grad.cpu(), input_tensor.grad, atol=1e-4, rtol=1e-4)
+        self.assertEqual(mps_weight.grad.cpu(), weight.grad, atol=1e-4, rtol=1e-4)
+        self.assertEqual(mps_bias.grad.cpu(), bias.grad, atol=1e-4, rtol=1e-4)
+
+    def test_conv_transpose1d_nlc_input(self):
+        input_tensor = torch.randn(2, 7, 63)
+        weight = torch.randn(7, 4, 5)
+        expected = F.conv_transpose1d(input_tensor, weight, stride=2, padding=1)
+        mps_input = input_tensor.transpose(1, 2).contiguous().to("mps").transpose(1, 2)
+        actual = F.conv_transpose1d(mps_input, weight.to("mps"), stride=2, padding=1)
+        self.assertEqual(actual.cpu(), expected, atol=1e-4, rtol=1e-4)
+
     def test_conv2d_h1_channels_last_output(self):
         input_tensor = torch.randn(2, 7, 1, 257).contiguous(memory_format=torch.channels_last)
         weight = torch.randn(33, 7, 1, 3)
@@ -14355,6 +14400,54 @@ class TestConvolutionMPS(TestCaseMPS):
         tol = self._conv1d_tolerance(torch.float32, weight.size(1) * weight.size(2))
         self.assertEqual(actual.cpu(), expected, atol=tol, rtol=tol)
 
+    @unittest.skipIf(MACOS_VERSION < 26.2, "MPP Conv1d requires macOS 26.2 or newer")
+    @parametrize(
+        "tile,batch_size,output_channels,kernel_size,stride,input_length",
+        [("bo64_bw64", 1, 33, 2, 2, 524288), ("bo128_bw64", 4, 65, 2, 2, 1048576), ("bo64_bw128", 128, 129, 7, 2, 16384)],
+        name_fn=lambda tile, n, o, k, s, length: tile,
+    )
+    def test_conv1d_mpp_strided_nlc_tiles(self, tile, batch_size, output_channels, kernel_size, stride, input_length):
+        x = torch.randn(batch_size, 9, input_length, dtype=torch.bfloat16, device="mps")
+        weight = torch.randn(output_channels, 9, kernel_size, dtype=torch.bfloat16, device="mps")
+        bias = torch.randn(output_channels, dtype=torch.bfloat16, device="mps")
+        expected = F.conv1d(x, weight, bias, stride=stride)
+        # no channels_last memory format for rank-3 tensors
+        nlc_x = x.transpose(1, 2).contiguous().transpose(1, 2)
+        actual = F.conv1d(nlc_x, weight, bias, stride=stride)
+        self.assertTrue(actual.transpose(1, 2).is_contiguous())
+        self.assertEqual(actual, expected, atol=0, rtol=0)
+
+    @unittest.skipIf(MACOS_VERSION < 26.2, "MPP Conv1d requires macOS 26.2 or newer")
+    @parametrize("layout", ["contiguous", "channels_last"])
+    @parametrize(
+        "kernel_size,stride",
+        [(2, 2), (3, 2), (3, 3), (4, 2), (5, 2), (6, 3), (8, 4), (10, 4), (10, 5), (12, 6), (16, 8), (3, 5), (5, 3), (7, 2)],
+        name_fn=lambda kernel_size, stride: f"k{kernel_size}_s{stride}",
+    )
+    @parametrize("with_bias", [False, True], name_fn=lambda with_bias: "bias" if with_bias else "no_bias")
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_conv1d_mpp_strided(self, dtype, with_bias, kernel_size, stride, layout):
+        x = torch.randn(2, 9, 257).to(dtype).float()
+        weight = torch.randn(33, 9, kernel_size).to(dtype).float()
+        bias = torch.randn(33).to(dtype).float() if with_bias else None
+        padding = kernel_size // 2
+        expected = F.conv1d(x, weight, bias, stride=stride, padding=padding)
+        mps_x = x.to(device="mps", dtype=dtype)
+        if layout == "channels_last":
+            # no channels_last memory format for rank-3 tensors
+            mps_x = mps_x.transpose(1, 2).contiguous().transpose(1, 2)
+        actual = F.conv1d(
+            mps_x,
+            weight.to(device="mps", dtype=dtype),
+            None if bias is None else bias.to(device="mps", dtype=dtype),
+            stride=stride,
+            padding=padding,
+        )
+        tol = self._conv1d_tolerance(dtype, weight.size(1) * weight.size(2))
+        self.assertEqual(actual.float().cpu(), expected, atol=tol, rtol=tol)
+        if layout == "channels_last":
+            self.assertTrue(actual.transpose(1, 2).is_contiguous())
+
     @parametrize("layout", ["contiguous", "channels_last"])
     @parametrize("groups", [2, 4])
     @parametrize("dtype", [torch.float32, torch.bfloat16])
@@ -14476,6 +14569,18 @@ class TestConvolutionMPS(TestCaseMPS):
         expected = F.conv1d(x, weight, stride=8)
         actual = F.conv1d(x.to("mps"), weight.to("mps"), stride=8)
         self.assertEqual(actual.cpu(), expected, atol=1e-4, rtol=1e-4)
+
+    @parametrize("kernel_size", [4, 31])
+    def test_conv1d_depthwise_nlc(self, kernel_size):
+        channels = 64
+        x = torch.randn(2, channels, 1024)
+        weight = torch.randn(channels, 1, kernel_size)
+        bias = torch.randn(channels)
+        expected = F.conv1d(x, weight, bias, padding=kernel_size // 2, groups=channels)
+        mps_input = x.to("mps").transpose(1, 2).contiguous().transpose(1, 2)
+        actual = F.conv1d(mps_input, weight.to("mps"), bias.to("mps"), padding=kernel_size // 2, groups=channels)
+        self.assertEqual(actual.cpu(), expected, atol=1e-4, rtol=1e-4)
+        self.assertTrue(actual.transpose(1, 2).is_contiguous())
 
     def test_conv1d_pointwise_strided(self):
         x = torch.randn(2, 48, 1000)
