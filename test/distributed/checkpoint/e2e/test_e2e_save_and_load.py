@@ -47,7 +47,6 @@ from torch.testing._internal.common_utils import (
     run_tests,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorContinuousTestBase,
     DTensorTestBase,
     skip_if_lt_x_gpu,
     with_comms,
@@ -513,11 +512,16 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
             )
 
 
-class TestNoCPU(DTensorContinuousTestBase):
+class TestNoCPU(DTensorTestBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    def test_no_cpu(self, device):
-        if device == "cpu":
+    @property
+    def backend(self):
+        return dist.get_default_backend_for_device(self.device_type)
+
+    @with_comms
+    def test_no_cpu(self):
+        if self.device_type == "cpu":
             self.skipTest("test_no_cpu requires a non-CPU device")
         with self.assertRaisesRegex(
             AssertionError, r"A CPU backend must be enabled for async save;.*?"
