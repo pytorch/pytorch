@@ -45,8 +45,13 @@ from torch.fx.experimental.symbolic_shapes import (
     statically_known_true,
     SYMPY_INTERP,
 )
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
+)
 from torch.testing._internal.common_dtype import all_types_and
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_LINUX,
     IS_MACOS,
@@ -57,7 +62,6 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TEST_WITH_SLOW,
-    TEST_XPU,
     TestCase,
 )
 from torch.testing._internal.logging_utils import logs_to_string
@@ -262,6 +266,8 @@ def create_symfloat(shape_env, f: float) -> SymFloat:
     "Creating ShapeEnv fails for confusing reasons (also we never expect dynamo to see code like this)"
 )
 class TestPySymInt(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_arith_ops(self):
         shape_env = ShapeEnv()
         symints = []
@@ -2065,6 +2071,8 @@ class f(torch.nn.Module):
     "Creating ShapeEnv fails for confusing reasons (also we never expect dynamo to see code like this)"
 )
 class TestSymNumberMagicMethods(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _do_test(self, fn, inp1, inp2, shape_env, is_unary_fn):
         with self.subTest(fn=fn, inp1=inp1, inp2=inp2, is_unary_fn=is_unary_fn):
             return self._do_test2(fn, inp1, inp2, shape_env, is_unary_fn)
@@ -2535,6 +2543,8 @@ instantiate_parametrized_tests(TestSymNumberMagicMethods)
 
 
 class TestFloorDiv(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @staticmethod
     def python_floordiv(x, y):
         return x // y
@@ -2640,6 +2650,8 @@ class TestFloorDiv(TestCase):
 
 
 class TestDimConstraints(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @skipIfTorchDynamo("mark_dynamic not supported")
     def test_simplify_max_1_0(self):
         x = torch.rand(10)
@@ -3653,6 +3665,8 @@ class TestGuardsExpressions(TestCase):
     Tests the guards-related methods used by the inductor FX graph cache.
     """
 
+    hw_classification = HardwareClassification.GENERIC
+
     def test_guards_gt_lt(self):
         shape_env = ShapeEnv()
         s0 = create_symint(shape_env, 6)
@@ -3832,9 +3846,6 @@ class TestGuardsExpressions(TestCase):
             shape_env.evaluate_guards_expression(guards, [guarding_hint_or_throw(s1)])
         )
 
-    @unittest.skipIf(
-        TEST_XPU, "Skipped on XPU"
-    )  # https://github.com/intel/torch-xpu-ops/issues/2169"
     @skipIfTorchDynamo("Attempt to trace generator")
     @torch.fx.experimental._config.patch("use_duck_shape", False)
     def test_size_comparison_no_recompile(self):
@@ -3955,6 +3966,8 @@ def custom_pass(graph: torch.fx.Graph) -> torch.fx.Graph:
 
 
 class TestUnbacked(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_rebind_unbacked_to_symbolic_expression(self):
         shape_env = ShapeEnv()
         fake_mode = torch._subclasses.FakeTensorMode(
@@ -4375,6 +4388,8 @@ class TestUnbacked(TestCase):
 
 
 class TestUbackedOps(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @fresh_cache()
     @skipIfTorchDynamo("not allowed to trace mark_unbacked")
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
@@ -6412,6 +6427,8 @@ instantiate_parametrized_tests(TestUnbacked)
 class TestMaybeFastEvalComparison(TestCase):
     """Tests for _maybe_fast_eval_comparison fast path optimization."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def test_sum_of_nonneg_ge_zero(self):
         """Test that sum of non-negative symbols >= 0 returns True."""
         shape_env = ShapeEnv()
@@ -6598,6 +6615,8 @@ class TestMaybeFastEvalComparison(TestCase):
 
 class TestTransferSymbolsFromForeignShapeEnv(TestCase):
     """Tests for ShapeEnv.transfer_symbols_from_foreign_shape_env."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def _make_source(self, name="t"):
         from torch._dynamo.source import ConstantSource
@@ -7068,8 +7087,14 @@ class TestTransferSymbolsFromForeignShapeEnv(TestCase):
             token_grid_sizes[1].node.expr + derived_sizes[2].node.expr,
         )
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
-    def test_flex_attention_foreign_fake_e2e(self):
+
+class TestTransferSymbolsFromForeignShapeEnvDevice(TestCase):
+    """Device tests for ShapeEnv.transfer_symbols_from_foreign_shape_env."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @onlyAccelerator
+    def test_flex_attention_foreign_fake_e2e(self, device):
         """E2E test: trace flex_attention with BlockMask containing unbacked dims
         through a fresh FakeTensorMode, exercising the foreign ShapeEnv transfer path."""
         from contextlib import contextmanager
@@ -7178,8 +7203,8 @@ class TestTransferSymbolsFromForeignShapeEnv(TestCase):
         mark_unbacked(q_indices, 1)
         mark_unbacked(full_q_indices, 1)
 
-        attn_regions = torch.arange(ntoks, dtype=torch.int32, device="cuda")
-        document_ids = torch.zeros(ntoks, dtype=torch.int32, device="cuda")
+        attn_regions = torch.arange(ntoks, dtype=torch.int32, device=device)
+        document_ids = torch.zeros(ntoks, dtype=torch.int32, device=device)
 
         def mask_mod(b, h, q_idx, kv_idx):
             return (
@@ -7189,22 +7214,22 @@ class TestTransferSymbolsFromForeignShapeEnv(TestCase):
             )
 
         block_mask = BlockMask(
-            kv_num_blocks=kv_num_blocks.to("cuda"),
-            kv_indices=copy_marks(kv_indices, kv_indices.to("cuda")),
-            full_kv_num_blocks=full_kv_num_blocks.to("cuda"),
-            full_kv_indices=copy_marks(full_kv_indices, full_kv_indices.to("cuda")),
-            q_num_blocks=q_num_blocks.to("cuda"),
-            q_indices=copy_marks(q_indices, q_indices.to("cuda")),
-            full_q_num_blocks=full_q_num_blocks.to("cuda"),
-            full_q_indices=copy_marks(full_q_indices, full_q_indices.to("cuda")),
+            kv_num_blocks=kv_num_blocks.to(device),
+            kv_indices=copy_marks(kv_indices, kv_indices.to(device)),
+            full_kv_num_blocks=full_kv_num_blocks.to(device),
+            full_kv_indices=copy_marks(full_kv_indices, full_kv_indices.to(device)),
+            q_num_blocks=q_num_blocks.to(device),
+            q_indices=copy_marks(q_indices, q_indices.to(device)),
+            full_q_num_blocks=full_q_num_blocks.to(device),
+            full_q_indices=copy_marks(full_q_indices, full_q_indices.to(device)),
             BLOCK_SIZE=(block_size, block_size),
             mask_mod=mask_mod,
             seq_lengths=(ntoks, ntoks),
         )
 
-        q = torch.randn(1, 4, ntoks, 128, device="cuda")
-        k = torch.randn(1, 4, ntoks, 128, device="cuda")
-        v = torch.randn(1, 4, ntoks, 128, device="cuda")
+        q = torch.randn(1, 4, ntoks, 128, device=device)
+        k = torch.randn(1, 4, ntoks, 128, device=device)
+        v = torch.randn(1, 4, ntoks, 128, device=device)
         cflex = torch.compile(flex_attention, dynamic=False, fullgraph=True)
 
         flat_args, spec = pytree.tree_flatten([q, k, v, block_mask])
@@ -7262,6 +7287,14 @@ class TestTransferSymbolsFromForeignShapeEnv(TestCase):
             4,
             lambda msg: f"{msg}\nExpected at least 4 unbacked dims but found {unbacked_count}",
         )
+
+
+instantiate_device_type_tests(
+    TestTransferSymbolsFromForeignShapeEnvDevice,
+    globals(),
+    only_for=("cuda", "xpu"),
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":
