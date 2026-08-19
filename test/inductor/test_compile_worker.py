@@ -3,6 +3,7 @@ import io
 import json
 import operator
 import os
+import selectors
 import subprocess
 import sys
 import tempfile
@@ -17,7 +18,9 @@ from unittest.mock import patch
 
 import torch._inductor.config as config
 from torch._inductor.compile_worker.subproc_pool import (
+    _DrainResult,
     _recv_msg,
+    _send_msg,
     _SubprocExceptionInfo,
     MsgHeader,
     raise_testexc,
@@ -31,12 +34,85 @@ from torch._inductor.compile_worker.timer import Timer
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
-    IS_LINUX,
     parametrize,
     skipIfWindows,
     subtest,
 )
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_TRITON
+
+
+def _wait_for_path(path, timeout):
+    deadline = time.monotonic() + timeout
+    while not os.path.exists(path):
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.01)
+    return True
+
+
+class TestSubprocControlPipe(TestCase):
+    def test_recv_msg_reassembles_short_reads(self):
+        class OneByteReader(io.BytesIO):
+            def read(self, size: int = -1) -> bytes:
+                return super().read(1 if size < 0 else min(size, 1))
+
+        write_pipe = io.BytesIO()
+        _send_msg(write_pipe, MsgHeader.JOB, 7, b"payload")
+
+        msg_header, job_id, data = _recv_msg(OneByteReader(write_pipe.getvalue()))
+        self.assertEqual(msg_header, MsgHeader.JOB)
+        self.assertEqual(job_id, 7)
+        self.assertEqual(data, b"payload")
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_coalesced_commands_remain_visible(self):
+        from torch._inductor.compile_worker.__main__ import _open_parent_read_pipe
+
+        read_fd, write_fd = os.pipe()
+        with _open_parent_read_pipe(read_fd) as read_pipe:
+            with os.fdopen(write_fd, "wb", buffering=0) as command_pipe:
+                _send_msg(command_pipe, MsgHeader.QUIESCE)
+                _send_msg(command_pipe, MsgHeader.SHUTDOWN)
+
+                msg_header, _, _ = _recv_msg(read_pipe)
+                self.assertEqual(msg_header, MsgHeader.QUIESCE)
+
+                with selectors.DefaultSelector() as selector:
+                    selector.register(read_pipe, selectors.EVENT_READ)
+                    self.assertTrue(selector.select(timeout=1.0))
+
+                msg_header, _, _ = _recv_msg(read_pipe)
+                self.assertEqual(msg_header, MsgHeader.SHUTDOWN)
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_quiesce_drain_supports_high_file_descriptors(self):
+        import fcntl
+
+        read_fd, write_fd = os.pipe()
+        try:
+            try:
+                high_read_fd = fcntl.fcntl(read_fd, fcntl.F_DUPFD, 1024)
+            except OSError as exc:
+                os.close(write_fd)
+                self.skipTest(f"could not allocate a high file descriptor: {exc}")
+        finally:
+            os.close(read_fd)
+
+        with os.fdopen(high_read_fd, "rb", buffering=0) as read_pipe:
+            with os.fdopen(write_fd, "wb") as command_pipe:
+                _send_msg(command_pipe, MsgHeader.SHUTDOWN)
+
+            main = SubprocMain(
+                SubprocPickler(), SubprocKind.FORK, 1, read_pipe, io.BytesIO()
+            )
+            with main._inflight_lock:
+                main._inflight[7] = time.monotonic()
+
+            self.assertGreaterEqual(read_pipe.fileno(), 1024)
+            self.assertEqual(
+                main._drain_inflight_until_shutdown(),
+                _DrainResult.SHUTDOWN_REQUESTED,
+            )
 
 
 class TestCompileWorker(TestCase):
@@ -191,7 +267,6 @@ class TestCompileWorker(TestCase):
         finally:
             pool.shutdown()
 
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/176968")
     @skipIfWindows(msg="pass_fds not supported on Windows.")
     def test_quiesce_repeatedly(self):
         pool = SubprocPool(2)
@@ -336,6 +411,123 @@ class TestCompileWorker(TestCase):
             lambda msg: f"{msg}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}",
         )
         self.assertIn("shutdown returned", result.stdout)
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_shutdown_terminates_while_quiescing(self):
+        code = textwrap.dedent(
+            """
+            import operator
+            import os
+            import time
+
+            from torch._inductor.compile_worker.subproc_pool import (
+                _test_signal_then_sleep,
+                SubprocPool,
+            )
+
+            pool = SubprocPool(2)
+            assert pool.submit(operator.add, 1, 2).result() == 3
+
+            signal_path = os.environ["WORKER_SIGNAL_PATH"]
+            pool.submit(_test_signal_then_sleep, signal_path, 120)
+
+            deadline = time.time() + 60
+            while not os.path.exists(signal_path):
+                if time.time() >= deadline:
+                    raise RuntimeError("worker never started the long-running job")
+                time.sleep(0.05)
+
+            pool.quiesce()
+
+            wait = pool.process.wait
+
+            def short_wait(timeout=None):
+                return wait(timeout=30)
+
+            pool.process.wait = short_wait
+
+            kill = pool.process.kill
+
+            def unexpected_kill():
+                kill()
+                raise AssertionError("shutdown required sidecar fallback kill")
+
+            pool.process.kill = unexpected_kill
+            pool.shutdown()
+
+            print("shutdown returned")
+            """
+        )
+        with tempfile.TemporaryDirectory() as cwd:
+            signal_path = os.path.join(cwd, "worker_started")
+            result = subprocess.run(
+                [sys.executable, "-c", code],
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+                env={**os.environ, "WORKER_SIGNAL_PATH": signal_path},
+                timeout=120,
+            )
+        self.assertEqual(
+            result.returncode,
+            0,
+            lambda msg: f"{msg}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}",
+        )
+        self.assertIn("shutdown returned", result.stdout)
+
+
+class TestCompileWorkerQuiesceOrdering(TestCase):
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_quiesce_drains_inflight_work_before_wakeup(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            started_path = os.path.join(tmpdir, "started")
+            release_path = os.path.join(tmpdir, "release")
+            wait_for_barrier_code = textwrap.dedent(
+                """
+                import os
+                import sys
+                import time
+
+                started_path, release_path, timeout = sys.argv[1:]
+                open(started_path, "wb").close()
+                deadline = time.monotonic() + float(timeout)
+                while not os.path.exists(release_path):
+                    if time.monotonic() >= deadline:
+                        sys.exit(1)
+                    time.sleep(0.01)
+                """
+            )
+            pool = SubprocPool(2)
+            try:
+                slow = pool.submit(
+                    subprocess.call,
+                    [
+                        sys.executable,
+                        "-c",
+                        wait_for_barrier_code,
+                        started_path,
+                        release_path,
+                        "5.0",
+                    ],
+                )
+                self.assertTrue(_wait_for_path(started_path, 60.0))
+
+                pool.quiesce()
+                pool.wakeup()
+                fast = pool.submit(
+                    subprocess.call,
+                    [
+                        sys.executable,
+                        "-c",
+                        "import sys; open(sys.argv[1], 'wb').close()",
+                        release_path,
+                    ],
+                )
+
+                self.assertEqual(slow.result(timeout=60.0), 1)
+                self.assertEqual(fast.result(timeout=60.0), 0)
+            finally:
+                pool.shutdown()
 
 
 @config.patch("quiesce_async_compile_time", 0.1)
