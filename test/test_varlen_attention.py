@@ -27,6 +27,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
     decorateIf,
+    HardwareClassification,
     parametrize,
     run_tests,
     setSdpaBackendsToDefaultFinally,
@@ -341,6 +342,8 @@ def create_variable_length_batch(
 
 
 class TestVarlenAttention(NNTestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def _test_varlen_vs_sdpa(
         self,
         device,
