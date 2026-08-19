@@ -1854,7 +1854,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
 
     M, N, K = 512, 512, 512
 
-    def _compile_and_check(self, fn, *args):
+    def _compile_and_check(self, fn, *args, expected_kernels=1):
         torch._dynamo.reset()
         with (
             config.patch(
@@ -1878,7 +1878,8 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         ):
             result, code_list = run_and_get_code(torch.compile(fn), *args)
         code = "\n".join(code_list)
-        self.assertEqual(code.count(".run("), 1)
+        if expected_kernels is not None:
+            self.assertEqual(code.count(".run("), expected_kernels)
         epilogue_fused = EPILOGUE_FN_NAME in code and "EpilogueArguments" in code
         return result, code, epilogue_fused
 
