@@ -687,13 +687,13 @@ class TestTensorCreation(TestCase):
     @onlyAccelerator
     def test_cat_channels_last_large_inputs(self, device):
         num_tensors = 130
-        inputs_cuda = [
+        inputs_device = [
             torch.randn((2, 3, 4, 4), device=device).contiguous(memory_format=torch.channels_last)
             for _ in range(num_tensors)
         ]
-        inputs_cpu = [t.cpu() for t in inputs_cuda]
+        inputs_cpu = [t.cpu() for t in inputs_device]
 
-        result = torch.cat(inputs_cuda, dim=1)
+        result = torch.cat(inputs_device, dim=1)
         expected = torch.cat(inputs_cpu, dim=1)
 
         self.assertEqual(result.cpu(), expected)
@@ -2717,9 +2717,8 @@ class TestTensorCreation(TestCase):
         self.assertEqual((1, 1, 0), torch.as_tensor([[[]]], device=device).shape)
 
     @onlyAccelerator
-    def test_tensor_factory_gpu_type_inference(self, device):
-        device_type = torch.accelerator.current_accelerator().type
-        with set_default_tensor_type(getattr(torch, device_type).DoubleTensor):
+    def test_tensor_factory_device_type_inference(self, device):
+        with set_default_dtype(torch.float64), torch.device(device):
             with set_default_dtype(torch.float32):
                 self.assertIs(torch.float32, torch.tensor(0.).dtype)
                 self.assertEqual(torch.device(device), torch.tensor(0.).device)
@@ -2729,15 +2728,14 @@ class TestTensorCreation(TestCase):
 
     @onlyAccelerator
     def test_tensor_factory_device_type(self, device):
-        device_type = torch.accelerator.current_accelerator().type
-        with set_default_tensor_type(getattr(torch, device_type).FloatTensor):
+        with set_default_dtype(torch.float), torch.device(device):
             x = torch.zeros((5, 5))
             self.assertIs(torch.float32, x.dtype)
-            self.assertTrue(x.device == torch.device(device))
-        with set_default_tensor_type(getattr(torch, device_type).DoubleTensor):
+            self.assertEqual(x.device, torch.device(device))
+        with set_default_dtype(torch.float64), torch.device(device):
             x = torch.zeros((5, 5))
             self.assertIs(torch.float64, x.dtype)
-            self.assertTrue(x.device == torch.device(device))
+            self.assertEqual(x.device, torch.device(device))
 
     @skipCPUIf(True, 'compares device with cpu')
     @dtypes(torch.int, torch.long, torch.float, torch.double)
