@@ -131,9 +131,7 @@ class ExtensionBackendTests(BaseExtensionBackendTests):
             ExtensionWrapperCodegen,
             ExtensionCppWrapperCodegen,
         )
-        register_device_op_overrides(
-            "extension_device", ExtensionDeviceOpOverrides()
-        )
+        register_device_op_overrides("extension_device", ExtensionDeviceOpOverrides())
         self.assertEqual(
             device_to_aten("extension_device"),
             "at::kPrivateUse1",

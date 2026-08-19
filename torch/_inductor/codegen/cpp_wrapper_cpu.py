@@ -39,10 +39,10 @@ from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import get_device_op_overrides, IndentedBuffer, Kernel
 from .cpp_utils import (
     cexpr,
+    device_to_aten,
     DEVICE_TO_INT,
     DTYPE_TO_ATEN,
     DTYPE_TO_CPP,
-    device_to_aten,
     LAYOUT_TO_ATEN,
 )
 from .wrapper import (
