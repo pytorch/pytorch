@@ -1379,7 +1379,6 @@ class TestSortAndSelectCUDA(TestCase):
     @slowTest
     @largeTensorTest("170GB", "cpu")
     @largeTensorTest("72GB", "cuda")
-    @largeTensorTest("72GB", "xpu")
     @parametrize("test_case", ["random", "identical"])
     def test_topk_large_k(self, device, dtype, test_case):
         """Test topk with k > 2^32 (integer overflow bug fix).
