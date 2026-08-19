@@ -6,6 +6,7 @@ import json
 import math
 import operator
 import os
+import pickle
 import random
 import re
 import sys
@@ -6843,7 +6844,10 @@ class DistributedTest:
 
             b = Bar()
             gather_objects = [b for _ in range(dist.get_world_size())]
-            with self.assertRaises(AttributeError):
+            # Pickling a local class fails; the exception type depends on the
+            # Python version: AttributeError on <=3.13, PicklingError on >=3.14
+            # (CPython gh-139806). pickle.PickleError covers PicklingError.
+            with self.assertRaises((AttributeError, pickle.PickleError)):
                 dist.all_gather_object(
                     [None for _ in range(dist.get_world_size())],
                     gather_objects[self.rank],

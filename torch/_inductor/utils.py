@@ -104,49 +104,24 @@ if TYPE_CHECKING:
     from .scheduler import BaseSchedulerNode, SchedulerBuffer
 
 
-# GPU_TYPES is a static list retained for backward compatibility.
-# It will NOT include PrivateUse1 backends even after they declare
-# is_gpu()=True.  For membership tests use the is_gpu() predicate; for
-# enumeration use _gpu_types() or get_gpu_type().  Several call-sites
-# still iterate GPU_TYPES (grep for "GPU_TYPES") and will silently
-# exclude PrivateUse1 backends until migrated to is_gpu() / _gpu_types().
 GPU_TYPES = ["cuda", "mps", "xpu", "mtia"]
 T = TypeVar("T")
 
 
-def _gpu_types() -> list[str]:
-    """Private: walk the registered DeviceInterface registry and return
-    device-type names for which is_gpu() returns True.  Used only by
-    get_gpu_type() and the GPU_TYPES compatibility shim."""
-    from torch._dynamo.device_interface import get_registered_device_interfaces
-
-    return [
-        d
-        for d, iface in get_registered_device_interfaces()
-        if ":" not in d and iface.is_gpu()
-    ]  # filter "cuda:0"-style indexed entries
+# defines here before import torch._dynamo is for avoiding circular import
+# when get_gpu_type is imported from dynamo
+@functools.cache
+def get_gpu_type() -> str:
+    avail_gpus = [x for x in GPU_TYPES if getattr(torch, x).is_available()]
+    if not len(avail_gpus) <= 1:
+        raise AssertionError(
+            f"Expected at most 1 available GPU type, got {len(avail_gpus)}: {avail_gpus}"
+        )
+    gpu_type = "cuda" if len(avail_gpus) == 0 else avail_gpus.pop()
+    return gpu_type
 
 
 from torch._dynamo.device_interface import get_interface_for_device
-
-
-@functools.cache
-def get_gpu_type() -> str:
-    avail_gpus = [t for t in _gpu_types() if get_interface_for_device(t).is_available()]
-    if len(avail_gpus) == 1:
-        return avail_gpus[0]
-    # Coexistence disambiguation: PrivateUse1 first, matching the
-    # priority of C++ getAccelerator().  Guard that the accelerator is
-    # actually present and GPU-class; otherwise fall through to the
-    # first available GPU (or "cuda" if none).
-    acc = torch.accelerator.current_accelerator()
-    if acc is not None and is_gpu(acc.type) and acc.type in avail_gpus:
-        return acc.type
-    # Fallthrough: return the first available GPU (dict-registration order,
-    # best-effort), or "cuda" if none are available.
-    return avail_gpus[0] if avail_gpus else "cuda"
-
-
 from torch._dynamo.utils import detect_fake_mode
 from torch.autograd import DeviceType
 from torch.autograd.profiler_util import EventList
@@ -195,6 +170,13 @@ ALIGNMENT = 16
 TMA_ALIGNMENT = 16
 TMA_DESCRIPTOR_SIZE = 128
 
+TRITON_FLOAT8_DTYPES = (
+    torch.float8_e4m3fn,
+    torch.float8_e5m2,
+    torch.float8_e4m3fnuz,
+    torch.float8_e5m2fnuz,
+)
+
 # PyTorch dtypes with valid CUtensorMapDataType mappings.
 # Ref: triton/backends/nvidia/include/cuda.h (CUtensorMapDataType enum)
 #      triton/_internal_testing.py (tma_dtypes test list)
@@ -211,10 +193,7 @@ _TMA_SUPPORTED_DTYPES: OrderedSet[torch.dtype] = OrderedSet(
         torch.bfloat16,
         torch.float32,
         torch.float64,
-        torch.float8_e4m3fn,
-        torch.float8_e5m2,
-        torch.float8_e4m3fnuz,
-        torch.float8_e5m2fnuz,
+        *TRITON_FLOAT8_DTYPES,
     ]
 )
 
@@ -3463,12 +3442,7 @@ def get_cloned_parameter_buffer_name(name: str) -> str:
 
 
 def is_gpu(device: str | None) -> bool:
-    if device is None:
-        return False
-    try:
-        return get_interface_for_device(device).is_gpu()
-    except NotImplementedError:
-        return False
+    return device in GPU_TYPES
 
 
 def is_rocm() -> bool:
@@ -3507,12 +3481,7 @@ def is_triton_fp8_dtype_supported(
     triton_arch: int | str | None = None,
     warp_size: int | None = None,
 ) -> bool:
-    if dtype not in (
-        torch.float8_e4m3fn,
-        torch.float8_e5m2,
-        torch.float8_e4m3fnuz,
-        torch.float8_e5m2fnuz,
-    ):
+    if dtype not in TRITON_FLOAT8_DTYPES:
         return True
 
     triton_dtype = _type_of(dtype).removeprefix("*")
@@ -3552,11 +3521,7 @@ def is_triton_fp8_dtype_supported(
 
 
 def device_need_guard(device: str) -> bool:
-    try:
-        iface = get_interface_for_device(device)
-    except NotImplementedError:
-        return False
-    return iface.is_gpu() and iface.exposes_streams()
+    return device != "mps" and is_gpu(device)  # TODO: MPS does not expose streams now
 
 
 def needs_fallback_due_to_atomic_add_limitations(dtype: torch.dtype) -> bool:
@@ -4759,6 +4724,9 @@ def should_fallback_by_default(node: torch.fx.Node) -> bool:
             torch.ops.aten._assert_scalar.default,
             torch.ops.aten.lift_fresh_copy.default,
             torch.ops.aten.sym_size.int,
+            # `.item()` returns a Scalar, which cannot be serialized as a generic
+            # fallback kernel; route it to its dedicated DynamicScalar lowering.
+            torch.ops.aten._local_scalar_dense.default,
         ]
     )
 

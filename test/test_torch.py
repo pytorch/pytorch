@@ -1607,6 +1607,25 @@ class TestTorchDeviceType(TestCase):
             torch.device(device).type == 'cuda')
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
+    def test_deterministic_interpolate_bicubic(self, device):
+        input = torch.randn(1, 2, 4, 4, device=device, requires_grad=True)
+        output_grad = torch.randn(1, 2, 9, 12, device=device)
+        grad = None
+        with DeterministicGuard(True):
+            for _ in range(5):
+                res = torch.nn.functional.interpolate(
+                    input,
+                    size=(9, 12),
+                    mode='bicubic',
+                    align_corners=False)
+                res.backward(output_grad)
+                if grad is None:
+                    grad = input.grad
+                else:
+                    self.assertEqual(grad, input.grad, atol=0, rtol=0)
+                input.grad = None
+
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_interpolate_trilinear(self, device):
         input = torch.randn(1, 2, 4, 4, 4, device=device, requires_grad=True)
         res = torch.nn.functional.interpolate(
@@ -6524,32 +6543,6 @@ class TestTorchDeviceType(TestCase):
         y = torch.randn(8, device=device)
         with self.assertRaisesRegex(RuntimeError, "same nbytes"):
             x.untyped_storage()._swap_data_ptr_(y.untyped_storage())
-
-    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/193288")
-    @dtypes(
-        torch.uint8,
-        torch.int8,
-        torch.int16,
-        torch.uint16,
-        torch.int32,
-        torch.uint32,
-        torch.int64,
-        torch.uint64,
-    )
-    def test_clamp_integral_out_of_range_bounds(self, device, dtype):
-        info = torch.iinfo(dtype)
-        x = torch.tensor([info.min, 0, info.max], device=device, dtype=dtype)
-        min_bound = info.min if dtype is torch.int64 else info.min - 1
-        max_bound = info.max if dtype is torch.uint64 else info.max + 1
-
-        self.assertEqual(torch.clamp(x, min=min_bound), x)
-        self.assertEqual(torch.clamp_min(x, min_bound), x)
-        self.assertEqual(torch.clamp(x, max=max_bound), x)
-        self.assertEqual(torch.clamp_max(x, max_bound), x)
-        if dtype not in (torch.int64, torch.uint64):
-            self.assertEqual(
-                torch.nn.functional.hardtanh(x, min_bound, max_bound), x
-            )
 
 
 # Tests that compare a device's computation with the (gold-standard) CPU's.

@@ -210,6 +210,8 @@ exclude_patterns = [
     'c10/cuda/CUDAAlgorithm.h',
     'c10/util/complex_math.h',
     'torch/headeronly/util/complex_utils.h',
+    'torch/headeronly/cuda/Atomic.h',
+    'torch/headeronly/cuda/KernelUtils.h',
     'c10/util/flat_hash_map.h',
     'c10/util/logging*.h',
     'c10/metal/*.h',
@@ -459,6 +461,7 @@ exclude_patterns=[
     '**/*.png',
     '**/*.gz',
     '**/*.patch',
+    'cmake/bolt_profiles/torch.tar.zst',
 ]
 command = [
     'python3',

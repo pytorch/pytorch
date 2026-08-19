@@ -1017,6 +1017,11 @@ def mm_plus_mm(match: Match, mat1, mat2, mat3, mat4):
     return inductor.kernel.mm_plus_mm.tuned_mm_plus_mm(mat1, mat2, mat3, mat4)
 
 
+def pointless_cumsum_non_scalar_check(match: Match) -> bool:
+    # Scalar cumsum is already handled directly by lowering.cumsum.
+    return len(match.kwargs["shape"]) > 0
+
+
 @register_graph_pattern(
     CallFunction(
         aten.cumsum.default,
@@ -1033,6 +1038,7 @@ def mm_plus_mm(match: Match, mat1, mat2, mat3, mat4):
         KeywordArg("dim"),
         _users=MULTIPLE,
     ),
+    extra_check=pointless_cumsum_non_scalar_check,
     # pyrefly: ignore [bad-argument-type]
     pass_dict=pass_patterns[1],
 )

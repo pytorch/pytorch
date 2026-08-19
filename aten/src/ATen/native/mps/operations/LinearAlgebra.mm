@@ -22,6 +22,7 @@
 #else
 #include <ATen/ScalarOps.h>
 #include <ATen/ops/_cholesky_solve_helper_native.h>
+#include <ATen/ops/_int_mm_native.h>
 #include <ATen/ops/_linalg_check_errors.h>
 #include <ATen/ops/_linalg_eigh.h>
 #include <ATen/ops/_linalg_solve_ex_native.h>
@@ -58,8 +59,10 @@
 #include <ATen/ops/zeros.h>
 #endif
 
+#include <c10/util/TypeCast.h>
 #include <c10/util/env.h>
 #include <algorithm>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <unordered_set>
@@ -346,6 +349,70 @@ Tensor& do_metal_mm(const Tensor& self, const Tensor& other, Tensor& output) {
     }
   });
   return output;
+}
+
+Tensor& int_mm_out_mps_impl(const Tensor& self, const Tensor& mat2, Tensor& result) {
+  static constexpr std::string_view func_name = "int_mm_out_mps";
+  check_mm_shapes(self, mat2, "_int_mm");
+  TORCH_CHECK(self.dtype() == at::kChar || self.dtype() == at::kByte,
+              func_name,
+              ": Expected self dtype to be int8 or uint8 but got ",
+              self.dtype());
+  TORCH_CHECK(mat2.dtype() == at::kChar, func_name, ": Expected mat2 dtype to be of type int8 but got ", mat2.dtype());
+  TORCH_CHECK(
+      result.dtype() == at::kInt, func_name, ": Expected result dtype to be of type kInt but got ", result.dtype());
+  TORCH_CHECK(result.size(0) == self.size(0),
+              func_name,
+              ": Expected result.size(0) to be ",
+              self.size(0),
+              " but got ",
+              result.size(0));
+  TORCH_CHECK(result.size(1) == mat2.size(1),
+              func_name,
+              ": Expected result.size(1) to be ",
+              mat2.size(1),
+              " but got ",
+              result.size(1));
+  TORCH_CHECK(result.dim() == 2, func_name, ": Expected result to be of dimension 2 but got ", result.dim());
+  TORCH_CHECK(result.is_contiguous(), func_name, ": Expected result to be contiguous.");
+
+  if (result.numel() == 0 || self.size(1) == 0) {
+    return result.zero_();
+  }
+
+  const auto m = c10::checked_convert<uint32_t>(self.size(0), "self.size(0)");
+  const auto k = c10::checked_convert<uint32_t>(self.size(1), "self.size(1)");
+  const auto n = c10::checked_convert<uint32_t>(mat2.size(1), "mat2.size(1)");
+  constexpr auto int_max = static_cast<uint32_t>(std::numeric_limits<int32_t>::max());
+  constexpr const char* mpp_kernel = "int_mm_mpp_64_64_4";
+  // MPP integer matmul requires operands with matching signedness, while _int_mm permits uint8 only for self.
+  const bool use_mpp = self.scalar_type() == at::kChar && self.stride(1) == 1 && mat2.stride(1) == 1 && m <= int_max &&
+      k <= int_max && n <= int_max && self.stride(0) <= int_max && mat2.stride(0) <= int_max && has_mpp() &&
+      lib.hasFunction(mpp_kernel);
+  const auto kernel_name = use_mpp ? mpp_kernel : self.scalar_type() == at::kByte ? "int_mm_uchar" : "int_mm_char";
+  auto stream = getCurrentMPSStream();
+  auto pso = lib.getPipelineStateForFunc(kernel_name);
+
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      getMPSProfiler().beginProfileKernel(pso, "int_mm", {self, mat2}, stream);
+      auto computeEncoder = stream->commandEncoder();
+      [computeEncoder setComputePipelineState:pso];
+      const c10::metal::vec3<uint32_t> sizes = {m, k, n};
+      const std::array<int64_t, 6> strides = {
+          self.stride(0), self.stride(1), mat2.stride(0), mat2.stride(1), result.stride(0), result.stride(1)};
+      const uint32_t tile_dim = use_mpp ? 64 : 16;
+      const auto grid_size_x = at::ceil_div(n, tile_dim);
+      const auto grid_size_y = at::ceil_div(m, tile_dim);
+      const auto threads_per_threadgroup = use_mpp ? MTLSizeMake(128, 1, 1) : MTLSizeMake(16, 16, 1);
+
+      mtl_setArgs(computeEncoder, self, mat2, result, strides, sizes);
+      [computeEncoder dispatchThreadgroups:MTLSizeMake(grid_size_x, grid_size_y, 1)
+                     threadsPerThreadgroup:threads_per_threadgroup];
+      getMPSProfiler().endProfileKernel(pso, stream);
+    }
+  });
+  return result;
 }
 
 Tensor& do_metal_bmm(const Tensor& batch1, const Tensor& batch2, Tensor& output) {
@@ -2369,6 +2436,15 @@ Tensor& addr_out_mps(const Tensor& self,
 
 TORCH_IMPL_FUNC(mm_out_mps)(const Tensor& self, const Tensor& mat2, const Tensor& result) {
   mps::mm_out_mps_impl(self, mat2, const_cast<Tensor&>(result));
+}
+
+Tensor& _int_mm_out_mps(const Tensor& self, const Tensor& mat2, Tensor& result) {
+  return mps::int_mm_out_mps_impl(self, mat2, result);
+}
+
+Tensor _int_mm_mps(const Tensor& self, const Tensor& mat2) {
+  auto result = at::empty({self.size(0), mat2.size(1)}, self.options().dtype(at::kInt));
+  return _int_mm_out_mps(self, mat2, result);
 }
 
 TORCH_IMPL_FUNC(addmm_out_mps)

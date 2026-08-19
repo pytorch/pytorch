@@ -28,7 +28,6 @@ from torch._prims_common import (
     FloatLike,
     FloatWithoutSymFloat,
     IntLike,
-    IntWithoutSymInt,
     is_contiguous_for_memory_format_or_false,
     is_contiguous_or_false,
     is_weakly_lesser_type,
@@ -799,8 +798,9 @@ def frac(x: TensorLikeType) -> TensorLikeType:
 def imag(a: TensorLikeType) -> TensorLikeType:
     if not isinstance(a, TensorLike):
         raise AssertionError(f"a must be TensorLike, got {type(a)}")
-    torch._check(
-        utils.is_complex_dtype(a.dtype), lambda: "imag only supports complex tensors."
+    torch._check_type(
+        utils.is_complex_dtype(a.dtype),
+        lambda: "imag only supports complex tensors.",
     )
     return prims.imag(a)
 
@@ -830,7 +830,7 @@ def isinf(a: TensorLikeType) -> TensorLikeType:
     exact_dtype=True,
 )
 def isposinf(a: TensorLikeType) -> TensorLikeType:
-    torch._check(
+    torch._check_type(
         not utils.is_complex_dtype(a.dtype),
         lambda: f"Complex dtype is not supported for isposinf, got dtype {a.dtype}",
     )
@@ -844,7 +844,7 @@ def isposinf(a: TensorLikeType) -> TensorLikeType:
     exact_dtype=True,
 )
 def isneginf(a: TensorLikeType) -> TensorLikeType:
-    torch._check(
+    torch._check_type(
         not utils.is_complex_dtype(a.dtype),
         lambda: f"Complex dtype is not supported for isneginf, got dtype {a.dtype}",
     )
@@ -2034,13 +2034,6 @@ def clamp(
     if min is None and max is None:
         msg = "clamp called but both min and max are none!"
         raise ValueError(msg)
-
-    if utils.is_integer_dtype(a.dtype):
-        limits = torch.iinfo(a.dtype)
-        if isinstance(min, IntWithoutSymInt):
-            min = builtins.max(limits.min, min)
-        if isinstance(max, IntWithoutSymInt):
-            max = builtins.min(limits.max, max)
 
     if min is not None:
         a_isnan = torch.isnan(a)

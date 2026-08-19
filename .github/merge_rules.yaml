@@ -633,6 +633,16 @@
   - Lint
   - pull
 
+- name: Greenlight Review Bot
+  patterns:
+  - '*'
+  approved_by:
+  - pytorchgreenlight
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
 - name: Core Reviewers
   patterns:
   - '*'
