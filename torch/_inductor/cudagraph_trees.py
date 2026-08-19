@@ -668,11 +668,15 @@ def _use_cuda_memory_pool_manager(
         # This is thread safe since a thread can only warmup or record 1 cudagraph
         # at the same time.
         torch._C._cuda_beginAllocateCurrentThreadToPool(device, mem_pool)
+        torch._C._cuda_beginCublasEagerWorkspaceMode()
         try:
             yield
         finally:
-            torch._C._cuda_endAllocateToPool(device, mem_pool)
-            torch._C._cuda_releasePool(device, mem_pool)
+            try:
+                torch._C._cuda_endAllocateToPool(device, mem_pool)
+            finally:
+                torch._C._cuda_endCublasEagerWorkspaceMode()
+                torch._C._cuda_releasePool(device, mem_pool)
 
     torch.cuda.current_stream().wait_stream(stream)
 

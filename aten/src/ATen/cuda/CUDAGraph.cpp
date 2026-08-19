@@ -196,6 +196,8 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*={0,0}*/, cudaStreamCaptureMode 
     _currently_capturing_graphs.emplace(capture_id_, this);
   }
   c10::cuda::CUDACachingAllocator::markCaptureBegin(capture_dev_);
+  beginCUDABlasEagerWorkspaceMode();
+  cublas_eager_workspace_mode_active_ = true;
 }
 
 // capture_end is split so callers can run work on the captured cudaGraph_t
@@ -215,6 +217,10 @@ void CUDAGraph::capture_end_pre() {
   // Clear bookkeeping before propagating the return status so watchdog-side
   // checks cannot observe stale "capture active" state on error paths.
   cudaError_t endCaptureErr = cudaStreamEndCapture(capture_stream_, &graph_);
+  if (cublas_eager_workspace_mode_active_) {
+    endCUDABlasEagerWorkspaceMode();
+    cublas_eager_workspace_mode_active_ = false;
+  }
   c10::cuda::CUDACachingAllocator::markCaptureEnd(capture_dev_);
   {
     std::unique_lock<std::mutex> lock(_currently_capturing_graphs_mutex);
@@ -366,6 +372,11 @@ void CUDAGraph::reset() {
     }
   }
   captured_generator_states_.clear();
+
+  if (cublas_eager_workspace_mode_active_) {
+    endCUDABlasEagerWorkspaceMode();
+    cublas_eager_workspace_mode_active_ = false;
+  }
 
   if (capture_id_ != 0) {
     std::lock_guard<std::mutex> lock(_currently_capturing_graphs_mutex);
