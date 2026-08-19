@@ -1957,6 +1957,7 @@ class PrecompileSession:
             self._collect_backends(),
             summary,
             self._backend,
+            _entry_fn_of(self._fn),
         )
 
 
