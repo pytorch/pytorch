@@ -1,5 +1,8 @@
 # Owner(s): ["oncall: export"]
 import json
+import os
+import re
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -12,6 +15,7 @@ from torch._inductor.package import load_package
 from torch.export import Dim
 from torch.export.experimental import _ExportPackage
 from torch.export.pt2_archive._package import _load_aoti
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -104,19 +108,22 @@ class TestPackage(TestCase):
 
 
 class TestAOTIPackageDeviceValidation(TestCase):
-    hw_classification = HardwareClassification.GENERIC
+    hw_classification = HardwareClassification.ACCELERATOR
 
-    def test_aoti_load_uses_cpp_device_validation_before_device_info(self):
+    def test_aoti_load_uses_cpp_device_validation_before_device_info(self, device):
+        device_type = self.device_type
+        unavailable_msg = (
+            f"Cannot load AOTInductor package for device '{device_type}' because "
+            f"{device_type.upper()} is not available in this process."
+        )
+
         class FakeAOTIModelPackageLoader:
             @staticmethod
             def load_metadata_from_package(file, model_name):
-                return {"AOTI_DEVICE_KEY": "cuda"}
+                return {"AOTI_DEVICE_KEY": device_type}
 
             def __init__(self, *args, **kwargs):
-                raise RuntimeError(
-                    "Cannot load AOTInductor package for device 'cuda' because "
-                    "CUDA is not available in this process."
-                )
+                raise RuntimeError(unavailable_msg)
 
         with (
             mock.patch.object(
@@ -124,15 +131,18 @@ class TestAOTIPackageDeviceValidation(TestCase):
             ),
             mock.patch("torch._inductor.codecache.get_device_information") as get_info,
         ):
-            with self.assertRaisesRegex(
-                RuntimeError,
-                "Cannot load AOTInductor package.*CUDA is not available",
-            ):
+            with self.assertRaisesRegex(RuntimeError, re.escape(unavailable_msg)):
                 _load_aoti("model.pt2", "model", False, 1, -1)
 
             get_info.assert_not_called()
 
-    def test_load_package_does_not_fallback_on_device_validation_error(self):
+    def test_load_package_does_not_fallback_on_device_validation_error(self, device):
+        device_type = self.device_type
+        unavailable_msg = (
+            f"Cannot load AOTInductor package for device '{device_type}' because "
+            f"{device_type.upper()} is not available in this process."
+        )
+
         class FakeAOTIModelPackageLoader:
             def __init__(self, *args, **kwargs):
                 raise AssertionError("AOTI fallback loader should not be constructed")
@@ -140,39 +150,62 @@ class TestAOTIPackageDeviceValidation(TestCase):
         with (
             mock.patch(
                 "torch._inductor.package.package.load_pt2",
-                side_effect=RuntimeError(
-                    "Cannot load AOTInductor package for device 'cuda' because "
-                    "CUDA is not available in this process."
-                ),
+                side_effect=RuntimeError(unavailable_msg),
             ),
             mock.patch.object(
                 torch._C._aoti, "AOTIModelPackageLoader", FakeAOTIModelPackageLoader
             ),
         ):
-            with self.assertRaisesRegex(
-                RuntimeError,
-                "Cannot load AOTInductor package.*CUDA is not available",
-            ):
+            with self.assertRaisesRegex(RuntimeError, re.escape(unavailable_msg)):
                 load_package("model.pt2")
 
-    @unittest.skipIf(
-        torch.cuda.is_available(), "requires CUDA to be unavailable in this process"
-    )
-    def test_cpp_aoti_package_loader_validates_cuda_availability(self):
+
+class TestAOTIPackageCudaDeviceValidation(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    def test_cpp_aoti_package_loader_validates_cuda_availability(self, device):
+        device_type = self.device_type
         with tempfile.TemporaryDirectory() as tmp:
             model_dir = Path(tmp) / "data" / "aotinductor" / "model"
             model_dir.mkdir(parents=True)
             extension = ".pyd" if sys.platform == "win32" else ".so"
             (model_dir / f"model{extension}").touch()
             (model_dir / "model_metadata.json").write_text(
-                json.dumps({"AOTI_DEVICE_KEY": "cuda"}), encoding="utf-8"
+                json.dumps({"AOTI_DEVICE_KEY": device_type}), encoding="utf-8"
             )
 
-            with self.assertRaisesRegex(
-                RuntimeError,
-                "Cannot load AOTInductor package.*(CUDA|ROCm) is not available",
-            ):
-                torch._C._aoti.AOTIModelPackageLoader(str(tmp), "model", False, 1, -1)
+            test_script = f"""
+import re
+import sys
+
+import torch
+
+try:
+    torch._C._aoti.AOTIModelPackageLoader({tmp!r}, "model", False, 1, -1)
+except RuntimeError as e:
+    if not re.search(
+        r"Cannot load AOTInductor package.*(CUDA|ROCm) is not available",
+        str(e),
+    ):
+        print(str(e), file=sys.stderr)
+        sys.exit(1)
+else:
+    print("expected RuntimeError", file=sys.stderr)
+    sys.exit(1)
+"""
+            subprocess.check_output(
+                [sys.executable, "-c", test_script],
+                env={**os.environ, "CUDA_VISIBLE_DEVICES": ""},
+                stderr=subprocess.STDOUT,
+            )
+
+
+instantiate_device_type_tests(
+    TestAOTIPackageDeviceValidation, globals(), except_for="cpu", allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestAOTIPackageCudaDeviceValidation, globals(), only_for="cuda"
+)
 
 
 if __name__ == "__main__":
