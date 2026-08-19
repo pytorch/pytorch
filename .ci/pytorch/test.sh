@@ -1153,30 +1153,16 @@ test_better_benchmark() {
     https://github.com/karthickai/better-benchmark.git "${benchmark_dir}"
   pushd "${benchmark_dir}"
 
-  local gpu_indices
-  gpu_indices="$(python - <<'PY'
-import sys
-import torch
-
-count = torch.cuda.device_count()
-if count < 1:
-    raise RuntimeError("Expected at least one GPU")
-print(f"Found {count} GPUs", file=sys.stderr)
-print(",".join(str(index) for index in range(count)))
-PY
-)"
-
-  python scripts/bench_parallel.py \
-    repros/canonical \
-    --all-shapes \
-    --gpus "${gpu_indices}" \
-    --output "${debug_dir}/current.json"
-  python scripts/dashboard_export.py \
-    --input "${debug_dir}/current.json" \
-    --model-accounting benchmarks/model_accounting_b200.json \
-    --timing auto \
-    --arch "NVIDIA B200" \
-    --ci-json "${test_reports_dir}/inductor_kernel_benchmark.json"
+  local accounting_dir="${debug_dir}/model-accounting"
+  python scripts/generate_occurrence_sidecars.py \
+    --corpus-root repros \
+    --output-dir "${accounting_dir}/occurrences" \
+    --extern-cache "${accounting_dir}/extern-cache.json" \
+    --all \
+    --device 0
+  python scripts/build_model_accounting.py \
+    --occdir "${accounting_dir}/occurrences" \
+    --output "${accounting_dir}/model_accounting_b200.json"
   popd
 }
 
