@@ -807,14 +807,10 @@ void initPythonBindings(PyObject* module) {
 
   TORCH_CHECK_PYTHON(PyType_Ready(&RecordFunctionFast_Type) >= 0);
 
-  Py_INCREF(&RecordFunctionFast_Type);
-  if (PyModule_AddObject(
+  TORCH_CHECK_PYTHON(
+      PyModule_AddObjectRef(
           m.ptr(),
           "_RecordFunctionFast",
-          (PyObject*)&RecordFunctionFast_Type) != 0) {
-    Py_DECREF(&RecordFunctionFast_Type);
-    // @allow-raw-throw: the reference must be dropped before unwinding
-    throw python_error();
-  }
+          (PyObject*)&RecordFunctionFast_Type) == 0);
 }
 } // namespace torch::profiler
