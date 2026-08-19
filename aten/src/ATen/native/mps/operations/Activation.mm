@@ -294,6 +294,12 @@ TORCH_IMPL_FUNC(softplus_out_mps)
   MPSScalar beta_scalar = getMPSScalar(beta, self.scalar_type());
   MPSScalar threshold_scalar = getMPSScalar(threshold, self.scalar_type());
 
+  bool executeGatherOp = needsGather(self);
+  Tensor result_;
+  if (executeGatherOp) {
+    result_ = at::empty_like(self, MemoryFormat::Contiguous);
+  }
+
   @autoreleasepool {
     std::string key = "softplus_out_mps:" + getTensorsStringKey({self}) + ":" + std::to_string(beta.to<double>()) +
         ":" + std::to_string(threshold.to<double>());
@@ -329,8 +335,9 @@ TORCH_IMPL_FUNC(softplus_out_mps)
       newCachedGraph->thresholdTensor_ = thresholdTensor;
       newCachedGraph->outputTensor_ = outputTensor;
     });
-    Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, result);
+    Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self, nil, executeGatherOp);
+    Placeholder outputPlaceholder =
+        Placeholder(cachedGraph->outputTensor_, executeGatherOp ? result_ : result, nil, false);
 
     // Create dictionary of inputs and outputs
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
@@ -339,6 +346,9 @@ TORCH_IMPL_FUNC(softplus_out_mps)
       cachedGraph->thresholdTensor_ : getMPSGraphTensorFromScalar(stream, threshold_scalar),
     };
     runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
+  }
+  if (executeGatherOp) {
+    result.copy_(result_);
   }
 }
 
@@ -364,6 +374,12 @@ TORCH_IMPL_FUNC(softplus_backward_out_mps)
   };
 
   MPSStream* stream = getCurrentMPSStream();
+
+  bool executeGatherOp = needsGather(grad_output) || needsGather(self);
+  Tensor grad_input_;
+  if (executeGatherOp) {
+    grad_input_ = at::empty_like(self, MemoryFormat::Contiguous);
+  }
 
   @autoreleasepool {
     std::string key = "softplus_backward_out_mps:" + getTensorsStringKey({grad_output, self}) + ":" +
@@ -404,9 +420,10 @@ TORCH_IMPL_FUNC(softplus_backward_out_mps)
       newCachedGraph->thresholdTensor_ = thresholdTensor;
       newCachedGraph->outputTensor_ = outputTensor;
     });
-    Placeholder gradOutputPlaceholder = Placeholder(cachedGraph->gradOutputTensor_, grad_output);
-    Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
-    Placeholder gradInputPlaceholder = Placeholder(cachedGraph->outputTensor_, grad_input);
+    Placeholder gradOutputPlaceholder = Placeholder(cachedGraph->gradOutputTensor_, grad_output, nil, executeGatherOp);
+    Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self, nil, executeGatherOp);
+    Placeholder gradInputPlaceholder =
+        Placeholder(cachedGraph->outputTensor_, executeGatherOp ? grad_input_ : grad_input, nil, false);
 
     // Create dictionary of inputs and outputs
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
@@ -416,6 +433,9 @@ TORCH_IMPL_FUNC(softplus_backward_out_mps)
       cachedGraph->thresholdTensor_ : getMPSGraphTensorFromScalar(stream, threshold_scalar),
     };
     runMPSGraph(stream, cachedGraph->graph(), feeds, gradInputPlaceholder);
+  }
+  if (executeGatherOp) {
+    grad_input.copy_(grad_input_);
   }
 }
 
