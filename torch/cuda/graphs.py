@@ -1,6 +1,7 @@
 # pylint: disable=useless-parent-delegation
 from __future__ import annotations
 
+import contextlib
 import ctypes
 import gc
 import typing
@@ -71,6 +72,15 @@ def _get_pool_id(pool: _GraphPool | None) -> _POOL_HANDLE | None:
     if _is_mem_pool(pool):
         return typing.cast("_POOL_HANDLE", pool.id)
     return typing.cast("_POOL_HANDLE", pool)
+
+
+@contextlib.contextmanager
+def _cublas_eager_workspace_mode():
+    torch._C._cuda_beginCublasEagerWorkspaceMode()
+    try:
+        yield
+    finally:
+        torch._C._cuda_endCublasEagerWorkspaceMode()
 
 
 if not hasattr(torch._C, "_CudaStreamBase"):
@@ -1390,7 +1400,7 @@ def make_graphed_callables(
     # hipBLASLt handles are per-(device, stream) on ROCm and lazily created.
     # Need to use the same stream for warmup and capture to avoid capture errors.
     stream = torch.cuda.Stream()
-    with torch.cuda.stream(stream):
+    with _cublas_eager_workspace_mode(), torch.cuda.stream(stream):
         for func, args, static_input_surface in zip(
             callables, _sample_args, per_callable_static_input_surfaces
         ):

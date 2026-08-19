@@ -1696,6 +1696,24 @@ static PyObject* THCPModule_clearBlasWorkspaces_wrap(
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THCPModule_beginCublasEagerWorkspaceMode(
+    PyObject* self,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  at::cuda::beginCUDABlasEagerWorkspaceMode();
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THCPModule_endCublasEagerWorkspaceMode(
+    PyObject* self,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  at::cuda::endCUDABlasEagerWorkspaceMode();
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THCPModule_getCublasWorkspaceSize(
     PyObject* self,
     PyObject* noargs) {
@@ -2244,6 +2262,14 @@ static struct PyMethodDef _THCPModule_methods[] = {
      nullptr},
     {"_cuda_clearCublasWorkspaces",
      THCPModule_clearBlasWorkspaces_wrap,
+     METH_NOARGS,
+     nullptr},
+    {"_cuda_beginCublasEagerWorkspaceMode",
+     THCPModule_beginCublasEagerWorkspaceMode,
+     METH_NOARGS,
+     nullptr},
+    {"_cuda_endCublasEagerWorkspaceMode",
+     THCPModule_endCublasEagerWorkspaceMode,
      METH_NOARGS,
      nullptr},
     {"_cuda_getCublasWorkspaceSize",
