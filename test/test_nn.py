@@ -8861,7 +8861,7 @@ class TestNNDeviceType(NNTestCase):
 
         for padding in [(), (0,), (0, 0), (0, 0, 0), (0, 0, 0, 0, 0)]:
             with self.assertRaisesRegex(
-                RuntimeError,
+                ValueError,
                 rf"padding size is expected to be 4, but got: {len(padding)}",
             ):
                 torch.ops.aten.reflection_pad2d_backward(
