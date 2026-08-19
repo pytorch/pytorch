@@ -328,6 +328,7 @@ class GuardManagerWrapper:
         self.extra_state: ExtraState | None = None
         self.id_matched_objs: dict[str, ReferenceType[object]] = {}
         self.no_tensor_aliasing_sources: list[str] = []
+        self.no_tensor_aliasing_source_objects: list[Source] = []
 
         self.printed_relational_guards: set[RelationalGuard] = set()
 
@@ -1345,6 +1346,7 @@ class GuardBuilder(GuardBuilderBase):
         # Collect the guard managers and debug info to insert no tensor aliasing
         # guards.
         self.no_tensor_aliasing_names: list[str] = []
+        self.no_tensor_aliasing_sources: list[Source] = []
         self.no_tensor_aliasing_guard_managers: list[GuardManager] = []
 
         self.check_fn_manager: CheckFunctionManager = check_fn_manager
@@ -3755,6 +3757,7 @@ class GuardBuilder(GuardBuilderBase):
                     # Keep track of all the tensor guard managers to insert
                     # NoAliasing check at the end.
                     self.no_tensor_aliasing_names.append(tensor_name)
+                    self.no_tensor_aliasing_sources.append(guard.originating_source)
                     self.no_tensor_aliasing_guard_managers.append(guard_manager)
 
                 output_graph = self.check_fn_manager.output_graph
@@ -5205,6 +5208,9 @@ class CheckFunctionManager:
         self.guard_manager.cache_entry = None
         self.guard_manager.extra_state = None
         self.guard_manager.no_tensor_aliasing_sources = no_tensor_aliasing_names
+        self.guard_manager.no_tensor_aliasing_source_objects = (
+            builder.no_tensor_aliasing_sources
+        )
 
     def invalidate(self, obj_str: str) -> None:
         # Some tests reveal that CheckFunctionManager has no attribute
@@ -5323,6 +5329,80 @@ def make_torch_function_mode_stack_guard(
 
 
 Scope = TypeAliasType("Scope", dict[str, object])
+_NO_TENSOR_ALIASING_LOOKUP_SOURCE_TYPES = (
+    ConstDictKeySource,
+    DefaultsSource,
+    DictGetItemSource,
+    DictSubclassGetItemSource,
+    GetItemSource,
+    ListGetItemSource,
+    NonSerializableSetGetItemSource,
+    TupleIteratorGetItemSource,
+)
+
+
+class _GuardSourceLookupError(Exception):
+    def __init__(self, error: TypeError) -> None:
+        super().__init__(str(error))
+        self.error = error
+
+
+def _eval_guard_source(
+    source: Source,
+    global_scope: dict[str, Any],
+    scope: Scope,
+    cache: dict[Source, Any],
+) -> Any:
+    if source in cache:
+        return cache[source]
+
+    source_type = type(source)
+    base_value: Any = None
+    if isinstance(source, ChainedSource):
+        base_value = _eval_guard_source(source.base, global_scope, scope, cache)
+
+    index: Any = None
+    if isinstance(source, (DictGetItemSource, DictSubclassGetItemSource)):
+        index = (
+            _eval_guard_source(source.index, global_scope, scope, cache)
+            if isinstance(source.index, Source)
+            else source.index
+        )
+    elif isinstance(source, GetItemSource):
+        index = source.unpack_slice() if source.index_is_slice else source.index
+
+    defaults: Any = None
+    if isinstance(source, DefaultsSource):
+        defaults = getattr(base_value, source.field)
+
+    try:
+        if source_type is ListGetItemSource:
+            value = list.__getitem__(base_value, index)
+        elif source_type is TupleIteratorGetItemSource:
+            value = tuple_iterator_getitem(base_value, index)
+        elif source_type is GetItemSource:
+            value = base_value[index]
+        elif source_type is ConstDictKeySource:
+            value = list(dict.keys(base_value))[cast(ConstDictKeySource, source).index]
+        elif source_type is NonSerializableSetGetItemSource:
+            value = set_getitem(
+                base_value, cast(NonSerializableSetGetItemSource, source).index
+            )
+        elif source_type is DictSubclassGetItemSource:
+            value = dict.__getitem__(base_value, index)
+        elif source_type is DictGetItemSource:
+            value = base_value[index]
+        elif source_type is DefaultsSource:
+            value = defaults[cast(DefaultsSource, source).idx_key]
+        else:
+            value = source.get_value(global_scope, scope, cache)
+    except TypeError as e:
+        if source_type in _NO_TENSOR_ALIASING_LOOKUP_SOURCE_TYPES:
+            raise _GuardSourceLookupError(e) from e
+        raise
+
+    cache[source] = value
+    return value
 
 
 def recompilation_reason_for_no_tensor_aliasing_guard(
@@ -5332,17 +5412,47 @@ def recompilation_reason_for_no_tensor_aliasing_guard(
         raise AssertionError("guard_manager.global_scope must not be None")
     global_scope = dict(guard_manager.global_scope)
     ids_to_source = collections.defaultdict(list)
-    for tensor_source in guard_manager.no_tensor_aliasing_sources:
-        global_scope["__compile_source__"] = tensor_source
-        tensor_id = id(eval(tensor_source, global_scope, scope))
-        ids_to_source[tensor_id].append(tensor_source)
+    source_eval_failures: list[str] = []
+    cache: dict[Source, Any] = {}
+    for tensor_source in guard_manager.no_tensor_aliasing_source_objects:
+        tensor_source_name = tensor_source.name
+        global_scope["__compile_source__"] = tensor_source_name
+        try:
+            tensor = _eval_guard_source(tensor_source, global_scope, dict(scope), cache)
+        except (AttributeError, LookupError) as e:
+            # The compiled source path may no longer exist after container
+            # structure or object type changes; keep explaining other sources.
+            source_eval_failures.append(
+                f"{tensor_source_name} ({type(e).__name__}: {e})"
+            )
+            continue
+        except _GuardSourceLookupError as e:
+            # The compiled source path may no longer exist after container
+            # structure or object type changes; keep explaining other sources.
+            error = e.error
+            source_eval_failures.append(
+                f"{tensor_source_name} ({type(error).__name__}: {error})"
+            )
+            continue
+        tensor_id = id(tensor)
+        ids_to_source[tensor_id].append(tensor_source_name)
 
     duplicate_tensors = [
         f"{ids_to_source[key]}" for key in ids_to_source if len(ids_to_source[key]) > 1
     ]
 
-    reason = ", ".join(duplicate_tensors)
-    return [f"Duplicate tensors found: {reason}"]
+    reasons: list[str] = []
+    if duplicate_tensors:
+        reason = ", ".join(duplicate_tensors)
+        reasons.append(f"Duplicate tensors found: {reason}")
+    if source_eval_failures:
+        reason = ", ".join(source_eval_failures)
+        reasons.append(
+            "NO_TENSOR_ALIASING guard source(s) no longer evaluate: " + reason
+        )
+    if not reasons:
+        reasons.append("NO_TENSOR_ALIASING guard failed")
+    return reasons
 
 
 def strip_local_scope(s: str) -> str:

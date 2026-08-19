@@ -2,9 +2,20 @@
 from unittest.mock import patch
 
 import torch
+import torch._dynamo.guards
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo import config as dc
+from torch._dynamo.source import (
+    AttrSource,
+    CallFunctionNoArgsSource,
+    ConstantSource,
+    ConstDictKeySource,
+    DictGetItemSource,
+    GetItemSource,
+    ListGetItemSource,
+    LocalSource,
+)
 
 
 class RecompileTests(torch._dynamo.test_case.TestCase):
@@ -197,6 +208,213 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cmp_result, eager_result)
         # Recompile, alias changed
         self.assertEqual(cnt.frame_count, 2)
+
+    def _check_aliasing_guard_failure_with_unavailable_source(self, fn, data):
+        failure_reasons = []
+
+        def guard_fail_fn(failure):
+            failure_reasons.append(failure.reason)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled_fn = torch._dynamo.optimize(backend=cnt, guard_fail_fn=guard_fail_fn)(
+            fn
+        )
+
+        t1, t2 = torch.randn(4), torch.randn(4)
+        self.assertEqual(compiled_fn(t1, t2, data), fn(t1, t2, data))
+
+        t = torch.randn(4)
+        self.assertEqual(compiled_fn(t, t, None), fn(t, t, None))
+
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(len(failure_reasons), 1)
+        self.assertIn("Duplicate tensors found", failure_reasons[0])
+        self.assertIn(
+            "NO_TENSOR_ALIASING guard source(s) no longer evaluate",
+            failure_reasons[0],
+        )
+        return failure_reasons[0]
+
+    def test_aliasing_guard_failure_with_unavailable_list_tensor_source(self):
+        def fn(a, b, data):
+            x = a + b
+            if data is not None:
+                x = x + data[0] + data[1]
+            return x
+
+        reason = self._check_aliasing_guard_failure_with_unavailable_source(
+            fn, [torch.randn(4), torch.randn(4)]
+        )
+
+        # debug_force_nested_calls rewrites top-level argument names in the
+        # nested-graph-breaks wrapper, but the same indexed source must fail.
+        for source in ("[0]", "[1]"):
+            self.assertTrue(
+                f"data{source}" in reason or f"args[2]{source}" in reason,
+                reason,
+            )
+
+    def test_aliasing_guard_failure_with_unavailable_dict_tensor_source(self):
+        def fn(a, b, data):
+            x = a + b
+            if data is not None:
+                x = x + next(iter(data.values()))
+            return x
+
+        reason = self._check_aliasing_guard_failure_with_unavailable_source(
+            fn, {object(): torch.randn(4)}
+        )
+        self.assertIn("dict.keys", reason)
+        self.assertIn("TypeError", reason)
+
+    def test_aliasing_guard_recompile_reason_with_unavailable_sources(self):
+        class MissingAttr:
+            pass
+
+        manager = torch._dynamo.guards.GuardManagerWrapper()
+        manager.global_scope = {"G": {}}
+        manager.no_tensor_aliasing_source_objects = [
+            LocalSource("duplicate_a"),
+            LocalSource("duplicate_b"),
+            AttrSource(LocalSource("missing_attr"), "value"),
+            GetItemSource(LocalSource("missing_index"), 0),
+            DictGetItemSource(LocalSource("missing_key"), "key"),
+            GetItemSource(LocalSource("not_subscriptable"), 0),
+            ListGetItemSource(LocalSource("not_list"), 0),
+        ]
+        duplicate = torch.randn(4)
+        scope = {
+            "L": {
+                "duplicate_a": duplicate,
+                "duplicate_b": duplicate,
+                "missing_attr": MissingAttr(),
+                "missing_index": [],
+                "missing_key": {},
+                "not_subscriptable": None,
+                "not_list": None,
+            }
+        }
+
+        reasons = (
+            torch._dynamo.guards.recompilation_reason_for_no_tensor_aliasing_guard(
+                manager, scope
+            )
+        )
+
+        self.assertEqual(len(reasons), 2)
+        self.assertIn("Duplicate tensors found", reasons[0])
+        self.assertIn("duplicate_a", reasons[0])
+        self.assertIn("duplicate_b", reasons[0])
+        self.assertIn(
+            "NO_TENSOR_ALIASING guard source(s) no longer evaluate", reasons[1]
+        )
+        for source, exception_type in (
+            ("missing_attr", "AttributeError"),
+            ("missing_index", "IndexError"),
+            ("missing_key", "KeyError"),
+            ("not_subscriptable", "TypeError"),
+            ("not_list", "TypeError"),
+        ):
+            self.assertIn(source, reasons[1])
+            self.assertIn(exception_type, reasons[1])
+
+        manager.no_tensor_aliasing_source_objects = [ConstantSource("len(1)")]
+        with self.assertRaisesRegex(TypeError, "has no len"):
+            torch._dynamo.guards.recompilation_reason_for_no_tensor_aliasing_guard(
+                manager, scope
+            )
+
+        manager.no_tensor_aliasing_source_objects = [ConstantSource("1 / 0")]
+        with self.assertRaisesRegex(ZeroDivisionError, "division by zero"):
+            torch._dynamo.guards.recompilation_reason_for_no_tensor_aliasing_guard(
+                manager, scope
+            )
+
+    def test_aliasing_guard_recompile_reason_with_mixed_source_type_error(self):
+        class TypeErrorDescriptor:
+            @property
+            def tensor(self):
+                raise TypeError("descriptor failure")
+
+            def __call__(self):
+                raise TypeError("call failure")
+
+        class OneReadHolder:
+            def __init__(self, data):
+                self.data_value = data
+                self.reads = 0
+
+            @property
+            def data(self):
+                self.reads += 1
+                if self.reads > 1:
+                    raise TypeError("descriptor read twice")
+                return self.data_value
+
+        class TypeErrorHolder:
+            @property
+            def data(self):
+                raise TypeError("index descriptor failure")
+
+        manager = torch._dynamo.guards.GuardManagerWrapper()
+        manager.global_scope = {}
+        scope = {"L": {"items": [TypeErrorDescriptor()]}}
+
+        for getitem_source in (
+            GetItemSource(LocalSource("items"), 0),
+            ListGetItemSource(LocalSource("items"), 0),
+        ):
+            for source, error in (
+                (AttrSource(getitem_source, "tensor"), "descriptor failure"),
+                (CallFunctionNoArgsSource(getitem_source), "call failure"),
+            ):
+                with self.subTest(source=source.name):
+                    manager.no_tensor_aliasing_source_objects = [source]
+                    with self.assertRaisesRegex(TypeError, error):
+                        torch._dynamo.guards.recompilation_reason_for_no_tensor_aliasing_guard(
+                            manager, scope
+                        )
+
+        key = object()
+        holder = OneReadHolder({key: torch.randn(4)})
+        dict_source = AttrSource(LocalSource("holder"), "data")
+        manager.no_tensor_aliasing_source_objects = [
+            DictGetItemSource(dict_source, ConstDictKeySource(dict_source, 0))
+        ]
+        reasons = (
+            torch._dynamo.guards.recompilation_reason_for_no_tensor_aliasing_guard(
+                manager, {"L": {"holder": holder}}
+            )
+        )
+        self.assertEqual(holder.reads, 1)
+        self.assertEqual(reasons, ["NO_TENSOR_ALIASING guard failed"])
+
+        duplicate = torch.randn(4)
+        holder = OneReadHolder([duplicate, duplicate])
+        shared_source = AttrSource(LocalSource("holder"), "data")
+        manager.no_tensor_aliasing_source_objects = [
+            GetItemSource(shared_source, 0),
+            GetItemSource(shared_source, 1),
+        ]
+        reasons = (
+            torch._dynamo.guards.recompilation_reason_for_no_tensor_aliasing_guard(
+                manager, {"L": {"holder": holder}}
+            )
+        )
+        self.assertEqual(holder.reads, 1)
+        self.assertIn("Duplicate tensors found", reasons[0])
+
+        index_source = AttrSource(LocalSource("holder"), "data")
+        manager.no_tensor_aliasing_source_objects = [
+            DictGetItemSource(
+                LocalSource("mapping"), ConstDictKeySource(index_source, 0)
+            )
+        ]
+        with self.assertRaisesRegex(TypeError, "index descriptor failure"):
+            torch._dynamo.guards.recompilation_reason_for_no_tensor_aliasing_guard(
+                manager,
+                {"L": {"mapping": {key: torch.randn(4)}, "holder": TypeErrorHolder()}},
+            )
 
     def test_object_alias_relation_guards_without_lambda(self):
         class Box:
