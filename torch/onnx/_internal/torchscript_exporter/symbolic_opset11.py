@@ -386,6 +386,7 @@ def __interpolate(
 
 
 @_onnx_symbolic("aten::gather")
+@symbolic_helper.quantized_args(True)
 @symbolic_helper.parse_args("v", "i", "v", "v")
 def gather(g: jit_utils.GraphContext, self, dim, index, sparse_grad=False):
     if symbolic_helper._maybe_get_const(sparse_grad, "i"):
@@ -991,20 +992,10 @@ def __rshift_(g: jit_utils.GraphContext, self, other):
         _type_utils.JitScalarType.from_value(self, _type_utils.JitScalarType.UNDEFINED)
         == _type_utils.JitScalarType.UINT8
     ):
+        # shifting an unsigned integer right is a logical shift
         return g.op("BitShift", self, other, direction_s="RIGHT")
 
-    two = g.op("Constant", value_t=torch.tensor(2, dtype=torch.float32))
-    # exponent (same type as self) has to be float or double in onnx::Pow
-    if not symbolic_helper._is_fp(self):
-        other = g.op("Cast", other, to_i=_C_onnx.TensorProtoDataType.FLOAT)
-    two_pow = g.op("Pow", two, other)
-    two_pow = g.op(
-        "Cast",
-        two_pow,
-        to_i=_type_utils.JitScalarType.from_value(self).onnx_type(),
-    )
-    rshift = g.op("Div", self, two_pow)
-    return rshift
+    return opset9.__rshift_(g, self, other)
 
 
 @_onnx_symbolic("aten::bitwise_left_shift")

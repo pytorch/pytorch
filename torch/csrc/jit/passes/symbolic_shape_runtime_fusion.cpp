@@ -425,7 +425,7 @@ void insertDynamicShapesGuard(
     guarded_node->addInput(pair.second);
     std::stringstream ss;
     ss << "SS_" << -pair.first;
-    subgraph->addInput(ss.str())->setType(IntType::get());
+    subgraph->addInput(std::move(ss).str())->setType(IntType::get());
   }
   guarded_node->is_(
       attr::symbolic_shape_inputs, std::move(symbolic_shape_inputs));

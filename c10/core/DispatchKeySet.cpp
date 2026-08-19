@@ -159,7 +159,7 @@ bool isIncludedInAlias(DispatchKey k, DispatchKey alias) {
 std::string toString(DispatchKeySet ts) {
   std::stringstream ss;
   ss << ts;
-  return ss.str();
+  return std::move(ss).str();
 }
 
 std::ostream& operator<<(std::ostream& os, DispatchKeySet ts) {

@@ -1,3 +1,10 @@
+# Rename upstream QuACK runtime entrypoints for the vendored package layout.
+#
+# The vendored copy must run independently of any top-level quack installation,
+# so worker imports and cache package names are rewritten to torch._vendor.quack
+# and torch_vendor_quack.
+#
+
 --- a/_compile_worker.py
 +++ b/_compile_worker.py
 @@ -16 +16 @@

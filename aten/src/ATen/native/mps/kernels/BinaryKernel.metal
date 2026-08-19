@@ -263,12 +263,35 @@ struct nextafter_functor {
   inline T operator()(const T a, const T b) {
     return static_cast<T>(::metal::nextafter(a, b));
   }
+
+  // Metal has no bfloat nextafter overload, so open-code the musl algorithm
+  // over the sign-magnitude bit pattern.
+  inline bfloat operator()(const bfloat from, const bfloat to) {
+    if (from != from || to != to) {
+      return from + to;
+    }
+    if (from == to) {
+      return to;
+    }
+    ushort ufrom = as_type<ushort>(from);
+    if (from == 0) {
+      ushort r = (as_type<ushort>(to) & (ushort(1) << 15)) | ushort(1);
+      return as_type<bfloat>(r);
+    }
+    if ((from < to) == (from > 0)) {
+      ufrom++;
+    } else {
+      ufrom--;
+    }
+    return as_type<bfloat>(ufrom);
+  }
 };
 
 struct hypot_functor {
   template <typename T>
   inline T operator()(const T a, const T b) {
-    return static_cast<T>(precise::sqrt(float(a) * a + float(b) * b));
+    return static_cast<T>(
+        c10::metal::hypot(::metal::fabs(a), ::metal::fabs(b)));
   }
 };
 
@@ -365,7 +388,7 @@ struct div_floor_functor {
       typename T,
       ::metal::enable_if_t<!::metal::is_integral_v<T>, bool> = true>
   inline T operator()(const T a, const T b) {
-    return metal::floor(c10::metal::div(a, b));
+    return c10::metal::div_floor(a, b);
   }
   template <
       typename T,
@@ -495,12 +518,15 @@ DEFINE_BINARY_COMPARISON_FUNCTOR(le, <=);
 DEFINE_BINARY_COMPARISON_FUNCTOR(gt, >);
 DEFINE_BINARY_COMPARISON_FUNCTOR(ge, >=);
 
-#define REGISTER_INTEGER_BINARY_OP(NAME)  \
-  REGISTER_BINARY_OP(NAME, long, long);   \
-  REGISTER_BINARY_OP(NAME, int, int);     \
-  REGISTER_BINARY_OP(NAME, short, short); \
-  REGISTER_BINARY_OP(NAME, uchar, uchar); \
-  REGISTER_BINARY_OP(NAME, char, char);   \
+#define REGISTER_INTEGER_BINARY_OP_NO_BOOL(NAME) \
+  REGISTER_BINARY_OP(NAME, long, long);          \
+  REGISTER_BINARY_OP(NAME, int, int);            \
+  REGISTER_BINARY_OP(NAME, short, short);        \
+  REGISTER_BINARY_OP(NAME, uchar, uchar);        \
+  REGISTER_BINARY_OP(NAME, char, char)
+
+#define REGISTER_INTEGER_BINARY_OP(NAME)    \
+  REGISTER_INTEGER_BINARY_OP_NO_BOOL(NAME); \
   REGISTER_BINARY_OP(NAME, bool, bool)
 
 #define REGISTER_INT2FLOAT_BINARY_OP(NAME) \
@@ -618,8 +644,8 @@ REGISTER_INTEGER_BINARY_OP(lcm);
 REGISTER_INTEGER_BINARY_OP(bitwise_and);
 REGISTER_INTEGER_BINARY_OP(bitwise_or);
 REGISTER_INTEGER_BINARY_OP(bitwise_xor);
-REGISTER_INTEGER_BINARY_OP(bitwise_left_shift);
-REGISTER_INTEGER_BINARY_OP(bitwise_right_shift);
+REGISTER_INTEGER_BINARY_OP_NO_BOOL(bitwise_left_shift);
+REGISTER_INTEGER_BINARY_OP_NO_BOOL(bitwise_right_shift);
 REGISTER_COMPARISON_OP(eq);
 REGISTER_COMPLEX_EQ_OP(eq);
 REGISTER_COMPARISON_OP(ne);
