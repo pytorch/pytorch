@@ -97,7 +97,7 @@ class CUDAMemPoolVariable(VariableTracker):
         return ConstantVariable.create(self.value.id)
 
     tp_members = {
-        "id": Member(_id),
+        "id": Member(_id, None),
     }
 
     def as_proxy(self) -> Proxy:
