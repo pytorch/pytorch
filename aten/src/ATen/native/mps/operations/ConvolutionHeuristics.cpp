@@ -46,14 +46,27 @@ Conv3dMppTile select_conv3d_mpp_tile(const Conv3DParams& params, int64_t groups)
     const unsigned device_cores = at::mps::MPSDevice::getInstance()->getCoreCount();
     return device_cores > 0 ? static_cast<int64_t>(device_cores) : 16;
   }();
-  // Keep in sync with INSTANTIATE_CONV3D_MPP_TILES in Convolution.metal.
-  const Conv3dMppTile candidates[] = {
+  // Keep in sync with INSTANTIATE_CONV3D_MPP_TILES and
+  // INSTANTIATE_CONV1D_MPP_TILES in Convolution.metal. Flat 1D tiles avoid
+  // padding the single output row and keep width per simdgroup at least 16.
+  const Conv3dMppTile conv3d_candidates[] = {
       {.output_channels = 32, .output_width = 8, .output_height = 8, .simdgroups = 2},
       {.output_channels = 32, .output_width = 16, .output_height = 8, .simdgroups = 4},
       {.output_channels = 64, .output_width = 8, .output_height = 8, .simdgroups = 2},
       {.output_channels = 64, .output_width = 16, .output_height = 8, .simdgroups = 4},
       {.output_channels = 128, .output_width = 8, .output_height = 8, .simdgroups = 4},
   };
+  const Conv3dMppTile conv1d_candidates[] = {
+      {.output_channels = 32, .output_width = 32, .output_height = 1, .simdgroups = 2},
+      {.output_channels = 64, .output_width = 64, .output_height = 1, .simdgroups = 2},
+      {.output_channels = 64, .output_width = 128, .output_height = 1, .simdgroups = 4},
+      {.output_channels = 128, .output_width = 64, .output_height = 1, .simdgroups = 4},
+  };
+  const bool use_conv1d_tiles = groups == 1 && params.conv2d.outH == 1 && params.kD == 1 &&
+      params.conv2d.kH == 1 && params.sD == 1 && params.conv2d.sH == 1 && params.dD == 1 && params.conv2d.dH == 1;
+  const c10::ArrayRef<Conv3dMppTile> candidates = use_conv1d_tiles
+      ? c10::ArrayRef<Conv3dMppTile>(conv1d_candidates)
+      : c10::ArrayRef<Conv3dMppTile>(conv3d_candidates);
   auto best_tile = candidates[0];
   auto best_cost = std::numeric_limits<float>::max();
   for (const auto& candidate : candidates) {
