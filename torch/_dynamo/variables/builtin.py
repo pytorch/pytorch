@@ -3652,6 +3652,28 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
                     )
                 elif name == "data":
                     # [Note: set_data_on_scoped_tensor]
+                    if (
+                        isinstance(obj, TensorVariable)
+                        and isinstance(val, TensorVariable)
+                        and obj.requires_grad
+                    ):
+                        obj_fake = get_fake_value(obj.as_proxy().node, tx)
+                        if isinstance(obj_fake, torch.nn.Parameter):
+                            if obj.valid_size() and val.valid_size():
+                                shape_changed = obj.size != val.size
+                            else:
+                                val_fake = get_fake_value(val.as_proxy().node, tx)
+                                shape_changed = obj_fake.shape != val_fake.shape
+                            if shape_changed:
+                                unimplemented(
+                                    gb_type="setattr() on Parameter.data with different shape",
+                                    context=f"setattr({obj}, {name}, {val})",
+                                    explanation="Dynamo does not trace shape-changing "
+                                    "`.data` mutations on differentiable parameters. "
+                                    "AOTAutograd assumes graph input metadata is stable "
+                                    "while building the backward graph.",
+                                    hints=[*graph_break_hints.SUPPORTABLE],
+                                )
                     if obj.source is None:
                         unimplemented(
                             gb_type="Failed to mutate tensor data attribute",
