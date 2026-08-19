@@ -449,9 +449,7 @@ cmake_dependent_option(USE_PRIORITIZED_TEXT_FOR_LD "Use prioritized text linker 
   "${USE_PRIORITIZED_TEXT_DEFAULT}" "CPU_INTEL OR CPU_AARCH64 OR CPU_POWER" OFF)
 
 # LLVM BOLT post-link binary optimization. Visible on AArch64, x86 and ppc64le.
-# Defaults ON for aarch64+linux+CUDA builds that also apply the linker script
-# optimization and a suitable llvm-bolt (>=21) is available. Depends on the
-# linker script because the committed profiles were collected with it enabled.
+# Enabled only for aarch64 + cuda==13.4 builds in .ci/manywheel/build_env_setup.py
 function(check_llvm_bolt_version var item)
   execute_process(COMMAND ${item} --version OUTPUT_VARIABLE _cmd_out)
   string(REGEX MATCH "[0-9]+\.[0-9]+\.[0-9]+" _bolt_version "${_cmd_out}")
@@ -462,9 +460,6 @@ endfunction()
 find_program(LLVM_BOLT_EXECUTABLE NAMES llvm-bolt VALIDATOR check_llvm_bolt_version)
 
 set(USE_LLVM_BOLT_DEFAULT OFF)
-if(LINUX AND USE_CUDA AND CPU_AARCH64 AND USE_PRIORITIZED_TEXT_FOR_LD AND LLVM_BOLT_EXECUTABLE)
-  set(USE_LLVM_BOLT_DEFAULT ON)
-endif()
 cmake_dependent_option(USE_LLVM_BOLT "Optimize libraries with LLVM BOLT."
   "${USE_LLVM_BOLT_DEFAULT}" "CPU_INTEL OR CPU_AARCH64 OR CPU_POWER" OFF)
 

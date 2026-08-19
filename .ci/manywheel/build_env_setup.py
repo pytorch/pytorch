@@ -157,6 +157,10 @@ def cuda_build_env(cuda_version: str, arch: str) -> dict[str, str]:
     # _set_triton_ptxas_path() automatically.
     if cuda_version == "13.4":
         env.setdefault("BUILD_BUNDLE_PTXAS", "1")
+
+    if cuda_version == "13.4" and arch == "aarch64":
+        env["USE_LLVM_BOLT"] = "1"
+
     return env
 
 
