@@ -32,9 +32,6 @@ d_hid = 512
 batch_size = 256
 chunks = 8
 
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
-backend = dist.get_default_backend_for_device(device_type)
-
 torch.manual_seed(0)
 
 
@@ -130,7 +127,7 @@ def get_flatten_hook():
 class PipelineStageTestBase(MultiProcContinuousTest):
     @classmethod
     def backend_str(cls) -> str:
-        return backend
+        return dist.get_default_backend_for_device(cls.device_type)
 
     def _rank_device(self, device: str) -> torch.device:
         # `device` is the framework-injected primary device ("{type}:0",
@@ -143,7 +140,7 @@ class StageTest(PipelineStageTestBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "Test requires 2+ accelerators"
     )
     @parametrize("ModelClass", [ExampleCode, MultiMLP])
     def test_tracer(self, device, ModelClass):
@@ -192,7 +189,7 @@ class StageTest(PipelineStageTestBase):
             )
 
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "Test requires 2+ accelerators"
     )
     @parametrize("ModelClass", [ModelWithKwargs])
     def test_tracer_kwargs(self, device, ModelClass):
@@ -246,7 +243,7 @@ class StageTest(PipelineStageTestBase):
             )
 
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "Test requires 2+ accelerators"
     )
     def test_manual(self, device):
         rank_device = self._rank_device(device)
@@ -280,7 +277,7 @@ class StageTest(PipelineStageTestBase):
             torch.testing.assert_close(out, ref_out)
 
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "Test requires 2+ accelerators"
     )
     def test_custom_dw_with_fb_schedule(self, device):
         """Tests that separate weight grad function 'dw_runner' gets run under a schedule that's only aware of F/B."""
@@ -342,7 +339,7 @@ class StageTest(PipelineStageTestBase):
             torch.testing.assert_close(out, ref_out)
 
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "Test requires 2+ accelerators"
     )
     def test_output_chunks_memory_usage(self, device):
         """Test that output_chunks doesn't store memory for non-first stages."""
@@ -409,7 +406,7 @@ class StageNegativeTest(PipelineStageTestBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "Test requires 2+ accelerators"
     )
     def test_shape_prop_mismatch(self, device):
         """Tests shape prop errors are raised"""
@@ -458,7 +455,7 @@ class StageNegativeTest(PipelineStageTestBase):
                 _run_step(x)
 
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "Test requires 2+ accelerators"
     )
     def test_custom_dw_errors(self, device):
         """Tests expected errors are raised"""
