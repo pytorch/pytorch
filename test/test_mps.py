@@ -14192,6 +14192,15 @@ class TestConvolutionMPS(TestCaseMPS):
         max_tolerance = {torch.float32: 1e-4, torch.float16: 5e-3, torch.bfloat16: 5e-2}[dtype]
         return max_tolerance * math.sqrt(reduction_size / reference_reduction_size)
 
+    def test_conv2d_h1_channels_last_output(self):
+        input_tensor = torch.randn(2, 7, 1, 257).contiguous(memory_format=torch.channels_last)
+        weight = torch.randn(33, 7, 1, 3)
+        expected = F.conv2d(input_tensor, weight, padding=(0, 1))
+        actual = F.conv2d(input_tensor.to("mps"), weight.to("mps"), padding=(0, 1))
+
+        self.assertEqual(actual.cpu(), expected)
+        self.assertTrue(actual.is_contiguous(memory_format=torch.channels_last))
+
     @parametrize(
         "kernel_size,stride,dilation,input_length",
         [(2, 2, 1, 2), (2, 2, 1, 3), (7, 1, 9, 55)],
@@ -14238,6 +14247,64 @@ class TestConvolutionMPS(TestCaseMPS):
         tol = self._conv1d_tolerance(dtype, weight.size(1) * weight.size(2))
         self.assertEqual(actual.float().cpu(), expected, atol=tol, rtol=tol)
 
+    @parametrize(
+        "kernel_size,dilation,padding",
+        [(2, 1, 1), (4, 1, 2), (3, 8, 8), (3, 64, 64), (9, 1, 4), (15, 1, 7), (31, 1, 15), (13, 3, 18), (3, 1, 9)],
+        name_fn=lambda kernel_size, dilation, padding: f"k{kernel_size}_d{dilation}_p{padding}",
+    )
+    @parametrize("with_bias", [False, True], name_fn=lambda with_bias: "bias" if with_bias else "no_bias")
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_conv1d_matmul_geometries(self, dtype, with_bias, kernel_size, dilation, padding):
+        input_length = max(257, dilation * (kernel_size - 1) + 17)
+        x = torch.randn(2, 24, input_length).to(dtype).float()
+        weight = torch.randn(40, 24, kernel_size).to(dtype).float()
+        bias = torch.randn(40).to(dtype).float() if with_bias else None
+        expected = F.conv1d(x, weight, bias, padding=padding, dilation=dilation)
+        actual = F.conv1d(
+            x.to(device="mps", dtype=dtype),
+            weight.to(device="mps", dtype=dtype),
+            None if bias is None else bias.to(device="mps", dtype=dtype),
+            padding=padding,
+            dilation=dilation,
+        )
+        tol = self._conv1d_tolerance(dtype, weight.size(1) * weight.size(2))
+        self.assertEqual(actual.float().cpu(), expected, atol=tol, rtol=tol)
+
+    @parametrize(
+        "groups,channels,output_channels",
+        [(2, 64, 64), (3, 48, 96), (8, 256, 256)],
+        name_fn=lambda groups, channels, output_channels: f"g{groups}_c{channels}_o{output_channels}",
+    )
+    @parametrize("layout", ["contiguous", "nlc"])
+    def test_conv1d_matmul_grouped(self, groups, channels, output_channels, layout):
+        x = torch.randn(2, channels, 999)
+        weight = torch.randn(output_channels, channels // groups, 5)
+        bias = torch.randn(output_channels)
+        expected = F.conv1d(x, weight, bias, padding=2, groups=groups)
+        mps_input = x.to("mps")
+        if layout == "nlc":
+            mps_input = mps_input.transpose(1, 2).contiguous().transpose(1, 2)
+        actual = F.conv1d(mps_input, weight.to("mps"), bias.to("mps"), padding=2, groups=groups)
+        self.assertEqual(actual.cpu(), expected, atol=1e-4, rtol=1e-4)
+
+    @parametrize("output_channels", [1, 3])
+    def test_conv1d_tiny_output_channels(self, output_channels):
+        x = torch.randn(2, 96, 3111)
+        weight = torch.randn(output_channels, 96, 3)
+        bias = torch.randn(output_channels)
+        expected = F.conv1d(x, weight, bias, padding=1)
+        actual = F.conv1d(x.to("mps"), weight.to("mps"), bias.to("mps"), padding=1)
+        self.assertEqual(actual.cpu(), expected, atol=1e-4, rtol=1e-4)
+
+    @parametrize("dtype", [torch.float32, torch.bfloat16])
+    def test_conv1d_long_input(self, dtype):
+        x = torch.randn(1, 20, 131072).to(dtype).float()
+        weight = torch.randn(24, 20, 3).to(dtype).float()
+        expected = F.conv1d(x, weight, padding=1)
+        actual = F.conv1d(x.to(device="mps", dtype=dtype), weight.to(device="mps", dtype=dtype), padding=1)
+        tol = self._conv1d_tolerance(dtype, weight.size(1) * weight.size(2))
+        self.assertEqual(actual.float().cpu(), expected, atol=tol, rtol=tol)
+
     def test_conv1d_pointwise_strided(self):
         x = torch.randn(2, 48, 1000)
         weight = torch.randn(96, 48, 1)
@@ -14254,6 +14321,15 @@ class TestConvolutionMPS(TestCaseMPS):
         bias = torch.randn(channels * multiplier)
         expected = F.conv1d(x, weight, bias, padding=1, groups=channels)
         actual = F.conv1d(x.to("mps"), weight.to("mps"), bias.to("mps"), padding=1, groups=channels)
+        self.assertEqual(actual.cpu(), expected, atol=1e-4, rtol=1e-4)
+
+    def test_conv1d_pad_only_columns(self):
+        # padding wide enough that leading and trailing outputs read only zeros
+        x = torch.randn(1, 16, 9)
+        weight = torch.randn(16, 16, 3)
+        bias = torch.randn(16)
+        expected = F.conv1d(x, weight, bias, padding=64)
+        actual = F.conv1d(x.to("mps"), weight.to("mps"), bias.to("mps"), padding=64)
         self.assertEqual(actual.cpu(), expected, atol=1e-4, rtol=1e-4)
 
     def test_conv1d_all_strides_paddings(self):
@@ -17364,6 +17440,44 @@ class TestMetalLibrary(TestCaseMPS):
         kernel = lib.nchw_to_nhwc_float_16_64_false_false
         kernel(src, dst, [11, 35], threads=(256, 1, 2), group_size=(256, 1, 1), arg_casts="int32")
         self.assertEqual(dst, src.permute(0, 2, 1))
+
+    def test_conv_weight_to_koc_kernel(self):
+        path = os.path.join(_CONFORMANCE_REPO_ROOT, "aten/src/ATen/native/mps/kernels/Convolution.metal")
+        lib = torch.mps.compile_shader(embed_headers(path))
+        out_channels, in_channels, kernel_width = 5, 3, 4
+        sources = {
+            "contiguous": torch.arange(
+                out_channels * in_channels * kernel_width, dtype=torch.float32, device="mps",
+            ).reshape(out_channels, in_channels, 1, kernel_width),
+            "output_channel_major": torch.arange(
+                out_channels * in_channels * kernel_width, dtype=torch.float32, device="mps",
+            ).reshape(1, kernel_width, in_channels, out_channels).permute(3, 2, 0, 1),
+            "strided_width": torch.arange(
+                out_channels * in_channels * 2 * kernel_width, dtype=torch.float32, device="mps",
+            ).reshape(out_channels, in_channels, 1, 2 * kernel_width)[..., ::2],
+        }
+        kernel = lib.conv_weight_to_koc_float
+        for layout, source in sources.items():
+            with self.subTest(layout=layout):
+                if layout != "contiguous":
+                    self.assertFalse(source.is_contiguous())
+                destination = torch.empty(kernel_width, out_channels, in_channels,
+                                          dtype=source.dtype, device="mps")
+                params = [
+                    out_channels,
+                    in_channels,
+                    1,
+                    kernel_width,
+                    source.stride(0),
+                    source.stride(1),
+                    0,
+                    0,
+                    source.stride(3),
+                ]
+                kernel(source, destination, params,
+                       threads=(in_channels, out_channels, 1),
+                       group_size=(min(in_channels, 256), 1, 1), arg_casts="int32")
+                self.assertEqual(destination, source.squeeze(2).permute(2, 0, 1))
 
     def test_conv_weight_to_dhwio_kernel(self):
         path = os.path.join(_CONFORMANCE_REPO_ROOT, "aten/src/ATen/native/mps/kernels/Convolution.metal")

@@ -27,6 +27,39 @@ struct Conv1dDwParams {
   bool has_bias;
 };
 
+// A region is an interval along the output length, not a 3D tensor subregion.
+// Direct matmul supports both NCL and NLC activation storage.
+struct Conv1dMatmulRegion {
+  // Index of the region's first output position.
+  int32_t out_col0;
+  // Number of consecutive output positions in the region.
+  int32_t out_cols;
+  // Input position used by out_col0 with weight tap w_tap0.
+  int32_t in_col0;
+  // Number of weight taps used per output in this region.
+  int32_t taps;
+  // Index of the first weight tap used.
+  int32_t w_tap0;
+  // Grid-y index assigned to the region's first output tile.
+  int32_t tile0;
+};
+
+C10_METAL_CONSTEXPR int32_t conv1d_matmul_max_regions = 16;
+
+struct Conv1dMatmulParams {
+  int32_t C_in;
+  int32_t C_out;
+  int32_t L;
+  // Full output length, used when advancing between channels or batches.
+  int32_t outW_total;
+  // Input-position spacing between adjacent weight taps.
+  int32_t dilation;
+  int32_t groups;
+  int32_t region_count;
+  bool has_bias;
+  ::c10::metal::array<Conv1dMatmulRegion, conv1d_matmul_max_regions> regions;
+};
+
 // Source element strides of the OIDHW weight view (may be non-contiguous).
 struct ConvWeightPermuteParams {
   uint32_t output_channels;
