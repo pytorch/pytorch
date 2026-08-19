@@ -376,7 +376,10 @@ void FunctionalTensorWrapper::regenerate_from_base() {
   auto t = storage_impl->base();
 
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(t));
-  t = at::functionalization::impl::apply_view_meta_sequence(t, view_metas_);
+  // This result is only used to refresh this wrapper's own value, so it is never
+  // handed to autograd and can take the cheap multi-output replay.
+  t = at::functionalization::impl::apply_view_meta_sequence(
+      t, view_metas_, /*single_output_replay=*/true);
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(t));
 
   replace_(t, /*from_lazy_regenerate=*/true);
@@ -792,10 +795,11 @@ void mutate_view_meta(const at::Tensor& self, const std::shared_ptr<functionaliz
 
 Tensor apply_view_meta_sequence(
     const Tensor& base,
-    const std::vector<std::shared_ptr<functionalization::ViewMeta>>& sequence) {
+    const std::vector<std::shared_ptr<functionalization::ViewMeta>>& sequence,
+    bool single_output_replay) {
   Tensor r = base;
   for (auto& vm : sequence) {
-    r = vm->forward(r);
+    r = single_output_replay ? vm->forward_single_output(r) : vm->forward(r);
   }
   return r;
 }
