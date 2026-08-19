@@ -41,12 +41,11 @@ from ..source import (
     GradSource,
 )
 from ..utils import GLOBAL_KEY_PREFIX, unpack_iterable
-from .base import GetSet, VariableTracker
+from .base import GetSet, Method, VariableTracker
 from .constant import ConstantVariable
 from .dicts import ConstDictVariable
 from .hashable import HashableTracker
 from .lists import ListVariable
-from .misc import GetAttrVariable
 from .user_defined import UserDefinedObjectVariable
 
 
@@ -108,52 +107,39 @@ class OptimizerVariable(UserDefinedObjectVariable):
         self.tensor_to_source = tensor_to_source or {}
         self.static_tensor_names = static_tensor_names or set()
 
-    def call_method(
+    def _call_init_group(
         self,
         tx: "InstructionTranslatorBase",
-        name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
-    ) -> "VariableTracker":
-        """This is an optimization to avoid tracing the very slow initialization of the optimizer"""
-        if name == "_init_group":
-            if not hasattr(self.value, "_init_group"):
-                # Fallback: if the optimizer does not have _init_group, trace normally
-                return super().call_method(tx, name, args, kwargs)
-            try:
-                self.graph_break_if_pending_mutation(tx)
-                self.move_step_if_cpu()
-                py_args, py_kwargs = self.get_python_args(*args, **kwargs)
-                ret_val = self.value._init_group(*py_args, **py_kwargs)
-                self.map_sources_and_install_guards(tx)
-                self.update_list_args(tx, args, kwargs, py_args, py_kwargs)
-                # stash a weak_ptr to optimizer to invalidate code
-                # if the optimizer object dies
-                mangled_name = f"__optimizer_{id(self.value)}"
-                tx.store_global_weakref_by_id(mangled_name, self.value)
-                self.create_finalizer(tx)
+    ) -> "VariableTracker | None":
+        """This is an optimization to avoid tracing the very slow initialization
+        of the optimizer. Declining (None) traces _init_group normally."""
+        if not hasattr(self.value, "_init_group"):
+            return None
+        try:
+            self.graph_break_if_pending_mutation(tx)
+            self.move_step_if_cpu()
+            py_args, py_kwargs = self.get_python_args(*args, **kwargs)
+            ret_val = self.value._init_group(*py_args, **py_kwargs)
+            self.map_sources_and_install_guards(tx)
+            self.update_list_args(tx, args, kwargs, py_args, py_kwargs)
+            # stash a weak_ptr to optimizer to invalidate code
+            # if the optimizer object dies
+            mangled_name = f"__optimizer_{id(self.value)}"
+            tx.store_global_weakref_by_id(mangled_name, self.value)
+            self.create_finalizer(tx)
 
-                # This is currently safe only because the only actual `ret_val`s returned
-                # by the `_init_group` of existing optimizers are properties that are invariant
-                # to the input tensors (e.g. dtype, layout). Changing these would trigger a
-                # recompilation and hence never result in the wrong specialization of `ret_val`.
-                return ConstantVariable.create(ret_val)
-            except (ArgMappingException, GuardInstallException) as _:
-                # trace normally if we can't map args or install guards correctly
-                pass
+            # This is currently safe only because the only actual `ret_val`s returned
+            # by the `_init_group` of existing optimizers are properties that are invariant
+            # to the input tensors (e.g. dtype, layout). Changing these would trigger a
+            # recompilation and hence never result in the wrong specialization of `ret_val`.
+            return ConstantVariable.create(ret_val)
+        except (ArgMappingException, GuardInstallException) as _:
+            # trace normally if we can't map args or install guards correctly
+            return None
 
-        return super().call_method(tx, name, args, kwargs)
-
-    # _init_group resolves to a GetAttrVariable so the call is intercepted in
-    # call_method (in the typical case, a UserMethodVariable would inline it).
-    def _get_init_group(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        if not self.source:
-            raise AssertionError("OptimizerVariable requires a source for _init_group")
-        name = "_init_group"
-        py_type = type(getattr(self.value, name))
-        return GetAttrVariable(
-            self, name, py_type=py_type, source=AttrSource(self.source, name)
-        )
+    tp_methods = {"_init_group": Method(_call_init_group)}
 
     # param_groups only runs setup side effects (static addresses, capturable
     # guards) and declines, falling through to the generic protocol.
@@ -168,8 +154,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
         return None
 
     tp_getset = {
-        "_init_group": GetSet(_get_init_group),
-        "param_groups": GetSet(_get_param_groups),
+        "param_groups": GetSet(_get_param_groups, None),
     }
 
     def graph_break_if_pending_mutation(self, tx: "InstructionTranslatorBase") -> None:
