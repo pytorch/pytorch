@@ -60,12 +60,13 @@ from torch.testing._internal.common_cuda import SM70OrLater
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
-    onlyAccelerator,
     onlyCUDA,
     skipCUDAIf,
 )
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
+    HardwareClassification,
+    instantiate_parametrized_tests,
     parametrize,
     run_tests,
     skipIfMPS,
@@ -74,7 +75,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
     xfailIfNoAcceleratorTriton,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, IS_BIG_GPU
+from torch.testing._internal.inductor_utils import IS_BIG_GPU
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import FloorDiv
 from torch.utils._sympy.symbol import make_symbol, SymT
@@ -130,7 +131,9 @@ def _test_cases(device, dtype):
     return test_cases
 
 
-class TestScheduler(TestCase):
+class TestSchedulerGeneric(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_why_no_fuse_names_are_lazy(self):
         node1 = Mock()
         node2 = Mock()
@@ -1374,8 +1377,8 @@ class TestScheduler(TestCase):
         }
         resolver._kernel = Mock(_load_mask=load_mask)
         resolver._layout = Mock(num_groups_str="GROUP")
-        resolver._layout.parent_dim.side_effect = (
-            lambda candidate: None if candidate is None else str(candidate[-1])
+        resolver._layout.parent_dim.side_effect = lambda candidate: (
+            None if candidate is None else str(candidate[-1])
         )
         resolver._layout.child_block.return_value = "CHILD"
         resolver._sub_parent_factor = 2
@@ -1418,8 +1421,8 @@ class TestScheduler(TestCase):
         )
         resolver = Mock()
         resolver.is_group_width_shape.side_effect = lambda shape: shape == group_shape
-        resolver.materialize_group_width.side_effect = (
-            lambda value: child if value is group else value
+        resolver.materialize_group_width.side_effect = lambda value: (
+            child if value is group else value
         )
         family = Mock()
         family.remap_index.return_value = sympy.Integer(7)
@@ -2450,78 +2453,6 @@ class TestScheduler(TestCase):
         )
         self.assertFalse(cleaned.skip_cudagraph)
 
-    @dtypes(torch.float, torch.float16)
-    @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
-    @xfailIfNoAcceleratorTriton
-    def test_disable_get_estimated_runtime_logging(self, device, dtype):
-        if device == "cpu":
-            return
-        tc = _test_cases(device, dtype)
-        # turn off logging of inductor metrics so that they don't get logged
-        torch._logging.set_logs(inductor_metrics=False)
-        metrics.reset()
-        for op, example_inputs, kwargs in tc:
-            comp = torch.compile(op)
-            torch._dynamo.reset()
-            with fresh_inductor_cache():
-                comp(*example_inputs, **kwargs)
-            self.assertEqual(metrics.num_bytes_accessed, 0)
-            self.assertEqual(any(m[1] for m in metrics.node_runtimes), False)
-            self.assertEqual(any(m[1] for m in metrics.nodes_num_elem), False)
-            metrics.reset()
-        torch._logging.set_logs()
-
-    @xfailIfNoAcceleratorTriton
-    @dtypes(torch.float, torch.float16)
-    @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
-    @parametrize(
-        "options",
-        [
-            {
-                "max_autotune": True,
-                "max_autotune_gemm_backends": "TRITON",
-            },
-            {
-                "max_autotune": True,
-                "max_autotune_gemm_backends": "TRITON,ATEN",
-            },
-        ],
-    )
-    @torch._inductor.config.patch(
-        {"force_disable_caches": True, "shape_padding": False}
-    )
-    @skipIf(not IS_BIG_GPU, "we can't use Triton only as a backend for max autotune")
-    @skipIfXpu(msg="torch-xpu-ops/issues/4853")
-    def test_flop_counter_op(self, device, dtype, options):
-        if device == "cpu":
-            return
-
-        tc = _test_cases(device, dtype)
-
-        torch._logging.set_logs(inductor_metrics=True)
-        for op, example_inputs, kwargs in tc:
-            comp = torch.compile(op, options=options)
-            # next two lines are required, otherwise the flops will be cached from previous runs of this function.
-            torch._dynamo.reset()
-            with fresh_inductor_cache():
-                # actually run to set the counters
-                comp(*example_inputs, **kwargs)
-                with FlopCounterMode() as mode:
-                    comp(*example_inputs, **kwargs)
-            reference_flops = get_total_flops(mode)
-
-            self.assertEqual(
-                reference_flops,
-                counters["inductor"]["flop_count"],
-                msg=lambda msg: f"{msg}\nop = {op} reference flops = {reference_flops} != counters {counters['inductor']['flop_count']}",
-            )
-            if op != torch.add:
-                self.assertNotEqual(
-                    reference_flops, 0, msg=lambda msg: f"{msg}\nop = {op} is 0 flops"
-                )
-            counters["inductor"]["flop_count"] = 0
-        torch._logging.set_logs()
-
     def test_fusion_prevent_too_many_reads_and_writes_prevents_fusion(self):
         """Test that fusion is prevented when unique I/O buffers exceed threshold"""
         # Setup: Create nodes with many unique I/O buffers
@@ -2705,9 +2636,89 @@ class TestScheduler(TestCase):
         self.assertTrue(can_fuse_prologue(hook_blocks=False))
         self.assertFalse(can_fuse_prologue(hook_blocks=True))
 
+
+class TestSchedulerAccelerator(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @dtypes(torch.float, torch.float16)
+    @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     @xfailIfNoAcceleratorTriton
-    @onlyAccelerator
-    def test_index_add_fusion_prevented(self):
+    def test_disable_get_estimated_runtime_logging(self, device, dtype):
+        if device == "cpu":
+            return
+        tc = _test_cases(device, dtype)
+        # turn off logging of inductor metrics so that they don't get logged
+        torch._logging.set_logs(inductor_metrics=False)
+        metrics.reset()
+        for op, example_inputs, kwargs in tc:
+            comp = torch.compile(op)
+            torch._dynamo.reset()
+            with fresh_inductor_cache():
+                comp(*example_inputs, **kwargs)
+            self.assertEqual(metrics.num_bytes_accessed, 0)
+            self.assertEqual(any(m[1] for m in metrics.node_runtimes), False)
+            self.assertEqual(any(m[1] for m in metrics.nodes_num_elem), False)
+            metrics.reset()
+        torch._logging.set_logs()
+
+    @xfailIfNoAcceleratorTriton
+    @dtypes(torch.float, torch.float16)
+    @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
+    @parametrize(
+        "options",
+        [
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+            },
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON,ATEN",
+            },
+        ],
+    )
+    @torch._inductor.config.patch(
+        {"force_disable_caches": True, "shape_padding": False}
+    )
+    @skipIf(not IS_BIG_GPU, "we can't use Triton only as a backend for max autotune")
+    @skipIfXpu(msg="torch-xpu-ops/issues/4853")
+    def test_flop_counter_op(self, device, dtype, options):
+        if device == "cpu":
+            return
+        tc = _test_cases(device, dtype)
+
+        torch._logging.set_logs(inductor_metrics=True)
+        for op, example_inputs, kwargs in tc:
+            comp = torch.compile(op, options=options)
+            # next two lines are required, otherwise the flops will be cached from previous runs of this function.
+            torch._dynamo.reset()
+            with fresh_inductor_cache():
+                # actually run to set the counters
+                comp(*example_inputs, **kwargs)
+                with FlopCounterMode() as mode:
+                    comp(*example_inputs, **kwargs)
+            reference_flops = get_total_flops(mode)
+
+            self.assertEqual(
+                reference_flops,
+                counters["inductor"]["flop_count"],
+                msg=lambda msg: (
+                    f"{msg}\nop = {op} reference flops = {reference_flops} != counters {counters['inductor']['flop_count']}"
+                ),
+            )
+            if op != torch.add:
+                self.assertNotEqual(
+                    reference_flops, 0, msg=lambda msg: f"{msg}\nop = {op} is 0 flops"
+                )
+            counters["inductor"]["flop_count"] = 0
+        torch._logging.set_logs()
+
+
+class TestSchedulerCuda(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    @xfailIfNoAcceleratorTriton
+    def test_index_add_fusion_prevented(self, device):
         """
         Test that index_add_ (scatter with atomic_add mode) is not fused with
         subsequent reads from the same buffer, preventing read-after-write hazards.
@@ -2727,7 +2738,6 @@ class TestScheduler(TestCase):
             F_u_at_atom = F_u_mol[batch] + 1e-6
             return f_u / F_u_at_atom
 
-        device = GPU_TYPE
         f = torch.ones(1024, 1, device=device)
         batch = torch.zeros(1024, dtype=torch.long, device=device)
 
@@ -2741,14 +2751,15 @@ class TestScheduler(TestCase):
         # Verify results match (no fusion bug)
         self.assertTrue(
             torch.allclose(eager_result, compiled_result, rtol=1e-4, atol=1e-4),
-            msg=lambda msg: f"{msg}\nindex_add_ fusion bug detected: "
-            f"eager={eager_result.mean().item():.6f}, "
-            f"compiled={compiled_result.mean().item():.6f}",
+            msg=lambda msg: (
+                f"{msg}\nindex_add_ fusion bug detected: "
+                f"eager={eager_result.mean().item():.6f}, "
+                f"compiled={compiled_result.mean().item():.6f}"
+            ),
         )
 
     @xfailIfNoAcceleratorTriton
-    @onlyAccelerator
-    def test_atomic_add_no_fusion_correctness(self):
+    def test_atomic_add_no_fusion_correctness(self, device):
         """
         Test that atomic_add operations produce correct results.
         """
@@ -2758,7 +2769,6 @@ class TestScheduler(TestCase):
             out.index_add_(0, idx, x)  # atomic_add: scatter to shared locations
             return out[idx] + 1.0  # read from same buffer: requires sync
 
-        device = GPU_TYPE
         x = torch.ones(5, device=device)
         idx = torch.tensor([0, 1, 0, 1, 0], device=device, dtype=torch.long)
 
@@ -2774,12 +2784,13 @@ class TestScheduler(TestCase):
         # This test will FAIL without the fusion prevention fix
         self.assertTrue(
             torch.allclose(expected, result),
-            msg=lambda msg: f"{msg}\nFusion bug detected! Expected {expected}, got {result}",
+            msg=lambda msg: (
+                f"{msg}\nFusion bug detected! Expected {expected}, got {result}"
+            ),
         )
 
     @xfailIfNoAcceleratorTriton
-    @onlyAccelerator
-    def test_expand_reuse_does_not_realize_before_reduction(self):
+    def test_expand_reuse_does_not_realize_before_reduction(self, device):
         def fn(icrd1, icrd2, wcrd, ocrd, meta, input1, input2, weight, output):
             input1_selected = torch.index_select(input1, 2, icrd1)
             input2_selected = torch.index_select(input2, 2, icrd2)
@@ -2804,7 +2815,6 @@ class TestScheduler(TestCase):
         U = 4
         V = 4
         W = 4
-        device = GPU_TYPE
 
         torch.manual_seed(0)
         input1 = torch.rand((B, U, L), dtype=torch.float32, device=device)
@@ -2849,8 +2859,7 @@ class TestScheduler(TestCase):
         self.assertEqual(metrics.generated_kernel_count, 1)
 
     @xfailIfNoAcceleratorTriton
-    @onlyAccelerator
-    def test_expand_reuse_realizes_in_deterministic_mode(self):
+    def test_expand_reuse_realizes_in_deterministic_mode(self, device):
         def fn(a, b, c, d, e):
             x = a * b * c * d * e
             y = x.view(8, 8, 1).expand(8, 8, 16)
@@ -2866,7 +2875,6 @@ class TestScheduler(TestCase):
             self.assertEqual(metrics.ir_nodes_pre_fusion, 2)
             self.assertEqual(metrics.generated_kernel_count, 2)
 
-        device = GPU_TYPE
         torch.manual_seed(0)
         args = [
             torch.rand((8, 8), dtype=torch.float32, device=device) for _ in range(5)
@@ -2887,13 +2895,12 @@ class TestScheduler(TestCase):
             check_realizes()
 
     @xfailIfNoAcceleratorTriton
-    @onlyCUDA
     @parametrize("op", ["select_scatter", "index_put"])
     # Both settings are pinned so the test can only pass via graph_fanout:
     # deterministic mode makes expand realize src on its own, and the read
     # threshold decides whether src counts as expensive at all.
     @inductor_config.patch(deterministic=False, realize_reads_threshold=4)
-    def test_scatter_realizes_expensive_src(self, op):
+    def test_scatter_realizes_expensive_src(self, device, op):
         def src(a, b, c, d, e):
             return a[..., 1] * b[..., 0] + c[..., 1] * d[..., 0] + e[..., 2]
 
@@ -2908,7 +2915,6 @@ class TestScheduler(TestCase):
                 base.index_put_((index,), src(*args))
                 return base
 
-        device = "cuda"
         torch.manual_seed(0)
         base_size = (32, 32, 26) if op == "select_scatter" else (26, 32, 32)
         base = torch.rand(base_size, dtype=torch.float32, device=device)
@@ -2931,6 +2937,7 @@ class TestScheduler(TestCase):
         self.assertEqual(metrics.generated_kernel_count, 2)
 
 
+@xfailIfNoAcceleratorTriton
 class TestScoreFusionMemory(TestCase):
     """
     Tests for _score_fusion_memory_by_buffer_overlap.
@@ -2945,10 +2952,11 @@ class TestScoreFusionMemory(TestCase):
     3. Small overlap: reads on different offset but overlap is small → don't fuse (2 kernels)
     """
 
-    @skipIf(not HAS_GPU, "GPU not available")
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @inductor_config.patch("score_fusion_memory_threshold", 1)
     @inductor_config.patch("min_overlap_ratio", 0.5)
-    def test_exact_same_reads_should_fuse(self) -> None:
+    def test_exact_same_reads_should_fuse(self, device) -> None:
         """
         Case 1: Exact matches in read/write → should fuse into 1 kernel.
 
@@ -2965,7 +2973,7 @@ class TestScoreFusionMemory(TestCase):
         torch._dynamo.reset()
         metrics.reset()
 
-        x = torch.randn(8, 512, device=GPU_TYPE, dtype=torch.float16)
+        x = torch.randn(8, 512, device=device, dtype=torch.float16)
 
         compiled_fn = torch.compile(exact_reads, backend="inductor", fullgraph=True)
         out1_eager, out2_eager = exact_reads(x)
@@ -2976,10 +2984,9 @@ class TestScoreFusionMemory(TestCase):
         # Should fuse into 1 kernel since both ops read exact same buffer
         self.assertEqual(metrics.generated_kernel_count, 1)
 
-    @skipIf(not HAS_GPU, "GPU not available")
     @inductor_config.patch("score_fusion_memory_threshold", 1)
     @inductor_config.patch("min_overlap_ratio", 0.5)
-    def test_split_cat_large_overlap_should_fuse(self) -> None:
+    def test_split_cat_large_overlap_should_fuse(self, device) -> None:
         """
         Case 2: Reads on different offset but overlap is huge (split/cat) → should fuse into 1 kernel.
 
@@ -2997,7 +3004,7 @@ class TestScoreFusionMemory(TestCase):
         torch._dynamo.reset()
         metrics.reset()
 
-        x = torch.randn(8, 512, device=GPU_TYPE, dtype=torch.float16)
+        x = torch.randn(8, 512, device=device, dtype=torch.float16)
 
         compiled_fn = torch.compile(
             split_and_process, backend="inductor", fullgraph=True
@@ -3010,9 +3017,8 @@ class TestScoreFusionMemory(TestCase):
         # Should fuse into 1 kernel since all ops read from the same underlying buffer
         self.assertEqual(metrics.generated_kernel_count, 1)
 
-    @skipIf(not HAS_GPU, "GPU not available")
     @inductor_config.patch("score_fusion_memory_threshold", 1)
-    def test_partial_overlap_below_threshold(self) -> None:
+    def test_partial_overlap_below_threshold(self, device) -> None:
         """
         Case 3: Partial overlap below the 0.5 threshold → should NOT fuse (2 kernels).
 
@@ -3049,9 +3055,9 @@ class TestScoreFusionMemory(TestCase):
         # y and z are 3x larger (384 elements each)
         # So each op reads: 128 (from x slice) + 384 (from y or z) = 512 total
         # overlap_ratio = 128 / 512 = 0.25 < 0.5 threshold
-        x = torch.randn(8, 512, device=GPU_TYPE, dtype=torch.float16)
-        y = torch.randn(8, 128, device=GPU_TYPE, dtype=torch.float16)
-        z = torch.randn(8, 128, device=GPU_TYPE, dtype=torch.float16)
+        x = torch.randn(8, 512, device=device, dtype=torch.float16)
+        y = torch.randn(8, 128, device=device, dtype=torch.float16)
+        z = torch.randn(8, 128, device=device, dtype=torch.float16)
 
         compiled_fn = torch.compile(
             partial_overlap_split, backend="inductor", fullgraph=True
@@ -3066,8 +3072,17 @@ class TestScoreFusionMemory(TestCase):
         self.assertEqual(metrics.generated_kernel_count, 2)
 
 
-instantiate_device_type_tests(TestScheduler, globals(), allow_xpu=True)
-instantiate_device_type_tests(TestScoreFusionMemory, globals(), allow_xpu=True)
+instantiate_parametrized_tests(TestSchedulerGeneric)
+
+instantiate_device_type_tests(
+    TestSchedulerAccelerator, globals(), except_for="cpu", allow_xpu=True
+)
+
+instantiate_device_type_tests(TestSchedulerCuda, globals(), only_for="cuda")
+
+instantiate_device_type_tests(
+    TestScoreFusionMemory, globals(), except_for="cpu", allow_xpu=True
+)
 
 if __name__ == "__main__":
     run_tests()
