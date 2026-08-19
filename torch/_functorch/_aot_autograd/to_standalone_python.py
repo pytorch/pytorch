@@ -837,15 +837,16 @@ def _graph_has_dynamic_shapes(gm: GraphModule) -> bool:
     for node in gm.graph.nodes:
         if node.op != "placeholder":
             continue
-        val = node.meta.get("val")
-        if _is_symbolic(val):
-            return True
-        if isinstance(val, torch.Tensor) and (
-            any(_is_symbolic(s) for s in val.shape)
-            or any(_is_symbolic(s) for s in val.stride())
-            or _is_symbolic(val.storage_offset())
-        ):
-            return True
+        for key in ("val", "example_value"):
+            val = node.meta.get(key)
+            if _is_symbolic(val):
+                return True
+            if isinstance(val, torch.Tensor) and (
+                any(_is_symbolic(s) for s in val.shape)
+                or any(_is_symbolic(s) for s in val.stride())
+                or _is_symbolic(val.storage_offset())
+            ):
+                return True
     return False
 
 
@@ -946,9 +947,16 @@ def compile_to_python(
         # Deepcopy first so compile_fx cannot mutate the caller's gm (torchbind
         # ProcessGroups smuggled through as shared references). Note: the raw-collective /
         # torchbind rewrites are inductor-lowering prereqs and belong to the step-2 inductor
-        # compile, which applies them to the dense graph -- not duplicated here.
+        # compile, which applies them to the dense graph -- not duplicated here. When
+        # called from a Dynamo backend, reuse its active fake mode: the example inputs
+        # are FakeTensors owned by that mode, so creating another one would mix modes.
+        # Outside Dynamo, infer the mode from the graph as before.
         shapes_mode = (
-            "from_graph" if _graph_has_dynamic_shapes(gm) else "from_example_inputs"
+            "from_tracing_context"
+            if torch._guards.TracingContext.try_get() is not None
+            else (
+                "from_graph" if _graph_has_dynamic_shapes(gm) else "from_example_inputs"
+            )
         )
         with (
             torch.no_grad(),

@@ -30,6 +30,16 @@ from torch.testing._internal.common_utils import (
 _GLOBAL_TENSOR = torch.randn(3)
 
 
+def _precompile_dynamo_dynamic(x):
+    return x.sin() + x.shape[0]
+
+
+def _precompile_dynamo_graph_break(x):
+    y = x + 1
+    torch._dynamo.graph_break()
+    return y * 2
+
+
 # A custom pytree node whose context (a set) is not JSON-dumpable and which has no
 # to_dumpable_context serializer, so treespec_dumps raises TypeError (distinct from the
 # unregistered-namedtuple NotImplementedError path). Registered once at module load and
@@ -946,14 +956,40 @@ class TestPrecompile(TestCase):
         with self.assertRaises(TypeError):
             torch.compiler.precompile(lambda t: t + 1, [(x,)])
 
-    def test_tracer_dynamo_not_implemented(self):
-        # "dynamo" is a valid (planned) tracer value but is not implemented yet; it must
-        # raise NotImplementedError, not silently fall back to make_fx.
-        m = torch.nn.Linear(4, 3).eval()
-        x = torch.randn(5, 4)
-        with self.assertRaisesRegex(NotImplementedError, "tracer='dynamo'"):
+    @torch._dynamo.config.patch(
+        automatic_dynamic_shapes=True, assume_static_by_default=True
+    )
+    def test_tracer_dynamo_recompiles_to_dynamic_graph(self):
+        examples = [(torch.randn(size, 4),) for size in (2, 3, 5)]
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_dynamic,
+            example_inputs=examples,
+            tracer="dynamo",
+        )
+
+        self.assertIn('TRACER = "dynamo"', code)
+        self.assertIn("VARIANT_COUNT = 2", code)
+        self.assertIn("GRAPH_COUNT = 2", code)
+        self.assertIn("DYNAMIC_GRAPH_COUNT = 1", code)
+        self.assertIn("Inductor output code", code)
+        self.assertIn("Guard trees and transformed Dynamo bytecode", code)
+
+        for _, loaded in _default_and_inlined_loaders(code, cache, "inductor"):
+            for size in (2, 7):
+                x = torch.randn(size, 4)
+                self.assertEqual(loaded(x), _precompile_dynamo_dynamic(x))
+            with self.assertRaisesRegex(PrecompileError, "no captured Dynamo variant"):
+                loaded(torch.randn(1, 4))
+
+    def test_tracer_dynamo_rejects_graph_break(self):
+        with self.assertRaisesRegex(
+            PrecompileError, "does not support graph breaks yet"
+        ):
             torch.compiler.precompile(
-                lambda model, xx: model(xx), example_inputs=[(m, x)], tracer="dynamo"
+                _precompile_dynamo_graph_break,
+                example_inputs=[(torch.randn(4),)],
+                tracer="dynamo",
+                backend="eager",
             )
 
     def test_tracer_invalid_raises(self):
