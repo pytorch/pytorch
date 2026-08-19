@@ -128,8 +128,6 @@ T = TypeVar("T")
 from torch._dynamo.device_interface import get_interface_for_device
 
 
-# defines here before import torch._dynamo is for avoiding circular import
-# when get_gpu_type is imported from dynamo
 @functools.cache
 def get_gpu_type() -> str:
     avail_gpus = [x for x in _gpu_types() if get_interface_for_device(x).is_available()]
