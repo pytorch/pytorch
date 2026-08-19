@@ -71,11 +71,14 @@ class CosineSimilarity(Module):
         dim (int, optional): Dimension where cosine similarity is computed. Default: 1
         eps (float, optional): Small value to avoid division by zero.
             Default: 1e-8
+        keepdim (bool, optional): Whether the output tensor retains :attr:`dim`.
+            Default: False
     Shape:
         - Input1: :math:`(\ast_1, D, \ast_2)` where D is at position `dim`
         - Input2: :math:`(\ast_1, D, \ast_2)`, same number of dimensions as x1, matching x1 size at dimension `dim`,
           and broadcastable with x1 at other dimensions.
-        - Output: :math:`(\ast_1, \ast_2)`
+        - Output: :math:`(\ast_1, \ast_2)` if ``keepdim`` is ``False``,
+          :math:`(\ast_1, 1, \ast_2)` if ``keepdim`` is ``True``
 
     Examples:
         >>> input1 = torch.randn(100, 128)
@@ -84,17 +87,19 @@ class CosineSimilarity(Module):
         >>> output = cos(input1, input2)
     """
 
-    __constants__ = ["dim", "eps"]
+    __constants__ = ["dim", "eps", "keepdim"]
     dim: int
     eps: float
+    keepdim: bool
 
-    def __init__(self, dim: int = 1, eps: float = 1e-8) -> None:
+    def __init__(self, dim: int = 1, eps: float = 1e-8, keepdim: bool = False) -> None:
         super().__init__()
         self.dim = dim
         self.eps = eps
+        self.keepdim = keepdim
 
     def forward(self, x1: Tensor, x2: Tensor) -> Tensor:
         """
         Runs the forward pass.
         """
-        return F.cosine_similarity(x1, x2, self.dim, self.eps)
+        return F.cosine_similarity(x1, x2, self.dim, self.eps, keepdim=self.keepdim)

@@ -270,7 +270,7 @@ Tensor _pdist_backward(const Tensor& grad, const Tensor& self, const double p, c
   return result;
 }
 
-Tensor cosine_similarity(const Tensor& x1_, const Tensor& x2_, int64_t dim, double eps) {
+Tensor cosine_similarity(const Tensor& x1_, const Tensor& x2_, int64_t dim, double eps, bool keepdim) {
     /*
    * cosine_similarity(x1, x2) = <x1, x2> / (||x1|| * ||x2||)
    *
@@ -334,7 +334,7 @@ Tensor cosine_similarity(const Tensor& x1_, const Tensor& x2_, int64_t dim, doub
     x2_norm.clamp_min_(eps_tensor);
   }
 
-  return ((*x1 / x1_norm) * (*x2 / x2_norm)).sum(dim);
+  return ((*x1 / x1_norm) * (*x2 / x2_norm)).sum(dim, keepdim);
 }
 
 }  // namespace at::native

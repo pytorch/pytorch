@@ -12,11 +12,13 @@ void CosineSimilarityImpl::reset() {}
 
 void CosineSimilarityImpl::pretty_print(std::ostream& stream) const {
   stream << std::boolalpha << "torch::nn::CosineSimilarity"
-         << "(dim=" << options.dim() << ", eps=" << options.eps() << ')';
+         << "(dim=" << options.dim() << ", eps=" << options.eps()
+         << ", keepdim=" << options.keepdim() << ')';
 }
 
 Tensor CosineSimilarityImpl::forward(const Tensor& x1, const Tensor& x2) {
-  return F::detail::cosine_similarity(x1, x2, options.dim(), options.eps());
+  return F::detail::cosine_similarity(
+      x1, x2, options.dim(), options.eps(), options.keepdim());
 }
 
 // ============================================================================
