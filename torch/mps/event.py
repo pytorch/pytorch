@@ -3,6 +3,11 @@ from typing import Optional
 import torch
 
 
+__all__ = [
+    "Event",
+]
+
+
 class Event:
     r"""Wrapper around an MPS event.
 
