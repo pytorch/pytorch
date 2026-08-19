@@ -13519,6 +13519,7 @@
   variants: method
   dispatch:
     CUDA: record_stream_cuda
+    MPS: record_stream_mps
     XPU: record_stream_xpu
 
 - func: isposinf(Tensor self) -> Tensor
