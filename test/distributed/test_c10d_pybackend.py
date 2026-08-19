@@ -45,6 +45,7 @@ class RecordingBackend(C10DBackend):
         self.reconfigure_opts = None
         self.start_coalescing_count = 0
         self.end_coalescing_count = 0
+        self.time_estimate_started = False
         self.sequence_number = 0
         self.registered_hook = None
         self.wait_for_pending_works_count = 0
@@ -71,7 +72,7 @@ class RecordingBackend(C10DBackend):
         return True
 
     @property
-    def supports_time_estimate(self):
+    def _supports_time_estimate(self):
         return True
 
     @property
@@ -95,6 +96,13 @@ class RecordingBackend(C10DBackend):
 
     def set_timeout(self, timeout):
         self.calls.append(("set_timeout", timeout))
+
+    def _start_time_estimate(self):
+        self.time_estimate_started = True
+
+    def _end_time_estimate(self):
+        self.time_estimate_started = False
+        return 1.25
 
     def shrink(self, ranks_to_exclude, shrink_flags=0, opts_override=None):
         self.calls.append(("shrink", ranks_to_exclude, shrink_flags, opts_override))
@@ -313,7 +321,7 @@ class TestPyBackend(TestCase):
         for attr in (
             "supports_splitting",
             "supports_coalescing",
-            "supports_time_estimate",
+            "_supports_time_estimate",
             "supports_shrinking",
             "supports_reconfigure",
             "supports_window",
@@ -435,6 +443,11 @@ class TestPyBackend(TestCase):
         group._end_coalescing(torch.device("cpu")).wait()
         self.assertEqual(backend.start_coalescing_count, 1)
         self.assertEqual(backend.end_coalescing_count, 1)
+
+        with dist._time_estimator(group, torch.device("cpu")) as estimator:
+            self.assertTrue(backend.time_estimate_started)
+        self.assertFalse(backend.time_estimate_started)
+        self.assertEqual(estimator.estimated_time, 1.25)
 
         backend._set_sequence_number_for_group()
         self.assertEqual(backend._get_sequence_number_for_group(), 123)
