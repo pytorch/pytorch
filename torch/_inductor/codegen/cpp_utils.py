@@ -88,6 +88,14 @@ DEVICE_TO_ATEN = {
     "mps": "at::kMPS",
 }
 
+LAYOUT_TO_ATEN = {
+    torch.strided: "at::kStrided",
+    torch._mkldnn: "at::kMkldnn",  # type: ignore[attr-defined]
+}
+
+# matches c10/core/DeviceType.h
+DEVICE_TO_INT = {"cpu": 0, "cuda": 1}
+
 
 def device_to_aten(device_type: str) -> str:
     if device_type in DEVICE_TO_ATEN:
@@ -97,18 +105,31 @@ def device_to_aten(device_type: str) -> str:
 
     try:
         overrides = get_device_op_overrides(device_type)
-    except KeyError:
-        raise KeyError(f"No ATen device type mapping for {device_type}") from None
-    return overrides.aten_device_type()
+    except KeyError as exc:
+        raise RuntimeError(
+            f"No ATen device type mapping for {device_type}"
+        ) from exc
 
+    try:
+        aten_device_type = overrides.aten_device_type()
+    except NotImplementedError as exc:
+        raise RuntimeError(
+            f"No ATen device type mapping for {device_type}"
+        ) from exc
 
-LAYOUT_TO_ATEN = {
-    torch.strided: "at::kStrided",
-    torch._mkldnn: "at::kMkldnn",  # type: ignore[attr-defined]
-}
+    if (
+        not isinstance(aten_device_type, str)
+        or not aten_device_type.startswith("at::k")
+        or len(aten_device_type) == len("at::k")
+    ):
+        raise RuntimeError(
+            f"{type(overrides).__name__}.aten_device_type() must return "
+            f"a non-empty ATen device type expression starting with 'at::k', "
+            f"got {aten_device_type!r}"
+        )
 
-# matches c10/core/DeviceType.h
-DEVICE_TO_INT = {"cpu": 0, "cuda": 1}
+    return aten_device_type
+
 
 _IS_WINDOWS = sys.platform == "win32"
 
