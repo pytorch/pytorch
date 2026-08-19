@@ -5,6 +5,7 @@ import torch
 import random
 import io
 import itertools
+import types
 import unittest
 import functools
 from contextlib import redirect_stderr
@@ -4343,6 +4344,43 @@ class TestSparseCompressedTritonKernels(TestCase):
         # ... or not:
         self.assertEqual(get_meta_with_checks(32, 32, 64, warn_count=1),
                          dict(GROUP_SIZE_ROW=4, SPLIT_N=4, num_stages=1, num_warps=4))
+
+
+class TestSparseTritonMetaDeviceName(TestCase):
+    """_get_device_name keys the Triton tuning tables, so it has to name whatever
+    accelerator is in use rather than only CUDA and XPU."""
+
+    def _patched(self, device_type, module):
+        return unittest.mock.patch.multiple(
+            torch,
+            accelerator=unittest.mock.MagicMock(
+                current_accelerator=lambda check_available=False: (
+                    None if device_type is None else torch.device(device_type)
+                )
+            ),
+            get_device_module=lambda _: module,
+        )
+
+    def test_uses_the_device_module(self):
+        from torch.sparse._triton_ops_meta import _get_device_name
+
+        module = types.SimpleNamespace(get_device_name=lambda: "Fake Accelerator")
+        with self._patched("privateuseone", module):
+            self.assertEqual(_get_device_name(), "Fake Accelerator")
+
+    def test_module_without_get_device_name_is_unnamed(self):
+        from torch.sparse._triton_ops_meta import _get_device_name
+
+        # MPS and MTIA register a device module but no get_device_name; that must
+        # key as unnamed rather than raising.
+        with self._patched("privateuseone", types.SimpleNamespace()):
+            self.assertEqual(_get_device_name(), "")
+
+    def test_no_accelerator_is_unnamed(self):
+        from torch.sparse._triton_ops_meta import _get_device_name
+
+        with self._patched(None, types.SimpleNamespace()):
+            self.assertEqual(_get_device_name(), "")
 
 
 # e.g., TestSparseCSRCPU and TestSparseCSRCUDA
