@@ -130,7 +130,12 @@ def _file_hash(path: str) -> str:
 # shared declaration machinery (expand_specs picks the grid points, the
 # validating loader decides what a declaration means). Neither is caught
 # by the tools/*.py glob below -- they live outside tools/.
-_CLOSURE_PREFIXES = ("torch._native", "torchgen.native_aot")
+# torch._vendor as well as torch._native: vendored DSL packages (torch/_vendor/
+# quack/) hold real kernel bodies, and a declaration's build() is meant to share
+# code with its JIT wrapper -- so an edit to a vendored body left every artifact's
+# closure unchanged, sources_current() True, and a relink shipping kernels
+# compiled from the old source with nothing reported.
+_CLOSURE_PREFIXES = ("torch._native", "torch._vendor", "torchgen.native_aot")
 
 # Tool sources that cannot change what an artifact MEANS, and so must stay out
 # of the closure: hashing them re-exports every kernel of every arch for an
@@ -248,20 +253,42 @@ def _effective_arch(
     that is an error rather than a coin flip."""
     if arch:
         return arch
-    kinds = [tc] if tc is not None else list(toolchains.TOOLCHAINS.values())
-    found = {}
-    for k in kinds:
-        env = os.getenv(k.ARCH_ENV_VAR) if k.ARCH_ENV_VAR else None
-        if env:
-            found[k.ARCH_ENV_VAR] = env
-    if len(set(found.values())) > 1:
+    # An arch variable with no --arch is REFUSED rather than honored. It is a
+    # per-kind variable, so it can only ever answer for the kinds that declare
+    # one: with CUTE_DSL_ARCH=sm_90a set, this resolved sm_90a when choosing a
+    # directory and for a CuteDSL sidecar, but sm_100 (the detected arch) for a
+    # kind that declares no variable -- so a tree named sm_90a held a sidecar
+    # recording sm_100, and generation filters trees by directory while the
+    # shipped gate comes from the sidecar. Refusing leaves exactly one arch=None
+    # path (on-device detection), which every kind answers identically.
+    named = {
+        k.ARCH_ENV_VAR: os.getenv(k.ARCH_ENV_VAR)
+        for k in toolchains.TOOLCHAINS.values()
+        if k.ARCH_ENV_VAR and os.getenv(k.ARCH_ENV_VAR)
+    }
+    if named:
         raise RuntimeError(
-            "conflicting toolchain arch variables: "
-            + ", ".join(f"{k}={v}" for k, v in sorted(found.items()))
-            + ". Unset all but one, or pass --arch to say which arch this "
-            "export is for."
+            "arch variable(s) "
+            + ", ".join(f"{k}={v}" for k, v in sorted(named.items()))
+            + " are set but --arch is not. They are per-toolchain, so they cannot "
+            "name the arch for every kind in one export; pass --arch "
+            f"(e.g. --arch {next(iter(sorted(named.values())))}) to state it once."
         )
-    return next(iter(found.values()), None) or _detected_arch()
+    return _detected_arch()
+
+
+def _claimed_spelling(arch: str, claimed: tuple[str, ...]) -> str | None:
+    """The spelling in ``claimed`` for ``arch``'s capability, or None.
+
+    Prefers the arch-conditional spelling when a declaration lists both, which is
+    the same preference the generator's tie-break applies: where an op ships an
+    sm_100a and an sm_100 build for one capability, the conditional one is what
+    its kernels were written against."""
+    want = decl.cc_of(arch)
+    same_cc = [a for a in claimed if decl.cc_of(a) == want]
+    if not same_cc:
+        return None
+    return sorted(same_cc, key=lambda a: (not a.endswith("a"), a))[0]
 
 
 def export_point(
@@ -321,6 +348,8 @@ def export_point(
         # The declaration lives at a path fixed by construction, so it needs
         # no threading through the job tuple.
         "sources": source_closure(os.path.join(OPS_DIR, op_pkg, "aot.py")),
+        # The compiler, which no source file names (see runtimes_current).
+        "runtimes": runtime_versions(tc.kind),
         **extra,
     }
     with open(os.path.join(out_dir, prefix + ".json"), "w") as f:
@@ -344,6 +373,14 @@ def _collect_jobs(ops_filter, out_root: str, archs):
     The generated .cpp sits at <out-root>/<decl_id>/, outside the arch
     trees, since it covers all of them."""
     jobs = []
+    # Declarations that matched NO requested arch, reported at the end. A
+    # declaration whose ARCHS lists only conditional spellings ("sm_100a") ships
+    # nothing for a release list of plain ones ("10.0") and vice versa -- and with
+    # several declarations that is partial and looks healthy: the build embeds the
+    # ops that matched, relinks, passes its post-relink check, and the others are
+    # simply absent. Nothing downstream can report it, because there is no tree for
+    # generation to complain about.
+    skipped: dict[str, list[str]] = {}
     for entry in sorted(os.listdir(OPS_DIR)):
         op_dir = os.path.join(OPS_DIR, entry)
         if not os.path.exists(os.path.join(op_dir, "aot.py")):
@@ -353,12 +390,6 @@ def _collect_jobs(ops_filter, out_root: str, archs):
             if ops_filter and entry not in ops_filter and d.ATEN_OP not in ops_filter:
                 continue
             for arch in archs:
-                # Declaration-level arch support: skip (declaration x
-                # arch) pairs the op's kernels are not valid on. An
-                # on-device export (arch None) is not filtered -- the
-                # builder machine is the target by construction.
-                if arch is not None and arch not in decl.archs_of(d):
-                    continue
                 # There is no unnamed layout: an artifact whose arch nobody can
                 # state is one the runtime gate cannot match to hardware.
                 layout_arch = _effective_arch(arch)
@@ -369,13 +400,61 @@ def _collect_jobs(ops_filter, out_root: str, archs):
                         "(e.g. --arch sm_100a), which also lets export run on "
                         "a machine without a GPU."
                     )
+                # Declaration-level arch support. TWO paths, because this name is
+                # also what generation filters trees by (--archs, built from the
+                # same list stage 2 passed to export):
+                #
+                #   * an arch named EXPLICITLY is used verbatim, and a declaration
+                #     that does not claim it is skipped. Resolving it to another
+                #     spelling here named the tree something generation was never
+                #     told about, so it ignored every tree and embedded nothing --
+                #     silently, because a manifest with no SOURCE= lines reads as
+                #     "no declaration ships kernels for this build". Every plain
+                #     spelling in a release arch list hit that.
+                #   * an ON-DEVICE arch (none named) adopts the spelling the
+                #     declaration claims for the detected capability, preferring
+                #     the arch-conditional one exactly as the generator's tie-break
+                #     does. This path passes no --archs at all, so it cannot
+                #     desynchronize, and it is the one that needed resolving: the
+                #     device reports the plain spelling (sm_100), so a declaration
+                #     pinning ('sm_100a',) got a tree it disowned and generation
+                #     refused with advice that rebuilt the identical tree.
+                if arch is not None:
+                    # Validated even though the comparison below is by string:
+                    # routing every arch through _claimed_spelling used to call
+                    # cc_of, which is the only thing that ever rejected a
+                    # malformed sm string. Without this, `--arch sm100a` (or
+                    # sm_1000, SM_100) matched no declaration and exported
+                    # nothing, exit 0 -- a typo that looked like success.
+                    decl.cc_of(layout_arch)
+                    if layout_arch not in decl.archs_of(d):
+                        skipped.setdefault(did, []).append(layout_arch)
+                        continue
+                else:
+                    claimed = _claimed_spelling(layout_arch, decl.archs_of(d))
+                    if claimed is None:
+                        continue
+                    layout_arch = claimed
+                # Named explicitly for the compile too, so the artifacts are built
+                # for the arch the sidecar records rather than for whatever the
+                # toolchain would pick from the device.
+                job_arch = layout_arch
                 root = os.path.join(out_root, layout_arch)
                 out_dir = os.path.join(root, did)
                 os.makedirs(out_dir, exist_ok=True)
                 points = expand_specs(d.kernel_precompile_grid())
                 _check_no_orphan_artifacts(out_dir, points)
                 for point in points:
-                    jobs.append((entry, d.KERNEL_MODULE, point, out_dir, arch))
+                    jobs.append((entry, d.KERNEL_MODULE, point, out_dir, job_arch))
+    shipped = {os.path.basename(j[3]) for j in jobs}
+    for did, missed in sorted(skipped.items()):
+        if did not in shipped:
+            print(
+                f"{did}: declares kernels but none for this build -- requested "
+                f"{' '.join(missed)}, and the declaration's ARCHS names none of "
+                f"them, so this op falls back to aten. The spellings must match "
+                f"exactly: an ARCHS of ('sm_100a',) does not cover a build for 10.0."
+            )
     return jobs
 
 
@@ -438,12 +517,19 @@ def _check_no_orphan_artifacts(out_dir: str, specs) -> None:
             )
         return
     live = [_json_normal(p) for p in specs]
-    stale = sorted(
-        fn
-        for fn in names
-        if fn.endswith(".json")
-        and _read_sidecar(os.path.join(out_dir, fn)).get("spec") not in live
-    )
+
+    def _is_stale(fn: str) -> bool:
+        sc = _read_sidecar(os.path.join(out_dir, fn))
+        # SCHEMA FIRST, as in _job_needed and gen_aot_lib: "spec" is read by name,
+        # and a version that changed the spec representation -- the documented
+        # reason to bump -- would otherwise make the first export in an existing
+        # tree demand `rm -rf` instead of just re-exporting the points it cannot
+        # read. A sidecar from another schema is not stale, it is unreadable.
+        if sc.get("version") != SIDECAR_VERSION:
+            return False
+        return sc.get("spec") not in live
+
+    stale = sorted(fn for fn in names if fn.endswith(".json") and _is_stale(fn))
     if stale:
         raise RuntimeError(
             f"{out_dir}: sidecars for spec points no longer in the grid "
@@ -451,6 +537,45 @@ def _check_no_orphan_artifacts(out_dir: str, specs) -> None:
             f"Their kernel objects would still be linked with no launcher "
             f"referencing them; {_CLEAN_HINT.format(d=out_dir)}."
         )
+
+
+def runtime_versions(kind: str) -> dict[str, str]:
+    """{distribution: version} for the runtimes that COMPILE this kind.
+
+    Metadata only, no import of the DSL itself (see Toolchain.RUNTIME_DISTS).
+    A distribution that is not installed is recorded as absent rather than
+    omitted, so "compiled where the wheel was missing" is distinguishable from
+    "compiled before this was recorded"."""
+    import importlib.metadata as md
+
+    out = {}
+    for dist in toolchains.get_toolchain(kind).RUNTIME_DISTS:
+        try:
+            out[dist] = md.version(dist)
+        except md.PackageNotFoundError:
+            out[dist] = "absent"
+    return dict(sorted(out.items()))
+
+
+def runtimes_current(sidecar: dict) -> bool:
+    """True if the sidecar was compiled by the DSL versions installed now.
+
+    The compiler is not part of the source closure -- no file on disk changes
+    when the wheel is upgraded -- so without this an upgrade re-exports nothing
+    and the tree mixes artifacts from two compilers, while the build reports
+    only the new one. A sidecar predating this record counts as stale.
+
+    Ignorance is not staleness: when none of the kind's distributions can be
+    found at all, this returns True rather than declaring every artifact stale.
+    That is the generation-only run on a machine without the DSL wheels, where
+    re-exporting is impossible anyway."""
+    tc = toolchains.get_toolchain(sidecar.get("kind", "cutedsl"))
+    current = runtime_versions(tc.kind)
+    # all() over an empty dict is True, so a kind that declares no RUNTIME_DISTS
+    # takes this arm too -- there is nothing whose version could have changed.
+    if all(v == "absent" for v in current.values()):
+        return True
+    return sidecar.get("runtimes") == current
 
 
 def sources_current(sidecar: dict) -> bool:
@@ -493,6 +618,13 @@ def _job_needed(job, force: bool) -> bool:
         if not fn.endswith(".json"):
             continue
         sc = _read_sidecar(os.path.join(out_dir, fn))
+        # SCHEMA FIRST, like gen_aot_lib: every field below is read by name, and
+        # another version need not mean the same thing by it. A sidecar from a
+        # version that drops or renames "kind" used to raise a bare KeyError here
+        # -- naming no file and no remedy -- where the version field exists
+        # precisely so the point re-exports.
+        if sc.get("version") != SIDECAR_VERSION or "kind" not in sc:
+            return True
         tc = toolchains.get_toolchain(sc["kind"])
         if sc.get("spec") == spec and sc.get("arch") == _effective_arch(arch, tc):
             # The sidecar is the skip marker, but it is not proof the
@@ -506,7 +638,7 @@ def _job_needed(job, force: bool) -> bool:
                 for e in tc.artifact_exts
             ):
                 return True
-            return not sources_current(sc)
+            return not (sources_current(sc) and runtimes_current(sc))
     return True
 
 
@@ -523,7 +655,17 @@ def archs_from_cuda_arch_list(arch_list: str) -> list[str]:
     stripped; named entries ("Hopper") are not translated -- callers
     should pass numeric lists (CI does). Dedup matters: "10.0;10.0+PTX" names
     one arch twice, and a repeated entry would otherwise read as
-    multi-arch downstream (nested artifact layout, --jobs > 1)."""
+    multi-arch downstream (nested artifact layout, --jobs > 1).
+
+    ONE arch per compute capability, preferring the arch-conditional
+    spelling: "10.0;10.0a" is one piece of hardware, and exporting both
+    builds two full sets of kernels of which generation can only use one
+    (gen_aot_lib._by_arch prefers the conditional -- it is what the kernels
+    were written against). The losing set is not merely wasted compile time:
+    its objects still match the embedded-link glob, so they ship inside
+    libtorch_cuda with no launcher referencing them. Measured 54 objects /
+    3.5 MiB of dead weight from a "10.0;10.0a" tree. CUDA 13.x manywheel
+    lists reach here, so this is the common case, not a corner."""
     out = []
     for entry in arch_list.replace(";", " ").split():
         entry = entry.removesuffix("+PTX")
@@ -538,7 +680,10 @@ def archs_from_cuda_arch_list(arch_list: str) -> list[str]:
         sm = f"sm_{int(parts[0]) * 10 + int(minor_num)}{suffix}"
         if sm in EXPORTABLE_ARCHES and sm not in out:
             out.append(sm)
-    return out
+    # Collapse per capability, keeping the conditional spelling wherever the
+    # list named it. Order-preserving on the survivors.
+    conditional = {a.removesuffix("a") for a in out if a.endswith("a")}
+    return [a for a in out if a.endswith("a") or a not in conditional]
 
 
 # Which TORCH_CUDA_ARCH_LIST entries are ELIGIBLE for AOT kernels on the
@@ -566,7 +711,7 @@ def archs_from_cuda_arch_list(arch_list: str) -> list[str]:
 EXPORTABLE_ARCHES = ("sm_90", "sm_90a", "sm_100", "sm_100a")
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out-dir", default=os.path.join(REPO, "build", "native_aot"))
     parser.add_argument(
@@ -595,7 +740,7 @@ def main() -> None:
         "explicit GPUTarget). Default: detect from the local device. "
         "Multiple archs nest artifacts under <out-dir>/<arch>/.",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if args.jobs is None:
         env_jobs = os.getenv("MAX_JOBS") or os.getenv("CMAKE_BUILD_PARALLEL_LEVEL")
         # Half the CPU count, not all of it: os.cpu_count() reports SMT
