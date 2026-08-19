@@ -33,14 +33,27 @@ case "${GPU_ARCH_TYPE:-BLANK}" in
         # builders import torch, so the raw wheel has to be installed first --
         # same ordering as .ci/pytorch/build.sh, which builds the wheel used by
         # test jobs. Stage 2 prints why and skips when it has nothing to do
-        # (non-CUDA build, no toolchain for the backend, no exportable arch in
+        # (no toolchain for the backend, no exportable arch in
         # TORCH_CUDA_ARCH_LIST); once it decides it WILL export, a missing DSL
         # runtime fails the build. There is no GPU in this container, so export
         # relies on the explicit arch from TORCH_CUDA_ARCH_LIST and never
         # touches the driver.
+        #
+        # CUDA arch types only: this case arm also serves cpu/xpu/rocm, where
+        # stage 2 can only ever skip. Guarding here keeps those containers from
+        # installing an unrepaired wheel and paying two torch-importing
+        # subprocesses to be told so.
+        if [[ "${GPU_ARCH_TYPE}" == cuda* ]]; then
+        # nullglob so an empty directory counts as zero: without it the glob
+        # yields a one-element array holding the literal pattern, and the
+        # message said "found 1", pointing the reader at a naming problem
+        # rather than at the missing wheel.
+        naot_wheels=()
+        shopt -s nullglob
         naot_wheels=("${RAW_WHEEL_DIR}"/*.whl)
+        shopt -u nullglob
         if [[ ${#naot_wheels[@]} -ne 1 ]]; then
-          echo "native-AOT: expected one raw wheel, found ${#naot_wheels[@]}" >&2
+          echo "native-AOT: expected one raw wheel in ${RAW_WHEEL_DIR}, found ${#naot_wheels[@]}" >&2
           exit 1
         fi
         RAW_WHEEL="${naot_wheels[0]}"
@@ -58,6 +71,7 @@ case "${GPU_ARCH_TYPE:-BLANK}" in
           install_cutlass_dsl
         fi
         python3 tools/native_aot/build_stage2.py --wheel "${RAW_WHEEL}"
+        fi  # GPU_ARCH_TYPE == cuda*
 
         python3 "${SCRIPTPATH}/repair_wheel.py" "${RAW_WHEEL_DIR}" "${PYTORCH_FINAL_PACKAGE_DIR}"
         ;;

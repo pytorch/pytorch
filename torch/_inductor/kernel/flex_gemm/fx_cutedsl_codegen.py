@@ -99,16 +99,99 @@ FlexGemmOutputLocalReducePlan = _epilogue_analysis.GemmOutputLocalReducePlan
 
 
 @dataclasses.dataclass(frozen=True)
-class FlexGemmLocalReduceStore(_epilogue_analysis.GemmLocalReduceStore):
-    """Extend a shared reduction store with FlexGEMM physical storage metadata."""
+class FlexGemmLocalReduceOutputStorage:
+    """Describe the physical storage selected for a returned local reduction."""
 
-    value_node: torch.fx.Node
-    output_layout: FlexGemmOutputStorageLayout | None = None
+    source: torch.fx.Node
+    layout: FlexGemmOutputStorageLayout
+    nodes: tuple[torch.fx.Node, ...]
+
+
+def match_flex_gemm_local_reduce_output_storage(
+    graph: FlexGemmEpilogueGraph,
+    node: torch.fx.Node,
+) -> FlexGemmLocalReduceOutputStorage | None:
+    """Recognize a supported terminal storage transform for a local reduction."""
+    normalized = graph.normalized_nodes.get(node)
+    if isinstance(normalized, NormalizedToBlocked):
+        return FlexGemmLocalReduceOutputStorage(
+            normalized.source,
+            FlexGemmOutputStorageLayout.BLOCKED_128X4,
+            (node,),
+        )
+
+    if node.target is torch.ops.aten.clone.default:
+        if node.kwargs.get("memory_format") not in (None, torch.contiguous_format):
+            return None
+        transpose = node.args[0]
+        if not isinstance(transpose, torch.fx.Node) or tuple(transpose.users) != (
+            node,
+        ):
+            return None
+        nodes = (transpose, node)
+    else:
+        transpose = node
+        nodes = (node,)
+
+    if transpose.target not in (
+        torch.ops.aten.t.default,
+        torch.ops.aten.transpose.int,
+        torch.ops.aten.permute.default,
+    ):
+        return None
+    source = transpose.args[0]
+    if not isinstance(source, torch.fx.Node):
+        return None
+
+    source_meta = source.meta.get("val")
+    transpose_meta = transpose.meta.get("val")
+    output_meta = node.meta.get("val")
+    if (
+        not isinstance(source_meta, torch.Tensor)
+        or not isinstance(transpose_meta, torch.Tensor)
+        or not isinstance(output_meta, torch.Tensor)
+        or source_meta.ndim != 2
+        or not statically_known_shape_equal(output_meta.shape, source_meta.shape[::-1])
+        or not statically_known_shape_equal(
+            transpose_meta.stride(), source_meta.stride()[::-1]
+        )
+        or not output_meta.is_contiguous()
+        or not node.users
+        or any(user.op != "output" for user in node.users)
+    ):
+        return None
+    return FlexGemmLocalReduceOutputStorage(
+        source,
+        FlexGemmOutputStorageLayout.TRANSPOSED,
+        nodes,
+    )
+
+
+@dataclasses.dataclass(frozen=True)
+class FlexGemmLocalReduceStore(_epilogue_analysis.GemmLocalReduceStore):
+    """Extend a shared reduction store with optional physical storage."""
+
+    output_storage: FlexGemmLocalReduceOutputStorage | None = None
 
     def __post_init__(self) -> None:
         super().__post_init__()
-        if not isinstance(self.value_node, torch.fx.Node):
+        storage = self.output_storage
+        if storage is not None and (
+            not isinstance(storage, FlexGemmLocalReduceOutputStorage)
+            or not storage.nodes
+            or storage.nodes[-1] is not self.node
+        ):
             raise RuntimeError(LOCAL_REDUCE_OUTPUT_PLAN_NODE_ERROR)
+
+    @property
+    def value_node(self) -> torch.fx.Node:
+        """Return the logical value written through the optional storage transform."""
+        return self.node if self.output_storage is None else self.output_storage.source
+
+    @property
+    def output_layout(self) -> FlexGemmOutputStorageLayout | None:
+        """Return the selected physical storage layout."""
+        return None if self.output_storage is None else self.output_storage.layout
 
 
 @dataclasses.dataclass(frozen=True)
@@ -178,13 +261,8 @@ def flex_gemm_compressed_aux_plan(
     aux_index: int,
 ) -> FlexGemmOutputLocalReducePlan | None:
     """Plan a compressed reduction relative to the physical accumulator shape."""
-    normalized = analysis.graph.normalized_nodes.get(aux)
-    if isinstance(normalized, NormalizedToBlocked):
-        source = normalized.source
-        output_layout = FlexGemmOutputStorageLayout.BLOCKED_128X4
-    else:
-        source = aux
-        output_layout = None
+    output_storage = match_flex_gemm_local_reduce_output_storage(analysis.graph, aux)
+    source = aux if output_storage is None else output_storage.source
     match = analysis.matches.get(source)
     source_meta = source.meta.get("val")
     aux_meta = aux.meta.get("val")
@@ -195,14 +273,17 @@ def flex_gemm_compressed_aux_plan(
     )
     if not statically_known_shape_equal(expected_aux_shape, source_meta.shape):
         return None
-    if output_layout is not None and match.geometry.axis != 1:
+    if (
+        output_storage is not None
+        and output_storage.layout is FlexGemmOutputStorageLayout.BLOCKED_128X4
+        and match.geometry.axis != 1
+    ):
         raise NotImplementedError(LOCAL_REDUCE_BLOCKED_AXIS_ERROR)
     return match.to_plan(
         store=FlexGemmLocalReduceStore(
             node=aux,
             aux_index=aux_index,
-            value_node=source,
-            output_layout=output_layout,
+            output_storage=output_storage,
         ),
         feeds_main=False,
     )
@@ -269,7 +350,12 @@ def validate_output_layout_transforms(
 ) -> None:
     """Require every layout transform to be the output validated by the plan."""
     store = plan.local_reduce_store
-    selected_node = store.node if store is not None and store.output_layout else None
+    selected_node = (
+        store.node
+        if store is not None
+        and store.output_layout is FlexGemmOutputStorageLayout.BLOCKED_128X4
+        else None
+    )
     if any(
         isinstance(normalized, NormalizedToBlocked) and node is not selected_node
         for node, normalized in graph.normalized_nodes.items()
@@ -760,6 +846,7 @@ class FlexGemmEpilogueEmitter:
         self.physical_reductions: dict[torch.fx.Node, FlexGemmPhysicalReduction] = {}
         self.local_reduce = self.outputs.local_reduce
         store = self.outputs.local_reduce_store
+        self.output_storage = None if store is None else store.output_storage
         self.feed_main: torch.fx.Node | None = None
         self.aux: torch.fx.Node | None = None
         self.feed_main_input: torch.fx.Node | None = None
@@ -947,8 +1034,8 @@ class FlexGemmEpilogueEmitter:
                 )
             self.env[node] = _cute_arg(normalized.source, self.env)
             return
-        if isinstance(normalized, NormalizedToBlocked):
-            self.env[node] = _cute_arg(normalized.source, self.env)
+        if self.output_storage is not None and node in self.output_storage.nodes:
+            self.env[node] = _cute_arg(self.output_storage.source, self.env)
             return
         lowered = lower_full_scalar(node)
         if lowered is not None:
