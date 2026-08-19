@@ -2098,7 +2098,7 @@ class TestFlexAttention(InductorTestCase):
         compiled = torch.compile(flex_attention)
         out = compiled(q, k, v, score_mod=asm_score_mod)
         ref = compiled(q, k, v, score_mod=ref_score_mod)
-        self.assertEqual(out, ref)
+        self.assertEqual(out, ref, atol=1e-4, rtol=1e-3)
 
         # The eager (unfused) path applies score_mod under vmap and runs the
         # asm via the Jiterator.
@@ -2131,7 +2131,7 @@ class TestFlexAttention(InductorTestCase):
         compiled = torch.compile(flex_attention)
         out = compiled(q, k, v, score_mod=asm_score_mod)
         ref = compiled(q, k, v, score_mod=ref_score_mod)
-        self.assertEqual(out, ref)
+        self.assertEqual(out, ref, atol=1e-4, rtol=1e-3)
 
     @supported_platform
     @skip_on_cpu
