@@ -328,6 +328,7 @@ def check_headeronly_symbols(install_root: Path) -> None:
     platform_specific_keywords = [
         "cpu/vec",
         "win32-headers.h",
+        "headeronly/cuda",
     ]
 
     filtered_headers = []
