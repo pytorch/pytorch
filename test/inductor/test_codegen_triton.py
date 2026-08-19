@@ -3,7 +3,7 @@ import ast
 import contextlib
 import dataclasses
 import unittest
-from collections import namedtuple
+from collections import namedtuple, OrderedDict
 from enum import Enum, IntEnum
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -1383,6 +1383,25 @@ def helper(x):
         self.assertIsInstance(sanitized_config, UserDefinedTritonKernelEnumConfig)
         self.assertEqual(sanitized_config.mode, 1)
         compile(repr(sanitized_config), "<sanitized-constexpr>", "eval")
+
+        for config_type in (UserDefinedAttrsLikeConfig, UserDefinedPydanticLikeConfig):
+            config = config_type(UserDefinedTritonKernelConfigMode.FAST, "hidden")
+            self.assertEqual(len(get_importable_constexpr_types([config])), 1)
+            sanitized_config = _sanitize_for_repr(config)
+            self.assertIsInstance(sanitized_config.nested, int)
+            compile(repr(sanitized_config), "<sanitized-constexpr>", "eval")
+
+        sanitized_set = _sanitize_for_repr({UserDefinedTritonKernelConfigMode.FAST})
+        self.assertIsInstance(next(iter(sanitized_set)), int)
+        sanitized_frozenset = _sanitize_for_repr(
+            frozenset({UserDefinedTritonKernelConfigMode.FAST})
+        )
+        self.assertIsInstance(next(iter(sanitized_frozenset)), int)
+
+        mapping = OrderedDict([("mode", UserDefinedTritonKernelConfigMode.FAST)])
+        sanitized_mapping = _sanitize_for_repr(mapping)
+        self.assertIsInstance(sanitized_mapping, OrderedDict)
+        self.assertIsInstance(sanitized_mapping["mode"], int)
 
         # Non-enum passthrough
         self.assertEqual(_sanitize_for_repr(42), 42)

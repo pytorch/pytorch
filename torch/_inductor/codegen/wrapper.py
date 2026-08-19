@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import collections
 import contextlib
-import copy
 import dataclasses
 import dis
 import functools
@@ -68,7 +67,7 @@ from ..utils import (
     DeferredLineBase,
     DelayReplaceLine,
     get_benchmark_name,
-    get_constexpr_dataclass_fields,
+    get_constexpr_repr_children,
     get_dtype_size,
     get_importable_constexpr_types,
     IndentedBuffer,
@@ -121,29 +120,13 @@ def _rewrite_symbol_solution_for_int_codegen(expr: sympy.Expr) -> sympy.Expr:
 
 def _sanitize_for_repr(obj: Any) -> Any:
     """Convert Enum values to their underlying value for valid Python repr in code generation."""
-    if isinstance(obj, dict):
-        return {_sanitize_for_repr(k): _sanitize_for_repr(v) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [_sanitize_for_repr(v) for v in obj]
-    # For namedtuples (have _fields), reconstruct to preserve the type
-    if isinstance(obj, tuple) and hasattr(obj, "_fields"):
-        return getattr(type(obj), "_make")(  # noqa: B009
-            _sanitize_for_repr(getattr(obj, field)) for field in obj._fields
-        )
-    if isinstance(obj, tuple):
-        return tuple(_sanitize_for_repr(v) for v in obj)
     if isinstance(obj, Enum):
         return _sanitize_for_repr(obj.value)
-    dataclass_fields = get_constexpr_dataclass_fields(obj)
-    if dataclass_fields is not None:
-        # Avoid the constructor and __post_init__, which may coerce sanitized
-        # values back into Enum instances before repr is generated.
-        result = copy.copy(obj)
-        for field in dataclass_fields:
-            object.__setattr__(
-                result, field.name, _sanitize_for_repr(getattr(obj, field.name))
-            )
-        return result
+    repr_children = get_constexpr_repr_children(obj)
+    if repr_children is not None:
+        return repr_children.rebuild(
+            tuple(_sanitize_for_repr(child) for child in repr_children.values)
+        )
     return obj
 
 

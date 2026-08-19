@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import collections
 import contextlib
+import copy
 import dataclasses
 import enum
 import functools
@@ -164,12 +165,101 @@ class ImportableConstexprType(NamedTuple):
     root_name: str
 
 
-def get_constexpr_dataclass_fields(
-    value: object,
-) -> tuple[dataclasses.Field[Any], ...] | None:
-    """Return the fields that contribute to a dataclass instance's repr."""
+class ConstexprReprChildren(NamedTuple):
+    values: tuple[object, ...]
+    rebuild: Callable[[tuple[object, ...]], object]
+
+
+def get_constexpr_repr_children(value: object) -> ConstexprReprChildren | None:
+    """Describe the immediate values included in an object's repr."""
     if dataclasses.is_dataclass(value) and not isinstance(value, type):
-        return tuple(field for field in dataclasses.fields(value) if field.repr)
+        fields = tuple(field for field in dataclasses.fields(value) if field.repr)
+
+        def rebuild_dataclass(children: tuple[object, ...]) -> object:
+            # Avoid constructors that could coerce sanitized values back to Enum.
+            result = copy.copy(value)
+            for field, child in zip(fields, children):
+                object.__setattr__(result, field.name, child)
+            return result
+
+        return ConstexprReprChildren(
+            tuple(getattr(value, field.name) for field in fields),
+            rebuild_dataclass,
+        )
+
+    attrs_fields = getattr(type(value), "__attrs_attrs__", None)
+    if attrs_fields is not None:
+        # attrs permits callable repr formatters, so only False hides a field.
+        fields = tuple(
+            field for field in attrs_fields if getattr(field, "repr", True) is not False
+        )
+
+        def rebuild_attrs(children: tuple[object, ...]) -> object:
+            result = copy.copy(value)
+            for field, child in zip(fields, children):
+                object.__setattr__(result, field.name, child)
+            return result
+
+        return ConstexprReprChildren(
+            tuple(getattr(value, field.name) for field in fields),
+            rebuild_attrs,
+        )
+
+    repr_args = getattr(value, "__repr_args__", None)
+    if callable(repr_args):
+        items = tuple(cast(Callable[[], Iterable[tuple[object, object]]], repr_args)())
+
+        def rebuild_repr_args(children: tuple[object, ...]) -> object:
+            result = copy.copy(value)
+            for (name, _), child in zip(items, children):
+                if not isinstance(name, str):
+                    raise TypeError(
+                        "Cannot sanitize an unnamed value returned by __repr_args__"
+                    )
+                object.__setattr__(result, name, child)
+            return result
+
+        return ConstexprReprChildren(
+            tuple(item for _, item in items),
+            rebuild_repr_args,
+        )
+
+    if isinstance(value, Mapping):
+        items = tuple(value.items())
+        mapping_constructor = cast(
+            Callable[[Mapping[object, object]], object], type(value)
+        )
+
+        def rebuild_mapping(children: tuple[object, ...]) -> object:
+            child_iter = iter(children)
+            sanitized = dict(zip(child_iter, child_iter))
+            if isinstance(value, collections.defaultdict):
+                return type(value)(value.default_factory, sanitized)
+            return mapping_constructor(sanitized)
+
+        return ConstexprReprChildren(
+            tuple(item for pair in items for item in pair),
+            rebuild_mapping,
+        )
+
+    if isinstance(value, list):
+        return ConstexprReprChildren(
+            tuple(value), lambda children: type(value)(children)
+        )
+
+    if isinstance(value, tuple) and hasattr(value, "_fields"):
+        return ConstexprReprChildren(
+            tuple(value),
+            lambda children: getattr(type(value), "_make")(children),  # noqa: B009
+        )
+
+    if isinstance(value, tuple):
+        return ConstexprReprChildren(tuple(value), tuple)
+
+    if isinstance(value, AbstractSet):
+        set_constructor = cast(Callable[[Iterable[object]], object], type(value))
+        return ConstexprReprChildren(tuple(value), set_constructor)
+
     return None
 
 
@@ -238,33 +328,10 @@ def _collect_importable_constexpr_types(
             root_name=root_name,
         )
 
-    dataclass_fields = get_constexpr_dataclass_fields(value)
-    if dataclass_fields is not None:
-        for field in dataclass_fields:
-            _collect_importable_constexpr_types(
-                getattr(value, field.name), result, seen
-            )
-    elif attrs_fields := getattr(value_type, "__attrs_attrs__", None):
-        # attrs exposes the fields used by its generated repr without requiring
-        # torch to depend on attrs at runtime.
-        for field in attrs_fields:
-            # attrs also accepts a callable repr formatter, so only False disables it.
-            if getattr(field, "repr", True) is not False:
-                _collect_importable_constexpr_types(
-                    getattr(value, field.name), result, seen
-                )
-    elif callable(repr_args := getattr(value, "__repr_args__", None)):
-        # Pydantic exposes the values selected for repr through this protocol.
-        repr_items = cast(Callable[[], Iterable[tuple[object, object]]], repr_args)()
-        for _, item in repr_items:
-            _collect_importable_constexpr_types(item, result, seen)
-    elif isinstance(value, Mapping):
-        for key, item in value.items():
-            _collect_importable_constexpr_types(key, result, seen)
-            _collect_importable_constexpr_types(item, result, seen)
-    elif isinstance(value, (list, tuple, AbstractSet)):
-        for item in value:
-            _collect_importable_constexpr_types(item, result, seen)
+    repr_children = get_constexpr_repr_children(value)
+    if repr_children is not None:
+        for child in repr_children.values:
+            _collect_importable_constexpr_types(child, result, seen)
 
 
 def get_importable_constexpr_types(
