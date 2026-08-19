@@ -455,6 +455,69 @@ class TestPythonRegistration(TestCase):
 
         _collect_all_valid_cia_ops_for_namespace(namespace)
 
+    def test_finalizer_no_getattr_into_cpp(self):
+        # Regression test: _clear_torch_ops_cache must not call __getattr__ on
+        # _OpNamespace (which invokes _jit_get_operation in C++). During
+        # interpreter shutdown the C++ runtime may be torn down, causing
+        # UnicodeDecodeError or segfaults when the finalizer fires.
+        lib = Library(self.test_ns, "DEF")  # noqa: SCOPED_LIBRARY
+        lib.define("uncached_op() -> None")
+
+        @impl(lib, "uncached_op", "")
+        def uncached_op():
+            pass
+
+        # Do NOT call torch.ops._test_python_registration.uncached_op() here,
+        # so the OpOverloadPacket is never cached on the namespace object.
+        # This simulates what happens when a library (e.g. vLLM) registers ops
+        # but some are never looked up before shutdown.
+        namespace = torch.ops._test_python_registration
+
+        # Patch __getattr__ to detect if it gets called during cache clearing.
+        original_getattr = type(namespace).__getattr__
+        getattr_called_with = []
+
+        def tracking_getattr(self, name):
+            getattr_called_with.append(name)
+            return original_getattr(self, name)
+
+        type(namespace).__getattr__ = tracking_getattr
+        try:
+            del lib
+            gc.collect()
+        finally:
+            type(namespace).__getattr__ = original_getattr
+
+        self.assertNotIn(
+            "uncached_op",
+            getattr_called_with,
+            "_clear_torch_ops_cache must not trigger __getattr__ (which calls "
+            "into C++) for ops that were never cached on the namespace",
+        )
+
+    def test_define_normalizes_namespaced_schema_name(self):
+        # Library.define() takes a bare op name in the schema, but C++ also
+        # accepts a name prefixed with the matching namespace ("ns::foo"). In
+        # that case the qualname recorded in _op_defs must not double-prepend the
+        # namespace. Regression: it used to produce "ns::ns::foo", which later
+        # broke teardown's _clear_torch_ops_cache with "too many values to
+        # unpack (expected 2)".
+        lib = Library(self.test_ns, "DEF")  # noqa: SCOPED_LIBRARY
+        lib.define(f"{self.test_ns}::my_op(Tensor x) -> Tensor")
+        self.assertIn(f"{self.test_ns}::my_op", lib._op_defs)
+        self.assertNotIn(f"{self.test_ns}::{self.test_ns}::my_op", lib._op_defs)
+        # Teardown must not raise.
+        lib._destroy()
+
+    def test_clear_torch_ops_cache_tolerates_malformed_qualname(self):
+        # Defense-in-depth: _clear_torch_ops_cache runs in a shutdown-time
+        # finalizer and must never raise, even on a qualname that does not split
+        # into exactly "namespace::name".
+        from torch.library import _clear_torch_ops_cache
+
+        # Must not raise.
+        _clear_torch_ops_cache({"a::b::c", "no_separator"})
+
     def test_register_check_mem_op_survives_gc(self):
         # Regression guard for the autorevert of #181785: inductor's
         # `register_check_mem_op` is an lru_cache-decorated registration whose
@@ -2863,7 +2926,7 @@ class TestWrapperSubclassAliasing(TestCase):
             self._test_wrapper_subclass_aliasing(torch.ops.aten.fft_fft2, args, kwargs)
 
 
-instantiate_device_type_tests(TestWrapperSubclassAliasing, globals())
+instantiate_device_type_tests(TestWrapperSubclassAliasing, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()

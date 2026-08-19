@@ -1,12 +1,11 @@
 # Owner(s): ["module: dynamo"]
-import unittest
 from unittest.mock import Mock
 
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
-from torch._dynamo.device_interface import CudaInterface, DeviceGuard
-from torch.testing._internal.common_cuda import TEST_CUDA
+from torch._dynamo.device_interface import DeviceGuard, get_interface_for_device
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 
 
 class TestDeviceGuard(torch._dynamo.test_case.TestCase):
@@ -46,28 +45,29 @@ class TestDeviceGuard(torch._dynamo.test_case.TestCase):
         self.assertEqual(device_guard.idx, None)
 
 
-@unittest.skipIf(not TEST_CUDA, "No CUDA available.")
-class TestCUDADeviceGuard(torch._dynamo.test_case.TestCase):
+class TestDeviceGuardWithInterface(torch._dynamo.test_case.TestCase):
     """
-    Unit tests for the DeviceGuard class using a CudaInterface.
+    Unit tests for the DeviceGuard class using a real DeviceInterface.
     """
 
-    def setUp(self):
-        super().setUp()
-        self.device_interface = CudaInterface
+    def test_device_guard_no_index(self, device):
+        device_interface = get_interface_for_device(torch.device(device).type)
+        current_device = device_interface.current_device()
 
-    def test_device_guard_no_index(self):
-        current_device = torch.cuda.current_device()
-
-        device_guard = DeviceGuard(self.device_interface, None)
+        device_guard = DeviceGuard(device_interface, None)
 
         with device_guard as _:
-            self.assertEqual(torch.cuda.current_device(), current_device)
+            self.assertEqual(device_interface.current_device(), current_device)
             self.assertEqual(device_guard.prev_idx, -1)
             self.assertEqual(device_guard.idx, None)
 
         self.assertEqual(device_guard.prev_idx, -1)
         self.assertEqual(device_guard.idx, None)
+
+
+instantiate_device_type_tests(
+    TestDeviceGuardWithInterface, globals(), allow_mps=True, allow_xpu=True
+)
 
 
 if __name__ == "__main__":

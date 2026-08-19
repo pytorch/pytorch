@@ -41,7 +41,7 @@ extern PyObject* guard_error_hook;
 typedef PyObject FrameState;
 typedef struct CacheEntry CacheEntry;
 
-// ExtraState encasulates CacheEntry and FrameState. ExtraState is the highest
+// ExtraState encapsulates CacheEntry and FrameState. ExtraState is the highest
 // level of abstraction of what is stored on the extra code object. Previously,
 // we saved different parts on different extra indexes.  We prefer this way
 // because of cleaner abstraction and faster SetExtra access.

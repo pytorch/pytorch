@@ -113,8 +113,8 @@ template <typename T, int D, int V = D, bool is_causal = false, bool HAS_MASK = 
         score += static_cast<U>(mask[0]);
       }
 
-      // Guard the (max,score)==(-inf,-inf) case: max - max is NaN otherwise.
-      U new_max = max(max_score, score);
+      // c10::metal::max propagates NaN (plain max drops it -> row max -inf -> 0).
+      U new_max = c10::metal::max(max_score, score);
       U factor;
       U exp_score;
       if (new_max == -INFINITY) {
@@ -283,7 +283,8 @@ template <typename T, int D, int V = D, bool is_causal = false, bool HAS_MASK = 
         score += static_cast<U>(mask[0]);
       }
 
-      U new_max = max(max_score, score);
+      // c10::metal::max propagates NaN (plain max drops it -> row max -inf -> 0).
+      U new_max = c10::metal::max(max_score, score);
       U factor;
       U exp_score;
       if (new_max == -INFINITY) {
