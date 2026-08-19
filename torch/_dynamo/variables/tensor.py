@@ -2163,6 +2163,10 @@ class TensorVariable(VariableTracker):
                         enable_grad=None,
                         set_subgraph_inputs="automatic_with_forced_inputs",
                         restore_side_effects=True,
+                        # Hooks may return the incoming gradient unchanged, but
+                        # the register_hook contract forbids modifying it in place.
+                        supports_input_mutation=False,
+                        supports_aliasing=True,
                     )
             except torch._dynamo.exc.UnknownPropertiesDuringBackwardTrace:
                 unimplemented(

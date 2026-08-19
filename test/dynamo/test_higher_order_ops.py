@@ -27,6 +27,7 @@ from torch._dynamo.testing import (
 from torch._dynamo.utils import counters, ifdynstaticdefault
 from torch._functorch.apis import _DYNAMO_WRAPPER_ATTRS
 from torch._higher_order_ops.hints_wrap import hints_wrapper
+from torch._higher_order_ops.strict_mode import strict_mode
 from torch._higher_order_ops.wrap import wrap
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -3415,6 +3416,218 @@ class GraphModule(torch.nn.Module):
         msg = r"args must be a tuple of tensors, ints, floats, or bools,"
         with self.assertRaisesRegex(RuntimeError, msg):
             fn_with_hints(x, y)
+
+    def test_hints_wrapper_rejects_aliasing(self):
+        def body(x):
+            return x
+
+        def fn(x):
+            return hints_wrapper(body, (x,), {}, hints={"test": True})
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            RuntimeError, "Encountered aliasing during higher order op tracing"
+        ):
+            opt_fn(torch.randn(3))
+
+    def test_strict_mode_rejects_aliasing_by_default(self):
+        def body(x):
+            return x
+
+        def fn(x):
+            return strict_mode(body, (x,))
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            RuntimeError, "Encountered aliasing during higher order op tracing"
+        ):
+            opt_fn(torch.randn(3))
+
+    def test_strict_mode_rejects_input_mutation_by_default(self):
+        def body(x):
+            x.add_(1)
+            return x + 1
+
+        def fn(x):
+            return strict_mode(body, (x,))
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Encountered input mutation during higher order op tracing",
+        ):
+            opt_fn(torch.randn(3))
+
+    def test_flex_attention_identity_score_mod_aliasing_supported(self):
+        from torch.nn.attention.flex_attention import flex_attention
+
+        def fn(q, k, v):
+            return flex_attention(q, k, v)
+
+        q = torch.randn(1, 1, 2, 4)
+        k = torch.randn(1, 1, 2, 4)
+        v = torch.randn(1, 1, 2, 4)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            expected = fn(q, k, v)
+        self.assertEqual(opt_fn(q, k, v), expected)
+
+    def test_flex_attention_mask_mod_aliasing_rejected(self):
+        from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+
+        mask_value = torch.tensor(True)
+
+        def mask_mod(b, h, q, k):
+            return mask_value
+
+        block_mask = create_block_mask(
+            mask_mod, B=1, H=1, Q_LEN=2, KV_LEN=2, device="cpu"
+        )
+
+        def fn(q, k, v):
+            return flex_attention(q, k, v, block_mask=block_mask)
+
+        q = torch.randn(1, 1, 2, 4)
+        k = torch.randn(1, 1, 2, 4)
+        v = torch.randn(1, 1, 2, 4)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            RuntimeError, "Encountered aliasing during higher order op tracing"
+        ):
+            opt_fn(q, k, v)
+
+    def test_flex_attention_mask_mod_input_aliasing_supported(self):
+        from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+
+        bounds = torch.tensor([[[0, 0], [1, 1]]])
+        lower = bounds[:, 0, :]
+        upper = bounds[:, 1, :]
+
+        def mask_mod(b, h, q, k):
+            return (lower[b, q] <= k) & (k <= upper[b, q])
+
+        block_mask = create_block_mask(
+            mask_mod, B=1, H=1, Q_LEN=2, KV_LEN=2, device="cpu"
+        )
+
+        def fn(q, k, v):
+            return flex_attention(q, k, v, block_mask=block_mask)
+
+        q = torch.randn(1, 1, 2, 4)
+        k = torch.randn(1, 1, 2, 4)
+        v = torch.randn(1, 1, 2, 4)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            expected = fn(q, k, v)
+        self.assertEqual(opt_fn(q, k, v), expected)
+
+    @requires_gpu_and_triton
+    def test_flex_attention_backward_mask_mod_input_aliasing_supported(self):
+        from torch._higher_order_ops.flex_attention import (
+            flex_attention as flex_attention_hop,
+        )
+        from torch.nn.attention.flex_attention import create_block_mask
+
+        bounds = torch.tensor([[[0, 0], [1, 1]]], device=GPU_TYPE)
+        lower = bounds[:, 0, :]
+        upper = bounds[:, 1, :]
+
+        def score_mod(score, b, h, q, k):
+            return score
+
+        def mask_mod(b, h, q, k):
+            return (lower[b, q] <= k) & (k <= upper[b, q])
+
+        block_mask = create_block_mask(
+            mask_mod, B=1, H=1, Q_LEN=2, KV_LEN=2, device=GPU_TYPE
+        )
+        query = torch.randn(1, 1, 2, 4, device=GPU_TYPE)
+        key = torch.randn(1, 1, 2, 4, device=GPU_TYPE)
+        value = torch.randn(1, 1, 2, 4, device=GPU_TYPE)
+        scale = 0.5
+        out, logsumexp, _ = flex_attention_hop(
+            query,
+            key,
+            value,
+            score_mod,
+            block_mask.as_tuple(),
+            scale,
+            {},
+        )
+        grad_out = torch.randn_like(out)
+
+        def backward(query, key, value, out, logsumexp, grad_out):
+            return torch.ops.higher_order.flex_attention_backward(
+                query,
+                key,
+                value,
+                out,
+                logsumexp,
+                grad_out,
+                None,
+                score_mod,
+                None,
+                block_mask.as_tuple(),
+                scale,
+                {},
+                (),
+                (),
+            )
+
+        with torch.no_grad():
+            expected = backward(query, key, value, out, logsumexp, grad_out)
+            actual = torch.compile(backward, backend="eager", fullgraph=True)(
+                query, key, value, out, logsumexp, grad_out
+            )
+        self.assertEqual(actual, expected)
+
+    def test_wrap_allows_aliasing_and_input_mutation(self):
+        def body(x):
+            x.add_(1)
+            return x
+
+        def fn(x):
+            return wrap(body, x)
+
+        x = torch.zeros(())
+        out = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(x, torch.ones(()))
+        self.assertEqual(out, x)
+
+    def test_wrap_with_set_grad_enabled_allows_aliasing_and_input_mutation(self):
+        from torch._higher_order_ops.wrap import wrap_with_set_grad_enabled
+
+        def body(x):
+            x.add_(1)
+            return x
+
+        def fn(x):
+            return wrap_with_set_grad_enabled(True, body, x)
+
+        x = torch.zeros(())
+        out = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(x, torch.ones(()))
+        self.assertEqual(out, x)
+
+    def test_wrap_with_autocast_allows_aliasing_and_input_mutation(self):
+        from torch._higher_order_ops.wrap import wrap_with_autocast
+
+        def body(x):
+            x.add_(1)
+            return x
+
+        def fn(x):
+            return wrap_with_autocast("cpu", torch.bfloat16, True, None, body, x)
+
+        x = torch.zeros(())
+        out = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(x, torch.ones(()))
+        self.assertEqual(out, x)
 
     @requires_gpu_and_triton
     def test_wrap_inductor_compiled_regions_option(self):
