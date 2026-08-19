@@ -15,10 +15,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     requires_capabilities,
 )
-from torch.testing._internal.common_utils import (
-    HardwareClassification,
-    instantiate_parametrized_tests,
-)
+from torch.testing._internal.common_utils import HardwareClassification
 from torch.utils._ordered_set import OrderedSet
 
 
@@ -80,7 +77,6 @@ class FakeProfilerEvent:
         self.cpu_children = cpu_children or []
 
 
-@instantiate_parametrized_tests
 class TestBenchGeneric(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
