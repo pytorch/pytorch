@@ -4446,13 +4446,68 @@ class ShapeEnv:
                 f"Expected orig_s to have free unbacked symbols: {orig_s}"
             )
         dest = self.replacements.get(orig_s)
-        if dest is not None:
-            if free_unbacked_symbols(dest):
-                raise AssertionError(f"{orig_s} -> {dest}")
+        if dest is not None and free_unbacked_symbols(dest):
+            # Re-exporting or re-lowering can register the same data-dependent binding
+            # twice, e.g. aten._unique2 through ExportedProgram.module() and
+            # PropagateUnbackedSymInts. Therefore orig_s, new_s, and dest are equal.
+            signpost_event(
+                "dynamic",
+                "rename_unbacked_to_unify",
+                {"orig_s": str(orig_s), "new_s": str(new_s), "dest": str(dest)},
+            )
+            log.info(
+                "rename_unbacked_to: unifying %s -> %s (existing dest %s)",
+                orig_s,
+                new_s,
+                dest,
+            )
         self._set_replacement(orig_s, new_s, "rename_unbacked_to")
         self.unbacked_renamings[orig_s] = new_s
         if dest is not None:
-            self._set_replacement(new_s, dest, "rename_unbacked_to_dest")
+            self._unify_unbacked_aliases(new_s, dest)
+
+    def _unify_unbacked_aliases(self, new_s: sympy.Symbol, dest: sympy.Expr) -> None:
+        """Unify unbacked aliases under one terminal, preferring a backed one.
+
+        When this function is called, ``new_s``, ``dest``, and the expression
+        ``new_s`` resolves to are known to be equal. A backed terminal is preferred
+        because it has a usable hint.
+        """
+        # Resolve new_s transitively (not a one-hop replacements lookup) so a
+        # chain like new_s -> unbacked -> backed contributes the backed terminal
+        # here rather than the intermediate unbacked symbol.
+        existing = self._find(new_s)
+        aliases = list(
+            dict.fromkeys(a for a in (new_s, dest, existing) if a is not None)
+        )
+        backed_aliases = [a for a in aliases if not free_unbacked_symbols(a)]
+        terminal = backed_aliases[0] if backed_aliases else dest
+
+        for alias in aliases:
+            # Redirect only unbacked symbols: the terminal needs no redirect, a
+            # replacement key must be a bare Symbol, and backed symbols are roots
+            # that must never be repointed.
+            if (
+                alias == terminal
+                or not isinstance(alias, sympy.Symbol)
+                or not free_unbacked_symbols(alias)
+            ):
+                continue
+            self._set_replacement(alias, terminal, "rename_unbacked_to_dest")
+            if self.replacements.get(alias) != terminal:
+                # _set_replacement declined the substitution (e.g. the target
+                # range is not a subset), leaving alias unreconciled rather than
+                # unified -- surface it instead of failing silently.
+                signpost_event(
+                    "dynamic",
+                    "rename_unbacked_to_unify_skipped",
+                    {"alias": str(alias), "terminal": str(terminal)},
+                )
+                log.info(
+                    "rename_unbacked_to: could not unify %s -> %s",
+                    alias,
+                    terminal,
+                )
 
     @record_shapeenv_event()
     def _constrain_is_bounded(self, a: sympy.Symbol, upper_bound: int) -> None:
@@ -6641,7 +6696,7 @@ class ShapeEnv:
                 if any(
                     is_dim(source)
                     for s in expr.free_symbols
-                    for source in symbol_to_source[s]
+                    for source in symbol_to_source.get(s, ())
                 ):
                     if self.dim_constraints is None:
                         raise AssertionError("dim_constraints must not be None")
@@ -6658,7 +6713,14 @@ class ShapeEnv:
                 # a constraint
                 if not is_trivial and len(expr.free_symbols) == 1:
                     symbol = next(iter(expr.free_symbols))
-                    source = symbol_to_source[symbol][0]
+                    # Subclasses opting out of outer size/stride tracking leave their
+                    # outer dims out of symbol_to_source; fall back as _print_Symbol does.
+                    sources = symbol_to_source.get(symbol) or self.var_to_sources.get(
+                        symbol
+                    )
+                    if not sources:
+                        return
+                    source = sources[0]
                     constraints = symbol_to_constraints[symbol]
                     for c in constraints:
                         if isinstance(c, StrictMinMaxConstraint):
@@ -7756,7 +7818,10 @@ class ShapeEnv:
             desc = "Could not guard on data-dependent expression"
             size_oblivious_result_msg = (
                 "consider using data-dependent friendly APIs such as "
-                "guard_or_false, guard_or_true and statically_known_true."
+                "guard_or_false, guard_or_true and statically_known_true. "
+                "If this was caused by Python `not` on a symbolic boolean, "
+                "use torch.sym_not() or an equivalent comparison instead; "
+                "Python `not` cannot be overloaded outside Dynamo bytecode tracing."
             )
 
         # If the ShapesSpec/ParamsSpec dynamic-shapes API is in use, this DDE is

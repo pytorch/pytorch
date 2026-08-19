@@ -166,7 +166,7 @@ struct ConvertTracedAttrReferences {
 
         // Short circuit: if we've already emitted a new Value for this
         // attribute, just use that.
-        if (local_remaps.count(inp)) {
+        if (local_remaps.contains(inp)) {
           n->replaceInput(inp_idx, local_remaps[inp]);
           continue;
         }
@@ -256,7 +256,7 @@ struct MakeDefsDominateUses {
       // Already lifted to this level by a previously processed Use, switch to
       // remapped value
       Value* inp_remapped = inp;
-      if (remap.count(inp_remapped)) {
+      if (remap.contains(inp_remapped)) {
         n->replaceInput(i, remap[inp_remapped]);
         inp_remapped = remap[inp_remapped];
       }
@@ -363,7 +363,7 @@ void lambdaLiftBlocksAndConvertToGraph(Block* b) {
       auto graph = std::make_shared<Graph>();
       std::unordered_map<Value*, Value*> remaps;
       graph->block()->cloneFrom(n->blocks()[0], [&](Value* v) {
-        if (!remaps.count(v)) {
+        if (!remaps.contains(v)) {
           remaps[v] = graph->addInput()->copyMetadata(v);
           n->addInput(v);
         }

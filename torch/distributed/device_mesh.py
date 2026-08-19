@@ -604,7 +604,7 @@ else:
                     split_ranks=pg_ranks_by_dim.tolist(),
                     group_desc=group_desc,
                 )
-                if dim_group is None:
+                if dim_group == GroupMember.NON_GROUP_MEMBER:
                     return None
                 return dim_group.group_name
 

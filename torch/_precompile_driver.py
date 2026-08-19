@@ -178,12 +178,10 @@ def _eager_forward(*args):
     for _t, _shp, _dt, _dev in zip(
         user_flat, USER_INPUT_SHAPES, USER_INPUT_DTYPES, USER_INPUT_DEVICES
     ):
-        if not isinstance(_t, _torch.Tensor):
+        if _shp is None or not isinstance(_t, _torch.Tensor):
             continue
         _act = tuple(_t.shape)
-        if _shp is not None and (
-            len(_act) != len(_shp) or any(a != e for a, e in zip(_act, _shp))
-        ):
+        if len(_act) != len(_shp) or any(a != e for a, e in zip(_act, _shp)):
             _fail(
                 f"precompile: a runtime input has shape {_act} but the artifact was "
                 f"traced with shape {tuple(_shp)}; the graph is specialized to the static "
@@ -272,13 +270,12 @@ def _inductor_forward(*args):
         USER_INPUT_DEVICES,
         USER_INPUT_BOUNDS,
     ):
-        if not isinstance(_t, _torch.Tensor):
+        if _shp is None or not isinstance(_t, _torch.Tensor):
             continue
         # A dim recorded as None was captured dynamic (unbacked); any size is valid.
         _act = tuple(_t.shape)
-        if _shp is not None and (
-            len(_act) != len(_shp)
-            or any(e is not None and a != e for a, e in zip(_act, _shp))
+        if len(_act) != len(_shp) or any(
+            e is not None and a != e for a, e in zip(_act, _shp)
         ):
             _fail(
                 f"precompile: a runtime input has shape {_act} but the artifact was "

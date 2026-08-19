@@ -2322,7 +2322,7 @@ class CppBuilder:
             Build options to the builder.
         output_dir:
             1. The output_dir the target file will output to.
-            2. The default value is empty string, and then the use current dir as output dir.
+            2. The default value is empty string, and then use the current dir as output dir.
             3. Final target file: output_dir/name.ext
     """
 
@@ -2498,7 +2498,7 @@ class CppBuilder:
             if _IS_WINDOWS:
                 self._libraries_dirs_args += f'/LIBPATH:"{lib_dir}" '
             else:
-                self._libraries_dirs_args += f"-L{lib_dir} "
+                self._libraries_dirs_args += f"-L{shlex.quote(lib_dir)} "
 
         for lib in BuildOption.get_libraries():
             if _IS_WINDOWS:

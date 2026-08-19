@@ -191,27 +191,92 @@ inline int aotriton_max_hdim() {
 // check_head_dim_size_flash because it changes the backend selection logic for
 // FA, which can break certain workloads that rely on the behavior of rejecting
 // FA for hdim_qk != hdim_vo
+bool check_fa4_constraints(sdp_params const& params, bool debug) {
+#if USE_ROCM_ATTENTION
+  return true;
+#else
+  if (!at::globalContext().userEnabledFA4SDP()) {
+    return true;
+  }
+
+  const auto* dprop = at::cuda::getCurrentDeviceProperties();
+  if (dprop->major != 9 && dprop->major != 10) {
+    if (debug) {
+      TORCH_WARN("FA4 requires compute capability 9.0 or 10.0.");
+    }
+    return false;
+  }
+  if (params.dropout != 0.0) {
+    if (debug) {
+      TORCH_WARN("FA4 does not support dropout.");
+    }
+    return false;
+  }
+  return true;
+#endif
+}
+
+#if !USE_ROCM_ATTENTION
+bool check_head_dim_size_fa4(sdp_params const& params) {
+  const auto query_size_last = params.query.sym_size(-1);
+  const auto key_size_last = params.key.sym_size(-1);
+  const auto value_size_last = params.value.sym_size(-1);
+  if (query_size_last != key_size_last) {
+    return false;
+  }
+
+  const auto* dprop = at::cuda::getCurrentDeviceProperties();
+  if (dprop->major == 9) {
+    return query_size_last > 0 && query_size_last <= 256 &&
+        value_size_last > 0 && value_size_last <= 256;
+  }
+  if (dprop->major == 10) {
+    const bool standard_head_dims = query_size_last > 0 &&
+        query_size_last <= 128 && value_size_last > 0 &&
+        value_size_last <= 128;
+    const bool deepseek_head_dims =
+        query_size_last == 192 && value_size_last == 128;
+    const bool head_dim_256 =
+        query_size_last == 256 && value_size_last == 256;
+    return standard_head_dims || deepseek_head_dims || head_dim_256;
+  }
+  return false;
+}
+#endif
+
 template<bool caller_is_meff = false>
 bool check_head_dim_size_flash(sdp_params const& params, bool debug) {
+  const auto query_size_last = params.query.sym_size(-1);
+  const auto key_size_last = params.key.sym_size(-1);
+  const auto value_size_last = params.value.sym_size(-1);
+  bool supported_head_dim;
 #if USE_ROCM_ATTENTION
   if (at::cuda::device_count() == 0) {
     return false;
   }
   const auto max_size = c10::SymInt(aotriton_max_hdim());
+  supported_head_dim =
+      query_size_last == key_size_last && query_size_last == value_size_last &&
+      query_size_last <= max_size;
 #else
-  // All head_dim sizes must be equal and less than 256
-  const auto max_size = c10::SymInt(256);
+  supported_head_dim = at::globalContext().userEnabledFA4SDP()
+      ? check_head_dim_size_fa4(params)
+      : query_size_last == key_size_last &&
+          query_size_last == value_size_last && query_size_last <= 256;
 #endif
-  const auto query_size_last = params.query.sym_size(-1);
-  const auto key_size_last = params.key.sym_size(-1);
-  const auto value_size_last = params.value.sym_size(-1);
-  bool same_head_dim_size =
-      query_size_last == key_size_last && query_size_last == value_size_last;
-  if (!(same_head_dim_size && (query_size_last <= max_size))) {
+  if (!supported_head_dim) {
     if (debug) {
+#if USE_ROCM_ATTENTION
+      const char* requirement = caller_is_meff
+          ? "Efficient attention on ROCM requires q,k,v to have the same last dimension and to be less than or equal to 256."
+          : "Flash attention requires q,k,v to have the same last dimension and to be less than or equal to 256.";
+#else
+      const char* requirement = at::globalContext().userEnabledFA4SDP()
+          ? "FA4 does not support the provided head dimensions."
+          : "Flash attention requires q,k,v to have the same last dimension and to be less than or equal to 256.";
+#endif
       TORCH_WARN(
-          caller_is_meff ? "Efficient attention on ROCM" : "Flash attention",
-          " requires q,k,v to have the same last dimension and to be less than or equal to 256.",
+          requirement,
           " Got Query.size(-1): ",
           query_size_last,
           ", Key.size(-1): ",
@@ -972,7 +1037,7 @@ bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
       std::to_array<bool (*)(sdp_params const&, bool)>({
       check_nonzero_sequence_lengths_dense,
       check_last_dim_stride_equals_1_dense<true /*ignore_singleton_dim=*/>,
-      check_batch_size_and_num_heads_dense<true /*enable_gqa*/, false /*requires_same_num_heads*/>,
+      check_batch_size_and_num_heads_dense<true /*supports_gqa*/, false /*requires_same_num_heads*/, true /*supports_mqa*/>,
       check_cudnn_tensor_shapes,
       check_cudnn_d256_bprop_head_dim
   });
@@ -1020,6 +1085,7 @@ bool can_use_flash_attention(sdp_params const& params, bool debug) {
       check_all_tensors_on_device,
       check_tensor_shapes,
       check_for_attn_mask,
+      check_fa4_constraints,
       check_head_dim_size_flash<false /*caller_is_meff*/>,
       check_flash_attention_hardware_support,
       check_requires_grad_and_head_dim_gt192_constraints_on_sm86_89_or_120,
@@ -1045,7 +1111,7 @@ bool can_use_flash_attention(sdp_params const& params, bool debug) {
   constexpr bool backend_supports_grouped_query_attention = true;
   if (has_only_dense_inputs(params)) {
     constexpr auto dense_constraints = std::to_array<bool (*)(sdp_params const&, bool)>({
-        check_batch_size_and_num_heads_dense<backend_supports_grouped_query_attention>,
+        check_batch_size_and_num_heads_dense<backend_supports_grouped_query_attention, true, true /*supports_mqa*/>,
         check_nonzero_sequence_lengths_dense,
         check_last_dim_stride_equals_1_dense<true /*ignore_singleton_dim=*/>});
     for (auto& constraint : dense_constraints) {
@@ -1105,10 +1171,17 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
     }
   }
   if (has_only_dense_inputs(params)) {
+#ifdef USE_ROCM
+    constexpr bool supports_gqa = false;
+    constexpr bool supports_mqa = false;
+#else
+    constexpr bool supports_gqa = true;
+    constexpr bool supports_mqa = true;
+#endif
     constexpr auto dense_constraints = std::to_array<bool (*)(sdp_params const&, bool)>({
         check_nonzero_sequence_lengths_dense,
         check_last_dim_stride_equals_1_dense<false /*ignore_singleton_dim=*/>,
-        check_batch_size_and_num_heads_dense<false /*supports_grouped_query_attention=*/>});
+        check_batch_size_and_num_heads_dense<supports_gqa, true, supports_mqa>});
     for (auto& constraint : dense_constraints) {
       if (!constraint(params, debug)) {
         return false;

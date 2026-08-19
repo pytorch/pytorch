@@ -2,16 +2,45 @@
 
 set -ex
 
+# Build sccache from source at v0.16.0 with the nvcc 13.3 dryrun-parsing fix
+# backported from mozilla/sccache#2722 (see
+# patches/sccache-nvcc-13.3-dryrun-parsing.patch). The prebuilt release binary
+# mis-parses nvcc 13.3+ --dryrun output (it skips the device compile, leaving
+# "fatbinary: Could not open input file '*.cubin'"), so build from source until
+# a fixed sccache release ships. Reverts #189365 (prebuilt-binary download).
+build_sccache_from_source() {
+  local VERSION=0.16.0
+  echo "Building sccache ${VERSION} from source with the nvcc 13.3 dryrun fix"
+  # The builder images pre-install a pinned rust at CARGO_HOME=/opt/rust with its
+  # bin on PATH (see #186302), so build with that toolchain directly instead of
+  # (re)installing rustup and sourcing its env.
+  apt-get update && apt-get install -y --no-install-recommends pkg-config libssl-dev curl git ca-certificates
+  git clone --depth 1 --branch "v${VERSION}" https://github.com/mozilla/sccache /tmp/sccache
+  local patch=/opt/cache/patches/sccache-nvcc-13.3-dryrun-parsing.patch
+  [ -f "$patch" ] || { echo "ERROR: $patch missing; the Dockerfile must 'COPY ./common/patches /opt/cache/patches'"; exit 1; }
+  git -C /tmp/sccache apply "$patch"
+  cargo build --manifest-path /tmp/sccache/Cargo.toml --release --features="dist-client dist-server"
+  cp /tmp/sccache/target/release/sccache /opt/cache/bin
+  cp /tmp/sccache/target/release/sccache-dist /opt/cache/bin
+  chmod a+x /opt/cache/bin/sccache /opt/cache/bin/sccache-dist
+  rm -rf /tmp/sccache
+}
+
 install_ubuntu() {
-  ARCH=$(uname -m)
-  VERSION=0.16.0
-  FEATURES="sccache sccache-dist"
-  echo "Downloading sccache binaries from GitHub mozilla/sccache release"
-  for feature in $FEATURES; do
-    curl --retry 3 -fsSL https://github.com/mozilla/sccache/releases/download/v${VERSION}/${feature}-v${VERSION}-${ARCH}-unknown-linux-musl.tar.gz | \
-      tar -xz -C /opt/cache/bin --strip-components=1 ${feature}-v${VERSION}-${ARCH}-unknown-linux-musl/${feature}
-    chmod a+x /opt/cache/bin/${feature}
-  done
+  # riscv64 (built under QEMU emulation) has no nvcc, so it is unaffected by the
+  # --simt-only bug; it also has no sccache-dist, and a from-source build under
+  # emulation would be impractically slow. Use the prebuilt binary there and
+  # build from source everywhere else.
+  if [[ "$(uname -m)" == "riscv64" ]]; then
+    local VERSION=0.16.0
+    # Rust's riscv64 arch is riscv64gc; sccache-dist is not available on riscv64.
+    echo "Downloading prebuilt sccache ${VERSION} for riscv64"
+    curl --retry 3 -fsSL https://github.com/mozilla/sccache/releases/download/v${VERSION}/sccache-v${VERSION}-riscv64gc-unknown-linux-musl.tar.gz | \
+      tar -xz -C /opt/cache/bin --strip-components=1 sccache-v${VERSION}-riscv64gc-unknown-linux-musl/sccache
+    chmod a+x /opt/cache/bin/sccache
+  else
+    build_sccache_from_source
+  fi
 
   echo "Downloading old sccache binary from S3 repo for PCH builds"
   curl --retry 3 https://s3.amazonaws.com/ossci-linux/sccache -o /opt/cache/bin/sccache-0.2.14a
@@ -67,10 +96,10 @@ EOF
   chmod a+x "/opt/cache/bin/$1"
 }
 
-# Skip all sccache wrapping for theRock nightly: sccache PATH wrappers
+# Skip all sccache wrapping for TheRock ROCm: sccache PATH wrappers
 # intercept assembly (.s) compilation and fail because the assembler does not
 # produce the .d dependency file that sccache expects.
-if [ "$ROCM_VERSION" != "nightly" ]; then
+if [ -z "$ROCM_VERSION" ]; then
   write_sccache_stub cc
   write_sccache_stub c++
   write_sccache_stub gcc
@@ -95,45 +124,5 @@ if [ -n "$CUDA_VERSION" ]; then
 fi
 
 if [ -n "$ROCM_VERSION" ]; then
-  # Skip sccache wrapping for theRock nightly - sccache has issues parsing
-  # theRock's complex include paths and causes hipconfig to fail
-  if [ "$ROCM_VERSION" = "nightly" ]; then
-    echo "Skipping sccache wrapping for theRock nightly ROCm"
-  else
-    source /etc/rocm_env.sh
-
-    # ROCm compiler is hcc or clang. However, it is commonly invoked via hipcc wrapper.
-    # hipcc will call either hcc or clang using an absolute path starting with $ROCM_PATH,
-    # causing the /opt/cache/bin to be skipped. We must create the sccache wrappers
-    # directly under $ROCM_PATH while also preserving the original compiler names.
-    # Note symlinks will chain as follows: [hcc or clang++] -> clang -> clang-??
-    # Final link in symlink chain must point back to original directory.
-
-    # Original compiler is moved one directory deeper. Wrapper replaces it.
-    function write_sccache_stub_rocm() {
-      OLDCOMP=$1
-      COMPNAME=$(basename $OLDCOMP)
-      TOPDIR=$(dirname $OLDCOMP)
-      WRAPPED="$TOPDIR/original/$COMPNAME"
-      mv "$OLDCOMP" "$WRAPPED"
-      printf "#!/bin/sh\nexec sccache $WRAPPED \"\$@\"" >"$OLDCOMP"
-      chmod a+x "$OLDCOMP"
-    }
-
-    # ROCm 3.5 and beyond use llvm/bin/clang
-    if [[ -e "${ROCM_PATH}/llvm/bin/clang" ]]; then
-      mkdir ${ROCM_PATH}/llvm/bin/original
-      write_sccache_stub_rocm ${ROCM_PATH}/llvm/bin/clang
-      write_sccache_stub_rocm ${ROCM_PATH}/llvm/bin/clang++
-      # Fix last link in symlink chain for traditional ROCm where clang -> clang-17
-      pushd ${ROCM_PATH}/llvm/bin/original
-      if [[ -L clang ]] && [[ "$(readlink clang)" == clang-* ]]; then
-        ln -s ../$(readlink clang)
-      fi
-      popd
-    else
-      echo "Cannot find ROCm compiler."
-      exit 1
-    fi
-  fi
+  echo "Deferring TheRock ROCm compiler launchers to the PyTorch build"
 fi
