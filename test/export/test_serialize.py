@@ -2734,7 +2734,10 @@ class TestSerializeTriton(TestCase):
     def _gate_triton(self, device) -> None:
         if not has_triton_package() or triton is None or wrap_triton is None:
             self.skipTest("requires triton package")
-        get_interface_for_device(torch.device(device).type)
+        torch_device = torch.device(device)
+        get_interface_for_device(torch_device.type).raise_if_triton_unavailable(
+            torch_device
+        )
 
     def test_triton_hop(self, device) -> None:
         self._gate_triton(device)
