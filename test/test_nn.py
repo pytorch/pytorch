@@ -4064,7 +4064,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         x = torch.full((9, 2, 8, 8), 1.11e15)
         w = torch.ones(2)
         b = torch.zeros(2)
-        with self.assertRaisesRegex(RuntimeError, "running_mean must be defined in evaluation mode"):
+        with self.assertRaisesRegex(ValueError, "running_mean must be defined in evaluation mode"):
             torch.ops.aten.native_batch_norm(x, w, b, None, None, False, 0.1, 1e-5)
 
     def test_pairwise_distance(self):
