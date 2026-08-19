@@ -102,9 +102,10 @@ def _get_total_norm(
                 [torch.linalg.vector_norm(g, norm_type) for g in device_tensors]
             )
 
-    total_norm = torch.linalg.vector_norm(
-        torch.stack([norm.to(first_device) for norm in norms]), norm_type
-    )
+    # Skip the no-op .to(first_device) when all tensors share a device (#133586)
+    if any(device != first_device for (device, _) in grouped_tensors):
+        norms = [norm.to(first_device) for norm in norms]
+    total_norm = torch.linalg.vector_norm(torch.stack(norms), norm_type)
 
     if error_if_nonfinite and torch.logical_or(total_norm.isnan(), total_norm.isinf()):
         raise RuntimeError(
