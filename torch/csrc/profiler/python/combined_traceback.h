@@ -1,8 +1,55 @@
+#pragma once
+
 #include <torch/csrc/profiler/combined_traceback.h>
 
-#include <nlohmann/json.hpp>
 #include <pybind11/pybind11.h>
 #include <torch/csrc/utils/pybind.h>
+
+#include <cstdint>
+#include <map>
+#include <memory>
+#include <string>
+#include <vector>
+
+namespace nlohmann {
+inline namespace json_abi_v3_12_0 {
+
+template <typename T, typename SFINAE>
+struct adl_serializer;
+
+template <
+    template <typename U, typename V, typename... Args> class ObjectType,
+    template <typename U, typename... Args> class ArrayType,
+    class StringType,
+    class BooleanType,
+    class NumberIntegerType,
+    class NumberUnsignedType,
+    class NumberFloatType,
+    template <typename U> class AllocatorType,
+    template <typename T, typename SFINAE> class JSONSerializer,
+    class BinaryType,
+    class CustomBaseClass>
+class basic_json;
+
+// Keep this in sync with nlohmann/json_fwd.hpp from the vendored nlohmann:
+// https://github.com/nlohmann/json/blob/55f93686c01528224f448c19128836e7df245f72/include/nlohmann/json_fwd.hpp
+// Do not include nlohmann headers here: this public header is installed without
+// vendored nlohmann.
+using json = basic_json<
+    std::map,
+    std::vector,
+    std::string,
+    bool,
+    std::int64_t,
+    std::uint64_t,
+    double,
+    std::allocator,
+    adl_serializer,
+    std::vector<std::uint8_t>,
+    void>;
+
+} // namespace json_abi_v3_12_0
+} // namespace nlohmann
 
 namespace torch {
 
