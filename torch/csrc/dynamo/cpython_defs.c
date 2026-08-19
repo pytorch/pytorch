@@ -274,7 +274,11 @@ void THP_PyFrame_Clear(_PyInterpreterFrame* frame) {
   Py_XDECREF(frame->frame_obj);
   Py_XDECREF(frame->f_locals);
 // DYNAMO: additional field for 3.12
+#if IS_PYTHON_3_12_PLUS
   Py_DECREF(frame->f_funcobj);
+#else
+  Py_DECREF(frame->f_func);
+#endif
   Py_DECREF(F_CODE(frame));
 }
 
