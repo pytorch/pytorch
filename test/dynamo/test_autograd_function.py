@@ -333,6 +333,96 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(opt_fn(x), fn(x))
         self.assertEqual(cnt.frame_count, 1)
 
+    def test_apply_recompiles_after_setup_context_replacement(self):
+        for requires_grad in (False, True):
+            for use_instance in (False, True):
+                with self.subTest(
+                    requires_grad=requires_grad, use_instance=use_instance
+                ):
+
+                    class Function(torch.autograd.Function):
+                        @staticmethod
+                        def forward(ctx_or_x, x=None):
+                            if x is None:
+                                return ctx_or_x + 1
+                            return x + 2
+
+                        @staticmethod
+                        def backward(ctx, grad_output):
+                            return grad_output
+
+                    def fn(x):
+                        target = Function() if use_instance else Function
+                        return target.apply(x)
+
+                    x = torch.randn(2, requires_grad=requires_grad)
+                    cnt = torch._dynamo.testing.CompileCounter()
+                    opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+                    self.assertEqual(opt_fn(x), x + 2)
+                    self.assertEqual(cnt.frame_count, 1)
+
+                    def setup_context(ctx, inputs, output):
+                        pass
+
+                    Function.setup_context = staticmethod(setup_context)
+                    self.assertEqual(fn(x), x + 1)
+                    self.assertEqual(opt_fn(x), x + 1)
+                    self.assertEqual(cnt.frame_count, 2)
+
+    def test_apply_guards_setup_context_identity(self):
+        class Function(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x + 1
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output
+
+        def fn(x):
+            return Function.apply(x)
+
+        x = torch.randn(2, requires_grad=True)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), x + 1)
+
+        inherited = torch.autograd.Function.setup_context
+        replacement = types.FunctionType(inherited.__code__, inherited.__globals__)
+        Function.setup_context = staticmethod(replacement)
+        with torch._dynamo.config.patch(error_on_recompile=True):
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.RecompileError, "setup_context"
+            ):
+                opt_fn(x)
+
+    def test_apply_uses_setup_context_identity(self):
+        class EqualToEverything:
+            def __eq__(self, other):
+                return True
+
+            def __ne__(self, other):
+                return False
+
+            def __call__(self, ctx, inputs, output):
+                pass
+
+        class Function(torch.autograd.Function):
+            @staticmethod
+            def forward(x):
+                return x + 1
+
+            setup_context = staticmethod(EqualToEverything())
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output
+
+        def fn(x):
+            return Function.apply(x)
+
+        x = torch.randn(2)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
     def test_classmethod_recompiles_after_replacement(self):
         class Function(torch.autograd.Function):
             @classmethod

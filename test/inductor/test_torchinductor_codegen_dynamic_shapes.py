@@ -142,6 +142,9 @@ test_failures = {
     "test_cat_empty_1d_negative_dim_zero_output_dynamic_shapes": TestFailure(
         ("cpu", "cuda", "xpu"), is_skip=True
     ),
+    "test_scatter_empty_index_dynamic_shapes": TestFailure(
+        ("cpu", "cuda", "xpu"), is_skip=True
+    ),
     #
     # Failed to find dynamic for loop variable:
     #
