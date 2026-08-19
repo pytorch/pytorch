@@ -307,15 +307,17 @@ namespace at::native {
 
 // Is an integral clamp bound below / above the representable range of scalar_t?
 // c10::less_than_lowest / greater_than_max are exact for integer sources (and
-// reject negative -> unsigned rather than wrapping); their digits-based logic is
-// wrong for floating-point sources, so those are compared as doubles.
+// reject negative -> unsigned rather than wrapping); their digits-based logic
+// is wrong for floating-point sources, so those are compared as doubles.
 template <typename scalar_t>
 static std::pair<bool, bool> clamp_bound_range(const Scalar& bound) {
   if (bound.isFloatingPoint()) {
     const auto value = bound.toDouble();
-    return {
-        value < static_cast<double>(std::numeric_limits<scalar_t>::lowest()),
-        value > static_cast<double>(std::numeric_limits<scalar_t>::max())};
+    const auto lowest =
+        static_cast<double>(std::numeric_limits<scalar_t>::lowest());
+    const auto highest =
+        static_cast<double>(std::numeric_limits<scalar_t>::max());
+    return {value<lowest, value> highest};
   }
   if (bound.type() == ScalarType::UInt64) {
     const auto value = bound.toUInt64();
@@ -333,9 +335,9 @@ static std::pair<bool, bool> clamp_bound_range(const Scalar& bound) {
 // or nullopt to drop the bound. An absent bound is dropped, as is an integral
 // no-op bound: a lower bound below the dtype's range (or an upper bound above
 // it) can never change a representable element. The opposite out-of-range case
-// would force every element to an unrepresentable value, so it raises. We cannot
-// defer that to the kernel's cast, which silently wraps a negative bound for
-// unsigned dtypes instead of raising.
+// would force every element to an unrepresentable value, so it raises. We
+// cannot defer that to the kernel's cast, which silently wraps a negative bound
+// for unsigned dtypes instead of raising.
 static std::optional<Scalar> prepare_clamp_bound(
     OptionalScalarRef bound,
     ScalarType dtype,
@@ -944,8 +946,9 @@ TORCH_IMPL_FUNC(clamp_max_out)
     // fill_stub because fill is not structured
     // this is a corner case anyway
     at::fill_(const_cast<Tensor&>(result), wrapped_scalar_tensor(max));
-  } else if (const auto bound = prepare_clamp_bound(
-                 max, result.scalar_type(), /*is_lower_bound=*/false)) {
+  } else if (
+      const auto bound = prepare_clamp_bound(
+          max, result.scalar_type(), /*is_lower_bound=*/false)) {
     clamp_max_scalar_stub(device_type(), *this, *bound);
   } else {
     result.copy_(self);
@@ -961,8 +964,9 @@ TORCH_IMPL_FUNC(clamp_min_out)
 (const Tensor& self, const Scalar& min, const Tensor& result) {
   if (min.toDouble() != min.toDouble()) {
     at::fill_(const_cast<Tensor&>(result), min);
-  } else if (const auto bound = prepare_clamp_bound(
-                 min, result.scalar_type(), /*is_lower_bound=*/true)) {
+  } else if (
+      const auto bound = prepare_clamp_bound(
+          min, result.scalar_type(), /*is_lower_bound=*/true)) {
     clamp_min_scalar_stub(device_type(), *this, *bound);
   } else {
     result.copy_(self);
