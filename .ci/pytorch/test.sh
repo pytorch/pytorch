@@ -84,18 +84,6 @@ export TORCH_SERIALIZATION_DEBUG=1
 # any legitimately long compile on those backends.
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
     export TORCHINDUCTOR_COMPILE_WORKER_WAIT_TIMEOUT=300
-    # Cap Inductor compile-worker fan-out on the ROCm test jobs. They run in a
-    # multi-pod-per-node ROCm runner fleet where the nested test container sees
-    # the host CPU count (nproc=192) instead of the pod's CPU allocation (no
-    # cpuset/quota is inherited), so decide_compile_threads() defaults
-    # compile_threads to min(32, cpu_count()) = 32 per test process and
-    # async_compile forks that many GPU-attached compile workers onto the single
-    # visible GPU. That oversubscribes the accelerator scheduler runlist and can
-    # thrash/hang a shard until its timeout. Cap the fan-out to a bounded pool of
-    # 8 workers: this still creates a GPU-attached SubprocPool (unlike a single
-    # thread, which runs compilation inline with no pool) but bounds the number of
-    # concurrent GPU-attached workers below the oversubscription threshold.
-    export TORCHINDUCTOR_COMPILE_THREADS=8
 fi
 
 export VALGRIND=ON
@@ -2497,8 +2485,8 @@ elif [[ "${BUILD_ENVIRONMENT}" == *rocm* && -n "$TESTS_TO_INCLUDE" ]]; then
   test_aten
 elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   # Sleep for 8 hours when running shard 1
-  echo "Shard ${SHARD_NUMBER} detected: sleeping for 8 hours"
-  sleep 8h
+  # echo "Shard ${SHARD_NUMBER} detected: sleeping for 8 hours"
+  # sleep 8h
   # TODO(temporary): run distributed-single first for faster signal while we
   # validate the split; move to the end once it's proven stable.
   if [[ "${BUILD_ENVIRONMENT}" == *cuda* || "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
