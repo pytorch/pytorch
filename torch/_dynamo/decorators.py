@@ -1109,9 +1109,7 @@ def _dim_range_to_value_ranges(dim_range: _DimRange, *, default_min: int) -> Any
     """
     Converts a _DimRange to a ValueRanges, filling in the bound the user left out
     since ValueRanges rejects None. ``default_min`` is the lower bound to assume for
-    the kind of size at hand, 2 for backed sizes since 0 and 1 are specialized and 0
-    for size oblivious unbacked sizes. Symbols that are not tensor sizes, an
-    unspecialized int input for instance, are unbounded and do not belong here.
+    the kind of size at hand.
     """
     from torch.utils._sympy.numbers import int_oo
     from torch.utils._sympy.value_ranges import ValueRanges
