@@ -19,6 +19,7 @@ from torch._inductor.custom_graph_pass import (
 from torch._inductor.lowering import lowerings as L
 from torch._inductor.pattern_matcher import Arg, CallFunction, PatternMatcherPass
 from torch._inductor.test_case import run_tests, TestCase
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import HardwareClassification, IS_LINUX
 from torch.testing._internal.inductor_utils import HAS_CPU, patch_inductor_backend
 
@@ -400,6 +401,10 @@ class TestPostGradCustomPrePostPassCPU(TestCustomPassBase):
             x = torch.randn(8, dtype=torch.float32)
             torch.testing.assert_close(torch.compile(f)(x), g(x))
 
+
+instantiate_device_type_tests(
+    TestPostGradCustomPrePostPassCPU, globals(), only_for="cpu"
+)
 
 if __name__ == "__main__":
     if IS_LINUX and HAS_CPU:
