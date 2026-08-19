@@ -6,21 +6,33 @@
 #include <ATen/Context.h>
 
 TEST(EventTest, testEventFlag) {
-
+// This intentionally tests a deprecated EventFlag
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
   c10::EventFlag flag = c10::EventFlag::BLOCKING | c10::EventFlag::TIMING | c10::EventFlag::INTERPROCESS;
   EXPECT_TRUE(flag & c10::EventFlag::BLOCKING);
   EXPECT_TRUE(flag & c10::EventFlag::TIMING);
   EXPECT_TRUE(flag & c10::EventFlag::INTERPROCESS);
+  EXPECT_TRUE(flag == c10::EventFlag::BACKEND_DEFAULT);
 
   flag = c10::EventFlag::BLOCKING | c10::EventFlag::PYTORCH_DEFAULT;
   EXPECT_TRUE(flag & c10::EventFlag::BLOCKING);
   EXPECT_FALSE(flag & c10::EventFlag::TIMING);
   EXPECT_FALSE(flag & c10::EventFlag::INTERPROCESS);
+  EXPECT_FALSE(flag == c10::EventFlag::BACKEND_DEFAULT);
 
   flag = c10::EventFlag::TIMING | c10::EventFlag::PYTORCH_DEFAULT;
   EXPECT_FALSE(flag & c10::EventFlag::BLOCKING);
   EXPECT_TRUE(flag & c10::EventFlag::TIMING);
   EXPECT_FALSE(flag & c10::EventFlag::INTERPROCESS);
+  EXPECT_TRUE(flag == c10::EventFlag::BACKEND_DEFAULT);
+
+  flag = c10::EventFlag::BACKEND_DEFAULT;
+  EXPECT_FALSE(flag & c10::EventFlag::BLOCKING);
+  EXPECT_TRUE(flag & c10::EventFlag::TIMING);
+  EXPECT_FALSE(flag & c10::EventFlag::INTERPROCESS);
+  EXPECT_TRUE(flag == c10::EventFlag::BACKEND_DEFAULT);
+#pragma GCC diagnostic pop
 
   if (at::accelerator::deviceCount() <= 0) {
     GTEST_SKIP() << "No accelerator device available";
