@@ -1194,6 +1194,14 @@ class TritonTemplateKernel(TritonKernel):
                     texpr(self.rename_indexing(node_stride[d])) for d in dim_order
                 ],
             }
+            prev = self.host_tma_descriptor_args.get(arg_name)
+            if prev is not None and prev != desc:
+                # def_kernel dedupes operands that alias one buffer into a single
+                # kernel arg, but one tensordesc<> arg cannot describe both views.
+                raise NotImplementedError(
+                    f"host-side TMA cannot share arg {arg_name} between two "
+                    "descriptors with different shape/strides"
+                )
             self.host_tma_descriptor_args[arg_name] = desc
             return f"{desc_name} = {input_name}"
 

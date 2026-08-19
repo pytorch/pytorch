@@ -100,9 +100,6 @@ class TestMaxAutotuneBlackwell(TestCase):
                 "triton.enable_persistent_tma_matmul": True,
                 "triton.enable_template_tma_store": tma_store,
                 "triton.enable_host_side_tma": host_side_tma,
-                # host-side TMA prerequisites (see the warning in compile_fx)
-                "triton.use_tensor_descriptor": host_side_tma,
-                "assume_aligned_inputs": host_side_tma,
                 "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_tma",
                 "test_configs.autotune_choice_desc_regex": epilogue_subtile_regex,
             }
@@ -162,8 +159,6 @@ class TestMaxAutotuneBlackwell(TestCase):
                 "max_autotune": True,
                 "triton.enable_persistent_tma_matmul": True,
                 "triton.enable_host_side_tma": True,
-                "triton.use_tensor_descriptor": True,
-                "assume_aligned_inputs": True,
                 "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_tma",
             }
         ):
@@ -193,8 +188,6 @@ class TestMaxAutotuneBlackwell(TestCase):
                 "max_autotune": True,
                 "triton.enable_persistent_tma_matmul": True,
                 "triton.enable_host_side_tma": host_side_tma,
-                "triton.use_tensor_descriptor": host_side_tma,
-                "assume_aligned_inputs": host_side_tma,
                 "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_tma",
             }
         ):
@@ -251,8 +244,6 @@ class TestMaxAutotuneBlackwell(TestCase):
                 "triton.enable_persistent_tma_matmul": True,
                 "triton.enable_template_tma_store": tma_store,
                 "triton.enable_host_side_tma": host_side_tma,
-                "triton.use_tensor_descriptor": host_side_tma,
-                "assume_aligned_inputs": host_side_tma,
                 "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_tma",
             }
         ):
@@ -289,14 +280,6 @@ class TestMaxAutotuneBlackwell(TestCase):
         tma_store: bool,
         host_side_tma: bool,
     ):
-        if host_side_tma and tma_store:
-            # Per-row scaling registers an epilogue descriptor, which the host
-            # path cannot resolve (block shape is still symbolic), so the choice
-            # is rejected and no template remains.
-            raise unittest.SkipTest(
-                "host-side TMA + TMA store unsupported for per-row scaling"
-            )
-
         def scaled_mm(a, b, scale_a, scale_b):
             # NOTE: Inductor constrains a to be row_major and b to be col_majo
             return torch._scaled_mm(
@@ -333,8 +316,6 @@ class TestMaxAutotuneBlackwell(TestCase):
                 "triton.enable_persistent_tma_matmul": True,
                 "triton.enable_template_tma_store": tma_store,
                 "triton.enable_host_side_tma": host_side_tma,
-                "triton.use_tensor_descriptor": host_side_tma,
-                "assume_aligned_inputs": host_side_tma,
                 "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_tma",
             }
         ):
