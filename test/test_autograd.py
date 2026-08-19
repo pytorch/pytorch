@@ -13466,7 +13466,7 @@ class TestAutogradDeviceType(TestCase):
         x = torch.randn(shape, requires_grad=True, device=device)
         x[i].sum().backward()
 
-    def _test_reentrant_parent_error_on_cpu(self, device):
+    def _test_reentrant_parent_error_on_device(self, device):
         t1 = torch.rand([3, 3], requires_grad=True)
         t2 = torch.rand([3, 3], device=device, requires_grad=True)
         t3 = torch.rand([3, 3], device=device, requires_grad=True)
@@ -13507,7 +13507,7 @@ class TestAutogradDeviceType(TestCase):
         self.assertIsNone(t3.grad)
 
     @onlyAccelerator
-    def test_reentrant_parent_error_on_cpu(self, device):
+    def test_reentrant_parent_error_on_device(self, device):
         def _get_cuda_memory_usage():
             # we don't need CUDA synchronize because the statistics are not tracked at
             # actual freeing, but at when marking the block as free.
@@ -13521,7 +13521,7 @@ class TestAutogradDeviceType(TestCase):
 
         # Run as separate function so that gc can clean up everything when we
         # check for memory usage.
-        self._test_reentrant_parent_error_on_cpu(device)
+        self._test_reentrant_parent_error_on_device(device)
 
         # Wait for autograd thread to cleanup failed tasks.
         after = _get_cuda_memory_usage()
