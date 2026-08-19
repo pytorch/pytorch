@@ -8488,16 +8488,41 @@ square = register_pointwise(aten.square)
 sub = register_pointwise(aten.sub, allow_alpha=True, round_scalars_to_tensor_dtype=True)
 
 
+@functools.cache
+def _cpu_addcmul_uses_fma() -> bool:
+    # ATen expresses CPU addcmul as ordinary multiply/add operations, so whether
+    # they contract depends on the compiler flags and CPU capability used by the
+    # running PyTorch build. Probe values whose fused and unfused results differ
+    # so Inductor follows eager instead of assuming that every vector ISA fuses.
+    # Require both scalar and tail-free vector paths to contract before changing
+    # the generic addcmul lowering.
+    with torch._C.DisableTorchFunction(), torch._C._DisableTorchDispatch():
+        for size in (1, 256):
+            base = torch.full(
+                (size,), 0.9007171988487244, dtype=torch.float32, device="cpu"
+            )
+            factor = torch.full(
+                (size,), 1.8365377187728882, dtype=torch.float32, device="cpu"
+            )
+            eager = torch.addcmul(base, factor, factor, value=1)
+            unfused = base + factor * factor
+            if torch.equal(eager, unfused):
+                return False
+    return True
+
+
 @register_lowering(aten.addcmul, broadcast=True)
 def addcmul(self, tensor1, tensor2, *, value=1):
     """
     Computes self + value * tensor1 * tensor2 using FMA for better precision.
 
-    Matches eager CUDA kernel order: self + value * (tensor1 * tensor2)
-    This is computed as: fma(value, tensor1 * tensor2, self)
+    Matches eager CUDA kernel order: self + value * (tensor1 * tensor2).
+    For value=1, this is computed as fma(tensor1, tensor2, self).
 
-    Note: FMA is used for floating-point types on CUDA and ROCm (via tl.fma). For
-    integer types we fall back to regular arithmetic since FMA doesn't support integers.
+    Note: FMA is used for floating-point types on CUDA and ROCm (via tl.fma).
+    On CPU, value=1 uses FMA only when the running eager addcmul kernel also
+    contracts the multiply-add. For integer types, we fall back to regular
+    arithmetic since FMA doesn't support integers.
 
     For floating-point types, we use mul_rn (round-to-nearest multiplication)
     to force rounding of the product before the FMA. This prevents Triton's
@@ -8522,13 +8547,19 @@ def addcmul(self, tensor1, tensor2, *, value=1):
         and device is not None
         and device.type in ["cuda", "xpu"]
     )
+    use_cpu_fma = (
+        dtype.is_floating_point
+        and device is not None
+        and device.type == "cpu"
+        and _cpu_addcmul_uses_fma()
+    )
 
     def inner_fn(idx):
         self_val = self_loader(idx)
         t1_val = t1_loader(idx)
         t2_val = t2_loader(idx)
 
-        if value == 1 and use_fma:
+        if value == 1 and (use_fma or use_cpu_fma):
             return ops.fma(t1_val, t2_val, self_val)
 
         # Match eager order: self + value * (tensor1 * tensor2)
