@@ -394,7 +394,6 @@ eig, linalg
 svd, linalg
 swapaxes, alias
 swapdims, alias
-cholesky, linalg
 cholesky_solve, linalg
 solve, linalg
 cholesky_inverse, linalg

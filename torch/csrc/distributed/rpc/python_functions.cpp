@@ -321,7 +321,7 @@ PyRRef pyRemoteBuiltin(
 
     ownerRRef->registerOwnerCreationFuture(jitFuture);
     // Builtin operators does not return py::object, and hence does not require
-    // GIL for destructing the potentially deleted OwerRRef.
+    // GIL for destructing the potentially deleted OwnerRRef.
     jitFuture->addCallback(at::wrapPropagateTLSState(
         [ownerRRefId = ownerRRef->rrefId()](JitFuture& future) {
           callback::finishCreatingOwnerRRef(future, ownerRRefId);

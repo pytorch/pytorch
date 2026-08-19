@@ -20,7 +20,7 @@ void initExportBindings(PyObject* module) {
         auto parsed = nlohmann::json::parse(serialized);
 
         // Query the current Python schema version as target
-        // TODO: expose schema_version in gneerated_serialization_types.h and
+        // TODO: expose schema_version in generated_serialization_types.h and
         // access it here directly.
         py::module_ schema_module =
             py::module_::import("torch._export.serde.schema");
