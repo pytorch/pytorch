@@ -632,7 +632,7 @@ class BaseTorchVariable(VariableTracker):
     def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         return hash(self.value), False
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
     ) -> VariableTracker:
         from .object_protocol import object_richcompare
@@ -1095,7 +1095,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     raise AssertionError(
                         "Expected first argument to accumulate_grad_ to be a tensor"
                     )
-                variable_grad = variable.getattro_impl(tx, "grad")
+                variable_grad = variable.tp_getattro_impl(tx, "grad")
                 updated_grad = tx.inline_user_function_return(
                     VariableTracker.build(tx, polyfills.accumulate_grad),
                     [variable, variable_grad, new_grad],
@@ -3332,7 +3332,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         return handlers
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> "VariableTracker":
         source = self.source and AttrSource(self.source, name)
@@ -4148,9 +4148,9 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             )
 
         try:
-            shape = tuple(data.getattro_impl(tx, "shape").as_python_constant())
-            dtype = data.getattro_impl(tx, "dtype").as_python_constant()
-            device = data.getattro_impl(tx, "device").as_python_constant()
+            shape = tuple(data.tp_getattro_impl(tx, "shape").as_python_constant())
+            dtype = data.tp_getattro_impl(tx, "dtype").as_python_constant()
+            device = data.tp_getattro_impl(tx, "device").as_python_constant()
         except NotImplementedError as e:
             unimplemented(
                 gb_type="`torch.nn.Parameter` with non-constant Tensor attributes",
@@ -4297,7 +4297,7 @@ class DispatchKeySetVariable(BaseTorchVariable):
         install_guard(source.make_guard(GuardBuilder.DISPATCH_KEY_SET_MATCH))
         return cls(value, source=source)
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
     ) -> VariableTracker:
         from .object_protocol import python_constant_richcompare_impl

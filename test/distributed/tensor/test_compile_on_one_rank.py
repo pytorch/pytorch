@@ -2,7 +2,10 @@
 
 import difflib
 import functools
+import os
+import subprocess
 import sys
+import textwrap
 import unittest
 
 import torch
@@ -209,7 +212,7 @@ class TestCompileOnOneRank(DTensorTestBase):
         """`dist.all_reduce(t)` with no `group=` (implicit `dist.group.WORLD`)
         should compile under compile_on_one_rank=True.
 
-        `WorldMetaClassVariable.getattro_impl` was routing the WORLD lookup through
+        `WorldMetaClassVariable.tp_getattro_impl` was routing the WORLD lookup through
         `SourcelessBuilder`, dropping the source it had just constructed for the
         guard. The resulting `CustomClassObjectVariable` had the raw ProcessGroup
         as its `proxy` field and blew up later in `as_proxy()` when the PG was
@@ -585,6 +588,55 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         self.assertIn("semaphores_cuda", code)  # the workspace is actually in play
         self.assertNotRegex(code, r"semaphores_cuda_\d")
         self._assert_no_baked_device(code)
+
+    @unittest.skipIf(
+        torch.version.cuda is None and torch.version.hip is None,
+        "needs a GPU-enabled build whose devices can be hidden",
+    )
+    def test_coor_compiles_on_gpu_build_with_no_visible_device(self):
+        # A GPU-enabled build running where no device is visible -- a container started
+        # without --gpus, a scheduler setting CUDA_VISIBLE_DEVICES="", every GPU already
+        # allocated -- must still compile a cpu graph under CooR. current_accelerator()
+        # reports what the *build* supports rather than what is present, so without an
+        # availability check the device-index lookup raises "No CUDA GPUs are available"
+        # from inside wrapper codegen.
+        #
+        # This needs a subprocess: CI never runs that combination directly (GPU jobs have
+        # GPUs, CPU jobs have no GPU build), and the devices have to be hidden before
+        # torch initializes them, so hiding them in-process is not possible.
+        script = textwrap.dedent(
+            """
+            import torch
+            import torch.compiler.config as compiler_config
+
+            assert torch.cuda.device_count() == 0, "expected no visible devices"
+            with compiler_config.patch(compile_on_one_rank=True):
+                compiled = torch.compile(
+                    lambda x: x + 1, backend="inductor", fullgraph=True
+                )
+                out = compiled(torch.randn(4))
+            assert out.device.type == "cpu", out.device
+            """
+        )
+        env = {
+            **os.environ,
+            "CUDA_VISIBLE_DEVICES": "",
+            "HIP_VISIBLE_DEVICES": "",
+            "TORCHINDUCTOR_COMPILE_THREADS": "1",
+        }
+        proc = subprocess.run(
+            [sys.executable, "-c", script],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=600,
+            check=False,
+        )
+        self.assertEqual(
+            proc.returncode,
+            0,
+            f"CooR compile failed with no visible device:\n{proc.stderr[-3000:]}",
+        )
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     @compiler_config.patch(compile_on_one_rank=True)

@@ -23,8 +23,6 @@ class TensorProperties:
     memory_format: torch.memory_format = field(default=torch.contiguous_format)
     pin_memory: bool = False
 
-    strides: tuple[int, ...] | None = None
-
     def __getstate__(self):
         # Since torch.memory_format cannot be pickled!
         memory_format = self.memory_format
@@ -43,31 +41,19 @@ class TensorProperties:
             self.requires_grad,
             mem_format_encoding,
             self.pin_memory,
-            self.strides,
         )
 
     def __setstate__(
         self,
         state,
     ):
-        if len(state) == 5:
-            (
-                self.dtype,
-                self.layout,
-                self.requires_grad,
-                mem_format_encoding,
-                self.pin_memory,
-            ) = state
-            self.strides = None
-        else:
-            (
-                self.dtype,
-                self.layout,
-                self.requires_grad,
-                mem_format_encoding,
-                self.pin_memory,
-                self.strides,
-            ) = state
+        (
+            self.dtype,
+            self.layout,
+            self.requires_grad,
+            mem_format_encoding,
+            self.pin_memory,
+        ) = state
 
         if mem_format_encoding == MEM_FORMAT_ENCODING.TORCH_CONTIGUOUS_FORMAT:
             memory_format = torch.contiguous_format
@@ -90,7 +76,6 @@ class TensorProperties:
             requires_grad=tensor.requires_grad,
             memory_format=torch.contiguous_format,
             pin_memory=tensor.is_pinned(),
-            strides=tensor.stride(),
         )
 
 

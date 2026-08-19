@@ -281,6 +281,7 @@ class Guard:
     user_stack: traceback.StackSummary | None = None
     _hash: int | None = None
     _unserializable: bool = False
+    _force_dict_keys_match: bool = False
 
     def __hash__(self) -> int:
         if self._hash is None:

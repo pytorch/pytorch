@@ -22,7 +22,9 @@ from torch.testing._internal.common_utils import (
     parametrize,
     recover_orig_fp32_precision,
     skipIfXpu,
+    TEST_XPU,
 )
+from torch.testing._internal.common_xpu import PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.utils._triton import has_triton_tma_device
 
@@ -884,6 +886,8 @@ class MixOrderReductionTest(TestBase):
         mock_node_1.get_device.return_value.type = "cuda"
         mock_node_1.is_reduction.return_value = True
         mock_node_2.is_reduction.return_value = True
+        mock_node_1.has_strict_reduction.return_value = False
+        mock_node_2.has_strict_reduction.return_value = False
 
         from torch._inductor.utils import OrderedSet
 
@@ -953,6 +957,8 @@ class MixOrderReductionTest(TestBase):
         mock_node_1.get_device.return_value.type = "cuda"
         mock_node_1.is_reduction.return_value = True
         mock_node_2.is_reduction.return_value = True
+        mock_node_1.has_strict_reduction.return_value = False
+        mock_node_2.has_strict_reduction.return_value = False
 
         from torch._inductor.utils import OrderedSet
 
@@ -1335,10 +1341,11 @@ class OverFusionTest(TestBase):
     regression. See #179423.
     """
 
-    @skipIfXpu(
-        msg="XPU selects Flash Attention for SDPA backward; the current SYCL TLA"
-        "implementation does not guarantee precision on PVC. Re-enable once oneDNN"
-        "adds SDPA backward support. See https://github.com/intel/torch-xpu-ops/issues/4094"
+    @unittest.skipIf(
+        TEST_XPU and not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU,
+        "XPU: SYCL TLA backward does not guarantee precision on non-Xe2 devices. "
+        "Re-enable once oneDNN adds SDPA backward support. "
+        "See https://github.com/intel/torch-xpu-ops/issues/4094",
     )
     @inductor_config.patch(
         {
