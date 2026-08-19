@@ -177,6 +177,8 @@ class TestCaseBase(TestCase):
 
 
 class PerfTestBetweenGoodAndBadShape(TestCaseBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @requires_capabilities(Capability.lib.triton)
     @unittest.skipIf(not DO_PERF_TEST, "Perf test not enabled")
     def test_nobias_LinearAndSoftmax_both_shapes(self, device):
@@ -262,6 +264,8 @@ class PerfTestBetweenGoodAndBadShape(TestCaseBase):
 
 
 class PerfTestWithAndWithoutPadding(TestCaseBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @maybe_cprofile
     def run_acc_and_perf_test(self, device, model, inputs, perf_inputs=None, tol=1e-3):
         """
@@ -396,6 +400,8 @@ class PerfTestWithAndWithoutPadding(TestCaseBase):
 
 
 class PaddingTest(TestCaseBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @requires_capabilities(Capability.lib.triton)
     @unittest.skipIf(not DO_PERF_TEST, "Perf test not enabled")
     def test_mm_padding_perf(self, device):
