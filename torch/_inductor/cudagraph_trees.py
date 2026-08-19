@@ -341,6 +341,18 @@ class MarkStepBox:
     mark_step_counter = 0
 
 
+_IS_GIL_ENABLED_CHECKER = getattr(sys, "_is_gil_enabled", None)
+
+
+def _gil_enabled() -> bool:
+    # under free-threaded Python, refcounts are biased and imprecise, so the
+    # destructive detach must not trust an exact refcount read. Skipping it
+    # fails toward "live": vacuous pins then never collapse there, so the
+    # stale-grad_fn path-growth issue is unmitigated (not merely delayed) on
+    # free-threaded builds; a synchronized sweep is required to support them.
+    return True if _IS_GIL_ENABLED_CHECKER is None else _IS_GIL_ENABLED_CHECKER()
+
+
 def mark_step_begin() -> None:
     "Indicates that a new iteration of inference or training is about to begin."
 
@@ -1396,11 +1408,32 @@ class CUDAGraphNode:
         self.graph.replay()
 
     def all_outputs_are_dead(self) -> bool:
-        "All outputs of the path from this node to its root are dead"
-        for depth, output_index in self.live_indices_after_graph:
-            if is_live(self.path_weakrefs[depth][output_index]):
+        """All outputs of the path from this node to its root are dead.
+
+        Evaluated to a fixpoint: is_live's check_refcount detaches vacuous
+        stale-grad_fn pins, and one output's detach can release an output an
+        earlier index already reported live, so a single fixed-order pass can
+        stay permanently one collapse behind (e.g. multi-graph inference where
+        each iteration creates a fresh pin). Consecutive live SETS are
+        compared, not counts: a late detach can kill an already-counted early
+        entry without changing the count. Deadness is monotone within a call,
+        so each pass either strictly shrinks the live set or repeats it; the
+        pass bound makes termination unconditional even if a user callback
+        (__del__/weakref) resurrects an entry mid-sweep, failing toward live.
+        """
+        prev: list[PathOutputIndex] | None = None
+        for _ in range(len(self.live_indices_after_graph) + 1):
+            live = [
+                (depth, output_index)
+                for depth, output_index in self.live_indices_after_graph
+                if is_live(self.path_weakrefs[depth][output_index])
+            ]
+            if not live:
+                return True
+            if live == prev:
                 return False
-        return True
+            prev = live
+        return False
 
     def _record(self, model: ModelType, inputs: list[InputType]) -> OutputType:
         "Record the model"
@@ -1655,13 +1688,45 @@ class CUDAGraphNode:
                 self_loc = self_ref()
                 if self_loc is None:
                     return False
+                if self_loc.cached_tensor_outputs[i] is None:
+                    # defensive: entries are only nulled after
+                    # remove_extra_reference detaches this check, so this is
+                    # unreachable today; returning live is the safe direction
+                    return False
+                # NB: the refcount must be measured before binding any local
+                # reference to the tensor, or the local itself inflates it
                 refcount = self_loc.get_output_refcount(i)
                 # pyrefly: ignore
-                if self_loc.cached_tensor_outputs[i]._use_count() > 1:
-                    # c10::Tensor may also holds one reference count
-                    if refcount < 3:
-                        raise AssertionError(f"expected refcount >= 3, got {refcount}")
-                    return refcount == 3
+                cached = self_loc.cached_tensor_outputs[i]
+                if (
+                    refcount == 2
+                    and cached._use_count() == 1
+                    and cached.grad_fn is not None
+                    and _gil_enabled()
+                ):
+                    # refcount == 2 is exactly the cache-only baseline (our
+                    # list entry + getrefcount's argument), so no user code
+                    # holds this tensor and detaching cannot strip a grad_fn
+                    # anyone could still call backward through. Like the
+                    # _backward_hooks reset in reconstruct_outputs, this scrubs
+                    # stale per-run autograd state off a cached tensor
+                    # (aot_autograd resets the meta on every replay-return
+                    # anyway) -- but lazily, because the stale grad_fn pins the
+                    # backward node, whose SavedVariables pin sibling cached
+                    # outputs, which would make the _use_count check below
+                    # permanently true and paths never abandonable. A genuine
+                    # pending backward survives the detach through external
+                    # edges to the node (e.g. a downstream loss tensor).
+                    cached.detach_()
+                if cached._use_count() > 1:
+                    # a C++ holder still references this output -- after the
+                    # detach above, this is a real external holder, typically
+                    # autograd's SavedVariable for a pending backward. Treating
+                    # it as dead lets the path be abandoned mid-generation,
+                    # severing the backward from its forward's tree; later
+                    # recordings may then claim the activation memory and its
+                    # replays silently corrupt the pending backward's inputs.
+                    return False
                 else:
                     if refcount < 2:
                         raise AssertionError(f"expected refcount >= 2, got {refcount}")
