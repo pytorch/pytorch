@@ -64,10 +64,14 @@ def _find_rocm_home():
     return rocm_home, cpp_extension
 
 
-def _major_minor(version_str):
+def _parse_version(version_str, components=None):
     from torch.torch_version import TorchVersion
 
-    return TorchVersion(".".join(version_str.split(".")[:2]))
+    version = version_str.split("-", maxsplit=1)[0]
+    parts = version.split(".")
+    if components is not None:
+        parts = parts[:components]
+    return TorchVersion(".".join(parts))
 
 
 def get_rocm_sdk_version():
@@ -87,12 +91,13 @@ def get_rocm_sdk_version():
         content = f.read()
     major = re.search(r"ROCM_VERSION_MAJOR\s+(\d+)", content)
     minor = re.search(r"ROCM_VERSION_MINOR\s+(\d+)", content)
-    if major is None or minor is None:
+    patch = re.search(r"ROCM_VERSION_PATCH\s+(\d+)", content)
+    if major is None or minor is None or patch is None:
         return None
-    return TorchVersion(f"{major.group(1)}.{minor.group(1)}")
+    return TorchVersion(f"{major.group(1)}.{minor.group(1)}.{patch.group(1)}")
 
 
-def get_rocm_version():
+def get_hip_version():
     """System HIP version from `hipcc --version`."""
     from torch.torch_version import TorchVersion
 
@@ -156,11 +161,11 @@ def check_rocm():
     system_sdk = get_rocm_sdk_version()
     torch_sdk = getattr(torch.version, "rocm", None)
     if system_sdk is not None and torch_sdk:
-        torch_rocm_ver = _major_minor(torch_sdk)
+        torch_rocm_ver = _parse_version(torch_sdk)
         rocm_ver = system_sdk
     else:
-        torch_rocm_ver = _major_minor(torch.version.hip)
-        rocm_ver = get_rocm_version()
+        torch_rocm_ver = _parse_version(torch.version.hip, components=2)
+        rocm_ver = get_hip_version()
 
     if rocm_ver != torch_rocm_ver:
         warnings.warn(

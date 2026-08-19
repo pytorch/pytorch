@@ -685,6 +685,21 @@ class TestCollectEnv(TestCase):
         self.assertIn("ROCm SDK used to build PyTorch: sdk-version", rocm_info)
         self.assertIn("HIP used to build PyTorch: hip-version", rocm_info)
 
+    def test_old_rocm_wheel_reports_sdk_version_as_not_available(self):
+        with (
+            unittest.mock.patch.object(torch.version, "rocm", None),
+            unittest.mock.patch.object(torch.version, "hip", "7.15.26306"),
+            unittest.mock.patch.object(torch._C, "_show_config", return_value=""),
+        ):
+            env_info = get_env_info()
+
+        self.assertEqual(env_info.rocm_compiled_version, "N/A")
+        self.assertEqual(env_info.hip_compiled_version, "7.15.26306")
+        self.assertIn(
+            "ROCm SDK used to build PyTorch: N/A",
+            pretty_str(env_info),
+        )
+
 
 class TestHipify(TestCase):
     def test_import_hipify(self):

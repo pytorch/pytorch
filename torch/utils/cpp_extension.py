@@ -2429,8 +2429,8 @@ def _jit_compile(name,
 
 def _get_hipcc_path():
     if IS_WINDOWS:
-        # mypy thinks ROCM_VERSION is None but it will never be None here
-        hipcc_exe = 'hipcc.exe' if ROCM_VERSION >= (6, 4) else 'hipcc.bat'  # type: ignore[operator]
+        # mypy thinks HIP_VERSION is None but it will never be None here
+        hipcc_exe = 'hipcc.exe' if HIP_VERSION >= (6, 4) else 'hipcc.bat'  # type: ignore[operator]
         return _join_rocm_home('bin', hipcc_exe)
     else:
         return _join_rocm_home('bin', 'hipcc')
@@ -2827,8 +2827,14 @@ def _get_build_directory(name: str, verbose: bool) -> str:
         # Note: torch.backends.cuda.is_built() returns True for both CUDA and ROCm,
         # so we need to check torch.version.hip to distinguish them
         if torch.version.hip is not None:
-            _rocm_version_str = torch.version.rocm or torch.version.hip
-            accelerator_str = f'rocm{_rocm_version_str.replace(".", "")}'
+            if torch.version.rocm is not None:
+                sdk_version = torch.version.rocm.replace(".", "")
+                hip_version = torch.version.hip.replace(".", "")
+                accelerator_str = f'rocm{sdk_version}_hip{hip_version}'
+            else:
+                # Preserve the legacy key for wheels built before
+                # torch.version.rocm was available.
+                accelerator_str = f'rocm{torch.version.hip.replace(".", "")}'
         elif torch.version.cuda is not None:
             accelerator_str = f'cu{torch.version.cuda.replace(".", "")}'
         else:
