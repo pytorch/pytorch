@@ -18,7 +18,11 @@ from enum import auto, Enum
 
 import torch
 from torch.autograd import Function
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 class NodeType(Enum):
@@ -107,6 +111,8 @@ class Marker:
 
 
 class TestNodeLifecycle(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     """Single output, various node types / hooks / backward states."""
 
     def _run(self, node_type, hook_type, backward_state):
@@ -296,6 +302,8 @@ class TestNodeLifecycle(TestCase):
 
 
 class TestLeafNodeLifecycle(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     """Leaf-specific tests (AccumulateGrad)."""
 
     def test_accumulate_grad_freed_refcount(self):
@@ -342,6 +350,8 @@ class TestLeafNodeLifecycle(TestCase):
 
 
 class TestSharedGradFn(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     """Tests for grad_fn shared by multiple output tensors."""
 
     def test_cpp_shared_grad_fn_one_deleted(self):
@@ -418,6 +428,8 @@ class TestSharedGradFn(TestCase):
 
 
 class TestChainLifecycle(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     """Tests for chains of nodes."""
 
     def test_cpp_chain_freed_refcount(self):
@@ -462,6 +474,8 @@ class TestChainLifecycle(TestCase):
 
 
 class TestSavedVariableLifecycle(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     """Tests that saved tensors are freed at the right time.
 
     Uses b**2 for C++ tests (PowBackward0 saves self) and PythonMul for

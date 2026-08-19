@@ -6,6 +6,7 @@ import subprocess
 import unittest
 
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_WINDOWS,
     run_tests,
     slowTest,
@@ -18,6 +19,8 @@ PYTORCH_COLLECT_COVERAGE = bool(os.environ.get("PYTORCH_COLLECT_COVERAGE"))
 
 # This is a very simple smoke test for the functional autograd benchmarking script.
 class TestFunctionalAutogradBenchmark(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _test_runner(self, model, disable_gpu=False):
         # Note about windows:
         # The temporary file is exclusively open by this process and the child process
