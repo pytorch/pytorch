@@ -1613,6 +1613,7 @@ class TestSparse(TestSparseBase):
     @onlyAccelerator
     @coalescedonoff
     @dtypes(torch.double)
+    @dtypesIfMPS(torch.float32)
     def test_bmm_deterministic(self, device, dtype, coalesced):
         def test_shape(num_mats, dim_i, dim_j, dim_k, nnz):
             a_list = []
