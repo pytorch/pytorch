@@ -3276,13 +3276,15 @@ class NumpyNdarrayVariable(TensorVariable):
         )
         return NumpyNdarrayVariable.create(tx, proxy)
 
+    # numpy's array_getsetlist leaves T read-only; real/imag/flat do have setters,
+    # but they write the array in place and the VT is a functional graph proxy.
     tp_getset = {
         "ndim": GetSet(_get_ndim, None),
         "itemsize": GetSet(_get_itemsize, None),
-        "T": GetSet(lambda s, tx: s._get_numpy_attr(tx, "T")),
-        "real": GetSet(lambda s, tx: s._get_numpy_attr(tx, "real")),
-        "imag": GetSet(lambda s, tx: s._get_numpy_attr(tx, "imag")),
-        "flat": GetSet(lambda s, tx: s._get_numpy_attr(tx, "flat")),
+        "T": GetSet(lambda s, tx: s._get_numpy_attr(tx, "T"), None),
+        "real": GetSet(lambda s, tx: s._get_numpy_attr(tx, "real"), None),
+        "imag": GetSet(lambda s, tx: s._get_numpy_attr(tx, "imag"), None),
+        "flat": GetSet(lambda s, tx: s._get_numpy_attr(tx, "flat"), None),
     }
 
     def tp_getattro_impl(

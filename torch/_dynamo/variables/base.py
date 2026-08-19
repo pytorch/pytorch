@@ -398,10 +398,11 @@ class Method:
 class GetSet:
     """`tp_getset` entry, analogous to CPython's PyGetSetDef. `getter`
     `(self, tx) -> VT | None` (None declines); `setter`
-    `(self, tx, value) -> VT | None`, None for read-only."""
+    `(self, tx, value) -> VT | None` (None declines), and a `setter` of None
+    means read-only."""
 
     getter: Callable[..., VariableTracker | None]
-    setter: Callable[..., VariableTracker | None] | None = None
+    setter: Callable[..., VariableTracker | None] | None
 
 
 @dataclasses.dataclass(slots=True)

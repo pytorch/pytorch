@@ -41,7 +41,6 @@ from .base import (
     AsPythonConstantNotImplementedError,
     AttrMutationKind,
     maybe_get_python_type,
-    Member,
     NO_SUCH_SUBOBJ,
     VariableTracker,
 )

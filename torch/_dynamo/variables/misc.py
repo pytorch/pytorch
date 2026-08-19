@@ -565,7 +565,7 @@ class TracebackVariable(VariableTracker):
     tp_getset = {
         "tb_next": GetSet(_get_tb_next, _set_tb_next),
         "tb_lineno": GetSet(_get_tb_lineno, None),
-        "frame_summary": GetSet(getset_read(lambda s: s.frame_summary)),
+        "frame_summary": GetSet(getset_read(lambda s: s.frame_summary), None),
     }
 
     # ref: CPython Objects/traceback.c tb_memberlist, where tb_lasti is
@@ -828,7 +828,7 @@ class ExceptionVariable(VariableTracker):
         return variables.ConstantVariable.create(None)
 
     tp_getset = {
-        "__class__": GetSet(getset_build(lambda s: s.exc_type)),
+        "__class__": GetSet(getset_build(lambda s: s.exc_type), None),
         "__context__": GetSet(getset_read(lambda s: s.__context__), _set_context),
         "__cause__": GetSet(getset_read(lambda s: s.__cause__), _set_cause),
         "__traceback__": GetSet(getset_read(lambda s: s.__traceback__), _set_traceback),

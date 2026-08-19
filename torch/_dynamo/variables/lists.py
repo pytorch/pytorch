@@ -1610,7 +1610,7 @@ class DequeVariable(BaseListVariable):
     # deque_getset: maxlen is a read-only getset (deque_get_maxlen, no setter).
     # https://github.com/python/cpython/blob/v3.13.0/Modules/_collectionsmodule.c (deque_getset)
     tp_getset = {
-        "maxlen": GetSet(getset_read(lambda s: s.maxlen)),
+        "maxlen": GetSet(getset_read(lambda s: s.maxlen), None),
     }
 
     def _clamp_maxlen(self, side: str) -> None:
