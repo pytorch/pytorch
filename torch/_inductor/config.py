@@ -1340,7 +1340,7 @@ class aten_distributed_optimizations:
     profile_guided_estimations_profile_path: str | None = None
 
     # Maximum memory increase above baseline for prefetch operations
-    # Uses minimum of absolute cap and ratio of baseline
+    # Uses maximum of absolute cap and ratio of baseline
     max_memory_increase_gb: float | None = None  # Absolute cap in GB
     max_memory_increase_ratio: float | None = None  # Ratio of baseline peak memory
 
@@ -1923,15 +1923,63 @@ class cpp:
     use_two_step_variance_threshold = 1024
 
 
-def tlx_mode_from_env() -> Literal["allow", "force"] | None:
-    # Only the explicit values "allow"/"force" enable torchTLX. Any other
-    # value -- unset, empty, a typo, or a legacy "default" -- maps to None so
-    # TLX stays off. See the "Knob" section of the torchTLX README under
-    # third-party/triton/.../tlx/language/tlx/inductor/README.md.
+def tlx_mode_default() -> Literal["allow", "force"] | None:
+    """Resolve torchTLX engagement, highest precedence first.
+
+    1. ``TORCHINDUCTOR_TLX_MODE``: "off", "allow" or "force". Unset is a
+       no-op. Any other value raises, so a typo fails loudly rather than
+       silently leaving TLX in whatever state the fleet is in.
+    2. ``pytorch/inductor:tlx_mode``, the fleet-wide rollout and killswitch:
+       1 off, 2 allow, 3 force. 0 is a no-op, and is also what
+       justknobs_getval_int reports for a knob that does not exist, an
+       unreachable JK, and PYTORCH_DISABLE_JUSTKNOBS -- hence a no-op rather
+       than a fleet-wide decision taken on absent information.
+    3. ``DEFAULT_MODE`` from the active Triton, which is where the TLX
+       templates live. Installing a Triton that ships the integration is
+       itself the opt-in; one that does not -- upstream OAI Triton -- has no
+       say and TLX stays off.
+
+    No fbcode gate is needed: outside fbcode the JustKnob stub reports 0,
+    which is already a no-op.
+
+    Off is spelled None rather than "off": get_hash() hashes every
+    non-compile-ignored config at its resolved value, so giving the off state
+    a new spelling would change the key for every Inductor process, TLX or
+    not, and invalidate the FX graph cache fleet-wide.
+    """
+    off_allow_force: tuple[Literal["allow", "force"] | None, ...] = (
+        None,
+        "allow",
+        "force",
+    )
+    env_modes = dict(zip(("off", "allow", "force"), off_allow_force))
+    # "default" was the documented spelling of off before this knob grew a
+    # JustKnob and a build default; keep honoring it so a job that still sets
+    # it does not die inside `import torch._inductor.config`.
+    env_modes["default"] = None
+
     mode = os.environ.get("TORCHINDUCTOR_TLX_MODE")
-    if mode in ("allow", "force"):
-        return cast("Literal['allow', 'force']", mode)
-    return None
+    if mode is not None:
+        if mode not in env_modes:
+            raise ValueError(
+                f"TORCHINDUCTOR_TLX_MODE={mode!r} is not one of {tuple(env_modes)}"
+            )
+        return env_modes[mode]
+
+    # JustKnob values 1/2/3 index off/allow/force; 0 falls through.
+    jk = torch._utils_internal.justknobs_getval_int("pytorch/inductor:tlx_mode")
+    if 1 <= jk <= len(off_allow_force):
+        return off_allow_force[jk - 1]
+
+    # A Triton that does not ship torchTLX has no default, so TLX stays off.
+    # Deliberately a module directly under `triton` rather than anything in
+    # triton.language.extra.tlx: that package eagerly imports the whole TLX
+    # DSL, and this runs in every Inductor process, GPU or not.
+    try:
+        from triton._torchtlx_default import DEFAULT_MODE
+    except ImportError:
+        return None
+    return DEFAULT_MODE
 
 
 class triton:
@@ -1939,12 +1987,12 @@ class triton:
     Config specific to codegen/triton.py
     """
 
-    # torchTLX enablement. None (the default) means TLX is never considered
-    # (standard Inductor behavior); "allow" lets TLX compete via autotuning;
-    # "force" uses only TLX templates plus forced epilogue fusion. Also a
-    # no-op unless the active Triton is the fbtriton fork (the integration
-    # import in template_heuristics/tlx.py fails cleanly otherwise).
-    tlx_mode: Literal["allow", "force"] | None = tlx_mode_from_env()
+    # torchTLX enablement. None (off) means TLX is never considered (standard
+    # Inductor behavior); "allow" lets TLX compete via autotuning; "force"
+    # uses only TLX templates plus forced epilogue fusion. Also a no-op
+    # unless the active Triton ships the integration (the import in
+    # heuristics/template/tlx.py fails cleanly otherwise).
+    tlx_mode: Literal["allow", "force"] | None = tlx_mode_default()
 
     # Use cudagraphs on output code
     cudagraphs = os.environ.get("TORCHINDUCTOR_CUDAGRAPHS") == "1"
@@ -2194,7 +2242,15 @@ class triton:
     # We should revisit this once we understand more of the source of register spills.
     spill_threshold: int = 32 if torch.version.hip else 16
 
-    # Generate code containing the newer tl.make_block_ptr() API for loads/store
+    # Generate code using the tl.make_block_ptr() API for loads/stores. Block
+    # pointers were removed from the Triton frontend in triton-lang/triton#10833,
+    # so this flag is honored only where the installed Triton still provides the
+    # API; where it is gone the request is a no-op and use_block_ptr_enabled()
+    # emits a one-time FutureWarning before falling back to masked indexing.
+    #
+    # TODO(#191012): remove use_block_ptr entirely (this flag + the block-pointer
+    # codegen path in codegen/triton.py) once downstream backends still on block
+    # pointers (e.g. MTIA) migrate.
     use_block_ptr = False
 
     # (Experimental)
