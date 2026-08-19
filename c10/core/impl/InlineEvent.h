@@ -7,7 +7,7 @@
 
 namespace c10::impl {
 
-/*
+  /*
  * Note [Event Semantics]
  *
  * `event_` is lazily initialized in one of three ways:
