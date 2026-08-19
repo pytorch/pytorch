@@ -38,17 +38,13 @@ class ShardedTensorTestBase(MultiProcessTestCase):
         # Set the per-rank device when the process group runs on the current
         # accelerator's own backend. gloo is excluded: it is the default backend
         # for cpu and mps, and carries no per-rank accelerator device index.
-        # Look the default backend up via the non-raising map access --
-        # get_default_backend_for_device() raises ValueError for a device type
-        # with no entry, and evaluating that must not blow up just because this
-        # condition is being checked, regardless of what `backend` is.
         accelerator = torch.accelerator.current_accelerator()
-        if accelerator is not None:
-            default_backend = dist.Backend.default_device_backend_map.get(
-                accelerator.type
-            )
-            if backend == default_backend and backend != dist.Backend.GLOO:
-                torch.accelerator.set_device_index(self.rank)
+        if (
+            accelerator is not None
+            and backend != dist.Backend.GLOO
+            and backend == dist.get_default_backend_for_device(accelerator)
+        ):
+            torch.accelerator.set_device_index(self.rank)
 
     def init_rpc(self):
         rpc_backend_options = rpc.TensorPipeRpcBackendOptions(
@@ -108,24 +104,10 @@ def with_comms(func=None, init_rpc=True, backend="nccl"):
 
     @wraps(func)
     def wrapper(self, *args, **kwargs):
-        # Skip test if backend requires accelerator but not enough devices available.
-        # Ask the distributed framework rather than matching a fixed backend-name
-        # list, so an out-of-tree backend is treated the same as a built-in one --
-        # matching init_pg above. Non-raising map access, for the same reason as
-        # there: get_default_backend_for_device() raises for an unmapped device
-        # type.
+        # Skip non-Gloo tests if an accelerator is unavailable or undersized.
         acc = torch.accelerator.current_accelerator()
-        default_backend = (
-            dist.Backend.default_device_backend_map.get(acc.type)
-            if acc is not None
-            else None
-        )
         if backend != dist.Backend.GLOO:
-            if (
-                acc is None
-                or backend != default_backend
-                or torch.accelerator.device_count() < self.world_size
-            ):
+            if acc is None or torch.accelerator.device_count() < self.world_size:
                 sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
         self.init_comms(init_rpc=init_rpc, backend=backend)
         func(self, *args, **kwargs)
