@@ -13,11 +13,7 @@ from torch.distributed.checkpoint.format_utils import (
 )
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.testing._internal.common_device_type import (
-    Capability,
-    instantiate_device_type_tests,
-    requires_capabilities,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import HardwareClassification, run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -82,11 +78,6 @@ class TestFormatUtils(DTensorTestBase):
     @with_comms
     @with_temp_dir
     @skip_if_lt_x_gpu(2)
-    @requires_capabilities(
-        Capability.distributed.backend,
-        Capability.distributed.dtensor,
-        Capability.distributed.fsdp,
-    )
     def test_online_torch_save_to_dcp(self, device) -> None:
         """Tests loading a model saved by torch.save directly into a sharded model
         using dcp.load
