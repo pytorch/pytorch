@@ -9666,7 +9666,9 @@ def prepare_softmax_online(x, dim):
 @register_lowering(inductor_prims.cvt_e8m0_rceil, type_promotion_kind=None)
 def cvt_e8m0_rceil_lowering(inp):
     """
-    Lowering for cvt_e8m0_rceil. Uses PTX cvt.rp.satfinite.ue8m0x2.f32 on NVIDIA SM100+.
+    Lowering for cvt_e8m0_rceil. Uses PTX cvt.rp.satfinite.ue8m0x2.f32 on NVIDIA
+    SM100+ CUDA; every other device/backend (XPU, older CUDA, ROCm, CPU) uses a
+    software bit-manipulation fallback matching the eager reference.
 
     The PTX instruction takes 2 float32 and outputs 2 e8m0 packed in uint16.
     Currently we pass 0.0 as the second input and only use the low byte result.
@@ -9684,7 +9686,7 @@ def cvt_e8m0_rceil_lowering(inp):
     if dtype != torch.float32:
         inp = to_dtype(inp, torch.float32)
 
-    if is_nvidia_sm100_or_later():
+    if inp.get_device().type == "cuda" and is_nvidia_sm100_or_later():
         fn = functools.partial(
             ops.inline_asm_elementwise,
             asm="cvt.rp.satfinite.ue8m0x2.f32 $0, 0.0, $1;",
