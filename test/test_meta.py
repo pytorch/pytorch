@@ -2236,6 +2236,7 @@ class TestMetaCore(TestCase):
         self.assertEqual(output.shape, v_bshd.shape)
         self.assertEqual(output.stride(), v_bshd.stride())
 
+
 class TestMetaKernelConv(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
