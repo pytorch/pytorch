@@ -49,6 +49,15 @@ class ExtensionDeviceOpOverrides(CpuDeviceOpOverrides):
         return "at::kPrivateUse1"
 
 
+class MissingAtenDeviceTypeOverrides(CpuDeviceOpOverrides):
+    pass
+
+
+class InvalidAtenDeviceTypeOverrides(CpuDeviceOpOverrides):
+    def aten_device_type(self) -> str:
+        return "c10::DeviceType::PrivateUse1"
+
+
 try:
     try:
         from . import test_torchinductor
@@ -64,6 +73,21 @@ run_and_get_cpp_code = test_torchinductor.run_and_get_cpp_code
 TestCase = test_torchinductor.TestCase
 
 
+class DeviceToAtenTests(TestCase):
+    def test_missing_aten_device_type(self):
+        device = "missing_aten_device_type"
+        register_device_op_overrides(device, MissingAtenDeviceTypeOverrides())
+        with self.assertRaisesRegex(RuntimeError, "No ATen device type mapping"):
+            device_to_aten(device)
+
+    def test_invalid_aten_device_type(self):
+        device = "invalid_aten_device_type"
+        register_device_op_overrides(device, InvalidAtenDeviceTypeOverrides())
+        with self.assertRaisesRegex(RuntimeError, "must return.*at::k"):
+            device_to_aten(device)
+
+
+@xfailIfS390X
 class BaseExtensionBackendTests(TestCase):
     module = None
 
@@ -178,6 +202,8 @@ class ExtensionBackendTests(BaseExtensionBackendTests):
                 FileCheck().check("void").check(load_expr).check(
                     "extension_device"
                 ).run(code)
+                if cpp_wrapper_flag:
+                    self.assertIn("CACHE_TORCH_DEVICE(privateuse1);", code)
                 opt_fn(x, y, z)
                 res = opt_fn(x, y, z)
                 self.assertEqual(ref, res.to(device="cpu"))
