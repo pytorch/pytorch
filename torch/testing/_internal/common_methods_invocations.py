@@ -19858,7 +19858,7 @@ op_db: list[OpInfo] = [
     OpInfo('rand_like',
            dtypes=floating_types_and(torch.half, torch.bfloat16, torch.complex32, torch.complex64, torch.complex128),
            op=lambda inp, *args, **kwargs:
-               wrapper_set_seed(torch.randn_like, inp, *args, **kwargs),
+               wrapper_set_seed(torch.rand_like, inp, *args, **kwargs),
            supports_out=False,
            sample_inputs_func=sample_inputs_like_fns,
            supports_autograd=False,
@@ -19866,7 +19866,7 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
                # AssertionError: JIT Test does not execute any logic
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-               DecorateInfo(unittest.skip("Expected: randn_like is not comparable between dtypes"),
+               DecorateInfo(unittest.skip("Expected: rand_like is not comparable between dtypes"),
                             'TestCommon', 'test_complex_half_reference_testing'),
                DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
            )),
