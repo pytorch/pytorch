@@ -12,10 +12,10 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
     dtypesIfXPU,
+    expectedFailureXLA,
     instantiate_device_type_tests,
     largeTensorTest,
     onlyAccelerator,
-    onlyNativeDeviceTypes,
     skipCUDAIf,
     skipMeta,
     skipXPUIf,
@@ -287,9 +287,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
 
     # https://github.com/pytorch/pytorch/issues/130806
     @onlyAccelerator
-    @largeTensorTest("40GB", device="cuda")
-    @largeTensorTest("40GB", device="xpu")
-    @largeTensorTest("40GB", device=torch._C._get_privateuse1_backend_name())
+    @largeTensorTest("40GB")
     def test_large_tensors(self, device):
         input = torch.randint(low=0, high=16032, size=[131072], device=device)
         w = torch.randn([16032, 16384], device=device)
@@ -539,7 +537,6 @@ class TestEmbeddingNNDeviceType(NNTestCase):
     # padding indices to fill in the gaps indicated by the offset array
 
     @skipIfTorchDynamo("see https://github.com/pytorch/pytorch/pull/95621")
-    @onlyNativeDeviceTypes
     @dtypes(torch.float32, torch.float64)
     @dtypesIfCUDA(torch.half, torch.bfloat16)
     @dtypesIfXPU(torch.half, torch.bfloat16)
@@ -884,9 +881,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
 
     @onlyAccelerator
     @dtypes(torch.bfloat16)
-    @largeTensorTest("80GB", device="cuda")
-    @largeTensorTest("80GB", device="xpu")
-    @largeTensorTest("80GB", device=torch._C._get_privateuse1_backend_name())
+    @largeTensorTest("80GB")
     def test_embedding_backward_large_batch_overflow(self, device, dtype):
         """
         Test that embedding_dense_backward handles large batches that exceed INT32_MAX thread IDs.
@@ -966,8 +961,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
     # https://github.com/pytorch/pytorch/issues/188467
     @onlyAccelerator
     @dtypes(torch.int32, torch.int64)
-    @largeTensorTest("20GB", device="cuda")
-    @largeTensorTest("20GB", device=torch._C._get_privateuse1_backend_name())
+    @largeTensorTest("20GB")
     def test_embedding_bag_max_backward_large_offset_overflow(self, device, dtype):
         # chosen to guarantee an int32 overflow
         dim = 2**16
@@ -988,7 +982,6 @@ class TestEmbeddingNNDeviceType(NNTestCase):
         torch.testing.assert_close(torch.ones(dim, device=device), grad_at_r(dtype))
 
     # https://github.com/pytorch/pytorch/issues/190063
-    @onlyNativeDeviceTypes
     @dtypes(torch.float32, torch.float64)
     def test_embedding_bag_scale_grad_by_freq_mixed_counts(self, device, dtype):
         # scale_grad_by_freq must divide each index's gradient by that index's
@@ -1013,7 +1006,6 @@ class TestEmbeddingNNDeviceType(NNTestCase):
     # Check correctness of torch.nn.functional.embedding_bag forward and
     # backward functions with padding_idx, given a 2D indices input. Compare
     # against torch.nn.functional.embedding followed by a reduction.
-    @onlyNativeDeviceTypes
     @dtypes(torch.float32, torch.float64)
     @dtypesIfCUDA(torch.half, torch.bfloat16)
     @dtypesIfXPU(torch.half, torch.bfloat16)
@@ -1965,7 +1957,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
             )
         self.assertEqual(output_non_contig, output_contig)
 
-    @onlyNativeDeviceTypes  # currently fails on XLA
+    @expectedFailureXLA
     @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long)))
     def test_embedding_bag_bfloat16(self, device, dtypes):
         with set_default_dtype(torch.double):
@@ -1988,7 +1980,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
                 test_backward=True,
             )
 
-    @onlyNativeDeviceTypes  # currently fails on XLA
+    @expectedFailureXLA
     @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long)))
     def test_embedding_bag_half(self, device, dtypes):
         self._test_EmbeddingBag(
