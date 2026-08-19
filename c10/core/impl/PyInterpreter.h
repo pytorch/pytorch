@@ -207,10 +207,12 @@ struct C10_API PyInterpreterVTable {
       uintptr_t stream) const = 0;
   virtual void trace_gpu_memory_allocation(
       c10::DeviceType device_type,
-      uintptr_t ptr) const = 0;
+      uintptr_t ptr,
+      uintptr_t stream) const = 0;
   virtual void trace_gpu_memory_deallocation(
       c10::DeviceType device_type,
-      uintptr_t ptr) const = 0;
+      uintptr_t ptr,
+      uintptr_t stream) const = 0;
   virtual void trace_gpu_stream_creation(
       c10::DeviceType device_type,
       uintptr_t stream) const = 0;
