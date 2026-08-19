@@ -2570,6 +2570,63 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertRaises(Exception, lambda: lstm(input, (hx, cx)))
         self.assertRaises(Exception, lambda: lstm(input, (cx, hx)))
 
+    def test_differentiable_cell_backward_invalid_gate_sizes(self):
+        # Issue #194049: Ensure differentiable GRU and LSTM cell backward operators
+        # validate gate dimensions and do not crash on undersized gate tensors.
+        with self.assertRaisesRegex(RuntimeError, "input_gates dimension 1 must be divisible by 3"):
+            torch.ops.aten._thnn_differentiable_gru_cell_backward(
+                torch.ones((1, 1)),
+                torch.ones((1, 1)),
+                torch.ones((1, 3)),
+                torch.ones((1, 1)),
+                None,
+                None,
+            )
+
+        with self.assertRaisesRegex(RuntimeError, "hidden_gates dimension 1 must be divisible by 3"):
+            torch.ops.aten._thnn_differentiable_gru_cell_backward(
+                torch.ones((1, 1)),
+                torch.ones((1, 3)),
+                torch.ones((1, 2)),
+                torch.ones((1, 1)),
+                None,
+                None,
+            )
+
+        with self.assertRaisesRegex(RuntimeError, "input_gates and hidden_gates must have the same sizes"):
+            torch.ops.aten._thnn_differentiable_gru_cell_backward(
+                torch.ones((1, 1)),
+                torch.ones((1, 3)),
+                torch.ones((1, 6)),
+                torch.ones((1, 1)),
+                None,
+                None,
+            )
+
+        with self.assertRaisesRegex(RuntimeError, "input_gates dimension 1 must be divisible by 4"):
+            torch.ops.aten._thnn_differentiable_lstm_cell_backward(
+                torch.ones((1, 1)),
+                None,
+                torch.ones((1, 1)),
+                torch.ones((1, 4)),
+                None,
+                None,
+                torch.ones((1, 1)),
+                torch.ones((1, 1)),
+            )
+
+        with self.assertRaisesRegex(RuntimeError, "hidden_gates dimension 1 must be divisible by 4"):
+            torch.ops.aten._thnn_differentiable_lstm_cell_backward(
+                torch.ones((1, 1)),
+                None,
+                torch.ones((1, 4)),
+                torch.ones((1, 2)),
+                None,
+                None,
+                torch.ones((1, 1)),
+                torch.ones((1, 1)),
+            )
+
 
     def test_Transformer_cell(self):
         # this is just a smoke test; these modules are implemented through
