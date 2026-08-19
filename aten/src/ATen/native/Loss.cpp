@@ -56,6 +56,7 @@
 #include <ATen/ops/where.h>
 #include <ATen/ops/xlogy.h>
 #include <ATen/ops/zeros_like.h>
+#include <ATen/ops/zeros.h>
 #endif
 
 constexpr float EPSILON = 1e-12;
@@ -435,7 +436,12 @@ Tensor& smooth_l1_loss_backward_out(const Tensor& grad_output, const Tensor& inp
 }
 
 Tensor smooth_l1_loss_backward(const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction, double beta) {
-  auto grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  auto dtype = c10::promoteTypes(
+      c10::promoteTypes(input.scalar_type(), target.scalar_type()),
+      grad_output.scalar_type());
+  auto grad_input = at::zeros(
+      input.sizes(),
+      input.options().dtype(dtype).memory_format(LEGACY_CONTIGUOUS_MEMORY_FORMAT));
   return at::smooth_l1_loss_backward_out(grad_input, grad_output, input, target, reduction, beta);
 }
 
@@ -460,7 +466,12 @@ Tensor& huber_loss_out(const Tensor& input, const Tensor& target, int64_t reduct
 }
 
 Tensor huber_loss_backward(const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction, double delta) {
-  auto grad_input = at::zeros_like(input, MemoryFormat::Contiguous);
+  auto dtype = c10::promoteTypes(
+      c10::promoteTypes(input.scalar_type(), target.scalar_type()),
+      grad_output.scalar_type());
+  auto grad_input = at::zeros(
+      input.sizes(),
+      input.options().dtype(dtype).memory_format(LEGACY_CONTIGUOUS_MEMORY_FORMAT));
   return at::huber_loss_backward_out(grad_input, grad_output, input, target, reduction, delta);
 }
 
@@ -477,7 +488,12 @@ Tensor& huber_loss_backward_out(const Tensor& grad_output, const Tensor& input, 
 }
 
 Tensor mse_loss_backward(const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction) {
-  Tensor grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  auto dtype = c10::promoteTypes(
+      c10::promoteTypes(input.scalar_type(), target.scalar_type()),
+      grad_output.scalar_type());
+  auto grad_input = at::zeros(
+      input.sizes(),
+      input.options().dtype(dtype).memory_format(LEGACY_CONTIGUOUS_MEMORY_FORMAT));
   return at::mse_loss_backward_out(grad_input, grad_output, input, target, reduction);
 }
 
