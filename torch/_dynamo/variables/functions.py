@@ -93,11 +93,13 @@ from .base import (
     AttributeMutationNew,
     GetSet,
     getset_build,
+    getset_load_or_build,
     getset_read,
     getset_set,
     Member,
     Method,
     NO_SUCH_SUBOBJ,
+    store_attr_mutation,
     ValueMutationNew,
     VariableTracker,
 )
@@ -378,15 +380,6 @@ fn_known_dunder_attrs = {
 }
 
 
-def _side_effect_setter(name: str) -> Callable[..., None]:
-    """Setter for a member whose getter reads through the wrapped object: record
-    the write as a side effect, which both the read path (generic_getattr checks
-    pending mutations first) and replay pick up."""
-    return getset_set(
-        lambda s, tx, val: tx.output.side_effects.store_attr(s, name, val)
-    )
-
-
 class BaseUserFunctionVariable(VariableTracker):
     # funcobject.c func_defaults/func_kwdefaults/func_closure/func_annotations:
     # dedicated slots, NOT __dict__ entries. Only a VT that synthesizes a
@@ -506,17 +499,6 @@ class BaseUserFunctionVariable(VariableTracker):
             val, source=self.source and AttrSource(self.source, name)
         )
 
-    def _side_effects_setter(
-        self,
-        tx: "InstructionTranslatorBase",
-        name: str,
-        value: "VariableTracker | None",
-    ) -> None:
-        se = tx.output.side_effects
-        if not se.is_attribute_mutation(self):
-            se.track_attribute_mutation_new(self)
-        se.store_attr(self, name, value or variables.DeletedVariable())
-
     def _set_type_params(
         self,
         tx: "InstructionTranslatorBase",
@@ -524,7 +506,7 @@ class BaseUserFunctionVariable(VariableTracker):
     ) -> None:
         if value is not None and not issubclass(value.python_type(), tuple):
             raise_type_error(tx, "__type_params__ must be set to a tuple object")
-        self._side_effects_setter(tx, "__type_params__", value)
+        store_attr_mutation(tx, self, "__type_params__", value)
 
     def _set_name(
         self,
@@ -533,7 +515,7 @@ class BaseUserFunctionVariable(VariableTracker):
     ) -> None:
         if value is not None and not issubclass(value.python_type(), str):
             raise_type_error(tx, "__name__ must be set to a string object")
-        self._side_effects_setter(tx, "__name__", value)
+        store_attr_mutation(tx, self, "__name__", value)
 
     def _set_qualname(
         self,
@@ -542,7 +524,7 @@ class BaseUserFunctionVariable(VariableTracker):
     ) -> None:
         if value is not None and not issubclass(value.python_type(), str):
             raise_type_error(tx, "__qualname__ must be set to a string object")
-        self._side_effects_setter(tx, "__qualname__", value)
+        store_attr_mutation(tx, self, "__qualname__", value)
 
     def _get_annotations(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # func_get_annotations lazily creates and stores an empty dict. The dict
@@ -601,11 +583,11 @@ class BaseUserFunctionVariable(VariableTracker):
     tp_members = {
         "__doc__": Member(
             lambda s, tx: s._get_named_attr(tx, "__doc__"),
-            _side_effect_setter("__doc__"),
+            getset_set("__doc__"),
         ),
         "__module__": Member(
             lambda s, tx: s._get_named_attr(tx, "__module__"),
-            _side_effect_setter("__module__"),
+            getset_set("__module__"),
         ),
         "__closure__": Member(_get_closure, None),
     }
