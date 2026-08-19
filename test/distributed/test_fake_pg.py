@@ -613,6 +613,31 @@ class TestFakePG(TestCase):
         )
         self.assertEqual(out_tensor, torch.empty_like(out_tensor))
 
+    @parametrize("noncontiguous_buffer", ["input", "output"])
+    def test_alltoall_base_requires_contiguous(self, noncontiguous_buffer):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        in_tensor = torch.arange(8.0).reshape(4, 2)
+        out_tensor = torch.empty(4, 2)
+        if noncontiguous_buffer == "input":
+            in_tensor = torch.arange(8.0).reshape(2, 4).t()
+        else:
+            out_tensor = torch.empty(2, 4).t()
+
+        with self.assertRaisesRegex(RuntimeError, "Tensors must be contiguous"):
+            dist.all_to_all_single(out_tensor, in_tensor)
+
+    def test_alltoall_base_channels_last(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        in_tensor = torch.arange(32.0).reshape(2, 2, 2, 4)
+        in_tensor = in_tensor.contiguous(memory_format=torch.channels_last)
+        out_tensor = torch.empty_like(in_tensor)
+        dist.all_to_all_single(out_tensor, in_tensor)
+        self.assertEqual(out_tensor, in_tensor)
+
     def test_alltoall_list_size_validation(self):
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
