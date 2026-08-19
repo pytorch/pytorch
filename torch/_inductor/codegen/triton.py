@@ -162,9 +162,8 @@ async_compile = AsyncCompile()
 
 @dataclasses.dataclass(frozen=True)
 class TemplateLocalReduction:
-    reduction_name: str
+    reduction_node: SchedulerNode
     output_name: str
-    reduction_type: str
 
 
 @dataclasses.dataclass(frozen=True)
@@ -8260,7 +8259,7 @@ class TritonScheduling(SIMDScheduling):
         if len(template.get_size()) != 2:
             return None
 
-        chains: list[list[ir.ComputedBuffer]] = []
+        chains: list[list[SchedulerNode]] = []
         chain_by_last_buffer: dict[str, int] = {}
         for node in nodes:
             if not (
@@ -8281,7 +8280,7 @@ class TritonScheduling(SIMDScheduling):
                 chain = chain_by_last_buffer.pop(read)
             else:
                 return None
-            chains[chain].append(node.node)
+            chains[chain].append(node)
             chain_by_last_buffer[node.node.get_name()] = chain
         if not chains:
             return None
@@ -8290,7 +8289,11 @@ class TritonScheduling(SIMDScheduling):
         reductions_out = []
         block = None
         for reductions in chains:
-            first = reductions[0]
+            first_node = reductions[0]
+            buffers = [
+                cast(ir.ComputedBuffer, reduction.node) for reduction in reductions
+            ]
+            first = buffers[0]
             if (
                 first._split_size is None
                 or first._original_inner_fn is None
@@ -8307,11 +8310,11 @@ class TritonScheduling(SIMDScheduling):
                 "sum",
             }:
                 return None
-            if any(reduction._split_size is None for reduction in reductions[:-1]):
+            if any(reduction._split_size is None for reduction in buffers[:-1]):
                 return None
             if any(
                 reduction.get_reduction_type() != reduction_type
-                for reduction in reductions
+                for reduction in buffers
             ):
                 return None
 
@@ -8372,7 +8375,7 @@ class TritonScheduling(SIMDScheduling):
                 )
                 if sympy.simplify(source_reads[0].index - expected_source_index) != 0:
                     return None
-            final = reductions[-1]
+            final = buffers[-1]
             expected_stride = ir.FlexibleLayout.contiguous_strides(expected_output)
             if not (
                 V.graph.sizevars.statically_known_list_equals(
@@ -8388,9 +8391,8 @@ class TritonScheduling(SIMDScheduling):
                 return None
             reductions_out.append(
                 TemplateLocalReduction(
-                    first.get_name(),
+                    first_node,
                     final.get_name(),
-                    reduction_type,
                 )
             )
         if block is None:

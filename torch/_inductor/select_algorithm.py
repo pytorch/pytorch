@@ -42,7 +42,6 @@ from torch._inductor.await_utils import await_sync
 from torch._inductor.utils import clear_on_fresh_cache
 from torch.utils._filelock import FileLock
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._sympy.value_ranges import ValueRanges
 
 from ..utils._sympy.functions import CeilDiv, Max, Min
 from . import config, ir
@@ -64,7 +63,7 @@ from .codegen.common import (
     WorkspaceArg,
     WorkspaceZeroMode,
 )
-from .codegen.simd import CantSplit, constant_repr
+from .codegen.simd import CantSplit, DerivedIterationRangesRoot
 from .codegen.simd_kernel_features import SIMDKernelFeatures
 from .codegen.subgraph import SubgraphChoiceCaller
 from .codegen.triton import (
@@ -533,132 +532,64 @@ class _TemplateLocalReductionOpsHandler(V.WrapperHandler):  # type: ignore[name-
         reduction: TemplateLocalReduction,
         *,
         source_name: str,
-        source_index: sympy.Expr,
-        store_index: sympy.Expr,
         tile: tuple[int, int],
         block: tuple[int, int],
-        reduction_mask: str,
-        output_index: str,
-        output_mask: str,
         result_name: str,
     ) -> None:
         super().__init__(inner)
         self.kernel = kernel
         self.spec = reduction
         self.source_name = source_name
-        self.source_index = source_index
-        self.store_index = store_index
         self.tile = tile
         self.block = block
-        self.reduction_mask = reduction_mask
-        self.output_index = output_index
-        self.output_mask = output_mask
         self.result_name = result_name
         self.value: CSEVariable | None = None
-        self.reduction_seen = False
 
     def load(self, name: str, index: sympy.Expr) -> CSEVariable:
-        if name != self.source_name or sympy.simplify(index - self.source_index) != 0:
-            raise CantSplit(index, self.source_index)
+        if name != self.source_name:
+            raise CantSplit(name, self.source_name)
         if self.value is None:
             value = self._inner.load(name, index)
             if value.dtype is None:
                 raise AssertionError("template accumulator must have a known dtype")
             tile_m, tile_n = self.tile
             block_m, block_n = self.block
-            shape = (tile_m // block_m, block_m, tile_n // block_n, block_n)
-            self.value = self.kernel.emit_reshape(value, shape, value.dtype)
+            groups_m = tile_m // block_m
+            groups_n = tile_n // block_n
+            value = self.kernel.emit_reshape(
+                value,
+                (groups_m, block_m, groups_n, block_n),
+                value.dtype,
+            )
+            value = self.kernel.cse.generate(
+                self.kernel.compute,
+                f"tl.permute({value}, (0, 2, 1, 3))",
+                dtype=value.dtype,
+                shape=(groups_m, groups_n, block_m, block_n),
+            )
+            self.value = self.kernel.emit_reshape(
+                value,
+                (groups_m, groups_n, block_m * block_n),
+                value.dtype,
+            )
         return self.value
 
-    def index_expr(self, expr: sympy.Expr, dtype: torch.dtype):
-        raise CantSplit(expr, dtype)
-
-    def to_dtype_bitcast(self, x, dtype: torch.dtype, src_dtype: torch.dtype):
-        raise CantSplit(dtype, src_dtype)
-
-    def reduction(
-        self,
-        dtype: torch.dtype,
-        src_dtype: torch.dtype,
-        reduction_type: str,
-        value: CSEVariable,
-    ) -> CSEVariable:
-        if self.reduction_seen or reduction_type != self.spec.reduction_type:
-            raise CantSplit(reduction_type, self.spec.reduction_type)
-        self.reduction_seen = True
-
-        tile_m, tile_n = self.tile
-        block_m, block_n = self.block
-        groups_m = tile_m // block_m
-        groups_n = tile_n // block_n
-        input_shape = (groups_m, block_m, groups_n, block_n)
-        expr = self.kernel.create_cse_var(
-            f"({value}).to({self.kernel.dtype_to_str(src_dtype)})",
-            ValueRanges.unknown(),
-            dtype=src_dtype,
-            shape=input_shape,
-        )
-        result_dtype = src_dtype
-        if src_dtype.is_floating_point and src_dtype.itemsize < 4:
-            result_dtype = torch.float32
-            expr = self.kernel.create_cse_var(
-                f"({expr}).to(tl.float32)",
-                ValueRanges.unknown(),
-                dtype=result_dtype,
-                shape=input_shape,
-            )
-
-        mask = self.kernel.create_cse_var(
-            self.reduction_mask,
-            ValueRanges.unknown(),
-            dtype=torch.bool,
-            shape=self.tile,
-        )
-        mask = self.kernel.emit_reshape(mask, input_shape, torch.bool)
-        neutral = constant_repr(
-            cast(
-                int | float,
-                ir.Reduction.default_accumulator(reduction_type, src_dtype),
-            )
-        )
-        value = self.kernel.create_cse_var(
-            f"tl.where({mask}, {expr}, {neutral})",
-            ValueRanges.unknown(),
-            dtype=result_dtype,
-            shape=input_shape,
-        )
-        value = self.kernel.emit_reduce(
-            value,
-            reduction_type,
-            3,
-            result_dtype,
-            (groups_m, block_m, groups_n),
-        )
-        result = self.kernel.emit_reduce(
-            value,
-            reduction_type,
-            1,
-            result_dtype,
-            (groups_m, groups_n),
-        )
-        self.kernel.compute.writeline(f"{self.result_name} = {result}")
-        return self.kernel.cse.namedvar(
-            self.result_name,
-            dtype=result_dtype,
-            shape=(groups_m, groups_n),
-        )
-
     def store_reduction(self, name: str, index: sympy.Expr, value: CSEVariable) -> None:
-        if (
-            name != self.spec.output_name
-            or sympy.simplify(index - self.store_index) != 0
-            or not self.reduction_seen
-        ):
-            raise CantSplit(index, self.store_index)
-        output_ptr = self.kernel.args.output(name)
-        self.kernel.stores.writeline(
-            f"tl.store({output_ptr} + {self.output_index}, {value}, {self.output_mask})"
+        expected_name = self.spec.reduction_node.node.get_name()
+        if name != expected_name:
+            raise CantSplit(name, expected_name)
+        self.kernel.compute.writeline(f"{self.result_name} = {value}")
+        value = self.kernel.cse.namedvar(
+            self.result_name,
+            dtype=value.dtype,
+            shape=value.shape,
         )
+        name = self.spec.output_name
+        self.kernel.store_buffer_names.add(name)
+        self.kernel.cse.store_cache[name] = value
+        if name not in V.graph.removed_buffers:
+            self.kernel.num_store += 1
+            self.kernel.store_reduction(name, index, value)
 
 
 # Function name, followed by args and kwargs.
@@ -852,6 +783,94 @@ class TritonTemplateKernel(TritonKernel):
         nodes = [node for epilogue in epilogue_nodes for node in epilogue.get_nodes()]
         return TritonScheduling._template_local_reduction_plan(self.output_node, nodes)
 
+    @contextlib.contextmanager
+    def _template_local_reduction_codegen(self):
+        plan = self.template_local_reduction_plan
+        tile = self.template_local_reduction_tile
+        if plan is None or tile is None:
+            raise AssertionError("expected a template-local reduction plan")
+
+        tile_m, tile_n = tile
+        block_m, block_n = plan.block
+        groups_m = tile_m // block_m
+        groups_n = tile_n // block_n
+        template_m, template_n = self.output_node.get_size()
+        output_m = template_m // block_m
+        output_n = template_n // block_n
+
+        old_range_trees = self.range_trees
+        old_range_tree_nodes = self.range_tree_nodes
+        old_numels = self.numels
+        old_inside_reduction = self.inside_reduction
+        old_persistent_reduction = self.persistent_reduction
+        old_cooperative_reduction = self.cooperative_reduction
+        old_template_mask = self.template_mask
+        old_template_out_shape = self.template_out_shape
+
+        self.range_tree_nodes = {}
+        try:
+            rnumel = sympy.Integer(block_m * block_n)
+            self.numels = {"x": output_m, "y": output_n, "r0_": rnumel}
+            self.inside_reduction = True
+            self.persistent_reduction = True
+            self.cooperative_reduction = False
+            self.template_mask = None
+            self.template_out_shape = (str(groups_m), str(groups_n), "1")
+            roots = {
+                tree.prefix: tree
+                for tree in self.construct_range_trees(
+                    pid_cache=None,
+                    inside_reduction=True,
+                    is_reduction=True,
+                    numels=self.numels,
+                    no_x_dim=False,
+                )
+            }
+            for tensor_dim, prefix in enumerate(("x", "y", "r0_")):
+                roots[prefix].index = tensor_dim
+                roots[prefix].tensor_dim = tensor_dim
+                roots[prefix].grid_dim = None
+
+            pid_m = sympy.Symbol("pid_m", integer=True, nonnegative=True)
+            pid_n = sympy.Symbol("pid_n", integer=True, nonnegative=True)
+            x_tree = DerivedIterationRangesRoot(
+                roots["x"],
+                numel=output_m,
+                block_size=sympy.Integer(groups_m),
+                block_offset=pid_m * groups_m,
+                name_suffix="block_local",
+            )
+            y_tree = DerivedIterationRangesRoot(
+                roots["y"],
+                numel=output_n,
+                block_size=sympy.Integer(groups_n),
+                block_offset=pid_n * groups_n,
+                name_suffix="block_local",
+            )
+            r_tree = DerivedIterationRangesRoot(
+                roots["r0_"],
+                numel=rnumel,
+                block_size=rnumel,
+                block_offset=sympy.S.Zero,
+                name_suffix="block_local",
+            )
+            self.range_trees = [x_tree, y_tree, r_tree]
+            self.simplify_indexing.cache_clear()
+
+            for tree in self.range_trees:
+                self.iteration_ranges_codegen_header(tree, self.body)
+            yield
+        finally:
+            self.range_trees = old_range_trees
+            self.range_tree_nodes = old_range_tree_nodes
+            self.numels = old_numels
+            self.inside_reduction = old_inside_reduction
+            self.persistent_reduction = old_persistent_reduction
+            self.cooperative_reduction = old_cooperative_reduction
+            self.template_mask = old_template_mask
+            self.template_out_shape = old_template_out_shape
+            self.simplify_indexing.cache_clear()
+
     def _codegen_template_local_reductions(self) -> None:
         plan = self.template_local_reduction_plan
         if plan is None:
@@ -859,69 +878,26 @@ class TritonTemplateKernel(TritonKernel):
         if self.template_local_reduction_tile is None:
             raise AssertionError("expected a template-local reduction tile")
 
-        tile_m, tile_n = self.template_local_reduction_tile
-        block_m, block_n = plan.block
-        groups_m = tile_m // block_m
-        groups_n = tile_n // block_n
-        template_m, template_n = self.output_node.get_size()
-        output_m = self.index_to_str(template_m // block_m)
-        output_n = self.index_to_str(template_n // block_n)
-        reduction_mask = self.template_mask or "(xmask & ymask)"
-        pid_m = "_block_local_pid_m"
-        pid_n = "_block_local_pid_n"
-        output_mask = "_block_local_store_mask"
-        self.compute.writeline(
-            f"{pid_m} = (pid_m * {groups_m} + tl.arange(0, {groups_m}))[:, None]"
-        )
-        self.compute.writeline(
-            f"{pid_n} = (pid_n * {groups_n} + tl.arange(0, {groups_n}))[None, :]"
-        )
-        self.compute.writeline(
-            f"{output_mask} = ({pid_m} < {output_m}) & ({pid_n} < {output_n})"
-        )
-        output_index = f"{pid_m} * {output_n} + {pid_n}"
-
-        for reduction_number, reduction in enumerate(plan.reductions):
-            buffer = V.graph.get_buffer(reduction.reduction_name)
-            output = V.graph.get_buffer(reduction.output_name)
-            if not isinstance(buffer, ir.ComputedBuffer) or not isinstance(
-                output, ir.ComputedBuffer
-            ):
-                raise CantSplit(reduction.reduction_name, reduction.output_name)
-            with buffer.with_original_inner_fn():
-                if not isinstance(buffer.data, ir.Reduction):
-                    raise AssertionError("expected the original reduction body")
-                index, reduction_index = buffer.data.inner_fn_args()
-                if len(index) != 2 or len(reduction_index) != 2:
-                    raise CantSplit(index, reduction_index)
-                source_index = self.output_node.make_indexer()(
-                    (
-                        index[0] * block_m + reduction_index[0],
-                        index[1] * block_n + reduction_index[1],
+        with self._template_local_reduction_codegen():
+            for reduction_number, reduction in enumerate(plan.reductions):
+                node = reduction.reduction_node
+                state = node.snapshot_loop_state()
+                try:
+                    node.cancel_reduction_split()
+                    handler = _TemplateLocalReductionOpsHandler(
+                        V.get_ops_handler(),
+                        self,
+                        reduction,
+                        source_name=self.output_node.get_name(),
+                        tile=self.template_local_reduction_tile,
+                        block=plan.block,
+                        result_name=f"_block_local_reduction_{reduction_number}",
                     )
-                )
-                output_index_expr = output.make_indexer()(index)
-                handler = _TemplateLocalReductionOpsHandler(
-                    V.get_ops_handler(),
-                    self,
-                    reduction,
-                    source_name=self.output_node.get_name(),
-                    source_index=source_index,
-                    store_index=output_index_expr,
-                    tile=self.template_local_reduction_tile,
-                    block=plan.block,
-                    reduction_mask=reduction_mask,
-                    output_index=output_index,
-                    output_mask=output_mask,
-                    result_name=f"_block_local_reduction_{reduction_number}",
-                )
-                with V.set_ops_handler(handler):
-                    buffer.data.store_reduction(
-                        reduction.output_name,
-                        output.make_indexer(),
-                        index,
-                        reduction_index,
-                    )
+                    with V.set_ops_handler(handler):
+                        node.codegen(self.split_and_set_ranges(node.get_ranges()))
+                finally:
+                    node.restore_loop_state(state)
+            self.codegen_body()
 
     @property
     def index_dtype(self) -> str:
