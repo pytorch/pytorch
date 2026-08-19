@@ -28,6 +28,7 @@ static void addReturnType(
           name,
           (PyObject*)type) != 0) {
     Py_DECREF(type);
+    // @allow-raw-throw: the reference must be dropped before unwinding
     throw python_error();
   }
 }
@@ -36,15 +37,14 @@ void initReturnTypes(PyObject* module) {
   static struct PyModuleDef def = {
       PyModuleDef_HEAD_INIT, "torch._C._return_types", nullptr, -1, {}};
   PyObject* return_types_module = PyModule_Create(&def);
-  if (!return_types_module) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(return_types_module);
 
   ${py_return_types_registrations}
 
   // steals a reference to return_types on success
   if (PyModule_AddObject(module, "_return_types", return_types_module) != 0) {
     Py_DECREF(return_types_module);
+    // @allow-raw-throw: the reference must be dropped before unwinding
     throw python_error();
   }
 }

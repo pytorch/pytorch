@@ -185,9 +185,7 @@ class PythonKernelHolder : public c10::OperatorKernel {
                   **args_kwargs.second)
         : with_keyset_ ? func(keyset, *args_kwargs.first, **args_kwargs.second)
                         : func(*args_kwargs.first, **args_kwargs.second);
-    if (!obj) {
-      throw python_error();
-    }
+    TORCH_CHECK_PYTHON(obj);
     pushPyOutToStack(op, stack, obj, "PythonKernelHolder");
   }
 };
@@ -598,6 +596,7 @@ static PyObject* make_pyobject_dispatch_func(
   auto* result = PyObject_New(PyObjectDispatchFunc, &PyObjectDispatchFuncType);
   if (result == nullptr) {
     delete owned_handle;
+    // @allow-raw-throw: the handle must be freed before unwinding
     throw python_error();
   }
   Py_INCREF(cpp_dispatch_fn);
@@ -619,6 +618,7 @@ static PyObject* make_pyobject_redispatch_func(
       PyObject_New(PyObjectRedispatchFunc, &PyObjectRedispatchFuncType);
   if (result == nullptr) {
     delete owned_handle;
+    // @allow-raw-throw: the handle must be freed before unwinding
     throw python_error();
   }
   Py_INCREF(cpp_redispatch_fn);
@@ -694,9 +694,7 @@ void initDispatchBindings(PyObject* module) {
   PyObjectDispatchFuncType.tp_call = PyVectorcall_Call;
   PyObjectDispatchFuncType.tp_vectorcall_offset =
       offsetof(PyObjectDispatchFunc, vectorcall);
-  if (PyType_Ready(&PyObjectDispatchFuncType) < 0) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(PyType_Ready(&PyObjectDispatchFuncType) >= 0);
 
   PyObjectRedispatchFuncType.tp_name = "torch._C._PyObjectRedispatchFunc";
   PyObjectRedispatchFuncType.tp_basicsize = sizeof(PyObjectRedispatchFunc);
@@ -707,9 +705,7 @@ void initDispatchBindings(PyObject* module) {
   PyObjectRedispatchFuncType.tp_call = PyVectorcall_Call;
   PyObjectRedispatchFuncType.tp_vectorcall_offset =
       offsetof(PyObjectRedispatchFunc, vectorcall);
-  if (PyType_Ready(&PyObjectRedispatchFuncType) < 0) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(PyType_Ready(&PyObjectRedispatchFuncType) >= 0);
 
   py::class_<c10::OperatorHandle>(m, "_DispatchOperatorHandle")
       .def("schema", &c10::OperatorHandle::schema)
@@ -1572,9 +1568,7 @@ void python_op_registration_trampoline_impl(
                                          **args_kwargs.second)
       : with_keyset ? callable(keyset, *args_kwargs.first, **args_kwargs.second)
                     : callable(*args_kwargs.first, **args_kwargs.second);
-  if (!obj) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(obj);
   pushPyOutToStack(op, stack, obj, "PythonKernelHolder");
 }
 

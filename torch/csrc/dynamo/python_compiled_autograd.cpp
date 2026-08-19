@@ -73,6 +73,8 @@ std::string TURN_OFF_COMPILED_AUTOGRAD_MSG() {
 static void throw_python_error() {
   python_error err;
   err.persist();
+  // See Note [ Persisting PyErr state across autograd engine threads ]
+  // @allow-raw-throw: persist() must run before unwinding
   throw std::move(err);
 }
 
