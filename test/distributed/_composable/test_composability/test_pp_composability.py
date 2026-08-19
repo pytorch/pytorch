@@ -78,20 +78,8 @@ class MLPModuleEven(torch.nn.Module):
 
 class ComposabilityTestBase(MultiProcContinuousTest):
     @classmethod
-    def _resolved_device_type(cls) -> str:
-        # MultiProcContinuousTest subprocesses run tests without calling
-        # PrivateUse1TestBase.setUpClass, so cls.device_type stays the generic
-        # "privateuse1" token; resolve it to the registered backend name.
-        dt = cls.device_type
-        if dt == "privateuse1":
-            dt = torch._C._get_privateuse1_backend_name()
-        return dt
-
-    @classmethod
     def backend_str(cls) -> str:
-        return torch.distributed.get_default_backend_for_device(
-            cls._resolved_device_type()
-        )
+        return torch.distributed.get_default_backend_for_device(cls.device_type)
 
     def _rank_device(self, device: str) -> torch.device:
         # `device` is the framework-injected primary device ("{type}:0",
@@ -216,7 +204,7 @@ class ComposabilityTest(ComposabilityTestBase):
         num_microbatches = 8
         dp_size = self.world_size // (tp_size * pp_size)
         device_mesh = init_device_mesh(
-            self._resolved_device_type(),
+            self.device_type,
             mesh_shape=(dp_size, pp_size, tp_size),
             mesh_dim_names=("dp", "pp", "tp"),
         )
@@ -358,7 +346,7 @@ class ComposabilityTest(ComposabilityTestBase):
         num_microbatches = 8
         replicate_size = self.world_size // (pp_size)
         device_mesh = init_device_mesh(
-            self._resolved_device_type(),
+            self.device_type,
             mesh_shape=(replicate_size, pp_size),
             mesh_dim_names=("replicate", "pp"),
         )
@@ -535,7 +523,7 @@ class ComposabilityTest(ComposabilityTestBase):
         num_microbatches = 8
         replicate_size = self.world_size // (pp_size)
         device_mesh = init_device_mesh(
-            self._resolved_device_type(),
+            self.device_type,
             mesh_shape=(replicate_size, pp_size),
             mesh_dim_names=("replicate", "pp"),
         )
