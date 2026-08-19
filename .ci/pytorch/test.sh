@@ -1163,17 +1163,17 @@ if count < 1:
 print(",".join(str(index) for index in range(count)))
 PY
 )"
-  local accounting_dir="${debug_dir}/model-accounting"
-  python scripts/generate_occurrence_sidecars.py \
-    --corpus-root repros \
-    --output-dir "${accounting_dir}/occurrences" \
-    --extern-cache "${accounting_dir}/extern-cache.json" \
-    --all \
-    --devices "${gpu_indices}"
-  python scripts/build_model_accounting.py \
-    --occdir "${accounting_dir}/occurrences" \
-    --output "${test_reports_dir}/model_accounting/b200" \
-    --prune
+
+  python scripts/bench_parallel.py \
+    repros/canonical \
+    --all-shapes \
+    --gpus "${gpu_indices}" \
+    --output "${debug_dir}/current.json"
+  python scripts/dashboard_export.py \
+    --input "${debug_dir}/current.json" \
+    --model-accounting benchmarks/model_accounting/b200 \
+    --timing auto \
+    --ci-json "${test_reports_dir}/inductor_kernel_benchmark.json"
   popd
 }
 
