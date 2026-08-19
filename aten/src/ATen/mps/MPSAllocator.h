@@ -399,7 +399,7 @@ class MPSHeapAllocatorImpl {
   // bytes unavailable for reuse: in-use plus freed-but-pending GPU completion;
   // feeds active_bytes in getDeviceStats (semantics follow CUDACachingAllocator)
   c10::CachingAllocator::Stat m_active_bytes;
-  // max buffer size allowed by Metalpython -c "import torch; print(torch.__version__)"
+  // max buffer size allowed by Metal
   size_t m_max_buffer_size = 0;
   // maximum total size allowed to be allocated
   size_t m_max_total_allowed_size = 0;
