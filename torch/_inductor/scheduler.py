@@ -8442,26 +8442,6 @@ class Scheduler:
             ):
                 return True
 
-            # Vertical fusion failed — the iteration domains may not
-            # match (e.g. pointwise reads buf[x//32] while reduction
-            # writes buf[x]).  Try reindexing the pointwise to the
-            # reduction's domain and retry.
-            if (
-                config.loop_reindexing_after_fusion
-                and self._try_reindex_pointwise_for_reduction(node1, node2)
-            ):
-                return (
-                    self.can_fuse_vertical(
-                        node1,
-                        node2,
-                        index_equivalent_dep_names=index_equivalent_dep_names,
-                    )
-                    and V.choices.can_fuse_vertical(
-                        self, node1, node2, shared_data_score
-                    )
-                    and self.get_backend(device).can_fuse_vertical(node1, node2)
-                )
-
             return False
         else:  # nodes don't depend on each other, but may have common reads
             return V.choices.can_fuse_horizontal(

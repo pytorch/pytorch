@@ -1982,9 +1982,6 @@ class FakeTensorMode(TorchDispatchMode):
         if torch.Tag.inplace_view in func.tags:
             raise _BypassDispatchCache("inplace view")
 
-        if func is aten._unsafe_view.default:
-            raise _BypassDispatchCache("unsafe view")
-
         if func is torch.ops.prims.as_strided.default:
             raise _BypassDispatchCache("prims.as_strided")
 
@@ -2142,7 +2139,15 @@ class FakeTensorMode(TorchDispatchMode):
 
         # Otherwise, create an entry that records the output tensor's metadata.
         view_idx = None
-        if isinstance(func, torch._ops.OpOverload) and func.is_view:
+        # _unsafe_view is a view in every way that matters here: its output
+        # shares the input's storage. It is only "unsafe" in that it does not
+        # record the view for autograd. Treat it like one, so the output
+        # synthesized on a hit aliases its input as the real op would - caching
+        # it as a plain op would hand back a fresh storage and quietly lose the
+        # aliasing.
+        if isinstance(func, torch._ops.OpOverload) and (
+            func.is_view or func is aten._unsafe_view.default
+        ):
             idxs = [i for i, t in enumerate(args) if isinstance(t, Tensor)]
             if len(idxs) != 1:
                 raise AssertionError(
@@ -2363,7 +2368,7 @@ class FakeTensorMode(TorchDispatchMode):
         # The set_ below replaces the size, stride and storage of the tensor
         # created here, so for a view op don't pay to derive them twice. On
         # symbolic shapes that derivation is the bulk of the cost of both calls.
-        is_view = isinstance(func, torch._ops.OpOverload) and func.is_view
+        is_view = entry.view_idx is not None
 
         with in_kernel_invocation_manager(self), maybe_suppress():
             empty = torch.empty_strided(

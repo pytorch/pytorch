@@ -262,6 +262,23 @@ def install_config_module(module: ModuleType) -> None:
         f"{module.__name__}._get_dict_cache", default=None
     )  # type: ignore[attr-defined]
 
+    # Note [config shadow]
+    #
+    # Reading an attribute that a module does not have costs ~1us: the class
+    # level __getattr__ hook only runs after normal lookup has failed and built
+    # an AttributeError. Compilation reads configs hundreds of thousands of
+    # times, so park the resolved value in the module __dict__ where a plain
+    # attribute lookup finds it and __getattr__ never runs.
+    #
+    # This is only sound while the value is a context-independent constant: a
+    # fast_default entry that nobody has written to reads as its default in
+    # every thread and context. __setattr__ and __delattr__ drop the shadow, so
+    # a config that is ever written falls back to __getattr__ for good.
+    for name, entry in config.items():
+        if entry.fast_default and "." not in name:
+            entry.owner_dict = module.__dict__
+            module.__dict__[name] = entry.default
+
 
 COMPILE_IGNORED_MARKER = "@compile_ignored"
 
@@ -334,6 +351,17 @@ class _ConfigEntry:
     # upstream bug - python/cpython#126886
     hide: bool = False
     alias: str | None = None
+    # True when a read reduces to "user_override if set else default", i.e. the
+    # alias / env / justknob / deprecation / mutable-default branches of
+    # ConfigModule.__getattr__ are all statically known not to apply. Config
+    # reads are hot on the compile path (hundreds of thousands per compile), so
+    # the common entry skips them.
+    fast_default: bool = False
+    # __dict__ of the owning module, and the key this entry is shadowed under
+    # in it. See Note [config shadow]. Write user_override through
+    # set_user_override so the shadow cannot go stale.
+    owner_dict: dict[str, Any] | None = None
+    name: str = ""
     # Deprecation support
     deprecated: bool = False
     deprecation_message: str | None = None
@@ -381,6 +409,27 @@ class _ConfigEntry:
                 raise AssertionError(
                     f"envvar configs only support (optional) booleans or strings, {self.value_type} is neither"
                 )
+        self.name = name
+        self.refresh_fast_default()
+
+    def set_user_override(self, value: object) -> None:
+        self.user_override.set(value)
+        self.drop_shadow()
+
+    def drop_shadow(self) -> None:
+        if self.owner_dict is not None:
+            self.owner_dict.pop(self.name, None)
+
+    def refresh_fast_default(self) -> None:
+        self.fast_default = (
+            not self.hide
+            and not self.deprecated
+            and self.alias is None
+            and self.justknob is None
+            and self.env_value_force is _UNSET_SENTINEL
+            and self.env_value_default is _UNSET_SENTINEL
+            and isinstance(self.default, _IMMUTABLE_CONFIG_TYPES)
+        )
 
 
 class ConfigModule(ModuleType):
@@ -431,7 +480,7 @@ class ConfigModule(ModuleType):
             if config.alias is not None:
                 self._set_alias_val(config, value)
             else:
-                config.user_override.set(value)
+                config.set_user_override(value)
                 self._hash_dirty_var.set(True)
                 self._mark_get_dict_dirty(name)
                 # Avoid a redundant instance-__dict__ write: hide defaults to False on
@@ -439,10 +488,17 @@ class ConfigModule(ModuleType):
                 # workaround), so only clear it when it is actually set.
                 if config.hide:
                     config.hide = False
+                    config.refresh_fast_default()
 
     def __getattr__(self, name: str) -> Any:
         try:
             config = self._config[name]
+
+            if config.fast_default:
+                user_override = config.user_override.get()
+                if user_override is not _UNSET_SENTINEL:
+                    return user_override
+                return config.default
 
             if config.hide:
                 raise AttributeError(f"{self.__name__}.{name} does not exist")
@@ -471,7 +527,7 @@ class ConfigModule(ModuleType):
             # Reference types can still be modified, so copy them to
             # user_overrides to prevent accidental mutation of defaults.
             if not isinstance(config.default, _IMMUTABLE_CONFIG_TYPES):
-                config.user_override.set(copy.deepcopy(config.default))
+                config.set_user_override(copy.deepcopy(config.default))
                 return config.user_override.get()
             return config.default
 
@@ -484,8 +540,9 @@ class ConfigModule(ModuleType):
         self._mark_get_dict_dirty(name)
         # must support delete because unittest.mock.patch deletes
         # then recreate things
-        self._config[name].user_override.set(_UNSET_SENTINEL)
+        self._config[name].set_user_override(_UNSET_SENTINEL)
         self._config[name].hide = True
+        self._config[name].refresh_fast_default()
 
     def _get_alias_module_and_name(
         self, entry: _ConfigEntry
@@ -992,13 +1049,13 @@ class ConfigModule(ModuleType):
         def change() -> Callable[[], None]:
             prior = {k: config[k].user_override.get() for k in changes}
             for k, v in changes.items():
-                config[k].user_override.set(v)
+                config[k].set_user_override(v)
                 self._hash_dirty_var.set(True)
                 self._mark_get_dict_dirty(k)
 
             def revert() -> None:
                 for k, v in prior.items():
-                    config[k].user_override.set(v)
+                    config[k].set_user_override(v)
                     self._hash_dirty_var.set(True)
                     self._mark_get_dict_dirty(k)
 

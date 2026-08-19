@@ -3915,6 +3915,8 @@ class SubgraphTracer(fx.Tracer):
         self.dynamic_scalar_nodes: dict[int, torch.SymInt] = {}
 
         self.prev_inst = None
+        # See Note [stack trace memo] in _create_proxy.
+        self._stack_trace_cache: dict[tuple[Any, ...], str] = {}
         # True if we want to allow externally visible side-effects (doesn't throw error on their existence)
         # during this tracer's tracing. This is currently only used by experimental AC out-of-tree
         # via torch._dynamo.utils._disable_side_effect_safety_checks_for_current_subtracer.
@@ -4190,26 +4192,59 @@ class SubgraphTracer(fx.Tracer):
                     ]
 
         if "stack_trace" not in rv.node.meta:
-            frame_summaries: list[traceback.FrameSummary] = []
-            while tx:
-                # Avoid frame summaries from inside the torch/nn/modules. This ensures that we keep the stack trace of
-                # the user code.
-                if not tx.is_co_filename_from_nn_modules():
-                    frame_summaries.append(tx.frame_summary())
-                tx = getattr(tx, "parent", None)
+            # Note [stack trace memo]
+            # Every fx node gets the user stack that produced it, and producing
+            # it is not cheap: a FrameSummary per frame, then StackSummary
+            # .format(), which reads the source line and works out the 3.11+
+            # anchor columns for each one. That is ~10 frames for every node.
+            #
+            # The same stack recurs constantly - a transformer traces the same
+            # lines once per layer - so key on what the answer depends on and
+            # build it only when it is new. The key is the frame identity, not
+            # the FrameSummary objects, so a hit skips constructing those too.
+            key = []
+            walk = tx
+            while walk:
+                # Skip torch/nn/modules frames so the trace shows user code.
+                if not walk.is_co_filename_from_nn_modules():
+                    filename = getattr(walk.f_code, "co_filename", "<unknown>")
+                    if filename not in uninteresting_files():
+                        positions = walk.current_instruction.positions
+                        key.append(
+                            (
+                                filename,
+                                walk.lineno,
+                                getattr(walk.f_code, "co_name", "<unknown>"),
+                                positions.col_offset if positions else None,
+                                positions.end_col_offset if positions else None,
+                            )
+                        )
+                walk = getattr(walk, "parent", None)
 
-            filtered_frame_summaries = [
-                frame
-                for frame in frame_summaries
-                if frame.filename not in uninteresting_files()
-            ]
-
-            # Reverse the frame_summaries, such that the innermost frame is at the last
-            filtered_frame_summaries.reverse()
-
-            # official from_list stub doesn't have new-style type
-            msgs = traceback.StackSummary.from_list(filtered_frame_summaries).format()
-            rv.node.stack_trace = "".join(msgs)
+            stack_key = tuple(key)
+            cached = self._stack_trace_cache.get(stack_key)
+            if cached is None:
+                frame_summaries = [
+                    traceback.FrameSummary(
+                        filename,
+                        lineno,
+                        name,
+                        lookup_line=False,
+                        **(
+                            {"colno": colno, "end_colno": end_colno}
+                            if sys.version_info >= (3, 11) and colno is not None
+                            else {}
+                        ),
+                    )
+                    # Innermost frame last, matching the order tracebacks print.
+                    for filename, lineno, name, colno, end_colno in reversed(key)
+                ]
+                # official from_list stub doesn't have new-style type
+                cached = "".join(
+                    traceback.StackSummary.from_list(frame_summaries).format()
+                )
+                self._stack_trace_cache[stack_key] = cached
+            rv.node.stack_trace = cached
 
         if (
             torch._dynamo.config.use_graph_deduplication

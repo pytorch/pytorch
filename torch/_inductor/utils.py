@@ -3788,6 +3788,22 @@ def remove_unaligned_input_idxs(
 def expr_fits_within_32bit(e: sympy.Expr) -> bool:
     """Check if an expression fits within 32-bit integer range.
 
+    Answers are memoized per SizeVarAllocator - the query costs ~265us and the
+    same expressions come back repeatedly - see
+    SizeVarAllocator.expr_fits_within_32bit.
+
+    NOTE: This function intentionally does not install guards. Callers are
+    responsible for guarding (e.g. via check_leq) when they decide to use
+    32-bit indexing based on this result.
+    """
+    from .virtualized import V
+
+    return V.graph.sizevars.expr_fits_within_32bit(e)
+
+
+def expr_fits_within_32bit_uncached(e: sympy.Expr) -> bool:
+    """Check if an expression fits within 32-bit integer range.
+
     NOTE: This function intentionally does not install guards. Callers are
     responsible for guarding (e.g. via check_leq) when they decide to use
     32-bit indexing based on this result.
