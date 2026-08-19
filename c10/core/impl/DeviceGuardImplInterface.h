@@ -306,6 +306,32 @@ struct C10_API DeviceGuardImplInterface {
   }
 
   /**
+   * Return an IPC handle for the given event, lazily initializing the backend
+   * event if needed. The handle can be passed to
+   * reconstructEventFromIPCHandle() in another process to reconstruct the event
+   * there.
+   */
+  virtual std::string getEventIPCHandle(
+      void** /*event*/,
+      const DeviceIndex /*device_index*/,
+      const EventFlag /*flag*/) const {
+    TORCH_CHECK(false, "Backend doesn't support IPC events.");
+  }
+
+  /**
+   * Reconstruct a backend event from an IPC handle string on the given device.
+   * *event is set to a newly allocated backend event; it will be released via
+   * destroyEvent() when the owning Event is destroyed.
+   */
+  virtual void reconstructEventFromIPCHandle(
+      void** /*event*/,
+      const DeviceIndex /*device_index*/,
+      const std::string& /*handle_string*/) const {
+    TORCH_CHECK(
+        false, "Backend doesn't support reconstructing event from IPC handle.");
+  }
+
+  /**
    * Intended use of this class is to leak the DeviceGuardImpl at program end.
    * So you better not call the destructor, buster!
    */
