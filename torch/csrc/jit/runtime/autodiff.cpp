@@ -456,7 +456,7 @@ static ReverseDetails addReverseInline(Gradient& grad_desc) {
     // only in non-differentiable contexts (e.g. as second input to
     // aten::type_as). In that case we simply ignore it as an output, because it
     // won't ever produce any meaningful values.
-    if (grad_map.count(input) == 0)
+    if (!grad_map.contains(input))
       continue;
     reverse_block->registerOutput(get_grad(input));
     grad_desc.df_output_vjps.push_back(i);
@@ -615,7 +615,7 @@ static void deduplicateSizeCaptures(
     if (!node->matches("aten::size(Tensor self) -> int[]")) {
       continue;
     }
-    if (usedOnlyInReverse(capture) && capture_set.count(node->input())) {
+    if (usedOnlyInReverse(capture) && capture_set.contains(node->input())) {
       WithInsertPoint insert_guard{*rev_info.reverse_block->nodes().begin()};
       auto* size =
           node->input()->owningGraph()->insert(aten::size, {node->input()});
@@ -643,7 +643,7 @@ static void eliminateDeadCode(ReverseDetails& rev_info) {
       [&](const std::unordered_set<const Value*>& live_values) {
         std::vector<Value*> to_erase;
         for (auto& entry : rev_info.grad_map) {
-          if (!live_values.count(entry.second)) {
+          if (!live_values.contains(entry.second)) {
             to_erase.push_back(entry.first);
           }
         }
@@ -728,12 +728,12 @@ static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
   for (Value* capture_val : reverse_captures) {
     // If it's already an output we don't have to add anything,
     // but register the fact that it needs to be captured.
-    if (orig_primal_outputs_idx.count(capture_val) > 0) {
+    if (orig_primal_outputs_idx.contains(capture_val)) {
       grad_desc.df_input_captured_outputs.push_back(
           orig_primal_outputs_idx[capture_val]);
       // If it's an input, we could add it as an output but in fact it's
       // more efficient to use a special kind of capture.
-    } else if (orig_primal_inputs_idx.count(capture_val) > 0) {
+    } else if (orig_primal_inputs_idx.contains(capture_val)) {
       grad_desc.df_input_captured_inputs.push_back(
           orig_primal_inputs_idx.at(capture_val));
       // Otherwise it's just a regular intermediate value that we need to add as
@@ -767,7 +767,7 @@ static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
     // false positives), while the gradients we will emit for this value can get
     // DCE-d in the optimization pass (because it has no influence on the real
     // f's outputs that we differentiate).
-    if (rev_info.grad_map.count(tmp) == 0)
+    if (!rev_info.grad_map.contains(tmp))
       continue;
 
     Value* tmp_vjp_in = reverse_block->addInput()->setType(tmp->type());

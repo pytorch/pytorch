@@ -115,7 +115,7 @@ def wait_until_pending_futures_and_users_flushed(timeout: int = 20) -> None:
     confirmed by the owner. The message confirming the fork may arrive after
     our tests check whether this map is empty, which leads to failures and
     flaky tests. to_here also does not guarantee that we have finished
-    processind the owner's confirmation message for the RRef. This function
+    processing the owner's confirmation message for the RRef. This function
     loops until the map is empty, which means the messages have been received
     as processed. Call this function before asserting the map returned by
     _get_debug_info is empty.

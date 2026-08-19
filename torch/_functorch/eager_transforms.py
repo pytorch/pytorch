@@ -591,7 +591,7 @@ def jacrev(
         >>> assert torch.allclose(hessian, torch.diag(-x.sin()))
 
     By default, :func:`jacrev` computes the Jacobian with respect to the first
-    input. However, it can compute the Jacboian with respect to a different
+    input. However, it can compute the Jacobian with respect to a different
     argument by using ``argnums``:
 
         >>> from torch.func import jacrev
@@ -778,7 +778,7 @@ def jacrev(
         # Step 2: The returned jacobian is one big tensor per input. In this step,
         # we split each Tensor by output.
         flat_jacobians_per_input = [
-            result.split(flat_output_numels, dim=0)
+            torch.split(result, list(flat_output_numels), dim=0)
             for result in flat_jacobians_per_input
         ]
         flat_input_flat_output = [
@@ -897,10 +897,11 @@ def _chunked_standard_basis_for_(
         chunk_size = total_numel
         chunk_numels = [total_numel]
 
-    diag_start_indices = (
-        0,
-        *torch.tensor(tensor_numels).cumsum(dim=0)[:-1].neg().unbind(),
-    )
+    diag_start_indices = []
+    diag_start_idx = 0
+    for tensor_numel in tensor_numels:
+        diag_start_indices.append(diag_start_idx)
+        diag_start_idx -= tensor_numel
 
     for chunk_idx, total_numel in enumerate(chunk_numels):
         chunks = tuple(
@@ -1132,6 +1133,9 @@ def jvp(
         >>> from torch.func import jvp
         >>> x = torch.randn([])
         >>> f = lambda x: x * torch.tensor([1.0, 2.0, 3])
+        >>> warnings.filterwarnings(
+        ...     "ignore", message=".*torch.jit.script"
+        ... )  # docs: hide
         >>> value, grad = jvp(f, (x,), (torch.tensor(1.0),))
         >>> assert torch.allclose(value, f(x))
         >>> assert torch.allclose(grad, torch.tensor([1.0, 2, 3]))
@@ -1334,7 +1338,7 @@ def jacfwd(
         >>> assert torch.allclose(hessian, torch.diag(-x.sin()))
 
     By default, :func:`jacfwd` computes the Jacobian with respect to the first
-    input. However, it can compute the Jacboian with respect to a different
+    input. However, it can compute the Jacobian with respect to a different
     argument by using ``argnums``:
 
         >>> from torch.func import jacfwd
@@ -1405,7 +1409,9 @@ def jacfwd(
                 safe_unflatten(jac_out_in, -1, primal.shape)
                 for primal, jac_out_in in zip(
                     flat_primals,
-                    jac_out.movedim(0, -1).split(flat_primals_numels, dim=-1),
+                    torch.split(
+                        jac_out.movedim(0, -1), list(flat_primals_numels), dim=-1
+                    ),
                 )
             )
             for jac_out in jac_outs
@@ -1844,6 +1850,7 @@ def linearize(
         >>> def fn(x):
         ...     return x.sin()
         ...
+        >>> warnings.filterwarnings("ignore", message=".*Attempted to insert a get_attr Node with no underlying reference")  # docs: hide
         >>> output, jvp_fn = linearize(fn, torch.zeros(3, 3))
         >>> jvp_fn(torch.ones(3, 3))
         tensor([[1., 1., 1.],

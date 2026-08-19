@@ -47,7 +47,7 @@ std::vector<std::string> traverse_depth_first(
     std::stringstream buffer;
     std::vector<const torch::jit::Node*> vec;
     node->print(buffer, 0, &vec, false, true, true, false);
-    result.push_back(buffer.str());
+    result.push_back(std::move(buffer).str());
     node = graph_it.next();
     ++count;
   }
