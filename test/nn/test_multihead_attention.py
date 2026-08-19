@@ -19,7 +19,6 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize as parametrize_test,
     run_tests,
-    TEST_CUDA,
     TEST_NUMPY,
     TEST_WITH_CROSSREF,
     xfailIfNoAcceleratorTriton,
@@ -36,9 +35,6 @@ if TEST_NUMPY:
 
 
 class TestMultiheadAttentionNN(NNTestCase):
-    if TEST_CUDA:
-        _do_cuda_memory_leak_check = True
-        _do_cuda_non_default_stream = True
     hw_classification = HardwareClassification.GENERIC
 
     @unittest.skipIf(not TEST_NUMPY, "numpy not found")
@@ -130,22 +126,6 @@ class TestMultiheadAttentionNN(NNTestCase):
             X_fc_b = X_bias.detach().numpy()
             X_fc_w = X_weight.detach().numpy()
             return np.matmul(X, np.transpose(X_fc_w)) + X_fc_b
-
-        def _create_src_lengths_mask(batch_size, src_lengths):
-            """
-            Generate boolean mask to prevent attention beyond the end of source
-            Inputs:
-              batch_size : int
-              src_lengths : [batch_size] of sentence lengths
-            Outputs:
-              [batch_size, max_src_len]
-            """
-            max_srclen = src_lengths.max()
-            src_indices = torch.arange(0, max_srclen).unsqueeze(0).to(src_lengths)
-            src_indices = src_indices.expand(batch_size, max_srclen)
-            src_lengths = src_lengths.unsqueeze(dim=1).expand(batch_size, max_srclen)
-            # returns [batch_size, max_seq_len]
-            return (src_indices < src_lengths).int().detach()
 
         def _multihead_attn_test_helper(
             add_key_padding_mask=False,
@@ -839,7 +819,6 @@ class TestMultiheadAttentionNNDeviceType(NNTestCase):
 
     @torch.no_grad()
     @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/4448")
-    @onlyAccelerator
     @unittest.skipIf(
         TEST_WITH_CROSSREF,
         "CrossRef turns on TorchFunctionMode, and so disables fastpath.",
