@@ -1,76 +1,33 @@
 # Owner(s): ["module: dynamo"]
 import sys
+import unittest
 
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
-from torch._dynamo import config
-from torch._dynamo.testing import make_test_cls_with_patches
+import torch.utils._pytree as python_pytree
 
 
 try:
-    # from . import test_ctx_manager
-    pass
+    from . import _test_nested_graph_breaks_helper
 except ImportError:
-    # import test_aot_autograd
-    # import test_ctx_manager
-
-    # import test_export
-    # import test_functions
-    # import test_higher_order_ops
-    # import test_misc
-    # import test_modules
-    # import test_repros
-    # import test_sdpa
-    # import test_subgraphs
-    pass
-
-
-test_classes = {}
-
-
-def make_nested_cls(cls):
-    suffix = "_nested_graph_breaks"
-
-    cls_prefix = "NestedGraphBreaks"
-
-    test_class = make_test_cls_with_patches(
-        cls,
-        cls_prefix,
-        suffix,
-        (config, "debug_force_nested_calls", True),
-        (config, "debug_force_graph_break_on_leaf_return", True),
-        (config, "debug_disable_compile_counter", True),
-        xfail_prop="_expected_failure_nested_graph_breaks",
-    )
-
-    test_classes[test_class.__name__] = test_class
-    # REMOVING THIS LINE WILL STOP TESTS FROM RUNNING
-    # globals()[test_class.__name__] = test_class
-    test_class.__module__ = __name__
-    return test_class
-
-
-tests = [
-    # test_ctx_manager.CtxManagerTests,
-    # test_functions.FunctionTests,
-    # test_misc.MiscTests,
-    # test_repros.ReproTests,
-    # test_modules.NNModuleTests,
-    # test_subgraphs.SubGraphTests,
-    # test_higher_order_ops.HigherOrderOpTests,
-    # test_higher_order_ops.FuncTorchHigherOrderOpTests,
-    # test_aot_autograd.AotAutogradFallbackTests,
-    # test_sdpa.TestSDPA,
-]
-test = None
-for test in tests:
-    make_nested_cls(test)
-del test
+    import _test_nested_graph_breaks_helper
 
 
 # for use in test_side_effects_globals
 global1, global2, global3, global4 = (torch.zeros(3),) * 4
+
+
+class CustomizedCtxManager:
+    def __init__(self, x):
+        self.x = x
+        torch._dynamo.graph_break()
+
+    def __enter__(self):
+        pass
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        pass
 
 
 class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
@@ -586,11 +543,7 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.op_count, 6)
 
     def test_side_effects_globals_different_module(self):
-        global f1, f2, _test_nested_graph_breaks_helper
-        try:
-            from . import _test_nested_graph_breaks_helper
-        except ImportError:
-            import _test_nested_graph_breaks_helper
+        global f1, f2
 
         def f1(x):
             x = x + 1
@@ -838,8 +791,10 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         # make sure inner3's code options are compatible with the instructions below
         global y
 
-        def y():
-            pass
+        # y must cause a graph break on STORE_ATTR. A torch-internal class
+        # (UDCV with __module__ starting with "torch.") declines mutation.
+        class y:
+            __module__ = "torch._dynamo._test_marker"
 
         def inner3(x):
             x.attr = 1000
@@ -1089,11 +1044,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         # frames get the correct f_globals. Without the factory fix,
         # MAKE_FUNCTION inherits the root frame's globals, so the resume
         # function for `inner` would not find HELPER_CONSTANT.
-        try:
-            from . import _test_nested_graph_breaks_helper
-        except ImportError:
-            import _test_nested_graph_breaks_helper
-
         def outer(x):
             return _test_nested_graph_breaks_helper.closure_with_graph_break(x) + 2
 
@@ -1364,11 +1314,11 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
             x = torch.no_grad()(_skipped_function_for_test_reconstruct)(fn, x)
             assert torch.compiler.is_compiling()  # noqa: S101
             assert torch.is_grad_enabled()  # noqa: S101
-            return x
+            return x + 1
 
         inp = torch.randn(3)
-        self.assertEqual(gn(inp), inp + 3)
-        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(gn(inp), inp + 4)
+        self.assertEqual(cnts.frame_count, 3)
 
     def test_step_graph_break_frame_values_not_corrupted(self):
         """Bytecode generation bug in step_graph_break corrupted parent frame
@@ -1419,7 +1369,563 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
 
         inp = torch.randn(3)
         self.assertEqual(fn(inp), inp + 6)
+        # `x + 1` compiles before the break in the ctx manager construction;
+        # the resume reconstructs the ctx manager (now enterable, see
+        # VariableBuilder.wrap_user_defined) and compiles the with-body `x + 2`
+        # plus `x + 3`, giving a second frame.
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_graph_break_during_module_init(self):
+        """Graph break during nn.Module.__init__ should not prevent the caller
+        from compiling the rest of the function."""
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                torch._dynamo.graph_break()
+                self.linear = torch.nn.Linear(10, 10)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def f(x):
+            m = MyModule()
+            return m(x)
+
+        x = torch.randn(10)
+        result = f(x)
+        self.assertEqual(result.shape, torch.Size([10]))
         self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 1)
+
+    def test_graph_break_during_user_class_init(self):
+        """Graph break during user class __init__ via instantiate_user_defined_class_object.
+
+        The polyfill does cls.__new__ then obj.__init__. If nested graph breaks
+        were allowed in the polyfill, the resume would have a half-initialized
+        object (created by __new__ but __init__ not yet complete), and accessing
+        attributes set after the graph break would fail with AttributeError.
+        """
+
+        class Config:
+            def __init__(self, scale):
+                torch._dynamo.graph_break()
+                self.scale = scale
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def f(x):
+            cfg = Config(2)
+            return x * cfg.scale
+
+        x = torch.randn(10)
+        result = f(x)
+        self.assertEqual(result, x * 2)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 1)
+
+    def test_graph_break_during_user_class_new(self):
+        """Graph break during __new__ via instantiate_user_defined_class_object.
+
+        The polyfill calls cls.__new__ first. If nested graph breaks were
+        allowed, the resume would not yet have the object on the stack at all
+        (since __new__ creates it), so the subsequent __init__ call and any
+        attribute access would operate on garbage.
+        """
+
+        class Wrapper:
+            def __new__(cls, val):
+                torch._dynamo.graph_break()
+                obj = super().__new__(cls)
+                obj.val = val
+                return obj
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def f(x):
+            w = Wrapper(3)
+            return x + w.val
+
+        x = torch.randn(10)
+        result = f(x)
+        self.assertEqual(result, x + 3)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 1)
+
+    def test_graph_break_in_copy_deepcopy(self):
+        """copy.deepcopy is a BUILTIN_INLINE_WHEN_CALLED function that contains
+        loops and graph-breaks internally. If nested graph breaks were allowed,
+        deepcopy's internal loop would trigger raise_loop_graph_break which
+        poisons the parent frame, and deepcopy's graph-breaks would produce
+        unusable resume functions for stdlib frames."""
+        import copy
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def f(x):
+            y = x + 1
+            m = torch.nn.Linear(10, 10)
+            m2 = copy.deepcopy(m)
+            return m2(y)
+
+        x = torch.randn(10)
+        result = f(x)
+        self.assertEqual(result.shape, torch.Size([10]))
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.op_count, 2)
+
+    def test_inlined_function_globals_across_graph_break(self):
+        """Module-level globals in inlined functions survive graph breaks.
+
+        When a function from another module is inlined and hits a graph break,
+        the resume function must use that module's globals (not the caller's).
+        This is handled by install_resume_function_global().
+        """
+        fn_with_module_global = _test_nested_graph_breaks_helper.fn_with_module_global
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def fn(x):
+            return fn_with_module_global(x)
+
+        inp = torch.randn(3)
+        self.assertEqual(fn(inp), inp + 3)
+        self.assertEqual(cnts.frame_count, 2)
+
+    @unittest.expectedFailure
+    def test_nested_decorated_function(self):
+        # decorator must call ContextWrappingVariable.cleanup_assert to trigger this test
+        def f(x):
+            @torch.autocast("cpu")
+            def inner(y):
+                y = y + 1
+                torch._dynamo.graph_break()
+                return y + 1
+
+            return inner(x)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(backend=cnts)(f)
+        x = torch.zeros(3)
+        res = f(x)
+        ref = opt_fn(x)
+        print(ref, res)
+        self.assertEqual(ref, res)
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.op_count, 6)
+
+    def test_nested_graph_break_in_custom_ctx_manager_init(self):
+        def f(x):
+            with CustomizedCtxManager(x):
+                return x + 1
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(backend=cnts)(f)
+        x = torch.zeros(3)
+        res = f(x)
+        ref = opt_fn(x)
+        self.assertEqual(ref, res)
+        # The graph break happens inside __init__, i.e. before the context
+        # manager is entered, so the pre-break graph is empty (not compiled).
+        # Only the resume (enter + `x + 1` + exit) is compiled: 1 frame, 1 op.
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 1)
+
+    def test_ctx_manager_passed_as_sourced_arg(self):
+        # A ctx manager passed in as an argument is sourced, so it is wrapped
+        # by VariableBuilder.wrap_user_defined -- which now produces a
+        # GenericContextWrappingVariable for any type with __enter__/__exit__.
+        # It must behave like eager both when entered in a `with` and when
+        # merely used as a plain object (attribute access, never entered).
+        class Ctx:
+            def __init__(self, x):
+                self.x = x
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+        def f_with(cm, x):
+            with cm:
+                return x + cm.x
+
+        def f_plain(cm, x):
+            return x + cm.x
+
+        cm = Ctx(torch.ones(3))
+        x = torch.zeros(3)
+        for fn in (f_with, f_plain):
+            cnts = torch._dynamo.testing.CompileCounter()
+            res = torch.compile(fn, backend=cnts, fullgraph=True)(cm, x)
+            self.assertEqual(res, fn(cm, x))
+            self.assertEqual(cnts.frame_count, 1)
+
+    def test_ctx_manager_c_level_enter_graph_breaks(self):
+        # A sourced context manager whose __enter__/__exit__ are not plain
+        # bound-method functions (no `.__func__`) must cleanly graph-break to
+        # eager when entered, NOT be wrapped as a GenericContextWrappingVariable
+        # (whose enter/exit take `.__func__`) which would raise
+        # InternalTorchDynamoError. Covers C-level builtins (threading locks)
+        # and a staticmethod-defined dunder.
+        import threading
+
+        class StaticCtx:
+            @staticmethod
+            def __enter__():
+                return None
+
+            @staticmethod
+            def __exit__(*args):
+                return False
+
+        def f(cm, x):
+            with cm:
+                return x + 1
+
+        x = torch.ones(3)
+        # sourced (VariableBuilder.wrap_user_defined path)
+        for cm in (threading.Lock(), threading.RLock(), StaticCtx()):
+            cnts = torch._dynamo.testing.CompileCounter()
+            res = torch.compile(f, backend=cnts)(cm, x)
+            self.assertEqual(res, x + 1)
+            self.assertEqual(cnts.frame_count, 0)  # skipped to eager, no crash
+
+        # constructed in-trace (SideEffects.get_variable_cls path)
+        def g(x):
+            with StaticCtx():
+                return x + 1
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        self.assertEqual(torch.compile(g, backend=cnts)(x), x + 1)
+
+    def test_ngb_suppressed_for_inline_module(self):
+        """NGB should be suppressed for functions in NGB_SUPPRESS_INLINELIST."""
+        from unittest.mock import patch
+
+        def inner(x):
+            x = x + 1
+            torch._dynamo.graph_break()
+            return x + 2
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def outer(x):
+            return inner(x) + 3
+
+        inp = torch.randn(3)
+        inner_file = inner.__code__.co_filename
+        with patch(
+            "torch._dynamo.trace_rules.is_ngb_suppressed_inline",
+            side_effect=lambda f: f == inner_file,
+        ):
+            self.assertEqual(outer(inp), inp + 6)
+
+        # NGB normally handles an inlined graph break in 2 frames.
+        # With suppression, the break propagates to the parent, producing more.
+        self.assertGreater(cnts.frame_count, 2)
+
+    def test_complex_nan_constant_across_graph_break(self):
+        """Graph break with complex constants containing nan/inf imaginary parts.
+
+        Regression test: repr(complex(x, nan)) produces "(x+nanj)" which Python
+        parses as a single identifier, not nan*1j. The FX codegen must use the
+        complex() constructor form for non-finite components.
+        """
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def fn(x):
+            vals = [
+                complex(1.0, float("nan")),
+                complex(float("inf"), 2.0),
+                complex(float("nan"), float("nan")),
+            ]
+            total = x
+            for v in vals:
+                torch._dynamo.graph_break()
+                total = total + v
+            return total
+
+        inp = torch.tensor(0.0 + 0j)
+        result = fn(inp)
+        self.assertTrue(result.isnan())
+
+    def test_fstring_graph_break_in_custom_str(self):
+        """f-string formatting of an object whose __str__ causes a graph break.
+
+        Regression test: when generic_str inlines __str__ and compile_subgraph
+        is called (setting should_exit=True) but fails with Unsupported,
+        _format_value must re-raise rather than silently swallowing the error.
+        """
+        import inspect
+
+        def target_fn(x: list[int]) -> int:
+            return sum(x)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def fn(x):
+            sig = inspect.signature(target_fn)
+            f"{sig}"
+            return x + 1
+
+        inp = torch.randn(3)
+        self.assertEqual(fn(inp), inp + 1)
+
+    def test_exhausted_generator_across_graph_break(self):
+        """Reconstruct an exhausted generator after a graph break.
+
+        Regression test: LocalGeneratorObjectVariable.reconstruct() crashed
+        with AttributeError on 'remaining_items' when the generator was
+        exhausted, because the field was only set inside a conditional.
+        The generator must be fully consumed (exhausted) and still in locals
+        when a graph break occurs inside a nested inlined function -- the NGB
+        stack reconstruction includes outer locals, so the exhausted generator
+        gets reconstruct()'d.
+        """
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def my_generator(n):
+            for i in range(n):  # noqa: UP028
+                yield i
+
+        def inner(x, val):
+            torch._dynamo.graph_break()
+            return x + val
+
+        @torch.compile(backend=cnts)
+        def fn(x):
+            gen = my_generator(3)
+            total = 0
+            for val in gen:
+                total += val
+            result = inner(x, total)
+            # Reference gen after the graph break to keep it live in locals
+            # during NGB stack reconstruction.
+            type(gen)
+            return result
+
+        inp = torch.tensor(10.0)
+        result = fn(inp)
+        self.assertEqual(result, inp + 3)
+
+    def test_generator_star_unpack_with_graph_break(self):
+        """Generator unpacked as *args must survive two-pass codegen.
+
+        reconstruct() is called twice during compile_subgraph (pass1 for use
+        counting, pass2 for actual codegen). The remaining items from the
+        generator must be cached so the second call doesn't see an empty
+        generator. CALL_FUNCTION_EX with *generator + **kwargs triggers a
+        graph break, putting the unconsumed generator on the stack.
+        """
+
+        def my_generator(n):
+            for i in range(n):
+                yield i + 1
+
+        @torch.compile(backend="eager")
+        def fn():
+            shape = my_generator(2)
+            return torch.randn(*shape, requires_grad=True)
+
+        result = fn()
+        self.assertEqual(result.shape, torch.Size([1, 2]))
+
+    def test_load_attr_method_variant_nested_graph_break(self):
+        """Resume-into-resume with LOAD_ATTR method variant.
+
+        Two graph breaks inside a method called via obj.method(x) test that the
+        resume prefix correctly pushes NULL/self for the method call stack layout.
+        """
+
+        class Foo:
+            def method(self, x):
+                torch._dynamo.graph_break()
+                y = x + 1
+                torch._dynamo.graph_break()
+                return y + 1
+
+        obj = Foo()
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def fn(x):
+            return obj.method(x)
+
+        x = torch.randn(3)
+        result = fn(x)
+        self.assertEqual(result, x + 2)
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_tree_map_graph_break_preserves_structure(self):
+        from torch.utils._pytree import tree_map
+
+        def fn():
+            inps = [torch.randn(3)]
+            return tree_map(lambda x: torch.zeros_like(x, requires_grad=True), inps)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        result = torch.compile(fn, backend=cnts)()
+        self.assertIsInstance(result, list)
+        self.assertEqual(len(result), 1)
+        self.assertIsInstance(result[0], torch.Tensor)
+        self.assertEqual(result[0].shape, (3,))
+        self.assertTrue(result[0].requires_grad)
+
+    def test_tree_map_graph_break_nested_structure(self):
+        from torch.utils._pytree import tree_map
+
+        def fn():
+            inps = {"a": [torch.randn(3)], "b": (torch.randn(2), torch.randn(4))}
+            return tree_map(lambda x: torch.zeros_like(x, requires_grad=True), inps)
+
+        result = torch.compile(fn, backend="eager")()
+        self.assertIsInstance(result, dict)
+        self.assertIsInstance(result["a"], list)
+        self.assertEqual(len(result["a"]), 1)
+        self.assertIsInstance(result["b"], tuple)
+        self.assertEqual(len(result["b"]), 2)
+        self.assertEqual(result["b"][0].shape, (2,))
+        self.assertEqual(result["b"][1].shape, (4,))
+
+    def test_tree_map_with_path_graph_break_preserves_structure(self):
+        from torch.utils._pytree import tree_map_with_path
+
+        def fn():
+            inps = [torch.randn(3), torch.randn(2)]
+            return tree_map_with_path(
+                lambda path, x: torch.zeros_like(x, requires_grad=True), inps
+            )
+
+        result = torch.compile(fn, backend="eager")()
+        self.assertIsInstance(result, list)
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0].shape, (3,))
+        self.assertEqual(result[1].shape, (2,))
+        self.assertTrue(result[0].requires_grad)
+
+    def test_tree_map_only_graph_break_preserves_structure(self):
+        from torch.utils._pytree import tree_map_only
+
+        def map_fn(x):
+            torch._dynamo.graph_break()
+            return x + 1
+
+        def fn(x, y):
+            return tree_map_only(torch.Tensor, map_fn, [x, y])
+
+        x, y = torch.randn(3), torch.randn(2)
+        result = torch.compile(fn, backend="eager")(x, y)
+        self.assertIsInstance(result, list)
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0], x + 1)
+        self.assertEqual(result[1], y + 1)
+
+    def test_tree_map_functools_partial_graph_break_preserves_structure(self):
+        import functools
+
+        from torch.utils._pytree import tree_map
+
+        def add_bias(bias, x):
+            torch._dynamo.graph_break()
+            return x + bias
+
+        def fn(x, y):
+            return tree_map(functools.partial(add_bias, 1), [x, y])
+
+        x, y = torch.randn(3), torch.randn(2)
+        result = torch.compile(fn, backend="eager")(x, y)
+        self.assertIsInstance(result, list)
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0], x + 1)
+        self.assertEqual(result[1], y + 1)
+
+    def test_tree_map_no_grad_wrapped_graph_break_preserves_structure(self):
+        from torch.utils._pytree import tree_map
+
+        def map_fn(x):
+            torch._dynamo.graph_break()
+            return x + 1
+
+        def fn(x, y):
+            return tree_map(torch.no_grad()(map_fn), [x, y])
+
+        x, y = torch.randn(3), torch.randn(2)
+        result = torch.compile(fn, backend="eager")(x, y)
+        self.assertIsInstance(result, list)
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0], x + 1)
+        self.assertEqual(result[1], y + 1)
+
+    def test_tree_map_no_grad_nested_fn_graph_break_preserves_structure(self):
+        from torch.utils._pytree import tree_map
+
+        def fn(x, y):
+            def map_fn(t):
+                torch._dynamo.graph_break()
+                return t + 1
+
+            return tree_map(torch.no_grad()(map_fn), [x, y])
+
+        x, y = torch.randn(3), torch.randn(2)
+        result = torch.compile(fn, backend="eager")(x, y)
+        self.assertIsInstance(result, list)
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0], x + 1)
+        self.assertEqual(result[1], y + 1)
+
+    def test_tree_map_graph_break_in_inlined_function(self):
+        """NGB should work on the caller frame after tree_map suppression restores config."""
+        from torch.utils._pytree import tree_map
+
+        def map_fn(t):
+            torch._dynamo.graph_break()
+            return t + 1
+
+        def inner(x, y):
+            a = x + 1
+            result = tree_map(map_fn, [a, y])
+            return result[0] + 2
+
+        def fn(x, y):
+            a = x * 2
+            result = inner(a, y)
+            return result * 3
+
+        x, y = torch.randn(3), torch.randn(2)
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        result = torch.compile(fn, backend=backend)(x, y)
+        self.assertEqual(result, (x * 2 + 1 + 1 + 2) * 3)
+        # With NGB on the caller frame, fn's ops merge with inner's ops into
+        # shared partial graphs (4 graphs). Without NGB, inner would run as a
+        # separate frame and produce 6 isolated single-op graphs.
+        self.assertEqual(len(backend.graphs), 4)
+
+    @unittest.skipIf(not python_pytree._cxx_pytree_exists, "missing optree package")
+    def test_cxx_pytree_treespec_leaf_namespace(self):
+        import torch.utils._cxx_pytree as cxx_pytree
+
+        def fn():
+            values, treespec = cxx_pytree.tree_flatten(1)
+            leaf = cxx_pytree.treespec_leaf()
+            torch._dynamo.graph_break()
+            return values, treespec == leaf
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        values, specs_equal = torch.compile(fn, backend=cnts)()
+        self.assertEqual(values, [1])
+        self.assertTrue(specs_equal)
 
 
 if __name__ == "__main__":

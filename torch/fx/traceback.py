@@ -8,6 +8,7 @@ from contextlib import contextmanager
 from enum import Enum
 from typing import Any, cast, Generic, Optional, ParamSpec, TypeVar, Union
 
+import torch
 from torch._utils_internal import signpost_event
 
 from ._compatibility import compatibility
@@ -41,6 +42,51 @@ __all__ = [
 ]
 
 _traceback_tls = threading.local()
+# Python ``threading.local`` state is not carried into autograd engine workers.
+# Preservation contexts bridge their state through this native TLS slot, which
+# AOTAutograd hooks fork per GraphTask and the engine restores after each NodeTask.
+_AUTOGRAD_ENGINE_STATE_KEY = "fx_traceback_autograd_engine_state"
+
+
+def _copy_current_meta(meta: dict[str, Any]) -> dict[str, Any]:
+    result = meta.copy()
+    if "custom" in result:
+        result["custom"] = copy.copy(result["custom"])
+    return result
+
+
+class _CapturedTracebackState:
+    def __init__(
+        self,
+        current_meta: dict[str, Any],
+        current_replay_node: Node | None,
+        should_preserve_node_meta: bool,
+        should_preserve_node_seq_nr: bool,
+        graph_task_id: int = -1,
+    ) -> None:
+        self.current_meta = current_meta
+        self.current_replay_node = current_replay_node
+        self.should_preserve_node_meta = should_preserve_node_meta
+        self.should_preserve_node_seq_nr = should_preserve_node_seq_nr
+        self.graph_task_id = graph_task_id
+
+    def copy(self) -> "_CapturedTracebackState":
+        return _CapturedTracebackState(
+            _copy_current_meta(self.current_meta),
+            self.current_replay_node,
+            self.should_preserve_node_meta,
+            self.should_preserve_node_seq_nr,
+            self.graph_task_id,
+        )
+
+
+def _get_autograd_engine_state() -> _CapturedTracebackState | None:
+    if torch._C._is_key_in_tls(_AUTOGRAD_ENGINE_STATE_KEY):
+        return cast(
+            _CapturedTracebackState,
+            torch._C._get_obj_in_tls(_AUTOGRAD_ENGINE_STATE_KEY),
+        )
+    return None
 
 
 class _ThreadLocalValue(Generic[_T]):
@@ -49,12 +95,17 @@ class _ThreadLocalValue(Generic[_T]):
         self._default_factory = default_factory
 
     def get(self) -> _T:
+        if (state := _get_autograd_engine_state()) is not None:
+            return cast(_T, getattr(state, self._name))
         if not hasattr(_traceback_tls, self._name):
             setattr(_traceback_tls, self._name, self._default_factory())
         return cast(_T, getattr(_traceback_tls, self._name))
 
     def set(self, value: _T) -> None:
-        setattr(_traceback_tls, self._name, value)
+        if (state := _get_autograd_engine_state()) is not None:
+            setattr(state, self._name, value)
+        else:
+            setattr(_traceback_tls, self._name, value)
 
     def __bool__(self) -> bool:
         return bool(self.get())
@@ -119,6 +170,42 @@ should_preserve_node_meta: _ThreadLocalValue[bool] = _ThreadLocalValue(
 _should_preserve_node_meta: _ThreadLocalValue[bool] = _ThreadLocalValue(
     "should_preserve_node_seq_nr", lambda: False
 )
+
+
+def _capture_thread_local_state() -> _CapturedTracebackState:
+    return _CapturedTracebackState(
+        current_meta=_copy_current_meta(_current_meta.get()),
+        current_replay_node=current_replay_node.get(),
+        should_preserve_node_meta=should_preserve_node_meta.get(),
+        should_preserve_node_seq_nr=_should_preserve_node_meta.get(),
+    )
+
+
+@contextmanager
+def _propagate_thread_local_state_for_autograd() -> Iterator[None]:
+    if _get_autograd_engine_state() is not None:
+        yield
+        return
+
+    torch._C._stash_obj_in_tls(
+        _AUTOGRAD_ENGINE_STATE_KEY, _capture_thread_local_state()
+    )
+    try:
+        yield
+    finally:
+        torch._C._remove_obj_from_tls(_AUTOGRAD_ENGINE_STATE_KEY)
+
+
+def _install_thread_local_state_for_autograd() -> None:
+    graph_task_id = torch._C._current_graph_task_id()
+    current_state = _get_autograd_engine_state()
+    if current_state is None or current_state.graph_task_id != graph_task_id:
+        # Reentrant backwards inherit the outer task's live metadata stack.
+        # Duplicate hook pairs within one task reuse it instead of resetting it.
+        new_state = (current_state or _capture_thread_local_state()).copy()
+        new_state.graph_task_id = graph_task_id
+        torch._C._stash_obj_in_tls(_AUTOGRAD_ENGINE_STATE_KEY, new_state)
+
 
 GRADIENT_ACC_SPECIAL_STACK = (
     "Gradient addition node due to multiple use of tensor around:"
@@ -334,15 +421,16 @@ class NodeSource:
 @compatibility(is_backward_compatible=False)
 @contextmanager
 def preserve_node_meta(enable: bool = True) -> Iterator[None]:
-    saved_should_preserve_node_meta = should_preserve_node_meta.get()
-    # Shallow copy is OK since fields of current_meta are not mutated
-    saved_current_meta = current_meta.copy()
-    try:
-        should_preserve_node_meta.set(enable)
-        yield
-    finally:
-        should_preserve_node_meta.set(saved_should_preserve_node_meta)
-        _set_current_meta(saved_current_meta)
+    with _propagate_thread_local_state_for_autograd():
+        saved_should_preserve_node_meta = should_preserve_node_meta.get()
+        # Shallow copy is OK since fields of current_meta are not mutated
+        saved_current_meta = current_meta.copy()
+        try:
+            should_preserve_node_meta.set(enable)
+            yield
+        finally:
+            should_preserve_node_meta.set(saved_should_preserve_node_meta)
+            _set_current_meta(saved_current_meta)
 
 
 @contextmanager
@@ -367,7 +455,7 @@ def set_stack_trace(stack: list[str]) -> None:
             current_meta["stack_trace"] = "".join(stack)
         else:
             # when the stack is empty, we explicitly clear the stack_trace to avoid
-            # propagating it to future node.˙
+            # propagating it to future node.
             current_meta.pop("stack_trace", None)
 
 
@@ -422,6 +510,26 @@ def annotate(annotation_dict: dict[str, Any]) -> Iterator[None]:
             current_meta["custom"] = old_custom
         else:
             del current_meta["custom"]
+
+
+# Key under node.meta["custom"] used to carry the activation-checkpointing budget
+# set by ``torch.autograd.graph.region_activation_memory_budget``. Shared by that
+# writer and the reader below so the partitioner / AOTAutograd cache read it the
+# same way.
+MEMORY_BUDGET_ANNOTATION_KEY = "_region_activation_memory_budget"
+
+
+def _get_memory_budget_annotation(node: Node) -> float | None:
+    """
+    Read the ``region_activation_memory_budget`` annotation off an FX node,
+    returning ``None`` if absent. The value is written only by
+    ``torch.autograd.graph.region_activation_memory_budget``, which validates it
+    and stores a ``float``.
+    """
+    custom = node.meta.get("custom")
+    if not isinstance(custom, dict):
+        return None
+    return custom.get(MEMORY_BUDGET_ANNOTATION_KEY)
 
 
 @compatibility(is_backward_compatible=False)
@@ -576,7 +684,7 @@ def get_current_meta() -> dict[str, Any]:
 @contextmanager
 def set_current_replay_node(node: Node | None) -> Iterator[None]:
     """
-    Set the currently replay node. If `current_replay_node` is not None,
+    Set the current replay node. If `current_replay_node` is not None,
     then we're re-generating the `current_replay_node` in FunctionalTensorMode.
     """
     # See [Note] annotation for more details.
@@ -591,7 +699,7 @@ def set_current_replay_node(node: Node | None) -> Iterator[None]:
 @compatibility(is_backward_compatible=False)
 def get_current_replay_node() -> Node | None:
     """
-    Get the currently replay node
+    Get the current replay node
     """
     return current_replay_node.get()
 

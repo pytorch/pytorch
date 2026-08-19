@@ -229,7 +229,7 @@ struct UnwindCache {
     Unwinder unwinder = Unwinder::unknown();
     try {
       unwinder = libraryFor(addr).unwinderFor(addr);
-    } catch (unwind::UnwindError& err) {
+    } catch ([[maybe_unused]] unwind::UnwindError& err) {
       // because unwinders are cached this will only print
       // once per frame that cannot be unwound.
       TORCH_WARN("Unsupported unwinding pattern: ", err.what());

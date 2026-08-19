@@ -1,7 +1,11 @@
 # Owner(s): ["module: dynamo"]
 import copy
+import operator
+import queue
 import re
+import threading
 import unittest
+from contextlib import nullcontext
 from textwrap import dedent
 from unittest.mock import patch
 
@@ -18,12 +22,24 @@ from torch._dynamo.testing import (
     rand_strided,
 )
 from torch._functorch.aot_autograd import _aot_export_function, create_functional_call
+from torch._functorch.partitioners import _extract_fwd_bwd_modules
 from torch._guards import CompileContext, StorageOverlap, TracingContext
+from torch._inductor.graph import GraphLowering
+from torch._inductor.virtualized import V
 from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.fx.experimental import _config as fx_config
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.profiler import profile
 from torch.testing import FileCheck
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
+    onlyCUDA,
+)
 from torch.testing._internal.common_utils import compare_equal_outs_and_grads
+from torch.utils._sympy.symbol import make_symbol, SymT
+from torch.utils._sympy.value_ranges import ValueRanges
 
 
 def maybe_dupe_op(x):
@@ -978,6 +994,78 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         self.assertNotIn("grad_fn_seq_nr", fx_traceback.current_meta)
         self.assertNotIn("in_grad_fn", fx_traceback.current_meta)
 
+    def test_stacktrace_hooks_use_backward_callers_state(self):
+        from torch._functorch.aot_autograd import setup_stacktrace_preservation_hooks
+
+        x = torch.randn(8, requires_grad=True)
+        out = x.sin().sum()
+        with fx_traceback.preserve_node_meta():
+            setup_stacktrace_preservation_hooks([out.grad_fn])
+            setup_stacktrace_preservation_hooks([out.grad_fn])
+
+        observed = []
+        out.grad_fn.register_prehook(
+            lambda _grad_outputs: observed.append(dict(fx_traceback.get_current_meta()))
+        )
+        with fx_traceback.preserve_node_meta(), fx_traceback.annotate({"run": 1}):
+            out.backward(retain_graph=True)
+        with fx_traceback.preserve_node_meta(), fx_traceback.annotate({"run": 2}):
+            out.backward()
+
+        self.assertEqual(
+            [meta["custom"] for meta in observed], [{"run": 1}, {"run": 2}]
+        )
+        self.assertFalse(fx_traceback.has_preserved_node_meta())
+        self.assertEqual(dict(fx_traceback.current_meta), {})
+
+    def test_stacktrace_hooks_isolate_concurrent_graph_tasks(self):
+        from torch._functorch.aot_autograd import setup_stacktrace_preservation_hooks
+
+        x = torch.randn(8, requires_grad=True)
+        out = x.sin().sum()
+        with fx_traceback.preserve_node_meta():
+            setup_stacktrace_preservation_hooks([out.grad_fn])
+
+        observed = queue.Queue()
+        errors = queue.Queue()
+        barrier = threading.Barrier(2)
+        out.grad_fn.register_prehook(
+            lambda _grad_outputs: observed.put(
+                fx_traceback.get_current_meta()["custom"]["owner"]
+            )
+        )
+
+        def run_backward(owner):
+            try:
+                with (
+                    fx_traceback.preserve_node_meta(),
+                    fx_traceback.annotate({"owner": owner}),
+                ):
+                    barrier.wait(timeout=5)
+                    out.backward(retain_graph=True)
+            except Exception as e:
+                errors.put(e)
+                barrier.abort()
+
+        threads = [
+            threading.Thread(target=run_backward, args=(owner,))
+            for owner in ("thread-a", "thread-b")
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=10)
+            self.assertFalse(thread.is_alive())
+
+        if not errors.empty():
+            raise errors.get()
+        self.assertEqual(
+            sorted([observed.get_nowait(), observed.get_nowait()]),
+            ["thread-a", "thread-b"],
+        )
+        self.assertFalse(fx_traceback.has_preserved_node_meta())
+        self.assertEqual(dict(fx_traceback.current_meta), {})
+
     # https://github.com/pytorch/pytorch/issues/110121
     def test_aot_export_joint_simple_repro(self):
         class Mod(torch.nn.Module):
@@ -1261,7 +1349,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
     def test_donated_buffer1(self):
         logger_name = "torch._functorch._aot_autograd.graph_compile"
 
-        @torch.compile()
+        @torch.compile()  # noqa: UNSPECIFIED_BACKEND
         def relu(x):
             return torch.nn.functional.relu(x)
 
@@ -1282,7 +1370,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         logger_name = "torch._functorch._aot_autograd.graph_compile"
 
         # we will reuse the graph for g across f1 and f2
-        @torch.compile()
+        @torch.compile()  # noqa: UNSPECIFIED_BACKEND
         def g(activation, param2):
             return torch.matmul(activation, param2)
 
@@ -1304,7 +1392,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         logger_name = "torch._functorch._aot_autograd.graph_compile"
 
         # we will reuse the graph for g across f1 and f2
-        @torch.compile()
+        @torch.compile()  # noqa: UNSPECIFIED_BACKEND
         def g(activation, param2):
             return torch.matmul(activation, param2)
 
@@ -1335,7 +1423,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
                 return torch.nn.functional.relu(x) + self.param
 
         mod = Mod()
-        mod = torch.compile(mod)
+        mod = torch.compile(mod)  # noqa: UNSPECIFIED_BACKEND
 
         inp = torch.ones([2, 2], requires_grad=True)
 
@@ -1357,7 +1445,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
     def test_donated_buffer5(self):
         logger_name = "torch._functorch._aot_autograd.graph_compile"
 
-        @torch.compile()
+        @torch.compile()  # noqa: UNSPECIFIED_BACKEND
         def f(x, z):
             y = x.view(2, 3)
             z = torch.nn.functional.relu(z)
@@ -1381,8 +1469,14 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         #   %le : [num_users=1] = call_function[target=torch.ops.aten.le.Scalar](args = (%relu, 0), kwargs = {})
         #   return [add, primals_1, le]
         #
+        if is_dynamic_shape_test(self._testMethodName):
+            # an extra symint exists before the saved tensors
+            expected_msg = "bw_donated_idxs=[2]"
+        else:
+            expected_msg = "bw_donated_idxs=[1]"
+
         # `le` is a donated buffer but primals_1 is not.
-        FileCheck().check("bw_donated_idxs=[1]").run("\n".join(captured.output))
+        FileCheck().check(expected_msg).run("\n".join(captured.output))
 
     @torch._functorch.config.patch("donated_buffer", True)
     @torch._dynamo.config.patch("graph_break_on_nn_param_ctor", False)
@@ -1399,7 +1493,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
             p = torch.nn.Parameter(x + 123)
             return p, p.sin()
 
-        opt = torch.compile(fn, fullgraph=True)
+        opt = torch.compile(fn, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
         x = torch.randn(16)
 
         with self.assertLogs(logger_name, level="INFO") as captured:
@@ -1421,7 +1515,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
         inp = torch.randn(3, 3, requires_grad=True)
 
-        mod = torch.compile(Mod())
+        mod = torch.compile(Mod())  # noqa: UNSPECIFIED_BACKEND
         for _ in range(5):
             mod(inp).sum().backward()
 
@@ -1438,7 +1532,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
         inp = torch.randn(3, 3, requires_grad=True)
 
-        mod = torch.compile(Mod())
+        mod = torch.compile(Mod())  # noqa: UNSPECIFIED_BACKEND
         out = mod(inp).sum()
         for _ in range(5):
             out.backward(retain_graph=True)
@@ -1457,7 +1551,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
         inp = torch.randn(3, 3, requires_grad=True)
 
-        mod = torch.compile(Mod())
+        mod = torch.compile(Mod())  # noqa: UNSPECIFIED_BACKEND
         mod(inp).sum().backward(create_graph=True)
         out = mod(inp).sum()
         for _ in range(5):
@@ -1504,7 +1598,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
         inp = torch.randn(3, 3, requires_grad=True)
 
-        mod = torch.compile(Mod())
+        mod = torch.compile(Mod())  # noqa: UNSPECIFIED_BACKEND
         mod(inp).sum().backward()
         out = mod(inp).sum()
         with self.assertRaisesRegex(
@@ -1758,7 +1852,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
         result_original = fuzzed_program(*args)
 
-        compiled_program = torch.compile(fuzzed_program, fullgraph=True, dynamic=True)
+        compiled_program = torch.compile(fuzzed_program, fullgraph=True, dynamic=True)  # noqa: UNSPECIFIED_BACKEND
         result_compiled = compiled_program(*args)
 
         self.assertTrue(torch.allclose(result_original, result_compiled))
@@ -1817,10 +1911,150 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         # Should only compile once regardless of batch size changes
         self.assertEqual(cnt.frame_count, 1)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @fx_config.patch(translation_validation=False)
+    def test_partitioner_saves_unreplaced_input_symbols_for_bw(self):
+        shape_env = ShapeEnv(should_record_events=False)
+        s0 = make_symbol(SymT.SIZE, 0, integer=True)
+        shape_env.var_to_range[s0] = ValueRanges(2, 10)
+        shape_env.add_backed_var_to_val(s0, 3)
+        s0_sym = shape_env.create_symintnode(s0, hint=3)
+
+        u0_sym = shape_env.create_unbacked_symint()
+        u0 = u0_sym.node._expr
+        shape_env._set_replacement(u0, s0, "test")
+        u1_sym = shape_env.create_unbacked_symint()
+        u1 = u1_sym.node._expr
+        shape_env._rename_unbacked_to(u0, u1)
+        derived_sym = shape_env.create_symintnode(u0 + 1, hint=None)
+
+        graph = torch.fx.Graph()
+        s0_node = graph.placeholder("primals_1")
+        s0_node.meta["val"] = s0_sym
+        u0_node = graph.call_function(operator.add, (s0_node, 0))
+        u0_node.meta["val"] = u0_sym
+        u0_node.meta["unbacked_bindings"] = {u0: ()}
+        derived_node = graph.call_function(operator.add, (u0_node, 1))
+        derived_node.meta["val"] = derived_sym
+        output = graph.output((s0_node, derived_node))
+        output.meta["desc"] = [None, None]
+        joint = torch.fx.GraphModule({}, graph)
+
+        _, bw_graph = _extract_fwd_bwd_modules(
+            joint, [], [derived_node], num_fwd_outputs=1
+        )
+        bw_placeholders = list(bw_graph.graph.find_nodes(op="placeholder"))
+        # The backward binds the unreplaced symbol u0 (needed by runtime
+        # assertions, which preserve raw placeholder expressions) *and* the
+        # replacement target s0 (needed by sizevar codegen and FxGraphCache
+        # guards, which use ShapeEnv replacements). Binding only u0 leaves s0
+        # undefined in the backward, surfacing as a KeyError during backward
+        # FxGraphCache guard evaluation.
+        self.assertEqual(
+            [node.meta["val"].node._expr for node in bw_placeholders],
+            [s0, u0, u0 + 1],
+        )
+
+        graph_inputs = [node.meta["val"] for node in bw_placeholders]
+        lowering = GraphLowering(
+            bw_graph, graph_inputs, shape_env=shape_env, is_backward=True
+        )
+        with V.set_graph_handler(lowering):
+            lowering.run(*graph_inputs)
+
+        self.assertEqual(
+            [lowering.graph_inputs[name] for name in lowering.graph_input_names],
+            [s0, u1, u1 + 1],
+        )
+        self.assertEqual(
+            [
+                lowering.graph_inputs[name].xreplace({u1: s0})
+                for name in lowering.graph_input_names
+            ],
+            [s0, s0, s0 + 1],
+        )
+
+    def test_batched_matmul_inference_mode(self):
+        # Regression test for torch.compile crash with batched matmul in inference_mode
+        x = torch.randn(2, 4, 8)
+        w = torch.randn(8, 8)
+
+        def f(x, w):
+            with torch.inference_mode():
+                return (x @ w).sum()
+
+        torch._dynamo.reset()
+        result = torch.compile(f)(x, w)  # noqa: UNSPECIFIED_BACKEND
+        self.assertIsInstance(result, torch.Tensor)
+
+
+class AotAutogradFallbackTestsDevice(torch._inductor.test_case.TestCase):
+    @onlyCUDA
+    def test_aot_backward_traceback_meta_on_worker(self, device):
+        caller_thread = threading.get_ident()
+        backward_threads = []
+
+        def fn(x):
+            sin = x.sin()
+            if sin.grad_fn is not None:
+                sin.grad_fn.register_prehook(
+                    lambda _grad_outputs: backward_threads.append(threading.get_ident())
+                )
+            return (sin + x.cos()).sum()
+
+        x = torch.randn(8, device=device, requires_grad=True)
+        with (
+            # Exercise the CUDA engine worker path instead of AOTAutograd's
+            # usual single-threaded tracing fallback.
+            patch.object(
+                torch.autograd,
+                "set_multithreading_enabled",
+                lambda _enabled: nullcontext(),
+            ),
+            torch.enable_grad(),
+            fx_traceback.preserve_node_meta(),
+        ):
+            joint_graph, _, _, _ = _aot_export_function(fn, (x,), no_tangents=True)
+
+        self.assertTrue(
+            any(thread_id != caller_thread for thread_id in backward_threads)
+        )
+        backward_nodes = [
+            node
+            for node in joint_graph.graph.nodes
+            if node.meta.get("autograd_backward")
+        ]
+        self.assertTrue(backward_nodes)
+        regular_backward_nodes = [
+            node for node in backward_nodes if not node.meta.get("is_gradient_acc")
+        ]
+        self.assertTrue(regular_backward_nodes)
+        self.assertTrue(
+            all(node.meta.get("seq_nr", -1) >= 0 for node in regular_backward_nodes)
+        )
+        self.assertTrue(
+            all(
+                node.meta.get("partitioner_tag") == "is_backward"
+                for node in regular_backward_nodes
+            )
+        )
+        gradient_accumulation_nodes = [
+            node for node in backward_nodes if node.meta.get("is_gradient_acc")
+        ]
+        self.assertTrue(gradient_accumulation_nodes)
+        self.assertTrue(
+            all(
+                fx_traceback.GRADIENT_ACC_SPECIAL_STACK
+                in node.meta.get("stack_trace", "")
+                for node in gradient_accumulation_nodes
+            )
+        )
+        self.assertFalse(fx_traceback.has_preserved_node_meta())
+        self.assertEqual(dict(fx_traceback.current_meta), {})
+
+    @onlyAccelerator
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     @patch.object(torch._dynamo.config, "capture_dynamic_output_shape_ops", True)
-    def test_partitioner_filters_symbool_saved_for_bw(self):
+    def test_partitioner_filters_symbool_saved_for_bw(self, device):
         """When cross-rank sync injects SymBool nodes (whose only consumers are
         _assert_scalar) into saved_values, the partitioner must filter them out
         so they don't become backward graph inputs that Inductor can't lower.
@@ -1854,16 +2088,16 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
             chunks = torch.split(y, splits, dim=0)
             return torch.cat([c * 2.0 for c in chunks], dim=0).sum()
 
-        x = torch.randn(20, 16, requires_grad=True, device="cuda")
-        splits_tensor = torch.tensor([3, 5], device="cuda")
-        mask = torch.zeros(20, dtype=torch.bool, device="cuda")
+        x = torch.randn(20, 16, requires_grad=True, device=device)
+        splits_tensor = torch.tensor([3, 5], device=device)
+        mask = torch.zeros(20, dtype=torch.bool, device=device)
         mask[:8] = True
 
         with (
             patch.object(P, "_sync_decision_cross_ranks", inject_symbool_nodes),
             patch.object(functorch_config, "_sync_decision_cross_ranks", True),
         ):
-            compiled_fn = torch.compile(fn)
+            compiled_fn = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
             loss = compiled_fn(x, splits_tensor, mask)
             # Without the fix, this raises:
             # InductorError: Unsupported inductor graph input type:
@@ -1879,7 +2113,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
         from functorch.compile import aot_function, default_partition, nop
 
-        x = torch.randn(20, 16, requires_grad=True, device="cuda")
+        x = torch.randn(20, 16, requires_grad=True, device=device)
         compiled_fn = aot_function(
             fn,
             fw_compiler=fw_compiler,
@@ -1904,19 +2138,8 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
             )
         )
 
-    def test_batched_matmul_inference_mode(self):
-        # Regression test for torch.compile crash with batched matmul in inference_mode
-        x = torch.randn(2, 4, 8)
-        w = torch.randn(8, 8)
 
-        def f(x, w):
-            with torch.inference_mode():
-                return (x @ w).sum()
-
-        torch._dynamo.reset()
-        result = torch.compile(f)(x, w)
-        self.assertIsInstance(result, torch.Tensor)
-
+instantiate_device_type_tests(AotAutogradFallbackTestsDevice, globals())
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

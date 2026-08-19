@@ -143,7 +143,7 @@ def einop_rule(
             op_schema, input_dims, input_specs, dim_to_sharding, []
         )
     else:
-        # It's a op that support linearity, but not all input arguments are partial
+        # It's an op that supports linearity, but not all input arguments are partial
         # we fail the sharding propagation with suggestion to make all inputs be
         # partial on the corresponding mesh dim (all inputs should be partial for
         # the mesh dims in order to execute locally and delay the sum reduction)
