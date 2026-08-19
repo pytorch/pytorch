@@ -280,6 +280,7 @@ void THP_PyFrame_Clear(_PyInterpreterFrame* frame) {
 
 #endif
 
+#if !IS_PYTHON_3_15_PLUS
 // https://github.com/python/cpython/blob/fad48ea1816be3125ea51edcdfe2f999d6ade796/Objects/obmalloc.c#L635
 void* THP_PyObject_VirtualAlloc(size_t size) {
   PyObjectArenaAllocator arena;
@@ -355,6 +356,7 @@ _PyInterpreterFrame* THP_PyThreadState_BumpFramePointerSlow(
   }
   return (_PyInterpreterFrame*)push_chunk(tstate, (int)size);
 }
+#endif // !IS_PYTHON_3_15_PLUS
 
 #if !IS_PYTHON_3_13_PLUS
 // https://github.com/python/cpython/blob/fad48ea1816be3125ea51edcdfe2f999d6ade796/Objects/obmalloc.c#L641
