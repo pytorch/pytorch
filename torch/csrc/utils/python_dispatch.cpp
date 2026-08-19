@@ -262,8 +262,8 @@ static c10::DispatchKeySet pyobject_dispatch_compute_keyset(
     PyObject* const* args,
     Py_ssize_t nargs) {
   uint64_t key_set = 0;
-  extractor.dispatchArgIndicesReverse().for_each_set_bit(
-      [&](size_t reverse_arg_index) {
+  c10::utils::for_each_set_bit(
+      extractor.dispatchArgIndicesReverse(), [&](size_t reverse_arg_index) {
         pyobject_dispatch_collect_keys(
             args[nargs - 1 - static_cast<Py_ssize_t>(reverse_arg_index)],
             key_set);

@@ -118,10 +118,6 @@ class OperatorArgsKwargsView {
       return parent_ == rhs.parent_ && current_ == rhs.current_;
     }
 
-    bool operator!=(const kwargs_iterator& rhs) {
-      return !(*this == rhs);
-    }
-
    private:
     const OperatorArgsKwargsView* parent_ = nullptr;
     size_t current_ = 0;
@@ -1490,7 +1486,7 @@ static bool sets_intersect(
     return sets_intersect(bigger, smaller);
   }
   for (const auto& item : smaller) {
-    if (bigger.find(item) != bigger.end()) {
+    if (bigger.contains(item)) {
       return true;
     }
   }
@@ -1999,7 +1995,8 @@ static PyObject* DTensor_compute_global_tensor_info_impl(
     } else if (!cpp_placement.is_replicate() && !cpp_placement.is_partial()) {
 #if IS_PYTHON_3_11_PLUS
       const auto placement_type_name =
-          py::str(py::handle(PyType_GetName(Py_TYPE(placement.ptr()))));
+          py::str(py::reinterpret_steal<py::object>(
+              PyType_GetName(Py_TYPE(placement.ptr()))));
 #else
       const auto placement_type_name =
           py::str(py::handle((PyObject*)Py_TYPE(placement.ptr()))
