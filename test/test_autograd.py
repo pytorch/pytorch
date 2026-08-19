@@ -18121,6 +18121,33 @@ class TestAutogradMultipleDispatch(TestCase):
         self.assertEqual(x.grad, torch.zeros_like(x))
         self.assertEqual(y.grad, torch.zeros_like(y))
 
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_atan2_gradient_no_overflow(self, device, dtype):
+        # The reverse rule forms 1 / (self^2 + other^2), which over- and
+        # underflows in half precision well inside the range of the gradient
+        # it feeds.
+        for a, b in [(2e-3, 2e-3), (1e-4, 1e-4), (200.0, 200.0), (1.0, 1.0)]:
+            with self.subTest(a=a, b=b):
+                x = torch.tensor([a], device=device, dtype=dtype, requires_grad=True)
+                y = torch.tensor([b], device=device, dtype=dtype, requires_grad=True)
+                torch.atan2(x, y).backward()
+                x64 = x.detach().double().requires_grad_()
+                y64 = y.detach().double().requires_grad_()
+                torch.atan2(x64, y64).backward()
+                self.assertEqual(x.grad, x64.grad.to(dtype), atol=0, rtol=1e-3)
+                self.assertEqual(y.grad, y64.grad.to(dtype), atol=0, rtol=1e-3)
+
+    @dtypes(torch.uint8, torch.int32, torch.bool)
+    def test_atan2_gradient_integral_self(self, device, dtype):
+        # atan2 promotes integral inputs to float, so both -self and self^2 must
+        # be formed in the promoted type rather than the integral one.
+        a = 100000 if dtype == torch.int32 else 1
+        x = torch.full((1,), a, device=device, dtype=dtype)
+        y = torch.ones(1, device=device, requires_grad=True)
+        torch.atan2(x, y).backward()
+        expected = torch.full_like(y, -a / (a * a + 1.0))
+        self.assertEqual(y.grad, expected, atol=0, rtol=1e-3)
+
     # Test that torch.autograd.backward respects __torch_function__ on tensor subclasses.
     def test_backward_respects_torch_function(self):
         backward_called_with_subclass = [False]

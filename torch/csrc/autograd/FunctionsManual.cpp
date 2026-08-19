@@ -8,6 +8,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/LegacyBatchedTensorImpl.h>
+#include <ATen/OpMathType.h>
 #include <ATen/ScalarOps.h>
 #include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/TensorSubclassLikeUtils.h>
@@ -3638,7 +3639,14 @@ std::tuple<Tensor, Tensor> atan2_backward(
   if (!grad.defined()) {
     return std::tuple<Tensor, Tensor>{Tensor(), Tensor()};
   }
-  auto denom = self * self + other * other;
+  // `1 / (self^2 + other^2)` over/underflows in half precision for inputs whose
+  // gradient is representable, so form it in the op math type. `.to()` is a
+  // no-op if dtype is same.
+  const auto result_dtype = at::result_type(self, other);
+  const auto opmath_dtype = at::toOpMathType(result_dtype);
+  auto self_ = self.to(opmath_dtype);
+  auto other_ = other.to(opmath_dtype);
+  auto denom = self_ * self_ + other_ * other_;
   auto recip = denom.reciprocal();
   if (at::areAnyTensorSubclassLike({self, other, denom, recip}) ||
       at::GradMode::is_enabled()) {
@@ -3647,8 +3655,8 @@ std::tuple<Tensor, Tensor> atan2_backward(
     recip.masked_fill_(denom == 0, 0);
   }
   return std::tuple<Tensor, Tensor>{
-      output_mask[0] ? grad * other * recip : Tensor(),
-      output_mask[1] ? grad * -self * recip : Tensor()};
+      output_mask[0] ? (grad * other_ * recip).to(result_dtype) : Tensor(),
+      output_mask[1] ? (grad * -self_ * recip).to(result_dtype) : Tensor()};
 }
 
 Tensor gelu_double_backward(
