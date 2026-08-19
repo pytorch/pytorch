@@ -851,6 +851,36 @@ TORCH_META_FUNC(_linalg_eigh)(const Tensor& A,
   at::native::squareCheckInputs(A, "linalg.eigh");
   at::native::checkUplo(uplo);
 
+  // Early check for 32-bit LAPACK workspace overflow (CPU only)
+  if (A.device().is_cpu() && compute_v) {
+    auto n = A.size(-1);
+    // syevd (real): lwork = 2*n*n + 6*n + 1
+    // heevd (complex): lwork = 2*n*n + 2*n + 1, lrwork = 2*n*n + 5*n + 1
+    // Both overflow int for n >= 32767
+    int64_t lwork_required = A.is_complex()
+        ? (2 * n * n + 2 * n + 1)
+        : (2 * n * n + 6 * n + 1);
+    TORCH_CHECK(
+        lwork_required <= std::numeric_limits<int>::max(),
+        "linalg.eigh: the required LAPACK workspace size (", lwork_required,
+        ") for a ", n, "x", n,
+        " matrix exceeds the 32-bit LAPACK interface limit (",
+        std::numeric_limits<int>::max(),
+        "). Consider using smaller matrices or a LAPACK build with 64-bit "
+        "integer support (ILP64).");
+    if (A.is_complex()) {
+      int64_t lrwork_required = 2 * n * n + 5 * n + 1;
+      TORCH_CHECK(
+          lrwork_required <= std::numeric_limits<int>::max(),
+          "linalg.eigh: the required LAPACK real workspace size (",
+          lrwork_required, ") for a ", n, "x", n,
+          " complex matrix exceeds the 32-bit LAPACK interface limit (",
+          std::numeric_limits<int>::max(),
+          "). Consider using smaller matrices or a LAPACK build with 64-bit "
+          "integer support (ILP64).");
+    }
+  }
+
   auto shape = A.sizes().vec();
   if (compute_v) {
     // eigenvectors
