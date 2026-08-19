@@ -25,6 +25,7 @@ from torch.testing._internal.common_utils import (
     HardwareClassification,
     recover_orig_fp32_precision,
 )
+from torch.testing._internal.inductor_utils import IS_BIG_GPU
 
 
 class TestKernelBenchmark(TestCase):
@@ -181,9 +182,12 @@ class TestKernelBenchmark(TestCase):
 
     # TODO: Currently the Triton mm template +  relu fusion causes slowdown on XPU,
     # Need to refine the template and config for XPU.
-    @requires_capabilities(Capability.lib.triton, Capability.big_gpu.big_gpu)
+    @requires_capabilities(Capability.lib.triton)
     @config.patch(
         max_autotune=True, max_autotune_gemm_backends="TRITON", force_shape_pad=True
+    )
+    @unittest.skipIf(
+        not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
     )
     @fresh_cache()
     def test_matmul_triton_kernel_benchmark(self, device):
@@ -200,9 +204,12 @@ class TestKernelBenchmark(TestCase):
         f(a, b)
         self.verify_compiled_kernels()
 
-    @requires_capabilities(Capability.lib.triton, Capability.big_gpu.big_gpu)
+    @requires_capabilities(Capability.lib.triton)
     @config.patch(
         max_autotune=True, max_autotune_gemm_backends="TRITON", shape_padding=False
+    )
+    @unittest.skipIf(
+        not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
     )
     @fresh_cache()
     def test_mm_triton_kernel_benchmark(self, device):
@@ -519,7 +526,10 @@ class TestKernelBenchmark(TestCase):
         compiled_module = self.get_compiled_module()
         self.verify_remove_inductor_deps(compiled_module)
 
-    @requires_capabilities(Capability.lib.triton, Capability.big_gpu.big_gpu)
+    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(
+        not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
+    )
     @config.patch("triton.unique_kernel_names", True)
     @config.patch(benchmark_kernel=False)
     @config.patch(compile_threads=1)
