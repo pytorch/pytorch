@@ -18,7 +18,6 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
-    instantiate_parametrized_tests,
     skipIfWindows,
 )
 from torch.testing._internal.logging_utils import multiple_logs_to_string
@@ -41,7 +40,6 @@ def filesize(filename: Path):
     return os.stat(filename).st_size
 
 
-@instantiate_parametrized_tests
 @config.patch("trace.enabled", True)
 class TestDebugTraceGeneric(test_torchinductor.TestCase):
     hw_classification = HardwareClassification.GENERIC
@@ -280,10 +278,10 @@ op2.node.kernel = extern_kernels.mm""",
         )
 
 
-@config.patch("trace.enabled", True)
 class TestDebugTraceAccelerator(test_torchinductor.TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @config.patch("trace.enabled", True)
     @requires_capabilities(Capability.lib.triton)
     def test_debug_multi_tempalte(self, device):
         class ToyModel(torch.nn.Module):
@@ -309,7 +307,6 @@ class TestDebugTraceAccelerator(test_torchinductor.TestCase):
             m(input_tensor)
 
 
-@instantiate_parametrized_tests
 class TestLogAutotuningResultsCallSite(test_torchinductor.TestCase):
     hw_classification = HardwareClassification.GENERIC
 
