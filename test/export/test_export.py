@@ -10203,6 +10203,7 @@ def forward(self, x):
         for tensor in inputs[0].values():
             for attr in [
                 "_dynamo_weak_dynamic_indices",
+                "_dynamo_weak_dynamic_range",
                 "_dynamo_dynamic_indices",
                 "_dynamo_dynamic_range",
                 "_dynamo_static_indices",

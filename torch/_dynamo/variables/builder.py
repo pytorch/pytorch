@@ -4812,6 +4812,19 @@ def _automatic_dynamic(
                         )
                 else:
                     constraint_size = RelaxedUnspecConstraint(warn_only=False)
+            elif marked_weak_dynamic and hasattr(e, "_dynamo_weak_dynamic_range"):
+                dim_range = [
+                    dr for dr in e._dynamo_weak_dynamic_range if dr.dim == i
+                ].pop()
+                if dim_range.min is not None or dim_range.max is not None:
+                    from torch.fx.experimental.symbolic_shapes import (
+                        StrictMinMaxConstraint,
+                    )
+
+                    constraint_size = StrictMinMaxConstraint(
+                        vr=ValueRanges(lower=dim_range.min, upper=dim_range.max),
+                        warn_only=True,
+                    )
             elif marked_strict_unbacked:
                 constraint_size = RelaxedUnspecConstraint(warn_only=False)
             elif not marked_static and automatic_dynamic:

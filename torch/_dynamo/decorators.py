@@ -1065,8 +1065,8 @@ class _DimRange:
     """
 
     dim: int
-    min: int
-    max: int
+    min: int | None
+    max: int | None
 
 
 @forbid_in_graph
@@ -1271,22 +1271,37 @@ def mark_dynamic(
 
 
 @forbid_in_graph
-def maybe_mark_dynamic(t: Any, index: int | list[Any] | tuple[Any]) -> None:
+def maybe_mark_dynamic(
+    t: Any,
+    index: int | list[Any] | tuple[Any],
+    *,
+    min: int | None = None,
+    max: int | None = None,
+) -> None:
     """
-    Mark a tensor as having a dynamic dim, but don't enforce it (i.e., if this
-    dimension ends up getting specialized, don't error).
+    Mark a tensor as having a dynamic dim, but do not enforce it (i.e., if this
+    dimension ends up getting specialized, do not error).
+
+    If min or max are specified, they are used as the initial range for the
+    dimension. The compiler may still narrow this range or specialize the
+    dimension.
     """
     if is_traceable_wrapper_subclass(t):
         # default behavior: mirror maybe_mark_dynamic() on all inner tensors with same dim as t
         # TODO: Make this configurable via a supported public API
-        _apply_func_to_inner_tensors_of_same_dim(maybe_mark_dynamic, t, index)
+        _apply_func_to_inner_tensors_of_same_dim(
+            maybe_mark_dynamic, t, index, min=min, max=max
+        )
 
     if isinstance(index, int):
         if not hasattr(t, "_dynamo_weak_dynamic_indices"):
             t._dynamo_weak_dynamic_indices = set()
+        if not hasattr(t, "_dynamo_weak_dynamic_range"):
+            t._dynamo_weak_dynamic_range = set()
         # TODO(voz): Should we bounds check?
 
         t._dynamo_weak_dynamic_indices.add(index)
+        t._dynamo_weak_dynamic_range.add(_DimRange(index, min, max))
         t._has_dynamo_dim_marking = True  # type: ignore[attr-defined]
         return
 
@@ -1295,7 +1310,7 @@ def maybe_mark_dynamic(t: Any, index: int | list[Any] | tuple[Any]) -> None:
             f"Expected index to be int, list, or tuple, got {type(index)}"
         )
     for i in index:
-        maybe_mark_dynamic(t, i)
+        maybe_mark_dynamic(t, i, min=min, max=max)
 
 
 def mark_static(t: Any, index: int | list[Any] | tuple[Any] | None = None) -> None:

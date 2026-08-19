@@ -10780,6 +10780,46 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         with self.assertRaises(ConstraintViolationError):
             torch.compile(my_dyn_fn, backend="eager")(y)
 
+    def test_maybe_mark_dynamic_with_ranges(self):
+        compiled_ranges = []
+
+        def backend(gm, example_inputs):
+            sizes = [arg for arg in example_inputs if isinstance(arg, torch.SymInt)]
+            size = sizes[0] if sizes else example_inputs[0].shape[0]
+            if isinstance(size, torch.SymInt):
+                shape_env = size.node.shape_env
+                if shape_env is None:
+                    raise AssertionError("expected SymInt to have a ShapeEnv")
+                vr = shape_env.var_to_range[size.node.expr]
+                compiled_ranges.append((vr.lower, vr.upper))
+            else:
+                compiled_ranges.append(size)
+            return gm.forward
+
+        def fn(x):
+            if x.shape[0] == 3:
+                return x.sin()
+            return x.cos() * x.shape[0]
+
+        x = torch.randn(3)
+        torch._dynamo.maybe_mark_dynamic(x, 0, min=2, max=5)
+        opt_fn = torch.compile(fn, backend=backend)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(compiled_ranges, [3])
+
+        x = torch.randn(4)
+        torch._dynamo.maybe_mark_dynamic(x, 0, min=2, max=5)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(compiled_ranges, [3, (2, 5)])
+
+        x = torch.randn(5)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(compiled_ranges, [3, (2, 5)])
+
+        x = torch.randn(6)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(len(compiled_ranges), 3)
+
     def test_mark_static(self):
         counter = CompileCounter()
 
