@@ -258,7 +258,11 @@ void* mmap(
 }
 
 int munmap(void* addr, size_t length) {
-  if (!UnmapViewOfFile(addr)) {
+  // mmap may return an offset into the view, but UnmapViewOfFile needs its
+  // base.
+  MEMORY_BASIC_INFORMATION mbi{};
+  if (VirtualQuery(addr, &mbi, sizeof(mbi)) == 0 ||
+      !UnmapViewOfFile(mbi.AllocationBase)) {
     errno = EINVAL;
     return -1;
   }
@@ -886,6 +890,14 @@ class AOTInductorModelBase {
 
   // NOLINTNEXTLINE(modernize-use-equals-default)
   ~AOTInductorModelBase() {
+#ifdef USE_MMAP_SELF
+    if (self_mmap) {
+      if (munmap(self_mmap, constant_blob_size()) != 0) {
+        std::cerr << "Failed to unmap AOTInductor model constants\n";
+      }
+      self_mmap = nullptr;
+    }
+#endif // USE_MMAP_SELF
 #ifdef USE_CUDA
     if (run_finished_) {
       auto code = cudaEventDestroy(*run_finished_);
