@@ -23,7 +23,7 @@
 #include <ATen/ops/sum.h>
 #endif
 
-constexpr int64_t CONV3D_GRAIN_SALT = 20;
+constexpr int64_t CONV3D_GRAIN_SALT = 0;
 
 namespace at::native {
 
