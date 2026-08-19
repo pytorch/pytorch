@@ -151,7 +151,7 @@ Evaluate BC implications per [bc-guidelines.md](bc-guidelines.md). For non-trivi
 
 ### Step 4: Consolidate Findings
 
-Deduplicate **before** you draft, and before Step 5 — every duplicate carried forward costs a verification agent and survives it.
+Deduplicate **before** you draft, and before Step 5 as it would slow it down significantly.
 
 Flatten every candidate — yours and every sub-agent's — into a list of `(file:line, one-line claim)` pairs, then collapse it:
 
