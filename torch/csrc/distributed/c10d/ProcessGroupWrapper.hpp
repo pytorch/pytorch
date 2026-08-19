@@ -150,6 +150,8 @@ class TORCH_API ProcessGroupWrapper : public Backend {
   bool supportsSplitting() const override;
   bool supportsCoalescing() const override;
   bool supportsTimeEstimation() const override;
+  void startTimeEstimate() override;
+  float endTimeEstimate() override;
   bool supportsShrinking() const override;
   c10::intrusive_ptr<Backend> shrink(
       const std::vector<int64_t>& ranks_to_exclude,
@@ -170,6 +172,8 @@ class TORCH_API ProcessGroupWrapper : public Backend {
   std::unordered_map<std::string, uint64_t> getMemoryStats() override;
 
   ErrorType getError() override;
+  std::optional<at::Device> getBoundDeviceId() const override;
+  void setBoundDeviceId(std::optional<at::Device> device) override;
   void eagerConnectSingleDevice(at::Device device) override;
 
   c10::intrusive_ptr<Backend> getWrappedPg() const;

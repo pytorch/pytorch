@@ -26,6 +26,7 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
      set_stance
      set_enable_guard_collectives
      cudagraph_mark_step_begin
+     cudagraph_mark_warmup_incomplete
      is_compiling
      is_dynamo_compiling
      is_exporting
@@ -38,7 +39,6 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
      nested_compile_region
      load_cache_artifacts
      load_compiled_function
-     export_python
      save_cache_artifacts
      wrap_numpy
 ```

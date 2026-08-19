@@ -31,6 +31,7 @@ _CUTEDSL_REQUIRED_VERSIONS: set[Version] = {
     Version(f"{4}.{4}.{1}"),
     Version(f"{4}.{4}.{2}"),
     Version(f"{4}.{5}.{2}"),
+    Version(f"{4}.{6}.{2}"),
 }
 
 
