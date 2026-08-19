@@ -6,6 +6,7 @@ from torch.distributed.tensor import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import OpSchema
 from torch.distributed.tensor._ops._common_rules import einop_rule, pointwise_rule
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import HardwareClassification, run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorContinuousTestBase,
@@ -400,6 +401,14 @@ class CommonRulesTest(DTensorContinuousTestBase):
         schema_suggestion = output_sharding.redistribute_schema
         self.assertEqual(schema_suggestion.args_schema[0].dim_map, mat1)
         self.assertEqual(schema_suggestion.args_schema[1].dim_map, mat1)
+
+
+instantiate_device_type_tests(
+    CommonRulesTest,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":

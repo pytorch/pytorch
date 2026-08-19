@@ -1926,9 +1926,25 @@ class TestUnsupportedDTensorOp(TestCase):
             _ = torch.ops.testlib.unsupported_cat([x_dt, y_dt], dim=0)
 
 
-instantiate_device_type_tests(DistTensorReplicateStrategyRegistrationTest, globals())
-instantiate_device_type_tests(TestStrategyHashing, globals())
-instantiate_device_type_tests(TestStrategyOperation, globals())
+instantiate_device_type_tests(
+    DistTensorReplicateStrategyRegistrationTest,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestStrategyHashing,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestStrategyOperation,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+
 
 if __name__ == "__main__":
     run_tests()

@@ -12,6 +12,7 @@ from torch.distributed.tensor import (
     Replicate,
     Shard,
 )
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -784,11 +785,19 @@ class TestDTensorOptimizerAccelerator(DTensorTestBase):
         )
 
 
-instantiate_parametrized_tests(TestDTensorOptimizerAccelerator)
-
 TestDTensorOptimizerWithLocalTensor = create_local_tensor_test_class(
     TestDTensorOptimizerAccelerator,
 )
+instantiate_parametrized_tests(TestDTensorOptimizerWithLocalTensor)
+
+
+instantiate_device_type_tests(
+    TestDTensorOptimizerAccelerator,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+
 
 if __name__ == "__main__":
     run_tests()

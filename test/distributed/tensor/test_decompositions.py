@@ -12,6 +12,7 @@ from torch.distributed.tensor.placement_types import (
     Replicate,
     Shard,
 )
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -303,6 +304,14 @@ class TestDecompShardingWithComms(DTensorTestBase):
         expected_dim1 = torch.aminmax(t, dim=1)
         self.assertTrue(torch.equal(result_dim1.min.full_tensor(), expected_dim1.min))
         self.assertTrue(torch.equal(result_dim1.max.full_tensor(), expected_dim1.max))
+
+
+instantiate_device_type_tests(
+    TestDecompShardingWithComms,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":
