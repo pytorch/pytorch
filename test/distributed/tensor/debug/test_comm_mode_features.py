@@ -11,13 +11,11 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
     RowwiseParallel,
 )
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    requires_cuda,
     run_tests,
     skipIfHpu,
-    TEST_XPU,
-    xfailIf,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -25,7 +23,6 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     MLPStacked,
     ModelArgs,
     NUM_DEVICES,
-    skip_unless_torch_gpu,
     Transformer,
     with_comms,
 )
@@ -229,12 +226,10 @@ class TestCommModeFeatures(DTensorTestBase):
         )
 
 
+@requires_cuda
 class TestCommModeTransformerCUDA(DTensorTestBase):
     hw_classification = HardwareClassification.CUDA
 
-    @skipIfHpu
-    @skip_unless_torch_gpu
-    @xfailIf(TEST_XPU)  # https://github.com/intel/torch-xpu-ops/issues/1555
     @with_comms
     def test_transformer_module_tracing(self, is_seq_parallel=False):
         """
@@ -384,19 +379,6 @@ class TestCommModeTransformerCUDA(DTensorTestBase):
             ],
             1,
         )
-
-
-instantiate_device_type_tests(
-    TestCommModeFeatures,
-    globals(),
-    except_for=["cpu"],
-    allow_xpu=True,
-)
-instantiate_device_type_tests(
-    TestCommModeTransformerCUDA,
-    globals(),
-    only_for=["cuda"],
-)
 
 
 if __name__ == "__main__":

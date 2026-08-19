@@ -231,8 +231,8 @@ class TestDTensorDebugMode(TestCase):
             backend="fake", rank=0, world_size=self.world_size, store=store
         )
 
-    def test_debug_mode_mm(self):
-        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+    def test_debug_mode_mm(self, device):
+        mesh = DeviceMesh(device, list(range(self.world_size)))
 
         x = torch.randn(1, 8, requires_grad=False)
         y = torch.randn(1, 32, requires_grad=True)
@@ -318,8 +318,8 @@ class TestDTensorDebugMode(TestCase):
         self.assertEqual(hash_(torch.ones(4, dtype=torch.int8)), 0)
         self.assertEqual(hash_(torch.ones(5, dtype=torch.int8)), 1)
 
-    def test_debug_string_inside_context(self):
-        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+    def test_debug_string_inside_context(self, device):
+        mesh = DeviceMesh(device, list(range(self.world_size)))
 
         x = torch.randn(1, 8, requires_grad=False)
         y = torch.randn(1, 32, requires_grad=True)
@@ -332,8 +332,8 @@ class TestDTensorDebugMode(TestCase):
         s1 = debug_mode.debug_string()
         self.assertEqual(s0, s1)
 
-    def test_debug_mode_backward(self):
-        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+    def test_debug_mode_backward(self, device):
+        mesh = DeviceMesh(device, list(range(self.world_size)))
 
         x = torch.randn(1, 8, requires_grad=True)
         y = torch.randn(8, 1, requires_grad=True)
@@ -455,8 +455,8 @@ class TestDTensorDebugMode(TestCase):
         self.assertTrue("x = self.l2(x)" in op_calls[2].stack_trace)
         self.assertTrue("x = x.relu()" in op_calls[12].stack_trace)
 
-    def test_debug_mode_densor_redistribution_trace(self):
-        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size).view(4, 2))
+    def test_debug_mode_densor_redistribution_trace(self, device):
+        mesh = DeviceMesh(device, torch.arange(self.world_size).view(4, 2))
 
         x = torch.randn(16, 8, requires_grad=True)
         y = torch.randn(8, 16, requires_grad=True)
@@ -488,9 +488,9 @@ class TestDTensorDebugMode(TestCase):
     aten::sum(t: f32[16, 128])""",
         )
 
-    def test_debug_mode_explicit_redistribute(self):
+    def test_debug_mode_explicit_redistribute(self, device):
         """Test that explicit user-called redistribute shows [explicit] annotation."""
-        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        mesh = DeviceMesh(device, list(range(self.world_size)))
 
         x = torch.randn(1, 8)
         x_dtensor = DTensor.from_local(x, mesh, [Shard(0)], run_check=False)
@@ -520,9 +520,9 @@ class TestDTensorDebugMode(TestCase):
     aten::view(t: f32[8, 8], [8, 8])  ->  t: f32[8, 8]""",
         )
 
-    def test_output_placements(self):
+    def test_output_placements(self, device):
         """Test that output placements are recorded for multi-output DTensor ops."""
-        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        mesh = DeviceMesh(device, list(range(self.world_size)))
 
         # Use topk which returns multiple outputs (values, indices)
         # Shard on dim=1 (the topk dimension) to trigger redistribution
@@ -548,8 +548,8 @@ class TestDTensorDebugMode(TestCase):
     aten::topk(t: f32[8, 16], 4, 1)  ->  ('t: f32[8, 4]', 't: i64[8, 4]')""",
         )
 
-    def test_debug_mode_einsum(self):
-        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size).view(4, 2))
+    def test_debug_mode_einsum(self, device):
+        mesh = DeviceMesh(device, torch.arange(self.world_size).view(4, 2))
 
         # Create test tensors with mixed Partial placements: P(sum)R and RP(sum).
         # Per-input linearity allows bmm to operate directly on Partial inputs
@@ -667,7 +667,7 @@ class TestDTensorDebugMode(TestCase):
 
     @parametrize("has_inner_mode", [True, False])
     @parametrize("has_outer_mode", [True, False])
-    def test_nested_debug_mode(self, has_inner_mode, has_outer_mode):
+    def test_nested_debug_mode(self, device, has_inner_mode, has_outer_mode):
         class DummyTorchDispatchMode1(TorchDispatchMode):
             def __torch_dispatch__(self, func, types, args=(), kwargs=None):
                 return func(*args, **kwargs)
@@ -676,7 +676,7 @@ class TestDTensorDebugMode(TestCase):
             def __torch_dispatch__(self, func, types, args=(), kwargs=None):
                 return func(*args, **kwargs)
 
-        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        mesh = DeviceMesh(device, list(range(self.world_size)))
 
         x = torch.randn(1, 8, requires_grad=True)
         y = torch.randn(1, 32, requires_grad=True)
@@ -1082,11 +1082,11 @@ class TestDTensorDebugMode(TestCase):
         or torch.cuda.get_device_properties(0).total_memory < 2**26,
         "Being conservative, test peak memory is 25MB?",
     )
-    def test_tensor_hash_redistribute(self):
+    def test_tensor_hash_redistribute(self, device):
         # test that hashing collectives gives correct results
-        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        mesh = DeviceMesh(device, list(range(self.world_size)))
 
-        local_tensor = torch.ones(2**18, device=self.device_type)
+        local_tensor = torch.ones(2**18, device=device)
         dt = DTensor.from_local(local_tensor, mesh, [Shard(0)], run_check=False)
 
         with DebugMode() as debug_mode, DebugMode.log_tensor_hashes():
@@ -1142,8 +1142,8 @@ class TestDTensorDebugMode(TestCase):
             len([m for m in triton_mismatches if not m["is_input_hash"]]), 0
         )
 
-    def test_check_structure_mismatches(self):
-        x = torch.randn(32, 32, device=self.device_type)
+    def test_check_structure_mismatches(self, device):
+        x = torch.randn(32, 32, device=device)
 
         with DebugMode() as dm1, DebugMode.log_tensor_hashes():
             x.sin()
@@ -1158,8 +1158,8 @@ class TestDTensorDebugMode(TestCase):
         with self.assertRaisesRegex(ValueError, "Log lengths don't match"):
             DebugMode.check_hash_mismatches(dm1.logs, dm3.logs)
 
-    def test_pretty_print_dtensor_make_fx(self):
-        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+    def test_pretty_print_dtensor_make_fx(self, device):
+        mesh = DeviceMesh(device, list(range(self.world_size)))
 
         A = torch.randn(8, 32)
         B = torch.randn(32, 32)
@@ -1438,11 +1438,6 @@ class TestDTensorDebugModeNCCLBackend(MultiProcessTestCase):
 
 instantiate_device_type_tests(
     TestDTensorDebugMode,
-    globals(),
-    only_for=["cuda"],
-)
-instantiate_device_type_tests(
-    TestDTensorDebugModeNCCLBackend,
     globals(),
     only_for=["cuda"],
 )
