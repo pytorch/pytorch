@@ -546,7 +546,7 @@ class _VarlenAttentionTestMixin:
             start_idx = end_idx
 
 
-class TestVarlenAttention(_VarlenAttentionTestMixin, NNTestCase):
+class TestVarlenAttentionDevice(_VarlenAttentionTestMixin, NNTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @requires_capabilities(Capability.attention.flash_attention)
@@ -1494,7 +1494,6 @@ class TestVarlenAttentionCUDA(_VarlenAttentionTestMixin, NNTestCase):
             expected[:, lo:hi] = (scores * scale).logsumexp(-1)
         self.assertEqual(lse, expected, atol=2e-2, rtol=2e-2)
 
-    @requires_capabilities(Capability.attention.flash_attention)
     @skipIfRocm
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     def test_cudnn_varlen_cached_graph_grad_out_layout(self, device, dtype):
@@ -1760,7 +1759,7 @@ class TestVarlenAttentionCUDA(_VarlenAttentionTestMixin, NNTestCase):
             torch.ops.aten._cudnn_attention_forward(**(aten_kwargs | {"query": q_grad}))
 
 
-instantiate_device_type_tests(TestVarlenAttention, globals(), except_for=("cpu",))
+instantiate_device_type_tests(TestVarlenAttentionDevice, globals(), except_for=("cpu",))
 instantiate_device_type_tests(TestVarlenAttentionCUDA, globals(), only_for=("cuda",))
 
 if __name__ == "__main__":
