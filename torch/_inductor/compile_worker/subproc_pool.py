@@ -6,6 +6,7 @@ import logging
 import multiprocessing
 import os
 import pickle
+import selectors
 import struct
 import subprocess
 import sys
@@ -13,6 +14,7 @@ import threading
 import time
 import traceback
 import typing
+from collections import deque
 from collections.abc import Callable
 from concurrent.futures import Future, ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
@@ -73,6 +75,11 @@ def _current_compile_id() -> Any:
         return None
 
 
+class _DrainResult(Enum):
+    DRAINED = 0
+    SHUTDOWN_REQUESTED = 1
+
+
 def _pack_msg(msg_header: MsgHeader, job_id: int, length: int) -> bytes:
     return struct.pack("nnn", int(msg_header), job_id, length)
 
@@ -113,9 +120,19 @@ def _send_msg(
     write_pipe.flush()
 
 
+def _read_exact(read_pipe: IO[bytes], size: int) -> bytes:
+    result = bytearray()
+    while len(result) < size:
+        chunk = read_pipe.read(size - len(result))
+        if not chunk:
+            return b""
+        result.extend(chunk)
+    return bytes(result)
+
+
 def _recv_msg(read_pipe: IO[bytes]) -> tuple[MsgHeader, int, bytes]:
-    msg_header, job_id, length = _unpack_msg(read_pipe.read(msg_bytes))
-    data = read_pipe.read(length) if length > 0 else b""
+    msg_header, job_id, length = _unpack_msg(_read_exact(read_pipe, msg_bytes))
+    data = _read_exact(read_pipe, length) if length > 0 else b""
     if len(data) != length:
         if msg_header in (MsgHeader.JOB, MsgHeader.JOB_ERROR):
             return MsgHeader.JOB_ERROR, job_id, b""
@@ -643,6 +660,7 @@ class SubprocMain:
         self.nprocs = nprocs
         self.pool: ProcessPoolExecutor | None = None
         self.pool_finalizer: Any | None = None
+        self.deferred_messages: deque[tuple[MsgHeader, int, bytes]] = deque()
         self.running = True
         # job_id -> monotonic submit time; scanned by the watchdog thread.
         self._inflight: dict[int, float] = {}
@@ -656,18 +674,50 @@ class SubprocMain:
             watchdog.create(self.nprocs)
         self._start_watchdog()
         while True:
-            msg_header, job_id, data = _recv_msg(self.read_pipe)
+            msg_header, job_id, data = self._next_msg()
             if msg_header == MsgHeader.JOB:
                 self.submit(job_id, data)
             elif msg_header == MsgHeader.WAKEUP:
                 self._start_pool()
             elif msg_header == MsgHeader.QUIESCE:
-                self._quiesce()
+                if self._quiesce() == _DrainResult.SHUTDOWN_REQUESTED:
+                    return
             else:
                 return self._shutdown()
 
-    def _quiesce(self) -> None:
+    def _next_msg(self) -> tuple[MsgHeader, int, bytes]:
+        if self.deferred_messages:
+            return self.deferred_messages.popleft()
+        return _recv_msg(self.read_pipe)
+
+    def _quiesce(self) -> _DrainResult:
+        if self.pool is None:
+            return _DrainResult.DRAINED
+        drain_result = self._drain_inflight_until_shutdown()
+        if drain_result == _DrainResult.SHUTDOWN_REQUESTED:
+            return drain_result
         self._shutdown_pool(terminate_workers=False)
+        return _DrainResult.DRAINED
+
+    def _drain_inflight_until_shutdown(self) -> _DrainResult:
+        with selectors.DefaultSelector() as selector:
+            selector.register(self.read_pipe, selectors.EVENT_READ)
+            while True:
+                with self._inflight_lock:
+                    # _send_result removes a job only after delivering its frame.
+                    if not self._inflight:
+                        return _DrainResult.DRAINED
+
+                # Preserve quiesce ordering, but allow final shutdown to preempt
+                # long-running compiler work instead of waiting behind QUIESCE.
+                if not selector.select(timeout=0.05):
+                    continue
+
+                msg_header, job_id, data = _recv_msg(self.read_pipe)
+                if msg_header in (MsgHeader.SHUTDOWN, MsgHeader.ERROR):
+                    self._shutdown()
+                    return _DrainResult.SHUTDOWN_REQUESTED
+                self.deferred_messages.append((msg_header, job_id, data))
 
     def _shutdown(self) -> None:
         self._watchdog_stop.set()
@@ -689,8 +739,7 @@ class SubprocMain:
         self.pool = None
 
         if self.pool_finalizer is not None:
-            if terminate_workers:
-                self.pool_finalizer.cancel()
+            self.pool_finalizer.cancel()
             self.pool_finalizer = None
 
         if terminate_workers:
@@ -698,7 +747,7 @@ class SubprocMain:
             # interpreter finalization wait for running compiler workers.
             _terminate_process_pool(pool)
         else:
-            pool.shutdown(wait=False)
+            pool.shutdown(wait=True)
 
     def submit(self, job_id: int, data: bytes) -> None:
         # Clock starts before _start_pool/_warm_process_pool, so the first job's
