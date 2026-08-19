@@ -2484,6 +2484,20 @@ class SchedulerNode(BaseSchedulerNode):
         with self.node.with_original_inner_fn():
             self._compute_attrs()
 
+    @contextlib.contextmanager
+    def use_original_reduction(self) -> Iterator[None]:
+        """Temporarily restore the reduction represented by a split node."""
+        if not MixOrderReduction.is_split_reduction(self):
+            yield
+            return
+
+        state = self.snapshot_loop_state()
+        try:
+            self.cancel_reduction_split()
+            yield
+        finally:
+            self.restore_loop_state(state)
+
     def expand_dimension_for_pointwise_node(
         self, dimension: int, new_range: int
     ) -> None:
@@ -5793,14 +5807,15 @@ class Scheduler:
             template_local_reduction = backend.can_fuse_reduction_epilogue(node1, node2)
 
             def choice_supports_fusion(choice: ir.ChoiceCaller) -> bool:
-                if not isinstance(
-                    choice, torch._inductor.select_algorithm.TritonTemplateCaller
-                ):
-                    return False
-                if template_local_reduction and not (
-                    backend.can_fuse_reduction_epilogue_choice(node1, node2, choice)
-                ):
-                    return False
+                if template_local_reduction:
+                    if not isinstance(
+                        choice, torch._inductor.select_algorithm.TritonTemplateCaller
+                    ):
+                        return False
+                    if not backend.can_fuse_reduction_epilogue_choice(
+                        node1, node2, choice
+                    ):
+                        return False
                 # For prologue fusion we check if the underlying template of the choice
                 # supports all allowed prologue inputs. If not, we skip this choice in
                 # the fusion benchmark.
@@ -5820,7 +5835,10 @@ class Scheduler:
                     ] = []
                     choice_timings = multi_node.choice_timings(hint_override)
                     for choice, _ in sorted(choice_timings.items(), key=lambda x: x[1]):
-                        if not choice_supports_fusion(choice):
+                        if not isinstance(
+                            choice,
+                            torch._inductor.select_algorithm.TritonTemplateCaller,
+                        ) or not choice_supports_fusion(choice):
                             continue
                         triton_choice = typing.cast(
                             torch._inductor.select_algorithm.TritonTemplateCaller,
@@ -5938,7 +5956,10 @@ class Scheduler:
                     for choice, _ in sorted(
                         choice_timings.items(), key=operator.itemgetter(1)
                     ):
-                        if not choice_supports_fusion(choice):
+                        if not isinstance(
+                            choice,
+                            torch._inductor.select_algorithm.TritonTemplateCaller,
+                        ) or not choice_supports_fusion(choice):
                             continue
                         triton_choice = typing.cast(
                             torch._inductor.select_algorithm.TritonTemplateCaller,
@@ -5978,14 +5999,14 @@ class Scheduler:
             future_choices: list[tuple[Any, LambdaFuture | None, ModuleType]] = []
             template_choices = 0
             for choice, unfused_time in choice_timings_iter:
-                if template_local_reduction and not choice_supports_fusion(choice):
-                    continue
                 is_triton = isinstance(
                     choice, torch._inductor.ir.TritonTemplateCallerBase
                 )
                 is_nvgemm = isinstance(choice, NVUniversalGemmCaller)
 
                 if not is_triton and not is_nvgemm:
+                    continue
+                if is_triton and not choice_supports_fusion(choice):
                     continue
 
                 # pyrefly: ignore [missing-attribute]
@@ -5996,19 +6017,6 @@ class Scheduler:
                 # the prologue direction (epilogue_fusion is False when node1 is
                 # the pointwise prologue, node2 is the template).
                 if is_nvgemm and not epilogue_fusion:
-                    continue
-
-                # For prologue fusion we check if the underlying template of the choice
-                # supports all allowed prologue inputs. If not, we skip this choice in
-                # the fusion benchmark.
-                # TODO: Remove this check after all Triton templates support prologue fusion.
-                # Currently, persistent+TMA Triton template does not due to the TMA-based loads.
-                if (
-                    is_triton
-                    and not epilogue_fusion
-                    and hasattr(choice, "allowed_prologue_inps")
-                    and choice.allowed_prologue_inps != multi_node.allowed_prologue_inps
-                ):
                     continue
 
                 if bench_epilogue and unfused_time >= ms1 + ms2:

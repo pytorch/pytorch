@@ -8351,7 +8351,7 @@ class TritonScheduling(SIMDScheduling):
                     and not callable(getattr(TritonOverrides, op, None))
                     for op in used_ops
                 ) or used_ops.intersection(
-                    {"index_expr", "reduction", "to_dtype_bitcast"}
+                    OrderedSet(["index_expr", "reduction", "to_dtype_bitcast"])
                 ):
                     return None
                 source_reads = [

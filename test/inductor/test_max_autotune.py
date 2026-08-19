@@ -201,7 +201,7 @@ class TestMaxAutotune(TestCase):
 
         self.assertEqual(actual, f(a, b))
         FileCheck().check_count("async_compile.triton", 1, exactly=True).check(
-            "_block_local_reduction"
+            "block_local_xindex"
         ).run(code[0])
 
     @unittest.skipIf(
@@ -313,9 +313,9 @@ class TestMaxAutotune(TestCase):
             "larger_tile_both",
             "larger_tile_relu",
         ):
-            FileCheck().check("_block_local_reduction").run(code[0])
+            FileCheck().check("block_local_xindex").run(code[0])
         else:
-            FileCheck().check_not("_block_local_reduction").run(code[0])
+            FileCheck().check_not("block_local_xindex").run(code[0])
         if case == "sum":
             FileCheck().check("to(tl.float32)").run(code[0])
             FileCheck().check("tl.sum").run(code[0])
@@ -333,9 +333,11 @@ class TestMaxAutotune(TestCase):
                 tuple(torch.signbit(x) for x in expected),
             )
         elif case == "multiple":
-            FileCheck().check("_block_local_reduction_2").run(code[0])
+            FileCheck().check_count("async_compile.triton", 1, exactly=True).run(
+                code[0]
+            )
         if case in ("relu", "larger_tile_relu"):
-            FileCheck().check("tl.maximum").check("_block_local_reduction").run(code[0])
+            FileCheck().check("tl.maximum").check("block_local_xindex").run(code[0])
         if case.startswith("larger_tile"):
             FileCheck().check("tl.arange(0, 2)").check("tl.reshape").run(code[0])
 
@@ -5388,7 +5390,7 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
 
         self.assertEqual(actual, f(a, b))
         FileCheck().check("extern_kernels.mm").run(code[0])
-        FileCheck().check_not("_block_local_reduction").run(code[0])
+        FileCheck().check_not("block_local_xindex").run(code[0])
 
     @unittest.skipIf(
         not has_triton_tma_device(), "Need device-side TMA support in Triton"
@@ -5436,7 +5438,7 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
         self.assertEqual(set(selected_callers), {None, 64})
         for choice in selected_callers.values():
             self.assertEqual(choice.template_local_reduction_tile, (128, 128))
-        FileCheck().check("_block_local_reduction").run(code[0])
+        FileCheck().check("block_local_xindex").run(code[0])
 
     @contextlib.contextmanager
     def get_common_patches(
