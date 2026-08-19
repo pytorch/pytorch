@@ -466,8 +466,10 @@ class TestFakePG(TestCase):
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=rank, world_size=2, store=store)
 
+        # out_tensor is larger than in_tensor, values are first
+        # filled with in_tensor then zeros
         in_tensor = torch.arange(4.0).reshape(4, 1)
-        out_tensor = torch.empty(8, 1)
+        out_tensor = torch.full((8, 1), -1.0)
         dist.all_to_all_single(
             out_tensor,
             in_tensor,
@@ -484,6 +486,8 @@ class TestFakePG(TestCase):
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=rank, world_size=2, store=store)
 
+        # out_tensor is smaller than in_tensor, values are first
+        # filled with values of in_tensor.
         in_tensor = torch.arange(8.0).reshape(8, 1)
         out_tensor = torch.empty(4, 1)
         dist.all_to_all_single(
@@ -508,6 +512,51 @@ class TestFakePG(TestCase):
             input_split_sizes=[2, 2],
         )
         self.assertEqual(out_tensor, in_tensor)
+
+    def test_alltoall_base_empty_input_split_sizes(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        out_tensor = torch.ones(2, 1)
+        dist.all_to_all_single(
+            out_tensor,
+            torch.empty(0, 1),
+            output_split_sizes=[0, 2],
+            input_split_sizes=[],
+        )
+        self.assertEqual(out_tensor, torch.zeros_like(out_tensor))
+
+    def test_alltoall_base_equal_split_numel_mismatch(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        in_tensor = torch.arange(8.0).reshape(4, 2)
+        out_tensor = torch.empty(4, 1)
+        dist.all_to_all_single(out_tensor, in_tensor)
+        self.assertEqual(out_tensor, torch.arange(4.0).reshape(4, 1))
+
+    def test_alltoall_base_flat_copy_equal_splits(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        in_tensor = torch.arange(4.0).reshape(4, 1)
+        out_tensor = torch.empty(2, 2)
+        dist.all_to_all_single(out_tensor, in_tensor)
+        self.assertEqual(out_tensor, in_tensor.view_as(out_tensor))
+
+    def test_alltoall_base_flat_copy_explicit_splits(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        in_tensor = torch.arange(4.0).reshape(2, 2)
+        out_tensor = torch.empty(4, 1)
+        dist.all_to_all_single(
+            out_tensor,
+            in_tensor,
+            output_split_sizes=[2, 2],
+            input_split_sizes=[1, 1],
+        )
+        self.assertEqual(out_tensor, in_tensor.view_as(out_tensor))
 
     def test_alltoall_base_split_size_validation(self):
         store = FakeStore()
@@ -538,18 +587,31 @@ class TestFakePG(TestCase):
                 input_split_sizes=[2, 2],
             )
 
-    def test_alltoall_base_empty_input_with_output(self):
+    def test_alltoall_base_zero_sized_input(self):
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
 
         out_tensor = torch.ones(2, 1)
         dist.all_to_all_single(
             out_tensor,
-            torch.empty(0, 2),
+            torch.empty(0, 1),
             output_split_sizes=[0, 2],
             input_split_sizes=[0, 0],
         )
         self.assertEqual(out_tensor, torch.zeros_like(out_tensor))
+
+    def test_alltoall_base_zero_sized_output(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        out_tensor = torch.empty(0, 1)
+        dist.all_to_all_single(
+            out_tensor,
+            torch.arange(4.0).reshape(4, 1),
+            output_split_sizes=[0, 0],
+            input_split_sizes=[0, 4],
+        )
+        self.assertEqual(out_tensor, torch.empty_like(out_tensor))
 
     def test_alltoall_list_size_validation(self):
         store = FakeStore()

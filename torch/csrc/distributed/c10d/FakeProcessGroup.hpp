@@ -335,12 +335,15 @@ class FakeProcessGroup : public Backend {
     at::AutoDispatchBelowAutograd guard;
     // Approximation: inputs from other ranks are unavailable here, so copy as
     // much of the local input as fits and zero the remainder.
-    outputBuffer.zero_();
-    auto copy_size = std::min(inputBuffer.size(0), outputBuffer.size(0));
+    auto copy_size = std::min(inputBuffer.numel(), outputBuffer.numel());
+    auto flat_input = inputBuffer.reshape({-1});
+    auto flat_buffer =
+        at::zeros({outputBuffer.numel()}, outputBuffer.options());
     if (copy_size > 0) {
-      outputBuffer.narrow(0, 0, copy_size)
-          .copy_(inputBuffer.narrow(0, 0, copy_size));
+      flat_buffer.narrow(0, 0, copy_size)
+          .copy_(flat_input.narrow(0, 0, copy_size));
     }
+    outputBuffer.copy_(flat_buffer.view_as(outputBuffer));
     return c10::make_intrusive<FakeWork>();
   }
 
