@@ -21,7 +21,7 @@ on:
       - rocm-mi300
       - rocm-mi350
       - rocm-navi31
-      - rocm-nightly
+      - rocm-preview
       - inductor-micro-benchmark
       - inductor-micro-benchmark-x86
       - inductor-cu124

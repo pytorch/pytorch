@@ -350,7 +350,7 @@ std::vector<Tensor> foreach_tensor_neg_cuda(TensorList tensors) {
     return at::native::foreach_tensor_neg_slow(tensors);
   }
 
-  TORCH_CHECK(
+  TORCH_CHECK_NOT_IMPLEMENTED(
       tensors[0].scalar_type() != kBool,
       "Negation, the `-` operator, on a bool tensor is not supported. "
       "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
@@ -364,7 +364,7 @@ void foreach_tensor_neg_cuda_(TensorList tensors) {
     return at::native::foreach_tensor_neg_slow_(tensors);
   }
 
-  TORCH_CHECK(
+  TORCH_CHECK_NOT_IMPLEMENTED(
       tensors[0].scalar_type() != kBool,
       "Negation, the `-` operator, on a bool tensor is not supported. "
       "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
