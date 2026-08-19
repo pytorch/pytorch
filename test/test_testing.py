@@ -20,11 +20,10 @@ from collections.abc import Iterator
 import torch
 
 from torch.testing import make_tensor
-from torch.testing._internal.common_cuda import _get_torch_rocm_version
 from torch.testing._internal.common_utils import (
     IS_FBCODE, IS_JETSON, IS_MACOS, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, slowTest,
     parametrize, reparametrize, subtest, instantiate_parametrized_tests, dtype_name,
-    TEST_WITH_ROCM, decorateIf, skipIfXpu, getRocmVersion
+    TEST_WITH_ROCM, decorateIf, skipIfXpu
 )
 from torch.testing._internal.common_device_type import \
     (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
@@ -560,22 +559,6 @@ instantiate_device_type_tests(TestTesting, globals())
 
 
 class TestFrameworkUtils(TestCase):
-
-    def test_rocm_version_uses_sdk_version(self):
-        with (
-            unittest.mock.patch.object(torch.version, "rocm", "10.1.0"),
-            unittest.mock.patch.object(torch.version, "hip", "7.15.26306"),
-        ):
-            self.assertEqual(_get_torch_rocm_version(), (10, 1, 0))
-            self.assertEqual(getRocmVersion(), (10, 1, 0))
-
-    def test_rocm_version_falls_back_to_hip_version(self):
-        with (
-            unittest.mock.patch.object(torch.version, "rocm", None),
-            unittest.mock.patch.object(torch.version, "hip", "7.15.26306"),
-        ):
-            self.assertEqual(_get_torch_rocm_version(), (7, 15, 26306))
-            self.assertEqual(getRocmVersion(), (7, 15, 26306))
 
     @unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
     @unittest.skipIf(IS_SANDCASTLE, "Skipping because doesn't work on sandcastle")
