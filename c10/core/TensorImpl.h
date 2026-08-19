@@ -249,6 +249,8 @@ struct C10_API FakeTensorMode {
   // hint unbacked symbols. Read once at mode creation, matching Python.
   bool propagate_real_tensors_ = false;
 
+  bool allow_unsafe_data_ptr_access_ = true;
+
   // if set, prefer this device type when resolving the common device for
   // mixed-device ops
   std::optional<c10::DeviceType> prefer_device_type_ = std::nullopt;
@@ -1536,6 +1538,14 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       TORCH_CHECK(
           mode->allow_meta_,
           "device.type must not be 'meta' when allow_meta is False");
+    }
+    if (mode && has_storage()) {
+      auto* storage_impl = storage().unsafeGetStorageImpl();
+      if (mode->allow_unsafe_data_ptr_access_) {
+        storage_impl->set_warn_deprecated_on_mutable_data_ptr();
+      } else {
+        storage_impl->set_throw_on_mutable_data_ptr();
+      }
     }
     extra_meta.fake_tensor_mode_ = std::move(mode);
   }

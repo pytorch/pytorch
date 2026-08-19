@@ -3596,12 +3596,10 @@ class VariableBuilder:
 
         fake_tensor_value = example_value
         # type: ignore[attr-defined]
-        if (
-            is_fake_tensor(fake_tensor_value)
-            and maybe_get_fake_mode(fake_tensor_value) is not self.tx.fake_mode
-        ):
+        fake_mode = maybe_get_fake_mode(fake_tensor_value)
+        if is_fake_tensor(fake_tensor_value) and fake_mode is not self.tx.fake_mode:
             raise AssertionError(
-                f"fake mode ({fake_tensor_value.fake_mode}) from fake tensor metadata doesn't match mode"
+                f"fake mode ({fake_mode}) from fake tensor metadata doesn't match mode"
                 "({self.tx.fake_mode}) from InstructionTranslator"
             )
 
@@ -3693,12 +3691,10 @@ class VariableBuilder:
 
             fake_tensor_value = example_value
             # type: ignore[attr-defined]
-            if (
-                is_fake_tensor(fake_tensor_value)
-                and maybe_get_fake_mode(fake_tensor_value) is not self.tx.fake_mode
-            ):
+            fake_mode = maybe_get_fake_mode(fake_tensor_value)
+            if is_fake_tensor(fake_tensor_value) and fake_mode is not self.tx.fake_mode:
                 raise AssertionError(
-                    f"fake mode ({fake_tensor_value.fake_mode}) from fake tensor metadata doesn't match mode"
+                    f"fake mode ({fake_mode}) from fake tensor metadata doesn't match mode"
                     "({self.tx.fake_mode}) from InstructionTranslator"
                 )
 
