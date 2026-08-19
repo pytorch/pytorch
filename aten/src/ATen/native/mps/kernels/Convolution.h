@@ -1,6 +1,65 @@
 #pragma once
 #include <c10/metal/common.h>
 
+// Eight adjacent outputs reuse each loaded depthwise weight while retaining
+// enough threads to saturate the GPU for the measured Conv1d workloads.
+C10_METAL_CONSTEXPR int32_t conv1d_dw_outputs_per_thread = 8;
+#define CONV1D_DW_OUTPUTS_PER_THREAD_STR "8"
+
+// The strides express NCL or NLC storage; swap_grid flips the (x, y) thread
+// axes so the stride-1 storage axis stays along x for coalescing. The vec8
+// variants assume NCL and ignore the stride fields.
+struct Conv1dDwParams {
+  int32_t input_channels;
+  int32_t input_length;
+  int32_t output_length;
+  int32_t batch_size;
+  int32_t kernel_size;
+  int32_t stride;
+  int32_t padding;
+  int32_t dilation;
+  int32_t channel_multiplier;
+  int32_t in_channel_stride;
+  int32_t in_pos_stride;
+  int32_t out_channel_stride;
+  int32_t out_pos_stride;
+  bool swap_grid;
+  bool has_bias;
+};
+
+// A region is an interval along the output length, not a 3D tensor subregion.
+// Direct matmul supports both NCL and NLC activation storage.
+struct Conv1dMatmulRegion {
+  // Index of the region's first output position.
+  int32_t out_col0;
+  // Number of consecutive output positions in the region.
+  int32_t out_cols;
+  // Input position used by out_col0 with weight tap w_tap0.
+  int32_t in_col0;
+  // Number of weight taps used per output in this region.
+  int32_t taps;
+  // Index of the first weight tap used.
+  int32_t w_tap0;
+  // Grid-y index assigned to the region's first output tile.
+  int32_t tile0;
+};
+
+C10_METAL_CONSTEXPR int32_t conv1d_matmul_max_regions = 16;
+
+struct Conv1dMatmulParams {
+  int32_t C_in;
+  int32_t C_out;
+  int32_t L;
+  // Full output length, used when advancing between channels or batches.
+  int32_t outW_total;
+  // Input-position spacing between adjacent weight taps.
+  int32_t dilation;
+  int32_t groups;
+  int32_t region_count;
+  bool has_bias;
+  ::c10::metal::array<Conv1dMatmulRegion, conv1d_matmul_max_regions> regions;
+};
+
 // Source element strides of the OIDHW weight view (may be non-contiguous).
 struct ConvWeightPermuteParams {
   uint32_t output_channels;
