@@ -102,12 +102,35 @@ with tempfile.TemporaryDirectory() as tmpdir:
 
         expected_root = (
             f"py{sys.version_info.major}{sys.version_info.minor}"
-            f"{getattr(sys, 'abiflags', '')}_rocm1010_hip71526306"
+            f"{getattr(sys, 'abiflags', '')}_rocm10.1.0_hip7.15.26306"
         )
         self.assertEqual(
             build_directory,
             os.path.join(tmpdir, expected_root, "test_extension"),
         )
+
+    def test_rocm_build_directory_version_key_does_not_collide(self):
+        def get_build_directory(tmpdir, sdk_version):
+            with (
+                mock.patch.dict(os.environ),
+                mock.patch.object(
+                    torch.utils.cpp_extension,
+                    "get_default_build_root",
+                    return_value=tmpdir,
+                ),
+                mock.patch.object(torch.version, "rocm", sdk_version),
+                mock.patch.object(torch.version, "hip", "7.15.26306"),
+            ):
+                os.environ.pop("TORCH_EXTENSIONS_DIR", None)
+                return torch.utils.cpp_extension._get_build_directory(
+                    "test_extension", verbose=False
+                )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            first = get_build_directory(tmpdir, "10.1.10")
+            second = get_build_directory(tmpdir, "10.11.0")
+
+        self.assertNotEqual(first, second)
 
 
 # There's only one test that runs gradcheck, run slow mode manually

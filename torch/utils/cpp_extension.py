@@ -2828,9 +2828,7 @@ def _get_build_directory(name: str, verbose: bool) -> str:
         # so we need to check torch.version.hip to distinguish them
         if torch.version.hip is not None:
             if torch.version.rocm is not None:
-                sdk_version = torch.version.rocm.replace(".", "")
-                hip_version = torch.version.hip.replace(".", "")
-                accelerator_str = f'rocm{sdk_version}_hip{hip_version}'
+                accelerator_str = f'rocm{torch.version.rocm}_hip{torch.version.hip}'
             else:
                 # Preserve the legacy key for wheels built before
                 # torch.version.rocm was available.
