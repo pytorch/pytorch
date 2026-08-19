@@ -7,6 +7,22 @@
 
 namespace c10::impl {
 
+/*
+ * Note [Event Semantics]
+ *
+ * `event_` is lazily initialized in one of three ways:
+ *   1. on the first record(),
+ *   2. via reconstructFromIPCHandle() (importer), or
+ *   3. via ipcHandle() (exporter).
+ *
+ * block(), query(), and synchronize() therefore guard on event_ != nullptr
+ * rather than on `was_marked_for_recording_`, which only tracks whether
+ * record() was called in the current process.
+ *
+ * The IPC importer calls reconstructFromIPCHandle() to initialize `event_`
+ * and resets `flag_` to PYTORCH_DEFAULT to prevent re-export via ipcHandle().
+ */
+
 template <typename T>
 struct InlineEvent final {
   InlineEvent() = delete;
@@ -81,7 +97,8 @@ struct InlineEvent final {
   }
 
   void block(const Stream& stream) const {
-    if (!was_marked_for_recording_)
+    // See Note [Event Semantics]
+    if (!event_)
       return;
 
     TORCH_CHECK(
@@ -96,7 +113,8 @@ struct InlineEvent final {
   }
 
   bool query() const {
-    if (!was_marked_for_recording_)
+    // See Note [Event Semantics]
+    if (!event_)
       return true;
     return backend_.queryEvent(event_);
   }
@@ -129,9 +147,37 @@ struct InlineEvent final {
   }
 
   void synchronize() const {
-    if (!was_marked_for_recording_)
+    // See Note [Event Semantics]
+    if (!event_)
       return;
     backend_.synchronizeEvent(event_);
+  }
+
+  std::string ipcHandle() {
+    TORCH_CHECK(flag_ & EventFlag::INTERPROCESS, "Event is not an IPC event.");
+    // See Note [Event Semantics]: event_ may be lazily initialized on the
+    // current device if record() was never called.
+    if (device_index_ == -1) {
+      device_index_ = backend_.getDevice().index();
+    }
+    return backend_.getEventIPCHandle(&event_, device_index_, flag_);
+  }
+
+  void reconstructFromIPCHandle(
+      const DeviceIndex device_index,
+      const std::string& handle_string) {
+    TORCH_CHECK(
+        flag_ & EventFlag::INTERPROCESS,
+        "Event must be created with EventFlag::INTERPROCESS to reconstruct from an IPC handle.");
+    TORCH_CHECK(
+        !event_,
+        "Event has already been initialized; cannot reconstruct from an IPC handle.");
+    device_index_ =
+        device_index == -1 ? backend_.getDevice().index() : device_index;
+    backend_.reconstructEventFromIPCHandle(
+        &event_, device_index_, handle_string);
+    // See Note [Event Semantics]
+    flag_ = EventFlag::PYTORCH_DEFAULT;
   }
 
  private:
