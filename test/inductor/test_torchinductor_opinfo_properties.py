@@ -45,7 +45,7 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_inductor_cache
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
-    onlyCUDA,
+    onlyAccelerator,
     ops,
 )
 from torch.testing._internal.common_methods_invocations import (
@@ -54,6 +54,7 @@ from torch.testing._internal.common_methods_invocations import (
     unary_ufuncs,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     getRocmVersion,
     IS_FBCODE,
     IS_WINDOWS,
@@ -619,6 +620,8 @@ def compile_fn(fn, backend):
 class TestOpInfoProperties(TestCase):
     """Test op properties under various inductor modes using OpInfo on CUDA."""
 
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def setUp(self):
         super().setUp()
         torch._dynamo.reset()
@@ -677,7 +680,7 @@ class TestOpInfoProperties(TestCase):
     # Batch Invariance Tests
     # =========================================================================
 
-    @onlyCUDA
+    @onlyAccelerator
     @skipIfTorchDynamo("Test uses dynamo already")
     @ops(llm_ops, allowed_dtypes=DTYPES)
     @parametrize("backend", BACKENDS)
@@ -707,27 +710,31 @@ class TestOpInfoProperties(TestCase):
         # Disable split-k accumulation in GEMM to ensure batch-invariant results.
         # Split-k can produce different rounding based on how work is partitioned.
         # Disabling split-k requires the cuBLASLt backend, so we set it first.
-        prev_blas_library = torch.backends.cuda.preferred_blas_library()
-        torch.backends.cuda.preferred_blas_library("cublaslt")
+        prev_blas_library = None
+        prev_fp16 = None
+        prev_bf16 = None
+        if device_type == "cuda" and torch.version.hip is None:
+            prev_blas_library = torch.backends.cuda.preferred_blas_library()
+            torch.backends.cuda.preferred_blas_library("cublaslt")
 
-        # We need to save both the reduced precision and split_k settings.
-        prev_fp16 = (
-            torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction,
-            torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction_split_k,
-        )
-        prev_bf16 = (
-            torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction,
-            torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction_split_k,
-        )
-        # Disable both reduced precision and split-k
-        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = (
-            False,
-            False,
-        )
-        torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = (
-            False,
-            False,
-        )
+            # We need to save both the reduced precision and split_k settings.
+            prev_fp16 = (
+                torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction,
+                torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction_split_k,
+            )
+            prev_bf16 = (
+                torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction,
+                torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction_split_k,
+            )
+            # Disable both reduced precision and split-k
+            torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = (
+                False,
+                False,
+            )
+            torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = (
+                False,
+                False,
+            )
 
         def run_test():
             tested_any = False
@@ -801,19 +808,20 @@ class TestOpInfoProperties(TestCase):
                 device_type, op.name, backend, "batch_invariance", dtype, run_test
             )
         finally:
-            torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = (
-                prev_fp16
-            )
-            torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = (
-                prev_bf16
-            )
-            torch.backends.cuda.preferred_blas_library(prev_blas_library)
+            if prev_fp16 is not None:
+                torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = (
+                    prev_fp16
+                )
+                torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = (
+                    prev_bf16
+                )
+                torch.backends.cuda.preferred_blas_library(prev_blas_library)
 
     # =========================================================================
     # Run-to-Run Determinism Tests
     # =========================================================================
 
-    @onlyCUDA
+    @onlyAccelerator
     @skipIfTorchDynamo("Test uses dynamo already")
     @ops(llm_ops, allowed_dtypes=DTYPES)
     @parametrize("backend", BACKENDS)
@@ -885,7 +893,7 @@ class TestOpInfoProperties(TestCase):
     # Bitwise Equivalence with Eager Mode Tests
     # =========================================================================
 
-    @onlyCUDA
+    @onlyAccelerator
     @skipIfTorchDynamo("Test uses dynamo already")
     @ops(llm_ops, allowed_dtypes=DTYPES)
     @parametrize("backend", BACKENDS)
@@ -936,7 +944,7 @@ class TestOpInfoProperties(TestCase):
     # Exhaustive/Sampled Unary Ufunc Tests
     # =========================================================================
 
-    @onlyCUDA
+    @onlyAccelerator
     @skipIfTorchDynamo("Test uses dynamo already")
     @ops(llm_unary_ops, allowed_dtypes=DTYPES)
     @parametrize("backend", BACKENDS)
@@ -998,7 +1006,7 @@ class TestOpInfoProperties(TestCase):
     # Sampled Binary Ufunc Tests
     # =========================================================================
 
-    @onlyCUDA
+    @onlyAccelerator
     @skipIfTorchDynamo("Test uses dynamo already")
     @ops(llm_binary_ops, allowed_dtypes=DTYPES)
     @parametrize("backend", BACKENDS)
