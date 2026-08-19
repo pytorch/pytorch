@@ -185,18 +185,18 @@ requires_helion = functools.partial(unittest.skipIf, not HAS_HELION, "requires h
 
 def requires_gpu_with_enough_memory(min_mem_required):
     def inner(fn):
-        total_memory = sys.maxsize
-        if torch.accelerator.is_available():
-            try:
-                _, total_memory = torch.accelerator.get_memory_info()
-            except Exception:
-                total_memory = sys.maxsize
+        skip_msg = f"Only if the GPU device has at least {min_mem_required / 1e9:.3f}GB memory to be safe"
+        # Fail closed: when there is no accelerator or the memory query is
+        # unavailable, skip rather than risk an OOM on an unknown device.
+        if not torch.accelerator.is_available():
+            return unittest.skip(skip_msg)(fn)
+        try:
+            _, total_memory = torch.accelerator.get_memory_info()
+        except Exception:
+            return unittest.skip(skip_msg)(fn)
         if total_memory < min_mem_required:
-            return unittest.skip(
-                f"Only if the GPU device has at least {min_mem_required / 1e9:.3f}GB memory to be safe"
-            )(fn)
-        else:
-            return fn
+            return unittest.skip(skip_msg)(fn)
+        return fn
 
     return inner
 

@@ -45,9 +45,17 @@ if os.environ.get("TORCHINDUCTOR_INPLACE_PADDING") is not None:
 DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
 
 
-@inductor_config.patch(inplace_padding=enable_inplace_padding)
 class InplacePaddingTest(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
+
+    def setUp(self):
+        super().setUp()
+        self._config_ctx = inductor_config.patch(inplace_padding=enable_inplace_padding)
+        self._config_ctx.__enter__()
+
+    def tearDown(self):
+        self._config_ctx.__exit__(None, None, None)
+        super().tearDown()
 
     @requires_capabilities(Capability.lib.triton)
     def test_skip_pad_due_to_fusion(self, device):
@@ -144,7 +152,7 @@ class InplacePaddingTest(TestCase):
             out = orig_generate_and_run_autotune_block(wrapper)
             call_code = wrapper.kernel_autotune_calls.getvalue()
             FileCheck().check(
-                f"buf0 = generate_example_value((2048, 2047), (2048, 1), '{device}:0', torch.float32, 0, (2048, 2048))"
+                f"buf0 = generate_example_value((2048, 2047), (2048, 1), '{device}', torch.float32, 0, (2048, 2048))"
             ).run(call_code)
             return out
 
@@ -226,6 +234,9 @@ class InplacePaddingTest(TestCase):
     @inductor_config.patch(force_shape_pad=True)
     @serialTest()
     def test_linear_and_cel(self, device):
+        self._run_linear_and_cel(device)
+
+    def _run_linear_and_cel(self, device):
         # Use nan for torch.empty
         torch.use_deterministic_algorithms(True)
         torch.utils.deterministic.fill_uninitialized_empty = True
@@ -272,7 +283,7 @@ class InplacePaddingTest(TestCase):
     @inductor_config.patch(max_autotune=True)
     @serialTest()
     def test_linear_and_cel_max_autotune(self, device):
-        self.test_linear_and_cel(device)
+        self._run_linear_and_cel(device)
 
 
 instantiate_device_type_tests(
