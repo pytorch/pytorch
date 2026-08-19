@@ -9553,6 +9553,34 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ),
         )
 
+    @parametrize("dtype", (torch.bfloat16, torch.float16))
+    def test_fmod_remainder_scalar_type_promotion_bf16_fp16(self, dtype):
+        def fn(x):
+            return (
+                torch.fmod(x, 1.7),
+                torch.remainder(x, 1.7),
+                torch.remainder(1.7, x),
+            )
+
+        compiled_fn = torch.compile(fn, fullgraph=True)
+        x = torch.tensor([1.703125, -1.703125], device=self.device, dtype=dtype)
+        expected = fn(x)
+        actual = compiled_fn(x)
+        self.assertEqual(actual, expected, atol=0, rtol=0)
+
+        if self.device == "mps":
+            opmath_expected = tuple(result.to(dtype) for result in fn(x.float()))
+            self.assertEqual(expected, opmath_expected, atol=0, rtol=0)
+
+            rounded_scalar = torch.tensor(1.7, device=self.device, dtype=dtype)
+            rounded_expected = (
+                torch.fmod(x, rounded_scalar),
+                torch.remainder(x, rounded_scalar),
+                torch.remainder(rounded_scalar, x),
+            )
+            for opmath_result, rounded_result in zip(opmath_expected, rounded_expected):
+                self.assertFalse(torch.equal(opmath_result, rounded_result))
+
     @skip_if_halide  # log2 not implemented for halide
     def test_log2(self):
         def fn(x):
