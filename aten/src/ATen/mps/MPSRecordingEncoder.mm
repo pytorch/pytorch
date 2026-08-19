@@ -33,6 +33,11 @@
   std::map<unsigned, at::mps::MPSStream::CapturedMetalKernel::BufferBinding> _stickyBuffers;
   std::map<unsigned, at::mps::MPSStream::CapturedMetalKernel::BytesBinding> _stickyBytes;
   std::map<unsigned, at::mps::MPSStream::CapturedMetalKernel::ThreadgroupMemoryBinding> _stickyThreadgroupMemory;
+  // Keyed by resource pointer rather than index: useResource: has no index of
+  // its own, and Metal combines usages when the same resource is declared
+  // more than once, so repeat declarations OR into the existing entry instead
+  // of each getting their own retain.
+  std::map<void*, unsigned long> _stickyResourceUsages;
 }
 
 - (instancetype)initWithEncoder:(id<MTLComputeCommandEncoder>)encoder stream:(at::mps::MPSStream*)stream {
@@ -55,6 +60,10 @@
   _stickyBuffers.clear();
   _stickyBytes.clear();
   _stickyThreadgroupMemory.clear();
+  for (auto& [resource, usage] : _stickyResourceUsages) {
+    [(__bridge id<MTLResource>)resource release];
+  }
+  _stickyResourceUsages.clear();
 }
 
 - (void)dealloc {
@@ -132,6 +141,20 @@
   [_inner setThreadgroupMemoryLength:length atIndex:index];
 }
 
+- (void)useResource:(id<MTLResource>)resource usage:(MTLResourceUsage)usage {
+  void* key = (__bridge void*)resource;
+  auto it = _stickyResourceUsages.find(key);
+  if (it == _stickyResourceUsages.end()) {
+    [resource retain];
+    _stickyResourceUsages[key] = usage;
+  } else {
+    // Matches Metal's own semantics: redeclaring a resource combines usages
+    // rather than replacing them.
+    it->second |= usage;
+  }
+  [_inner useResource:resource usage:usage];
+}
+
 - (std::unique_ptr<at::mps::MPSStream::CapturedMetalKernel>)snapshotDispatch {
   auto kernel = std::make_unique<at::mps::MPSStream::CapturedMetalKernel>();
   kernel->pso = _currentPSO;
@@ -150,6 +173,11 @@
   kernel->threadgroupMemory.reserve(_stickyThreadgroupMemory.size());
   for (auto& [idx, tg] : _stickyThreadgroupMemory) {
     kernel->threadgroupMemory.push_back(tg);
+  }
+  kernel->resourceUsages.reserve(_stickyResourceUsages.size());
+  for (auto& [resource, usage] : _stickyResourceUsages) {
+    kernel->resourceUsages.push_back({resource, usage});
+    [(__bridge id<MTLResource>)resource retain];
   }
   return kernel;
 }
