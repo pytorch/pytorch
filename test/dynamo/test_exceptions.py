@@ -1584,6 +1584,14 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+        torch._dynamo.reset()
+        with self.assertRaises(Unsupported) as cm:
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        msg = str(cm.exception)
+        self.assertIn("traceback.tb_lasti not supported", msg)
+        # tb_lasti is a known-unsupportable attribute, not a Dynamo bug
+        self.assertNotIn("Dynamo bug", msg)
+
     def test_exception_set_tb_next(self):
         # Test setting tb_next on a traceback
         def fn(x):
