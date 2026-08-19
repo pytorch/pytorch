@@ -6347,11 +6347,19 @@ Done""",
         with self.assertRaisesRegex(
             RuntimeError,
             "Function 'MyFuncBackward' returned nan values in its 0th output.",
-        ):
+        ) as context:
             with warnings.catch_warnings(record=True) as w:
                 with detect_anomaly():
                     out.backward()
             self.assertIn("No forward pass information", str(w[0].message))
+        error = str(context.exception)
+        self.assertIn(
+            "grad_outputs: [Tensor(shape=[1], dtype=float, device=cpu)]", error
+        )
+        self.assertIn(
+            "grad_inputs: [Tensor(shape=[10], dtype=float, device=cpu), undefined]",
+            error,
+        )
 
         inp = torch.rand(size, requires_grad=True)
         with self.assertRaisesRegex(
@@ -6363,6 +6371,37 @@ Done""",
                     out = MyFunc.apply(inp, inp, False)
                     out.backward()
             self.assertIn("MyFunc.apply", str(w[0].message))
+
+    @parametrize(
+        "initial_mode, backward_mode, should_raise",
+        [(True, False, False), (False, True, True)],
+    )
+    def test_anomaly_mode_changed_in_backward(
+        self, initial_mode, backward_mode, should_raise
+    ):
+        class MyFunc(Function):
+            @staticmethod
+            def forward(ctx, inp):
+                return inp.clone()
+
+            @staticmethod
+            def backward(ctx, grad):
+                torch.autograd.set_detect_anomaly(backward_mode)
+                return torch.full_like(grad, float("nan"))
+
+        inp = torch.ones(1, requires_grad=True)
+        with torch.autograd.set_detect_anomaly(initial_mode):
+            if should_raise:
+                with self.assertWarnsRegex(
+                    UserWarning, "No forward pass information available"
+                ):
+                    with self.assertRaisesRegex(
+                        RuntimeError,
+                        "Function 'MyFuncBackward' returned nan values in its 0th output.",
+                    ):
+                        MyFunc.apply(inp).sum().backward()
+            else:
+                MyFunc.apply(inp).sum().backward()
 
     def test_calculate_shape_util(self):
         out = torch.randn(10, 5, requires_grad=True)
