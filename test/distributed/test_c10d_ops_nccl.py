@@ -68,7 +68,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    def test_empty_tensors(self):
+    def test_empty_tensors(self, device):
         pg = self.pg
         local_device_idx = self.rank_to_GPU[self.rank][0]
 
@@ -104,7 +104,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    def test_broadcast_ops(self):
+    def test_broadcast_ops(self, device):
         pg = self.pg
 
         def broadcast(xs, rootRank, rootTensor):
@@ -140,7 +140,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    def test_sparse_allreduce_ops(self):
+    def test_sparse_allreduce_ops(self, device):
         pg = self.pg
 
         indices = torch.tensor([[0, 1]])
@@ -167,7 +167,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    def test_allreduce_ops(self):
+    def test_allreduce_ops(self, device):
         pg = self.pg
         local_device_id = self.rank_to_GPU[self.rank][0]
 
@@ -255,7 +255,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
     @skip_but_pass_in_sandcastle_if(
         not PLATFORM_SUPPORTS_FP8, "Float8 requires sm >= 90"
     )
-    def test_allreduce_float8(self):
+    def test_allreduce_float8(self, device):
         device = torch.device("cuda", self.rank_to_GPU[self.rank][0])
 
         numel = 1024
@@ -271,7 +271,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    def test_alltoall_ops_with_cudafree_race(self):
+    def test_alltoall_ops_with_cudafree_race(self, device):
         pg = self.pg
         opts = c10d.AllToAllOptions()
         local_device = f"cuda:{self.rank_to_GPU[self.rank][0]}"
@@ -296,7 +296,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    def test_allreduce_in_cudagraph(self):
+    def test_allreduce_in_cudagraph(self, device):
         local_device_idx = self.rank_to_GPU[self.rank][0]
         # This device setting is needed by the CUDAGraph API to understand on
         # which device to find the current stream
@@ -327,7 +327,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
     @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/157896")
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    def test_nccl_watchdog_cudagraph(self):
+    def test_nccl_watchdog_cudagraph(self, device):
         # test that the watchdog does not crash graphs with disallowed event query
         pg = self.pg
         rank = self.rank_to_GPU[self.rank][0]
@@ -353,7 +353,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
         (2, 29), "Need NCCL 2.29+ for multisegment memory in CUDA graph"
     )
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    def test_nccl_cudagraph_multisegment(self):
+    def test_nccl_cudagraph_multisegment(self, device):
         # Prior to NCCL 2.29, this would cause an Invalid Memory Access (IMA)
         # because NCCL didn't properly handle multisegment memory in graphs.
         local_device_idx = self.rank_to_GPU[self.rank][0]
@@ -385,7 +385,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    def test_reduce_ops(self):
+    def test_reduce_ops(self, device):
         pg = self.pg
         local_device_id = self.rank_to_GPU[self.rank][0]
 
@@ -450,7 +450,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    def test_allgather_ops(self):
+    def test_allgather_ops(self, device):
         pg = self.pg
         local_device_ids = self.rank_to_GPU[self.rank]
 
@@ -480,7 +480,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    def test_allgather_base_ops(self):
+    def test_allgather_base_ops(self, device):
         pg = self.pg
         local_device_id = self.rank_to_GPU[self.rank][0]
 
@@ -502,7 +502,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    def test_allgather_base_basics(self):
+    def test_allgather_base_basics(self, device):
         pg = self.pg
         local_device_id = self.rank_to_GPU[self.rank][0]
 
@@ -535,7 +535,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    def test_gather_ops(self):
+    def test_gather_ops(self, device):
         pg = self.pg
         local_device_ids = self.rank_to_GPU[self.rank]
         num_gpus = len(local_device_ids)
@@ -570,7 +570,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    def test_gather_stress(self):
+    def test_gather_stress(self, device):
         pg = self.pg
         local_device_ids = self.rank_to_GPU[self.rank]
         num_gpus = len(local_device_ids)
@@ -612,7 +612,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    def test_gather_checks(self):
+    def test_gather_checks(self, device):
         pg = self.pg
         device_id = self.rank_to_GPU[self.rank][0]
 
@@ -648,7 +648,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    def test_scatter_ops(self):
+    def test_scatter_ops(self, device):
         pg = self.pg
         local_device_ids = self.rank_to_GPU[self.rank]
         num_gpus = len(local_device_ids)
@@ -683,7 +683,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    def test_scatter_stress(self):
+    def test_scatter_stress(self, device):
         pg = self.pg
         local_device_ids = self.rank_to_GPU[self.rank]
         num_gpus = len(local_device_ids)
@@ -725,7 +725,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    def test_scatter_checks(self):
+    def test_scatter_checks(self, device):
         pg = self.pg
         local_device_ids = self.rank_to_GPU[self.rank]
         num_gpus = len(local_device_ids)
@@ -767,7 +767,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    def test_reduce_scatter_base_basics(self):
+    def test_reduce_scatter_base_basics(self, device):
         pg = self.pg
         local_device_id = self.rank_to_GPU[self.rank][0]
 
@@ -800,7 +800,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    def test_reduce_scatter_v(self):
+    def test_reduce_scatter_v(self, device):
         device = torch.device("cuda", self.rank_to_GPU[self.rank][0])
         # A list of tensors with different sizes
         input_list = [torch.ones(i, device=device) for i in range(self.world_size)]
@@ -813,7 +813,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    def test_all_gather_v(self):
+    def test_all_gather_v(self, device):
         device = torch.device("cuda", self.rank_to_GPU[self.rank][0])
         # A list of tensors with different sizes
         output_list = [torch.zeros(i, device=device) for i in range(self.world_size)]
@@ -826,7 +826,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    def test_reduce_scatter_ops(self):
+    def test_reduce_scatter_ops(self, device):
         pg = self.pg
         local_device_ids = self.rank_to_GPU[self.rank]
         num_gpus = len(local_device_ids)
@@ -937,7 +937,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    def test_reduce_scatter_base_ops(self):
+    def test_reduce_scatter_base_ops(self, device):
         pg = self.pg
         local_device_id = self.rank_to_GPU[self.rank][0]
 
@@ -963,7 +963,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
     @skip_but_pass_in_sandcastle_if(
         not PLATFORM_SUPPORTS_FP8, "Float8 requires sm >= 90"
     )
-    def test_reduce_scatter_float8(self):
+    def test_reduce_scatter_float8(self, device):
         device = torch.device("cuda", self.rank_to_GPU[self.rank][0])
 
         numel = 1024
@@ -981,7 +981,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
         torch.testing.assert_close(output_tensor, expected)
 
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    def test_reduce_scatter_bfloat16(self):
+    def test_reduce_scatter_bfloat16(self, device):
         device = torch.device("cuda", self.rank_to_GPU[self.rank][0])
 
         numel = 1024
@@ -1001,7 +1001,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    def test_barrier(self):
+    def test_barrier(self, device):
         pg = self.pg
         local_device_ids = self.rank_to_GPU[self.rank]
 
@@ -1036,7 +1036,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    def test_send_recv(self):
+    def test_send_recv(self, device):
         device = self.rank_to_GPU[self.rank][0]
 
         # Generate the same random tensor
@@ -1051,7 +1051,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    def test_send_recv_complex(self):
+    def test_send_recv_complex(self, device):
         device = self.rank_to_GPU[self.rank][0]
 
         # Generate the same random tensor
@@ -1066,7 +1066,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    def test_send_recv_object_list(self):
+    def test_send_recv_object_list(self, device):
         device = self.rank_to_GPU[self.rank][0]
 
         val = 99 if self.rank == 0 else None
@@ -1079,7 +1079,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    def test_tensor_register_hook(self):
+    def test_tensor_register_hook(self, device):
         os.environ["TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK"] = "1"
 
         pg = self.pg
@@ -1106,7 +1106,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    def test_reduce_op_premul_sum(self):
+    def test_reduce_op_premul_sum(self, device):
         if torch.cuda.nccl.version() < (2, 11, 1):
             self.skipTest("NCCL 2.11.1+ is required for PREMUL_SUM")
 
