@@ -291,6 +291,7 @@ class TestSparseCompressed(TestCase):
 class TestSparseCompressedDevice(TestCase):
     """Testing sparse compressed (CSR, CSC, BSR, BSC) tensor generic features.
     """
+    hw_classification = HardwareClassification.ACCELERATOR
 
     def genTensor(self, size, nnz, *, layout, device=None, dtype=torch.float, index_dtype=torch.int64):
         if device is None:
@@ -304,8 +305,10 @@ class TestSparseCompressedDevice(TestCase):
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_sparse_compressed_constructor(self, layout, device, dtype,
                                            use_factory_function, shape_and_device_inference, input_kind):
+        device_type = torch.device(device).type
+
         if input_kind == 'list' and shape_and_device_inference:
-            if torch.device(device).type != 'cpu':
+            if device_type != 'cpu':
                 # list inputs to factory/constructor function without
                 # specifying device will result a sparse compressed tensor
                 # on CPU. So, skip testing against cuda device as unused.
@@ -314,8 +317,8 @@ class TestSparseCompressedDevice(TestCase):
                 self.skipTest("dtype not supported with list values")
 
         expected_devices = [torch.device(device)]
-        if torch.device(device).type != 'cpu' and torch.accelerator.device_count() >= 2 and not shape_and_device_inference:
-            expected_devices.append(torch.device(f'{torch.device(device).type}:1'))
+        if device_type != 'cpu' and torch.accelerator.device_count() >= 2 and not shape_and_device_inference:
+            expected_devices.append(torch.device(f'{device_type}:1'))
 
         factory_function = {
             torch.sparse_csr: torch.sparse_csr_tensor,
@@ -927,6 +930,9 @@ class TestSparseCompressedDevice(TestCase):
                    'for all i = 1, ..., compressed_dim '
                    'are sorted and distinct along the last dimension values` is not satisfied.')
 
+        # These cross-device mismatch checks now run on the accelerator instance
+        # with `device_type`, rather than on the CPU instance with a hardcoded device,
+        # so they generalize to any accelerator.
         if device_type != 'cpu':
             yield ('indices and values mismatch of device',
                    torch.tensor([0, 2, 4]),
@@ -1250,6 +1256,7 @@ class TestSparseCSR(TestCase):
     @dtypes(torch.float, torch.bool)
     @all_sparse_compressed_layouts()
     def test_resize_as_sparse_compressed(self, device, dtype, layout):
+        device_type = torch.device(device).type
 
         def _check_resize_b_as_a(b, a):
             br = b.clone()
@@ -1336,7 +1343,7 @@ class TestSparseCSR(TestCase):
 
             # TODO: .cpu() does not seem to work correctly for sparse. Causes a call to `copy_` which
             # complains about incompatible nnz between src and self?
-            if torch.device(device).type == 'cuda' and (layout not in (torch.sparse_bsc, torch.sparse_bsr)):
+            if device_type == 'cuda' and (layout not in (torch.sparse_bsc, torch.sparse_bsr)):
                 a_cpu = self.genSparseCompressedTensor(shape,
                                                        layout=layout,
                                                        device='cpu',
