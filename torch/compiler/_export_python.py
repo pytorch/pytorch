@@ -90,6 +90,40 @@ def _atomic_publish(path: str, data: bytes) -> bool:
             pass
 
 
+# Elements below this fraction of the reference's peak are too small for a relative diff
+# to say anything; they are covered by the absolute term instead.
+_REL_REPORT_FLOOR = 1e-6
+
+
+def _allclose(a: torch.Tensor, b: torch.Tensor, rtol: float, atol: float) -> bool:
+    """torch.allclose, but tolerant of dtypes that have no comparison kernel.
+
+    float8 reaches allclose and dies inside it on a missing mul (as NotImplementedError,
+    which is a RuntimeError); promote and compare there rather than failing an artifact
+    that is perfectly honest.
+    """
+    try:
+        return bool(torch.allclose(a, b, rtol=rtol, atol=atol, equal_nan=True))
+    except RuntimeError:
+        return bool(
+            torch.allclose(a.double(), b.double(), rtol=rtol, atol=atol, equal_nan=True)
+        )
+
+
+def _finite_mask(t: torch.Tensor) -> torch.Tensor | None:
+    """Where ``t`` is finite, or None for a dtype that cannot answer.
+
+    float8 is is_floating_point() but has no isfinite kernel, so asking crashes the
+    check on an artifact that is perfectly honest.
+    """
+    if not t.is_floating_point():
+        return None
+    try:
+        return torch.isfinite(t)
+    except RuntimeError:
+        return None
+
+
 def _precompile_error(msg: str) -> Exception:
     from torch._precompile import PrecompileError
 
