@@ -77,7 +77,12 @@ which version of PyTorch you are using, refer to this example below::
 TensorFloat-32(TF32) on ROCm
 ----------------------------
 
-TF32 is not supported on ROCm.
+TF32 is supported on AMD Instinct MI300 (gfx942, CDNA3) via hipBLASLt. The
+same ``torch.backends.cuda.matmul.fp32_precision`` and
+``torch.backends.cuda.matmul.allow_tf32`` controls used on NVIDIA hardware
+also apply on ROCm. The TF32 path on MI300 has hardware-level numerical
+differences from the NVIDIA implementation; see :ref:`tf32_on_mi300` for
+details.
 
 .. _rocm-memory-management:
 
@@ -87,7 +92,7 @@ Memory management
 PyTorch uses a caching memory allocator to speed up memory allocations. This
 allows fast memory deallocation without device synchronizations. However, the
 unused memory managed by the allocator will still show as if used in
-``rocm-smi``. You can use :meth:`~torch.cuda.memory_allocated` and
+``amd-smi``. You can use :meth:`~torch.cuda.memory_allocated` and
 :meth:`~torch.cuda.max_memory_allocated` to monitor memory occupied by
 tensors, and use :meth:`~torch.cuda.memory_reserved` and
 :meth:`~torch.cuda.max_memory_reserved` to monitor the total amount of memory

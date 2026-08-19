@@ -32,9 +32,12 @@ def get_compile_pg() -> dist.ProcessGroup | None:
         global _COMPILE_PG
         if _COMPILE_PG is None:
             # , timeout=datetime.timedelta(seconds=2)
-            _COMPILE_PG = dist.distributed_c10d._new_group_with_tag(
+            compile_pg = dist.distributed_c10d._new_group_with_tag(
                 pg_tag="pt2_compile_pg"
             )
+            if compile_pg == dist.GroupMember.NON_GROUP_MEMBER:
+                raise AssertionError("Compiler process group must include all ranks")
+            _COMPILE_PG = compile_pg
         return _COMPILE_PG
 
     return None
@@ -46,7 +49,10 @@ def get_guard_pg() -> dist.ProcessGroup | None:
     if dist.is_available() and dist.is_initialized():
         global _GUARD_PG
         if _GUARD_PG is None:
-            _GUARD_PG = dist.distributed_c10d._new_group_with_tag(pg_tag="pt2_guard_pg")
+            guard_pg = dist.distributed_c10d._new_group_with_tag(pg_tag="pt2_guard_pg")
+            if guard_pg == dist.GroupMember.NON_GROUP_MEMBER:
+                raise AssertionError("Guard process group must include all ranks")
+            _GUARD_PG = guard_pg
         return _GUARD_PG
 
     return None

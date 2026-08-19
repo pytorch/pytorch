@@ -126,7 +126,8 @@ void XNNGraph::checkOpsToDelegate(std::shared_ptr<torch::jit::Graph>& graph) {
   }
   TORCH_CHECK(
       unsupported_ops.empty(),
-      "the module contains the following unsupported ops:\n" + error.str());
+      "the module contains the following unsupported ops:\n" +
+          std::move(error).str());
 }
 
 std::string XNNGraph::serializedXNNGraph() {

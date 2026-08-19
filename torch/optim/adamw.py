@@ -1,5 +1,3 @@
-# mypy: allow-untyped-defs
-
 from torch import Tensor
 
 from .adam import Adam, adam
@@ -11,6 +9,7 @@ from .optimizer import (
     _maximize_doc,
     _params_doc,
     ParamsT,
+    StateDict,
 )
 
 
@@ -51,7 +50,7 @@ class AdamW(Adam):
     # Preserve decoupled_weight_decay from AdamW for backwards compatibility. The following
     # guarantees that decoupled_weight_decay will always be True for loading any state into
     # AdamW
-    def __setstate__(self, state):
+    def __setstate__(self, state: StateDict) -> None:
         super().__setstate__(state)
         for group in self.param_groups:
             group["decoupled_weight_decay"] = True

@@ -484,7 +484,7 @@ class SWALR(LRScheduler):
             group["swa_lr"] = swa_lr
         if anneal_strategy not in ["cos", "linear"]:
             raise ValueError(
-                "anneal_strategy must by one of 'cos' or 'linear', "
+                "anneal_strategy must be one of 'cos' or 'linear', "
                 f"instead got {anneal_strategy}"
             )
         self._set_anneal_func(anneal_strategy)

@@ -62,6 +62,8 @@ with open("compiled_add.pt", "rb") as f:
 result = loaded_fn(torch.randn(3, 4), torch.randn(3, 4))
 ```
 
+(compiling-a-module)=
+
 ### Compiling a module
 
 When compiling an `nn.Module`, call `aot_compile()` on the `.forward` method
@@ -85,16 +87,16 @@ model = MyModel()
 # AOT compile the forward method.
 compiled_fn = torch.compile(
     model, fullgraph=True
-).forward.aot_compile(((torch.randn(3, 4, requires_grad=True),), {}))
+).forward.aot_compile(((torch.randn(3, 4),), {}))
 
 # Call with the module instance as the first argument.
-inputs = torch.randn(3, 4, requires_grad=True)
-result = compiled_fn(model, inputs)
+result = compiled_fn(model, torch.randn(3, 4))
 
-# Backward works through the compiled function.
+# Backward works through the compiled function because model parameters
+# require gradients.
 loss = result.sum()
 loss.backward()
-print(inputs.grad)  # gradients flow back correctly
+print(model.linear.weight.grad)  # gradients flow to model parameters
 
 # Save and load.
 compiled_fn.save_compiled_function("compiled_model.pt")
@@ -103,10 +105,10 @@ with open("compiled_model.pt", "rb") as f:
     loaded_fn = torch.compiler.load_compiled_function(f)
 
 # Backward also works after loading from disk.
-inputs = torch.randn(3, 4, requires_grad=True)
-result = loaded_fn(model, inputs)
+model.zero_grad()
+result = loaded_fn(model, torch.randn(3, 4))
 result.sum().backward()
-print(inputs.grad)
+print(model.linear.weight.grad)
 ```
 
 ## API reference
@@ -216,6 +218,147 @@ with open("fn_with_model.pt", "rb") as f:
         f, external_data={"model": model}
     )
 ```
+
+## Training
+
+`aot_compile()` supports training out of the box. When any parameter requires
+gradients, the compilation automatically traces the joint forward+backward
+graph, partitions it, and compiles both halves. The resulting function is
+autograd-aware -- calling `.backward()` on its output works as expected.
+
+Using the same `MyModel` from {ref}`Compiling a module <compiling-a-module>`
+above:
+
+```python
+model = MyModel()
+
+compiled_fn = torch.compile(
+    model, fullgraph=True
+).forward.aot_compile(((torch.randn(3, 4),), {}))
+
+# Training loop using the AOT-compiled function.
+optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+for _ in range(3):
+    optimizer.zero_grad()
+    output = compiled_fn(model, torch.randn(3, 4))
+    loss = output.sum()
+    loss.backward()
+    optimizer.step()
+```
+
+Save and load preserve the autograd support -- backward works after loading
+from disk:
+
+```python
+compiled_fn.save_compiled_function("train_model.pt")
+
+with open("train_model.pt", "rb") as f:
+    loaded_fn = torch.compiler.load_compiled_function(f)
+
+output = loaded_fn(model, torch.randn(3, 4))
+output.sum().backward()  # gradients flow correctly
+```
+
+### Distributed training with DTensor
+
+When training with tensor-parallelized models using
+{class}`~torch.distributed.tensor.DTensor`, `aot_compile()` can be combined
+with `compile_on_one_rank` to produce rank-independent compiled graphs. Without
+this flag, rank-specific values (mesh coordinates, shard offsets) get baked into
+the compiled graph as constants, producing a different graph per rank. With the
+flag enabled, these values become symbolic and are computed at runtime.
+
+Set the flag via `torch.distributed.config.patch`:
+
+```python
+import torch.distributed.config as dist_config
+
+with dist_config.patch(compile_on_one_rank=True):
+    compiled_fn = torch.compile(
+        model, fullgraph=True
+    ).forward.aot_compile(((example_input,), {}))
+```
+
+Or via the environment variable `TORCH_DISTRIBUTED_COMPILE_ON_ONE_RANK=1`.
+
+Here is a complete example of a tensor-parallel model compiled and trained
+across multiple GPUs via `torchrun`:
+
+```python
+# train_tp.py -- run with: torchrun --nproc_per_node=8 train_tp.py
+import torch
+import torch.distributed as dist
+import torch.distributed.config as dist_config
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.distributed.device_mesh import init_device_mesh
+from torch.distributed.tensor import DTensor, Replicate
+from torch.distributed.tensor.parallel import (
+    ColwiseParallel,
+    RowwiseParallel,
+    parallelize_module,
+)
+
+
+class FeedForward(nn.Module):
+    def __init__(self, dim, hidden_dim):
+        super().__init__()
+        self.linear1 = nn.Linear(dim, hidden_dim)
+        self.linear2 = nn.Linear(hidden_dim, dim)
+
+    def forward(self, x):
+        return self.linear2(F.relu(self.linear1(x)))
+
+
+def main():
+    dist.init_process_group(backend="nccl")
+    rank = dist.get_rank()
+    torch.cuda.set_device(rank)
+    mesh = init_device_mesh("cuda", (dist.get_world_size(),))
+
+    model = FeedForward(64, 128).cuda()
+    parallelize_module(model, mesh, {
+        "linear1": ColwiseParallel(),
+        "linear2": RowwiseParallel(),
+    })
+
+    x = DTensor.from_local(
+        torch.randn(4, 64, device=f"cuda:{rank}"),
+        mesh, [Replicate()], run_check=False,
+    )
+
+    # Compile with compile_on_one_rank -- all ranks produce the same graph.
+    with dist_config.patch(compile_on_one_rank=True):
+        compiled_fn = torch.compile(
+            model, fullgraph=True,
+        ).forward.aot_compile(((x,), {}))
+
+    # Training loop.
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    for step in range(5):
+        optimizer.zero_grad()
+        x = DTensor.from_local(
+            torch.randn(4, 64, device=f"cuda:{rank}"),
+            mesh, [Replicate()], run_check=False,
+        )
+        out = compiled_fn(model, x)
+        loss = out.to_local().sum()
+        loss.backward()
+        optimizer.step()
+        if rank == 0:
+            print(f"step {step}: loss = {loss.item():.4f}")
+
+    dist.destroy_process_group()
+
+
+if __name__ == "__main__":
+    main()
+```
+
+Saving and loading works the same way as the single-process case -- call
+`save_compiled_function` on any rank and `load_compiled_function` on any rank.
+Because `compile_on_one_rank=True` produces rank-independent graphs, the same
+artifact can be loaded on every rank without per-rank compilation.
 
 ## Limitations
 

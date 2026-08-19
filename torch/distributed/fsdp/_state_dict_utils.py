@@ -655,7 +655,7 @@ def _sharded_pre_load_state_dict_hook(
                 device=fsdp_state.compute_device,
             )
             with SimpleProfiler.profile(SimpleProfiler.Type.ALLGATHER):
-                dist.all_gather_into_tensor(
+                dist.all_gather_single(
                     tensor, local_tensor, group=fsdp_state.process_group
                 )
             tensor = tensor.narrow(0, 0, param_numel).reshape(param.size())

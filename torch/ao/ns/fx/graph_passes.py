@@ -122,7 +122,7 @@ def add_loggers_to_model(
                 ref_name, ref_node_type = node_to_instrument_inputs_to_ref_node_name[
                     node
                 ]
-                # Ops such add and mul are special because either
+                # Ops such as add and mul are special because either
                 # one or two of the first two arguments can be tensors,
                 # and if one argument is a tensor it can be first or
                 # second (x + 1 versus 1 + x).

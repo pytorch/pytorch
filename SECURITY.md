@@ -20,10 +20,6 @@ Please report security issues using https://github.com/pytorch/pytorch/security/
 
 All reports submitted through the security advisories mechanism would **either be made public or dismissed by the team within 90 days of the submission**. If advisory has been closed on the grounds that it is not a security issue, please do not hesitate to create an [new issue](https://github.com/pytorch/pytorch/issues/new?template=bug-report.yml) as it is still likely a valid issue within the framework.
 
-Please refer to the following page for our responsible disclosure policy, reward guidelines, and those things that should not be reported:
-
-https://www.facebook.com/whitehat
-
 ## Issues That Are Not Security Vulnerabilities
 
 PyTorch is a framework that executes user-provided code, including model definitions, custom operators, and training scripts. Like many low-level computational libraries, PyTorch generally does not validate all inputs to every function - the responsibility for providing valid arguments lies with the calling code. An attacker who already has the ability to execute arbitrary code locally, or to modify files on the system, does not gain any additional capability by exploiting PyTorch. The following categories of reports should be filed as regular bugs, **not** as security vulnerabilities:

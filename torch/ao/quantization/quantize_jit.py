@@ -274,7 +274,7 @@ def quantize_jit(model, qconfig_dict, run_fn, run_args, inplace=False, debug=Fal
         `debug`: flag for producing a debug friendly model (preserve weight attribute)
 
     Return:
-        Quantized TorchSciprt model.
+        Quantized TorchScript model.
 
     Example:
     ```python
@@ -327,7 +327,7 @@ def quantize_dynamic_jit(model, qconfig_dict, inplace=False, debug=False):
         `debug`: flag for producing a debug friendly model (preserve weight attribute)
 
     Return:
-        Quantized TorchSciprt model.
+        Quantized TorchScript model.
 
     Example:
     ```python
@@ -381,7 +381,7 @@ def _quantize_ondevice_dynamic_jit(
         model has:
         - Method is inlined.
         - Model has observer modules inserted in the model.
-        - Model has packed params inserted in the model. However they are empty as in they dont
+        - Model has packed params inserted in the model. However they are empty as in they don't
           contain valid quantized weights.
         - observe_<method_name> is added that observe the values to be quantized.
         - reset_observers_<method_name> to reset observers.
