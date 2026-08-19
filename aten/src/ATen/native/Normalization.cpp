@@ -868,10 +868,10 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cpu(const Tensor& self, const std:
   // dereferences undefined tensors below. Reject here with the same message
   // the impl-index wrapper uses rather than crashing (#194014).
   if (!train) {
-    TORCH_CHECK(
+    TORCH_CHECK_VALUE(
         running_mean.defined(),
         "running_mean must be defined in evaluation mode");
-    TORCH_CHECK(
+    TORCH_CHECK_VALUE(
         running_var.defined(),
         "running_var must be defined in evaluation mode");
   }
