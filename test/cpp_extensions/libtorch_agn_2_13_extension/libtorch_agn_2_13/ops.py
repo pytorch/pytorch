@@ -28,6 +28,11 @@ def test_kernel_launch_on_stream(input, fill_value: int):
     )
 
 
+def my_rand_with_generator(size, generator):
+    """rand via torch_call_dispatcher threading a Generator (2.13+)."""
+    return torch.ops.libtorch_agn_2_13.my_rand_with_generator.default(size, generator)
+
+
 def __getattr__(name):
     """Proxy for inherited ops from previous versions."""
     if name.startswith("_"):

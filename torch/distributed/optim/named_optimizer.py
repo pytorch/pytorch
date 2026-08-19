@@ -34,7 +34,7 @@ class _NamedOptimizer(optim.Optimizer):
             `param_groups` to pass to optimizer if specified.
             The key of the inner map needs to be FQNs.
             Default: None
-        module (nn.Module): the module whose parameters to updated
+        module (nn.Module): the module whose parameters to be updated
             by the optimizer.
         args: arguments to pass to the optimizer constructor.
         kwargs: arguments to pass to the optimizer constructor.
@@ -50,7 +50,7 @@ class _NamedOptimizer(optim.Optimizer):
         >>> # Forward pass + backward pass.
         >>> named_optim.step()
         >>> ...
-        >>> # Call state_dict for the named optimizer returns a FQN state_dict.
+        >>> # Call state_dict for the named optimizer returns an FQN state_dict.
         >>> named_optim.state_dict()
 
     Warning: This API is still in development and subject to change.
@@ -300,7 +300,7 @@ class _NamedOptimizer(optim.Optimizer):
 
     def init_state(self) -> None:
         """
-        Run a dummy optimizer step, which allows to initialize optimizer state because we do lazy init for most optimizers.
+        Run a dummy optimizer step, which allows us to initialize optimizer state because we do lazy init for most optimizers.
 
         This allows doing in-place loading of optimizer state from a checkpoint.
         """

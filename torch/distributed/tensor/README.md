@@ -86,7 +86,7 @@ replica_placement = [Replicate()]
 # distributed tensor will be replicated to all four GPUs.
 replica_tensor = distribute_tensor(big_tensor, device_mesh=device_mesh, placements=replica_placement)
 
-# if we want to distributed a tensor with both replication and sharding
+# if we want to distribute a tensor with both replication and sharding
 device_mesh = init_device_mesh("cuda", (2, 2))
 # replicate across the first dimension of device mesh, then sharding on the second dimension of device mesh
 spec=[Replicate(), Shard(0)]

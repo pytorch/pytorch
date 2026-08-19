@@ -8,7 +8,7 @@ import torch
 import torch.fx.node
 import torch.utils._pytree as pytree
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.opaque_object import is_opaque_type
+from torch._library.opaque_object import is_custom_class
 from torch._ops import HigherOrderOperator
 
 
@@ -22,7 +22,7 @@ def is_graphable(val: object) -> bool:
     return (
         val is None
         or isinstance(val, (*torch.fx.node.base_types, FakeScriptObject))
-        or is_opaque_type(type(val))
+        or is_custom_class(type(val))
     )
 
 
@@ -31,7 +31,7 @@ def is_graphable_type(typ: type[object]) -> bool:
     return (
         typ is type(None)
         or issubclass(typ, torch.fx.node.base_types)
-        or is_opaque_type(typ)
+        or is_custom_class(typ)
         or issubclass(typ, FakeScriptObject)
     )
 
@@ -128,7 +128,7 @@ class FlatApply(HigherOrderOperator):
         """
         if not (
             isinstance(func, _op_types)
-            or is_opaque_type(type(func))
+            or is_custom_class(type(func))
             or pytree._is_constant_holder(func)
         ):
             raise AssertionError(

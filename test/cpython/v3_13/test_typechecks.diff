@@ -1,0 +1,41 @@
+diff --git a/test/cpython/v3_13/test_typechecks.py b/test/cpython/v3_13/test_typechecks.py
+index a0e617b06f3..3d6211a9d61 100644
+--- a/test/cpython/v3_13/test_typechecks.py
++++ b/test/cpython/v3_13/test_typechecks.py
+@@ -1,3 +1,21 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_typechecks.py
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch._dynamo.test_case import CPythonTestCase
++from torch.testing._internal.common_utils import run_tests
++
++# ======= END DYNAMO PATCH =======
++
+ """Unit tests for __instancecheck__ and __subclasscheck__."""
+ 
+ import unittest
+@@ -24,7 +42,7 @@ class SubInt(Integer):
+     pass
+ 
+ 
+-class TypeChecksTest(unittest.TestCase):
++class TypeChecksTest(CPythonTestCase):
+ 
+     def testIsSubclassInternal(self):
+         self.assertEqual(Integer.__subclasscheck__(int), True)
+@@ -68,4 +86,4 @@ class TypeChecksTest(unittest.TestCase):
+ 
+ 
+ if __name__ == "__main__":
+-    unittest.main()
++    run_tests()

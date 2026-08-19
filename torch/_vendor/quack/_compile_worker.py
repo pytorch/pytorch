@@ -13,8 +13,9 @@ import sys
 import threading
 import time
 
+import torch
+
 from . import cache
-from ._compile_payload import deserialize_worker_value
 from .cache import CompileOnlyFakeTensorMode
 
 
@@ -87,6 +88,41 @@ def _install_parent_watchdog() -> None:
 # depth"). External callers should still use ``compile_only_mode()``.
 cache._COMPILE_ONLY_DEPTH.set(cache._COMPILE_ONLY_DEPTH.get() + 1)
 
+_TENSOR_META_TAG = "__quack_tensor_meta__"
+
+
+_dtype_map = {
+    "torch.float16": torch.float16,
+    "torch.bfloat16": torch.bfloat16,
+    "torch.float32": torch.float32,
+    "torch.float64": torch.float64,
+    "torch.int32": torch.int32,
+    "torch.int64": torch.int64,
+    "torch.int8": torch.int8,
+    "torch.uint8": torch.uint8,
+    "torch.bool": torch.bool,
+}
+
+
+def _make_fake_tensor(meta):
+    shape = meta["shape"]
+    stride = meta["stride"]
+    dtype = _dtype_map[meta["dtype"]]
+    return torch.empty_strided(shape, stride, dtype=dtype, device="cuda")
+
+
+def _deserialize_precompile_value(value):
+    if isinstance(value, dict):
+        if value.get(_TENSOR_META_TAG):
+            return _make_fake_tensor(value)
+        return {k: _deserialize_precompile_value(v) for k, v in value.items()}
+    if isinstance(value, tuple):
+        return tuple(_deserialize_precompile_value(v) for v in value)
+    if isinstance(value, list):
+        return [_deserialize_precompile_value(v) for v in value]
+    return value
+
+
 def _recv(stream):
     """Read a length-prefixed pickled message. Returns None on EOF."""
     header = stream.read(4)
@@ -140,13 +176,13 @@ def main():
         config_kwargs = payload["config_kwargs"]
 
         with CompileOnlyFakeTensorMode():
-            fake_args = [deserialize_worker_value(arg) for arg in serialized_args]
-            kwargs = deserialize_worker_value(kwargs)
+            fake_args = _deserialize_precompile_value(serialized_args)
+            fake_kwargs = _deserialize_precompile_value(kwargs)
             try:
-                fn(*fake_args, **kwargs, **config_kwargs)
+                fn(*fake_args, **fake_kwargs, **config_kwargs)
                 _send(stdout, "OK")
             except Exception as e:
-                _send(stdout, f"ERR:{type(e).__name__}: {e}")
+                _send(stdout, f"ERR:{e}")
 
 
 if __name__ == "__main__":
