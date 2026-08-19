@@ -376,6 +376,9 @@ static void conv3d_metal_forward(const Tensor& input_t,
   const int64_t input_channels_per_group = input_channels / groups;
   TORCH_CHECK(weight_t.size(2) * weight_t.size(3) * weight_t.size(4) * input_channels_per_group <= kInt32Max,
               "conv3d: kernel volume times channels per group exceeds int32");
+  TORCH_CHECK(
+      std::max({input_depth, input_height, input_width, output_depth, output_height, output_width}) <= kInt32Max,
+      "conv3d: a single spatial extent exceeds int32");
   const bool use_mpp = !use_long_index && has_mpp();
 
   const auto activation = conv3d_to_ndhwc(input_t); // NDHWC
@@ -1100,7 +1103,8 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
   // H padding is computationally 1D and takes the Metal conv path too.
   const bool is1DConv = input_t.dim() == 4 && input_t.size(2) == 1 && weight_t.size(2) == 1 && padding[0] == 0;
   // MPSGraph 2D conv miscomputes the output once a filter spatial dim reaches 256; use a Metal kernel instead.
-  if (input_t.dim() == 4 && (weight_t.size(2) >= 256 || weight_t.size(3) >= 256)) {
+  if (input_t.dim() == 4 && (weight_t.size(2) >= 256 || weight_t.size(3) >= 256) &&
+      (!is1DConv || input_shape.has_value())) {
     const auto outH = (input_t.size(2) + 2 * padding[0] - dilation[0] * (weight_t.size(2) - 1) - 1) / stride[0] + 1;
     const auto outW = (input_t.size(3) + 2 * padding[1] - dilation[1] * (weight_t.size(3) - 1) - 1) / stride[1] + 1;
     // Degenerate shapes fall through to the normal path's shape check.
@@ -1129,14 +1133,38 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
   checkAllSameType(c, {input, weight});
   checkAllSameGPU(c, {input, weight});
 
-  auto output_t =
-      at::empty(input_shape.has_value() ? input_shape.value()
-                                        : conv_output_size(input->sizes(), weight->sizes(), padding, stride, dilation),
-                input->scalar_type(),
-                std::nullopt,
-                kMPS,
-                std::nullopt,
-                is_channels_last ? (is3DConv ? kChannelsLast3d : kChannelsLast) : kContiguous);
+  const auto output_size = input_shape.has_value()
+      ? input_shape->vec()
+      : conv_output_size(input->sizes(), weight->sizes(), padding, stride, dilation);
+  if (is1DConv) {
+    constexpr int64_t max_int32 = std::numeric_limits<int32_t>::max();
+    bool fits_int32 = input_t.size(0) <= max_int32 && input_t.size(1) <= max_int32 && input_t.size(3) <= max_int32 &&
+        weight_t.size(0) <= max_int32 && weight_t.size(1) <= max_int32 && weight_t.size(3) <= max_int32 &&
+        output_size[0] <= max_int32 && output_size[1] <= max_int32 && output_size[3] <= max_int32 &&
+        stride[1] <= max_int32 && padding[1] <= max_int32 && dilation[1] <= max_int32 && groups <= max_int32;
+    if (fits_int32 && output_size[3] > 0) {
+      fits_int32 = conv1d_indexing_fits_int32(weight_t.size(3), stride[1], padding[1], dilation[1], output_size[3] - 1);
+    }
+    TORCH_CHECK(fits_int32,
+                "MPS Conv1d dimensions, parameters, and index math must fit in the signed 32-bit range, but got input ",
+                input_t.sizes(),
+                ", weight ",
+                weight_t.sizes(),
+                ", stride ",
+                stride[1],
+                ", padding ",
+                padding[1],
+                ", dilation ",
+                dilation[1],
+                ", and groups ",
+                groups);
+  }
+  auto output_t = at::empty(output_size,
+                            input->scalar_type(),
+                            std::nullopt,
+                            kMPS,
+                            std::nullopt,
+                            is_channels_last ? (is3DConv ? kChannelsLast3d : kChannelsLast) : kContiguous);
   if (output_t.numel() == 0) {
     return output_t;
   }
@@ -1148,7 +1176,7 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
     output_c = at::empty_like(output_t, output_t.options().memory_format(kContiguous));
   }
 
-  if (!is_macos_at_least(MacOSVersion::MACOS_15_1) && !is3DConv) {
+  if (!is_macos_at_least(MacOSVersion::MACOS_15_1) && !is3DConv && !is1DConv) {
     // On macOS < 15.1, MPS convolution kernel does not support output channels > 2^16
     for (auto elem : output_t.sizes()) {
       TORCH_CHECK_NOT_IMPLEMENTED(elem <= (1 << 16), "Output channels > 65536 not supported at the MPS device. ");
@@ -1278,6 +1306,19 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
     if (input_t.size(1) % groups == 0 && conv1d_im2col_matmul_eligible(input_t, weight_t, padding[1], output_t)) {
       conv1d_im2col_matmul_forward(input_t, weight_t, bias_opt, stride[1], padding[1], dilation[1], groups, output_t);
       return output_t;
+    }
+    // The normal convolution caller does not supply input_shape; return here
+    // instead of reaching the MPSGraph fallback used by ConvTranspose backward-input.
+    if (!input_shape.has_value()) {
+      // Direct indexing handles a logical im2col element count over INT32_MAX
+      // without materializing it.
+      conv3d_metal_forward(input_3d, weight_3d, bias_opt, padding_3d, stride_3d, dilation_3d, groups, output_3d);
+      return output_t;
+    }
+    if (!is_macos_at_least(MacOSVersion::MACOS_15_1)) {
+      for (auto elem : output_t.sizes()) {
+        TORCH_CHECK_NOT_IMPLEMENTED(elem <= (1 << 16), "Output channels > 65536 not supported at the MPS device. ");
+      }
     }
   }
 
