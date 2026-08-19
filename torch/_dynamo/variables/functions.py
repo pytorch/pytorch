@@ -95,7 +95,6 @@ from .base import (
     GetSet,
     getset_build,
     getset_load_or_build,
-    getset_read,
     getset_set,
     Member,
     Method,
@@ -1895,7 +1894,7 @@ class UserMethodVariable(UserFunctionVariable):
     # __self__ / __func__ are read-only members on method objects.
     # https://github.com/python/cpython/blob/v3.13.0/Objects/classobject.c#L20-L24
     tp_members = {
-        "__self__": Member(getset_read(lambda s: s.obj), None),
+        "__self__": Member(lambda s, _: s.obj, None),
         "__func__": Member(_get_func, None),
     }
 
@@ -4870,6 +4869,23 @@ class PropertyVariable(DescriptorVariable):
     _nonvar_fields = {
         "descriptor",
         *VariableTracker._nonvar_fields,
+    }
+
+    tp_members = {
+        "fget": Member(getset_build(lambda s: s.descriptor.fget), None),
+        "fset": Member(getset_build(lambda s: s.descriptor.fset), None),
+        "fdel": Member(getset_build(lambda s: s.descriptor.fdel), None),
+        "__doc__": Member(
+            getset_load_or_build(lambda s: s.descriptor.__doc__, "__doc__"),
+            getset_set("__doc__"),
+        ),
+    }
+
+    tp_getset = {
+        "__name__": GetSet(
+            getset_load_or_build(lambda s: s.descriptor.__name__, "__name__"),
+            getset_set("__name__"),
+        ),
     }
 
     def __init__(

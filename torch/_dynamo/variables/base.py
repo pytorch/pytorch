@@ -427,13 +427,6 @@ class Member:
     setter: Setter
 
 
-def getset_read(
-    accessor: Callable[[Any], VariableTracker],
-) -> Getter:
-    """Getter for a GetSet/Member whose value is an already-built VT."""
-    return lambda self, tx: accessor(self)
-
-
 def getset_build(
     accessor: Callable[[Any], Any],
 ) -> Getter:
