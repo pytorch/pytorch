@@ -1011,6 +1011,8 @@ def with_fresh_cache_if_config() -> Generator[None, None, None]:
 
 class _CompileFxKwargs(TypedDict, total=False):
     cudagraphs: BoxedBool | None
+    cudagraphs_bwd_override: bool | None
+    cudagraphs_override: bool | None
     static_input_idxs: Sequence[int]
     is_backward: bool
     graph_id: int | None
@@ -1041,6 +1043,7 @@ def compile_fx_inner(
     **kwargs: Unpack[_CompileFxKwargs],
 ) -> OutputCode:
     kwargs.setdefault("cudagraphs", None)
+    kwargs.setdefault("cudagraphs_override", None)
     kwargs.setdefault("static_input_idxs", ())
     kwargs.setdefault("is_backward", False)
     kwargs.setdefault("graph_id", None)
@@ -2746,6 +2749,9 @@ class CompilerConfigExtra:
     # Enable graph partition for this compile (even if globally off) to isolate a
     # region whose cudagraphs preference differs from the enclosing graph.
     enable_region_graph_partition: bool = False
+    # Graph-specific cudagraphs decision that must survive cache loading instead
+    # of using the forward-derived shared BoxedBool.
+    cudagraphs_override: bool | None = None
 
 
 def create_compiler_config_extra(
@@ -2792,6 +2798,7 @@ def create_compiler_config_extra(
     # The top-level cudagraphs decision (config + annotation); patched into
     # config.triton.cudagraphs by cudagraph_annotation_context.
     patch_config_for_cudagraphs = cudagraphs.value
+    cudagraphs_override = None
 
     # A nested region may opt into cudagraphs even when the top level is off.
     # Enable the runtime decision so the region is captured, without patching the
@@ -2800,6 +2807,7 @@ def create_compiler_config_extra(
         inner_gm = gm if isinstance(gm, GraphModule) else getattr(gm, "gm", None)
         if inner_gm is not None and _any_subgraph_enables_cudagraphs(inner_gm):
             cudagraphs = BoxedBool(True)
+            cudagraphs_override = True
             cudagraphs_log.info(
                 "enabling cudagraphs at runtime for a nested invoke_subgraph "
                 "region that opted in (top-level config left unchanged)"
@@ -2841,6 +2849,7 @@ def create_compiler_config_extra(
         forward_is_partitioned=forward_is_partitioned,
         patch_config_for_cudagraphs=patch_config_for_cudagraphs,
         enable_region_graph_partition=enable_region_graph_partition,
+        cudagraphs_override=cudagraphs_override,
     )
 
 
@@ -2992,6 +3001,7 @@ def compile_fx_forward(
             example_inputs,
             static_input_idxs=get_static_input_idxs(fixed),
             cudagraphs=compiler_config_extra.cudagraphs,
+            cudagraphs_override=compiler_config_extra.cudagraphs_override,
             graph_id=compiler_config_extra.graph_id,
             is_inference=is_inference,
             boxed_forward_device_index=compiler_config_extra.forward_device,
@@ -3047,11 +3057,14 @@ def compile_fx_backward(
         # backward respects the forward's final cudagraph determination.
         if compiler_config_extra.patch_config_for_cudagraphs:
             cudagraphs = compiler_config_extra.cudagraphs
+            cudagraphs_override = None
         else:
             cudagraphs = BoxedBool(False)
+            cudagraphs_override = False
         # Check if cudagraphs should be overridden for backward via annotation
         if compiler_config_extra.cudagraphs_bwd_override is not None:
             cudagraphs = BoxedBool(compiler_config_extra.cudagraphs_bwd_override)
+            cudagraphs_override = compiler_config_extra.cudagraphs_bwd_override
 
         # A nested region in the backward may opt into cudagraphs (via
         # bw_inductor_config_patches) even when the top level is off. The
@@ -3063,6 +3076,7 @@ def compile_fx_backward(
         outer_cudagraphs = cudagraphs.value
         if not cudagraphs.value and _any_subgraph_enables_cudagraphs(gm):
             cudagraphs = BoxedBool(True)
+            cudagraphs_override = True
         bw_region_graph_partition_ctx = (
             config.patch("graph_partition", True)
             if not config.graph_partition
@@ -3107,6 +3121,7 @@ def compile_fx_backward(
                 example_inputs,
                 static_input_idxs=static_input_idxs,
                 cudagraphs=cudagraphs,
+                cudagraphs_override=cudagraphs_override,
                 is_backward=True,
                 graph_id=compiler_config_extra.graph_id,
                 boxed_forward_device_index=compiler_config_extra.forward_device,
