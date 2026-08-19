@@ -12585,7 +12585,12 @@ op_db: list[OpInfo] = [
                    dtypes=(torch.complex64, torch.complex128)),
                DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-3, rtol=2e-3)}),
                             "TestConsistency", "test_output_grad_match", device_type="mps"),
-           )),
+                # torch-xpu-ops/issues/4932
+                DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_quick', device_type='xpu',
+                    dtypes=(torch.int8, )),
+                DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_comprehensive', device_type='xpu',
+                    dtypes=(torch.uint8, torch.int8)),
+            )),
     OpInfo('addmm',
            # When alpha=beta=1 as compile-time constants, JIT will decompose addmm into mm and add.
            variant_test_name='decomposed',
@@ -12630,6 +12635,11 @@ op_db: list[OpInfo] = [
                             "TestConsistency", "test_output_match", device_type="mps"),
                DecorateInfo(toleranceOverride({torch.float32: tol(atol=2e-5, rtol=3e-6)}),
                             "TestConsistency", "test_output_grad_match", device_type="mps"),
+               # torch-xpu-ops/issues/4932
+               DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_quick', device_type='xpu',
+                            dtypes=(torch.uint8, torch.int8)),
+               DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_comprehensive', device_type='xpu',
+                            dtypes=(torch.uint8, torch.int8)),
            ],
            sample_inputs_func=sample_inputs_addmv),
     OpInfo('addbmm',
@@ -12714,7 +12724,20 @@ op_db: list[OpInfo] = [
                    'TestSchemaCheckModeOpInfo',
                    'test_schema_correctness',
                    dtypes=(torch.complex64, torch.complex128)),
-           )),
+                # internal issue with torch-xpu-ops, see https://github.com/intel/torch-xpu-ops/issues/4932
+                DecorateInfo(
+                    unittest.expectedFailure,
+                    'TestDecomp',
+                    'test_quick',
+                    device_type='xpu',
+                    dtypes=(torch.uint8, torch.int8)),
+                DecorateInfo(
+                    unittest.expectedFailure,
+                    'TestDecomp',
+                    'test_comprehensive',
+                    device_type='xpu',
+                    dtypes=(torch.uint8, torch.int8)),
+            )),
     OpInfo('dot',
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
@@ -12792,7 +12815,9 @@ op_db: list[OpInfo] = [
                ),
                # torch-xpu-ops/issues/4932
                DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_quick', device_type='xpu',
-                            dtypes=(torch.uint8,)),
+                            dtypes=(torch.uint8, )),
+               DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_comprehensive', device_type='xpu',
+                            dtypes=(torch.uint8, torch.int8)),
            ],
            sample_inputs_func=sample_inputs_mv),
     OpInfo('addr',
@@ -14410,9 +14435,9 @@ op_db: list[OpInfo] = [
 
                # Off-by-one issue when casting floats to ints
                DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_quick',
-                            dtypes=(torch.int16, torch.int32, torch.int64), device_type="cuda"),
+                            dtypes=(torch.int16, torch.int32, torch.int64), device_type=("cuda", "xpu")),
                DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_comprehensive',
-                            dtypes=(torch.int16, torch.int32, torch.int64), device_type="cuda"),
+                            dtypes=(torch.int16, torch.int32, torch.int64), device_type=("cuda", "xpu")),
                # UserWarning: CUDA caching allocator reports a memory leak not verified by the driver API
                # in __main__.TestJitCUDA.test_variant_consistency_jit_logspace_cuda_complex64!
                # Caching allocator allocated memory was 0 and is now reported as 307200 on device 0.
@@ -14445,9 +14470,9 @@ op_db: list[OpInfo] = [
 
                # Off-by-one issue when casting floats to ints
                DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_quick',
-                            dtypes=(torch.int16, torch.int32, torch.int64), device_type="cuda"),
+                            dtypes=(torch.int16, torch.int32, torch.int64), device_type=("cuda", "xpu")),
                DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_comprehensive',
-                            dtypes=(torch.int16, torch.int32, torch.int64), device_type="cuda"),
+                            dtypes=(torch.int16, torch.int32, torch.int64), device_type=("cuda", "xpu")),
                # UserWarning: CUDA caching allocator reports a memory leak not verified by the driver API
                # in __main__.TestJitCUDA.test_variant_consistency_jit_logspace_cuda_complex64!
                # Caching allocator allocated memory was 0 and is now reported as 307200 on device 0.
@@ -16805,6 +16830,11 @@ op_db: list[OpInfo] = [
                 "test_variant_consistency_jit",
                 device_type="cuda",
             ),
+            # torch-xpu-ops/issues/5020
+            DecorateInfo(unittest.expectedFailure, 'TestMeta', "test_dispatch_symbolic_meta_outplace",
+                         device_type='xpu'),
+            DecorateInfo(unittest.expectedFailure, 'TestMeta', "test_dispatch_meta_outplace",
+                         device_type='xpu'),
         ),
     ),
     OpInfo('nn.functional.avg_pool2d',
@@ -16890,6 +16920,9 @@ op_db: list[OpInfo] = [
                # Pre-existing condition; Needs to be fixed
                DecorateInfo(unittest.skip("Works on some configs"), 'TestNNCOpInfo',
                             'test_nnc_correctness', dtypes=(torch.bfloat16,)),
+               # pytorch/pytorch/pull/182619
+               DecorateInfo(unittest.skip("Not implemented"), 'TestDecomp',
+                            'test_comprehensive', device_type='xpu'),
            ),
            error_inputs_func=error_inputs_max_pool1d,
            sample_inputs_func=sample_inputs_max_pool),
@@ -16907,7 +16940,12 @@ op_db: list[OpInfo] = [
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            dtypesIfMPS=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            error_inputs_func=error_inputs_max_pool2d,
-           sample_inputs_func=sample_inputs_max_pool),
+           sample_inputs_func=sample_inputs_max_pool,
+           skips=(
+               # pytorch/pytorch/pull/182619
+               DecorateInfo(unittest.skip("Not implemented"), 'TestDecomp',
+                            'test_comprehensive', device_type='xpu'),
+           ),),
     OpInfo('max_pool2d_with_indices_backward',
            op=max_pool2d_backward,
            # We've defined a custom op, so there's no corresponding aten op
@@ -16935,7 +16973,7 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                # object has no attribute max_pool2d_with_indices_backward (It's not available on torch -- so expected)
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-               # torchf-xpu-ops/issue/3600
+               # torch-xpu-ops/issue/3600
                DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_quick', device_type='xpu'),
                DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_comprehensive', device_type='xpu')
            )),
@@ -17440,10 +17478,12 @@ op_db: list[OpInfo] = [
                          'TestCompositeCompliance', 'test_cow_input',
                          device_type='cuda', dtypes=(torch.bfloat16, torch.float16, torch.float32),
                          active_if=TEST_WITH_ROCM and PLATFORM_SUPPORTS_MEM_EFF_ATTENTION),
-            # torch-xpu/issues/4461
+            # torch-xpu-ops/issues/4461
             DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta_outplace',
                          device_type='xpu', dtypes=(torch.uint8, torch.int8)),
             DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_symbolic_meta_outplace',
+                         device_type='xpu', dtypes=(torch.uint8, torch.int8)),
+            DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_meta_outplace',
                          device_type='xpu', dtypes=(torch.uint8, torch.int8)),),
     ),
     OpInfo(
@@ -17631,6 +17671,11 @@ op_db: list[OpInfo] = [
             # UserWarning not triggered : Resized a non-empty tensor but did not
             # warn about it
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
+            # torch-xpu-ops/issues/5020
+            DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_symbolic_meta_outplace',
+                         device_type=('xpu',)),
+            DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_meta_outplace',
+                         device_type=('xpu',)),
         ),
     ),
     UnaryUfuncInfo(
@@ -18727,6 +18772,11 @@ op_db: list[OpInfo] = [
                # https://github.com/pytorch/pytorch/issues/71774
                DecorateInfo(unittest.skip('Skipped!'), 'TestNNCOpInfo', 'test_nnc_correctness',
                             device_type='cpu', dtypes=(torch.long,)),
+               # NotImplementedError: "dot_xpu_mkl" not implemented for 'Char', torch-xpu-ops/issues/4438
+               DecorateInfo(unittest.skip("NotImplementedError: 'dot_xpu_mkl' not implemented for 'Char'"),
+                            'TestMeta', device_type='xpu', dtypes=(torch.uint8, torch.int8)),
+               DecorateInfo(unittest.skip("NotImplementedError: 'dot_xpu_mkl' not implemented for 'Char'"),
+                            'TestDecomp', 'test_comprehensive', device_type='xpu', dtypes=(torch.uint8, torch.int8)),
            )),
     BinaryUfuncInfo('__rmod__',
                     op=torch.Tensor.__rmod__,
@@ -19789,6 +19839,8 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.skip('Skipped!'), 'TestTensorMetaProp', 'test_inplace_ops_propagate_requires_grad_metadata',
                             dtypes=float8_types()),
                DecorateInfo(unittest.skip('Skipped!'), 'TestDecomp', 'test_comprehensive', dtypes=float8_types()),
+               # intel/torch-xpu-ops/issues/5429
+               DecorateInfo(unittest.skip('Skipped!'), None, None, dtypes=float8_types(), device_type='xpu'),
            )),
     UnaryUfuncInfo(
         'bfloat16',
@@ -21257,6 +21309,11 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
                # intel/torch-xpu-ops/issues/4452
                DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta_outplace', device_type="xpu", dtypes=(torch.uint8, torch.int8)),
+               # NotImplementedError: "dot_xpu_mkl" not implemented for 'Char', torch-xpu-ops/issues/4438
+               DecorateInfo(unittest.skip("NotImplementedError: 'dot_xpu_mkl' not implemented for 'Char'"),
+                            'TestMeta', device_type='xpu', dtypes=(torch.uint8, torch.int8)),
+               DecorateInfo(unittest.skip("NotImplementedError: 'dot_xpu_mkl' not implemented for 'Char'"),
+                            'TestDecomp', device_type='xpu', dtypes=(torch.uint8, torch.int8)),
            )
            ),
     OpInfo('to_sparse',
