@@ -60,14 +60,9 @@ batch_size = 64
 n_microbatches = 4
 microbatch_size = batch_size // n_microbatches
 
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
-backend = dist.get_default_backend_for_device(device_type)
-
 
 def _requires_multi_gpu(fn):
-    @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, f"{backend} test requires 4+ GPUs"
-    )
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "Test requires 4+ GPUs")
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
         return fn(*args, **kwargs)
@@ -87,18 +82,8 @@ class DTensorPPTestBase(MultiProcContinuousTest):
     # on this base leaves it inherited, so cls refers to the generated
     # device-specific test class when called.
     @classmethod
-    def _resolved_device_type(cls) -> str:
-        # MultiProcContinuousTest subprocesses run tests without calling
-        # PrivateUse1TestBase.setUpClass, so cls.device_type stays the generic
-        # "privateuse1" token; resolve it to the registered backend name.
-        dt = cls.device_type
-        if dt == "privateuse1":
-            dt = torch._C._get_privateuse1_backend_name()
-        return dt
-
-    @classmethod
     def backend_str(cls) -> str:
-        return dist.get_default_backend_for_device(cls._resolved_device_type())
+        return dist.get_default_backend_for_device(cls.device_type)
 
     def _rank_device(self, device: str) -> torch.device:
         device_type = torch.device(device).type
@@ -125,7 +110,7 @@ class TestDTensorPPUnitTests(DTensorPPTestBase):
     def _make_mesh(self, dim_names=("tp",)):
         """Create a 1D device mesh spanning all ranks."""
         return init_device_mesh(
-            self._resolved_device_type(), (self.world_size,), mesh_dim_names=dim_names
+            self.device_type, (self.world_size,), mesh_dim_names=dim_names
         )
 
     def _make_dtensor(
