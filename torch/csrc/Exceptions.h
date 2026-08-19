@@ -264,6 +264,16 @@ struct python_error : public std::exception {
   std::string message;
 };
 
+// Hand control back to the interpreter when `cond` is false, propagating the
+// error CPython has already set. Unlike TORCH_CHECK this takes no message,
+// because the message is whatever CPython raised; a TORCH_CHECK here would
+// replace a real Python exception with a RuntimeError.
+#define TORCH_CHECK_PYTHON(cond)                                        \
+  if (C10_UNLIKELY_OR_CONST(!(cond))) {                                 \
+    /* @allow-raw-throw: this macro is the sanctioned wrapper for it */ \
+    throw python_error();                                               \
+  }
+
 bool THPException_init(PyObject* module);
 
 namespace torch {
