@@ -1,6 +1,9 @@
 # Owner(s): ["oncall: distributed"]
 import os
+import tempfile
 import unittest
+from contextlib import redirect_stdout
+from io import StringIO
 
 import torch
 import torch.nn as nn
@@ -62,6 +65,41 @@ class TestMemoryTracker(TestCase):
         self.assertTrue(len(tracker._markers) == 2)
         self.assertTrue(tracker._cur_module_name != "")
         self.assertTrue(hasattr(tracker, "_num_alloc_retries"))
+
+    def test_save_load_restores_operation_count(self):
+        """
+        ``summary()`` bounds its iteration with ``_op_index``, so a tracker
+        restored from a stats file has to get that count back or it silently
+        reports no operators at all.
+        """
+        tracker = MemoryTracker()
+        for index, name in enumerate(["aten::conv2d", "aten::relu", "aten::linear"]):
+            tracker.memories_allocated[index] = (name, float(index))
+            tracker.memories_active[index] = (name, float(index))
+            tracker.memories_reserved[index] = (name, float(index))
+            tracker._op_index += 1
+        tracker._num_alloc_retries = 2
+
+        fd, path = tempfile.mkstemp()
+        os.close(fd)
+        try:
+            tracker.save_stats(path)
+
+            loaded = MemoryTracker()
+            loaded.load(path)
+
+            self.assertEqual(loaded._op_index, tracker._op_index)
+
+            expected, actual = StringIO(), StringIO()
+            with redirect_stdout(expected):
+                tracker.summary()
+            with redirect_stdout(actual):
+                loaded.summary()
+
+            self.assertEqual(actual.getvalue(), expected.getvalue())
+            self.assertIn("aten::relu", actual.getvalue())
+        finally:
+            os.remove(path)
 
 
 if __name__ == "__main__":

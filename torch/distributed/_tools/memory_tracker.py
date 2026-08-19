@@ -212,6 +212,7 @@ class MemoryTracker:
             "memories_reserved": self.memories_reserved,
             "markers": self._markers,
             "num_alloc_retries": self._num_alloc_retries,
+            "op_index": self._op_index,
         }
 
         with open(path, "wb") as f:
@@ -227,6 +228,11 @@ class MemoryTracker:
         self.memories_reserved = stats["memories_reserved"]
         self._markers = stats["markers"]
         self._num_alloc_retries = stats["num_alloc_retries"]
+        # ``summary()`` iterates up to ``_op_index``; without restoring it a
+        # loaded tracker reports no operators at all. Stats files written before
+        # ``op_index`` was persisted are handled by rebuilding the count from the
+        # traces, which are keyed by a contiguous range of operation indices.
+        self._op_index = stats.get("op_index", len(self.memories_allocated))
 
     def _create_pre_forward_hook(self, name: str) -> Callable:
         """Prefix operator name with current module and 'forward', and insert 'fw_start' marker at forward pass start."""
