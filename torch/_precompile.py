@@ -204,9 +204,12 @@ it.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import io
 import logging
+import os
+import threading
 from types import MappingProxyType
 from typing import Any, cast, NewType, TYPE_CHECKING
 
@@ -219,6 +222,253 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 
 log = logging.getLogger(__name__)
+_CAPTURE_LOCK = threading.RLock()
+
+
+def _reinit_capture_lock_after_fork() -> None:
+    # A child that inherits this lock held by a thread the fork did not carry over
+    # would block on it forever; only the forking thread survives, so nothing that
+    # held it can still be running.
+    global _CAPTURE_LOCK
+    _CAPTURE_LOCK = threading.RLock()
+
+
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_reinit_capture_lock_after_fork)
+
+
+def _capture_rng_devices(args: tuple[object, ...]) -> list[torch.device]:
+    devices: set[torch.device] = set()
+    for arg in args:
+        if isinstance(arg, torch.nn.Module):
+            tensors = [*arg.parameters(), *arg.buffers()]
+        else:
+            tensors = [
+                leaf
+                for leaf in pytree.tree_leaves(arg)
+                if isinstance(leaf, torch.Tensor)
+            ]
+        for tensor in tensors:
+            if tensor.device.type in ("cuda", "xpu"):
+                devices.add(tensor.device)
+    for device_type in ("cuda", "xpu"):
+        device_module = getattr(torch, device_type, None)
+        if device_module is not None and device_module.is_initialized():
+            devices.add(torch.device(device_type, device_module.current_device()))
+    return sorted(
+        devices,
+        key=lambda device: (device.type, -1 if device.index is None else device.index),
+    )
+
+
+# nondeterministic_seeded marks ops that MAY draw. For these a parameter decides, and
+# they sit in the middle of every attention, dropout and RNN call site, so treating
+# them as unconditional draws would put essentially every real model on the
+# rewind-anything-concurrent path. The named argument is falsy iff the op cannot draw.
+# Qualified names: a custom op that merely shares a base name must not inherit a gate.
+# This is every tagged aten op taking a "dropout_p" or "train" argument;
+# test_rng_gate_table_matches_the_op_registry keeps it honest against the registry.
+_RNG_GATED_BY_ARG = {
+    "aten::_cudnn_attention_backward": "dropout_p",
+    "aten::_cudnn_attention_forward": "dropout_p",
+    "aten::_cudnn_init_dropout_state": "train",
+    "aten::_cudnn_rnn": "train",
+    "aten::_efficient_attention_forward": "dropout_p",
+    "aten::_fill_mem_eff_dropout_mask_": "dropout_p",
+    "aten::_flash_attention_forward": "dropout_p",
+    "aten::_flash_attention_forward_no_dropout_inplace": "dropout_p",
+    "aten::_fused_sdp_choice": "dropout_p",
+    "aten::_lstm_mps": "train",
+    "aten::_scaled_dot_product_attention_math": "dropout_p",
+    "aten::_scaled_dot_product_attention_math_for_mps": "dropout_p",
+    "aten::_scaled_dot_product_cudnn_attention": "dropout_p",
+    "aten::_scaled_dot_product_cudnn_attention_backward": "dropout_p",
+    "aten::_scaled_dot_product_efficient_attention": "dropout_p",
+    "aten::_scaled_dot_product_efficient_attention_backward": "dropout_p",
+    "aten::_scaled_dot_product_flash_attention": "dropout_p",
+    "aten::_scaled_dot_product_flash_attention_for_cpu": "dropout_p",
+    "aten::_scaled_dot_product_fused_attention_overrideable": "dropout_p",
+    "aten::_triton_scaled_dot_attention": "dropout_p",
+    "aten::alpha_dropout": "train",
+    "aten::alpha_dropout_": "train",
+    "aten::dropout": "train",
+    "aten::dropout_": "train",
+    "aten::feature_alpha_dropout": "train",
+    "aten::feature_alpha_dropout_": "train",
+    "aten::feature_dropout": "train",
+    "aten::feature_dropout_": "train",
+    "aten::gru": "train",
+    "aten::lstm": "train",
+    "aten::miopen_rnn": "train",
+    "aten::native_dropout": "train",
+    "aten::rnn_relu": "train",
+    "aten::rnn_tanh": "train",
+    "aten::rrelu": "training",
+    "aten::rrelu_": "training",
+    "aten::rrelu_with_noise": "training",
+    "aten::rrelu_with_noise_": "training",
+    "aten::rrelu_with_noise_functional": "training",
+    "aten::scaled_dot_product_attention": "dropout_p",
+}
+
+
+def _op_can_draw(node: torch.fx.Node) -> bool:
+    target = node.target
+    if not isinstance(target, torch._ops.OpOverload):
+        return False
+    if torch.Tag.nondeterministic_seeded not in target.tags:
+        return False
+    # Keyed on the qualified name: a custom op that merely shares a name with an
+    # aten op must not inherit its gate, since its argument may not control drawing.
+    arg_name = _RNG_GATED_BY_ARG.get(target._schema.name)
+    if arg_name is None:
+        return True
+    schema_args = target._schema.arguments
+    index = next((i for i, a in enumerate(schema_args) if a.name == arg_name), None)
+    if index is None:
+        return True
+    if arg_name in node.kwargs:
+        value = node.kwargs[arg_name]
+    elif index < len(node.args):
+        value = node.args[index]
+    else:
+        value = schema_args[index].default_value
+    # Anything not a plain constant (a symbolic or traced value) has to be assumed
+    # live; only a literal zero/False proves this call site cannot draw.
+    return not isinstance(value, (bool, int, float)) or bool(value)
+
+
+def _graph_rng_devices(gm: torch.fx.GraphModule) -> set[torch.device] | None:
+    """Devices whose generators the captured graph can draw from.
+
+    This is how a restore decides what it has of its own to undo. The alternative --
+    diffing global generator state across capture -- cannot tell the capture's own
+    draws from a concurrent thread's, so it rewinds unrelated work. Per device rather
+    than a single flag for the same reason: a graph that draws only on CUDA must not
+    rewind the CPU generator a concurrent thread is drawing from. None means a drawing
+    op whose device could not be read, which the caller treats as "all of them".
+    """
+    devices: set[torch.device] = set()
+    for node in gm.graph.nodes:
+        target = node.target
+        if isinstance(target, torch._ops.OpOverload) and not target.name().startswith(
+            "aten::"
+        ):
+            # An opaque custom op can draw inside its own kernel with nothing in the
+            # graph to say so (the vLLM-style attention/MoE shape this API targets).
+            # Attributing per device would leave those draws un-restored, so once one
+            # is present the only safe answer is "could be any generator".
+            return None
+        if not _op_can_draw(node):
+            continue
+        val = node.meta.get("val")
+        if isinstance(val, (tuple, list)):
+            val = next((v for v in val if isinstance(v, torch.Tensor)), None)
+        if not isinstance(val, torch.Tensor):
+            return None
+        devices.add(val.device)
+    return devices
+
+
+def _rng_devices_indicate_a_draw(drawn: set[torch.device] | None) -> bool:
+    """None means "could be any generator"; a non-empty set names them."""
+    return drawn is None or bool(drawn)
+
+
+class _CaptureRngState:
+    """Generator state saved across capture, restored only if capture consumed it.
+
+    make_fx runs ``fn`` for real, so a traced ``torch.rand`` advances the very
+    generators the first real call is about to draw from; without a restore, capturing
+    would visibly change the numbers a first call produces. The restore is conditional
+    because it writes process-global state: rewinding when the capture drew nothing
+    would silently replay a concurrent thread's draws.
+    """
+
+    def __init__(self, args: tuple[object, ...]) -> None:
+        with self._raw():
+            self._cpu = torch.random.get_rng_state().clone()
+            self._devices = []
+            self._states = []
+            self._unsnapshotted: list[torch.device] = []
+            for device in _capture_rng_devices(args):
+                try:
+                    module = torch.get_device_module(device.type)
+                    state = module.get_rng_state(device).clone()
+                except Exception:
+                    # Reading a generator can fail (a fake tensor naming a device this
+                    # host does not have). Record it so warn_on_unsnapshotted_devices
+                    # can report it, rather than dying with a bare driver error here or
+                    # dropping it silently.
+                    self._unsnapshotted.append(device)
+                    continue
+                self._devices.append((module, device))
+                self._states.append(state)
+
+    @staticmethod
+    @contextlib.contextmanager
+    def _raw():
+        # Reading generator state must not be intercepted by whatever mode stack the
+        # caller is under; a tracing mode would turn these reads into graph nodes, and
+        # a torch-function mode can reject or rewrite the read outright.
+        with (
+            torch.utils._python_dispatch._disable_current_modes(),
+            torch._C._DisableFuncTorch(),
+            torch._C.DisableTorchFunction(),
+        ):
+            yield
+
+    def warn_on_unsnapshotted_devices(self, drawn: set[torch.device] | None) -> None:
+        # A device the graph drew on but that was not snapshotted (not current, not
+        # reachable from the arguments, or only initialized during capture) cannot be
+        # rewound, so the capturing run returns different numbers than every later run.
+        # Nothing can be done after the fact except say so.
+        if drawn is None:
+            # "Could be any generator" -- which is the common case now, since an opaque
+            # custom op forces it. Anything not snapshotted is unrestorable and there is
+            # no device name to report, so say that rather than going quiet.
+            if self._devices or self._unsnapshotted:
+                log.warning(
+                    "precompile: the captured graph contains an op whose draws cannot "
+                    "be attributed to a device, so only the generators saved at capture "
+                    "were restored; any other initialized generator it touched will not "
+                    "reproduce when the artifact is loaded."
+                )
+            return
+        saved = {device for _module, device in self._devices}
+        missed = sorted(
+            {d for d in drawn if d.type != "cpu" and d not in saved}
+            | set(self._unsnapshotted),
+            key=str,
+        )
+        if missed:
+            log.warning(
+                "precompile: the captured graph draws on %s, whose generator state was "
+                "not saved and so could not be restored; this capturing run may return "
+                "different random values than later runs load from the artifact. "
+                "Precompile with an example tensor on that device, or make it current.",
+                ", ".join(str(d) for d in missed),
+            )
+
+    def changed(self) -> bool:
+        with self._raw():
+            if not torch.equal(torch.random.get_rng_state(), self._cpu):
+                return True
+            return any(
+                not torch.equal(module.get_rng_state(device), state)
+                for (module, device), state in zip(self._devices, self._states)
+            )
+
+    def restore(self, drawn: set[torch.device] | None = None) -> None:
+        # Restore only the generators the capture could have drawn from. Writing back
+        # one it did not touch is not a no-op: it rewinds whatever another thread drew
+        # from that generator while capture ran.
+        with self._raw():
+            if drawn is None or any(d.type == "cpu" for d in drawn):
+                torch.random.set_rng_state(self._cpu)
+            for (module, device), state in zip(self._devices, self._states):
+                if drawn is None or device in drawn:
+                    module.set_rng_state(state, device)
 
 
 if TYPE_CHECKING:
@@ -282,7 +532,11 @@ def _dense_shape(t: object) -> tuple[int, ...] | None:
 
     Tensor subclasses (e.g. DTensor) go through AOTAutograd's flatten path, so their
     outer shape is not the dense shape the inductor artifact bakes; record ``None`` and
-    skip them in the shape check.
+    skip them in the SHAPE check only -- dtype and device are still recorded and still
+    checked. Note this leaves a subclass's INNER shapes unguarded: an artifact captured
+    from one sharding silently runs a differently-sharded input against capture's baked
+    local shapes, and an empty inner leaf is worse than a wrong number. Recording the
+    dense-leaf shapes is the real fix and is not done here.
     """
     if isinstance(t, torch.Tensor) and not is_traceable_wrapper_subclass(t):
         return tuple(t.shape)
@@ -290,26 +544,33 @@ def _dense_shape(t: object) -> tuple[int, ...] | None:
 
 
 def _dense_dtype(t: object) -> str | None:
-    """Return the dtype of a plain dense tensor as a string, else ``None``.
+    """Return a tensor's dtype as a string, else ``None`` for a non-tensor.
 
     Recorded as a string (e.g. ``"torch.float32"``) so it serializes into the artifact
-    metadata as a literal and compares cleanly against ``str(t.dtype)`` at runtime;
-    mirrors the _dense_shape convention (None for non-tensor / subclass leaves). The
+    metadata as a literal and compares cleanly against ``str(t.dtype)`` at runtime. The
     graph is specialized to the example dtype (invariant 6).
+
+    Unlike _dense_shape this DOES apply to a wrapper subclass: its outer dtype is the
+    one AOTAutograd specializes on, and skipping it let a float64 subclass reach a graph
+    built for float32 and come back as reinterpreted bytes with no error at all.
     """
-    if isinstance(t, torch.Tensor) and not is_traceable_wrapper_subclass(t):
+    if isinstance(t, torch.Tensor):
         return str(t.dtype)
     return None
 
 
 def _dense_device(t: object) -> str | None:
-    """Return the device (as a string) of a plain dense tensor, else ``None``.
+    """Return a tensor's device as a string, else ``None`` for a non-tensor.
 
     Recorded as a string so it serializes into the artifact metadata as a literal and
-    compares cleanly at runtime; mirrors _dense_shape (None for non-tensor / subclass
-    leaves). The graph is specialized to the example device (invariant 6).
+    compares cleanly at runtime. The graph is specialized to the example device
+    (invariant 6).
+
+    Applies to a wrapper subclass for the same reason as _dense_dtype, and here the
+    stakes are memory safety rather than a wrong number: skipping it handed a CUDA
+    subclass to a graph built for CPU.
     """
-    if isinstance(t, torch.Tensor) and not is_traceable_wrapper_subclass(t):
+    if isinstance(t, torch.Tensor):
         return str(t.device)
     return None
 
@@ -682,7 +943,6 @@ def _capture(
     interning/order established here for params then buffers is the calling
     convention the runtime model must reproduce (invariant 2).
     """
-    import contextlib
 
     args = tuple(args)
     module_positions = [i for i, a in enumerate(args) if isinstance(a, torch.nn.Module)]
@@ -847,10 +1107,17 @@ def _capture(
         captured_grad_param_indices = grad_param_indices
         return [*result_flat, *grad_flat]
 
-    # Trace with grad enabled so any backward in ``fn`` is built as graph ops; the
-    # forward graph is the same as under no_grad. Restore in finally so a make_fx
-    # failure (e.g. fn raising after running a backward) does not leave the user's
-    # example model with clobbered .grad fields.
+    # Trace with grad enabled, so a backward inside ``fn`` is built as graph ops. This
+    # DOES specialize a ``fn`` that reads torch.is_grad_enabled() and branches: it always
+    # captures the grad-enabled branch, which is documented alongside the other Python
+    # specializations. Tracing under the caller's ambient mode instead was tried and is
+    # worse: it makes the baked branch depend on ambient state that no stamp records, so
+    # a no_grad capture silently returns the wrong branch in every later process, and
+    # stamping it is not an option either -- capture-with-grad-on then call-under-no_grad
+    # is the ordinary inference pattern and a strict check would refuse it. A constant
+    # that is documented beats an ambient input that cannot be checked.
+    # Restore .grad in finally so a make_fx failure (e.g. fn raising after running a
+    # backward) does not leave the user's example model with clobbered .grad fields.
     from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode
 
     tracing_mode = "symbolic" if fake_mode is not None else "real"
@@ -957,15 +1224,21 @@ class _Capture:
 
 
 _GENERATED_HEADER = """\
-# Generated by torch.compiler.precompile -- do not edit.
+# Generated by torch.compiler.precompile. Editing it is supported: this source is
+# what runs, so an edit here takes effect on the next load.
 #
 # This is a SELF-CONTAINED, EXECUTABLE artifact: it runs on its own, needing no
 # companion cache. You provide the model(s) at runtime, exactly as the original fn
 # took them, e.g.:
 #
-#     ns = {}
-#     exec(open("this_file.py").read(), ns)
+#     path = "this_file.py"
+#     ns = {"__file__": path}
+#     exec(compile(open(path).read(), path, "exec"), ns)
 #     out = ns["forward"](model, my_input)      # same args as the traced fn
+#
+# Compile with the real path rather than exec'ing the string: the Triton kernels are
+# defined at module level and @triton.jit looks up its own source by filename, so a
+# bare exec(open(...).read()) cannot load this artifact.
 #
 # The runtime model must be STRUCTURALLY IDENTICAL to the one precompile traced
 # (same parameter/buffer names, order, and weight tying); only the weight VALUES
@@ -976,9 +1249,9 @@ _GENERATED_HEADER = """\
 # example). See Note [precompile programming model] in torch/_precompile.py.
 #
 # It contains, in order:
-#   1. The composed graph module from aot_autograd.compile_to_python: the inlined
-#      Inductor kernels (JIT-compiled from the embedded source on first use -- no
-#      external cache required) plus AOTAutograd's own codegen'd prelude/epilogue
+#   1. The composed graph module from aot_autograd.compile_to_python: the Inductor
+#      kernels as module-level source (JIT-compiled on first use -- no external cache
+#      required) plus AOTAutograd's own codegen'd prelude/epilogue
 #      (tensor-subclass wrap/unwrap, input-mutation reflection, output aliasing),
 #      exposing ``call(flat_inputs) -> outputs``.
 #   2. Calling-convention metadata.
@@ -1164,15 +1437,21 @@ def _build_python_source(
 
 
 _EAGER_GENERATED_HEADER = """\
-# Generated by torch.compiler.precompile (backend="eager") -- do not edit.
+# Generated by torch.compiler.precompile (backend="eager"). Editing it is supported:
+# this source is what runs, so an edit here takes effect on the next load.
 #
 # Self-contained, executable artifact: the captured ATen graph is inlined below (both
 # the human-readable rendering and the executable code) and runs on its own. Provide
 # the model(s) at runtime, exactly as the original fn took them:
 #
-#     ns = {}
-#     exec(open("this_file.py").read(), ns)
+#     path = "this_file.py"
+#     ns = {"__file__": path}
+#     exec(compile(open(path).read(), path, "exec"), ns)
 #     out = ns["forward"](model, my_input)      # same args as the traced fn
+#
+# Compile with the real path rather than exec'ing the string: the Triton kernels are
+# defined at module level and @triton.jit looks up its own source by filename, so a
+# bare exec(open(...).read()) cannot load this artifact.
 #
 # The runtime model must be structurally identical to the traced one (only weight
 # VALUES may differ), and control flow / shapes are specialized to the example inputs.
@@ -1387,7 +1666,34 @@ class PrecompiledModule:
                 "precompile: mark_unbacked (dynamic shapes) is only supported with "
                 "backend='inductor'; eager + unbacked is not supported."
             )
-        capture = _capture(self._fn, args, self._decompositions)
+        with _CAPTURE_LOCK:
+            rng = _CaptureRngState(args)
+            # No restore on the failure path. There is no graph to attribute draws to,
+            # and capture rejections are routine (an unsupported construct), so
+            # rewinding here would replay a concurrent thread's draws far more often
+            # than it would undo anything of ours.
+            capture = _capture(self._fn, args, self._decompositions)
+            if capture.fake_mode is not None:
+                # A fake-traced capture (mark_unbacked) runs no real kernel, so nothing
+                # was consumed however the graph reads, and restoring could only rewind
+                # what another thread drew. rng.changed() cannot substitute for this --
+                # a concurrent draw makes it true either way.
+                pass
+            elif _rng_devices_indicate_a_draw(drawn := _graph_rng_devices(capture.gm)):
+                rng.restore(drawn)
+                rng.warn_on_unsnapshotted_devices(drawn)
+            elif rng.changed():
+                # The capture consumed generator state that no graph op accounts for --
+                # most likely an opaque custom op that draws without being tagged
+                # nondeterministic_seeded. Nothing here can attribute it, so the
+                # capturing run will not reproduce on load.
+                log.warning(
+                    "precompile: capture consumed generator state that the captured "
+                    "graph does not account for, so it was left as-is and this run may "
+                    "not reproduce when the artifact is loaded. If %s draws inside an "
+                    "opaque custom op, tag that op with torch.Tag.nondeterministic_seeded.",
+                    getattr(self._fn, "__name__", "fn"),
+                )
         self._module_positions = capture.module_positions
         self._num_positional_args = capture.num_positional_args
         self._param_names = capture.param_names
@@ -1443,7 +1749,31 @@ class PrecompiledModule:
         # ShapeEnv through automatically, so there is no dynamic_shapes knob to pass and
         # no manual TracingContext to install: a static capture specializes to the
         # example shapes, an unbacked capture keeps the symbols.
-        options: dict[str, Any] = {"size_asserts": True}
+        # Pin cpp.dynamic_threads ON so the CPU reduction kernels size their per-thread
+        # accumulator arrays from omp_get_max_threads() at runtime. Off (the default when
+        # the capturing process's thread count happens to equal os.cpu_count()) inductor
+        # bakes a fixed-size array while still emitting a bare ``#pragma omp parallel``
+        # whose team size is decided at run time, so replaying the artifact after a
+        # torch.set_num_threads() to anything larger indexes past the end and segfaults --
+        # on the SAME machine, which no part of the artifact contract covers. This is a
+        # pin and not a sixth stamp on purpose: a stamp is droppable by hand-edit and a
+        # dropped stamp degrades to warn-and-continue, which here would silently restore
+        # a memory-safety bug rather than a wrong number.
+        # readable_wrapper is what makes the emitted kernels module-level code the
+        # reader can edit, instead of source strings handed to AsyncCompile. It also
+        # trims the preamble to the bindings this graph actually uses.
+        # autotune_local_cache off: with it on, loading the artifact drops a
+        # <hash>.best_config next to it -- into the directory the artifact is meant to be
+        # committed from -- and that sidecar is keyed on basename(__file__), so two
+        # unrelated artifacts both named artifact.py share one entry and can pick up each
+        # other's launch config. The docs already promise autotuning is re-run on load
+        # rather than recorded; this makes that true.
+        options: dict[str, Any] = {
+            "size_asserts": True,
+            "cpp.dynamic_threads": True,
+            "readable_wrapper": True,
+            "autotune_local_cache": False,
+        }
         if capture.fake_mode is not None and hasattr(_ind_config, "scalar_asserts"):
             options["scalar_asserts"] = True
         try:
@@ -1550,7 +1880,14 @@ class PrecompiledModule:
         return buf.getvalue()
 
 
-def _make_inlined_forward(python_code: str) -> Callable[..., object]:
+# What ``filename`` says when the caller has no file on disk to point at, i.e. loading
+# from a code string rather than from an artifact path.
+_ANONYMOUS_FILENAME = "<precompile>"
+
+
+def _make_inlined_forward(
+    python_code: str, *, warn: bool = True, filename: str = _ANONYMOUS_FILENAME
+) -> Callable[..., object]:
     """Fallback: execute the self-contained python string (JITs kernels).
 
     ``python_code`` needs no cache -- the kernels (inductor) or graph (eager) are
@@ -1559,15 +1896,36 @@ def _make_inlined_forward(python_code: str) -> Callable[..., object]:
     inputs)."""
     # python_code is untrusted EXECUTABLE input -- exec'ing it runs whatever it contains
     # (JIT-compiling inlined kernels or running the inlined graph). Warn per load (not
-    # warning_once) before the exec so the inlined fallback is never silent about it.
-    log.warning(
-        "torch.compiler.precompile.load is about to EXEC python_code, which is untrusted "
-        "executable input (it runs inlined kernels / graph code). Only exec python_code "
-        "you produced or otherwise trust (Note [precompile programming model], "
-        "invariant 7)."
-    )
-    module_ns: dict[str, object] = {"__name__": "_precompiled_artifact"}
-    exec(compile(python_code, "<precompile>", "exec"), module_ns)
+    # warning_once) before the exec so the inlined fallback is never silent about it,
+    # but only when warn is True. A caller that has already established its own trust
+    # boundary and warning may pass warn=False.
+    if warn:
+        log.warning(
+            "torch.compiler.precompile.load is about to EXEC python_code, which is untrusted "
+            "executable input (it runs inlined kernels / graph code). Only exec python_code "
+            "you produced or otherwise trust (Note [precompile programming model], "
+            "invariant 7)."
+        )
+    # filename rides into every code object the exec creates, so a traceback out of the
+    # artifact names the file a reader can open. Under the anonymous default a hand-edit
+    # that raises at call time produced a frame with no path and no source line, which
+    # is the wrong diagnostic for source whose whole purpose is being edited in place.
+    # __file__ as well as __name__: a kernel is defined at module level and carries
+    # filename=__file__ from its heuristics decorator, and @triton.jit resolves its own
+    # source by that path, so a namespace without it cannot load such an artifact.
+    if filename == _ANONYMOUS_FILENAME and "@triton.jit" in python_code:
+        # A caller that had no file to name (precompile.load on a code string) still
+        # has to give triton one: @triton.jit reads its own source off disk and rejects
+        # a function whose module has no file. Park a copy in the inductor cache dir,
+        # which is where every kernel source already lives.
+        from torch._inductor.codecache import write
+
+        _key, filename = write(python_code, "py")
+    module_ns: dict[str, object] = {
+        "__name__": "_precompiled_artifact",
+        "__file__": filename,
+    }
+    exec(compile(python_code, filename, "exec"), module_ns)
     return cast("Callable[..., object]", module_ns["forward"])
 
 
@@ -1621,10 +1979,24 @@ class _PrecompileApi:
         contract; read Note [precompile programming model] before using it. The artifact
         faithfully reproduces ``fn`` only for callers that uphold that contract.
 
-        THREADING: the inductor lowering step drives process-global compiler state
-        and is serialized by an internal lock, so concurrent ``backend="inductor"``
-        calls lower one at a time. The make_fx capture phase and the ``backend="eager"``
-        path are NOT serialized.
+        THREADING: make_fx capture drives process-global tracing state and is serialized
+        by a shared reentrant lock across all precompile callers; the inductor lowering
+        step has its own compiler lock. The capture lock is held across ``fn`` itself, so
+        an ``fn`` that blocks waiting on another thread's precompile deadlocks.
+
+        Capture restores the generator state it consumed, and only that: a graph
+        containing no op that can draw leaves the generators untouched even if a
+        concurrent thread advanced them. Attribution is by the drawing op's output
+        device, not by which generator it names, so a draw taking an explicit
+        ``torch.Generator`` restores that device's default generator instead and leaves
+        the named one advanced. "Can draw" is decided conservatively from the
+        graph, so an attention or dropout op configured not to draw still counts unless
+        a literal argument proves otherwise. When a restore does happen it rewinds any
+        draw a concurrent thread made while capture ran, so precompile random
+        computations before starting threads that share the default generator. A capture
+        that RAISES restores nothing, since a partial graph attributes nothing. Only
+        already-initialized CUDA/XPU generators and those reachable from the arguments
+        are saved; a device first initialized during capture warns and is left as-is.
 
         ``backend`` selects how the captured graph is realized:
 
