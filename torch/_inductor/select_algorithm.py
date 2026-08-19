@@ -493,6 +493,10 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
         if mode != "atomic_add":
             raise AssertionError("Only atomic_add is supported for inner stores")
 
+        # Record it on the kernel: these atomics never pass through
+        # TritonKernel.store, so nothing else would mark the kernel as using them.
+        self.kernel.atomic_add_found = True
+
         buf_name = self._add_kernel_input(name)
         index_str = self._broadcast_index(index, f"{value}.shape")
         return f"tl.atomic_add({buf_name} + {index_str}, {value}, {self.mask}, sem='relaxed')"
@@ -910,7 +914,9 @@ class TritonTemplateKernel(TritonKernel):
             "device": DeviceProperties.create(self.output_node.get_device()),
             "constants": {},
         }
-        triton_meta["configs"] = [config_of(signature)]
+        # Rendered from a deferred hook, so the body -- including any subgraph
+        # modifications that emit atomics -- already exists at this point.
+        triton_meta["configs"] = [config_of(signature, **self.pointer_range_kwargs())]
         for arg_num in equal_1_arg_indices(signature):  # type: ignore[index]
             triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index,union-attr]
         matrix_instr_nonkdim = self.meta.get("matrix_instr_nonkdim", None)
