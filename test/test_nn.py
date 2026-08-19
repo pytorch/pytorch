@@ -35,7 +35,7 @@ from torch.nn import Buffer, Parameter
 from torch.nn.parallel._functions import Broadcast
 from torch.testing._internal.common_dtype import integral_types, get_all_math_dtypes, floating_types
 from torch.testing._internal.common_utils import dtype_name, freeze_rng_state, run_tests, TestCase, \
-    skipIfNoLapack, skipIfRocm, skipIfRocmVersionLessThan, getRocmVersion, getRocmSdkVersion, TEST_NUMPY, TEST_SCIPY, TEST_WITH_CROSSREF, TEST_WITH_ROCM, TEST_MULTIACCELERATOR, \
+    skipIfNoLapack, skipIfRocm, skipIfRocmVersionLessThan, getRocmVersion, TEST_NUMPY, TEST_SCIPY, TEST_WITH_CROSSREF, TEST_WITH_ROCM, TEST_MULTIACCELERATOR, \
     download_file, get_function_arglist, load_tests, skipIfMPS, MACOS_VERSION, \
     IS_PPC, IS_ARM64, IS_MACOS, IS_WINDOWS, IS_CPU_CAPABILITY_SVE, IS_CPU_EXT_SVE_SUPPORTED, xfailIf, \
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, \
@@ -14601,7 +14601,7 @@ if __name__ == '__main__':
     def test_linear_cross_entropy_loss_with_acc_dtype(self, device, dtype, acc_policy, bias):
         if (
             TEST_WITH_ROCM
-            and getRocmSdkVersion() == (10, 1)
+            and (torch.version.rocm or "0.0").split(".")[:2] == ["10", "1"]
             and not bias
             and dtype == torch.float16
             and acc_policy == "compact"
@@ -14622,7 +14622,7 @@ if __name__ == '__main__':
     ):
         if (
             TEST_WITH_ROCM
-            and getRocmSdkVersion() == (10, 1)
+            and (torch.version.rocm or "0.0").split(".")[:2] == ["10", "1"]
             and not bias
             and dtype == torch.bfloat16
             and acc_policy == "auto"

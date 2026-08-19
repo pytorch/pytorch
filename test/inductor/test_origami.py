@@ -16,7 +16,6 @@ from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_cache
 from torch._logging import trace_structured
-from torch.testing._internal.common_utils import getRocmSdkVersion
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU_AND_TRITON
 
 
@@ -38,9 +37,10 @@ PERF_SLOWDOWN_TOLERANCE = 1.05  # 5% tolerance on performance
 
 IS_ROCM = torch.version.hip is not None
 # Preview wheels report torch.version.rocm as 10.1.x (HIP remains 7.15.x).
-# getRocmVersion() still reads HIP, so gate on the SDK attribute.
+# getRocmVersion() still reads HIP on this branch, so gate on the SDK attribute.
 skipIfRocm101 = unittest.skipIf(
-    getRocmSdkVersion() == (10, 1), "ROCm version 10.1: known failure"
+    (torch.version.rocm or "0.0").split(".")[:2] == ["10", "1"],
+    "ROCm version 10.1: known failure",
 )
 
 ORIGAMI_ROCM_SUPPORTED = IS_ROCM and _th_rocm_version < ORIGAMI_UNSUPPORTED_ROCM_VERSION
