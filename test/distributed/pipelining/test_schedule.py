@@ -32,6 +32,7 @@ from torch.distributed.pipelining.schedules import (
     _defer_recv_ops,
     _format_pipeline_order,
     _merge_bw,
+    _PendingSendTracker,
     _PipelineSchedule,
     _PipelineScheduleRuntime,
     _simulate_comms_compute,
@@ -50,6 +51,7 @@ from torch.distributed.pipelining.schedules import (
     W,
 )
 from torch.distributed.pipelining.stage import (
+    _early_send_release_default,
     _PipelineStageBase,
     _RecvInfo,
     PipelineStage,
@@ -84,6 +86,9 @@ class MockPipelineStage(_PipelineStageBase):
         self.group_size = kwargs.get("group_size", 1)
         self.group_rank = kwargs.get("group_rank", 0)
         self.group = kwargs.get("group")
+        self.early_send_release = kwargs.get(
+            "early_send_release", _early_send_release_default()
+        )
 
     def _create_grad_recv_info(self, *args, **kwargs):
         return None
@@ -2076,6 +2081,162 @@ class TestBatchP2P(TestCase):
         mock_isend.assert_not_called()
         mock_irecv.assert_not_called()
         self.assertEqual(len(result), 4)
+
+
+class _FakeWork:
+    """Test-controlled ``dist.Work`` stub."""
+
+    def __init__(self, error: Exception | None = None):
+        self.completed = False
+        self.wait_count = 0
+        # Failed NCCL work reports complete but raises from wait().
+        self.error = error
+
+    def is_completed(self):
+        return self.completed or self.error is not None
+
+    def wait(self):
+        self.wait_count += 1
+        if self.error is not None:
+            raise self.error
+        self.completed = True
+        return True
+
+
+class TestPendingSendTracker(TestCase):
+    """Tests send-buffer lifetime tracking."""
+
+    def _make_batch(self, num_works=1):
+        works = [_FakeWork() for _ in range(num_works)]
+        op = MagicMock()
+        op.tensor = torch.zeros(4)
+        return works, [op]
+
+    def test_poll_retires_only_completed_batches(self):
+        tracker = _PendingSendTracker()
+        retired = []
+
+        slow_works, slow_ops = self._make_batch()
+        fast_works, fast_ops = self._make_batch()
+        tracker.register(slow_ops, slow_works, lambda: retired.append("slow"))
+        tracker.register(fast_ops, fast_works, lambda: retired.append("fast"))
+
+        tracker.poll()
+        self.assertEqual(retired, [])
+
+        fast_works[0].completed = True
+        tracker.poll()
+        self.assertEqual(retired, ["fast"])
+        # Only the completed batch releases its buffer.
+        self.assertEqual(fast_ops, [])
+        self.assertEqual(len(slow_ops), 1)
+
+        slow_works[0].completed = True
+        tracker.poll()
+        self.assertEqual(retired, ["fast", "slow"])
+        self.assertEqual(slow_ops, [])
+
+    def test_batch_retires_only_when_all_works_complete(self):
+        tracker = _PendingSendTracker()
+        retired = []
+        works, ops = self._make_batch(num_works=2)
+        tracker.register(ops, works, lambda: retired.append("batch"))
+
+        works[0].completed = True
+        tracker.poll()
+        self.assertEqual(retired, [])
+
+        works[1].completed = True
+        tracker.poll()
+        self.assertEqual(retired, ["batch"])
+
+    def test_poll_never_waits(self):
+        tracker = _PendingSendTracker()
+        works, ops = self._make_batch()
+        tracker.register(ops, works)
+
+        tracker.poll()
+        self.assertEqual(works[0].wait_count, 0)
+
+    def test_drain_waits_for_stragglers(self):
+        tracker = _PendingSendTracker()
+        retired = []
+        works, ops = self._make_batch()
+        work = works[0]
+        tracker.register(ops, works, lambda: retired.append("batch"))
+
+        tracker.drain()
+
+        self.assertEqual(work.wait_count, 1)
+        self.assertEqual(retired, ["batch"])
+        self.assertEqual(ops, [])
+        # A second drain must not retire the batch again.
+        tracker.drain()
+        self.assertEqual(retired, ["batch"])
+
+    def test_poll_is_a_noop_during_cuda_graph_capture(self):
+        """Avoid completion queries during graph capture."""
+        tracker = _PendingSendTracker()
+        retired = []
+
+        class _ExplodingWork(_FakeWork):
+            def is_completed(self):
+                raise AssertionError("queried completion during capture")
+
+        works, ops = [_ExplodingWork()], [MagicMock()]
+        tracker.register(ops, works, lambda: retired.append("batch"))
+
+        with patch(
+            "torch.distributed.pipelining.schedules._stream_is_capturing",
+            return_value=True,
+        ):
+            tracker.poll()
+        self.assertEqual(retired, [])
+
+        # Poll normally outside capture.
+        works[0].is_completed = lambda: True
+        with patch(
+            "torch.distributed.pipelining.schedules._stream_is_capturing",
+            return_value=False,
+        ):
+            tracker.poll()
+        self.assertEqual(retired, ["batch"])
+
+    def test_disabled_tracker_defers_everything_to_drain(self):
+        """Preserve end-of-step ownership when disabled."""
+        tracker = _PendingSendTracker(enabled=False)
+        retired = []
+        works, ops = self._make_batch()
+        works[0].completed = True
+        tracker.register(ops, works, lambda: retired.append("batch"))
+
+        tracker.poll()
+        self.assertEqual(retired, [])
+        self.assertEqual(len(ops), 1)
+
+        tracker.drain()
+        self.assertEqual(retired, ["batch"])
+
+    def test_poll_surfaces_a_failed_send(self):
+        # Waiting surfaces errors from completed work.
+        tracker = _PendingSendTracker()
+        retired = []
+        works = [_FakeWork(error=RuntimeError("NCCL send failed"))]
+        ops = [object()]
+        tracker.register(ops, works, lambda: retired.append("batch"))
+
+        with self.assertRaisesRegex(RuntimeError, "NCCL send failed"):
+            tracker.poll()
+        self.assertEqual(retired, [])
+
+    def test_empty_batch_retires_immediately(self):
+        # Stages with nothing to send may still register a batch.
+        tracker = _PendingSendTracker()
+        retired = []
+        tracker.register([], [], lambda: retired.append("empty"))
+
+        tracker.poll()
+        self.assertEqual(retired, ["empty"])
 
 
 if __name__ == "__main__":
