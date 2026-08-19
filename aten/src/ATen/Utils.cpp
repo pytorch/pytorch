@@ -2,6 +2,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/Functions.h>
 #include <ATen/Utils.h>
+#include <c10/core/ScalarType.h>
 #include <c10/util/accumulate.h>
 
 
@@ -22,9 +23,13 @@ template <typename T>
 Tensor tensor_cpu(ArrayRef<T> values, const TensorOptions& options) {
   auto result = at::empty(values.size(), options);
   AT_ASSERT(result.is_contiguous());
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(result.scalar_type(), "tensor_cpu", [&] {
-    std::copy(
-        values.begin(), values.end(), result.template data_ptr<scalar_t>());
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16,
+      result.scalar_type(), "tensor_cpu", [&] {
+    auto* dest = result.template data_ptr<scalar_t>();
+    for (size_t i = 0; i < values.size(); ++i) {
+      // NOLINTNEXTLINE(bugprone-signed-char-misuse)
+      dest[i] = static_cast<scalar_t>(values[i]);
+    }
   });
   return result;
 }
