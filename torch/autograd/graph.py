@@ -276,7 +276,8 @@ def queue_callback(callback: Callable[[], None]) -> None:
 
     Must be called during a backward pass, for example from a
     :class:`torch.autograd.Function` backward or a backward hook. The callback
-    runs once the backward pass currently executing on this thread finishes.
+    runs once the backward pass currently executing on this thread completes
+    successfully; it is not run if the backward pass raises an error.
     Callbacks queued multiple times run multiple times, in queueing order.
 
     Example::
