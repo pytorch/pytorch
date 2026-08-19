@@ -924,27 +924,30 @@ if __name__ == "__main__":
 
     @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
     def test_event_multiprocess(self):
-        event = torch.cuda.Event(enable_timing=False, interprocess=True)
-        self.assertTrue(event.query())
+        for event in [
+            torch.cuda.Event(enable_timing=False, interprocess=True),
+            torch.Event(enable_timing=False, interprocess=True),
+        ]:
+            self.assertTrue(event.query())
 
-        ctx = mp.get_context("spawn")
-        p2c = ctx.SimpleQueue()
-        c2p = ctx.SimpleQueue()
-        p = ctx.Process(
-            target=_event_multiprocess_child,
-            args=(event, p2c, c2p),
-        )
-        p.start()
+            ctx = mp.get_context("spawn")
+            p2c = ctx.SimpleQueue()
+            c2p = ctx.SimpleQueue()
+            p = ctx.Process(
+                target=_event_multiprocess_child,
+                args=(event, p2c, c2p),
+            )
+            p.start()
 
-        c2p.get()  # wait for until child process is ready
-        torch.cuda._sleep(50000000)  # spin for about 50 ms
-        event.record()
-        p2c.put(0)  # notify child event is recorded
+            c2p.get()  # wait for until child process is ready
+            torch.cuda._sleep(200000000)  # spin for about 200 ms
+            event.record()
+            p2c.put(0)  # notify child event is recorded
 
-        self.assertFalse(event.query())
-        c2p.get()  # wait for synchronization in child
-        self.assertTrue(event.query())
-        p.join()
+            self.assertFalse(event.query())
+            c2p.get()  # wait for synchronization in child
+            self.assertTrue(event.query())
+            p.join()
 
     @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
     @unittest.skipIf(not TEST_MULTIGPU, "found only 1 GPU")
