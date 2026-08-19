@@ -44,7 +44,6 @@ from torch.testing._internal.inductor_utils import (
     HAS_MPS,
     patch_inductor_backend,
 )
-from torch.utils._triton import has_triton
 
 
 # Make the helper files in test/ importable
@@ -1306,6 +1305,7 @@ class TestInductorDynamic(DynamicShapesTestCase):
         self.assertEqual(cnt.frame_count, 2)
 
     @onlyAccelerator
+    @requires_capabilities(Capability.lib.triton)
     def test_dynamic_rblock_bounds(self, device):
         class ForcePersistent(InductorChoices):
             @staticmethod
@@ -1326,16 +1326,14 @@ class TestInductorDynamic(DynamicShapesTestCase):
             fn_c = torch.compile(fn)
             actual, source_codes = run_and_get_code(fn_c, x)
             self.assertEqual(fn(x), actual)
-            if has_triton():
-                FileCheck().check("R0_BLOCK: tl.constexpr = 64").run(source_codes[0])
+            FileCheck().check("R0_BLOCK: tl.constexpr = 64").run(source_codes[0])
             torch._dynamo.reset()
 
             torch._dynamo.mark_dynamic(x, 2, min=1, max=64)
             fn_c = torch.compile(fn)
             actual, source_codes = run_and_get_code(fn_c, x)
             self.assertEqual(fn(x), actual)
-            if has_triton():
-                FileCheck().check("R0_BLOCK: tl.constexpr = 64").run(source_codes[0])
+            FileCheck().check("R0_BLOCK: tl.constexpr = 64").run(source_codes[0])
 
     def test_non_persistent_dynamic_rblock(self, device):
         def reduce_bounded(x, y):
@@ -1397,7 +1395,7 @@ class TestInductorDynamic(DynamicShapesTestCase):
         self.assertEqual(cnt.frame_count, 4)
 
     def test_sort_dynamic_shape_with_check(self, device):
-        if not has_triton():
+        if not self.has_capabilities(Capability.lib.triton):
 
             def check_count(n):
                 self.assertEqual(metrics.generated_kernel_count, 0)
