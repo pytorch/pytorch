@@ -3876,41 +3876,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(out, torch.ones(2, dtype=torch.float))
 
 
-    def test_grid_sample_error_checking(self):
-        input = torch.empty(1, 1, 2, 2)
-        grid = torch.empty(1, 1, 1, 2)
-
-        # assert no error
-        F.grid_sample(input, grid, align_corners=False)
-
-        with self.assertRaisesRegex(ValueError, "but got: 'garbage'"):
-            F.grid_sample(input, grid, mode='garbage', align_corners=False)
-
-        with self.assertRaisesRegex(ValueError, "but got: 'garbage'"):
-            F.grid_sample(input, grid, padding_mode='garbage', align_corners=False)
-
-        with self.assertRaisesRegex(RuntimeError, "expected grid to have size 1 in last dimension"):
-            F.grid_sample(input[0], grid, align_corners=False)
-
-        with self.assertRaisesRegex(RuntimeError, "expected grid to have size 2 in last dimension"):
-            F.grid_sample(input, torch.empty(1, 1, 1, 1, 3), align_corners=False)
-
-        with self.assertRaisesRegex(RuntimeError, "expected grid and input to have same batch size"):
-            F.grid_sample(input, torch.empty(2, 1, 1, 2), align_corners=False)
-
-        with self.assertRaisesRegex(RuntimeError, "expected grid to have size 2 in last dimension"):
-            F.grid_sample(input, torch.empty(1, 1, 1, 3), align_corners=False)
-
-        with self.assertRaisesRegex(RuntimeError, "expected input to have non-empty spatial dimensions"):
-            F.grid_sample(torch.empty(1, 1, 0, 2), grid, align_corners=False)
-
-        with self.assertRaisesRegex(RuntimeError, "bicubic interpolation only supports 4D input"):
-            F.grid_sample(torch.empty(1, 1, 2, 2, 2), torch.empty(1, 1, 1, 1, 3), mode='bicubic')
-
-        if TEST_CUDA:
-            with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
-                F.grid_sample(input.cuda(), grid, align_corners=False)
-
     def test_affine_grid_error_checking(self):
         # 2D affine
         theta = torch.empty(1, 2, 3, dtype=torch.double)
@@ -3984,31 +3949,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
         with self.assertRaisesRegex(NotImplementedError, "affine_grid only supports 4D and 5D sizes"):
             F.affine_grid(theta, torch.Size([1, 1, 2, 2, 2, 2]), align_corners=False)
-
-    @parametrize_test('device', ['cpu'] + (['cuda'] if TEST_CUDA else []))
-    @parametrize_test('nd', [2, 3])
-    def test_affine_grid_backward_cl_cf_consistency(self, device, nd):
-        # Test based on reported issue: https://github.com/pytorch/pytorch/issues/124154
-
-        theta = torch.rand([6, nd, nd + 1], requires_grad=True, device=device)
-        size = [6, 3, 4, 5] if nd == 2 else [6, 3, 4, 5, 5]
-        grid = torch.nn.functional.affine_grid(theta, size, align_corners=False)
-
-        grad_tensor = torch.rand(grid.shape, device=device)
-
-        memory_format_cl = torch.channels_last if nd == 2 else torch.channels_last_3d
-        grad_tensor_cl = grad_tensor.contiguous(memory_format=memory_format_cl)
-
-        if theta.grad is not None:
-            raise AssertionError("expected theta.grad to be None")
-        grid.backward(grad_tensor_cl)
-        theta_grad_cl = theta.grad.clone().contiguous()
-
-        theta.grad.zero_()
-        grid.backward(grad_tensor)
-        theta_grad_cf = theta.grad
-
-        self.assertEqual(theta_grad_cf, theta_grad_cl)
 
     @set_default_dtype(torch.double)
     def test_grid_sample(self):
@@ -4451,53 +4391,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             out_t_5 = m(in_t_9[:, :, :5])
         self.assertEqual(out_t_9[:, :, :15], out_t_5)
 
-    @set_default_dtype(torch.double)
-    def test_upsampling_not_recompute_scale_factor(self):
-        # test output against known input: result must match opencv
-        in_t = torch.arange(8.).view(1, 2, 2, 2)
-        expected_out_t = torch.tensor(
-            [[[[-0.32725, -0.08843, 0.37933, 0.79744],
-              [0.15039, 0.38921, 0.85697, 1.27508],
-              [1.08591, 1.32473, 1.79249, 2.21060],
-              [1.92213, 2.16095, 2.62871, 3.04682]],
-
-             [[3.67275, 3.91157, 4.37933, 4.79744],
-              [4.15039, 4.38921, 4.85697, 5.27508],
-              [5.08591, 5.32473, 5.79249, 6.21060],
-              [5.92213, 6.16095, 6.62871, 7.04682]]]])
-        if IS_PPC:
-            # Both OpenCV and PyTorch give a slightly different result on PPC
-            expected_out_t = torch.tensor(
-                [[[[-0.32725, -0.08843, 0.37933, 0.79744],
-                  [0.15039, 0.38921, 0.85697, 1.27508],
-                  [1.08591, 1.32473, 1.79249, 2.21060],
-                  [1.92212, 2.16094, 2.62870, 3.04681]],
-
-                 [[3.67275, 3.91157, 4.37933, 4.79743],
-                  [4.15039, 4.38921, 4.85697, 5.27508],
-                  [5.08591, 5.32473, 5.79249, 6.21059],
-                  [5.92212, 6.16094, 6.62870, 7.04680]]]])
-        out_t = F.interpolate(in_t, scale_factor=2.3, mode='bicubic', align_corners=False, recompute_scale_factor=False)
-        torch.set_printoptions(precision=5)
-        self.assertEqual(out_t, expected_out_t, atol=1e-4, rtol=0)
-
-        device_list = ['cpu']
-        if TEST_CUDA:
-            device_list.append('cuda')
-
-        for align_corners in [True, False]:
-            kwargs = dict(mode='bicubic', align_corners=align_corners)
-            # test float scale factor up & downsampling
-            for device in device_list:
-                for scale_factor in [0.6, 1.6, 2.3]:
-                    in_t = torch.ones(2, 2, 2, 2).to(device)
-                    out_t = F.interpolate(in_t, scale_factor=scale_factor, **kwargs)
-                    out_size = int(math.floor(in_t.shape[-1] * scale_factor))
-                    self.assertEqual(torch.ones(2, 2, out_size, out_size), out_t.data, atol=1e-5, rtol=0)
-
-                    input = torch.randn(2, 2, 2, 2, requires_grad=True)
-                    gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
-
     def test_upsamplingBilinear2d_spatial_invariance(self):
         m = nn.Upsample(scale_factor=3, mode='bilinear', align_corners=False)
         in_t_9 = torch.zeros(1, 1, 9, 9)
@@ -4569,29 +4462,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             helper([1, 1, 11, 7], 257, 'bicubic', device)
             helper([3, 2, 11, 7, 3], 20, 'trilinear', device)
             helper([3, 2, 11, 7, 3], 20, 'trilinear', device, torch.channels_last_3d)
-
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    def test_interpolate_illegal_memory_access(self):
-        in_s = 45
-        out_s = 14
-
-        input = torch.ones((1, 1, in_s), device='cuda', requires_grad=True)
-        # note we allocated grad_output to be larger so out of bound access
-        # would be visible in grad_input
-        grad = torch.ones((1, 1, out_s * 2), device='cuda', requires_grad=True)
-        grad = grad[:, :, :out_s]
-
-        input_ref = input.detach().cpu().requires_grad_()
-        grad_ref = grad.cpu()
-
-        out = F.interpolate(input, size=(out_s,), mode='nearest')
-        out.backward(grad)
-
-        out_ref = F.interpolate(input_ref, size=(out_s,), mode='nearest')
-        out_ref.backward(grad_ref)
-
-        self.assertEqual(out_ref, out)
-        self.assertEqual(input_ref.grad, input.grad)
 
     def test_interpolate_undefined_behavior_casting(self):
         x = torch.ones([1, 1, 16, 16])
@@ -4730,67 +4600,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
                         libc.munmap(addr, total_size)
 
-    @set_default_dtype(torch.double)
-    def test_interpolate(self):
-        def _test_interpolate_non_integer_size_warning(in_t, out_size, dim, **kwargs):
-            test_sizes = [float(out_size),
-                          torch.tensor(out_size, dtype=torch.float)]
-            for size in test_sizes:
-                self.assertRaisesRegex(TypeError,
-                                       "(expected size to be one of int or).*",
-                                       F.interpolate, in_t, size=(size,) * dim, **kwargs)
-
-        def _test_interpolate_helper(in_t, scale_factor, layer):
-            out_size = int(math.floor(in_t.shape[-1] * scale_factor))
-            dim = len(in_t.shape) - 2
-            out_shape = [1, 1] + [out_size] * dim
-            with warnings.catch_warnings(record=True) as w:
-                out_t = layer(in_t)
-            self.assertEqual(torch.ones(out_shape), out_t)
-
-            self.assertEqual(
-                F.interpolate(in_t, (out_size,) * dim, **kwargs),
-                F.interpolate(in_t, scale_factor=scale_factor, **kwargs))
-            gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [in_t], nondet_tol=GRADCHECK_NONDET_TOL)
-            gradgradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [in_t], nondet_tol=GRADCHECK_NONDET_TOL)
-            _test_interpolate_non_integer_size_warning(in_t, out_size, dim, **kwargs)
-
-        def _make_input(dim, device):
-            size = [1, 1]
-            size += [2] * dim
-            return torch.ones(size, requires_grad=True, device=device)
-
-        device_list = ['cpu']
-        if TEST_CUDA:
-            device_list.append('cuda')
-
-        for device in device_list:
-            for scale_factor in [0.5, 1.5, 2]:
-                for mode in ['nearest', 'area']:
-                    kwargs = dict(mode=mode)
-                    m = nn.Upsample(scale_factor=scale_factor, **kwargs).to(device)
-                    for input in [_make_input(1, device), _make_input(2, device), _make_input(3, device)]:
-                        _test_interpolate_helper(input, scale_factor, m)
-
-                for align_corners in [True, False]:
-                    kwargs = dict(mode='linear', align_corners=align_corners)
-                    m = nn.Upsample(scale_factor=scale_factor, **kwargs).to(device)
-                    _test_interpolate_helper(_make_input(1, device), scale_factor, m)
-
-                    kwargs = dict(mode='bilinear', align_corners=align_corners)
-                    m = nn.Upsample(scale_factor=scale_factor, **kwargs).to(device)
-                    _test_interpolate_helper(_make_input(2, device), scale_factor, m)
-
-                    kwargs = dict(mode='bicubic', align_corners=align_corners)
-
-                    def m(t):
-                        return F.interpolate(t, scale_factor=scale_factor, **kwargs).to(device)
-                    _test_interpolate_helper(_make_input(2, device), scale_factor, m)
-
-                    kwargs = dict(mode='trilinear', align_corners=align_corners)
-                    m = nn.Upsample(scale_factor=scale_factor, **kwargs).to(device)
-                    _test_interpolate_helper(_make_input(3, device), scale_factor, m)
-
     def test_linear_broadcasting(self):
         m = nn.Linear(5, 8)
         inp = torch.randn(2, 3, 5)
@@ -4804,53 +4613,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         inp = torch.ones(1).squeeze()
         with self.assertRaisesRegex(RuntimeError, ".*both arguments.*1D.*"):
             m(inp)
-
-    @tf32_on_and_off(0.005)
-    @parametrize_test('device', ['cpu'] + (['cuda'] if TEST_CUDA else []))
-    @parametrize_test('bias', [
-        subtest(False, name='nobias'), subtest(True, name='bias')])
-    @parametrize_test('weight_layout', [
-        subtest(torch.strided, name='weightStrided'),
-        subtest(torch.sparse_coo, name='weightCOO'),
-        subtest(torch.sparse_csr, name='weightCSR'),
-        subtest(torch.sparse_csc, name='weightCSC'),
-        # TODO: addmm: computation on CPU is not implemented for Strided + Strided @ SparseBsr
-        # subtest(torch.sparse_bsr, name='weightBSR'),
-        # subtest(torch.sparse_bsc, name='weightBSC'),
-    ])
-    def test_linear_autograd(self, device, bias, weight_layout):
-        module = nn.Linear(4, 4, bias=bias, device=device)
-        if weight_layout == torch.strided:
-            pass
-        elif weight_layout == torch.sparse_csr:
-            module.weight = nn.Parameter(module.weight.to_sparse_csr())
-        elif weight_layout == torch.sparse_csc:
-            module.weight = nn.Parameter(module.weight.to_sparse_csc())
-        elif weight_layout == torch.sparse_bsr:
-            module.weight = nn.Parameter(module.weight.to_sparse_bsr((2, 2)))
-        elif weight_layout == torch.sparse_bsc:
-            module.weight = nn.Parameter(module.weight.to_sparse_bsc((2, 2)))
-        elif weight_layout == torch.sparse_coo:
-            module.weight = nn.Parameter(module.weight.to_sparse_coo())
-        else:
-            raise AssertionError
-
-        inp = torch.randn(4, requires_grad=True, device=device)
-        res = module(inp)
-        if bias:
-            expected = (torch.einsum("i,ji->j", inp, module.weight.to_dense())) + module.bias
-        else:
-            expected = (torch.einsum("i,ji->j", inp, module.weight.to_dense()))
-        self.assertEqual(res, expected)
-
-        grad_output = torch.randn(4, device=device)
-        grads = torch.autograd.grad(res, [module.weight, inp], grad_output)
-        grads_expected = torch.autograd.grad(expected, [module.weight, inp], grad_output)
-
-        self.assertEqual(grads_expected[0].layout, weight_layout)
-
-        for g, ge in zip(grads, grads_expected):
-            self.assertEqual(g, ge)
 
     def test_bilinear(self):
         module = nn.Bilinear(10, 10, 8)
@@ -5206,109 +4968,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             target, reduction="mean",
         )
         self.assertEqual(expected, actual)
-
-    def test_linear_cross_entropy_options_auto_defaults(self):
-        """``LinearCrossEntropyOptions()`` keeps the auto sentinels at
-        construction time; ``_adjust`` resolves them per (device, dtype).
-
-        Covers: known (device, dtype) pair, unknown pair (falls back),
-        partial override (one field auto, one explicit), and missing
-        device argument (falls back).
-        """
-        # Default construction keeps "auto" until _adjust is called.
-        opts = nn.LinearCrossEntropyOptions()
-        self.assertEqual(opts.acc_policy, "auto")
-        self.assertEqual(opts.chunking_method, "auto")
-
-        # Known pair: CUDA + bf16 -> ("compact", "aspect_ratio"). These
-        # vocab shapes (num_classes >> in_features) leave the N*V/4D cap
-        # inert; the budget regime is covered in the memory-cap test.
-        adjusted = opts._adjust(
-            128, 4096, 50000, torch.bfloat16, torch.device("cuda"),
-        )
-        self.assertEqual(adjusted.acc_policy, "compact")
-        self.assertEqual(adjusted.chunking_method, "aspect_ratio")
-
-        # Known pair: CUDA + fp16 -> ("compact", "aspect_ratio").
-        # Same pick as bf16 -- a single CUDA policy across dtypes
-        # post-``weight_chunk_dtype=acc_dtype`` fix.
-        adjusted = opts._adjust(
-            128, 4096, 50000, torch.float16, torch.device("cuda"),
-        )
-        self.assertEqual(adjusted.acc_policy, "compact")
-        self.assertEqual(adjusted.chunking_method, "aspect_ratio")
-
-        # Known pair: CPU + bf16 -> ("accurate", "aspect_ratio").
-        # CPU has no hardware low-precision matmul, so the only
-        # chunked policy that runs the bulk weight-grad GEMM in fp32
-        # ("accurate") is dramatically faster than the others.
-        adjusted = opts._adjust(
-            128, 4096, 50000, torch.bfloat16, torch.device("cpu"),
-        )
-        self.assertEqual(adjusted.acc_policy, "accurate")
-        self.assertEqual(adjusted.chunking_method, "aspect_ratio")
-
-        # Known pair: CPU + fp16 -> ("accurate", "aspect_ratio").
-        adjusted = opts._adjust(
-            128, 4096, 50000, torch.float16, torch.device("cpu"),
-        )
-        self.assertEqual(adjusted.acc_policy, "accurate")
-        self.assertEqual(adjusted.chunking_method, "aspect_ratio")
-
-        # CPU + fp32: "accurate" is only for CPU low-precision input (its
-        # emulated low-precision GEMM); fp32/fp64 GEMM is native at any policy,
-        # so auto picks the memory-frugal "compact".
-        adjusted = opts._adjust(
-            128, 4096, 50000, torch.float32, torch.device("cpu"),
-        )
-        self.assertEqual(adjusted.acc_policy, "compact")
-        self.assertEqual(adjusted.chunking_method, "aspect_ratio")
-
-        # No device given -> "compact" fallback (back-compat with callers
-        # / tests that don't pass device).
-        adjusted = opts._adjust(128, 4096, 50000, torch.float32)
-        self.assertEqual(adjusted.acc_policy, "compact")
-        self.assertEqual(adjusted.chunking_method, "aspect_ratio")
-
-        # Partial override: acc_policy explicit, chunking_method auto.
-        opts = nn.LinearCrossEntropyOptions(acc_policy="accurate")
-        adjusted = opts._adjust(
-            128, 4096, 50000, torch.bfloat16, torch.device("cuda"),
-        )
-        self.assertEqual(adjusted.acc_policy, "accurate")
-        self.assertEqual(adjusted.chunking_method, "aspect_ratio")
-
-        # Partial override: chunking_method explicit, acc_policy auto.
-        opts = nn.LinearCrossEntropyOptions(chunking_method="aspect_ratio")
-        adjusted = opts._adjust(
-            128, 4096, 50000, torch.bfloat16, torch.device("cuda"),
-        )
-        self.assertEqual(adjusted.acc_policy, "compact")
-        self.assertEqual(adjusted.chunking_method, "aspect_ratio")
-
-        # acc_dtype auto resolution: fp32 on supported hardware,
-        # input dtype otherwise; explicit non-auto policy opts out.
-        opts = nn.LinearCrossEntropyOptions()
-        cpu = torch.device("cpu")
-        for d in (torch.bfloat16, torch.float16):
-            self.assertEqual(opts._adjust(128, 4096, 50000, d, cpu).acc_dtype, torch.float32)
-        self.assertEqual(opts._adjust(128, 4096, 50000, torch.float32, cpu).acc_dtype, torch.float32)
-        opts_explicit = nn.LinearCrossEntropyOptions(acc_policy="compact")
-        self.assertEqual(
-            opts_explicit._adjust(128, 4096, 50000, torch.bfloat16, cpu).acc_dtype,
-            torch.bfloat16,
-        )
-        if torch.cuda.is_available():
-            major = torch.cuda.get_device_capability()[0]
-            cuda = torch.device("cuda")
-            self.assertEqual(
-                opts._adjust(128, 4096, 50000, torch.bfloat16, cuda).acc_dtype,
-                torch.float32 if major >= 8 else torch.bfloat16,
-            )
-            self.assertEqual(
-                opts._adjust(128, 4096, 50000, torch.float16, cuda).acc_dtype,
-                torch.float32 if major >= 7 else torch.float16,
-            )
 
     def test_linear_cross_entropy_options_auto_memory_cap(self):
         """``auto`` + ``compact`` caps the chunk at a per-target ``B_ref`` so
@@ -15821,8 +15480,341 @@ if __name__ == '__main__':
         else:
             _inference(memory_format, ref_backend, mixed, dtype)
 
+    def test_grid_sample_error_checking(self, device):
+        input = torch.empty(1, 1, 2, 2, device=device)
+        grid = torch.empty(1, 1, 1, 2, device=device)
+
+        # assert no error
+        F.grid_sample(input, grid, align_corners=False)
+
+        with self.assertRaisesRegex(ValueError, "but got: 'garbage'"):
+            F.grid_sample(input, grid, mode='garbage', align_corners=False)
+
+        with self.assertRaisesRegex(ValueError, "but got: 'garbage'"):
+            F.grid_sample(input, grid, padding_mode='garbage', align_corners=False)
+
+        with self.assertRaisesRegex(RuntimeError, "expected grid to have size 1 in last dimension"):
+            F.grid_sample(input[0], grid, align_corners=False)
+
+        with self.assertRaisesRegex(RuntimeError, "expected grid to have size 2 in last dimension"):
+            F.grid_sample(input, torch.empty(1, 1, 1, 1, 3, device=device), align_corners=False)
+
+        with self.assertRaisesRegex(RuntimeError, "expected grid and input to have same batch size"):
+            F.grid_sample(input, torch.empty(2, 1, 1, 2, device=device), align_corners=False)
+
+        with self.assertRaisesRegex(RuntimeError, "expected grid to have size 2 in last dimension"):
+            F.grid_sample(input, torch.empty(1, 1, 1, 3, device=device), align_corners=False)
+
+        with self.assertRaisesRegex(RuntimeError, "expected input to have non-empty spatial dimensions"):
+            F.grid_sample(torch.empty(1, 1, 0, 2, device=device), grid, align_corners=False)
+
+        input_5d = torch.empty(1, 1, 2, 2, 2, device=device)
+        grid_5d = torch.empty(1, 1, 1, 1, 3, device=device)
+        with self.assertRaisesRegex(RuntimeError, "bicubic interpolation only supports 4D input"):
+            F.grid_sample(input_5d, grid_5d, mode='bicubic')
+
+        if torch.device(device).type != 'cpu':
+            with self.assertRaisesRegex(RuntimeError, "[Ee]xpected.*same device"):
+                F.grid_sample(input, grid.cpu(), align_corners=False)
+
+    @parametrize_test('nd', [2, 3])
+    def test_affine_grid_backward_cl_cf_consistency(self, device, nd):
+        # Test based on reported issue: https://github.com/pytorch/pytorch/issues/124154
+
+        theta = torch.rand([6, nd, nd + 1], requires_grad=True, device=device)
+        size = [6, 3, 4, 5] if nd == 2 else [6, 3, 4, 5, 5]
+        grid = torch.nn.functional.affine_grid(theta, size, align_corners=False)
+
+        grad_tensor = torch.rand(grid.shape, device=device)
+
+        memory_format_cl = torch.channels_last if nd == 2 else torch.channels_last_3d
+        grad_tensor_cl = grad_tensor.contiguous(memory_format=memory_format_cl)
+
+        if theta.grad is not None:
+            raise AssertionError("expected theta.grad to be None")
+        grid.backward(grad_tensor_cl)
+        theta_grad_cl = theta.grad.clone().contiguous()
+
+        theta.grad.zero_()
+        grid.backward(grad_tensor)
+        theta_grad_cf = theta.grad
+
+        self.assertEqual(theta_grad_cf, theta_grad_cl)
+
+    @skipMPS  # MPS does not support double dtype, which this test relies on via set_default_dtype
+    @set_default_dtype(torch.double)
+    def test_upsampling_not_recompute_scale_factor(self, device):
+        # test output against known input: result must match opencv
+        in_t = torch.arange(8.).view(1, 2, 2, 2)
+        expected_out_t = torch.tensor(
+            [[[[-0.32725, -0.08843, 0.37933, 0.79744],
+              [0.15039, 0.38921, 0.85697, 1.27508],
+              [1.08591, 1.32473, 1.79249, 2.21060],
+              [1.92213, 2.16095, 2.62871, 3.04682]],
+
+             [[3.67275, 3.91157, 4.37933, 4.79744],
+              [4.15039, 4.38921, 4.85697, 5.27508],
+              [5.08591, 5.32473, 5.79249, 6.21060],
+              [5.92213, 6.16095, 6.62871, 7.04682]]]])
+        if IS_PPC:
+            # Both OpenCV and PyTorch give a slightly different result on PPC
+            expected_out_t = torch.tensor(
+                [[[[-0.32725, -0.08843, 0.37933, 0.79744],
+                  [0.15039, 0.38921, 0.85697, 1.27508],
+                  [1.08591, 1.32473, 1.79249, 2.21060],
+                  [1.92212, 2.16094, 2.62870, 3.04681]],
+
+                 [[3.67275, 3.91157, 4.37933, 4.79743],
+                  [4.15039, 4.38921, 4.85697, 5.27508],
+                  [5.08591, 5.32473, 5.79249, 6.21059],
+                  [5.92212, 6.16094, 6.62870, 7.04680]]]])
+        out_t = F.interpolate(in_t, scale_factor=2.3, mode='bicubic', align_corners=False, recompute_scale_factor=False)
+        torch.set_printoptions(precision=5)
+        self.assertEqual(out_t, expected_out_t, atol=1e-4, rtol=0)
+
+        for align_corners in [True, False]:
+            kwargs = dict(mode='bicubic', align_corners=align_corners)
+            # test float scale factor up & downsampling
+            for scale_factor in [0.6, 1.6, 2.3]:
+                in_t = torch.ones(2, 2, 2, 2).to(device)
+                out_t = F.interpolate(in_t, scale_factor=scale_factor, **kwargs)
+                out_size = int(math.floor(in_t.shape[-1] * scale_factor))
+                self.assertEqual(torch.ones(2, 2, out_size, out_size), out_t.data, atol=1e-5, rtol=0)
+
+                input = torch.randn(2, 2, 2, 2, requires_grad=True)
+                gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
+
+    def test_interpolate_illegal_memory_access(self, device):
+        in_s = 45
+        out_s = 14
+
+        input = torch.ones((1, 1, in_s), device=device, requires_grad=True)
+        # note we allocated grad_output to be larger so out of bound access
+        # would be visible in grad_input
+        grad = torch.ones((1, 1, out_s * 2), device=device, requires_grad=True)
+        grad = grad[:, :, :out_s]
+
+        input_ref = input.detach().cpu().requires_grad_()
+        grad_ref = grad.cpu()
+
+        out = F.interpolate(input, size=(out_s,), mode='nearest')
+        out.backward(grad)
+
+        out_ref = F.interpolate(input_ref, size=(out_s,), mode='nearest')
+        out_ref.backward(grad_ref)
+
+        self.assertEqual(out_ref, out)
+        self.assertEqual(input_ref.grad, input.grad)
+
+    @skipMPS  # MPS does not support double dtype, which this test relies on via set_default_dtype
+    @set_default_dtype(torch.double)
+    def test_interpolate(self, device):
+        def _test_interpolate_non_integer_size_warning(in_t, out_size, dim, **kwargs):
+            test_sizes = [float(out_size),
+                          torch.tensor(out_size, dtype=torch.float)]
+            for size in test_sizes:
+                self.assertRaisesRegex(TypeError,
+                                       "(expected size to be one of int or).*",
+                                       F.interpolate, in_t, size=(size,) * dim, **kwargs)
+
+        def _test_interpolate_helper(in_t, scale_factor, layer):
+            out_size = int(math.floor(in_t.shape[-1] * scale_factor))
+            dim = len(in_t.shape) - 2
+            out_shape = [1, 1] + [out_size] * dim
+            with warnings.catch_warnings(record=True) as w:
+                out_t = layer(in_t)
+            self.assertEqual(torch.ones(out_shape), out_t)
+
+            self.assertEqual(
+                F.interpolate(in_t, (out_size,) * dim, **kwargs),
+                F.interpolate(in_t, scale_factor=scale_factor, **kwargs))
+            gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [in_t], nondet_tol=GRADCHECK_NONDET_TOL)
+            gradgradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [in_t], nondet_tol=GRADCHECK_NONDET_TOL)
+            _test_interpolate_non_integer_size_warning(in_t, out_size, dim, **kwargs)
+
+        def _make_input(dim, device):
+            size = [1, 1]
+            size += [2] * dim
+            return torch.ones(size, requires_grad=True, device=device)
+
+        for scale_factor in [0.5, 1.5, 2]:
+            for mode in ['nearest', 'area']:
+                kwargs = dict(mode=mode)
+                m = nn.Upsample(scale_factor=scale_factor, **kwargs).to(device)
+                for input in [_make_input(1, device), _make_input(2, device), _make_input(3, device)]:
+                    _test_interpolate_helper(input, scale_factor, m)
+
+            for align_corners in [True, False]:
+                kwargs = dict(mode='linear', align_corners=align_corners)
+                m = nn.Upsample(scale_factor=scale_factor, **kwargs).to(device)
+                _test_interpolate_helper(_make_input(1, device), scale_factor, m)
+
+                kwargs = dict(mode='bilinear', align_corners=align_corners)
+                m = nn.Upsample(scale_factor=scale_factor, **kwargs).to(device)
+                _test_interpolate_helper(_make_input(2, device), scale_factor, m)
+
+                kwargs = dict(mode='bicubic', align_corners=align_corners)
+
+                def m(t):
+                    return F.interpolate(t, scale_factor=scale_factor, **kwargs).to(device)
+                _test_interpolate_helper(_make_input(2, device), scale_factor, m)
+
+                kwargs = dict(mode='trilinear', align_corners=align_corners)
+                m = nn.Upsample(scale_factor=scale_factor, **kwargs).to(device)
+                _test_interpolate_helper(_make_input(3, device), scale_factor, m)
+
+    @skipMPS
+    @tf32_on_and_off(0.005)
+    @parametrize_test('bias', [
+        subtest(False, name='nobias'), subtest(True, name='bias')])
+    @parametrize_test('weight_layout', [
+        subtest(torch.strided, name='weightStrided'),
+        subtest(torch.sparse_coo, name='weightCOO'),
+        subtest(torch.sparse_csr, name='weightCSR'),
+        subtest(torch.sparse_csc, name='weightCSC'),
+        # TODO: addmm: computation on CPU is not implemented for Strided + Strided @ SparseBsr
+        # subtest(torch.sparse_bsr, name='weightBSR'),
+        # subtest(torch.sparse_bsc, name='weightBSC'),
+    ])
+    def test_linear_autograd(self, device, bias, weight_layout):
+        module = nn.Linear(4, 4, bias=bias, device=device)
+        if weight_layout == torch.strided:
+            pass
+        elif weight_layout == torch.sparse_csr:
+            module.weight = nn.Parameter(module.weight.to_sparse_csr())
+        elif weight_layout == torch.sparse_csc:
+            module.weight = nn.Parameter(module.weight.to_sparse_csc())
+        elif weight_layout == torch.sparse_bsr:
+            module.weight = nn.Parameter(module.weight.to_sparse_bsr((2, 2)))
+        elif weight_layout == torch.sparse_bsc:
+            module.weight = nn.Parameter(module.weight.to_sparse_bsc((2, 2)))
+        elif weight_layout == torch.sparse_coo:
+            module.weight = nn.Parameter(module.weight.to_sparse_coo())
+        else:
+            raise AssertionError
+
+        inp = torch.randn(4, requires_grad=True, device=device)
+        res = module(inp)
+        if bias:
+            expected = (torch.einsum("i,ji->j", inp, module.weight.to_dense())) + module.bias
+        else:
+            expected = (torch.einsum("i,ji->j", inp, module.weight.to_dense()))
+        self.assertEqual(res, expected)
+
+        grad_output = torch.randn(4, device=device)
+        grads = torch.autograd.grad(res, [module.weight, inp], grad_output)
+        grads_expected = torch.autograd.grad(expected, [module.weight, inp], grad_output)
+
+        self.assertEqual(grads_expected[0].layout, weight_layout)
+
+        for g, ge in zip(grads, grads_expected):
+            self.assertEqual(g, ge)
+
 
 class TestNNCUDA(NNTestCase):
+    def test_linear_cross_entropy_options_auto_defaults(self, device):
+        """``LinearCrossEntropyOptions()`` keeps the auto sentinels at
+        construction time; ``_adjust`` resolves them per (device, dtype).
+
+        Covers: known (device, dtype) pair, unknown pair (falls back),
+        partial override (one field auto, one explicit), and missing
+        device argument (falls back).
+        """
+        # Default construction keeps "auto" until _adjust is called.
+        opts = nn.LinearCrossEntropyOptions()
+        self.assertEqual(opts.acc_policy, "auto")
+        self.assertEqual(opts.chunking_method, "auto")
+
+        # Known pair: CUDA + bf16 -> ("compact", "aspect_ratio"). These
+        # vocab shapes (num_classes >> in_features) leave the N*V/4D cap
+        # inert; the budget regime is covered in the memory-cap test.
+        adjusted = opts._adjust(
+            128, 4096, 50000, torch.bfloat16, torch.device("cuda"),
+        )
+        self.assertEqual(adjusted.acc_policy, "compact")
+        self.assertEqual(adjusted.chunking_method, "aspect_ratio")
+
+        # Known pair: CUDA + fp16 -> ("compact", "aspect_ratio").
+        # Same pick as bf16 -- a single CUDA policy across dtypes
+        # post-``weight_chunk_dtype=acc_dtype`` fix.
+        adjusted = opts._adjust(
+            128, 4096, 50000, torch.float16, torch.device("cuda"),
+        )
+        self.assertEqual(adjusted.acc_policy, "compact")
+        self.assertEqual(adjusted.chunking_method, "aspect_ratio")
+
+        # Known pair: CPU + bf16 -> ("accurate", "aspect_ratio").
+        # CPU has no hardware low-precision matmul, so the only
+        # chunked policy that runs the bulk weight-grad GEMM in fp32
+        # ("accurate") is dramatically faster than the others.
+        adjusted = opts._adjust(
+            128, 4096, 50000, torch.bfloat16, torch.device("cpu"),
+        )
+        self.assertEqual(adjusted.acc_policy, "accurate")
+        self.assertEqual(adjusted.chunking_method, "aspect_ratio")
+
+        # Known pair: CPU + fp16 -> ("accurate", "aspect_ratio").
+        adjusted = opts._adjust(
+            128, 4096, 50000, torch.float16, torch.device("cpu"),
+        )
+        self.assertEqual(adjusted.acc_policy, "accurate")
+        self.assertEqual(adjusted.chunking_method, "aspect_ratio")
+
+        # CPU + fp32: "accurate" is only for CPU low-precision input (its
+        # emulated low-precision GEMM); fp32/fp64 GEMM is native at any policy,
+        # so auto picks the memory-frugal "compact".
+        adjusted = opts._adjust(
+            128, 4096, 50000, torch.float32, torch.device("cpu"),
+        )
+        self.assertEqual(adjusted.acc_policy, "compact")
+        self.assertEqual(adjusted.chunking_method, "aspect_ratio")
+
+        # No device given -> "compact" fallback (back-compat with callers
+        # / tests that don't pass device).
+        adjusted = opts._adjust(128, 4096, 50000, torch.float32)
+        self.assertEqual(adjusted.acc_policy, "compact")
+        self.assertEqual(adjusted.chunking_method, "aspect_ratio")
+
+        # Partial override: acc_policy explicit, chunking_method auto.
+        opts = nn.LinearCrossEntropyOptions(acc_policy="accurate")
+        adjusted = opts._adjust(
+            128, 4096, 50000, torch.bfloat16, torch.device("cuda"),
+        )
+        self.assertEqual(adjusted.acc_policy, "accurate")
+        self.assertEqual(adjusted.chunking_method, "aspect_ratio")
+
+        # Partial override: chunking_method explicit, acc_policy auto.
+        opts = nn.LinearCrossEntropyOptions(chunking_method="aspect_ratio")
+        adjusted = opts._adjust(
+            128, 4096, 50000, torch.bfloat16, torch.device("cuda"),
+        )
+        self.assertEqual(adjusted.acc_policy, "compact")
+        self.assertEqual(adjusted.chunking_method, "aspect_ratio")
+
+        # acc_dtype auto resolution: fp32 on supported hardware,
+        # input dtype otherwise; explicit non-auto policy opts out.
+        opts = nn.LinearCrossEntropyOptions()
+        cpu = torch.device("cpu")
+        for d in (torch.bfloat16, torch.float16):
+            self.assertEqual(opts._adjust(128, 4096, 50000, d, cpu).acc_dtype, torch.float32)
+        self.assertEqual(opts._adjust(128, 4096, 50000, torch.float32, cpu).acc_dtype, torch.float32)
+        opts_explicit = nn.LinearCrossEntropyOptions(acc_policy="compact")
+        self.assertEqual(
+            opts_explicit._adjust(128, 4096, 50000, torch.bfloat16, cpu).acc_dtype,
+            torch.bfloat16,
+        )
+        if torch.cuda.is_available():
+            major = torch.cuda.get_device_capability()[0]
+            cuda = torch.device("cuda")
+            self.assertEqual(
+                opts._adjust(128, 4096, 50000, torch.bfloat16, cuda).acc_dtype,
+                torch.float32 if major >= 8 else torch.bfloat16,
+            )
+            self.assertEqual(
+                opts._adjust(128, 4096, 50000, torch.float16, cuda).acc_dtype,
+                torch.float32 if major >= 7 else torch.float16,
+            )
+
     @skipCUDAIfNoCudnn
     @deviceCountAtLeast(2)
     def test_cudnn_rnn_dropout_states_device(self, devices):
