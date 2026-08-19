@@ -22,8 +22,10 @@ from torch._inductor.virtualized import V
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import IS_SM89
 from torch.testing._internal.common_device_type import (
+    Capability,
     instantiate_device_type_tests,
     onlyAccelerator,
+    requires_capabilities,
     skipIf,
 )
 from torch.testing._internal.common_utils import (
