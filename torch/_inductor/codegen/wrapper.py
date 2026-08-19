@@ -124,9 +124,14 @@ def _sanitize_for_repr(obj: Any) -> Any:
         return _sanitize_for_repr(obj.value)
     repr_children = get_constexpr_repr_children(obj)
     if repr_children is not None:
-        return repr_children.rebuild(
-            tuple(_sanitize_for_repr(child) for child in repr_children.values)
-        )
+        children = tuple(_sanitize_for_repr(child) for child in repr_children.values)
+        # Rebuilding arbitrary attrs, pydantic, and container subclasses can
+        # invoke user code, so preserve the original when sanitization is a no-op.
+        if all(
+            child is original for child, original in zip(children, repr_children.values)
+        ):
+            return obj
+        return repr_children.rebuild(children)
     return obj
 
 

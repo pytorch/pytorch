@@ -3264,13 +3264,6 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
             "torch": torch_lib,
             "triton": triton_lib,
         }
-        for type_spec in get_importable_constexpr_types(
-            compile_meta.get("constants", {}).values()
-        ):
-            scope[type_spec.root_name] = getattr(
-                importlib.import_module(type_spec.module), type_spec.root_name
-            )
-
         if not hasattr(binary, "launch_metadata"):
             # launch args before CompiledKernel.launch_metadata is added.
             # TODO(jansel): delete this branch in mid-2025
@@ -3320,6 +3313,20 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
 
             scope["_host_tma_aligned"] = _host_tma_aligned
             scope["TensorDescriptor"] = TensorDescriptor
+
+        for type_spec in get_importable_constexpr_types(
+            compile_meta.get("constants", {}).values()
+        ):
+            if type_spec.root_name in scope:
+                raise ImportError(
+                    "Triton constexpr value type "
+                    f"{type_spec.module}.{type_spec.qualname} requires import name "
+                    f"{type_spec.root_name}, which would shadow an existing "
+                    "generated launcher binding. Rename the root type."
+                )
+            scope[type_spec.root_name] = getattr(
+                importlib.import_module(type_spec.module), type_spec.root_name
+            )
 
         launcher = self._gen_launcher_code(
             scope, def_args, runner_args, pre_runner_lines=pre_runner_lines

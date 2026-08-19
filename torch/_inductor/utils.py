@@ -165,8 +165,8 @@ class ImportableConstexprType(NamedTuple):
     root_name: str
 
 
-# Keep this aligned with the names bound by TritonKernel.gen_common_triton_imports
-# and the generated launcher scope in CachingAutotuner.make_launcher.
+# Keep this aligned with names that generated Triton kernel modules bind before
+# evaluating constexpr reprs. Launcher-specific bindings are checked at its call site.
 _TRITON_CONSTEXPR_RESERVED_NAMES = frozenset(
     (
         "AttrsDescriptor",
@@ -255,6 +255,7 @@ def get_constexpr_repr_children(value: object) -> ConstexprReprChildren | None:
         )
 
         def rebuild_mapping(children: tuple[object, ...]) -> object:
+            # children is the flattened key, value, key, value stream.
             child_iter = iter(children)
             sanitized = dict(zip(child_iter, child_iter))
             if isinstance(value, collections.defaultdict):

@@ -1411,8 +1411,13 @@ def helper(x):
             self.assertIsInstance(sanitized_config.nested, int)
             compile(repr(sanitized_config), "<sanitized-constexpr>", "eval")
 
+            unchanged_config = config_type(1, "hidden")
+            self.assertIs(_sanitize_for_repr(unchanged_config), unchanged_config)
+
         sanitized_set = _sanitize_for_repr({UserDefinedTritonKernelConfigMode.FAST})
         self.assertIsInstance(next(iter(sanitized_set)), int)
+        unchanged_set = {1}
+        self.assertIs(_sanitize_for_repr(unchanged_set), unchanged_set)
         sanitized_frozenset = _sanitize_for_repr(
             frozenset({UserDefinedTritonKernelConfigMode.FAST})
         )
@@ -1422,6 +1427,35 @@ def helper(x):
         sanitized_mapping = _sanitize_for_repr(mapping)
         self.assertIsInstance(sanitized_mapping, OrderedDict)
         self.assertIsInstance(sanitized_mapping["mode"], int)
+
+        unchanged_mapping = OrderedDict([("mode", 1)])
+        self.assertIs(_sanitize_for_repr(unchanged_mapping), unchanged_mapping)
+
+        class ComputedReprArgs:
+            @property
+            def computed(self):
+                return 1
+
+            def __repr_args__(self):
+                return (("computed", self.computed),)
+
+        computed = ComputedReprArgs()
+        self.assertIs(_sanitize_for_repr(computed), computed)
+
+        class PositionalReprArgs:
+            def __repr_args__(self):
+                return ((None, 1),)
+
+        positional = PositionalReprArgs()
+        self.assertIs(_sanitize_for_repr(positional), positional)
+
+        class LabelledMapping(dict):
+            def __init__(self, label, values):
+                super().__init__(values)
+                self.label = label
+
+        labelled_mapping = LabelledMapping("config", {"mode": 1})
+        self.assertIs(_sanitize_for_repr(labelled_mapping), labelled_mapping)
 
         # Non-enum passthrough
         self.assertEqual(_sanitize_for_repr(42), 42)
