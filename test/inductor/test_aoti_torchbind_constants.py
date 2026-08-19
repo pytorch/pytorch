@@ -2,26 +2,26 @@
 
 import torch
 from torch._inductor.test_case import TestCase
-from torch.testing._internal.common_device_type import (
-    Capability,
-    instantiate_device_type_tests,
-    requires_capabilities,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import HardwareClassification, run_tests
 from torch.testing._internal.torchbind_impls import init_torchbind_implementations
+from torch.utils._triton import has_triton_package
 
 
-class TestTorchbindAOTI(TestCase):
-    hw_classification = HardwareClassification.ACCELERATOR
+def _ensure_triton(test_case, device):
+    torch_device = torch.device(device)
+    if not has_triton_package():
+        test_case.skipTest("requires triton")
+    from torch._dynamo.device_interface import get_interface_for_device
+    from torch._inductor.exc import GPUTooOldForTriton
 
-    """Verify that torchbind constants embedded in an AOTI .pt2 are reachable
-    via AOTIModelPackageLoader.get_custom_objs() after load.
+    try:
+        get_interface_for_device(torch_device.type).raise_if_triton_unavailable(torch_device)
+    except (ImportError, NotImplementedError, RuntimeError, GPUTooOldForTriton) as e:
+        test_case.skipTest(str(e) or f"requires triton on {torch_device.type}")
 
-    Backends (e.g. torch-tensorrt) need post-load access to torchbind
-    constants to mutate runtime state (stream binding, comm binding, profiling
-    toggles). Before this accessor existed, the IValues lived in
-    OSSProxyExecutor::custom_objs_ with no public way out.
-    """
+
+class _TorchbindAOTIHelpers:
 
     @classmethod
     def setUpClass(cls):
@@ -41,7 +41,21 @@ class TestTorchbindAOTI(TestCase):
 
         return M()
 
-    @requires_capabilities(Capability.lib.triton)
+
+class _TorchbindAOTITests:
+    """Verify that torchbind constants embedded in an AOTI .pt2 are reachable
+    via AOTIModelPackageLoader.get_custom_objs() after load.
+
+    Backends (e.g. torch-tensorrt) need post-load access to torchbind
+    constants to mutate runtime state (stream binding, comm binding, profiling
+    toggles). Before this accessor existed, the IValues lived in
+    OSSProxyExecutor::custom_objs_ with no public way out.
+
+    Test methods are copied onto TestCase classes rather than inherited, so
+    instantiate_device_type_tests can see them and unittest does not collect
+    unsuffixed mixin methods that lack an injected device.
+    """
+
     def test_custom_objs_exposed_through_loader(self, device):
         m = self._make_model().to(device)
         x = torch.randn(2, 3, device=device)
@@ -65,7 +79,6 @@ class TestTorchbindAOTI(TestCase):
             msg=lambda msg: f"{msg}\nExpected a torchbind ScriptObject, got {type(any_torchbind)}",
         )
 
-    @requires_capabilities(Capability.lib.triton)
     def test_mutating_custom_obj_after_load_affects_run(self, device):
         # The central contract: IValues returned by get_custom_objs() share
         # intrusive_ptr ownership with the live entries inside
@@ -101,7 +114,6 @@ class TestTorchbindAOTI(TestCase):
         after = loader.run([x])[0]
         torch.testing.assert_close(after, 40 * x + x)
 
-    @requires_capabilities(Capability.lib.triton)
     def test_custom_objs_empty_when_no_torchbind(self, device):
         # A plain model with no torchbind attrs should yield an empty map.
         class Plain(torch.nn.Module):
@@ -118,7 +130,31 @@ class TestTorchbindAOTI(TestCase):
         self.assertEqual(loader.get_custom_objs(), {})
 
 
-instantiate_device_type_tests(TestTorchbindAOTI, globals(), allow_xpu=True)
+def _expose_mixin_tests(cls):
+    for name, meth in _TorchbindAOTITests.__dict__.items():
+        if name.startswith("test_"):
+            setattr(cls, name, meth)
+    return cls
+
+
+@_expose_mixin_tests
+class TestTorchbindAOTI(_TorchbindAOTIHelpers, TestCase):
+    hw_classification = HardwareClassification.CPU
+
+
+@_expose_mixin_tests
+class TestTorchbindAOTIAccelerator(_TorchbindAOTIHelpers, TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def setUp(self):
+        super().setUp()
+        _ensure_triton(self, self.get_primary_device())
+
+
+instantiate_device_type_tests(TestTorchbindAOTI, globals(), only_for="cpu")
+instantiate_device_type_tests(
+    TestTorchbindAOTIAccelerator, globals(), except_for="cpu", allow_xpu=True
+)
 
 
 if __name__ == "__main__":
