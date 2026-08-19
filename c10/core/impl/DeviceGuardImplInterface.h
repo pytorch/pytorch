@@ -50,11 +50,11 @@ enum class EventFlag : uint8_t {
   INTERPROCESS = 0x4, // event is IPC-shareable
 };
 
-inline EventFlag operator|(EventFlag a, EventFlag b) {
+constexpr EventFlag operator|(EventFlag a, EventFlag b) {
   return static_cast<EventFlag>(
       static_cast<uint8_t>(a) | static_cast<uint8_t>(b));
 }
-inline bool operator&(EventFlag a, EventFlag b) {
+constexpr bool operator&(EventFlag a, EventFlag b) {
   return static_cast<uint8_t>(a) & static_cast<uint8_t>(b);
 }
 
