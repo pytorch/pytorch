@@ -2507,13 +2507,13 @@ class TestBinaryUfuncsDevice(TestCase):
             torch.fmax,
             torch.fmin,
         ):
-            with self.assertRaisesRegex(RuntimeError, ".+not implemented for.+"):
+            with self.assertRaisesRegex(TypeError, ".+not implemented for.+"):
                 torch_op(
                     torch.ones(1, device=device, dtype=dtypes[0]),
                     torch.ones(1, device=device, dtype=dtypes[1]),
                 )
 
-            with self.assertRaisesRegex(RuntimeError, ".+not implemented for.+"):
+            with self.assertRaisesRegex(TypeError, ".+not implemented for.+"):
                 torch_op(
                     torch.ones(1, device=device, dtype=dtypes[1]),
                     torch.ones(1, device=device, dtype=dtypes[0]),
@@ -2867,6 +2867,48 @@ class TestBinaryUfuncsDevice(TestCase):
                     )
                 ).tangent
             self.assertEqual(tangent, [1.0, float("nan"), float("nan")])
+
+    @dtypes(torch.float, torch.double)
+    def test_fmin_fmax_nan_input_gradients(self, device, dtype):
+        for op in (torch.fmax, torch.fmin):
+            a = torch.tensor(
+                [float("nan"), 1.0, float("nan")],
+                device=device,
+                dtype=dtype,
+                requires_grad=True,
+            )
+            b = torch.tensor(
+                [1.0, float("nan"), float("nan")],
+                device=device,
+                dtype=dtype,
+                requires_grad=True,
+            )
+            op(a, b).sum().backward()
+            self.assertEqual(a.grad, [0.0, 1.0, 1.0])
+            self.assertEqual(b.grad, [1.0, 0.0, 0.0])
+
+            with fwAD.dual_level():
+                tangent = fwAD.unpack_dual(
+                    op(
+                        fwAD.make_dual(
+                            a.detach(),
+                            torch.tensor(
+                                [float("nan"), 4.0, 7.0],
+                                device=device,
+                                dtype=dtype,
+                            ),
+                        ),
+                        fwAD.make_dual(
+                            b.detach(),
+                            torch.tensor(
+                                [10.0, float("nan"), 13.0],
+                                device=device,
+                                dtype=dtype,
+                            ),
+                        ),
+                    )
+                ).tangent
+            self.assertEqual(tangent, [10.0, 4.0, 7.0])
 
     # TODO: tests like this should be generic
     @dtypesIfCUDA(torch.half, torch.float, torch.double)

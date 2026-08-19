@@ -4,9 +4,12 @@
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class TpGetattroTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     # --- getattr() builtin ---
 
     def test_getattr_constant(self):

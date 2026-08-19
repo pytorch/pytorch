@@ -2360,10 +2360,15 @@ class FakeTensorMode(TorchDispatchMode):
         if self.shape_env is not None:
             maybe_suppress = self.shape_env.suppress_guards
 
+        # The set_ below replaces the size, stride and storage of the tensor
+        # created here, so for a view op don't pay to derive them twice. On
+        # symbolic shapes that derivation is the bulk of the cost of both calls.
+        is_view = isinstance(func, torch._ops.OpOverload) and func.is_view
+
         with in_kernel_invocation_manager(self), maybe_suppress():
             empty = torch.empty_strided(
-                shape,
-                stride,
+                () if is_view else shape,
+                () if is_view else stride,
                 dtype=metadata.dtype,
                 layout=metadata.layout,
                 device="meta",
@@ -2375,7 +2380,7 @@ class FakeTensorMode(TorchDispatchMode):
         if metadata.is_neg:
             torch._C._set_neg(empty, True)
 
-        if isinstance(func, torch._ops.OpOverload) and func.is_view:
+        if is_view:
             # For view ops, the storage should be the same as the tensor input.
             view_arg = args[cast(int, entry.view_idx)]
             if not isinstance(view_arg, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR

@@ -303,7 +303,12 @@ void FlightRecorder<EventType>::retire_id(
     // cudaEventDuration() can hang, and we need to acquire the lock before we
     // can dump(), which we never want to block.
     guard.unlock();
-    duration = getDurationFromEvent<EventType>(*startEvent, *endEvent);
+    try {
+      duration = getDurationFromEvent<EventType>(*startEvent, *endEvent);
+    } catch (const std::exception& e) {
+      LOG(ERROR) << "Failed to compute duration for id " << *id << ": "
+                 << e.what();
+    }
     guard.lock();
 
     // Refresh the entry pointer, see if the entry has been overwritten
@@ -324,6 +329,35 @@ void FlightRecorder<EventType>::retire_id(
     std::optional<size_t> id,
     bool compute_duration) {
   retire_id(id, 0, compute_duration);
+}
+
+template <typename EventType>
+void FlightRecorder<EventType>::retire_completed(
+    std::optional<size_t> id,
+    std::optional<size_t> reset_epoch,
+    std::optional<float> duration) {
+  if (!enabled_ || !id || !reset_epoch) {
+    return;
+  }
+  std::lock_guard<std::mutex> guard(mutex_);
+  Entry* entry = &entries_.at(getIdxFromId(*id, *reset_epoch));
+  if (entry->id_ != *id || entry->reset_epoch_ != *reset_epoch) {
+    // Overwritten while its collective was still in flight; there is nothing
+    // left to say about it.
+    return;
+  }
+  auto now = c10::getTime();
+  if (!entry->time_discovered_started_.has_value()) {
+    entry->time_discovered_started_ = now;
+  }
+  if (!entry->time_discovered_completed_.has_value()) {
+    entry->time_discovered_completed_ = now;
+  }
+  if (duration.has_value()) {
+    entry->duration_ = duration;
+  }
+  entry->retired_ = true;
+  entry->start_ = entry->end_ = nullptr;
 }
 
 template <typename EventType>
