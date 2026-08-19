@@ -858,12 +858,6 @@ class TestOperators(TestCase):
                 skip("nn.functional.scaled_dot_product_attention"),
                 xfail("torch.ops.aten._flash_attention_forward"),
                 xfail("torch.ops.aten._efficient_attention_forward"),
-                # AssertionError: Tensor-likes are not close!
-                # Mismatched elements: 1 / 15 (6.7%)
-                # Greatest absolute difference: 24.0 at index (2, 4) (up to 1e-05 allowed)
-                # Greatest relative difference: 1.7933241714393998e-06 at index (2, 4) (up to 1.3e-06 allowed)
-                # The failure occurred for item [0]
-                xfail("masked.prod"),
             }
         ),
     )

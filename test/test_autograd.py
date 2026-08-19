@@ -1128,9 +1128,7 @@ class TestAutograd(TestCase):
         def f(x):
             return 4000.0 * torch.prod(x)
 
-        x = torch.tensor(
-            [0.03, 1.0, 1.0, 1.0], dtype=torch.float16, requires_grad=True
-        )
+        x = torch.tensor([0.03, 1.0, 1.0, 1.0], dtype=torch.float16, requires_grad=True)
         v = torch.tensor([0.0, 1.0, 0.0, 0.0], dtype=torch.float16)
         expected = torch.tensor(4000.0, dtype=torch.float16)
 
