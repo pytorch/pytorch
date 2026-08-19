@@ -174,7 +174,7 @@ void div_true_kernel(TensorIteratorBase& iter) {
       iter.remove_operand(2);
       cpu_kernel_vec(
           iter,
-          [=](scalar_t a) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
+          [=](scalar_t a) -> scalar_t {
             return static_cast<opmath_t>(a) / b;
           },
           [=](Vectorized<scalar_t> a) {
@@ -190,8 +190,7 @@ void div_true_kernel(TensorIteratorBase& iter) {
         kBFloat16, kHalf, dtype, "div_cpu", [&]() {
           cpu_kernel_vec(
               iter,
-              [](scalar_t a, scalar_t b)
-                  __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
+              [](scalar_t a, scalar_t b) -> scalar_t {
                     return a / b;
                   },
               [](Vectorized<scalar_t> a, Vectorized<scalar_t> b) {
@@ -221,8 +220,7 @@ void div_trunc_kernel(TensorIteratorBase& iter) {
           iter.remove_operand(2);
           cpu_kernel_vec(
               iter,
-              [=](scalar_t a)
-                  __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
+              [=](scalar_t a) -> scalar_t {
                     return std::trunc(static_cast<opmath_t>(a) / b);
                   },
               [=](Vectorized<scalar_t> a) {
@@ -240,8 +238,7 @@ void div_trunc_kernel(TensorIteratorBase& iter) {
         kBFloat16, kHalf, dtype, "div_trunc_cpu", [&]() {
           cpu_kernel_vec(
               iter,
-              [](scalar_t a, scalar_t b)
-                  __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
+              [](scalar_t a, scalar_t b) -> scalar_t {
                     return std::trunc(a / b);
                   },
               [](Vectorized<scalar_t> a, Vectorized<scalar_t> b) {
@@ -366,8 +363,7 @@ void remainder_kernel(TensorIteratorBase& iter) {
   } else if (iter.common_dtype() == kBFloat16) {
     cpu_kernel_vec(
         iter,
-        [=](BFloat16 a, BFloat16 b)
-            __ubsan_ignore_float_divide_by_zero__ -> BFloat16 {
+        [=](BFloat16 a, BFloat16 b) -> BFloat16 {
               float a0 = static_cast<float>(a);
               float b0 = static_cast<float>(b);
               float mod0 = std::fmod(a0, b0);
@@ -393,8 +389,7 @@ void remainder_kernel(TensorIteratorBase& iter) {
         iter.common_dtype(), "remainder_cpu", [&]() {
           cpu_kernel_vec(
               iter,
-              [=](scalar_t a, scalar_t b)
-                  __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
+              [=](scalar_t a, scalar_t b) -> scalar_t {
                     scalar_t mod = std::fmod(a, b);
                     if ((mod != 0) && ((b < 0) != (mod < 0)))
                       mod += b;

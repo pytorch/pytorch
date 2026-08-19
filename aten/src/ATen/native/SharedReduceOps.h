@@ -122,7 +122,7 @@ struct WelfordOps {
       new_count
     };
   }
-  inline C10_DEVICE res_t project(acc_t acc) const __ubsan_ignore_float_divide_by_zero__ {
+  inline C10_DEVICE res_t project(acc_t acc) const {
     const auto mean = static_cast<scalar_t>(acc.mean);
     const auto divisor = acc.nf > correction ? acc.nf - correction : 0;
     const auto var = acc.m2 / divisor;

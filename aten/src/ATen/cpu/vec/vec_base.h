@@ -823,8 +823,7 @@ Vectorized<T> inline operator*(const Vectorized<T>& a, const Vectorized<T>& b) {
 VECTORIZED_SUPPORT_SCALARS_FOR_BINARY_OP(*)
 
 template <class T>
-Vectorized<T> inline operator/(const Vectorized<T>& a, const Vectorized<T>& b)
-    __ubsan_ignore_float_divide_by_zero__ {
+Vectorized<T> inline operator/(const Vectorized<T>& a, const Vectorized<T>& b) {
   Vectorized<T> c;
   for (int i = 0; i != Vectorized<T>::size(); i++) {
     c[i] = a[i] / b[i];
@@ -835,8 +834,7 @@ Vectorized<T> inline operator/(const Vectorized<T>& a, const Vectorized<T>& b)
 VECTORIZED_SUPPORT_SCALARS_FOR_BINARY_OP(/)
 
 template <class T, typename std::enable_if_t<!is_floating_point_v<T>, int> = 0>
-Vectorized<T> inline operator%(const Vectorized<T>& a, const Vectorized<T>& b)
-    __ubsan_ignore_float_divide_by_zero__ {
+Vectorized<T> inline operator%(const Vectorized<T>& a, const Vectorized<T>& b) {
   return a - a / b * b;
 }
 
