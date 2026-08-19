@@ -507,6 +507,27 @@ class FStringMutationTests(TestCase):
 
         self._check(fn, torch.randn(3), Obj([1, 2]))
 
+    def test_fstring_tensor_conversions_track_mutations(self):
+        import torch
+
+        formatters = {
+            "str": lambda x: f"{x!s}",
+            "repr": lambda x: f"{x!r}",
+            "ascii": lambda x: f"{x!a}",
+            "repr_with_spec": lambda x: f"{x!r:>20}",
+        }
+
+        for name, formatter in formatters.items():
+            with self.subTest(name=name):
+                torch._dynamo.reset()
+
+                def fn(x):
+                    s = formatter(x)
+                    x.add_(1)
+                    return s, x
+
+                self._check(fn, torch.tensor([1.0, 2.0]))
+
     def test_explicit_str_tracks_mutations(self):
         import torch
 
