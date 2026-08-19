@@ -57,7 +57,6 @@ from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import get_devtype
 from torch.testing._internal.common_utils import (
     HardwareClassification,
-    instantiate_parametrized_tests,
     IS_LINUX,
     parametrize,
     run_tests,
@@ -2178,10 +2177,6 @@ class TestDTensorCompileCUDA(torch._dynamo.test_case.TestCase):
         dist.destroy_process_group()
 
     @property
-    def device_type(self) -> str:
-        return device_type
-
-    @property
     def world_size(self) -> int:
         return 2
 
@@ -2189,10 +2184,9 @@ class TestDTensorCompileCUDA(torch._dynamo.test_case.TestCase):
     @skipIfXpu(msg="standalone_compile coverage is CUDA-only")
     @skip_if_lt_x_gpu(1)
     @patch.object(torch._inductor.config, "compile_threads", 1)
-    def test_aot_standalone_compile_dtensor_to_dtype_layout(self):
+    def test_aot_standalone_compile_dtensor_to_dtype_layout(self, device):
         from torch._inductor import standalone_compile
 
-        device = torch.device(self.device_type, 0)
         mesh = DeviceMesh(self.device_type, torch.arange(1))
         index = DTensor.from_local(
             torch.arange(2, device=device, dtype=torch.int64),
@@ -2243,10 +2237,6 @@ class TestDTensorCompileAccelerator(torch._dynamo.test_case.TestCase):
         torch._dynamo.config.canonicalize_output_graph_node_order = True
         super().tearDown()
         dist.destroy_process_group()
-
-    @property
-    def device_type(self) -> str:
-        return device_type
 
     @property
     def world_size(self) -> int:
@@ -2865,7 +2855,6 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         self.assertNotEqual(h0, h1)
 
 
-@instantiate_parametrized_tests
 class TestDTensorCompileE2E(DTensorTestBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
@@ -3403,7 +3392,30 @@ class TestDTensorACCompile(DTensorTestBase):
         out2.sum().backward()
 
 
-instantiate_device_type_tests(TestDTensorCompileE2E, globals())
-instantiate_device_type_tests(TestDTensorACCompile, globals())
+instantiate_device_type_tests(
+    TestDTensorCompileAccelerator,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestDTensorCompileE2E,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestDTensorACCompile,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestDTensorCompileCUDA,
+    globals(),
+    only_for=["cuda"],
+)
+
+
 if __name__ == "__main__":
     run_tests()

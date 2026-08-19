@@ -930,11 +930,18 @@ class TestCompileOnOneRankLegacyCollective(TestCase):
 
 
 instantiate_device_type_tests(
+    TestCompileOnOneRank,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
     TestCompileOnOneRankDeviceAsParameter,
     globals(),
     except_for=["cpu"],
     allow_xpu=True,
 )
+
 
 if __name__ == "__main__":
     run_tests()
