@@ -30,6 +30,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import (
     find_library_location,
     HardwareClassification,
+    instantiate_parametrized_tests,
     IS_FBCODE,
     IS_MACOS,
     IS_SANDCASTLE,
@@ -39,8 +40,7 @@ from torch.testing._internal.common_utils import (
     skipIfXpu,
     slowTest,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, RUN_GPU
-from torch.utils._triton import has_triton_tensor_descriptor_host_tma
+from torch.utils._triton import has_triton, has_triton_tensor_descriptor_host_tma
 
 
 try:
@@ -587,10 +587,12 @@ class TestGpuWrapperCuda(InductorTestCase):
 # Helper script for test_lazy_compile_kernel_name_collision_across_modules.
 # Run as a subprocess so dlopen truly re-runs .so static initializers.
 _LAZY_COMPILE_COLLISION_SCRIPT = """\
+import os
 import torch
-from torch.testing._internal.inductor_utils import GPU_TYPE
 
 from torch._inductor import config
+
+device = os.environ["TEST_DEVICE"]
 
 config.cpp_wrapper = True
 config.triton.autotune_at_compile_time = False
@@ -605,7 +607,7 @@ def fn(x, y, z, w):
     d = (c * w).cos()
     return d.sum()
 
-args = [torch.randn(32, device=GPU_TYPE, requires_grad=True) for _ in range(4)]
+args = [torch.randn(32, device=device, requires_grad=True) for _ in range(4)]
 ref_args = [a.detach().clone().requires_grad_(True) for a in args]
 ref = fn(*ref_args)
 ref.backward()
@@ -624,7 +626,7 @@ class TestLazyCompileKernelCollision(InductorTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @requires_capabilities(Capability.lib.triton)
-    def test_lazy_compile_kernel_name_collision_across_modules(self):
+    def test_lazy_compile_kernel_name_collision_across_modules(self, device):
         """The collision manifests when a fresh process loads .so modules from
         warm on-disk caches: AOTAutograd cache hits cause both forward and
         backward .so to be loaded (static initializers register kernels in
@@ -639,6 +641,7 @@ class TestLazyCompileKernelCollision(InductorTestCase):
                 **os.environ,
                 "TORCHINDUCTOR_CACHE_DIR": cache_dir,
                 "INDUCTOR_TEST_DISABLE_FRESH_CACHE": "1",
+                "TEST_DEVICE": device,
             }
             # First run: cold compile, populates on-disk caches.
             r1 = subprocess.run(
@@ -670,10 +673,12 @@ class TestLazyCompileKernelCollision(InductorTestCase):
 
 # Helper script for test_static_init_dlopen_does_not_deadlock
 _STATIC_INIT_DEADLOCK_SCRIPT = """\
+import os
 import torch
-from torch.testing._internal.inductor_utils import GPU_TYPE
 
 from torch._inductor import config
+
+device = os.environ["TEST_DEVICE"]
 
 config.compile_threads = 1
 config.cpp_wrapper = True
@@ -685,7 +690,7 @@ def fn(x):
 
 
 compiled = torch.compile(fn)
-x = torch.randn(128, device=GPU_TYPE)
+x = torch.randn(128, device=device)
 compiled(x)
 """
 
@@ -695,7 +700,7 @@ class TestCppWrapperStaticInitDeadlock(InductorTestCase):
 
     @skipIfXpu(msg="https://github.com/pytorch/pytorch/issues/184496")
     @requires_capabilities(Capability.lib.triton)
-    def test_static_init_dlopen_does_not_deadlock(self):
+    def test_static_init_dlopen_does_not_deadlock(self, device):
         """The cpp_wrapper-generated .so must not trigger Triton kernel
         compilation from a static initializer (dlopen-time): doing so
         runs Triton -> mlir::verify -> llvm::StdThreadPool, whose workers
@@ -705,6 +710,7 @@ class TestCppWrapperStaticInitDeadlock(InductorTestCase):
         with tempfile.TemporaryDirectory() as cache_dir:
             env = {
                 **os.environ,
+                "TEST_DEVICE": device,
                 "TORCHINDUCTOR_CACHE_DIR": cache_dir,
             }
             try:
@@ -897,6 +903,7 @@ class DynamicShapesGpuWrapperGpuTests(InductorTestCase):
         )
         fn()
 
+
 test_failures_gpu_wrapper = {
     "test_mm_plus_mm2_dynamic_shapes": test_torchinductor.TestFailure(
         ("gpu_wrapper",), is_skip=True
@@ -966,7 +973,7 @@ def make_test_case(
     if dynamic_shapes:
         fn = torch._dynamo.config.patch(assume_static_by_default=False)(fn)
 
-    fn.__name__ = test_name
+    fn.__name__ = full_name
     fn.__dict__ = copy.deepcopy(func.__dict__)
 
     for prop in xfail_props:
@@ -989,11 +996,14 @@ def make_test_case(
         setattr(target_cls, full_name, fn)
 
 
-if RUN_GPU:
+instantiate_parametrized_tests(TestGpuWrapperGeneric)
+
+
+if has_triton():
 
     class BaseTest(NamedTuple):
         name: str
-        device: str = GPU_TYPE
+        device: str = "cuda"
         tests: InductorTestCase = test_torchinductor.GPUTests()
         check_code: bool = True
 
@@ -1130,7 +1140,10 @@ if RUN_GPU:
             dynamic_shapes=True,
             test_failures=test_failures_gpu_wrapper,
             tf_suffix="gpu_wrapper",
-            xfail_props=("_expected_failure_dynamic", "_expected_failure_dynamic_wrapper"),
+            xfail_props=(
+                "_expected_failure_dynamic",
+                "_expected_failure_dynamic_wrapper",
+            ),
         )
 
 
@@ -1165,5 +1178,5 @@ instantiate_device_type_tests(
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if RUN_GPU:
+    if has_triton():
         run_tests(needs="filelock")
