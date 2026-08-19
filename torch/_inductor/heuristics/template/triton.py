@@ -21,7 +21,7 @@ from ... import config
 from ...autows_utils import meta_ws_enabled
 from ...kernel.bmm import bmm_template
 from ...kernel.mm import (
-    blackwell_ws_persistent_device_tma_mm_template,
+    blackwell_ws_persistent_tma_mm_template,
     get_scaling_options,
     get_tile_size,
     mm_template,
@@ -2650,9 +2650,17 @@ class TMATemplateConfigMixin(TMAWorkspaceMixin, MMTemplateConfigMixin):
         if not isinstance(kernel_inputs, MMKernelInputs):
             raise AssertionError("TMATemplateConfigMixin requires MMKernelInputs")
         mat1, mat2 = kernel_inputs.mat1mat2()
+
+        def _row_major(node) -> bool:
+            # TMA needs the contiguous dim last. Layout.is_transposed() ignores
+            # size-1 dims, so a contiguous [1, K] operand reports transposed and
+            # the descriptor is then built with a non-unit trailing stride.
+            stride = node.layout.stride
+            return bool(V.graph.sizevars.statically_known_equals(stride[-1], 1))
+
         tma_opts = {
-            "A_ROW_MAJOR": not mat1.layout.is_transposed(),
-            "B_ROW_MAJOR": not mat2.layout.is_transposed(),
+            "A_ROW_MAJOR": _row_major(mat1),
+            "B_ROW_MAJOR": _row_major(mat2),
             "NUM_SMS": get_num_sms(),
             "TMA_SIZE": TMA_DESCRIPTOR_SIZE,
             "TMA_EXPERIMENTAL_API": not has_triton_stable_tma_api(),
@@ -2721,6 +2729,7 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
                 "NUM_SMS": get_num_sms(),
                 "WARP_SPECIALIZE": ws,
                 "FLATTEN": flatten,
+                "HOST_SIDE_TMA": config.triton.enable_host_side_tma,
             }
 
     @staticmethod
@@ -3134,7 +3143,7 @@ class PersistentMMTemplateConfigHeuristic(
 
 
 @register_template_heuristic(
-    blackwell_ws_persistent_device_tma_mm_template.uid,
+    blackwell_ws_persistent_tma_mm_template.uid,
     "cuda",
     register=torch.version.hip is None,
 )
@@ -3162,7 +3171,7 @@ class CUDAAddmmPersistentTMATemplateConfigHeuristic(
 
 
 @register_template_heuristic(
-    blackwell_ws_persistent_device_tma_mm_template.uid,
+    blackwell_ws_persistent_tma_mm_template.uid,
     "cuda",
     register=torch.version.hip is None,
     op_name="addmm",
@@ -3285,7 +3294,7 @@ class CUDAScaledTMAMainLoopScalingTemplateConfigHeuristic(
 
 @register_template_heuristic(
     # regular Blackwell MM template + scaling epilogue from ScaledMMConfigMixin
-    blackwell_ws_persistent_device_tma_mm_template.uid,
+    blackwell_ws_persistent_tma_mm_template.uid,
     "cuda",
     register=torch.version.hip is None,
     op_name="scaled_mm",
