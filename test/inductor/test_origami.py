@@ -42,8 +42,21 @@ except ImportError:
     HAS_ORIGAMI = False
 
 
-if IS_ROCM:
-    torch.set_float32_matmul_precision("highest")
+_PRIOR_FP32_MATMUL_PRECISION: str | None = None
+
+
+def setUpModule():
+    global _PRIOR_FP32_MATMUL_PRECISION
+    _PRIOR_FP32_MATMUL_PRECISION = torch.get_float32_matmul_precision()
+    if IS_ROCM:
+        torch.set_float32_matmul_precision("highest")
+
+
+def tearDownModule():
+    global _PRIOR_FP32_MATMUL_PRECISION
+    if _PRIOR_FP32_MATMUL_PRECISION is not None:
+        torch.set_float32_matmul_precision(_PRIOR_FP32_MATMUL_PRECISION)
+        _PRIOR_FP32_MATMUL_PRECISION = None
 
 
 @unittest.skipIf(not HAS_GPU_AND_TRITON, "requires GPU and Triton")
@@ -204,7 +217,7 @@ class TestOrigami(TestCase):
                 self.assertLess(
                     origami_case["benchmark_gpu_calls"],
                     max_autotune_case["benchmark_gpu_calls"],
-                    msg=f"Origami ({origami_case['benchmark_gpu_calls']} calls) should have fewer "
+                    msg=lambda msg: f"{msg}\nOrigami ({origami_case['benchmark_gpu_calls']} calls) should have fewer "
                     f"GPU benchmarks than max_autotune ({max_autotune_case['benchmark_gpu_calls']} calls)",
                 )
 
@@ -346,7 +359,7 @@ class TestOrigami(TestCase):
                 self.assertIn(
                     "topk",
                     str(e).lower(),
-                    msg=f"Error should mention topk parameter: {e}",
+                    msg=lambda msg: f"{msg}\nError should mention topk parameter: {e}",  # noqa: F821
                 )
 
         # Test case 5: Mid-range integer topk
@@ -373,7 +386,7 @@ class TestOrigami(TestCase):
                     self.assertGreaterEqual(
                         result["topk_calls"],
                         0,
-                        msg=f"origami.select_topk_configs should be callable with topk={topk_val}",
+                        msg=lambda msg: f"{msg}\norigami.select_topk_configs should be callable with topk={topk_val}",
                     )
                 except Exception as e:
                     self.fail(f"Compilation failed with valid topk={topk_val}: {e}")

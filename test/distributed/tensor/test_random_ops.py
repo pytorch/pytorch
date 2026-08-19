@@ -748,7 +748,7 @@ class DistTensorRandomOpCompileTest(DTensorTestBase):
         for i in range(len(rng_states) - 1):
             self.assertFalse(
                 torch.equal(rng_states[i], rng_states[i + 1]),
-                f"RNG state did not change between call {i} and {i + 1}",
+                lambda msg: f"{msg}\nRNG state did not change between call {i} and {i + 1}",
             )
         return results, rng_states
 

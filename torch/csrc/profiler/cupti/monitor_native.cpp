@@ -138,15 +138,28 @@ void CuptiMonitorBuffers::on_complete(
   cv_.notify_one();
 }
 
-std::optional<CompletedCuptiBuffer> CuptiMonitorBuffers::get_completed() {
-  std::unique_lock<std::mutex> lock(mutex_);
-  cv_.wait(lock, [this] { return !completed_.empty() || shutdown_; });
+std::optional<CompletedCuptiBuffer> CuptiMonitorBuffers::
+    pop_completed_locked() {
   if (completed_.empty()) {
-    return std::nullopt; // shutdown
+    return std::nullopt; // timeout or shutdown
   }
   CompletedCuptiBuffer buf = std::move(completed_.front());
   completed_.pop_front();
   return buf;
+}
+
+std::optional<CompletedCuptiBuffer> CuptiMonitorBuffers::get_completed() {
+  std::unique_lock<std::mutex> lock(mutex_);
+  cv_.wait(lock, [this] { return !completed_.empty() || shutdown_; });
+  return pop_completed_locked();
+}
+
+std::optional<CompletedCuptiBuffer> CuptiMonitorBuffers::get_completed_for(
+    std::chrono::nanoseconds timeout) {
+  std::unique_lock<std::mutex> lock(mutex_);
+  cv_.wait_for(
+      lock, timeout, [this] { return !completed_.empty() || shutdown_; });
+  return pop_completed_locked();
 }
 
 void CuptiMonitorBuffers::return_buffer(uint8_t* ptr) {
@@ -212,22 +225,20 @@ void CuptiMonitorDecoder::configure(
     uintptr_t subscriber,
     uintptr_t get_next_record_fn,
     uint32_t fence_kind,
-    int fence_end_field) {
+    int fence_end_field,
+    bool self_flush,
+    uint64_t flush_period_ns,
+    uintptr_t flush_fn) {
   subscriber_ = subscriber;
   get_next_record_fn_ = get_next_record_fn;
   fence_kind_ = fence_kind;
   fence_end_field_ = fence_end_field;
+  self_flush_ = self_flush;
+  flush_period_ns_ = flush_period_ns;
+  flush_fn_ = flush_fn;
   max_sync_ns_.store(0);
   buffers_decoded_.store(0);
   valid_bytes_.store(0);
-}
-
-void CuptiMonitorDecoder::set_cbid_filter(
-    int cbid_field_id,
-    std::unordered_map<uint32_t, std::pair<bool, std::unordered_set<uint32_t>>>
-        filters) {
-  cbid_field_id_ = cbid_field_id;
-  cbid_filters_ = std::move(filters);
 }
 
 void CuptiMonitorDecoder::start() {
@@ -249,18 +260,52 @@ void CuptiMonitorDecoder::stop() {
 }
 
 void CuptiMonitorDecoder::worker_loop() {
-  // get_completed() blocks until a buffer is ready and returns nullopt only
-  // once the pool is shut down AND drained, so on stop() the worker decodes
-  // every already-completed buffer (incl. the fence's trailing flush) before
-  // exiting.
+  // Single native thread: drives the periodic plain flush (when self_flush_ is
+  // set) AND decodes. cuptiActivityFlushAll(0) is called through the address
+  // Python passed (like the record iterator), so this file needs no libcupti
+  // link. We track the time since the last flush and re-flush
+  // before waiting once the period has elapsed, so the cadence holds no matter
+  // how busy the decode is. The wait is bounded by the period so an idle thread
+  // still re-checks the cadence; without self-flush it blocks until a buffer or
+  // shutdown. nullopt from get_completed*() means timeout OR shutdown --
+  // distinguished by running_. On stop() the pool is shut down and the worker
+  // drains every already-completed buffer before exiting.
+  const bool do_flush = self_flush_;
+  // Floor the cadence: a configured period of 0 ("continuously") would make the
+  // bounded wait below a non-blocking poll, turning this into a busy loop that
+  // pegs a core and hammers cuptiActivityFlushAll with no backoff. 1ms is far
+  // below any useful flush cadence, so this only bites the degenerate 0 case.
+  const auto period = std::max(
+      std::chrono::nanoseconds(flush_period_ns_),
+      std::chrono::nanoseconds(std::chrono::milliseconds(1)));
+  // Backdate so the first iteration flushes immediately (matters for HES, whose
+  // records only surface on a flush).
+  auto last_flush = std::chrono::steady_clock::now() - period;
+  auto& buffers = CuptiMonitorBuffers::get();
   while (true) {
+    if (do_flush) {
+      auto now = std::chrono::steady_clock::now();
+      if (now - last_flush >= period) {
+        // cuptiActivityFlushAll(flag). Called via the address Python passed
+        // (see decode_buffer for the same pattern), so this TU needs no
+        // libcupti link.
+        using FlushAllFn = int (*)(uint32_t);
+        // NOLINTNEXTLINE(performance-no-int-to-ptr)
+        auto flush_all = reinterpret_cast<FlushAllFn>(flush_fn_);
+        if (flush_all != nullptr) {
+          flush_all(0);
+        }
+        last_flush = now;
+      }
+    }
     std::optional<CompletedCuptiBuffer> buf =
-        CuptiMonitorBuffers::get().get_completed();
-    if (!buf.has_value()) {
+        do_flush ? buffers.get_completed_for(period) : buffers.get_completed();
+    if (buf.has_value()) {
+      decode_buffer(*buf);
+      buffers.return_buffer(buf->ptr);
+    } else if (!running_.load()) {
       break; // shut down and drained
     }
-    decode_buffer(*buf);
-    CuptiMonitorBuffers::get().return_buffer(buf->ptr);
   }
 }
 
@@ -290,9 +335,6 @@ void CuptiMonitorDecoder::decode_buffer(const CompletedCuptiBuffer& buf) {
       local;
   std::map<uint32_t, const CuptiRecordLayout*> layout_by_kind;
   std::map<uint32_t, CuptiLayoutKey> key_by_kind;
-  // Per-kind cbid field offset for the noisy-cbid filter (-1 = kind has no cbid
-  // field).
-  std::map<uint32_t, int64_t> cbid_off_by_kind;
   uint64_t local_max_sync = 0;
   void* record = nullptr;
   while (get_next(subscriber, buf.ptr, buf.valid_size, &record) == 0) {
@@ -315,37 +357,6 @@ void CuptiMonitorDecoder::decode_buffer(const CompletedCuptiBuffer& buf) {
     }
     if (layout == nullptr) {
       continue; // no captured layout for this kind; skip
-    }
-    // Drop noisy runtime/driver records by cbid (see set_cbid_filter) so they
-    // never reach the columns: the runtime blocklist / driver allowlist,
-    // applied here because CUPTI's own per-cbid filter is NOT_COMPATIBLE under
-    // user-defined records.
-    if (!cbid_filters_.empty()) {
-      auto filt = cbid_filters_.find(kind);
-      if (filt != cbid_filters_.end()) {
-        auto offit = cbid_off_by_kind.find(kind);
-        int64_t cbid_off = -1;
-        if (offit == cbid_off_by_kind.end()) {
-          for (const auto& f : layout->fields) {
-            if (f.field_id == cbid_field_id_) {
-              cbid_off = static_cast<int64_t>(f.offset);
-              break;
-            }
-          }
-          cbid_off_by_kind[kind] = cbid_off;
-        } else {
-          cbid_off = offit->second;
-        }
-        if (cbid_off >= 0) {
-          uint32_t cbid = 0;
-          std::memcpy(&cbid, rec + cbid_off, sizeof(uint32_t));
-          const bool in_set = filt->second.second.contains(cbid);
-          const bool keep = filt->second.first ? in_set : !in_set;
-          if (!keep) {
-            continue; // noisy record: drop before accumulating its columns
-          }
-        }
-      }
     }
     auto& kind_cols = local[kind][key_by_kind[kind]];
     for (const auto& field : layout->fields) {

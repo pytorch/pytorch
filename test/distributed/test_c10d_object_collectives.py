@@ -13,6 +13,8 @@ if not dist.is_available():
 
 from torch.testing._internal.common_distributed import DistributedTestBase, TEST_SKIPS
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
     run_tests,
     skipIfHpu,
     TEST_WITH_DEV_DBG_ASAN,
@@ -55,56 +57,76 @@ def with_comms(func=None):
 
 
 class TestObjectCollectives(DistributedTestBase):
+    @parametrize("weights_only", [True, False])
     @with_comms()
-    def test_all_gather_object(self):
+    def test_all_gather_object(self, weights_only):
         output = [None] * dist.get_world_size()
-        dist.all_gather_object(object_list=output, obj=self.rank)
+        dist.all_gather_object(
+            object_list=output, obj=self.rank, weights_only=weights_only
+        )
 
         for i, v in enumerate(output):
             self.assertEqual(i, v, lambda msg: f"{msg}\nrank: {self.rank}")
 
+    @parametrize("weights_only", [True, False])
     @with_comms()
-    def test_gather_object(self):
+    def test_gather_object(self, weights_only):
         output = [None] * dist.get_world_size() if self.rank == 0 else None
-        dist.gather_object(obj=self.rank, object_gather_list=output)
+        dist.gather_object(
+            obj=self.rank, object_gather_list=output, weights_only=weights_only
+        )
 
         if self.rank == 0:
             for i, v in enumerate(output):
                 self.assertEqual(i, v, lambda msg: f"{msg}\nrank: {self.rank}")
 
     @skipIfHpu
+    @parametrize("weights_only", [True, False])
     @with_comms()
-    def test_send_recv_object_list(self):
+    def test_send_recv_object_list(self, weights_only):
         val = 99 if self.rank == 0 else None
         object_list = [val] * dist.get_world_size()
         if self.rank == 0:
-            dist.send_object_list(object_list, 1)
+            dist.send_object_list(object_list, 1, weights_only=weights_only)
         if self.rank == 1:
-            dist.recv_object_list(object_list, 0)
+            dist.recv_object_list(object_list, 0, weights_only=weights_only)
 
         if self.rank < 2:
             self.assertEqual(99, object_list[0])
         else:
             self.assertEqual(None, object_list[0])
 
+    @parametrize("weights_only", [True, False])
     @with_comms()
-    def test_broadcast_object_list(self):
+    def test_broadcast_object_list(self, weights_only):
         val = 99 if self.rank == 0 else None
         object_list = [val] * dist.get_world_size()
         # TODO test with broadcast_object_list's device argument
-        dist.broadcast_object_list(object_list=object_list)
+        dist.broadcast_object_list(object_list=object_list, weights_only=weights_only)
 
         self.assertEqual(99, object_list[0])
 
+    @parametrize("weights_only", [True, False])
     @with_comms()
-    def test_scatter_object_list(self):
+    def test_scatter_object_list(self, weights_only):
         input_list = list(range(dist.get_world_size())) if self.rank == 0 else None
         output_list = [None]
         dist.scatter_object_list(
-            scatter_object_output_list=output_list, scatter_object_input_list=input_list
+            scatter_object_output_list=output_list,
+            scatter_object_input_list=input_list,
+            weights_only=weights_only,
         )
 
         self.assertEqual(self.rank, output_list[0])
+
+    @with_comms()
+    def test_weights_only_rejects_unsafe_object(self):
+        # An arbitrary function is not deserializable under weights_only=True
+        output = [None] * dist.get_world_size()
+        with self.assertRaises(Exception):
+            dist.all_gather_object(
+                object_list=output, obj=with_comms, weights_only=True
+            )
 
     # Test Object Collectives With Sub Pg
 
@@ -145,6 +167,9 @@ class TestObjectCollectives(DistributedTestBase):
             out_list[0] = rank
         dist.broadcast_object_list(out_list, src=ranks[0], group=my_pg)
         self.assertEqual(ranks[0], out_list[0])
+
+
+instantiate_parametrized_tests(TestObjectCollectives)
 
 
 if __name__ == "__main__":

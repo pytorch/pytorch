@@ -458,7 +458,7 @@ class Tensor(torch._C.TensorBase):
             and (
                 isinstance(self, torch._subclasses.functional_tensor.FunctionalTensor)
                 or (
-                    not isinstance(self, torch._subclasses.fake_tensor.FakeTensor)
+                    not torch._subclasses.fake_tensor.is_fake_tensor(self)
                     and self.data_ptr() == 0
                 )
             )
@@ -478,7 +478,7 @@ class Tensor(torch._C.TensorBase):
             type(self) is not torch.Tensor
             and type(self).__torch_dispatch__ is not torch.Tensor.__torch_dispatch__
             and (
-                isinstance(self, torch._subclasses.fake_tensor.FakeTensor)
+                torch._subclasses.fake_tensor.is_fake_tensor(self)
                 and not (skip_data and materialize_fake_tensors)
             )
         ):
@@ -512,7 +512,7 @@ class Tensor(torch._C.TensorBase):
             # don't have _subclasses
             if (
                 hasattr(torch, "_subclasses")
-                and isinstance(self, torch._subclasses.fake_tensor.FakeTensor)
+                and torch._subclasses.fake_tensor.is_fake_tensor(self)
                 and skip_data
             ):
                 storage._fake_device = self.device

@@ -12,11 +12,17 @@ from torch.distributed.checkpoint.metadata import (
     TensorProperties,
     TensorStorageMetadata,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 
 
 class TestDCPCompatbility(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_metadata(self) -> None:
         # Ensure that all the new fields of all the metadata have the default
         # values so that we can always deserialize from a legacy metadata.

@@ -73,10 +73,10 @@ class C10_API SmallVectorBase {
 
  public:
   SmallVectorBase() = delete;
-  size_t size() const {
+  [[nodiscard]] size_t size() const {
     return Size;
   }
-  size_t capacity() const {
+  [[nodiscard]] size_t capacity() const {
     return Capacity;
   }
 
@@ -272,85 +272,85 @@ class SmallVectorTemplateCommon
   using Base::size;
 
   // forward iterator creation methods.
-  iterator begin() {
+  [[nodiscard]] iterator begin() {
     return (iterator)this->BeginX;
   }
-  const_iterator begin() const {
+  [[nodiscard]] const_iterator begin() const {
     return (const_iterator)this->BeginX;
   }
-  iterator end() {
+  [[nodiscard]] iterator end() {
     return begin() + size();
   }
-  const_iterator end() const {
+  [[nodiscard]] const_iterator end() const {
     return begin() + size();
   }
 
   // reverse iterator creation methods.
-  reverse_iterator rbegin() {
+  [[nodiscard]] reverse_iterator rbegin() {
     return reverse_iterator(end());
   }
-  const_reverse_iterator rbegin() const {
+  [[nodiscard]] const_reverse_iterator rbegin() const {
     return const_reverse_iterator(end());
   }
-  reverse_iterator rend() {
+  [[nodiscard]] reverse_iterator rend() {
     return reverse_iterator(begin());
   }
-  const_reverse_iterator rend() const {
+  [[nodiscard]] const_reverse_iterator rend() const {
     return const_reverse_iterator(begin());
   }
 
-  size_type size_in_bytes() const {
+  [[nodiscard]] size_type size_in_bytes() const {
     return size() * sizeof(T);
   }
-  constexpr size_type max_size() const {
+  [[nodiscard]] constexpr size_type max_size() const {
     return std::min(this->SizeTypeMax(), size_type(-1) / sizeof(T));
   }
 
-  size_t capacity_in_bytes() const {
+  [[nodiscard]] size_t capacity_in_bytes() const {
     return capacity() * sizeof(T);
   }
 
   /// Return a pointer to the vector's buffer, even if empty().
-  pointer data() {
+  [[nodiscard]] pointer data() {
     return pointer(begin());
   }
   /// Return a pointer to the vector's buffer, even if empty().
-  const_pointer data() const {
+  [[nodiscard]] const_pointer data() const {
     return const_pointer(begin());
   }
 
   // SmallVector::at is NOT from LLVM.
-  reference at(size_type idx) {
+  [[nodiscard]] reference at(size_type idx) {
     assert(idx < size());
     return begin()[idx];
   }
-  const_reference at(size_type idx) const {
+  [[nodiscard]] const_reference at(size_type idx) const {
     assert(idx < size());
     return begin()[idx];
   }
-  reference operator[](size_type idx) {
+  [[nodiscard]] reference operator[](size_type idx) {
     assert(idx < size());
     return begin()[idx];
   }
-  const_reference operator[](size_type idx) const {
+  [[nodiscard]] const_reference operator[](size_type idx) const {
     assert(idx < size());
     return begin()[idx];
   }
 
-  reference front() {
+  [[nodiscard]] reference front() {
     assert(!empty());
     return begin()[0];
   }
-  const_reference front() const {
+  [[nodiscard]] const_reference front() const {
     assert(!empty());
     return begin()[0];
   }
 
-  reference back() {
+  [[nodiscard]] reference back() {
     assert(!empty());
     return end()[-1];
   }
-  const_reference back() const {
+  [[nodiscard]] const_reference back() const {
     assert(!empty());
     return end()[-1];
   }
@@ -1010,16 +1010,16 @@ class SmallVectorImpl : public SmallVectorTemplateBase<T> {
       std::is_nothrow_move_constructible_v<T> &&
       std::is_nothrow_destructible_v<T>);
 
-  bool operator==(const SmallVectorImpl& RHS) const {
+  [[nodiscard]] bool operator==(const SmallVectorImpl& RHS) const {
     if (this->size() != RHS.size())
       return false;
     return std::equal(this->begin(), this->end(), RHS.begin());
   }
-  bool operator!=(const SmallVectorImpl& RHS) const {
+  [[nodiscard]] bool operator!=(const SmallVectorImpl& RHS) const {
     return !(*this == RHS);
   }
 
-  bool operator<(const SmallVectorImpl& RHS) const {
+  [[nodiscard]] bool operator<(const SmallVectorImpl& RHS) const {
     return std::lexicographical_compare(
         this->begin(), this->end(), RHS.begin(), RHS.end());
   }
@@ -1404,7 +1404,7 @@ class /* LLVM_GSL_OWNER */ SmallVector : public SmallVectorImpl<T>,
 };
 
 template <typename T, unsigned N>
-inline size_t capacity_in_bytes(const SmallVector<T, N>& X) {
+[[nodiscard]] inline size_t capacity_in_bytes(const SmallVector<T, N>& X) {
   return X.capacity_in_bytes();
 }
 
@@ -1430,11 +1430,12 @@ using ValueTypeFromRangeType = std::remove_const_t<
 /// when you want to iterate a range and then sort the results.
 template <unsigned Size, typename R>
 // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
-SmallVector<ValueTypeFromRangeType<R>, Size> to_vector(R&& Range) {
+[[nodiscard]] SmallVector<ValueTypeFromRangeType<R>, Size> to_vector(
+    R&& Range) {
   return {std::begin(Range), std::end(Range)};
 }
 template <typename R>
-SmallVector<
+[[nodiscard]] SmallVector<
     ValueTypeFromRangeType<R>,
     CalculateSmallVectorDefaultInlinedElements<
         ValueTypeFromRangeType<R>>::value>

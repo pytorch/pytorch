@@ -52,13 +52,15 @@ def check(self, f, t, delta, check_val=True, graph_input=False, P=None):
     if delta == -1:
         self.assertTrue(
             old_num_nodes >= new_num_nodes,
-            (f"number of nodes increased {old_num_nodes}, {new_num_nodes}"),
+            (
+                lambda msg: f"{msg}\nnumber of nodes increased {old_num_nodes}, {new_num_nodes}"
+            ),
         )
     else:
         self.assertTrue(
             old_num_nodes == new_num_nodes + delta,
             (
-                f"number of nodes not the same {old_num_nodes - delta}, {new_num_nodes}\n {fx_g.graph} \n {new_graph}"
+                lambda msg: f"{msg}\nnumber of nodes not the same {old_num_nodes - delta}, {new_num_nodes}\n {fx_g.graph} \n {new_graph}"
             ),
         )
 
@@ -69,7 +71,7 @@ def check(self, f, t, delta, check_val=True, graph_input=False, P=None):
     self.assertTrue(
         pass_2_num_nodes == new_num_nodes,
         (
-            f"second pass graph has less node {pass_2_num_nodes}, {new_num_nodes}\n {new_graph} \n {pass_2_graph}"
+            lambda msg: f"{msg}\nsecond pass graph has less node {pass_2_num_nodes}, {new_num_nodes}\n {new_graph} \n {pass_2_graph}"
         ),
     )
 
@@ -79,12 +81,15 @@ def check(self, f, t, delta, check_val=True, graph_input=False, P=None):
         our_result = new_g(t)
         if true_result is None:  # both return None
             self.assertTrue(
-                our_result is None, f"true result is None, CSE result is {our_result}"
+                our_result is None,
+                lambda msg: f"{msg}\ntrue result is None, CSE result is {our_result}",
             )
         else:  # results returned are the same
             self.assertTrue(
                 torch.all(true_result == our_result),
-                (f"results are different {true_result}, {our_result}"),
+                (
+                    lambda msg: f"{msg}\nresults are different {true_result}, {our_result}"
+                ),
             )  # check results are the same
 
 
