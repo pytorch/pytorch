@@ -165,6 +165,30 @@ class ImportableConstexprType(NamedTuple):
     root_name: str
 
 
+# Keep this aligned with the names bound by TritonKernel.gen_common_triton_imports
+# and the generated launcher scope in CachingAutotuner.make_launcher.
+_TRITON_CONSTEXPR_RESERVED_NAMES = frozenset(
+    (
+        "AttrsDescriptor",
+        "AutotuneHint",
+        "DeviceProperties",
+        "ReductionHint",
+        "TileHint",
+        "libdevice",
+        "math",
+        "pl",
+        "proton",
+        "tl",
+        "tl_math",
+        "tlx",
+        "torch",
+        "triton",
+        "triton_helpers",
+        "triton_heuristics",
+    )
+)
+
+
 class ConstexprReprChildren(NamedTuple):
     values: tuple[object, ...]
     rebuild: Callable[[tuple[object, ...]], object]
@@ -288,7 +312,9 @@ def _collect_importable_constexpr_types(
     value_type = type(value)
     type_module = getattr(value_type, "__module__", None)
     type_qualname = getattr(value_type, "__qualname__", None)
-    repr_prefix = _constexpr_type_repr_prefix(value)
+    repr_prefix = (
+        _constexpr_type_repr_prefix(value) if type_module != "builtins" else None
+    )
     if (
         type_module is not None
         and type_qualname is not None
@@ -319,6 +345,13 @@ def _collect_importable_constexpr_types(
                         "evaluated as a constructor call. Set repr=False or init=True."
                     )
         root_name = type_qualname.split(".", 1)[0]
+        if root_name in _TRITON_CONSTEXPR_RESERVED_NAMES:
+            raise ImportError(
+                "Triton constexpr value type "
+                f"{type_module}.{type_qualname} requires import name {root_name}, "
+                "which would shadow a name reserved by generated Triton code. "
+                "Rename the root type."
+            )
         existing = result.get(root_name)
         # Generated imports bind the root, so sibling nested types from the
         # same module intentionally share one entry.

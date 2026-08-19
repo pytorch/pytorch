@@ -46,6 +46,10 @@ class UserDefinedTritonKernelNonInitConfig:
     derived: int = dataclasses.field(init=False, default=0)
 
 
+# This root name would overwrite the conventional triton.language import alias.
+tl = dataclasses.make_dataclass("tl", [("offset", int)], frozen=True)
+
+
 class UserDefinedAttrsLikeConfig:
     # attrs publishes this metadata for the fields used by its generated repr.
     __attrs_attrs__ = (

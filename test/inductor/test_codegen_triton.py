@@ -55,6 +55,7 @@ from torch.utils._triton import has_triton_package
 
 try:
     from triton_constexpr_configs import (
+        tl as TritonLanguageShadowConfig,
         UserDefinedAttrsLikeConfig,
         UserDefinedPydanticLikeConfig,
         UserDefinedTritonKernelConfigMode,
@@ -66,6 +67,7 @@ try:
     )
 except ImportError:
     from test.inductor.triton_constexpr_configs import (
+        tl as TritonLanguageShadowConfig,
         UserDefinedAttrsLikeConfig,
         UserDefinedPydanticLikeConfig,
         UserDefinedTritonKernelConfigMode,
@@ -240,6 +242,15 @@ class TestCodegenTriton(InductorTestCase):
             ImportError, "repr-visible field derived with init=False"
         ):
             get_importable_constexpr_types([value])
+
+    def test_importable_constexpr_types_skip_builtin_repr(self):
+        with patch("builtins.repr") as repr_mock:
+            self.assertEqual(get_importable_constexpr_types([{"values": [1, 2]}]), [])
+        repr_mock.assert_not_called()
+
+    def test_importable_constexpr_types_reserved_name_error(self):
+        with self.assertRaisesRegex(ImportError, "import name tl.*reserved"):
+            get_importable_constexpr_types([TritonLanguageShadowConfig(offset=2)])
 
     def test_importable_constexpr_types_set(self):
         namespace = UserDefinedTritonKernelConfigNamespace
