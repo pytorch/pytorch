@@ -100,15 +100,7 @@ def with_comms(func=None, init_rpc=True, backend=None):
         # present on the host.
         device_type = getattr(self, "device_type", "cpu")
         if backend is None:
-            if device_type == "cpu":
-                resolved_backend = "gloo"
-            else:
-                acc = torch.accelerator.current_accelerator()
-                resolved_backend = (
-                    dist.get_default_backend_for_device(acc)
-                    if acc is not None
-                    else "gloo"
-                )
+            resolved_backend = dist.get_default_backend_for_device(device_type)
         else:
             resolved_backend = backend
 
