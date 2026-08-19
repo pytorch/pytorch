@@ -22,6 +22,7 @@ from torch._inductor.codegen.cpp import CppOverrides, CppVecOverrides
 from torch._inductor.compile_fx import compile_fx, compile_fx_inner
 from torch._inductor.exc import InductorError
 from torch._inductor.graph import GraphLowering
+from torch._inductor.lowering import _cpu_addcmul_uses_fma
 from torch._inductor.utils import fresh_cache, timed
 from torch._prims_common import is_float_dtype
 from torch.autograd.functional import vjp
@@ -5394,6 +5395,65 @@ class CPUReproTests(TestCase):
             f"tmp_acc0_vec.store(tmpbuf.data(), static_cast<int64_t>({tail_width}L));",
             code,
         )
+
+    def test_group_norm_affine_fma_precision(self):
+        def fn(x, weight, bias):
+            y = F.group_norm(x, 5, weight, bias)
+            return torch.log(torch.clamp(y, min=1e-6))
+
+        x = torch.full((4, 5, 6, 6), 0.9999949932098389)
+        test_cases = [
+            ("weight_and_bias", torch.ones(5), torch.zeros(5)),
+            ("weight_only", torch.ones(5), None),
+            ("bias_only", None, torch.zeros(5)),
+        ]
+
+        for name, weight, bias in test_cases:
+            with self.subTest(name=name):
+                expected = fn(x, weight, bias)
+                torch._dynamo.reset()
+                actual = torch.compile(fn, backend="inductor")(x, weight, bias)
+
+                self.assertLess((expected - actual).abs().max().item(), 1e-4)
+
+        # Exercise cancellation in the folded bias expression itself. Separate
+        # multiply/add rounds this case 0.001953125 away from eager's FMA result.
+        def group_norm(x, weight, bias):
+            return F.group_norm(x, 5, weight, bias)
+
+        x = torch.full((4, 5, 6, 6), 10.0)
+        weight = torch.full((5,), 10.0)
+        bias = torch.full((5,), 31622.779296875)
+        expected = group_norm(x, weight, bias)
+        torch._dynamo.reset()
+        actual = torch.compile(group_norm, backend="inductor")(x, weight, bias)
+        self.assertEqual(expected, actual)
+
+    def test_cpu_addcmul_fma_probe_ignores_default_device(self):
+        _cpu_addcmul_uses_fma.cache_clear()
+        try:
+            expected = _cpu_addcmul_uses_fma()
+            _cpu_addcmul_uses_fma.cache_clear()
+            with torch.device("meta"):
+                actual = _cpu_addcmul_uses_fma()
+            self.assertEqual(expected, actual)
+        finally:
+            _cpu_addcmul_uses_fma.cache_clear()
+
+    def test_cpu_addcmul_fma_matches_eager_dtypes_and_tail(self):
+        def fn(x, tensor1, tensor2):
+            return torch.addcmul(x, tensor1, tensor2, value=1)
+
+        for dtype in (torch.float16, torch.bfloat16, torch.float32, torch.float64):
+            with self.subTest(dtype=dtype):
+                torch.manual_seed(0)
+                x = torch.randn(257, dtype=dtype)
+                tensor1 = torch.randn(257, dtype=dtype)
+                tensor2 = torch.randn(257, dtype=dtype)
+                expected = fn(x, tensor1, tensor2)
+                torch._dynamo.reset()
+                actual = torch.compile(fn, backend="inductor")(x, tensor1, tensor2)
+                self.assertEqual(expected, actual)
 
     @unittest.skipIf(
         os.getenv("ATEN_CPU_CAPABILITY") == "default",
