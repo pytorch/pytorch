@@ -9,6 +9,7 @@ from torch.distributed.tensor import DeviceMesh, DTensor, Replicate, Shard
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import OpSchema
 from torch.distributed.tensor.debug import _clear_sharding_prop_cache
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -36,7 +37,6 @@ class TestDTensorLogging(TestCase):
         dist.init_process_group(
             backend="fake", rank=0, world_size=self.world_size, store=store
         )
-        self.device_type = DEVICE_TYPE
 
     def test_sharding_prop_cache_logging(self):
         mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
@@ -129,6 +129,14 @@ sharding_prop python cache HIT: aten.add.Tensor(Spec(f32[4, 4](S(0))), Spec(f32[
         self.assertEqual(len(log_records), 2)
         self.assertIn("MISS", log_records[0].getMessage())
         self.assertIn("HIT", log_records[1].getMessage())
+
+
+instantiate_device_type_tests(
+    TestDTensorLogging,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":

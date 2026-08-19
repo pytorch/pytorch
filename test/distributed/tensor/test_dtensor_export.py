@@ -24,10 +24,12 @@ from torch.nn.attention.flex_attention import (
     create_block_mask,
     flex_attention,
 )
-from torch.testing._internal.common_device_type import skipPRIVATEUSE1
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    skipPRIVATEUSE1,
+)
 from torch.testing._internal.common_utils import (
     HardwareClassification,
-    instantiate_parametrized_tests,
     parametrize,
     run_tests,
     TestCase,
@@ -195,7 +197,6 @@ class DTensorExportTest(TestCase):
         dist.init_process_group(
             backend="fake", rank=0, world_size=self.world_size, store=store
         )
-        self.device_type = DEVICE_TYPE
 
     def _run_test(self, export_fn, test_annotation=False):
         dp_degree = 2
@@ -590,7 +591,12 @@ graph():
         self.assertEqual(gm(z_dt, z_dt).shape, (0, 0))
 
 
-instantiate_parametrized_tests(DTensorExportTest)
+instantiate_device_type_tests(
+    DTensorExportTest,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":
