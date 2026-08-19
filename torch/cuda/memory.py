@@ -80,16 +80,24 @@ if not hasattr(torch._C, "_MemPool"):
     torch._C.__dict__["_cuda_beginAllocateCurrentThreadToPool"] = _dummy_type(
         "_cuda_beginAllocateCurrentThreadToPool"
     )
+    torch._C.__dict__["_cuda_beginCublasEagerWorkspaceMode"] = _dummy_type(
+        "_cuda_beginCublasEagerWorkspaceMode"
+    )
     torch._C.__dict__["_cuda_endAllocateToPool"] = _dummy_type(
         "_cuda_endAllocateToPool"
+    )
+    torch._C.__dict__["_cuda_endCublasEagerWorkspaceMode"] = _dummy_type(
+        "_cuda_endCublasEagerWorkspaceMode"
     )
     torch._C.__dict__["_cuda_releasePool"] = _dummy_type("_cuda_releasePool")
 
 from torch._C import (  # noqa: F401
     _cuda_beginAllocateCurrentThreadToPool,
     _cuda_beginAllocateToPool,
+    _cuda_beginCublasEagerWorkspaceMode,
     _cuda_CUDAAllocator,
     _cuda_endAllocateToPool,
+    _cuda_endCublasEagerWorkspaceMode,
     _cuda_releasePool,
     _MemPool,
 )
@@ -1445,14 +1453,18 @@ def use_mem_pool(pool: MemPool, device: "Device" = None):
         torch.cuda.current_device() if device is None else _get_device_index(device)
     )
     _cuda_beginAllocateCurrentThreadToPool(device_index, pool.id)
+    _cuda_beginCublasEagerWorkspaceMode()
     try:
         if torch.cuda.is_current_stream_capturing():
             graph = torch.cuda.CUDAGraph.get_currently_capturing_graph()
             graph._retain_pool(pool)
         yield
     finally:
-        _cuda_endAllocateToPool(device_index, pool.id)
-        _cuda_releasePool(device_index, pool.id)
+        try:
+            _cuda_endAllocateToPool(device_index, pool.id)
+        finally:
+            _cuda_endCublasEagerWorkspaceMode()
+            _cuda_releasePool(device_index, pool.id)
 
 
 # Process-lifetime singleton: the UVM pluggable allocator + the ctypes closures

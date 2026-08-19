@@ -84,17 +84,22 @@ TORCH_CUDA_CPP_API c10::Allocator* getCUDADeviceAllocator();
 /* Handles */
 TORCH_CUDA_CPP_API cusparseHandle_t getCurrentCUDASparseHandle();
 TORCH_CUDA_CPP_API cublasHandle_t getCurrentCUDABlasHandle(bool setup = true);
-// capture_workspace owns an invocation-scoped workspace when the current
-// stream is captured through at::cuda::CUDAGraph. Its deleter clears the
-// thread-local handle before releasing the allocation. The owner must outlive
-// all uses of the returned handle and must not overlap another setup call on
-// the same thread and device. It remains empty outside capture.
+// workspace owns invocation-scoped storage during CUDAGraph capture or while
+// eager workspace mode is active. Its deleter clears the thread-local handle
+// before releasing the allocation. The owner must outlive all uses of the
+// returned handle and must not overlap another setup call on the same thread
+// and device. It remains empty when the persistent workspace cache is used.
 TORCH_CUDA_CPP_API cublasHandle_t getCurrentCUDABlasHandle(
-    at::DataPtr& capture_workspace);
+    at::DataPtr& workspace);
 TORCH_CUDA_CPP_API cublasLtHandle_t getCurrentCUDABlasLtHandle();
 
 TORCH_CUDA_CPP_API void clearCublasWorkspaces();
 TORCH_CUDA_CPP_API void clearCublasWorkspacesForStream(cudaStream_t stream);
+// These balanced calls define a nestable process-wide mode. Internal cuBLAS
+// and cuBLASLt callers use invocation-scoped workspaces while any scope is
+// active. Scopes may overlap across threads.
+TORCH_CUDA_CPP_API void beginCUDABlasEagerWorkspaceMode();
+TORCH_CUDA_CPP_API void endCUDABlasEagerWorkspaceMode();
 struct WorkspaceMapWithMutex {
   std::map<std::tuple<void*, void*>, std::pair<at::DataPtr, size_t>> map;
   std::shared_mutex mutex;
@@ -105,8 +110,7 @@ TORCH_CUDA_CPP_API WorkspaceMapWithMutex& cublaslt_handle_stream_to_workspace();
 TORCH_CUDA_CPP_API size_t getChosenWorkspaceSize();
 TORCH_CUDA_CPP_API size_t getCUDABlasLtWorkspaceSize();
 TORCH_CUDA_CPP_API void* getCUDABlasLtWorkspace();
-TORCH_CUDA_CPP_API void* getCUDABlasLtWorkspace(
-    at::DataPtr& capture_workspace);
+TORCH_CUDA_CPP_API void* getCUDABlasLtWorkspace(at::DataPtr& workspace);
 TORCH_CUDA_CPP_API void setChosenWorkspaceSize(size_t size);
 TORCH_CUDA_CPP_API void setCUDABlasLtWorkspaceSize(size_t size);
 TORCH_CUDA_CPP_API void resetChosenWorkspaceSize();

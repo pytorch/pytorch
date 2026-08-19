@@ -45,7 +45,21 @@ namespace {
 // -1 means no override; use env var / default
 std::atomic<int64_t> cublas_workspace_override{-1};
 std::atomic<int64_t> cublaslt_workspace_override{-1};
+std::atomic<int64_t> cublas_eager_workspace_mode_depth{0};
 } // namespace
+
+void beginCUDABlasEagerWorkspaceMode() {
+  cublas_eager_workspace_mode_depth.fetch_add(1, std::memory_order_relaxed);
+}
+
+void endCUDABlasEagerWorkspaceMode() {
+  auto depth = cublas_eager_workspace_mode_depth.load(std::memory_order_relaxed);
+  do {
+    TORCH_INTERNAL_ASSERT(
+        depth > 0, "Unbalanced cuBLAS eager workspace mode scope");
+  } while (!cublas_eager_workspace_mode_depth.compare_exchange_weak(
+      depth, depth - 1, std::memory_order_relaxed));
+}
 
 namespace {
 
@@ -355,6 +369,12 @@ bool isCapturing(c10::cuda::CUDAStream stream) {
       c10::cuda::isStreamCapturingMayInitCtx(stream);
 }
 
+bool useEagerWorkspace(c10::cuda::CUDAStream stream) {
+  auto depth =
+      cublas_eager_workspace_mode_depth.load(std::memory_order_relaxed);
+  return C10_UNLIKELY(depth > 0) || isCapturing(stream);
+}
+
 void* getPersistentCUDABlasLtWorkspace(c10::cuda::CUDAStream stream) {
 #ifndef USE_ROCM
   if (unified_cublas_and_lt_workspaces()) {
@@ -438,29 +458,29 @@ void* getCUDABlasLtWorkspace() {
   return getPersistentCUDABlasLtWorkspace(stream);
 }
 
-void* getCUDABlasLtWorkspace(at::DataPtr& capture_workspace) {
+void* getCUDABlasLtWorkspace(at::DataPtr& workspace) {
   auto stream = c10::cuda::getCurrentCUDAStream();
-  if (isCapturing(stream)) {
+  if (useEagerWorkspace(stream)) {
     // A persistent entry may still be referenced by an older live graph, so
     // keep it intact and use caller-owned storage for this invocation.
-    capture_workspace = getNewCUDABlasLtWorkspace();
-    return capture_workspace.mutable_get();
+    workspace = getNewCUDABlasLtWorkspace();
+    return workspace.mutable_get();
   }
   return getPersistentCUDABlasLtWorkspace(stream);
 }
 
 void setupCUDABlasHandle(
     cublasHandle_t handle,
-    at::DataPtr* capture_workspace) {
+    at::DataPtr* workspace) {
   auto stream = c10::cuda::getCurrentCUDAStream();
   TORCH_CUDABLAS_CHECK(cublasSetStream(handle, stream));
 
-  if (capture_workspace != nullptr && isCapturing(stream)) {
+  if (workspace != nullptr && useEagerWorkspace(stream)) {
     // A persistent entry may still be referenced by an older live graph, so
     // keep it intact and use caller-owned storage for this invocation.
-    *capture_workspace = getNewWorkspaceForHandle(handle);
+    *workspace = getNewWorkspaceForHandle(handle);
     TORCH_CUDABLAS_CHECK(cublasSetWorkspace(
-        handle, capture_workspace->get(), getChosenWorkspaceSize()));
+        handle, workspace->get(), getChosenWorkspaceSize()));
   } else {
     // We explicitly set the cublas workspace even though CUDA 12.2+ fixed the
     // issue where memory usage increased during graph capture.
@@ -532,10 +552,10 @@ cublasHandle_t getCurrentCUDABlasHandle(bool setup) {
   return handle;
 }
 
-cublasHandle_t getCurrentCUDABlasHandle(at::DataPtr& capture_workspace) {
-  TORCH_INTERNAL_ASSERT(!capture_workspace);
+cublasHandle_t getCurrentCUDABlasHandle(at::DataPtr& workspace) {
+  TORCH_INTERNAL_ASSERT(!workspace);
   auto handle = getCurrentCUDABlasHandle(/*setup=*/false);
-  setupCUDABlasHandle(handle, &capture_workspace);
+  setupCUDABlasHandle(handle, &workspace);
   return handle;
 }
 

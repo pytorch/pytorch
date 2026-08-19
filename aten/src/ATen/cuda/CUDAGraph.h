@@ -145,6 +145,9 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   // still routing allocations to the pool (capture abandoned before capture_end
   // ran) and must be ended before the pool can be released.
   bool capturing_to_pool_ = false;
+  // Tracks the process-wide eager cuBLAS workspace scope entered for this
+  // capture so reset() can balance it after an abandoned capture.
+  bool cublas_eager_workspace_mode_active_ = false;
 
   // the ID assigned by cuda during graph capture,
   // used to identify when a stream is participating in capture

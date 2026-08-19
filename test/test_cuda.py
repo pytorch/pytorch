@@ -3937,6 +3937,83 @@ exit(2)
         graph.replay()
         self.assertEqual(result, expected)
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "memory statistics are not supported")
+    @setBlasBackendsToDefaultFinally
+    @serialTest()
+    @parametrize("backend", ("cublas", "cublaslt"))
+    def test_cublas_eager_workspace_mode_global(self, backend):
+        torch.backends.cuda.preferred_blas_library(backend)
+        a = torch.randn(128, 128, device="cuda")
+        b = torch.randn(128, 128, device="cuda")
+        result = torch.empty_like(a)
+        expected = torch.mm(a, b)
+
+        torch._C._cuda_clearCublasWorkspaces()
+        torch.cuda.synchronize()
+        active_before = torch.cuda.memory_stats()["active_bytes.all.current"]
+        state = {}
+
+        def worker():
+            try:
+                with torch.cuda.device(a.device):
+                    torch.mm(a, b, out=result)
+            except BaseException as error:
+                state["error"] = error
+
+        torch._C._cuda_beginCublasEagerWorkspaceMode()
+        torch._C._cuda_beginCublasEagerWorkspaceMode()
+        try:
+            torch._C._cuda_endCublasEagerWorkspaceMode()
+            thread = threading.Thread(target=worker)
+            thread.start()
+            thread.join(timeout=30)
+            self.assertFalse(thread.is_alive())
+            if "error" in state:
+                raise state["error"]
+        finally:
+            torch._C._cuda_endCublasEagerWorkspaceMode()
+
+        torch.cuda.synchronize()
+        self.assertEqual(result, expected)
+        self.assertEqual(
+            torch.cuda.memory_stats()["active_bytes.all.current"], active_before
+        )
+
+        try:
+            torch.mm(a, b, out=result)
+            torch.cuda.synchronize()
+            self.assertGreater(
+                torch.cuda.memory_stats()["active_bytes.all.current"], active_before
+            )
+        finally:
+            torch._C._cuda_clearCublasWorkspaces()
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "memory statistics are not supported")
+    @setBlasBackendsToDefaultFinally
+    @serialTest()
+    @parametrize("backend", ("cublas", "cublaslt"))
+    def test_use_mem_pool_cublas_eager_workspace(self, backend):
+        torch.backends.cuda.preferred_blas_library(backend)
+        a = torch.randn(128, 128, device="cuda")
+        b = torch.randn(128, 128, device="cuda")
+        result = torch.empty_like(a)
+        expected = torch.mm(a, b)
+
+        torch._C._cuda_clearCublasWorkspaces()
+        torch.cuda.synchronize()
+        active_before = torch.cuda.memory_stats()["active_bytes.all.current"]
+        pool = torch.cuda.MemPool()
+        with torch.cuda.use_mem_pool(pool):
+            torch.mm(a, b, out=result)
+
+        torch.cuda.synchronize()
+        self.assertEqual(result, expected)
+        self.assertEqual(
+            torch.cuda.memory_stats()["active_bytes.all.current"], active_before
+        )
+
     def _capture_cublas_workspace_cross_thread(
         self, x, weight, *, rtol, atol, check_allocation
     ):
