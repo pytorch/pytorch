@@ -76,6 +76,7 @@ from ..utils import (
 )
 from .base import (
     AsPythonConstantNotImplementedError,
+    GetSet,
     getset_build,
     getset_read,
     Member,
@@ -521,37 +522,56 @@ class TracebackVariable(VariableTracker):
         val: VariableTracker,
     ) -> VariableTracker:
         name = name_var.as_python_constant()
-        if name == "tb_next":
-            if not self.is_valid_traceback(val):
-                raise_observed_exception(TypeError, tx)
-            if not isinstance(val, (TracebackVariable, ConstantVariable)):
-                raise AssertionError(
-                    f"tb_next val must be TracebackVariable or ConstantVariable, got {type(val)}"
-                )
-            if self.has_reference_cycle(val) or (
-                istype(val, TracebackVariable) and val.has_reference_cycle(self)
-            ):
-                raise_observed_exception(ValueError, tx)
-            self.tb_next = val
+        getset = self.lookup_tp_getset_member(name)
+        if getset is not None and getset.setter is not None:
+            getset.setter(self, tx, val)
         return variables.ConstantVariable.create(None)
 
-    def tp_getattro_impl(
-        self, tx: "InstructionTranslatorBase", name: str
+    def _get_tb_next(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return self.tb_next
+
+    def _set_tb_next(
+        self, tx: "InstructionTranslatorBase", val: VariableTracker
     ) -> VariableTracker:
-        if name == "tb_next":
-            return self.tb_next
-        elif name == "tb_lineno":
-            return self.frame_summary.tp_getattro_impl(tx, "lineno")
-        elif name == "frame_summary":
-            return self.frame_summary
-        elif name == "tb_lasti":
-            unimplemented(
-                gb_type="traceback.tb_lasti not supported",
-                context=f"{self} accessing 'tb_lasti'",
-                explanation="Dynamo does not support accessing the tb_lasti attribute of traceback objects.",
-                hints=[*graph_break_hints.SUPPORTABLE],
+        if not self.is_valid_traceback(val):
+            raise_observed_exception(TypeError, tx)
+        if not isinstance(val, (TracebackVariable, ConstantVariable)):
+            raise AssertionError(
+                f"tb_next val must be TracebackVariable or ConstantVariable, got {type(val).__name__}"
             )
-        return super().tp_getattro_impl(tx, name)
+        if self.has_reference_cycle(val) or (
+            istype(val, TracebackVariable) and val.has_reference_cycle(self)
+        ):
+            raise_observed_exception(ValueError, tx, args=["traceback loop detected"])
+        self.tb_next = val
+        return variables.ConstantVariable.create(None)
+
+    def _get_tb_lineno(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return self.frame_summary.tp_getattro_impl(tx, "lineno")
+
+    def _get_tb_lasti(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        unimplemented(
+            gb_type="traceback.tb_lasti not supported",
+            context=f"{self} accessing 'tb_lasti'",
+            explanation="Dynamo does not support accessing the tb_lasti attribute of traceback objects.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
+    # ref: CPython Objects/traceback.c tb_getsetters. `tb_next` is a getset with
+    # getter+setter (tb_next_get / tb_next_set, which runs a reference-cycle
+    # check); `tb_lineno` is a get-only getset. `frame_summary` is dynamo-internal
+    # (not a real CPython traceback attribute).
+    tp_getset = {
+        "tb_next": GetSet(_get_tb_next, _set_tb_next),
+        "tb_lineno": GetSet(_get_tb_lineno, None),
+        "frame_summary": GetSet(getset_read(lambda s: s.frame_summary)),
+    }
+
+    # ref: CPython Objects/traceback.c tb_memberlist, where tb_lasti is
+    # READONLY. Dynamo graph breaks on read rather than modelling the value.
+    tp_members = {
+        "tb_lasti": Member(_get_tb_lasti),
+    }
 
     def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
@@ -655,113 +675,25 @@ class ExceptionVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if name == "__setattr__":
-            name = args[0].as_python_constant()
-            val = args[1]
-            if name == "__context__":
-                # Constant can be either an Exceptior or None
-                if not (
-                    val.is_constant_none()
-                    or isinstance(
-                        val,
-                        (
-                            variables.ExceptionVariable,
-                            variables.UserDefinedExceptionClassVariable,
-                            variables.UserDefinedExceptionObjectVariable,
-                        ),
-                    )
-                ):
-                    raise_type_error(
-                        tx,
-                        "exception context must be None or derive from BaseException",
-                    )
-                self.set_context(val)
-            elif name == "__cause__":
-                if val.is_constant_none() or isinstance(
-                    val,
-                    (
-                        variables.BuiltinVariable,
-                        variables.ExceptionVariable,
-                        variables.UserDefinedExceptionClassVariable,
-                        variables.UserDefinedExceptionObjectVariable,
-                    ),
-                ):
-                    self.__cause__ = val
-                    self.__suppress_context__ = variables.ConstantVariable.create(True)
-                else:
-                    raise_type_error(
-                        tx, "exception cause must be None or derive from BaseException"
-                    )
-            elif name == "__suppress_context__":
-                if val.is_constant_match(True, False):
-                    self.__suppress_context__ = val
-                else:
-                    raise_type_error(
-                        tx, "exception cause must be None or derive from BaseException"
-                    )
-            elif name == "__traceback__":
-                if not TracebackVariable.is_valid_traceback(val):
-                    raise_type_error(tx, "__traceback__ must be a traceback or None")
-                self.__traceback__ = val
-            elif name == "args":
-                # CPython coerces any iterable to a tuple (PySequence_Tuple).
-                self.args = unpack_iterable(tx, val)
+            attr = args[0].as_python_constant()
+            # Writable attributes route through their tp_getset/tp_members
+            # setter. Anything else becomes a custom instance-dict attribute.
+            getset = self.lookup_tp_getset_member(attr)
+            if getset is not None and getset.setter is not None:
+                getset.setter(self, tx, args[1])
             else:
                 # Arbitrary user attribute -> store in the instance __dict__
                 # via the side effects table.
                 se = tx.output.side_effects
                 if not se.is_attribute_mutation(self):
                     se.track_attribute_mutation_new(self)
-                se.store_instance_dict_attr(self, name, val)
+                se.store_instance_dict_attr(self, attr, args[1])
             return variables.ConstantVariable.create(None)
-        elif name == "__setstate__":
-            if len(args) != 1:
-                raise_type_error(
-                    tx, f"__setstate__() takes exactly one argument ({len(args)} given)"
-                )
-            [state] = args
-            # BaseException.__setstate__(None) is a documented no-op.
-            if state.is_constant_none():
-                return variables.ConstantVariable.create(None)
-            if not isinstance(state, variables.ConstDictVariable):
-                raise_type_error(tx, "state is not a dictionary")
-            for key, value in state.keys_as_python_constant().items():
-                self.call_method(
-                    tx, "__setattr__", [ConstantVariable.create(key), value], {}
-                )
-            return variables.ConstantVariable.create(None)
-        elif name == "with_traceback":
-            if len(args) != 1:
-                raise_type_error(
-                    tx,
-                    f"with_traceback() takes exactly one argument ({len(args)} given)",
-                )
-            [tb] = args
-            if not TracebackVariable.is_valid_traceback(tb):
-                raise_type_error(tx, "__traceback__ must be a traceback or None")
-            self.__traceback__ = tb
-            return self
-        else:
-            return super().call_method(tx, name, args, kwargs)
+        return super().call_method(tx, name, args, kwargs)
 
     def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
-        if name == "__class__":
-            return VariableTracker.build(tx, self.exc_type)
-        elif name == "__context__":
-            return self.__context__
-        elif name == "__cause__":
-            return self.__cause__
-        elif name == "__suppress_context__":
-            return self.__suppress_context__
-        elif name == "__traceback__":
-            return self.__traceback__
-        elif name == "args":
-            return VariableTracker.build(
-                tx,
-                tuple(self.args),
-                source=self.source and AttrSource(self.source, "args"),
-            )
         try:
             # Custom attributes are stored in the side effects instance dict and
             # resolved by generic_getattr before reaching here, so a fall-through
@@ -775,6 +707,139 @@ class ExceptionVariable(VariableTracker):
                 tx,
                 args=[f"'{self.exc_type.__name__}' object has no attribute '{name}'"],
             )
+
+    def _set_context(
+        self, tx: "InstructionTranslatorBase", val: VariableTracker
+    ) -> VariableTracker:
+        # Constant can be either an Exception or None
+        if not (
+            val.is_constant_none()
+            or isinstance(
+                val,
+                (
+                    variables.ExceptionVariable,
+                    variables.UserDefinedExceptionClassVariable,
+                    variables.UserDefinedExceptionObjectVariable,
+                ),
+            )
+        ):
+            raise_type_error(
+                tx, "exception context must be None or derive from BaseException"
+            )
+        self.set_context(val)
+        return variables.ConstantVariable.create(None)
+
+    def _set_cause(
+        self, tx: "InstructionTranslatorBase", val: VariableTracker
+    ) -> VariableTracker:
+        if val.is_constant_none() or isinstance(
+            val,
+            (
+                variables.BuiltinVariable,
+                variables.ExceptionVariable,
+                variables.UserDefinedExceptionClassVariable,
+                variables.UserDefinedExceptionObjectVariable,
+            ),
+        ):
+            self.__cause__ = val
+            self.__suppress_context__ = variables.ConstantVariable.create(True)
+        else:
+            raise_type_error(
+                tx, "exception cause must be None or derive from BaseException"
+            )
+        return variables.ConstantVariable.create(None)
+
+    def _set_suppress_context(
+        self, tx: "InstructionTranslatorBase", val: VariableTracker
+    ) -> VariableTracker:
+        if val.is_constant_match(True, False):
+            self.__suppress_context__ = val
+        else:
+            raise_type_error(
+                tx, "exception cause must be None or derive from BaseException"
+            )
+        return variables.ConstantVariable.create(None)
+
+    def _set_traceback(
+        self, tx: "InstructionTranslatorBase", val: VariableTracker
+    ) -> VariableTracker:
+        if not TracebackVariable.is_valid_traceback(val):
+            raise_type_error(tx, "__traceback__ must be a traceback or None")
+        self.__traceback__ = val
+        return variables.ConstantVariable.create(None)
+
+    def with_traceback(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if len(args) != 1:
+            raise_type_error(
+                tx,
+                f"with_traceback() takes exactly one argument ({len(args)} given)",
+            )
+        [tb] = args
+        if not TracebackVariable.is_valid_traceback(tb):
+            raise_type_error(tx, "__traceback__ must be a traceback or None")
+        self.__traceback__ = tb
+        return self
+
+    def setstate(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if len(args) != 1:
+            raise_type_error(
+                tx, f"__setstate__() takes exactly one argument ({len(args)} given)"
+            )
+        [state] = args
+        # BaseException.__setstate__(None) is a documented no-op.
+        if state.is_constant_none():
+            return variables.ConstantVariable.create(None)
+        if not isinstance(state, variables.ConstDictVariable):
+            raise_type_error(tx, "state is not a dictionary")
+        for key, value in state.keys_as_python_constant().items():
+            self.call_method(
+                tx, "__setattr__", [ConstantVariable.create(key), value], {}
+            )
+        return variables.ConstantVariable.create(None)
+
+    tp_methods = {
+        "with_traceback": Method(with_traceback),
+        "__setstate__": Method(setstate),
+    }
+
+    def _get_args(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return VariableTracker.build(
+            tx,
+            tuple(self.args),
+            source=self.source and AttrSource(self.source, "args"),
+        )
+
+    def _set_args(
+        self, tx: "InstructionTranslatorBase", val: VariableTracker
+    ) -> VariableTracker:
+        # CPython coerces any iterable to a tuple (PySequence_Tuple).
+        self.args = unpack_iterable(tx, val)
+        return variables.ConstantVariable.create(None)
+
+    tp_getset = {
+        "__class__": GetSet(getset_build(lambda s: s.exc_type)),
+        "__context__": GetSet(getset_read(lambda s: s.__context__), _set_context),
+        "__cause__": GetSet(getset_read(lambda s: s.__cause__), _set_cause),
+        "__traceback__": GetSet(getset_read(lambda s: s.__traceback__), _set_traceback),
+        "args": GetSet(_get_args, _set_args),
+    }
+    # __suppress_context__ is a writable PyMemberDef on BaseException, not a
+    # getset, so it lives in tp_members.
+    tp_members = {
+        "__suppress_context__": Member(
+            getset_read(lambda s: s.__suppress_context__), _set_suppress_context
+        ),
+    }
 
     def tp_str_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/exceptions.c#L118-L129
@@ -821,12 +886,10 @@ class StopIterationVariable(ExceptionVariable):
         self.value = args[0] if args else variables.ConstantVariable.create(None)
         super().__init__(exc_type, args, init_kwargs, source, mutation_type)
 
-    def tp_getattro_impl(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> VariableTracker:
-        if name == "value":
-            return self.value
-        return super().tp_getattro_impl(tx, name)
+    # ref: StopIteration_members in CPython Objects/exceptions.c
+    tp_members = {
+        "value": Member(getset_read(lambda s: s.value)),
+    }
 
 
 class _KwargAttrExceptionVariable(ExceptionVariable):
@@ -848,13 +911,6 @@ class _KwargAttrExceptionVariable(ExceptionVariable):
         none = variables.ConstantVariable.create(None)
         self._attrs = {name: init_kwargs.pop(name, none) for name in self._kwarg_attrs}
         super().__init__(exc_type, args, init_kwargs, source, mutation_type)
-
-    def tp_getattro_impl(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> VariableTracker:
-        if name in self._attrs:
-            return self._attrs[name]
-        return super().tp_getattro_impl(tx, name)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         super().reconstruct(codegen)
@@ -2557,7 +2613,7 @@ class NumpyDTypeVariable(ConstantLikeVariable):
         """
         # All three construction paths produce a real numpy.dtype: the
         # np_constant_collections_map entry for tnp.dtype, builder.py's
-        # is_numpy_dtype branch, and ConstantLikeVariable.getattro_impl's
+        # is_numpy_dtype branch, and ConstantLikeVariable.tp_getattro_impl's
         # isinstance(result, self.np_dtype) branch.
         return cast("np.dtype[Any]", self.value).type.__name__
 
@@ -2672,12 +2728,8 @@ class ContextVarVariable(VariableTracker):
         except LookupError:
             raise_observed_exception(LookupError, tx, args=[f"{self.cv_obj!r}"])
 
-    def tp_getattro_impl(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> "VariableTracker":
-        if name == "name":
-            return ConstantVariable.create(self.cv_obj.name)
-        return super().tp_getattro_impl(tx, name)
+    # contextvars.ContextVar.name is a read-only member.
+    tp_members = {"name": Member(getset_build(lambda s: s.cv_obj.name))}
 
 
 class RandomClassVariable(VariableTracker):
