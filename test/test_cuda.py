@@ -1526,6 +1526,25 @@ print(t.is_pinned())
         self.assertNotEqual(event.event_id, 0)
         self.assertEqual(event.cuda_event, event.event_id)
 
+    @unittest.skipIf(TEST_WITH_ROCM, "not enabled on rocm")
+    @requires_cuda_python_bindings
+    def test_generic_event_flag(self):
+        import cuda.bindings.runtime as cudart
+
+        from torch.cuda._utils import _check_cuda_bindings
+
+        for blocking in (True, False):
+            event = torch.Event(blocking=blocking)
+            event.record()
+            flags = _check_cuda_bindings(cudart.cudaEventGetFlags(event.cuda_event))
+            has_blocking_sync = bool(flags & cudart.cudaEventBlockingSync)
+            self.assertEqual(
+                has_blocking_sync,
+                blocking,
+                f"Expected cudaEventBlockingSync to be {'set' if blocking else 'unset'}, "
+                f"got flags=0x{flags:08x}",
+            )
+
     def test_events_elapsedtime(self):
         event1 = torch.cuda.Event(enable_timing=False)
         event2 = torch.cuda.Event(enable_timing=False)
