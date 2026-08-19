@@ -821,8 +821,10 @@ class ExceptionVariable(VariableTracker):
         )
 
     def _set_args(
-        self, tx: "InstructionTranslatorBase", val: VariableTracker
+        self, tx: "InstructionTranslatorBase", val: VariableTracker | None
     ) -> VariableTracker:
+        if val is None:
+            raise_type_error(tx, "args may not be deleted")
         # CPython coerces any iterable to a tuple (PySequence_Tuple).
         self.args = unpack_iterable(tx, val)
         return variables.ConstantVariable.create(None)
