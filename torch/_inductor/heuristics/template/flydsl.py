@@ -332,6 +332,23 @@ def get_default_mxfp4_gemm_configs() -> list[FlyDSLMXFP4Config]:
         (64, 64, 256, 2, 1, 1, 0),
         (32, 32, 128, 2, 1, 1, 0),
         (16, 16, 128, 2, 1, 1, 0),
+        # Measured winners. Every entry below beat this list's previous best on
+        # at least one of the 13 benchmark shapes once the packed-unit scale
+        # path removed the per-byte scale fallback that used to make shallow
+        # register blocking unusable. Without them the default search cannot
+        # reach the numbers the EXHAUSTIVE space does -- 11 of the 13 per-shape
+        # winners were absent here.
+        (32, 32, 512, 6, 2, 1, 4),    # 32x4096x4096
+        (16, 32, 256, 4, 1, 1, 0),    # 64x4096x4096
+        (32, 64, 1024, 3, 1, 4, 0),   # 32x14336x4096
+        (32, 32, 512, 2, 1, 2, 0),    # 128x4096x4096
+        (32, 64, 256, 2, 1, 2, 0),    # 32x28672x4096
+        (64, 32, 512, 2, 1, 1, 4),    # 4096x256x4096
+        (64, 64, 512, 2, 2, 2, 4),    # 256x4096x4096
+        (64, 128, 512, 2, 2, 2, 4),   # 512x4096x4096
+        (128, 128, 512, 2, 2, 2, 4),  # 1024x4096x4096
+        (256, 256, 256, 2, 4, 4, 4),  # 4096x4096x4096
+        (256, 256, 256, 2, 4, 2, 0),  # 8192x8192x8192
     ]
     # Tuple order must match the FlyDSLMXFP4Config field declaration order.
     configs = [FlyDSLMXFP4Config(*args) for args in tile_tuples]

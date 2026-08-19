@@ -623,7 +623,33 @@ def make_mxfp8_scaled_mm_gfx950(
         s2r_atom = fx.make_copy_atom(fx.UniversalCopy128b(), fx.Float8E4M3FN)
         thr_copy_A = fx.make_tiled_copy_A(s2r_layout_atom, tiled_mma).get_slice(tid)
         thr_copy_B = fx.make_tiled_copy_B(s2r_layout_atom, tiled_mma).get_slice(tid)
-        dma_atom = fx.make_copy_atom(fx.rocdl.BufferCopyLDS128b(), 128)
+        # Async direct-to-LDS DMA (FlyDSL #1023) when the runtime has it.
+        #
+        # On gfx950 this lowers to the same buffer_load ... lds instruction as the
+        # synchronous CDNA3 atom; what changes is that the backend no longer
+        # inserts its own vmcnt wait before the staged LDS data is read, which is
+        # the unexpected vmcnt(0) raised in review on this line.
+        #
+        # The explicit s_waitcnt vmcnt(N) in __barrier stays. gfx950 still counts
+        # this load in vmcnt -- hasAsyncMark() is true here only via
+        # hasVMemToLDSLoad(); the real s_wait_asynccnt is gfx1250+ -- so the manual
+        # wait remains both valid and necessary.
+        #
+        # Bracketing the copies with rocdl.asyncmark(), which the atom's docstring
+        # suggests, was measured and rejected: asyncmark is a side-effecting meta
+        # op, so it acts as a scheduling barrier and blocks sinking the DMA into
+        # the MFMA block -- the ordering v7 ablation adopted. On
+        # 256,256,256,2,4,2,0 it cost 24 spills and 2 extra vmcnt(0) per iteration;
+        # adding wait_asyncmark on top cost 31 and 8.
+        #
+        # Guarded because the released FlyDSL 0.3.1 predates #1023: without this
+        # the template would raise AttributeError instead of falling back.
+        if const_expr(hasattr(fx.rocdl.cdna4, "BufferLoadAsyncLDS128b")):
+            dma_atom = fx.make_copy_atom(
+                fx.rocdl.cdna4.BufferLoadAsyncLDS128b(), 128
+            )
+        else:
+            dma_atom = fx.make_copy_atom(fx.rocdl.BufferCopyLDS128b(), 128)
         scale_atom = fx.make_copy_atom(fx.rocdl.BufferCopy8b(), fx.Uint8)
 
         swizzle = fx.static(fx.SwizzleType.get(swizzle_bits, 4, swizzle_bits))

@@ -521,9 +521,30 @@ def make_mxfp4_scaled_mm_gfx950(
     use_group_m = group_m > 0 and tiles_m % group_m == 0 and tiles_m > group_m
     # The remap only helps when the swizzle is there to compact the result.
     use_xcd_remap = use_group_m
-    # One dword feeds exactly four repeats through the 4x4 lane-group transpose,
-    # so shallower register blocking keeps the per-byte scale loads.
-    packed_scale = d.mma_m_repeat % 4 == 0 and d.mma_n_repeat % 4 == 0
+    # One dword load feeds four repeats through the 4x4 lane-group transpose.
+    # When the register blocking supplies four of them, the per-K-step loads sit
+    # at adjacent dwords and LLVM merges them into dwordx2/x4 -- the dividend
+    # recorded in MXFP4-v1-DERIVATION.md 5.1. Nothing below changes that path.
+    packed_repeat_scale = d.mma_m_repeat % 4 == 0 and d.mma_n_repeat % 4 == 0
+    # Shallower blocking used to fall straight back to per-BYTE scale gathers,
+    # and that is where the kernel loses: every EXHAUSTIVE champion on a cell
+    # that loses to Triton has a per-wave tile under 64 in some dimension, which
+    # is exactly the condition above (repeat = per-wave extent / 16). Measured
+    # cost was 6-10x the L1 accesses per MFMA (P0-STRUCTURAL-FINDINGS.md).
+    #
+    # The four lanes groups do not have to carry four *repeats*. A unit is "one
+    # row's dword at one MFMA K step", and k_halves supplies units just as well,
+    # so flattening (repeat, k_half) refills the groups when repeats alone
+    # cannot. Those loads do not land on adjacent dwords, so they do not merge
+    # -- but ceil(units/4) beats the byte path's one instruction per repeat per
+    # K step, which is the comparison the gate makes.
+    a_scale_units = d.mma_m_repeat * d.k_halves
+    b_scale_units = d.mma_n_repeat * d.k_halves
+    packed_unit_scale = not packed_repeat_scale and (
+        -(-a_scale_units // 4) + -(-b_scale_units // 4)
+        < d.k_halves * (d.mma_m_repeat + d.mma_n_repeat)
+    )
+    packed_scale = packed_repeat_scale or packed_unit_scale
 
     @flyc.kernel(known_block_size=[block_threads, 1, 1])
     def kernel(
@@ -649,7 +670,33 @@ def make_mxfp4_scaled_mm_gfx950(
         # the LDS side is modeled in dwords the way the FlyDSL mxfp4 reference
         # kernel models it, and only the MMA atom is told the element format.
         lds_copy = fx.make_copy_atom(fx.UniversalCopy128b(), fx.Int32)
-        dma_atom = fx.make_copy_atom(fx.rocdl.BufferCopyLDS128b(), 128)
+        # Async direct-to-LDS DMA (FlyDSL #1023) when the runtime has it.
+        #
+        # On gfx950 this lowers to the same buffer_load ... lds instruction as the
+        # synchronous CDNA3 atom; what changes is that the backend no longer
+        # inserts its own vmcnt wait before the staged LDS data is read, which is
+        # the unexpected vmcnt(0) raised in review on this line.
+        #
+        # The explicit s_waitcnt vmcnt(N) in __barrier stays. gfx950 still counts
+        # this load in vmcnt -- hasAsyncMark() is true here only via
+        # hasVMemToLDSLoad(); the real s_wait_asynccnt is gfx1250+ -- so the manual
+        # wait remains both valid and necessary.
+        #
+        # Bracketing the copies with rocdl.asyncmark(), which the atom's docstring
+        # suggests, was measured and rejected: asyncmark is a side-effecting meta
+        # op, so it acts as a scheduling barrier and blocks sinking the DMA into
+        # the MFMA block -- the ordering v7 ablation adopted. On
+        # 256,256,256,2,4,2,0 it cost 24 spills and 2 extra vmcnt(0) per iteration;
+        # adding wait_asyncmark on top cost 31 and 8.
+        #
+        # Guarded because the released FlyDSL 0.3.1 predates #1023: without this
+        # the template would raise AttributeError instead of falling back.
+        if const_expr(hasattr(fx.rocdl.cdna4, "BufferLoadAsyncLDS128b")):
+            dma_atom = fx.make_copy_atom(
+                fx.rocdl.cdna4.BufferLoadAsyncLDS128b(), 128
+            )
+        else:
+            dma_atom = fx.make_copy_atom(fx.rocdl.BufferCopyLDS128b(), 128)
         scale_atom = fx.make_copy_atom(fx.rocdl.BufferCopy8b(), fx.Uint8)
 
         swizzle_bytes = fx.static(
@@ -852,6 +899,35 @@ def make_mxfp4_scaled_mm_gfx950(
                 regs.append(reg)
             return regs
 
+        def packed_unit_issue(buf, base, row_base, repeat_stride, n_repeat, col_base):
+            """packed_scale_issue for blocking too shallow to give four repeats.
+
+            Unit u = mi * k_halves + kh addresses one row's dword at one MFMA K
+            step; lane group g takes unit q + g. k_halves is the fast axis so a
+            full load's four groups read consecutive dwords of at most two rows.
+            """
+            n_units = n_repeat * d.k_halves
+            regs = []
+            for q in range_constexpr(0, n_units, 4):
+                unit = fx.Int32(q) + scale_group
+                if const_expr(q + 4 > n_units):
+                    # Short tail: wrap onto a valid unit rather than address off
+                    # the end of the scale tensor. The surplus groups' words are
+                    # simply never consumed.
+                    unit = unit % fx.Int32(n_units)
+                row = row_base + fx.Int32(repeat_stride) * (
+                    unit // fx.Int32(d.k_halves)
+                )
+                offset = (
+                    (base + row) * fx.Int32(scale_k32)
+                    + col_base
+                    + unit % fx.Int32(d.k_halves)
+                )
+                reg = fx.make_rmem_tensor(1, fx.Uint32)
+                fx.copy(scale32_atom, fx.slice(buf, (None, offset)), reg)
+                regs.append(reg)
+            return regs
+
         def packed_scale_finish(regs):
             """Broadcast each loaded dword's four rows across the four lane
             groups, then extract this lane's K-quarter byte.
@@ -936,7 +1012,32 @@ def make_mxfp4_scaled_mm_gfx950(
             issuing the scale loads and consuming them so those loads get the
             whole DMA block as latency shadow.
             """
-            if const_expr(packed_scale):
+            if const_expr(packed_unit_scale):
+                col_base = k_tile * fx.Int32(block_k // MXFP4_MFMA_K)
+                a_regs = packed_unit_issue(
+                    sa32, m_base, a_row_base, m_repeat_stride, d.mma_m_repeat,
+                    col_base,
+                )
+                b_regs = packed_unit_issue(
+                    sb32, n_base, b_row_base, n_repeat_stride, d.mma_n_repeat,
+                    col_base,
+                )
+                av, bv = mid()
+                sa_words = packed_scale_finish(a_regs)
+                sb_words = packed_scale_finish(b_regs)
+                for kh in range_constexpr(d.k_halves):
+                    for ni in range_constexpr(d.mma_n_repeat):
+                        for mi in range_constexpr(d.mma_m_repeat):
+                            scaled_mma(
+                                frag_C[(None, 0), mi, ni],
+                                av[kh * d.mma_m_repeat + mi],
+                                bv[kh * d.mma_n_repeat + ni],
+                                sa_words[mi * d.k_halves + kh],
+                                sb_words[ni * d.k_halves + kh],
+                            )
+                return
+
+            if const_expr(packed_repeat_scale):
                 issued = []
                 for kh in range_constexpr(d.k_halves):
                     col32 = k_tile * fx.Int32(block_k // MXFP4_MFMA_K) + fx.Int32(kh)
