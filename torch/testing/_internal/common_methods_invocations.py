@@ -12527,6 +12527,9 @@ op_db: list[OpInfo] = [
                    "test_dtensor_op_db",
                    dtypes=(torch.float32,),
                ),
+               # torch-xpu-ops/issues/4932
+               DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_quick', device_type='xpu',
+                            dtypes=(torch.uint8,)),
            ],
            sample_inputs_func=sample_inputs_mv),
     OpInfo('addr',
@@ -14162,9 +14165,9 @@ op_db: list[OpInfo] = [
 
                # Off-by-one issue when casting floats to ints
                DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_quick',
-                            dtypes=(torch.int16, torch.int32, torch.int64), device_type="cuda"),
+                            dtypes=(torch.int16, torch.int32, torch.int64), device_type=("cuda", "xpu")),
                DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_comprehensive',
-                            dtypes=(torch.int16, torch.int32, torch.int64), device_type="cuda"),
+                            dtypes=(torch.int16, torch.int32, torch.int64), device_type=("cuda", "xpu")),
                # UserWarning: CUDA caching allocator reports a memory leak not verified by the driver API
                # in __main__.TestJitCUDA.test_variant_consistency_jit_logspace_cuda_complex64!
                # Caching allocator allocated memory was 0 and is now reported as 307200 on device 0.
@@ -16563,6 +16566,9 @@ op_db: list[OpInfo] = [
             # NotImplementedError: The operator 'aten::multilabel_margin_loss' is not
             # currently implemented for the MPS device
             DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps'),
+            # torch-xpu-ops/issues/5020
+            DecorateInfo(unittest.expectedFailure, 'TestMeta',
+                         "test_dispatch_symbolic_meta_outplace", device_type='xpu'),
         ),
     ),
     OpInfo('nn.functional.leaky_relu',
@@ -16743,7 +16749,10 @@ op_db: list[OpInfo] = [
                # FX failed to normalize op - add the op to the op_skip list.
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                # object has no attribute max_pool2d_with_indices_backward (It's not available on torch -- so expected)
-               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit')
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+               # torchf-xpu-ops/issue/3600
+               DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_quick', device_type='xpu'),
+               DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_comprehensive', device_type='xpu')
            )),
     OpInfo('nn.functional.max_pool3d',
            aten_name='max_pool3d',
@@ -17234,8 +17243,13 @@ op_db: list[OpInfo] = [
             # FIXME
             DecorateInfo(unittest.skip('test_cow_input does not work with efficient attention on ROCM'),
                          'TestCompositeCompliance', 'test_cow_input',
-                         device_type=('cuda', 'xpu'), dtypes=(torch.bfloat16, torch.float16, torch.float32),
-                         active_if=TEST_WITH_ROCM and PLATFORM_SUPPORTS_MEM_EFF_ATTENTION),),
+                         device_type='cuda', dtypes=(torch.bfloat16, torch.float16, torch.float32),
+                         active_if=TEST_WITH_ROCM and PLATFORM_SUPPORTS_MEM_EFF_ATTENTION),
+            # torch-xpu/issues/4461
+            DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta_outplace',
+                         device_type='xpu', dtypes=(torch.uint8, torch.int8)),
+            DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_symbolic_meta_outplace',
+                         device_type='xpu', dtypes=(torch.uint8, torch.int8)),),
     ),
     OpInfo(
         'torch.ops.aten._flash_attention_forward',
@@ -17250,6 +17264,7 @@ op_db: list[OpInfo] = [
         supports_fwgrad_bwgrad=False,
         supports_forward_ad=False,
         check_batched_forward_grad=False,
+        # torch-xpu-ops/issues/2344
         decorators=[skipXPU, skipCUDAIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "This platform doesn't support Flash Attention")],
         skips=(
             # Checking the scalar value of the philox seed and offset
@@ -17916,12 +17931,13 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
                # Could not run 'aten::narrow_copy.out' with arguments from the 'CUDA' backend
+               # torch-xpu-ops/issues/2309
                DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta_outplace',
-                            device_type='cuda'),
+                            device_type=('cuda', 'xpu')),
                DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_meta_outplace',
-                            device_type='cuda'),
+                            device_type=('cuda', 'xpu')),
                DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_symbolic_meta_outplace',
-                            device_type='cuda'),
+                            device_type=('cuda', 'xpu')),
            )),
     OpInfo('view_copy',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
@@ -18511,6 +18527,9 @@ op_db: list[OpInfo] = [
                # https://github.com/pytorch/pytorch/issues/71774
                DecorateInfo(unittest.skip('Skipped!'), 'TestNNCOpInfo', 'test_nnc_correctness',
                             device_type='cpu', dtypes=(torch.long,)),
+               # NotImplementedError: "dot_xpu_mkl" not implemented for 'Char', torch-xpu-ops/issues/4438
+               DecorateInfo(unittest.skip("NotImplementedError: 'dot_xpu_mkl' not implemented for 'Char'"),
+                            'TestMeta', device_type='xpu', dtypes=(torch.uint8, torch.int8)),
            )),
     BinaryUfuncInfo('__rmod__',
                     op=torch.Tensor.__rmod__,
@@ -21038,6 +21057,11 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
                # Skip operator schema test because this is a functional and not an operator.
                # Reference: https://github.com/pytorch/pytorch/issues/54574
                DecorateInfo(unittest.skip("Skipped!"), 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
+               # intel/torch-xpu-ops/issues/4452
+               DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta_outplace', device_type="xpu", dtypes=(torch.uint8, torch.int8)),
+               # NotImplementedError: "dot_xpu_mkl" not implemented for 'Char', torch-xpu-ops/issues/4438
+               DecorateInfo(unittest.skip("NotImplementedError: 'dot_xpu_mkl' not implemented for 'Char'"),
+                            'TestMeta', device_type='xpu', dtypes=(torch.uint8, torch.int8)),
            )
            ),
     OpInfo('to_sparse',

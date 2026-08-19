@@ -442,7 +442,7 @@ class TestFloat4Dtype(TestCase):
             )
 
 
-instantiate_device_type_tests(TestFloat8Dtype, globals())
+instantiate_device_type_tests(TestFloat8Dtype, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestFloat4Dtype, globals())
 
 
