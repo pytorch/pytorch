@@ -74,6 +74,12 @@ class Node(abc.ABC):
     @property
     @abc.abstractmethod
     def next_functions(self) -> tuple[tuple[Optional["Node"], int], ...]:
+        r"""Return the edges from this node to its input functions.
+
+        Each entry is a ``(Node, int)`` pair. The node is ``None`` for an input
+        that does not require gradients. The integer is the output index of the
+        input function to which this edge connects.
+        """
         raise NotImplementedError
 
     @abc.abstractmethod
