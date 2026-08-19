@@ -456,23 +456,22 @@ class TestSplitDevice(TestCase):
 
     def test_device_handling(self, device):
         """Test split behavior with different devices."""
-        if torch.accelerator.is_available():
-            # Test on accelerator
-            accelerator_tensor = torch.randn(3, 12, 5, device=device)
-            x, y, z = dims(3)
-            t = accelerator_tensor[x, y, z]
+        # Test on accelerator
+        accelerator_tensor = torch.randn(3, 12, 5, device=device)
+        x, y, z = dims(3)
+        t = accelerator_tensor[x, y, z]
 
-            d1, d2 = Dim("d1", 4), Dim("d2", 8)
-            result = t.split([d1, d2], dim=y)
+        d1, d2 = Dim("d1", 4), Dim("d2", 8)
+        result = t.split([d1, d2], dim=y)
 
-            for i, part in enumerate(result):
-                ordered = part.order(x, d1 if i == 0 else d2, z)
-                self.assertEqual(ordered.device, torch.device(device))
-                self.assertEqual(ordered.shape[0], 3)
-                self.assertEqual(ordered.shape[2], 5)
+        for i, part in enumerate(result):
+            ordered = part.order(x, d1 if i == 0 else d2, z)
+            self.assertEqual(ordered.device, torch.device(device))
+            self.assertEqual(ordered.shape[0], 3)
+            self.assertEqual(ordered.shape[2], 5)
 
 
-instantiate_device_type_tests(TestSplitDevice, globals())
+instantiate_device_type_tests(TestSplitDevice, globals(), except_for="cpu")
 
 if __name__ == "__main__":
     run_tests()
