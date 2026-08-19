@@ -101,18 +101,11 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
 
   // Event-related functions
   void createEvent(cudaEvent_t* cuda_event, const EventFlag flag) const {
-    // Maps PyTorch's Event::Flag to CUDA flag
-    auto cuda_flag = cudaEventDefault;
-    switch (flag) {
-      case EventFlag::PYTORCH_DEFAULT:
-        cuda_flag = cudaEventDisableTiming;
-        break;
-      case EventFlag::BACKEND_DEFAULT:
-        cuda_flag = cudaEventDefault;
-        break;
-      default:
-        TORCH_CHECK(false, "CUDA event received unknown flag");
-    }
+    // Maps PyTorch EventFlag bits to CUDA event flags.
+    // cudaEventDefault has timing enabled; disable it unless TIMING bit is set.
+    const unsigned int cuda_flag =
+        (flag & EventFlag::TIMING ? cudaEventDefault : cudaEventDisableTiming) |
+        (flag & EventFlag::BLOCKING ? cudaEventBlockingSync : cudaEventDefault);
 
     C10_CUDA_CHECK(cudaEventCreateWithFlags(cuda_event, cuda_flag));
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
