@@ -108,17 +108,6 @@ include(cmake/EnvVarForwarding.cmake)
 # unconditionally.
 include(cmake/PreBuildSteps.cmake)
 
-if(CMAKE_VERSION VERSION_GREATER_EQUAL "4.3")
-  cmake_instrumentation(
-    API_VERSION 1
-    DATA_VERSION 1.0
-    HOOKS postCMakeBuild
-    OPTIONS trace
-    CALLBACK "${Python_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/build_trace_summary.py" --root "${CMAKE_CURRENT_SOURCE_DIR}" --index
-  )
-  set(PYTORCH_CMAKE_INSTRUMENTATION ON)
-endif()
-
 if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
   set(LINUX TRUE)
 else()
@@ -1098,6 +1087,23 @@ cmake_dependent_option(
   "Enable memory-efficient attention for scaled dot product attention.\
   Will be disabled if not supported by the platform" ON
   "USE_CUDA OR USE_ROCM" OFF)
+
+cmake_dependent_option(
+  USE_CMAKE_INSTRUMENTATION
+  "Use cmake-instrumentation to collect build metrics"
+  OFF # disabled by default because it causes CI timeouts
+  "CMAKE_VERSION VERSION_GREATER_EQUAL 4.3"
+  OFF
+)
+if(USE_CMAKE_INSTRUMENTATION)
+  cmake_instrumentation(
+    API_VERSION 1
+    DATA_VERSION 1.0
+    HOOKS postCMakeBuild
+    OPTIONS trace
+    CALLBACK "${Python_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/build_trace_summary.py" --root "${CMAKE_CURRENT_SOURCE_DIR}" --index
+  )
+endif()
 
 #
 # Cannot be put into Dependencies.cmake due circular dependency:

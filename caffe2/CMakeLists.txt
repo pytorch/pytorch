@@ -3,7 +3,7 @@
 # a long command that causes ctest to fail with "Argument list too long".
 # Setting RULE_LAUNCH_CUSTOM to empty prevents custom commands in this
 # directory from being wrapped.
-if(PYTORCH_CMAKE_INSTRUMENTATION)
+if(USE_CMAKE_INSTRUMENTATION)
   set_property(DIRECTORY PROPERTY RULE_LAUNCH_CUSTOM "")
 endif()
 

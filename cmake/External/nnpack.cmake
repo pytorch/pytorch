@@ -75,7 +75,7 @@ if(ANDROID OR IOS OR ${CMAKE_SYSTEM_NAME} STREQUAL "Linux" OR ${CMAKE_SYSTEM_NAM
     # NNPACK custom commands use PYTHONPATH=... shell env var assignment
     # syntax, which fails when ctest --instrument wraps them. This can be
     # removed if https://github.com/Maratyszcza/NNPACK/pull/224 is merged
-    if(PYTORCH_CMAKE_INSTRUMENTATION)
+    if(USE_CMAKE_INSTRUMENTATION)
       set_property(DIRECTORY "${NNPACK_SOURCE_DIR}" PROPERTY RULE_LAUNCH_CUSTOM "")
     endif()
     # We build static versions of nnpack and pthreadpool but link
