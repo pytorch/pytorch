@@ -6627,6 +6627,130 @@ def forward(self, L_x_ : torch.Tensor, s77 : torch.SymInt, s27 : torch.SymInt):
 
         self.assertEqual(ref, res)
 
+    @parametrize(
+        "parameter_kind,dynamic",
+        [
+            ("parameter_subclass", False),
+            ("parameter", True),
+            ("tensor_subclass", False),
+        ],
+    )
+    def test_parameter_data_different_shape_graph_breaks(self, parameter_kind, dynamic):
+        class ParameterSubclass(torch.nn.Parameter):
+            pass
+
+        class TensorSubclass(torch.Tensor):
+            @staticmethod
+            def __new__(cls, data):
+                return torch.Tensor._make_subclass(cls, data, data.requires_grad)
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                if parameter_kind == "parameter_subclass":
+                    self.param = ParameterSubclass(torch.randn(3))
+                elif parameter_kind == "tensor_subclass":
+                    self.param = torch.nn.Parameter(TensorSubclass(torch.randn(3)))
+                else:
+                    self.param = torch.nn.Parameter(torch.randn(3))
+
+            def forward(self, x):
+                self.param.data = x
+                return (self.param * x).sum()
+
+        model = Model()
+        x = torch.randn(5)
+        counter = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        actual = torch.compile(model, backend=counter, dynamic=dynamic)(x)
+
+        self.assertEqual(actual, (x * x).sum())
+        actual.backward()
+        self.assertEqual(model.param.grad, x)
+        self.assertGreater(counter.op_count, 0)
+
+    def test_parameter_data_same_shape_dynamic_fullgraph(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.randn(3))
+
+            def forward(self, x):
+                self.param.data = x
+                return (self.param * x).sum()
+
+        model = Model()
+        x = torch.randn(3)
+        counter = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        actual = torch.compile(model, backend=counter, dynamic=True, fullgraph=True)(x)
+
+        self.assertEqual(actual, (x * x).sum())
+        actual.backward()
+        self.assertEqual(model.param.grad, x)
+        self.assertGreater(counter.op_count, 0)
+
+    def test_deepspeed_zero3_partitioned_parameter_hooks(self):
+        class FakeZeRO:
+            def install(self, module):
+                for child in module.modules():
+                    child.register_forward_pre_hook(self._pre_forward_module_hook)
+                    child.register_forward_hook(self._post_forward_module_hook)
+
+            def _pre_forward_module_hook(self, module, args):
+                self.pre_sub_module_forward_function(module)
+
+            def _post_forward_module_hook(self, module, args, output):
+                self.post_sub_module_forward_function(module)
+
+            def pre_sub_module_forward_function(self, sub_module):
+                for param in sub_module.parameters(recurse=False):
+                    if param.ds_status == "NOT_AVAILABLE":
+                        param.data = param.ds_tensor.narrow(0, 0, param.ds_numel).view(
+                            param.ds_shape
+                        )
+                        param.ds_status = "AVAILABLE"
+
+            def post_sub_module_forward_function(self, sub_module):
+                for param in sub_module.parameters(recurse=False):
+                    if param.ds_status == "AVAILABLE":
+                        param.ds_tensor = param.detach().clone().flatten()
+                        param.data = torch.empty(0, dtype=param.dtype)
+                        param.ds_status = "NOT_AVAILABLE"
+
+        class MLP(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.gate_proj = torch.nn.Linear(4, 8)
+                self.up_proj = torch.nn.Linear(4, 8)
+                self.down_proj = torch.nn.Linear(8, 4)
+
+            def forward(self, x):
+                return self.down_proj(
+                    torch.nn.functional.silu(self.gate_proj(x)) * self.up_proj(x)
+                )
+
+        def partition_parameters(module):
+            for param in module.parameters():
+                param.ds_shape = param.shape
+                param.ds_numel = param.numel()
+                param.ds_tensor = param.detach().clone().flatten()
+                param.ds_status = "NOT_AVAILABLE"
+                param.data = torch.empty(0, dtype=param.dtype)
+
+        model = MLP()
+        ref_model = copy.deepcopy(model)
+        partition_parameters(model)
+        FakeZeRO().install(model)
+
+        x = torch.randn(2, 4)
+        expected = ref_model(x)
+        counter = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        actual = torch.compile(model, backend=counter)(x)
+
+        self.assertEqual(actual, expected)
+        self.assertGreater(counter.op_count, 0)
+        for param in model.parameters():
+            self.assertEqual(param.shape, torch.Size([0]))
+
     def test_os_fspath(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(x):
