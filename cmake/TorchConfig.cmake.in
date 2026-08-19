@@ -43,12 +43,12 @@ macro(append_wholearchive_lib_if_found)
 endmacro()
 
 include(FindPackageHandleStandardArgs)
+include(CMakeFindDependencyMacro)
 
 if(DEFINED ENV{TORCH_INSTALL_PREFIX})
   set(TORCH_INSTALL_PREFIX $ENV{TORCH_INSTALL_PREFIX})
 else()
   # Assume we are in <install-prefix>/share/cmake/Torch/TorchConfig.cmake
-  get_filename_component(CMAKE_CURRENT_LIST_DIR "${CMAKE_CURRENT_LIST_FILE}" PATH)
   get_filename_component(TORCH_INSTALL_PREFIX "${CMAKE_CURRENT_LIST_DIR}/../../../" ABSOLUTE)
 endif()
 
@@ -59,7 +59,7 @@ set(TORCH_INCLUDE_DIRS
 
 # Library dependencies.
 if(@BUILD_SHARED_LIBS@)
-  find_package(Caffe2 REQUIRED PATHS ${CMAKE_CURRENT_LIST_DIR}/../Caffe2)
+  find_dependency(Caffe2 PATHS ${CMAKE_CURRENT_LIST_DIR}/../Caffe2)
   set(TORCH_LIBRARIES torch ${Caffe2_MAIN_LIBS})
   append_torchlib_if_found(c10)
 else()
@@ -143,7 +143,7 @@ endif()
 
 find_library(TORCH_LIBRARY torch PATHS "${TORCH_INSTALL_PREFIX}/lib")
 # the statements below changes target properties on
-# - the imported target from Caffe2Targets.cmake in shared library mode (see the find_package above)
+# - the imported target from Caffe2Targets.cmake in shared library mode (see the find_dependency above)
 #    - this is untested whether it is the correct (or desired) methodology in CMake
 # - the imported target created in this file in static library mode
 if(NOT @BUILD_SHARED_LIBS@)

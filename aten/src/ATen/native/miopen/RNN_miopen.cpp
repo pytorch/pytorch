@@ -136,7 +136,7 @@ struct RNNDescriptorParams {
                 {
                     std::ostringstream oss;
                     oss << "unrecognized miopen RNN mode " << fn_mode;
-                    TORCH_CHECK(false, oss.str());
+                    TORCH_CHECK(false, std::move(oss).str());
                 }
         }
     }
@@ -315,6 +315,12 @@ struct RNNDescriptors {
 thread_local DropoutDescriptor RNNDescriptors::dropout_desc {};
 // Each state is 0.75 MB so there is no problem in caching all of them for each thread
 thread_local std::unique_ptr<DropoutState> RNNDescriptors::dropout_states { nullptr };
+
+// Releases the calling thread's cached MIOpen RNN dropout state buffer. This is
+// thread-lifetime state that empty_cache() cannot reclaim on its own.
+void _miopen_clear_dropout_state() {
+  RNNDescriptors::dropout_states.reset();
+}
 
 Tensor permute_wei_for_miopen(Tensor wei, int64_t mode)
 {

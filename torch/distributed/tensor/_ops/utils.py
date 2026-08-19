@@ -399,7 +399,7 @@ def expand_to_full_mesh_op_strategy(
     inplace_op: bool = False,
     allow_unbacked_sharding: bool | None = None,
     allow_uneven_sharding: bool = False,
-    is_valid_strategy_cb: Callable[
+    full_mesh_strategy_filter: Callable[
         [list[DTensorSpec], DTensorSpec | tuple[DTensorSpec | None, ...]], bool
     ]
     | None = None,
@@ -418,7 +418,8 @@ def expand_to_full_mesh_op_strategy(
         output_tensor_meta: tensor metadata for the output(s), used to populate DTensorSpec.tensor_meta field
         input_index: the number of outputs of the op, defaults to 1
         inplace_op: whether the op is inplace or not, defaults to False
-        is_valid_strategy_cb: a callback function to filter out invalid sharding rules, defaults to None.
+        full_mesh_strategy_filter: callback to filter invalid full-mesh strategy
+            candidates, defaults to None.
 
     Example: Let's say `my_op(tensor_x, tensor_y) - > output_tensor`  can support sharding or replicating tensor_x,
     but always requires tensor_y to be replicated.  We can specify these valid combinations ignoring mesh dims.
@@ -465,7 +466,14 @@ def expand_to_full_mesh_op_strategy(
         # (e.g., philox_seed/offset in SDPA are scalar tensors without OpStrategy)
         input_strategy_counter = 0
         for position, specs in enumerate(zip(*strategy_comb, strict=True)):
-            if specs[0] is not None:
+            if any(spec is None for spec in specs):
+                if any(spec is not None for spec in specs):
+                    raise AssertionError(
+                        f"{op_schema.op}: strategy position {position} mixes None "
+                        f"with placements across mesh dims: {specs}"
+                    )
+                spec_list.append(None)
+            else:
                 # Populate tensor_meta field for both output and input specs,
                 # including for tuple output cases
                 tensor_meta = None
@@ -504,8 +512,6 @@ def expand_to_full_mesh_op_strategy(
                         use_strided_shard_as_shard_order=use_strided,
                     )
                 )
-            else:
-                spec_list.append(None)
 
         # Skip strategy combinations that would create mixed partial types
         # (except sum+avg which commute with each other).
@@ -621,7 +627,14 @@ def expand_to_full_mesh_op_strategy(
                 continue
 
         output_specs: tuple[DTensorSpec | None, ...] | DTensorSpec | None
-        if input_index == 0:
+        has_container_output_meta = isinstance(
+            output_tensor_meta, Sequence
+        ) and not isinstance(output_tensor_meta, TensorMeta)
+        if op_schema.return_type_list_tensor_like() and has_container_output_meta:
+            # Tensor[] outputs must stay container-shaped even when there is
+            # only one output spec, so they are distinguishable from Tensor.
+            output_specs = tuple(spec_list[:input_index])
+        elif input_index == 0:
             # No outputs (e.g., _linalg_check_errors)
             output_specs = None
         elif input_index > 1:
@@ -647,8 +660,8 @@ def expand_to_full_mesh_op_strategy(
 
         # perform additional op-specific filtering
         # Skip callback for no-output ops (output_specs is None)
-        if is_valid_strategy_cb is not None and output_specs is not None:
-            if not is_valid_strategy_cb(input_specs, output_specs):
+        if full_mesh_strategy_filter is not None and output_specs is not None:
+            if not full_mesh_strategy_filter(input_specs, output_specs):
                 continue
 
         redistribute_cost = [
@@ -672,6 +685,10 @@ def expand_to_full_mesh_op_strategy(
             f"are not supported. The input has placement {blocking_inplace_input_placements}, "
             f"but no valid strategy preserves this placement. "
             f"Please use the out-of-place version of this operation instead."
+        )
+    if not all_strategies:
+        raise RuntimeError(
+            f"{op_schema.op}: no valid sharding strategy for the input placements."
         )
 
     return OpStrategy(all_strategies)

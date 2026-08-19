@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, TYPE_CHECKING
 
 from torch._inductor import config as inductor_config
+from torch._inductor.heuristics.registry import register_template_heuristic
 
 from ...kernel.bmm import aten_baddbmm, aten_bmm, aten_bmm_dtype
 from ...kernel.mm import (
@@ -16,7 +17,6 @@ from ...kernel.mm import (
 from ...kernel.mm_plus_mm import aten_mm_plus_mm
 from .base import TemplateConfigHeuristics
 from .gemm import GemmMaxAutotuneTemplateConfigHeuristics
-from .registry import register_template_heuristic
 
 
 if TYPE_CHECKING:
@@ -86,9 +86,12 @@ class ATenBiasAddMMConfigHeuristics(
         nodes = kernel_inputs.nodes()
         # for addmm, bias is the first input
         bias = nodes[0]
-        assert (
+        if not (
             len(bias.get_size()) == 2
             and bias.get_stride()[0] == 0
             and inductor_config.triton.autotune_cublasLt
-        )
+        ):
+            raise AssertionError(
+                "Expected 2D bias with stride[0]==0 and autotune_cublasLt enabled"
+            )
         yield from super()._get_template_configs_impl(kernel_inputs, op_name)
