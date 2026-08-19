@@ -8,6 +8,7 @@ import unittest
 
 import torch
 import torch._dynamo.testing as dynamo_testing
+from torch._dynamo.exc import Unsupported
 from torch._dynamo.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import make_dynamo_test
 
@@ -1257,6 +1258,16 @@ class _OverridingNamespace(types.SimpleNamespace):
         return True
 
 
+class _InitNamespace(types.SimpleNamespace):
+    def __init__(self, a: int = 1) -> None:
+        super().__init__(a=a, b=a * 2)
+
+
+class _RequiredArgNamespace(types.SimpleNamespace):
+    def __init__(self, a: int) -> None:
+        super().__init__(a=a)
+
+
 @torch._dynamo.config.patch(enable_trace_unittest=True)
 class TestSimpleNamespace(TestCase):
     """types.SimpleNamespace, ported from CPython's SimpleNamespaceTests."""
@@ -1433,6 +1444,73 @@ class TestSimpleNamespace(TestCase):
         self.assertIs(type(spam2), _Namespace)
         self.assertEqual(vars(spam2), {"ham": 5, "eggs": 9})
 
+    @make_dynamo_test
+    def test_subclass_init_via_super(self):
+        # namespace_init is a tp_init slot wrapper, reached through super().
+        self.assertEqual(vars(_InitNamespace(2)), {"a": 2, "b": 4})
+
+    @unittest.skipIf(sys.version_info < (3, 13), "copy.replace added in 3.13")
+    @make_dynamo_test
+    def test_replace_subclass_with_init(self):
+        got = copy.replace(_InitNamespace(1), a=5)
+        self.assertIs(type(got), _InitNamespace)
+        self.assertEqual(vars(got), {"a": 5, "b": 2})
+
+    @unittest.skipIf(sys.version_info < (3, 13), "copy.replace added in 3.13")
+    @make_dynamo_test
+    def test_replace_keeps_constructor_only_attrs(self):
+        # namespace_replace calls type(self)(), so the copy starts from what the
+        # constructor produced; PyDict_Update only overlays what self carries.
+        ns = _InitNamespace(1)
+        del ns.b
+        self.assertEqual(vars(copy.replace(ns, a=5)), {"a": 5, "b": 2})
+
+    @unittest.skipIf(sys.version_info < (3, 13), "copy.replace added in 3.13")
+    @make_dynamo_test
+    def test_replace_subclass_init_requires_arg(self):
+        # type(self)() is what raises here, so skipping __init__ would swallow it.
+        with self.assertRaises(TypeError):
+            copy.replace(_RequiredArgNamespace(1), a=5)
+
+    @make_dynamo_test
+    def test_constructor_arity_message(self):
+        if sys.version_info < (3, 13):
+            with self.assertRaisesRegex(TypeError, "no positional arguments expected"):
+                types.SimpleNamespace({}, {})
+            return
+        # PyArg_UnpackTuple gets its funcname from _PyType_Name(Py_TYPE(ns)),
+        # so a subclass reports its own name.
+        too_many = "expected at most 1 argument, got 2"
+        with self.assertRaisesRegex(TypeError, f"SimpleNamespace {too_many}"):
+            types.SimpleNamespace({}, {})
+        with self.assertRaisesRegex(TypeError, f"_Namespace {too_many}"):
+            _Namespace({}, {})
+
+    @unittest.skipIf(sys.version_info < (3, 13), "positional argument added in 3.13")
+    def test_str_subclass_key_graph_breaks(self):
+        # PyUnicode_Check takes a str subclass, but Dynamo models the instance
+        # dict with exact-str names, so this graph-breaks instead of tracing.
+        class MyStr(str):
+            __slots__ = ()
+
+        def fn(x):
+            return len(vars(types.SimpleNamespace({MyStr("a"): 1}))), x + 1
+
+        x = torch.randn(3)
+        with self.assertRaisesRegex(Unsupported, "str subclass key in SimpleNamespace"):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(torch.compile(fn, backend="eager")(x)[0], fn(x)[0])
+
+    @unittest.skipIf(sys.version_info < (3, 13), "positional argument added in 3.13")
+    def test_non_constant_key_graph_breaks(self):
+        # Formatting a tensor produces a StringFormatVariable, which is str-typed
+        # but has no constant value to use as an attribute name.
+        def fn(x):
+            return len(vars(types.SimpleNamespace({f"a{x}": 1}))), x + 1
+
+        with self.assertRaisesRegex(Unsupported, "non-constant key in SimpleNamespace"):
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(3))
+
     def test_holds_tensors_in_one_graph(self):
         def fn(x):
             ns = types.SimpleNamespace(a=x + 1)
@@ -1457,9 +1535,11 @@ class TestSimpleNamespace(TestCase):
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         x = torch.randn(3)
-        expected = fn(types.SimpleNamespace(name="cfg", scale=2), x)
-        got = opt_fn(types.SimpleNamespace(name="cfg", scale=2), x)
-        self.assertEqual(expected, got)
+        ns_eager = types.SimpleNamespace(name="cfg", scale=2)
+        ns_compiled = types.SimpleNamespace(name="cfg", scale=2)
+        self.assertEqual(fn(ns_eager, x), opt_fn(ns_compiled, x))
+        # The write to ns.total has to replay onto the caller's object.
+        self.assertEqual(vars(ns_eager), vars(ns_compiled))
 
     @unittest.skipIf(sys.version_info < (3, 13), "copy.replace added in 3.13")
     def test_replace_from_outside(self):
@@ -1469,9 +1549,10 @@ class TestSimpleNamespace(TestCase):
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         x = torch.randn(3)
-        expected = fn(types.SimpleNamespace(name="cfg", scale=2), x)
-        got = opt_fn(types.SimpleNamespace(name="cfg", scale=2), x)
-        self.assertEqual(expected, got)
+        ns_eager = types.SimpleNamespace(name="cfg", scale=2)
+        ns_compiled = types.SimpleNamespace(name="cfg", scale=2)
+        self.assertEqual(fn(ns_eager, x), opt_fn(ns_compiled, x))
+        self.assertEqual(vars(ns_eager), vars(ns_compiled))
 
 
 if __name__ == "__main__":

@@ -75,6 +75,7 @@ from ..source import (
 from ..utils import (
     base_exception_methods,
     check_constant_args,
+    check_positional,
     cmp_name_to_op_mapping,
     deque_iterator,
     deque_methods,
@@ -92,6 +93,7 @@ from ..utils import (
     list_methods,
     namedtuple_fields,
     no_keywords,
+    no_positional,
     object_has_getattribute,
     proxy_args_kwargs,
     raise_args_mismatch,
@@ -187,12 +189,22 @@ if TYPE_CHECKING:
     from .lists import ListVariable, TupleVariable
 
 
+_STANDARD_SETATTRS: tuple[Any, ...] = (object.__setattr__, BaseException.__setattr__)
+_STANDARD_DELATTRS: tuple[Any, ...] = (object.__delattr__, BaseException.__delattr__)
+if sys.version_info < (3, 13):
+    # Types that name tp_setattro in their static struct get their own
+    # __setattr__/__delattr__ wrappers from PyType_Ready before 3.13, even when
+    # the slot is PyObject_GenericSetAttr. BaseException above is the same case.
+    _STANDARD_SETATTRS += (types.SimpleNamespace.__setattr__,)
+    _STANDARD_DELATTRS += (types.SimpleNamespace.__delattr__,)
+
+
 def is_standard_setattr(val: object) -> bool:
-    return val in (object.__setattr__, BaseException.__setattr__)
+    return val in _STANDARD_SETATTRS
 
 
 def is_standard_delattr(val: object) -> bool:
-    return val in (object.__delattr__, BaseException.__delattr__)
+    return val in _STANDARD_DELATTRS
 
 
 def is_forbidden_context_manager(ctx: object) -> bool:
@@ -1105,7 +1117,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         elif (
             name == "__replace__"
             and args
-            and isinstance(args[0], variables.SimpleNamespaceVariable)
+            and issubclass(self.value, types.SimpleNamespace)
         ):
             # copy.replace(ns) resolves type(ns).__replace__ and calls it with
             # the instance as the sole positional argument.
@@ -5528,16 +5540,19 @@ class SimpleNamespaceVariable(UserDefinedObjectVariable):
     """types.SimpleNamespace and its subclasses.
 
     Attribute get/set/del, __dict__ and vars() are inherited: the type keeps a
-    plain instance dict and does not override __getattribute__, __setattr__ or
-    __delattr__. Only its C slots need a model, since they have no Python source
-    to inline.
+    plain instance dict and its tp_getattro/tp_setattro are the generic ones.
+    Only its C slots need a model, since they have no Python source to inline.
+
+    Before 3.13 those generic slots are still published as __getattribute__,
+    __setattr__ and __delattr__ wrappers on the type, which is why
+    is_standard_setattr has to know about them.
 
     ref: https://github.com/python/cpython/blob/3.13/Objects/namespaceobject.c
     """
 
     @staticmethod
     def is_matching_cls(cls: type) -> bool:
-        return isinstance(cls, type) and issubclass(cls, types.SimpleNamespace)
+        return issubclass(cls, types.SimpleNamespace)
 
     def _repr_name(self) -> str:
         # namespace_repr prints "namespace" for the exact type, tp_name otherwise.
@@ -5566,7 +5581,28 @@ class SimpleNamespaceVariable(UserDefinedObjectVariable):
         for key, value in scratch.items.items():
             if not issubclass(key.vt.python_type(), str):
                 raise_type_error(tx, "keywords must be strings")
-            merged[key.vt.as_python_constant()] = value
+            try:
+                attr = key.vt.as_python_constant()
+            except NotImplementedError as exc:
+                unimplemented(
+                    gb_type="non-constant key in SimpleNamespace()",
+                    context=f"key={key.vt}",
+                    explanation="Dynamo needs the attribute names a namespace is "
+                    "built from to be constants.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                    from_exc=exc,
+                )
+            # PyUnicode_Check accepts a str subclass, but the instance dict is
+            # modelled with exact-str names, so ConstantVariable would reject it.
+            if type(attr) is not str:
+                unimplemented(
+                    gb_type="str subclass key in SimpleNamespace()",
+                    context=f"key={attr!r}, type={type(attr)}",
+                    explanation="Dynamo models namespace attribute names as exact "
+                    "strings, so a str subclass key cannot be tracked.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+            merged[attr] = value
         for name, value in kwargs.items():
             # ** unpacking a non-str key reaches here unvalidated; CPython
             # rejects it in the call machinery with this same message.
@@ -5596,12 +5632,22 @@ class SimpleNamespaceVariable(UserDefinedObjectVariable):
         replace = types.SimpleNamespace.__replace__  # type: ignore[missing-attribute]
         if self._maybe_get_baseclass_method("__replace__") is not replace:
             return None
-        if args:
-            raise_type_error(tx, "__replace__() takes no positional arguments")
+        no_positional(tx, "__replace__", args)
+        # namespace_replace builds the copy with PyObject_CallNoArgs on the type,
+        # so a subclass __init__ runs and whatever it seeds survives the updates
+        # below. Allocating with __new__ instead would drop those attributes and
+        # swallow the TypeError from a constructor that needs arguments.
         cls_vt = VariableTracker.build(tx, type(self.value), self.cls_source)
-        new_vt = tx.output.side_effects.track_new_user_defined_object(
-            cls_vt, cls_vt, [], tx=tx
-        )
+        new_vt = cls_vt.call_function(tx, [], {})
+        if not isinstance(new_vt, SimpleNamespaceVariable):
+            # _PyNamespace_Check on the constructor's return value.
+            unimplemented(
+                gb_type="__replace__ on a namespace whose type returned a non-namespace",
+                context=f"type={type(self.value)}, returned={new_vt}",
+                explanation="types.SimpleNamespace.__replace__ calls type(self)() and "
+                "requires the result to be a namespace.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
         attrs = dict(self._attr_items(tx))
         attrs.update(kwargs)
         for attr, value in attrs.items():
@@ -5617,14 +5663,11 @@ class SimpleNamespaceVariable(UserDefinedObjectVariable):
         kwargs: dict[str, Any],
     ) -> VariableTracker:
         # namespace_init grew its optional positional argument in 3.13 (gh-108191).
-        if args and sys.version_info < (3, 13):
+        if sys.version_info >= (3, 13):
+            # PyArg_UnpackTuple, whose message matches _PyArg_CheckPositional's.
+            check_positional(tx, type(self.value).__name__, len(args), 0, 1)
+        elif args:
             raise_type_error(tx, "no positional arguments expected")
-        if len(args) > 1:
-            raise_type_error(
-                tx,
-                f"{type(self.value).__name__} expected at most "
-                f"1 argument, got {len(args)}",
-            )
         for attr, value in self._merge_args(tx, args, kwargs).items():
             tx.output.side_effects.store_instance_dict_attr(self, attr, value)
         return variables.ConstantVariable.create(None)
