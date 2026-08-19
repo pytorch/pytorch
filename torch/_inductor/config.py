@@ -653,6 +653,14 @@ max_autotune_gemm_backends = os.environ.get(
     "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS", "ATEN,TRITON,CPP"
 ).upper()
 
+# Opt-in for the shared-A bmm template (see kernel/bmm.py), off by default. The
+# template is only ever an extra autotune choice, so leaving it off keeps the
+# stock bmm choices and changes nothing else.
+bmm_shared_a: bool = Config(
+    default=False,
+    env_name_force="TORCHINDUCTOR_BMM_SHARED_A_TEMPLATE_ENABLED",
+)
+
 
 # Configures the maximum number of NVIDIA Universal GEMM (NVGEMM) configs to profile
 # in max_autotune. Default 10: a sweep over GDN2/attn/MoE + FLUX shapes (bf16 and
