@@ -927,9 +927,7 @@ class TestFastCudaLauncher(TestCase):
         device_interface = get_interface_for_device(torch.device(device).type)
         stream = device_interface.get_raw_stream(device_interface.current_device())
         fast(1, 1, 1, stream, new_arg0, 5)
-        self.assertEqual(
-            new_arg0, torch.tensor([5], dtype=torch.int32, device=device)
-        )
+        self.assertEqual(new_arg0, torch.tensor([5], dtype=torch.int32, device=device))
 
     def test_multiple_tensor_args(self, device):
         """Verify _FastCudaLauncher handles multiple tensor pointer args correctly."""
