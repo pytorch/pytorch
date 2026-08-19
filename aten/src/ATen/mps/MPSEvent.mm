@@ -102,14 +102,14 @@ bool MPSEvent::notify(bool needsLock, MTLSharedEventNotificationBlock block) {
 
 void MPSEvent::notifyCpuSync() {
   std::lock_guard<std::mutex> lock(m_cpu_sync_mutex);
-  m_cpu_sync_completed = true;
+  ++m_cpu_sync_pending;
   m_cpu_sync_cv.notify_one();
 }
 
 void MPSEvent::waitForCpuSync() {
   std::unique_lock<std::mutex> lock(m_cpu_sync_mutex);
-  m_cpu_sync_cv.wait(lock, [&] { return m_cpu_sync_completed; });
-  m_cpu_sync_completed = false;
+  m_cpu_sync_cv.wait(lock, [&] { return m_cpu_sync_pending > 0; });
+  --m_cpu_sync_pending;
 }
 
 bool MPSEvent::synchronize() {
@@ -139,7 +139,7 @@ void MPSEvent::reset(MPSStream* stream, bool enable_timing) {
   // reset record time
   m_completion_time = 0;
   m_enable_timing = enable_timing;
-  m_cpu_sync_completed = false;
+  m_cpu_sync_pending = 0;
 };
 
 //-----------------------------------------------------------------
