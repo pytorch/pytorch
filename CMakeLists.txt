@@ -1,3 +1,48 @@
+# PyTorch build overview
+#
+# This file is the entry point of the native build. It is normally driven by
+# scikit-build-core through `pip install -e . -v --no-build-isolation`
+# (`spin develop`) rather than by invoking cmake directly; the exception is the
+# standalone libtorch build in tools/build_libtorch.py. The stages below appear
+# in the order they are executed in this file.
+#
+# 1. Bootstrap: forward the toolchain env vars needed before project() (cross
+#    compilation), call project() with the version from version.txt, then
+#    cmake/EnvVarForwarding.cmake turns the remaining build env vars into CMake
+#    cache variables. That module is the reference for the environment
+#    variables that configure the build: look there first for an env var to
+#    set, and document new ones there. The exceptions are third-party locations
+#    such as MKLROOT or ROCM_PATH and a handful of niche flags, which are read
+#    directly where they are used.
+# 2. Pre-build (cmake/PreBuildSteps.cmake): initialize and verify the git
+#    submodules, and fetch the pinned NCCL for distributed CUDA builds.
+# 3. Options: declare every build knob (USE_*, BUILD_*). An option added here
+#    must also be added to cmake/Summary.cmake.
+# 4. Dependencies (cmake/Dependencies.cmake): find or build the third-party
+#    libraries and set up the accelerator toolchains (CUDA/ROCm/XPU). The
+#    global compile and link flags are resolved inline right after.
+# 5. Code generation, all driven from caffe2/CMakeLists.txt: cmake/Codegen.cmake
+#    runs torchgen over native_functions.yaml to emit the ATen operator headers
+#    and sources, and tools/setup_helpers/generate_code.py emits the autograd
+#    and Python binding sources. The .pyi stubs are generated later, in
+#    torch/CMakeLists.txt.
+# 6. Main build: add_subdirectory() of torch/headeronly, c10 and caffe2 (which
+#    in turn adds torch/). This builds c10, torch_cpu, the per-accelerator
+#    torch_cuda/torch_hip/torch_xpu, the umbrella torch library and
+#    torch_python, plus the C++ tests; those subdirectories also carry the
+#    install rules for the headers and libraries.
+# 7. Export and extras: generate the Caffe2Config.cmake / Caffe2Targets.cmake
+#    files that downstream C++ projects consume, then the optional binaries/
+#    and JNI bindings, which link against the libraries built above.
+# 8. Python packaging: cmake/FileMirroring.cmake copies sources into
+#    torchgen/packaged and into the torch/ subpackages that need files vendored
+#    out of third_party/, cmake/PackageData.cmake installs the non-Python
+#    package data (stubs, headers, templates) into torch/, and
+#    cmake/PostBuildSteps.cmake merges compile_commands.json and registers the
+#    install-time fixups (TORCH_STABLE_ONLY header wrapping, Windows runtime
+#    DLL and macOS OpenMP bundling).
+# 9. Summary (cmake/Summary.cmake): print the resolved configuration.
+
 cmake_minimum_required(VERSION 3.27 FATAL_ERROR)
 
 cmake_policy(SET CMP0126 OLD)
@@ -448,6 +493,26 @@ endif()
 cmake_dependent_option(USE_PRIORITIZED_TEXT_FOR_LD "Use prioritized text linker for ld."
   "${USE_PRIORITIZED_TEXT_DEFAULT}" "CPU_INTEL OR CPU_AARCH64 OR CPU_POWER" OFF)
 
+# LLVM BOLT post-link binary optimization. Visible on AArch64, x86 and ppc64le.
+# Defaults ON for aarch64+linux+CUDA builds that also apply the linker script
+# optimization and a suitable llvm-bolt (>=21) is available. Depends on the
+# linker script because the committed profiles were collected with it enabled.
+function(check_llvm_bolt_version var item)
+  execute_process(COMMAND ${item} --version OUTPUT_VARIABLE _cmd_out)
+  string(REGEX MATCH "[0-9]+\.[0-9]+\.[0-9]+" _bolt_version "${_cmd_out}")
+  if(${_bolt_version} VERSION_LESS 21)
+    set(${var} FALSE PARENT_SCOPE)
+  endif()
+endfunction()
+find_program(LLVM_BOLT_EXECUTABLE NAMES llvm-bolt VALIDATOR check_llvm_bolt_version)
+
+set(USE_LLVM_BOLT_DEFAULT OFF)
+if(LINUX AND USE_CUDA AND CPU_AARCH64 AND USE_PRIORITIZED_TEXT_FOR_LD AND LLVM_BOLT_EXECUTABLE)
+  set(USE_LLVM_BOLT_DEFAULT ON)
+endif()
+cmake_dependent_option(USE_LLVM_BOLT "Optimize libraries with LLVM BOLT."
+  "${USE_LLVM_BOLT_DEFAULT}" "CPU_INTEL OR CPU_AARCH64 OR CPU_POWER" OFF)
+
 option(USE_MIMALLOC "Use mimalloc" OFF)
 # Enable third party mimalloc library to improve memory allocation performance
 # on Windows and AArch64.
@@ -794,40 +859,48 @@ endif()
 
 # Prioritized Text Linker Optimization
 if(USE_PRIORITIZED_TEXT_FOR_LD)
-
-  set(LINKER_SCRIPT_FILE_IN "${CMAKE_SOURCE_DIR}/cmake/prioritized_text.txt")
-  set(LINKER_SCRIPT_FILE_OUT "${CMAKE_SOURCE_DIR}/cmake/linker_script.ld")
-
-  execute_process(
-    COMMAND ${Python_EXECUTABLE}
-            ${CMAKE_SOURCE_DIR}/tools/setup_helpers/generate_linker_script.py
-            --filein "${LINKER_SCRIPT_FILE_IN}"
-            --fout  "${LINKER_SCRIPT_FILE_OUT}"
-    RESULT_VARIABLE _gen_result
-    OUTPUT_VARIABLE _gen_output
-    ERROR_VARIABLE  _gen_error
-  )
-
-  if(NOT _gen_result EQUAL 0)
-    message(FATAL_ERROR
-      "Failed to generate linker script:\n${_gen_output}\n${_gen_error}")
-  endif()
-
   append_cxx_flag_if_supported("-ffunction-sections" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-fdata-sections" CMAKE_CXX_FLAGS)
   append_c_flag_if_supported("-ffunction-sections" CMAKE_C_FLAGS)
   append_c_flag_if_supported("-fdata-sections" CMAKE_C_FLAGS)
 
-  set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -T${LINKER_SCRIPT_FILE_OUT}")
-  set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} -T${LINKER_SCRIPT_FILE_OUT}")
+  set(LINKER_SCRIPT_FILE_IN "${CMAKE_SOURCE_DIR}/cmake/prioritized_text.txt")
+  set(LINKER_SCRIPT_FILE_OUT "${CMAKE_SOURCE_DIR}/cmake/linker_script.ld")
+  set(LINKER_SCRIPT_PATH "${CMAKE_SOURCE_DIR}/tools/setup_helpers/generate_linker_script.py")
+  add_custom_command(
+    OUTPUT "${LINKER_SCRIPT_FILE_OUT}"
+    COMMAND ${Python_EXECUTABLE}
+            "${LINKER_SCRIPT_PATH}"
+            --filein "${LINKER_SCRIPT_FILE_IN}"
+            --fout   "${LINKER_SCRIPT_FILE_OUT}"
+    DEPENDS "${LINKER_SCRIPT_PATH}"
+            "${LINKER_SCRIPT_FILE_IN}"
+    VERBATIM
+  )
+  add_custom_target(generate_linker_script DEPENDS "${LINKER_SCRIPT_FILE_OUT}")
+elseif(LINUX AND CPU_AARCH64)
+  message(WARNING [[
+  It is strongly recommend to enable linker script optimization for all AArch64 Linux builds.
+  To do so please export USE_PRIORITIZED_TEXT_FOR_LD=1
+  ]])
+endif()
 
-else()
-  if(LINUX AND CPU_AARCH64)
-    message(WARNING [[
-    It is strongly recommend to enable linker script optimization for all AArch64 Linux builds.
-    To do so please export USE_PRIORITIZED_TEXT_FOR_LD=1
-    ]])
-  endif()
+if(USE_LLVM_BOLT)
+  # BOLT requires -fno-reorder-blocks-and-partition for the compiler and
+  # --emit-relocs for the linker. Since --emit-relocs increases the binary
+  # size, we limit the use to libraries that are actually optimized by BOLT
+  # instead of applying globally (see torch_optimize_layout_if_enabled)
+  # NVIDIA internal benchmarking shows -fno-plt also provides a perf boost.
+  append_cxx_flag_if_supported("-fno-plt" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-fno-reorder-blocks-and-partition" CMAKE_CXX_FLAGS)
+  append_c_flag_if_supported("-fno-plt" CMAKE_C_FLAGS)
+  append_c_flag_if_supported("-fno-reorder-blocks-and-partition" CMAKE_C_FLAGS)
+
+  # Extract the committed BOLT profiles for the build-time optimization
+  # step (torch_optimize_layout_if_enabled in cmake/public/utils.cmake).
+  set(LLVM_BOLT_PROFILES_DIR "${CMAKE_BINARY_DIR}/bolt_profiles")
+  file(ARCHIVE_EXTRACT INPUT "${CMAKE_SOURCE_DIR}/cmake/bolt_profiles/torch.tar.zst"
+       DESTINATION "${LLVM_BOLT_PROFILES_DIR}")
 endif()
 
 # Build libtorch mobile library, which contains ATen/TH ops and native support
