@@ -1455,7 +1455,7 @@ class TestExperimentDevice(TestCase):
     @requires_capabilities(
         Capability.attention.flash_attention
     )
-    @unittest.skipUnless(has_triton() and not torch.version.hip, "Requires Triton and not ROCm",) 
+    @unittest.skipIf(torch.version.hip, "Requires not ROCm") 
     def test_aot_export_flex_attention_callable_mask_mod(self, device):
         """Test flex_attention AOT export with callable class as mask_mod.
 
@@ -1527,7 +1527,7 @@ class TestExperimentDevice(TestCase):
     @requires_capabilities(
         Capability.attention.flash_attention
     )
-    @unittest.skipUnless(has_triton() and not torch.version.hip, "Requires Triton and not ROCm",)
+    @unittest.skipIf(torch.version.hip, "Requires not ROCm")
     def test_aot_export_flex_attention_with_blockmask_placeholders(self, device):
         from torch._subclasses.fake_tensor import FakeTensorMode
         from torch.nn.attention.flex_attention import create_block_mask, flex_attention
