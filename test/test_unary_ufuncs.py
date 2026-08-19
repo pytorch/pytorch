@@ -43,6 +43,7 @@ from torch.testing._internal.common_utils import (
     gradcheck,
     is_iterable_of_tensors,
     numpy_to_torch_dtype_dict,
+    parametrize,
     run_tests,
     skipIfNoSciPy,
     slowTest,
@@ -107,7 +108,7 @@ class TestUnaryUfuncs(TestCase):
                     result.item(),
                     float("nan"),
                     msg=(
-                        f"input of {lower_tensor.item()} outside lower domain boundary"
+                        lambda msg: f"{msg}\ninput of {lower_tensor.item()} outside lower domain boundary"
                         f" {low} produced {result.item()}, not nan!"
                     ),
                 )
@@ -126,7 +127,7 @@ class TestUnaryUfuncs(TestCase):
                     result.item(),
                     float("nan"),
                     msg=(
-                        f"input of {higher_tensor.item()} outside upper domain boundary"
+                        lambda msg: f"{msg}\ninput of {higher_tensor.item()} outside upper domain boundary"
                         f" {high} produced {result.item()}, not nan!"
                     ),
                 )
@@ -242,7 +243,7 @@ class TestUnaryUfuncs(TestCase):
             torch_kwargs, numpy_kwargs = op.sample_kwargs(t.device, dtype, t)
             if dtype is torch.bfloat16:
                 a = t.cpu().to(torch.float32).numpy()
-            elif dtype is torch.complex32:
+            elif dtype in (torch.complex32, torch.bcomplex32):
                 a = t.cpu().to(torch.complex64).numpy()
             else:
                 a = t.cpu().numpy()
@@ -574,6 +575,32 @@ class TestUnaryUfuncs(TestCase):
             device=device,
         )
         self.compare_with_numpy(torch.sqrt, np.sqrt, x)
+
+    @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
+    def test_relu_signed_zero(self, device, dtype):
+        x = torch.tensor([-0.0, 0.0], device=device, dtype=dtype)
+        exp = torch.tensor([True, False], device=device)
+
+        self.assertEqual(torch.signbit(torch.relu(x)), exp)
+        self.assertEqual(torch.signbit(torch.nn.functional.relu(x)), exp)
+
+        y = x.clone()
+        y.relu_()
+        self.assertEqual(torch.signbit(y), exp)
+
+    @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
+    def test_clamp_signed_zero(self, device, dtype):
+        x = torch.tensor([-0.0, 0.0], device=device, dtype=dtype)
+        exp = torch.signbit(x)
+
+        for name, result in (
+            ("clamp_min", torch.clamp_min(x, 0)),
+            ("clamp_max", torch.clamp_max(x, 0)),
+            ("clamp_min_kwarg", torch.clamp(x, min=0)),
+            ("clamp_min_max_kwarg", torch.clamp(x, min=0, max=1))
+        ):
+            with self.subTest(op=name):
+                self.assertEqual(torch.signbit(result), exp)
 
     @unittest.skipIf(not TEST_SCIPY, "Requires SciPy")
     @dtypes(torch.float, torch.double)
@@ -924,13 +951,13 @@ class TestUnaryUfuncs(TestCase):
             ("sin", doubles, True, True, "cpu"),
             ("sin", doubles, True, True, "cuda"),
             ("sinh", doubles, True, True, "cpu"),
-            ("sinh", doubles, False, True, "cuda"),
+            ("sinh", doubles, True, True, "cuda"),
             ("sigmoid", doubles, True, True, "cpu"),
             ("sigmoid", doubles, True, True, "cuda"),
             ("logit", doubles, True, True, "cpu"),
             ("logit", doubles, True, True, "cuda"),
             ("sqrt", doubles, True, True, "cpu"),
-            ("sqrt", doubles, False, True, "cuda"),
+            ("sqrt", doubles, True, True, "cuda"),
             ("tan", doubles, True, True, "cpu"),
             ("tan", doubles, True, True, "cuda"),
             ("tanh", doubles, True, True, "cpu"),
@@ -946,7 +973,7 @@ class TestUnaryUfuncs(TestCase):
             has_internal_mem_overlap_check,
             dev,
         ) in unary_mem_overlap_cases:
-            if dev != device:
+            if dev != self.device_type:
                 continue
             out_fn = getattr(torch, fn)
             in_fn = getattr(torch.Tensor, fn + "_")
@@ -1937,6 +1964,35 @@ class TestUnaryUfuncs(TestCase):
         y = x.to(torch.float8_e5m2)
         ref = x.cpu().float().to(torch.float8_e5m2)
         self.assertEqual(y.cpu().view(torch.uint8), ref.view(torch.uint8))
+
+    # Regression for https://github.com/pytorch/pytorch/issues/177839:
+    # when eps > 0.5 the scalar kernel clamps via `x < eps ? eps : ...` (so
+    # the lower bound wins over the upper bound when eps > 1 - eps), and the
+    # vectorized kernel must match.
+    @onlyCPU
+    @dtypes(torch.float32, torch.float64, torch.float16, torch.bfloat16)
+    @parametrize("eps", [0.49, 0.51, 0.6, 0.9])
+    @parametrize("shape", [(2, 16), (4, 32), (8, 64)])
+    def test_logit_vectorized_matches_scalar(self, device, dtype, eps, shape):
+        torch.manual_seed(0)
+        # Slice from a wider tensor so the result is non-contiguous and
+        # bypasses the contiguous MKL fast-path — ensures the vectorized
+        # kernel we patched is actually exercised on MKL-enabled builds.
+        rows, cols = shape
+        t = torch.rand((rows, cols + 2), dtype=dtype, device=device) * 2 - 0.5
+        x = t[:, :cols]
+        self.assertFalse(x.is_contiguous())
+        got = torch.special.logit(x, eps=eps)
+        # Reference: apply the scalar kernel elementwise against a single-
+        # lane tensor of the same dtype. cpu_kernel_vec falls back to its
+        # scalar lambda for lengths below `Vectorized::size()`, so this
+        # always hits the scalar path and gives a bit-exact ground truth.
+        ref = torch.empty_like(x)
+        x_flat = x.reshape(-1)
+        ref_flat = ref.reshape(-1)
+        for i in range(x_flat.numel()):
+            ref_flat[i] = torch.special.logit(x_flat[i : i + 1], eps=eps)
+        self.assertEqual(got, ref)
 
 
 instantiate_device_type_tests(TestUnaryUfuncs, globals())

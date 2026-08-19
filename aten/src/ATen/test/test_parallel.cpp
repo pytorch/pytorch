@@ -5,7 +5,9 @@
 #include <ATen/Parallel.h>
 #include <ATen/ParallelFuture.h>
 
+#include <atomic>
 #include <iostream>
+#include <memory>
 // NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <string.h>
 #include <sstream>
@@ -105,6 +107,34 @@ TEST(TestParallel, Exceptions) {
       throw std::runtime_error("exception");
     }),
     std::runtime_error);
+}
+
+// Regression test for the std::latch use-after-free that was introduced into
+// at::internal::invoke_parallel(): the coordinator's wait() could return and
+// unwind the frame holding the synchronization object while a pool worker was
+// still inside its final count_down(), touching freed memory. We stress
+// parallel_for with grain_size 1 so every call spins up several pool tasks and
+// a pool thread is frequently the last to finish. On a build with the bug this
+// deterministically trips TSan (data race) / ASan (heap-use-after-free); the
+// exact-visit checks additionally guard the wait/dispatch correctness in every
+// build.
+TEST(TestParallel, InvokeParallelNoUseAfterFree) {
+  NumThreadsGuard guard(4);
+  constexpr int64_t kSize = 2048;
+  for (int iter = 0; iter < 2000; ++iter) {
+    auto visited = std::make_unique<std::atomic<int>[]>(kSize);
+    for (int64_t i = 0; i < kSize; ++i) {
+      visited[i].store(0, std::memory_order_relaxed);
+    }
+    at::parallel_for(0, kSize, 1, [&](int64_t begin, int64_t end) {
+      for (int64_t i = begin; i < end; ++i) {
+        visited[i].fetch_add(1, std::memory_order_relaxed);
+      }
+    });
+    for (int64_t i = 0; i < kSize; ++i) {
+      ASSERT_EQ(visited[i].load(std::memory_order_relaxed), 1);
+    }
+  }
 }
 
 TEST(TestParallel, IntraOpLaunchFuture) {

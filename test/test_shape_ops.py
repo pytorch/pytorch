@@ -21,9 +21,12 @@ from torch.testing._internal.common_device_type import (
     onlyCPU,
 )
 from torch.testing._internal.common_dtype import (
+    all_passthru_types,
+    all_passthru_types_and,
     all_types,
     all_types_and,
     all_types_and_complex_and,
+    barebones_unsigned_types,
 )
 from torch.testing._internal.common_utils import (
     IS_JETSON,
@@ -297,8 +300,16 @@ class TestShapeOps(TestCase):
         values given the min_vals and/or max_vals.
         If with_nans is provided, then some values are randomly set to nan.
         """
-        X = torch.rand(100, device=device).mul(50).add(-25)  # uniform in [-25, 25]
-        X = X.to(dtype)
+        if dtype in barebones_unsigned_types():
+            info = torch.iinfo(dtype)
+            X = torch.randint(0, 50, (100,), device=device, dtype=torch.int64).to(dtype)
+            # Values above the signed max, which a signed comparison would misorder.
+            top = [info.max, info.max - 1, info.max // 2 + 1, info.max // 2]
+            X[: len(top)] = torch.tensor(top, device=device, dtype=dtype)
+        else:
+            X = torch.rand(100, device=device).mul(50).add(-25)  # uniform in [-25, 25]
+            X = X.to(dtype)
+
         if with_nans:
             mask = torch.randint(0, 2, X.shape, dtype=torch.bool, device=device)
             X[mask] = nan
@@ -309,14 +320,18 @@ class TestShapeOps(TestCase):
         if isinstance(max_vals, torch.Tensor):
             max_vals = max_vals.cpu().numpy()
 
-        # Use NumPy implementation as reference
-        X_clamped = torch.tensor(
-            np.clip(X.cpu().numpy(), a_min=min_vals, a_max=max_vals), device=device
-        )
+        # Use NumPy implementation as reference. np.clip against a Python int
+        # bound can widen a uint64 array to the distinct `ulonglong` scalar type,
+        # which torch cannot ingest. Cast back to the input dtype so from_numpy
+        # stays on a supported type.
+        X_np = X.cpu().numpy()
+        X_clamped = torch.from_numpy(
+            np.clip(X_np, a_min=min_vals, a_max=max_vals).astype(X_np.dtype)
+        ).to(device)
         return X, X_clamped
 
     # Tests clamp and its alias, clip
-    @dtypes(torch.int64, torch.float32)
+    @dtypes(torch.int64, torch.float32, *barebones_unsigned_types())
     def test_clamp(self, device, dtype):
         op_list = (
             torch.clamp,
@@ -327,8 +342,16 @@ class TestShapeOps(TestCase):
             torch.Tensor.clip_,
         )
 
-        # min/max argument product
-        args = product((-10, None), (10, None))
+        if dtype in barebones_unsigned_types():
+            # A negative bound would wrap, and a pair straddling the signed max
+            # would promote a Long scalar against a UInt64 one, which is unsupported.
+            info = torch.iinfo(dtype)
+            min_bound, max_bound = info.max // 4, info.max // 2
+        else:
+            min_bound, max_bound = -10, 10
+
+        # min/max argument product; materialized so every op sees every combination
+        args = tuple(product((min_bound, None), (max_bound, None)))
 
         for op in op_list:
             for min_val, max_val in args:
@@ -350,6 +373,14 @@ class TestShapeOps(TestCase):
                     op(X, min=min_val, max=max_val, out=Y_out)
                     self.assertEqual(Y_expected, Y_out)
 
+        min_t = torch.full((100,), min_bound, device=device, dtype=dtype)
+        max_t = torch.full((100,), max_bound, device=device, dtype=dtype)
+        for min_tv, max_tv in ((min_t, max_t), (min_t, None), (None, max_t)):
+            X, Y_expected = self.generate_clamp_baseline(
+                device, dtype, min_vals=min_tv, max_vals=max_tv, with_nans=False
+            )
+            self.assertEqual(Y_expected, torch.clamp(X, min=min_tv, max=max_tv))
+
     def test_clamp_propagates_nans(self, device):
         op_list = (
             torch.clamp,
@@ -360,8 +391,8 @@ class TestShapeOps(TestCase):
             torch.Tensor.clip_,
         )
 
-        # min/max argument product
-        args = product((-10, None), (10, None))
+        # min/max argument product; materialized so every op sees every combination
+        args = tuple(product((-10, None), (10, None)))
 
         for op in op_list:
             for min_val, max_val in args:
@@ -405,7 +436,8 @@ class TestShapeOps(TestCase):
         with self.assertRaisesRegex(RuntimeError, error_msg):
             torch.clamp(X)
 
-    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    @dtypes(*all_passthru_types())
+    @dtypesIfCUDA(*all_passthru_types_and(torch.chalf))
     def test_flip(self, device, dtype):
         make_from_data = partial(torch.tensor, device=device, dtype=dtype)
         make_from_size = partial(make_tensor, device=device, dtype=dtype)

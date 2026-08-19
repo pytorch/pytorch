@@ -163,13 +163,13 @@ def vector_norm(
     else:
         # From here on the computation dtype is important as the reduction is non-trivial
         x = _maybe_convert_to_dtype(x, computation_dtype)  # type: ignore[assignment]
-        reduce_sum = partial(torch.sum, dim=dim, keepdim=keepdim)
-
         is_ord_even = ord % 2 == 0 if isinstance(ord, IntLike) else ord % 2.0 == 0.0
-        if dim == []:
+        if dim is not None and not isinstance(dim, IntLike) and len(dim) == 0:
             dim = None
         elif dim is not None:
             dim = utils.canonicalize_dims(x.ndim, dim)
+
+        reduce_sum = partial(torch.sum, dim=dim, keepdim=keepdim)
 
         if (dim is None and guard_or_false(x.numel() == 1)) or (
             dim is not None
@@ -363,76 +363,3 @@ def svdvals(A: TensorLikeType) -> Tensor:
 def vecdot(x: Tensor, y: Tensor, dim: int = -1) -> Tensor:
     check_fp_or_complex(x.dtype, "linalg.vecdot")
     return (x.conj() * y).sum(dim=dim)
-
-
-def _pivots_to_permutation(pivots, shape, *, inverse=False):
-    perm = torch.empty(shape, dtype=torch.int32, device=pivots.device)
-    perm[..., :] = torch.arange(shape[-1], dtype=torch.int32, device=pivots.device)
-    indices = range(shape[-1])
-    if inverse:
-        indices = reversed(indices)
-
-    if len(shape) > 1:
-        for i in indices:
-            j_s = pivots[..., i]
-            perm_i = perm[..., i].clone()
-            j_idx = torch.meshgrid(
-                *[torch.arange(s, device=perm.device) for s in j_s.shape], indexing="ij"
-            ) + (j_s,)
-            perm_j = perm[j_idx]
-            perm.index_put_(j_idx, perm_i)
-            perm[..., i].copy_(perm_j)
-
-    else:
-        for i in indices:
-            j = pivots[i]
-            perm_i = perm[i].clone()
-            perm_j = perm[j].clone()
-            perm[i].copy_(perm_j)
-            perm[j].copy_(perm_i)
-
-    return perm
-
-
-def _apply_pivots(a, pivots, shape, *, inverse=False):
-    perm = _pivots_to_permutation(pivots - 1, shape, inverse=inverse)
-
-    if len(shape) == 1:
-        return a[perm, :]
-    else:
-        idx = torch.meshgrid(
-            *[torch.arange(s, device=a.device) for s in perm.shape], indexing="ij"
-        )[:-1] + (perm, slice(None))
-        return a[idx]
-
-
-def linalg_lu_solve_out_mps(LU, pivots, B, *, left=True, adjoint=False, out):
-    if out.numel() == 0:
-        return
-
-    if not left:
-        adjoint = not adjoint
-        B = B.mH
-
-    if adjoint:
-        lu_ = LU.mH
-        x = torch.linalg.solve_triangular(lu_, B, left=True, upper=False)
-        x = torch.linalg.solve_triangular(
-            lu_, x, left=True, upper=True, unitriangular=True
-        )
-        x = _apply_pivots(x, pivots, LU.shape[:-1], inverse=True)
-    else:
-        x = _apply_pivots(B, pivots, LU.shape[:-1])
-        x = torch.linalg.solve_triangular(
-            LU, x, left=True, upper=False, unitriangular=True
-        )
-        x = torch.linalg.solve_triangular(LU, x, left=True, upper=True)
-
-    if not left:
-        x = x.mH
-
-    out.copy_(x)
-
-
-mps_lib = torch.library.Library("aten", "IMPL", "MPS")
-mps_lib.impl("aten::linalg_lu_solve.out", linalg_lu_solve_out_mps)

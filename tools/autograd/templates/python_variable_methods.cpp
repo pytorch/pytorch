@@ -35,6 +35,7 @@
 #include "torch/csrc/utils/tensor_types.h"
 #include "torch/csrc/autograd/generated/python_return_types.h"
 
+#include <ATen/core/TorchDispatchUtils.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/core/grad_mode.h>
 #include <ATen/FuncTorchTLS.h>

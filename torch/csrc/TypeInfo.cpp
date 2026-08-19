@@ -254,7 +254,8 @@ static PyObject* THPFInfo_str(THPFInfo* self) {
   if (dtypeStr != nullptr) {
     oss << ", dtype=" << PyUnicode_AsUTF8(dtypeStr) << ')';
   }
-  return !PyErr_Occurred() ? THPUtils_packString(oss.str().c_str()) : nullptr;
+  return !PyErr_Occurred() ? THPUtils_packString(std::move(oss).str().c_str())
+                           : nullptr;
 }
 
 static PyObject* THPIInfo_str(THPIInfo* self) {
@@ -267,7 +268,8 @@ static PyObject* THPIInfo_str(THPIInfo* self) {
     oss << ", dtype=" << PyUnicode_AsUTF8(dtypeStr) << ')';
   }
 
-  return !PyErr_Occurred() ? THPUtils_packString(oss.str().c_str()) : nullptr;
+  return !PyErr_Occurred() ? THPUtils_packString(std::move(oss).str().c_str())
+                           : nullptr;
 }
 
 static const std::initializer_list<PyGetSetDef> THPFInfo_properties = {
