@@ -3,7 +3,7 @@
 import collections
 import logging
 from collections.abc import Iterator, Sequence
-from typing import Any
+from typing import Any, cast
 
 import torch
 from torch.autograd.graph import GradientEdge, Node
@@ -15,13 +15,17 @@ from ._debug import map_debug_info
 logger = logging.getLogger(__name__)
 
 
-def _get_grad_fn_or_grad_acc(t: torch.Tensor) -> Node | None:
+def _get_grad_fn_or_grad_acc(t: torch.Tensor | GradientEdge) -> Node | None:
     """
     Get the grad function or grad accumulator for a tensor.
 
     Accumulate grad nodes are lazily created, so we need to a
     dummy view in order to trigger its creation.
+
+    A ``GradientEdge`` directly supplies the backward root.
     """
+    if isinstance(t, GradientEdge):
+        return t.node
     if t.requires_grad and t.grad_fn is None:
         # if no grad function (leaf tensors) we use view
         viewed_t = t.view_as(t)
@@ -141,7 +145,7 @@ def get_param_groups(
 
 
 def _autograd_grad_for_inputs(
-    outputs: Sequence[torch.Tensor],
+    outputs: Sequence[torch.Tensor | GradientEdge],
     inputs: Sequence[Any],
     grad_outputs: Sequence[torch.Tensor | None] | None = None,
     retain_graph: bool = False,
@@ -161,7 +165,8 @@ def _autograd_grad_for_inputs(
         return tuple(None for _ in inputs)
 
     grads = torch.autograd.grad(
-        outputs=outputs,
+        # The stub does not model Autograd's GradientEdge support.
+        outputs=cast(Sequence[torch.Tensor], outputs),
         inputs=inputs_requiring_grad,
         grad_outputs=grad_outputs,
         retain_graph=retain_graph,
@@ -175,7 +180,7 @@ def _autograd_grad_for_inputs(
 
 
 def stage_backward_input(
-    stage_outputs_or_loss: list[torch.Tensor],
+    stage_outputs_or_loss: Sequence[torch.Tensor | GradientEdge | None],
     output_grads: list[torch.Tensor] | None,
     input_values: list[Any],
     weights: Iterator[Parameter],
@@ -184,21 +189,34 @@ def stage_backward_input(
     Compute the gradients for only the stage inputs with
     respect to the stage outputs (if non-last stage) or loss (if last stage)
 
+    Entries may be tensors, edges for released outputs, or ``None``.
+
     After computing input gradients, we save the intermediate nodes in `param_groups`
     for later use in stage_backward_weight. We don't need to save any other intermediate nodes
     that aren't needed for dW because when we do dW calculation, we start from saved intermediates.
     Detaching the stage_outputs_or_loss at the end of this function is important as
     it frees up the memory that the autograd graph is anticipating to be used later (but doesn't actually need).
     """
-    valid_outputs: list[torch.Tensor] = []
+    valid_outputs: list[torch.Tensor | GradientEdge] = []
     valid_output_grads: list[torch.Tensor | None] = []
     for i, stage_output in enumerate(stage_outputs_or_loss):
-        if not stage_output.requires_grad and stage_output.grad_fn is None:
-            continue
-        valid_outputs.append(stage_output)
-        valid_output_grads.append(
-            torch.ones_like(stage_output) if output_grads is None else output_grads[i]
-        )
+        if isinstance(stage_output, GradientEdge):
+            # Released activations receive gradients from the next stage.
+            if output_grads is None:
+                raise AssertionError(
+                    "A GradientEdge root requires output gradients from the next stage"
+                )
+            valid_outputs.append(stage_output)
+            valid_output_grads.append(output_grads[i])
+        elif isinstance(stage_output, torch.Tensor) and (
+            stage_output.requires_grad or stage_output.grad_fn is not None
+        ):
+            valid_outputs.append(stage_output)
+            valid_output_grads.append(
+                torch.ones_like(stage_output)
+                if output_grads is None
+                else output_grads[i]
+            )
 
     stage_output_grad_fns: list[Node] = list(
         filter(None, map(_get_grad_fn_or_grad_acc, valid_outputs))
@@ -262,7 +280,8 @@ def stage_backward_input(
 
         # drop output side graph state we no longer need
         for t in stage_outputs_or_loss:
-            t.detach_()
+            if isinstance(t, torch.Tensor):
+                t.detach_()
 
         return dinputs, param_groups
     except Exception as e:
@@ -358,6 +377,10 @@ def stage_backward(
     value(s), compute and accumulate gradients for all parameter values (leaves
     in the autograd trace) as well as return a list of the gradients for the
     input values
+
+    An output value may be a ``GradientEdge`` instead of a tensor when the stage
+    released the output after its send completed. Autograd starts from the edge's
+    node, so the released activation is not needed.
     """
     if outputs_with_grads_idxs is not None:
         # Deprecated, not used in runtime calls, only exists in compiler
@@ -367,7 +390,7 @@ def stage_backward(
     try:
         # stage_output may be a composite datatype like dict. Extract all individual
         # tensor values here
-        stage_output_tensors: list[torch.Tensor] = []
+        stage_output_tensors: list[torch.Tensor | GradientEdge] = []
         output_grad_tensors: list[torch.Tensor | None] = []
 
         def extract_tensors_with_grads(
@@ -376,7 +399,14 @@ def stage_backward(
             # Don't delete me- see [Note: ref cycle]
             extract_tensors_with_grads,
         ):
-            if isinstance(output_val, torch.Tensor):
+            if isinstance(output_val, GradientEdge):
+                if not isinstance(grad_val, torch.Tensor):
+                    raise AssertionError(
+                        f"A GradientEdge root requires a gradient but got {type(grad_val)}"
+                    )
+                stage_output_tensors.append(output_val)
+                output_grad_tensors.append(grad_val)
+            elif isinstance(output_val, torch.Tensor):
                 if not output_val.requires_grad and output_val.grad_fn is None:
                     return
                 if not isinstance(grad_val, (torch.Tensor, type(None))):
@@ -432,7 +462,7 @@ def stage_backward(
         )
 
         torch.autograd.backward(
-            stage_output_tensors,
+            cast(Sequence[torch.Tensor], stage_output_tensors),
             grad_tensors=output_grad_tensors,  # type: ignore[arg-type]
         )
 
