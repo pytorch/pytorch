@@ -10768,8 +10768,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         res = f(torch.tensor([20, 21]))
         self.assertEqual(torch.tensor(True), res)
 
-    @staticmethod
-    def _range_recording_backend(compiled_ranges):
+    def _range_recording_backend(self, compiled_ranges):
         """Records the range of the single dynamic dim of each compiled graph."""
 
         def backend(gm, example_inputs):
@@ -10846,6 +10845,12 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(opt_fn(x), fn(x))
         self.assertEqual(compiled_ranges, ["static", (2, 5), (2, int_oo), (3, 5)])
 
+    # Translation validation changes the exception type, don't run with it: the
+    # constraint violation is raised by create_symbol, nested inside the recorded
+    # top level _create_symbolic_sizes_strides_storage_offset event. recording.py pops
+    # that failed event from the log while the mutations it already made to the
+    # ShapeEnv stay, so the replayed ShapeEnv differs and NotEqualError surfaces.
+    @torch.fx.experimental._config.patch(translation_validation=False)
     def test_maybe_mark_dynamic_range_narrow_and_extend(self):
         compiled_ranges = []
 
