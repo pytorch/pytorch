@@ -49,7 +49,7 @@ from torch.ao.quantization.quantization_mappings import (
 
 from torch.jit.mobile import _load_for_lite_interpreter
 from torch.testing._internal.common_quantized import override_quantized_engine
-from torch.testing._internal.common_utils import TEST_WITH_ROCM, TestCase
+from torch.testing._internal.common_utils import TEST_WITH_ROCM, TestCase, IS_ARM64
 
 try:
     from torch.ao.ns.fx.ns_types import NSSingleResultValuesType, NSSubgraph
@@ -357,7 +357,7 @@ def skipIfNoFBGEMM(fn):
 
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
-        if "fbgemm" not in torch.backends.quantized.supported_engines:
+        if IS_ARM64 or "fbgemm" not in torch.backends.quantized.supported_engines:
             raise unittest.SkipTest(reason)
         else:
             fn(*args, **kwargs)
