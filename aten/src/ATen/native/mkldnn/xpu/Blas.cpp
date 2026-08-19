@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/WrapDimUtilsMulti.h>
+#include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/mkldnn/xpu/detail/oneDNN.h>
 #include <ATen/native/xpu/Blas.h>
@@ -30,21 +31,7 @@ Tensor& addmm_out(
     const Scalar& alpha,
     Tensor& result) {
   checkBackend("addmm_out", {result, self, mat1, mat2}, Backend::XPU);
-  TORCH_CHECK(
-      mat1.dim() == 2, "mat1 must be a matrix, got ", mat1.dim(), "-D tensor");
-  TORCH_CHECK(
-      mat2.dim() == 2, "mat2 must be a matrix, got ", mat2.dim(), "-D tensor");
-  TORCH_CHECK(
-      mat1.sizes()[1] == mat2.sizes()[0],
-      "mat1 and mat2 shapes cannot be multiplied (",
-      mat1.sizes()[0],
-      "x",
-      mat1.sizes()[1],
-      " and ",
-      mat2.sizes()[0],
-      "x",
-      mat2.sizes()[1],
-      ")");
+  check_mm_shapes(mat1, mat2, "addmm");
   TORCH_CHECK(
       mat1.dtype() == mat2.dtype(),
       "expected mat1 and mat2 to have the same dtype, but got: ",
@@ -178,19 +165,7 @@ Tensor& _addmm_activation_out(
 
 Tensor& mm_out(const Tensor& self, const Tensor& mat2, Tensor& result) {
   checkBackend("mm_out", {result, self, mat2}, Backend::XPU);
-  TORCH_CHECK(self.dim() == 2, "self must be a matrix");
-  TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix");
-  TORCH_CHECK(
-      self.sizes()[1] == mat2.sizes()[0],
-      "mat1 and mat2 shapes cannot be multiplied (",
-      self.sizes()[0],
-      "x",
-      self.sizes()[1],
-      " and ",
-      mat2.sizes()[0],
-      "x",
-      mat2.sizes()[1],
-      ")");
+  check_mm_shapes(self, mat2, "mm");
   TORCH_CHECK(
       self.dtype() == mat2.dtype(),
       "expected mat1 and mat2 to have the same dtype, but got: ",

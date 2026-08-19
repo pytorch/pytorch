@@ -60,7 +60,9 @@ from torch.testing._internal.common_device_type import (
     onlyAccelerator,
     onlyCPU,
     onlyCUDA,
+    skipCUDAIf,
     skipMeta,
+    skipXPUIf,
 )
 from torch.testing._internal.common_dtype import floating_types_and
 from torch.testing._internal.common_methods_invocations import mask_not_all_zeros
@@ -7189,7 +7191,6 @@ Done""",
         c = torch.ones(2, 2, requires_grad=True, dtype=torch.complex128)
         self.assertTrue(gradcheck(fn2, (c)))
 
-    @unittest.skipIf(TEST_CUDA, "CPU-only test")
     def test_gradcheck_adjusted_atol_complex_inputs(self):
         # Regression test for incorrect atol transformation for
         # complex inputs, allowing fast gradcheck to fail and slow gradcheck to pass.
@@ -14334,7 +14335,7 @@ class TestAutogradDeviceType(TestCase):
                 is not None
             )
             try:
-                # Using torch.device("cuda") directly doesn't work here because
+                # Using torch.device(device) directly doesn't work here because
                 # it has some issues. In particular, unlike set_default_device or
                 # invoking the TorchFunctionMode directly, it doesn't update the
                 # global state dynamo references for guards:
@@ -14398,13 +14399,12 @@ class TestAutogradDeviceType(TestCase):
         self.assertIsInstance(x.float(), torch.FloatTensor)
         self.assertIsInstance(x.int(), torch.IntTensor)
         if device != "cpu":
-            if device_type == "cuda":
-                self.assertIsInstance(
-                    x.float().to(device), getattr(torch, device_type).FloatTensor
-                )
-                self.assertIsInstance(
-                    x.int().to(device), getattr(torch, device_type).IntTensor
-                )
+            self.assertIsInstance(
+                x.float().to(device), getattr(torch, device_type).FloatTensor
+            )
+            self.assertIsInstance(
+                x.int().to(device), getattr(torch, device_type).IntTensor
+            )
             self.assertIsInstance(x.int().to(device).cpu(), torch.IntTensor)
             if torch.accelerator.device_count() >= 2:
                 x2 = x.float().to(f"{device_type}:1")
@@ -14438,19 +14438,19 @@ class TestAutogradDeviceType(TestCase):
                 self.assertIs(t_dtype, x.type(t_dtype).dtype)
                 self.assertEqual(y.data_ptr(), y.type(t).data_ptr())
                 if device != "cpu":
-                    for x_cuda in (True, False):
-                        for y_cuda in (True, False):
-                            x_c = x.to(device) if x_cuda else x
-                            y_c = y.to(device) if y_cuda else y
+                    for x_acc in (True, False):
+                        for y_acc in (True, False):
+                            x_c = x.to(device) if x_acc else x
+                            y_c = y.to(device) if y_acc else y
                             _, y_type = y_c.type().rsplit(".", 1)
                             y_typestr = (
-                                f"torch.{device_type}." if y_cuda else "torch."
+                                f"torch.{device_type}." if y_acc else "torch."
                             ) + y_type
                             self.assertEqual(y_c.type(), x_c.type(y_typestr).type())
                             self.assertIs(y_c.dtype, x_c.type(y_c.dtype).dtype)
                             self.assertEqual(
                                 y_c.data_ptr(),
-                                y_c.to(device).data_ptr() if y_cuda else y_c.data_ptr(),
+                                y_c.to(device).data_ptr() if y_acc else y_c.data_ptr(),
                             )
 
         self._test_type_conversion_backward(lambda x: x)
@@ -14728,11 +14728,9 @@ class TestAutogradDeviceType(TestCase):
 
             self.assertTrue(gradcheck(func, x, fast_mode=True))
 
+    @skipCUDAIf(not torch.cuda.is_bf16_supported(), "Test requires bf16 support")
+    @skipXPUIf(not torch.xpu.is_bf16_supported(), "Test requires bf16 support")
     def test_checkpointing_non_reentrant_autocast(self, device):
-        if (device.startswith("cuda") and not torch.cuda.is_bf16_supported()) or (
-            device.startswith("xpu") and not torch.xpu.is_bf16_supported()
-        ):
-            self.skipTest("Test requires bf16 support")
         for enabled in [True, False]:
 
             def foo(x, y, z):
