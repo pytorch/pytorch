@@ -4729,6 +4729,75 @@ def nn_module_has_global_hooks() -> bool:
     )
 
 
+DynamoRuntimeModuleRef = weakref.ReferenceType[torch.nn.Module]
+
+
+class _DynamoRuntimeModuleTLS(threading.local):
+    refs: tuple[DynamoRuntimeModuleRef, ...] = ()
+
+
+_dynamo_runtime_module_tls = _DynamoRuntimeModuleTLS()
+
+
+def get_dynamo_runtime_module_refs(*values: Any) -> tuple[DynamoRuntimeModuleRef, ...]:
+    """Get weak references to modules used only for a compiled runtime call."""
+    refs = []
+    seen = set()
+    for value in values:
+        module = None
+        if isinstance(value, torch.nn.Module):
+            module = value
+        elif isinstance(
+            value, (types.MethodType, types.BuiltinMethodType)
+        ) and isinstance(value.__self__, torch.nn.Module):
+            module = value.__self__
+
+        if module is not None and id(module) not in seen:
+            seen.add(id(module))
+            refs.append(weakref.ref(module))
+    return tuple(refs)
+
+
+def set_dynamo_runtime_module_refs(
+    refs: tuple[DynamoRuntimeModuleRef, ...],
+) -> tuple[DynamoRuntimeModuleRef, ...]:
+    prior = _dynamo_runtime_module_tls.refs
+    _dynamo_runtime_module_tls.refs = prior + refs
+    return prior
+
+
+def restore_dynamo_runtime_module_refs(
+    refs: tuple[DynamoRuntimeModuleRef, ...],
+) -> None:
+    _dynamo_runtime_module_tls.refs = refs
+
+
+def is_dynamo_runtime_module(module: torch.nn.Module) -> bool:
+    return any(ref() is module for ref in _dynamo_runtime_module_tls.refs)
+
+
+def wrap_dynamo_runtime_module_call(
+    fn: Callable[_P, R], *values: Any
+) -> Callable[_P, R]:
+    """Run ``fn`` with the supplied compiler-owned modules active."""
+    refs = get_dynamo_runtime_module_refs(*values)
+    if not refs:
+        return fn
+
+    @functools.wraps(fn)
+    def wrapped(*args: _P.args, **kwargs: _P.kwargs) -> R:
+        runtime_modules_prior = None
+        if torch.nn.modules.module._has_any_global_hook():
+            runtime_modules_prior = set_dynamo_runtime_module_refs(refs)
+        try:
+            return fn(*args, **kwargs)
+        finally:
+            if runtime_modules_prior is not None:
+                restore_dynamo_runtime_module_refs(runtime_modules_prior)
+
+    return wrapped
+
+
 def nn_module_get_all_hooks(
     mod: torch.nn.Module,
     check_forward_hooks: bool = False,
@@ -5592,14 +5661,24 @@ def flatten_graph_inputs(
         def unflatten_fn(flat_args: Any) -> Any:
             return (flat_args[:boxed_inputs_count], *flat_args[boxed_inputs_count:])
 
-        compiled_fn = compile_gm(GmWrapper(gm, unflatten_fn), flatten_fn(inputs))
+        flat_inputs = flatten_fn(inputs)
     else:
         # slow path, don't know inputs structure
         flat_inputs, spec = pytree.tree_flatten(inputs)
         unflatten_fn = functools.partial(pytree.tree_unflatten, treespec=spec)
-        compiled_fn = compile_gm(GmWrapper(gm, unflatten_fn), flat_inputs)
         # note this doesn't check the spec, assuming it is the same
         flatten_fn = pytree.arg_tree_leaves
+
+    gm_wrapper = GmWrapper(gm, unflatten_fn)
+    runtime_module_refs = get_dynamo_runtime_module_refs(gm_wrapper)
+    runtime_modules_prior = None
+    if runtime_module_refs and torch.nn.modules.module._has_any_global_hook():
+        runtime_modules_prior = set_dynamo_runtime_module_refs(runtime_module_refs)
+    try:
+        compiled_fn = compile_gm(gm_wrapper, flat_inputs)
+    finally:
+        if runtime_modules_prior is not None:
+            restore_dynamo_runtime_module_refs(runtime_modules_prior)
 
     def wrapper(*args: Any) -> Any:
         flat_args = flatten_fn(args)
@@ -5609,7 +5688,14 @@ def flatten_graph_inputs(
             args[i].clear()
 
         # this call is boxed to avoid increasing refcount until we reach aot_module_simplified forward
-        return compiled_fn(flat_args)
+        runtime_modules_prior = None
+        if runtime_module_refs and torch.nn.modules.module._has_any_global_hook():
+            runtime_modules_prior = set_dynamo_runtime_module_refs(runtime_module_refs)
+        try:
+            return compiled_fn(flat_args)
+        finally:
+            if runtime_modules_prior is not None:
+                restore_dynamo_runtime_module_refs(runtime_modules_prior)
 
     return wrapper
 
