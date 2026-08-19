@@ -308,6 +308,9 @@ class ReductionHeuristic(CodegenConfigHeuristics):
         elif max_autotune_enabled:
             pass
         elif reduction_hint == ReductionHint.INNER:
+            configs.extend(
+                self._get_inner_extra_configs(make_config, register_intensive)
+            )
             return configs + [contiguous_config]
         elif reduction_hint == ReductionHint.OUTER:
             return configs + [outer_config]
@@ -497,6 +500,10 @@ class ReductionHeuristic(CodegenConfigHeuristics):
     def _finalize_configs(self, configs, make_config, size_hints, inductor_meta):
         """Post-process non-persistent configs."""
         return configs
+
+    def _get_inner_extra_configs(self, make_config, register_intensive):
+        """Extra candidate configs to try for the INNER reduction hint."""
+        return []
 
     def _persistent_xblock_vals(self) -> list[int]:
         """XBLOCK values for persistent reduction."""
@@ -724,6 +731,12 @@ class ROCmReductionHeuristic(ReductionHeuristic):
 @register_codegen_heuristic("reduction", "xpu", register=torch.xpu._is_compiled())
 class XPUReductionHeuristic(ReductionHeuristic):
     """Reduction configs for XPU devices."""
+
+    def _get_inner_extra_configs(self, make_config, register_intensive):
+        # We see performance regression on xpu in some models because the
+        # default INNER config lacks a high-num_warps candidate. Add one back
+        # for XPU to recover the regressed performance.
+        return [make_config(64, 64, num_warps=16)]
 
     def _persistent_inner_config(
         self,
