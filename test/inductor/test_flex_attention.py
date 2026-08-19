@@ -1729,7 +1729,8 @@ class TestFlexAttention(InductorTestCase):
     @skip_on_cpu
     @skip_on_mps  # hardcodes kernel_options={"BACKEND": "TRITON"}
     def test_kv_order_invariance_padded_causal(self, device):
-        if device == "cuda" and not PLATFORM_SUPPORTS_BF16:
+        supports_bf16 = type(self).get_capabilities().get(Capability.dtype.bf16, False)
+        if torch.device(device).type == "cuda" and not supports_bf16:
             self.skipTest("bf16 is required for this regression test")
 
         batch_size = 1
@@ -2071,7 +2072,7 @@ class TestFlexAttention(InductorTestCase):
         """
         Tests with tensors that require gradients with bf16 dtype in the score_mod
         """
-        if not PLATFORM_SUPPORTS_BF16:
+        if not type(self).get_capabilities().get(Capability.dtype.bf16, False):
             self.skipTest("Platform does not support bf16")
 
         B_local, H_local, S_local, D_local = 2, 4, 32, 64
@@ -2490,8 +2491,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         out1.backward(grad)
         out2 = torch.compile(m2)(q2, k2, v2)
         out2.backward(grad)
-        if device == "cuda":
-            torch.cuda.synchronize()
+        if torch.device(device).type == "cuda":
+            torch.get_device_module(device).synchronize()
 
         pairs = [
             (out1, out2),
@@ -4561,7 +4562,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @skip_on_mps
     @skip_on_xpu
     def test_backward_kernel_options_filtering(self, device):
-        if not PLATFORM_SUPPORTS_BF16:
+        if not type(self).get_capabilities().get(Capability.dtype.bf16, False):
             self.skipTest("bf16 is required for this regression test")
 
         b, h, n, c = 1, 8, 234, 16
@@ -4828,7 +4829,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         for name, block_mask in block_masks.items():
             with self.subTest(name=name):
                 out = flash(q, k, v, block_mask=block_mask)
-                torch.cuda.synchronize()
+                torch.get_device_module(device).synchronize()
                 self.assertEqual(out, ref, atol=5e-2, rtol=5e-2)
 
     @supported_platform
@@ -6635,7 +6636,8 @@ class GraphModule(torch.nn.Module):
             def forward(self, q, k, v, mu):
                 return flex_attention(q, k, v, score_mod=self._score_mod(mu))
 
-        dtype = torch.bfloat16 if PLATFORM_SUPPORTS_BF16 else torch.float16
+        supports_bf16 = type(self).get_capabilities().get(Capability.dtype.bf16, False)
+        dtype = torch.bfloat16 if supports_bf16 else torch.float16
         device_obj = torch.device(device)
         module = FlexAttentionCPB(N=18, R=2).to(device_obj)
         compiled_module = torch.compile(module, backend="inductor", dynamic=False)
