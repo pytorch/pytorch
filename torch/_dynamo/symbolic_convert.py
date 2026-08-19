@@ -4421,6 +4421,10 @@ class InstructionTranslatorBase(
 
         self.call_function(BuiltinVariable(str.format), [fmt_var, value], {})
 
+    @break_graph_if_unsupported(
+        push=True,
+        msg_prefix="Encountered graph break when formatting an f-string value",
+    )
     def FORMAT_VALUE(self, inst: Instruction) -> None:
         flags = inst.arg
         if flags is None:
@@ -5070,6 +5074,10 @@ class InstructionTranslatorBase(
 
         self.push(fn)
 
+    @break_graph_if_unsupported(
+        push=True,
+        msg_prefix="Encountered graph break when converting an f-string value",
+    )
     def CONVERT_VALUE(self, inst: Instruction) -> None:
         if inst.arg is None:
             raise AssertionError("expected inst.arg is not None to be true")

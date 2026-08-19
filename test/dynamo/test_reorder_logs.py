@@ -186,6 +186,48 @@ class IgnoreLogsTests(torch._dynamo.test_case.TestCase):
 
 
 class ReorderLogsTests(torch._dynamo.test_case.TestCase):
+    def test_logger_fstring_debug_resumes_after_graph_break(self):
+        counters.clear()
+        test_logger = logging.getLogger(
+            "test_logger_fstring_debug_resumes_after_graph_break"
+        )
+        old_level = test_logger.level
+        test_logger.setLevel(logging.WARNING)
+
+        try:
+
+            def f(x):
+                a = x + 1
+                test_logger.warning(f"a : {a=}")  # noqa: G004
+                b = x * 2
+                return b + 1
+
+            cnt = torch._dynamo.testing.CompileCounter()
+            x = torch.ones(2)
+            opt_f = torch.compile(f, backend=cnt)
+            with self.assertLogs(test_logger, level="WARNING") as captured:
+                opt_out = opt_f(x)
+                second_out = opt_f(x + 1)
+
+            self.assertTrue(same(x * 2 + 1, opt_out))
+            self.assertTrue(same((x + 1) * 2 + 1, second_out))
+            self.assertEqual(
+                [record.getMessage() for record in captured.records],
+                ["a : a=tensor([2., 2.])", "a : a=tensor([3., 3.])"],
+            )
+            self.assertEqual(cnt.frame_count, 2)
+            self.assertEqual(cnt.op_count, 3)
+            self.assertEqual(
+                sum(
+                    count
+                    for reason, count in counters["graph_break"].items()
+                    if reason.startswith("repr() on tensor")
+                ),
+                1,
+            )
+        finally:
+            test_logger.setLevel(old_level)
+
     def test_dont_reorder_print(self):
         def f(x):
             x = x + x
