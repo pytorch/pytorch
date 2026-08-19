@@ -10839,7 +10839,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(opt_fn(x), fn(x))
         self.assertEqual(compiled_ranges, ["static", (2, 5), (2, int_oo), (3, 5)])
 
-        # Re-declaring a range that was already compiled reuses its graph.
+        # Declaring the same range again reuses the graph compiled for it.
         x = torch.randn(4)
         torch._dynamo.maybe_mark_dynamic(x, 0, min=3, max=5)
         self.assertEqual(opt_fn(x), fn(x))
