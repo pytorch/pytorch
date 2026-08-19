@@ -97,6 +97,7 @@ _EXCEPTION_STATE_ATTRS_TO_DROP = frozenset(
     (
         "_torch_dynamo_tracer_output",
         "first_useful_frame",
+        "frame_exec_strategy_cache_key",
         "frame_exec_strategy",
     )
 )
@@ -150,12 +151,24 @@ class TorchDynamoException(RuntimeError):
             instead of the default behavior. This allows exceptions to signal specific
             execution strategies (e.g., SKIP, RUN_ONLY) without requiring separate
             exception types for control flow.
+        frame_exec_strategy_apply_to_code: Whether the custom strategy should be
+            cached on the code object or only apply to the current frame invocation.
+        frame_exec_strategy_cache_key: Optional object identity used by the frame
+            converter to cache a non-code-global strategy.
+        frame_exec_strategy_cache_name: Name of the root-frame local or global
+            containing ``frame_exec_strategy_cache_key`` on future invocations.
+        frame_exec_strategy_cache_is_global: Whether the cache name is resolved
+            from frame globals instead of frame locals.
     """
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._torch_dynamo_tracer_output: DynamoTracerOutput | None = None
         self.frame_exec_strategy: FrameExecStrategy | None = None
+        self.frame_exec_strategy_apply_to_code = True
+        self.frame_exec_strategy_cache_key: object | None = None
+        self.frame_exec_strategy_cache_name: str | None = None
+        self.frame_exec_strategy_cache_is_global = False
 
     def __reduce__(self) -> tuple[Any, ...]:
         return (
@@ -204,6 +217,15 @@ class RequiresGradRestartAnalysis(RestartAnalysis):
 
     On restart, requires_grad_() will graph break instead of being traced,
     preserving partial acceleration for code before the call.
+    """
+
+
+class NNModuleContainerIndexRestartAnalysis(RestartAnalysis):
+    """Raised when an nn.Module attribute used as a container key is mutated.
+
+    On restart, Dynamo graph breaks at the earlier container indexing operation
+    so the mutation can live in a helper frame without losing the intended
+    frame-skip boundary while unwinding.
     """
 
 

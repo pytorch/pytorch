@@ -590,6 +590,20 @@ class TestExport(TestCase):
         #     exported_program.module()(*args, **reversed_kwargs), f(*args, **reversed_kwargs)
         # )
 
+    def test_module_list_static_attr_index(self):
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.layers = torch.nn.ModuleList(
+                    [torch.nn.Linear(4, 4) for _ in range(2)]
+                )
+                self.idx = 0
+
+            def forward(self, x):
+                return self.layers[self.idx](x)
+
+        self._test_export_same_as_eager(Mod(), (torch.randn(2, 4),))
+
     def test_guards_fn_recovers_from_unparse_recursion_error(self):
         # Regression test: guards-fn codegen pretty-prints each guard for the
         # assert error message via ast.unparse(ast.parse(...)), which recurses

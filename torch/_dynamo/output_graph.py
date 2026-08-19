@@ -143,6 +143,7 @@ from .source import (
     TensorProperty,
     TensorPropertySource,
 )
+from .types import NNModuleContainerIndexFrame
 from .utils import (
     _extract_tensor_dict,
     _get_cudagraph_override,
@@ -278,6 +279,18 @@ class MutationInfo:
     has_mutation: bool
     msg: str
     mutated_input_indices: tuple[int, ...] = ()
+
+
+@dataclass
+class NNModuleContainerIndexCandidate:
+    """One leaf index site plus its retained leaf-to-root translator ancestry.
+
+    Retaining translator objects gives each inlined invocation a stable identity
+    for the duration of the attempt; ``id(tx)`` can be reused between siblings.
+    """
+
+    leaf_tx: "InstructionTranslatorBase"
+    frames: dict["InstructionTranslatorBase", NNModuleContainerIndexFrame]
 
 
 def collect_reachable_grad_fns(
@@ -837,6 +850,12 @@ class OutputGraph(OutputGraphCommon):
         # Stores the full fqn of a param or buffer to the relevant source.
         self.param_name_to_source: dict[str, Source] | None = {}
         self.side_effects = SideEffects(self)
+        # Container-index sites grouped by the nn.Module attribute source used
+        # as the key. If the source is later mutated, a restart promotes these
+        # sites to graph-break locations in the shared speculation log.
+        self.nn_module_container_index_sites: dict[
+            Source, list[NNModuleContainerIndexCandidate]
+        ] = {}
         # Generators created while tracing this frame. Tracked here (not on
         # SideEffects) because SideEffects is cloned/swapped during HOP
         # speculation and graph-break restore; the OutputGraph is the single
@@ -1519,6 +1538,16 @@ class OutputGraph(OutputGraphCommon):
 
     def push_tx(self, tx: "InstructionTranslatorBase") -> None:
         self._current_tx.append(tx)
+
+    def record_nn_module_container_index_site(
+        self,
+        source: Source,
+        leaf_tx: "InstructionTranslatorBase",
+        frames: dict["InstructionTranslatorBase", NNModuleContainerIndexFrame],
+    ) -> None:
+        self.nn_module_container_index_sites.setdefault(source, []).append(
+            NNModuleContainerIndexCandidate(leaf_tx, frames)
+        )
 
     def pop_tx(self) -> "InstructionTranslatorBase":
         return self._current_tx.pop()

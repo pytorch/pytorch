@@ -1173,6 +1173,24 @@ class UnspecModuleWithIntAttr(torch.nn.Module):
         return self.layer(x) + self.step
 
 
+class _GlobalDynamicIndexModuleList(torch.nn.ModuleList):
+    def __init__(self) -> None:
+        super().__init__([torch.nn.Identity(), torch.nn.Identity()])
+        self._pos = 0
+
+
+_global_dynamic_index_module: _GlobalDynamicIndexModuleList | None = None
+
+
+def _global_dynamic_index_fn(x):
+    module = _global_dynamic_index_module
+    if module is None:
+        raise AssertionError("test module must be installed")
+    y = module[module._pos](x)
+    module._pos = 1 - module._pos
+    return y
+
+
 def make_test(fn, expected_ops=None):
     def test_fn(self):
         return torch._dynamo.testing.standard_test(
@@ -1815,6 +1833,344 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
             res3 = opt_mod(x)
             self.assertTrue(torch.allclose(ref3, res3))
             self.assertEqual(cnt.frame_count, ifdynstaticdefault(2, 1))
+
+    def test_mutating_module_list_subclass_dynamic_index_graph_breaks(self):
+        class CycleModuleList(torch.nn.ModuleList):
+            def __init__(self) -> None:
+                super().__init__([torch.nn.Linear(4, 4) for _ in range(10)])
+                self._pos = 0
+
+            def forward(self, x):
+                y = self[self._pos](x)
+                self._pos = (self._pos + 1) % len(self)
+                return y
+
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.layers = CycleModuleList()
+
+            def forward(self, x):
+                x = x + 1
+                x = self.layers(x)
+                return x + 2
+
+        mod = Mod()
+        opt_mod = copy.deepcopy(mod)
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_mod = torch.compile(opt_mod, backend=cnt)
+        x = torch.randn(2, 4)
+
+        with torch._dynamo.config.patch(error_on_recompile=True):
+            direct_cnt = torch._dynamo.testing.CompileCounter()
+            opt_layers = torch.compile(copy.deepcopy(mod.layers), backend=direct_cnt)
+            for _ in range(20):
+                self.assertTrue(torch.allclose(mod.layers(x), opt_layers(x)))
+
+            for _ in range(20):
+                self.assertTrue(torch.allclose(mod(x), opt_mod(x)))
+
+        self.assertEqual(direct_cnt.frame_count, 0)
+        self.assertEqual(direct_cnt.op_count, 0)
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(cnt.op_count, 2)
+        self.assertTrue(
+            any(
+                "Unspecialized nn.Module container indexed by mutable nn.Module attribute"
+                in msg
+                for msg in torch._dynamo.utils.counters["graph_break"]
+            )
+        )
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "indexed by mutable nn.Module attribute",
+        ):
+            torch._dynamo.export(copy.deepcopy(mod.layers))(x)
+
+    def test_mutating_module_list_subclass_dynamic_index_in_helper(self):
+        class Mod(torch.nn.ModuleList):
+            def __init__(self) -> None:
+                super().__init__([torch.nn.Linear(4, 4) for _ in range(10)])
+                self._pos = 0
+
+            def advance(self):
+                self._pos = (self._pos + 1) % len(self)
+
+            def forward(self, x):
+                y = self[self._pos](x)
+                self.advance()
+                return y
+
+        mod = Mod()
+        opt_mod = copy.deepcopy(mod)
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_mod = torch.compile(opt_mod, backend=cnt)
+        x = torch.randn(2, 4)
+
+        with torch._dynamo.config.patch(error_on_recompile=True):
+            for _ in range(20):
+                self.assertTrue(torch.allclose(mod(x), opt_mod(x)))
+
+        self.assertEqual(cnt.frame_count, 0)
+        self.assertEqual(cnt.op_count, 0)
+
+    def test_mutating_module_list_subclass_dynamic_index_in_called_helper(self):
+        class Mod(torch.nn.ModuleList):
+            def __init__(self) -> None:
+                super().__init__([torch.nn.Linear(4, 4) for _ in range(10)])
+                self._pos = 0
+
+            def select(self, x):
+                return self[self._pos](x)
+
+            def forward(self, x):
+                y = self.select(x)
+                self._pos = (self._pos + 1) % len(self)
+                return y
+
+        mod = Mod()
+        opt_mod = copy.deepcopy(mod)
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_mod = torch.compile(opt_mod, backend=cnt)
+        x = torch.randn(2, 4)
+
+        with torch._dynamo.config.patch(error_on_recompile=True):
+            for _ in range(20):
+                self.assertTrue(torch.allclose(mod(x), opt_mod(x)))
+
+        self.assertEqual(cnt.frame_count, 0)
+        self.assertEqual(cnt.op_count, 0)
+
+    def test_module_list_static_attr_index(self):
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.layers = torch.nn.ModuleList(
+                    [torch.nn.Linear(4, 4) for _ in range(2)]
+                )
+                self.idx = 0
+
+            def forward(self, x):
+                return self.layers[self.idx](x)
+
+        mod = Mod()
+        x = torch.randn(2, 4)
+        ref = mod(x)
+
+        opt_mod = torch.compile(copy.deepcopy(mod), backend="eager", fullgraph=True)
+        self.assertTrue(torch.allclose(ref, opt_mod(x)))
+
+        exported, _ = torch._dynamo.export(copy.deepcopy(mod))(x)
+        self.assertTrue(torch.allclose(ref, exported(x)))
+
+    def test_module_list_idempotent_attr_store(self):
+        class Mod(torch.nn.Module):
+            def __init__(self, index) -> None:
+                super().__init__()
+                self.layers = torch.nn.ModuleList(
+                    [torch.nn.Linear(4, 4) for _ in range(2)]
+                )
+                self.idx = index
+                self.reset_idx = index
+
+            def forward(self, x):
+                y = self.layers[self.idx](x)
+                self.idx = self.reset_idx
+                return y
+
+        x = torch.randn(2, 4)
+        for index in (0, True):
+            with self.subTest(index=index):
+                mod = Mod(index)
+                ref = mod(x)
+
+                cnt = torch._dynamo.testing.CompileCounter()
+                opt_mod = torch.compile(copy.deepcopy(mod), backend=cnt, fullgraph=True)
+                self.assertTrue(torch.allclose(ref, opt_mod(x)))
+                self.assertEqual(cnt.frame_count, 1)
+
+                exported, _ = torch._dynamo.export(copy.deepcopy(mod))(x)
+                self.assertTrue(torch.allclose(ref, exported(x)))
+
+    def test_module_list_idempotent_attr_store_does_not_call_user_eq(self):
+        class Index(int):
+            def __eq__(self, other):
+                raise RuntimeError("user equality must not run")
+
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.layers = torch.nn.ModuleList([torch.nn.Identity()])
+                self.idx = Index(0)
+
+            def forward(self, x):
+                y = self.layers[self.idx](x)
+                self.idx = Index(0)
+                return y
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "indexed by mutable nn.Module attribute",
+        ):
+            torch.compile(Mod(), backend="eager", fullgraph=True)(torch.randn(2, 4))
+
+    def test_module_list_dynamic_index_shared_forward(self):
+        class Selector(torch.nn.ModuleList):
+            def __init__(self, mutate) -> None:
+                super().__init__([torch.nn.Linear(4, 4) for _ in range(10)])
+                self.requires_grad_(False)
+                self._pos = 0
+                self.mutate = mutate
+
+            def select(self, x):
+                return self[self._pos](x)
+
+            def forward(self, x):
+                y = self.select(x)
+                if self.mutate:
+                    self._pos = (self._pos + 1) % len(self)
+                return y
+
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.fixed = Selector(False)
+                self.dynamic = Selector(True)
+
+            def forward(self, x):
+                x = self.fixed(x)
+                return self.dynamic(x)
+
+        mod = Mod()
+        opt_mod = copy.deepcopy(mod)
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_mod = torch.compile(opt_mod, backend=cnt)
+        x = torch.randn(2, 4)
+
+        with torch._dynamo.config.patch(error_on_recompile=True):
+            for _ in range(20):
+                self.assertTrue(torch.allclose(mod(x), opt_mod(x)))
+
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 1)
+
+    def test_module_list_dynamic_index_instance_skip_cache(self):
+        class Selector(torch.nn.ModuleList):
+            def __init__(self, mutate) -> None:
+                super().__init__([torch.nn.Identity(), torch.nn.Identity()])
+                self._pos = 0
+                self.mutate = mutate
+
+        class Controller:
+            __hash__ = None
+
+            def __init__(self, mutate) -> None:
+                self.layers = Selector(mutate)
+
+            def run(this, x):
+                y = this.layers[this.layers._pos](x)
+                if this.layers.mutate:
+                    this.layers._pos = 1 - this.layers._pos
+                return y + 1
+
+        dynamic = Controller(True)
+        opt_dynamic_arg = copy.deepcopy(dynamic)
+        dynamic_cnt = torch._dynamo.testing.CompileCounter()
+        opt_dynamic = torch.compile(opt_dynamic_arg.run, backend=dynamic_cnt)
+        frames_before = torch._dynamo.utils.counters["frames"]["total"]
+        x = torch.randn(2, 4)
+        with torch._dynamo.config.patch(error_on_recompile=True):
+            for _ in range(3):
+                self.assertTrue(torch.allclose(dynamic.run(x), opt_dynamic(x)))
+        self.assertEqual(
+            torch._dynamo.utils.counters["frames"]["total"] - frames_before, 1
+        )
+        self.assertEqual(dynamic_cnt.frame_count, 0)
+
+        fixed = Controller(False)
+        opt_fixed_arg = copy.deepcopy(fixed)
+        fixed_cnt = torch._dynamo.testing.CompileCounter()
+        opt_fixed = torch.compile(opt_fixed_arg.run, backend=fixed_cnt, fullgraph=True)
+        self.assertTrue(torch.allclose(fixed.run(x), opt_fixed(x)))
+        self.assertEqual(fixed_cnt.frame_count, 1)
+
+        torch._dynamo.reset()
+        frames_before = torch._dynamo.utils.counters["frames"]["total"]
+        for _ in range(2):
+            self.assertTrue(torch.allclose(dynamic.run(x), opt_dynamic(x)))
+        self.assertEqual(
+            torch._dynamo.utils.counters["frames"]["total"] - frames_before, 1
+        )
+
+    def test_module_list_dynamic_index_global_skip_cache(self):
+        global _global_dynamic_index_module
+
+        _global_dynamic_index_module = _GlobalDynamicIndexModuleList()
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(_global_dynamic_index_fn, backend=cnt)
+        x = torch.randn(2, 4)
+        frames_before = torch._dynamo.utils.counters["frames"]["total"]
+        try:
+            for _ in range(4):
+                self.assertTrue(torch.allclose(x, opt_fn(x)))
+        finally:
+            _global_dynamic_index_module = None
+
+        self.assertEqual(
+            torch._dynamo.utils.counters["frames"]["total"] - frames_before, 1
+        )
+        self.assertEqual(cnt.frame_count, 0)
+
+    def test_module_list_dynamic_index_closure_skip_cache(self):
+        module = _GlobalDynamicIndexModuleList()
+
+        def fn(x):
+            y = module[module._pos](x)
+            module._pos = 1 - module._pos
+            return y
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt)
+        x = torch.randn(2, 4)
+        frames_before = torch._dynamo.utils.counters["frames"]["total"]
+        for _ in range(4):
+            self.assertTrue(torch.allclose(x, opt_fn(x)))
+
+        self.assertEqual(
+            torch._dynamo.utils.counters["frames"]["total"] - frames_before, 1
+        )
+        self.assertEqual(cnt.frame_count, 0)
+
+    def test_module_list_dynamic_index_ancestor_subscript(self):
+        class Layers(torch.nn.ModuleList):
+            def __init__(self) -> None:
+                super().__init__([torch.nn.Linear(4, 4) for _ in range(3)])
+                self.requires_grad_(False)
+                self.idx = 0
+
+        class Selector:
+            def __init__(self, layers) -> None:
+                self.layers = layers
+
+            def __getitem__(self, key):
+                return self.layers[self.layers.idx]
+
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.layers = Layers()
+                self.selector = Selector(self.layers)
+
+            def forward(self, x):
+                y = self.selector[0](x)
+                self.layers.idx = (self.layers.idx + 1) % len(self.layers)
+                return y
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "indexed by mutable nn.Module attribute",
+        ):
+            torch.compile(Mod(), backend="eager", fullgraph=True)(torch.randn(2, 4))
 
 
 class NNModuleTestsDevice(torch._dynamo.test_case.TestCase):
