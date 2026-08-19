@@ -722,14 +722,14 @@ traces all the memory operations.
 #include <iostream>
 // Compile with g++ alloc.cc -o alloc.so -I/usr/local/cuda/include -shared -fPIC
 extern "C" {
-void* my_malloc(ssize_t size, int device, cudaStream_t stream) {
+void* my_malloc(size_t size, int device, cudaStream_t stream) {
    void *ptr;
    cudaMalloc(&ptr, size);
    std::cout<<"alloc "<<ptr<<size<<std::endl;
    return ptr;
 }
 
-void my_free(void* ptr, ssize_t size, int device, cudaStream_t stream) {
+void my_free(void* ptr, size_t size, int device, cudaStream_t stream) {
    std::cout<<"free "<<ptr<< " "<<stream<<std::endl;
    cudaFree(ptr);
 }
