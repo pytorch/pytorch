@@ -254,6 +254,8 @@ class ReplicateTest(MultiProcContinuousTest):
 
 
 class ReplicateFullyShardInit(ReplicateTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @requires_capabilities(Capability.distributed.fsdp)
     @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/179810")
     @skip_if_lt_x_gpu(2)
