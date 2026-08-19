@@ -137,6 +137,48 @@ def recommended_max_memory() -> int:
     return torch._C._mps_recommendedMaxMemory()
 
 
+def set_memory_budget(budget: int) -> None:
+    r"""Set total GPU memory budget for the MPS allocator in bytes.
+
+    Sets the hard limit (high watermark) to ``budget`` bytes and scales the
+    soft limit (low watermark) proportionally, preserving the current
+    low/high watermark ratio.
+
+    Args:
+        budget (int): Memory budget in bytes. Passing 0 disables the limit
+            (may cause system failure if system-wide OOM occurs).
+
+    Example::
+
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_MPS)
+        >>> torch.mps.set_memory_budget(2 * 1024 ** 3)  # 2 GB
+        >>> torch.mps.get_memory_budget()
+        2147483648
+    """
+    if not isinstance(budget, int):
+        raise TypeError(
+            f"Invalid type for budget argument, must be `int`, got {type(budget)}"
+        )
+    if budget < 0:
+        raise ValueError(f"Invalid budget value: {budget}. Must be >= 0")
+    torch._C._mps_setMemoryBudget(budget)
+
+
+def get_memory_budget() -> int:
+    r"""Return the current GPU memory budget for the MPS allocator in bytes.
+
+    Returns 0 if no budget limit is set (unlimited).
+
+    Example::
+
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_MPS)
+        >>> torch.mps.set_memory_budget(1 * 1024 ** 3)  # 1 GB
+        >>> torch.mps.get_memory_budget()
+        1073741824
+    """
+    return torch._C._mps_getMemoryBudget()
+
+
 def compile_shader(source: str):
     r"""Compiles compute shader from source and allows one to invoke kernels
     defined there from the comfort of Python runtime
@@ -251,5 +293,7 @@ __all__ = [
     "Event",
     "profiler",
     "recommended_max_memory",
+    "set_memory_budget",
+    "get_memory_budget",
     "is_available",
 ]

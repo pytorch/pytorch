@@ -72,6 +72,12 @@ struct TORCH_API MPSHooksInterface : AcceleratorHooksInterface {
   virtual void setMemoryFraction(double /*ratio*/) const {
     FAIL_MPSHOOKS_FUNC(__func__);
   }
+  virtual void setMemoryBudget(size_t /*budget_bytes*/) const {
+    FAIL_MPSHOOKS_FUNC(__func__);
+  }
+  virtual size_t getMemoryBudget() const {
+    FAIL_MPSHOOKS_FUNC(__func__);
+  }
   virtual void profilerStartTrace(const std::string& mode, bool waitUntilCompleted) const {
     FAIL_MPSHOOKS_FUNC(__func__);
   }
