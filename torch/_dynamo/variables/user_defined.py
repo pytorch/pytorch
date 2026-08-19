@@ -2856,6 +2856,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        method = self._maybe_get_baseclass_method("__init__")
+        if method is object.__init__:
+            return variables.ConstantVariable.create(None)
         res = self._vectorcall_method(tx, "__init__", args, kwargs)
         if not res.is_constant_none():
             raise_type_error(

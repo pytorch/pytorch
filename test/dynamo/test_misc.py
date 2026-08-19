@@ -2137,6 +2137,46 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(opt(x), fn(x))
         self.assertEqual(cnt.frame_count, 1)
 
+    def test_symint_explicit_dunder_index(self):
+        # Explicit s.__index__() on a SymInt binds int.__index__ (a C slot
+        # wrapper) as a method-wrapper whose call must dispatch to the
+        # nb_index slot model (specializing the symbol with a guard), not
+        # to SymNodeVariable.call_method's generic proxy path.
+        def fn(x):
+            s = x.size(0)
+            return x.sum() + s.__index__()
+
+        cnt = CompileCounter()
+        opt = torch.compile(fn, backend=cnt, fullgraph=True, dynamic=True)
+        x = torch.randn(5)
+        self.assertEqual(opt(x), fn(x))
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_explicit_method_wrapper_call_constant_folds(self):
+        # Explicit dunder calls binding C slot wrappers on constant types
+        # must keep constant-folding through call_method when the VT has no
+        # dedicated slot impl (str subscript/concat, int.__bool__).
+        def fn(x):
+            a = "abc".__getitem__(1)
+            b = "ab".__add__("cd")
+            c = (7).__bool__()
+            d = (7).__index__()
+            return x + 1, a, b, c, d
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(3)
+        self.assertEqual(opt(x), fn(x))
+
+    def test_explicit_range_dunder_bool(self):
+        # bool(range(...)) constant-folds before reaching the nb_bool slot, so
+        # the explicit wrapper call is the only path into RangeVariable's slot.
+        def fn(x):
+            return x + 1, range(0).__bool__(), range(5).__bool__()
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(3)
+        self.assertEqual(opt(x), fn(x))
+
     def test_int_base_out_of_range_value_error(self):
         class MyIndexable:
             def __index__(self):
