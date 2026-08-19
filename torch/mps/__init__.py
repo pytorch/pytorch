@@ -233,6 +233,7 @@ def _host_alias_storage(storage: "torch.UntypedStorage") -> "torch.UntypedStorag
 
 from . import profiler
 from .event import Event
+from .streams import current_stream, default_stream, set_stream, Stream, stream
 
 
 __all__ = [
@@ -249,6 +250,11 @@ __all__ = [
     "current_allocated_memory",
     "driver_allocated_memory",
     "Event",
+    "Stream",
+    "stream",
+    "current_stream",
+    "set_stream",
+    "default_stream",
     "profiler",
     "recommended_max_memory",
     "is_available",

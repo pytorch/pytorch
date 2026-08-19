@@ -11,6 +11,7 @@
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <memory>
+#include <vector>
 
 #ifdef USE_MPS
 #include <ATen/mps/MPSAllocatorInterface.h>
@@ -242,6 +243,27 @@ static PyObject* MPSModule_setStream(PyObject* _unused, PyObject* stream) {
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
+
+static PyObject* MPSModule_getCurrentStream(
+    PyObject* _unused,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  auto* type = reinterpret_cast<PyTypeObject*>(THPMPSStreamClass);
+  THPObjectPtr ptr(type->tp_alloc(type, 0));
+  if (!ptr) {
+    return nullptr;
+  }
+  at::mps::MPSStream* stream = at::mps::getCurrentMPSStream();
+  c10::Stream unwrapped = stream->unwrap();
+  THPMPSStream* self = reinterpret_cast<THPMPSStream*>(ptr.get());
+  self->stream_id = static_cast<int64_t>(unwrapped.id());
+  // NOLINTNEXTLINE(bugprone-signed-char-misuse)
+  self->device_index = static_cast<int64_t>(unwrapped.device_index());
+  self->device_type = static_cast<int64_t>(unwrapped.device_type());
+  self->mps_stream = stream;
+  return ptr.release();
+  END_HANDLE_TH_ERRORS
+}
 #endif /* USE_MPS */
 
 // NOLINTNEXTLINE(*-c-arrays, *-global-variables)
@@ -295,6 +317,7 @@ static struct PyMethodDef _MPSModule_methods[] = {
      nullptr},
 #ifdef USE_MPS
     {"_mps_setStream", MPSModule_setStream, METH_O, nullptr},
+    {"_mps_getCurrentStream", MPSModule_getCurrentStream, METH_NOARGS, nullptr},
 #endif /* USE_MPS */
     {nullptr}};
 
