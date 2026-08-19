@@ -541,6 +541,7 @@ if HAS_CPU:
     class DynamicShapesCodegenCpuTests(TestCase):
         maxDiff = None
         device = "cpu"
+        hw_classification = HardwareClassification.CPU
 
         @torch._dynamo.config.patch(assume_static_by_default=False)
         def test_assert_dynamic_dims_rejects_specialized_dim(self):
@@ -661,7 +662,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
     class DynamicShapesCodegenGPUTests(DynamicShapesCodegenTestCase):
         maxDiff = None
         device = GPU_TYPE
-        hw_classification = HardwareClassification.ACCELERATOR
+        hw_classification = HardwareClassification.CUDA
 
         def common(
             self: TestCase,

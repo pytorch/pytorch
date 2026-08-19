@@ -1304,7 +1304,7 @@ class TestInductorDynamic(DynamicShapesTestCase):
         self.assertEqual(cnt.frame_count, 2)
 
     @onlyAccelerator
-    def test_dynamic_rblock_bounds(self):
+    def test_dynamic_rblock_bounds(self, device):
         class ForcePersistent(InductorChoices):
             @staticmethod
             def should_use_cooperative_reduction(*args, **kwargs) -> bool:
@@ -1317,21 +1317,24 @@ class TestInductorDynamic(DynamicShapesTestCase):
         def fn(x):
             return x.sum()
 
-        x = torch.rand([31], device=GPU_TYPE)
+        x = torch.rand([31], device=device)
 
         with V.set_choices_handler(ForcePersistent()):
             torch._dynamo.mark_dynamic(x, 0, min=1, max=62)
             fn_c = torch.compile(fn)
             actual, source_codes = run_and_get_code(fn_c, x)
             self.assertEqual(fn(x), actual)
-            FileCheck().check("R0_BLOCK: tl.constexpr = 64").run(source_codes[0])
+            from torch._inductor.ir import has_triton
+            if has_triton:
+                FileCheck().check("R0_BLOCK: tl.constexpr = 64").run(source_codes[0])
             torch._dynamo.reset()
 
             torch._dynamo.mark_dynamic(x, 2, min=1, max=64)
             fn_c = torch.compile(fn)
             actual, source_codes = run_and_get_code(fn_c, x)
             self.assertEqual(fn(x), actual)
-            FileCheck().check("R0_BLOCK: tl.constexpr = 64").run(source_codes[0])
+            if has_triton:
+                FileCheck().check("R0_BLOCK: tl.constexpr = 64").run(source_codes[0])
 
     def test_non_persistent_dynamic_rblock(self):
         def reduce_bounded(x, y):
@@ -1475,7 +1478,7 @@ class TestInductorDynamic(DynamicShapesTestCase):
     @onlyAccelerator
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
-    def test_sympy_infinity_bounds_in_persistent_reduction(self):
+    def test_sympy_infinity_bounds_in_persistent_reduction(self, device):
         """
         Regression test for sympy Infinity bounds handling in should_use_persistent_reduction.
 
@@ -1499,13 +1502,13 @@ class TestInductorDynamic(DynamicShapesTestCase):
             return t15
 
         arg0 = torch.rand(
-            [65, 1024, 10], dtype=torch.float32, device=GPU_TYPE, requires_grad=True
+            [65, 1024, 10], dtype=torch.float32, device=device, requires_grad=True
         )
         arg2 = torch.rand(
-            [134, 4, 640], dtype=torch.float32, device=GPU_TYPE, requires_grad=True
+            [134, 4, 640], dtype=torch.float32, device=device, requires_grad=True
         )
         arg3 = torch.rand(
-            [65, 67, 6], dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True
+            [65, 67, 6], dtype=torch.bfloat16, device=device, requires_grad=True
         )
 
         compiled_fn = torch.compile(fn, fullgraph=True, dynamic=True)
