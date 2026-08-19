@@ -20,6 +20,7 @@ import torch._dynamo as torchdynamo
 import torch._export.serde.schema as schema
 import torch.export._trace
 import torch.utils._pytree as pytree
+from torch._dynamo.device_interface import get_interface_for_device
 from torch._export.db.case import ExportCase, SupportLevel
 from torch._export.db.examples import all_examples
 from torch._export.serde.schema import ArgumentKind
@@ -42,11 +43,7 @@ from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.export import Dim, export, load, save, unflatten
 from torch.export.pt2_archive.constants import ARCHIVE_VERSION_PATH
 from torch.fx.experimental.symbolic_shapes import is_concrete_int, ValueRanges
-from torch.testing._internal.common_device_type import (
-    Capability,
-    instantiate_device_type_tests,
-    requires_capabilities,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -59,10 +56,13 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.testing._internal.torchbind_impls import init_torchbind_implementations
+from torch.utils._triton import has_triton_package
+
 
 try:
     import triton
     import triton.language as tl
+
     from torch.library import wrap_triton
 except ImportError:
     triton = None  # type: ignore[assignment]
@@ -2644,7 +2644,6 @@ class TestPredispatchSerialization(TestCase):
         self.assertTrue(torch.allclose(exp_out, actual_out))
 
 
-
 class TestSerializeAccelerator(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
@@ -2732,12 +2731,11 @@ class TestSaveLoadAccelerator(TestCase):
 class TestSerializeTriton(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-
     def _gate_triton(self, device) -> None:
-        if triton is None or wrap_triton is None:
-            self.skipTest("triton is not installed")
+        if not has_triton_package() or triton is None or wrap_triton is None:
+            self.skipTest("requires triton package")
+        get_interface_for_device(torch.device(device).type)
 
-    @requires_capabilities(Capability.lib.triton)
     def test_triton_hop(self, device) -> None:
         self._gate_triton(device)
 
@@ -2887,7 +2885,6 @@ class TestSerializeTriton(TestCase):
                     serialized.example_inputs,
                 )
 
-    @requires_capabilities(Capability.lib.triton)
     def test_triton_constexpr_matching(self, device) -> None:
         self._gate_triton(device)
 
@@ -2946,15 +2943,25 @@ class TestSerializeTriton(TestCase):
 
 
 instantiate_device_type_tests(
-    TestSerializeAccelerator, globals(), except_for="cpu", allow_mps=True, allow_xpu=True
+    TestSerializeAccelerator,
+    globals(),
+    except_for="cpu",
+    allow_mps=True,
+    allow_xpu=True,
 )
 instantiate_device_type_tests(
-    TestDeserializeAccelerator, globals(), except_for="cpu", allow_mps=True, allow_xpu=True
+    TestDeserializeAccelerator,
+    globals(),
+    except_for="cpu",
+    allow_mps=True,
+    allow_xpu=True,
 )
 instantiate_device_type_tests(
     TestSaveLoadAccelerator, globals(), except_for="cpu", allow_mps=True, allow_xpu=True
 )
-instantiate_device_type_tests(TestSerializeTriton, globals(), except_for="cpu")
+instantiate_device_type_tests(
+    TestSerializeTriton, globals(), except_for="cpu", allow_xpu=True
+)
 
 
 if __name__ == "__main__":
