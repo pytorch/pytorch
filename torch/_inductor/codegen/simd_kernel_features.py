@@ -223,6 +223,13 @@ class SIMDKernelFeatures:
         # conservative here.
         total_numel = self.numel * self.reduction_numel
 
+        # The split is a pointwise dim while the reduction axis keeps its true
+        # extent, so total_numel counts each element `split` times. Divide it out;
+        # storage_size() and any_index_expr_overflows_int32() still bound the rest.
+        grid_split = self.get_grid_split()
+        if grid_split:
+            total_numel = FloorDiv(total_numel, grid_split)
+
         from .simd import SIMDScheduling
 
         if SIMDScheduling.can_use_32bit_indexing(total_numel, buffers):
@@ -333,6 +340,13 @@ class SIMDKernelFeatures:
         else:
             reduction_hint_val = ReductionHint.DEFAULT
         return reduction_hint_val
+
+    def get_grid_split(self) -> int:
+        """The grid split factor, or 0 if this kernel is not split as a grid dim."""
+        for n in self.reduction_nodes():
+            if isinstance(n.node, ir.ComputedBuffer) and n.node._grid_split_factor:
+                return n.node._grid_split_factor
+        return 0
 
     @cache_on_self
     def buffer_read_counts(self) -> dict[str, int]:
