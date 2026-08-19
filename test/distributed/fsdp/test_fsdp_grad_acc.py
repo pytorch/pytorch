@@ -13,15 +13,21 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import (
     BackwardPrefetch,
     ShardingStrategy,
 )
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
+)
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     DEVICEInitMode,
     FSDPInitMode,
     FSDPTestContinuous,
+    get_devtype,
     TransformerWithSharedParams,
 )
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
+    HardwareClassification,
     parametrize,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
@@ -82,6 +88,8 @@ class TestGradAcc(FSDPTestContinuous):
     """Tests ``FullyShardedDataParallel``'s gradient accumulation via both its
     ``no_sync()`` context manager and without the context manager."""
 
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return 2
@@ -133,7 +141,7 @@ class TestGradAcc(FSDPTestContinuous):
             deterministic=True,
             add_bn=False,  # disable BN since the test uses varying batch sizes
         )
-        device = torch.device("cuda")
+        device = torch.device(get_devtype())
         optim = torch.optim.SGD(
             fsdp_model.parameters(),
             lr=0.01,
@@ -229,6 +237,7 @@ class TestGradAcc(FSDPTestContinuous):
             ],
         }
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     @parametrize(
         "configs",
@@ -274,6 +283,7 @@ class TestGradAcc(FSDPTestContinuous):
             use_orig_params=use_orig_params,
         )
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     @parametrize("use_orig_params", [False, True])
     def test_grad_acc_cpu_offload(
@@ -300,7 +310,8 @@ class TestGradAcc(FSDPTestContinuous):
         )
 
 
-instantiate_parametrized_tests(TestGradAcc)
+devices = ("cuda", "hpu", "xpu", "privateuse1")
+instantiate_device_type_tests(TestGradAcc, globals(), only_for=devices, allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()
