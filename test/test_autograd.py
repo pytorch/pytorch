@@ -15450,11 +15450,7 @@ def _get_device_name(idx):
     return f"{torch.accelerator.current_accelerator().type}:{idx}"
 
 
-# Although this is written to be generic over all accelerators, non-cuda accelerators
-# are not fully tested since sleep is only supported on cuda.
-class TestAutogradStreamSynchronization(TestCase):
-    hw_classification = HardwareClassification.ACCELERATOR
-
+class _TestAutogradStreamSynchronizationBase(TestCase):
     def get_default_streams(self, num_devices=1):
         out = []
         for i in range(num_devices):
@@ -15479,6 +15475,12 @@ class TestAutogradStreamSynchronization(TestCase):
                 self.assertEqual(
                     torch.get_device_module(acc).current_stream(), default_streams[i]
                 )
+
+
+# Although this is written to be generic over all accelerators, non-cuda accelerators
+# are not fully tested since sleep is only supported on cuda.
+class TestAutogradStreamSynchronization(_TestAutogradStreamSynchronizationBase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
     # AttributeError: module 'torch.mps' has no attribute 'default_stream'
     @onlyAccelerator
@@ -15812,7 +15814,7 @@ class TestAutogradStreamSynchronization(TestCase):
                 do_test(suppress_warn=suppress_warn, keep_grad_acc=keep_grad_acc)
 
 
-class TestAutogradStreamSynchronizationCudaOnly(TestCase):
+class TestAutogradStreamSynchronizationCudaOnly(_TestAutogradStreamSynchronizationBase):
     hw_classification = HardwareClassification.CUDA
 
     # This test may spuriously fail on non-cuda accelerators (since we won't
