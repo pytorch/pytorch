@@ -49,7 +49,6 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorContinuousTestBase,
     DTensorTestBase,
-    NUM_DEVICES,
     skip_if_lt_x_gpu,
     with_comms,
 )
@@ -154,19 +153,13 @@ def _train(model, optim, train_steps=1):
     return loss, train_state
 
 
-class TestE2ESaveAndLoad(DTensorContinuousTestBase, VerifyStateDictMixin):
+class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @property
-    def world_size(self) -> int:
-        return NUM_DEVICES
-
-    @classmethod
-    def backend_str(cls) -> str:
-        # async_save requires a CPU backend for staging, so include cpu:gloo
-        # alongside the accelerator backend.
-        curr_backend = dist.get_default_backend_for_device(device_type)
-        return f"cpu:gloo,{device_type}:{curr_backend}"
+    def backend(self):
+        curr_backend = dist.get_default_backend_for_device(self.device_type)
+        return f"cpu:gloo,{self.device_type}:{curr_backend}"
 
     def _create_model(self, compile, model_type, state_dict_options=None):
         dummy_model = TestDummyModel().to(self.device_type)
