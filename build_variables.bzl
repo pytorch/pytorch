@@ -772,6 +772,7 @@ libtorch_cuda_core_sources = [
 
 # These files are the only ones that are supported on Windows.
 libtorch_cuda_distributed_base_sources = [
+    "torch/csrc/distributed/c10d/gloo/ProcessGroupGlooCuda.cpp",
     "torch/csrc/distributed/c10d/reducer_cuda.cpp",
 ]
 
@@ -780,7 +781,6 @@ libtorch_cuda_distributed_extra_sources = [
     "torch/csrc/distributed/c10d/FlightRecorderCuda.cpp",
     "torch/csrc/distributed/c10d/NCCLUtils.cpp",
     "torch/csrc/distributed/c10d/NanCheck.cu",
-    "torch/csrc/distributed/c10d/gloo/ProcessGroupGlooCuda.cpp",
     "torch/csrc/distributed/c10d/ProcessGroupNCCL.cpp",
     "torch/csrc/distributed/c10d/nccl2/TracingGuard.cpp",
     "torch/csrc/distributed/c10d/nccl2/Utils.cpp",
