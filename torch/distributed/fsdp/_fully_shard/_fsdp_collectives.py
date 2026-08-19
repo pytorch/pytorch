@@ -259,7 +259,6 @@ def all_gather_copy_in_meta(
 @torch.library.impl(lib, "all_gather_copy_in", "HPU")
 @torch.library.impl(lib, "all_gather_copy_in", "CPU")
 @torch.library.impl(lib, "all_gather_copy_in", "MTIA")
-@torch.library.impl(lib, "all_gather_copy_in", "PrivateUse1")
 def all_gather_copy_in_cuda(
     all_gather_inputs: list[torch.Tensor],
     all_gather_output: torch.Tensor,
@@ -273,6 +272,21 @@ def all_gather_copy_in_cuda(
     foreach_copy_dsts = torch.split(all_gather_input, inp_split_sizes)
     with torch.no_grad():
         torch._foreach_copy_(foreach_copy_dsts, all_gather_inputs)
+    return all_gather_input, all_gather_output
+
+
+@torch.library.impl(lib, "all_gather_copy_in", "PrivateUse1")
+def all_gather_copy_in_optimal(
+    all_gather_inputs: list[torch.Tensor],
+    all_gather_output: torch.Tensor,
+    inp_split_sizes: list[int],
+    all_gather_input_numel: int,
+    rank: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    if len(all_gather_inputs) == 1:
+        all_gather_input = all_gather_inputs[0]
+    else:
+        all_gather_input = torch.cat(all_gather_inputs, dim=0)
     return all_gather_input, all_gather_output
 
 
@@ -594,17 +608,29 @@ def foreach_reduce(
     )
     reduce_scatter_input_numel = sum(s.numel() for s in padded_unsharded_sizes)
     reduce_scatter_output_numel = reduce_scatter_input_numel // world_size
-    reduce_scatter_input = reduce_scatter_comm.allocate(
-        (reduce_scatter_input_numel,),
-        dtype=reduce_dtype,
-        device=device,
+
+    is_tpu = device.type in (
+        "tpu",
+        torch._C._get_privateuse1_backend_name(),
+        "privateuseone",
     )
 
-    foreach_reduce_scatter_copy_in(unsharded_grads, reduce_scatter_input, world_size)
+    if not is_tpu:
+        reduce_scatter_input = reduce_scatter_comm.allocate(
+            (reduce_scatter_input_numel,),
+            dtype=reduce_dtype,
+            device=device,
+        )
+        foreach_reduce_scatter_copy_in(
+            unsharded_grads, reduce_scatter_input, world_size
+        )
+        # Only after the copy-in finishes can we free the gradients
+        unsharded_grads.clear()
+        reduce_scatter_stream.wait_stream(current_stream)
+    else:
+        # Direct Scatter Optimization for TPU: Bypass intermediate 2D buffer allocation
+        reduce_scatter_input = torch.empty((1,), device=device)
 
-    # Only after the copy-in finishes can we free the gradients
-    unsharded_grads.clear()
-    reduce_scatter_stream.wait_stream(current_stream)
     all_reduce_input = None
     all_reduce_event = None
 
@@ -614,21 +640,49 @@ def foreach_reduce(
             dtype=reduce_dtype,
             device=device,
         )
-        _div_if_needed(reduce_scatter_input, predivide_factor)
-        if world_size > 1:
-            reduce_scatter_comm(
-                output_tensor=reduce_output,
-                input_tensor=reduce_scatter_input,
-                group=reduce_scatter_group,
-                op=reduce_scatter_op,
-            )
-        else:
-            # For single GPU, just copy the input to output (no actual reduce-scatter needed), and
-            # account for a possible gradient_divide_factor.
-            if gradient_divide_factor is not None:
-                reduce_output.copy_(reduce_scatter_input / gradient_divide_factor)
+        if is_tpu:
+            out_offset = 0
+            if world_size > 1:
+                for grad, size in zip(unsharded_grads, padded_unsharded_sizes):
+                    sharded_numel = size.numel() // world_size
+                    out_chunk = reduce_output.narrow(0, out_offset, sharded_numel)
+                    grad_2d = grad.reshape(world_size, -1)
+                    if predivide_factor is not None and predivide_factor != 1.0:
+                        grad_2d = grad_2d / predivide_factor
+                    dist.reduce_scatter_single(
+                        out_chunk,
+                        grad_2d,
+                        group=reduce_scatter_group,
+                        op=reduce_scatter_op,
+                    )
+                    out_offset += sharded_numel
             else:
-                reduce_output.copy_(reduce_scatter_input)
+                for grad, size in zip(unsharded_grads, padded_unsharded_sizes):
+                    sharded_numel = size.numel()
+                    out_chunk = reduce_output.narrow(0, out_offset, sharded_numel)
+                    if gradient_divide_factor is not None:
+                        out_chunk.copy_(grad.view(-1) / gradient_divide_factor)
+                    else:
+                        out_chunk.copy_(grad.view(-1))
+                    out_offset += sharded_numel
+            unsharded_grads.clear()
+        else:
+            _div_if_needed(reduce_scatter_input, predivide_factor)
+            if world_size > 1:
+                reduce_scatter_comm(
+                    output_tensor=reduce_output,
+                    input_tensor=reduce_scatter_input,
+                    group=reduce_scatter_group,
+                    op=reduce_scatter_op,
+                )
+            else:
+                # For single GPU, just copy the input to output (no actual reduce-scatter needed), and
+                # account for a possible gradient_divide_factor.
+                if gradient_divide_factor is not None:
+                    reduce_output.copy_(reduce_scatter_input / gradient_divide_factor)
+                else:
+                    reduce_output.copy_(reduce_scatter_input)
+
         reduce_scatter_event = reduce_scatter_stream.record_event()
         post_reduce_stream = reduce_scatter_stream
         if all_reduce_group is not None:  # HSDP or DDP/replicate
