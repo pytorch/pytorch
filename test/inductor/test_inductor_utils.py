@@ -204,15 +204,14 @@ class TestBenchGeneric(TestCase):
             )
 
 
-class TestBenchAccelerator(TestCase):
+class TestBenchCuda(TestCase):
     hw_classification = HardwareClassification.CUDA
 
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        device = cls.get_primary_device()
-        x = torch.rand(1024, 10).to(device).half()
-        w = torch.rand(512, 10).to(device).half()
+        x = torch.rand(1024, 10).to(cls.device_type).half()
+        w = torch.rand(512, 10).to(cls.device_type).half()
         cls._bench_fn = staticmethod(
             functools.partial(torch.nn.functional.linear, x, w)
         )
@@ -229,7 +228,7 @@ class TestBenchAccelerator(TestCase):
         self.assertGreater(res, 0)
 
 
-instantiate_device_type_tests(TestBenchAccelerator, globals(), only_for="cuda")
+instantiate_device_type_tests(TestBenchCuda, globals(), only_for="cuda")
 
 
 class TestStrideOrder(TestCase):
