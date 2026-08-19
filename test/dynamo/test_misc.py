@@ -5560,6 +5560,86 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         torch._dynamo.testing.standard_test(self, fn=fn1, nargs=3)
 
+    def test_dunder_class_across_vt_types(self):
+        # obj.__class__ under compile must return the type for VTs across
+        # families (list/dict/set subclasses, tensor, exception).
+        class MyList(list):
+            pass
+
+        class MyExc(ValueError):
+            pass
+
+        def fn(x):
+            return (
+                x + 1,
+                MyList([1, 2]).__class__,
+                {1: 2}.__class__,
+                {1, 2}.__class__,
+                x.__class__,
+                MyExc("boom").__class__,
+            )
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_instance_dunder_dict(self):
+        # An instance's writable __dict__ under compile.
+        class Foo:
+            def __init__(self):
+                self.a = 1
+                self.b = 2
+
+        def fn(x):
+            obj = Foo()
+            return x + 1, dict(obj.__dict__)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_class_object_dunder_dict(self):
+        # A class object's __dict__ is a read-only mappingproxy, not an instance
+        # dict; both membership (which installs a dict guard) and item read must
+        # not route through the instance-dict machinery.
+        class Foo:
+            x = 5
+
+        def fn(t):
+            has_x = "x" in Foo.__dict__
+            return t + 1, has_x, Foo.__dict__["x"]
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        t = torch.randn(4)
+        self.assertEqual(fn(t), opt_fn(t))
+
+    def test_hasattr_dunder_dict_no_dict_type(self):
+        # Types without an instance __dict__ (builtins, __slots__-only classes)
+        # must report hasattr(obj, "__dict__") == False under compile, while
+        # types that do have one report True.
+        class Slots:
+            __slots__ = ("a",)
+
+            def __init__(self):
+                self.a = 1
+
+        class Plain:
+            def __init__(self):
+                self.a = 1
+
+        def fn(x):
+            return (
+                x + 1,
+                hasattr(Slots(), "__dict__"),
+                hasattr([1, 2], "__dict__"),
+                hasattr(5, "__dict__"),
+                hasattr(Plain(), "__dict__"),
+            )
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
     def test_class_reassignment_graph_break(self):
         class BaseClass:
             def __init__(self, x):

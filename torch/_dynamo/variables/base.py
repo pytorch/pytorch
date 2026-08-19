@@ -1603,7 +1603,15 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     tp_methods: dict[str, Method] = {}
     # Declarative attribute tables, split to match CPython: tp_getset holds the
     # PyGetSetDef attributes, tp_members the PyMemberDef ones.
-    tp_getset: dict[str, GetSet] = {}
+    tp_getset: dict[str, GetSet] = {
+        "__class__": GetSet(
+            getter=lambda self, tx: VariableTracker.build(
+                tx,
+                self.python_type(),
+                AttrSource(self.source, "__class__") if self.source else None,
+            )
+        ),
+    }
     tp_members: dict[str, Member] = {}
 
     def _lookup_tp_table(self, name: str, *table_attrs: str) -> Any:
@@ -1986,10 +1994,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             result = getset.getter(self, tx)
             if result is not None:
                 return result
-
-        # object.__class__: one shared getset on `object` rather than per-VT.
-        if name == "__class__":
-            return VariableTracker.build(tx, self.python_type())
 
         try:
             py_type = self.python_type()
