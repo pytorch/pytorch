@@ -418,7 +418,14 @@ class _Recorder(unittest.TestResult):
 
     @staticmethod
     def _key(test: unittest.TestCase) -> str:
-        return f"{type(test).__name__}::{test._testMethodName}"
+        # A class-level SkipTest is reported against a unittest _ErrorHolder, which
+        # has a description but no _testMethodName. Reaching for it unguarded raises
+        # out of suite.run, and the file then reads as unmeasurable rather than as
+        # a class that skips.
+        method = getattr(test, "_testMethodName", None)
+        if method is None:
+            return str(getattr(test, "description", test))
+        return f"{type(test).__name__}::{method}"
 
     def addSuccess(self, test):
         self.ran.add(self._key(test))
@@ -493,19 +500,28 @@ def _probe_values(mod: ModuleType, names: set[str]) -> dict[str, bool]:
         if isinstance(value, bool):
             out[name] = value
             continue
-        # Calling is restricted to zero-argument predicates named like one. A test
-        # module's namespace holds plenty of callables -- Triton kernels among them
-        # -- that must not be invoked to answer a question about gating.
+        # Calling is restricted to zero-argument predicates named like one, and
+        # defined in torch or the file itself. A test module's namespace holds
+        # plenty of callables -- Triton kernels, and things that shell out or probe
+        # a driver -- that must not be invoked to answer a question about gating.
+        origin = getattr(value, "__module__", "") or ""
         if not callable(value) or not re.match(r"^(has_|is_|supports_)", name):
+            continue
+        if not (origin.startswith("torch.") or origin == getattr(mod, "__name__", "")):
             continue
         try:
             if inspect.signature(value).parameters:
                 continue
-            if hasattr(value, "cache_clear"):
-                value.cache_clear()
-            out[name] = bool(value())
+            # Not cache_clear(): these caches are process-global and the worker goes
+            # on to import more files, so clearing one here changes the answer for
+            # later files in the same batch, which then get written to the on-disk
+            # cache. __wrapped__ re-evaluates without touching global state.
+            fn = getattr(value, "__wrapped__", value)
+            out[name] = bool(fn())
         except Exception:
-            out[name] = False
+            # Omitted rather than recorded False: a probe that blew up is not the
+            # same as a capability that is absent.
+            continue
     return out
 
 
