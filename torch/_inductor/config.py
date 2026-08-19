@@ -1059,6 +1059,12 @@ deterministic = os.getenv("TORCHINDUCTOR_DETERMINISTIC") == "1"
 # Batch-invariant mode: stable per-sample compiled kernel across batch sizes. Implies deterministic.
 batch_invariant = os.getenv("TORCHINDUCTOR_BATCH_INVARIANT") == "1"
 
+# Use eager's opt-in INNER_TREE order for eligible NVIDIA CUDA sums.
+# pyrefly: ignore [bad-assignment]
+numerics: Literal["default", "strict"] = os.environ.get(
+    "TORCHINDUCTOR_NUMERICS", "default"
+)  # type: ignore[assignment]
+
 # When we do split reduction, this number control the minimum value for
 # num_split. Too small num_split make the split reduction less efficient.
 # It's a much bigger problem when we compile a dynamic shape kernel with
@@ -1103,11 +1109,7 @@ combo_kernel_max_num_nodes = 8
 # When True, each combo sub-kernel gets its own block sizes (XBLOCK_0, YBLOCK_0, etc.)
 # allowing different sub-kernels to use different tile sizes based on their heuristics.
 # When False, all sub-kernels share block sizes (XBLOCK, YBLOCK, etc.)
-combo_kernel_per_subkernel_blocks: bool = Config(
-    justknob="pytorch/inductor:combo_kernel_per_subkernel_blocks",
-    env_name_force="TORCHINDUCTOR_COMBO_KERNEL_PER_SUBKERNEL_BLOCKS",
-    default=True,
-)
+combo_kernel_per_subkernel_blocks = False
 # When True, each combo sub-kernel autotunes its block sizes standalone at compile time; the
 # winning per-subkernel blocks are stitched into the combo kernel and passed as args (the combo
 # then autotunes num_warps/num_stages over the winners). Requires
@@ -1130,11 +1132,11 @@ combo_kernels_pointwise_only = False
 # kernels. When both thresholds are set, the tighter limit wins.
 combo_kernel_peak_memory_increase_gb: float | None = None  # Absolute cap in GB
 combo_kernel_peak_memory_pct_threshold: float | None = 0.05
-# Maximum baseline-index span of a single combo candidate. Groups whose
-# first-to-last baseline-index distance exceeds this are split into
-# sub-windows. Set to -1 (or any negative value) to disable splitting
-# and treat each parallel group as one window.
-combo_kernel_max_distance: int = -1
+# Maximum baseline-schedule distance scanned for a memory-gated combo candidate.
+# This is ignored when memory gating is disabled. Set to -1 (or any negative
+# value) to scan the remaining schedule. Unbounded scans can take quadratic
+# time on large schedules and are intended only for small graphs or debugging.
+combo_kernel_max_distance: int = 64
 
 # constant folding on the joint graph
 joint_graph_constant_folding = True
@@ -1239,20 +1241,49 @@ _fuse_ddp_communication_passes: list[Callable[..., None] | str] = [
 _micro_pipeline_tp: bool = False
 
 
-# Enable/disable partitioned scatter optimization for atomic add kernels
-# this will improve kernel performance at cost of memory usage.
+# Enable/disable partitioned scatter optimization for atomic add kernels.
+# Improves kernel performance for high-contention index_put(accumulate=True)
+# at the cost of temporary memory for expanded partition buffers.
+_partitioned_scatter_default = "1" if torch.version.hip else "0"
 partitioned_scatter_enabled = (
-    os.environ.get("TORCHINDUCTOR_PARTITIONED_SCATTER_ENABLED", "0") == "1"
+    os.environ.get(
+        "TORCHINDUCTOR_PARTITIONED_SCATTER_ENABLED", _partitioned_scatter_default
+    )
+    == "1"
 )
 
-# Min partitions for scatter optimization
+# Power-of-2 bounds for num_partitions (bitwise AND partition assignment requires pow2).
+# Capped at 64: contention relief saturates before that while the expanded buffer keeps
+# growing, and P=128 measured slower than P=64 at every contention level on MI308X.
 partitioned_scatter_min_partitions: int = 2
+partitioned_scatter_max_partitions: int = 64
 
-# Max partitions for scatter optimization
-partitioned_scatter_max_partitions: int = 128
+# Skip ops with fewer writes than this — small scatters don't generate meaningful contention.
+partitioned_scatter_min_index_size: int = 4096
 
-# Memory budget fraction for scatter buffers
-partitioned_scatter_memory_budget: float = 0.10
+# Skip ops where index_numel / scatter_dim_size is below this ratio.
+# Contention is measured per scatter-dim slot; low density means most slots get ≤1 write.
+# The partitioned form pays a zero-fill and reduce over the expanded buffer plus a
+# slower scatter kernel (atomics over P copies lose cache residency), whether or not
+# contention was actually relieved. Assumes indices spread uniformly over all slots;
+# the real distribution is a runtime property, so concentrated indices are
+# under-estimated here.
+partitioned_scatter_min_contention_ratio: float = 4.0
+
+# GPU memory reserved for state invisible to the FX profile: CUDA driver context,
+# PyTorch caching allocator pool, and kernel scratch (cuBLAS/Triton). Subtracted from
+# total GPU memory to compute available headroom for expanded partition buffers.
+# 1.5 GB is conservative for MI300 (206 GB total); tune down to allow more partitions.
+partitioned_scatter_non_model_floor_bytes: int = 1_500_000_000
+
+# Bypass the heuristic skip gates (min_index_size, min_contention_ratio, and the
+# diminishing-returns cap on num_partitions). Correctness gates and the hard memory
+# budget are still enforced. Useful for benchmarking or skewed-index workloads where
+# static estimates undercount real contention.
+# Enable via: TORCHINDUCTOR_PARTITIONED_SCATTER_FORCE=1
+partitioned_scatter_force: bool = (
+    os.environ.get("TORCHINDUCTOR_PARTITIONED_SCATTER_FORCE", "0") == "1"
+)
 
 
 class _collective:
@@ -2163,7 +2194,15 @@ class triton:
     # We should revisit this once we understand more of the source of register spills.
     spill_threshold: int = 32 if torch.version.hip else 16
 
-    # Generate code containing the newer tl.make_block_ptr() API for loads/store
+    # Generate code using the tl.make_block_ptr() API for loads/stores. Block
+    # pointers were removed from the Triton frontend in triton-lang/triton#10833,
+    # so this flag is honored only where the installed Triton still provides the
+    # API; where it is gone the request is a no-op and use_block_ptr_enabled()
+    # emits a one-time FutureWarning before falling back to masked indexing.
+    #
+    # TODO(#191012): remove use_block_ptr entirely (this flag + the block-pointer
+    # codegen path in codegen/triton.py) once downstream backends still on block
+    # pointers (e.g. MTIA) migrate.
     use_block_ptr = False
 
     # (Experimental)
@@ -2210,6 +2249,10 @@ class triton:
     # descriptor flavor only; requires use_tensor_descriptor and
     # assume_aligned_inputs to also be enabled (no effect otherwise).
     enable_host_side_tma = os.environ.get("ENABLE_HOST_SIDE_TMA", "0") == "1"
+
+    # Expand the Blackwell GEMM search space with Meta Triton autoWS knobs
+    # (no-op on archs/Triton builds without meta-WS).
+    enable_template_autows = os.environ.get("ENABLE_TEMPLATE_AUTOWS", "0") == "1"
 
     # Skip L1 cache for buffers that are used only once.  Disabled by default
     skip_l1_cache = os.environ.get("TORCHINDUCTOR_SKIP_L1", "0") == "1"
@@ -2264,9 +2307,8 @@ class triton:
         == "1"
     )
 
-    # Fuse dependent cross-axis reductions (e.g., RMSNorm over D followed
-    # by per-block amax over a small group dimension like FP8 block size)
-    # into a single kernel with two sequential reduction passes.
+    # Fuse staged reduction pipelines, including dependent cross-axis reductions
+    # and lane-resolution pointwise epilogues.
     nested_reduction = os.environ.get("TORCHINDUCTOR_NESTED_REDUCTION", "0") == "1"
 
     # Map for storing the amount of kernel runs with dumped input tensors
@@ -2990,6 +3032,10 @@ _cache_config_ignore_prefix: list[str] = [
     # not relevant
     "worker_start_method",
     "compile_threads",
+    # only controls how often the sidecar watchdog reports a still-running job;
+    # it has no effect on compiled output, so including it would change the
+    # config hash and needlessly invalidate every cache entry
+    "compile_worker_watchdog_interval_seconds",
     # see CustomGraphPass; these are handled specially
     "post_grad_custom_post_pass",
     "post_grad_custom_pre_pass",
@@ -3134,6 +3180,7 @@ class eager_numerics:
 emulate_precision_casts: bool = (
     os.environ.get("TORCHINDUCTOR_EMULATE_PRECISION_CASTS", "0") == "1"
 )
+
 
 # Targeted variant of emulate_precision_casts for saved low-precision outputs.
 # When a low-precision pointwise result is saved for backward and also used by
