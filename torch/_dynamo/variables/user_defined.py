@@ -2262,10 +2262,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def _lookup_method(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
-        # Mirrors lookup_method: a missing dunder is reported as a bare
-        # AttributeError(name).  Reachable for the dunder pairs that share one
-        # slot (__setitem__/__delitem__, __set__/__delete__) when a type
-        # implements only one half.
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L2323-L2333
         m = self._maybe_lookup_method(tx, name)
         if m is None:

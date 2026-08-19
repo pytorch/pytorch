@@ -79,10 +79,10 @@ from .base import (
     GetSet,
     getset_build,
     getset_read,
-    getset_set,
     Member,
     Method,
     NO_SUCH_SUBOBJ,
+    Setter,
     VariableTracker,
 )
 from .constant import ConstantVariable
@@ -521,8 +521,10 @@ class TracebackVariable(VariableTracker):
         return self.tb_next
 
     def _set_tb_next(
-        self, tx: "InstructionTranslatorBase", val: VariableTracker
+        self, tx: "InstructionTranslatorBase", val: VariableTracker | None
     ) -> VariableTracker:
+        if val is None:
+            raise_type_error(tx, "can't delete tb_next attribute")
         if not self.is_valid_traceback(val):
             raise_observed_exception(TypeError, tx)
         if not isinstance(val, (TracebackVariable, ConstantVariable)):
@@ -664,9 +666,11 @@ class ExceptionVariable(VariableTracker):
             )
 
     def _set_context(
-        self, tx: "InstructionTranslatorBase", val: VariableTracker
+        self, tx: "InstructionTranslatorBase", val: VariableTracker | None
     ) -> VariableTracker:
         # Constant can be either an Exception or None
+        if val is None:
+            raise_type_error(tx, "__context__ may not be deleted")
         if not (
             val.is_constant_none()
             or isinstance(
@@ -685,8 +689,10 @@ class ExceptionVariable(VariableTracker):
         return variables.ConstantVariable.create(None)
 
     def _set_cause(
-        self, tx: "InstructionTranslatorBase", val: VariableTracker
+        self, tx: "InstructionTranslatorBase", val: VariableTracker | None
     ) -> VariableTracker:
+        if val is None:
+            raise_type_error(tx, "__cause__ may not be deleted")
         if val.is_constant_none() or isinstance(
             val,
             (
@@ -705,19 +711,22 @@ class ExceptionVariable(VariableTracker):
         return variables.ConstantVariable.create(None)
 
     def _set_suppress_context(
-        self, tx: "InstructionTranslatorBase", val: VariableTracker
+        self, tx: "InstructionTranslatorBase", val: VariableTracker | None
     ) -> VariableTracker:
-        if val.is_constant_match(True, False):
+        # T_BOOL member: PyMember_SetOne rejects both deletion and non-bools.
+        if val is None:
+            raise_type_error(tx, "can't delete numeric/char attribute")
+        elif val.is_constant_match(True, False):
             self.__suppress_context__ = val
         else:
-            raise_type_error(
-                tx, "exception cause must be None or derive from BaseException"
-            )
+            raise_type_error(tx, "attribute value type must be bool")
         return variables.ConstantVariable.create(None)
 
     def _set_traceback(
-        self, tx: "InstructionTranslatorBase", val: VariableTracker
+        self, tx: "InstructionTranslatorBase", val: VariableTracker | None
     ) -> VariableTracker:
+        if val is None:
+            raise_type_error(tx, "__traceback__ may not be deleted")
         if not TracebackVariable.is_valid_traceback(val):
             raise_type_error(tx, "__traceback__ must be a traceback or None")
         self.__traceback__ = val
@@ -862,6 +871,17 @@ class StopIterationVariable(ExceptionVariable):
         codegen.store_attr("value")
 
 
+def _set_kwarg_attr(name: str) -> Setter:
+    # T_OBJECT member: deleting clears the slot, and reads then give None.
+    def setter(
+        self, tx: "InstructionTranslatorBase", val: VariableTracker | None
+    ) -> VariableTracker:
+        self._attrs[name] = val if val is not None else ConstantVariable.create(None)
+        return ConstantVariable.create(None)
+
+    return setter
+
+
 class _KwargAttrExceptionVariable(ExceptionVariable):
     # Base for exceptions whose constructor accepts keyword-only attributes that
     # default to None (e.g. NameError's `name`, AttributeError's `name`/`obj`).
@@ -897,13 +917,9 @@ class AttributeErrorVariable(_KwargAttrExceptionVariable):
     _kwarg_attrs = ("name", "obj")
     tp_members = {
         "name": Member(
-            getset_read(lambda s: s._attrs["name"]),
-            getset_set(lambda s, tx, val: s._attrs.__setitem__("name", val)),
+            getset_read(lambda s: s._attrs["name"]), _set_kwarg_attr("name")
         ),
-        "obj": Member(
-            getset_read(lambda s: s._attrs["obj"]),
-            getset_set(lambda s, tx, val: s._attrs.__setitem__("obj", val)),
-        ),
+        "obj": Member(getset_read(lambda s: s._attrs["obj"]), _set_kwarg_attr("obj")),
     }
 
 
@@ -912,9 +928,8 @@ class NameErrorVariable(_KwargAttrExceptionVariable):
     _kwarg_attrs = ("name",)
     tp_members = {
         "name": Member(
-            getset_read(lambda s: s._attrs["name"]),
-            getset_set(lambda s, tx, val: s._attrs.__setitem__("name", val)),
-        )
+            getset_read(lambda s: s._attrs["name"]), _set_kwarg_attr("name")
+        ),
     }
 
 
