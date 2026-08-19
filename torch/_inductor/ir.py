@@ -8684,7 +8684,7 @@ class UserDefinedTritonKernel(ExternKernel):
         if not config.epilogue_fusion_user_defined_triton_kernel:
             return False
 
-        if not self.arg_accesses.can_fuse_epilogue:
+        if not self.arg_can_fuse_epilogue:
             return False
 
         # We achieve fusion by parsing the original src into a python AST,
@@ -8748,11 +8748,11 @@ class UserDefinedTritonKernel(ExternKernel):
         kernel_kwargs = self.kwargs
         epilogue_out_override: dict[str, Any] = {}
         if epilogue_fusion:
-            if len(self.arg_accesses.read_writes.writes) != 1:
+            if len(self.mutated_arg_names) != 1:
                 raise AssertionError(
-                    f"expected one write, got {len(self.arg_accesses.read_writes.writes)}"
+                    f"expected one write, got {len(self.mutated_arg_names)}"
                 )
-            mutable_arg_name = next(iter(self.arg_accesses.read_writes.writes)).name
+            mutable_arg_name = self.mutated_arg_names[0]
             epilogue_computed_buffer, _ = epilogue_fusion
             kernel_kwargs = {**self.kwargs, mutable_arg_name: epilogue_computed_buffer}
             epilogue_out_override = {mutable_arg_name: epilogue_computed_buffer}
@@ -8858,6 +8858,8 @@ class UserDefinedTritonKernel(ExternKernel):
         tma_descriptor_metadata: dict[str, Any],
         kernel_args: dict[str, Any],
         launch_kwargs: tuple[str, ...],
+        mutated_arg_names: tuple[str, ...] | None = None,
+        can_fuse_epilogue: bool | None = None,
     ) -> None:
         inputs: list[IRNode] = []
         kwargs: dict[str, IRNode] = {}
@@ -8914,19 +8916,26 @@ class UserDefinedTritonKernel(ExternKernel):
         self.kernel_ast = ast.parse(self.kernel_src)
         self.kernel_stores = identify_triton_stores(self.kernel_src)
         self.kernel_args = kernel_args
-        # names in `arg_accesses.read_writes` are names of formal arguments in the kernel's prototype
-        self.arg_accesses = identify_accessed_tensors(
-            kernel,
-            {**kernel_args, **autotuned_kwargs},
-            tma_descriptor_metadata,
-        )
+        # Names of formal arguments in the kernel's prototype. Normally recorded
+        # on the node when it was created; derived here only for a graph that
+        # carries neither - see Note [TTIR mutation analysis].
+        if mutated_arg_names is None or can_fuse_epilogue is None:
+            accesses = identify_accessed_tensors(
+                kernel,
+                {**kernel_args, **autotuned_kwargs},
+                tma_descriptor_metadata,
+            )
+            mutated_arg_names = tuple(dep.name for dep in accesses.read_writes.writes)
+            can_fuse_epilogue = accesses.can_fuse_epilogue
+        self.mutated_arg_names = mutated_arg_names
+        self.arg_can_fuse_epilogue = can_fuse_epilogue
 
         # Filter to only tensor args: with Triton 3.7+, ordered_arg_names
         # includes scalars, so writes may reference non-tensor args like SymInts.
         self.mutable_args = [
-            kernel_args[key.name]
-            for key in self.arg_accesses.read_writes.writes
-            if isinstance(kernel_args.get(key.name), TensorBox)
+            kernel_args[name]
+            for name in self.mutated_arg_names
+            if isinstance(kernel_args.get(name), TensorBox)
         ]
 
         self.mutation_outputs = [

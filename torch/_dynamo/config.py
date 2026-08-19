@@ -878,6 +878,17 @@ _unsafe_skip_fsdp_module_guards = (
 # Common prefix to append to the id of each compile run to filter out data
 pt2_compile_id_prefix: str | None = os.environ.get("PT2_COMPILE_ID_PREFIX", None)
 
+# Generation-2 threshold to install while compiling, or None to leave CPython's
+# thresholds alone. A full collection walks every tracked object, and compiling
+# creates on the order of a million of them (FX nodes, SymNodes, sympy
+# expressions), so with the default threshold of 10 the collector repeatedly
+# rescans a heap that is still growing; on one model that was 16 full
+# collections costing 4.2s. Deferring them does not leak - gen0 and gen1
+# still collect, and
+# run_gc_after_compile reclaims per-compile garbage afterwards - it just stops us
+# paying for the same traversal over and over.
+gc_gen2_threshold_during_compile: int | None = 1000
+
 # Run GC at the end of compilation
 run_gc_after_compile = Config(  # type: ignore[var-annotated]
     # Disable by default on free-threaded builds since they always do a full collection, which can be slow
