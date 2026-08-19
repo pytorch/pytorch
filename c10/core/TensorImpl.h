@@ -249,6 +249,7 @@ struct C10_API FakeTensorMode {
   // hint unbacked symbols. Read once at mode creation, matching Python.
   bool propagate_real_tensors_ = false;
 
+  // allows data_ptr() calls on a FakeTensor's storage
   bool allow_unsafe_data_ptr_access_ = true;
 
   // if set, prefer this device type when resolving the common device for
