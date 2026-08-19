@@ -571,9 +571,12 @@ def _pip_install_cmd(editable):
 
 def _native_aot_stage2():
     # Post-install: the kernel builders import the installed torch, and
-    # scikit-build-core has no post-build hook inside the PEP 517
-    # backend. Skips cleanly (printing why) without the DSL runtime or
-    # a supported arch; see tools/native_aot/build_stage2.py.
+    # scikit-build-core has no post-build hook inside the PEP 517 backend.
+    #
+    # Skips cleanly, printing why, when AOT kernels do not apply (build_stage2.py
+    # lists the conditions) -- but NOT for a missing DSL runtime, which is a hard
+    # error once it decides to export. So on a machine with an exportable GPU this
+    # needs the DSL wheels installed, or TORCH_NATIVE_AOT=0.
     spin.util.run([sys.executable, "tools/native_aot/build_stage2.py"])
 
 
@@ -583,7 +586,8 @@ def develop():
 
     Runs an editable pip install using uv when available, falling back to
     regular pip.  Build configuration comes from the environment, e.g.
-    `BUILD_CONFIG spin develop`.
+    `BUILD_CONFIG spin develop`.  The build stages are documented at the top of
+    CMakeLists.txt and the supported env vars in cmake/EnvVarForwarding.cmake.
     """
     spin.util.run(_pip_install_cmd(editable=True))
     _native_aot_stage2()
@@ -600,7 +604,8 @@ def install():
 
     Runs a regular pip install using uv when available, falling back to
     regular pip.  Build configuration comes from the environment, e.g.
-    `BUILD_CONFIG spin install`.
+    `BUILD_CONFIG spin install`.  The build stages are documented at the top of
+    CMakeLists.txt and the supported env vars in cmake/EnvVarForwarding.cmake.
     """
     spin.util.run(_pip_install_cmd(editable=False))
     _native_aot_stage2()

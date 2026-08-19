@@ -458,36 +458,29 @@ untouched.
 
 ### 2.5 CMake integration
 
+CMake contributes one line, and makes no decisions:
+
 ```cmake
 # caffe2/CMakeLists.txt
-  # Embed exported native-AOT DSL kernels directly into torch_cuda
-  # (stage-2 artifacts from tools/native_aot/export.py + gen_aot_lib.py).
-  # An empty artifacts dir degrades gracefully: no sources, no kernels
-  # registered, stock aten behavior -- so the main build never depends
-  # on stage 2 having run. CONFIGURE_DEPENDS so a later export + ninja
-  # picks up new artifacts and relinks (~3s incremental).
-  set(NATIVE_AOT_ARTIFACTS_DIR "${CMAKE_BINARY_DIR}/native_aot"
-      CACHE PATH "Exported native-AOT kernel artifacts")
-  file(GLOB NATIVE_AOT_GEN_SRCS CONFIGURE_DEPENDS
-       "${NATIVE_AOT_ARTIFACTS_DIR}/*/aot_*.cpp")
-  file(GLOB NATIVE_AOT_KERNEL_SRCS CONFIGURE_DEPENDS
-       "${NATIVE_AOT_ARTIFACTS_DIR}/*/*.c")
-  file(GLOB NATIVE_AOT_KERNEL_OBJS CONFIGURE_DEPENDS
-       "${NATIVE_AOT_ARTIFACTS_DIR}/*/*.o")
-  if(NATIVE_AOT_GEN_SRCS)
-    # ... (see the file for the DSL runtime archive lookup and link options)
-  else()
-    message(STATUS "native-AOT embedded: no artifacts under ${NATIVE_AOT_ARTIFACTS_DIR} (build proceeds without)")
-  endif()
+  include("${CMAKE_BINARY_DIR}/native_aot/native_aot.cmake" OPTIONAL)
 ```
 
-The globs are one level deep, which is why single-arch export is the supported
-configuration today (see [Arch gating](#7-arch-gating)). The CuTeDSL objects are
-marked `EXTERNAL_OBJECT`/`GENERATED` so CMake links rather than compiles them,
-each artifact subdirectory becomes an include dir (the generated `.cpp` includes
-the exported ABI headers by bare name), and
-`libcuda_dialect_runtime_static.a` is located via the `nvidia_cutlass_dsl`
-namespace package and linked with `--exclude-libs`.
+Everything else is emitted by `gen_aot_lib.write_cmake_include()`, which knows
+what it just generated and so needs no globbing, no manifest to parse and no
+staleness comparison: the file lists exact paths, and stage 2 deletes it before
+writing new sources, so a stale one cannot survive. `OPTIONAL` is what makes a
+tree that never ran stage 2 (or opted out) build normally -- no sources, no
+kernels registered, stock aten -- so the main build never depends on stage 2.
+
+The emitted file carries the `TORCH_NATIVE_AOT` opt-out (checked at configure
+time, because a previous run's file can still be on disk), registers itself in
+`CMAKE_CONFIGURE_DEPENDS`, marks the CuTeDSL objects `EXTERNAL_OBJECT` so CMake
+links rather than compiles them, adds each artifact subdirectory as an include
+dir (the generated `.cpp` includes the exported ABI headers by bare name), sets
+`BUILD_WITH_INSTALL_RPATH`, and links `libcuda_dialect_runtime_static.a` with
+`--exclude-libs` plus the generated version script. Because it lists paths rather
+than globbing, multi-arch export needs no CMake change: nesting depth is the
+generator's problem (see [Arch gating](#7-arch-gating)).
 
 ---
 
@@ -1590,10 +1583,19 @@ It skips (printing why, leaving a normal artifacts-free build) when:
   * no toolchain targets this build's backend (Toolchain.BACKENDS); a
     ROCm build skips here today, and gains AOT support by adding a
     toolchain class rather than by editing this gate
+  * CUDA older than _MIN_CUDA_MAJOR (13), or a CUDA version that cannot
+    be determined from the CMake cache or the installed torch
   * TORCH_CUDA_ARCH_LIST contains no exportable arch (Blackwell only,
     for now -- see export.EXPORTABLE_ARCHES); on-device export runs when
     arch list is unset and a supported GPU is present
 ```
+
+The CUDA 13 floor is a cost decision, not a capability one: CUDA 12 builds top
+out at sm_90 (`.ci/manywheel/build_env_setup.py`'s arch table) and every 13.x
+config builds sm_90 too, so a 12.x export is a strict subset of what the 13.x
+wheels already ship. Because `.ci/pytorch/build.sh` calls `install_cutlass_dsl`
+only when `--print-verdict` says `RUN`, the 12.x jobs skip the DSL wheel install
+as well as the export.
 
 Past those checks the DSL runtimes are **required, not optional**: a toolchain
 that targets this backend was asked for declared kernels, so a missing runtime
@@ -1827,7 +1829,7 @@ Codegen (stage 1):
 | `torchgen/dest/register_dispatch_key.py` | the call site: replaces `op.impl(...)` with the consultation in the structured wrapper, and adds the stubs include for CUDA. |
 | `aten/src/ATen/templates/NativeAotStubs.{h,cpp}` | the stub header/source templates. |
 | `cmake/Codegen.cmake` | declarations as codegen inputs (`CONFIGURE_DEPENDS`). |
-| `caffe2/CMakeLists.txt` | the embedded-artifact glob/link block for `torch_cuda`. |
+| `caffe2/CMakeLists.txt` | one `include(... OPTIONAL)` of the generated `native_aot.cmake`; no logic. |
 
 Runtime:
 
