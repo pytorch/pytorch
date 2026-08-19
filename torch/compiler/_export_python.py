@@ -884,7 +884,7 @@ class ExportedPythonArtifact:
         # self-contained and always exec'd -- so only the code is written to disk.
         code, _cache = torch.compiler.precompile(
             self._fn,
-            *example,
+            example_inputs=[example],
             backend=self._backend,
             tracer=self._tracer,
             decompositions=self._decompositions,

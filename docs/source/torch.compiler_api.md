@@ -50,7 +50,7 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 % intentionally omitted from the autosummary block above.
 
 ```{eval-rst}
-.. py:function:: precompile(fn, *example_inputs, backend="inductor", tracer="make_fx", decompositions=None)
+.. py:function:: precompile(fn, *, example_inputs, backend="inductor", tracer="make_fx", decompositions=None)
 
    Ahead-of-time precompile ``fn`` against example inputs, returning a self-contained,
    runnable Python source string plus an acceleration cache as ``(python_code, cache)``.
@@ -62,8 +62,9 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 
    .. note::
 
-      With the default ``make_fx`` tracer, capture is non-strict. Control flow is
-      specialized to the example inputs, and shapes are static -- each size is baked in.
+      With the default ``make_fx`` tracer, ``example_inputs`` must contain exactly one
+      positional-argument tuple and capture is non-strict. Control flow is specialized
+      to that example, and shapes are static -- each size is baked in.
       The exception is a tensor dim explicitly marked unbacked (inductor backend only)
       with ``torch._dynamo.decorators.mark_unbacked`` on the inputs before the call; such
       a dim is captured as an unbacked symint, so one artifact serves any runtime size of
@@ -83,8 +84,9 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 
    :param fn: The whole computation to capture, taking the model(s) and runtime inputs
        as positional arguments.
-   :param example_inputs: Example positional arguments to ``fn``; the ``nn.Module``
-       arguments are lifted and the rest are the runtime inputs.
+   :param example_inputs: A sequence of positional-argument tuples for ``fn``. The
+       ``make_fx`` tracer requires exactly one tuple. Within each tuple, ``nn.Module``
+       arguments are lifted and the rest are runtime inputs.
    :param backend: ``"inductor"`` (default) lowers through AOTAutograd + Inductor;
        ``"eager"`` keeps the captured ATen graph (layout-flexible, no kernels; shapes
        are still specialized to the example).
@@ -102,7 +104,9 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 
    Example::
 
-       python_code, cache = torch.compiler.precompile(lambda m, x: m(x), model, x)
+       python_code, cache = torch.compiler.precompile(
+           lambda m, x: m(x), example_inputs=[(model, x)]
+       )
        f = torch.compiler.precompile.load(python_code, cache)
        out = f(model, x)   # pass the model again at runtime
 ```

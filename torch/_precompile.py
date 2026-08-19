@@ -1,6 +1,8 @@
 """Ahead-of-time precompilation (``make_fx`` tracer by default; Dynamo planned).
 
-    python_code, cache = torch.compiler.precompile(fn, model, *example_inputs)
+    python_code, cache = torch.compiler.precompile(
+        fn, example_inputs=[(model, *example_inputs)]
+    )
     f_c = torch.compiler.precompile.load(python_code, cache)
     out = f_c(model, *example_inputs)   # pass the model again at runtime
 
@@ -472,7 +474,7 @@ class _CaptureRngState:
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Callable, Mapping, Sequence
 
     from torch._subclasses.fake_tensor import FakeTensorMode
 
@@ -1652,7 +1654,7 @@ class PrecompiledModule:
         obj._loaded_forward = forward
         return obj
 
-    def _compile(self, args: tuple[object, ...]) -> None:
+    def _compile(self, example_inputs: Sequence[tuple[object, ...]]) -> None:
         # make_fx is the only implemented tracer; "dynamo" is a planned alternative
         # capture front-end. Reject it here (the single capture-dispatch point) before
         # running fn, so the failure is clear rather than a wrong default.
@@ -1661,6 +1663,12 @@ class PrecompiledModule:
                 f"precompile tracer={self._tracer!r} is not implemented yet; use "
                 "tracer='make_fx' (the default)."
             )
+        if len(example_inputs) != 1:
+            raise AssertionError(
+                "precompile with tracer='make_fx' requires exactly one example "
+                "input tuple."
+            )
+        args = example_inputs[0]
         if self._backend == "eager" and _has_unbacked_marks(args):
             raise NotImplementedError(
                 "precompile: mark_unbacked (dynamic shapes) is only supported with "
@@ -1961,7 +1969,8 @@ class _PrecompileApi:
     def __call__(
         self,
         fn: Callable[..., object],
-        *example_inputs: object,
+        *,
+        example_inputs: Sequence[tuple[object, ...]],
         backend: str = "inductor",
         tracer: str = "make_fx",
         decompositions: dict | None = None,
@@ -1978,6 +1987,11 @@ class _PrecompileApi:
         With the default ``make_fx`` tracer this is a non-strict trace with an explicit
         contract; read Note [precompile programming model] before using it. The artifact
         faithfully reproduces ``fn`` only for callers that uphold that contract.
+
+        ``example_inputs`` is a sequence of positional-argument tuples for ``fn``.
+        The outer sequence supports capture front-ends that can specialize one artifact
+        from multiple calls. The ``make_fx`` tracer accepts exactly one tuple because it
+        records only one execution; ``dynamo`` is planned to accept multiple tuples.
 
         THREADING: make_fx capture drives process-global tracing state and is serialized
         by a shared reentrant lock across all precompile callers; the inductor lowering
@@ -2017,10 +2031,10 @@ class _PrecompileApi:
         ``tracer`` selects the capture front-end:
 
         - ``"make_fx"`` (default): a NON-STRICT make_fx trace -- it records the ATen ops
-          that actually run when ``fn`` executes once on the example inputs and does not
-          analyze your Python, so control flow and shapes are specialized to the example
-          (the source of the programming-model contract). The only tracer implemented
-          today.
+          that actually run when ``fn`` executes once on the sole example-input tuple
+          and does not analyze your Python, so control flow and shapes are specialized
+          to the example (the source of the programming-model contract). The only
+          tracer implemented today.
         - ``"dynamo"``: planned (a Dynamo-based front-end that analyzes the Python);
           raises ``NotImplementedError`` for now.
 
@@ -2031,12 +2045,13 @@ class _PrecompileApi:
 
         Dynamic shapes are opt-in via ``torch._dynamo.decorators.mark_unbacked``
         (inductor backend only), NOT a precompile kwarg: mark dims on the inputs before
-        calling, e.g. ``mark_unbacked(x, 0); precompile(fn, model, x)`` frees ``x``'s
-        batch dim. Marked dims are captured as UNBACKED symints, which cannot be guarded
-        on, so one artifact serves any runtime size of them (invariant 3); a graph that
-        needs to guard on / specialize a marked dim fails at capture with a
-        ``PrecompileError``. Dims sharing a ``shape_id`` reuse one symbol (equal by
-        construction); ``min``/``max`` become runtime asserts. Other dims stay static.
+        calling, e.g. ``mark_unbacked(x, 0); precompile(fn,
+        example_inputs=[(model, x)])`` frees ``x``'s batch dim. Marked dims are captured
+        as UNBACKED symints, which cannot be guarded on, so one artifact serves any
+        runtime size of them (invariant 3); a graph that needs to guard on / specialize
+        a marked dim fails at capture with a ``PrecompileError``. Dims sharing a
+        ``shape_id`` reuse one symbol (equal by construction); ``min``/``max`` become
+        runtime asserts. Other dims stay static.
         Dims that MUST be equal at runtime (e.g. two inputs combined by a broadcast that
         requires equal sizes, ``model(a) + model(b)``) MUST be given a SHARED ``shape_id``
         so a mismatch is rejected; marking two such dims INDEPENDENTLY currently bakes a
@@ -2055,7 +2070,7 @@ class _PrecompileApi:
         ``fn`` is the whole computation, e.g.::
 
             python_code, cache = torch.compiler.precompile(
-                lambda model, x: model(x), model, x
+                lambda model, x: model(x), example_inputs=[(model, x)]
             )
 
 
@@ -2063,12 +2078,14 @@ class _PrecompileApi:
                 loss_fn(model(x), t).backward()  # or return autograd.grad(...)
 
 
-            python_code, cache = torch.compiler.precompile(train_step, model, x, t)
+            python_code, cache = torch.compiler.precompile(
+                train_step, example_inputs=[(model, x, t)]
+            )
 
-        Among ``example_inputs``, the ``nn.Module`` arguments have their params/buffers
-        lifted to graph inputs (no weights are baked into the artifact -- invariant 1);
-        the rest are the runtime inputs. The reloaded callable is invoked with the SAME
-        argument structure -- pass the model(s) again at runtime, e.g.
+        Within each tuple in ``example_inputs``, the ``nn.Module`` arguments have their
+        params/buffers lifted to graph inputs (no weights are baked into the artifact --
+        invariant 1); the rest are the runtime inputs. The reloaded callable is invoked
+        with the SAME argument structure -- pass the model(s) again at runtime, e.g.
         ``f_c(model, x)``, and that runtime model must match the example model's
         parameter/buffer structure (invariant 2). Arguments are matched POSITIONALLY:
         pass the model(s) and inputs positionally both here and at load time; keyword-
@@ -2085,10 +2102,10 @@ class _PrecompileApi:
         are supported -- AOTAutograd's prelude/epilogue is composed into the artifact
         (invariant 4), as is functionalized RNG. Caller responsibilities NOT checked
         here (see the Note): the runtime model must be structurally identical to the
-        example, and control flow / shapes are specialized to ``example_inputs``
-        (invariants 2 and 3). Violations that ARE checked raise ``PrecompileError``: a
-        tensor baked
-        as a constant (invariant 1), effectful ops (invariant 4), and -- for the
+        example, and control flow / shapes are specialized to the sole ``make_fx``
+        example tuple (invariants 2 and 3). Violations that ARE checked raise
+        ``PrecompileError``: a tensor baked as a constant (invariant 1), effectful ops
+        (invariant 4), and -- for the
         inductor backend -- a runtime input whose stride / memory format differs from
         the example's (invariant 6).
         """

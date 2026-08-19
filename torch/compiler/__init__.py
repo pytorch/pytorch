@@ -1086,11 +1086,11 @@ def export_python(
 
     It is a distinct entry point rather than a ``path=`` kwarg on
     :func:`torch.compiler.precompile` because the two have different shapes: the raw
-    ``precompile(fn, *example_inputs)`` primitive is eager, takes the example inputs
-    positionally (mirroring how ``fn`` is called), and returns ``(python_code,
-    cache)`` for the caller to manage. ``export_python`` is a decorator that owns the
-    on-disk artifact and returns a runnable, so ``fn`` arrives via ``@`` and the
-    example inputs move to a keyword-only ``example_inputs`` list.
+    ``precompile(fn, example_inputs=[(...)])`` primitive is eager, takes a sequence of
+    positional-argument tuples, and returns ``(python_code, cache)`` for the caller to
+    manage. ``export_python`` is a decorator that owns the on-disk artifact and returns
+    a runnable, so ``fn`` arrives via ``@`` and ``example_inputs`` describes one call's
+    positional arguments (or is inferred from the first call).
 
     Keyword call arguments and positional defaults are normalized onto ``fn``'s full
     positional signature (so ``rope(q=..., k=...)`` works and omitted defaults do not
