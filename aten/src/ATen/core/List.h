@@ -188,9 +188,27 @@ private:
     return lhs.iterator_ == rhs.iterator_;
   }
 
+#ifdef __cpp_lib_three_way_comparison
   friend auto operator<=>(const ListIterator& lhs, const ListIterator& rhs) {
     return lhs.iterator_ <=> rhs.iterator_;
   }
+#else // This can be removed after upgrading clang used in macos-py3-arm64
+  friend bool operator<(const ListIterator& lhs, const ListIterator& rhs) {
+    return lhs.iterator_ < rhs.iterator_;
+  }
+
+  friend bool operator<=(const ListIterator& lhs, const ListIterator& rhs) {
+    return lhs.iterator_ <= rhs.iterator_;
+  }
+
+  friend bool operator>(const ListIterator& lhs, const ListIterator& rhs) {
+    return lhs.iterator_ > rhs.iterator_;
+  }
+
+  friend bool operator>=(const ListIterator& lhs, const ListIterator& rhs) {
+    return lhs.iterator_ >= rhs.iterator_;
+  }
+#endif
 
   friend class ListIterator<T, typename c10::detail::ListImpl::list_type::iterator>;
   friend class List<T>;
