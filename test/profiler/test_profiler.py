@@ -3267,7 +3267,6 @@ class TestExperimentalUtilsDevice(TestCase):
         "https://github.com/pytorch/pytorch/issues/158727",
     )
     @xfailIfNoAcceleratorTriton
-    @onlyAccelerator
     def test_profiler_debug_autotuner(self, device):
         """
         This test makes sure that profiling events will be present when the kernel is run using the DebugAutotuner.
@@ -3402,7 +3401,7 @@ class TestProfilerDeviceStopped(TestCase):
             schedule=torch.profiler.schedule(**schedule_kwargs),
         )
 
-    def test_enters_device_stopped_from_warmup(self):
+    def test_enters_device_stopped_from_warmup(self, device):
         p = self._make_profiler(wait=0, warmup=2, active=2)
         with patch(self.PATCH_TARGET, return_value=True):
             p.start()
@@ -3412,7 +3411,7 @@ class TestProfilerDeviceStopped(TestCase):
             self.assertEqual(p.current_action, ProfilerAction.DEVICE_STOPPED)
             p.stop()
 
-    def test_enters_device_stopped_from_record(self):
+    def test_enters_device_stopped_from_record(self, device):
         p = self._make_profiler(wait=0, warmup=1, active=3)
         with patch(self.PATCH_TARGET, return_value=False):
             p.start()
@@ -3427,7 +3426,7 @@ class TestProfilerDeviceStopped(TestCase):
             self.assertEqual(p.current_action, ProfilerAction.DEVICE_STOPPED)
             p.stop()
 
-    def test_does_not_enter_device_stopped_from_record_and_save(self):
+    def test_does_not_enter_device_stopped_from_record_and_save(self, device):
         """When prev_action is RECORD_AND_SAVE, the natural action_map
         transition (e.g. R&S -> WARMUP) already fires stop_trace +
         _trace_ready + prepare_trace, which resets Kineto. We do NOT
@@ -3477,7 +3476,7 @@ class TestProfilerDeviceStopped(TestCase):
             # cycle 2 R&S -> stop fires on_trace_ready a second time
             self.assertEqual(callback_count[0], 2)
 
-    def test_device_stopped_persists_through_cycle(self):
+    def test_device_stopped_persists_through_cycle(self, device):
         """Once in DEVICE_STOPPED, the profiler stays there until the schedule
         moves to WARMUP (new cycle) or NONE (end)."""
         p = self._make_profiler(wait=0, warmup=1, active=4, repeat=2)
@@ -3503,7 +3502,7 @@ class TestProfilerDeviceStopped(TestCase):
             self.assertEqual(p.current_action, ProfilerAction.WARMUP)
             p.stop()
 
-    def test_device_stopped_recovers_without_warmup(self):
+    def test_device_stopped_recovers_without_warmup(self, device):
         """With warmup=0 (and wait=0), the schedule never produces WARMUP or
         NONE between cycles. DEVICE_STOPPED must still exit at cycle
         boundaries (RECORD_AND_SAVE -> next), otherwise the profiler would
@@ -3532,7 +3531,7 @@ class TestProfilerDeviceStopped(TestCase):
             self.assertEqual(p.current_action, ProfilerAction.RECORD)
             p.stop()
 
-    def test_device_stopped_exits_via_wait_phase(self):
+    def test_device_stopped_exits_via_wait_phase(self, device):
         """With wait > 0, the NONE phase between cycles is the natural
         exit path out of DEVICE_STOPPED. After the wait, profiling resumes
         normally through WARMUP and RECORD."""
@@ -3577,7 +3576,7 @@ class TestProfilerDeviceStopped(TestCase):
             self.assertEqual(p.current_action, ProfilerAction.RECORD)
             p.stop()
 
-    def test_device_stopped_persists_through_multistep_warmup(self):
+    def test_device_stopped_persists_through_multistep_warmup(self, device):
         """With warmup >= 2, consecutive WARMUP steps are mid-cycle, not
         cycle boundaries. DEVICE_STOPPED must persist through the entire
         warmup phase rather than oscillating WARMUP -> DEVICE_STOPPED ->
@@ -3612,7 +3611,7 @@ class TestProfilerDeviceStopped(TestCase):
             self.assertEqual(p.current_action, ProfilerAction.NONE)
             p.stop()
 
-    def test_warmup_to_device_stopped_fires_trace_ready(self):
+    def test_warmup_to_device_stopped_fires_trace_ready(self, device):
         """When DEVICE_STOPPED is entered from WARMUP (e.g. active=1
         schedule where every R&S step gets converted to DS), the
         (WARMUP, DEVICE_STOPPED) transition must fire on_trace_ready so
@@ -3652,7 +3651,7 @@ class TestProfilerDeviceStopped(TestCase):
             self.assertEqual(callback_count[0], 2)
             p.stop()
 
-    def test_start_after_stop_in_device_stopped(self):
+    def test_start_after_stop_in_device_stopped(self, device):
         """A user may call start() after a stop() that left current_action
         in DEVICE_STOPPED. The second start() must re-derive state from
         the schedule (not trust the stale DS), so a real (NONE, X)
@@ -3693,7 +3692,7 @@ class TestProfilerDeviceStopped(TestCase):
             "second run must produce a trace, not silently no-op",
         )
 
-    def test_user_schedule_returning_device_stopped_raises_at_init(self):
+    def test_user_schedule_returning_device_stopped_raises_at_init(self, device):
         """ProfilerAction.DEVICE_STOPPED is internal; user-provided
         schedules must not return it. __init__ catches schedules that
         return it at step 0 — without this check, start() would silently
@@ -3704,7 +3703,7 @@ class TestProfilerDeviceStopped(TestCase):
                 schedule=lambda step: ProfilerAction.DEVICE_STOPPED,
             )
 
-    def test_user_schedule_returning_device_stopped_raises_at_step(self):
+    def test_user_schedule_returning_device_stopped_raises_at_step(self, device):
         """If the user schedule returns DEVICE_STOPPED on a later step,
         step() raises ValueError and leaves the profiler state untouched
         so the user can stop() cleanly after catching the error."""
@@ -3732,7 +3731,7 @@ class TestProfilerDeviceStopped(TestCase):
         # stop() runs without re-exiting an already-exited record_function.
         p.stop()
 
-    def test_device_stopped_recovers_across_infinite_cycles(self):
+    def test_device_stopped_recovers_across_infinite_cycles(self, device):
         """With repeat=0 (infinite cycles), DEVICE_STOPPED entry and
         recovery must work across multiple cycles, not just one."""
         # Normal schedule for wait=0, warmup=1, active=2, repeat=0 (cycle length 3, infinite):
@@ -3776,7 +3775,7 @@ class TestProfilerDeviceStopped(TestCase):
             self.assertEqual(p.current_action, ProfilerAction.WARMUP)
             p.stop()
 
-    def test_skips_device_stopped_when_prev_is_none(self):
+    def test_skips_device_stopped_when_prev_is_none(self, device):
         p = self._make_profiler(wait=2, warmup=1, active=1)
         with patch(self.PATCH_TARGET, return_value=True):
             p.start()
@@ -3787,7 +3786,7 @@ class TestProfilerDeviceStopped(TestCase):
             self.assertEqual(p.current_action, ProfilerAction.NONE)
             p.stop()
 
-    def test_skips_device_stopped_when_already_stopping(self):
+    def test_skips_device_stopped_when_already_stopping(self, device):
         p = self._make_profiler(wait=0, warmup=1, active=1, repeat=1)
         with patch(self.PATCH_TARGET, return_value=False):
             p.start()
@@ -3807,7 +3806,7 @@ class TestProfilerDeviceStopped(TestCase):
         "prev",
         [ProfilerAction.NONE, ProfilerAction.RECORD_AND_SAVE],
     )
-    def test_unreachable_transition_raises(self, prev):
+    def test_unreachable_transition_raises(self, device, prev):
         """Transitions into DEVICE_STOPPED that step() / start() / __init__
         all exclude should raise if invoked directly via _transit_action.
 
@@ -3824,7 +3823,7 @@ class TestProfilerDeviceStopped(TestCase):
         ):
             p._transit_action(prev, ProfilerAction.DEVICE_STOPPED)
 
-    def test_cpu_only_profiler_ignores_stale_is_kineto_stopped(self):
+    def test_cpu_only_profiler_ignores_stale_is_kineto_stopped(self, device):
         """A CPU-only profiler should not enter DEVICE_STOPPED even if
         _is_kineto_stopped returns True (e.g. stale flag from a previous
         device profiler)."""
@@ -3840,7 +3839,7 @@ class TestProfilerDeviceStopped(TestCase):
             self.assertEqual(p.current_action, ProfilerAction.RECORD_AND_SAVE)
             p.stop()
 
-    def test_device_stopped_with_real_kineto(self):
+    def test_device_stopped_with_real_kineto(self, device):
         """Integration test: when _is_kineto_stopped flips True mid-run
         against a live Kineto session, the DEVICE_STOPPED transition must
         actually fire stop_trace + _trace_ready (not just flip the action
@@ -3909,7 +3908,7 @@ class TestProfilerEventsParity(TestCase):
 
     hw_classification = HardwareClassification.ACCELERATOR
 
-    def test_python_function_events_in_events(self):
+    def test_python_function_events_in_events(self, device):
         class DummyModule(nn.Module):
             def forward(self, x):
                 return x + 1
@@ -3957,7 +3956,7 @@ class TestProfilerEventsParity(TestCase):
             self.assertEqual(fe_mod.python_parent_id, args["Python parent id"])
             self.assertEqual(fe_mod.python_module_id, args["Python module id"])
 
-    def test_key_averages_excludes_python_functions_by_default(self):
+    def test_key_averages_excludes_python_functions_by_default(self, device):
         """key_averages() must not include Python function events (e.g. threading.py: wait)
         by default; they can be opted in with include_python_functions=True."""
         t = threading.Thread(target=lambda: time.sleep(0.05))
@@ -3981,7 +3980,6 @@ class TestProfilerEventsParity(TestCase):
             "key_averages(include_python_functions=True) should include threading.py events",
         )
 
-    @onlyAccelerator
     def test_profiler_flow_events_parity(self, device):
         """Verify that async CPU->GPU flow fields on events() match Chrome trace JSON."""
         with profile(activities=get_profiler_activities(self.device_type)) as prof:
@@ -4031,7 +4029,7 @@ class TestProfilerEventsParity(TestCase):
                 "Async CPU->GPU flow end IDs differ between events() and Chrome trace",
             )
 
-    def test_profiler_fwdbwd_flow_events_parity(self):
+    def test_profiler_fwdbwd_flow_events_parity(self, device):
         """Verify that fwd->bwd flow fields on events() match Chrome trace JSON."""
         with profile(activities=[ProfilerActivity.CPU]) as prof:
             t1 = torch.ones(1, requires_grad=True)
@@ -4075,7 +4073,6 @@ class TestProfilerEventsParity(TestCase):
                 "fwdbwd flow end IDs differ between events() and Chrome trace",
             )
 
-    @onlyAccelerator
     def test_profiler_timestamp_consistency(self, device):
         """Verify that FunctionEvent timestamps can reconstruct Chrome trace ts values."""
         with profile(activities=get_profiler_activities(self.device_type)) as prof:
@@ -4116,7 +4113,7 @@ class TestProfilerEventsParity(TestCase):
                 msg="Recovered Chrome trace ts doesn't match JSON for aten::mm",
             )
 
-    def test_profiler_op_args_events_parity(self):
+    def test_profiler_op_args_events_parity(self, device):
         """Verify that cpu_op args on events() match Chrome trace JSON args."""
         base_tensor = torch.randn(1024, dtype=torch.float32)
         a = base_tensor.as_strided((16, 16), (17, 1), 0)
@@ -4167,7 +4164,6 @@ class TestProfilerEventsParity(TestCase):
             self.assertEqual(fe_cat.structured_input_strides, args_cat["Input Strides"])
             self.assertEqual(fe_cat.input_dtypes, args_cat["Input type"])
 
-    @onlyAccelerator
     def test_profiler_external_id_parity(self, device):
         """Verify that FunctionEvent.external_id matches External id in Chrome trace JSON."""
         from collections import Counter
@@ -4200,7 +4196,6 @@ class TestProfilerEventsParity(TestCase):
                 "(name, external_id) pairs differ between events() and Chrome trace JSON",
             )
 
-    @onlyAccelerator
     def test_profiler_activity_type_parity(self, device):
         """Verify activity_type on events() matches Chrome trace cat field."""
         with profile(activities=get_profiler_activities(self.device_type)) as prof:
@@ -4238,7 +4233,7 @@ instantiate_device_type_tests(TestProfilerEventsParity, globals(), except_for=("
 
 
 @unittest.skipIf(not kineto_available(), "Kineto is required")
-class TestProfilerEventsParityCUDA(TestCase):
+class TestProfilerEventsParityCudaOnly(TestCase):
     """Structured-metadata parity tests keyed on CUPTI-specific trace
     categories/fields (cuda_runtime, cbid, cid, ...) that have no
     cross-backend equivalent."""
@@ -4246,7 +4241,7 @@ class TestProfilerEventsParityCUDA(TestCase):
     hw_classification = HardwareClassification.CUDA
 
     @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179944")
-    def test_structured_metadata_matches_chrome_trace(self):
+    def test_structured_metadata_matches_chrome_trace(self, device):
         # Compare metadata fields between events() and Chrome trace JSON to make sure they stay in parity
         # 1. Run a dummy workload with profiling enabled and collect the json/events() outputs
         # 2. Parse each event instance in the json and events() to create a key->value mapping
@@ -4396,7 +4391,7 @@ For a model PR to follow, see: https://github.com/pytorch/pytorch/pull/180100
                 lambda msg: f"{msg}\n{key}: structured metadata differs between events() and Chrome trace JSON",
             )
 
-    def test_typed_metadata_matches_chrome_trace(self):
+    def test_typed_metadata_matches_chrome_trace(self, device):
         # Match events to Chrome trace records by identity (via name, cat, external/correlation id),
         # then verify every metadata field has the same value in the matching trace record.
         target_cats = ("cuda_runtime", "gpu_memcpy", "kernel")
@@ -4457,7 +4452,7 @@ For a model PR to follow, see: https://github.com/pytorch/pytorch/pull/180100
 
 
 instantiate_device_type_tests(
-    TestProfilerEventsParityCUDA, globals(), only_for=("cuda",)
+    TestProfilerEventsParityCudaOnly, globals(), only_for=("cuda",)
 )
 
 
@@ -4477,7 +4472,7 @@ class TestPythonChromeTraceExport(TestCase):
             torch.accelerator.synchronize()
         return prof
 
-    def test_python_export_matches_kineto(self):
+    def test_python_export_matches_kineto(self, device):
         prof = self._profile_workload()
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -4563,7 +4558,7 @@ class TestPythonChromeTraceExport(TestCase):
         )
         self.assertEqual(kineto_flow, py_flow, "Flow events differ")
 
-    def test_python_export_gzip(self):
+    def test_python_export_gzip(self, device):
         import gzip as gzip_mod
 
         prof = self._profile_workload()
@@ -4579,7 +4574,7 @@ class TestPythonChromeTraceExport(TestCase):
         x_events = [e for e in trace["traceEvents"] if e.get("ph") == "X"]
         self.assertGreater(len(x_events), 0)
 
-    def test_python_export_plain_json(self):
+    def test_python_export_plain_json(self, device):
         prof = self._profile_workload()
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -4637,13 +4632,13 @@ class TestMetadataJsonFormat(TestCase):
             f"trace_activities_types={dict(raw_types)} events_cats={dict(event_cats)}"
         )
 
-    def test_metadata_json_is_valid_json_fragment(self):
+    def test_metadata_json_is_valid_json_fragment(self, device):
         md = self._get_kernel_metadata()
         parsed = json.loads("{" + md + "}")
         self.assertIsInstance(parsed, dict)
         self.assertGreater(len(parsed), 0)
 
-    def test_kernel_metadata_has_expected_fields(self):
+    def test_kernel_metadata_has_expected_fields(self, device):
         md = self._get_kernel_metadata()
         parsed = json.loads("{" + md + "}")
         common_keys = ["device", "stream", "correlation", "grid", "block"]
@@ -4664,7 +4659,7 @@ class TestMetadataJsonFormat(TestCase):
                 lambda msg: f"{msg}\nMissing field '{key}' in kernel metadataJson",
             )
 
-    def test_kernel_metadata_field_types(self):
+    def test_kernel_metadata_field_types(self, device):
         md = self._get_kernel_metadata()
         parsed = json.loads("{" + md + "}")
         common_int_keys = ["device", "stream", "correlation"]
@@ -4688,7 +4683,7 @@ class TestMetadataJsonFormat(TestCase):
             self.assertIsInstance(parsed[key], list)
             self.assertEqual(len(parsed[key]), 3)
 
-    def test_metadata_json_key_value_format(self):
+    def test_metadata_json_key_value_format(self, device):
         md = self._get_kernel_metadata()
         # Verify the ": " (colon-space) separator convention that string
         # splicing in the export path relies on for field extraction.
