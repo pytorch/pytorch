@@ -117,6 +117,7 @@ from torch.testing._internal.inductor_utils import (
     get_func_call,
     get_kernel_launch,
     HAS_CUDA_AND_TRITON,
+    IS_BIG_GPU,
 )
 
 
@@ -254,7 +255,6 @@ class TestMaxAutotune(TestCase):
                     "max_autotune should include all pointwise configs from max_autotune_pointwise",
                 )
 
-    @requires_capabilities(Capability.big_gpu.big_gpu)
     @unittest.skipIf(
         not has_triton_tma_device(), "Need device-side TMA support in Triton"
     )
@@ -337,7 +337,6 @@ class TestMaxAutotune(TestCase):
 
         torch.testing.assert_close(c_actual, c_expected, atol=1e-2, rtol=1e-2)
 
-    @requires_capabilities(Capability.big_gpu.big_gpu)
     def test_use_triton_tma_template_rejects_descriptor_shapes_exceeding_int32(
         self, device
     ):
@@ -415,7 +414,7 @@ class TestMaxAutotune(TestCase):
                 guard_or_false.assert_called_once_with(condition)
                 statically_known_true.assert_not_called()
 
-    @requires_capabilities(Capability.lib.triton, Capability.big_gpu.big_gpu)
+    @requires_capabilities(Capability.lib.triton)
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @parametrize("a_transposed", (False, True))
     @parametrize("b_transposed", (False, True))
@@ -466,7 +465,7 @@ class TestMaxAutotune(TestCase):
 
         torch.testing.assert_close(c_actual, c_expected, atol=1e-2, rtol=1e-2)
 
-    @requires_capabilities(Capability.lib.triton, Capability.big_gpu.big_gpu)
+    @requires_capabilities(Capability.lib.triton)
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @parametrize("a_transposed", (False, True))
     @parametrize("b_transposed", (False, True))
@@ -521,7 +520,6 @@ class TestMaxAutotune(TestCase):
 
         torch.testing.assert_close(c_actual, c_expected, atol=1e-2, rtol=1e-2)
 
-    @requires_capabilities(Capability.big_gpu.big_gpu)
     @unittest.skipIf(
         not has_triton_tma_device(), "Need device-side TMA support in Triton"
     )
@@ -666,7 +664,6 @@ class TestMaxAutotune(TestCase):
         for size in ws_sizes:
             self.assertEqual(size, expected_bytes)
 
-    @requires_capabilities(Capability.big_gpu.big_gpu)
     @unittest.skipIf(
         not has_triton_tma_device(), "Need device-side TMA support in Triton"
     )
@@ -735,7 +732,6 @@ class TestMaxAutotune(TestCase):
             check_str = "triton.language.make_tensor_descriptor"
         FileCheck().check("triton_tem_fused_mm").check(check_str).run(code[0])
 
-    @requires_capabilities(Capability.big_gpu.big_gpu)
     @unittest.skipIf(
         not has_triton_tma_device(), "Need device-side TMA support in Triton"
     )
@@ -769,7 +765,6 @@ class TestMaxAutotune(TestCase):
         # given the config flags above, we should have no choices left.
         self.assertIn("NoValidChoicesError", str(context.exception))
 
-    @requires_capabilities(Capability.big_gpu.big_gpu)
     @unittest.skipIf(
         not has_triton_tma_device(), "Need device-side TMA support in Triton"
     )
@@ -845,7 +840,6 @@ class TestMaxAutotune(TestCase):
 
         torch.testing.assert_close(c_actual, c_expected, atol=1e-2, rtol=1e-2)
 
-    @requires_capabilities(Capability.big_gpu.big_gpu)
     @unittest.skipIf(
         not has_triton_tma_device(), "Need device-side TMA support in Triton"
     )
@@ -958,7 +952,6 @@ class TestMaxAutotune(TestCase):
 
             self.assertEqual((100,), extern_bias_shape)
 
-    @requires_capabilities(Capability.big_gpu.big_gpu)
     @unittest.skipIf(
         not has_triton_tma_device(), "Need device-side TMA support in Triton"
     )
@@ -1045,7 +1038,6 @@ class TestMaxAutotune(TestCase):
 
         torch.testing.assert_close(c_actual, c_expected, atol=1e-2, rtol=1e-2)
 
-    @requires_capabilities(Capability.big_gpu.big_gpu)
     @unittest.skipIf(
         not has_triton_tma_device(), "Need device-side TMA support in Triton"
     )
@@ -1589,7 +1581,7 @@ class TestMaxAutotune(TestCase):
         act = f(x, y)
         torch.testing.assert_close(act, ref, atol=2e-2, rtol=1e-2)
 
-    @requires_capabilities(Capability.lib.triton, Capability.big_gpu.big_gpu)
+    @requires_capabilities(Capability.lib.triton)
     @unittest.skipIf(
         config.triton.native_matmul,
         "native matmul and Triton template both have accuracy fail (2.2%)",
@@ -1609,7 +1601,7 @@ class TestMaxAutotune(TestCase):
         act = f(x1, y1, x2, y2)
         torch.testing.assert_close(act, ref, atol=1e-1, rtol=1e-2)
 
-    @requires_capabilities(Capability.lib.triton, Capability.big_gpu.big_gpu)
+    @requires_capabilities(Capability.lib.triton)
     @config.patch(
         max_autotune=True,
         max_autotune_gemm_backends="",
@@ -1624,7 +1616,7 @@ class TestMaxAutotune(TestCase):
             torch.compile(lambda a, b: a.matmul(b))(a, b)
         self.assertIn("NoValidChoicesError", str(context.exception))
 
-    @requires_capabilities(Capability.lib.triton, Capability.big_gpu.big_gpu)
+    @requires_capabilities(Capability.lib.triton)
     @unittest.skipIf(
         config.triton.native_matmul, "Only test when template is being called"
     )
@@ -1650,7 +1642,7 @@ class TestMaxAutotune(TestCase):
                 torch.compile(lambda a, b: a.matmul(b))(a, b)
             self.assertIn("NoValidChoicesError", str(context.exception))
 
-    @requires_capabilities(Capability.lib.triton, Capability.big_gpu.big_gpu)
+    @requires_capabilities(Capability.lib.triton)
     @config.patch(force_shape_pad=True, max_autotune=True)
     def test_linear_and_cel(self, device):
         """
@@ -1732,7 +1724,7 @@ class TestMaxAutotune(TestCase):
                     rtol=1e-4,
                 )
 
-    @requires_capabilities(Capability.lib.triton, Capability.big_gpu.big_gpu)
+    @requires_capabilities(Capability.lib.triton)
     @unittest.skipIf(
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
     )
@@ -1799,7 +1791,7 @@ class TestMaxAutotune(TestCase):
                     code[1]
                 )
 
-    @requires_capabilities(Capability.lib.triton, Capability.big_gpu.big_gpu)
+    @requires_capabilities(Capability.lib.triton)
     @unittest.skipIf(
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
     )
@@ -2050,7 +2042,7 @@ class TestMaxAutotune(TestCase):
             # Check that contiguous transform was used
             FileCheck().check("contiguous_mm").run(code[0])
 
-    @requires_capabilities(Capability.big_gpu.big_gpu)
+    @unittest.skipIf(not IS_BIG_GPU, "Requires big GPU with triton")
     @config.patch(
         max_autotune=True,
         max_autotune_gemm_backends="TRITON",
@@ -2164,7 +2156,6 @@ class TestMaxAutotune(TestCase):
             FileCheck().check("triton_tem_fused_bmm").run(code[0])
             self.assertEqual(out, expected, atol=1e-3, rtol=1e-3)
 
-    @requires_capabilities(Capability.big_gpu.big_gpu)
     def test_triton_template_generated_code_cache_key(self, device):
         generate_and_load_args = len(
             inspect.signature(
@@ -2182,7 +2173,7 @@ class TestMaxAutotune(TestCase):
         self.assertEqual(generate_and_load_args - 1, make_key_args)
         self.assertEqual(generate_and_load_args, 21)
 
-    @requires_capabilities(Capability.lib.triton, Capability.big_gpu.big_gpu)
+    @requires_capabilities(Capability.lib.triton)
     @fresh_cache()
     @config.patch(
         {
@@ -2211,7 +2202,7 @@ class TestMaxAutotune(TestCase):
             ):
                 torch.compile(func_test1, dynamic=False)(a, b, a, b)
 
-    @requires_capabilities(Capability.lib.triton, Capability.big_gpu.big_gpu)
+    @requires_capabilities(Capability.lib.triton)
     @config.patch(
         {
             "max_autotune": True,
@@ -2403,7 +2394,7 @@ class TestMaxAutotune(TestCase):
             self.assertEqual(hits(), 0)
             self.assertEqual(misses(), 7)
 
-    @requires_capabilities(Capability.lib.triton, Capability.big_gpu.big_gpu)
+    @requires_capabilities(Capability.lib.triton)
     @config.patch(
         {
             "max_autotune": True,
@@ -2440,7 +2431,7 @@ class TestMaxAutotune(TestCase):
             self.assertEqual(hits(), 4)
             self.assertEqual(misses(), 4)
 
-    @requires_capabilities(Capability.lib.triton, Capability.big_gpu.big_gpu)
+    @requires_capabilities(Capability.lib.triton)
     @config.patch(
         {
             "max_autotune": True,
@@ -2559,7 +2550,7 @@ class TestMaxAutotune(TestCase):
             self.assertEqual(aliased, torch.bmm(x, x), atol=0.1, rtol=0.05)
             self.assertEqual(distinct, torch.bmm(a, b), atol=0.1, rtol=0.05)
 
-    @requires_capabilities(Capability.lib.triton, Capability.big_gpu.big_gpu)
+    @requires_capabilities(Capability.lib.triton)
     @fresh_cache()
     @unittest.skipIf(
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
@@ -2609,7 +2600,7 @@ class TestMaxAutotune(TestCase):
                     self.assertTrue(decompose_count > 0)
                     self.assertTrue(decompose_count <= num_decompose_k_splits)
 
-    @requires_capabilities(Capability.lib.triton, Capability.big_gpu.big_gpu)
+    @requires_capabilities(Capability.lib.triton)
     @unittest.skipIf(
         config.triton.native_matmul,
         "native matmul takes different tuning configs",
@@ -2675,7 +2666,7 @@ class TestMaxAutotune(TestCase):
             out, code = run_and_get_code(compiled_f, a, b)
             torch.testing.assert_close(out, mm(a, b), atol=1e-2, rtol=1e-2)
 
-    @requires_capabilities(Capability.lib.triton, Capability.big_gpu.big_gpu)
+    @requires_capabilities(Capability.lib.triton)
     @parametrize("op", ("mm", "addmm", "bmm", "baddbmm", "mm_plus_mm"))
     @parametrize("max_autotune", (False, True))
     @config.patch(
@@ -2850,7 +2841,7 @@ class TestMaxAutotune(TestCase):
             _, code_out = run_and_get_code(c_f, *args)
             FileCheck().check(output_code_padding_check).run(code_out[0])
 
-    @requires_capabilities(Capability.lib.triton, Capability.big_gpu.big_gpu)
+    @requires_capabilities(Capability.lib.triton)
     @parametrize("k", (15, 16))
     @parametrize("dynamic", (False, True))
     def test_even_k(self, device, k: int, dynamic: bool):
@@ -2922,7 +2913,7 @@ class TestMaxAutotune(TestCase):
             # should force fallback to extern_kernels.bmm
             FileCheck().check_not("triton_tem").run(code[0])
 
-    @requires_capabilities(Capability.lib.triton, Capability.big_gpu.big_gpu)
+    @requires_capabilities(Capability.lib.triton)
     @parametrize("always_freeze", [True, False])
     def test_mm_layout_freezing_behavior(self, device, always_freeze):
         """Test that mm layout freezing behavior depends on always_freeze_layout.
@@ -3125,7 +3116,7 @@ class TestMaxAutotune(TestCase):
             _, code = run_and_get_code(compiled_fn, a, b, c, idx0, idx1, value)
             FileCheck().check("triton_tem_fused").run(code[0])
 
-    @requires_capabilities(Capability.lib.triton, Capability.big_gpu.big_gpu)
+    @requires_capabilities(Capability.lib.triton)
     @skipIfTorchInductor(msg="https://github.com/pytorch/pytorch/issues/182093")
     @parametrize("dtype", (torch.float16, torch.bfloat16, torch.float32))
     @parametrize("use_addmm", (False, True))
@@ -3225,7 +3216,7 @@ class TestMaxAutotune(TestCase):
         else:
             self.assertEqual(out, out_unfused)
 
-    @requires_capabilities(Capability.lib.triton, Capability.big_gpu.big_gpu)
+    @requires_capabilities(Capability.lib.triton)
     @parametrize("dtype", (torch.float16, torch.bfloat16, torch.float32))
     @parametrize("use_addmm", (False, True))
     def test_triton_gemm_no_epilogue_no_truncation_casts(
@@ -3741,6 +3732,7 @@ class TestMaxAutotuneCuda(TestCase):
             torch.testing.assert_close(Y_compiled, Y, atol=1e-2, rtol=1e-2)
 
 
+@unittest.skipIf(not IS_BIG_GPU, "Requires big GPU for shared memory pruning")
 class TestTemplateConfigPruning(TestCase):
     """Test class for pruning logic in GEMM autotuning."""
 
@@ -3911,7 +3903,7 @@ class TestTemplateConfigPruning(TestCase):
             shared_memory_checker_opts,
         )
 
-    @requires_capabilities(Capability.lib.triton, Capability.big_gpu.big_gpu)
+    @requires_capabilities(Capability.lib.triton)
     @skipIfXpu(msg="Missing device_properties shared_memory_per_block on xpu.")
     @parametrize("dtype", (torch.float32, torch.bfloat16))
     @parametrize("mat1_transposed", (False, True))
@@ -4121,7 +4113,7 @@ class TestMaxAutotunePrecompile(TestCase):
         fn_c = torch.compile(mode="max-autotune-no-cudagraphs")(fn)
         self.assertEqual(counters["inductor"]["select_algorithm_precompile"], 0)
 
-    @requires_capabilities(Capability.lib.triton, Capability.big_gpu.big_gpu)
+    @requires_capabilities(Capability.lib.triton)
     @config.patch(autotune_local_cache=False, autotune_remote_cache=False)
     @unittest.skipIf(config.triton.native_matmul, "native matmul has counter 0")
     def test_precompilations(self, device):
@@ -4323,7 +4315,7 @@ class TestMaxAutotuneSubproc(TestCase):
             ),
         )
 
-    @requires_capabilities(Capability.lib.triton, Capability.big_gpu.big_gpu)
+    @requires_capabilities(Capability.lib.triton)
     def test_triton_template_with_epilogues_and_dynamic_shape(self, device):
         def fn(
             x: torch.Tensor, w: torch.Tensor, bias: torch.Tensor, mul: torch.Tensor
@@ -4378,7 +4370,7 @@ class TestMaxAutotuneRemoteCache(TestCase):
         super().tearDown()
         PatchCaches.tearDown()
 
-    @requires_capabilities(Capability.lib.triton, Capability.big_gpu.big_gpu)
+    @requires_capabilities(Capability.lib.triton)
     @parametrize("dynamic", (False, True))
     @config.patch(
         {"compile_threads": 1, "prologue_fusion": False}
@@ -4517,7 +4509,6 @@ class TestTuningProcessPool(TestCase):
             expected_dir,
         )
 
-    @requires_capabilities(Capability.big_gpu.big_gpu)
     @config.patch({"autotune_multi_device": False})
     def test_tuning_pool_cache_env_resets(self, device):
         with mock.patch.dict(os.environ, {}, clear=False):
@@ -4543,7 +4534,6 @@ class TestTuningProcessPool(TestCase):
             finally:
                 tuning_pool.shutdown()
 
-    @requires_capabilities(Capability.big_gpu.big_gpu)
     @config.patch({"autotune_multi_device": False})
     def test_tuning_pool_cache_env_clears_codecache(self, device):
         with (
@@ -4624,7 +4614,6 @@ class TestTuningProcessPool(TestCase):
             finally:
                 autotune_pool._shutdown()
 
-    @requires_capabilities(Capability.big_gpu.big_gpu)
     @config.patch({"autotune_multi_device": False})
     def test_tuning_pool_crash(self, device):
         tuning_pool = TuningProcessPool()
@@ -4648,7 +4637,6 @@ class TestTuningProcessPool(TestCase):
 
         tuning_pool.shutdown()
 
-    @requires_capabilities(Capability.big_gpu.big_gpu)
     @config.patch({"autotune_multi_device": False})
     def test_tuning_pool_timeout(self, device):
         tuning_pool = TuningProcessPool()
@@ -4673,7 +4661,6 @@ class TestTuningProcessPool(TestCase):
 
         tuning_pool.shutdown()
 
-    @requires_capabilities(Capability.big_gpu.big_gpu)
     @config.patch({"autotune_multi_device": True})
     def test_tuning_pool_multiple_devices(self, device):
         # Adapt the test to the available devices (and whether the backend-specific
@@ -4972,7 +4959,7 @@ class TestPrologueFusion(TestCase):
         # should not be done in low precision, two kernels
         self.check_code(code[0], num_kernels=2, num_allocs=2, num_deallocs=3)
 
-    @requires_capabilities(Capability.lib.triton, Capability.big_gpu.big_gpu)
+    @requires_capabilities(Capability.lib.triton)
     @unittest.skipIf(
         config.triton.native_matmul,
         "generated code is different in native matmul",
@@ -4990,7 +4977,7 @@ class TestPrologueFusion(TestCase):
         self.assertEqual(out, foo(x, y), atol=0.05, rtol=0.05)
         self.check_code(code[0], num_kernels=2, num_allocs=2, num_deallocs=3)
 
-    @requires_capabilities(Capability.lib.triton, Capability.big_gpu.big_gpu)
+    @requires_capabilities(Capability.lib.triton)
     @parametrize("sizes", ((64, 128, 256), (64, 64, 64), (64, 120, 64)))
     @parametrize("use_async_compile", (True, False))
     @unittest.skipIf(
@@ -5118,7 +5105,7 @@ class TestPrologueFusion(TestCase):
         self.assertEqual(out, out_eager, atol=0.05, rtol=0.05)
         self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=3)
 
-    @requires_capabilities(Capability.lib.triton, Capability.big_gpu.big_gpu)
+    @requires_capabilities(Capability.lib.triton)
     def test_storage_offset_prologue(self, device):
         def foo(a):
             q = a[:64, :]
@@ -5130,7 +5117,7 @@ class TestPrologueFusion(TestCase):
         self.assertEqual(out, foo(inp), atol=0.05, rtol=0.05)
         self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=1)
 
-    @requires_capabilities(Capability.lib.triton, Capability.big_gpu.big_gpu)
+    @requires_capabilities(Capability.lib.triton)
     @config.patch(realize_reads_threshold=1, realize_opcount_threshold=1)
     @parametrize("sizes", ((64, 128, 256), (128, 128, 128), (63, 120, 250)))
     @parametrize("use_async_compile", (True, False))
@@ -5182,7 +5169,7 @@ class TestPrologueFusion(TestCase):
         self.assertEqual(out, foo(x, y), atol=0.05, rtol=0.05)
         self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
 
-    @requires_capabilities(Capability.lib.triton, Capability.big_gpu.big_gpu)
+    @requires_capabilities(Capability.lib.triton)
     @unittest.skipIf(
         config.triton.native_matmul,
         "generated code is different in native matmul",
@@ -5214,7 +5201,7 @@ class TestPrologueFusion(TestCase):
                 f = FileCheck().check("k_idx").check("a =").check_not("tl.where")
             f.check("tl.dot").run(code[0])
 
-    @requires_capabilities(Capability.lib.triton, Capability.big_gpu.big_gpu)
+    @requires_capabilities(Capability.lib.triton)
     @config.patch(realize_reads_threshold=1, realize_opcount_threshold=1)
     @parametrize("benchmark_fusion", (True, False))
     @parametrize("use_async_compile", (True, False))
@@ -5244,7 +5231,7 @@ class TestPrologueFusion(TestCase):
                     code[0], num_kernels=2, num_allocs=None, num_deallocs=None
                 )
 
-    @requires_capabilities(Capability.lib.triton, Capability.big_gpu.big_gpu)
+    @requires_capabilities(Capability.lib.triton)
     @config.patch(realize_reads_threshold=1, realize_opcount_threshold=1)
     @config.patch(allow_buffer_reuse=False)
     @unittest.skipIf(
@@ -5267,7 +5254,7 @@ class TestPrologueFusion(TestCase):
         # not sure why disabling buffer reuse doesn't stop
         self.check_code(code[0], num_kernels=2, num_allocs=2, num_deallocs=4)
 
-    @requires_capabilities(Capability.lib.triton, Capability.big_gpu.big_gpu)
+    @requires_capabilities(Capability.lib.triton)
     @skipIfXpu
     @config.patch(
         {
@@ -5350,7 +5337,7 @@ class TestPrologueFusion(TestCase):
             "to_copy_add_div_mm_mul_relu_sub_tanh_1"
         ).run(code[0])
 
-    @requires_capabilities(Capability.lib.triton, Capability.big_gpu.big_gpu)
+    @requires_capabilities(Capability.lib.triton)
     @config.patch(shape_padding=True)
     @config.patch(force_shape_pad=True)
     @parametrize("sizes", ((250, 245, 128), (250, 256, 128), (256, 128, 62)))
@@ -5543,7 +5530,6 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
         finally:
             mm_heuristic.mm_configs = original_mm_configs
 
-    @requires_capabilities(Capability.big_gpu.big_gpu)
     @unittest.skipIf(not has_triton_tma_device(), "Need TMA support in Triton")
     @skipIfXpu(msg="Bad tma config can be covered by XPU TMA")
     @unittest.skipIf(
@@ -5649,7 +5635,6 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
                 tma_heuristic.mm_configs = original_tma_mm_configs
                 mm_heuristic.mm_configs = original_mm_mm_configs
 
-    @requires_capabilities(Capability.big_gpu.big_gpu)
     @skipIfTorchInductor(msg="https://github.com/pytorch/pytorch/issues/179695")
     @requires_capabilities(Capability.lib.triton)
     @unittest.skipIf(
@@ -5724,7 +5709,6 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
                         "triton_poi_fused__to_copy"
                     ).run(code[0])
 
-    @requires_capabilities(Capability.big_gpu.big_gpu)
     @requires_capabilities(Capability.lib.triton)
     @unittest.skipIf(
         config.cpp_wrapper, "Skip static analysis codegen checks on cpp_wrapper"
@@ -5781,7 +5765,6 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
                         "triton_poi_fused_add_mul"
                     ).run(code[0])
 
-    @requires_capabilities(Capability.big_gpu.big_gpu)
     @skipIfTorchInductor(msg="https://github.com/pytorch/pytorch/issues/179694")
     @skipIfTorchInductor(msg="https://github.com/pytorch/pytorch/issues/176115")
     @requires_capabilities(Capability.lib.triton)
@@ -5848,7 +5831,6 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
                         "triton_poi_fused__to_copy"
                     ).run(code[0])
 
-    @requires_capabilities(Capability.big_gpu.big_gpu)
     @skipIfTorchInductor(msg="https://github.com/pytorch/pytorch/issues/176114")
     @skipIfTorchInductor(msg="https://github.com/pytorch/pytorch/issues/176113")
     @requires_capabilities(Capability.lib.triton)
@@ -5915,7 +5897,6 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
                         "triton_poi_fused__to_copy"
                     ).run(code[0])
 
-    @requires_capabilities(Capability.big_gpu.big_gpu)
     @requires_capabilities(Capability.lib.triton)
     @parametrize("use_async_compile", (True, False))
     def test_epilogue_prologue_fusion_cache_preserved(
@@ -6142,7 +6123,7 @@ class TestMaxAutotuneAsyncPipelined(TestMaxAutotune, TestEpilogueFusionStaticAna
         cache_entries_after_second = len(AsyncAutotuner.choice_hash_to_future)
         self.assertEqual(cache_entries_after_second, 0)
 
-    @requires_capabilities(Capability.lib.triton, Capability.big_gpu.big_gpu)
+    @requires_capabilities(Capability.lib.triton)
     @config.patch(max_autotune_gemm=True)
     def test_triton_error_precompilation_and_autotuning(self, device):
         """
