@@ -1203,6 +1203,16 @@ class SchedulerDonatedBuffer(SchedulerBuffer):
 
 
 class BaseSchedulerNode:
+    """
+    One unit of work the scheduler orders, fuses and then hands to a backend.
+
+    A node wraps either a single ir.Operation (SchedulerNode) or a group of them
+    (FusedSchedulerNode and friends), and owns the dependency information the
+    fusion search runs on: `read_writes`, `ancestors`, and the buffers it writes.
+    Anything derived from `read_writes` is cached and must be invalidated through
+    `clear_read_writes_dependent_caches` when the dependencies are recomputed.
+    """
+
     ancestors: OrderedSet[str]
     group: tuple[torch.device, tuple[tuple[sympy.Expr, ...], ...]]
     last_usage: OrderedSet[str]
@@ -1343,9 +1353,30 @@ class BaseSchedulerNode:
         self.clear_read_writes_dependent_caches()
         self.prune_deps()
 
+    @cache_on_self
+    def read_write_deps(self) -> OrderedSet[Dep]:
+        return self.read_writes.reads | self.read_writes.writes
+
+    @cache_on_self
+    def read_size_by_name(self) -> dict[str, int]:
+        """
+        Bytes this node reads, summed per buffer name. A node can read the same
+        buffer through several deps (e.g. four split reads of one input), and
+        those are summed. Deps with no usable hint count as FALLBACK_DEP_SIZE so
+        that unbacked symbols do not make everything look free.
+        """
+        FALLBACK_DEP_SIZE = 10
+        sizes: dict[str, int] = {}
+        for dep in self.read_writes.reads:
+            size = V.graph.get_dep_size_hint(dep)
+            sizes[dep.name] = sizes.get(dep.name, 0) + (size or FALLBACK_DEP_SIZE)
+        return sizes
+
     def clear_read_writes_dependent_caches(self) -> None:
         self.get_coalesce_analysis.clear_cache(self)
         typing.cast(Any, self.get_tiling).clear_cache(self)
+        self.read_write_deps.clear_cache(self)
+        self.read_size_by_name.clear_cache(self)
 
     @cache_on_self
     def get_coalesce_analysis(self) -> CoalesceVarAnalysis | None:
@@ -4257,6 +4288,8 @@ class Scheduler:
 
     def _init(self, nodes: list[ir.Operation]) -> None:
         self._tiling_memory_cache: dict[tuple[Any, ...], Any] = {}
+        # buffer name -> reuse key, see can_fusion_increase_peak_memory
+        self._fusion_reuse_keys: dict[str, Any] = {}
         super().__init__()
         V.graph.scheduler = self
         self.backends: dict[torch.device, BaseScheduling] = {}
@@ -7022,6 +7055,31 @@ class Scheduler:
             WhyNoFuse(node1, node2)("will create cycle")
         return cycle
 
+    def _single_user_read_reuse_keys(self, node: BaseSchedulerNode) -> OrderedSet[Any]:
+        """
+        Reuse keys of the buffers `node` reads that have no other user, i.e. the
+        buffers that could be reused if `node` is not fused. Whether a buffer
+        qualifies, and its key, depend only on the buffer, so they are memoized
+        by name: the fusion search walks the same buffers once per candidate pair.
+        """
+        from .codegen.wrapper import buffer_reuse_key
+
+        cache = self._fusion_reuse_keys
+        keys: OrderedSet[Any] = OrderedSet()
+        for rd in node.read_writes.reads:
+            if rd.name in cache:
+                key = cache[rd.name]
+            else:
+                buf = self.name_to_buf.get(rd.name)
+                if buf and len(buf.users) == 1 and buf.node.has_tensor_output():
+                    key = buffer_reuse_key(buf.node)
+                else:
+                    key = None
+                cache[rd.name] = key
+            if key is not None:
+                keys.add(key)
+        return keys
+
     def can_fusion_increase_peak_memory(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:
@@ -7043,24 +7101,9 @@ class Scheduler:
         We return true only if the saving for fusion can not trade off the extra memory allocation.
         """
 
-        from .codegen.wrapper import buffer_reuse_key
-
-        def _find_single_user_inputs(
-            node: BaseSchedulerNode,
-        ) -> list[ir.Buffer]:
-            output = []
-            for rd in node.read_writes.reads:
-                buf = self.name_to_buf.get(rd.name)
-                if buf and len(buf.users) == 1 and buf.node.has_tensor_output():
-                    output.append(buf.node)
-            return output
-
         # Check inputs that can be potentially reused
-        lhs_dep_nodes = _find_single_user_inputs(node1)
-        rhs_dep_nodes = _find_single_user_inputs(node2)
-
-        lhs_reuse_keys = OrderedSet(buffer_reuse_key(buf) for buf in lhs_dep_nodes)
-        rhs_reuse_keys = OrderedSet(buffer_reuse_key(buf) for buf in rhs_dep_nodes)
+        lhs_reuse_keys = self._single_user_read_reuse_keys(node1)
+        rhs_reuse_keys = self._single_user_read_reuse_keys(node2)
 
         common_reuse_keys = lhs_reuse_keys.intersection(rhs_reuse_keys)
 
@@ -8934,8 +8977,8 @@ class Scheduler:
             or node1.is_template()
             or node2.is_template()
         ):
-            node1_deps = node1.read_writes.reads | node1.read_writes.writes
-            node2_deps = node2.read_writes.reads | node2.read_writes.writes
+            node1_deps = node1.read_write_deps()
+            node2_deps = node2.read_write_deps()
 
             def _match(dep1: Dep, dep2: Dep):
                 if dep1 == dep2:
@@ -8956,12 +8999,19 @@ class Scheduler:
 
             return _construct_return_value(score, 0, False)
 
-        node1_deps = node1.read_writes.reads | node1.read_writes.writes
-        node2_deps = node2.read_writes.reads | node2.read_writes.writes
-        if len(node1_deps) > len(node2_deps):
-            node1_deps, node2_deps = node2_deps, node1_deps
+        # Walk the deps of whichever node has fewer of them and test membership
+        # against the other's raw read/write sets. Materializing the union of a
+        # node's reads and writes would be O(deps), and fusion keeps building
+        # bigger nodes, so doing it here makes the search quadratic.
+        rw1, rw2 = node1.read_writes, node2.read_writes
+        if len(rw1.reads) + len(rw1.writes) > len(rw2.reads) + len(rw2.writes):
+            rw1, rw2 = rw2, rw1
 
-        common_memory_deps = [dep for dep in node1_deps if dep in node2_deps]
+        common_memory_deps: OrderedSet[Dep] = OrderedSet(
+            dep
+            for dep in itertools.chain(rw1.reads, rw1.writes)
+            if dep in rw2.reads or dep in rw2.writes
+        )
         score = sum(self.dep_size_hint(dep, count_bytes) for dep in common_memory_deps)
         if score:
             return _construct_return_value(score, 0, False)
@@ -9107,47 +9157,20 @@ class Scheduler:
         - This ensures overlap ratio is calculated correctly when nodes read
           multiple slices from the same underlying buffer
         """
-        # Fallback size when dep_size_hint returns 0 (e.g., unbacked symbols)
-        FALLBACK_DEP_SIZE = 10
-
-        def get_dep_size(dep: Dep) -> int:
-            size = self.dep_size_hint(dep)
-            return size if size > 0 else FALLBACK_DEP_SIZE
-
-        node1_read_names = OrderedSet(dep.name for dep in node1.read_writes.reads)
-        node2_read_names = OrderedSet(dep.name for dep in node2.read_writes.reads)
+        node1_sizes = node1.read_size_by_name()
+        node2_sizes = node2.read_size_by_name()
 
         # Early exit if no common buffer names
-        common_names = node1_read_names & node2_read_names
-
+        common_names = [name for name in node1_sizes if name in node2_sizes]
         if not common_names:
             return 0
 
-        # Calculate total read sizes for each node (sum of ALL deps)
-        node1_total_read_size = sum(
-            get_dep_size(dep) for dep in node1.read_writes.reads
-        )
-        node2_total_read_size = sum(
-            get_dep_size(dep) for dep in node2.read_writes.reads
-        )
-
-        max_total_read_size = max(node1_total_read_size, node2_total_read_size)
+        max_total_read_size = max(sum(node1_sizes.values()), sum(node2_sizes.values()))
         if max_total_read_size == 0:
             return 0
 
-        # Calculate total reads from common buffers for each node
-        # Sum ALL deps for each common buffer name
-        # (handles multiple reads from same buffer)
-        node1_common_read_size = sum(
-            get_dep_size(dep)
-            for dep in node1.read_writes.reads
-            if dep.name in common_names
-        )
-        node2_common_read_size = sum(
-            get_dep_size(dep)
-            for dep in node2.read_writes.reads
-            if dep.name in common_names
-        )
+        node1_common_read_size = sum(node1_sizes[name] for name in common_names)
+        node2_common_read_size = sum(node2_sizes[name] for name in common_names)
 
         # Use max of the two as the common buffer size estimate
         # This represents how much data is being read from shared buffers
