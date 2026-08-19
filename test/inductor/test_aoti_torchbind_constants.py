@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 
 import torch
+from torch._dynamo.device_interface import get_interface_for_device
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import HardwareClassification, run_tests
@@ -9,20 +10,15 @@ from torch.utils._triton import has_triton_package
 
 
 def _ensure_triton(test_case, device):
-    torch_device = torch.device(device)
     if not has_triton_package():
         test_case.skipTest("requires triton")
-    from torch._dynamo.device_interface import get_interface_for_device
-    from torch._inductor.exc import GPUTooOldForTriton
-
-    try:
-        get_interface_for_device(torch_device.type).raise_if_triton_unavailable(torch_device)
-    except (ImportError, RuntimeError, GPUTooOldForTriton) as e:
-        test_case.skipTest(str(e) or f"requires triton on {torch_device.type}")
+    torch_device = torch.device(device)
+    get_interface_for_device(torch_device.type).raise_if_triton_unavailable(
+        torch_device
+    )
 
 
 class _TorchbindAOTIHelpers:
-
     @classmethod
     def setUpClass(cls):
         # Loads the test torchbind library AND registers fake classes for
