@@ -15537,8 +15537,6 @@ def _set_device_index(target_device):
 def _sleep_if_supported(cycles):
     # Spin the device for a while if the current accelerator exposes _sleep.
     acc = torch.accelerator.current_accelerator()
-    if acc is None:
-        return
     device_module = torch.get_device_module(acc)
     if hasattr(device_module, "_sleep"):
         device_module._sleep(cycles)
