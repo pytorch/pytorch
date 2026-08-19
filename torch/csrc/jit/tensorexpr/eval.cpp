@@ -49,7 +49,9 @@ static inline std::enable_if_t<std::is_integral_v<T>, T> div_value(
 }
 
 template <typename T>
-static inline std::enable_if_t<std::is_floating_point_v<T>, T> div_value(T lhs, T rhs) {
+static inline std::enable_if_t<std::is_floating_point_v<T>, T> div_value(
+    T lhs,
+    T rhs) {
   return lhs / rhs;
 }
 
@@ -1138,9 +1140,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       case kSqrt:
         return std::sqrt(v);
       case kRsqrt: {
-        auto rsqrt = [](TInput v) {
-          return 1.0f / std::sqrt(v);
-        };
+        auto rsqrt = [](TInput v) { return 1.0f / std::sqrt(v); };
         return rsqrt(v);
       }
       case kCeil:

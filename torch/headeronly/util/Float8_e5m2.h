@@ -193,9 +193,8 @@ operator*(const Float8_e5m2& a, const Float8_e5m2& b) {
   return static_cast<float>(a) * static_cast<float>(b);
 }
 
-inline C10_HOST_DEVICE Float8_e5m2 operator/(
-    const Float8_e5m2& a,
-    const Float8_e5m2& b) {
+inline C10_HOST_DEVICE Float8_e5m2
+operator/(const Float8_e5m2& a, const Float8_e5m2& b) {
   return static_cast<float>(a) / static_cast<float>(b);
 }
 
