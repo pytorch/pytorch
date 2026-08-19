@@ -1409,8 +1409,11 @@ ConvBackend select_conv_backend(
   // Expand 1d -> 2d.
   // This is only done for backends that don't natively support 1d spatial input.
   if (k == 3 && !input.is_mkldnn() && !input.is_xpu()) {
-    // avoid accidentally going through NHWC for permuted 3d input.
-    input = input.contiguous();
+    // MPS handles NLC-backed inputs explicitly. Other backends must not
+    // accidentally treat a permuted 3D input as NHWC.
+    if (!input.is_mps()) {
+      input = input.contiguous();
+    }
     params.view1d_as_2d();
     input = view4d(input);
     weight = view4d(weight);
@@ -1577,8 +1580,11 @@ at::Tensor _convolution(
   // Expand 1d -> 2d.
   // This is only done for backends that don't natively support 1d spatial input.
   if (k == 3 && !input.is_mkldnn() && !input.is_xpu()) {
-    // avoid accidentally going through NHWC for permuted 3d input.
-    input = input.contiguous();
+    // MPS handles NLC-backed inputs explicitly. Other backends must not
+    // accidentally treat a permuted 3D input as NHWC.
+    if (!input.is_mps()) {
+      input = input.contiguous();
+    }
     params.view1d_as_2d();
     input = view4d(input);
     weight = view4d(weight);
