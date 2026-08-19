@@ -217,6 +217,10 @@ if [[ -z "${OMP_NUM_THREADS:-}" ]] && [[ -n "${USE_ARC:-}" ]]; then
   export OMP_NUM_THREADS
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+  export OMP_NUM_THREADS=8
+fi
+
 export LANG=C.UTF-8
 
 PR_NUMBER=${PR_NUMBER:-${CIRCLE_PR_NUMBER:-}}
