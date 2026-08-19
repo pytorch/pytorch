@@ -894,6 +894,7 @@ class TestGroupBatchFusionGeneric(TestCase):
 class TestGroupBatchFusionXpu(_FusionCompareBase):
     hw_classification = HardwareClassification.XPU
 
+    @requires_capabilities(Capability.lib.triton)
     def test_xpu_auto_enable_batch_linear_lhs(self, device):
         # Verify that batch_linear_lhs fusion is auto-enabled when example inputs
         # contain XPU tensors, driven by the "devices" key in the default
