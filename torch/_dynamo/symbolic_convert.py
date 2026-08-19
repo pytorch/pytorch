@@ -227,6 +227,7 @@ if TYPE_CHECKING:
     from torch._subclasses.fake_tensor import FakeTensorMode
 
     from .package import CompilePackage
+    from .types import NNModuleContainerIndexTarget
 
 log = logging.getLogger(__name__)
 graph_break_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
@@ -339,6 +340,11 @@ class SpeculationLog:
     # instead of tracing it. Set when we detect that such an intermediate
     # leaks as a graph output with requires_grad=True.
     graph_break_on_requires_grad_: bool = False
+    # Bytecode sites where an nn.Module attribute was used to index an
+    # unspecialized nn.Module container and mutated on an earlier attempt.
+    mutated_nn_module_container_index_sites: dict[
+        tuple[types.CodeType, int], NNModuleContainerIndexTarget
+    ] = dataclasses.field(default_factory=dict)
 
     def restart(self) -> None:
         self.index = 0
@@ -1746,6 +1752,28 @@ class InstructionTranslatorBase(
         self.update_block_stack(inst)
 
         try:
+            graph_break_target = (
+                self.speculation_log.mutated_nn_module_container_index_sites.get(
+                    (self.f_code, inst.offset)
+                )
+                if inst.offset is not None
+                else None
+            )
+            if graph_break_target is not None and not graph_break_target.source_aware:
+                locator = graph_break_target.locator
+                if locator is None or (
+                    UnspecializedNNModuleVariable._frame_locator_matches(self, locator)
+                ):
+                    cache_key, cache_locator = (
+                        UnspecializedNNModuleVariable._frame_exec_strategy_cache_key(
+                            self, graph_break_target
+                        )
+                    )
+                    UnspecializedNNModuleVariable._raise_mutated_nn_module_container_index(
+                        graph_break_target.source,
+                        cache_key,
+                        cache_locator,
+                    )
             self.dispatch_table[inst.opcode](self, inst)
             return not self.output.should_exit
         except TensorifyScalarRestartAnalysis:

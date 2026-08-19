@@ -160,6 +160,7 @@ from .utils import (
     CompileTimeInstructionCounter,
     counters,
     dynamo_timed,
+    ExactWeakKeyDictionary,
     format_bytecode,
     gen_record_file_name,
     get_hook_for_recompile_user_context,
@@ -488,6 +489,12 @@ def exception_handler(
 
 FRAME_COUNTER = 0
 FRAME_COMPILE_COUNTER: typing.Counter[int | FrameStateSizeEntry] = collections.Counter()
+_FRAME_EXEC_STRATEGY_CACHE_EPOCH = 0
+
+
+def reset_frame_exec_strategy_cache() -> None:
+    global _FRAME_EXEC_STRATEGY_CACHE_EPOCH
+    _FRAME_EXEC_STRATEGY_CACHE_EPOCH += 1
 
 
 def maybe_cprofile(func: Callable[_P, _T]) -> Callable[_P, _T]:
@@ -2350,6 +2357,14 @@ class ConvertFrame:
         )
         self._hooks = hooks
         self._recompile_limit = recompile_limit
+        # A custom suppressed failure can be instance-specific: applying its
+        # SKIP/SKIP strategy to the code object would poison fixed instances
+        # sharing the same ``forward``. Key the negative cache by the root
+        # frame local/global name and exact object identity instead.
+        self._frame_exec_strategy_cache: dict[
+            CodeType, dict[tuple[bool, str], ExactWeakKeyDictionary]
+        ] = {}
+        self._frame_exec_strategy_cache_epoch = _FRAME_EXEC_STRATEGY_CACHE_EPOCH
 
     @property
     def _clone_with_backend(self) -> Callable[[WrapBackendDebug], ConvertFrame]:
@@ -2368,6 +2383,22 @@ class ConvertFrame:
         frame_state: dict[str, int | FrameStateSizeEntry],
         skip: int = 0,
     ) -> ConvertFrameReturn:
+        if self._frame_exec_strategy_cache_epoch != _FRAME_EXEC_STRATEGY_CACHE_EPOCH:
+            self._frame_exec_strategy_cache.clear()
+            self._frame_exec_strategy_cache_epoch = _FRAME_EXEC_STRATEGY_CACHE_EPOCH
+        cached_locals = self._frame_exec_strategy_cache.get(frame.f_code)
+        if cached_locals is not None:
+            for (is_global, name), cached_keys in cached_locals.items():
+                namespace = frame.f_globals if is_global else frame.f_locals
+                cache_key = namespace.get(name)
+                if cache_key is not None and cache_key in cached_keys:
+                    return ConvertFrameReturn(
+                        frame_exec_strategy=FrameExecStrategy(
+                            FrameAction.SKIP, FrameAction.SKIP
+                        ),
+                        apply_to_code=False,
+                        skip_reason="frame matches a cached instance-specific skip",
+                    )
         input_codes.add(frame.f_code)
         counters["frames"]["total"] += 1
         try:
@@ -2474,8 +2505,23 @@ class ConvertFrame:
                 isinstance(e, exc.TorchDynamoException)
                 and e.frame_exec_strategy is not None
             ):
+                cache_key = e.frame_exec_strategy_cache_key
+                cache_name = e.frame_exec_strategy_cache_name
+                if cache_key is not None and cache_name is not None:
+                    cache_locator = (
+                        e.frame_exec_strategy_cache_is_global,
+                        cache_name,
+                    )
+                    cached_keys = self._frame_exec_strategy_cache.setdefault(
+                        frame.f_code, {}
+                    ).setdefault(cache_locator, ExactWeakKeyDictionary())
+                    try:
+                        cached_keys[cache_key] = True
+                    except TypeError:
+                        pass
                 return ConvertFrameReturn(
                     frame_exec_strategy=e.frame_exec_strategy,
+                    apply_to_code=e.frame_exec_strategy_apply_to_code,
                     skip_reason="compilation failed with a custom frame execution strategy",
                 )
 

@@ -31,7 +31,7 @@ import textwrap
 import traceback
 import weakref
 from collections.abc import Callable, Generator, MutableMapping
-from types import CellType
+from types import CellType, CodeType
 from typing import Any, TYPE_CHECKING
 
 import torch
@@ -50,8 +50,14 @@ from .bytecode_transformation import (
     Instruction,
 )
 from .codegen import PyCodegen
-from .exc import collapse_resume_frames, get_stack_above_dynamo, unimplemented
+from .exc import (
+    collapse_resume_frames,
+    get_stack_above_dynamo,
+    NNModuleContainerIndexRestartAnalysis,
+    unimplemented,
+)
 from .source import AttrSource, GlobalSource, LocalCellSource, Source, TempLocalSource
+from .types import NNModuleContainerIndexTarget
 from .utils import (
     is_frozen_dataclass,
     is_namedtuple_cls,
@@ -536,8 +542,80 @@ class SideEffects:
             and value.is_python_constant()
         ):
             deferred = self.snapshot_attr_mutation(item, name, value)
+        if mutated_source is None and item.source is not None:
+            mutated_source = AttrSource(item.source, name)
         if not deferred:
             self.check_allowed_side_effect(item)
+            if mutated_source is not None:
+                output_graph = self.output_graph_weakref()
+                if output_graph is None:
+                    raise AssertionError("output_graph weakref is dead")
+                index_candidates = output_graph.nn_module_container_index_sites.get(
+                    mutated_source
+                )
+                if index_candidates:
+                    selector_value_changed = True
+                    if value.is_python_constant():
+                        try:
+                            previous_value = item.tp_getattro_impl(
+                                output_graph.current_tx, name
+                            )
+                        except NotImplementedError:
+                            pass
+                        else:
+                            if previous_value.is_python_constant():
+                                previous = previous_value.as_python_constant()
+                                current = value.as_python_constant()
+                                if (
+                                    type(previous) is type(current)
+                                    and type(current) in (bool, int, str)
+                                    and previous == current
+                                ):
+                                    selector_value_changed = False
+
+                    if not selector_value_changed:
+                        index_candidates = None
+
+                if index_candidates:
+                    mutation_txs = []
+                    current_tx = output_graph.current_tx
+                    while True:
+                        mutation_txs.append(current_tx)
+                        if current_tx.parent is None:
+                            break
+                        current_tx = current_tx.parent
+
+                    index_sites: dict[
+                        tuple[CodeType, int], NNModuleContainerIndexTarget
+                    ] = {}
+                    for candidate in index_candidates:
+                        for mutation_tx in mutation_txs:
+                            if mutation_tx in candidate.frames:
+                                target_frame = candidate.frames[mutation_tx]
+                                root_tx = candidate.leaf_tx
+                                while root_tx.parent is not None:
+                                    root_tx = root_tx.parent
+                                root_frame = candidate.frames[root_tx]
+                                index_sites[target_frame.site] = (
+                                    NNModuleContainerIndexTarget(
+                                        source=mutated_source,
+                                        source_aware=mutation_tx is candidate.leaf_tx,
+                                        locator=target_frame.locator,
+                                        cache_locator=root_frame.cache_locator,
+                                    )
+                                )
+                                break
+
+                    if index_sites:
+                        speculation_log = output_graph.current_tx.speculation_log
+                        speculation_log.mutated_nn_module_container_index_sites.update(
+                            index_sites
+                        )
+                        raise NNModuleContainerIndexRestartAnalysis(
+                            restart_reason=(
+                                "nn.Module container index source was mutated"
+                            )
+                        )
         if item not in self.store_attr_mutations:
             self.store_attr_mutations[item] = {}
         if item not in self.attr_mutation_kinds:
@@ -548,10 +626,6 @@ class SideEffects:
         self._capture_user_stack(item)
         if mutated_source is not None:
             self.mutated_sources.add(mutated_source)
-        else:
-            item_source = getattr(item, "source", None)
-            if item_source is not None:
-                self.mutated_sources.add(AttrSource(item_source, name))
 
     def store_instance_dict_attr(
         self, item: VariableTracker, name: str, value: VariableTracker
