@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 import ast
 import contextlib
+import re
 import unittest
 from collections import namedtuple
 from enum import Enum, IntEnum
@@ -861,6 +862,64 @@ def helper(x):
         _, code = run_and_get_code(torch.compile(fn), x)
         code_str = " ".join(code)
         self.assertIn("tt.pointer_range", code_str)
+
+    @unittest.skipUnless(torch.version.hip is not None, "pointer_range_32 is HIP-only")
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    @inductor_config.patch("triton.emit_pointer_range_32", False)
+    def test_pointer_range_disabled_for_template_kernels(self):
+        """The config flag must reach template kernels, not just the pointwise path.
+
+        Template kernels build their own triton_meta in
+        TritonTemplateKernel.jit_lines() rather than going through
+        TritonKernel.codegen_kernel(), so the two can disagree.
+        """
+        from torch.nn.attention.flex_attention import flex_attention
+
+        q, k, v = (
+            torch.randn(1, 4, 256, 64, device=GPU_TYPE, dtype=torch.float16)
+            for _ in range(3)
+        )
+        _, code = run_and_get_code(
+            torch.compile(flex_attention, fullgraph=True), q, k, v
+        )
+        code_str = " ".join(code)
+        self.assertIn("triton_tem_fused", code_str)
+        self.assertNotIn("tt.pointer_range", code_str)
+
+    @unittest.skipUnless(torch.version.hip is not None, "pointer_range_32 is HIP-only")
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    def test_pointer_range_not_applied_to_template_kernel_with_atomics(self):
+        """Kernels using atomics must not be tagged, including template kernels.
+
+        A score_mod capturing a tensor that requires grad makes the flex_attention
+        backward accumulate into it with tl.atomic_add. Tagging that kernel lets the
+        backend pick buffer atomics, which are far slower than global atomics when
+        many lanes target the same address.
+        """
+        from torch.nn.attention.flex_attention import flex_attention
+
+        q, k, v = (
+            torch.randn(
+                1, 4, 256, 64, device=GPU_TYPE, dtype=torch.float16, requires_grad=True
+            )
+            for _ in range(3)
+        )
+        bias = torch.randn(4, device=GPU_TYPE, dtype=torch.float16, requires_grad=True)
+
+        def score_mod(score, b, h, q_idx, kv_idx):
+            return score + bias[h]
+
+        def fwd_bwd(q, k, v):
+            out = torch.compile(flex_attention, fullgraph=True)(
+                q, k, v, score_mod=score_mod
+            )
+            out.sum().backward()
+            return out
+
+        _, code = run_and_get_code(fwd_bwd, q, k, v)
+        for chunk in re.split(r"\n(?=@triton_heuristics\.)", " ".join(code)):
+            if re.search(r"tl\.atomic_\w+", chunk):
+                self.assertNotIn("tt.pointer_range", chunk)
 
     def test_is_multiple_of_rules(self):
         """Test structural divisibility rules in _is_multiple_of."""
