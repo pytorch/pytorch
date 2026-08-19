@@ -3,18 +3,24 @@
 
 import os
 import tempfile
+from unittest import mock
 
 from model_registry import ExampleCode, ModelWithKwargs, MultiMLP
 
 import torch
 import torch.distributed as dist
+from torch.autograd.graph import GradientEdge
 from torch.distributed.pipelining import (
     build_stage,
     pipeline,
     PipelineStage,
     ScheduleGPipe,
 )
-from torch.distributed.pipelining._utils import PipeliningMetadataError
+from torch.distributed.pipelining._utils import (
+    extract_tensor_meta,
+    PipeliningMetadataError,
+)
+from torch.distributed.pipelining.stage import _early_send_release_default, _RecvInfo
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     requires_accelerator_dist_backend,
@@ -125,6 +131,206 @@ def get_flatten_hook():
         return tree_map_only(torch.Tensor, f, output)
 
     return flatten_hook
+
+
+class OutputSlotReleaseTest(TestCase):
+    """Tests forward-cache output release."""
+
+    def setUp(self):
+        super().setUp()
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self._owns_pg = not dist.is_initialized()
+        if self._owns_pg:
+            dist.init_process_group(
+                "gloo",
+                init_method=f"file://{os.path.join(self._tmpdir.name, 'pg')}",
+                rank=0,
+                world_size=1,
+            )
+
+    def tearDown(self):
+        if self._owns_pg and dist.is_initialized():
+            dist.destroy_process_group()
+        self._tmpdir.cleanup()
+        super().tearDown()
+
+    def _make_stage(self, *, stage_index=0, num_stages=2, dst_stages=None, **kwargs):
+        stage = PipelineStage(
+            torch.nn.Linear(d_hid, d_hid),
+            stage_index,
+            num_stages,
+            torch.device("cpu"),
+            **kwargs,
+        )
+        stage.has_backward = True
+        # Explicit, so the test does not depend on the default.
+        stage.early_send_release = True
+        # Avoid peer-dependent forward setup.
+        stage.act_send_info = {0: dst_stages or [stage_index + 1]}
+        return stage
+
+    def _forward_and_send(self, stage, mb_index=0):
+        x = torch.randn(batch_size, d_hid)
+        stage.forward_one_chunk(mb_index, (x,))
+        return stage.get_fwd_send_ops(mb_index)
+
+    def test_output_released_when_send_retires(self):
+        stage = self._make_stage()
+        ops = self._forward_and_send(stage)
+        entry = stage.fwd_cache[0]
+
+        self.assertEqual(len(ops), 1)
+        self.assertEqual(entry.pending_consumers, [1])
+        self.assertIsNotNone(entry.live_outputs[0])
+        self.assertIsInstance(entry.backward_roots[0], GradientEdge)
+
+        stage.retire_fwd_sends(0)
+
+        self.assertEqual(entry.pending_consumers, [0])
+        self.assertIsNone(entry.live_outputs[0])
+        self.assertIs(entry.stage_output_for_backward()[0], entry.backward_roots[0])
+
+    def test_output_kept_until_every_destination_retires(self):
+        stage = self._make_stage(num_stages=3, dst_stages=[1, 2])
+        ops = self._forward_and_send(stage)
+        entry = stage.fwd_cache[0]
+
+        # Destinations share one batched buffer lease.
+        self.assertEqual(len(ops), 2)
+        self.assertIs(ops[0].tensor, ops[1].tensor)
+        self.assertEqual(entry.pending_consumers, [1])
+
+        stage.retire_fwd_sends(0)
+        self.assertIsNone(entry.live_outputs[0])
+
+    def test_last_stage_output_never_released(self):
+        stage = self._make_stage(stage_index=0, num_stages=1, dst_stages=[None])
+        ops = self._forward_and_send(stage)
+        entry = stage.fwd_cache[0]
+
+        self.assertEqual(ops, [])
+        self.assertEqual(entry.releasable, (False,))
+        self.assertIsNone(entry.backward_roots[0])
+        self.assertEqual(stage._retained_output_reason, "last-stage output")
+
+        stage.retire_fwd_sends(0)
+        self.assertIsNotNone(entry.live_outputs[0])
+
+    def test_early_send_release_defaults_on(self):
+        # Do not inherit the caller's opt-out.
+        with mock.patch.dict(os.environ):
+            os.environ.pop("TORCH_PIPELINING_EARLY_SEND_RELEASE", None)
+            self.assertTrue(_early_send_release_default())
+            stage = PipelineStage(
+                torch.nn.Linear(d_hid, d_hid), 0, 2, torch.device("cpu")
+            )
+            self.assertTrue(stage.early_send_release)
+
+    def test_early_send_release_env_opt_out(self):
+        with mock.patch.dict(os.environ, {"TORCH_PIPELINING_EARLY_SEND_RELEASE": "0"}):
+            self.assertFalse(_early_send_release_default())
+            stage = PipelineStage(
+                torch.nn.Linear(d_hid, d_hid), 0, 2, torch.device("cpu")
+            )
+            self.assertFalse(stage.early_send_release)
+
+    def test_forward_only_keeps_no_backward_root(self):
+        # An unused edge would retain the forward-only graph.
+        stage = self._make_stage()
+        stage.has_backward = False
+        self._forward_and_send(stage)
+        entry = stage.fwd_cache[0]
+
+        self.assertEqual(entry.backward_roots, (None,))
+        stage.retire_fwd_sends(0)
+        self.assertIsNone(entry.live_outputs[0])
+
+    def test_release_disabled_keeps_output(self):
+        stage = self._make_stage()
+        stage.early_send_release = False
+        self._forward_and_send(stage)
+        entry = stage.fwd_cache[0]
+
+        self.assertEqual(entry.releasable, (False,))
+        stage.retire_fwd_sends(0)
+        self.assertIsNotNone(entry.live_outputs[0])
+        self.assertIsInstance(entry.stage_output_for_backward()[0], torch.Tensor)
+
+    def test_dw_builder_keeps_output(self):
+        stage = self._make_stage(dw_builder=lambda: (lambda: None))
+        self._forward_and_send(stage)
+        entry = stage.fwd_cache[0]
+
+        self.assertEqual(entry.releasable, (False,))
+        stage.retire_fwd_sends(0)
+        self.assertIsNotNone(entry.live_outputs[0])
+
+    def test_tensor_subclass_output_kept(self):
+        class TaggedTensor(torch.Tensor):
+            pass
+
+        class TaggedModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(d_hid, d_hid)
+
+            def forward(self, x):
+                return TaggedTensor(self.linear(x))
+
+        stage = PipelineStage(TaggedModule(), 0, 2, torch.device("cpu"))
+        stage.has_backward = True
+        # Explicit, so the subclass check is what rejects the slot.
+        stage.early_send_release = True
+        stage.act_send_info = {0: [1]}
+        stage.forward_one_chunk(0, (torch.randn(batch_size, d_hid),))
+        entry = stage.fwd_cache[0]
+
+        self.assertEqual(entry.releasable, (False,))
+        self.assertIn("TaggedTensor", stage._retained_output_reason)
+
+    def test_retire_after_backward_consumed_the_entry(self):
+        # The final drain may run after backward pops the entry.
+        stage = self._make_stage()
+        self._forward_and_send(stage)
+        stage.fwd_cache.pop(0)
+        stage.retire_fwd_sends(0)
+
+    def test_split_backward_drops_edge_roots(self):
+        """Drop edge roots before split weight backward."""
+        # The first stage keeps its roots for weight backward.
+        stage = self._make_stage(stage_index=1, num_stages=3)
+        stage.chunks = 1
+        stage._stage_meta.inputs = (None,)
+
+        act_buffer = torch.randn(batch_size, d_hid, requires_grad=True)
+        stage.args_recv_info = {
+            0: (_RecvInfo("act_recv", 0, act_buffer, extract_tensor_meta(act_buffer)),)
+        }
+        stage.forward_one_chunk(0, ())
+        stage.get_fwd_send_ops(0)
+        stage.retire_fwd_sends(0)
+        self.assertIsNone(stage.fwd_cache[0].live_outputs[0])
+
+        grad_buffer = torch.randn(batch_size, d_hid)
+        stage.grad_recv_info = {
+            0: (
+                _RecvInfo(
+                    "grad_recv", 1, grad_buffer, extract_tensor_meta(grad_buffer)
+                ),
+            )
+        }
+        stage.backward_one_chunk(0, full_backward=False)
+
+        roots = stage.backward_state[0][2]
+        self.assertTrue(all(not isinstance(root, GradientEdge) for root in roots))
+
+    def test_send_after_release_is_rejected(self):
+        stage = self._make_stage()
+        self._forward_and_send(stage)
+        stage.retire_fwd_sends(0)
+
+        with self.assertRaisesRegex(AssertionError, "released before its send"):
+            stage.get_fwd_send_ops(0)
 
 
 class StageTest(MultiProcContinuousTest):
