@@ -239,9 +239,7 @@ class TestCacheKeyStrategy(TestCase):
         fake_strategy.key_from_json.side_effect = lambda value: json.dumps(
             value, sort_keys=True
         )
-        fake_properties = types.SimpleNamespace(
-            name="test-gpu", gcnArchName="test-gcn"
-        )
+        fake_properties = types.SimpleNamespace(name="test-gpu", gcnArchName="test-gcn")
         CacheBase.get_system.cache_clear()
         try:
             with (
@@ -274,9 +272,7 @@ class TestCacheKeyStrategy(TestCase):
                 FakeDeviceInterface.info = ("runtime", "1")
                 CacheBase.get_system.cache_clear()
                 first = CacheBase.get_system()
-                self.assertEqual(
-                    first["device_interfaces"], {"fake": ("runtime", "1")}
-                )
+                self.assertEqual(first["device_interfaces"], {"fake": ("runtime", "1")})
                 self.assertEqual(FakeDeviceInterface.calls, 2)
                 FakeDeviceInterface.info = ("runtime", "2")
                 CacheBase.get_system.cache_clear()
@@ -325,9 +321,7 @@ class TestCacheKeyStrategy(TestCase):
         finally:
             CacheBase.get_system.cache_clear()
 
-        self.assertEqual(
-            system["device_interfaces"], {"fake": ("runtime", "1")}
-        )
+        self.assertEqual(system["device_interfaces"], {"fake": ("runtime", "1")})
         self.assertEqual(
             strategy.key_from_json.call_args.args[0],
             {"device_interfaces": {"fake": ("runtime", "1")}},
