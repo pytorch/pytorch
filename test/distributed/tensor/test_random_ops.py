@@ -24,6 +24,7 @@ from torch.distributed.tensor._random import (
 from torch.distributed.tensor._utils import compute_local_shape_and_global_offset
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.parallel import ColwiseParallel, parallelize_module
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -1099,6 +1100,33 @@ DistTensorRandomOpTestWithLocalTensor = create_local_tensor_test_class(
 DistTensorRandomOpsTest3DWithLocalTensor = create_local_tensor_test_class(
     DistTensorRandomOpsTest3D,
 )
+
+
+instantiate_device_type_tests(
+    DistTensorRandomInitTest,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    DistTensorRandomOpTest,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    DistTensorRandomOpCompileTest,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    DistTensorRandomOpsTest3D,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+
 
 if __name__ == "__main__":
     run_tests()
