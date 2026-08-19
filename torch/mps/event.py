@@ -31,7 +31,7 @@ class Event:
         r"""Records the event in a given stream.
 
         Args:
-            stream (Stream, torch.Stream, optional): Uses ``torch.mps.current_stream()`` if no stream is specified.
+            stream (torch.mps.Stream, torch.Stream, optional): Uses ``torch.mps.current_stream()`` if no stream is specified.
         """
         if stream is None:
             stream = torch.mps.current_stream()
@@ -43,7 +43,7 @@ class Event:
         r"""Makes all future work submitted to the given stream wait for this event.
 
         Args:
-            stream (Stream, torch.Stream, optional): Uses ``torch.mps.current_stream()`` if no stream is specified.
+            stream (torch.mps.Stream, torch.Stream, optional): Uses ``torch.mps.current_stream()`` if no stream is specified.
         """
         if stream is None:
             stream = torch.mps.current_stream()
