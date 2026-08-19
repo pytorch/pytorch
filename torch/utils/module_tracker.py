@@ -100,21 +100,21 @@ class ModuleTracker:
         return mod_name
 
     def _is_dynamo_runtime_module(self, mod):
-        eval_frame = sys.modules.get("torch._dynamo.eval_frame")
-        optimized_module_cls = getattr(eval_frame, "OptimizedModule", None)
-        if optimized_module_cls is not None and isinstance(mod, optimized_module_cls):
+        # Dynamo registers compiler-owned modules at its backend and
+        # compiled-autograd boundaries. Query lazily so eager ModuleTracker
+        # users do not import Dynamo just for this check.
+        dynamo_utils = sys.modules.get("torch._dynamo.utils")
+        is_dynamo_runtime_module = getattr(
+            dynamo_utils, "is_dynamo_runtime_module", None
+        )
+        if is_dynamo_runtime_module is not None and is_dynamo_runtime_module(mod):
             return True
 
-        if isinstance(mod, torch.fx.GraphModule):
-            # User-owned FX GraphModules can run inside OptimizedModule too.
-            # Only skip GraphModules that Dynamo marked as compiler runtime.
-            if getattr(mod, "_is_torch_compile", False):
-                return True
-
-            meta = getattr(mod, "meta", {})
-            return isinstance(meta, dict) and "dynamo_compile_id" in meta
-
-        return False
+        eval_frame = sys.modules.get("torch._dynamo.eval_frame")
+        optimized_module_cls = getattr(eval_frame, "OptimizedModule", None)
+        return optimized_module_cls is not None and isinstance(
+            mod, optimized_module_cls
+        )
 
     def _get_append_fn(self, name, is_bw):
         def fn(*args) -> None:

@@ -21,7 +21,7 @@ import operator
 import time
 from collections import Counter, defaultdict
 from collections.abc import Callable, Generator, Sequence
-from typing import Any, TYPE_CHECKING
+from typing import Any, cast, Literal, Protocol, TYPE_CHECKING
 
 import torch
 import torch.utils._pytree as pytree
@@ -37,7 +37,10 @@ from torch._dynamo.source import GetItemSource, LocalSource
 from torch._dynamo.utils import (
     counters,
     get_chromium_event_logger,
+    get_dynamo_runtime_module_refs,
     lazy_format_graph_code,
+    restore_dynamo_runtime_module_refs,
+    set_dynamo_runtime_module_refs,
     set_locals_to_steal,
 )
 from torch._functorch._aot_autograd.runtime_wrappers import (
@@ -67,6 +70,7 @@ from torch.utils._traceback import CapturedTraceback
 
 
 if TYPE_CHECKING:
+    from torch._functorch._aot_autograd.schemas import SubclassMeta, ViewAndMutationMeta
     from torch.fx.proxy import Proxy
 
 
@@ -78,6 +82,17 @@ TURN_OFF_MSG = """You can turn off compiled autograd by either:
 
 compiled_autograd_log = getArtifactLogger(__name__, "compiled_autograd")
 verbose_log = getArtifactLogger(__name__, "compiled_autograd_verbose")
+
+# The kind of autograd hook being proxied. Threaded through proxy_call_hook into
+# the fx node's kwargs, where the graph post-processing passes read it back to
+# match nodes (e.g. node.kwargs["hook_type"] == "post_hook").
+HookType = Literal[
+    "unpack_hook",
+    "tensor_pre_hook",
+    "pre_hook",
+    "post_hook",
+    "post_acc_grad_hook",
+]
 
 
 def snapshot_verbose_logging_enabled() -> bool:
@@ -96,11 +111,27 @@ def maybe_clone(x: torch.Tensor | None) -> torch.Tensor | None:
     return x
 
 
-def extract_bw_module(CompiledFunction: Any) -> Callable[..., Any]:
+class _AOTCompiledFunction(Protocol):
+    """Structural type for the AOTAutograd autograd.Function subclass that
+    compiled autograd retraces. The concrete class is generated locally inside
+    AOTAutograd, so we describe only the private attributes consumed here.
+    """
+
+    _lazy_backward_info: (
+        AutogradLazyBackwardCompileInfo | CachedAutogradLazyBackwardCompileInfo | None
+    )
+    metadata: "ViewAndMutationMeta"
+    maybe_subclass_metadata: "SubclassMeta | None"
+    _aot_id: int
+    _bw_prologue_fn: Callable[..., Any]
+    _bw_epilogue_fn: Callable[..., Any]
+
+
+def extract_bw_module(CompiledFunction: _AOTCompiledFunction) -> GraphModule:
     if isinstance(
         CompiledFunction._lazy_backward_info, AutogradLazyBackwardCompileInfo
     ):
-        return CompiledFunction._lazy_backward_info.bw_module
+        return cast(GraphModule, CompiledFunction._lazy_backward_info.bw_module)
     elif isinstance(
         CompiledFunction._lazy_backward_info, CachedAutogradLazyBackwardCompileInfo
     ):
@@ -469,8 +500,8 @@ class AutogradCompilerInstance:
         pinputs: Sequence[Any],
         psaved_tensors: Sequence[torch.Tensor],
         saved_tensors: Sequence[torch.Tensor],
-        pctx: Any,
-        ctx: Any,
+        pctx: "Proxy",
+        ctx: torch.autograd.function.BackwardCFunction,
         maybe_backward_state_idx: int | None,
         opaque_object_indices: list[int],
     ) -> Sequence[Any]:
@@ -485,7 +516,10 @@ class AutogradCompilerInstance:
         # If Dynamo graph capture were better, then we could add a node for the prologue
         # into the CA graph and have Dynamo trace into it.
 
-        psymints = [self.to_proxy(e) for e in ctx._get_compiled_autograd_symints()]
+        psymints = [
+            self.to_proxy(e)
+            for e in ctx._get_compiled_autograd_symints()  # type: ignore[attr-defined]
+        ]
 
         popaque_objects = [
             self.hooks_proxy[idx]  # type: ignore[index]
@@ -493,7 +527,7 @@ class AutogradCompilerInstance:
         ]
 
         # NOTE: we should only close over constants
-        CompiledFunction = ctx._forward_cls
+        CompiledFunction: _AOTCompiledFunction = ctx._forward_cls  # type: ignore[attr-defined]
         bw_module = extract_bw_module(CompiledFunction)
         metadata = CompiledFunction.metadata
         maybe_subclass_metadata = CompiledFunction.maybe_subclass_metadata
@@ -554,15 +588,15 @@ class AutogradCompilerInstance:
 
             # set up the proxy inputs to bw_module
             # the calling convention is: [*symints, *args (primals and tangents), backward_state]
-            num_args = num_inputs(bw_module.graph)  # type: ignore[attr-defined]
+            num_args = num_inputs(bw_module.graph)
             pall_args = [
                 pgrads[i] for i in range(num_args - int(pbackward_state is not None))
             ]
             # replace the symints with our symints
-            symints = ctx._get_compiled_autograd_symints()
-            if len(symints) != len(ctx.symints):
+            symints = ctx._get_compiled_autograd_symints()  # type: ignore[attr-defined]
+            if len(symints) != len(ctx.symints):  # type: ignore[attr-defined]
                 raise AssertionError(
-                    f"symints length mismatch: {len(symints)} vs {len(ctx.symints)}"
+                    f"symints length mismatch: {len(symints)} vs {len(ctx.symints)}"  # type: ignore[attr-defined]
                 )
             psymints = [self.to_proxy(e) for e in symints]
             pall_args[: len(symints)] = psymints
@@ -588,7 +622,7 @@ class AutogradCompilerInstance:
                 # make it both informative and unique
                 return f"aot{deduped_aot_id}_{node_name}"
 
-            for node in bw_module.graph.nodes:  # type: ignore[attr-defined]
+            for node in bw_module.graph.nodes:
                 if node.op == "placeholder":
                     ph = pall_args[args_idx].node
                     ph.name = make_unique(node.name)
@@ -884,7 +918,7 @@ class AutogradCompilerInstance:
         return result
 
     def proxy_call_hook(
-        self, hook: Callable[..., Any], *args: Any, **kwargs: Any
+        self, hook: Callable[..., Any], *args: Any, hook_type: HookType
     ) -> torch.fx.Proxy:
         return self.fx_tracer.create_proxy(
             "call_function",
@@ -893,7 +927,7 @@ class AutogradCompilerInstance:
                 hook,
                 *[self.to_proxy(x) for x in args],
             ),
-            kwargs,
+            {"hook_type": hook_type},
         )
 
     def unpack_hook(self, hook_id: int, data_id: int) -> torch.Tensor:
@@ -993,7 +1027,7 @@ class AutogradCompilerInstance:
     # Eager autograd backward implements scalars as 0-dim tensors, see DivBackward0::other_.
     # When compiled autograd traces those nodes, it lifts the scalar tensors, resulting in a graph
     # with some cpu 0-dim tensor inputs. To prevent the entire graph from skipping cudagraph, we move the
-    # scalars tensors to cuda. This works because ATen/prims ops will accept cuda 0-dim tensors too.
+    # scalar tensors to cuda. This works because ATen/prims ops will accept cuda 0-dim tensors too.
     def move_graph_nodes_to_cuda(self, graph: torch.fx.Graph) -> list[int]:
         to_move: dict[int, torch.fx.Node] = {}
         has_cuda_inputs = False
@@ -1238,13 +1272,25 @@ class AutogradCompilerInstance:
                 for i in runtime_inputs_to_move:
                     inputs[i] = inputs[i].pin_memory().cuda(non_blocking=True)
 
-                with _disable(), make_compile_context(self.id):
-                    out = compiled_fn(
-                        inputs, filtered_sizes, scalars, hooks, packed_inputs
+                runtime_modules_prior = None
+                if (
+                    runtime_module_refs
+                    and torch.nn.modules.module._has_any_global_hook()
+                ):
+                    runtime_modules_prior = set_dynamo_runtime_module_refs(
+                        runtime_module_refs
                     )
-                    if self.nan_checker:
-                        self.nan_checker.check(out)
-                    return out
+                try:
+                    with _disable(), make_compile_context(self.id):
+                        out = compiled_fn(
+                            inputs, filtered_sizes, scalars, hooks, packed_inputs
+                        )
+                        if self.nan_checker:
+                            self.nan_checker.check(out)
+                        return out
+                finally:
+                    if runtime_modules_prior is not None:
+                        restore_dynamo_runtime_module_refs(runtime_modules_prior)
             finally:
                 in_compiled_autograd_region = False
 
@@ -1256,7 +1302,19 @@ class AutogradCompilerInstance:
             log_pt2_compile_event=True,
         )
         self.compile_context.__exit__(None, None, None)
-        return runtime_wrapper, self.compiler_fn(graph)
+        graph_runtime_module_refs = get_dynamo_runtime_module_refs(graph)
+        runtime_modules_prior = None
+        if graph_runtime_module_refs and torch.nn.modules.module._has_any_global_hook():
+            runtime_modules_prior = set_dynamo_runtime_module_refs(
+                graph_runtime_module_refs
+            )
+        try:
+            compiled_fn = self.compiler_fn(graph)
+        finally:
+            if runtime_modules_prior is not None:
+                restore_dynamo_runtime_module_refs(runtime_modules_prior)
+        runtime_module_refs = get_dynamo_runtime_module_refs(graph, compiled_fn)
+        return runtime_wrapper, compiled_fn
 
     @staticmethod
     def get_all_nodes(args: Sequence[Any]) -> list[torch.fx.Node]:

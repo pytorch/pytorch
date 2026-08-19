@@ -7,6 +7,7 @@ from torch.types import Storage
 
 
 __all__: list[str] = [
+    "is_available",
     "gds_register_buffer",
     "gds_deregister_buffer",
     "GdsFile",
@@ -20,7 +21,16 @@ def _dummy_fn(name: str) -> Callable:
     return fn
 
 
-if not hasattr(torch._C, "_gds_register_buffer"):
+def is_available() -> bool:
+    r"""Return ``True`` if GDS (GPUDirect Storage) support is built in.
+
+    This requires PyTorch to be built with cuFile (CUDA) or hipFile (ROCm).
+    """
+    return torch._C._has_gds
+
+
+# Without GDS built in, install dummy stubs so the API raises a clear error.
+if not is_available():
     if hasattr(torch._C, "_gds_deregister_buffer"):
         raise AssertionError(
             "_gds_deregister_buffer exists but _gds_register_buffer does not"

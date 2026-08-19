@@ -95,6 +95,278 @@ class TestModuleTracker(TestCase):
 
         self.assertEqual(seen, [({"Global", "Outer", "Outer.gm"}, False)])
 
+    def test_compiled_user_graph_module_hierarchy(self):
+        seen = []
+
+        class Leaf(nn.Module):
+            def forward(self, x):
+                return x.sin()
+
+        gm = torch.fx.symbolic_trace(Leaf())
+        gm.register_forward_pre_hook(
+            lambda mod, args: seen.append((copy(tracker.parents), tracker.is_bw))
+        )
+        mod = torch.compile(gm, backend="eager")
+        self.assertTrue(gm._is_torch_compile)
+        self.assertFalse(torch._dynamo.utils.is_dynamo_runtime_module(gm))
+
+        with ModuleTracker() as tracker:
+            mod(torch.randn(2, 2))
+            mod(torch.randn(2, 2))
+
+        self.assertEqual(
+            seen,
+            [({"Global", "Leaf"}, False), ({"Global", "Leaf"}, False)],
+        )
+
+    @skipIfTorchDynamo("test itself calls torch.compile with a custom backend")
+    def test_dynamo_runtime_graph_module_hierarchy(self):
+        seen = []
+        runtime_modules = []
+
+        def backend(gm, example_inputs):
+            runtime_gm = torch.fx.symbolic_trace(gm)
+            runtime_gm.register_forward_pre_hook(
+                lambda mod, args: seen.append((copy(tracker.parents), tracker.is_bw))
+            )
+            runtime_modules.append(runtime_gm)
+            return runtime_gm
+
+        class Leaf(nn.Module):
+            def forward(self, x):
+                return x.sin()
+
+        with torch._dynamo.config.patch(verify_correctness=True):
+            mod = torch.compile(Leaf(), backend=backend)
+
+            with ModuleTracker() as tracker:
+                mod(torch.randn(2, 2))
+
+        self.assertEqual(len(runtime_modules), 1)
+        self.assertEqual(runtime_modules[0].meta, {})
+        self.assertFalse(
+            torch._dynamo.utils.is_dynamo_runtime_module(runtime_modules[0])
+        )
+        self.assertTrue(seen)
+        for parents, is_bw in seen:
+            self.assertEqual(parents, {"Global", "Leaf"})
+            self.assertFalse(is_bw)
+
+        seen.clear()
+        with ModuleTracker() as tracker:
+            runtime_modules[0](torch.randn(2, 2))
+        self.assertEqual(seen, [({"Global", "GraphModule"}, False)])
+
+    @skipIfTorchDynamo("test itself calls torch.compile with a custom backend")
+    def test_dynamo_backend_input_graph_module_hierarchy(self):
+        seen = []
+
+        def backend(gm, example_inputs):
+            gm.register_forward_pre_hook(
+                lambda mod, args: seen.append(
+                    (
+                        copy(tracker.parents),
+                        torch._dynamo.utils.is_dynamo_runtime_module(mod),
+                    )
+                )
+            )
+            gm(*example_inputs)
+            return gm.forward
+
+        class Leaf(nn.Module):
+            def forward(self, x):
+                return x.sin()
+
+        mod = torch.compile(Leaf(), backend=backend)
+        with ModuleTracker() as tracker:
+            mod(torch.randn(2, 2))
+
+        self.assertTrue(seen)
+        for parents, is_dynamo_runtime in seen:
+            self.assertEqual(parents, {"Global", "Leaf"})
+            self.assertTrue(is_dynamo_runtime)
+
+    @skipIfTorchDynamo("test itself calls torch.compile with a backend")
+    def test_dynamo_runtime_graph_module_closure(self):
+        class Leaf(nn.Module):
+            def forward(self, x):
+                return x.sin()
+
+        mod = torch.compile(Leaf(), backend="eager_noexcept")
+        seen = []
+        with torch._dynamo.config.patch(verify_correctness=True):
+            with ModuleTracker() as tracker:
+                handle = nn.modules.module.register_module_forward_pre_hook(
+                    lambda module, args: seen.append(
+                        (
+                            copy(tracker.parents),
+                            torch._dynamo.utils.is_dynamo_runtime_module(module),
+                        )
+                    )
+                    if isinstance(module, torch.fx.GraphModule)
+                    else None
+                )
+                try:
+                    mod(torch.randn(2, 2))
+                    seen.clear()
+                    mod(torch.randn(2, 2))
+                finally:
+                    handle.remove()
+
+        self.assertEqual(seen, [({"Global", "Leaf"}, True)])
+
+    @skipIfTorchDynamo("test itself enables compiled autograd")
+    def test_compiled_autograd_runtime_graph_module_hierarchy(self):
+        seen = []
+
+        def compiler(gm):
+            gm.register_forward_pre_hook(
+                lambda mod, args: seen.append(
+                    (
+                        copy(tracker.parents),
+                        torch._dynamo.utils.is_dynamo_runtime_module(mod),
+                    )
+                )
+            )
+            return gm
+
+        x = torch.randn(3, requires_grad=True)
+        with ModuleTracker() as tracker:
+            with torch._dynamo.compiled_autograd._enable(compiler):
+                x.sin().sum().backward()
+
+        self.assertEqual(seen, [({"Global"}, True)])
+
+    @skipIfTorchDynamo("test itself enables compiled autograd")
+    def test_aot_compiled_autograd_runtime_module_hierarchy(self):
+        from torch._dynamo.utils import GmWrapper
+
+        seen = []
+        x = torch.randn(3, requires_grad=True)
+        with ModuleTracker() as tracker:
+            handle = nn.modules.module.register_module_forward_pre_hook(
+                lambda mod, args: seen.append(
+                    (
+                        copy(tracker.parents),
+                        torch._dynamo.utils.is_dynamo_runtime_module(mod),
+                    )
+                )
+                if isinstance(mod, GmWrapper)
+                else None
+            )
+            try:
+                with torch._dynamo.compiled_autograd._enable(
+                    torch.compile(backend="aot_eager")
+                ):
+                    x.sin().sum().backward()
+            finally:
+                handle.remove()
+
+        self.assertTrue(seen)
+        for parents, is_dynamo_runtime in seen:
+            self.assertEqual(parents, {"Global"})
+            self.assertTrue(is_dynamo_runtime)
+
+    @skipIfTorchDynamo("test itself calls torch.compile with a backend")
+    def test_aot_eager_runtime_graph_module_hierarchy(self):
+        class Leaf(nn.Module):
+            def forward(self, x):
+                return x.sin()
+
+        for force_autograd_cache in (False, True):
+            with self.subTest(force_autograd_cache=force_autograd_cache):
+                torch._dynamo.reset()
+                seen = []
+                with torch._functorch.config.patch(
+                    force_autograd_cache=force_autograd_cache
+                ):
+                    mod = torch.compile(Leaf(), backend="aot_eager")
+                    with ModuleTracker() as tracker:
+                        handle = nn.modules.module.register_module_forward_pre_hook(
+                            lambda module, args: seen.append(
+                                (
+                                    copy(tracker.parents),
+                                    torch._dynamo.utils.is_dynamo_runtime_module(
+                                        module
+                                    ),
+                                )
+                            )
+                            if isinstance(module, torch.fx.GraphModule)
+                            else None
+                        )
+                        try:
+                            mod(torch.randn(2, 2, requires_grad=True)).sum().backward()
+                        finally:
+                            handle.remove()
+
+                self.assertTrue(seen)
+                for parents, is_dynamo_runtime in seen:
+                    self.assertEqual(parents, {"Global", "Leaf"})
+                    self.assertTrue(is_dynamo_runtime)
+
+    def test_restored_aot_eager_runtime_graph_module(self):
+        from torch._dynamo.backends.debugging import AOTEagerOutputCode, boxed_nop
+
+        x = torch.randn(2, 2)
+        root = nn.Module()
+        root.inner = nn.Identity()
+        graph = torch.fx.Graph()
+        graph_input = graph.placeholder("x")
+        graph.output(graph.call_module("inner", (graph_input,)))
+        gm = torch.fx.GraphModule(root, graph)
+        with torch._functorch.config.patch(force_autograd_cache=True):
+            output = boxed_nop(gm, [x])
+        self.assertIsInstance(output, AOTEagerOutputCode)
+        output.prepare_for_serialization()
+        output.post_compile()
+
+        seen = []
+        handle = nn.modules.module.register_module_forward_pre_hook(
+            lambda module, args: seen.append(
+                torch._dynamo.utils.is_dynamo_runtime_module(output.gm)
+            )
+            if module is output.gm.inner
+            else None
+        )
+        try:
+            self.assertEqual(output([x]), x)
+        finally:
+            handle.remove()
+
+        self.assertEqual(seen, [True])
+
+    def test_user_exported_graph_module_hierarchy(self):
+        seen = []
+
+        class Leaf(nn.Module):
+            def forward(self, x):
+                return x.sin()
+
+        class Outer(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.gm = torch.export.export(
+                    Leaf(), (torch.randn(2, 2),), strict=True
+                ).module()
+                self.gm.register_forward_pre_hook(
+                    lambda mod, args: seen.append(
+                        (copy(tracker.parents), tracker.is_bw)
+                    )
+                )
+
+            def forward(self, x):
+                return self.gm(x).cos()
+
+        mod = Outer()
+        self.assertIn("dynamo_compile_id", mod.gm.meta)
+        self.assertNotIn("backend_id", mod.gm.meta)
+        self.assertFalse(torch._dynamo.utils.is_dynamo_runtime_module(mod.gm))
+
+        with ModuleTracker() as tracker:
+            mod(torch.randn(2, 2))
+
+        self.assertEqual(seen, [({"Global", "Outer", "Outer.gm"}, False)])
+
     @skipIfTorchDynamo("unexplained 3.13+ recursion error")
     def test_confused_hierarchy(self):
         class MyMod(nn.Module):

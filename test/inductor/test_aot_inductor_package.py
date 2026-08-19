@@ -221,6 +221,23 @@ class TestAOTInductorPackage(TestCase):
         )
         self.check_model(Model(), example_inputs)
 
+    def test_int64_floor_divide_tensor_constant_divisor(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.divisor = torch.tensor(3, dtype=torch.int64)
+
+            def forward(self, x):
+                return torch.floor_divide(x, self.divisor)
+
+        example_inputs = (
+            torch.tensor([-5, -1, 0, 7, 8], dtype=torch.int64, device=self.device),
+        )
+        self.check_model(Model(), example_inputs)
+
     def test_remove_intermediate_files(self):
         # For CUDA, generated cpp files contain absolute path to the generated cubin files.
         # With the package artifact, that cubin path should be overridden at the run time,
