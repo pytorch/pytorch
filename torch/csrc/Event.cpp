@@ -47,19 +47,14 @@ static PyObject* THPEvent_pynew(
   THPEvent* self = reinterpret_cast<THPEvent*>(ptr.get());
   self->weakreflist = nullptr;
 
-  // TODO: blocking and interprocess are not supported yet. To support them, the
-  // flag system of c10::Event needs to be refactored. c10::Event should also
-  // provide a generic constructor to support blocking and interprocess events.
-  (void)blocking;
+  // See note [Flags defining the behavior of events]
   (void)interprocess;
+  const c10::EventFlag flag =
+      (enable_timing ? c10::EventFlag::TIMING
+                     : c10::EventFlag::PYTORCH_DEFAULT) |
+      (blocking ? c10::EventFlag::BLOCKING : c10::EventFlag::PYTORCH_DEFAULT);
 
-  new (&self->event) c10::Event(
-      device->type(),
-      // See note [Flags defining the behavior of events]
-      // BACKEND_DEFAULT is an enable-timing flag, and
-      // PYTORCH_DEFAULT is a disable-timing flag.
-      (enable_timing ? c10::EventFlag::BACKEND_DEFAULT
-                     : c10::EventFlag::PYTORCH_DEFAULT));
+  new (&self->event) c10::Event(device->type(), flag);
 
   return static_cast<PyObject*>(ptr.release());
   END_HANDLE_TH_ERRORS

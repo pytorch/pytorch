@@ -54,7 +54,7 @@ TEST(XPUGuardTest, EventBehavior) {
   c10::impl::VirtualGuardImpl impl(device.type());
   c10::Stream stream1 = impl.getStream(device);
   c10::Stream stream2 = impl.getStream(device);
-  c10::Event event1(device.type(), c10::EventFlag::BACKEND_DEFAULT);
+  c10::Event event1(device.type(), c10::EventFlag::TIMING);
   // event is lazily created.
   EXPECT_FALSE(event1.eventId());
 
@@ -99,7 +99,7 @@ TEST(XPUGuardTest, EventBehavior) {
   // ensure deviceData1 and deviceData2 are different buffers.
   int* deviceData2 = sycl::malloc_device<int>(numel, xpu_stream1);
   sycl::free(deviceData1, c10::xpu::get_device_context());
-  c10::Event event2(device.type(), c10::EventFlag::BACKEND_DEFAULT);
+  c10::Event event2(device.type(), c10::EventFlag::TIMING);
 
   // Copy hostData1 to deviceData2 via stream1, and then copy deviceData2 to
   // hostData1 via stream1.
