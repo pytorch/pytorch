@@ -5,6 +5,9 @@ import torch
 import torch._dynamo
 import torch._dynamo.config as config
 import torch._dynamo.test_case
+from torch._dynamo.aot_compile_types import GraphModuleSerializableCallable
+from torch._dynamo.backends.debugging import eager
+from torch._dynamo.output_graph import WrapperBackend
 from torch._dynamo.testing import same
 from torch.fx._lazy_graph_module import _force_skip_lazy_graph_module
 
@@ -60,6 +63,21 @@ def transform(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
 
 @config.patch("verify_correctness", True)
 class TestVerifyCorrectness(torch._dynamo.test_case.TestCase):
+    def test_preserves_serializable_backend_callable(self):
+        gm = torch.fx.symbolic_trace(lambda x: x.sin())
+        x = torch.randn(2, 2)
+        backend = WrapperBackend(eager, track_runtime_modules=True)
+
+        with torch._functorch.config.patch(force_autograd_cache=True):
+            compiled_fn = backend(gm, [x])
+
+        self.assertIsInstance(compiled_fn, GraphModuleSerializableCallable)
+        self.assertTrue(
+            any(
+                ref() is compiled_fn.graph_module for ref in backend.runtime_module_refs
+            )
+        )
+
     def test_example_inputs(self):
         def fn(a, bc, d):
             b, c = bc

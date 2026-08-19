@@ -34,6 +34,7 @@ import torch
 from functorch.compile import min_cut_rematerialization_partition
 from torch import _guards
 from torch._dynamo.output_graph import GraphCompileReason
+from torch._dynamo.utils import wrap_dynamo_runtime_module_call
 from torch._functorch import config as functorch_config
 from torch._functorch.compilers import ts_compile
 from torch._inductor.output_code import OutputCode
@@ -283,6 +284,8 @@ class AOTEagerOutputCode(OutputCode):
     def __call__(self, inputs: Any) -> Any:
         if self.gm is None:
             raise AssertionError("gm must not be None")
+        if torch.nn.modules.module._has_any_global_hook():
+            return wrap_dynamo_runtime_module_call(self.gm.forward, self.gm)(inputs)
         return self.gm.forward(inputs)
 
     def prepare_for_serialization(self) -> None:
@@ -346,7 +349,7 @@ def boxed_nop(
         return forward_fn(args)
 
     run._boxed_call = True  # type: ignore[attr-defined]
-    return run
+    return wrap_dynamo_runtime_module_call(run, fx_g)
 
 
 def boxed_nop_with_mode(
@@ -369,7 +372,7 @@ def boxed_nop_with_mode(
             return forward_fn(args)
 
     run._boxed_call = True  # type: ignore[attr-defined]
-    return run
+    return wrap_dynamo_runtime_module_call(run, fx_g)
 
 
 def fake_crossref_boxed_nop(
@@ -391,7 +394,7 @@ def fake_crossref_boxed_nop(
             return forward_fn(args)
 
     run._boxed_call = True  # type: ignore[attr-defined]
-    return run
+    return wrap_dynamo_runtime_module_call(run, fx_g)
 
 
 def ignore_builtins(op: torch._ops.OpOverload) -> bool:

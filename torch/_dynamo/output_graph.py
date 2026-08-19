@@ -154,6 +154,7 @@ from .utils import (
     counters,
     dynamo_timed,
     get_chromium_event_logger,
+    get_dynamo_runtime_module_refs,
     get_instruction_source_311,
     get_locals_to_steal,
     get_static_address_type,
@@ -164,7 +165,9 @@ from .utils import (
     lazy_format_graph_code,
     LazyString,
     nn_module_proxy,
+    restore_dynamo_runtime_module_refs,
     same,
+    set_dynamo_runtime_module_refs,
     set_example_value,
 )
 from .variables.builder import (
@@ -368,24 +371,52 @@ class FakeRootModule(torch.nn.Module):
 
 
 class WrapperBackend:
-    def __init__(self, backend: CompilerFn) -> None:
+    def __init__(self, backend: CompilerFn, *, track_runtime_modules: bool) -> None:
         self.backend: CompilerFn = backend
+        self.track_runtime_modules = track_runtime_modules
+        self.runtime_module_refs: tuple[
+            weakref.ReferenceType[torch.nn.Module], ...
+        ] = ()
+
+    def _set_runtime_modules(self, *values: Any):
+        if (
+            not self.track_runtime_modules
+            or not torch.nn.modules.module._has_any_global_hook()
+        ):
+            return None
+
+        refs = get_dynamo_runtime_module_refs(*values)
+        if not refs:
+            return None
+        return set_dynamo_runtime_module_refs(refs)
 
     def __call__(
         self, gm: torch.fx.GraphModule, example_inputs: list[torch.Tensor]
     ) -> CompiledFn:
+        self.runtime_module_refs = ()
         self.restore = checkpoint_params(gm)
         self.gm = gm
         copy_gm = copy.deepcopy(self.gm)
-        self.candidate = self.backend(copy_gm, example_inputs)
+        runtime_modules_prior = self._set_runtime_modules(copy_gm)
+        try:
+            self.candidate = self.backend(copy_gm, example_inputs)
+        finally:
+            if runtime_modules_prior is not None:
+                restore_dynamo_runtime_module_refs(runtime_modules_prior)
 
         if self.candidate is None or self.candidate is self.gm.forward:
             return self.gm.forward
+
+        if self.track_runtime_modules:
+            self.runtime_module_refs = get_dynamo_runtime_module_refs(
+                copy_gm, self.candidate
+            )
 
         if not config.verify_correctness:
             return self.candidate
 
         # if verify_correctness=True
+        runtime_modules_prior = self._set_runtime_modules(copy_gm, self.candidate)
         try:
             correct = self.gm.forward(*clone_inputs(example_inputs))
             result = self.candidate(*clone_inputs(example_inputs))
@@ -400,7 +431,14 @@ class WrapperBackend:
             log.exception("error in verify_correctness")
             raise
         finally:
+            if runtime_modules_prior is not None:
+                restore_dynamo_runtime_module_refs(runtime_modules_prior)
             self.restore()
+
+
+class UserCompilerResult(NamedTuple):
+    compiled_fn: CompiledFn
+    runtime_module_refs: tuple[weakref.ReferenceType[torch.nn.Module], ...]
 
 
 Scope = dict[str, object]
@@ -2824,7 +2862,7 @@ class OutputGraph(OutputGraphCommon):
         is enabled, otherwise None.
         """
         with torch._guards.TracingContext.clear_frame():
-            from .decorators import disable
+            from .decorators import _disable_with_runtime_module_refs
 
             if not self.should_exit:
                 raise AssertionError(
@@ -3007,6 +3045,9 @@ class OutputGraph(OutputGraphCommon):
                     example_inputs[idx].fake_device = snapshot.fake_device  # type: ignore[union-attr]
 
             gm.graph.lint()
+            compiler_runtime_module_refs: tuple[
+                weakref.ReferenceType[torch.nn.Module], ...
+            ] = ()
             if is_noop_graph(gm):
                 # The graph can still be empty here even though the early check
                 # in this function passed: we decided to compile because there
@@ -3017,7 +3058,9 @@ class OutputGraph(OutputGraphCommon):
                 compiled_fn = noop_graph_call
             else:
                 with self.restore_global_state():
-                    compiled_fn = self.call_user_compiler(gm, example_inputs)
+                    compiler_result = self.call_user_compiler(gm, example_inputs)
+                    compiled_fn = compiler_result.compiled_fn
+                    compiler_runtime_module_refs = compiler_result.runtime_module_refs
 
             from torch.fx._lazy_graph_module import _LazyGraphModule
 
@@ -3052,6 +3095,13 @@ class OutputGraph(OutputGraphCommon):
             if self.package is not None:
                 self.package.add_backend_id(name, compiled_fn)
 
+            runtime_module_refs = (
+                ()
+                if self.export
+                else get_dynamo_runtime_module_refs(gm, compiled_fn)
+                + compiler_runtime_module_refs
+            )
+
             # If __torch_function__ subclass dispatch was inlined during
             # tracing, wrap the compiled graph to disable __torch_function__
             # at runtime, preventing double dispatch (the C++ dispatcher
@@ -3066,8 +3116,10 @@ class OutputGraph(OutputGraphCommon):
 
                 compiled_fn = _tf_disabled_wrapper
 
-            compiled_fn = disable(
-                compiled_fn, reason="do not trace Dynamo-compiled graph"
+            compiled_fn = _disable_with_runtime_module_refs(
+                compiled_fn,
+                reason="do not trace Dynamo-compiled graph",
+                runtime_module_refs=runtime_module_refs,
             )
 
             counters["stats"]["unique_graphs"] += 1
@@ -3122,8 +3174,26 @@ class OutputGraph(OutputGraphCommon):
                                 gm.meta["specialization"] = specialization
                                 example_inputs: list[Tensor] = list(args)
                                 with tracing(self.tracing_context):
+                                    specialized_result = self.call_user_compiler(
+                                        gm, example_inputs
+                                    )
+                                    specialized_compiled_fn = (
+                                        specialized_result.compiled_fn
+                                    )
+                                    specialized_runtime_module_refs = (
+                                        ()
+                                        if self.export
+                                        else get_dynamo_runtime_module_refs(
+                                            gm, specialized_compiled_fn
+                                        )
+                                        + specialized_result.runtime_module_refs
+                                    )
                                     specialization_cache[specialization] = (
-                                        self.call_user_compiler(gm, example_inputs)
+                                        _disable_with_runtime_module_refs(
+                                            specialized_compiled_fn,
+                                            reason="do not trace Dynamo-compiled graph",
+                                            runtime_module_refs=specialized_runtime_module_refs,
+                                        )
                                     )
 
                             return specialization_cache[specialization](*args, **kwargs)
@@ -3185,7 +3255,7 @@ class OutputGraph(OutputGraphCommon):
 
     def call_user_compiler(
         self, gm: fx.GraphModule, example_inputs: list[Tensor]
-    ) -> CompiledFn:
+    ) -> UserCompilerResult:
         with dynamo_timed(
             "OutputGraph.call_user_compiler",
             phase_name="backend_compile",
@@ -3198,7 +3268,7 @@ class OutputGraph(OutputGraphCommon):
 
     def _call_user_compiler(
         self, gm: fx.GraphModule, example_inputs: list[Tensor]
-    ) -> CompiledFn:
+    ) -> UserCompilerResult:
         if self.compiler_fn is None:
             raise AssertionError("compiler_fn must not be None")
         tot = 0
@@ -3254,9 +3324,24 @@ class OutputGraph(OutputGraphCommon):
 
         try:
             _step_logger()(logging.INFO, f"calling compiler function {name}")
+            wrapper_backend: WrapperBackend | None = None
             if config.verify_correctness:
-                compiler_fn = WrapperBackend(compiler_fn)
-            compiled_fn = compiler_fn(gm, example_inputs)
+                wrapper_backend = WrapperBackend(
+                    compiler_fn, track_runtime_modules=not self.export
+                )
+                compiler_fn = wrapper_backend
+            runtime_modules_prior = None
+            if not self.export and torch.nn.modules.module._has_any_global_hook():
+                runtime_module_refs = get_dynamo_runtime_module_refs(gm)
+                if runtime_module_refs:
+                    runtime_modules_prior = set_dynamo_runtime_module_refs(
+                        runtime_module_refs
+                    )
+            try:
+                compiled_fn = compiler_fn(gm, example_inputs)
+            finally:
+                if runtime_modules_prior is not None:
+                    restore_dynamo_runtime_module_refs(runtime_modules_prior)
             _step_logger()(logging.INFO, f"done compiler function {name}")
             if not callable(compiled_fn):
                 raise AssertionError("compiler_fn did not return callable")
@@ -3299,8 +3384,10 @@ class OutputGraph(OutputGraphCommon):
             },
         )
 
-        # pyrefly: ignore [bad-return]
-        return compiled_fn
+        runtime_module_refs = (
+            wrapper_backend.runtime_module_refs if wrapper_backend is not None else ()
+        )
+        return UserCompilerResult(cast(CompiledFn, compiled_fn), runtime_module_refs)
 
     def dedup_pass(self) -> dict[str, torch.fx.GraphModule]:
         if torch._dynamo.config.use_graph_deduplication:
