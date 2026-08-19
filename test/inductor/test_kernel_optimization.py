@@ -4,7 +4,11 @@ import torch
 import torch._inductor
 from torch._dynamo.utils import counters
 from torch._inductor.test_case import run_tests, TestCase
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
+)
 from torch.testing._internal.common_utils import HardwareClassification, serialTest
 
 
@@ -55,10 +59,9 @@ class TestKernelOptimization(TestCase):
     def compare_gradients(self, module, traced, rtol=1e-3, atol=1e-3):
         ref_grad = {key: param.grad for key, param in module.named_parameters()}
         res_grad = {key: param.grad for key, param in traced.named_parameters()}
-        self.assertTrue(
-            self.compare_dict_tensors(ref_grad, res_grad, rtol, atol=atol)
-        )
+        self.assertTrue(self.compare_dict_tensors(ref_grad, res_grad, rtol, atol=atol))
 
+    @requires_capabilities(Capability.lib.triton)
     @torch._inductor.config.patch(
         pre_grad_fusion_options={
             "einsum_to_pointwise_pass": {},
