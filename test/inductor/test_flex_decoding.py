@@ -25,7 +25,6 @@ from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_BF16,
-    PLATFORM_SUPPORTS_FP8,
     with_tf32_off,
 )
 from torch.testing._internal.common_device_type import (
@@ -104,6 +103,10 @@ device_configs = {
         ),
         dtypes_fast=[torch.float32],
     ),
+    "default": DeviceConfig(
+        dtypes=[torch.float32, torch.bfloat16, torch.float16],
+        dtypes_fast=[torch.float16],
+    ),
 }
 
 if torch.xpu.is_available():
@@ -124,10 +127,7 @@ class parametrize_device_dtype(common_utils.parametrize):
         self.dtypes_attr = dtypes_attr
 
     def _parametrize_test(self, test, generic_cls, device_cls):
-        config = device_configs.get(
-            device_cls.device_type,
-            DeviceConfig(dtypes=[torch.float32], dtypes_fast=[torch.float32]),
-        )
+        config = device_configs.get(device_cls.device_type, device_configs["default"])
         dtypes = getattr(config, self.dtypes_attr)
         for idx, dtype in enumerate(dtypes):
             values = [dtype]
@@ -1665,8 +1665,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @requires_capabilities(Capability.attention.flex_attention)
     @skip_on_cpu
     def test_mixed_dtypes(self, device):
-        dtype_high = torch.float16 if PLATFORM_SUPPORTS_FP8 else torch.float32
-        dtype_low = e4m3_type if PLATFORM_SUPPORTS_FP8 else torch.float16
+        fp8_supported = type(self).get_capabilities().get(Capability.dtype.fp8, False)
+        dtype_high = torch.float16 if fp8_supported else torch.float32
+        dtype_low = e4m3_type if fp8_supported else torch.float16
         query = torch.randn((1, 1, 8, 64), dtype=dtype_high, device=device)
         key = torch.randn((1, 1, 1024, 64), dtype=dtype_high, device=device).to(
             dtype_low
@@ -1683,7 +1684,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @requires_capabilities(Capability.attention.flex_attention)
     @skip_on_cpu
-    @unittest.skipUnless(PLATFORM_SUPPORTS_FP8, "FP8 is not supported on this platform")
+    @requires_capabilities(Capability.dtype.fp8)
     def test_mixed_dtypes_sqnr_per_tensor(self, device):
         query_ref = torch.testing.make_tensor(
             (1, 1, 8, 64), dtype=torch.bfloat16, device=device
@@ -1721,7 +1722,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @requires_capabilities(Capability.attention.flex_attention)
     @skip_on_cpu
-    @unittest.skipUnless(PLATFORM_SUPPORTS_FP8, "FP8 is not supported on this platform")
+    @requires_capabilities(Capability.dtype.fp8)
     def test_mixed_dtypes_sqnr_per_head(self, device):
         query_ref = torch.testing.make_tensor(
             (1, 4, 8, 64), dtype=torch.bfloat16, device=device
@@ -1765,8 +1766,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @requires_capabilities(Capability.attention.flex_attention)
     @skip_on_cpu
     def test_mixed_dtype_backwards(self, device):
-        dtype_high = torch.float16 if PLATFORM_SUPPORTS_FP8 else torch.float32
-        dtype_low = e4m3_type if PLATFORM_SUPPORTS_FP8 else torch.float16
+        fp8_supported = type(self).get_capabilities().get(Capability.dtype.fp8, False)
+        dtype_high = torch.float16 if fp8_supported else torch.float32
+        dtype_low = e4m3_type if fp8_supported else torch.float16
         q = torch.testing.make_tensor(
             (1, 1, 8, 64),
             dtype=dtype_high,
@@ -2371,10 +2373,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             self._check_equal(golden_outs, ref_outs, paged_out, fudge_factor, "Out")
 
 
-instantiate_device_type_tests(TestFlexDecoding, globals(), allow_xpu=True)
-
-
-class TestFlexDecodingCUDA(InductorTestCase):
+class TestFlexDecodingLargeKV(InductorTestCase):
     hw_classification = HardwareClassification.CUDA
 
     @requires_capabilities(Capability.attention.flex_attention)
@@ -2416,7 +2415,8 @@ class TestFlexDecodingCUDA(InductorTestCase):
         torch.testing.assert_close(out, ref, rtol=2e-2, atol=2e-2)
 
 
-instantiate_device_type_tests(TestFlexDecodingCUDA, globals(), only_for="cuda")
+instantiate_device_type_tests(TestFlexDecoding, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestFlexDecodingLargeKV, globals(), only_for="cuda")
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
