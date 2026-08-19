@@ -14,6 +14,12 @@ SET(APL_BIN_SEARCH_PATHS $ENV{ARMPL_DIR}/bin)
 
 SET(APL_FOUND ON)
 
+IF(USE_OPENMP)
+    SET(APL_THREADING_SUFFIX "_mp")
+ELSE()
+    SET(APL_THREADING_SUFFIX "")
+ENDIF()
+
 # Check include file
 FIND_PATH(APL_INCLUDE_DIR NAMES armpl.h PATHS ${APL_INCLUDE_SEARCH_PATHS})
 IF(NOT APL_INCLUDE_DIR)
@@ -22,14 +28,14 @@ IF(NOT APL_INCLUDE_DIR)
 ENDIF()
 
 # Check lib file
-FIND_PATH(APL_LIB_DIR NAMES armpl_lp64.dll.lib libarmpl_lp64.a PATHS ${APL_LIB_SEARCH_PATHS})
+FIND_PATH(APL_LIB_DIR NAMES armpl_lp64${APL_THREADING_SUFFIX}.dll.lib libarmpl_lp64${APL_THREADING_SUFFIX}.a PATHS ${APL_LIB_SEARCH_PATHS})
 IF(NOT APL_LIB_DIR)
     SET(APL_FOUND OFF)
     MESSAGE(STATUS "Could not verify APL lib directory. Turning APL_FOUND off")
 ENDIF()
 
 # Check bin file
-FIND_PATH(APL_BIN_DIR NAMES armpl_lp64.dll armpl-info PATHS ${APL_BIN_SEARCH_PATHS})
+FIND_PATH(APL_BIN_DIR NAMES armpl_lp64${APL_THREADING_SUFFIX}.dll armpl-info PATHS ${APL_BIN_SEARCH_PATHS})
 IF(NOT APL_BIN_DIR)
     SET(APL_FOUND OFF)
     MESSAGE(STATUS "Could not verify APL bin directory. Turning APL_FOUND off")
@@ -38,20 +44,20 @@ ENDIF()
 IF (APL_FOUND)
   IF(WIN32)
     set(APL_LIBRARIES
-      "${APL_LIB_DIR}/armpl_lp64.dll.lib"
+      "${APL_LIB_DIR}/armpl_lp64${APL_THREADING_SUFFIX}.dll.lib"
     )
     set(APL_DLLS
-      "${CMAKE_INSTALL_PREFIX}/lib/armpl_lp64.dll"
+      "${CMAKE_INSTALL_PREFIX}/lib/armpl_lp64${APL_THREADING_SUFFIX}.dll"
     )
     add_custom_command(
       OUTPUT ${APL_DLLS}
       COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_INSTALL_PREFIX}/lib"
-      COMMAND ${CMAKE_COMMAND} -E copy_if_different "${APL_BIN_DIR}/armpl_lp64.dll" "${CMAKE_INSTALL_PREFIX}/lib/armpl_lp64.dll"
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different "${APL_BIN_DIR}/armpl_lp64${APL_THREADING_SUFFIX}.dll" "${CMAKE_INSTALL_PREFIX}/lib/armpl_lp64${APL_THREADING_SUFFIX}.dll"
     )
     add_custom_target(copy_apl_dlls ALL DEPENDS ${APL_DLLS})
   ELSEIF(UNIX)
     set(APL_LIBRARIES
-      "${APL_LIB_DIR}/libarmpl_lp64.a"
+      "${APL_LIB_DIR}/libarmpl_lp64${APL_THREADING_SUFFIX}.a"
     )
   ENDIF()
   MESSAGE(STATUS "Found APL header: ${APL_INCLUDE_DIR}")
