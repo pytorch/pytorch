@@ -406,26 +406,11 @@ class BaseUserFunctionVariable(VariableTracker):
         # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/funcobject.c
         return VariableTracker.build(tx, repr(self.as_python_constant()))
 
-    def call_method(
-        self,
-        tx: "InstructionTranslatorBase",
-        name: str,
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if name == "__setattr__":
-            if args[0].is_constant_match("__annotations__"):
-                self.annotations = args[1]
-                return ConstantVariable.create(None)
-            return self.get_dict_vt(tx).call_method(
-                tx, "__setitem__", list(args), kwargs
-            )
-        elif name == "__delattr__":
-            if args[0].is_constant_match("__annotations__"):
-                self.annotations = None
-                return ConstantVariable.create(None)
-            return self.get_dict_vt(tx).call_method(tx, "__delitem__", list(args), {})
-        return super().call_method(tx, name, list(args), kwargs)
+    def _set_annotations(
+        self, tx: "InstructionTranslatorBase", value: "VariableTracker | None"
+    ) -> "VariableTracker":
+        self.annotations = value
+        return ConstantVariable.create(None)
 
     def _set_annotations(
         self, tx: "InstructionTranslatorBase", value: "VariableTracker | None"

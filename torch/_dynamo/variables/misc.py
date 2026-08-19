@@ -337,8 +337,9 @@ class SuperVariable(VariableTracker):
         elif is_standard_setattr(inner_fn) and isinstance(
             self.objvar, UserDefinedObjectVariable
         ):
-            # type: ignore[arg-type]
-            return self.objvar.method_setattr_standard(tx, *args, **kwargs)
+            from .object_protocol import object_generic_setattr
+
+            return object_generic_setattr(tx, self.objvar, *args)
         elif inner_fn is object.__delattr__:
             attr = args[0]
             try:
@@ -515,18 +516,6 @@ class TracebackVariable(VariableTracker):
     def python_type(self) -> type[types.TracebackType]:
         return types.TracebackType
 
-    def call_setattr(
-        self,
-        tx: "InstructionTranslatorBase",
-        name_var: VariableTracker,
-        val: VariableTracker,
-    ) -> VariableTracker:
-        name = name_var.as_python_constant()
-        getset = self.lookup_tp_getset_member(name)
-        if getset is not None and getset.setter is not None:
-            getset.setter(self, tx, val)
-        return variables.ConstantVariable.create(None)
-
     def _get_tb_next(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         return self.tb_next
 
@@ -581,17 +570,6 @@ class TracebackVariable(VariableTracker):
         from .object_protocol import object_richcompare
 
         return object_richcompare(self, tx, other, op)
-
-    def call_method(
-        self,
-        tx: "InstructionTranslatorBase",
-        name: str,
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if name == "__setattr__":
-            return self.call_setattr(tx, *args)
-        return super().call_method(tx, name, args, kwargs)
 
 
 class ExceptionVariable(VariableTracker):
@@ -668,30 +646,6 @@ class ExceptionVariable(VariableTracker):
         from .object_protocol import object_richcompare
 
         return object_richcompare(self, tx, other, op)
-
-    def call_method(
-        self,
-        tx: "InstructionTranslatorBase",
-        name: str,
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if name == "__setattr__":
-            attr = args[0].as_python_constant()
-            # Writable attributes route through their tp_getset/tp_members
-            # setter. Anything else becomes a custom instance-dict attribute.
-            getset = self.lookup_tp_getset_member(attr)
-            if getset is not None and getset.setter is not None:
-                getset.setter(self, tx, args[1])
-            else:
-                # Arbitrary user attribute -> store in the instance __dict__
-                # via the side effects table.
-                se = tx.output.side_effects
-                if not se.is_attribute_mutation(self):
-                    se.track_attribute_mutation_new(self)
-                se.store_instance_dict_attr(self, attr, args[1])
-            return variables.ConstantVariable.create(None)
-        return super().call_method(tx, name, args, kwargs)
 
     def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
@@ -1491,7 +1445,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if name == "__setattr__":
+        if name in ("__setattr__", "__delattr__"):
             return super().call_method(tx, name, args, kwargs)
         elif name == "mark_non_differentiable":
             if kwargs:
