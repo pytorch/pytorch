@@ -444,7 +444,7 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(D
 #endif
   }
   if (cublasStatus != CUBLAS_STATUS_SUCCESS) {
-    TORCH_WARN(
+    TORCH_WARN_ONCE(
       "bgemm_internal_cublaslt error: ",
       at::cuda::blas::_cublasGetErrorEnum(cublasStatus),
       " when calling cublasLtMatmul with transpose_mat1 ",
@@ -1681,7 +1681,7 @@ bool gemm_and_bias(
 #endif
   }
   if (cublasStatus != CUBLAS_STATUS_SUCCESS) {
-    TORCH_WARN(
+    TORCH_WARN_ONCE(
       "gemm_and_bias error: ",
       at::cuda::blas::_cublasGetErrorEnum(cublasStatus),
       " when calling cublasLtMatmul with transpose_mat1 ",

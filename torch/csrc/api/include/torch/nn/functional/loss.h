@@ -48,7 +48,7 @@ inline Tensor kl_div(
   torch::Reduction::Reduction reduction_enum{};
 
   if (std::holds_alternative<enumtype::kMean>(reduction)) {
-    TORCH_WARN(
+    TORCH_WARN_ONCE(
         "reduction: 'mean' divides the total loss by both the batch size and the support size."
         "'batchmean' divides only by the batch size, and aligns with the KL div math definition."
         "'mean' will be changed to behave the same as 'batchmean' in the next major release.");
@@ -103,7 +103,7 @@ inline Tensor mse_loss(
     const Tensor& target,
     MSELossFuncOptions::reduction_t reduction) {
   if (!(target.sizes() == input.sizes())) {
-    TORCH_WARN(
+    TORCH_WARN_ONCE(
         "Using a target size (",
         target.sizes(),
         ") that is different to the input size (",
@@ -345,7 +345,7 @@ inline Tensor smooth_l1_loss(
     SmoothL1LossFuncOptions::reduction_t reduction,
     std::optional<double> beta_opt = std::nullopt) {
   if (target.sizes() != input.sizes()) {
-    TORCH_WARN(
+    TORCH_WARN_ONCE(
         "Using a target size (",
         target.sizes(),
         ") that is different to the input size (",
@@ -418,7 +418,7 @@ inline Tensor huber_loss(
     HuberLossFuncOptions::reduction_t reduction,
     double delta = 1.) {
   if (target.sizes() != input.sizes()) {
-    TORCH_WARN(
+    TORCH_WARN_ONCE(
         "Using a target size (",
         target.sizes(),
         ") that is different to the input size (",

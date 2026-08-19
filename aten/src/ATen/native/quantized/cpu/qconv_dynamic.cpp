@@ -79,7 +79,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_dynamic(
     const at::Tensor& input,
     bool reduce_range) {
   if (reduce_range) {
-    TORCH_WARN("Currently, qnnpack incorrectly ignores reduce_range when it is set to true; this may change in a future release.");
+    TORCH_WARN_ONCE("Currently, qnnpack incorrectly ignores reduce_range when it is set to true; this may change in a future release.");
   }
 
   // On empty input, no output data will be generated,

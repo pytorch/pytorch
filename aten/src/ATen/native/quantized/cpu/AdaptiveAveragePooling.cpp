@@ -322,8 +322,8 @@ Tensor& adaptive_avg_pool3d_out_quantized_cpu(
     at::Tensor& output) {
 #ifdef USE_PYTORCH_QNNPACK
   if (at::globalContext().qEngine() == at::QEngine::QNNPACK) {
-    TORCH_WARN("Quantized Adaptive Average Pool 3D is not implemented for ",
-               "QNNPACK. Falling back to default implementation.");
+    TORCH_WARN_ONCE("Quantized Adaptive Average Pool 3D is not implemented for ",
+                    "QNNPACK. Falling back to default implementation.");
   }
 #endif
   AT_DISPATCH_QINT_TYPES(

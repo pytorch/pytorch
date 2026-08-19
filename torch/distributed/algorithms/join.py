@@ -248,10 +248,11 @@ class Join:
 
         i = 0
         WARN_THRESHOLD = 1000
-        warnings.simplefilter("once")
 
         while not all_procs_joined:
-            if i > WARN_THRESHOLD:
+            # Warn exactly once when the threshold is crossed; do not touch
+            # the global warning filters (simplefilter would clobber them).
+            if i == WARN_THRESHOLD:
                 warnings.warn(
                     "Detected uneven input skew of greater than "
                     f"{WARN_THRESHOLD}. This means that rank "

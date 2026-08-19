@@ -39,7 +39,7 @@ from torch.testing._internal.common_utils import dtype_name, freeze_rng_state, r
     download_file, get_function_arglist, load_tests, skipIfMPS, MACOS_VERSION, \
     IS_PPC, IS_ARM64, IS_MACOS, IS_WINDOWS, IS_CPU_CAPABILITY_SVE, IS_CPU_EXT_SVE_SUPPORTED, xfailIf, \
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, \
-    skipIfTorchDynamo, gcIfJetson, set_default_dtype, skipIfNoCuteDSL
+    skipIfTorchDynamo, gcIfJetson, set_default_dtype, skipIfNoCuteDSL, set_warn_always_context
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, \
     SM80OrLater, SM90OrLater, _get_torch_rocm_version
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
@@ -2734,13 +2734,17 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 weight.set_(weight_data)
 
             for _ in range(2):
+                # The weight format warning is a TORCH_WARN_ONCE; force
+                # warn-always so this test doesn't depend on being the
+                # first trigger in the process.
                 with warnings.catch_warnings(record=True) as w:
-                    output_noncontig = rnn(input, hx)
+                    warnings.simplefilter("always")
+                    with set_warn_always_context(True):
+                        output_noncontig = rnn(input, hx)
                 if first_warn:
                     self.assertEqual(len(w), 1)
                     self.assertIn('weights are not part of single contiguous chunk of memory', w[0].message.args[0])
                     first_warn = False
-                    warnings.resetwarnings()
                 output_noncontig[0].sum().backward()
                 grads_noncontig = [v.grad.data.clone() for v in all_vars]
                 for v in all_vars:

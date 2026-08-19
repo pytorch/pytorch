@@ -346,7 +346,7 @@ at::Tensor make_contiguous_and_aligned(
   at::Tensor out = memory_format.has_value() ? tensor.contiguous(*memory_format)
                                              : tensor.contiguous();
   if (!is_64_bytes_aligned(out)) {
-    TORCH_WARN(
+    TORCH_WARN_ONCE(
         "Tensor is not 64-byte aligned. Cloning to ensure alignment for oneDNN "
         "operations, which incurs a device-to-device copy.");
     out = out.clone();
