@@ -51,10 +51,6 @@ INPUT_SEED = 42
 TARGET_SEED = 123
 
 
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
-backend = dist.get_default_backend_for_device(device_type)
-
-
 class RMSNorm(nn.Module):
     def __init__(self, dim: int, eps: float = 1e-6):
         super().__init__()
@@ -138,7 +134,7 @@ def _loss_fn(output: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
 def _requires_multi_gpu(func):
     @skip_but_pass_in_sandcastle_if(
         torch.accelerator.device_count() < 4,
-        f"{backend} test requires 4+ GPUs",
+        "Test requires 4+ GPUs",
     )
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
@@ -151,18 +147,8 @@ class DTensorPPIntegrationBase(MultiProcContinuousTest):
     world_size = 4
 
     @classmethod
-    def _resolved_device_type(cls) -> str:
-        # MultiProcContinuousTest subprocesses run tests without calling
-        # PrivateUse1TestBase.setUpClass, so cls.device_type stays the generic
-        # "privateuse1" token; resolve it to the registered backend name.
-        dt = cls.device_type
-        if dt == "privateuse1":
-            dt = torch._C._get_privateuse1_backend_name()
-        return dt
-
-    @classmethod
     def backend_str(cls) -> str:
-        return dist.get_default_backend_for_device(cls._resolved_device_type())
+        return dist.get_default_backend_for_device(cls.device_type)
 
     def _rank_device(self, device: str) -> torch.device:
         device_type = torch.device(device).type
@@ -173,9 +159,7 @@ class DTensorPPIntegrationBase(MultiProcContinuousTest):
             torch.accelerator.set_device_index(rank_device)
 
     def _make_mesh(self) -> DeviceMesh:
-        return init_device_mesh(
-            self._resolved_device_type(), (2, 2), mesh_dim_names=("pp", "tp")
-        )
+        return init_device_mesh(self.device_type, (2, 2), mesh_dim_names=("pp", "tp"))
 
     def _build_baseline_and_clones(
         self,
