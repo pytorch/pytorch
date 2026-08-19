@@ -39,7 +39,7 @@ from torch.testing._internal.common_utils import dtype_name, freeze_rng_state, r
     download_file, get_function_arglist, load_tests, skipIfMPS, MACOS_VERSION, \
     IS_PPC, IS_ARM64, IS_MACOS, IS_WINDOWS, IS_CPU_CAPABILITY_SVE, IS_CPU_EXT_SVE_SUPPORTED, xfailIf, \
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, \
-    skipIfTorchDynamo, gcIfJetson, set_default_dtype, skipIfNoCuteDSL
+    skipIfTorchDynamo, gcIfJetson, set_default_dtype, skipIfNoCuteDSL, isRocmArchAnyOf, MI200_ARCH
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUDNN, \
     SM80OrLater, SM90OrLater, _get_torch_rocm_version
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
@@ -7482,7 +7482,7 @@ class TestNNDeviceType(NNTestCase):
 
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
-    @tf32_on_and_off()
+    @tf32_on_and_off(0.005)
     @reduced_f32_on_and_off()
     def test_affine_2d_rotate0(self, device):
         # scipy before 1.0.0 do not support homogeneous coordinate
@@ -12950,17 +12950,6 @@ if __name__ == '__main__':
     @dtypesIfMPS(torch.float32)
     @dtypes(torch.float32, torch.float64)
     def test_module_to_empty(self, device, dtype):
-        if (
-            TEST_WITH_ROCM
-            and getRocmVersion() >= (7, 14)
-            and torch.device(device).type == "cuda"
-            and dtype == torch.float32
-        ):
-            self.skipTest(
-                "order/state-dependent NotImplementedError regex mismatch on "
-                "ROCm 7.14+ (cuda, float32)"
-            )
-
         class MyModule(nn.Module):
             def __init__(self, in_features, out_features, device=None, dtype=None):
                 super().__init__()
@@ -13795,6 +13784,18 @@ if __name__ == '__main__':
             else:  # compact, fp16 (cpu / cuda / rocm)
                 expected_input_grad_max_ulp_diff = 192  # cpu 93
                 expected_weight_grad_max_ulp_diff = 64  # cpu 23, cuda/rocm 5
+                if "cpu" not in device and isRocmArchAnyOf(MI200_ARCH):
+                    # bf16-grade backward GEMMs (see wb_grad_err_tol below):
+                    # input-grad err measured at 6.39e-3 = 6.54 * eps
+                    # (bias=False; bias=True 4.83 * eps) against the
+                    # feps = 3 * eps cap. 7.5 * eps covers it with ~15%
+                    # headroom while staying under 1 bf16 ulp (8 * eps).
+                    input_grad_err_mult = 7.5
+                    # Measured 206 / 117 (input / weight) against the shared
+                    # 192 / 64 caps; ~2.2-2.5x headroom like the
+                    # reduction='none' MI200 bump above (116 -> 256).
+                    expected_input_grad_max_ulp_diff = 512
+                    expected_weight_grad_max_ulp_diff = 256
         elif prob_target:
             # Probability-target caps with the near-zero ULP floor (see
             # ``grad_max_ulp``). fp32 takes the all-input-dtype path, so
@@ -13848,6 +13849,10 @@ if __name__ == '__main__':
             else:  # compact, fp16
                 expected_input_grad_max_ulp_diff = 48
                 expected_weight_grad_max_ulp_diff = 128
+                if "cpu" not in device and isRocmArchAnyOf(MI200_ARCH):
+                    # bf16-grade backward GEMMs (see wb_grad_err_tol below);
+                    # measured 116 against the shared cap of 48.
+                    expected_input_grad_max_ulp_diff = 256
         elif _resolved_policy == "accurate":
             # bias=False caps are device-independent here (the device-specific
             # spread lived only in the now-dropped bias=True caps).
@@ -13908,6 +13913,21 @@ if __name__ == '__main__':
         # Weight/bias grad_error use feps, except the prob+bias accelerator legs
         # (same cancellation inflates them too) which also get 16*eps.
         wb_grad_err_tol = eta * 16 if prob_bias_accel else feps
+        if "cpu" not in device and dtype == torch.float16 and isRocmArchAnyOf(MI200_ARCH):
+            # MI200 fp16 backward GEMMs use the bf16-intermediate alt
+            # implementation (fp16_on_mi200 in numerical_accuracy.md). The
+            # weight grad error trips its cap there: measured
+            # 3.283e-3 = 3.36 * eps against the feps = 3 * eps cap. Input
+            # grads and the ULP caps pass unchanged except the prob +
+            # reduction='none' legs, whose MI200 input-grad caps live in the
+            # branch above.
+            wb_grad_err_tol = feps * 2
+            if prob_target and none_reduction and _resolved_policy != "accurate":
+                # dW rides the same bf16-grade GEMMs as the input grad on
+                # these legs: weight err measured 6.20e-3 = 6.35 * eps
+                # (bias=True legs 4.17 * eps max) against the feps * 2 cap
+                # above, so it gets the same 7.5 * eps as the input grad.
+                wb_grad_err_tol = eta * 7.5
 
         def diff_ulp(x, y):
             # ULP difference between two normal numbers, applied to
@@ -16101,7 +16121,7 @@ class TestNNCUDA(NNTestCase):
         self.assertEqual(weight_data, all_vars[4].data)
 
     @skipCUDAIfNoCudnn
-    @tf32_on_and_off()
+    @tf32_on_and_off(0.005)
     @parametrize_test('mode,proj_size', [('LSTM', 0), ('LSTM', 10), ('GRU', 0), ('RNN', 0)])
     def test_cudnn_weight_tying(self, device, mode, proj_size):
         rnn_kwargs = {'proj_size': proj_size} if proj_size else {}
@@ -16135,7 +16155,7 @@ class TestNNCUDA(NNTestCase):
         self.assertEqual(output_device, output_cpu)
 
     @skipCUDAIfNoCudnn
-    @tf32_on_and_off()
+    @tf32_on_and_off(0.005)
     def test_RNN_cudnn_weight_norm(self, device):
         input_size = 10
         hidden_size = 6

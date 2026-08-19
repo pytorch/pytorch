@@ -1403,6 +1403,53 @@ print(t.is_pinned())
             self.assertEqual(a, b)
             self.assertEqual(torch.cuda.initial_seed(), 2)
 
+    def _check_lazy_call_reentrant_no_deadlock(self, script):
+        # Separate process: a regression deadlocks the interpreter (non-reentrant lock).
+        # The pass path exits quickly regardless of the limit; the timeout only
+        # bounds failure detection, so keep it generous for slow CI.
+        timeout_sec = 60
+        try:
+            proc = subprocess.run(
+                [sys.executable, "-c", script],
+                capture_output=True,
+                text=True,
+                timeout=timeout_sec,
+            )
+        except subprocess.TimeoutExpired as e:
+            self.fail(
+                f"lazy_call reentrancy subprocess did not finish within {timeout_sec}s "
+                "(likely deadlock in torch.cuda._lazy_call); "
+                f"cmd={e.cmd!r}"
+            )
+        self.assertEqual(
+            proc.returncode,
+            0,
+            msg=f"stdout={proc.stdout!r}\nstderr={proc.stderr!r}",
+        )
+        self.assertIn("done", proc.stdout)
+
+    def test_lazy_call_reentrant_set_rng_state_does_not_deadlock(self):
+        # Reentrant _lazy_call after CUDA is initialized.
+        script = (
+            "import torch; "
+            "torch.cuda.init(); "
+            "state = torch.cuda.get_rng_state(); "
+            "torch.cuda._lazy_call(lambda: torch.cuda.set_rng_state(state)); "
+            "print('done')"
+        )
+        self._check_lazy_call_reentrant_no_deadlock(script)
+
+    def test_lazy_call_reentrant_queued_does_not_deadlock(self):
+        # Reentrant _lazy_call from a queued callback while _lazy_init drains
+        # _queued_calls with _initialization_lock held.
+        script = (
+            "import torch; "
+            "torch.cuda._lazy_call(lambda: torch.cuda.manual_seed(42)); "
+            "torch.cuda.init(); "
+            "print('done')"
+        )
+        self._check_lazy_call_reentrant_no_deadlock(script)
+
     def test_specify_improper_device_name(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             fname = os.path.join(tmpdir, "tempfile.pt")
