@@ -2,6 +2,7 @@
 import torch
 from torch.distributed.fsdp._trace_utils import _ExecOrderTracer
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_fsdp import FSDP_DEVICES
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
@@ -113,7 +114,7 @@ class TestSymbolicTracing(TestCase):
         self.assertEqual(exec_info.visited_params, set(exec_info.param_forward_order))
 
 
-devices = ("cuda", "hpu", "xpu")
+devices = FSDP_DEVICES
 instantiate_device_type_tests(
     TestSymbolicTracing, globals(), only_for=devices, allow_xpu=True
 )

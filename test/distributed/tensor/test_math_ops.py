@@ -376,9 +376,9 @@ class DistMathOpsTest(DTensorTestBase):
         shard_dims = [-1, 0, 1, 2]
         elementwise_affine_list = [False, True]
 
-        # Test RMSNorm as well if CUDA
+        # Test RMSNorm as well if accelerator
         norm_types = [torch.nn.LayerNorm]
-        if self.device_type == "cuda" and hasattr(torch.nn, "RMSNorm"):
+        if self.device_type != "cpu" and hasattr(torch.nn, "RMSNorm"):
             norm_types.append(torch.nn.RMSNorm)
 
         test_config_list = list(
@@ -444,9 +444,9 @@ class DistMathOpsTest(DTensorTestBase):
         shard_dims = [0, 1, 2]
         elementwise_affine_list = [False, True]
 
-        # Test both LayerNorm and RMSNorm (if CUDA)
+        # Test both LayerNorm and RMSNorm (if accelerator)
         norm_types = [torch.nn.LayerNorm]
-        if self.device_type == "cuda" and hasattr(torch.nn, "RMSNorm"):
+        if self.device_type != "cpu" and hasattr(torch.nn, "RMSNorm"):
             norm_types.append(torch.nn.RMSNorm)
 
         test_config_list = list(
@@ -560,9 +560,9 @@ class DistMathOpsTest(DTensorTestBase):
         device_mesh = self.build_device_mesh()
         batch, seq_len, embedding_dim, vocab_size = 8, 8, 10, 32
 
-        # Test both LayerNorm and RMSNorm (if CUDA)
+        # Test both LayerNorm and RMSNorm (if accelerator)
         norm_types = [torch.nn.LayerNorm]
-        if self.device_type == "cuda" and hasattr(torch.nn, "RMSNorm"):
+        if self.device_type != "cpu" and hasattr(torch.nn, "RMSNorm"):
             norm_types.append(torch.nn.RMSNorm)
 
         # build our subtest configurations and filter out invalid ones

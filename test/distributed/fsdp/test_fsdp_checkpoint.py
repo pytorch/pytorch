@@ -19,6 +19,7 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import (
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
+    FSDP_DEVICES,
     _maybe_wrap_fsdp,
     FSDPTest,
     FSDPTestContinuous,
@@ -344,7 +345,7 @@ class TestFSDPCheckpointSubmodule(FSDPTestContinuous):
             self.assertTrue(p1.grad.allclose(p2.grad))
 
 
-devices = ("cuda", "hpu", "xpu")
+devices = FSDP_DEVICES
 instantiate_device_type_tests(
     TestFSDPCheckpointSubmodule, globals(), only_for=devices, allow_xpu=True
 )

@@ -23,6 +23,9 @@ from torch.testing._internal.common_utils import (
 )
 
 
+
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+
 RootGuardManager = guards.RootGuardManager
 DictGuardManager = guards.DictGuardManager
 GetAttrGuardAccessor = guards.GetAttrGuardAccessor

@@ -14,6 +14,25 @@ from torch._C._profiler import gather_traceback, symbolize_tracebacks
 
 logger = logging.getLogger("LoggingTensor")
 
+
+# LoggingTensor passes its (args, kwargs, rs) payload through the LogRecord.args
+# slot (``logger.info(msg, args, kwargs, rs)``) as a channel passing args to
+# LoggingTensorHandler, but the message string has no % specifiers. Any handler
+# that formats the record then breaks: LogRecord.getMessage() runs ``msg % args``
+# and raises "not all arguments converted" (e.g. pytest's LogCaptureHandler under
+# capture_logs). Relocate the payload to record.lt_payload and clear record.args
+# so getMessage() returns the message unchanged for every handler;
+# LoggingTensorHandler.emit reads it back from lt_payload.
+class _RelocateLoggingTensorPayload(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.args and not hasattr(record, "lt_payload"):
+            record.lt_payload = record.args
+            record.args = ()
+        return True
+
+
+logger.addFilter(_RelocateLoggingTensorPayload())
+
 # How the chain of calls works for LoggingTensor:
 # 1. Call torch.sin
 # 2. Attempt __torch_function__. In LoggingTensor torch function is disabled so we bypass it entirely
@@ -116,6 +135,7 @@ class LoggingTensorHandler(logging.Handler):
             return repr(a)
 
     def emit(self, record):
+        args, kwargs, rs = getattr(record, "lt_payload", None) or record.args
         fmt_args = ", ".join(
             itertools.chain(
                 (str(tree_map(self._fmt, a)) for a in record.lt_args),

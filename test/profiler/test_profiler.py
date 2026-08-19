@@ -66,6 +66,8 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     skipIfTorchDynamo,
     TemporaryFileName,
+    TEST_CUDA,
+    TEST_PRIVATEUSE1,
     TEST_WITH_CROSSREF,
     TEST_WITH_ROCM,
     TEST_WITH_SLOW,
@@ -122,6 +124,13 @@ try:
 except ModuleNotFoundError:
     HAS_PSUTIL = False
     psutil = None
+
+
+device_type = (
+    torch.accelerator.current_accelerator().type
+    if torch.accelerator.is_available()
+    else "cpu"
+)
 
 
 @unittest.skipIf(not HAS_PSUTIL, "Requires psutil to run")
@@ -1197,13 +1206,12 @@ class TestProfiler(TestCase):
                                 found_empty_warning = True
                         self.assertTrue(found_empty_warning)
 
-        # Same test but for cuda.
-        use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
-        if not use_cuda:
+        # Same test but for accelerator device.
+        if device_type == "cpu":
             return
 
-        device = torch.device("cuda:0")
-        with _profile(use_device="cuda", use_kineto=use_kineto) as prof:
+        device = torch.device(device_type, 0)
+        with _profile(use_device=device_type, use_kineto=use_kineto) as prof:
             t1, t2 = torch.ones(1, device=device), torch.ones(1, device=device)
             torch.add(t1, t2)
 

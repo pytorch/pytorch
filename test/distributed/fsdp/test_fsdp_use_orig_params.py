@@ -1404,7 +1404,7 @@ class TestMultiTensorApply(TestCase):
         # Check that this does not segfault
         torch._foreach_mul_(size0_tensors, 0.1)
 
-    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "no cuda and no xpu")
+    @unittest.skipIf(not torch.accelerator.is_available(), "no accelerator")
     def test_multi_tensor_apply_size0_tensors_cuda(self):
         size0_tensors = [
             torch.empty(0, device=device_type) for _ in range(NUM_SIZE0_TENSORS)

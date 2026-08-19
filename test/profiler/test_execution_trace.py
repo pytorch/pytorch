@@ -35,6 +35,9 @@ from torch.testing._internal.common_utils import (
     skipIfHpu,
     skipIfTorchDynamo,
     TemporaryFileName,
+    TEST_HPU,
+    TEST_PRIVATEUSE1,
+    TEST_PRIVATEUSE1_DEVICE_TYPE,
     TEST_XPU,
     TestCase,
 )
@@ -55,6 +58,16 @@ except ImportError:
     pass
 
 Json = dict[str, Any]
+
+USE_DEVICE = any(
+    a in supported_activities()
+    for a in (
+        torch.profiler.ProfilerActivity.CUDA,
+        torch.profiler.ProfilerActivity.XPU,
+        torch.profiler.ProfilerActivity.HPU,
+        torch.profiler.ProfilerActivity.PrivateUse1,
+    )
+)
 
 
 class TestExecutionTrace(TestCase):

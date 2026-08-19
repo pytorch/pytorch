@@ -27,7 +27,9 @@ import torch._inductor.compile_fx as compile_fx
 from torch._dynamo import config as dynamo_config
 from torch._dynamo.utils import counters
 from torch._functorch import config as functorch_config
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 from torch._functorch._aot_autograd.autograd_cache import (
+
     AOTAutogradCache,
     AOTAutogradCachePickler,
     autograd_cache_key,

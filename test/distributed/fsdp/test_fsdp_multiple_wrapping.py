@@ -8,7 +8,7 @@ from torch.nn import Linear, Module, Sequential
 from torch.optim import SGD
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import FSDPTestContinuous, get_devtype
+from torch.testing._internal.common_fsdp import FSDP_DEVICES, FSDPTestContinuous, get_devtype
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 
 
@@ -61,7 +61,7 @@ class TestMultipleWrapping(FSDPTestContinuous):
         self.assertEqual(output, rewrapped_output)
 
 
-devices = ("cuda", "hpu", "xpu")
+devices = FSDP_DEVICES
 instantiate_device_type_tests(
     TestMultipleWrapping, globals(), only_for=devices, allow_xpu=True
 )

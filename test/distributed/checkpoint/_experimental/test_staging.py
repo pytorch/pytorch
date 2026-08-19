@@ -83,6 +83,8 @@ class TestDefaultStager(TestCase):
 
     def test_different_option_combinations(self) -> None:
         """Test various combinations of staging options."""
+        has_accelerator = torch.accelerator.is_available()
+
         test_cases = [
             # All disabled
             CheckpointStagerConfig(
@@ -111,19 +113,19 @@ class TestDefaultStager(TestCase):
             # Only async staging
             test_cases.append(
                 CheckpointStagerConfig(
-                    use_pinned_memory=torch.accelerator.is_available(),
+                    use_pinned_memory=True,
                     use_shared_memory=False,
                     use_async_staging=True,
                     use_non_blocking_copy=False,
                 )
             )
-            # Only CUDA non-blocking copy
+            # Only non-blocking copy
             test_cases.append(
                 CheckpointStagerConfig(
-                    use_pinned_memory=torch.accelerator.is_available(),
+                    use_pinned_memory=True,
                     use_shared_memory=False,
                     use_async_staging=False,
-                    use_non_blocking_copy=torch.accelerator.is_available(),
+                    use_non_blocking_copy=True,
                 )
             )
 
@@ -132,7 +134,7 @@ class TestDefaultStager(TestCase):
                 stager = DefaultStager(options)
 
                 # Test staging works with these options
-                if options.use_async_staging and torch.accelerator.is_available():
+                if options.use_async_staging and has_accelerator:
                     result = stager.stage(self.state_dict)
                     self.assertIsInstance(result, Future)
                     staged_dict = result.result()
@@ -161,12 +163,13 @@ class TestDefaultStager(TestCase):
         options = CheckpointStagerConfig(use_async_staging=False)
         stager = DefaultStager(options)
 
-        staged_dict = stager.stage(cuda_state_dict)
+        # Stage the state dict
+        staged_dict = stager.stage(device_state_dict)
         if not isinstance(staged_dict, dict):
             raise AssertionError(f"Expected dict, got {type(staged_dict)}")
 
         # Verify tensors are staged (should be moved to CPU)
-        self.assertIn("cuda_tensor", staged_dict)
+        self.assertIn("device_tensor", staged_dict)
         self.assertIn("cpu_tensor", staged_dict)
         self.assertIn("mixed_model", staged_dict)
 
@@ -186,11 +189,13 @@ class TestDefaultStager(TestCase):
 
     def test_multiple_staging_operations(self) -> None:
         """Test multiple staging operations with the same stager."""
+        has_accelerator = torch.accelerator.is_available()
+
         options = CheckpointStagerConfig(
             use_async_staging=False,
-            use_pinned_memory=torch.accelerator.is_available(),
+            use_pinned_memory=has_accelerator,
             use_shared_memory=False,
-            use_non_blocking_copy=torch.accelerator.is_available(),
+            use_non_blocking_copy=has_accelerator,
         )
         stager = DefaultStager(options)
 

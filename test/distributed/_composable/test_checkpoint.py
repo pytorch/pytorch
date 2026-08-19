@@ -26,7 +26,7 @@ class MemoryDelta(ContextDecorator):
     def __enter__(self):
         self.active_memory_enter = (
             torch.accelerator.memory_stats()["active_bytes.all.current"]
-            if self.device.type == "cuda" or self.device.type == "xpu"
+            if self.device.type in ("cuda", "xpu")
             else 0
         )
         return self
@@ -34,7 +34,7 @@ class MemoryDelta(ContextDecorator):
     def __exit__(self, *exc):
         self.active_memory_exit = (
             torch.accelerator.memory_stats()["active_bytes.all.current"]
-            if self.device.type == "cuda" or self.device.type == "xpu"
+            if self.device.type in ("cuda", "xpu")
             else 0
         )
 

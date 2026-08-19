@@ -24,6 +24,8 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TEST_CUDA,
     TEST_HPU,
+    TEST_PRIVATEUSE1,
+    TEST_XPU,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,

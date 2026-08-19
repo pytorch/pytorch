@@ -8,6 +8,11 @@ import torch._dynamo.testing
 import torch.utils._pytree as python_pytree
 
 
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+)
+
+
 try:
     from . import _test_nested_graph_breaks_helper
 except ImportError:
@@ -765,7 +770,7 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
             return x
 
         # test normal graph break
-        x = torch.zeros(3)
+        x = torch.zeros(3, device=device_type)
 
         def inner1(x):
             x += 1
@@ -775,7 +780,7 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref, torch.zeros(3) + 7)
 
         # test step graph break
-        x = torch.zeros(3)
+        x = torch.zeros(3, device=device_type)
 
         def inner2(x):
             x += 1
@@ -821,7 +826,7 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         inner3.__code__ = inner3_code
 
         torch._dynamo.utils.counters.clear()
-        x = torch.zeros(3)
+        x = torch.zeros(3, device=device_type)
         ref = f3(inner3, x)
         self.assertEqual(ref, torch.zeros(3) + 1006)
         # make sure we're actually STORE_ATTR graph breaking
@@ -844,7 +849,7 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
             x += 4
             return f2(inner4, x)
 
-        x = torch.zeros(3)
+        x = torch.zeros(3, device=device_type)
         ref = f4(x)
         self.assertEqual(ref, torch.zeros(3) + 15)
 

@@ -36,7 +36,8 @@ class TensorParallelAPITests(DTensorTestBase):
     @property
     def world_size(self):
         gpu_num = torch.accelerator.device_count()
-        return gpu_num if gpu_num % 2 == 0 and gpu_num > 4 else 4
+        ws = gpu_num if gpu_num % 2 == 0 and gpu_num > 4 else 4
+        return min(ws, 8)
 
     def _compare_params(
         self,

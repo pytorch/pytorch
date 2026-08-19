@@ -22,8 +22,12 @@ class ShardedTensorTestBase(MultiProcessTestCase):
         return TEST_GPU_NUM
 
     def init_pg(self, backend="nccl"):
-        if backend not in ["nccl", "gloo", "mpi", "hccl", "xccl"]:
-            raise RuntimeError(f"Backend {backend} not supported!")
+        if backend not in ["nccl", "gloo", "mpi", "hccl"]:
+            if torch.accelerator.is_available():
+                device_type = torch.accelerator.current_accelerator().type
+                backend = dist.Backend.default_device_backend_map[device_type]
+            else:
+                raise RuntimeError(f"Backend {backend} not supported!")
 
         dist.init_process_group(
             backend=backend,

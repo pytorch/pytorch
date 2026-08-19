@@ -33,9 +33,17 @@ from torch.testing._internal.common_utils import (
     parametrize,
     subtest,
 )
-from torch.testing._internal.triton_utils import requires_gpu_and_triton
+from torch.testing._internal.triton_utils import (
+    requires_accelerator_and_triton,
+    requires_gpu_and_triton,
+)
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._python_dispatch import return_and_correct_aliasing
+
+
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+)
 
 
 def nontraceable_subclass(c):
@@ -1216,7 +1224,7 @@ class SubclassTests(_SubclassCompileCheckMixin, torch._dynamo.test_case.TestCase
             res = x * y + z
             return res
 
-        x0 = torch.randn(2, 2)
+        x0 = torch.randn(2, 2, device=device_type)
         x1 = x0.clone()
 
         fn_opt = compile_full_eager(fn)
@@ -4801,7 +4809,7 @@ class GraphModule(torch.nn.Module):
     def test_basic_autograd(self):
         self._test_autograd("aot_eager")
 
-    @requires_gpu_and_triton
+    @requires_accelerator_and_triton
     def test_basic_autograd_inductor(self):
         self._test_autograd("inductor")
 

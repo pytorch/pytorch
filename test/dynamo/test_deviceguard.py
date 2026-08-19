@@ -8,6 +8,9 @@ from torch._dynamo.device_interface import DeviceGuard, get_interface_for_device
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 
 
+
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+
 class TestDeviceGuard(torch._dynamo.test_case.TestCase):
     """
     Unit tests for the DeviceGuard class using a mock DeviceInterface.
