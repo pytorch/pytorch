@@ -134,9 +134,7 @@ CUSPARSE_SPMM_COMPLEX128_SUPPORTED = (
     IS_WINDOWS and torch.version.cuda
 ) or (not IS_WINDOWS and not TEST_WITH_ROCM)
 
-HIPSPARSE_SPMM_COMPLEX128_SUPPORTED = (
-    TEST_WITH_ROCM and ROCM_VERSION >= (6, 0)
-)
+HIPSPARSE_SPMM_COMPLEX128_SUPPORTED = ROCM_VERSION >= (6, 0)
 
 def all_sparse_layouts(test_name='layout', include_strided=False):
     return parametrize(test_name, [

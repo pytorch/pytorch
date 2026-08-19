@@ -736,7 +736,9 @@ def get_env_info():
             hip_runtime_version = get_version_or_na(cfg, "HIP Runtime")
             miopen_runtime_version = get_version_or_na(cfg, "MIOpen")
             cuda_version_str = "N/A"
-            rocm_compiled_version = getattr(torch.version, "rocm", None)
+            # Older wheels have no torch.version.rocm; pretty_str would
+            # otherwise render None as "Could not collect".
+            rocm_compiled_version = getattr(torch.version, "rocm", None) or "N/A"
             hip_compiled_version = torch.version.hip
     else:
         version_str = debug_mode_str = cuda_available_str = cuda_version_str = xpu_available_str = "N/A"  # type: ignore[assignment]

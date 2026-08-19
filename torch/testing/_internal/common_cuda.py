@@ -505,10 +505,9 @@ def _get_torch_cuda_version():
     return tuple(int(x) for x in cuda_version.split("."))
 
 def _get_torch_rocm_version():
-    rocm_version = getattr(torch.version, "rocm", None) or torch.version.hip
+    rocm_version = torch.version.rocm or torch.version.hip
     if rocm_version is None:
         return (0, 0)
-    rocm_version = str(rocm_version)
     rocm_version = rocm_version.split("-", maxsplit=1)[0]    # ignore git sha
     return tuple(int(x) for x in rocm_version.split("."))
 

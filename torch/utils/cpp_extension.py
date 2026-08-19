@@ -359,8 +359,8 @@ HIP_HOME = _join_rocm_home('hip') if ROCM_HOME else None
 IS_HIP_EXTENSION = bool(ROCM_HOME is not None and torch.version.hip is not None)
 ROCM_VERSION = None
 if torch.version.hip is not None:
-    _rocm_version_str = getattr(torch.version, "rocm", None) or torch.version.hip
-    ROCM_VERSION = tuple(int(v) for v in str(_rocm_version_str).split('.')[:2])
+    _rocm_version_str = torch.version.rocm or torch.version.hip
+    ROCM_VERSION = tuple(int(v) for v in _rocm_version_str.split('.')[:2])
 
 CUDA_HOME = _find_cuda_home() if (torch.cuda._is_compiled() and torch.version.cuda) else None
 CUDNN_HOME = os.environ.get('CUDNN_HOME') or os.environ.get('CUDNN_PATH')
@@ -2819,8 +2819,8 @@ def _get_build_directory(name: str, verbose: bool) -> str:
         # Note: torch.backends.cuda.is_built() returns True for both CUDA and ROCm,
         # so we need to check torch.version.hip to distinguish them
         if torch.version.hip is not None:
-            _rocm_version_str = getattr(torch.version, "rocm", None) or torch.version.hip
-            accelerator_str = f'rocm{str(_rocm_version_str).replace(".", "")}'
+            _rocm_version_str = torch.version.rocm or torch.version.hip
+            accelerator_str = f'rocm{_rocm_version_str.replace(".", "")}'
         elif torch.version.cuda is not None:
             accelerator_str = f'cu{torch.version.cuda.replace(".", "")}'
         else:
