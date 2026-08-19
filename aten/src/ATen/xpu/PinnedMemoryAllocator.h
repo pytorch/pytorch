@@ -1,7 +1,8 @@
 #pragma once
 
-#include <ATen/xpu/CachingHostAllocator.h>
+#include <ATen/core/CachingHostAllocator.h>
 #include <c10/core/Allocator.h>
+#include <c10/macros/Export.h>
 
 namespace at::xpu {
 
