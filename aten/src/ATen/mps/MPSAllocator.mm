@@ -580,13 +580,21 @@ void MPSHeapAllocatorImpl::garbage_collect_cached_buffers(AllocParams& params) {
 }
 
 // public interface to MPSAllocator
-id<MTLBuffer> MPSHeapAllocatorImpl::malloc(size_t size, uint32_t usage, bool allow_in_flight_reuse) {
+id<MTLBuffer> MPSHeapAllocatorImpl::malloc(size_t size, uint32_t usage) {
   std::lock_guard<std::recursive_mutex> lock(m_mutex);
 
   // Return any buffers parked in-flight by free() whose GPU work has since
   // completed back to their pools before serving this allocation.
   freeInactiveBuffers();
-  BufferBlock* buffer_block = alloc_buffer_block(size, usage, allow_in_flight_reuse);
+  BufferBlock* buffer_block = alloc_buffer_block(size, usage, /*allow_in_flight_reuse=*/true);
+  return buffer_block ? buffer_block->buffer : nullptr;
+}
+
+id<MTLBuffer> MPSHeapAllocatorImpl::malloc_host(size_t size, uint32_t usage) {
+  std::lock_guard<std::recursive_mutex> lock(m_mutex);
+
+  freeInactiveBuffers();
+  BufferBlock* buffer_block = alloc_buffer_block(size, usage, /*allow_in_flight_reuse=*/false);
   return buffer_block ? buffer_block->buffer : nullptr;
 }
 
@@ -892,10 +900,12 @@ struct TORCH_API MPSAllocator final : public IMPSAllocator {
   }
 
   DataPtr allocate(const size_t nbytes) override {
-    return allocate(nbytes, /*allow_in_flight_reuse=*/true);
+    __block id<MTLBuffer> buf = nbytes > 0 ? _getAllocImpl().malloc(nbytes, m_usage) : nullptr;
+    return {buf, buf, &Delete, at::Device(at::DeviceType::MPS, 0)};
   }
   DataPtr allocateForHost(const size_t nbytes) {
-    return allocate(nbytes, /*allow_in_flight_reuse=*/false);
+    __block id<MTLBuffer> buf = nbytes > 0 ? _getAllocImpl().malloc_host(nbytes, m_usage) : nullptr;
+    return {buf, buf, &Delete, at::Device(at::DeviceType::MPS, 0)};
   }
 
   // implementation of IMPSAllocator interface
@@ -994,11 +1004,6 @@ struct TORCH_API MPSAllocator final : public IMPSAllocator {
   }
 
  private:
-  DataPtr allocate(const size_t nbytes, bool allow_in_flight_reuse) {
-    __block id<MTLBuffer> buf = nbytes > 0 ? _getAllocImpl().malloc(nbytes, m_usage, allow_in_flight_reuse) : nullptr;
-    return {buf, buf, &Delete, at::Device(at::DeviceType::MPS, 0)};
-  }
-
   uint32_t m_usage;
 
   static void Delete(void* ptr) {

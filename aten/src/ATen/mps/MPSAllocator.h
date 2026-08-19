@@ -298,7 +298,10 @@ class MPSHeapAllocatorImpl {
     emptyCache();
   }
   // interface exposed to at::Allocator
-  id<MTLBuffer> malloc(size_t size, uint32_t usage, bool allow_in_flight_reuse);
+  id<MTLBuffer> malloc(size_t size, uint32_t usage);
+  // same as malloc(), but for memory the CPU accesses immediately: never
+  // reuses a cached buffer still retained by in-flight GPU work
+  id<MTLBuffer> malloc_host(size_t size, uint32_t usage);
   // frees a buffer and returns it into buffer pool
   void free(void* ptr);
   // releases all the cached buffers and their associated heaps
