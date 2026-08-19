@@ -79,7 +79,50 @@ class CppWrapperAssertTests(InductorTestCase):
         compiled = torch.compile(fn)
         expected_error = (
             "Expect the tensor to be 16 bytes aligned. "
-            "Fail due to storage_offset=1 itemsize=4"
+            r"Data pointer is misaligned by [1-9][0-9]* bytes "
+            r"\(storage_offset=1, itemsize=4\)"
+        )
+        with self.assertRaisesRegex(RuntimeError, expected_error):
+            compiled(torch.randn(8, 24))
+
+    @config.patch(
+        cpp_wrapper=True,
+        fx_graph_cache=False,
+        implicit_fallbacks=True,
+        alignment_asserts=True,
+    )
+    def test_fallback_output_alignment_assert_checks_data_pointer(self):
+        def misaligned_base(x):
+            storage = bytearray(x.numel() * x.element_size() + 16)
+            base = torch.frombuffer(storage, dtype=torch.uint8)
+            offset = 1 if (base.data_ptr() + 1) % 16 else 2
+            result = torch.frombuffer(
+                storage,
+                dtype=x.dtype,
+                count=x.numel(),
+                offset=offset,
+            ).reshape(x.shape)
+            if result.storage_offset() != 0:
+                raise AssertionError("expected external storage_offset to be zero")
+            if result.data_ptr() % 16 == 0:
+                raise AssertionError("expected external storage to be misaligned")
+            return result
+
+        def misaligned_base_meta(x):
+            return torch.empty_like(x)
+
+        op_name = unique_op_name("misaligned_base_assert")
+        define_custom_op_for_test(op_name, misaligned_base, misaligned_base_meta)
+
+        def fn(x):
+            a = torch.nn.functional.relu(x)
+            return torch.cos(getattr(torch.ops.test_cpp_wrapper_asserts, op_name)(a))
+
+        compiled = torch.compile(fn)
+        expected_error = (
+            "Expect the tensor to be 16 bytes aligned. "
+            r"Data pointer is misaligned by [1-9][0-9]* bytes "
+            r"\(storage_offset=0, itemsize=4\)"
         )
         with self.assertRaisesRegex(RuntimeError, expected_error):
             compiled(torch.randn(8, 24))

@@ -7,7 +7,7 @@ namespace torch::jit {
 // Eliminates common inputs among `aten::cat` ops.
 TORCH_API bool EliminateConcatCommonInputs(const std::shared_ptr<Graph>& graph);
 
-// Expands `aten::cat` ops into `aten::copy` ops and eliminates redudancies
+// Expands `aten::cat` ops into `aten::copy` ops and eliminates redundancies
 // in the buffers used for concatenation if possible.
 TORCH_API void ExpandConcatAndEliminateRedundancy(
     const std::shared_ptr<Graph>& graph);

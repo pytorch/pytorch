@@ -317,8 +317,8 @@ struct ElementwiseInterpreter : torch::CustomClassHolder {
     if (inputs.size() != input_names_.size()) {
       std::stringstream err;
       err << "Expected " << input_names_.size() << " inputs, but got "
-          << inputs.size() << "!";
-      throw std::runtime_error(err.str());
+          << inputs.size() << '!';
+      throw std::runtime_error(std::move(err).str());
     }
     for (size_t i = 0; i < inputs.size(); ++i) {
       environment[input_names_[i]] = inputs[i];
@@ -340,8 +340,8 @@ struct ElementwiseInterpreter : torch::CustomClassHolder {
           inputs.push_back(constants_.at(input_name));
         } else {
           std::stringstream err;
-          err << "Instruction referenced unknown value " << input_name << "!";
-          throw std::runtime_error(err.str());
+          err << "Instruction referenced unknown value " << input_name << '!';
+          throw std::runtime_error(std::move(err).str());
         }
       }
 
@@ -360,8 +360,8 @@ struct ElementwiseInterpreter : torch::CustomClassHolder {
         result = inputs[0] * inputs[1];
       } else {
         std::stringstream err;
-        err << "Unknown operator " << op << "!";
-        throw std::runtime_error(err.str());
+        err << "Unknown operator " << op << '!';
+        throw std::runtime_error(std::move(err).str());
       }
 
       // Write back result into environment
@@ -599,15 +599,15 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
           "__str__",
           [](const c10::intrusive_ptr<MyStackClass<std::string>>& self) {
             std::stringstream ss;
-            ss << "[";
+            ss << '[';
             for (size_t i = 0; i < self->stack_.size(); ++i) {
               ss << self->stack_[i];
               if (i != self->stack_.size() - 1) {
                 ss << ", ";
               }
             }
-            ss << "]";
-            return ss.str();
+            ss << ']';
+            return std::move(ss).str();
           });
   // clang-format off
         // The following will fail with a static assert telling you you have to

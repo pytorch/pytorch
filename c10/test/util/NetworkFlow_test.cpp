@@ -31,7 +31,7 @@ void expect_vector_contains_subset(
         ss << e << ", ";
       }
       ss << "}, but couldn't find " << element;
-      FAIL() << ss.str();
+      FAIL() << std::move(ss).str();
     }
   }
 }

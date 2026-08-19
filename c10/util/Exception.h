@@ -12,6 +12,7 @@
 #include <exception>
 #include <memory>
 #include <string>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -331,8 +332,8 @@ class C10_API AcceleratorError : public Error {
   int32_t error_code;
 
  public:
-  AcceleratorError(SourceLocation loc, int32_t code, const std::string& msg)
-      : Error(loc, msg), error_code(code) {}
+  AcceleratorError(SourceLocation loc, int32_t code, std::string msg)
+      : Error(loc, std::move(msg)), error_code(code) {}
   int32_t get_error_code() const {
     return error_code;
   }

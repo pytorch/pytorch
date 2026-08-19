@@ -10,7 +10,6 @@ from torch._inductor.fx_passes.pad_mm import (
     get_alignment_size,
     get_pad_cache,
     get_padded_length,
-    is_mm_compute_bound,
     should_pad_mm_bf16,
 )
 from torch._inductor.test_case import run_tests, TestCase
@@ -193,20 +192,36 @@ class PadMMTest(TestCase):
         b = torch.randn(10, 100).to(GPU_TYPE)
         self.assertEqual(torch.compile(addmm)(x, a, b), addmm(x, a, b))
 
-    @unittest.skipIf(GPU_TYPE != "cuda", "TF32 matmul is CUDA-specific")
+    @fresh_cache()
     @inductor_config.patch(shape_padding=True)
-    def test_can_pad_non_contiguous_fp32_tf32(self):
-        old_precision = torch.get_float32_matmul_precision()
-        try:
-            torch.set_float32_matmul_precision("high")
+    @unittest.skipIf(
+        GPU_TYPE != "cuda",
+        "CUDA eager ignores addmm input shape when beta=0",
+    )
+    def test_addmm_beta_zero_mismatched_bias_skips_padding(self):
+        def addmm(bias, x, weight):
+            return torch.addmm(bias, x, weight, beta=0.0, alpha=0.1)
 
-            mat1 = rand_strided((7, 4), (1, 8), device=GPU_TYPE, dtype=torch.float32)
-            mat2 = torch.randn((4, 4), device=GPU_TYPE, dtype=torch.float32)
+        def bench(fn):
+            fn()
+            return 1.0
 
-            self.assertFalse(can_pad(mat1, mat2, torch.ops.aten.mm))
-            self.assertTrue(can_pad(mat1.contiguous(), mat2, torch.ops.aten.mm))
-        finally:
-            torch.set_float32_matmul_precision(old_precision)
+        bias = torch.zeros(8, device=GPU_TYPE)
+        x = torch.randn(2, 8, device=GPU_TYPE)
+        weight = torch.randn(8, 13, device=GPU_TYPE)
+
+        with (
+            unittest.mock.patch(
+                "torch._inductor.fx_passes.pad_mm.is_mm_compute_bound",
+                return_value=True,
+            ),
+            unittest.mock.patch(
+                "torch._inductor.fx_passes.pad_mm.get_do_bench",
+                return_value=bench,
+            ),
+        ):
+            actual = torch.compile(addmm, fullgraph=True)(bias, x, weight)
+        self.assertEqual(actual, addmm(bias, x, weight))
 
     @inductor_config.patch(
         max_autotune=True, max_autotune_gemm_backends="TRITON", force_shape_pad=True
@@ -435,38 +450,49 @@ class PadMMTest(TestCase):
 
     @fresh_cache()
     def test_exclude_padding(self):
+        def bench(fn):
+            fn()
+            return 1.0
+
         @torch.compile()
         def mm(a, b):
             return a @ b
 
-        # Size must be big enough that `is_mm_compute_bound` returns True on
-        # the current GPU, and must still need padding to 4 elements.
-        dim = 61
-        while not is_mm_compute_bound(dim, dim, dim, torch.float32):
-            dim += 4
-        size = [dim, dim]
-        mm(torch.rand(size, device=GPU_TYPE), torch.rand(size, device=GPU_TYPE))
-        local_cache = get_pad_cache().get_local_cache()
-        self.assertEqual(len(local_cache), 2)
-        FileCheck().check_count("exclude_pad:False", 2, exactly=True).run(
-            repr(local_cache)
-        )
+        # Size must require padding to 4 elements; the compute-bound heuristic is
+        # patched below so the cache-key assertions do not depend on GPU model.
+        size = [61, 61]
+        with (
+            unittest.mock.patch(
+                "torch._inductor.fx_passes.pad_mm.is_mm_compute_bound",
+                return_value=True,
+            ),
+            unittest.mock.patch(
+                "torch._inductor.fx_passes.pad_mm.get_do_bench",
+                return_value=bench,
+            ),
+        ):
+            mm(torch.rand(size, device=GPU_TYPE), torch.rand(size, device=GPU_TYPE))
+            local_cache = get_pad_cache().get_local_cache()
+            self.assertEqual(len(local_cache), 2)
+            FileCheck().check_count("exclude_pad:False", 2, exactly=True).run(
+                repr(local_cache)
+            )
 
-        @torch.compile()
-        def mm(a, b):
-            return (a + 1) @ b
+            @torch.compile()
+            def mm(a, b):
+                return (a + 1) @ b
 
-        mm(torch.rand(size, device=GPU_TYPE), torch.rand(size, device=GPU_TYPE))
-        local_cache = get_pad_cache().get_local_cache()
-        # reuse original base timing
-        self.assertEqual(len(local_cache), 3)
+            mm(torch.rand(size, device=GPU_TYPE), torch.rand(size, device=GPU_TYPE))
+            local_cache = get_pad_cache().get_local_cache()
+            # reuse original base timing
+            self.assertEqual(len(local_cache), 3)
 
-        FileCheck().check_count("exclude_pad:False", 3, exactly=True).run(
-            repr(local_cache)
-        )
-        FileCheck().check_count("exclude_pad:True", 1, exactly=True).run(
-            repr(local_cache)
-        )
+            FileCheck().check_count("exclude_pad:False", 3, exactly=True).run(
+                repr(local_cache)
+            )
+            FileCheck().check_count("exclude_pad:True", 1, exactly=True).run(
+                repr(local_cache)
+            )
 
     @fresh_cache()
     @inductor_config.patch(max_pointwise_cat_inputs=2)
@@ -535,7 +561,9 @@ class PadMMTest(TestCase):
         {
             "triton.unique_kernel_names": "original_aten",
             "max_autotune_gemm_backends": "TRITON",
-            "shape_padding": True,
+            # Force padding so it is applied regardless of the device-dependent
+            # is_mm_compute_bound checks in should_pad_common.
+            "force_shape_pad": True,
         }
     )
     def test_original_aten_preserved_pad_mm(self):
@@ -671,6 +699,23 @@ class PadMMTest(TestCase):
         torch.compiler.reset()
         torch.manual_seed(42)
         test_masked_mha(B, H, S, D, device, dtype)
+
+    @inductor_config.patch(force_shape_pad=True, strict_output_strides=True)
+    def test_pad_mm_output_strides_preserved(self):
+        """Regression test: pad_mm creates views with padded strides.
+        User-visible output strides must match eager execution."""
+
+        def fn(x, y):
+            return torch.mm(x, y)
+
+        # N=2 gets padded to 4, so the mm output is (3, 4) sliced to (3, 2),
+        # creating a view with stride (4, 1) instead of the expected (2, 1).
+        x = torch.randn(3, 5, device=GPU_TYPE)
+        y = torch.randn(5, 2, device=GPU_TYPE)
+        expected = fn(x, y)
+        compiled = torch.compile(fn)(x, y)
+        self.assertEqual(compiled, expected)
+        self.assertEqual(compiled.stride(), expected.stride())
 
 
 if __name__ == "__main__":

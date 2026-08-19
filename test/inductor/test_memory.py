@@ -8,7 +8,7 @@ from torch._dynamo.utils import same
 from torch._inductor import config, memory
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_triton_code
-from torch.testing._internal.common_utils import serialTest, skipIfXpu
+from torch.testing._internal.common_utils import serialTest
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -240,7 +240,6 @@ class TestOperatorReorderForPeakMemory(TestCase):
             outp = compiled_model(self.inputs)
             self.assertTrue(same(outp, outp_corr))
 
-    @skipIfXpu(msg="Blocked by https://github.com/pytorch/pytorch/issues/170049")
     @mock.patch.object(config, "allow_buffer_reuse", False)
     @unittest.skipUnless(TRITON_AVAILABLE, "Triton is not available")
     @config.patch("test_configs.track_memory_lifecycle", "assert")
@@ -547,7 +546,7 @@ class TestOperatorReorderForPeakMemory(TestCase):
                 base_order,
                 peak_mem_order,
                 msg=(
-                    f"torch.cond operations were reordered by reorder_for_peak_memory!\n"
+                    lambda msg: f"{msg}\ntorch.cond operations were reordered by reorder_for_peak_memory!\n"
                     f"Base order: {base_order}\n"
                     f"Peak memory order: {peak_mem_order}\n"
                     f"This can cause NCCL hangs when torch.cond contains collective operations "
