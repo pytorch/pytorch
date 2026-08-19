@@ -12,6 +12,9 @@ import unittest
 import warnings
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
+from unittest import mock
+
+import sympy
 
 import torch
 import torch._dynamo.config as dynamo_config
@@ -19,7 +22,8 @@ import torch.nn as nn
 from torch._dynamo.backends.debugging import aot_eager_decomp_partition_with_mode
 from torch._dynamo.utils import counters
 from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
-from torch._inductor import config
+from torch._higher_order_ops.invoke_subgraph import get_invoke_subgraph_compile_options
+from torch._inductor import config, ir
 from torch._inductor.codecache import FxGraphCache
 from torch._inductor.compile_fx import compile_fx_inner
 from torch._inductor.cudagraph_trees import (
@@ -28,8 +32,10 @@ from torch._inductor.cudagraph_trees import (
     ExecutionState,
 )
 from torch._inductor.cudagraph_utils import PlaceholderInfo
+from torch._inductor.scheduler import Scheduler
 from torch._inductor.test_case import TestCase as InductorTestCase
-from torch._inductor.utils import run_and_get_code
+from torch._inductor.utils import run_and_get_code, run_fw_bw_and_get_code
+from torch._inductor.virtualized import V
 from torch._ops import OpOverload
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.immutable_collections import immutable_dict
@@ -159,6 +165,16 @@ class CUDAGraphAPIOnlyTests(TestCase):
         existing_devices = tuple(containers)
         torch.compiler.cudagraph_mark_warmup_incomplete()
         self.assertEqual(tuple(containers), existing_devices)
+
+
+def _module_def_body(code: str, header: str) -> str:
+    """Return the indented body of the module-level def starting at `header`."""
+    body = []
+    for line in code.split(header, 1)[1].splitlines():
+        if line and not line[0].isspace():
+            break
+        body.append(line)
+    return "\n".join(body)
 
 
 if HAS_CUDA_AND_TRITON:
@@ -464,6 +480,624 @@ if HAS_CUDA_AND_TRITON:
                 FileCheck().check(
                     "skipping cudagraphs due to graph with symbolic shapes inputs"
                 ).run(utils_log_stream.getvalue())
+
+        @dynamo_config.patch("enable_invoke_subgraph_regional_compile", True)
+        @dynamo_config.patch("inline_single_use_invoke_subgraph", False)
+        @config.patch("graph_partition", False)
+        @config.patch("triton.cudagraphs", False)
+        def test_invoke_subgraph_region_cudagraph_optin(self):
+            # Region opts in, enclosing graph off, graph_partition globally off:
+            # the region becomes its own cudagraph partition, the add stays inline.
+            nested_config = get_invoke_subgraph_compile_options(
+                fw_inductor_config_patches={"triton.cudagraphs": True}
+            )
+
+            @torch.compiler.nested_compile_region(options=nested_config)
+            def g(x, y):
+                return torch.cos(x), torch.sin(y)
+
+            def fn(x, y):
+                a, b = g(x, y)
+                return a + b
+
+            opt_fn = torch.compile(fn, fullgraph=True)
+            x = torch.randn(10, 4, device="cuda")
+            y = torch.randn(10, 4, device="cuda")
+            result, codes = run_and_get_code(lambda: opt_fn(x, y))
+
+            self.assertEqual(result, fn(x, y))
+            code = codes[0]
+            self.assertIn("def partition_0(args):", code)
+            self.assertIn("def repeated_subgraph0(args):", code)
+            # The region launcher runs inside the cudagraph partition fn.
+            partition_body = _module_def_body(code, "def partition_0(args):")
+            self.assertIn("repeated_subgraph0(", partition_body)
+
+            for _ in range(3):
+                self.assertEqual(opt_fn(x, y), fn(x, y))
+            self.assertIsNotNone(self.get_manager())
+            self.assertGreater(self.get_manager().new_graph_id().id, 0)
+
+        @dynamo_config.patch("enable_invoke_subgraph_regional_compile", True)
+        @dynamo_config.patch("inline_single_use_invoke_subgraph", False)
+        @config.patch("graph_partition", False)
+        def test_invoke_subgraph_region_cudagraph_optout(self):
+            # Region opts out, enclosing graph on, graph_partition globally off:
+            # the region is excluded from the cudagraph, the rest is captured.
+            nested_config = get_invoke_subgraph_compile_options(
+                fw_inductor_config_patches={"triton.cudagraphs": False}
+            )
+
+            @torch.compiler.nested_compile_region(options=nested_config)
+            def g(x, y):
+                return torch.cos(x), torch.sin(y)
+
+            def fn(x, y):
+                a, b = g(x, y)
+                return a + b
+
+            opt_fn = torch.compile(fn, fullgraph=True)
+            x = torch.randn(10, 4, device="cuda")
+            y = torch.randn(10, 4, device="cuda")
+            result, codes = run_and_get_code(lambda: opt_fn(x, y))
+
+            self.assertEqual(result, fn(x, y))
+            code = codes[0]
+            self.assertIn("def partition_0(args):", code)
+            # The region launcher is not inside the cudagraph partition fn.
+            partition_body = _module_def_body(code, "def partition_0(args):")
+            self.assertNotIn("repeated_subgraph0(", partition_body)
+
+            for _ in range(3):
+                self.assertEqual(opt_fn(x, y), fn(x, y))
+            self.assertIsNotNone(self.get_manager())
+            self.assertGreater(self.get_manager().new_graph_id().id, 0)
+
+        @dynamo_config.patch("enable_invoke_subgraph_regional_compile", True)
+        @dynamo_config.patch("inline_single_use_invoke_subgraph", False)
+        @config.patch("graph_partition", False)
+        @config.patch("triton.cudagraphs", False)
+        def test_invoke_subgraph_region_cudagraph_unsafe_body_skips(self):
+            # Region opts in but its body has a non-cudagraphable op (a host
+            # round-trip), so cudagraphs are skipped for it; result still correct.
+            nested_config = get_invoke_subgraph_compile_options(
+                fw_inductor_config_patches={"triton.cudagraphs": True}
+            )
+
+            @torch.compiler.nested_compile_region(options=nested_config)
+            def g(x, y):
+                return torch.cos(x), torch.sin(y).cpu().cuda()
+
+            def fn(x, y):
+                a, b = g(x, y)
+                return a + b
+
+            opt_fn = torch.compile(fn, fullgraph=True)
+            x = torch.randn(10, 4, device="cuda")
+            y = torch.randn(10, 4, device="cuda")
+            result, codes = run_and_get_code(lambda: opt_fn(x, y))
+
+            self.assertEqual(result, fn(x, y))
+            # The unsafe region is not turned into a cudagraph partition.
+            self.assertNotIn("def partition_0(args):", codes[0])
+
+            for _ in range(3):
+                self.assertEqual(opt_fn(x, y), fn(x, y))
+            self.assertIsNone(self.get_manager())
+
+        @dynamo_config.patch("enable_invoke_subgraph_regional_compile", True)
+        @dynamo_config.patch("inline_single_use_invoke_subgraph", False)
+        @config.patch("graph_partition", False)
+        @config.patch("triton.cudagraphs", False)
+        @config.patch("implicit_fallbacks", True)
+        def test_invoke_subgraph_region_cudagraph_nested_unsafe_body_skips(self):
+            # An opted-in region whose body contains a nested region with a
+            # cudagraph-unsafe op must not be captured: the body check recurses
+            # into nested regions rather than treating them as safe.
+            nested_config = get_invoke_subgraph_compile_options(
+                fw_inductor_config_patches={"triton.cudagraphs": True}
+            )
+
+            @torch.library.custom_op(
+                "mylib::nested_region_cg_unsafe",
+                mutates_args=[],
+                schema="(Tensor x) -> Tensor",
+                device_types="cuda",
+                tags=(torch._C.Tag.cudagraph_unsafe,),
+            )
+            def nested_region_cg_unsafe(x) -> torch.Tensor:
+                return x + 1
+
+            @nested_region_cg_unsafe.register_fake
+            def _(x) -> torch.Tensor:
+                return torch.empty_like(x)
+
+            @torch.compiler.nested_compile_region(options=nested_config)
+            def inner(y):
+                return torch.ops.mylib.nested_region_cg_unsafe(y)
+
+            @torch.compiler.nested_compile_region(options=nested_config)
+            def outer(x, y):
+                return torch.cos(x), inner(y)
+
+            def fn(x, y):
+                a, b = outer(x, y)
+                return a + b
+
+            opt_fn = torch.compile(fn, fullgraph=True)
+            x = torch.randn(10, 4, device="cuda")
+            y = torch.randn(10, 4, device="cuda")
+            result, codes = run_and_get_code(lambda: opt_fn(x, y))
+
+            self.assertEqual(result, fn(x, y))
+            # The outer region is not captured; its nested body is unsafe.
+            self.assertNotIn("def partition_0(args):", codes[0])
+
+            for _ in range(3):
+                self.assertEqual(opt_fn(x, y), fn(x, y))
+            self.assertIsNone(self.get_manager())
+
+        @dynamo_config.patch("enable_invoke_subgraph_regional_compile", True)
+        @dynamo_config.patch("inline_single_use_invoke_subgraph", False)
+        @config.patch("graph_partition", False)
+        @config.patch("triton.cudagraphs", False)
+        def test_invoke_subgraph_region_cudagraph_backward_optin(self):
+            # The region opts its backward into cudagraphs via
+            # bw_inductor_config_patches while the forward stays off: only the
+            # backward region becomes its own cudagraph partition.
+            nested_config = get_invoke_subgraph_compile_options(
+                bw_inductor_config_patches={"triton.cudagraphs": True}
+            )
+
+            @torch.compiler.nested_compile_region(options=nested_config)
+            def g(x, y):
+                return torch.cos(x), torch.sin(y)
+
+            def fn(x, y):
+                a, b = g(x, y)
+                return (a + b).sum()
+
+            opt_fn = torch.compile(fn, fullgraph=True)
+            x = torch.randn(10, 4, device="cuda", requires_grad=True)
+            y = torch.randn(10, 4, device="cuda", requires_grad=True)
+            result, codes = run_fw_bw_and_get_code(lambda: opt_fn(x, y))
+
+            self.assertEqual(result, fn(x, y))
+            self.assertEqual(len(codes), 2)
+            fw_code, bw_code = codes
+            # Forward is not a cudagraph partition; the backward region is.
+            self.assertNotIn("def partition_0(args):", fw_code)
+            self.assertIn("def partition_0(args):", bw_code)
+            # The backward region launcher runs inside the cudagraph partition fn.
+            bw_partition_body = _module_def_body(bw_code, "def partition_0(args):")
+            self.assertIn("partitioned_bw_subgraph_0_0(", bw_partition_body)
+
+            for _ in range(3):
+                # Null grads before each backward; cudagraphs manages the grad
+                # buffers and accumulation would overwrite captured outputs.
+                x.grad = None
+                y.grad = None
+                opt_fn(x, y).backward()
+            self.assertIsNotNone(self.get_manager())
+            self.assertGreater(self.get_manager().new_graph_id().id, 0)
+
+        @dynamo_config.patch("enable_invoke_subgraph_regional_compile", True)
+        @dynamo_config.patch("inline_single_use_invoke_subgraph", False)
+        @config.patch("graph_partition", False)
+        @config.patch("triton.cudagraphs", False)
+        def test_invoke_subgraph_region_cudagraph_fw_bw_optin(self):
+            # The region opts into cudagraphs for the forward, and the backward
+            # reuses the forward config (the default), so both opt in. Both the
+            # forward and backward regions must become their own cudagraph
+            # partitions, independently of the enclosing graph which stays off.
+            nested_config = get_invoke_subgraph_compile_options(
+                fw_inductor_config_patches={"triton.cudagraphs": True}
+            )
+
+            @torch.compiler.nested_compile_region(options=nested_config)
+            def g(x, y):
+                return torch.cos(x), torch.sin(y)
+
+            def fn(x, y):
+                a, b = g(x, y)
+                return (a + b).sum()
+
+            opt_fn = torch.compile(fn, fullgraph=True)
+            x = torch.randn(10, 4, device="cuda", requires_grad=True)
+            y = torch.randn(10, 4, device="cuda", requires_grad=True)
+            result, codes = run_fw_bw_and_get_code(lambda: opt_fn(x, y))
+
+            self.assertEqual(result, fn(x, y))
+            self.assertEqual(len(codes), 2)
+            fw_code, bw_code = codes
+            # Both the forward and backward regions are cudagraph partitions.
+            self.assertIn("def partition_0(args):", fw_code)
+            self.assertIn("def partition_0(args):", bw_code)
+            # The region launchers run inside their cudagraph partition fns.
+            fw_partition_body = _module_def_body(fw_code, "def partition_0(args):")
+            self.assertIn("partitioned_fw_subgraph_0_0(", fw_partition_body)
+            bw_partition_body = _module_def_body(bw_code, "def partition_0(args):")
+            self.assertIn("partitioned_bw_subgraph_0_0(", bw_partition_body)
+
+            for _ in range(3):
+                x.grad = None
+                y.grad = None
+                opt_fn(x, y).backward()
+            self.assertIsNotNone(self.get_manager())
+            self.assertGreater(self.get_manager().new_graph_id().id, 0)
+
+        @dynamo_config.patch("enable_invoke_subgraph_regional_compile", True)
+        @dynamo_config.patch("inline_single_use_invoke_subgraph", False)
+        @config.patch("graph_partition", False)
+        @config.patch("triton.cudagraphs", False)
+        @config.patch("triton.cudagraph_skip_dynamic_graphs", True)
+        def test_invoke_subgraph_region_cudagraph_dynamic_body_skips(self):
+            # Region opts in, but its body has dynamic shapes and
+            # cudagraph_skip_dynamic_graphs is set, so cudagraphs are skipped for
+            # it (the body is captured as a unit, so the per-node dynamic-shape
+            # check is applied over the body here).
+            nested_config = get_invoke_subgraph_compile_options(
+                fw_inductor_config_patches={"triton.cudagraphs": True}
+            )
+
+            @torch.compiler.nested_compile_region(options=nested_config)
+            def g(x, y):
+                return torch.cos(x), torch.sin(y)
+
+            def fn(x, y):
+                a, b = g(x, y)
+                return a + b
+
+            opt_fn = torch.compile(fn, fullgraph=True)
+            x = torch.randn(10, 4, device="cuda")
+            y = torch.randn(10, 4, device="cuda")
+            torch._dynamo.mark_dynamic(x, 0)
+            torch._dynamo.mark_dynamic(y, 0)
+            result, codes = run_and_get_code(lambda: opt_fn(x, y))
+
+            self.assertEqual(result, fn(x, y))
+            # The dynamic-shape region body is not turned into a cudagraph partition.
+            self.assertNotIn("def partition_0(args):", codes[0])
+            self.assertIsNone(self.get_manager())
+
+        def _check_region_cudagraph_aot_cache_hit(
+            self, opt_fn, eager_fn, expect_manager=True, with_backward=True
+        ):
+            counters.clear()
+            AOTAutogradCache.clear()
+            FxGraphCache.clear()
+
+            def run():
+                x = torch.randn(10, 4, device="cuda", requires_grad=with_backward)
+                y = torch.randn(10, 4, device="cuda", requires_grad=with_backward)
+                result = opt_fn(x, y)
+                if with_backward:
+                    result.backward()
+                self.assertEqual(result, eager_fn(x, y))
+
+            run()
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+            torch._dynamo.reset()
+            torch._inductor.cudagraph_trees.reset_cudagraph_trees()
+
+            with (
+                mock.patch(
+                    "torch._inductor.output_code.cudagraph_post_compile",
+                    wraps=torch._inductor.output_code.cudagraph_post_compile,
+                ) as whole_graph_post_compile,
+                mock.patch(
+                    "torch._inductor.output_code.cudagraph_partition_post_compile",
+                    wraps=torch._inductor.output_code.cudagraph_partition_post_compile,
+                ) as partition_post_compile,
+            ):
+                run()
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+            self.assertEqual(whole_graph_post_compile.call_count, 0)
+            self.assertGreater(partition_post_compile.call_count, 0)
+            if expect_manager:
+                self.assertIsNotNone(self.get_manager())
+            else:
+                self.assertIsNone(self.get_manager())
+
+        @dynamo_config.patch("enable_invoke_subgraph_regional_compile", True)
+        @dynamo_config.patch("inline_single_use_invoke_subgraph", False)
+        @config.patch("graph_partition", False)
+        def test_invoke_subgraph_region_cudagraph_optout_aot_cache_hit(self):
+            nested_config = get_invoke_subgraph_compile_options(
+                fw_inductor_config_patches={"triton.cudagraphs": False}
+            )
+
+            @torch.compiler.nested_compile_region(options=nested_config)
+            def g(y):
+                return torch.sin(y).cpu().cuda()
+
+            def fn(x, y):
+                return (torch.cos(x) + g(y)).sum()
+
+            self._check_region_cudagraph_aot_cache_hit(
+                torch.compile(fn, fullgraph=True), fn
+            )
+
+        @dynamo_config.patch("enable_invoke_subgraph_regional_compile", True)
+        @dynamo_config.patch("inline_single_use_invoke_subgraph", False)
+        @config.patch("graph_partition", False)
+        @config.patch("triton.cudagraphs", False)
+        def test_invoke_subgraph_region_cudagraph_unsafe_optin_aot_cache_hit(self):
+            nested_config = get_invoke_subgraph_compile_options(
+                fw_inductor_config_patches={"triton.cudagraphs": True}
+            )
+
+            @torch.compiler.nested_compile_region(options=nested_config)
+            def g(y):
+                return torch.sin(y).cpu().cuda()
+
+            def fn(x, y):
+                return (torch.cos(x) + g(y)).sum()
+
+            self._check_region_cudagraph_aot_cache_hit(
+                torch.compile(fn, fullgraph=True),
+                fn,
+                expect_manager=False,
+                with_backward=False,
+            )
+
+        @dynamo_config.patch("enable_invoke_subgraph_regional_compile", True)
+        @dynamo_config.patch("inline_single_use_invoke_subgraph", False)
+        @config.patch("graph_partition", False)
+        @config.patch("triton.cudagraphs", False)
+        @parametrize("fw_cudagraphs,bw_cudagraphs", [(None, True), (True, False)])
+        def test_invoke_subgraph_region_cudagraph_directional_aot_cache_hit(
+            self, fw_cudagraphs, bw_cudagraphs
+        ):
+            nested_config = get_invoke_subgraph_compile_options(
+                fw_inductor_config_patches=(
+                    {"triton.cudagraphs": fw_cudagraphs}
+                    if fw_cudagraphs is not None
+                    else None
+                ),
+                bw_inductor_config_patches={"triton.cudagraphs": bw_cudagraphs},
+            )
+
+            @torch.compiler.nested_compile_region(options=nested_config)
+            def g(x, y):
+                return torch.cos(x), torch.sin(y)
+
+            def fn(x, y):
+                a, b = g(x, y)
+                return (a + b).sum()
+
+            self._check_region_cudagraph_aot_cache_hit(
+                torch.compile(fn, fullgraph=True), fn
+            )
+
+        @parametrize("annotated_first", (False, True))
+        def test_cudagraph_backward_override_affects_aot_cache_key(
+            self, annotated_first
+        ):
+            counters.clear()
+            AOTAutogradCache.clear()
+            FxGraphCache.clear()
+
+            def fn(x):
+                return torch.sin(x).sum()
+
+            def run(annotated):
+                torch._dynamo.reset()
+                x = torch.randn(10, 4, device="cuda", requires_grad=True)
+                if annotated:
+                    with torch._dynamo.override_cudagraphs(bwd=False):
+                        result = torch.compile(fn, fullgraph=True)(x)
+                else:
+                    result = torch.compile(fn, fullgraph=True)(x)
+                result.backward()
+
+            run(annotated_first)
+            run(not annotated_first)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+
+        @config.patch("triton.cudagraphs", True)
+        @config.patch("triton.cudagraph_skip_dynamic_graphs", True)
+        @parametrize("node_type", ("invoke_subgraph", "multi_output"))
+        def test_invoke_subgraph_region_cudagraph_optin_runs_scheduler_checks(
+            self, node_type
+        ):
+            subgraph = object.__new__(ir.Subgraph)
+            subgraph.inductor_config_patches = {"triton.cudagraphs": True}
+            region = object.__new__(ir.InvokeSubgraph)
+            region.subgraph = subgraph
+            region.name = "region"
+            multi_output = object.__new__(ir.MultiOutput)
+            multi_output.name = "multi_output"
+            multi_output.inputs = [region]
+            region.outputs = [multi_output]
+            region_node = mock.Mock()
+            region_node.node = region
+            multi_output_node = mock.Mock()
+            multi_output_node.node = multi_output
+            node = region_node if node_type == "invoke_subgraph" else multi_output_node
+            scheduler = object.__new__(Scheduler)
+            scheduler.name_to_buf = {}
+            scheduler.name_to_node = {
+                "region": region_node,
+                "multi_output": multi_output_node,
+            }
+
+            with (
+                mock.patch.object(
+                    Scheduler,
+                    "_invoke_subgraph_body_cudagraph_skip_reason",
+                    return_value=None,
+                ),
+                mock.patch.object(
+                    Scheduler, "_ir_node_cudagraph_skip_reason", return_value=None
+                ),
+            ):
+                region_node.is_gpu.return_value = False
+                region_node.get_device.return_value = torch.device("cpu")
+                multi_output_node.is_gpu.return_value = True
+                self.assertEqual(scheduler.should_partition(node), "cpu ops")
+
+                region_node.is_gpu.return_value = True
+                with (
+                    mock.patch.object(
+                        Scheduler,
+                        "_uses_cudagraph_unsafe_unbacked_symint",
+                        side_effect=lambda snode: (
+                            "unsafe unbacked symint"
+                            if snode is multi_output_node
+                            else None
+                        ),
+                    ),
+                    mock.patch(
+                        "torch._inductor.scheduler.get_scheduler_node_symbol_uses",
+                        return_value=set(),
+                    ),
+                ):
+                    self.assertEqual(
+                        scheduler.should_partition(node), "unsafe unbacked symint"
+                    )
+
+                with (
+                    mock.patch.object(
+                        Scheduler,
+                        "_uses_cudagraph_unsafe_unbacked_symint",
+                        return_value=None,
+                    ),
+                    mock.patch(
+                        "torch._inductor.scheduler.get_scheduler_node_symbol_uses",
+                        side_effect=lambda snode: (
+                            {sympy.Symbol("s0")}
+                            if snode is multi_output_node
+                            else set()
+                        ),
+                    ),
+                ):
+                    self.assertEqual(
+                        scheduler.should_partition(node), "dynamic shape ops"
+                    )
+
+        @config.patch("triton.cudagraph_skip_dynamic_graphs", True)
+        def test_invoke_subgraph_nested_dynamic_output_layout_skips(self):
+            symbol = sympy.Symbol("s0")
+            nested_output = object.__new__(ir.MultiOutput)
+            nested_output.name = "nested_output"
+            nested_output.layout = ir.FixedLayout(
+                torch.device("cuda"), torch.float32, [symbol], [1]
+            )
+            nested_output.inputs = []
+            nested_output.mutation_outputs = []
+
+            nested_graph = mock.Mock(operations=[], device_types={"cuda"})
+            nested_subgraph = object.__new__(ir.Subgraph)
+            nested_subgraph.graph = nested_graph
+            nested_region = object.__new__(ir.InvokeSubgraph)
+            nested_region.name = "nested_region"
+            nested_region.layout = ir.MultiOutputLayout(device=torch.device("cuda"))
+            nested_region.inputs = []
+            nested_region.mutation_outputs = []
+            nested_region.outputs = [nested_output]
+            nested_region.subgraph = nested_subgraph
+            nested_output.inputs = [nested_region]
+
+            outer_graph = mock.Mock(
+                operations=[nested_region, nested_output], device_types={"cuda"}
+            )
+            outer_subgraph = object.__new__(ir.Subgraph)
+            outer_subgraph.graph = outer_graph
+            outer_region = object.__new__(ir.InvokeSubgraph)
+            outer_region.subgraph = outer_subgraph
+
+            scheduler = object.__new__(Scheduler)
+            with (
+                mock.patch.object(
+                    Scheduler, "_ir_node_cudagraph_skip_reason", return_value=None
+                ),
+                mock.patch.object(
+                    ir.InvokeSubgraph, "get_free_symbol_uses", return_value=set()
+                ),
+            ):
+                self.assertEqual(
+                    scheduler._invoke_subgraph_body_cudagraph_skip_reason(outer_region),
+                    "invoke_subgraph body has dynamic shape ops",
+                )
+
+        @config.patch("triton.cudagraph_skip_dynamic_graphs", False)
+        def test_invoke_subgraph_while_loop_unsafe_body_skips(self):
+            unsafe_op = mock.Mock()
+            unsafe_op.get_subgraphs.return_value = []
+            unsafe_op.get_free_symbol_uses.return_value = set()
+            unsafe_op.get_outputs.return_value = []
+
+            cond_graph = mock.Mock(operations=[], device_types={"cuda"})
+            body_graph = mock.Mock(operations=[unsafe_op], device_types={"cuda"})
+            cond_subgraph = object.__new__(ir.Subgraph)
+            cond_subgraph.graph = cond_graph
+            body_subgraph = object.__new__(ir.Subgraph)
+            body_subgraph.graph = body_graph
+            while_loop = object.__new__(ir.WhileLoop)
+            while_loop.cond_subgraph = cond_subgraph
+            while_loop.body_subgraph = body_subgraph
+            while_loop.inputs = []
+            while_loop.constant_args = []
+            while_loop.kwargs = {}
+            while_loop.layout = ir.MultiOutputLayout(device=torch.device("cuda"))
+            while_loop.mutation_outputs = []
+            while_loop.outputs = []
+
+            outer_graph = mock.Mock(operations=[while_loop], device_types={"cuda"})
+            outer_subgraph = object.__new__(ir.Subgraph)
+            outer_subgraph.graph = outer_graph
+            outer_region = object.__new__(ir.InvokeSubgraph)
+            outer_region.subgraph = outer_subgraph
+
+            scheduler = object.__new__(Scheduler)
+            with mock.patch.object(
+                Scheduler,
+                "_ir_node_cudagraph_skip_reason",
+                side_effect=lambda op: "CUDAGraph-unsafe custom ops"
+                if op is unsafe_op
+                else None,
+            ):
+                self.assertEqual(
+                    scheduler._invoke_subgraph_body_cudagraph_skip_reason(outer_region),
+                    "invoke_subgraph body has CUDAGraph-unsafe custom ops",
+                )
+
+        @config.patch("triton.cudagraph_skip_dynamic_graphs", False)
+        @config.patch("cudagraph_unsafe_unbacked_ops", ["aten::item"])
+        def test_invoke_subgraph_unsafe_unbacked_symint_body_skips(self):
+            symbol = sympy.Symbol("u0", integer=True, nonnegative=True)
+            unsafe_op = object.__new__(ir.FallbackKernel)
+            unsafe_op.op_overload = aten.item.default
+            unsafe_op.get_unbacked_symbol_defs = mock.Mock(return_value={symbol})
+            unsafe_op.get_subgraphs = mock.Mock(return_value=[])
+            unsafe_op.get_free_symbol_uses = mock.Mock(return_value=set())
+            unsafe_op.get_outputs = mock.Mock(return_value=[])
+            consumer = mock.Mock()
+            consumer.get_subgraphs.return_value = []
+            consumer.get_free_symbol_uses.return_value = {symbol}
+            consumer.get_outputs.return_value = []
+
+            body = mock.Mock(operations=[unsafe_op, consumer], device_types={"cuda"})
+            subgraph = object.__new__(ir.Subgraph)
+            subgraph.graph = body
+            region = object.__new__(ir.InvokeSubgraph)
+            region.subgraph = subgraph
+
+            graph = mock.Mock()
+            graph.sizevars.simplify.side_effect = lambda expr: expr
+            scheduler = object.__new__(Scheduler)
+            with (
+                V.set_graph_handler(graph),
+                mock.patch.object(
+                    Scheduler, "_ir_node_cudagraph_skip_reason", return_value=None
+                ),
+            ):
+                self.assertEqual(
+                    scheduler._invoke_subgraph_body_cudagraph_skip_reason(region),
+                    "invoke_subgraph body uses cudagraph-unsafe unbacked symint: u0",
+                )
 
         @parametrize("backend", ("inductor", "cudagraphs"))
         @torch._dynamo.config.patch("cudagraph_backend_keep_input_mutation", True)
@@ -4856,16 +5490,18 @@ if HAS_CUDA_AND_TRITON:
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_no_partition_keeps_static(self):
             # When graph_partition is enabled but the forward has no unsafe
-            # ops, forward_is_partitioned should be False and all saved
+            # ops, forward_is_cudagraph_partitioned should be False and all saved
             # tensors remain static in the backward.
             from unittest.mock import patch
 
-            forward_partitioned = None
+            forward_cudagraph_partitioned = None
             orig_bw = torch._inductor.compile_fx.compile_fx_backward
 
             def intercept_bw(gm, example_inputs, compiler_config_extra, **kwargs):
-                nonlocal forward_partitioned
-                forward_partitioned = compiler_config_extra.forward_is_partitioned.value
+                nonlocal forward_cudagraph_partitioned
+                forward_cudagraph_partitioned = (
+                    compiler_config_extra.forward_is_cudagraph_partitioned.value
+                )
                 return orig_bw(gm, example_inputs, compiler_config_extra, **kwargs)
 
             class Mod(torch.nn.Module):
@@ -4889,7 +5525,7 @@ if HAS_CUDA_AND_TRITON:
                 loss.backward()
                 optimizer.step()
 
-            self.assertFalse(forward_partitioned)
+            self.assertFalse(forward_cudagraph_partitioned)
 
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_cpu_only(self):

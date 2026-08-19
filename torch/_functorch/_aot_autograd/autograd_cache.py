@@ -862,13 +862,20 @@ def create_fx_config(
     compile_region_name: str | None = None,
 ) -> _CompileFxKwargs:
     if compiler_config_extra is None:
-        cudagraphs = BoxedBool(torch._inductor.config.triton.cudagraphs)
+        forward_cudagraphs = BoxedBool(torch._inductor.config.triton.cudagraphs)
+        backward_cudagraphs_annotation_override = None
         boxed_forward_device_index = None
     else:
-        cudagraphs = compiler_config_extra.cudagraphs
-        boxed_forward_device_index = compiler_config_extra.forward_device
+        forward_cudagraphs = compiler_config_extra.forward_cudagraphs
+        backward_cudagraphs_annotation_override = (
+            compiler_config_extra.backward_cudagraphs_annotation_override
+        )
+        boxed_forward_device_index = compiler_config_extra.forward_device_index
     return {
-        "cudagraphs": cudagraphs,
+        "cudagraphs": forward_cudagraphs,
+        "backward_cudagraphs_annotation_override": (
+            backward_cudagraphs_annotation_override
+        ),
         "boxed_forward_device_index": boxed_forward_device_index,
         "compile_region_name": compile_region_name,  # pyrefly: ignore[bad-typed-dict-key]
     }
