@@ -2796,7 +2796,7 @@ static int THPVariable_set_data(
 
 static std::optional<at::ScalarType> get_effective_grad_dtype(
     const Variable& var) {
-  const auto grad_fn = var.grad_fn();
+  const auto& grad_fn = var.grad_fn();
   if (grad_fn) {
     return grad_fn->input_metadata(var.output_nr()).grad_dtype();
   }
