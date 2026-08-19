@@ -11,6 +11,7 @@ from torch._inductor import config
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
 )
@@ -28,6 +29,8 @@ importlib.import_module("filelock")
 
 @instantiate_parametrized_tests
 class CodegenInductorTest(InductorTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def run_and_compare(
         self,
         func: Callable[..., Any],
