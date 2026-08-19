@@ -1813,13 +1813,15 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         except NotImplementedError:
             return False
 
-    def nb_bool_impl(self, tx: InstructionTranslatorBase) -> VariableTracker | None:
+    def nb_bool_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
         # Mirrors CPython's tp_as_number->nb_bool slot.
         # https://github.com/python/cpython/blob/c09ccd9c429/Objects/object.c#L2135-L2158
-        #
-        # Returns None when the type has no nb_bool, causing generic_is_true to
-        # fall through to length check, then truthy default.
-        return None
+        unimplemented(
+            gb_type="Missing nb_bool_impl override",
+            context=f"nb_bool_impl {self}",
+            explanation=f"{type(self).__name__} does not implement nb_bool_impl. Add a nb_bool_impl override to {type(self).__name__}.",
+            hints=[*graph_break_hints.DYNAMO_BUG],
+        )
 
     def is_hashable(self) -> bool:
         """Whether the underlying Python object is hashable.

@@ -806,6 +806,10 @@ class RangeVariable(BaseListVariable):
     def step(self) -> int:
         return guard_if_dyn(self.items[2])
 
+    def nb_bool_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        # ref: range_bool in https://github.com/python/cpython/blob/v3.13.0/Objects/rangeobject.c#L740-L744
+        return ConstantVariable.create(self.range_length() != 0)
+
     def range_length(self) -> int:
         lo = self.start()
         hi = self.stop()
@@ -1415,6 +1419,14 @@ class DequeVariable(BaseListVariable):
         op: str,
     ) -> VariableTracker:
         return self._seq_richcompare(tx, other, op, collections.deque)
+
+    if sys.version_info < (3, 11):
+
+        def nb_bool_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+            # deque fills nb_bool (deque_bool: Py_SIZE(deque) != 0) up to Python
+            # 3.10; CPython GH-32397 dropped the slot in 3.11, so newer versions
+            # fall through to sq_length in generic_is_true and never reach here.
+            return ConstantVariable.create(len(self.items) > 0)
 
     def is_hashable(self) -> bool:
         return False

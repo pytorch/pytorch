@@ -391,9 +391,7 @@ def generic_is_true(
             raise_observed_exception(type(e), tx, args=[str(e)])
 
     if obj.tp_as_number.nb_bool:
-        result = obj.nb_bool_impl(tx)
-        if result is not None:
-            return result
+        return obj.nb_bool_impl(tx)
 
     try:
         length = generic_size(tx, obj)

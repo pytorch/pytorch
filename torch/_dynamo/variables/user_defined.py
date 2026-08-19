@@ -1900,7 +1900,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def nb_bool_impl(
         self,
         tx: "InstructionTranslatorBase",
-    ) -> "VariableTracker | None":
+    ) -> "VariableTracker":
         # Mirrors slot_nb_bool:
         # https://github.com/python/cpython/blob/c09ccd9c429/Objects/typeobject.c#L9408-L9458
         res = self._maybe_call_special(tx, "__bool__", [])

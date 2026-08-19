@@ -3671,6 +3671,16 @@ class DataPtrVariable(VariableTracker):
             hints=[],
         )
 
+    def nb_bool_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        """DataPtr nb_bool: mirrors long_bool, but the address is runtime-only."""
+        unimplemented(
+            gb_type="Data pointer truth value",
+            context=f"nb_bool_impl {self}",
+            explanation="Dynamo cannot decide the truth value of a data pointer "
+            "because the address is only known at runtime.",
+            hints=[],
+        )
+
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.from_tensor)
         codegen.load_method(self.method_name)
