@@ -29,7 +29,7 @@ import re
 import types
 from collections.abc import Iterable
 from contextlib import contextmanager, nullcontext
-from typing import Any, TYPE_CHECKING
+from typing import Any, NoReturn, TYPE_CHECKING
 
 import torch.nn
 from torch._guards import Source
@@ -379,7 +379,7 @@ class NNModuleVariable(VariableTracker):
         mod = tx.output.get_submodule(self.module_key)
         return getattr(mod, "training", False)
 
-    def convert_to_unspecialized(self, tx: "InstructionTranslatorBase") -> None:
+    def convert_to_unspecialized(self, tx: "InstructionTranslatorBase") -> NoReturn:
         """Restart analysis treating this module as an UnspecializedNNModuleVariable"""
         mod = tx.output.get_submodule(self.module_key)
         GenerationTracker.tag(mod)
@@ -1419,53 +1419,62 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                     ],
                 )
 
-            # "_parameters" in self.value.__dict__ checks that module is initialized
-            if name == "__setattr__" and "_parameters" in self.value.__dict__:
-                # Record if mutations happens on parameters/buffers/modules. The
-                # mutations on these are not tracked by base class
-                # UserDefinedObject vt. This will be used later to graph break
-                # on seeing a parameters() and family calls.
-                # TODO(anijain2305) - This might not be needed if we let Dynamo
-                # inline both getattr and setattr. In that case, it should see
-                # the lowest level dicts - _parameters and family and
-                # automatically track mutations on those. Investigate if that
-                # can be done.
-                attr_name = args[0].as_python_constant()
-                value = args[1]
-
-                # This is reverse engineered by looking at nn module __setattr__
-                # logic.
-                if (
-                    value.is_tensor() and value.python_type() is torch.nn.Parameter
-                ) or attr_name in self.value.__dict__["_parameters"]:
-                    # Handle parameters
-                    self.is_state_mutated = True
-                elif attr_name in self.value.__dict__["_buffers"]:
-                    # Handle buffers
-                    self.is_state_mutated = True
-                elif (
-                    isinstance(
-                        value,
-                        (
-                            variables.NNModuleVariable,
-                            variables.UnspecializedNNModuleVariable,
-                        ),
-                    )
-                    or attr_name in self.value.__dict__["_modules"]
-                ):
-                    # Handle submodules
-                    self.is_state_mutated = True
-
-            if (
-                method is torch.nn.Module.__setattr__
-                and isinstance(args[1], variables.DeletedVariable)
-            ) or method is torch.nn.Module.__delattr__:
-                # Trace through __delattr__ to track mutations on the module
-                # members like `_modules``.
-                fn_vt = VariableTracker.build(tx, torch.nn.Module.__delattr__)
-                return fn_vt.call_function(tx, [self, args[0]], kwargs)
-
         return super().call_method(tx, name, list(args), kwargs)
+
+    def tp_setattro_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        # "_parameters" in self.value.__dict__ checks that module is initialized
+        if "_parameters" in self.value.__dict__:
+            # Record if mutations happens on parameters/buffers/modules. The
+            # mutations on these are not tracked by base class
+            # UserDefinedObject vt. This will be used later to graph break
+            # on seeing a parameters() and family calls.
+            # TODO(anijain2305) - This might not be needed if we let Dynamo
+            # inline both getattr and setattr. In that case, it should see
+            # the lowest level dicts - _parameters and family and
+            # automatically track mutations on those. Investigate if that
+            # can be done.
+
+            # This is reverse engineered by looking at nn module __setattr__
+            # logic.
+            if (
+                value is not None
+                and value.is_tensor()
+                and value.python_type() is torch.nn.Parameter
+            ) or name in self.value.__dict__["_parameters"]:
+                # Handle parameters
+                self.is_state_mutated = True
+            elif name in self.value.__dict__["_buffers"]:
+                # Handle buffers
+                self.is_state_mutated = True
+            elif (
+                isinstance(
+                    value,
+                    (
+                        variables.NNModuleVariable,
+                        variables.UnspecializedNNModuleVariable,
+                    ),
+                )
+                or name in self.value.__dict__["_modules"]
+            ):
+                # Handle submodules
+                self.is_state_mutated = True
+
+        if (
+            value is None
+            and inspect.getattr_static(type(self.value), "__delattr__", None)
+            is torch.nn.Module.__delattr__
+        ):
+            # Trace through __delattr__ to track mutations on the module
+            # members like `_modules``.
+            fn_vt = VariableTracker.build(tx, torch.nn.Module.__delattr__)
+            return fn_vt.call_function(tx, [self, VariableTracker.build(tx, name)], {})
+
+        return super().tp_setattro_impl(tx, name, value)
 
     def getattr_helper(
         self, tx: "InstructionTranslatorBase", field: str, name_vt: VariableTracker

@@ -776,7 +776,7 @@ def _wrap_delattr(
         raise_type_error(tx, "this method takes no keyword arguments")
     if len(args) != 1:
         raise_type_error(tx, f"expected 1 argument, got {len(args)}")
-    return func(self, tx, args[0])
+    return func(self, tx, args[0], None)
 
 
 def _wrap_getattro(
@@ -1089,19 +1089,18 @@ _SLOTDEFS: list[SlotDef] = [
         PyTypeSlots.TP_GETATTRO,
         _wrap_getattro,
     ),
-    # This needs one to model tp_setattro first + PyObject_GenericSetAttr / PyObject_GenericDelAttr
-    # TPSLOT(
-    #     "__setattr__",
-    #     "setattro_impl",
-    #     PyTypeSlots.TP_SETATTRO,
-    #     _wrap_setattr,
-    # ),
-    # TPSLOT(
-    #     "__delattr__",
-    #     "delattro_impl",
-    #     PyTypeSlots.TP_SETATTRO,
-    #     _wrap_delattr,
-    # ),
+    TPSLOT(
+        "__setattr__",
+        "tp_setattro_impl",
+        PyTypeSlots.TP_SETATTRO,
+        _wrap_setattr,
+    ),
+    TPSLOT(
+        "__delattr__",
+        "tp_setattro_impl",
+        PyTypeSlots.TP_SETATTRO,
+        _wrap_delattr,
+    ),
     TPSLOT(
         "__lt__",
         "tp_richcompare_impl",
