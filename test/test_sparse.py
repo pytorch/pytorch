@@ -2028,31 +2028,38 @@ class TestSparse(TestSparseBase):
     @dtypes(torch.double, torch.cdouble)
     @dtypesIfMPS(torch.float32, torch.complex64)
     def test_norm(self, device, dtype, coalesced):
+        norm = torch.linalg.vector_norm
+
         def test_shape(sparse_dims, nnz, with_size):
             x, _, _ = self._gen_sparse(sparse_dims, nnz, with_size, dtype, device, coalesced)
-            y = x.coalesce()
-            self.assertEqual(
-                torch.linalg.vector_norm(x),
-                torch.linalg.vector_norm(y._values()),
-            )
+            all_dims = list(range(x.dim()))
+            dense = x.to_dense()
+            ref = norm(dense)
+            ref_keepdim = norm(dense, dim=all_dims, keepdim=True)
+            self.assertEqual(norm(x), ref)
+            self.assertEqual(norm(x, keepdim=True), ref_keepdim)
+            self.assertEqual(norm(x, dtype=dtype), ref)
+            # torch.norm reaches norm_sparse through a different wrapper
+            self.assertEqual(x.norm(2), ref)
+            self.assertEqual(x.norm(2, all_dims, keepdim=True), ref_keepdim)
+            self.assertEqual(x.norm(2, all_dims, False, dtype=dtype), ref)
 
         test_shape(3, 10, 100)
         test_shape(4, 10, [100, 100, 100, 5, 5, 5, 0])
         test_shape(4, 0, [0, 0, 100, 5, 5, 5, 0])
 
-        # Unsupported arguments should error
-        kwarg_error_pairs = [
-            ({'keepdim': True},
-             RuntimeError, r'norm_sparse currently does not support keepdim=True'),
-            ({'dim': 0},
-             RuntimeError, r'norm_sparse currently only supports full reductions'),
-            ({'dtype': torch.double, 'ord': 0},
-             RuntimeError, r"norm_sparse currently does not support 'dtype' argument"),
-        ]
         x = self._gen_sparse(3, 10, 100, dtype, device, coalesced)[0]
-        for kwargs, err, msg in kwarg_error_pairs:
-            with self.assertRaisesRegex(err, msg):
-                torch.linalg.vector_norm(x, **kwargs)
+        with self.assertRaisesRegex(RuntimeError, "only supports full reductions"):
+            norm(x, dim=0)
+
+        with self.assertRaisesRegex(RuntimeError, "floating point or complex"):
+            norm(x, dtype=torch.int32)
+        wrong_domain = torch.float64 if dtype.is_complex else torch.complex128
+        with self.assertRaisesRegex(RuntimeError, "dtype should be"):
+            norm(x, dtype=wrong_domain)
+        narrower = torch.complex32 if dtype.is_complex else torch.float16
+        with self.assertRaisesRegex(RuntimeError, "without narrowing"):
+            norm(x, dtype=narrower)
 
     @coalescedonoff
     @dtypes(torch.double)

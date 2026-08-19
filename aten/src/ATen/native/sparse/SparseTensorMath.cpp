@@ -52,6 +52,7 @@
 #include <ATen/ops/floor_divide.h>
 #include <ATen/ops/floor_divide_native.h>
 #include <ATen/ops/hspmm_native.h>
+#include <ATen/ops/linalg_vector_norm.h>
 #include <ATen/ops/mm_native.h>
 #include <ATen/ops/mul.h>
 #include <ATen/ops/mul_native.h>
@@ -357,13 +358,13 @@ Tensor norm_sparse(const SparseTensor& self, const std::optional<Scalar>& p, Int
   if (!dim.empty()) {
     const auto ndim = static_cast<size_t>(self.dim());
     TORCH_CHECK(dim_list_to_bitset(dim, ndim).count() == ndim,
-      "norm_sparse currently only supports full reductions, so 'dim' must either be empty or contain all dimensions of the input");
+      "norm on sparse tensors only supports full reductions: 'dim' must either be empty or contain all dimensions of the input");
   }
-  TORCH_CHECK(keepdim == false, "norm_sparse currently does not support keepdim=True");
-  TORCH_CHECK(!dtype.has_value(), "norm_sparse currently does not support 'dtype' argument");
   constexpr auto TWO = 2.0;
   auto p_ = p.value_or(TWO);
-  return self.coalesce()._values().norm(p_);
+  auto result = at::linalg_vector_norm(
+      self.coalesce()._values(), p_, std::nullopt, /*keepdim=*/false, dtype);
+  return keepdim ? result.view(DimVector(self.dim(), 1)) : result;
 }
 
 // --------------------------------------------------------------------
