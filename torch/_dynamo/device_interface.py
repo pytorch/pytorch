@@ -132,7 +132,7 @@ class DeviceInterface:
         return cls.Worker.get_device_properties(device)
 
     @classmethod
-    def get_cache_system_info(cls) -> tuple[Any, ...] | None:
+    def get_cache_system_info(cls) -> dict[str, Any] | None:
         """Return stable, JSON-serializable metadata for the code cache key.
 
         Implementations should return only metadata that invalidates generated

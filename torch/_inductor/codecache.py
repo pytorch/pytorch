@@ -162,11 +162,14 @@ class SystemVersionInfo(TypedDict, total=False):
     hip: str | None
 
 
-class SystemInfo(TypedDict):
-    hash: str
+class SystemCacheInfo(TypedDict, total=False):
     device: NotRequired[SystemDeviceInfo]
     version: NotRequired[SystemVersionInfo]
-    device_interfaces: NotRequired[dict[str, Any]]
+    device_interfaces: NotRequired[dict[str, dict[str, Any]]]
+
+
+class SystemInfo(SystemCacheInfo):
+    hash: str
 
 
 class CacheInfo(TypedDict, total=False):
@@ -337,8 +340,7 @@ class CacheBase:
         with dynamo_timed("CacheBase.get_system.triton_key"):
             triton_version = triton_key()
 
-        hash_input: dict[str, Any] = {}
-        system: dict[str, Any] = {}
+        system_info: SystemCacheInfo = {}
         try:
             device_info: SystemDeviceInfo = {"name": None}
             version_info: SystemVersionInfo = {"triton": triton_version}
@@ -351,34 +353,47 @@ class CacheBase:
             else:
                 device_info["name"] = device_properties.gcnArchName
                 version_info["hip"] = torch.version.hip
-            hash_input.update(
-                {
-                    "device": device_info,
-                    "version": version_info,
-                }
-            )
-            system.update(
-                {
-                    "device": device_info,
-                    "version": version_info,
-                }
-            )
+            system_info["device"] = device_info
+            system_info["version"] = version_info
         except (AssertionError, RuntimeError):
             # If cuda is not installed, none of the above config is relevant.
             pass
 
-        device_interface_info = {
-            name: info
-            for name, interface in get_registered_device_interfaces()
-            if ":" not in name
-            if (info := interface.get_cache_system_info()) is not None
-        }
-        if device_interface_info:
-            hash_input["device_interfaces"] = device_interface_info
-            system["device_interfaces"] = device_interface_info
+        device_interface_info: dict[str, dict[str, Any]] = {}
+        for name, interface in get_registered_device_interfaces():
+            if ":" in name:
+                continue
 
-        system["hash"] = SYSTEM_CACHE_KEY_STRATEGY.key_from_json(hash_input)
-        return cast(SystemInfo, system)
+            try:
+                if not interface.is_available():
+                    continue
+            except Exception:
+                log.warning(
+                    "Failed to check availability for device interface %s",
+                    name,
+                    exc_info=True,
+                )
+                continue
+
+            try:
+                info = interface.get_cache_system_info()
+            except Exception:
+                log.warning(
+                    "Failed to collect cache system info from device interface %s",
+                    name,
+                    exc_info=True,
+                )
+                continue
+            if info is not None:
+                device_interface_info[name] = info
+
+        if device_interface_info:
+            system_info["device_interfaces"] = device_interface_info
+
+        return {
+            **system_info,
+            "hash": SYSTEM_CACHE_KEY_STRATEGY.key_from_json(system_info),
+        }
 
     @staticmethod
     @clear_on_fresh_cache
