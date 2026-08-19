@@ -580,24 +580,30 @@ def broadcast_symbolic_shapes(a, b):
     return tuple(reversed(output))
 
 
+def _round_scalar_constants_for_add_sub(device_type: str) -> bool:
+    # Eager CPU/MPS add/sub consume wrapped scalars at tensor precision.
+    return device_type in ("cpu", "mps")
+
+
+def _round_scalar_constants_for_fmod_remainder(device_type: str) -> bool:
+    # MPS is the known opmath exception; preserve tensor-precision rounding on
+    # other backends.
+    return device_type != "mps"
+
+
 def promote_constants(
     inputs: Sequence[_T],
     override_return_dtype: torch.dtype | None = None,
     type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND | None = None,
-    round_scalar_constants: bool = False,
-    round_scalars_to_tensor_dtype: bool = False,
+    scalar_rounding_predicate: Callable[[str], bool] | None = None,
 ) -> Sequence[_T | BaseView | BaseConstant]:
     """Convert raw Python scalars and sympy expressions in inputs to IR constants.
 
     When a tensor input is present, scalars become Constants of the tensor's
     dtype, broadcast to its size. For bf16/fp16 tensors, the scalar value is
-    additionally rounded to the tensor dtype to match eager kernels that cast
-    scalar operands to the common dtype: always for comparison ops
-    (override_return_dtype == torch.bool); on all devices except MPS for callers
-    passing round_scalar_constants (e.g. fmod/remainder, whose MPS eager kernels
-    keep scalars at opmath precision); and on CPU and MPS only for ops passing
-    round_scalars_to_tensor_dtype (e.g. add/sub, whose CUDA eager kernels keep
-    scalars at opmath precision).
+    additionally rounded to the tensor dtype for comparison ops, or when a
+    caller-provided device predicate says the eager kernel consumes the scalar
+    at tensor precision rather than opmath precision.
     """
     if not (override_return_dtype is None or type_promotion_kind is None):
         raise AssertionError(
@@ -628,15 +634,15 @@ def promote_constants(
     ex = next(x for x in inputs if isinstance(x, (TensorBox, ExpandView, ir.Constant)))
     tensor_dtype = ex.get_dtype()
 
-    # Round scalars to the tensor's dtype where eager does; see docstring.
-    device_type = ex.get_device_or_error().type
     if tensor_dtype in (
         torch.bfloat16,
         torch.float16,
     ) and (
         override_return_dtype == torch.bool
-        or (round_scalar_constants and device_type != "mps")
-        or (round_scalars_to_tensor_dtype and device_type in ("cpu", "mps"))
+        or (
+            scalar_rounding_predicate is not None
+            and scalar_rounding_predicate(ex.get_device_or_error().type)
+        )
     ):
         _round_scalar = lambda v: torch.tensor(v, dtype=tensor_dtype).item()  # noqa: E731
     else:
@@ -736,7 +742,7 @@ def make_pointwise(
     allow_alpha: bool = False,
     use_fma_for_alpha: bool = False,
     triton_fallback: Callable[..., _T] | None = None,
-    round_scalars_to_tensor_dtype: bool = False,
+    scalar_rounding_predicate: Callable[[str], bool] | None = None,
 ) -> Callable[..., TensorBox | _T]:
     """Wraps a pointwise fn and returns a function representing the pointwise in
     the define-by-run IR."""
@@ -753,7 +759,7 @@ def make_pointwise(
         inputs = promote_constants(
             inputs,
             override_return_dtype,
-            round_scalars_to_tensor_dtype=round_scalars_to_tensor_dtype,
+            scalar_rounding_predicate=scalar_rounding_predicate,
         )
         if allow_alpha:
             if alpha is not None and alpha != 1:
@@ -1144,7 +1150,7 @@ def register_pointwise(
     allow_alpha=False,
     use_fma_for_alpha=False,
     triton_fallback=None,
-    round_scalars_to_tensor_dtype=False,
+    scalar_rounding_predicate=None,
 ):
     """A pointwise function that maps ops.{name} to inputs"""
     name = name or aten_fn.__name__
@@ -1164,7 +1170,7 @@ def register_pointwise(
         allow_alpha=allow_alpha,
         use_fma_for_alpha=use_fma_for_alpha,
         triton_fallback=triton_fallback,
-        round_scalars_to_tensor_dtype=round_scalars_to_tensor_dtype,
+        scalar_rounding_predicate=scalar_rounding_predicate,
     )
     fn = register_lowering(
         aten_fn,
@@ -1416,7 +1422,7 @@ def trunc(x):
 
 
 @register_lowering(aten.expand, type_promotion_kind=None)
-def expand(x, sizes, *, implicit=False):
+def expand(x, sizes, *, implicit=False, graph_fanout=False):
     # `implicit` is autograd-internal metadata (see aten::expand schema); it
     # does not affect the produced tensor, so the lowering ignores it. Without
     # this kwarg the lowering rejects graphs produced by dynamo autograd where
@@ -1443,12 +1449,17 @@ def expand(x, sizes, *, implicit=False):
         if x_size_product > 0 and not free_unbacked_symbols(sizes):
             # Broadcast loop reuse is not graph fanout; keep the graph-fanout
             # read-count heuristic from materializing cheap expanded producers.
+            # graph_fanout=True is for consumers that cannot hoist the broadcast
+            # load out of their loop: a reduction over the broadcast dim can, but
+            # a pointwise or scatter loop over the expanded size folds that dim
+            # into its own index space and so reloads x at every position.
             # In deterministic modes, preserve the old materialization boundary
             # since fusing through expanded inputs can change reduction numerics.
             x.mark_reuse(
                 V.graph.sizevars.guarding_hint_or_throw(sympy_product(sizes))
                 // x_size_product,
-                graph_reuse=config.deterministic
+                graph_reuse=graph_fanout
+                or config.deterministic
                 or torch.are_deterministic_algorithms_enabled(),
             )
     return TensorBox(ExpandView.create(x.data, tuple(sizes)))
@@ -4117,7 +4128,8 @@ def select_scatter(x, src, dim: int, index: int):
 
     V.graph.sizevars.check_leq(0, index)  # type: ignore[arg-type]
     V.graph.sizevars.check_lt(index, x.get_size()[dim])  # type: ignore[arg-type]
-    src = expand(unsqueeze(src, dim), x.get_size())
+    # inner_fn below loads src at every position of `dim`; see expand()
+    src = expand(unsqueeze(src, dim), x.get_size(), graph_fanout=True)
     src_loader = src.make_loader()
 
     def inner_fn(idx):
@@ -5033,7 +5045,9 @@ def index_put_impl_(self, indices, values, accumulate, check, may_realize=False)
         None,
         check=check,
     )
-    values = expand(values, expected_vals_size)
+    # the Scatter below loads values at every position of expected_vals_size;
+    # see expand()
+    values = expand(values, expected_vals_size, graph_fanout=True)
     # all guards are set above during broadcast_tensors and expand
 
     device = self.get_device()
@@ -7879,8 +7893,11 @@ def div(a, b):
 
 @register_lowering([aten.fmod, prims.fmod], broadcast=True)
 def fmod(a, b):
-    a, b = promote_constants((a, b), round_scalar_constants=True)
     is_integral = is_boolean_type(a) or is_integer_type(a)
+    a, b = promote_constants(
+        (a, b),
+        scalar_rounding_predicate=_round_scalar_constants_for_fmod_remainder,
+    )
 
     if is_integral:
 
@@ -8198,7 +8215,7 @@ add = register_pointwise(
     allow_alpha=True,
     use_fma_for_alpha=True,
     override_fn_when_input_bool="logical_or",
-    round_scalars_to_tensor_dtype=True,
+    scalar_rounding_predicate=_round_scalar_constants_for_add_sub,
 )
 
 sort_fallback = fallback_handler(aten.sort.stable, add_to_fallback_set=False)
@@ -8477,7 +8494,11 @@ relu = register_pointwise(aten.relu)
 sigmoid = register_pointwise_numeric_ldf64(aten.sigmoid)
 sqrt = register_pointwise_numeric_ldf64(aten.sqrt)
 square = register_pointwise(aten.square)
-sub = register_pointwise(aten.sub, allow_alpha=True, round_scalars_to_tensor_dtype=True)
+sub = register_pointwise(
+    aten.sub,
+    allow_alpha=True,
+    scalar_rounding_predicate=_round_scalar_constants_for_add_sub,
+)
 
 
 @register_lowering(aten.addcmul, broadcast=True)
@@ -8697,7 +8718,10 @@ register_op_dtype_propagation_rules(
 
 @register_lowering(aten.remainder, broadcast=True)
 def remainder(a, b):
-    a, b = promote_constants((a, b), round_scalar_constants=True)
+    a, b = promote_constants(
+        (a, b),
+        scalar_rounding_predicate=_round_scalar_constants_for_fmod_remainder,
+    )
     fn = ops_wrapper("remainder")
     return make_pointwise(fn)(a, b)
 
@@ -9223,14 +9247,21 @@ def process_subgraph_nodes(graph_module: torch.fx.GraphModule, args: list[Any]):
     - Output nodes return their result
     - Other nodes are executed via V.graph.run_node
 
+    ``args`` holds one entry per placeholder, so placeholders are counted
+    separately from nodes.  fx does not require placeholders to be a
+    contiguous prefix of the graph, and a decomposition running over the
+    subgraph can leave ops between them; indexing ``args`` by node position
+    would then read past its end.
     """
     output = _MISSING
 
-    for i, node in enumerate(graph_module.graph.nodes):
+    placeholder_idx = 0
+    for node in graph_module.graph.nodes:
         if node.op == "placeholder":
             if node in V.graph.env:
                 raise AssertionError("expected: node not in V.graph.env")
-            V.graph.env[node] = args[i]
+            V.graph.env[node] = args[placeholder_idx]
+            placeholder_idx += 1
             continue
         elif node.op == "output":
             output_args, kwargs = V.graph.fetch_args_kwargs_from_env(node)
