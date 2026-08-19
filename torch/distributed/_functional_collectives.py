@@ -385,7 +385,10 @@ def reduce_scatter_tensor_autograd(
 
 
 def all_reduce_coalesced(
-    self: list[torch.Tensor], reduceOp: str, group: RANK_TYPES, tag: str = ""
+    self: list[torch.Tensor],
+    reduceOp: str | dist.ReduceOp,
+    group: RANK_TYPES,
+    tag: str = "",
 ) -> list[torch.Tensor]:
     """
     Reduces a list of tensors across all machines in such a way that all get
@@ -404,9 +407,10 @@ def all_reduce_coalesced(
     that information and perform collective algebraic optimization. Use other forms of input for that.
     """
     group = _resolve_group(group, tag)
+    reduce_op = reduceOp.lower() if isinstance(reduceOp, str) else reduceOp
     tensor_list = torch.ops._c10d_functional.all_reduce_coalesced(  # type: ignore[attr-defined]
         self,
-        reduceOp.lower(),
+        reduce_op,
         _group_or_group_name(group),
     )
     return list(map(_maybe_wrap_tensor, tensor_list))
@@ -914,19 +918,35 @@ def all_reduce_coalesced_backward(ctx, grad_outputs: list[torch.Tensor]):
     """
     group_name = ctx.group_name
     reduce_op = ctx.reduce_op
-
-    if reduce_op != "sum":
+    if not _is_reduceop_supported(reduce_op):
         raise RuntimeError(
-            f"all_reduce_coalesced backward only supports 'sum' reduction, got '{reduce_op}'"
+            f"all_reduce_coalesced backward only supports `sum`, `premul_sum`, `avg`, `max`, `min` reductions, got '{reduce_op}'"
         )
-
-    # Backward does all_reduce on list of gradients
+    grad_reduce_op = "sum" if _is_min_max(reduce_op) else reduce_op
     grad_inputs = torch.ops._c10d_functional.all_reduce_coalesced(
         [grad_output.contiguous() for grad_output in grad_outputs],
-        reduce_op,
+        grad_reduce_op,
         group_name,
     )
-    return (list(map(wait_tensor, grad_inputs)), None, None)
+    grad_inputs = list(map(wait_tensor, grad_inputs))
+
+    if _is_min_max(reduce_op):
+        saved = ctx.saved_tensors
+        n = len(grad_inputs)
+        fwd_inputs, fwd_outputs = saved[:n], saved[n:]
+        grad_inputs = [
+            torch.ops.aten.where.self(
+                fwd_input.isnan(),
+                grad_input,
+                torch.ops.aten.where.ScalarOther(
+                    fwd_input == wait_tensor(fwd_output), grad_input, 0
+                ),
+            )
+            for grad_input, fwd_input, fwd_output in zip(
+                grad_inputs, fwd_inputs, fwd_outputs
+            )
+        ]
+    return (grad_inputs, None, None)
 
 
 def all_reduce_coalesced_setup_context(ctx, inputs, output):
@@ -940,7 +960,9 @@ def all_reduce_coalesced_setup_context(ctx, inputs, output):
     """
     tensor_list, reduce_op, group_name = inputs
     ctx.group_name = group_name
-    ctx.reduce_op = reduce_op.lower()
+    ctx.reduce_op = reduce_op.lower() if isinstance(reduce_op, str) else reduce_op
+    if _is_min_max(reduce_op):
+        ctx.save_for_backward(*tensor_list, *output)
 
 
 torch.library.register_autograd(

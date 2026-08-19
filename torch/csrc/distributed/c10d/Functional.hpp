@@ -44,6 +44,12 @@ C10_EXPORT std::vector<at::Tensor> all_reduce_coalesced_(
 C10_EXPORT std::vector<at::Tensor> all_reduce_coalesced_(
     std::vector<at::Tensor> inputs,
     // NOLINTNEXTLINE(performance-unnecessary-value-param)
+    c10::intrusive_ptr<ReduceOp> reduce_op,
+    c10::intrusive_ptr<ProcessGroup> group);
+
+C10_EXPORT std::vector<at::Tensor> all_reduce_coalesced_(
+    std::vector<at::Tensor> inputs,
+    // NOLINTNEXTLINE(performance-unnecessary-value-param)
     std::string reduce_op,
     // NOLINTNEXTLINE(performance-unnecessary-value-param)
     std::string group_name);
@@ -51,6 +57,11 @@ C10_EXPORT std::vector<at::Tensor> all_reduce_coalesced_(
 C10_EXPORT std::vector<at::Tensor> all_reduce_coalesced(
     std::vector<at::Tensor> inputs,
     std::string reduce_op,
+    c10::intrusive_ptr<ProcessGroup> group);
+
+C10_EXPORT std::vector<at::Tensor> all_reduce_coalesced(
+    std::vector<at::Tensor> inputs,
+    c10::intrusive_ptr<ReduceOp> reduce_op,
     c10::intrusive_ptr<ProcessGroup> group);
 
 C10_EXPORT std::vector<at::Tensor> all_reduce_coalesced(
