@@ -1009,6 +1009,137 @@ class TestMPS(TestCaseMPS):
             s2.synchronize()
             torch.mps.empty_cache()
 
+    def _get_stream_base_by_name(self, stream):
+        if stream == "default":
+            return torch._C._MPSStreamBase(stream_id=0)
+        elif stream == "pool":
+            return torch._C._MPSStreamBase()
+        else:
+            raise NotImplementedError(f"stream '{stream}' not recognized")
+
+    # Tests that `Tensor.record_stream` is supported on MPS, and that it
+    # prevents a tensor's buffer from being handed to a new allocation while
+    # another stream still has an outstanding read of it.
+    @parametrize("stream1", ["default", "pool"])
+    @parametrize("stream2", ["default", "pool"])
+    def test_stream_record_stream(self, stream1, stream2):
+        s1 = self._get_stream_base_by_name(stream1)
+        s2 = self._get_stream_base_by_name(stream2)
+
+        torch.mps.synchronize()
+        s1.synchronize()
+        s2.synchronize()
+        torch.mps.empty_cache()
+
+        # Create `t` on `s1`
+        try:
+            torch._C._mps_setStream(s1)
+            t = torch.full((1_000_000,), 3.0, device="mps")
+        finally:
+            torch._C._mps_setStream(None)
+        s1.synchronize()
+
+        # Use `t` as an input to an operation run on `s2`, and record `t` onto
+        # `s2`, but don't commit the work yet.
+        try:
+            torch._C._mps_setStream(s2)
+            out = t + 1
+        finally:
+            torch._C._mps_setStream(None)
+        t.record_stream(s2)
+
+        # Drop the only reference to `t`. And create a new tensor on `s1` filled
+        # with different values. Without the `record_stream` call above, the
+        # allocator would consider `t`'s buffer free immediately, and `filler`
+        # below would be handed that exact buffer, overwriting the data `s2`'s
+        # uncommitted work depends on.
+        del t
+        try:
+            torch._C._mps_setStream(s1)
+            filler = torch.full((1_000_000,), 5.0, device="mps")
+        finally:
+            torch._C._mps_setStream(None)
+        s1.synchronize()
+
+        # Finally commit `s2` and check that the results are correct.
+        s2.synchronize()
+        self.assertEqual(out.cpu(), torch.full((1_000_000,), 4.0))
+        self.assertEqual(filler.cpu(), torch.full((1_000_000,), 5.0))
+
+    # Test that `MPSAllocator::waitForEvents` waits on all events that were
+    # created with `MPSAllocator::recordStream`, not just the most recent one.
+    #
+    # The strategy is to create and record two workloads on different streams
+    # that operate on the same input tensor, force the second one to complete
+    # before the first one, and then check that `waitForEvents` still waits
+    # until after we commit the first one.
+    @parametrize("stream1", ["default", "pool"])
+    @parametrize("stream2", ["default", "pool"])
+    def test_stream_record_stream_wait(self, stream1, stream2):
+        s1 = self._get_stream_base_by_name(stream1)
+        s2 = self._get_stream_base_by_name(stream2)
+        if s1.stream_id == s2.stream_id:
+            self.skipTest("test requires two distinct streams")
+
+        t = torch.zeros(500, device="mps")
+        torch.mps.synchronize()
+        s1.synchronize()
+        s2.synchronize()
+
+        # Empty the cache to prevent any chance that this test falls into
+        # `alloc_buffer_block`'s `release_cached_buffers` call later in the
+        # test, which would commit and wait on all streams, silently completing
+        # `s1` before the test explicitly commits it.
+        torch.mps.empty_cache()
+
+        # Create a workload on `s1` and record it on `t`, but don't commit it
+        # yet, to prevent its completion until later. It won't actually get
+        # committed until we sync the stream.
+        try:
+            torch._C._mps_setStream(s1)
+            tmp1 = t + 0
+        finally:
+            torch._C._mps_setStream(None)
+        t.record_stream(s1)
+
+        # Create a workload on `s2` and record it on `t`, then commit and wait
+        # for it.
+        try:
+            torch._C._mps_setStream(s2)
+            tmp2 = t + 0
+        finally:
+            torch._C._mps_setStream(None)
+        t.record_stream(s2)
+        s2.synchronize()
+
+        # Create a separate thread to start waiting for any outstanding events
+        # on `t`'s pointer. Initially, it will be stuck waiting since we haven't
+        # committed any work for `s1` yet.
+        started_waiting = threading.Event()
+        finished_waiting = threading.Event()
+        ptr = t.data_ptr()
+
+        def waiter():
+            started_waiting.set()
+            torch._C._mps_allocator_waitForEvents([ptr])
+            finished_waiting.set()
+
+        thread = threading.Thread(target=waiter)
+        thread.start()
+        started_waiting.wait()
+
+        # Even after sleeping for a significant time, the waiter thread should
+        # not be finished yet since we still haven't committed `s1`.
+        self.assertFalse(finished_waiting.wait(0.25))
+
+        # Now commit `s1` so that it starts to run and the waiter thread can
+        # finish, since it was only waiting on the uncommitted `s1`'s work.
+        s1.synchronize()
+        thread.join()
+        # Double check that the waiter thread reported that it successfully
+        # completed waiting on the events.
+        self.assertTrue(finished_waiting.is_set())
+
     def test_exp(self, device="mps", dtype=torch.float):
         for v in (2, -2) + ((1j, 1 + 1j) if dtype.is_complex else ()):
             b = torch.arange(18, dtype=dtype, device=device) / 3 * math.pi
