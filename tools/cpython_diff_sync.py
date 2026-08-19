@@ -23,6 +23,10 @@ This offline check trusts whoever last ran tools/regenerate_cpython_diffs.py;
 it does not re-fetch upstream in CI. A periodic job can confirm <before> against
 the CPython repo blob at the header tag.
 
+Regeneration without --pristine must not move <before>. Reverse-apply of a
+stale .diff can succeed for edits outside existing hunks and would otherwise
+rewrite the upstream anchor, dropping the adaptation from the .diff.
+
 typinganndata/ helper modules are not adapted tests and have no *.diff; they are
 intentionally excluded (we only walk *.diff files).
 """
@@ -148,6 +152,30 @@ def pristine_download_hint(tag: str, upstream_rel: str) -> str:
         "  python tools/regenerate_cpython_diffs.py --force "
         f"--pristine /tmp/pristine.py --only {Path(upstream_rel).name}"
     )
+
+
+def check_pristine_anchor(
+    pristine: bytes, diff_text: str, tag: str, upstream: str
+) -> None:
+    """Refuse reconstructed upstream bytes whose blob hash is not index <before>.
+
+    git apply -R only requires the diff's + lines, so an edit outside existing
+    hunks reverse-applies cleanly and would otherwise be absorbed into the
+    checked-in before hash. A missing index line means nothing to preserve
+    (first full-index write). Callers that passed a real --pristine file skip
+    this check.
+    """
+    try:
+        old_before, _ = parse_index(diff_text)
+    except ValueError:
+        return
+    new_before = git_hash_object(pristine)
+    if new_before != old_before:
+        raise RuntimeError(
+            f"reconstructed pristine hash {new_before} != diff index "
+            f"before hash {old_before}; refusing to move the upstream "
+            "anchor.\n" + pristine_download_hint(tag, upstream)
+        )
 
 
 def _git_apply(

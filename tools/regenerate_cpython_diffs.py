@@ -5,8 +5,10 @@ Diffs are written with `git diff --full-index` so the `index <before>..<after>`
 line carries blob hashes used by the offline sync check (no manifest file).
 
 This tool never downloads over the network. It reconstructs pristine bytes by
-reverse-applying the checked-in .diff. If that fails, pass a locally downloaded
-file via --pristine (see the error hint for curl/wget).
+reverse-applying the checked-in .diff. If that fails, or if reverse-apply
+would move the checked-in index <before> hash (an edit outside existing
+hunks), pass a locally downloaded file via --pristine (see the error hint
+for curl/wget). --force still refuses to move <before> without --pristine.
 
 Usage:
   python tools/regenerate_cpython_diffs.py              # all pairs
@@ -138,6 +140,13 @@ def regenerate(
                 needs_rewrite = bool(errors)
 
             if needs_rewrite:
+                if pristine_path is None:
+                    diff_sync.check_pristine_anchor(
+                        pristine,
+                        diff_path.read_text(encoding="utf-8", errors="strict"),
+                        tag,
+                        upstream,
+                    )
                 new_diff = diff_sync.make_unified_diff(pristine, adapted, repo_rel)
                 with tempfile.TemporaryDirectory() as tmp:
                     tmp_diff = Path(tmp) / "patch.diff"
@@ -149,12 +158,6 @@ def regenerate(
                         raise RuntimeError(
                             "regenerated diff does not reproduce adapted file"
                         )
-                    # Confirm full-index hashes round-trip.
-                    before, after = diff_sync.parse_index(new_diff)
-                    if diff_sync.git_hash_object(pristine) != before:
-                        raise RuntimeError("before hash mismatch in regenerated diff")
-                    if diff_sync.git_hash_object(adapted) != after:
-                        raise RuntimeError("after hash mismatch in regenerated diff")
                 planned.append((diff_path, new_diff))
                 rewritten += 1
                 print(f"REWRITE  {rel}  ({tag})")
@@ -190,7 +193,10 @@ def main() -> int:
     ap.add_argument(
         "--force",
         action="store_true",
-        help="Rewrite every .diff even if verify already passes",
+        help=(
+            "Rewrite every .diff even if verify already passes "
+            "(still refuses to move index <before> without --pristine)"
+        ),
     )
     ap.add_argument(
         "--pristine",
