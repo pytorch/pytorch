@@ -1453,7 +1453,7 @@ class TestExperimentDevice(TestCase):
             _dynamo_graph_capture_for_export(module)(x)
 
     @requires_capabilities(
-        Capability.attention.flash_attention
+        Capability.attention.flex_attention
     )
     @unittest.skipIf(torch.version.hip, "Requires not ROCm") 
     def test_aot_export_flex_attention_callable_mask_mod(self, device):
@@ -1525,7 +1525,7 @@ class TestExperimentDevice(TestCase):
         self.assertTrue(torch.allclose(out_eager, out_export, atol=1e-5))
 
     @requires_capabilities(
-        Capability.attention.flash_attention
+        Capability.attention.flex_attention
     )
     @unittest.skipIf(torch.version.hip, "Requires not ROCm")
     def test_aot_export_flex_attention_with_blockmask_placeholders(self, device):
