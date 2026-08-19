@@ -12,23 +12,13 @@ import math
 import operator
 import os
 import pprint
-import sys
 import textwrap
 import time
 import traceback
 import typing
 from collections import Counter, defaultdict
 from concurrent.futures import as_completed, Future
-from typing import (
-    Any,
-    Generic,
-    Literal,
-    NamedTuple,
-    overload,
-    TYPE_CHECKING,
-    TypeAlias,
-    TypeVar,
-)
+from typing import Any, Generic, Literal, overload, TYPE_CHECKING, TypeAlias, TypeVar
 from typing_extensions import ParamSpec
 
 from torch.utils._ordered_set import OrderedSet
@@ -58,7 +48,7 @@ from torch._inductor.ir import TritonTemplateCallerBase
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 from torch._inductor.stream_utils import get_stream_name
 from torch.fx.experimental.symbolic_shapes import free_symbols
-from torch.utils._sympy.functions import FloorDiv
+from torch.utils._sympy.functions import FloorDiv, Identity
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 from torch.utils._triton import has_triton
 
@@ -168,19 +158,6 @@ class PendingFusion:
         return (self.node1, self.node2)
 
 
-class _LocalEntry(NamedTuple):
-    """One row of the post-rewrite slice the gate builds.
-
-    `cur` is the step the node currently wants to run at, `baseline`
-    is its original index (used to break ties when sorting), and
-    `node` is the slice member itself.
-    """
-
-    cur: int
-    baseline: int
-    node: BaseSchedulerNode
-
-
 @dataclasses.dataclass(slots=True)
 class ComboKernelMemoryContext:
     """Shared state used by the memory-aware combo gate.
@@ -191,6 +168,7 @@ class ComboKernelMemoryContext:
     """
 
     graph_outputs: OrderedSet[str]
+    baseline_nodes: tuple[BaseSchedulerNode, ...]
     node_to_idx: dict[BaseSchedulerNode, int]
     baseline_peak: int = 0
     # Running peak after earlier accepts. Bumped on each accept; the
@@ -515,6 +493,14 @@ class MixOrderReduction:
         return True
 
 
+# Note [Sub-parent reduction epilogues]
+#
+# Fusion-time planning proves that a derived sub-parent domain is safe to emit
+# and gives the fused group a FusedStagedReduction identity. Scheduler fusion is
+# followed by merge_loops(), which may change the node ranges, so codegen builds
+# the final plan from the post-fusion nodes rather than carrying the approval
+# plan across phases. The staged identity is the stable contract: codegen cannot
+# decline the fusion and treats a missing final plan as a compiler error.
 class NestedReduction:
     """
     Detects when an outer reduction and a dependent grouped reduction can be
@@ -590,6 +576,13 @@ class NestedReduction:
         R = enum.auto()
         X = enum.auto()
 
+    INTERLEAVED_SUB_PARENT_FACTOR = 2
+
+    class SubParentSourceLayout(enum.Enum):
+        # The parent grouped axis is split as child, lane, so parent_r =
+        # factor * child_r + lane. This covers NVFP4 even/odd packing.
+        INTERLEAVED = enum.auto()
+
     @dataclasses.dataclass(frozen=True)
     class PointwiseDomainContext:
         grouped_reduction: SchedulerNode
@@ -597,6 +590,315 @@ class NestedReduction:
         grouped_rnumel: sympy.Expr
         local_reduction_domain: tuple[sympy.Expr, ...]
         parent_full_domain: tuple[sympy.Expr, ...]
+
+    @classmethod
+    def sub_parent_epilogue_plan(
+        cls,
+        nodes: Sequence[BaseSchedulerNode],
+        numel: sympy.Expr,
+        rnumel: sympy.Expr,
+    ) -> StagedReductionPlan | None:
+        """Plan ``nodes`` as a reduction plus a sub-parent pointwise epilogue.
+
+        The epilogue runs over the parent's R tile divided into lanes. Returns
+        ``None`` when the candidate cannot be emitted safely. See Note
+        [Sub-parent reduction epilogues].
+        """
+        parent_rnumel = V.graph.sizevars.simplify(rnumel)
+        # TODO: No fundamental limitation; track aliases and mutation versions here.
+        if any(node.has_aliasing_or_mutation() for node in nodes):
+            return None
+        if not all(isinstance(node, SchedulerNode) for node in nodes):
+            return None
+        scheduler_nodes = typing.cast("Sequence[SchedulerNode]", nodes)
+
+        # TODO: Consider an alternative to rediscovering the reduction here.
+        has_reduction = False
+        parent_source_names: OrderedSet[str] = OrderedSet()
+        for node in scheduler_nodes:
+            if node.is_reduction():
+                has_reduction = True
+                for dep in node.read_writes.reads:
+                    if isinstance(dep, MemoryDep):
+                        parent_source_names.add(dep.name)
+        if not has_reduction:
+            return None
+
+        candidate = cls._sub_parent_epilogue_candidate_nodes(
+            scheduler_nodes,
+            numel,
+            rnumel,
+        )
+        if candidate is None:
+            return None
+        epilogue_nodes, sub_parent_factor = candidate
+        epilogue_node_set = OrderedSet(epilogue_nodes)
+        parent_nodes = tuple(
+            node for node in scheduler_nodes if node not in epilogue_node_set
+        )
+        source_layouts = cls._try_get_sub_parent_source_layouts(
+            parent_nodes,
+            epilogue_nodes,
+            numel,
+            parent_rnumel,
+            parent_source_names,
+            sub_parent_factor,
+        )
+        if not source_layouts:
+            return None
+        if not cls._sub_parent_epilogue_outputs_unread(
+            scheduler_nodes, epilogue_node_set
+        ):
+            return None
+        return StagedReductionPlan(
+            parent_nodes=parent_nodes,
+            parent_numel=numel,
+            parent_rnumel=parent_rnumel,
+            nested_stage=None,
+            sub_parent_stages=(
+                SubParentEpilogueStage(
+                    factor=sub_parent_factor,
+                    source_layouts=source_layouts,
+                    epilogue_nodes=tuple(epilogue_nodes),
+                ),
+            ),
+        )
+
+    @classmethod
+    def _sub_parent_epilogue_candidate_nodes(
+        cls,
+        nodes: Sequence[SchedulerNode],
+        numel: sympy.Expr,
+        rnumel: sympy.Expr,
+    ) -> tuple[tuple[SchedulerNode, ...], int] | None:
+        """Classify a candidate group and return its lane-resolution nodes.
+
+        Other members must fit the parent reduction, reduced-output, or
+        full-parent domain.
+        """
+        factor = cls.INTERLEAVED_SUB_PARENT_FACTOR
+        expected_groups = (numel, FloorDiv(rnumel, factor))
+        parent_full_numel = V.graph.sizevars.simplify(numel * rnumel)
+        candidates: list[SchedulerNode] = []
+        for node in nodes:
+            _, (node_numel, node_rnumel) = node.group
+            if node.is_reduction():
+                if not (
+                    V.graph.sizevars.statically_known_equals(node_numel, numel)
+                    and V.graph.sizevars.statically_known_equals(node_rnumel, rnumel)
+                ):
+                    return None
+                continue
+            if cls._pointwise_node_matches_domain(
+                node, sympy_product(expected_groups), expected_groups
+            ):
+                candidates.append(node)
+                continue
+            if cls._pointwise_node_matches_domain(node, numel, (numel,)):
+                continue
+            if cls._pointwise_node_matches_domain(
+                node, parent_full_numel, (numel, rnumel)
+            ):
+                continue
+            return None
+        if not candidates:
+            return None
+        return tuple(candidates), factor
+
+    @staticmethod
+    def _pointwise_node_matches_domain(
+        node: SchedulerNode,
+        expected_numel: sympy.Expr,
+        expected_groups: Sequence[sympy.Expr],
+    ) -> bool:
+        from .codegen.simd import SIMDKernel
+
+        _, (node_numel, node_rnumel) = node.group
+        return (
+            V.graph.sizevars.statically_known_equals(node_rnumel, 1)
+            and V.graph.sizevars.statically_known_equals(node_numel, expected_numel)
+            and SIMDKernel.is_compatible(expected_groups, node.get_ranges())
+        )
+
+    @staticmethod
+    def try_get_sub_parent_extent_subs(
+        parent_extent: sympy.Expr, factor: int
+    ) -> dict[sympy.Expr, sympy.Expr] | None:
+        """Return extent substitutions, or ``None`` if divisibility is unproven.
+
+        On success, the mapping may be empty if the extent is already normalized.
+        """
+        rounded_extent = V.graph.sizevars.simplify(
+            factor * FloorDiv(parent_extent, factor)
+        )
+        if not V.graph.sizevars.statically_known_equals(parent_extent, rounded_extent):
+            return None
+        return (
+            {parent_extent: rounded_extent} if parent_extent != rounded_extent else {}
+        )
+
+    @classmethod
+    def interleaved_sub_parent_lane(
+        cls,
+        index: sympy.Expr,
+        factor: int,
+        extent_subs: dict[sympy.Expr, sympy.Expr],
+        source_sizes: tuple[sympy.Expr, ...] = (),
+    ) -> sympy.Expr:
+        # Identity controls emitted index width but does not change the lane.
+        index = index.replace(Identity, lambda x: x)
+        extent_subs = dict(extent_subs)
+        expanded_sizes = [
+            V.graph.sizevars.simplify(floor_div.args[1] * floor_div)
+            for floor_div in index.atoms(FloorDiv)
+        ]
+        expanded_sizes.extend(
+            V.graph.sizevars.simplify(sympy_product(source_sizes[i:]))
+            for i in range(len(source_sizes))
+        )
+        for symbol in index.free_symbols:
+            if symbol_is_type(symbol, SymT.SIZE):
+                for expanded_size in expanded_sizes:
+                    if (
+                        symbol != expanded_size
+                        and V.graph.sizevars.statically_known_multiple_of(
+                            expanded_size, factor
+                        )
+                        and V.graph.sizevars.statically_known_equals(
+                            symbol, expanded_size
+                        )
+                    ):
+                        extent_subs[symbol] = expanded_size
+                        break
+                symbol_subs = cls.try_get_sub_parent_extent_subs(symbol, factor)
+                if symbol_subs is not None:
+                    extent_subs.update(symbol_subs)
+        return V.graph.sizevars.simplify(
+            sympy.Mod(sympy_subs(index, extent_subs), factor)
+        )
+
+    @classmethod
+    def _try_get_sub_parent_source_layouts(
+        cls,
+        parent_nodes: Sequence[SchedulerNode],
+        epilogue_nodes: Sequence[SchedulerNode],
+        parent_numel: sympy.Expr,
+        parent_rnumel: sympy.Expr,
+        parent_source_names: OrderedSet[str],
+        sub_parent_factor: int,
+    ) -> tuple[tuple[str, NestedReduction.SubParentSourceLayout], ...] | None:
+        """Find parent inputs reused by supported lane-resolution projections.
+
+        Independent epilogue inputs remain ordinary kernel dependencies. Shared
+        indexed parent inputs must have one normalized parent access, and every
+        indexed epilogue access must equal it under
+        ``parent_r = factor * child_r + lane``.
+        """
+        from .utils import sympy_index_symbol
+
+        # Normalize source reads into a common two-axis domain.
+        def normalized_source_read_indices(
+            nodes: Sequence[SchedulerNode],
+            source_names: OrderedSet[str],
+            var_names: tuple[sympy.Symbol, sympy.Symbol],
+            sizes: tuple[sympy.Expr, sympy.Expr],
+        ) -> dict[str, OrderedSet[sympy.Expr]] | None:
+            result: dict[str, OrderedSet[sympy.Expr]] = collections.defaultdict(
+                OrderedSet
+            )
+            for node in nodes:
+                for dep in node.read_writes.reads:
+                    if isinstance(dep, MemoryDep) and dep.name in source_names:
+                        normalized = dep.normalize_with_ranges(var_names, sizes)
+                        if normalized is None:
+                            return None
+                        index = normalized.index.replace(Identity, lambda x: x)
+                        result[dep.name].add(index)
+            return result
+
+        # Express epilogue reads in the derived child domain.
+        child_rnumel = FloorDiv(parent_rnumel, sub_parent_factor)
+        extent_subs = cls.try_get_sub_parent_extent_subs(
+            parent_rnumel, sub_parent_factor
+        )
+        if extent_subs is None:
+            return None
+        x = sympy_index_symbol("_sub_parent_x")
+        parent_r = sympy_index_symbol("_sub_parent_r")
+        child_r = sympy_index_symbol("_sub_parent_child_r")
+        child_indices = normalized_source_read_indices(
+            epilogue_nodes,
+            parent_source_names,
+            (x, child_r),
+            (parent_numel, child_rnumel),
+        )
+        if child_indices is None:
+            return None
+        # Express the corresponding source reads in the full parent domain.
+        parent_indices = normalized_source_read_indices(
+            parent_nodes,
+            OrderedSet(child_indices),
+            (x, parent_r),
+            (parent_numel, parent_rnumel),
+        )
+        if parent_indices is None:
+            return None
+
+        source_layouts: list[tuple[str, NestedReduction.SubParentSourceLayout]] = []
+        # Prove every child read is a lane projection of one parent read.
+        for name in parent_source_names:
+            source_child_indices = child_indices.get(name)
+            if not source_child_indices:
+                continue
+            # TODO: Extend #188180's structural load-index cache to support
+            # multiple parent accesses to one source buffer.
+            source_parent_indices = parent_indices.get(name)
+            if source_parent_indices is None or len(source_parent_indices) != 1:
+                return None
+            parent_index = sympy_subs(next(iter(source_parent_indices)), extent_subs)
+            for child_index in source_child_indices:
+                lane = cls.interleaved_sub_parent_lane(
+                    child_index,
+                    sub_parent_factor,
+                    extent_subs,
+                    (parent_numel, parent_rnumel),
+                )
+                if not any(
+                    V.graph.sizevars.statically_known_equals(lane, value)
+                    for value in range(sub_parent_factor)
+                ):
+                    return None
+                expected = parent_index.subs(
+                    parent_r, sub_parent_factor * child_r + lane
+                )
+                if not V.graph.sizevars.statically_known_equals(child_index, expected):
+                    return None
+            source_layouts.append((name, cls.SubParentSourceLayout.INTERLEAVED))
+        return tuple(source_layouts)
+
+    @staticmethod
+    def _sub_parent_epilogue_outputs_unread(
+        nodes: Sequence[BaseSchedulerNode],
+        epilogue_node_set: OrderedSet[SchedulerNode],
+    ) -> bool:
+        """Whether every epilogue output is a leaf within the group.
+
+        Epilogue outputs only exist at lane resolution, so a non-epilogue node
+        reading one would need a parent-resolution view that was never emitted.
+        TODO: Support consumers in a post-sub-parent stage.
+        """
+        epilogue_output_names = OrderedSet(
+            name for node in epilogue_node_set for name in node.get_buffer_names()
+        )
+        if not epilogue_output_names:
+            return True
+        for node in nodes:
+            if node in epilogue_node_set:
+                continue
+            for dep in node.read_writes.reads:
+                if dep.name in epilogue_output_names:
+                    return False
+        return True
 
     @classmethod
     def _get_grouped_reduction_and_size(
@@ -638,30 +940,6 @@ class NestedReduction:
         if not isinstance(group_size, (int, sympy.Integer)) or int(group_size) < 1:
             return None
         return reduction, sympy.Integer(group_size)
-
-    @classmethod
-    def _pointwise_nodes_match_nested_domains(
-        cls,
-        outer_node: BaseSchedulerNode,
-        grouped_node: BaseSchedulerNode,
-        domain_context: PointwiseDomainContext,
-    ) -> bool:
-        """Classify pointwise nodes by nested stage and validate their ranges.
-
-        Each pointwise node must run either on the grouped reduction output,
-        on the grouped reduction's full local-group domain, or on the outer
-        reduction's full parent domain, based on its producer/consumer
-        relationship to the grouped reduction.
-        """
-        pointwise_domains = cls._classify_nested_pointwise_nodes(
-            outer_node,
-            grouped_node,
-            domain_context,
-        )
-        if pointwise_domains is None:
-            return False
-
-        return cls._pointwise_domains_are_compatible(domain_context, pointwise_domains)
 
     @classmethod
     def _classify_nested_pointwise_nodes(
@@ -715,6 +993,7 @@ class NestedReduction:
         """
         grouped_reduction = domain_context.grouped_reduction
         reduction_names = grouped_reduction.get_operation_names()
+        reduction_buffer_names = grouped_reduction.get_buffer_names()
         full_numel = V.graph.sizevars.simplify(
             domain_context.grouped_numel * domain_context.grouped_rnumel
         )
@@ -729,7 +1008,9 @@ class NestedReduction:
 
             sn_names = sn.get_operation_names()
             is_producer = bool(sn_names & grouped_reduction.ancestors)
-            is_consumer = bool(reduction_names & sn.ancestors)
+            is_consumer = bool(reduction_names & sn.ancestors) or any(
+                dep.name in reduction_buffer_names for dep in sn.read_writes.reads
+            )
             if is_producer and is_consumer:
                 # Supportable by splitting/modeling a multi-stage pointwise,
                 # but not as one nested pipeline stage today.
@@ -774,10 +1055,7 @@ class NestedReduction:
         domain: PointwiseDomain,
         domain_context: PointwiseDomainContext,
     ) -> bool:
-        from .codegen.simd import SIMDKernel
-
         iter_ranges, _ = domain_context.grouped_reduction.get_ranges()
-        _, (sn_numel, _) = sn.group
         if domain is cls.PointwiseDomain.REDUCED:
             expected_numel = domain_context.grouped_numel
             expected_groups: Sequence[sympy.Expr] = tuple(iter_ranges)
@@ -793,9 +1071,7 @@ class NestedReduction:
                 domain_context.grouped_numel * domain_context.grouped_rnumel
             )
             expected_groups = domain_context.parent_full_domain
-        return V.graph.sizevars.statically_known_equals(
-            sn_numel, expected_numel
-        ) and SIMDKernel.is_compatible(expected_groups, sn.get_ranges())
+        return cls._pointwise_node_matches_domain(sn, expected_numel, expected_groups)
 
     @classmethod
     def _min_block_unprofitable_for_kernel(
@@ -861,12 +1137,16 @@ class NestedReduction:
         return cls.MAX_NON_INNER_GROUP_SIZE
 
     @classmethod
-    def can_fuse(cls, node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> bool:
-        """Check whether a dependent cross-axis reduction pair can be fused."""
+    def plan(
+        cls,
+        node1: BaseSchedulerNode,
+        node2: BaseSchedulerNode,
+    ) -> StagedReductionPlan | None:
+        """Plan a dependent cross-axis reduction pair for staged code generation."""
         # TODO: enable nested reduction with cpp wrapper after validating the
         # additional autotuning meta (min_xblock / min_rblock).
         if not cls._is_enabled_for(node1, node2):
-            return False
+            return None
 
         if not cls._is_dependent_reduction_pair(node1, node2):
             raise AssertionError(
@@ -882,7 +1162,7 @@ class NestedReduction:
         outer_numel, outer_rnumel = outer_group
         grouped_numel, grouped_rnumel = grouped_group
         if V.graph.sizevars.statically_known_equals(outer_rnumel, grouped_rnumel):
-            return False
+            return None
 
         # The grouped candidate must be one small block-local reduction.
         # We specialize the grouped reduction on that block size, so it must
@@ -892,7 +1172,7 @@ class NestedReduction:
             grouped_node, grouped_rnumel
         )
         if grouped_reduction_info is None:
-            return False
+            return None
 
         # Total-element equality also implies divisibility of the grouped
         # parent extent by group_size (grouped_total factors through
@@ -904,7 +1184,7 @@ class NestedReduction:
         outer_total = V.graph.sizevars.simplify(outer_numel * outer_rnumel)
         grouped_total = V.graph.sizevars.simplify(grouped_numel * grouped_rnumel)
         if not V.graph.sizevars.statically_known_equals(outer_total, grouped_total):
-            return False
+            return None
 
         grouped_reduction, group_size = grouped_reduction_info
 
@@ -916,7 +1196,7 @@ class NestedReduction:
             outer_node=outer_node,
         )
         if grouped_axis is None:
-            return False
+            return None
         parent_grouped_axis = (
             outer_rnumel if grouped_axis is cls.GroupedAxis.R else outer_numel
         )
@@ -928,14 +1208,14 @@ class NestedReduction:
             if not V.graph.sizevars.statically_known_equals(
                 FloorDiv(parent_grouped_axis, group_size), grouped_axis_groups
             ):
-                return False
+                return None
         elif not V.graph.sizevars.statically_known_equals(
             sympy.Mod(parent_grouped_axis, group_size), 0
         ):
-            return False
+            return None
         group_size_int = int(group_size)
         if not (1 <= group_size_int and is_power_of_2(group_size_int)):
-            return False
+            return None
         if cls._min_block_unprofitable_for_kernel(
             outer_node,
             outer_numel,
@@ -943,8 +1223,36 @@ class NestedReduction:
             grouped_axis=grouped_axis,
             group_size=group_size_int,
         ):
-            return False
+            return None
+
+        return cls.plan_from_topology(
+            outer_node,
+            grouped_node,
+            grouped_reduction,
+            group_size,
+            grouped_axis,
+        )
+
+    @classmethod
+    def plan_from_topology(
+        cls,
+        outer_node: BaseSchedulerNode,
+        grouped_node: BaseSchedulerNode,
+        grouped_reduction: SchedulerNode,
+        group_size: sympy.Integer,
+        grouped_axis: GroupedAxis,
+    ) -> StagedReductionPlan | None:
+        """Rebuild mutable domains for an approved nested topology.
+
+        ``merge_loops`` rewrites loop bodies after fusion, so grouped-axis
+        discovery can no longer recover every axis approved at fusion time.
+        The axis and group size remain stable; ranges and domains do not.
+        """
+        _, (outer_numel, outer_rnumel) = outer_node.group
+        _, (grouped_numel, grouped_rnumel) = grouped_node.group
         iter_ranges, reduce_ranges = grouped_reduction.get_ranges()
+        # Use PointwiseDomainContext.create if one is added; direct construction
+        # must not bypass derived sub-parent domains.
         domain_context = cls.PointwiseDomainContext(
             grouped_reduction=grouped_reduction,
             grouped_numel=grouped_numel,
@@ -952,14 +1260,42 @@ class NestedReduction:
             local_reduction_domain=(*iter_ranges, *reduce_ranges),
             parent_full_domain=(outer_numel, outer_rnumel),
         )
-        if not cls._pointwise_nodes_match_nested_domains(
+        pointwise_domains = cls._classify_nested_pointwise_nodes(
             outer_node,
             grouped_node,
             domain_context,
+        )
+        if pointwise_domains is None or not cls._pointwise_domains_are_compatible(
+            domain_context, pointwise_domains
         ):
-            return False
+            return None
+        local_reduction_input_nodes = OrderedSet(
+            node
+            for node, domain in pointwise_domains
+            if domain is cls.PointwiseDomain.LOCAL_REDUCTION_INPUT
+        )
 
-        return True
+        return StagedReductionPlan(
+            parent_nodes=tuple(
+                sn
+                for sn in outer_node.get_nodes()
+                if sn not in local_reduction_input_nodes
+            ),
+            parent_numel=outer_numel,
+            parent_rnumel=outer_rnumel,
+            nested_stage=NestedReductionStage(
+                group_size=group_size,
+                grouped_axis=grouped_axis,
+                grouped_nodes=tuple(grouped_node.get_nodes()),
+                domain_context=domain_context,
+                pointwise_domains=tuple(pointwise_domains),
+            ),
+            sub_parent_stages=(),
+        )
+
+    @classmethod
+    def can_fuse(cls, node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> bool:
+        return cls.plan(node1, node2) is not None
 
     @classmethod
     def get_grouped_axis(
@@ -1079,6 +1415,45 @@ class NestedReduction:
                         return None
                     result = candidate
         return result
+
+
+@dataclasses.dataclass(frozen=True)
+class NestedReductionStage:
+    """A grouped reduction staged inside its parent tile."""
+
+    group_size: sympy.Integer
+    grouped_axis: NestedReduction.GroupedAxis
+    grouped_nodes: tuple[BaseSchedulerNode, ...]
+    domain_context: NestedReduction.PointwiseDomainContext
+    pointwise_domains: tuple[tuple[SchedulerNode, NestedReduction.PointwiseDomain], ...]
+
+
+@dataclasses.dataclass(frozen=True)
+class SubParentEpilogueStage:
+    """A pointwise epilogue over a fraction of its parent tile."""
+
+    factor: int
+    source_layouts: tuple[tuple[str, NestedReduction.SubParentSourceLayout], ...]
+    epilogue_nodes: tuple[SchedulerNode, ...]
+
+
+@dataclasses.dataclass(frozen=True)
+class StagedReductionPlan:
+    """Emission plan for a reduction with derived iteration stages."""
+
+    parent_nodes: tuple[BaseSchedulerNode, ...]
+    parent_numel: sympy.Expr
+    parent_rnumel: sympy.Expr
+    nested_stage: NestedReductionStage | None
+    sub_parent_stages: tuple[SubParentEpilogueStage, ...]
+
+    def __post_init__(self) -> None:
+        if self.nested_stage is None and not self.sub_parent_stages:
+            raise AssertionError("staged reduction plan must contain a derived stage")
+        if self.nested_stage is not None and self.sub_parent_stages:
+            raise AssertionError("combined staged reductions are not supported yet")
+        if len(self.sub_parent_stages) > 1:
+            raise AssertionError("multiple sub-parent stages are not supported yet")
 
 
 @dataclasses.dataclass
@@ -3085,14 +3460,23 @@ class FusedMixOrderReductions(FusedSchedulerNode):
                 return FusedMixOrderReductions(self.node1, fused_node)
 
 
-class FusedNestedReductions(FusedSchedulerNode):
+class FusedStagedReduction(FusedSchedulerNode):
+    """A fused reduction group that requires staged SIMD codegen."""
+
+
+class FusedNestedReductions(FusedStagedReduction):
     """
     Fused node for two dependent reductions over the same logical elements.
     The outer reduction owns the codegen grid; the grouped reduction is staged
     inside that grid.
     """
 
-    def __init__(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> None:
+    def __init__(
+        self,
+        node1: BaseSchedulerNode,
+        node2: BaseSchedulerNode,
+        stage: NestedReductionStage,
+    ) -> None:
         self.node1 = node1
         self.node2 = node2
         super().__init__(
@@ -3103,37 +3487,12 @@ class FusedNestedReductions(FusedSchedulerNode):
         # internal producer-consumer edges from later ancestor checks so reads
         # from node1 are not mistaken for external intermediate deps.
         self.ancestors -= self.get_operation_names()
-        grouped_node = node2
-        _, (grouped_numel, grouped_rnumel) = grouped_node.group
-        grouped_reduction_info = NestedReduction._get_grouped_reduction_and_size(
-            grouped_node, grouped_rnumel
-        )
-        if grouped_reduction_info is None:
-            raise AssertionError("expected grouped_reduction_info to be non-None")
-        grouped_reduction, exact_group_size = grouped_reduction_info
-        self.grouped_reduction: SchedulerNode = grouped_reduction
-        self.group_size: sympy.Integer = exact_group_size
-        _, (outer_numel, outer_rnumel) = node1.group
-        grouped_axis = NestedReduction.get_grouped_axis(
-            grouped_reduction,
-            outer_numel,
-            outer_rnumel,
-            exact_group_size,
-            outer_node=node1,
-        )
-        if grouped_axis is None:
-            raise AssertionError("expected grouped_axis to be non-None")
-        self.grouped_axis: NestedReduction.GroupedAxis = grouped_axis
+        self.grouped_reduction: SchedulerNode = stage.domain_context.grouped_reduction
+        self.group_size: sympy.Integer = stage.group_size
+        self.grouped_axis: NestedReduction.GroupedAxis = stage.grouped_axis
         self.group_size_in_r: bool = self.grouped_axis is NestedReduction.GroupedAxis.R
-        iter_ranges, reduce_ranges = grouped_reduction.get_ranges()
         self.domain_context: NestedReduction.PointwiseDomainContext = (
-            NestedReduction.PointwiseDomainContext(
-                grouped_reduction=grouped_reduction,
-                grouped_numel=grouped_numel,
-                grouped_rnumel=grouped_rnumel,
-                local_reduction_domain=(*iter_ranges, *reduce_ranges),
-                parent_full_domain=(outer_numel, outer_rnumel),
-            )
+            stage.domain_context
         )
 
     def can_fuse_with(self, other: BaseSchedulerNode, *, can_reorder: bool) -> bool:
@@ -3179,7 +3538,10 @@ class FusedNestedReductions(FusedSchedulerNode):
         device = self.node2.get_device()
         backend = self.scheduler.get_backend(device)
         new_node2 = backend.fuse(self.node2, other)
-        return FusedNestedReductions(self.node1, new_node2)
+        plan = NestedReduction.plan(self.node1, new_node2)
+        if plan is None or plan.nested_stage is None:
+            raise AssertionError("expected appended nested reduction plan")
+        return FusedNestedReductions(self.node1, new_node2, plan.nested_stage)
 
 
 class FusedExternTritonKernelSchedulerNode(FusedSchedulerNode):
@@ -3524,11 +3886,11 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
                 "ComboKernels: %d FusedMixOrderReductions nodes are filtered",
                 len(mix_order),
             )
-        nested_reductions = [x for x in nodes if isinstance(x, FusedNestedReductions)]
-        if nested_reductions:
+        staged_reductions = [x for x in nodes if isinstance(x, FusedStagedReduction)]
+        if staged_reductions:
             log.debug(
-                "ComboKernels: %d FusedNestedReductions nodes are filtered",
-                len(nested_reductions),
+                "ComboKernels: %d FusedStagedReduction nodes are filtered",
+                len(staged_reductions),
             )
 
         filtered_nodes = [
@@ -3541,10 +3903,11 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
                     ExternKernelSchedulerNode,
                     GroupedSchedulerNode,
                     FusedMixOrderReductions,
-                    FusedNestedReductions,
+                    FusedStagedReduction,
                 ),
             )
         ]
+
         foreach_nodes = [
             x for x in filtered_nodes if isinstance(x, ForeachKernelSchedulerNode)
         ]
@@ -3602,6 +3965,27 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         return filtered_nodes
 
     @staticmethod
+    def _filter_nodes_for_combo_kernel_grouping(
+        nodes: Sequence[BaseSchedulerNode],
+    ) -> list[BaseSchedulerNode]:
+        """Exclude unsupported devices and mixed-order-reduction consumers."""
+        excluded_buffer_names = OrderedSet(
+            buf_name
+            for node in nodes
+            if isinstance(node, FusedMixOrderReductions)
+            for buf_name in node.get_buffer_names()
+        )
+        filtered_nodes = []
+        for node in nodes:
+            device = node.get_device()
+            if device and device.type in ("mps", "cpu"):
+                continue
+            if node.used_buffer_names() & excluded_buffer_names:
+                continue
+            filtered_nodes.append(node)
+        return filtered_nodes
+
+    @staticmethod
     def _default_group_nodes_for_combo_kernels(
         scheduler: Scheduler,
     ) -> list[list[BaseSchedulerNode]]:
@@ -3611,15 +3995,11 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         sorted_nodes = scheduler._topological_sort_nodes()
         grouped_nodes = []
         max_num_nodes = config.combo_kernel_max_num_nodes
-
-        excluded_buffer_names: OrderedSet[str] = OrderedSet(
-            [
-                buf_name
-                for group in sorted_nodes
-                for node in group
-                if isinstance(node, FusedMixOrderReductions)
-                for buf_name in node.get_buffer_names()
-            ]
+        all_sorted_nodes = [node for group in sorted_nodes for node in group]
+        grouping_nodes = OrderedSet(
+            ForeachKernelSchedulerNode._filter_nodes_for_combo_kernel_grouping(
+                all_sorted_nodes
+            )
         )
         for nodes in sorted_nodes:
             # Group nodes by device first to avoid mixed-device fusion
@@ -3627,14 +4007,9 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
                 defaultdict(list)
             )
             for node in nodes:
-                device = node.get_device()
-                if device and (device.type == "mps" or device.type == "cpu"):
+                if node not in grouping_nodes:
                     continue
-
-                # exclude nodes that read from FusedMixOrderReductions output buffers'
-                if node.used_buffer_names() & excluded_buffer_names:
-                    continue
-                device_groups[device].append(node)
+                device_groups[node.get_device()].append(node)
 
             # Sub-group by stream and mempool to avoid mixing nodes across
             # context boundaries. When a context is inactive every node maps to
@@ -3667,6 +4042,17 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
     def set_group_algorithm_for_combo_kernels(
         custom_group_algorithm: Callable[[Scheduler], list[list[BaseSchedulerNode]]],
     ) -> None:
+        r"""Register the grouping callback used when memory gating is disabled.
+
+        Schedule-first memory gating does not invoke this callback. Set both
+        combo-kernel peak-memory thresholds to ``None`` to use it.
+
+        Args:
+            custom_group_algorithm: Receives the current scheduler and returns
+                disjoint groups of mutually independent nodes from
+                ``scheduler.nodes``. Nodes in each group must have compatible
+                devices, streams, and memory-pool contexts.
+        """
         ForeachKernelSchedulerNode.group_algorithm_for_combo_kernels = (
             custom_group_algorithm
         )
@@ -5676,6 +6062,27 @@ class Scheduler:
         if not config.benchmark_fusion and not is_multi_template:
             return FusionResult.fuse(True)
 
+        # Staged reductions cannot be represented by generic benchmark codegen.
+        # Initial standalone candidates need backend planning because their
+        # typed identity is created only after this profitability check.
+        fused_nodes = [*node1.get_nodes(), *node2.get_nodes()]
+        device = fused_nodes[0].get_device()
+        staged = isinstance(node1, FusedStagedReduction) or isinstance(
+            node2, FusedStagedReduction
+        )
+        nested = NestedReduction._is_dependent_reduction_pair(
+            node1, node2
+        ) and NestedReduction.can_fuse(node1, node2)
+        if (
+            staged
+            or nested
+            or (
+                device is not None
+                and self.get_backend(device).has_sub_parent_epilogue(fused_nodes)
+            )
+        ):
+            return FusionResult.fuse(True)
+
         if (
             node1.is_template()
             and not isinstance(node1.get_template_node(), ir.TritonTemplateBuffer)
@@ -6552,47 +6959,116 @@ class Scheduler:
         nodes = self.topological_sort_schedule(nodes)
         return nodes
 
-    @staticmethod
-    def _distance_windows(
-        nodes: list[BaseSchedulerNode],
-        node_to_idx: dict[BaseSchedulerNode, int],
-        max_distance: int,
-    ) -> Iterator[list[BaseSchedulerNode]]:
-        """Sort `nodes` by baseline index, then yield groups whose span
-        is at most `max_distance`. Start a new window whenever the next
-        node would push the span past the limit. Negative `max_distance`
-        means "no limit" — yield everything as one window.
-        """
-        ordered = sorted(nodes, key=lambda n: node_to_idx[n])
-        if max_distance < 0:
-            if ordered:
-                yield ordered
-            return
-        window: list[BaseSchedulerNode] = []
-        window_min = -1
-        for n in ordered:
-            idx = node_to_idx[n]
-            if window and idx - window_min > max_distance:
-                yield window
-                window = []
-            if not window:
-                window_min = idx
-            window.append(n)
-        if window:
-            yield window
+    def _combo_kernel_context_key(
+        self,
+        node: BaseSchedulerNode,
+    ) -> tuple[torch.device | None, int, tuple[int, int] | None]:
+        return (
+            node.get_device(),
+            self.get_node_stream(node),
+            self.node_to_mempool.get(node),
+        )
+
+    def _collect_combo_members_from_schedule(
+        self,
+        baseline_nodes: tuple[BaseSchedulerNode, ...],
+        eligible_nodes: OrderedSet[BaseSchedulerNode],
+        region_start: int,
+        region_end: int,
+        max_members: int,
+    ) -> list[BaseSchedulerNode]:
+        """Collect independent, compatible members from a schedule region."""
+        if not (0 <= region_start < region_end <= len(baseline_nodes)):
+            raise AssertionError("invalid combo-kernel search region")
+
+        seed = baseline_nodes[region_start]
+        if seed not in eligible_nodes or max_members < 2:
+            return []
+
+        seed_context = self._combo_kernel_context_key(seed)
+        if seed_context[0] is None:
+            return []
+
+        members: list[BaseSchedulerNode] = []
+        member_names = OrderedSet[str]()
+        member_ancestors = OrderedSet[str]()
+
+        for idx in range(region_start, region_end):
+            node = baseline_nodes[idx]
+            if node not in eligible_nodes:
+                continue
+            if self._combo_kernel_context_key(node) != seed_context:
+                continue
+
+            node_names = node.get_operation_names()
+            if node.ancestors & member_names or node_names & member_ancestors:
+                continue
+            if any(self.will_fusion_create_cycle(member, node) for member in members):
+                continue
+
+            members.append(node)
+            member_names.update(node_names)
+            member_ancestors.update(node.ancestors)
+            if len(members) == max_members:
+                return members
+
+        return members
+
+    def _collect_combo_candidates_from_schedule(
+        self,
+        baseline_nodes: tuple[BaseSchedulerNode, ...],
+        eligible_nodes: OrderedSet[BaseSchedulerNode],
+        region_start: int,
+        region_end: int,
+        max_members: int,
+        *,
+        speedup_cache: dict[tuple[BaseSchedulerNode, ...], bool] | None,
+    ) -> list[list[BaseSchedulerNode]]:
+        """Collect profitable, node-disjoint candidates from one region."""
+        remaining = OrderedSet(
+            node
+            for node in baseline_nodes[region_start:region_end]
+            if node in eligible_nodes
+        )
+        candidates: list[list[BaseSchedulerNode]] = []
+        for idx in range(region_start, region_end):
+            seed = baseline_nodes[idx]
+            if seed not in remaining:
+                continue
+
+            members = self._collect_combo_members_from_schedule(
+                baseline_nodes,
+                remaining,
+                idx,
+                region_end,
+                max_members,
+            )
+            remaining.discard(seed)
+            if len(members) < 2:
+                continue
+
+            if speedup_cache is None:
+                has_speedup = self.speedup_by_combo_kernel(members)
+            else:
+                members_key = tuple(members)
+                if members_key not in speedup_cache:
+                    speedup_cache[members_key] = self.speedup_by_combo_kernel(members)
+                has_speedup = speedup_cache[members_key]
+            if not has_speedup:
+                continue
+
+            candidates.append(members)
+            remaining.difference_update(members)
+
+        return candidates
 
     def create_combo_kernel_nodes(self, num_ck_nodes: int | None = None) -> None:
-        """Group parallel nodes into combo kernels.
+        """Create combo kernels using the configured memory-gating policy.
 
-        Each parallel group is split into windows whose baseline-index
-        span is at most `combo_kernel_max_distance` (set the config to a
-        negative value to disable splitting). If a peak-memory threshold is set,
-        each window goes through the gate, which simulates the
-        post-fusion peak and accepts the combo only if the peak stays
-        under the threshold; rejected windows are halved and retried.
-        Without a threshold, every window becomes a combo directly.
+        Without memory gating, preserve the configured grouping callback. With
+        memory gating, collect candidates from bounded baseline-schedule regions
+        and halve rejected regions before advancing the cursor.
         """
-        fused_nodes = OrderedSet(self.nodes)
         count = 0
         num_nodes_orig = len(self.nodes)
         log.debug("ComboKernels: Generating with num_ck_nodes = %s...", num_ck_nodes)
@@ -6601,15 +7077,6 @@ class Scheduler:
         abs_thr_gb = config.combo_kernel_peak_memory_increase_gb
         pct_thr = config.combo_kernel_peak_memory_pct_threshold
         memory_check = abs_thr_gb is not None or pct_thr is not None
-        max_distance = config.combo_kernel_max_distance
-        memory_sim_time = 0.0
-        mem_ctx: ComboKernelMemoryContext | None = None
-        if memory_check:
-            mem_ctx = self._init_peak_memory_context()
-            node_to_idx = mem_ctx.node_to_idx
-        else:
-            node_to_idx = {n: i for i, n in enumerate(self.nodes)}
-        output_order = node_to_idx.copy()
 
         def _register_accept(
             combo_node: ForeachKernelSchedulerNode,
@@ -6623,10 +7090,6 @@ class Scheduler:
                 len(accepted),
                 num,
             )
-            for node in accepted:
-                fused_nodes.remove(node)
-            fused_nodes.add(combo_node)
-            output_order[combo_node] = min(output_order[node] for node in accepted)
             self.name_to_fused_node.update(
                 {n.get_name(): combo_node for n in combo_node.get_nodes()}
             )
@@ -6646,57 +7109,114 @@ class Scheduler:
                 )
             self.node_to_mempool[combo_node] = next(iter(accepted_mempools))
 
-        for num, node_list in enumerate(
-            ForeachKernelSchedulerNode.group_nodes_for_combo_kernels(self)
-        ):
-            if num_ck_nodes is not None and count > num_ck_nodes:
-                break
-            members = ForeachKernelSchedulerNode.combinable_nodes(node_list)
-            if len(members) < 2:
-                continue
-
-            for window in Scheduler._distance_windows(
-                members, node_to_idx, max_distance
+        if not memory_check:
+            fused_nodes = OrderedSet(self.nodes)
+            output_order = {node: idx for idx, node in enumerate(self.nodes)}
+            for num, node_list in enumerate(
+                ForeachKernelSchedulerNode.group_nodes_for_combo_kernels(self)
             ):
                 if num_ck_nodes is not None and count > num_ck_nodes:
                     break
-                if len(window) < 2 or not self.speedup_by_combo_kernel(window):
+                members = ForeachKernelSchedulerNode.combinable_nodes(node_list)
+                if len(members) < 2 or not self.speedup_by_combo_kernel(members):
                     continue
-                if memory_check:
-                    if mem_ctx is None:
-                        raise AssertionError("expected mem_ctx to be set")
-                    sim_start = time.perf_counter()
-                    self._try_combo_with_halving(
-                        window,
-                        num,
-                        mem_ctx,
-                        enable_autotune=enable_autotune,
-                        on_accept=_register_accept,
-                    )
-                    memory_sim_time += time.perf_counter() - sim_start
-                else:
-                    combo_node = ForeachKernelSchedulerNode(
-                        window[0].scheduler,
-                        window,
-                        use_custom_partition_algo=True,
-                        enable_autotune=enable_autotune,
-                        per_subkernel_blocks=config.combo_kernel_per_subkernel_blocks,
-                    )
-                    _register_accept(combo_node, window, num)
 
-        self.nodes = sorted(fused_nodes, key=output_order.__getitem__)
-        self.nodes = self.topological_sort_schedule(self.nodes)
+                combo_node = ForeachKernelSchedulerNode(
+                    members[0].scheduler,
+                    members,
+                    use_custom_partition_algo=True,
+                    enable_autotune=enable_autotune,
+                    per_subkernel_blocks=config.combo_kernel_per_subkernel_blocks,
+                )
+                _register_accept(combo_node, members, num)
+                for node in members:
+                    fused_nodes.remove(node)
+                fused_nodes.add(combo_node)
+                output_order[combo_node] = min(output_order[node] for node in members)
+
+            self.nodes = sorted(fused_nodes, key=output_order.__getitem__)
+            self.nodes = self.topological_sort_schedule(self.nodes)
+            log.info(
+                "Generated ComboKernel nodes: %d ComboKernels, totally %d -> %d nodes",
+                count,
+                num_nodes_orig,
+                len(self.nodes),
+            )
+            self.prune_redundant_deps(self.nodes)
+            return
+
+        if (
+            ForeachKernelSchedulerNode.group_algorithm_for_combo_kernels
+            is not ForeachKernelSchedulerNode._default_group_nodes_for_combo_kernels
+        ):
+            torch._logging.warning_once(
+                log,
+                "Combo-kernel memory gating ignores the custom grouping algorithm "
+                "registered by set_group_algorithm_for_combo_kernels. Set both "
+                "combo_kernel_peak_memory_increase_gb and "
+                "combo_kernel_peak_memory_pct_threshold to None to use it.",
+            )
+
+        mem_ctx = self._init_peak_memory_context()
+        baseline_nodes = mem_ctx.baseline_nodes
+        schedule_nodes = (
+            ForeachKernelSchedulerNode._filter_nodes_for_combo_kernel_grouping(
+                baseline_nodes
+            )
+        )
+        eligible_nodes = OrderedSet(
+            ForeachKernelSchedulerNode.combinable_nodes(schedule_nodes)
+        )
+        max_distance = config.combo_kernel_max_distance
+        memory_sim_time = 0.0
+        finalized_nodes: list[BaseSchedulerNode] = []
+        cursor = 0
+        candidate_num = 0
+        while cursor < len(baseline_nodes):
+            if num_ck_nodes is not None and count > num_ck_nodes:
+                finalized_nodes.extend(baseline_nodes[cursor:])
+                break
+
+            if baseline_nodes[cursor] not in eligible_nodes:
+                finalized_nodes.append(baseline_nodes[cursor])
+                cursor += 1
+                continue
+
+            region_end = (
+                len(baseline_nodes)
+                if max_distance < 0
+                else min(len(baseline_nodes), cursor + max_distance + 1)
+            )
+            sim_start = time.perf_counter()
+            region_nodes, cursor = self._try_combo_with_halving(
+                cursor,
+                region_end,
+                eligible_nodes,
+                candidate_num,
+                baseline_nodes,
+                mem_ctx,
+                enable_autotune=enable_autotune,
+                on_accept=_register_accept,
+            )
+            memory_sim_time += time.perf_counter() - sim_start
+            finalized_nodes.extend(region_nodes)
+            candidate_num += 1
+
+        self.nodes = finalized_nodes
+        if self.topological_sort_schedule(self.nodes) != self.nodes:
+            raise AssertionError(
+                "final combo schedule differs from the validated schedule"
+            )
         log.info(
             "Generated ComboKernel nodes: %d ComboKernels, totally %d -> %d nodes",
             count,
             num_nodes_orig,
             len(self.nodes),
         )
-        if memory_check:
-            log.info(
-                "ComboKernels memory-aware: %.3fs spent in peak simulation",
-                memory_sim_time,
-            )
+        log.info(
+            "ComboKernels memory-aware: %.3fs spent in peak simulation",
+            memory_sim_time,
+        )
         self.prune_redundant_deps(self.nodes)
 
     def _init_peak_memory_context(self) -> ComboKernelMemoryContext:
@@ -6735,29 +7255,92 @@ class Scheduler:
 
         return ComboKernelMemoryContext(
             graph_outputs=graph_outputs,
+            baseline_nodes=tuple(self.nodes),
             node_to_idx={node: idx for idx, node in enumerate(self.nodes)},
             baseline_peak=baseline_peak,
             running_peak=baseline_peak,
             baseline_live_before=baseline_live_before,
         )
 
+    def _build_combo_kernel_region(
+        self,
+        combo_groups: list[list[BaseSchedulerNode]],
+        baseline_nodes: tuple[BaseSchedulerNode, ...],
+        *,
+        region_start: int,
+        region_end: int,
+        enable_autotune: bool,
+    ) -> tuple[list[ForeachKernelSchedulerNode], list[BaseSchedulerNode]] | None:
+        """Build all combos and topologically repair their schedule region."""
+        if not (0 <= region_start < region_end <= len(baseline_nodes)):
+            raise AssertionError("invalid combo-kernel schedule region")
+
+        region_set = OrderedSet(baseline_nodes[region_start:region_end])
+        member_to_combo: dict[BaseSchedulerNode, ForeachKernelSchedulerNode] = {}
+        combo_nodes: list[ForeachKernelSchedulerNode] = []
+        for group_nodes in combo_groups:
+            if len(group_nodes) < 2:
+                raise AssertionError("combo kernel must contain at least two nodes")
+            if not all(node in region_set for node in group_nodes):
+                raise AssertionError("combo member is outside its schedule region")
+            if any(node in member_to_combo for node in group_nodes):
+                raise AssertionError("combo-kernel candidates overlap")
+
+            combo_node = ForeachKernelSchedulerNode(
+                group_nodes[0].scheduler,
+                group_nodes,
+                use_custom_partition_algo=True,
+                enable_autotune=enable_autotune,
+                per_subkernel_blocks=config.combo_kernel_per_subkernel_blocks,
+            )
+            combo_nodes.append(combo_node)
+            member_to_combo.update(dict.fromkeys(group_nodes, combo_node))
+
+        local_nodes: list[BaseSchedulerNode] = []
+        inserted_combos = OrderedSet[ForeachKernelSchedulerNode]()
+        for node in baseline_nodes[region_start:region_end]:
+            if combo_node := member_to_combo.get(node):
+                if combo_node not in inserted_combos:
+                    local_nodes.append(combo_node)
+                    inserted_combos.add(combo_node)
+            else:
+                local_nodes.append(node)
+
+        local_nodes = self.topological_sort_schedule(local_nodes)
+        buffer_order = {
+            name: idx
+            for idx, node in enumerate(local_nodes)
+            for name in node.get_buffer_names()
+        }
+        if any(
+            buffer_order[dep.name] > idx
+            for idx, node in enumerate(local_nodes)
+            for dep in node.unmet_dependencies
+            if dep.name in buffer_order
+        ):
+            log.debug("ComboKernels: joint region rewrite creates a cycle")
+            return None
+
+        return combo_nodes, local_nodes
+
     def _try_combo_with_memory_check(
         self,
-        group_nodes: list[BaseSchedulerNode],
+        combo_groups: list[list[BaseSchedulerNode]],
         mem_ctx: ComboKernelMemoryContext,
+        *,
+        region_start: int,
+        region_end: int,
         enable_autotune: bool,
-    ) -> tuple[ForeachKernelSchedulerNode | None, int]:
-        """The gate: does fusing `group_nodes` into one combo keep peak
-        memory under the threshold?
+    ) -> tuple[list[ForeachKernelSchedulerNode], list[BaseSchedulerNode]] | None:
+        """Does fusing all candidates keep peak memory under the threshold?
 
-        Returns `(combo_node, combo_step)` if accepted, or `(None, 0)`
+        Returns the combos and exact rewritten region if accepted, or `None`
         if rejected. The running peak lives on `mem_ctx.running_peak`.
 
-        The pretend rewrite only changes node order inside the window
-        `[region_start, region_end]` (the smallest range containing all
-        members). Inside that window:
-          - the members collapse into one combo node, all at `combo_step`,
-          - everything else is evaluated from the original schedule.
+        The pretend rewrite only changes node order inside the half-open
+        window `[region_start, region_end)`. Inside that window:
+          - each candidate collapses into one combo node,
+          - everything else is evaluated from the baseline schedule.
         Outside the window, nothing moves. Earlier accepts are accounted
         for only by `mem_ctx.running_peak`. The threshold is checked
         against `mem_ctx.baseline_peak` (the original graph peak) so total
@@ -6765,62 +7348,31 @@ class Scheduler:
         """
         from .memory import estimate_region_peak_memory
 
-        combo_node = ForeachKernelSchedulerNode(
-            group_nodes[0].scheduler,
-            group_nodes,
-            use_custom_partition_algo=True,
+        build_result = self._build_combo_kernel_region(
+            combo_groups,
+            mem_ctx.baseline_nodes,
+            region_start=region_start,
+            region_end=region_end,
             enable_autotune=enable_autotune,
-            per_subkernel_blocks=config.combo_kernel_per_subkernel_blocks,
         )
-        # Wire the combo's pred_buffers from its members so the gate
-        # simulator can read `node.mpi_node.pred_buffers` uniformly.
-        combo_pred_buffers = OrderedSet()
-        for m in group_nodes:
-            combo_pred_buffers.update(m.mpi_node.pred_buffers)
-        combo_node.mpi_node = MemoryPlanningInfoForNode(
-            pred_buffers=combo_pred_buffers,
-        )
+        if build_result is None:
+            return None
+        combo_nodes, local_nodes = build_result
+        for combo_node, group_nodes in zip(combo_nodes, combo_groups):
+            combo_pred_buffers = OrderedSet()
+            for member in group_nodes:
+                combo_pred_buffers.update(member.mpi_node.pred_buffers)
+            combo_node.mpi_node = MemoryPlanningInfoForNode(
+                pred_buffers=combo_pred_buffers,
+            )
 
         node_to_idx = mem_ctx.node_to_idx
 
-        # Single pass over group_nodes: build the set and find the
-        # min/max baseline index together.
-        group_set: OrderedSet[BaseSchedulerNode] = OrderedSet()
-        region_start = sys.maxsize
-        region_end = -1
-        for n in group_nodes:
-            group_set.add(n)
-            idx = node_to_idx[n]
-            if idx < region_start:
-                region_start = idx
-            if idx > region_end:
-                region_end = idx
-
-        # Build the post-rewrite slice for [region_start, region_end].
-        local_entries: list[_LocalEntry] = []
-        inserted_combo = False
-
-        def add_local(node: BaseSchedulerNode, cur: int, baseline: int) -> None:
-            local_entries.append(_LocalEntry(cur, baseline, node))
-
-        for i in range(region_start, region_end + 1):
-            n = self.nodes[i]
-            if n in group_set:
-                if not inserted_combo:
-                    add_local(combo_node, region_start, i)
-                    inserted_combo = True
-                continue
-            add_local(n, i, i)
-
-        local_nodes = [
-            e.node for e in sorted(local_entries, key=lambda e: (e.cur, e.baseline))
-        ]
-        local_nodes = self.topological_sort_schedule(local_nodes)
-
         new_step = {n: region_start + i for i, n in enumerate(local_nodes)}
-        combo_step = new_step[combo_node]
-        for n in group_nodes:
-            new_step[n] = combo_step
+        for combo_node, group_nodes in zip(combo_nodes, combo_groups):
+            combo_step = new_step[combo_node]
+            for node in group_nodes:
+                new_step[node] = combo_step
 
         def step_of(node: BaseSchedulerNode) -> int:
             if node in new_step:
@@ -6834,7 +7386,7 @@ class Scheduler:
         region_peak = estimate_region_peak_memory(
             local_nodes,
             region_start=region_start,
-            region_end=region_end,
+            region_end=region_end - 1,
             step_of=step_of,
             graph_outputs=mem_ctx.graph_outputs,
             cur_memory=cur_memory,
@@ -6857,64 +7409,83 @@ class Scheduler:
         pct = (100.0 * delta / original_peak) if original_peak > 0 else 0.0
         if not accept:
             log.debug(
-                "ComboKernels memory-aware: rejected %d nodes "
+                "ComboKernels memory-aware: rejected %d combos / %d nodes "
                 "(peak delta %+d bytes = %.3f%%)",
-                len(group_nodes),
+                len(combo_groups),
+                sum(map(len, combo_groups)),
                 delta,
                 pct,
             )
-            return None, 0
+            return None
 
         log.info(
-            "ComboKernels memory-aware: accepted %d nodes "
+            "ComboKernels memory-aware: accepted %d combos / %d nodes "
             "(peak delta %+d bytes = %.3f%%)",
-            len(group_nodes),
+            len(combo_groups),
+            sum(map(len, combo_groups)),
             delta,
             pct,
         )
         mem_ctx.running_peak = new_peak
-        return combo_node, combo_step
+        return combo_nodes, local_nodes
 
     def _try_combo_with_halving(
         self,
-        candidate: list[BaseSchedulerNode],
+        region_start: int,
+        region_end: int,
+        eligible_nodes: OrderedSet[BaseSchedulerNode],
         num: int,
+        baseline_nodes: tuple[BaseSchedulerNode, ...],
         mem_ctx: ComboKernelMemoryContext,
         *,
         enable_autotune: bool,
         on_accept: Callable[
             [ForeachKernelSchedulerNode, list[BaseSchedulerNode], int], None
         ],
-    ) -> None:
-        """Try the full candidate; on reject, halve at the
-        baseline-index midpoint and try each half.
-        """
-        n2i = mem_ctx.node_to_idx
-        # Push late then early so early pops first.
-        stack: list[list[BaseSchedulerNode]] = [candidate]
+    ) -> tuple[list[BaseSchedulerNode], int]:
+        """Finalize a region, halving and recollecting after memory rejection."""
+        if mem_ctx.baseline_nodes is not baseline_nodes:
+            raise AssertionError("memory context does not match baseline schedule")
+        finalized_nodes: list[BaseSchedulerNode] = []
+        speedup_cache: dict[tuple[BaseSchedulerNode, ...], bool] | None = (
+            {} if config.benchmark_combo_kernel else None
+        )
+        stack = [(region_start, region_end)]
         while stack:
-            subset = stack.pop()
-            if len(subset) < 2 or not self.speedup_by_combo_kernel(subset):
-                continue
-
-            combo_node, combo_step = Scheduler._try_combo_with_memory_check(
-                self, subset, mem_ctx, enable_autotune
+            start, end = stack.pop()
+            candidates = self._collect_combo_candidates_from_schedule(
+                baseline_nodes,
+                eligible_nodes,
+                start,
+                end,
+                config.combo_kernel_max_num_nodes,
+                speedup_cache=speedup_cache,
             )
-            if combo_node is not None:
-                on_accept(combo_node, subset, num)
+            if not candidates:
+                finalized_nodes.extend(baseline_nodes[start:end])
                 continue
 
-            idxs = [n2i[n] for n in subset]
-            lo, hi = min(idxs), max(idxs)
-            if lo == hi:
+            result = Scheduler._try_combo_with_memory_check(
+                self,
+                candidates,
+                mem_ctx,
+                region_start=start,
+                region_end=end,
+                enable_autotune=enable_autotune,
+            )
+            if result is not None:
+                combo_nodes, local_nodes = result
+                for combo_node, candidate in zip(combo_nodes, candidates):
+                    on_accept(combo_node, candidate, num)
+                finalized_nodes.extend(local_nodes)
                 continue
-            mid = (lo + hi) // 2
-            early = [n for n in subset if n2i[n] <= mid]
-            late = [n for n in subset if n2i[n] > mid]
-            if 2 <= len(late) < len(subset):
-                stack.append(late)
-            if 2 <= len(early) < len(subset):
-                stack.append(early)
+
+            region_size = end - start
+            midpoint = start + region_size // 2
+            stack.append((midpoint, end))
+            stack.append((start, midpoint))
+
+        return finalized_nodes, region_end
 
     def prune_redundant_deps(self, nodes: list[BaseSchedulerNode]) -> None:
         for node in nodes:
@@ -7624,6 +8195,7 @@ class Scheduler:
             or not config.triton.coalesce_tiling_analysis
             or config.triton.prefer_nd_tiling
             or any(node.is_foreach() for node in nodes)
+            or any(isinstance(node, FusedStagedReduction) for node in nodes)
         ):
             return None
 
@@ -10354,9 +10926,9 @@ class Scheduler:
                 else:
                     raise AssertionError(f"{type(self)=}")
                 backend.codegen_combo_kernel(node)
-            elif isinstance(node, FusedNestedReductions):
+            elif isinstance(node, FusedStagedReduction):
                 # pyrefly: ignore [unbound-name]
-                self.get_backend(device).codegen_nested_reduction(node)
+                self.get_backend(device).codegen_staged_reduction(node)
             elif isinstance(node, FusedMixOrderReductions):
                 # pyrefly: ignore [unbound-name]
                 self.get_backend(device).codegen_mix_order_reduction(node)
@@ -10603,6 +11175,17 @@ class BaseScheduling:  # noqa: docstring_linter
         """Return a set of .codegen.common.BackendFeature()"""
         return OrderedSet()
 
+    def has_sub_parent_epilogue(self, nodes: Sequence[BaseSchedulerNode]) -> bool:
+        """Whether ``nodes`` codegen through the sub-parent staged emitter.
+
+        Combo kernels and fusion benchmarking re-expand a group through generic
+        scheduling, which cannot represent the epilogue's derived group and
+        raises ``unexpected group``. Backends that emit sub-parent epilogues
+        report them here so those paths decline the node instead of aborting the
+        compile. Declining costs a combo or a benchmark, not the fusion.
+        """
+        return False
+
     def can_fuse_vertical(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:
@@ -10658,10 +11241,13 @@ class BaseScheduling:  # noqa: docstring_linter
         """
         if node1.is_foreach() or node2.is_foreach():
             return ForeachKernelSchedulerNode.fuse(node1, node2)
-        elif NestedReduction._is_dependent_reduction_pair(
-            node1, node2
-        ) and NestedReduction.can_fuse(node1, node2):
-            return FusedNestedReductions(node1, node2)
+        elif (
+            NestedReduction._is_dependent_reduction_pair(node1, node2)
+            and (plan := NestedReduction.plan(node1, node2)) is not None
+        ):
+            if plan.nested_stage is None:
+                raise AssertionError("expected nested reduction stage")
+            return FusedNestedReductions(node1, node2, plan.nested_stage)
         elif MixOrderReduction.are_mix_order_reductions(node1, node2):
             return FusedMixOrderReductions(node1, node2)
         elif isinstance(node1, FusedNestedReductions):
@@ -10677,7 +11263,15 @@ class BaseScheduling:  # noqa: docstring_linter
                 )
             return FusedExternTritonKernelSchedulerNode.epilogue_fuse(node1, node2)
         else:
-            return FusedSchedulerNode.fuse(node1, node2)
+            nodes = [*node1.get_nodes(), *node2.get_nodes()]
+            staged = isinstance(node1, FusedStagedReduction) or isinstance(
+                node2, FusedStagedReduction
+            )
+            device = node1.get_device()
+            if not staged and device is not None:
+                staged = self.has_sub_parent_epilogue(nodes)
+            node_type = FusedStagedReduction if staged else FusedSchedulerNode
+            return node_type.fuse(node1, node2)
 
     def group_fn(
         self, sizes: Sequence[Sequence[sympy.Expr]]
@@ -10721,7 +11315,7 @@ class BaseScheduling:  # noqa: docstring_linter
     def codegen_mix_order_reduction(self, node: FusedMixOrderReductions) -> None:
         raise NotImplementedError
 
-    def codegen_nested_reduction(self, node: FusedNestedReductions) -> None:
+    def codegen_staged_reduction(self, node: FusedStagedReduction) -> None:
         raise NotImplementedError
 
     def codegen_sync(self) -> None:
