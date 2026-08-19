@@ -647,10 +647,9 @@ def valid_vec_isa_list() -> list[VecISA]:
         if (caps.get("sve2", False) or caps.get("sve", False)) and caps.get(
             "bf16", False
         ):
-            if caps.get("sve_max_length") == 128:
-                isa_list.append(VecSVE(128))
-            else:
-                isa_list.append(VecSVE(256))
+            isa = VecSVE(128 if caps.get("sve_max_length") == 128 else 256)
+            if isa:
+                isa_list.append(isa)
         else:
             isa_list.append(VecNEON())
 
