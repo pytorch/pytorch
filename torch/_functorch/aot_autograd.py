@@ -91,7 +91,6 @@ from ._aot_autograd.input_output_analysis import (  # noqa: F401
     remove_dupe_metadata,
 )
 from ._aot_autograd.logging_utils import (  # noqa: F401
-    callback_set,
     describe_input,
     format_guard_bug_msg,
     get_aot_compilation_context,

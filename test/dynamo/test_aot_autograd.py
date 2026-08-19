@@ -1,8 +1,11 @@
 # Owner(s): ["module: dynamo"]
 import copy
 import operator
+import queue
 import re
+import threading
 import unittest
+from contextlib import nullcontext
 from textwrap import dedent
 from unittest.mock import patch
 
@@ -32,6 +35,7 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
+    onlyCUDA,
 )
 from torch.testing._internal.common_utils import compare_equal_outs_and_grads
 from torch.utils._sympy.symbol import make_symbol, SymT
@@ -990,6 +994,78 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         self.assertNotIn("grad_fn_seq_nr", fx_traceback.current_meta)
         self.assertNotIn("in_grad_fn", fx_traceback.current_meta)
 
+    def test_stacktrace_hooks_use_backward_callers_state(self):
+        from torch._functorch.aot_autograd import setup_stacktrace_preservation_hooks
+
+        x = torch.randn(8, requires_grad=True)
+        out = x.sin().sum()
+        with fx_traceback.preserve_node_meta():
+            setup_stacktrace_preservation_hooks([out.grad_fn])
+            setup_stacktrace_preservation_hooks([out.grad_fn])
+
+        observed = []
+        out.grad_fn.register_prehook(
+            lambda _grad_outputs: observed.append(dict(fx_traceback.get_current_meta()))
+        )
+        with fx_traceback.preserve_node_meta(), fx_traceback.annotate({"run": 1}):
+            out.backward(retain_graph=True)
+        with fx_traceback.preserve_node_meta(), fx_traceback.annotate({"run": 2}):
+            out.backward()
+
+        self.assertEqual(
+            [meta["custom"] for meta in observed], [{"run": 1}, {"run": 2}]
+        )
+        self.assertFalse(fx_traceback.has_preserved_node_meta())
+        self.assertEqual(dict(fx_traceback.current_meta), {})
+
+    def test_stacktrace_hooks_isolate_concurrent_graph_tasks(self):
+        from torch._functorch.aot_autograd import setup_stacktrace_preservation_hooks
+
+        x = torch.randn(8, requires_grad=True)
+        out = x.sin().sum()
+        with fx_traceback.preserve_node_meta():
+            setup_stacktrace_preservation_hooks([out.grad_fn])
+
+        observed = queue.Queue()
+        errors = queue.Queue()
+        barrier = threading.Barrier(2)
+        out.grad_fn.register_prehook(
+            lambda _grad_outputs: observed.put(
+                fx_traceback.get_current_meta()["custom"]["owner"]
+            )
+        )
+
+        def run_backward(owner):
+            try:
+                with (
+                    fx_traceback.preserve_node_meta(),
+                    fx_traceback.annotate({"owner": owner}),
+                ):
+                    barrier.wait(timeout=5)
+                    out.backward(retain_graph=True)
+            except Exception as e:
+                errors.put(e)
+                barrier.abort()
+
+        threads = [
+            threading.Thread(target=run_backward, args=(owner,))
+            for owner in ("thread-a", "thread-b")
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=10)
+            self.assertFalse(thread.is_alive())
+
+        if not errors.empty():
+            raise errors.get()
+        self.assertEqual(
+            sorted([observed.get_nowait(), observed.get_nowait()]),
+            ["thread-a", "thread-b"],
+        )
+        self.assertFalse(fx_traceback.has_preserved_node_meta())
+        self.assertEqual(dict(fx_traceback.current_meta), {})
+
     # https://github.com/pytorch/pytorch/issues/110121
     def test_aot_export_joint_simple_repro(self):
         class Mod(torch.nn.Module):
@@ -1912,6 +1988,69 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
 
 class AotAutogradFallbackTestsDevice(torch._inductor.test_case.TestCase):
+    @onlyCUDA
+    def test_aot_backward_traceback_meta_on_worker(self, device):
+        caller_thread = threading.get_ident()
+        backward_threads = []
+
+        def fn(x):
+            sin = x.sin()
+            if sin.grad_fn is not None:
+                sin.grad_fn.register_prehook(
+                    lambda _grad_outputs: backward_threads.append(threading.get_ident())
+                )
+            return (sin + x.cos()).sum()
+
+        x = torch.randn(8, device=device, requires_grad=True)
+        with (
+            # Exercise the CUDA engine worker path instead of AOTAutograd's
+            # usual single-threaded tracing fallback.
+            patch.object(
+                torch.autograd,
+                "set_multithreading_enabled",
+                lambda _enabled: nullcontext(),
+            ),
+            torch.enable_grad(),
+            fx_traceback.preserve_node_meta(),
+        ):
+            joint_graph, _, _, _ = _aot_export_function(fn, (x,), no_tangents=True)
+
+        self.assertTrue(
+            any(thread_id != caller_thread for thread_id in backward_threads)
+        )
+        backward_nodes = [
+            node
+            for node in joint_graph.graph.nodes
+            if node.meta.get("autograd_backward")
+        ]
+        self.assertTrue(backward_nodes)
+        regular_backward_nodes = [
+            node for node in backward_nodes if not node.meta.get("is_gradient_acc")
+        ]
+        self.assertTrue(regular_backward_nodes)
+        self.assertTrue(
+            all(node.meta.get("seq_nr", -1) >= 0 for node in regular_backward_nodes)
+        )
+        self.assertTrue(
+            all(
+                node.meta.get("partitioner_tag") == "is_backward"
+                for node in regular_backward_nodes
+            )
+        )
+        gradient_accumulation_nodes = [
+            node for node in backward_nodes if node.meta.get("is_gradient_acc")
+        ]
+        self.assertTrue(gradient_accumulation_nodes)
+        self.assertTrue(
+            all(
+                fx_traceback.GRADIENT_ACC_SPECIAL_STACK
+                in node.meta.get("stack_trace", "")
+                for node in gradient_accumulation_nodes
+            )
+        )
+        self.assertFalse(fx_traceback.has_preserved_node_meta())
+        self.assertEqual(dict(fx_traceback.current_meta), {})
+
     @onlyAccelerator
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     @patch.object(torch._dynamo.config, "capture_dynamic_output_shape_ops", True)
