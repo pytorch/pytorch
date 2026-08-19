@@ -1268,6 +1268,9 @@ torch.cuda.synchronize()
         )
         check([[1, 2]], (2, 1, 1, 2, False, False), [[2, 1]])
         check([[1, 2]], (2, 2, 1, 2, False, True), [[2, 2]])
+        # window reaching past the input: used to overflow the ceil division
+        # bounding the output range, and read out of bounds
+        check([[1, 2, 3, 4]], (2, 2**63 - 1, 0, 2147483647, False, True), [[1]])
 
     @onlyCPU
     @dtypes(torch.float16, torch.float32)

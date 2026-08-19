@@ -77,16 +77,21 @@ struct PoolingParams1D {
     return oj * SJ + kj * DJ - PJ;
   }
 
+  // ceil(x / SJ) for x >= 1, without at::divup's `x + SJ - 1` overflowing.
+  inline int64_t ceil_div_stride(int64_t x) const {
+    return (x - 1) / SJ + 1;
+  }
+
   // Return index of first output within bounds for this kernel index
   inline int64_t valid_output_start(int64_t kj) const {
     int64_t ij = index(kj, 0);;
-    return ij < 0 ? at::divup(-ij, SJ) : 0;
+    return ij < 0 ? ceil_div_stride(-ij) : 0;
   }
 
   // Return index one past last output within bounds for this kernel index
   inline int64_t valid_output_end(int64_t kj) const {
     int64_t ij = index(kj, OW - 1);
-    return ij >= IW ? OW - at::divup(ij - (IW - 1), SJ) : OW;
+    return ij >= IW ? OW - ceil_div_stride(ij - (IW - 1)) : OW;
   }
 };
 
