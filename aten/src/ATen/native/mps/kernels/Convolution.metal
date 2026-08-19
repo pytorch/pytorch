@@ -268,6 +268,93 @@ INSTANTIATE_NCHW_TO_NHWC_ALL(float)
 INSTANTIATE_NCHW_TO_NHWC_ALL(half)
 INSTANTIATE_NCHW_TO_NHWC_ALL(bfloat)
 
+// Depthwise conv1d directly on NCL: rows are per-channel independent, so the
+// NDHWC transpose the matmul kernels need would be pure overhead here.
+template <typename T>
+kernel void conv1d_dw(
+    device const T* input [[buffer(0)]],
+    device const T* weight [[buffer(1)]],
+    device T* output [[buffer(2)]],
+    constant Conv1dDwParams& params [[buffer(3)]],
+    device const T* bias [[buffer(4)]],
+    uint3 position [[thread_position_in_grid]]) {
+  // the host puts the output's stride-1 axis on x
+  const int output_index = int(params.swap_grid ? position.y : position.x);
+  const int channel = int(params.swap_grid ? position.x : position.y);
+  const int batch = int(position.z);
+  float accumulator = params.has_bias ? (float)bias[channel] : 0.0f;
+  device const T* input_batch = input +
+      (int64_t)batch * params.input_channels * params.input_length +
+      (int64_t)(channel / params.channel_multiplier) * params.in_channel_stride;
+  const int input_start = output_index * params.stride - params.padding;
+  for (int kernel_index = 0; kernel_index < params.kernel_size;
+       ++kernel_index) {
+    const int input_index = input_start + kernel_index * params.dilation;
+    if (input_index >= 0 && input_index < params.input_length) {
+      accumulator +=
+          (float)input_batch[(int64_t)input_index * params.in_pos_stride] *
+          (float)weight[(int64_t)channel * params.kernel_size + kernel_index];
+    }
+  }
+  output
+      [(int64_t)batch * params.input_channels * params.channel_multiplier *
+           params.output_length +
+       (int64_t)channel * params.out_channel_stride +
+       (int64_t)output_index * params.out_pos_stride] = (T)accumulator;
+}
+
+template <typename T, bool CHECK_BOUNDS>
+kernel void conv1d_dw_vec(
+    device const T* input [[buffer(0)]],
+    device const T* weight [[buffer(1)]],
+    device T* output [[buffer(2)]],
+    constant Conv1dDwParams& params [[buffer(3)]],
+    device const T* bias [[buffer(4)]],
+    uint3 position [[thread_position_in_grid]]) {
+  const int output_start = int(position.x) * conv1d_dw_outputs_per_thread;
+  const int channel = int(position.y);
+  const int batch = int(position.z);
+  const float initial = params.has_bias ? (float)bias[channel] : 0.0f;
+  float accumulators[conv1d_dw_outputs_per_thread];
+#pragma unroll
+  for (int lane = 0; lane < conv1d_dw_outputs_per_thread; ++lane) {
+    accumulators[lane] = initial;
+  }
+  device const T* input_row = input +
+      ((int64_t)batch * params.input_channels +
+       channel / params.channel_multiplier) *
+          params.input_length;
+  for (int kernel_index = 0; kernel_index < params.kernel_size;
+       ++kernel_index) {
+    const int input_start =
+        output_start - params.padding + kernel_index * params.dilation;
+    const float weight_value =
+        (float)weight[(int64_t)channel * params.kernel_size + kernel_index];
+#pragma unroll
+    for (int lane = 0; lane < conv1d_dw_outputs_per_thread; ++lane) {
+      const int input_index = input_start + lane;
+      if IF_CONSTEXPR (!CHECK_BOUNDS) {
+        accumulators[lane] += (float)input_row[input_index] * weight_value;
+      } else if (input_index >= 0 && input_index < params.input_length) {
+        accumulators[lane] += (float)input_row[input_index] * weight_value;
+      }
+    }
+  }
+  const int64_t output_row =
+      ((int64_t)batch * params.input_channels * params.channel_multiplier +
+       channel) *
+      params.output_length;
+#pragma unroll
+  for (int lane = 0; lane < conv1d_dw_outputs_per_thread; ++lane) {
+    const int output_index = output_start + lane;
+    if IF_CONSTEXPR (!CHECK_BOUNDS) {
+      output[output_row + output_index] = (T)accumulators[lane];
+    } else if (output_index < params.output_length) {
+      output[output_row + output_index] = (T)accumulators[lane];
+    }
+  }
+}
+
 // DHWIO copy of an OIDHW weight view; ATen's generic permute copy runs well
 // below memory bandwidth for this permutation. Each thread streams one kW row.
 template <typename T>
@@ -309,6 +396,41 @@ kernel void conv_weight_to_dhwio(
 INSTANTIATE_CONV_WEIGHT_TO_DHWIO(float)
 INSTANTIATE_CONV_WEIGHT_TO_DHWIO(half)
 INSTANTIATE_CONV_WEIGHT_TO_DHWIO(bfloat)
+
+static_assert(
+    conv1d_dw_outputs_per_thread == 8,
+    "CONV1D_DW_OUTPUTS_PER_THREAD_STR must match conv1d_dw_outputs_per_thread");
+
+#define INSTANTIATE_CONV1D_DW(DT)                                       \
+  template [[host_name("conv1d_dw_" #DT)]] kernel void conv1d_dw<DT>(   \
+      device const DT*,                                                 \
+      device const DT*,                                                 \
+      device DT*,                                                       \
+      constant Conv1dDwParams&,                                         \
+      device const DT*,                                                 \
+      uint3);                                                           \
+  template [[host_name("conv1d_dw_vec" CONV1D_DW_OUTPUTS_PER_THREAD_STR \
+                       "_" #DT)]] kernel void                           \
+  conv1d_dw_vec<DT, true>(                                              \
+      device const DT*,                                                 \
+      device const DT*,                                                 \
+      device DT*,                                                       \
+      constant Conv1dDwParams&,                                         \
+      device const DT*,                                                 \
+      uint3);                                                           \
+  template [[host_name("conv1d_dw_vec" CONV1D_DW_OUTPUTS_PER_THREAD_STR \
+                       "_valid_" #DT)]] kernel void                     \
+  conv1d_dw_vec<DT, false>(                                             \
+      device const DT*,                                                 \
+      device const DT*,                                                 \
+      device DT*,                                                       \
+      constant Conv1dDwParams&,                                         \
+      device const DT*,                                                 \
+      uint3);
+
+INSTANTIATE_CONV1D_DW(float)
+INSTANTIATE_CONV1D_DW(half)
+INSTANTIATE_CONV1D_DW(bfloat)
 
 #if __METAL_VERSION__ >= 400 && \
     __has_include(<MetalPerformancePrimitives/MetalPerformancePrimitives.h>)

@@ -14185,6 +14185,77 @@ class TestViewOpsMPS(TestCaseMPS):
             self.assertEqual(x.view(6).shape, [6])
 
 class TestConvolutionMPS(TestCaseMPS):
+    @staticmethod
+    def _conv1d_tolerance(dtype, reduction_size):
+        # Scale the established bounds by the square root of the accumulated terms.
+        reference_reduction_size = 7 * 7
+        max_tolerance = {torch.float32: 1e-4, torch.float16: 5e-3, torch.bfloat16: 5e-2}[dtype]
+        return max_tolerance * math.sqrt(reduction_size / reference_reduction_size)
+
+    @parametrize(
+        "kernel_size,stride,dilation,input_length",
+        [(2, 2, 1, 2), (2, 2, 1, 3), (7, 1, 9, 55)],
+        name_fn=lambda kernel_size, stride, dilation, input_length: f"k{kernel_size}_s{stride}_d{dilation}_l{input_length}",
+    )
+    @parametrize("with_bias", [False, True], name_fn=lambda value: "bias" if value else "no_bias")
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_conv1d_single_output(self, dtype, with_bias, kernel_size, stride, dilation, input_length):
+        input_tensor = torch.randn(2, 7, input_length).to(dtype).float()
+        weight = torch.randn(33, 7, kernel_size).to(dtype).float()
+        bias = torch.randn(33).to(dtype).float() if with_bias else None
+        expected = F.conv1d(input_tensor, weight, bias, stride=stride, dilation=dilation)
+        actual = F.conv1d(
+            input_tensor.to(device="mps", dtype=dtype),
+            weight.to(device="mps", dtype=dtype),
+            None if bias is None else bias.to(device="mps", dtype=dtype),
+            stride=stride,
+            dilation=dilation,
+        )
+        tol = self._conv1d_tolerance(dtype, weight.size(1) * weight.size(2))
+        self.assertEqual(actual.float().cpu(), expected, atol=tol, rtol=tol)
+
+    @parametrize(
+        "channels,stride,padding,input_length",
+        [(1, 1, 27, 257), (1, 1, 0, 118), (32, 1, 27, 257), (32, 2, 13, 257)],
+        name_fn=lambda channels, stride, padding, input_length: f"c{channels}_s{stride}_p{padding}_l{input_length}",
+    )
+    @parametrize("with_bias", [False, True], name_fn=lambda with_bias: "bias" if with_bias else "no_bias")
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_conv1d_depthwise(self, dtype, with_bias, channels, stride, padding, input_length):
+        input_tensor = torch.randn(2, channels, input_length).to(dtype).float()
+        weight = torch.randn(channels, 1, 7).to(dtype).float()
+        bias = torch.randn(channels).to(dtype).float() if with_bias else None
+        expected = F.conv1d(input_tensor, weight, bias, stride=stride, padding=padding, dilation=9, groups=channels)
+        actual = F.conv1d(
+            input_tensor.to(device="mps", dtype=dtype),
+            weight.to(device="mps", dtype=dtype),
+            None if bias is None else bias.to(device="mps", dtype=dtype),
+            stride=stride,
+            padding=padding,
+            dilation=9,
+            groups=channels,
+        )
+        tol = self._conv1d_tolerance(dtype, weight.size(1) * weight.size(2))
+        self.assertEqual(actual.float().cpu(), expected, atol=tol, rtol=tol)
+
+    def test_conv1d_pointwise_strided(self):
+        x = torch.randn(2, 48, 1000)
+        weight = torch.randn(96, 48, 1)
+        bias = torch.randn(96)
+        expected = F.conv1d(x, weight, bias, stride=4)
+        actual = F.conv1d(x.to("mps"), weight.to("mps"), bias.to("mps"), stride=4)
+        self.assertEqual(actual.cpu(), expected, atol=1e-4, rtol=1e-4)
+
+    @parametrize("multiplier", [2, 3])
+    def test_conv1d_depthwise_multiplier(self, multiplier):
+        channels = 16
+        x = torch.randn(2, channels, 777)
+        weight = torch.randn(channels * multiplier, 1, 3)
+        bias = torch.randn(channels * multiplier)
+        expected = F.conv1d(x, weight, bias, padding=1, groups=channels)
+        actual = F.conv1d(x.to("mps"), weight.to("mps"), bias.to("mps"), padding=1, groups=channels)
+        self.assertEqual(actual.cpu(), expected, atol=1e-4, rtol=1e-4)
+
     def test_conv1d_all_strides_paddings(self):
         # https://github.com/pytorch/pytorch/issues/82921
         def helper(stride, padding):
