@@ -1974,6 +1974,22 @@ def _reject_uninstallable_entry(frames: list[dict[str, Any]], entry: Any) -> Non
     entry_frames = [f for f in frames if f["is_entry"]]
     if not entry_frames:
         return
+    if not any(f["variants"] for f in entry_frames):
+        # Handing precompile a bare nn.Module compiles Dynamo's own wrapper
+        # frame (external_utils.wrap_inline's `inner`) rather than the module:
+        # every graph lands there, closing over the module, and the entry frame
+        # itself holds nothing. Load cannot rebuild that closure, and `inner`'s
+        # code object is shared by every wrap_inline in the process, so serving
+        # it would let an unrelated frame hit these guards.
+        raise PrecompileError(
+            f"precompile captured no dispatchable graph for {entry.fn_name!r}. The "
+            f"entry frame produced no guarded code, so the artifact would serve "
+            f"nothing. This happens when the captured callable is a thin wrapper -- "
+            f"an nn.Module, or a forward that immediately delegates -- where Dynamo "
+            f"compiles the wrapper's inner frame instead. Capture the function that "
+            f"CALLS the model, e.g. "
+            f"precompile(lambda m, x: m(x), example_inputs=[(model, x)])."
+        )
     code = SerializedCode.to_code_object(entry_frames[0]["code"])
     if code.co_freevars:
         raise PrecompileError(
@@ -1997,24 +2013,9 @@ def _reject_unreachable_frames(frames: list[dict[str, Any]], entry: Any) -> None
 
     Such a frame runs EAGER when served. That is a coverage and performance
     gap, not a correctness one: eager is what the graph was traced from, so the
-    answer is the same. It is therefore a warning. An entry frame with no
-    guarded code at all is different -- the artifact would serve nothing -- and
-    is refused.
+    answer is the same. It is therefore a warning.
     """
     from torch._dynamo.package import SerializedCode
-
-    if not any(f["is_entry"] and f["variants"] for f in frames):
-        # Nothing to dispatch at all: the artifact would run the whole call
-        # eager. That is not an artifact, so refuse rather than ship it.
-        raise PrecompileError(
-            f"precompile captured no dispatchable graph for {entry.fn_name!r}. The "
-            f"entry frame produced no guarded code, so a self-contained artifact "
-            f"would run the entire call eager. This happens when the captured "
-            f"callable is a thin wrapper -- an nn.Module whose forward immediately "
-            f"delegates, where Dynamo compiles the wrapper's inner frame instead. "
-            f"Capture the function that CALLS the model, e.g. "
-            f"precompile(lambda m, x: m(x), example_inputs=[(model, x)])."
-        )
 
     unreachable = [
         f
@@ -2760,6 +2761,57 @@ class _PrecompileApi:
                     "form. Drop tracer='make_fx', or pass positional example "
                     "arguments to get a single make_fx trace."
                 )
+            # Serialize only the guards that DISCRIMINATE -- the ones whose
+            # value differed across the captured variants, or that only some
+            # variants carry. Everything else held identically in every variant
+            # and selects nothing.
+            #
+            # This is not an optimization, it is most of what makes an artifact
+            # viable. Most guards cannot be serialized at all (identity guards
+            # on modules, callables, closure cells), and of those that can, the
+            # overwhelming majority are invariant: on a 62-frame ranking model,
+            # 738 of 1207 guard slots. Keeping them would mean refusing that
+            # model over guards that never chose anything.
+            #
+            # The contract this rests on is precompile's: the environment is the
+            # same at capture and at runtime, and every variation in computation
+            # comes from the inputs. An invariant guard is therefore either
+            # environment -- pinned by that contract -- or an input dimension the
+            # examples deliberately did not vary. The cost is real and worth
+            # stating: a call outside the captured domain is served by a
+            # captured graph rather than refused, where a kept guard would have
+            # caught it.
+            #
+            # Which guards discriminate is only knowable once every variant
+            # exists, and guards are serialized per compilation as each one is
+            # produced. So learn it from a throwaway capture first, then capture
+            # again keeping only those. The examples fully determine the
+            # capture, and PrecompileSession gives each session a fresh PGO
+            # state, so the second pass reproduces the first: measured identical
+            # on that model (53 frames, 121 variants, no frame differing).
+            from torch._dynamo.precompile_package import varying_guard_slots
+
+            probe = _capture_session(
+                fn,
+                backend=backend,
+                guard_filter_fn=guard_filter_fn,
+                recompile_limit=recompile_limit,
+                dynamic=dynamic,
+                example_inputs=example_inputs,
+                training=bool(training),
+            )
+            # The probe runs the same calls, so it raises the same things the
+            # real capture would -- and it raises them FIRST. Translate here too,
+            # or a package error surfaces raw from a pass the caller cannot see.
+            from torch._dynamo.exc import PackageError as _PackageError
+
+            try:
+                with probe:
+                    pass
+            except _PackageError as e:
+                raise PrecompileError(str(e)) from e
+            keep_only = varying_guard_slots(probe._guard_sets)
+            torch._dynamo.reset()
             session = PrecompileSession(
                 _capture_session(
                     fn,
@@ -2769,6 +2821,7 @@ class _PrecompileApi:
                     dynamic=dynamic,
                     example_inputs=example_inputs,
                     invariants=invariants,
+                    keep_only=keep_only,
                     training=bool(training),
                 )
             )

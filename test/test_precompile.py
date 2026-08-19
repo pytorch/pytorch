@@ -298,6 +298,16 @@ class _PrecompileTrainMod(torch.nn.Module):
         return torch.relu(self.b(torch.relu(self.a(x))))
 
 
+def _precompile_scaled(x, k):
+    return x * k
+
+
+def _precompile_branchy(x, flag):
+    if flag:
+        return (x * 2).sum()
+    return (x + 1).sum()
+
+
 def _precompile_call_model(model, x):
     return model(x)
 
@@ -2386,12 +2396,14 @@ class TestPrecompile(TestCase):
         with _maybe_scoped(loaded), torch.no_grad():
             self.assertIsNotNone(loaded(model, x, True))
             counters.clear()
+            # flag varied across nothing here -- one example -- so its guard is
+            # not serialized and the captured graph answers. That is the trade
+            # invariant-guard dropping makes, and it is why the artifact's
+            # domain is the calls you gave it.
+            self.assertIsNotNone(loaded(model, x, False))
             if installed:
-                self.assertEqual(loaded(model, x, False), reference)
-                self.assertGreater(counters["stats"]["unique_graphs"], 0)
-            else:
-                with self.assertRaisesRegex(RuntimeError, "no captured variant"):
-                    loaded(model, x, False)
+                self.assertEqual(counters["stats"]["unique_graphs"], 0)
+        del reference, installed
 
     def test_dynamo_tracer_training_across_a_graph_break_matches_torch_compile(self):
         # Gradients, through a break, against torch.compile as the reference.
@@ -2425,6 +2437,49 @@ class TestPrecompile(TestCase):
         for want, param in zip(reference, model.parameters()):
             self.assertEqual(want, param.grad)
 
+    def test_invariant_guards_are_not_serialized(self):
+        # The default, and a load-bearing one: a guard whose value never varied
+        # across the capture discriminates nothing, so it is not serialized.
+        # The trade is explicit -- an uncovered value is then served by a
+        # captured graph rather than refused.
+        from torch._precompile import _parse_artifact_metadata
+
+        xs = [torch.randn(3), torch.randn(5)]
+        torch._dynamo.reset()
+        code, cache = torch.compiler.precompile(
+            _precompile_scaled,
+            backend="eager",
+            dynamic=False,
+            example_inputs=[(x, 2) for x in xs],
+        )
+        self.assertEqual(_parse_artifact_metadata(code)["TRACER"], "dynamo")
+        torch._dynamo.reset()
+        loaded = torch.compiler.precompile.load(code, cache)
+        x = torch.randn(3)
+        with torch.no_grad():
+            self.assertEqual(loaded(x, 2), x * 2)
+            # k never varied, so nothing checks it: the captured graph serves.
+            self.assertEqual(loaded(x, 5), x * 2)
+
+    def test_discriminating_guards_are_kept(self):
+        # The other half: a value that DID vary is what selects between the
+        # variants, so its guard survives and both variants serve correctly.
+        x = torch.randn(4)
+        with torch.no_grad():
+            expected = {f: _precompile_branchy(x, f) for f in (False, True)}
+        torch._dynamo.reset()
+        code, cache = torch.compiler.precompile(
+            _precompile_branchy,
+            backend="eager",
+            dynamic=False,
+            example_inputs=[(x, False), (x, True)],
+        )
+        torch._dynamo.reset()
+        loaded = torch.compiler.precompile.load(code, cache)
+        with torch.no_grad():
+            for flag in (False, True):
+                self.assertEqual(loaded(x, flag), expected[flag])
+
     def test_multi_graph_installed_entry_with_closure_is_refused(self):
         # An installed artifact rebuilds the entry from its code object, and
         # types.FunctionType cannot restore a closure, so the capture is refused
@@ -2437,31 +2492,35 @@ class TestPrecompile(TestCase):
                 example_inputs=[(torch.randn(4),)],
             )
 
-    def test_multi_graph_wrapper_only_capture_serves_by_installing(self):
-        # Capturing a bare nn.Module makes Dynamo compile the wrapper's INNER
-        # frame, which a source artifact cannot reach. Installed serving reaches
-        # it, so this is now a usable artifact -- called with the receiver in
-        # its original position, since the entry frame is ``forward``.
-        from torch._precompile import _parse_artifact_metadata
+    def test_multi_graph_bare_module_capture_is_refused(self):
+        # Handing precompile a bare nn.Module compiles Dynamo's OWN wrapper
+        # frame (wrap_inline's `inner`), which closes over the module: the
+        # entry frame holds no graph, and no artifact can rebuild that closure.
+        # Refuse, and name the spelling that works.
+        model = torch.nn.Linear(8, 4).eval()
+        x = torch.randn(3, 8)
+        with self.assertRaisesRegex(
+            torch._precompile.PrecompileError, "captured no dispatchable graph"
+        ):
+            torch.compiler.precompile(
+                model, backend="eager", dynamic=False, example_inputs=[(x,)]
+            )
 
+    def test_multi_graph_module_behind_a_function_is_captured(self):
+        # The spelling the refusal above points at: a module-level function that
+        # calls the model. Now the entry frame is real and the artifact serves.
         model = torch.nn.Linear(8, 4).eval()
         x = torch.randn(3, 8)
         with torch.no_grad():
-            expected = model(x)
+            expected = _brk_call(model, x)
+        torch._dynamo.reset()
         code, cache = torch.compiler.precompile(
-            model, backend="eager", dynamic=False, example_inputs=[(x,)]
+            _brk_call, backend="eager", dynamic=False, example_inputs=[(model, x)]
         )
-        self.assertEqual(_parse_artifact_metadata(code)["SERVING_MODE"], "installed")
-
         torch._dynamo.reset()
         loaded = torch.compiler.precompile.load(code, cache)
-        with loaded, torch.no_grad():
-            # The entry frame here is the wrapper, which captured no variant of
-            # its own; what the artifact serves is the inner frame behind it.
+        with _maybe_scoped(loaded), torch.no_grad():
             self.assertEqual(loaded(model, x), expected)
-            # Dropping the receiver is a plain TypeError, not a wrong answer.
-            with self.assertRaisesRegex(TypeError, "missing 1 required"):
-                loaded(x)
 
     def test_precompile_rejects_mixed_example_input_forms(self):
         x = torch.randn(3)

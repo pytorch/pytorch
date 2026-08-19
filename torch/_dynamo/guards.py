@@ -4879,6 +4879,15 @@ class CheckFunctionManager:
                     True,
                     guard_filter_fn=serialization_guard_filter_fn,
                 )
+                # Value pruning keys off the guard tree: anything the tree does
+                # not reach is replaced by a placeholder. Dropping a guard must
+                # not drop the VALUE it named, because the rest of the state
+                # still refers to it -- a pruned tensor comes back with no
+                # dtype. So prune against the unfiltered tree.
+                serialization_builder.guard_tree_values = {
+                    **builder.guard_tree_values,
+                    **serialization_builder.guard_tree_values,
+                }
 
             self.guard_manager = guard_manager
             self.compile_check_fn(builder, runtime_guards, guard_fail_fn)

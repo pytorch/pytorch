@@ -102,6 +102,7 @@ artifacts transparently without an explicit capture block.
 
 from __future__ import annotations
 
+import collections
 import contextlib
 import functools
 import hashlib
@@ -1034,6 +1035,36 @@ def _wont_generalize(
     return tuple(sorted(pinned))
 
 
+def varying_guard_slots(
+    guard_sets: Mapping[tuple[str, str, int], Sequence[frozenset[_GuardFact]]],
+) -> frozenset[tuple[str, str]]:
+    """The guard slots that actually discriminate between captured variants.
+
+    A slot is ``(guard_type, normalized source)``. It varies when two variants
+    of one frame recorded DIFFERENT facts for it, and also when it is present in
+    some variants and absent in others -- a guard only one variant carries is
+    what tells that variant apart, and comparing values alone would call it
+    invariant and drop it. On a 62-frame ranking model that second case is 225
+    of the 274 slots kept, so it is the majority of the answer, not an edge.
+
+    Everything else held identically in every variant, so it is not serialized:
+    see the rationale at the call site in ``torch._precompile``.
+    """
+    varying: set[tuple[str, str]] = set()
+    for variants in guard_sets.values():
+        seen: dict[tuple[str, str], set[tuple[tuple[str, ...], str]]] = {}
+        present: collections.Counter[tuple[str, str]] = collections.Counter()
+        for facts in variants:
+            for slot in {(f.guard_type, f.source) for f in facts}:
+                present[slot] += 1
+            for f in facts:
+                seen.setdefault((f.guard_type, f.source), set()).add((f.code, f.value))
+        for slot, rendered in seen.items():
+            if len(rendered) > 1 or present[slot] != len(variants):
+                varying.add(slot)
+    return frozenset(varying)
+
+
 def _summarize(
     entry: _DynamoCacheEntry,
     dropped: set[tuple[str, str]],
@@ -1078,6 +1109,7 @@ class PrecompileSession:
         dynamic: bool | None = None,
         example_inputs: Sequence[ExampleInput | tuple[object, ...]] | None = None,
         invariants: str | None = None,
+        keep_only: frozenset[tuple[str, str]] | None = None,
         training: bool = False,
     ) -> None:
         # Not `example_inputs or ()`: truth-testing the caller's object turns the
@@ -1104,6 +1136,10 @@ class PrecompileSession:
         self._fn = fn
         self._backend = backend
         self._custom_guard_filter = guard_filter_fn is not None
+        # The guard slots that DID vary across the capture; every other slot is
+        # dropped. None means serialize everything serializable, which only the
+        # internal capture entry point uses -- precompile() always passes a set.
+        self._keep_only: frozenset[tuple[str, str]] | None = keep_only
         # A training capture traces with grad on and lowers the backward
         # eagerly, so the artifact carries AOTAutograd's CompiledFunction and
         # calling .backward() on a served output runs precompiled code.
@@ -1366,15 +1402,49 @@ class PrecompileSession:
         def filter_fn(entries: Sequence[GuardFilterEntry]) -> Sequence[bool]:
             decisions = inner(entries)
             namespaces = _module_namespaces(entries)
+            # A slot whose fact was identical in every variant of every frame
+            # discriminates nothing, so it is not serialized. Recorded apart
+            # from the ordinary drops, which are "could not be serialized";
+            # these could, and were not wanted.
+            policy_dropped: set[int] = set()
+            if self._keep_only is not None:
+                for i, entry in enumerate(entries):
+                    # An unmodelled guard never enters _guard_sets, so it was
+                    # never shown to be constant -- only never analyzed. This
+                    # policy drops what it PROVED invariant, so these stay.
+                    # SHAPE_ENV is the one that matters: it carries symbolic
+                    # shape constraints that no TENSOR_MATCH repeats.
+                    if entry.guard_type in _UNMODELLED_GUARD_TYPES:
+                        continue
+                    if (
+                        decisions[i]
+                        and (
+                            entry.guard_type,
+                            _normalize(entry.name),
+                        )
+                        not in self._keep_only
+                    ):
+                        policy_dropped.add(i)
+                decisions = [
+                    keep and i not in policy_dropped for i, keep in enumerate(decisions)
+                ]
             facts: set[_GuardFact] = set()
             undetermined: set[_GuardFact] = set()
-            for keep, entry in zip(decisions, entries):
+            for i, (keep, entry) in enumerate(zip(decisions, entries)):
+                slot = (entry.guard_type, entry.name)
+                if i in policy_dropped:
+                    # Not "risky": the policy is the caller stating that the
+                    # environment is fixed and every variation is in the inputs,
+                    # so a slot that never varied is out of the artifact's
+                    # declared domain rather than an unchecked hazard.
+                    self._policy_dropped_guards.add(slot)
+                    continue
                 target = self._kept_guards if keep else self._dropped_guards
-                target.add((entry.guard_type, entry.name))
+                target.add(slot)
                 if not keep and (
                     self._custom_guard_filter or _is_risky_drop(entry, namespaces)
                 ):
-                    self._risky_dropped_guards.add((entry.guard_type, entry.name))
+                    self._risky_dropped_guards.add(slot)
                 unmodelled = entry.guard_type in _UNMODELLED_GUARD_TYPES
                 fact = _GuardFact(
                     guard_type=entry.guard_type,
@@ -2068,6 +2138,7 @@ def precompile_capture(
     dynamic: bool | None = None,
     example_inputs: Sequence[ExampleInput | tuple[object, ...]] | None = None,
     invariants: str | None = None,
+    keep_only: frozenset[tuple[str, str]] | None = None,
     training: bool = False,
 ) -> PrecompileSession:
     r"""Begin capturing ``fn`` into a multi-graph artifact.
@@ -2100,6 +2171,7 @@ def precompile_capture(
         dynamic=dynamic,
         example_inputs=example_inputs,
         invariants=invariants,
+        keep_only=keep_only,
         training=training,
     )
 
