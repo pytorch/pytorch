@@ -128,6 +128,8 @@ if TYPE_CHECKING:
     from .tensor import TensorVariable
 
 
+log = logging.getLogger(__name__)
+
 _F = TypeVar("_F", bound=Callable[..., Any])
 CO_VARARGS = 0x04
 CO_VARKEYWORDS = 0x08
@@ -3403,6 +3405,47 @@ from torch._higher_order_ops.triton_kernel_wrap import (
 )
 
 
+def ttir_mutation_analysis_for_node(
+    kernel_idx: int | None,
+    constant_args_idx: int,
+    non_constant_args: dict[Any, Any],
+    tma_descriptor_metadata: TMADescriptorMetadata,
+) -> tuple[tuple[str, ...], bool] | None:
+    """(names of written args, whether an epilogue may be fused) for the node we
+    are about to emit, so that downstream consumers need not each re-derive it.
+
+    Returns None if it cannot be worked out here, in which case nothing is
+    recorded and consumers fall back to deriving it themselves.
+    """
+    from torch._higher_order_ops.triton_kernel_wrap import (
+        kernel_side_table,
+        ttir_mutation_analysis,
+    )
+
+    if kernel_idx is None:
+        return None
+
+    try:
+        example_kwargs = {}
+        for key_vt, value_vt in non_constant_args.items():
+            # Dynamo records fake values under example_value; "val" is only
+            # populated later, by proxy tensor tracing.
+            meta = value_vt.as_proxy().node.meta
+            example_kwargs[key_vt.as_python_constant()] = meta["example_value"]
+        kernel = kernel_side_table.get_kernel(kernel_idx)
+        constant_args = kernel_side_table.get_constant_args(constant_args_idx)
+    except Exception:
+        log.debug(
+            "could not assemble triton kernel args for kernel %s",
+            kernel_idx,
+            exc_info=True,
+        )
+        return None
+    return ttir_mutation_analysis(
+        kernel, {**example_kwargs, **constant_args}, tma_descriptor_metadata
+    )
+
+
 class DynamoTritonHOPifier(TritonHOPifier):
     def raise_unsupported(self, msg: str) -> Never:
         unimplemented(
@@ -3593,18 +3636,34 @@ class DynamoTritonHOPifier(TritonHOPifier):
 
         constant_args_idx = kernel_side_table.add_constant_args(constant_args)
         meta = ConstDictVariable(non_constant_args)
+
+        # Work out here which arguments the kernel mutates, and record it on the
+        # node. Deriving it means compiling the kernel to TTIR, and four separate
+        # consumers downstream would otherwise each ask independently; see Note
+        # [TTIR mutation analysis]. Best effort: if the analysis cannot run, the
+        # arguments are omitted and those consumers derive them themselves.
+        analysis = ttir_mutation_analysis_for_node(
+            variable.kernel_idx,
+            constant_args_idx,
+            non_constant_args,
+            tma_descriptor_metadata,
+        )
+
+        hop_kwargs: dict[str, Any] = {
+            "kernel_idx": variable.kernel_idx,
+            "constant_args_idx": constant_args_idx,
+            "grid": grids,
+            "tma_descriptor_metadata": tma_descriptor_metadata,
+            "kwargs": meta.as_proxy(),
+            "launch_kwargs": launch_kwargs,
+        }
+        if analysis is not None:
+            hop_kwargs["mutated_arg_names"], hop_kwargs["can_fuse_epilogue"] = analysis
         tx.output.create_proxy(
             "call_function",
             triton_kernel_wrapper_mutation,
             (),
-            {
-                "kernel_idx": variable.kernel_idx,
-                "constant_args_idx": constant_args_idx,
-                "grid": grids,
-                "tma_descriptor_metadata": tma_descriptor_metadata,
-                "kwargs": meta.as_proxy(),
-                "launch_kwargs": launch_kwargs,
-            },
+            hop_kwargs,
         )
 
         return VariableTracker.build(
