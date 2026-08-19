@@ -41,7 +41,7 @@ from torch.testing._internal.common_utils import dtype_name, freeze_rng_state, r
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, \
     skipIfTorchDynamo, gcIfJetson, set_default_dtype, skipIfNoCuteDSL, isRocmArchAnyOf, MI200_ARCH
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUDNN, \
-    SM80OrLater, SM90OrLater, _get_torch_rocm_version
+    SM80OrLater, SM90OrLater, _get_torch_rocm_version, has_device_side_assert
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
     module_tests, criterion_tests, loss_reference_fns, _create_basic_net, \
     ctcloss_reference, get_new_module_tests, single_batch_reference_fn, _test_bfloat16_ops, _test_module_empty_input
@@ -7482,7 +7482,7 @@ class TestNNDeviceType(NNTestCase):
 
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
-    @tf32_on_and_off()
+    @tf32_on_and_off(0.005)
     @reduced_f32_on_and_off()
     def test_affine_2d_rotate0(self, device):
         # scipy before 1.0.0 do not support homogeneous coordinate
@@ -12224,13 +12224,7 @@ class TestThatContainsCUDAAssert(TestCase):
 if __name__ == '__main__':
     run_tests()
         """)
-        # CUDA says "device-side assert triggered"
-        # ROCm says "unspecified launch failure", or HSA_STATUS_ERROR_EXCEPTION
-        has_cuda_assert = 'CUDA error: device-side assert triggered' in stderr
-        has_hip_assert = ('launch failure' in stderr
-                          or 'HSA_STATUS_ERROR_EXCEPTION' in stderr
-                          or 'illegal memory access' in stderr)
-        self.assertTrue(has_cuda_assert or has_hip_assert,
+        self.assertTrue(has_device_side_assert(stderr),
                         lambda msg: f"{msg}\nExpected device assert error in stderr, got: {stderr}")
 
 
@@ -12950,17 +12944,6 @@ if __name__ == '__main__':
     @dtypesIfMPS(torch.float32)
     @dtypes(torch.float32, torch.float64)
     def test_module_to_empty(self, device, dtype):
-        if (
-            TEST_WITH_ROCM
-            and getRocmVersion() >= (7, 14)
-            and torch.device(device).type == "cuda"
-            and dtype == torch.float32
-        ):
-            self.skipTest(
-                "order/state-dependent NotImplementedError regex mismatch on "
-                "ROCm 7.14+ (cuda, float32)"
-            )
-
         class MyModule(nn.Module):
             def __init__(self, in_features, out_features, device=None, dtype=None):
                 super().__init__()
@@ -16132,7 +16115,7 @@ class TestNNCUDA(NNTestCase):
         self.assertEqual(weight_data, all_vars[4].data)
 
     @skipCUDAIfNoCudnn
-    @tf32_on_and_off()
+    @tf32_on_and_off(0.005)
     @parametrize_test('mode,proj_size', [('LSTM', 0), ('LSTM', 10), ('GRU', 0), ('RNN', 0)])
     def test_cudnn_weight_tying(self, device, mode, proj_size):
         rnn_kwargs = {'proj_size': proj_size} if proj_size else {}
@@ -16166,7 +16149,7 @@ class TestNNCUDA(NNTestCase):
         self.assertEqual(output_device, output_cpu)
 
     @skipCUDAIfNoCudnn
-    @tf32_on_and_off()
+    @tf32_on_and_off(0.005)
     def test_RNN_cudnn_weight_norm(self, device):
         input_size = 10
         hidden_size = 6
