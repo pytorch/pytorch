@@ -885,10 +885,12 @@ class CompiledFxGraph(OutputCode):
         # A direction-specific annotation or nested-region opt-in can override
         # the forward-derived shared BoxedBool. The override is serialized with
         # this FX graph so AOTAutograd cache hits make the same decision.
-        cudagraphs_override = self.fx_kwargs.get("cudagraphs_override")
-        cudagraphs = (
-            BoxedBool(cudagraphs_override)
-            if cudagraphs_override is not None
+        cudagraphs_post_compile_override = self.fx_kwargs.get(
+            "cudagraphs_post_compile_override"
+        )
+        graph_cudagraphs = (
+            BoxedBool(cudagraphs_post_compile_override)
+            if cudagraphs_post_compile_override is not None
             else graph_kwargs["cudagraphs"]
         )
 
@@ -900,9 +902,9 @@ class CompiledFxGraph(OutputCode):
         policy = config.cudagraph_policy
         if policy is not None and not policy.should_wrap(self):
             counters["inductor"]["cudagraph_skips"] += 1
-            BoxedBool.disable(cudagraphs)
+            BoxedBool.disable(graph_cudagraphs)
 
-        if cudagraphs:
+        if graph_cudagraphs:
             # It's possible that cudagraphs is enabled, but was disabled
             # during a previous compilation we're loading from the cache.
             # If so, we need to disable it on this new process too.
@@ -913,7 +915,7 @@ class CompiledFxGraph(OutputCode):
                     )
                 else:
                     counters["inductor"]["cudagraph_skips"] += 1
-                BoxedBool.disable(cudagraphs)
+                BoxedBool.disable(graph_cudagraphs)
             else:
                 if is_backward:
                     if "boxed_forward_device_index" not in graph_kwargs:
@@ -939,7 +941,7 @@ class CompiledFxGraph(OutputCode):
                     cudagraph_partition_post_compile(
                         example_inputs,
                         self,
-                        cudagraphs,
+                        graph_cudagraphs,
                         constants.unwrap(self),
                         boxed_forward_device_index,
                     )
@@ -947,15 +949,15 @@ class CompiledFxGraph(OutputCode):
                     cudagraph_post_compile(
                         example_inputs,
                         self,
-                        cudagraphs,
+                        graph_cudagraphs,
                         constants.unwrap(self),
                         boxed_forward_device_index,
                     )
         inputs_to_check = self.inputs_to_check
-        # cudagraphs could have been disabled from the earlier conditions
+        # graph_cudagraphs could have been disabled by the earlier conditions,
         # so we still need to realign inputs if that happens
         maybe_realign_inputs(
-            cudagraphs,
+            graph_cudagraphs,
             self,
             inputs_to_check,
             self.mutated_input_idxs,

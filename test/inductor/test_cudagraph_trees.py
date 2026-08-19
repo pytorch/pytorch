@@ -35,6 +35,7 @@ from torch._inductor.cudagraph_utils import PlaceholderInfo
 from torch._inductor.scheduler import Scheduler
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code, run_fw_bw_and_get_code
+from torch._inductor.virtualized import V
 from torch._ops import OpOverload
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.immutable_collections import immutable_dict
@@ -1019,6 +1020,83 @@ if HAS_CUDA_AND_TRITON:
                 self.assertEqual(
                     scheduler._invoke_subgraph_body_cudagraph_skip_reason(outer_region),
                     "invoke_subgraph body has dynamic shape ops",
+                )
+
+        @config.patch("triton.cudagraph_skip_dynamic_graphs", False)
+        def test_invoke_subgraph_while_loop_unsafe_body_skips(self):
+            unsafe_op = mock.Mock()
+            unsafe_op.get_subgraphs.return_value = []
+            unsafe_op.get_free_symbol_uses.return_value = set()
+            unsafe_op.get_outputs.return_value = []
+
+            cond_graph = mock.Mock(operations=[], device_types={"cuda"})
+            body_graph = mock.Mock(operations=[unsafe_op], device_types={"cuda"})
+            cond_subgraph = object.__new__(ir.Subgraph)
+            cond_subgraph.graph = cond_graph
+            body_subgraph = object.__new__(ir.Subgraph)
+            body_subgraph.graph = body_graph
+            while_loop = object.__new__(ir.WhileLoop)
+            while_loop.cond_subgraph = cond_subgraph
+            while_loop.body_subgraph = body_subgraph
+            while_loop.inputs = []
+            while_loop.constant_args = []
+            while_loop.kwargs = {}
+            while_loop.layout = ir.MultiOutputLayout(device=torch.device("cuda"))
+            while_loop.mutation_outputs = []
+            while_loop.outputs = []
+
+            outer_graph = mock.Mock(operations=[while_loop], device_types={"cuda"})
+            outer_subgraph = object.__new__(ir.Subgraph)
+            outer_subgraph.graph = outer_graph
+            outer_region = object.__new__(ir.InvokeSubgraph)
+            outer_region.subgraph = outer_subgraph
+
+            scheduler = object.__new__(Scheduler)
+            with mock.patch.object(
+                Scheduler,
+                "_ir_node_cudagraph_skip_reason",
+                side_effect=lambda op: "CUDAGraph-unsafe custom ops"
+                if op is unsafe_op
+                else None,
+            ):
+                self.assertEqual(
+                    scheduler._invoke_subgraph_body_cudagraph_skip_reason(outer_region),
+                    "invoke_subgraph body has CUDAGraph-unsafe custom ops",
+                )
+
+        @config.patch("triton.cudagraph_skip_dynamic_graphs", False)
+        @config.patch("cudagraph_unsafe_unbacked_ops", ["aten::item"])
+        def test_invoke_subgraph_unsafe_unbacked_symint_body_skips(self):
+            symbol = sympy.Symbol("u0", integer=True, nonnegative=True)
+            unsafe_op = object.__new__(ir.FallbackKernel)
+            unsafe_op.op_overload = aten.item.default
+            unsafe_op.get_unbacked_symbol_defs = mock.Mock(return_value={symbol})
+            unsafe_op.get_subgraphs = mock.Mock(return_value=[])
+            unsafe_op.get_free_symbol_uses = mock.Mock(return_value=set())
+            unsafe_op.get_outputs = mock.Mock(return_value=[])
+            consumer = mock.Mock()
+            consumer.get_subgraphs.return_value = []
+            consumer.get_free_symbol_uses.return_value = {symbol}
+            consumer.get_outputs.return_value = []
+
+            body = mock.Mock(operations=[unsafe_op, consumer], device_types={"cuda"})
+            subgraph = object.__new__(ir.Subgraph)
+            subgraph.graph = body
+            region = object.__new__(ir.InvokeSubgraph)
+            region.subgraph = subgraph
+
+            graph = mock.Mock()
+            graph.sizevars.simplify.side_effect = lambda expr: expr
+            scheduler = object.__new__(Scheduler)
+            with (
+                V.set_graph_handler(graph),
+                mock.patch.object(
+                    Scheduler, "_ir_node_cudagraph_skip_reason", return_value=None
+                ),
+            ):
+                self.assertEqual(
+                    scheduler._invoke_subgraph_body_cudagraph_skip_reason(region),
+                    "invoke_subgraph body uses cudagraph-unsafe unbacked symint: u0",
                 )
 
         @parametrize("backend", ("inductor", "cudagraphs"))
@@ -5412,16 +5490,18 @@ if HAS_CUDA_AND_TRITON:
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_no_partition_keeps_static(self):
             # When graph_partition is enabled but the forward has no unsafe
-            # ops, forward_is_partitioned should be False and all saved
+            # ops, forward_is_cudagraph_partitioned should be False and all saved
             # tensors remain static in the backward.
             from unittest.mock import patch
 
-            forward_partitioned = None
+            forward_cudagraph_partitioned = None
             orig_bw = torch._inductor.compile_fx.compile_fx_backward
 
             def intercept_bw(gm, example_inputs, compiler_config_extra, **kwargs):
-                nonlocal forward_partitioned
-                forward_partitioned = compiler_config_extra.forward_is_partitioned.value
+                nonlocal forward_cudagraph_partitioned
+                forward_cudagraph_partitioned = (
+                    compiler_config_extra.forward_is_cudagraph_partitioned.value
+                )
                 return orig_bw(gm, example_inputs, compiler_config_extra, **kwargs)
 
             class Mod(torch.nn.Module):
@@ -5445,7 +5525,7 @@ if HAS_CUDA_AND_TRITON:
                 loss.backward()
                 optimizer.step()
 
-            self.assertFalse(forward_partitioned)
+            self.assertFalse(forward_cudagraph_partitioned)
 
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_cpu_only(self):

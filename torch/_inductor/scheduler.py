@@ -9376,32 +9376,56 @@ class Scheduler:
         Reason the region body cannot be captured as one cudagraph partition, or
         None if it is safe. The body is codegened as a unit, so the per-node
         cudagraph-safety checks should_partition would apply are run here over the
-        body's IR operations. Scheduler-node-level checks that need a scheduled
-        node (cudagraph-unsafe unbacked symint uses) are not replicated.
+        body's IR operations, including operations in nested control-flow graphs.
         """
         subgraph = invoke_subgraph.subgraph
+        unsafe_symints = self._get_cudagraph_unsafe_unbacked_symints_from_ir_nodes(
+            self._iter_subgraph_operations(subgraph)
+        )
+        return self._subgraph_cudagraph_skip_reason(subgraph, unsafe_symints)
+
+    @staticmethod
+    def _iter_subgraph_operations(
+        subgraph: ir.Subgraph | None,
+    ) -> Iterator[ir.Operation]:
+        if subgraph is None or subgraph.graph is None:
+            return
+        for op in subgraph.graph.operations:
+            yield op
+            if isinstance(op, ir.IRNode):
+                for nested_subgraph in op.get_subgraphs():
+                    yield from Scheduler._iter_subgraph_operations(nested_subgraph)
+
+    def _subgraph_cudagraph_skip_reason(
+        self,
+        subgraph: ir.Subgraph | None,
+        unsafe_symints: OrderedSet[sympy.Symbol],
+    ) -> str | None:
         if subgraph is None or subgraph.graph is None:
             return None
-        body = subgraph.graph
-        for device in body.device_types:
+        graph = subgraph.graph
+        for device in graph.device_types:
             if not is_gpu(device):
                 return f"invoke_subgraph body has non-GPU ({device}) ops"
         skip_dynamic = config.triton.cudagraph_skip_dynamic_graphs
-        for op in body.operations:
-            if isinstance(op, ir.InvokeSubgraph):
-                # A nested region is captured as part of this body, so its body
-                # must be cudagraph-safe too.
-                if reason := self._invoke_subgraph_body_cudagraph_skip_reason(op):
-                    return reason
+        for op in graph.operations:
             if reason := self._ir_node_cudagraph_skip_reason(op):
                 return f"invoke_subgraph body has {reason}"
-            if skip_dynamic:
-                symbol_uses = op.get_free_symbol_uses()
-                symbol_uses.update(
-                    *(get_layout_symints(output) for output in op.get_outputs())
-                )
-                if symbol_uses:
-                    return "invoke_subgraph body has dynamic shape ops"
+            symbol_uses = OrderedSet(op.get_free_symbol_uses())
+            for output in op.get_outputs():
+                symbol_uses.update(get_layout_symints(output))
+            if reason := self._cudagraph_unsafe_unbacked_symint_use_reason(
+                symbol_uses, unsafe_symints
+            ):
+                return f"invoke_subgraph body {reason}"
+            if skip_dynamic and symbol_uses:
+                return "invoke_subgraph body has dynamic shape ops"
+            if isinstance(op, ir.IRNode):
+                for nested_subgraph in op.get_subgraphs():
+                    if reason := self._subgraph_cudagraph_skip_reason(
+                        nested_subgraph, unsafe_symints
+                    ):
+                        return reason
         return None
 
     def _scheduler_node_cudagraph_skip_reason(
@@ -9508,8 +9532,9 @@ class Scheduler:
                     return "invoke_subgraph opts out of cudagraphs"
 
         # When not using cudagraphs, keep all kernels in the `call` function
-        # instead of graph partition functions, since graph partition only brings
-        # benefit to cudagraph
+        # instead of graph partition functions. Nested-region opt-in relies on
+        # this: compile_fx leaves the top-level config off so every non-region
+        # node is inlined and only the opted-in region is isolated.
         if (
             not torch._inductor.config.triton.cudagraphs
             and _unstable_customized_partition_wrapper.wrapper is None
@@ -9530,16 +9555,19 @@ class Scheduler:
         """
         Collect output unbacked symints from ops in config.cudagraph_unsafe_unbacked_ops.
         """
+        return self._get_cudagraph_unsafe_unbacked_symints_from_ir_nodes(
+            node.node for node in self.nodes if node.node is not None
+        )
+
+    def _get_cudagraph_unsafe_unbacked_symints_from_ir_nodes(
+        self, ir_nodes: Iterable[ir.Operation]
+    ) -> OrderedSet[sympy.Symbol]:
         unsafe_symints: OrderedSet[sympy.Symbol] = OrderedSet()
 
         if not config.cudagraph_unsafe_unbacked_ops:
             return unsafe_symints
 
-        for node in self.nodes:
-            ir_node = node.node
-            if ir_node is None:
-                continue
-
+        for ir_node in ir_nodes:
             if not isinstance(ir_node, torch._inductor.ir.FallbackKernel):
                 continue
 
@@ -9561,6 +9589,20 @@ class Scheduler:
 
         return unsafe_symints
 
+    def _cudagraph_unsafe_unbacked_symint_use_reason(
+        self,
+        symbol_uses: Iterable[sympy.Expr],
+        unsafe_symints: OrderedSet[sympy.Symbol],
+    ) -> str | None:
+        if not unsafe_symints:
+            return None
+        for sym in symbol_uses:
+            simplified_sym = V.graph.sizevars.simplify(sym)
+            for free_sym in simplified_sym.free_symbols:
+                if free_sym in unsafe_symints:
+                    return f"uses cudagraph-unsafe unbacked symint: {free_sym}"
+        return None
+
     def _uses_cudagraph_unsafe_unbacked_symint(
         self, node: BaseSchedulerNode
     ) -> str | None:
@@ -9568,15 +9610,9 @@ class Scheduler:
         if not unsafe_symints:
             return None
 
-        node_symbols = get_scheduler_node_symbol_uses(node)
-
-        for sym in node_symbols:
-            simplified_sym = V.graph.sizevars.simplify(sym)
-            for free_sym in simplified_sym.free_symbols:
-                if free_sym in unsafe_symints:
-                    return f"uses cudagraph-unsafe unbacked symint: {free_sym}"
-
-        return None
+        return self._cudagraph_unsafe_unbacked_symint_use_reason(
+            get_scheduler_node_symbol_uses(node), unsafe_symints
+        )
 
     def get_name_to_nodes(
         self,
