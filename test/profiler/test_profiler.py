@@ -148,13 +148,13 @@ class TestProfilerCUDA(TestCase):
         )
 
     @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/78457")
-    def test_mem_leak(self):
+    def test_mem_leak(self, device):
         """Checks that there's no memory leak when using profiler with CUDA"""
-        t = torch.rand(1, 1).cuda()
+        t = torch.rand(1, 1).to(device)
         p = psutil.Process()
         last_rss = collections.deque(maxlen=5)
         for _ in range(10):
-            with _profile(use_device="cuda"):
+            with _profile(use_device=torch.device(device).type):
                 for _ in range(1024):
                     t = torch.mm(t, t)
 
@@ -175,7 +175,7 @@ class TestProfilerCUDA(TestCase):
             msg=lambda msg: f"{msg}\nmemory usage is increasing, {str(last_rss)}",
         )
 
-    def test_custom_module_input_op_ids(self):
+    def test_custom_module_input_op_ids(self, device):
         class MyFunc(torch.autograd.Function):
             @staticmethod
             def forward(ctx, x):
@@ -200,7 +200,7 @@ class TestProfilerCUDA(TestCase):
             q = s.sum()
             q.backward()
 
-    def test_cudagraph_profiling_workaround(self):
+    def test_cudagraph_profiling_workaround(self, device):
         import subprocess
 
         # repro taken from #75504
@@ -244,7 +244,7 @@ with profile(activities=[ProfilerActivity.CUDA]):
 
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     @unittest.skipIf(not TEST_MULTIGPU, "Multiple GPUs needed")
-    def test_kineto_multigpu(self):
+    def test_kineto_multigpu(self, device):
         with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
             for gpu_id in [0, 1]:
                 x = torch.randn(10, 10).cuda(gpu_id)
@@ -281,7 +281,7 @@ with profile(activities=[ProfilerActivity.CUDA]):
     @unittest.skipIf(
         IS_JETSON, "Jetson has a guard against OOM since host and gpu memory are shared"
     )
-    def test_oom_tracing(self):
+    def test_oom_tracing(self, device):
         def run_profiler(tensor_creation_fn):
             with _profile(profile_memory=True, record_shapes=True) as prof:
                 with self.assertRaisesRegex(RuntimeError, ".*[tT]ried to allocate.*"):
@@ -289,7 +289,6 @@ with profile(activities=[ProfilerActivity.CUDA]):
                 return prof
 
         def create_cuda_tensor_oom():
-            device = torch.device("cuda:0")
             return torch.empty(
                 1024, 1024, 1024, 1024, dtype=torch.float32, device=device
             )
@@ -320,8 +319,7 @@ with profile(activities=[ProfilerActivity.CUDA]):
             check_trace(fname)
 
     @unittest.skipIf(not kineto_available(), "Kineto is required")
-    def test_profiler_cuda_sync_events(self):
-        device = torch.device("cuda:0")
+    def test_profiler_cuda_sync_events(self, device):
         t1, t2 = torch.ones(1, device=device), torch.ones(1, device=device)
 
         def workload() -> None:
@@ -332,7 +330,7 @@ with profile(activities=[ProfilerActivity.CUDA]):
         def trace_and_check(exp_config: _ExperimentalConfig | None) -> None:
             with _profile(
                 use_kineto=True,
-                use_device="cuda",
+                use_device=torch.device(device).type,
                 experimental_config=exp_config,
             ) as prof:
                 workload()
@@ -362,7 +360,7 @@ with profile(activities=[ProfilerActivity.CUDA]):
 
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
     @unittest.skipIf(not kineto_available(), "Kineto is required")
-    def test_disable_external_correlation(self):
+    def test_disable_external_correlation(self, device):
         cuda_external_id_events = {"cuda_runtime", "gpu_memcpy", "kernel"}
         activities = [ProfilerActivity.CPU, ProfilerActivity.CUDA]
 
@@ -400,16 +398,16 @@ with profile(activities=[ProfilerActivity.CUDA]):
                     disable_external_correlation=disable_external_correlation
                 ),
             ) as prof:
-                self.payload(device="cuda", tensor_size=256)
+                self.payload(device=device, tensor_size=256)
             validate_json(prof, disable_external_correlation)
 
     @unittest.skipIf(not kineto_available(), "Kineto is required")
-    def test_activity_filter_mixed_syntax(self):
+    def test_activity_filter_mixed_syntax(self, device):
         """Enum and dict entries can coexist for different activity groups."""
         activities = [ProfilerActivity.CPU, {ProfilerActivity.CUDA: ["GPU_MEMCPY"]}]
         with profile(activities=activities) as p:
             with record_function("test_annotation"):
-                x = torch.randn(10, 10).to("cuda")
+                x = torch.randn(10, 10).to(device)
                 y = torch.mm(x, x)
         self.assertGreater(len(p.events()), 0)
 
