@@ -271,6 +271,11 @@ def all_reduce(tensor, op=ReduceOp.SUM, group=group.WORLD):
     After the call the returned tensor is going to be bitwise
     identical in all processes.
 
+    Unlike :func:`torch.distributed.all_reduce`, this wrapper is an autograd
+    ``Function`` so gradients can flow through the collective. This API is
+    deprecated; prefer :mod:`torch.distributed._functional_collectives` or
+    :mod:`torch.distributed.tensor` (DTensor) in new code.
+
     Arguments:
         tensor (Tensor): Input of the collective.
         op (optional): One of the values from
