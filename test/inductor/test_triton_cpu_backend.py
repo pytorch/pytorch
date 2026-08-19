@@ -3,13 +3,18 @@ import unittest
 
 from torch._inductor import config
 from torch._inductor.test_case import run_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    skipOps,
+)
 from torch.testing._internal.inductor_utils import HAS_CPU, TRITON_HAS_CPU
 
 
 try:
-    from . import test_torchinductor
+    from . import test_torchinductor, test_torchinductor_opinfo
 except ImportError:
     import test_torchinductor
+    import test_torchinductor_opinfo
 
 TRITON_CPU_SLOW_TESTS = (
     # ~1000s
@@ -62,6 +67,47 @@ if HAS_CPU and TRITON_HAS_CPU:
             name,
             unittest.skip("Triton CPU: slow test")(getattr(CpuTritonTests, name)),
         )
+
+    # TODO: support generating inductor backend subclasses in instantiate_device_type_tests
+    def make_inductor_opinfo_triton_cpu_cls():
+        OPINFO__INCLUDE_OPS = {"index_add"}
+        # TODO: expand op support over time. For now add as we see fit
+        # to avoid increasing CI time too much.
+        ops_subset = [
+            op
+            for op in test_torchinductor_opinfo.op_db
+            if op.full_name in OPINFO__INCLUDE_OPS
+        ]
+        # Clone the base opinfo class and use that in `instantiate_device_type_tests`
+        # in order to preserve DecorateInfo references to TestTorchInductorOpInfo
+        TestTorchInductorOpInfo = test_torchinductor_opinfo.make_inductor_opinfo_cls(
+            ops_decorator=test_torchinductor_opinfo._ops(ops_subset),
+            skip_ops_decorator=skipOps(test_torchinductor_opinfo.test_skips_or_fails),
+        )
+        opinfo_scope = {
+            TestTorchInductorOpInfo.__name__: TestTorchInductorOpInfo,
+        }
+
+        instantiate_device_type_tests(
+            TestTorchInductorOpInfo, opinfo_scope, only_for="cpu"
+        )
+
+        generated_classes = [
+            cls
+            for name, cls in opinfo_scope.items()
+            if name != TestTorchInductorOpInfo.__name__
+        ]
+        if len(generated_classes) != 1:
+            raise AssertionError(
+                f"Expected exactly one generated OpInfo class, got {len(generated_classes)}"
+            )
+        generated_cpu_cls = generated_classes[0]
+
+        return config.patch({"cpu_backend": "triton"})(
+            type("TestInductorOpInfoTritonCPU", (generated_cpu_cls,), {})
+        )
+
+    TestInductorOpInfoTritonCPU = make_inductor_opinfo_triton_cpu_cls()
 
 
 if __name__ == "__main__":
