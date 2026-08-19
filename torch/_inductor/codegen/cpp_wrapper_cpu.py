@@ -2366,6 +2366,22 @@ class CppWrapperCpu(PythonWrapperCodegen):
         for name, size, stride in asserts:
             self._codegen_assert_size_stride(code, name, size, stride, op_name)
 
+    def _codegen_assert_alignment(
+        self, code: IndentedBuffer, name: str, alignment: int, op_name: str
+    ) -> None:
+        if V.graph.aot_mode and V.graph.is_const_graph:
+            return
+        stmt = f'assert_alignment({name}, {alignment}, "{op_name}");'
+        if V.graph.aot_mode:
+            guarded = f"if (_check_aoti_runtime_check_inputs_env()) {{ {stmt} }}"
+            if V.graph.is_dual_wrapper_mode:
+                code.writeline_jit(stmt)
+                code.writeline_aot(guarded)
+            else:
+                code.writeline(guarded)
+        else:
+            code.writeline(stmt)
+
     def codegen_device(self, device):
         if device.type not in DEVICE_TO_ATEN:
             raise AssertionError(device.type + " not found in DEVICE_TO_ATEN")
