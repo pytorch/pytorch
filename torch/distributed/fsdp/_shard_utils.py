@@ -35,7 +35,7 @@ def _create_chunk_sharded_tensor(
     device: torch.device | None = None,
 ) -> ShardedTensor:
     """
-    Shard a tensor to chunks along the first dimension. The local rank will gets its
+    Shard a tensor to chunks along the first dimension. The local rank will get its
     corresponding chunk as the local shard to create a ShardedTensor.
     """
     chunks = tensor.chunk(world_size, dim=0)
@@ -98,7 +98,7 @@ def _create_chunk_dtensor(
     device_mesh: DeviceMesh,
 ) -> DTensor:
     """
-    Shard a tensor to chunks along the first dimension. The local rank will gets its
+    Shard a tensor to chunks along the first dimension. The local rank will get its
     corresponding chunk as the local tensor to create a DTensor.
     """
     # We need to explicitly call .detach() to return a new tensor detached from the current graph.

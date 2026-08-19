@@ -143,7 +143,7 @@ static void check_exact_values(
             expected_parameters.at(i / kSampleEvery).at(p).to(torch::kFloat64);
         if (!computed.allclose(expected, /*rtol=*/1e-3, /*atol=*/5e-4)) {
           std::cout << "Iteration " << i << ": " << computed
-                    << " != " << expected << " (parameter " << p << ")" << '\n';
+                    << " != " << expected << " (parameter " << p << ')' << '\n';
           ASSERT_TRUE(false);
         }
       }

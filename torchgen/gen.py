@@ -2927,14 +2927,18 @@ def main() -> None:
         ignore_keys.update(MPS_KEYS)
         dispatch_keys[:] = [k for k in dispatch_keys if k not in MPS_KEYS]
 
+    XPU_KEYS = {
+        DispatchKey.XPU,
+        DispatchKey.SparseXPU,
+        DispatchKey.SparseCsrXPU,
+        DispatchKey.NestedTensorXPU,
+    }
     if options.xpu or options.update_aoti_c_shim:
         functions_keys.add(DispatchKey.XPU)
         aoti_backends.add(DispatchKey.XPU)
     else:
-        ignore_keys.add(DispatchKey.XPU)
-
-        if DispatchKey.XPU in dispatch_keys:
-            del dispatch_keys[dispatch_keys.index(DispatchKey.XPU)]
+        ignore_keys.update(XPU_KEYS)
+        dispatch_keys[:] = [k for k in dispatch_keys if k not in XPU_KEYS]
 
     if not options.mtia:
         ignore_keys.add(DispatchKey.MTIA)

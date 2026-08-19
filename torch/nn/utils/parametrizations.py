@@ -132,7 +132,7 @@ class _Orthogonal(Module):
             Q = Q.mT
             n, k = k, n
 
-        # We always make sure to always copy Q in every path
+        # We always make sure to copy Q in every path
         if not hasattr(self, "base"):
             # Note [right_inverse expm cayley]
             # If we do not have use_trivialization=True, we just implement the inverse of the forward
@@ -481,7 +481,7 @@ class _SpectralNorm(Module):
         #
         #    However, after we update `u` and `v` in-place, we need to **clone**
         #    them before using them to normalize the weight. This is to support
-        #    backproping through two forward passes, e.g., the common pattern in
+        #    backpropagating through two forward passes, e.g., the common pattern in
         #    GAN training: loss = D(real) - D(fake). Otherwise, engine will
         #    complain that variables needed to do backward for the first forward
         #    (i.e., the `u` and `v` vectors) are changed in the second forward.

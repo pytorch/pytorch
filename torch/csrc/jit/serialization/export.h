@@ -114,7 +114,7 @@ class TORCH_API ScriptModuleSerializer {
 
   // Uniquely identifies a SourceRange in a model.
   // SourceRanges are associated with Nodes of Graphs.
-  // However for mobile deployment we dont intend to ship
+  // However for mobile deployment we don't intend to ship
   // full JIT with capabilities of reading code and constructing
   // graphs.
   // Instead we serialize the Code generated from graph of the methods.

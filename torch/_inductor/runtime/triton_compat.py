@@ -148,16 +148,6 @@ else:
     HAS_TRITON = False
 
 
-def cc_warp_size(cc: str | int) -> int:
-    if torch.version.hip:
-        if "gfx9" in str(cc):
-            return 64
-        else:
-            return 32
-    else:
-        return 32
-
-
 try:
     autograd_profiler = torch.autograd.profiler
 except AttributeError:  # Compile workers only have a mock version of torch
@@ -180,7 +170,6 @@ __all__ = [
     "libdevice",
     "math",
     "triton",
-    "cc_warp_size",
     "knobs",
     "triton_key",
 ]
