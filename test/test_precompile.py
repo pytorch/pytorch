@@ -5318,6 +5318,132 @@ class TestExportPython(TestCase):
         self.assertIn("delete the", source)
         self.assertIn("stream=raw_stream0 argument", source)
 
+    def test_a_missing_cpu_isa_stamp_warns_like_every_other_stamp(self, device):
+        # It was the only checked stamp with no missing-stamp branch, so deleting one
+        # comment line switched off the only guard that RAISES -- the one standing
+        # between a C++ kernel and a host whose vector width it was not built for.
+        if torch.device(device).type != "cpu":
+            self.skipTest("the stamp is about C++ kernels")
+        from torch.compiler._export_python import _CPU_ISA_TAG
+
+        path = self._tmp_path("isa_missing.py")
+
+        def fn(x, y):
+            return ((x * 2.0 + y).tanh() * x).sum(dim=0)
+
+        x = make_tensor((256, 256), device=device, dtype=torch.float32)
+        y = make_tensor((256, 256), device=device, dtype=torch.float32)
+        expected = torch.compiler.export_python(path=path)(fn)(x, y)
+        with open(path, encoding="utf-8") as f:
+            source = f.read()
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("\n".join(l for l in source.splitlines() if _CPU_ISA_TAG not in l))
+        with self.assertLogs("torch.compiler._export_python", level="WARNING") as logs:
+            self.assertEqual(
+                torch.compiler.export_python(path=path)(fn)(x, y), expected
+            )
+        self.assertTrue(
+            any("no recorded cpu-vec-isa stamp" in line for line in logs.output),
+            logs.output,
+        )
+
+    def test_a_graph_with_no_cpp_kernel_does_not_warn_about_the_isa(self, device):
+        # "recorded as None" and "stamp deleted" both read back as None. Only the second
+        # is a missing guard; warning on the first would make every CUDA artifact noisy.
+        if torch.device(device).type != "cuda":
+            self.skipTest("needs a graph with no C++ kernel")
+        path = self._tmp_path("isa_none.py")
+
+        def fn(x):
+            return (x * 2).relu()
+
+        x = make_tensor((1024,), device=device, dtype=torch.float32)
+        torch.compiler.export_python(path=path)(fn)(x)
+        # Every load logs the trusted-exec warning; the point is that nothing complains
+        # about the stamp.
+        with self.assertLogs("torch.compiler._export_python", level="WARNING") as logs:
+            torch.compiler.export_python(path=path)(fn)(x)
+        self.assertFalse(
+            [line for line in logs.output if "cpu-vec-isa" in line], logs.output
+        )
+
+    def test_an_explicit_atol_override_is_not_capped(self, device):
+        # The cap exists so a fixed atol cannot dwarf a small-magnitude output. An
+        # explicit override is the escape hatch FROM that, so capping it too left the
+        # user no way out -- and on an all-zero reference it drove atol to zero.
+        from torch.compiler._export_python import _check_tolerances
+
+        with mock.patch.dict(os.environ, {"COMPILER_EXPORT_PYTHON_CHECK_ATOL": "0.5"}):
+            rtol, atol, atol_frac = _check_tolerances(torch.float16)
+        self.assertEqual(atol, 0.5)
+        self.assertIsNone(atol_frac, "an explicit atol must not be scaled down")
+        self.assertIsNotNone(_check_tolerances(torch.float16)[2])
+
+    def test_mismatch_message_reports_a_real_relative_diff(self, device):
+        # The significance floor was derived from the tolerance cap, so with an explicit
+        # atol nothing counted as significant and the message always said the reference
+        # was all near-zero -- printed directly beside a non-zero magnitude.
+        from torch.compiler._export_python import _verify_against_eager
+
+        path = self._tmp_path("relmsg.py")
+
+        def fn(x):
+            return torch.relu(x)
+
+        x = make_tensor((256,), device=device, dtype=torch.float32, low=-1, high=1)
+        with mock.patch.dict(os.environ, {"COMPILER_EXPORT_PYTHON_CHECK_ATOL": "1e-9"}):
+            with self.assertRaises(PrecompileError) as cm:
+                _verify_against_eager(
+                    fn,
+                    (x,),
+                    (x,),
+                    torch.relu(x) + 1.0,
+                    path,
+                    torch.random.get_rng_state(),
+                )
+        self.assertNotIn("all near-zero", str(cm.exception))
+
+    def test_a_small_magnitude_random_fn_is_skipped_not_blamed(self, device):
+        # The draw detector compared with the UNCAPPED tolerance while the real
+        # comparison used the capped one, so a small-magnitude random fn looked
+        # deterministic to the detector and wrong to the caller: reported as a bad
+        # hand-edit of an artifact nobody had touched.
+        path = self._tmp_path("smallrand.py")
+
+        def fn(x):
+            return torch.rand_like(x) * 1e-4
+
+        x = make_tensor((4096,), device=device, dtype=torch.float32)
+        from torch.compiler._export_python import _CHECK_ENV
+
+        with mock.patch.dict(os.environ, {_CHECK_ENV: "1"}):
+            torch.compiler.export_python(path=path)(fn)(x)
+            with self.assertLogs(
+                "torch.compiler._export_python", level="WARNING"
+            ) as lg:
+                torch.compiler.export_python(path=path)(fn)(x)
+        self.assertTrue(
+            any("draws from the generator" in line for line in lg.output), lg.output
+        )
+
+    def test_a_dtype_without_comparison_kernels_does_not_crash_the_check(self, device):
+        # float8 is is_floating_point() but has neither isfinite nor the mul that
+        # allclose runs internally, so an honest artifact died inside its own checker.
+        if torch.device(device).type != "cuda":
+            self.skipTest("float8 arithmetic is a GPU path here")
+        path = self._tmp_path("fp8.py")
+
+        def fn(x):
+            return (x * 2).to(torch.float8_e4m3fn)
+
+        x = make_tensor((1024,), device=device, dtype=torch.float32)
+        from torch.compiler._export_python import _CHECK_ENV
+
+        with mock.patch.dict(os.environ, {_CHECK_ENV: "1"}):
+            torch.compiler.export_python(path=path)(fn)(x)
+            got = torch.compiler.export_python(path=path)(fn)(x)
+        self.assertEqual(got.dtype, torch.float8_e4m3fn)
+
 
 instantiate_device_type_tests(TestExportPython, globals())
 

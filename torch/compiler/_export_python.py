@@ -224,12 +224,16 @@ def _explain_kernel_compile_error(
 
 _CHECK_ENV = "COMPILER_EXPORT_PYTHON_CHECK"
 
+# Elements below this fraction of the reference's peak are too small for a relative diff
+# to say anything; they are covered by the absolute term instead.
+_REL_REPORT_FLOOR = 1e-6
+
 
 def _check_enabled() -> bool:
     return os.environ.get(_CHECK_ENV, "") not in ("", "0")
 
 
-def _check_tolerances(dtype: torch.dtype) -> tuple[float, float, float]:
+def _check_tolerances(dtype: torch.dtype) -> tuple[float, float, float | None]:
     """Tolerances for comparing THIS artifact against eager, overridable by env var.
 
     Returns ``(rtol, atol, atol_frac)``. Deliberately looser than torch.testing's
@@ -263,12 +267,14 @@ def _check_tolerances(dtype: torch.dtype) -> tuple[float, float, float]:
     override_rtol = os.environ.get(f"{_CHECK_ENV}_RTOL")
     override_atol = os.environ.get(f"{_CHECK_ENV}_ATOL")
     if override_atol:
-        # An explicit absolute tolerance is an escape hatch; take it at face value and
-        # do not also scale it down.
+        # An explicit absolute tolerance is an escape hatch; take it at face value.
+        # atol_frac None means "do not cap", which is the whole point of the override --
+        # capping it against the reference's magnitude made the escape hatch unusable,
+        # and made it do nothing at all on an all-zero reference.
         return (
             float(override_rtol) if override_rtol else rtol,
             float(override_atol),
-            1.0,
+            None,
         )
     return (float(override_rtol) if override_rtol else rtol, atol, atol_frac)
 
@@ -308,10 +314,48 @@ def _eager_draws(
     for a, b in pairs:
         if a.shape != b.shape or a.dtype != b.dtype:
             return True
-        rtol, atol, _frac = _check_tolerances(a.dtype)
-        if not torch.allclose(a, b, rtol=rtol, atol=atol, equal_nan=True):
+        rtol, atol, atol_frac = _check_tolerances(a.dtype)
+        # Cap it exactly as the real comparison does. Using the raw absolute tolerance
+        # here made a small-magnitude random fn look deterministic to this function while
+        # looking wrong to the caller, so it was reported as a bad hand-edit instead of
+        # being skipped.
+        if atol_frac is not None:
+            finite = _finite_mask(a)
+            values = a[finite] if finite is not None else a.flatten()
+            if values.numel():
+                atol = min(atol, atol_frac * values.double().abs().max().item())
+        if not _allclose(a, b, rtol, atol):
             return True
     return False
+
+
+def _allclose(a: torch.Tensor, b: torch.Tensor, rtol: float, atol: float) -> bool:
+    """torch.allclose, but tolerant of dtypes that have no comparison kernel.
+
+    float8 reaches allclose and dies inside it on a missing mul (as NotImplementedError,
+    which is a RuntimeError); promote and compare there rather than failing an artifact
+    that is perfectly honest.
+    """
+    try:
+        return bool(torch.allclose(a, b, rtol=rtol, atol=atol, equal_nan=True))
+    except RuntimeError:
+        return bool(
+            torch.allclose(a.double(), b.double(), rtol=rtol, atol=atol, equal_nan=True)
+        )
+
+
+def _finite_mask(t: torch.Tensor) -> torch.Tensor | None:
+    """Where ``t`` is finite, or None for a dtype that cannot answer.
+
+    float8 is is_floating_point() but has no isfinite kernel, so asking crashes the
+    check on an artifact that is perfectly honest.
+    """
+    if not t.is_floating_point():
+        return None
+    try:
+        return torch.isfinite(t)
+    except RuntimeError:
+        return None
 
 
 def _verify_against_eager(
@@ -358,10 +402,13 @@ def _verify_against_eager(
         # that leaves part of the output unwritten reads back whatever the allocator
         # held, which is how "max abs diff nan" and "max abs diff 2.8e+38" both showed up
         # for the same edit; say that plainly instead of reporting it as numeric drift.
-        if got.is_floating_point() and not torch.equal(
-            torch.isfinite(got), torch.isfinite(want)
+        finite_want, finite_got = _finite_mask(want), _finite_mask(got)
+        if (
+            finite_want is not None
+            and finite_got is not None
+            and not torch.equal(finite_got, finite_want)
         ):
-            bad = int((torch.isfinite(got) != torch.isfinite(want)).sum())
+            bad = int((finite_got != finite_want).sum())
             raise _precompile_error(
                 f"{_CHECK_ENV}: output {i} of the artifact at {path} disagrees with "
                 f"{getattr(fn, '__name__', 'fn')} about where the result is finite "
@@ -372,16 +419,21 @@ def _verify_against_eager(
             )
         # Cap the absolute tolerance at a fraction of how big the reference actually is,
         # so a tensor whose every element is smaller than atol is still checked.
-        finite = want[torch.isfinite(want)] if want.is_floating_point() else want
-        magnitude = finite.double().abs().max().item() if finite.numel() else 0.0
-        atol = min(atol, atol_frac * magnitude)
-        if torch.allclose(got, want, rtol=rtol, atol=atol, equal_nan=True):
+        values = want[finite_want] if finite_want is not None else want.flatten()
+        magnitude = values.double().abs().max().item() if values.numel() else 0.0
+        if atol_frac is not None:
+            atol = min(atol, atol_frac * magnitude)
+        if _allclose(got, want, rtol, atol):
             continue
         diff = (got.double() - want.double()).abs()
         # Report the relative diff only where the reference is big enough for a ratio to
         # mean anything. Clamping to float64 tiny made every exactly-zero element (gelu
         # and relu produce them constantly) report a ratio near 1e308 and swamp the stat.
-        floor = atol_frac * magnitude
+        # A ratio is only informative where the reference is big enough to divide by.
+        # Deriving this floor from atol_frac meant that with an explicit _ATOL (frac 1.0)
+        # nothing was ever "significant" and the message always claimed the reference was
+        # all near-zero, directly beside the magnitude proving otherwise.
+        floor = _REL_REPORT_FLOOR * magnitude
         significant = want.double().abs() > floor if floor > 0 else want.double() != 0
         if significant.any():
             rel = f"{(diff[significant] / want.double().abs()[significant]).max().item():.3e}"
@@ -782,6 +834,7 @@ class ExportedPythonArtifact:
         self._input_duplicates: list[list[int]] | None = None
         self._global_state: list[list[str]] | None = None
         self._cpu_isa: str | None = None
+        self._cpu_isa_stamped = False
         self._code_devices: set[str] = set()
         self._autocast: list[list[Any]] | None = None
         self._loaded: Callable[..., Any] | None = None
@@ -970,7 +1023,7 @@ class ExportedPythonArtifact:
             log.warning(
                 "torch.compiler.export_python: the artifact at %s carries no recorded "
                 "global-state stamp, so calling it under a different default dtype, "
-                "default device, matmul precision or determinism setting than capture "
+                "default device or determinism setting than capture "
                 "is unchecked. Delete %s to regenerate it.",
                 self._path,
                 self._path,
@@ -1026,7 +1079,20 @@ class ExportedPythonArtifact:
                     "Autocast dtypes are baked into the artifact; capture under the "
                     "same autocast context you call it in."
                 )
-        if self._cpu_isa is not None:
+        if not self._cpu_isa_stamped:
+            # Every other checked stamp warns per call while it is missing. This one was
+            # silent, which made it the only guard a hand-edit could switch off without
+            # saying anything -- and it is the one guarding the loudest failure, a C++
+            # kernel whose baked vector width does not match the host's.
+            log.warning(
+                "torch.compiler.export_python: the artifact at %s carries no recorded "
+                "cpu-vec-isa stamp, so running a C++ kernel built for a different "
+                "vector width than this host's is unchecked, and that failure is "
+                "silent. Delete %s to regenerate it.",
+                self._path,
+                self._path,
+            )
+        elif self._cpu_isa is not None:
             live_isa = _cpu_vec_isa("cpp_fused")
             if live_isa is not None and live_isa != self._cpu_isa:
                 raise _precompile_error(
@@ -1157,6 +1223,7 @@ class ExportedPythonArtifact:
         self._autocast = self._read_stamp(code, _AUTOCAST_TAG)
         self._global_state = self._read_stamp(code, _GLOBAL_STATE_TAG)
         self._cpu_isa = self._read_stamp(code, _CPU_ISA_TAG)
+        self._cpu_isa_stamped = self._read_raw_stamp(code, _CPU_ISA_TAG) is not None
         self._code_devices = _code_devices(code)
         entry = self._load(code, from_disk=from_disk)
         self._example_inputs = None

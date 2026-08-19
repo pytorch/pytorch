@@ -1109,8 +1109,8 @@ def export_python(
     kernels were built for, for every device type the artifact's own source names, not
     only the ones its inputs live on), and the ambient globals the generated code
     resolves against rather than re-reads: the default dtype and device a factory op
-    with no explicit argument takes, the matmul precision a GEMM template bakes as a
-    constant, and whether deterministic algorithms were enabled when inductor chose
+    with no explicit argument takes, and whether deterministic algorithms were enabled
+    when inductor chose
     between a deterministic and an atomic lowering (checked one-way -- capturing with
     determinism on and calling with it off is safe, the reverse is not), and, for an
     artifact containing a C++ kernel, the CPU vector ISA it was generated against (the
