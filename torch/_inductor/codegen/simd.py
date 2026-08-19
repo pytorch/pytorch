@@ -4,6 +4,7 @@ from __future__ import annotations
 import collections
 import contextlib
 import dataclasses
+import enum
 import functools
 import itertools
 import logging
@@ -11,7 +12,7 @@ import math
 import operator
 import textwrap
 from collections import Counter
-from typing import Any, Generic, NamedTuple, TYPE_CHECKING
+from typing import Any, cast, Generic, NamedTuple, TYPE_CHECKING
 from typing_extensions import TypeVar
 
 import sympy
@@ -43,13 +44,23 @@ if TYPE_CHECKING:
 
     from ..ir import IRNode
 
-from ..optimize_indexing import indexing_dtype_strength_reduction
+from ..ops_handler import WrapperHandler
+from ..optimize_indexing import (
+    convert_index_expr_to_value_expr,
+    indexing_dtype_strength_reduction,
+)
 from ..runtime.coordinate_descent_tuner import CoordescTuner
-from ..runtime.hints import DeviceProperties
-from ..runtime.runtime_utils import green_text, last_power_of_2, yellow_text
+from ..runtime.hints import DeviceProperties, InductorMeta
+from ..runtime.runtime_utils import (
+    green_text,
+    last_power_of_2,
+    next_power_of_2,
+    yellow_text,
+)
 from ..scheduler import BaseSchedulerNode, BaseScheduling, WhyNoFuse
 from ..utils import (
     cache_property_on_self,
+    decompose_index,
     expr_fits_within_32bit,
     get_dtype_size,
     IndentedBuffer,
@@ -73,9 +84,13 @@ from .simd_kernel_features import (
 )
 
 
+_MAX_INLINE_PRECOMPUTABLE_SIZE_EXPR_OPS = 64
+
+
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator, Sequence
 
+    from torch._inductor.codegen.triton import TritonCSEVariable, TritonKernel
     from torch._inductor.tiling_utils import CoalesceVarAnalysis
 
 
@@ -192,7 +207,8 @@ class IterationRangesRoot(IterationRanges):
         # True if the dimension is implemented as a single program looping over
         # the full dimension (currently only used for non-persistent reduction)
 
-        assert not is_loop or (self.is_reduction and grid_dim is None)
+        if is_loop and not (self.is_reduction and grid_dim is None):
+            raise AssertionError("loop ranges must be reduction with no grid_dim")
         self.is_loop = is_loop
         # Index of corresponding dimension on triton tensors
         self.tensor_dim = tensor_dim
@@ -219,6 +235,14 @@ class IterationRangesRoot(IterationRanges):
 
     def owns_mask(self, mask_var: str) -> bool:
         return mask_var == self.mask_name()
+
+    def mask_shape(self, tensor_ndim: int) -> tuple[str, ...]:
+        if self.tensor_dim is None:
+            return ()
+
+        shape = ["1"] * tensor_ndim
+        shape[self.tensor_dim] = self.block_size_str()
+        return tuple(shape)
 
     def supports_constant_mask(self) -> bool:
         return True
@@ -367,7 +391,8 @@ class IterationRangesEntry(IterationRanges):
         precomputed_args: list[sympy.Expr] = []
         if isinstance(self.expr, sympy.Symbol):
             return precomputed_args
-        assert isinstance(self.expr, (FloorDiv, ModularIndexing)), type(self.expr)
+        if not isinstance(self.expr, (FloorDiv, ModularIndexing)):
+            raise AssertionError(type(self.expr))
         for arg in self.expr.args[1:]:
             if not isinstance(arg, (sympy.Integer, sympy.Symbol)):
                 symbols = arg.free_symbols
@@ -381,7 +406,8 @@ class IterationRangesEntry(IterationRanges):
         return hash(self.name)
 
     def __eq__(self, other: object) -> bool:
-        assert isinstance(other, IterationRangesEntry)
+        if not isinstance(other, IterationRangesEntry):
+            raise AssertionError(f"expected IterationRangesEntry, got {type(other)}")
         return self.name == other.name
 
 
@@ -389,7 +415,7 @@ class DerivedIterationRangesRoot(IterationRangesRoot):
     """A root with reduced numel/block_size derived from a parent tree.
 
     Used for the grouped reduction output: if the parent R tree covers 1024
-    columns with group_size=128, the derived root covers 8 groups. It shares
+    columns with local_reduction_size=128, the derived root covers 8 groups. It shares
     the parent's loop structure (same is_loop, prefix, loop variable) but
     has its own block geometry:
 
@@ -568,6 +594,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         self.min_xblock: int | None = None
         self.min_rblock: int | None = None
         self.saved_partial_accumulate: list[PartialAccumulate] = []
+        self._index_dtype = self.features.select_index_dtype()
 
     def codegen_template_body(
         self,
@@ -616,7 +643,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         raise NotImplementedError
 
     def get_index_dtype_as_torch_dtype(self) -> torch.dtype:
-        return self.features.select_index_dtype()
+        return self._index_dtype
 
     @property
     def index_dtype(self) -> str:
@@ -734,7 +761,11 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
     def combine_contiguous_dims(
         self, index: sympy.Expr, tree: IterationRangesRoot
     ) -> sympy.Expr:
-        if expand_res := V.graph.sizevars.expand_floor_div(index):
+        if isinstance(index, sympy.Add) and index.has(FloorDiv):
+            candidate_vars, _ = tree.vars_and_sizes(index)
+        else:
+            candidate_vars = None
+        if expand_res := V.graph.sizevars.expand_floor_div(index, candidate_vars):
             new_index, denominator = expand_res  # type: ignore[misc]
             return FloorDiv(self._combine_contiguous_dims(new_index, tree), denominator)
         else:
@@ -766,7 +797,8 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         @contextlib.contextmanager
         def ctx():
             if not self.features.is_reduction():
-                assert not self.inside_reduction
+                if self.inside_reduction:
+                    raise AssertionError("expected not self.inside_reduction")
                 yield
                 return
             if should_flush:
@@ -785,7 +817,11 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         return ctx()
 
     def set_ranges(self, *lengths: sympy.Expr) -> list[sympy.Symbol]:
-        assert len(lengths) == len(self.range_trees)
+        if len(lengths) != len(self.range_trees):
+            raise AssertionError(
+                f"expected len(lengths) == len(self.range_trees), "
+                f"got {len(lengths)} and {len(self.range_trees)}"
+            )
         return [
             ranges.construct(length)
             for length, ranges in zip(lengths, self.range_trees)
@@ -822,7 +858,11 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             Builds the nested expression:
               ((...((s1*v[i1] + v[i2]) * s2 + v[i3]) ... ) * sk + v[i(k+1)])
             """
-            assert len(idxs) == len(sizes) + 1
+            if len(idxs) != len(sizes) + 1:
+                raise AssertionError(
+                    f"expected len(idxs) == len(sizes) + 1, "
+                    f"got {len(idxs)} and {len(sizes) + 1}"
+                )
 
             def getter(flat_vars: list[sympy.Expr]) -> sympy.Expr:
                 expr = flat_vars[idxs[0]]
@@ -848,24 +888,12 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                     # scroll to next group with remaining elements
                     current_group += 1
 
-                # During native matmul on bmm, we enforce tiling order (z, y, x, r).
-                # When fusing a bmm node with loop (z, y, x, r) with a pw node
-                # of shape (z*y*x, 1), we need to split the pw iteration range
-                # into three dimensions.
-                # The group becomes [z, y, x, 1], with lengths ([z*y*x], []).
-                # In this case, we decompose the combined size z*y*x into three
-                # consecutive groups. Previously, _split_iteration_ranges supported
-                # splitting into at most two dimensions, but we now extend it to do
-                # three splits when the total size is divisible by all three.
-
-                # is group having (z,y,x,r=1) form?
-                is_bmm_then_pw = len(remaining) == 4 and remaining[-1] == 1
-                if (
-                    current_group + 2 < len(remaining)
-                    and sv.statically_known_gt(
-                        size, remaining[current_group] * remaining[current_group + 1]
-                    )
-                    and is_bmm_then_pw
+                # When fusing a node whose flat iteration size spans three
+                # consecutive kernel groups, decompose it across those groups.
+                # This covers both bmm-style [z, y, x, 1] groups and nested
+                # reduction [outer, groups, local] groups.
+                if current_group + 2 < len(remaining) and sv.statically_known_gt(
+                    size, remaining[current_group] * remaining[current_group + 1]
                 ):
                     # need to break size in three
                     if not sv.statically_known_multiple_of(
@@ -936,9 +964,15 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                     )
             return_getters_groups.append(return_getters)
 
-        assert all(
-            V.graph.sizevars.guarding_hint_or_throw(s) == 1 for s in remaining
-        ), f"failed to set ranges {remaining} {lengths}"
+        if not all(V.graph.sizevars.guarding_hint_or_throw(s) == 1 for s in remaining):
+            # Non-unit leftover extents mean the node's iteration space does not
+            # tile onto the kernel groups -- e.g. fusing an epilogue whose row
+            # count is a strict sub-multiple of a template's tiling ([s, N] into
+            # [K*s, N]). Raise CantSplit (consistent with the divisibility exits
+            # in add_range above) so callers like is_compatible and
+            # Scheduler.speedup_by_fusion skip this fusion and fall back to
+            # unfused codegen instead of hard-failing the whole compile.
+            raise CantSplit(remaining, lengths)
         # pyrefly: ignore [bad-return]
         return new_ranges, return_getters_groups
 
@@ -1056,7 +1090,11 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             if entry is None:
                 # Non-iterated variables, e.g. strides
                 continue
-            assert isinstance(entry.parent, IterationRangesRoot)
+            if not isinstance(entry.parent, IterationRangesRoot):
+                raise AssertionError(
+                    f"expected entry.parent to be IterationRangesRoot, "
+                    f"got {type(entry.parent)}"
+                )
             # Find which active tree this entry belongs to (identity check
             # because derived trees may shadow the same prefix).
             tree_pos = next(
@@ -1093,6 +1131,33 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             return f"[{', '.join(map(self.index_to_str, index))}]"
         return self.kexpr(self.rename_indexing(index))  # type: ignore[call-arg]
 
+    @staticmethod
+    def _should_precompute_size_expr(index: sympy.Expr) -> bool:
+        if (
+            isinstance(index, (int, sympy.Symbol, sympy.Number))
+            or index.is_number
+            or index.is_symbol
+            or index.is_integer is not True
+        ):
+            return False
+
+        symbols = index.free_symbols
+        return (
+            bool(symbols)
+            and all(
+                symbol_is_type(
+                    s,
+                    (
+                        SymT.SIZE,
+                        SymT.UNBACKED_INT,
+                        SymT.PRECOMPUTED_SIZE,
+                    ),
+                )
+                for s in symbols
+            )
+            and sympy.count_ops(index) > _MAX_INLINE_PRECOMPUTABLE_SIZE_EXPR_OPS
+        )
+
     def prepare_indexing(
         self,
         index: sympy.Expr,
@@ -1122,12 +1187,27 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
 
         simp_index = self.simplify_indexing(index)
 
-        # Now that we are done simplifying we can unwrap Identity so that downstream handling
-        # for its contained expression will work. previously, tl.full wrapping of sympy.Integer
-        # would not occur
+        singleton_replacements = {}
+        for tree in self.active_range_trees():
+            if not V.graph.sizevars.statically_known_equals(tree.numel, 1):
+                continue
+            # Any active loop var ranging over a singleton extent is
+            # semantically equal to zero. Canonicalizing those symbols here is
+            # globally safe and lets degenerate tiles CSE identical loads/stores.
+            for symbol in tree.var_list:
+                singleton_replacements[symbol] = sympy.S.Zero
+        if singleton_replacements:
+            simp_index = sympy_subs(simp_index, singleton_replacements)
+
+        # Now that we are done simplifying we can unwrap Identity so downstream
+        # handling for its contained expression will work. In particular,
+        # backend index/mask analysis needs to recognize wrapped constants.
         simp_index = (
             simp_index if not isinstance(simp_index, Identity) else simp_index.args[0]
         )
+
+        if self._should_precompute_size_expr(simp_index):
+            simp_index = V.graph.sizevars.lookup_precomputed_size(simp_index)
 
         return self.codegen_indexing(simp_index)
 
@@ -1397,7 +1477,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         return OpsWrapper._unwrap((mean, m2, rnumel))
 
     def prepare_softmax_twopass_fallback(self, dtype, value):
-        vmax = ops.reduction(dtype, dtype, "max", value)
+        vmax = ops.reduction(dtype, dtype, "fmax", value)
         sub = ops.sub(value, vmax)
         exp = ops.exp(sub)
         vsum = ops.reduction(dtype, dtype, "sum", exp)
@@ -1413,6 +1493,783 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         pass
 
 
+@dataclasses.dataclass(frozen=True)
+class _IterationSpace:
+    """Source domain used to remap a pointwise body.
+
+    ``groups`` are source-domain extents. ``values`` are the matching
+    codegen-side symbolic index expressions in the outer kernel.
+
+    For a grouped reduction body with logical ranges [B, D // G, G],
+    ``groups`` may be [B, D // G, G] while ``values`` are the concrete
+    symbols the parent kernel is using for those coordinates.
+    """
+
+    groups: Sequence[sympy.Expr]
+    values: Sequence[sympy.Expr]
+
+
+RemappedRangeValue = CSEVariable | tuple[CSEVariable, ...]
+
+
+class _SubParentFusion(enum.Enum):
+    DEFER = enum.auto()
+    REJECT = enum.auto()
+    FUSE = enum.auto()
+
+
+def _select_lane(
+    parts: tuple[CSEVariable, ...],
+    lane: sympy.Expr,
+) -> CSEVariable | None:
+    for i, part in enumerate(parts):
+        if V.graph.sizevars.statically_known_equals(lane, i):
+            return part
+    return None
+
+
+@dataclasses.dataclass
+class _DerivedIterationFamily:
+    """Alternate range trees and forwarded values for a derived stage."""
+
+    # Trees to swap onto the kernel while this stage runs
+    range_trees: tuple[IterationRangesRoot, ...]
+    # Rewrite body iter-var symbols to derived tree symbols (reduced-output)
+    index_subs: dict[sympy.Symbol, sympy.Expr] = dataclasses.field(default_factory=dict)
+    # Values readable by name without issuing a load in the derived domain.
+    # TODO: Replace name-keyed forwarding with a #188180-style indexed
+    # projection cache shared by standalone and nested sub-parent stages.
+    remapped_values: dict[str, RemappedRangeValue] = dataclasses.field(
+        default_factory=dict
+    )
+    lane_index_subs: dict[sympy.Expr, sympy.Expr] = dataclasses.field(
+        default_factory=dict
+    )
+    flat_index_derived_tree: DerivedIterationRangesRoot | None = None
+    _headers_emitted: bool = False
+
+    def remap_index(self, index: sympy.Expr) -> sympy.Expr:
+        return index.subs(self.index_subs)
+
+    def resolve_load(self, name: str, index: sympy.Expr) -> CSEVariable | None:
+        """The pre-materialized value for ``name``, or None if there is none.
+
+        A tuple entry in ``remapped_values`` is a lane tuple: the parent tile
+        was split into ``len(value)`` lanes, and ``index`` selects one of them
+        as ``index % len(value)``. Non-tuple entries are already the value.
+        """
+        value = self.remapped_values.get(name)
+        if not isinstance(value, tuple):
+            return value
+        lane = scheduler.NestedReduction.interleaved_sub_parent_lane(
+            index, len(value), self.lane_index_subs
+        )
+        part = _select_lane(value, lane)
+        if part is None:
+            raise AssertionError(
+                f"sub-parent load for {name!r} has non-constant lane {lane}"
+            )
+        return part
+
+    def is_active_on(self, kernel: SIMDKernel[Any]) -> bool:
+        if len(kernel.range_trees) != len(self.range_trees):
+            return False
+        return all(
+            active is expected
+            for active, expected in zip(kernel.range_trees, self.range_trees)
+        )
+
+    def sub_parent_tree(self) -> DerivedIterationRangesRoot:
+        assert self.flat_index_derived_tree is not None  # noqa: S101
+        return self.flat_index_derived_tree
+
+    @contextlib.contextmanager
+    def ensure_active(self, kernel: SIMDKernel[Any]):
+        """Activate this family if it isn't already active on ``kernel``."""
+        if self.is_active_on(kernel):
+            yield
+        else:
+            with self.activate(kernel):
+                yield
+
+    def ensure_headers(self, kernel: SIMDKernel[Any]) -> None:
+        # Called lazily from activate(). Reduced-output families may activate
+        # more than once (the grouped reduction stores through the family, then
+        # reduced-output epilogues run inside it), so emit derived headers once.
+        # Parent-full families reuse the outer trees, so this stays a no-op.
+        if self._headers_emitted:
+            return
+        for tree in self.range_trees:
+            if isinstance(tree, DerivedIterationRangesRoot):
+                # Looped derived trees depend on the current reduction-loop
+                # offset, so emit them in the loop-local indexing buffer.
+                # Non-looped trees can be emitted once in the kernel prologue.
+                emit_in_loop_body = tree.is_loop and kernel.inside_reduction
+                target = kernel.indexing_code if emit_in_loop_body else kernel.body
+                kernel.iteration_ranges_codegen_header(tree, target)
+        self._headers_emitted = True
+
+    @contextlib.contextmanager
+    def activate(self, kernel: SIMDKernel[Any]) -> Iterator[None]:
+        # Temporarily switch the kernel's active iteration family so normal
+        # load/store/indexing code interprets indices in this family's space.
+        self.ensure_headers(kernel)
+        with kernel.use_range_trees(self.range_trees):
+            yield
+
+
+@dataclasses.dataclass(frozen=True)
+class _GroupedReductionVars:
+    """Variables used to call the grouped-reduction body.
+
+    ``iter_remapped`` and ``reduce_remapped`` are the iteration/reduction
+    arguments passed to the grouped reduction's loop body. ``passthrough`` is
+    the non-grouped axis, while ``group_index`` and ``local_reduction`` are
+    the two pieces of the grouped parent axis after it is split into
+    [num_groups, local_reduction_size]. ``group_index_var`` is None only for
+    the single-group case, where the group index is the constant 0.
+    """
+
+    iter_remapped: list[sympy.Expr]
+    reduce_remapped: list[sympy.Expr]
+    passthrough_iter_var: sympy.Symbol
+    group_index_var: sympy.Symbol | None
+    group_index_expr: sympy.Expr
+    local_reduction_var: sympy.Expr
+
+
+@dataclasses.dataclass(frozen=True)
+class _GroupedReductionLayout:
+    """Geometry for decomposing one parent-tile axis into groups and lanes."""
+
+    x_tree: IterationRangesRoot
+    r_tree: IterationRangesRoot
+    local_reduction_size: sympy.Expr
+    local_reduction_in_r: bool
+
+    @classmethod
+    def from_kernel(
+        cls,
+        kernel: SIMDKernel[Any],
+        local_reduction_size: sympy.Expr,
+        local_reduction_in_r: bool,
+    ) -> _GroupedReductionLayout:
+        if len(kernel.range_trees) != 2:
+            raise AssertionError(
+                f"expected exactly 2 range trees, got {len(kernel.range_trees)}"
+            )
+        x_tree, r_tree = kernel.range_trees
+        if x_tree.prefix != "x":
+            raise AssertionError(f"expected x range tree, got {x_tree.prefix!r}")
+        return cls(
+            x_tree=x_tree,
+            r_tree=r_tree,
+            local_reduction_size=local_reduction_size,
+            local_reduction_in_r=local_reduction_in_r,
+        )
+
+    @property
+    def group_tree(self) -> IterationRangesRoot:
+        """The tree decomposed into [num_groups, local_reduction_size]."""
+        return self.r_tree if self.local_reduction_in_r else self.x_tree
+
+    @property
+    def passthrough_tree(self) -> IterationRangesRoot:
+        """The tree that passes through unchanged (not grouped)."""
+        return self.x_tree if self.local_reduction_in_r else self.r_tree
+
+    @property
+    def parent_axis(self) -> int:
+        # Axis of the grouped parent dimension within the 2D [x, r] tile.
+        return 1 if self.local_reduction_in_r else 0
+
+    @property
+    def group_prefix(self) -> str:
+        return "nested_" + self.group_tree.prefix.upper().removesuffix("_")
+
+    @property
+    def local_reduction_size_sym(self) -> sympy.Symbol:
+        return sympy.Symbol(
+            f"{self.group_prefix}_LOCAL_REDUCTION_SIZE",
+            integer=True,
+            positive=True,
+        )
+
+    @property
+    def reduced_block_sym(self) -> sympy.Symbol:
+        return sympy.Symbol(
+            f"{self.group_prefix}_REDUCED_BLOCK",
+            integer=True,
+            positive=True,
+        )
+
+    @property
+    def parent_block(self) -> str:
+        return self.group_tree.block_size_str()
+
+    @property
+    def passthrough_block(self) -> str:
+        return self.passthrough_tree.block_size_str()
+
+    @property
+    def num_groups(self) -> sympy.Expr:
+        return FloorDiv(self.group_tree.numel, self.local_reduction_size)
+
+    @property
+    def num_groups_str(self) -> str:
+        return str(self.reduced_block_sym)
+
+    @property
+    def local_reduction_size_dim(self) -> str:
+        return str(self.local_reduction_size_sym)
+
+    @property
+    def reshape_shape(self) -> tuple[str, str, str]:
+        """Shape used before the local group reduction."""
+        if self.local_reduction_in_r:
+            return (
+                self.passthrough_block,
+                self.num_groups_str,
+                self.local_reduction_size_dim,
+            )
+        return (
+            self.num_groups_str,
+            self.local_reduction_size_dim,
+            self.passthrough_block,
+        )
+
+    @property
+    def reduce_axis(self) -> int:
+        """Axis reduced in [passthrough, num_groups, local_reduction_size]."""
+        return 2 if self.local_reduction_in_r else 1
+
+    @property
+    def output_shape(self) -> tuple[str, str]:
+        if self.local_reduction_in_r:
+            return (self.passthrough_block, self.num_groups_str)
+        return (self.num_groups_str, self.passthrough_block)
+
+    def parent_dim(self, value: CSEVariable) -> str | None:
+        shape = getattr(value, "shape", None)
+        if shape is None:
+            return None
+        if len(shape) == 2:
+            return str(shape[self.parent_axis])
+        if len(shape) == 1 and V.graph.sizevars.statically_known_equals(
+            self.passthrough_tree.numel, 1
+        ):
+            return str(shape[0])
+        return None
+
+    def construct_group_reduction_vars(
+        self,
+        body: Any,
+    ) -> _GroupedReductionVars:
+        if V.graph.sizevars.statically_known_equals(self.num_groups, 1):
+            # Degenerate grouped axis: the parent dimension is exactly one
+            # group. Reuse the parent full-range symbol for the group lane so
+            # remapped shared-input loads CSE with the outer-reduction load.
+            group_index_expr = sympy.S.Zero
+            group_index_var = None
+            local_reduction_var = self.group_tree.full_range().symbol()
+        else:
+            group_index_var, local_reduction_var = self.group_tree.construct(
+                [self.num_groups, self.local_reduction_size]
+            )
+            group_index_expr = group_index_var
+        # The passthrough axis is not split; it is reconstructed as a single
+        # loop variable so the grouped body can still address the unchanged
+        # parent-tile dimension.
+        passthrough_var = self.passthrough_tree.construct(
+            [self.passthrough_tree.numel]
+        )[0]
+
+        reduce_remapped = [local_reduction_var]
+        if len(body.iter_vars) == 2:
+            iter_remapped = (
+                [passthrough_var, group_index_expr]
+                if self.local_reduction_in_r
+                else [group_index_expr, passthrough_var]
+            )
+        elif len(body.iter_vars) == 1:
+            # 1 iter var: flatten passthrough_tree and group index into one index.
+            iter_remapped = [
+                passthrough_var * self.num_groups + group_index_expr
+                if self.local_reduction_in_r
+                else group_index_expr * self.passthrough_tree.numel + passthrough_var
+            ]
+        else:
+            raise AssertionError("nested grouped reduction expects 1 or 2 iter vars")
+
+        return _GroupedReductionVars(
+            iter_remapped,
+            reduce_remapped,
+            passthrough_var,
+            group_index_var,
+            group_index_expr,
+            local_reduction_var,
+        )
+
+    def make_reduced_output_family(
+        self,
+        group_reduction_vars: _GroupedReductionVars,
+    ) -> _DerivedIterationFamily:
+        def build(tree: IterationRangesRoot) -> IterationRangesRoot:
+            if tree is not self.group_tree:
+                # Only the grouped axis changes shape in the reduced-output
+                # family. Reuse the passthrough tree directly so we do not emit
+                # duplicate index/mask headers like reduced_xindex = xindex.
+                return tree
+            local_reduction_size_const = (
+                self.local_reduction_size_sym,
+                self.local_reduction_size,
+                True,
+            )
+            reduced_block_const = (
+                self.reduced_block_sym,
+                FloorDiv(tree.block_size(), self.local_reduction_size_sym),
+                True,
+            )
+            return DerivedIterationRangesRoot(
+                tree,
+                numel=FloorDiv(tree.numel, self.local_reduction_size),
+                block_size=self.reduced_block_sym,
+                block_offset=FloorDiv(
+                    tree.block_offset(), self.local_reduction_size_sym
+                ),
+                named_constants=(local_reduction_size_const, reduced_block_const),
+            )
+
+        reduced_x_tree = build(self.x_tree)
+        reduced_r_tree = build(self.r_tree)
+        index_subs: dict[sympy.Symbol, sympy.Expr] = {}
+        reduced_passthrough_tree = (
+            reduced_x_tree if self.local_reduction_in_r else reduced_r_tree
+        )
+        reduced_group_tree = (
+            reduced_r_tree if self.local_reduction_in_r else reduced_x_tree
+        )
+        index_subs[group_reduction_vars.passthrough_iter_var] = (
+            reduced_passthrough_tree.full_range().symbol()
+        )
+        if group_reduction_vars.group_index_var is not None:
+            # The single-group case uses constant 0 for the group lane, so
+            # there is no constructed group-index symbol to rewrite.
+            index_subs[group_reduction_vars.group_index_var] = (
+                reduced_group_tree.full_range().symbol()
+            )
+        return _DerivedIterationFamily(
+            index_subs=index_subs,
+            range_trees=(reduced_x_tree, reduced_r_tree),
+        )
+
+    def make_parent_full_family(
+        self,
+    ) -> _DerivedIterationFamily:
+        return _DerivedIterationFamily(
+            range_trees=(self.x_tree, self.r_tree),
+        )
+
+    def parent_full_iteration_values(
+        self, group_reduction_vars: _GroupedReductionVars
+    ) -> _IterationSpace:
+        if not self.local_reduction_in_r:
+            source_groups = [
+                self.num_groups,
+                self.local_reduction_size,
+                self.passthrough_tree.numel,
+            ]
+            source_values = [
+                group_reduction_vars.group_index_expr,
+                group_reduction_vars.local_reduction_var,
+                group_reduction_vars.passthrough_iter_var,
+            ]
+            return _IterationSpace(
+                source_groups,
+                source_values,
+            )
+        return _IterationSpace(
+            [self.x_tree.numel, self.r_tree.numel],
+            [self.x_tree.full_range().symbol(), self.r_tree.full_range().symbol()],
+        )
+
+    def child_block(self, factor: int) -> str:
+        return str(FloorDiv(self.group_tree.block_size(), factor))
+
+    def make_sub_parent_family(self, factor: int) -> _DerivedIterationFamily:
+        if not self.local_reduction_in_r:
+            raise AssertionError("sub-parent iteration requires a reduction in R")
+        derived_tree = DerivedIterationRangesRoot(
+            self.group_tree,
+            numel=FloorDiv(self.group_tree.numel, factor),
+            block_size=FloorDiv(self.group_tree.block_size(), factor),
+            block_offset=FloorDiv(self.group_tree.block_offset(), factor),
+            name_suffix=f"half{factor}",
+        )
+        lane_index_subs = scheduler.NestedReduction.try_get_sub_parent_extent_subs(
+            self.group_tree.numel, factor
+        )
+        if lane_index_subs is None:
+            raise AssertionError("sub-parent extent must be divisible by its factor")
+        return _DerivedIterationFamily(
+            range_trees=(self.x_tree, derived_tree),
+            flat_index_derived_tree=derived_tree,
+            lane_index_subs=lane_index_subs,
+        )
+
+    def sub_parent_iteration_values(
+        self,
+        family: _DerivedIterationFamily,
+        factor: int,
+    ) -> _IterationSpace:
+        """The iteration space one lane sees: the grouped axis divided by ``factor``.
+
+        The x extent is unchanged -- only the grouped axis shrinks, since the
+        split happens inside a group.
+        """
+        sub_parent_tree = family.sub_parent_tree()
+        group_var, pair_var = sub_parent_tree.construct(
+            [self.num_groups, FloorDiv(self.local_reduction_size, factor)]
+        )
+        return _IterationSpace(
+            [
+                self.x_tree.numel,
+                self.num_groups,
+                FloorDiv(self.local_reduction_size, factor),
+            ],
+            [self.x_tree.full_range().symbol(), group_var, pair_var],
+        )
+
+    def maybe_broadcast_value_to_parent_resolution(
+        self,
+        kernel: TritonKernel,
+        value: CSEVariable,
+    ) -> CSEVariable:
+        if value.dtype is None:
+            raise AssertionError("value must have a known dtype")
+        if value.shape is None or len(value.shape) < 2:
+            # Some scalar or opaque CSE values do not carry block-shape
+            # metadata. Pointwise consumers can still rely on Triton
+            # broadcasting, unlike grouped-reduction reshape inputs.
+            return value
+
+        return self._broadcast_value_to_parent_resolution(
+            kernel,
+            value,
+            materialize_singleton=False,
+        )
+
+    def ensure_parent_tile_resolution(
+        self,
+        kernel: TritonKernel,
+        value: CSEVariable,
+    ) -> CSEVariable:
+        if value.dtype is None:
+            raise AssertionError("value must have a known dtype")
+        if not (value.shape is not None and len(value.shape) >= 2):
+            raise AssertionError(
+                "grouped reduction input must have a known parent-tile shape"
+            )
+
+        return self._broadcast_value_to_parent_resolution(
+            kernel,
+            value,
+            materialize_singleton=True,
+        )
+
+    def materialize_value_at_sub_parent_resolution(
+        self,
+        kernel: TritonKernel,
+        family: _DerivedIterationFamily,
+        factor: int,
+        name: str,
+        value: CSEVariable,
+        source_layout: scheduler.NestedReduction.SubParentSourceLayout,
+    ) -> None:
+        """Split a parent-resolution value into per-lane values, in registers.
+
+        Registers the lanes on ``family`` so later loads of ``name`` resolve to
+        a lane instead of re-reading memory.
+        """
+        assert value.dtype is not None  # noqa: S101
+        assert (  # noqa: S101
+            source_layout is scheduler.NestedReduction.SubParentSourceLayout.INTERLEAVED
+        )
+        shape = value.shape
+        if shape is None:
+            raise AssertionError(f"cannot project {name!r} without a known shape")
+        # Scalar loads are lane-invariant and need no split.
+        if shape == ():
+            family.remapped_values[name] = value
+            return
+        parent_dim = self.parent_dim(value)
+        if parent_dim is None:
+            raise AssertionError(f"cannot project {name!r} with shape {shape}")
+        if parent_dim == "1":
+            family.remapped_values[name] = value
+            return
+        # A value already at child width can be forwarded directly.
+        if parent_dim == self.child_block(factor):
+            family.remapped_values[name] = value
+            return
+        # Only a full parent tile can be projected to child width here.
+        if parent_dim != self.parent_block:
+            raise AssertionError(
+                f"cannot project {name!r} with parent dimension {parent_dim!r}; "
+                f"expected {self.parent_block!r}"
+            )
+        sub_parent_tree = family.sub_parent_tree()
+        child_block = sub_parent_tree.block_size_str()
+        factor_dim = str(factor)
+        if len(shape) == 2:
+            passthrough_dim = str(shape[1 - self.parent_axis])
+            reshape_shape = (passthrough_dim, child_block, factor_dim)
+            part_shape = (passthrough_dim, child_block)
+        else:
+            reshape_shape = (child_block, factor_dim)
+            part_shape = (child_block,)
+        parts = tuple(
+            kernel.cse.newvar(dtype=value.dtype, shape=part_shape)
+            for _ in range(factor)
+        )
+        kernel.emit_split_via_reshape(value, reshape_shape, tuple(map(str, parts)))
+        # Derived loads select the appropriate register value from this tuple.
+        family.remapped_values[name] = parts
+
+    def _broadcast_value_to_parent_resolution(
+        self,
+        kernel: TritonKernel,
+        value: CSEVariable,
+        *,
+        materialize_singleton: bool,
+    ) -> CSEVariable:
+        if value.dtype is None:
+            raise AssertionError("value must have a known dtype")
+        if not (value.shape is not None and len(value.shape) >= 2):
+            raise AssertionError("value must have a known parent-tile shape")
+        parent_dim = str(value.shape[self.parent_axis])
+        if parent_dim == self.parent_block or (
+            parent_dim == "1" and not materialize_singleton
+        ):
+            return value
+
+        passthrough_extent = self.passthrough_block
+        parent_extent = self.parent_block
+        if parent_dim == "1":
+            # A parent-axis singleton already broadcasts semantically, but the
+            # grouped reduction still needs a full parent tile before reshape.
+            if self.local_reduction_in_r:
+                pre_broadcast_shape = (passthrough_extent, 1)
+                broadcast_shape = (passthrough_extent, parent_extent)
+                final_shape = (passthrough_extent, parent_extent)
+            else:
+                pre_broadcast_shape = (1, passthrough_extent)
+                broadcast_shape = (parent_extent, passthrough_extent)
+                final_shape = (parent_extent, passthrough_extent)
+        elif self.local_reduction_in_r:
+            num_groups = self.num_groups_str
+            local_reduction_size = self.local_reduction_size_dim
+            # [X, groups] -> [X, groups, 1] -> [X, groups, G] -> [X, R]
+            pre_broadcast_shape = (passthrough_extent, num_groups, 1)
+            broadcast_shape = (passthrough_extent, num_groups, local_reduction_size)
+            final_shape = (passthrough_extent, parent_extent)
+        else:
+            num_groups = self.num_groups_str
+            local_reduction_size = self.local_reduction_size_dim
+            # [groups, R] -> [groups, 1, R] -> [groups, G, R] -> [X, R]
+            pre_broadcast_shape = (num_groups, 1, passthrough_extent)
+            broadcast_shape = (num_groups, local_reduction_size, passthrough_extent)
+            final_shape = (parent_extent, passthrough_extent)
+        value = kernel.emit_broadcast_via_reshape(
+            value=value,
+            pre_broadcast_shape=pre_broadcast_shape,
+            broadcast_shape=broadcast_shape,
+            final_shape=final_shape,
+            dtype=value.dtype,
+            out_shape=final_shape,
+        )
+        return value
+
+
+@dataclasses.dataclass(frozen=True)
+class _ParentFullLoadTransform:
+    """Lift loaded values to parent-full resolution when needed."""
+
+    kernel: TritonKernel
+    layout: _GroupedReductionLayout
+
+    def apply(self, value: CSEVariable) -> CSEVariable:
+        return self.layout.maybe_broadcast_value_to_parent_resolution(
+            self.kernel,
+            value,
+        )
+
+
+class _GroupedReductionOpsHandler(WrapperHandler):  # type: ignore[type-arg]
+    """Group-reduction stage handler: reshape parent-full tile into
+    [num_groups, local_reduction_size], reduce over the local axis, and store
+    the result.
+    Loads go through the normal CSE path, then may be lifted to parent
+    resolution before the reshape.
+    """
+
+    def __init__(
+        self,
+        inner,
+        kernel: TritonKernel,
+        *,
+        layout: _GroupedReductionLayout,
+        family: _DerivedIterationFamily,
+        load_transform: _ParentFullLoadTransform | None = None,
+    ):
+        super().__init__(inner)
+        self._kernel = kernel
+        self._layout = layout
+        self._family = family
+        self._load_transform = load_transform
+
+    def load(self, name: str, index: sympy.Expr) -> CSEVariable:
+        value = self._inner.load(name, index)
+        if self._load_transform is not None:
+            # Used when a nested stage reads reduced values that must be lifted
+            # back to parent-tile resolution before this body consumes them.
+            value = self._load_transform.apply(value)
+        return value
+
+    def reduction(
+        self,
+        dtype: torch.dtype,
+        src_dtype: torch.dtype,
+        reduction_type: str,
+        value: CSEVariable,
+    ) -> CSEVariable:
+        """Reshape the parent-full tile and reduce over the local reduction."""
+        k = self._kernel
+        value = self._layout.ensure_parent_tile_resolution(k, value)
+        # The grouped-reduction reshape uses the grouped-axis named constants
+        # from the reduced-output family, so emit the derived headers before
+        # we materialize the reshape line.
+        self._family.ensure_headers(k)
+        reshaped = k.emit_reshape(value, self._layout.reshape_shape, src_dtype)
+        k.num_reduction += 1
+        return k.emit_reduce(
+            reshaped,
+            reduction_type,
+            self._layout.reduce_axis,
+            dtype,
+            self._layout.output_shape,
+        )
+
+    def store_reduction(self, name: str, index: sympy.Expr, value: CSEVariable) -> None:
+        remapped_index = self._family.remap_index(index)
+        with self._family.ensure_active(self._kernel):
+            self._inner.store(name, remapped_index, value)
+
+
+class _PointwiseRemapHandler(WrapperHandler):  # type: ignore[type-arg]
+    """Pointwise bodies at a remapped iteration range.
+
+    Unlike _GroupedReductionOpsHandler (which performs reshape+reduce), this
+    handler runs pure pointwise bodies for reduced/parent-full prologues
+    and epilogues. Loads use forwarded values when available, then fall back to
+    normal CSE after index remapping and an optional resolution transform.
+    """
+
+    def __init__(
+        self,
+        inner,
+        kernel: SIMDKernel[Any],
+        *,
+        family: _DerivedIterationFamily,
+        load_transform: _ParentFullLoadTransform | None = None,
+        load_resolver: _SubParentSourceLoadResolver | None = None,
+    ):
+        super().__init__(inner)
+        self._kernel = kernel
+        self._family = family
+        self._load_transform = load_transform
+        self._load_resolver = load_resolver
+
+    def load(self, name: str, index: sympy.Expr) -> CSEVariable:
+        value = None
+        # TODO: Use the indexed load cache so masked forwarding can preserve
+        # its mask and fill value through the normal explicit-where path.
+        if self._kernel._load_mask is None:
+            value = self._family.resolve_load(name, index)
+            if value is None and self._load_resolver is not None:
+                value = self._load_resolver.resolve_load(name, index)
+        if value is not None:
+            return value
+        remapped_index = self._family.remap_index(index)
+        with self._family.ensure_active(self._kernel):
+            value = self._inner.load(name, remapped_index)
+        if self._load_transform is not None:
+            value = self._load_transform.apply(value)
+        return value
+
+    def store(
+        self,
+        name: str,
+        index: sympy.Expr,
+        value: CSEVariable,
+        mode: Any = None,
+    ) -> None:
+        k = self._kernel
+        remapped_index = self._family.remap_index(index)
+        with self._family.ensure_active(k):
+            self._inner.store(name, remapped_index, value, mode=mode)
+
+
+class _SubParentSourceLoadResolver(WrapperHandler):  # type: ignore[type-arg]
+    """Projects the latest CSE-live parent load into a sub-parent stage."""
+
+    def __init__(
+        self,
+        inner,
+        kernel: TritonKernel,
+        layout: _GroupedReductionLayout,
+        sub_parent_family: _DerivedIterationFamily,
+        *,
+        source_layouts: dict[str, scheduler.NestedReduction.SubParentSourceLayout],
+        sub_parent_factor: int,
+    ):
+        super().__init__(inner)
+        self._kernel = kernel
+        self._layout = layout
+        self._sub_parent_family = sub_parent_family
+        self._sub_parent_factor = sub_parent_factor
+        self._source_layouts = source_layouts
+        self._values: dict[
+            str,
+            tuple[TritonCSEVariable, scheduler.NestedReduction.SubParentSourceLayout],
+        ] = {}
+
+    def load(self, name: str, index: sympy.Expr) -> TritonCSEVariable:
+        value = cast("TritonCSEVariable", self._inner.load(name, index))
+        source_layout = self._source_layouts.get(name)
+        if self._kernel._load_mask is None and source_layout is not None:
+            self._values[name] = (value, source_layout)
+        return value
+
+    def resolve_load(self, name: str, index: sympy.Expr) -> CSEVariable | None:
+        recorded = self._values.get(name)
+        if recorded is None:
+            return None
+        value, source_layout = recorded
+        if not self._kernel.cse.contains_value(value):
+            return None
+        if name not in self._sub_parent_family.remapped_values:
+            self._layout.materialize_value_at_sub_parent_resolution(
+                self._kernel,
+                self._sub_parent_family,
+                self._sub_parent_factor,
+                name,
+                value,
+                source_layout,
+            )
+        return self._sub_parent_family.resolve_load(name, index)
+
+
 class SIMDScheduling(BaseScheduling):
     """
     Single Instruction Multiple Data parent class used for fusion across
@@ -1420,6 +2277,7 @@ class SIMDScheduling(BaseScheduling):
     """
 
     kernel_type: type[Any] = SIMDKernel  # override in subclass
+    supports_sub_parent_epilogue = False
 
     def group_fn(self, sizes):
         return tuple(V.graph.sizevars.simplify(sympy_product(s)) for s in sizes)
@@ -1456,6 +2314,17 @@ class SIMDScheduling(BaseScheduling):
                 reduction_can_fuse = MixOrderReduction.can_fuse(node1, node2)
 
             if not reduction_can_fuse:
+                # Scheduler legality creates the fused nested node, but SIMD
+                # still runs this backend fusion gate. The regular
+                # numel/rnumel checks reject nested reductions because the two
+                # reductions intentionally use different iteration spaces.
+                from torch._inductor.scheduler import NestedReduction
+
+                reduction_can_fuse = NestedReduction._is_dependent_reduction_pair(
+                    node1, node2
+                ) and NestedReduction.can_fuse(node1, node2)
+
+            if not reduction_can_fuse:
                 why(
                     "numel/rnumel mismatch (reduce) (%s, %s), (%s, %s)",
                     numel1,
@@ -1481,7 +2350,7 @@ class SIMDScheduling(BaseScheduling):
                 # 3. If a candidate node (node2) uses a different loop order (e.g., (z,x,y,r)),
                 #    its tiling is incompatible with native matmul tiling (z,y,x,r).
                 #    This means _split_iteration_ranges will fail, so these nodes should not be fused.
-                tiling = self.select_tiling(node1.get_nodes(), numel1, rnumel1)
+                tiling = node1.get_tiling(numel1, rnumel1)
                 if not all(
                     SIMDKernel.is_compatible(
                         tiling.values(), n2.get_ranges(), reduction_numel=rnumel1
@@ -1489,6 +2358,16 @@ class SIMDScheduling(BaseScheduling):
                     for n2 in node2.get_nodes()
                 ):
                     why("invalid loop order and tiling for native matmul")
+                    return False
+
+            if reduction_can_fuse and any(
+                isinstance(node, scheduler.FusedStagedReduction)
+                and not isinstance(node, scheduler.FusedNestedReductions)
+                for node in (node1, node2)
+            ):
+                nodes = [*node1.get_nodes(), *node2.get_nodes()]
+                if self._find_sub_parent_epilogue_plan(nodes) is None:
+                    why("staged reduction plan would be lost")
                     return False
 
             return reduction_can_fuse
@@ -1508,7 +2387,7 @@ class SIMDScheduling(BaseScheduling):
                     # prologue fusion input sizes differ from output group
                     # fuse so long as this node matches the group of existing prologue nodes
                     for node in node2.get_nodes():
-                        # dont need to check epilogue nodes for prologue fusion, break after template
+                        # don't need to check epilogue nodes for prologue fusion, break after template
                         if node.is_template():
                             break
                         # we would have already restricted prologue from fusing if it had multiple
@@ -1531,8 +2410,8 @@ class SIMDScheduling(BaseScheduling):
                     return True
 
             # check for a bad combined tiling
-            tiling1 = self.select_tiling(node1.get_nodes(), numel1, rnumel1)
-            tiling2 = self.select_tiling(node2.get_nodes(), numel1, rnumel1)
+            tiling1 = node1.get_tiling(numel1, rnumel1)
+            tiling2 = node2.get_tiling(numel1, rnumel1)
             tiling3 = self.select_tiling(
                 node1.get_nodes() + node2.get_nodes(), numel1, rnumel1
             )
@@ -1557,39 +2436,202 @@ class SIMDScheduling(BaseScheduling):
             return True
 
         if not node1.is_reduction() and node2.is_reduction():
-            assert rnumel1 == 1 and rnumel2 != 1
+            if not (rnumel1 == 1 and rnumel2 != 1):
+                raise AssertionError(
+                    f"expected rnumel1 == 1 and rnumel2 != 1, "
+                    f"got {rnumel1} and {rnumel2}"
+                )
+            ordinary_fusion = False
             if numel1 == numel2 * rnumel2:
-                if not all(
+                ordinary_fusion = all(
                     SIMDKernel.is_compatible((numel2, rnumel2), n.get_ranges())
                     for n in node1.get_nodes()
-                ):
+                )
+                if not ordinary_fusion:
                     why("nodes numel/rnumel incompatibility")
-                    return False
-                if (
+                elif (
                     config.triton.tiling_prevents_reduction_fusion
                     and not node1.is_template()
                 ):
-                    is_reduction_tiling_valid = tuple(
-                        self.select_tiling(node1.get_nodes(), numel1).values()
+                    ordinary_fusion = tuple(
+                        node1.get_tiling(numel1, sympy.S.One).values()
                     ) in (
                         (numel1, 1),
                         (numel2, rnumel2, 1),
                     )
-                    if not is_reduction_tiling_valid:
+                    if not ordinary_fusion:
                         why("invalid tiling for reduction")
-                    return is_reduction_tiling_valid
+            else:
+                ordinary_fusion = numel1 == numel2
+                if not ordinary_fusion:
+                    why("nodes numel incompatibility")
+
+            if ordinary_fusion and type(node2) is not scheduler.FusedStagedReduction:
                 return True
 
-            if numel1 != numel2:
-                why("nodes numel incompatibility")
-            return numel1 == numel2
+            if (
+                node2.get_operation_names() & node1.ancestors
+                or type(node2) is scheduler.FusedStagedReduction
+            ):
+                sub_parent_fusion = self._sub_parent_epilogue_decision(node1, node2)
+                if sub_parent_fusion is _SubParentFusion.REJECT:
+                    why("invalid sub-parent epilogue fusion")
+                    return False
+                if sub_parent_fusion is _SubParentFusion.FUSE:
+                    return True
+            if type(node2) is scheduler.FusedStagedReduction:
+                why("staged reduction plan would be lost")
+                return False
+            return ordinary_fusion
 
-        assert node1.is_reduction() and not node2.is_reduction()
+        if not node1.is_reduction() or node2.is_reduction():
+            raise AssertionError(
+                "expected node1 to be a reduction and node2 not a reduction"
+            )
         # swap args to hit the case above
         return self.can_fuse_horizontal(node2, node1)
 
     can_fuse_vertical = can_fuse
     can_fuse_horizontal = can_fuse
+
+    @staticmethod
+    def _is_sub_parent_shaped(
+        node: scheduler.BaseSchedulerNode,
+        parent_numel: sympy.Expr,
+        parent_rnumel: sympy.Expr,
+    ) -> bool:
+        """Whether ``node`` runs at a fraction of the parent tile.
+
+        A group member is normally reduced ``(parent_numel, 1)``, full resolution
+        ``(parent_numel * parent_rnumel, 1)``, or the reduction itself. Anything
+        else only has meaning under a sub-parent plan.
+        """
+        if node.is_reduction():
+            return False
+        _, (node_numel, node_rnumel) = node.group
+        if not V.graph.sizevars.statically_known_equals(node_rnumel, 1):
+            return False
+        return not (
+            V.graph.sizevars.statically_known_equals(node_numel, parent_numel)
+            or V.graph.sizevars.statically_known_equals(
+                node_numel, parent_numel * parent_rnumel
+            )
+        )
+
+    def _sub_parent_epilogue_decision(
+        self,
+        node1: scheduler.BaseSchedulerNode,
+        node2: scheduler.BaseSchedulerNode,
+    ) -> _SubParentFusion:
+        """Decide whether sub-parent planning fuses, rejects, or defers."""
+        if (
+            not self.supports_sub_parent_epilogue
+            or not torch._inductor.config.triton.nested_reduction
+        ):
+            return _SubParentFusion.DEFER
+        if node1.is_reduction() == node2.is_reduction():
+            return _SubParentFusion.DEFER
+        reduction_node = node1 if node1.is_reduction() else node2
+        consumer_node = node2 if node1.is_reduction() else node1
+        _, (parent_numel, parent_rnumel) = reduction_node.group
+        nodes = [*node1.get_nodes(), *node2.get_nodes()]
+        plan = self._sub_parent_epilogue_plan(nodes, parent_numel, parent_rnumel)
+        if plan is None:
+            # No sub-parent plan covers the combined set, so a sub-parent-shaped
+            # member would reach generic tiling and scheduling, neither of which
+            # models a fraction of the parent tile. Keep it out of the group.
+            # The nested append path owns its own sub-parent stage, so leave
+            # those pairs to FusedNestedReductions.can_fuse_with.
+            if isinstance(node1, scheduler.FusedNestedReductions) or isinstance(
+                node2, scheduler.FusedNestedReductions
+            ):
+                return _SubParentFusion.DEFER
+            return (
+                _SubParentFusion.REJECT
+                if any(
+                    self._is_sub_parent_shaped(node, parent_numel, parent_rnumel)
+                    for node in nodes
+                )
+                else _SubParentFusion.DEFER
+            )
+        stage = plan.sub_parent_stages[0]
+        epilogue_nodes = stage.epilogue_nodes
+        epilogue_node_set = OrderedSet(epilogue_nodes)
+        if type(reduction_node) is scheduler.FusedStagedReduction:
+            return _SubParentFusion.FUSE
+        return (
+            _SubParentFusion.FUSE
+            if all(node in epilogue_node_set for node in consumer_node.get_nodes())
+            else _SubParentFusion.DEFER
+        )
+
+    def _sub_parent_epilogue_plan(
+        self,
+        nodes: Sequence[BaseSchedulerNode],
+        parent_numel: sympy.Expr,
+        parent_rnumel: sympy.Expr,
+    ) -> scheduler.StagedReductionPlan | None:
+        """The scheduler's plan, gated on this backend being able to emit it.
+
+        The backend gates (config, ``supports_sub_parent_epilogue``, 2D tiling)
+        belong here rather than in the scheduler, which has no view of them. See
+        Note [Sub-parent reduction epilogues].
+        """
+        if (
+            not self.supports_sub_parent_epilogue
+            or not torch._inductor.config.triton.nested_reduction
+        ):
+            return None
+        plan = scheduler.NestedReduction.sub_parent_epilogue_plan(
+            nodes, parent_numel, parent_rnumel
+        )
+        if plan is None:
+            return None
+        if not self._sub_parent_tiling_is_2d(nodes, parent_numel, parent_rnumel):
+            return None
+        return plan
+
+    def _sub_parent_tiling_is_2d(
+        self,
+        nodes: Sequence[BaseSchedulerNode],
+        parent_numel: sympy.Expr,
+        parent_rnumel: sympy.Expr,
+    ) -> bool:
+        """Whether the parent reduction tiles into exactly one x and one r tree.
+
+        Sub-parent codegen derives its range tree from the parent's R axis and
+        cannot express a y/z tiling. Tiling is otherwise chosen *after* the
+        fusion is committed, so decide it here: a 3D tiling would otherwise
+        surface as an assertion during codegen rather than a declined fusion.
+
+        This calls the same helper with the same arguments codegen will use
+        (``coalesce_analysis=None`` on this path, see ``codegen_node``) rather
+        than reasoning about which config combinations can widen the tiling.
+        """
+        reduction_nodes = [node for node in nodes if node.is_reduction()]
+        if not reduction_nodes:
+            return False
+        tiling, _ = self.get_tiling_and_scores(
+            reduction_nodes, parent_numel, parent_rnumel, None
+        )
+        return len(tiling) == 2
+
+    def has_sub_parent_epilogue(self, nodes: Sequence[BaseSchedulerNode]) -> bool:
+        return self._find_sub_parent_epilogue_plan(list(nodes)) is not None
+
+    def _find_sub_parent_epilogue_plan(
+        self,
+        nodes: Sequence[BaseSchedulerNode],
+    ) -> scheduler.StagedReductionPlan | None:
+        """Return the first valid standalone sub-parent plan for ``nodes``."""
+        for node in nodes:
+            if not node.is_reduction():
+                continue
+            _, (parent_numel, parent_rnumel) = node.group
+            plan = self._sub_parent_epilogue_plan(nodes, parent_numel, parent_rnumel)
+            if plan is not None:
+                return plan
+        return None
 
     def generate_node_schedule(self, nodes, numel, rnumel):
         node_schedule: list[Any] = []
@@ -1654,9 +2696,15 @@ class SIMDScheduling(BaseScheduling):
                 return False
             if not not_ready_yet_nodes & node.ancestors:
                 return False
-            assert node_schedule and not isinstance(
-                node_schedule[-1], (EnableReduction, DisableReduction)
-            )
+            if not (
+                node_schedule
+                and not isinstance(
+                    node_schedule[-1], (EnableReduction, DisableReduction)
+                )
+            ):
+                raise AssertionError(
+                    "expected non-empty node_schedule not ending in a reduction toggle"
+                )
             return bool(not_ready_yet_nodes)
 
         for node in nodes:
@@ -1691,9 +2739,11 @@ class SIMDScheduling(BaseScheduling):
         node1, node2 = node.node1, node.node2
 
         # Make sure there are no producer/consumer relationship
-        assert not (node1.ancestors & node2.get_operation_names()) and not (
-            node2.ancestors & node1.get_operation_names()
-        )
+        if not (
+            not (node1.ancestors & node2.get_operation_names())
+            and not (node2.ancestors & node1.get_operation_names())
+        ):
+            raise AssertionError("node1 and node2 must not be ancestors of each other")
 
         self._codegen_mix_order_reduction(node1, node2)
 
@@ -1730,8 +2780,10 @@ class SIMDScheduling(BaseScheduling):
                 "override_persistent_reduction": True,
             },
         )[0]
-        assert kernel.persistent_reduction
-        assert kernel.mix_order_reduction
+        if not kernel.persistent_reduction:
+            raise AssertionError("expected kernel.persistent_reduction")
+        if not kernel.mix_order_reduction:
+            raise AssertionError("expected kernel.mix_order_reduction")
         kernel.rsplit_size = split_size
         self.codegen_node_schedule_with_kernel(node_schedule, kernel)
 
@@ -1743,7 +2795,8 @@ class SIMDScheduling(BaseScheduling):
             False,
             dtype=torch.float,
         )
-        assert ws_off == 0, f"{ws_off=}"
+        if ws_off != 0:
+            raise AssertionError(f"{ws_off=}")
         with kernel:
             kernel.codegen_body()
 
@@ -1763,7 +2816,11 @@ class SIMDScheduling(BaseScheduling):
 
     # pyrefly: ignore [bad-override]
     def benchmark_codegened_module(
-        self, mod, n_spills_threshold=8, node_names: OrderedSet[str] | None = None
+        self,
+        mod,
+        n_spills_threshold=8,
+        node_names: OrderedSet[str] | None = None,
+        skip_perf_cache: bool = False,
     ) -> tuple[float, str]:
         raise NotImplementedError
 
@@ -1856,7 +2913,8 @@ class SIMDScheduling(BaseScheduling):
                     .node.get_name()
                 )
                 rename[bufname] = username
-                assert self.scheduler
+                if not self.scheduler:
+                    raise AssertionError("expected self.scheduler to be set")
                 self.scheduler.removed_ops.add(
                     subnode.get_outputs()[0].users[0].node.get_name()
                 )
@@ -1887,7 +2945,12 @@ class SIMDScheduling(BaseScheduling):
         V.graph.inplaced_to_remove |= kernel.inplaced_to_remove
 
         # an extra round of reduction
-        assert len(converted_nodes) == len(kernel.saved_partial_accumulate)
+        if len(converted_nodes) != len(kernel.saved_partial_accumulate):
+            raise AssertionError(
+                f"expected len(converted_nodes) == "
+                f"len(kernel.saved_partial_accumulate), got "
+                f"{len(converted_nodes)} and {len(kernel.saved_partial_accumulate)}"
+            )
         nsplit = V.graph.wrapper_code.codegen_python_sizevar(
             (numel + split_size - 1) // split_size
         )
@@ -1933,19 +2996,454 @@ class SIMDScheduling(BaseScheduling):
 
         self.free_buffers_in_scheduler()
 
+    def codegen_staged_reduction(self, node):
+        """See Note [Sub-parent reduction epilogues]."""
+        # TODO: Share the parent-kernel pipeline and specialize only stage emission.
+        if isinstance(node, scheduler.FusedNestedReductions):
+            plan = scheduler.NestedReduction.plan_from_topology(
+                node.node1,
+                node.node2,
+                node.grouped_reduction,
+                node.group_size,
+                node.grouped_axis,
+            )
+            if plan is None or plan.nested_stage is None:
+                raise AssertionError("nested reduction plan was lost before codegen")
+            return self._codegen_nested_reduction(node, plan)
+
+        if not isinstance(node, scheduler.FusedStagedReduction):
+            raise AssertionError(f"unexpected staged reduction type: {type(node)}")
+        nodes = [
+            sn
+            for sn in node.get_nodes()
+            if not self.scheduler or sn.get_name() not in self.scheduler.removed_ops
+        ]
+        plan = self._find_sub_parent_epilogue_plan(nodes)
+        if plan is None:
+            raise AssertionError("sub-parent reduction plan was lost before codegen")
+        return self._codegen_reduction_with_sub_parent_epilogue(nodes, plan)
+
+    def _codegen_nested_reduction(self, node, plan):
+        """
+        Generate a single kernel with an outer reduction, a group
+        reduction, and optional reduced/parent-full epilogues for
+        dependent cross-axis reductions that share a large input.
+
+        The local group may split either parent tree. For example,
+        group-in-R reshapes [XBLOCK, RBLOCK] into [XBLOCK, RBLOCK/G, G],
+        while group-in-X reshapes it into [XBLOCK/G, G, RBLOCK].
+        """
+        outer_node = node.node1
+        stage = plan.nested_stage
+        if stage is None:
+            raise AssertionError("expected nested reduction stage")
+        outer_numel = plan.parent_numel
+        outer_rnumel = plan.parent_rnumel
+        grouped_numel = stage.domain_context.grouped_numel
+        grouped_rnumel = stage.domain_context.grouped_rnumel
+        local_reduction_size = stage.group_size
+        local_reduction_in_r = (
+            stage.grouped_axis is scheduler.NestedReduction.GroupedAxis.R
+        )
+        local_reduction_size_hint = int(local_reduction_size)
+        nested_pointwise_domains = stage.pointwise_domains
+        pointwise_domain_by_node: dict[
+            BaseSchedulerNode, scheduler.NestedReduction.PointwiseDomain
+        ] = dict(nested_pointwise_domains)
+        local_reduction_domain = (
+            scheduler.NestedReduction.PointwiseDomain.LOCAL_REDUCTION_INPUT
+        )
+        outer_local_reduction_pointwise = [
+            sn
+            for sn, domain in nested_pointwise_domains
+            if sn in outer_node.get_nodes() and domain is local_reduction_domain
+        ]
+        outer_codegen_nodes = list(plan.parent_nodes)
+        grouped_reduction = stage.domain_context.grouped_reduction
+        grouped_schedule: list[NodeScheduleEntry] = self.generate_node_schedule(
+            list(stage.grouped_nodes),
+            grouped_numel,
+            grouped_rnumel,
+        )
+        if not any(sn is grouped_reduction for sn in grouped_schedule):
+            raise AssertionError("grouped reduction must appear in grouped schedule")
+        grouped_reduction_body = grouped_reduction._body
+
+        combined_schedule = self.generate_node_schedule(
+            outer_codegen_nodes,
+            outer_numel,
+            outer_rnumel,
+        )
+        coalesce_analysis = (
+            outer_node.get_coalesce_analysis()
+            if torch._inductor.config.triton.coalesce_tiling_analysis
+            else None
+        )
+        kernel_features = SIMDKernelFeatures(
+            combined_schedule,
+            outer_numel,
+            outer_rnumel,
+            coalesce_analysis,
+        )
+        # The outer reduction owns the grid and persistent/tiling choice. The
+        # grouped reduction is emitted inside that tile, so its accesses do not
+        # feed these heuristics yet.
+        tiling, tiling_score = self.get_tiling_and_scores(
+            combined_schedule,
+            outer_numel,
+            outer_rnumel,
+            coalesce_analysis,
+        )
+        if "y" in tiling or "z" in tiling:
+            raise AssertionError("nested reduction does not support tiled reductions")
+
+        metrics.codegen_nested_reduction += 1
+        kernel_kwargs: dict[str, Any] = {
+            "features": kernel_features,
+            "override_cooperative_reduction": False,
+            "tiling_scores": tiling_score,
+        }
+        kernel = cast(
+            "TritonKernel",
+            self.create_kernel_choices(
+                kernel_features,
+                [tiling],
+                kernel_kwargs,
+            )[0],
+        )
+
+        if local_reduction_in_r:
+            kernel.min_rblock = local_reduction_size_hint
+        else:
+            kernel.min_xblock = local_reduction_size_hint
+
+        # Emit the first stage through the normal scheduler path so its loads,
+        # stores, CSE state, masks, and reduction setup are identical to an
+        # ordinary SIMD reduction kernel. Nested handlers append later stages.
+        self.codegen_node_schedule_with_kernel(combined_schedule, kernel)
+
+        with kernel:
+            # Flush the outer reduction code:
+            # - Persistent: one pass, no loops
+            # - Looped: disable_reduction already flushed loop 1
+            #   and post-loop code, but pending buffers may still have the next
+            #   pass. Flush it now so later nested stages can consume it.
+            kernel.codegen_body()
+
+            layout: _GroupedReductionLayout = _GroupedReductionLayout.from_kernel(
+                kernel,
+                local_reduction_size,
+                local_reduction_in_r,
+            )
+            group_reduction_vars: _GroupedReductionVars = (
+                layout.construct_group_reduction_vars(grouped_reduction_body)
+            )
+            reduced_output_family: _DerivedIterationFamily = (
+                layout.make_reduced_output_family(group_reduction_vars)
+            )
+            parent_full_family: _DerivedIterationFamily = (
+                layout.make_parent_full_family()
+            )
+            local_reduction_source: _IterationSpace = (
+                self._local_reduction_iteration_values(
+                    grouped_reduction_body,
+                    group_reduction_vars.iter_remapped,
+                    group_reduction_vars.reduce_remapped,
+                )
+            )
+            parent_full_source: _IterationSpace = layout.parent_full_iteration_values(
+                group_reduction_vars
+            )
+            self._codegen_remapped_pointwise(
+                kernel,
+                outer_local_reduction_pointwise,
+                parent_full_family,
+                local_reduction_source,
+                load_transform=_ParentFullLoadTransform(kernel, layout),
+            )
+            self._codegen_nested_grouped_schedule(
+                kernel,
+                grouped_schedule,
+                grouped_reduction,
+                layout,
+                group_reduction_vars.iter_remapped,
+                group_reduction_vars.reduce_remapped,
+                local_reduction_source,
+                parent_full_source,
+                pointwise_domain_by_node,
+                reduced_output_family,
+                parent_full_family,
+            )
+
+            kernel.codegen_body()
+
+        self._finalize_nested_reduction_kernel(
+            kernel,
+            combined_schedule,
+            node.get_nodes(),
+            [
+                *combined_schedule,
+                *outer_local_reduction_pointwise,
+                *grouped_schedule,
+            ],
+        )
+
+    def _finalize_nested_reduction_kernel(
+        self,
+        kernel,
+        combined_schedule,
+        nodes_to_mark,
+        config_patch_schedule=None,
+    ) -> None:
+        config_patches = self._collect_config_patches(
+            config_patch_schedule or combined_schedule
+        )
+        with V.set_kernel_handler(kernel), config.patch(**config_patches):
+            src_code = kernel.codegen_kernel()
+        kernel.kernel_name = self.define_kernel(
+            src_code,
+            combined_schedule,
+            kernel,
+        )
+        kernel.code_hash = code_hash(src_code)
+
+        with V.set_kernel_handler(kernel):
+            for sn in nodes_to_mark:
+                sn.mark_run()
+
+        base_scheduler_nodes = [
+            node for node in combined_schedule if isinstance(node, BaseSchedulerNode)
+        ]
+        self._launch_kernel_and_cleanup(kernel, base_scheduler_nodes)
+
+    def _codegen_nested_grouped_schedule(
+        self,
+        kernel,
+        grouped_schedule,
+        grouped_reduction: scheduler.SchedulerNode,
+        layout: _GroupedReductionLayout,
+        iter_remapped,
+        reduce_remapped,
+        local_reduction_source: _IterationSpace,
+        parent_full_source: _IterationSpace,
+        pointwise_domain_by_node: dict[
+            BaseSchedulerNode, scheduler.NestedReduction.PointwiseDomain
+        ],
+        reduced_output_family,
+        parent_full_family,
+    ) -> None:
+        """Interpret the local reduction schedule with nested emitters.
+
+        ``local_reduction_source`` is the pre-reduction domain, including the
+        local reduction lane. ``parent_full_source`` is the outer tile domain
+        used by pointwise consumers after reduced values are broadcast back.
+        """
+        grouped_reduction_body = grouped_reduction._body
+        reduced_source = _IterationSpace(
+            [
+                grouped_reduction_body.var_ranges[v]
+                for v in grouped_reduction_body.iter_vars
+            ],
+            iter_remapped,
+        )
+        parent_full_load_transform = _ParentFullLoadTransform(kernel, layout)
+        for sn in grouped_schedule:
+            if sn in (DisableReduction, EnableReduction):
+                # These markers only control standalone reduction-loop
+                # emission. Nested codegen lowers the grouped reduction as a
+                # local reshape+reduce inside the outer kernel, so there is no
+                # grouped loop to close or reopen here.
+                continue
+            if not isinstance(sn, scheduler.SchedulerNode):
+                raise AssertionError(f"expected SchedulerNode, got {type(sn)}")
+            if sn is grouped_reduction:
+                self._codegen_grouped_reduction(
+                    kernel,
+                    sn,
+                    layout,
+                    iter_remapped,
+                    reduce_remapped,
+                    reduced_output_family,
+                )
+                continue
+            domain = pointwise_domain_by_node.get(sn)
+            if domain is None:
+                raise AssertionError(f"no pointwise domain classified for {sn}")
+            if domain is scheduler.NestedReduction.PointwiseDomain.REDUCED:
+                self._codegen_remapped_pointwise(
+                    kernel,
+                    [sn],
+                    reduced_output_family,
+                    reduced_source,
+                )
+                continue
+            elif (
+                domain
+                is scheduler.NestedReduction.PointwiseDomain.LOCAL_REDUCTION_INPUT
+            ):
+                source = local_reduction_source
+            elif domain is scheduler.NestedReduction.PointwiseDomain.PARENT_FULL:
+                source = self._select_full_resolution_pointwise_source(
+                    sn,
+                    parent_full_source,
+                    local_reduction_source,
+                )
+            else:
+                raise AssertionError(f"unexpected nested pointwise domain: {domain}")
+            self._codegen_remapped_pointwise(
+                kernel,
+                [sn],
+                parent_full_family,
+                source,
+                load_transform=parent_full_load_transform,
+            )
+
+    def _select_full_resolution_pointwise_source(
+        self,
+        sn: scheduler.SchedulerNode,
+        parent_full_source: _IterationSpace,
+        local_reduction_source: _IterationSpace,
+    ) -> _IterationSpace:
+        sn_ranges = sn.get_ranges()
+        if self._ranges_exactly_match_groups(parent_full_source.groups, sn_ranges):
+            return parent_full_source
+        if self._ranges_exactly_match_groups(local_reduction_source.groups, sn_ranges):
+            return local_reduction_source
+        if SIMDKernel.is_compatible(parent_full_source.groups, sn_ranges):
+            return parent_full_source
+        if SIMDKernel.is_compatible(local_reduction_source.groups, sn_ranges):
+            return local_reduction_source
+        raise AssertionError(
+            f"unsupported full-resolution nested pointwise ranges: {sn_ranges}"
+        )
+
+    @staticmethod
+    def _ranges_exactly_match_groups(
+        groups: Sequence[sympy.Expr],
+        ranges: Sequence[Sequence[sympy.Expr]],
+    ) -> bool:
+        iter_ranges, reduction_ranges = ranges
+        return (
+            not reduction_ranges
+            and len(iter_ranges) == len(groups)
+            and all(
+                V.graph.sizevars.statically_known_equals(iter_range, group)
+                for iter_range, group in zip(iter_ranges, groups)
+            )
+        )
+
+    def _codegen_grouped_reduction(
+        self,
+        kernel,
+        grouped_reduction: scheduler.SchedulerNode,
+        layout: _GroupedReductionLayout,
+        iter_remapped,
+        reduce_remapped,
+        reduced_output_family,
+    ) -> None:
+        grouped_reduction_body = grouped_reduction._body
+        self._prepare_loop_body(grouped_reduction_body)
+        load_transform = _ParentFullLoadTransform(kernel, layout)
+        handler = _GroupedReductionOpsHandler(
+            V.get_ops_handler(),
+            kernel=kernel,
+            layout=layout,
+            family=reduced_output_family,
+            load_transform=load_transform,
+        )
+        with V.set_ops_handler(handler), kernel.set_current_node(grouped_reduction):
+            grouped_reduction_body(
+                iter_remapped,
+                reduce_remapped,
+                allow_same_symbol_in_index=True,
+            )
+
+    @classmethod
+    def _map_iteration_values_to_node_sizes(
+        cls,
+        source: _IterationSpace,
+        lengths: Sequence[Sequence[sympy.Expr]],
+    ) -> list[list[sympy.Expr]]:
+        groups = source.groups
+        values = source.values
+        if len(groups) != len(values):
+            raise AssertionError(
+                f"groups/values length mismatch: {len(groups)} != {len(values)}"
+            )
+
+        def split_values_by_ranges(
+            *new_ranges: Sequence[sympy.Expr],
+        ) -> list[list[sympy.Expr]]:
+            return [
+                decompose_index(value, ranges)
+                for value, ranges in zip(values, new_ranges)
+            ]
+
+        return SIMDKernel.map_kernel_groups_to_node_sizes(
+            groups,
+            lengths,
+            split_values_by_ranges,
+        )
+
+    def _local_reduction_iteration_values(
+        self,
+        body,
+        iter_remapped,
+        reduce_remapped,
+    ) -> _IterationSpace:
+        body_vars = [*body.iter_vars, *body.reduce_vars]
+        groups = [body.var_ranges[v] for v in body_vars]
+        return _IterationSpace(groups, [*iter_remapped, *reduce_remapped])
+
+    def _codegen_remapped_pointwise(
+        self,
+        kernel,
+        pointwise_nodes,
+        family: _DerivedIterationFamily,
+        source: _IterationSpace,
+        *,
+        load_transform: _ParentFullLoadTransform | None = None,
+        load_resolver: _SubParentSourceLoadResolver | None = None,
+    ) -> None:
+        """Emit pointwise nodes under an explicit nested iteration family.
+
+        `source` describes the coordinate space whose values are remapped into
+        each pointwise node's own loop ranges.
+        """
+        with family.activate(kernel):
+            for sn in pointwise_nodes:
+                iter_vars, reduction_vars = self._map_iteration_values_to_node_sizes(
+                    source,
+                    sn.get_ranges(),
+                )
+                if reduction_vars:
+                    raise AssertionError(
+                        f"pointwise node must have no reduction vars, got {reduction_vars}"
+                    )
+                handler = _PointwiseRemapHandler(
+                    V.get_ops_handler(),
+                    kernel=kernel,
+                    family=family,
+                    load_transform=load_transform,
+                    load_resolver=load_resolver,
+                )
+                self._prepare_loop_body(sn._body)
+                with V.set_ops_handler(handler), kernel.set_current_node(sn):
+                    sn._body(iter_vars)
+
     def _codegen_nodes(
         self,
         nodes: Sequence[scheduler.SchedulerNode],
         coalesce_analysis: CoalesceVarAnalysis | None = None,
     ):
-        assert self.scheduler
+        if not self.scheduler:
+            raise AssertionError("expected self.scheduler to be set")
         nodes = [
             node for node in nodes if node.get_name() not in self.scheduler.removed_ops
         ]
         if not nodes:
             return
         _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group
-
         node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
         schedule_log.debug("Schedule:\n %s", node_schedule)
 
@@ -1953,13 +3451,110 @@ class SIMDScheduling(BaseScheduling):
             SIMDKernelFeatures(node_schedule, numel, rnumel, coalesce_analysis)
         )
 
+    def _codegen_reduction_with_sub_parent_epilogue(
+        self,
+        nodes: Sequence[BaseSchedulerNode],
+        plan: scheduler.StagedReductionPlan,
+    ) -> None:
+        """Emit a reduction followed by its lane-resolution epilogue.
+
+        Parent loads still live after reduction codegen are split in registers;
+        expired loads are reissued in the derived iteration space.
+        """
+        if plan.nested_stage is not None or len(plan.sub_parent_stages) != 1:
+            raise AssertionError("expected one standalone sub-parent stage")
+        stage = plan.sub_parent_stages[0]
+        numel = plan.parent_numel
+        rnumel = plan.parent_rnumel
+        sub_parent_epilogue_nodes = stage.epilogue_nodes
+        reduction_schedule = self.generate_node_schedule(
+            list(plan.parent_nodes),
+            numel,
+            rnumel,
+        )
+        schedule_log.debug(
+            "Schedule:\n %s\nHalf-resolution epilogue:\n %s",
+            reduction_schedule,
+            sub_parent_epilogue_nodes,
+        )
+        combined_schedule = cast(
+            list[NodeScheduleEntry],
+            [*reduction_schedule, *sub_parent_epilogue_nodes],
+        )
+        # TODO: Coalesce looped sub-parent lane loads into one parent-width load.
+        # Tiling uses the grid-owning reduction schedule, while index-width
+        # analysis must also see the derived epilogue's buffer accesses.
+        kernel_features = SIMDKernelFeatures(
+            reduction_schedule,
+            numel,
+            rnumel,
+            indexing_node_schedule=combined_schedule,
+        )
+        # Force the 2D tiling rather than re-running the heuristic. The lanes
+        # are derived from the parent's R axis and cannot be expressed under a
+        # y/z tiling, and _sub_parent_tiling_is_2d already declined the fusion
+        # for any parent whose heuristic wanted more. Deciding it once here
+        # means the fusion-time answer and the codegen-time answer cannot
+        # disagree, instead of agreeing by construction of their inputs.
+        tiling = self.create_tiling([numel], [rnumel])
+        tiling_score = None
+        kernel_kwargs = {
+            "features": kernel_features,
+            "tiling_scores": tiling_score,
+            "override_cooperative_reduction": False,
+        }
+        kernel = cast(
+            "TritonKernel",
+            self.create_kernel_choices(kernel_features, [tiling], kernel_kwargs)[0],
+        )
+        metrics.codegen_nested_reduction += 1
+        sub_parent_factor = stage.factor
+        parent_rnumel = plan.parent_rnumel
+        sub_parent_source_layouts = dict(stage.source_layouts)
+        kernel.min_rblock = sub_parent_factor
+        assert len(kernel.range_trees) == 2  # noqa: S101
+        layout = _GroupedReductionLayout.from_kernel(
+            kernel,
+            parent_rnumel,
+            local_reduction_in_r=True,
+        )
+        sub_parent_family = layout.make_sub_parent_family(sub_parent_factor)
+        with kernel:
+            source_resolver = _SubParentSourceLoadResolver(
+                V.get_ops_handler(),
+                kernel,
+                layout,
+                sub_parent_family,
+                source_layouts=sub_parent_source_layouts,
+                sub_parent_factor=sub_parent_factor,
+            )
+            with V.set_ops_handler(source_resolver):
+                self._codegen_node_schedule_body(reduction_schedule, kernel)
+            kernel.codegen_body()
+            sub_parent_source = layout.sub_parent_iteration_values(
+                sub_parent_family, sub_parent_factor
+            )
+            self._codegen_remapped_pointwise(
+                kernel,
+                sub_parent_epilogue_nodes,
+                sub_parent_family,
+                sub_parent_source,
+                load_resolver=source_resolver,
+            )
+            kernel.codegen_body()
+
+        self._finalize_nested_reduction_kernel(kernel, combined_schedule, nodes)
+
     def codegen_node(
         self, node: scheduler.FusedSchedulerNode | scheduler.SchedulerNode
     ):
         """
-        Given a set of pre-fused nodes, generate a Triton kernel.
+        Given a set of pre-fused nodes, generate a SIMD kernel.
         """
-        assert self.scheduler
+        if not self.scheduler:
+            raise AssertionError("expected self.scheduler to be set")
+        if isinstance(node, scheduler.FusedStagedReduction):
+            raise AssertionError("staged reduction reached generic SIMD codegen")
         nodes = [
             node
             for node in node.get_nodes()
@@ -1970,7 +3565,8 @@ class SIMDScheduling(BaseScheduling):
 
         if torch._inductor.config.triton.coalesce_tiling_analysis:
             if len(nodes) != len(node.get_nodes()):
-                assert self.scheduler
+                if not self.scheduler:
+                    raise AssertionError("expected self.scheduler to be set")
                 node = scheduler.FusedSchedulerNode(self.scheduler, nodes)
             coalesce_analysis = node.get_coalesce_analysis()
         else:
@@ -2111,7 +3707,8 @@ class SIMDScheduling(BaseScheduling):
                 name = node.get_name()
                 if name not in live_outs:
                     continue
-                assert node.node is not None
+                if node.node is None:
+                    raise AssertionError("expected node.node to not be None")
                 origin_node = node.node.get_origin_node()
                 if origin_node is not None:
                     counters["inductor"]["intermediate_hooks"] += 1
@@ -2131,6 +3728,7 @@ class SIMDScheduling(BaseScheduling):
         self.codegen_comment(base_scheduler_nodes, kernel.kernel_name)
         if config.cpp.enable_kernel_profile:
             V.graph.wrapper_code.write_kernel_context_guard_begin()
+        if config.cpp.enable_kernel_profile and config.cpp.enable_kernel_context_guard:
             V.graph.wrapper_code.write_kernel_context_guard(
                 kernel.kernel_name,
                 base_scheduler_nodes,
@@ -2160,39 +3758,54 @@ class SIMDScheduling(BaseScheduling):
             )
         ]
 
-    def codegen_node_schedule_with_kernel(self, node_schedule, kernel):
+    def codegen_node_schedule_with_kernel(
+        self,
+        node_schedule,
+        kernel,
+    ):
         with kernel:
-            stack = contextlib.ExitStack()
-            all_indexing = {}
+            self._codegen_node_schedule_body(node_schedule, kernel)
 
-            # First pass to collect indexing and decide inplace updates
-            for node in node_schedule:
-                if node is DisableReduction:
-                    stack.enter_context(kernel.disable_reduction())
-                elif node is EnableReduction:
-                    stack.close()
-                else:
-                    node.decide_inplace_update()
-                    index_vars = kernel.split_and_set_ranges(node.get_ranges())
-                    all_indexing.update(
-                        dict.fromkeys(
-                            node._body.indexing_from_args(index_vars).values()
-                        )
-                    )
+    @staticmethod
+    def _prepare_loop_body(body) -> None:
+        indexing_dtype_strength_reduction(body)
+        convert_index_expr_to_value_expr(body)
 
-            kernel.finalize_indexing(all_indexing.keys())
+    def _codegen_node_schedule_body(self, node_schedule, kernel) -> None:
+        """Run a node schedule into ``kernel``: collect indexing, then emit.
 
-            # Second pass to do codegen
-            for node in node_schedule:
-                if node is DisableReduction:
-                    stack.enter_context(kernel.disable_reduction())
-                elif node is EnableReduction:
-                    stack.close()
-                else:
-                    # TODO - use split ranges ?
-                    indexing_dtype_strength_reduction(node._body)
-                    index_vars = kernel.split_and_set_ranges(node.get_ranges())
-                    node.codegen(index_vars)
+        Split out of ``codegen_node_schedule`` so the sub-parent path can reuse
+        the body without the kernel-construction and benchmarking around it.
+        """
+        stack = contextlib.ExitStack()
+        all_indexing = {}
+
+        # First pass to collect indexing and decide inplace updates
+        for node in node_schedule:
+            if node is DisableReduction:
+                stack.enter_context(kernel.disable_reduction())
+            elif node is EnableReduction:
+                stack.close()
+            else:
+                node.decide_inplace_update()
+                index_vars = kernel.split_and_set_ranges(node.get_ranges())
+                all_indexing.update(
+                    dict.fromkeys(node._body.indexing_from_args(index_vars).values())
+                )
+
+        kernel.finalize_indexing(all_indexing.keys())
+
+        # Second pass to do codegen
+        for node in node_schedule:
+            if node is DisableReduction:
+                stack.enter_context(kernel.disable_reduction())
+            elif node is EnableReduction:
+                stack.close()
+            else:
+                # TODO - use split ranges ?
+                self._prepare_loop_body(node._body)
+                index_vars = kernel.split_and_set_ranges(node.get_ranges())
+                node.codegen(index_vars)
 
     def _codegen_single_template(
         self,
@@ -2215,13 +3828,17 @@ class SIMDScheduling(BaseScheduling):
             prologue_group.append(prologue)
             # this must be the end of a prologue group
             if names & template_reads:
-                assert len(names) == 1
+                if len(names) != 1:
+                    raise AssertionError(f"expected len(names) == 1, got {len(names)}")
                 buf_name_to_prologue_group[next(iter(names))] = prologue_group
                 kernel.prologue_fused_inputs.add(next(iter(names)))
                 prologue_group = []
 
         # all prologue groups should have finalized with use in template
-        assert len(prologue_group) == 0
+        if len(prologue_group) != 0:
+            raise AssertionError(
+                f"expected empty prologue_group, got {len(prologue_group)}"
+            )
 
         # Remove prologue-fused inputs from input_buffers so that
         # remove_kernel_local_buffers can remove them.
@@ -2335,7 +3952,8 @@ class SIMDScheduling(BaseScheduling):
         """
 
         _, (_numel, rnumel) = template_node.group
-        assert rnumel == 1
+        if rnumel != 1:
+            raise AssertionError(f"expected rnumel == 1, got {rnumel}")
 
         if (
             isinstance(template_node.node, MultiTemplateBuffer)
@@ -2363,7 +3981,10 @@ class SIMDScheduling(BaseScheduling):
                         prologue_nodes,
                         only_gen_src_code=True,
                     )
-                    assert isinstance(src_code, str)
+                    if not isinstance(src_code, str):
+                        raise AssertionError(
+                            f"expected src_code to be a str, got {type(src_code)}"
+                        )
                     # pyrefly: ignore [bad-argument-type]
                     src_codes.append(src_code)
                 else:
@@ -2431,7 +4052,354 @@ class SIMDScheduling(BaseScheduling):
                 return None
 
     def codegen_sync(self):
-        V.graph.wrapper_code.writeline(V.graph.device_ops.synchronize())
+        V.graph.wrapper_code.generate_debug_sync(V.graph.wrapper_code)
+
+    def _codegen_standalone_kernel(
+        self,
+        node_info: NodeInfo,
+        only_gen_src_code: bool,
+    ) -> tuple[str, TritonKernel]:
+        kernel_kwargs: dict[str, Any] = {}
+        self.kernel_type.apply_feature_required_overrides(
+            node_info.features, kernel_kwargs
+        )
+        kernel = self.kernel_type(
+            node_info.tiling,
+            features=node_info.features,
+            tiling_scores=node_info.tiling_scores,
+            **kernel_kwargs,
+        )
+        self.process_kernel(kernel, node_info.node_schedule, only_gen_src_code)
+        with V.set_kernel_handler(kernel):
+            src_code = kernel.codegen_kernel()
+        return src_code, kernel
+
+    def _probe_subkernel_heuristic(self, node_info: NodeInfo) -> tuple[list[Any], Any]:
+        from ..runtime.triton_heuristics import (
+            persistent_reduction,
+            pointwise,
+            reduction,
+        )
+        from .triton_utils import select_tile_hint
+
+        kernel_kwargs: dict[str, Any] = dict(
+            is_combo_kernel=True,
+            override_cooperative_reduction=False,
+        )
+        self.kernel_type.apply_feature_required_overrides(
+            node_info.features, kernel_kwargs
+        )
+        kernel = self.kernel_type(
+            node_info.tiling,
+            features=node_info.features,
+            tiling_scores=node_info.tiling_scores,
+            **kernel_kwargs,
+        )
+        with config.patch(benchmark_kernel=False), V.set_kernel_handler(kernel):
+            self.codegen_node_schedule_with_kernel(node_info.node_schedule, kernel)
+            _ = kernel.codegen_kernel()
+
+        size_hints = {
+            prefix: next_power_of_2(int(V.graph.sizevars.optimization_hint(numel)))
+            for prefix, numel in kernel.numels.items()
+            if not prefix_is_reduction(prefix) or kernel.inside_reduction
+        }
+        inductor_meta = cast(
+            "InductorMeta",
+            {
+                **kernel.inductor_meta_common(),
+                **kernel.inductor_meta_per_kernel(),
+            },
+        )
+        if kernel.persistent_reduction:
+            configs = persistent_reduction(
+                size_hints,
+                reduction_hint=kernel.features.get_reduction_hint(kernel.tiling_scores),
+                triton_meta=kernel.triton_meta,
+                inductor_meta=inductor_meta,
+                return_configs=True,
+            )
+        elif kernel.inside_reduction:
+            configs = reduction(
+                size_hints,
+                reduction_hint=kernel.features.get_reduction_hint(kernel.tiling_scores),
+                triton_meta=kernel.triton_meta,
+                inductor_meta=inductor_meta,
+                return_configs=True,
+            )
+        else:
+            _, _, signature, _ = kernel.args.python_argdefs()
+            configs = pointwise(
+                size_hints,
+                triton_meta=kernel.triton_meta,
+                tile_hint=select_tile_hint(size_hints, signature),
+                inductor_meta=inductor_meta,
+                return_configs=True,
+            )
+        return configs, kernel
+
+    @staticmethod
+    def _stitch_combo_block_config(chosen_configs: list[Any]) -> dict[str, int]:
+        """Suffix each subkernel's BLOCK kwargs into one combo config dict
+        (XBLOCK -> XBLOCK_0, XBLOCK_1, ...; R0_BLOCK -> R0_BLOCK_0, ...)."""
+        return {
+            f"{key}_{i}": int(cfg.kwargs[key])
+            for i, cfg in enumerate(chosen_configs)
+            for key in cfg.kwargs
+            if key.endswith("BLOCK")
+        }
+
+    @staticmethod
+    def _stitch_no_bench_combo_config(
+        chosen_configs: list[Any], chosen_nodes: list[Any]
+    ) -> Any:
+        import triton
+
+        def node_total_bytes(snode: Any) -> int:
+            return sum(
+                V.graph.get_dep_size_hint(d, count_bytes=True)
+                for d in itertools.chain(
+                    snode.read_writes.reads, snode.read_writes.writes
+                )
+            )
+
+        # Heaviest subkernel by total memory traffic dominates runtime; its
+        # config is authoritative for the combo. Its num_warps, num_stages,
+        # and non-BLOCK kwargs (HIP backend options like waves_per_eu) apply
+        # combo-wide. Per-subkernel BLOCK kwargs are suffixed (XBLOCK_0, ...).
+        winner_idx = max(
+            range(len(chosen_configs)),
+            key=lambda i: node_total_bytes(chosen_nodes[i]),
+        )
+        winner_cfg = chosen_configs[winner_idx]
+
+        stitched_kwargs: dict[str, Any] = SIMDScheduling._stitch_combo_block_config(
+            chosen_configs
+        )
+        stitched_kwargs.update(
+            {
+                key: value
+                for key, value in winner_cfg.kwargs.items()
+                if not key.endswith("BLOCK")
+            }
+        )
+
+        return triton.Config(
+            stitched_kwargs,
+            num_warps=int(winner_cfg.num_warps),
+            num_stages=int(winner_cfg.num_stages),
+        )
+
+    def _autotune_subkernels_compile_time(
+        self, group: list[Any], node_schedule_map: dict[Any, NodeInfo]
+    ) -> list[Any | None]:
+        """Autotune each combo subkernel standalone at compile time and read back its winning
+        config (None for a subkernel whose compile or benchmark failed, which the caller
+        carves out to run standalone instead of failing the compile).
+
+        Triton precompiles are submitted to the async compile pool as each subkernel is codegened.
+        The subkernels are then benchmarked in compile-completion order through the standard
+        benchmark_codegened_module path, so device benchmarking overlaps the remaining precompiles
+        while retaining preserve_rng_state, argument cloning and the n_spills guard. Subkernels
+        with a single candidate config (unless coordinate descent tuning is on) or an autotune
+        cache hit are taken directly with no benchmark.
+        """
+        from concurrent.futures import as_completed
+
+        from ..async_compile import AsyncCompile
+        from ..codecache import CodeCacheFuture
+
+        async_compile = AsyncCompile()
+        use_process_pool = async_compile.use_process_pool()
+        work: list[tuple[Any, Any, bool, bool, Any]] = []
+        futures_by_autotuner: dict[int, Any] = {}
+        seen_autotuners: OrderedSet[int] = OrderedSet()
+
+        # Benchmark codegen must not count toward generated_kernel_count: these kernels
+        # are never emitted into the wrapper.
+        old_kernel_count = metrics.generated_kernel_count
+        for pn in group:
+            node_info = node_schedule_map[pn]
+            # Cooperative reductions are disabled to match how the combo emits its
+            # subkernels; force_cooperative_reductions must be patched too since it
+            # short-circuits should_use_cooperative_reduction before the first flag.
+            with config.patch(
+                {
+                    "triton.cooperative_reductions": False,
+                    "triton.force_cooperative_reductions": False,
+                }
+            ):
+                src_code = self.generate_kernel_code_from_nodes(
+                    pn.get_nodes(),
+                    benchmark_kernel=True,
+                    coalesce_analysis=node_info.features.coalesce_analysis,
+                )
+            mod = PyCodeCache.load(src_code)
+            autotuner = mod.triton_
+            configs = autotuner.configs
+            already_tuned = bool(autotuner.launchers)  # from a prior compile this run
+            # One candidate config -> nothing to autotune among configs, so take it directly.
+            # Skip only when CDT is off: with CDT on, coordinate descent can still improve a
+            # single config by searching its neighbors.
+            single = (
+                not config.coordinate_descent_tuning
+                and configs is not None
+                and len(configs) == 1
+            )
+            autotuner_id = id(autotuner)
+            duplicate = autotuner_id in seen_autotuners
+            seen_autotuners.add(autotuner_id)
+            future = futures_by_autotuner.get(autotuner_id)
+            if not already_tuned and not duplicate and not single and use_process_pool:
+                # triton() may compile synchronously and return a raw autotuner
+                # (e.g. TRITON_INTERPRET=1) despite use_process_pool being True.
+                maybe_future = async_compile.triton("triton_", src_code)
+                future = (
+                    maybe_future if isinstance(maybe_future, CodeCacheFuture) else None
+                )
+                futures_by_autotuner[autotuner_id] = future
+            work.append((pn, mod, already_tuned or duplicate, single, future))
+        metrics.generated_kernel_count = old_kernel_count
+
+        winners: list[Any | None] = [None] * len(work)
+        failed: OrderedSet[int] = OrderedSet()
+
+        def fallback(index: int, pn: Any) -> None:
+            counters["inductor"]["combo_subkernel_autotune_fallback"] += 1
+            log.warning("combo compile-time autotune failed for %s; carving out", pn)
+            failed.add(index)
+
+        def benchmark(index: int) -> None:
+            pn, mod, already_tuned, single, _ = work[index]
+            autotuner = mod.triton_
+            configs = autotuner.configs
+            benchmark_failed = False
+            if not already_tuned and not single:
+                # skip_perf_cache: the winner is needed in launchers, not just the timing.
+                try:
+                    ms, _mod_path = self.benchmark_codegened_module(
+                        mod, skip_perf_cache=True
+                    )
+                except Exception:
+                    log.debug("combo subkernel benchmark raised", exc_info=True)
+                    ms = float("inf")
+                # inf means the benchmark failed or spilled; launchers != 1 means the
+                # autotune race never pruned to a winner.
+                benchmark_failed = (
+                    math.isinf(ms) and len(autotuner.launchers) != 1
+                ) or len(autotuner.launchers) > 1
+            if benchmark_failed:
+                fallback(index, pn)
+                return
+            launchers = autotuner.launchers
+            info = autotuner.autotune_cache_info or {}
+            # cached == no fresh benchmark ran: in-process reuse (launchers already set),
+            # the benchmark was skipped (no launchers), or a .best_config hit.
+            cached = (
+                already_tuned
+                or not launchers
+                or info.get("autotune_cache_state") == "hit"
+            )
+            counters["inductor"][
+                "combo_subkernel_autotune_cached"
+                if cached
+                else "combo_subkernel_autotune"
+            ] += 1
+            if launchers:
+                winners[index] = launchers[0].config
+            elif configs:
+                winners[index] = configs[0]
+            else:
+                # configs is None after a precompile that failed to produce launchers.
+                fallback(index, pn)
+
+        pending: dict[Any, list[int]] = {}
+        ready: list[int] = []
+        for index, (*_, future) in enumerate(work):
+            raw_future = getattr(future, "future", None)
+            if raw_future is None:
+                ready.append(index)
+            else:
+                pending.setdefault(raw_future, []).append(index)
+
+        def resolve_and_benchmark(future: Any, indices: list[int]) -> None:
+            if future is not None:
+                try:
+                    # Waiting on the raw pool future (not the LambdaFuture wrapper)
+                    # surfaces worker exceptions without repeating the wrapper's
+                    # parent-side precompile of a kernel we discard: benchmark() uses
+                    # mod.triton_, whose own precompile hits the now-warm disk cache.
+                    future.result()
+                except Exception:
+                    for index in indices:
+                        fallback(index, work[index][0])
+                    return
+            for index in indices:
+                benchmark(index)
+
+        resolved_futures: OrderedSet[int] = OrderedSet()
+        for index in ready:
+            future = work[index][-1]
+            if future is not None and id(future) in resolved_futures:
+                future = None
+            elif future is not None:
+                resolved_futures.add(id(future))
+            resolve_and_benchmark(future, [index])
+
+        for raw_future in as_completed(pending):
+            resolve_and_benchmark(raw_future, pending[raw_future])
+
+        if any(w is None for i, w in enumerate(winners) if i not in failed):
+            raise AssertionError("expected all combo subkernels to be autotuned")
+        return winners
+
+    def _build_combo_kernel(
+        self,
+        fusion_pns: list[Any],
+        node_schedule_map: dict[Any, NodeInfo],
+        enable_autotune: bool,
+        mixed_sizes: bool,
+        per_subkernel_blocks: bool,
+        only_gen_src_code: bool,
+    ) -> Any:
+        """Build a ComboKernel and its sub-kernels from a list of partition nodes."""
+        from .triton_combo_kernel import ComboKernel
+
+        kernel = ComboKernel(
+            triton_kernel_cls=self.kernel_type,
+            enable_autotune=enable_autotune,
+            mixed_sizes=mixed_sizes,
+            per_subkernel_blocks=per_subkernel_blocks,
+        )
+        for pn in fusion_pns:
+            node_info = node_schedule_map[pn]
+            subkernel = ComboKernel.create_triton_kernel(
+                node_info.tiling,
+                features=node_info.features,
+                optimize_mask=not mixed_sizes,
+                triton_kernel_cls=self.kernel_type,
+                tiling_scores=node_info.tiling_scores,
+                per_subkernel_blocks=per_subkernel_blocks,
+            )
+            self.process_kernel(
+                kernel.create_sub_kernel(subkernel),
+                node_info.node_schedule,
+                only_gen_src_code,
+            )
+        return kernel
+
+    @staticmethod
+    def _combo_launch_candidates(winners: list[Any]) -> list[Any]:
+        """Deduplicate the subkernels' winner launch configs (non-block kwargs + num_warps +
+        num_stages) into the candidate set for the combo's kernel-level autotune."""
+        from .triton_combo_kernel import ComboLaunchConfig
+
+        seen: dict[Any, Any] = {}
+        for w in winners:
+            nb = {k: int(v) for k, v in w.kwargs.items() if not k.endswith("BLOCK")}
+            key = (tuple(sorted(nb.items())), int(w.num_warps), int(w.num_stages))
+            seen[key] = ComboLaunchConfig(nb, int(w.num_warps), int(w.num_stages))
+        return [seen[k] for k in sorted(seen)]
 
     def generate_combo_kernel_code(
         self,
@@ -2440,6 +4408,7 @@ class SIMDScheduling(BaseScheduling):
         enable_autotune: bool,
         mixed_sizes: bool,
         only_gen_src_code: bool = False,
+        per_subkernel_blocks: bool = False,
     ) -> list[tuple[str | None, Any, Any]]:
         """
         Generate kernel code for combo kernel partitions.
@@ -2454,7 +4423,11 @@ class SIMDScheduling(BaseScheduling):
         from .triton_combo_kernel import ComboKernel
 
         # This is currently the only type supported by this method
-        assert issubclass(self.kernel_type, TritonKernel)
+        if not issubclass(self.kernel_type, TritonKernel):
+            raise AssertionError(
+                f"expected self.kernel_type to subclass TritonKernel, "
+                f"got {self.kernel_type}"
+            )
 
         fused_node_lists = [node.get_nodes() for node in subkernel_nodes]
         node_schedule_map: dict[Any, NodeInfo] = {}
@@ -2462,11 +4435,15 @@ class SIMDScheduling(BaseScheduling):
             _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group
             node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
             tiling_scores = None
-            if config.combo_kernel_per_subkernel_blocks:
+            if per_subkernel_blocks:
                 if torch._inductor.config.triton.coalesce_tiling_analysis:
-                    assert isinstance(
+                    if not isinstance(
                         pn, (scheduler.FusedSchedulerNode, scheduler.SchedulerNode)
-                    )
+                    ):
+                        raise AssertionError(
+                            f"expected pn to be FusedSchedulerNode or "
+                            f"SchedulerNode, got {type(pn)}"
+                        )
                     coalesce_analysis = pn.get_coalesce_analysis()
                 else:
                     coalesce_analysis = None
@@ -2485,7 +4462,8 @@ class SIMDScheduling(BaseScheduling):
             is_persistent_reduction = (
                 features.is_reduction()
                 and V.choices.should_use_persistent_reduction(
-                    features, cooperative_reduction=False
+                    features.with_tiling_scores(tiling_scores),
+                    cooperative_reduction=False,
                 )
             )
             node_schedule_map[pn] = NodeInfo(
@@ -2521,48 +4499,117 @@ class SIMDScheduling(BaseScheduling):
                     # Skip code generation - caller has cached benchmark results
                     kernel_code_list.append((None, None, node_group))
                 else:
-                    # Generate regular kernel
-                    kernel_kwargs: dict[str, Any] = {}
-                    self.kernel_type.apply_feature_required_overrides(
-                        node_info.features, kernel_kwargs
+                    src_code, kernel = self._codegen_standalone_kernel(
+                        node_info, only_gen_src_code
                     )
-                    kernel = self.kernel_type(
-                        node_info.tiling,
-                        features=node_info.features,
-                        **kernel_kwargs,
-                    )
-                    self.process_kernel(
-                        kernel, node_info.node_schedule, only_gen_src_code
-                    )
-                    with V.set_kernel_handler(kernel):
-                        src_code = kernel.codegen_kernel()
                     # pyrefly: ignore [bad-argument-type]
                     kernel_code_list.append((src_code, kernel, node_group))
             else:
-                # Multi-node: create ComboKernel with combo subkernels
-                kernel = ComboKernel(
-                    triton_kernel_cls=self.kernel_type,
-                    enable_autotune=enable_autotune,
-                    mixed_sizes=mixed_sizes,
-                )
-                for pn in node_group:
-                    node_info = node_schedule_map[pn]
-                    subkernel = ComboKernel.create_triton_kernel(
-                        node_info.tiling,
-                        features=node_info.features,
-                        optimize_mask=not mixed_sizes,
-                        triton_kernel_cls=self.kernel_type,
-                        tiling_scores=node_info.tiling_scores,
+                if (
+                    enable_autotune
+                    and per_subkernel_blocks
+                    and config.combo_kernel_compile_time_autotune
+                    and not only_gen_src_code
+                ):
+                    group = list(node_group)
+                    tuned = self._autotune_subkernels_compile_time(
+                        group, node_schedule_map
                     )
-                    self.process_kernel(
-                        kernel.create_sub_kernel(subkernel),
-                        node_info.node_schedule,
-                        only_gen_src_code,
+                    # A None winner means its compile/benchmark failed; carve it out to
+                    # run standalone rather than stitch a bogus config or fail compile.
+                    fusable = [(pn, w) for pn, w in zip(group, tuned) if w is not None]
+                    carve_out = [pn for pn, w in zip(group, tuned) if w is None]
+                    if len(fusable) >= 2:
+                        fusable_pns = [pn for pn, _ in fusable]
+                        winners = [w for _, w in fusable]
+                        kernel = self._build_combo_kernel(
+                            fusable_pns,
+                            node_schedule_map,
+                            enable_autotune=True,
+                            mixed_sizes=mixed_sizes,
+                            per_subkernel_blocks=True,
+                            only_gen_src_code=only_gen_src_code,
+                        )
+                        kernel.combo_compile_time_autotune = True
+                        kernel.combo_launch_candidates = self._combo_launch_candidates(
+                            winners
+                        )
+                        # Compile-time autotune needs only the per-subkernel block sizes;
+                        # warps / num_stages / backend kwargs are autotuned over
+                        # combo_launch_candidates.
+                        kernel.stitched_block_config = self._stitch_combo_block_config(
+                            winners
+                        )
+                        src_code = kernel.codegen_kernel()
+                        # pyrefly: ignore [bad-argument-type]
+                        kernel_code_list.append((src_code, kernel, fusable_pns))
+                    else:
+                        # Fewer than two tunable sub-kernels: emit them all standalone.
+                        carve_out = list(group)
+                    for pn in carve_out:
+                        co_src, co_kernel = self._codegen_standalone_kernel(
+                            node_schedule_map[pn], only_gen_src_code
+                        )
+                        # pyrefly: ignore [bad-argument-type]
+                        kernel_code_list.append((co_src, co_kernel, [pn]))
+                    continue
+                no_bench_mode = per_subkernel_blocks and not enable_autotune
+                fusion_pns: list[Any] = []
+                fusion_configs: list[Any] = []
+                carve_out_pns: list[Any] = []
+                if no_bench_mode:
+                    old_kernel_count = metrics.generated_kernel_count
+                    try:
+                        for pn in node_group:
+                            configs, probe_kernel = self._probe_subkernel_heuristic(
+                                node_schedule_map[pn]
+                            )
+                            if torch.version.hip or torch.xpu.is_available():
+                                fuse_ok = configs and not probe_kernel.autotune_hints
+                            else:
+                                fuse_ok = configs and len(configs) <= 2
+                            if fuse_ok:
+                                fusion_pns.append(pn)
+                                fusion_configs.append(configs[0])
+                            else:
+                                carve_out_pns.append(pn)
+                    finally:
+                        if only_gen_src_code:
+                            metrics.generated_kernel_count = old_kernel_count
+                    if len(fusion_pns) < 2:
+                        fusion_pns = []
+                        fusion_configs = []
+                        carve_out_pns = list(node_group)
+                else:
+                    fusion_pns = list(node_group)
+
+                if len(fusion_pns) >= 2:
+                    kernel = self._build_combo_kernel(
+                        fusion_pns,
+                        node_schedule_map,
+                        enable_autotune=enable_autotune,
+                        mixed_sizes=mixed_sizes,
+                        per_subkernel_blocks=per_subkernel_blocks,
+                        only_gen_src_code=only_gen_src_code,
                     )
 
-                src_code = kernel.codegen_kernel()
-                # pyrefly: ignore [bad-argument-type]
-                kernel_code_list.append((src_code, kernel, node_group))
+                    if no_bench_mode and fusion_configs:
+                        kernel.no_bench_stitched_config = (
+                            self._stitch_no_bench_combo_config(
+                                fusion_configs, fusion_pns
+                            )
+                        )
+
+                    src_code = kernel.codegen_kernel()
+                    # pyrefly: ignore [bad-argument-type]
+                    kernel_code_list.append((src_code, kernel, fusion_pns))
+
+                for pn in carve_out_pns:
+                    co_src_code, co_kernel = self._codegen_standalone_kernel(
+                        node_schedule_map[pn], only_gen_src_code
+                    )
+                    # pyrefly: ignore [bad-argument-type]
+                    kernel_code_list.append((co_src_code, co_kernel, [pn]))
         # pyrefly: ignore [bad-return]
         return kernel_code_list
 
@@ -2574,8 +4621,14 @@ class SIMDScheduling(BaseScheduling):
             config.combo_kernel_allow_mixed_sizes == 1 and custom_part_algorithm
         )
 
+        per_subkernel_blocks = combo_kernel_node.per_subkernel_blocks
+
         kernel_code_list = self.generate_combo_kernel_code(
-            subkernel_nodes, custom_part_algorithm, enable_autotune, mixed_sizes
+            subkernel_nodes,
+            custom_part_algorithm,
+            enable_autotune,
+            mixed_sizes,
+            per_subkernel_blocks=per_subkernel_blocks,
         )
 
         for src_code, kernel, _ in kernel_code_list:
@@ -2595,17 +4648,19 @@ class SIMDScheduling(BaseScheduling):
             """
             Compute tiling candidates by dividing up the iteration ranges.
             """
-            assert len(rw.range_vars) == len(ranges), f"{rw.range_vars=} {ranges=}"
+            if len(rw.range_vars) != len(ranges):
+                raise AssertionError(f"{rw.range_vars=} {ranges=}")
 
             # isinstance(dep, MemoryDep): this filters out StarDeps. StarDeps refer to reads
             # that need to access the entire tensor; they don't contribute read indexing
             # information (and practically, they don't have dep.index so they can't be used
             # for stride_hints below
             dep_sources = [rw.reads, rw.writes]
-            assert all(
+            if not all(
                 isinstance(dep, (MemoryDep, StarDep))
                 for dep in itertools.chain.from_iterable(dep_sources)
-            )
+            ):
+                raise AssertionError("expected all deps to be MemoryDep or StarDep")
             deps = [
                 dep
                 for dep in itertools.chain.from_iterable(dep_sources)
@@ -2631,7 +4686,11 @@ class SIMDScheduling(BaseScheduling):
             # Find non-trivial tiling candidates.
             for dep in deps:
                 strides = V.graph.sizevars.stride_hints(dep.index, rw.range_vars)
-                assert len(strides) == len(ranges)
+                if len(strides) != len(ranges):
+                    raise AssertionError(
+                        f"expected len(strides) == len(ranges), "
+                        f"got {len(strides)} and {len(ranges)}"
+                    )
                 try:
                     split = strides.index(1) + 1
                     if split == len(ranges):
@@ -2724,8 +4783,16 @@ class SIMDScheduling(BaseScheduling):
         """
         pw_prefixes = ("z", "y", "x")
         reduction_prefixes = ("r0_", "r1_")
-        assert len(pw_tiling) <= len(pw_prefixes)
-        assert len(reduction_tiling) <= len(reduction_prefixes)
+        if len(pw_tiling) > len(pw_prefixes):
+            raise AssertionError(
+                f"expected len(pw_tiling) <= len(pw_prefixes), "
+                f"got {len(pw_tiling)} and {len(pw_prefixes)}"
+            )
+        if len(reduction_tiling) > len(reduction_prefixes):
+            raise AssertionError(
+                f"expected len(reduction_tiling) <= len(reduction_prefixes), "
+                f"got {len(reduction_tiling)} and {len(reduction_prefixes)}"
+            )
 
         return immutable_dict(
             [
@@ -2923,7 +4990,7 @@ class SIMDScheduling(BaseScheduling):
         pointwise_numel: sympy.Expr,
         reduction_numel: sympy.Expr,
         coalesce_analysis: CoalesceVarAnalysis,
-    ) -> tuple[dict[str, sympy.Expr], dict[str, sympy.Expr] | None]:
+    ) -> _TilingSelection:
         """
         Generates a tiling, and a score of each tile according to each tile's coalesced memory accesses.
         """
@@ -2953,17 +5020,15 @@ class SIMDScheduling(BaseScheduling):
         )
 
         # score of a pointwise or reduction split
-        scored_sub_split: dict[Any, tuple[list[int], list[int]]] = {}
+        scored_sub_split: dict[Any, _SubSplit] = {}
 
-        score_split: list[
-            tuple[tuple[list[int], list[int]], tuple[list[int], list[int]]]
-        ] = []
+        score_split: list[tuple[_SubSplit, _SubSplit]] = []
 
         def process_node_vars(
             vars_to_use: tuple[sympy.Expr, ...] = (),
             use_split_var: bool = False,
             is_pointwise: bool = False,
-        ) -> tuple[list[int], list[int]]:
+        ) -> _SubSplit:
             """
             Generate a tiling, and a tiling score, given vars to use as splits.
             """
@@ -2973,9 +5038,9 @@ class SIMDScheduling(BaseScheduling):
             # Some kernels have no reduction ranges, and a reduction numel of 1
             if not ranges:
                 if target_numel:
-                    return ([target_numel], [])
+                    return _SubSplit([target_numel], [], 0)
                 else:
-                    return ([], [])
+                    return _SubSplit([], [], 0)
 
             key = (repr(vars_to_use), use_split_var, is_pointwise)
             if out := scored_sub_split.get(key):
@@ -2999,7 +5064,8 @@ class SIMDScheduling(BaseScheduling):
 
                 if use_split_var and v == tiling_var:
                     var_tiling = coalesce_analysis.suggested_split
-                    assert var_tiling is not None
+                    if var_tiling is None:
+                        raise AssertionError("expected var_tiling to not be None")
 
                     tile = var_tiling.tiling_factor
                     remainder = FloorDiv(v_range, var_tiling.tiling_factor)
@@ -3024,6 +5090,8 @@ class SIMDScheduling(BaseScheduling):
                 splits.append(prod)
                 split_scores.append(prev_var_coalesced_score)
 
+            coalesced_memory = sum(split_scores)
+
             # penalize splits that leave small blocks
             # where we can't fully utilize full memory transaction
             # TODO: incorporate exact bitwidth, and read/write
@@ -3033,8 +5101,9 @@ class SIMDScheduling(BaseScheduling):
                 s = min(s, 8)
                 split_scores[i] = int(split_scores[i] * s / 8)
 
-            scored_sub_split[key] = (splits, split_scores)
-            return (splits, split_scores)
+            sub_split = _SubSplit(splits, split_scores, coalesced_memory)
+            scored_sub_split[key] = sub_split
+            return sub_split
 
         # add the default tiling
         score_split.append(
@@ -3076,23 +5145,30 @@ class SIMDScheduling(BaseScheduling):
                     )
                 )
 
-        tilings: list[tuple[CandidateTiling, immutable_dict[str, sympy.Expr]]] = []
-        for (pw_split, pw_score), (red_split, red_score) in score_split:
+        tilings: list[tuple[CandidateTiling, immutable_dict[str, sympy.Expr], int]] = []
+        for pw, red in score_split:
             candidate = CandidateTiling(
-                cls.create_tiling(pw_split, red_split),
-                score=sum(pw_score) + sum(red_score),
+                cls.create_tiling(pw.splits, red.splits),
+                score=sum(pw.split_scores) + sum(red.split_scores),
             )
-            tiling_score = cls.create_tiling(pw_score, red_score)
-            tilings.append((candidate, tiling_score))
+            tiling_score = cls.create_tiling(pw.split_scores, red.split_scores)
+            tilings.append(
+                (candidate, tiling_score, pw.coalesced_memory + red.coalesced_memory)
+            )
 
         default_tiling = cls.create_tiling([pointwise_numel], [reduction_numel])
 
-        # add a slight penalty for longer tilings that dont increase score much,
+        # add a slight penalty for longer tilings that don't increase score much,
         # and are poor sizes
         bad_size_additional_tiling_penalty = 1.025
         good_size_tiling_penalty = 1.005
 
         total_uncoalesced = sum(coalesce_analysis.uncoalesced_addrs.values())
+        # Every access is either coalesced or not under a given tiling, and the
+        # total is tiling-independent, so the uncoalesced remainder is exact.
+        total_memory = (
+            sum(coalesce_analysis.coalesced_by_var.values()) + total_uncoalesced
+        )
 
         def score_mod(t):
             score_factor = 1.0
@@ -3108,15 +5184,29 @@ class SIMDScheduling(BaseScheduling):
 
             return -(t[0].score + uncoalesced_penalty) * score_factor
 
-        # apply penalty for longer tilings that dont increase score much
-        for cand, tiling_score in sorted(tilings, key=score_mod):
+        def make_selection(
+            tiling: dict[str, sympy.Expr],
+            tiling_score: immutable_dict[str, sympy.Expr],
+            coalesced_memory: int,
+        ) -> _TilingSelection:
+            return _TilingSelection(
+                tiling,
+                tiling_score,
+                MemoryCoalescing(
+                    coalesced=coalesced_memory,
+                    uncoalesced=max(total_memory - coalesced_memory, 0),
+                ),
+            )
+
+        # apply penalty for longer tilings that don't increase score much
+        for cand, tiling_score, coalesced_memory in sorted(tilings, key=score_mod):
             if (
                 cls.tiling_is_compatible(
                     node_schedule, pointwise_numel, reduction_numel, cand.tiling
                 )
                 or cand.tiling == default_tiling
             ):
-                # we always include default reduction numel == 1, dont include
+                # we always include default reduction numel == 1, don't include
                 tiling_len = len(cand.tiling) - (1 if reduction_numel == 1 else 0)
                 if tiling_len > get_max_tiles(default=3):
                     perf_hint_log.info(
@@ -3127,14 +5217,14 @@ class SIMDScheduling(BaseScheduling):
                     )
                     continue
 
-                return cand.tiling, tiling_score
+                return make_selection(cand.tiling, tiling_score, coalesced_memory)
 
             # surprisingly, the default tiling is not always read as compatible by `tiling_is_compatible`
             # TODO - look into, occurs with dynamic shapes often
             if cand.tiling == default_tiling:
-                return cand.tiling, tiling_score
+                return make_selection(cand.tiling, tiling_score, coalesced_memory)
 
-        return default_tiling, None
+        return _TilingSelection(default_tiling, None, None)
 
     @classmethod
     def tiling_is_compatible(
@@ -3144,7 +5234,8 @@ class SIMDScheduling(BaseScheduling):
         reduction_numel: sympy.Expr,
         tiling: dict[str, sympy.Expr],
     ):
-        assert isinstance(tiling, dict)
+        if not isinstance(tiling, dict):
+            raise AssertionError(f"expected tiling to be a dict, got {type(tiling)}")
         return all(
             SIMDKernel.is_compatible(
                 tiling.values(), node.get_ranges(), reduction_numel=reduction_numel
@@ -3193,7 +5284,26 @@ class SIMDScheduling(BaseScheduling):
 
         Returns:
             `(tile1, tile2, reduction_numel)` s.t. `tile1 * tile2 == numel`
+        """
+        selection = cls.select_tiling_with_memory(
+            node_schedule, numel, reduction_numel, coalesce_analysis
+        )
+        return selection.tiling, selection.tiling_scores
 
+    @classmethod
+    def select_tiling_with_memory(
+        cls,
+        node_schedule,
+        numel,
+        reduction_numel=sympy.S.One,
+        coalesce_analysis: CoalesceVarAnalysis | None = None,
+    ) -> _TilingSelection:
+        """
+        Heuristics to decide how to tile kernels.
+        Currently, we tile based on stride-1 dimensions.
+
+        Same selection as get_tiling_and_scores(), additionally reporting the
+        coalesced/uncoalesced memory under the selected tiling when known.
         """
         # If this is a reduction, only tile reduction dims.
         is_pointwise = reduction_numel == 1
@@ -3215,7 +5325,7 @@ class SIMDScheduling(BaseScheduling):
                     range_y_x = node_ranges[0]  # (M,N)
                     range_r = node_ranges[1]  # (K)
                     tiling = cls.create_tiling(range_y_x, range_r)
-                    return tiling, None
+                    return _TilingSelection(tiling, None, None)
 
         # # TODO: enable by default
         if (
@@ -3247,7 +5357,7 @@ class SIMDScheduling(BaseScheduling):
                         )
                         break
 
-            return default_tiling, None
+            return _TilingSelection(default_tiling, None, None)
 
         seen_names: OrderedSet[str] = OrderedSet()
         candidate_tiles: Counter[CandidateTiling] = collections.Counter()
@@ -3290,7 +5400,10 @@ class SIMDScheduling(BaseScheduling):
                     # swap so a0 is bigger
                     (a0, a1), (b0, b1) = (b0, b1), (a0, a1)
 
-                assert hint(a1 - b1) > 0
+                if not (hint(a1 - b1) > 0):
+                    raise AssertionError(
+                        f"expected hint(a1 - b1) > 0, got {hint(a1 - b1)}"
+                    )
                 if not V.graph.sizevars.statically_known_multiple_of(a1, b1):
                     return None
 
@@ -3325,9 +5438,9 @@ class SIMDScheduling(BaseScheduling):
         if tiling := cls.get_first_compatible_tiling(
             node_schedule, numel, reduction_numel, ranked_tilings
         ):
-            return tiling, None
+            return _TilingSelection(tiling, None, None)
 
-        return default_tiling, None
+        return _TilingSelection(default_tiling, None, None)
 
     def flush(self):
         pass
@@ -3336,15 +5449,40 @@ class SIMDScheduling(BaseScheduling):
         return False
 
     def generate_kernel_code_from_nodes(
-        self, nodes, benchmark_kernel=False, hint_override: int | None = None
+        self,
+        nodes,
+        benchmark_kernel=False,
+        hint_override: int | None = None,
+        coalesce_analysis: CoalesceVarAnalysis | None = None,
     ):
         if not any(n.is_template() for n in nodes):
             _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group
             node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
-            tiling = self.select_tiling(node_schedule, numel, rnumel)
+            if (
+                coalesce_analysis is None
+                and torch._inductor.config.triton.coalesce_tiling_analysis
+            ):
+                from torch._inductor.tiling_utils import (
+                    analyze_memory_coalescing_for_nodes,
+                )
+
+                coalesce_analysis = analyze_memory_coalescing_for_nodes(nodes)
+            features = SIMDKernelFeatures(
+                node_schedule, numel, rnumel, coalesce_analysis=coalesce_analysis
+            )
+            tiling, tiling_scores = self.get_tiling_and_scores(
+                node_schedule,
+                numel,
+                rnumel,
+                features.coalesce_analysis,
+            )
+            kernel_kwargs: dict[str, Any] = {}
+            self.kernel_type.apply_feature_required_overrides(features, kernel_kwargs)
             kernel = self.kernel_type(
                 tiling,
-                features=SIMDKernelFeatures(node_schedule, numel, rnumel),
+                features=features,
+                tiling_scores=tiling_scores,
+                **kernel_kwargs,
             )
             self.codegen_node_schedule_with_kernel(node_schedule, kernel)
             # Collect config_patches from operations
@@ -3374,6 +5512,46 @@ class SIMDScheduling(BaseScheduling):
 
     def define_kernel(self, src_code, node_schedule, kernel):
         raise NotImplementedError
+
+
+@dataclasses.dataclass(frozen=True)
+class _SubSplit:
+    """A candidate pointwise or reduction split, and what it coalesces."""
+
+    splits: list[sympy.Expr]
+    # Intra-kernel ranking scores, penalized for small blocks.
+    split_scores: list[int]
+    # Absolute coalesced memory, comparable across kernels.
+    coalesced_memory: int
+
+
+# Use a fixed 16x heuristic for uncoalesced memory traffic.
+_UNCOALESCED_MEMORY_COST_WEIGHT = 16
+
+
+@dataclasses.dataclass(frozen=True)
+class MemoryCoalescing:
+    """Memory accessed under a tiling, split by whether it coalesces.
+
+    These are absolute memory scores (writes weighted x2, as in
+    CoalesceVarAnalysis), so unlike tiling scores they are comparable across
+    different kernels - e.g. one fused kernel against two separate ones.
+    """
+
+    coalesced: int
+    uncoalesced: int
+
+    def weighted_cost(self) -> int:
+        """Total cost, weighting uncoalesced traffic as more expensive."""
+        return self.coalesced + _UNCOALESCED_MEMORY_COST_WEIGHT * self.uncoalesced
+
+
+@dataclasses.dataclass(frozen=True)
+class _TilingSelection:
+    tiling: dict[str, sympy.Expr]
+    tiling_scores: dict[str, sympy.Expr] | None
+    # None when the tiling was forced or fell back, so memory was never scored.
+    memory: MemoryCoalescing | None
 
 
 @dataclasses.dataclass(frozen=True)

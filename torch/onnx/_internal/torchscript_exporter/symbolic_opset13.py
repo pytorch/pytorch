@@ -641,7 +641,7 @@ def repeat_interleave(
 
         # Check if repeats is dynamic
         # As repeats is dynamic, we use a where node as a substitute for the if statement
-        # If repests_dim = 1, expand repeats otherwise use original tensor
+        # If repeats_dim = 1, expand repeats otherwise use original tensor
         if cond_dynamic_repeats:
             repeat_dim = symbolic_helper._size_helper(
                 g, repeats, g.op("Constant", value_t=torch.LongTensor([0]))

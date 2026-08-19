@@ -17,6 +17,7 @@ import os
 import queue
 import threading
 import warnings
+import weakref
 from collections.abc import Callable
 from typing import Any, Generic, NoReturn, TYPE_CHECKING, TypeVar
 from typing_extensions import Self
@@ -73,6 +74,12 @@ default_convert = _utils.collate.default_convert
 get_worker_info = _utils.worker.get_worker_info
 
 logger = logging.getLogger(__name__)
+
+_persistent_workers_atexit_lock = threading.Lock()
+_persistent_workers_atexit_registered = False
+_persistent_workers_atexit: weakref.WeakSet[_MultiProcessingDataLoaderIter] = (
+    weakref.WeakSet()
+)
 
 
 class _DatasetKind:
@@ -549,7 +556,7 @@ class DataLoader(Generic[_T_co]):
         # This function check whether the dataloader's worker number is rational based on
         # current system's resource. Current rule is that if the number of workers this
         # Dataloader will create is bigger than the number of logical cpus that is allowed to
-        # use, than we will pop up a warning to let user pay attention.
+        # use, then we will pop up a warning to let user pay attention.
         #
         # eg. If current system has 2 physical CPUs with 16 cores each. And each core support 2
         #     threads, then the total logical cpus here is 2 * 16 * 2 = 64. Let's say current
@@ -1137,11 +1144,13 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
             # Need to `cancel_join_thread` here!
             # See sections (2) and (3b) above.
             index_queue.cancel_join_thread()
+            # The worker consumes the holder so its Process does not retain the dataset.
+            dataset_holder = [self._dataset]
             w = multiprocessing_context.Process(
                 target=_utils.worker._worker_loop,
                 args=(
                     self._dataset_kind,
-                    self._dataset,
+                    dataset_holder,
                     index_queue,
                     self._worker_result_queue,
                     self._workers_done_event,
@@ -1212,10 +1221,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         # atexit is used to shutdown thread and child processes in the
         # right sequence before main process exits
         if self._persistent_workers and self._pin_memory:
-            import atexit
-
-            for w in self._workers:
-                atexit.register(_MultiProcessingDataLoaderIter._clean_up_worker, w)
+            self._register_persistent_workers_atexit()
 
         # .pid can be None only before process is spawned (not the case, so ignore)
         _utils.signal_handling._set_worker_pids(
@@ -1672,15 +1678,29 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                         # here, which we shouldn't, (e.g., pytorch/pytorch#39570),
                         # we kill the worker.
                         w.terminate()
+                        w.join(timeout=_utils.MP_STATUS_CHECK_INTERVAL)
 
-    # staticmethod is used to remove reference to `_MultiProcessingDataLoaderIter`
     @staticmethod
-    def _clean_up_worker(w) -> None:
-        try:
-            w.join(timeout=_utils.MP_STATUS_CHECK_INTERVAL)
-        finally:
-            if w.is_alive():
-                w.terminate()
+    def _clean_up_persistent_workers_atexit() -> None:
+        # This callback is registered after `_utils._set_python_exit_flag`,
+        # so it runs while `_shutdown_workers()` can still use multiprocessing.
+        with _persistent_workers_atexit_lock:
+            iterators = tuple(_persistent_workers_atexit)
+        for iterator in iterators:
+            iterator._shutdown_workers()
+
+    def _register_persistent_workers_atexit(self) -> None:
+        import atexit
+
+        global _persistent_workers_atexit_registered
+        with _persistent_workers_atexit_lock:
+            _persistent_workers_atexit.add(self)
+            if _persistent_workers_atexit_registered:
+                return
+            atexit.register(
+                _MultiProcessingDataLoaderIter._clean_up_persistent_workers_atexit
+            )
+            _persistent_workers_atexit_registered = True
 
     def __del__(self) -> None:
         self._shutdown_workers()

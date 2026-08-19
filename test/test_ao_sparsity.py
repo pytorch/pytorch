@@ -22,11 +22,13 @@ from ao.sparsity.test_sparsifier import (  # noqa: F401
 
 # Structured Pruning
 from ao.sparsity.test_structured_sparsifier import (  # noqa: F401
-    TestBaseStructuredSparsifier,
+    TestBaseStructuredSparsifierCPU,
+    TestBaseStructuredSparsifierDevice,
     TestFPGMPruner,
     TestSaliencyPruner,
 )
 
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import IS_ARM64, run_tests
 
 
@@ -54,6 +56,11 @@ from ao.sparsity.test_data_sparsifier import (  # noqa: F401
 
 # Utilities
 from ao.sparsity.test_sparsity_utils import TestSparsityUtilFunctions  # noqa: F401
+
+
+instantiate_device_type_tests(TestSaliencyPruner, globals())
+instantiate_device_type_tests(TestBaseStructuredSparsifierDevice, globals())
+instantiate_device_type_tests(TestFPGMPruner, globals())
 
 
 if __name__ == "__main__":

@@ -263,7 +263,7 @@ def sgd(
     *,
     weight_decay: float,
     momentum: float,
-    lr: float,
+    lr: float | Tensor,
     dampening: float,
     nesterov: bool,
     maximize: bool,
@@ -328,7 +328,7 @@ def _single_tensor_sgd(
     *,
     weight_decay: float,
     momentum: float,
-    lr: float,
+    lr: float | Tensor,
     dampening: float,
     nesterov: bool,
     maximize: bool,
@@ -388,7 +388,7 @@ def _multi_tensor_sgd(
     *,
     weight_decay: float,
     momentum: float,
-    lr: float,
+    lr: float | Tensor,
     dampening: float,
     nesterov: bool,
     maximize: bool,
@@ -469,11 +469,11 @@ def _multi_tensor_sgd(
                 grads_x_lr = torch._foreach_mul(device_grads, -lr)
                 torch._foreach_add_(device_params, grads_x_lr)
             else:
-                torch._foreach_add_(device_params, device_grads, alpha=-lr)
+                torch._foreach_add_(device_params, device_grads, alpha=-lr)  # type: ignore[arg-type]
         else:
             # foreach APIs don't support sparse
             for i in range(len(device_params)):
-                device_params[i].add_(device_grads[i], alpha=-lr)
+                device_params[i].add_(device_grads[i], alpha=-lr)  # type: ignore[arg-type]
 
 
 def _fused_sgd(
@@ -485,7 +485,7 @@ def _fused_sgd(
     *,
     weight_decay: float,
     momentum: float,
-    lr: float,
+    lr: float | Tensor,
     dampening: float,
     nesterov: bool,
     maximize: bool,

@@ -8,6 +8,10 @@
 #include <torch/csrc/profiler/stubs/base.h>
 #include <torch/csrc/profiler/util.h>
 
+namespace libkineto {
+struct ITraceActivity;
+}
+
 namespace torch {
 
 namespace profiler::impl {
@@ -20,6 +24,7 @@ struct ActivityTraceWrapper;
 namespace autograd::profiler {
 using experimental_event_t = std::shared_ptr<torch::profiler::impl::Result>;
 using extra_meta_t = std::unordered_map<std::string, std::string>;
+using typed_metadata_t = std::unordered_map<std::string, c10::IValue>;
 
 struct TORCH_API KinetoEvent {
   KinetoEvent(
@@ -69,6 +74,7 @@ struct TORCH_API KinetoEvent {
   int64_t privateuse1ElapsedUs() const;
   void getPerfEventCounters(torch::profiler::perf_counters_t& /*in*/) const;
   extra_meta_t extraMeta() const;
+  const typed_metadata_t& typedMetadata() const;
   std::string metadataJson() const;
 
   const c10::ArrayRef<torch::profiler::impl::shape> structuredInputShapes()
@@ -121,6 +127,9 @@ struct TORCH_API ProfilerResult {
   }
 
   void save(const std::string& path);
+#ifdef USE_KINETO
+  const std::vector<const libkineto::ITraceActivity*>* traceActivities();
+#endif
 
  private:
   uint64_t trace_start_ns_ = 0;

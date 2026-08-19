@@ -39,6 +39,7 @@ if TYPE_CHECKING:
     from torch._dynamo.backends.distributed import DDPOptimizerContext
     from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.guards import GuardCheckSpec
+    from torch._dynamo.output_graph import CodeOptions
     from torch._functorch._aot_autograd.schemas import ViewAndMutationMeta
     from torch._higher_order_ops.invoke_subgraph import NestedCompileRegionOptions
     from torch._subclasses.fake_tensor import FakeTensorMode
@@ -209,7 +210,7 @@ class GuardSource(enum.Enum):
 Base class for a "GuardBuilder" role.
 
 The GuardBuilderBase role is to represent a scope within which to build a guard. The name is a little
-confusing, as its not a builder, but for the sake of avoiding a lot of renames and keeping the original reference
+confusing, as it's not a builder, but for the sake of avoiding a lot of renames and keeping the original reference
 to torchdynamo's GuardBuilder.
 
 Note: create_fn is invoked with a GuardBuilderBase and a Guard. A GuardBuilder is chosen based
@@ -280,6 +281,7 @@ class Guard:
     user_stack: traceback.StackSummary | None = None
     _hash: int | None = None
     _unserializable: bool = False
+    _force_dict_keys_match: bool = False
 
     def __hash__(self) -> int:
         if self._hash is None:
@@ -712,7 +714,7 @@ class GuardsSet:
 
 """
 A GuardsContext is a checkpointable representation of all the guards in the current tracing
-context. It's lifecycle is bound 1:1 to the tracing context, and it should never be instantiated
+context. Its lifecycle is bound 1:1 to the tracing context, and it should never be instantiated
 directly outside of it. For passing around internal state representations of this object,
 prefer to extract them with copy_graphstate to produce a GuardsCheckpointState.
 """
@@ -765,6 +767,16 @@ class HopSubgraphCache:
     def get_proxy_dispatch_entry(self, identifier: str) -> Callable | None: ...
 
     @abstractmethod
+    def add_functionalize_schema_entry(
+        self, key: object, schema: torch._C.FunctionSchema
+    ) -> None: ...
+
+    @abstractmethod
+    def get_functionalize_schema_entry(
+        self, key: object
+    ) -> torch._C.FunctionSchema | None: ...
+
+    @abstractmethod
     def add_lazy_bwd_entry(
         self,
         identifier: str,
@@ -810,7 +822,7 @@ class InvokeSubgraphReuseCondition:
     #   (InputTag.TENSOR, TensorMetadata)
     #   (InputTag.SYMNODE, sym_num — same object implies same symbol)
     #   (InputTag.CONSTANT, value)
-    #   (InputTag.MODULE, None)
+    #   (InputTag.OBJECT, None)
     # Tensor metadata is checked here because TENSOR_MATCH guards for
     # subgraph inputs may already exist before tracing and thus won't
     # appear in the guard delta.
@@ -835,6 +847,7 @@ class InvokeSubgraphCache(HopSubgraphCache):
     def __init__(self) -> None:
         self.autograd_cache: dict[str, Callable] = {}
         self.proxy_dispatch_cache: dict[str, Callable] = {}
+        self.functionalize_schema_cache: dict[object, torch._C.FunctionSchema] = {}
         self.dynamo_installed_submodules: dict[CodeType, list[str]] = defaultdict(list)
         self.lazy_bwd_cache: dict[
             str, dict[tuple[object], tuple[torch.fx.GraphModule, int]]
@@ -873,6 +886,16 @@ class InvokeSubgraphCache(HopSubgraphCache):
 
     def get_proxy_dispatch_entry(self, identifier: str) -> Callable | None:
         return self.proxy_dispatch_cache.get(identifier, None)
+
+    def add_functionalize_schema_entry(
+        self, key: object, schema: torch._C.FunctionSchema
+    ) -> None:
+        self.functionalize_schema_cache[key] = schema
+
+    def get_functionalize_schema_entry(
+        self, key: object
+    ) -> torch._C.FunctionSchema | None:
+        return self.functionalize_schema_cache.get(key, None)
 
     def add_lazy_bwd_entry(
         self,
@@ -982,7 +1005,19 @@ class HopDispatchSetCache:
         return self.hop_cache_map[op]  # type: ignore[index]
 
 
-_TLS = threading.local()
+class _TLSStorage(threading.local):
+    # Default the hot-path attributes to None per thread so that
+    # TracingContext.try_get() / CompileContext.try_get() -- called on every
+    # torch.compile'd call -- hit a present attribute instead of paying for an
+    # AttributeError raise+catch inside getattr(). Without this, a thread that
+    # never ran compilation itself (e.g. a worker thread executing compiled code
+    # compiled on another thread) takes the slow getattr-miss path on every call.
+    def __init__(self) -> None:
+        self.tracing_context: TracingContext | None = None
+        self.compile_context: CompileContext | None = None
+
+
+_TLS = _TLSStorage()
 
 """
 TracingContext is the source of truth for all currently accumulated information
@@ -1047,7 +1082,7 @@ class InlinedCodeCache:
 
     instructions: list[Any]
     indexof: dict[Any, int]
-    code_options: dict[str, Any]
+    code_options: CodeOptions
 
 
 class TracingContext:
@@ -1506,6 +1541,8 @@ def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:
         FakeTensor,
         FakeTensorMode,
         get_plain_tensors,
+        is_fake_tensor,
+        maybe_get_fake_mode,
     )
 
     # If TracingContext has a fake_mode, use it authoritatively.
@@ -1526,17 +1563,19 @@ def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:
 
     flat_inputs = pytree.tree_leaves(inputs)
     for i, flat_input in enumerate(flat_inputs):
-        if isinstance(flat_input, FakeTensor):
-            fake_modes.append((flat_input.fake_mode, "fake tensor input", i))
+        if is_fake_tensor(flat_input):
+            fake_modes.append((maybe_get_fake_mode(flat_input), "fake tensor input", i))
         if is_traceable_wrapper_subclass(flat_input):
             out: list[torch.Tensor | int | torch.SymInt] = []
             get_plain_tensors(flat_input, out=out)  # type: ignore[arg-type]
             fake_tensors: list[FakeTensor] = [
-                x for x in out if isinstance(x, FakeTensor)
+                x
+                for x in out
+                if isinstance(x, FakeTensor)  # noqa: ISINSTANCE_FAKE_TENSOR
             ]
             fake_modes.extend(
                 [
-                    (tensor.fake_mode, f"subclass input {i}", ix)
+                    (maybe_get_fake_mode(tensor), f"subclass input {i}", ix)
                     for ix, tensor in enumerate(fake_tensors)
                 ]
             )

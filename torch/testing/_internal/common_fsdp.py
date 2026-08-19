@@ -6,7 +6,6 @@ import os
 import re
 import sys
 import time
-import unittest
 import warnings
 from abc import ABC, abstractmethod
 from collections.abc import Callable
@@ -670,7 +669,7 @@ class ModuleWithDelay(FSDPTestModel):
         return loss
 
     def run_backward(self, loss):
-        orig_reduce_scatter = torch.distributed.reduce_scatter_tensor
+        orig_reduce_scatter = torch.distributed.reduce_scatter_single
 
         def _delayed_reduce_scatter(*args, **kwargs):
             if self.delay_before_reduction_ms > 0:
@@ -683,7 +682,7 @@ class ModuleWithDelay(FSDPTestModel):
             return orig_reduce_scatter(*args, **kwargs)
 
         with mock.patch(
-            "torch.distributed.reduce_scatter_tensor", _delayed_reduce_scatter
+            "torch.distributed.reduce_scatter_single", _delayed_reduce_scatter
         ):
             self.module.run_backward(loss)  # type: ignore[operator]
 
@@ -994,14 +993,14 @@ class DoubleLinear(nn.Module):
 # all threads use the patched value inside the context
 @contextlib.contextmanager
 def patch_all_gather(new_all_gather_into_tensor: Callable):
-    orig_all_gather = dist.all_gather_into_tensor
+    orig_all_gather = dist.all_gather_single
     dist.barrier()
-    dist.all_gather_into_tensor = new_all_gather_into_tensor
+    dist.all_gather_single = new_all_gather_into_tensor
     try:
         yield
     finally:
         dist.barrier()
-        dist.all_gather_into_tensor = orig_all_gather
+        dist.all_gather_single = orig_all_gather
 
 
 @contextlib.contextmanager
@@ -1042,14 +1041,14 @@ def patch_foreach_reduce(new_foreach_reduce: Callable):
 
 @contextlib.contextmanager
 def patch_reduce_scatter(new_reduce_scatter_tensor: Callable):
-    orig_reduce_scatter = dist.reduce_scatter_tensor
+    orig_reduce_scatter = dist.reduce_scatter_single
     dist.barrier()
-    dist.reduce_scatter_tensor = new_reduce_scatter_tensor
+    dist.reduce_scatter_single = new_reduce_scatter_tensor
     try:
         yield
     finally:
         dist.barrier()
-        dist.reduce_scatter_tensor = orig_reduce_scatter
+        dist.reduce_scatter_single = orig_reduce_scatter
 
 
 @contextlib.contextmanager
@@ -1172,7 +1171,6 @@ def check_sharded_parity(
         cls.assertEqual(sharded_param.grad.to_local(), sharded_ref_grad.to_local())
 
 
-@unittest.skipIf(TEST_XPU, "not-support-multithread")
 class FSDPTestMultiThread(MultiThreadedTestCase):
     @property
     def world_size(self):
@@ -1222,7 +1220,7 @@ class FSDPTestMixin:
             sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
 
         # Specify gloo backend to make 'init_process_group()' succeed,
-        # Actual tests will be skipped if there is no enough GPUs.
+        # Actual tests will be skipped if there are not enough GPUs.
         try:
             if fake_pg:
                 store = torch.testing._internal.distributed.fake_pg.FakeStore()
@@ -1565,7 +1563,7 @@ class FSDPTest(FSDPTestMixin, MultiProcessTestCase):
             sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
 
         # Specify gloo backend to make 'init_process_group()' succeed,
-        # Actual tests will be skipped if there is no enough GPUs.
+        # Actual tests will be skipped if there are not enough GPUs.
         try:
             if fake_pg:
                 store = torch.testing._internal.distributed.fake_pg.FakeStore()
