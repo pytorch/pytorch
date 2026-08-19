@@ -13,8 +13,8 @@ ensuring type safety and clear contracts between different components of the sys
 
 import dataclasses
 import types
-from collections.abc import Callable
-from typing import Any, NamedTuple, Protocol
+from collections.abc import Callable, Mapping
+from typing import Any, NamedTuple, Protocol, runtime_checkable
 
 # CacheEntry has a `guard_manager` field for the guard, and a `code` field for the code object.
 from torch._C._dynamo.eval_frame import (
@@ -24,11 +24,39 @@ from torch._C._dynamo.eval_frame import (
     _FrameExecStrategy as FrameExecStrategy,
     _PyInterpreterFrame as DynamoFrameType,
 )
-from torch._guards import CompileId, Guard
+from torch._guards import CompileId, Guard, Source
 
 
 # We use a dict to store additional data per frame.
 FrameState = dict[Any, Any]
+
+
+@dataclasses.dataclass(frozen=True)
+class NNModuleContainerIndexFrameLocator:
+    """How a translator frame reaches the module owning an index attribute."""
+
+    name: str
+    source: Source
+    is_global: bool
+
+
+@dataclasses.dataclass(frozen=True)
+class NNModuleContainerIndexFrame:
+    """Metadata for one translator frame containing an index candidate."""
+
+    site: tuple[types.CodeType, int]
+    locator: NNModuleContainerIndexFrameLocator | None
+    cache_locator: NNModuleContainerIndexFrameLocator | None
+
+
+@dataclasses.dataclass(frozen=True)
+class NNModuleContainerIndexTarget:
+    """A retry target and the root-frame object used for negative caching."""
+
+    source: Source
+    source_aware: bool
+    locator: NNModuleContainerIndexFrameLocator | None
+    cache_locator: NNModuleContainerIndexFrameLocator | None
 
 
 class GuardFail(NamedTuple):
@@ -103,6 +131,14 @@ class DynamoCallbackFn(Protocol):
 
 
 DynamoCallback = DynamoCallbackFn | None | bool
+
+
+CompilerConfig = Mapping[str, Any]
+
+
+@runtime_checkable
+class CompilerConfigProvider(Protocol):
+    def get_compiler_config(self) -> CompilerConfig | None: ...
 
 
 class DynamoGuardHook(Protocol):

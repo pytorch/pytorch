@@ -692,6 +692,10 @@
       "description": "Related to torch.optim"
     },
     {
+      "name": "module: package/deploy",
+      "description": "Add issue/PR to torch.package TODO board"
+    },
+    {
       "name": "module: padding",
       "description": ""
     },
@@ -1016,18 +1020,6 @@
       "description": "Intel XPU related issues"
     },
     {
-      "name": "needs design",
-      "description": "We want to add this feature but we need to figure out how first"
-    },
-    {
-      "name": "needs reproduction",
-      "description": "Ensure you have actionable steps to reproduce the issue. Someone else needs to confirm the repro. Add when issue requires downloading external files (.zip, .pt, .pth, .pkl, .safetensors) or links to external storage (Google Drive, Dropbox) to reproduce."
-    },
-    {
-      "name": "needs research",
-      "description": "We need to decide whether or not this merits inclusion, based on research world"
-    },
-    {
       "name": "newcomer",
       "description": ""
     },
@@ -1054,10 +1046,6 @@
     {
       "name": "oncall: mobile",
       "description": "Related to mobile support, including iOS and Android"
-    },
-    {
-      "name": "oncall: package/deploy",
-      "description": "Add issue/PR to torch.package TODO board"
     },
     {
       "name": "oncall: profiler",

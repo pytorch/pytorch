@@ -10,7 +10,7 @@ import traceback
 import types
 import unittest
 from copy import deepcopy
-from functools import partial
+from functools import partial, update_wrapper
 from typing import NamedTuple
 from unittest.mock import patch
 
@@ -21,7 +21,7 @@ import torch.nn.functional as F
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.eval_frame import unsupported
 from torch._dynamo.mutation_guard import GenerationTracker
-from torch._dynamo.testing import expectedFailureDynamic, same
+from torch._dynamo.testing import same
 from torch._dynamo.utils import ifdynstaticdefault
 from torch._dynamo.variables.torch_function import TensorWithTFOverrideVariable
 from torch.nn.modules.lazy import LazyModuleMixin
@@ -1173,6 +1173,24 @@ class UnspecModuleWithIntAttr(torch.nn.Module):
         return self.layer(x) + self.step
 
 
+class _GlobalDynamicIndexModuleList(torch.nn.ModuleList):
+    def __init__(self) -> None:
+        super().__init__([torch.nn.Identity(), torch.nn.Identity()])
+        self._pos = 0
+
+
+_global_dynamic_index_module: _GlobalDynamicIndexModuleList | None = None
+
+
+def _global_dynamic_index_fn(x):
+    module = _global_dynamic_index_module
+    if module is None:
+        raise AssertionError("test module must be installed")
+    y = module[module._pos](x)
+    module._pos = 1 - module._pos
+    return y
+
+
 def make_test(fn, expected_ops=None):
     def test_fn(self):
         return torch._dynamo.testing.standard_test(
@@ -1511,8 +1529,6 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.op_count, 1)
         self.assertTrue(torch._dynamo.testing.same(out1, out2))
 
-    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
-    @expectedFailureDynamic
     def test_lazy_module1(self):
         input_shape = (16, 3, 6, 7, 8)
 
@@ -1581,8 +1597,6 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         )
         self.assertEqual(cnt.frame_count, 1, "No guards should have triggered.")
 
-    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
-    @expectedFailureDynamic
     def test_lazy_module2(self):
         # Test FX graph 'call_module' works well if argument is lazy module
         m = LazyMLP()
@@ -1594,8 +1608,6 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         ref = m(x)
         self.assertTrue(torch.allclose(ref, res))
 
-    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
-    @expectedFailureDynamic
     def test_lazy_module4(self):
         m = LazyMLP()
         x = torch.rand([10, 10])
@@ -1612,8 +1624,6 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         except RuntimeError:
             self.assertIn("must have same reduction dim", traceback.format_exc())
 
-    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
-    @expectedFailureDynamic
     def test_lazy_module5(self):
         # Test lazy module works well with list/tuple input
         m = LazyModuleWithListInput()
@@ -1623,8 +1633,6 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         ref = m(x)
         self.assertTrue(torch.allclose(ref, res))
 
-    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
-    @expectedFailureDynamic
     def test_lazy_module6(self):
         # Test new lazy submodule in lazy module's initialize_parameters
         m = LazyModuleWithLazySubmodule()
@@ -1634,8 +1642,6 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         ref = m(x)
         self.assertTrue(torch.allclose(ref, res))
 
-    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
-    @expectedFailureDynamic
     def test_lazy_module7(self):
         # Test lazy module works well with namedtuple/dict input
         m = LazyModuleWithNamedTupleInput()
@@ -1691,8 +1697,6 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         with self.assertRaises(AttributeError):
             exp_res = opt_m(x, y)
 
-    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
-    @expectedFailureDynamic
     def test_lazy_module_speculation_log_divergence(self):
         class ModWithOneLazyLinear(torch.nn.Module):
             def __init__(self) -> None:
@@ -1729,6 +1733,22 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         expect_res = mod(x)
         self.assertTrue(torch.allclose(expect_res, actual_res))
         self.assertEqual(cnt.frame_count, 1)
+
+    def test_lazy_module_symbolic_shapes(self):
+        # Regression test: lazy module initialization must handle symbolic
+        # shapes from dynamic inputs without hitting "SymIntArrayRef expected
+        # to contain only concrete integers".
+        m = torch.nn.LazyBatchNorm1d()
+
+        @torch.compile(backend="eager", dynamic=True)
+        def fn(x):
+            return m(x)
+
+        x = torch.randn(16, 3, 6)
+        result = fn(x)
+        self.assertEqual(result.shape, x.shape)
+        self.assertIsInstance(m, torch.nn.BatchNorm1d)
+        self.assertEqual(m.num_features, 3)
 
     def test_call_fn_with_non_const_inputs_safe(self):
         class ModuleSpecialFwd(torch.nn.Module):
@@ -1856,15 +1876,304 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.op_count, 2)
         self.assertTrue(
             any(
-                "Unspecialized nn.Module container indexed by nn.Module attribute"
+                "Unspecialized nn.Module container indexed by mutable nn.Module attribute"
                 in msg
                 for msg in torch._dynamo.utils.counters["graph_break"]
             )
         )
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "indexed by mutable nn.Module attribute",
+        ):
+            torch._dynamo.export(copy.deepcopy(mod.layers))(x)
+
+    def test_mutating_module_list_subclass_dynamic_index_in_helper(self):
+        class Mod(torch.nn.ModuleList):
+            def __init__(self) -> None:
+                super().__init__([torch.nn.Linear(4, 4) for _ in range(10)])
+                self._pos = 0
+
+            def advance(self):
+                self._pos = (self._pos + 1) % len(self)
+
+            def forward(self, x):
+                y = self[self._pos](x)
+                self.advance()
+                return y
+
+        mod = Mod()
+        opt_mod = copy.deepcopy(mod)
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_mod = torch.compile(opt_mod, backend=cnt)
+        x = torch.randn(2, 4)
+
+        with torch._dynamo.config.patch(error_on_recompile=True):
+            for _ in range(20):
+                self.assertTrue(torch.allclose(mod(x), opt_mod(x)))
+
+        self.assertEqual(cnt.frame_count, 0)
+        self.assertEqual(cnt.op_count, 0)
+
+    def test_mutating_module_list_subclass_dynamic_index_in_called_helper(self):
+        class Mod(torch.nn.ModuleList):
+            def __init__(self) -> None:
+                super().__init__([torch.nn.Linear(4, 4) for _ in range(10)])
+                self._pos = 0
+
+            def select(self, x):
+                return self[self._pos](x)
+
+            def forward(self, x):
+                y = self.select(x)
+                self._pos = (self._pos + 1) % len(self)
+                return y
+
+        mod = Mod()
+        opt_mod = copy.deepcopy(mod)
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_mod = torch.compile(opt_mod, backend=cnt)
+        x = torch.randn(2, 4)
+
+        with torch._dynamo.config.patch(error_on_recompile=True):
+            for _ in range(20):
+                self.assertTrue(torch.allclose(mod(x), opt_mod(x)))
+
+        self.assertEqual(cnt.frame_count, 0)
+        self.assertEqual(cnt.op_count, 0)
+
+    def test_module_list_static_attr_index(self):
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.layers = torch.nn.ModuleList(
+                    [torch.nn.Linear(4, 4) for _ in range(2)]
+                )
+                self.idx = 0
+
+            def forward(self, x):
+                return self.layers[self.idx](x)
+
+        mod = Mod()
+        x = torch.randn(2, 4)
+        ref = mod(x)
+
+        opt_mod = torch.compile(copy.deepcopy(mod), backend="eager", fullgraph=True)
+        self.assertTrue(torch.allclose(ref, opt_mod(x)))
+
+        exported, _ = torch._dynamo.export(copy.deepcopy(mod))(x)
+        self.assertTrue(torch.allclose(ref, exported(x)))
+
+    def test_module_list_idempotent_attr_store(self):
+        class Mod(torch.nn.Module):
+            def __init__(self, index) -> None:
+                super().__init__()
+                self.layers = torch.nn.ModuleList(
+                    [torch.nn.Linear(4, 4) for _ in range(2)]
+                )
+                self.idx = index
+                self.reset_idx = index
+
+            def forward(self, x):
+                y = self.layers[self.idx](x)
+                self.idx = self.reset_idx
+                return y
+
+        x = torch.randn(2, 4)
+        for index in (0, True):
+            with self.subTest(index=index):
+                mod = Mod(index)
+                ref = mod(x)
+
+                cnt = torch._dynamo.testing.CompileCounter()
+                opt_mod = torch.compile(copy.deepcopy(mod), backend=cnt, fullgraph=True)
+                self.assertTrue(torch.allclose(ref, opt_mod(x)))
+                self.assertEqual(cnt.frame_count, 1)
+
+                exported, _ = torch._dynamo.export(copy.deepcopy(mod))(x)
+                self.assertTrue(torch.allclose(ref, exported(x)))
+
+    def test_module_list_idempotent_attr_store_does_not_call_user_eq(self):
+        class Index(int):
+            def __eq__(self, other):
+                raise RuntimeError("user equality must not run")
+
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.layers = torch.nn.ModuleList([torch.nn.Identity()])
+                self.idx = Index(0)
+
+            def forward(self, x):
+                y = self.layers[self.idx](x)
+                self.idx = Index(0)
+                return y
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "indexed by mutable nn.Module attribute",
+        ):
+            torch.compile(Mod(), backend="eager", fullgraph=True)(torch.randn(2, 4))
+
+    def test_module_list_dynamic_index_shared_forward(self):
+        class Selector(torch.nn.ModuleList):
+            def __init__(self, mutate) -> None:
+                super().__init__([torch.nn.Linear(4, 4) for _ in range(10)])
+                self.requires_grad_(False)
+                self._pos = 0
+                self.mutate = mutate
+
+            def select(self, x):
+                return self[self._pos](x)
+
+            def forward(self, x):
+                y = self.select(x)
+                if self.mutate:
+                    self._pos = (self._pos + 1) % len(self)
+                return y
+
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.fixed = Selector(False)
+                self.dynamic = Selector(True)
+
+            def forward(self, x):
+                x = self.fixed(x)
+                return self.dynamic(x)
+
+        mod = Mod()
+        opt_mod = copy.deepcopy(mod)
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_mod = torch.compile(opt_mod, backend=cnt)
+        x = torch.randn(2, 4)
+
+        with torch._dynamo.config.patch(error_on_recompile=True):
+            for _ in range(20):
+                self.assertTrue(torch.allclose(mod(x), opt_mod(x)))
+
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 1)
+
+    def test_module_list_dynamic_index_instance_skip_cache(self):
+        class Selector(torch.nn.ModuleList):
+            def __init__(self, mutate) -> None:
+                super().__init__([torch.nn.Identity(), torch.nn.Identity()])
+                self._pos = 0
+                self.mutate = mutate
+
+        class Controller:
+            __hash__ = None
+
+            def __init__(self, mutate) -> None:
+                self.layers = Selector(mutate)
+
+            def run(this, x):
+                y = this.layers[this.layers._pos](x)
+                if this.layers.mutate:
+                    this.layers._pos = 1 - this.layers._pos
+                return y + 1
+
+        dynamic = Controller(True)
+        opt_dynamic_arg = copy.deepcopy(dynamic)
+        dynamic_cnt = torch._dynamo.testing.CompileCounter()
+        opt_dynamic = torch.compile(opt_dynamic_arg.run, backend=dynamic_cnt)
+        frames_before = torch._dynamo.utils.counters["frames"]["total"]
+        x = torch.randn(2, 4)
+        with torch._dynamo.config.patch(error_on_recompile=True):
+            for _ in range(3):
+                self.assertTrue(torch.allclose(dynamic.run(x), opt_dynamic(x)))
+        self.assertEqual(
+            torch._dynamo.utils.counters["frames"]["total"] - frames_before, 1
+        )
+        self.assertEqual(dynamic_cnt.frame_count, 0)
+
+        fixed = Controller(False)
+        opt_fixed_arg = copy.deepcopy(fixed)
+        fixed_cnt = torch._dynamo.testing.CompileCounter()
+        opt_fixed = torch.compile(opt_fixed_arg.run, backend=fixed_cnt, fullgraph=True)
+        self.assertTrue(torch.allclose(fixed.run(x), opt_fixed(x)))
+        self.assertEqual(fixed_cnt.frame_count, 1)
+
+        torch._dynamo.reset()
+        frames_before = torch._dynamo.utils.counters["frames"]["total"]
+        for _ in range(2):
+            self.assertTrue(torch.allclose(dynamic.run(x), opt_dynamic(x)))
+        self.assertEqual(
+            torch._dynamo.utils.counters["frames"]["total"] - frames_before, 1
+        )
+
+    def test_module_list_dynamic_index_global_skip_cache(self):
+        global _global_dynamic_index_module
+
+        _global_dynamic_index_module = _GlobalDynamicIndexModuleList()
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(_global_dynamic_index_fn, backend=cnt)
+        x = torch.randn(2, 4)
+        frames_before = torch._dynamo.utils.counters["frames"]["total"]
+        try:
+            for _ in range(4):
+                self.assertTrue(torch.allclose(x, opt_fn(x)))
+        finally:
+            _global_dynamic_index_module = None
+
+        self.assertEqual(
+            torch._dynamo.utils.counters["frames"]["total"] - frames_before, 1
+        )
+        self.assertEqual(cnt.frame_count, 0)
+
+    def test_module_list_dynamic_index_closure_skip_cache(self):
+        module = _GlobalDynamicIndexModuleList()
+
+        def fn(x):
+            y = module[module._pos](x)
+            module._pos = 1 - module._pos
+            return y
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt)
+        x = torch.randn(2, 4)
+        frames_before = torch._dynamo.utils.counters["frames"]["total"]
+        for _ in range(4):
+            self.assertTrue(torch.allclose(x, opt_fn(x)))
+
+        self.assertEqual(
+            torch._dynamo.utils.counters["frames"]["total"] - frames_before, 1
+        )
+        self.assertEqual(cnt.frame_count, 0)
+
+    def test_module_list_dynamic_index_ancestor_subscript(self):
+        class Layers(torch.nn.ModuleList):
+            def __init__(self) -> None:
+                super().__init__([torch.nn.Linear(4, 4) for _ in range(3)])
+                self.requires_grad_(False)
+                self.idx = 0
+
+        class Selector:
+            def __init__(self, layers) -> None:
+                self.layers = layers
+
+            def __getitem__(self, key):
+                return self.layers[self.layers.idx]
+
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.layers = Layers()
+                self.selector = Selector(self.layers)
+
+            def forward(self, x):
+                y = self.selector[0](x)
+                self.layers.idx = (self.layers.idx + 1) % len(self.layers)
+                return y
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "indexed by mutable nn.Module attribute",
+        ):
+            torch.compile(Mod(), backend="eager", fullgraph=True)(torch.randn(2, 4))
 
 
 class NNModuleTestsDevice(torch._dynamo.test_case.TestCase):
-    @expectedFailureDynamic
     @skipIfHpu
     def test_lazy_module3(self, device):
         m = LazyMLP()
@@ -2354,6 +2663,85 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             )
         )
 
+    def test_celu_matches_eager(self):
+        for alpha, inplace in itertools.product((0.5, 1.0, 2.0), (False, True)):
+            with self.subTest(alpha=alpha, inplace=inplace):
+
+                def fn(x):
+                    if inplace:
+                        return torch.celu_(x, alpha=alpha)
+                    return torch.celu(x, alpha=alpha)
+
+                eager_inp = torch.linspace(-2, 2, 17)
+                compiled_inp = eager_inp.clone()
+                opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+                self.assertEqual(fn(eager_inp), opt_fn(compiled_inp))
+                self.assertEqual(eager_inp, compiled_inp)
+
+    def test_celu_zero_alpha_raises(self):
+        for inplace in (False, True):
+            with self.subTest(inplace=inplace):
+
+                def fn(x):
+                    if inplace:
+                        return torch.celu_(x, alpha=0.0)
+                    return torch.celu(x, alpha=0.0)
+
+                with self.assertRaisesRegex(
+                    RuntimeError, "ZeroDivisionError: alpha cannot be 0 for CELU"
+                ):
+                    fn(torch.randn(8))
+
+                with self.assertRaisesRegex(
+                    RuntimeError, "ZeroDivisionError: alpha cannot be 0 for CELU"
+                ):
+                    torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(8))
+
+    def test_partial_monkeypatched_forward_no_recompile(self):
+        class Hook:
+            def pre_forward(self, module, *args, **kwargs):
+                return args, kwargs
+
+            def post_forward(self, module, output):
+                return output
+
+        def add_hook_to_module(module):
+            old_forward = module.forward
+            module._old_forward = old_forward
+            module._hf_hook = Hook()
+
+            def new_forward(module, *args, **kwargs):
+                args, kwargs = module._hf_hook.pre_forward(module, *args, **kwargs)
+                output = module._old_forward(*args, **kwargs)
+                return module._hf_hook.post_forward(module, output)
+
+            module.forward = update_wrapper(partial(new_forward, module), old_forward)
+
+        class Layer(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.q_proj = torch.nn.Linear(4, 4)
+                add_hook_to_module(self.q_proj)
+
+            def forward(self, x):
+                return self.q_proj(x)
+
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("eager")
+
+        @torch.compile(backend=cnt)
+        def run(layer, x):
+            return layer(x)
+
+        x = torch.randn(2, 4)
+        layers = [Layer() for _ in range(4)]
+
+        self.assertTrue(same(layers[0](x), run(layers[0], x)))
+        with patch.object(torch._dynamo.config, "error_on_recompile", True):
+            for layer in layers[1:]:
+                self.assertTrue(same(layer(x), run(layer, x)))
+        self.assertEqual(cnt.frame_count, 1)
+
     @patch.object(torch._dynamo.config, "skip_nnmodule_hook_guards", False)
     def test_hooks_outer(self):
         class TestModule(torch.nn.Module):
@@ -2466,6 +2854,33 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         m._forward_hooks[handle.id] = new_forward_hook
         self.assertEqual(compiled_func(inp), outer_func(inp))
         self.assertEqual(compiled_func(inp).item(), 16)
+
+    def test_forward_hook_handle_attr_in_hasattr(self):
+        class TestModule(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.encoder = torch.nn.Linear(8, 4)
+                self.decoder = torch.nn.Linear(4, 8)
+
+            def forward(self, x):
+                if not hasattr(self, "_forward_hook"):
+                    self._forward_hook = self.register_forward_hook(
+                        lambda module, inputs, output: output + 1
+                    )
+                return self.decoder(self.encoder(x))
+
+        model = TestModule().eval()
+        x = torch.randn(2, 8)
+
+        with torch.no_grad():
+            model(x)
+            expected = model(x)
+
+        compiled_model = torch.compile(model, backend="eager", fullgraph=True)
+        with torch.no_grad():
+            actual = compiled_model(x)
+
+        self.assertEqual(actual, expected)
 
     def _forward_hook_test_helper(self, model):
         forward_handles = {}
@@ -3063,6 +3478,77 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
         self.assertFalse(hasattr(model, "foo"))
         self.assertFalse(hasattr(compiled_model, "foo"))
+
+    def test_custom_getattr_hasattr_no_recursion(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def __getattr__(self, name):
+                try:
+                    return super().__getattr__(name)
+                except AttributeError:
+                    if (
+                        hasattr(self, "custom_attributes")
+                        and name in self.custom_attributes
+                    ):
+                        return self.custom_attributes[name]
+                    raise
+
+            def forward(self, x):
+                return self.linear(x).relu()
+
+        mod = Mod()
+        x = torch.randn(2, 4)
+        compiled_mod = torch.compile(mod, backend="eager", fullgraph=True)
+        self.assertEqual(mod(x), compiled_mod(x))
+
+        class ModWithAttrs(Mod):
+            def __init__(self):
+                super().__init__()
+                self.custom_attributes = {"scale": 2.0}
+
+            def forward(self, x):
+                return self.linear(x) * self.scale
+
+        mod2 = ModWithAttrs()
+        compiled_mod2 = torch.compile(mod2, backend="eager", fullgraph=True)
+        self.assertEqual(mod2(x), compiled_mod2(x))
+
+    def test_lazy_module_custom_getattr_no_recursion(self):
+        class LazyMod(torch.nn.modules.lazy.LazyModuleMixin, torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.UninitializedParameter()
+
+            def initialize_parameters(self, x):
+                with torch.no_grad():
+                    self.weight.materialize((x.shape[-1],))
+                    self.weight.fill_(2.0)
+
+            def forward(self, x):
+                return x * self.weight
+
+        class LazyModWithGetattr(LazyMod):
+            def __getattr__(self, name):
+                try:
+                    return super().__getattr__(name)
+                except AttributeError:
+                    if (
+                        hasattr(self, "custom_attributes")
+                        and name in self.custom_attributes
+                    ):
+                        return self.custom_attributes[name]
+                    raise
+
+        mod = LazyMod()
+        mod.__class__ = LazyModWithGetattr
+        x = torch.randn(2, 4)
+        compiled_mod = torch.compile(mod, backend="eager")
+        compiled_mod(x)
+        res = compiled_mod(x)
+        self.assertEqual(x * 2.0, res)
 
     def test_globals_change_in_other_file(self):
         global _variable, _variable1
@@ -3702,6 +4188,44 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         input_tensor = torch.randn(1, 10)
         # This would error before fixing guard orering on nn.Modules (https://github.com/pytorch/pytorch/issues/170429)
         _ = runner_func(model, input_tensor)
+
+    @patch.object(torch._dynamo.config, "guard_nn_modules", True)
+    def test_prepend_forward_pre_hook_after_hook_with_closure(self):
+        class SimpleModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        def make_hook(offset):
+            def hook(module, args):
+                return (args[0] + offset,)
+
+            return hook
+
+        def prepended_hook(module, args):
+            return args[0] + 2.0
+
+        model = SimpleModel()
+        existing_handle = model.linear.register_forward_pre_hook(make_hook(1.0))
+        prepended_handle = model.linear.register_forward_pre_hook(
+            prepended_hook, prepend=True
+        )
+
+        self.assertEqual(
+            list(model.linear._forward_pre_hooks.keys()),
+            [prepended_handle.id, existing_handle.id],
+        )
+        self.assertEqual(
+            list(dict.keys(model.linear._forward_pre_hooks)),
+            [existing_handle.id, prepended_handle.id],
+        )
+
+        compiled_model = torch.compile(model, fullgraph=True, backend="eager")
+        input_tensor = torch.randn(1, 10)
+        self.assertEqual(compiled_model(input_tensor), model(input_tensor))
 
     def test_prepend_hook_ordering(self):
         class HookedLinear(torch.nn.Linear):

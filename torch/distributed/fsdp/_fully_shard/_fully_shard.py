@@ -755,6 +755,44 @@ class FSDPModule:
                         max_input_buffers
                     )
 
+    def set_separate_reduce_scatter_group(
+        self, enable: bool = True, *, recurse: bool = True
+    ) -> None:
+        """
+        Enables (or disables) running gradient reduce-scatter on its own process
+        group so it can overlap with all-gather in the backward pass
+        (experimental).
+
+        By default FSDP runs all-gather and reduce-scatter on separate CUDA
+        streams but through the **same** process group -- one NCCL communicator,
+        which processes one collective at a time and so serializes them on the
+        wire. When enabled, FSDP creates a dedicated process group over the shard
+        ranks (``dist.new_group(..., use_local_synchronization=True)``) -- one
+        per distinct set of shard ranks, typically a single communicator -- so
+        the two collectives can progress concurrently when the network can
+        sustain it. This is collective for each shard rank set: like other FSDP
+        comm setup, call it consistently across ranks using this FSDP mesh.
+
+        Args:
+            enable (bool): ``True`` (default) gives reduce-scatter its own
+                process group; ``False`` resets it to the shared shard/all-gather
+                group.
+            recurse (bool): Whether to set for all FSDP submodules or just the
+                passed-in module.
+        """
+        self_module = cast(nn.Module, self)
+        modules = list(self_module.modules()) if recurse else [self_module]
+        # Cache created groups by shard ranks so meshes that shard over the same
+        # ranks share one communicator (typically one total), not one per mesh.
+        new_groups: dict = {}
+        for module in modules:
+            if isinstance(module, FSDPModule):
+                state = module._get_fsdp_state()
+                for fsdp_param_group in state._fsdp_param_groups:
+                    fsdp_param_group._set_separate_reduce_scatter_group(
+                        enable, new_groups
+                    )
+
     def set_unshard_in_backward(self, unshard_in_backward: bool) -> None:
         """
         Sets whether the FSDP module's parameters need to be unsharded in

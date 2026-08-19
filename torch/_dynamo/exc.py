@@ -20,6 +20,32 @@ Observed Exceptions:
     - Special handling for StopIteration, LookupError, etc.
     - Exception state management during compilation
 
+    When an exception is raised inside a ``torch.compile`` region,
+    TorchDynamo does **not** immediately propagate it to the caller.
+    Instead, Dynamo symbolically traces the exception so that
+    ``try``/``except`` blocks inside the compiled function can be
+    captured in the FX graph and reasoned about statically.
+
+    Common Python exception types are wrapped in ``ObservedException``
+    subclasses (e.g. ``StopIteration`` → ``ObservedUserStopIteration``,
+    ``KeyError`` → ``ObservedKeyError``).  The full mapping is defined in
+    ``observed_exception_map``.  For exception types not present in that
+    map, :func:`get_dynamo_observed_exception` creates a new
+    ``ObservedException`` subclass dynamically at tracing time.
+
+    If an observed exception is **not caught** inside the compiled region
+    it propagates out and is re-raised as the original exception type in
+    eager mode, preserving the original traceback for the user.
+
+    .. note::
+        This behaviour means that exception-based control flow (e.g.
+        ``StopIteration`` from a custom iterator, ``KeyError`` from a
+        dict access) is generally supported inside ``torch.compile``
+        regions.  However, raising or catching exceptions that depend on
+        *data-dependent* conditions may still cause a graph break because
+        Dynamo cannot statically determine which branch will be taken at
+        compile time.
+
 Error Formatting:
     - Stack trace filtering and formatting
     - Error message augmentation
@@ -71,6 +97,7 @@ _EXCEPTION_STATE_ATTRS_TO_DROP = frozenset(
     (
         "_torch_dynamo_tracer_output",
         "first_useful_frame",
+        "frame_exec_strategy_cache_key",
         "frame_exec_strategy",
     )
 )
@@ -124,12 +151,24 @@ class TorchDynamoException(RuntimeError):
             instead of the default behavior. This allows exceptions to signal specific
             execution strategies (e.g., SKIP, RUN_ONLY) without requiring separate
             exception types for control flow.
+        frame_exec_strategy_apply_to_code: Whether the custom strategy should be
+            cached on the code object or only apply to the current frame invocation.
+        frame_exec_strategy_cache_key: Optional object identity used by the frame
+            converter to cache a non-code-global strategy.
+        frame_exec_strategy_cache_name: Name of the root-frame local or global
+            containing ``frame_exec_strategy_cache_key`` on future invocations.
+        frame_exec_strategy_cache_is_global: Whether the cache name is resolved
+            from frame globals instead of frame locals.
     """
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._torch_dynamo_tracer_output: DynamoTracerOutput | None = None
         self.frame_exec_strategy: FrameExecStrategy | None = None
+        self.frame_exec_strategy_apply_to_code = True
+        self.frame_exec_strategy_cache_key: object | None = None
+        self.frame_exec_strategy_cache_name: str | None = None
+        self.frame_exec_strategy_cache_is_global = False
 
     def __reduce__(self) -> tuple[Any, ...]:
         return (
@@ -181,6 +220,15 @@ class RequiresGradRestartAnalysis(RestartAnalysis):
     """
 
 
+class NNModuleContainerIndexRestartAnalysis(RestartAnalysis):
+    """Raised when an nn.Module attribute used as a container key is mutated.
+
+    On restart, Dynamo graph breaks at the earlier container indexing operation
+    so the mutation can live in a helper frame without losing the intended
+    frame-skip boundary while unwinding.
+    """
+
+
 class UnspecializeRestartAnalysis(RestartAnalysis):
     pass
 
@@ -213,10 +261,15 @@ class TorchRuntimeError(TorchDynamoException):
 
 
 class InvalidBackend(TorchDynamoException):
-    def __init__(self, name: str) -> None:
-        super().__init__(
-            f"Invalid backend: {name!r}, see `torch._dynamo.list_backends()` for available backends."
+    def __init__(self, name: str, suggestions: list[str] | None = None) -> None:
+        msg = f"Invalid backend: {name!r}"
+        msg += (
+            f", did you mean: {', '.join(map(repr, suggestions))}?"
+            if suggestions
+            else "."
         )
+        msg += " See `torch._dynamo.list_backends()` for available backends."
+        super().__init__(msg)
 
 
 class ResetRequired(TorchDynamoException):
@@ -464,6 +517,10 @@ class ObservedTypeError(ObservedException):
     pass
 
 
+class FakeTensorObservedException(ObservedException):
+    pass
+
+
 observed_exception_map = {
     StopIteration: ObservedUserStopIteration,
     LookupError: ObservedLookupError,
@@ -475,6 +532,28 @@ observed_exception_map = {
     NotImplementedError: ObservedNotImplementedError,
     TypeError: ObservedTypeError,
 }
+
+
+class UnhandledDescriptorError(NotImplementedError):
+    """Raised by object_generic_getattr when a descriptor type is not
+    recognized by _resolve_descriptor_get.  Subclasses NotImplementedError
+    so callers that catch NotImplementedError (e.g., generic_getattr's
+    graph-break fallback) still work, but callers that want to
+    distinguish unhandled descriptors from other NotImplementedErrors can
+    catch this specifically.
+    """
+
+
+class TritonUnavailableError(RuntimeError):
+    """
+    Raised by DeviceInterface.raise_if_triton_unavailable to signal that a
+    device cannot run Triton (e.g. no Triton backend was built for it).
+
+    Subclasses RuntimeError so existing callers that catch RuntimeError keep
+    working, while callers that only want to react to Triton unavailability -
+    such as has_triton() - can catch this specific type instead of swallowing
+    every RuntimeError, which would hide unrelated bugs.
+    """
 
 
 def get_dynamo_observed_exception(exc_type: type[Exception]) -> type[ObservedException]:
@@ -494,7 +573,6 @@ def raise_observed_exception(
     args: list[VariableTracker] | list[str] | None = None,
     kwargs: dict[str, VariableTracker] | None = None,
 ) -> NoReturn:
-    from .symbolic_convert import ExceptionVals
     from .variables.builder import SourcelessBuilder
 
     if args:
@@ -510,15 +588,7 @@ def raise_observed_exception(
     exception_vt = SourcelessBuilder.create(tx, exc_type).call_function(
         tx, args_, kwargs or {}
     )
-    if not isinstance(exception_vt, ExceptionVals):
-        raise AssertionError(f"expected ExceptionVals, got {type(exception_vt)}")
-    tx._attach_traceback_to_exception(exception_vt)
-    tx.exn_vt_stack.set_current_exception(exception_vt)  # type: ignore[arg-type]
-    raised_exc = get_dynamo_observed_exception(exc_type)
-    # Store the original exception arguments for better error messages
-    if args:
-        raise raised_exc(*args_)
-    raise raised_exc
+    tx.do_raise(exception_vt, None)
 
 
 def raise_type_error(tx: InstructionTranslatorBase, msg: str) -> NoReturn:

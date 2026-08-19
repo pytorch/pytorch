@@ -248,7 +248,7 @@ std::optional<size_t> findInputWithName(
     bool is_aten) {
   for (const auto i : c10::irange(kwargs.size())) {
     // TS doesn't understand that the self argument in function
-    // scheams is renamed to input for the functional variant
+    // schemas is renamed to input for the functional variant
     if (is_aten && name == "self" && kwargs[i].name() == "input") {
       return i;
     }

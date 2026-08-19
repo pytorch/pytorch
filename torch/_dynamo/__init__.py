@@ -178,7 +178,18 @@ def reset() -> None:
         kernel_side_table.reset_table()
         inductor_code_side_table.reset_table()
 
-        if torch.cuda.is_available():
+        # The fake tensor dispatch cache is process-global (shared across
+        # FakeTensorMode instances), so it survives into later compiles. That
+        # is normally fine since it caches pure metadata propagation, but if a
+        # meta kernel errantly mutates input metadata (a bug, e.g. #191283),
+        # the mutation happens only on cache miss: a compile that failed cold
+        # can then "succeed" when retried in the same process, which test
+        # harness reruns misclassify as flakiness.
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        FakeTensorMode.cache_clear()
+
+        if torch.cuda.is_initialized():
             from torch._inductor.cudagraph_trees import reset_cudagraph_trees
 
             reset_cudagraph_trees()
@@ -197,6 +208,7 @@ def reset_code_caches() -> None:
     log.info("torch._dynamo.reset_code_caches")
     """Clear compile caches that are keyed by code objects"""
     with convert_frame.compile_lock:
+        convert_frame.reset_frame_exec_strategy_cache()
         reset_code_state()
         for weak_code in (
             convert_frame.input_codes.seen + convert_frame.output_codes.seen
