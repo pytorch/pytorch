@@ -54,11 +54,13 @@ from torch.testing._internal.common_methods_invocations import (
     unary_ufuncs,
 )
 from torch.testing._internal.common_utils import (
+    getRocmVersion,
     IS_FBCODE,
     IS_WINDOWS,
     parametrize,
     skipIfTorchDynamo,
     TEST_WITH_ASAN,
+    TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.testing._internal.opinfo.core import _filter_unary_elementwise_tensor
@@ -569,6 +571,14 @@ ROCM_RELAXED_PROPERTY_CASES = {
         },
     },
 }
+
+if TEST_WITH_ROCM and getRocmVersion() >= (7, 14):
+    # ROCm 7.14 fixes log10 strict numerics but still needs default-mode tolerance.
+    del ROCM_UNARY_NUMERICAL_XFAILS["inductor_numerics"]["log10"]
+    ROCM_RELAXED_PROPERTY_CASES["unary_numerical"]["inductor_default"]["log10"] = {
+        fp16,
+        fp32,
+    }
 
 
 def is_expected_failure(device_type, op_name, backend, test_type, dtype=None):
