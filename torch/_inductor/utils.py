@@ -4752,6 +4752,8 @@ def should_fallback_by_default(node: torch.fx.Node) -> bool:
             # `.item()` returns a Scalar, which cannot be serialized as a generic
             # fallback kernel; route it to its dedicated DynamicScalar lowering.
             torch.ops.aten._local_scalar_dense.default,
+            # `x.stride(dim)` returns a SymInt too; same symbolic handling as sym_size.
+            torch.ops.aten.sym_stride.int,
         ]
     )
 
