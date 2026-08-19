@@ -82,6 +82,20 @@ def empty_cache() -> None:
     torch._C._mps_emptyCache()
 
 
+def clear_graph_cache() -> None:
+    r"""Releases all cached MPSGraph objects and their compiled executables.
+
+    The MPS backend caches compiled graph definitions to avoid recompilation
+    on repeated calls. This function clears that cache, releasing the
+    associated Metal compiler resources. Subsequent operations will trigger
+    recompilation.
+
+    Use this when you need to reclaim memory held by the Metal compiler
+    cache (e.g., after running many different model configurations).
+    """
+    torch._C._mps_clearGraphCache()
+
+
 def set_per_process_memory_fraction(fraction) -> None:
     r"""Set memory fraction for limiting process's memory allocation on MPS device.
     The allowed value equals the fraction multiplied by recommended maximum device memory
@@ -245,6 +259,7 @@ __all__ = [
     "set_rng_state",
     "synchronize",
     "empty_cache",
+    "clear_graph_cache",
     "set_per_process_memory_fraction",
     "current_allocated_memory",
     "driver_allocated_memory",
