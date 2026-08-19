@@ -2163,6 +2163,29 @@ def forward(self, x_1):
         )(x)
         self.assertEqual(fx_g_cpp.code.strip(), fx_g.code.strip())
 
+    def test_python_functionalization_to_dense(self):
+        maybe_disable = torch._C._ExcludeDispatchKeyGuard(
+            torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
+        )
+        inputs = [torch.randn(2, 3).to_sparse()]
+        if torch.backends.mkldnn.is_available():
+            inputs.append(torch.randn(2, 3).to_mkldnn())
+
+        for x in inputs:
+            for use_op in (False, True):
+                with maybe_disable, FunctionalTensorMode():
+                    x_wrapped = FunctionalTensor.to_functional(x)
+                    if use_op:
+                        out_wrapped = torch.ops.aten.to_dense.default(x_wrapped)
+                    else:
+                        out_wrapped = x_wrapped.to_dense()
+
+                out_unwrapped = out_wrapped.elem
+                torch._sync(out_unwrapped)
+                out = torch._from_functional_tensor(out_unwrapped)
+                self.assertEqual(out.layout, torch.strided)
+                self.assertEqual(out, x.to_dense())
+
     def test_python_functionalization_is_conj(self):
         def f(x):
             out = x.conj()

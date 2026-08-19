@@ -2,7 +2,6 @@
 import functools
 import inspect
 import logging
-import warnings
 
 import torch
 from torch.utils._ordered_set import OrderedSet
@@ -17,6 +16,7 @@ from ..pattern_matcher import (
 
 
 log = logging.getLogger(__name__)
+perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 aten = torch.ops.aten
 
 _scaled_dot_product_attention = aten.scaled_dot_product_attention
@@ -936,7 +936,7 @@ def _warn_tf32_disabled() -> None:
         and torch.backends.cuda.matmul.fp32_precision != "tf32"
         and torch.cuda.get_device_capability() >= (8, 0)
     ):
-        warnings.warn(
+        perf_hint_log.info(
             "TensorFloat32 tensor cores for float32 matrix multiplication available but not enabled. "
             "Skipping pattern matching to fused flash-attention. "
             "Consider setting `torch.set_float32_matmul_precision('high')` for better performance."
@@ -990,6 +990,17 @@ def _sfdp_params_check(match):
         ):
             return False
     return True
+
+
+def _sfdp_pattern_13_check(match):
+    if not _sfdp_params_check(match):
+        return False
+    permutes = filter_nodes(match.nodes, aten.permute.default)
+    if len(permutes) != 1:
+        return False
+    # The serialized pattern wildcard-matches the permute dimensions.
+    permute_dims = permutes[0].args[1]
+    return isinstance(permute_dims, (list, tuple)) and tuple(permute_dims) == (0, 2, 1)
 
 
 def _sfdp_extra_check(scale_factor_op=None, disable_cuda=False):
@@ -1210,7 +1221,7 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
                 _sfdp_replacement_13,
                 [g_3d(), g_3d(), g_3d()],
                 d,
-                _sfdp_params_check,
+                _sfdp_pattern_13_check,
             ),
             (
                 _sfdp_pattern_14,

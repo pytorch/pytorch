@@ -17,20 +17,10 @@ on:
     paths: [.github/workflows/create_release.yml]
 
 jobs:
-  get-label-type:
-    if: github.repository_owner == 'pytorch'
-    name: get-label-type
-    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
-    with:
-      triggering_actor: ${{ github.triggering_actor }}
-      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
-      curr_branch: ${{ github.head_ref || github.ref_name }}
-      curr_ref_type: ${{ github.ref_type }}
-
   release:
     if: ${{ github.repository == 'pytorch/pytorch' }}
     name: Create Release
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # https://github.com/softprops/action-gh-release?tab=readme-ov-file#permissions
     permissions:
       contents: write
@@ -122,13 +112,12 @@ jobs:
 
   upload_source_code_to_s3:
     if: ${{ github.repository == 'pytorch/pytorch' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && contains(github.ref, 'rc') }}
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
+    runs-on: ubuntu-24.04
     environment: sourcecode-upload
     name: Upload source code to S3 for release tags
     permissions:
       id-token: write
     needs:
-      - get-label-type
       - release
     steps:
       - uses: actions/download-artifact@65a9edc5881444af0b9093a5e628f2fe47ea3b2e # v4.1.7
