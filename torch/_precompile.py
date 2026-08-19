@@ -2531,6 +2531,7 @@ class _PrecompileApi:
         require_complete: bool = True,
         require_no_risky_drops: bool = True,
         require_no_dropped_guards: bool = False,
+        guard_policy: str = "all",
         training: bool | None = None,
     ) -> tuple[str, bytes]:
         """Ahead-of-time precompile ``fn`` against example inputs.
@@ -2760,6 +2761,30 @@ class _PrecompileApi:
                     "form. Drop tracer='make_fx', or pass positional example "
                     "arguments to get a single make_fx trace."
                 )
+            keep_only = None
+            if guard_policy == "varying":
+                # Which guards discriminate is only knowable once every variant
+                # exists, and guards are serialized per compilation, as each one
+                # is produced. So learn it from a throwaway capture first, then
+                # capture again keeping only those. The examples fully determine
+                # the capture, so the second pass reproduces the first: measured
+                # identical on a 62-frame model (53 frames, 121 variants, no
+                # frame differing in variant count).
+                from torch._dynamo.precompile_package import varying_guard_slots
+
+                probe = _capture_session(
+                    fn,
+                    backend=backend,
+                    guard_filter_fn=guard_filter_fn,
+                    recompile_limit=recompile_limit,
+                    dynamic=dynamic,
+                    example_inputs=example_inputs,
+                    training=bool(training),
+                )
+                with probe:
+                    pass
+                keep_only = varying_guard_slots(probe._guard_sets)
+                torch._dynamo.reset()
             session = PrecompileSession(
                 _capture_session(
                     fn,
@@ -2769,6 +2794,7 @@ class _PrecompileApi:
                     dynamic=dynamic,
                     example_inputs=example_inputs,
                     invariants=invariants,
+                    keep_only=keep_only,
                     training=bool(training),
                 )
             )

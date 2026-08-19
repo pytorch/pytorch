@@ -298,6 +298,16 @@ class _PrecompileTrainMod(torch.nn.Module):
         return torch.relu(self.b(torch.relu(self.a(x))))
 
 
+def _precompile_scaled(x, k):
+    return x * k
+
+
+def _precompile_branchy(x, flag):
+    if flag:
+        return (x * 2).sum()
+    return (x + 1).sum()
+
+
 def _precompile_call_model(model, x):
     return model(x)
 
@@ -2424,6 +2434,58 @@ class TestPrecompile(TestCase):
             out.backward()
         for want, param in zip(reference, model.parameters()):
             self.assertEqual(want, param.grad)
+
+    def test_guard_policy_varying_drops_guards_that_never_varied(self):
+        # k is the same in every example, so nothing depends on its guard to
+        # pick a variant. Under guard_policy="varying" it is not serialized,
+        # and an uncovered k therefore serves the captured graph rather than
+        # raising -- the documented trade the policy makes.
+        from torch._precompile import _parse_artifact_metadata
+
+        xs = [torch.randn(3), torch.randn(5)]
+        examples = [(x, 2) for x in xs]
+        sizes = {}
+        for policy in ("all", "varying"):
+            torch._dynamo.reset()
+            code, cache = torch.compiler.precompile(
+                _precompile_scaled,
+                backend="eager",
+                dynamic=False,
+                example_inputs=examples,
+                guard_policy=policy,
+            )
+            sizes[policy] = len(code)
+            self.assertEqual(_parse_artifact_metadata(code)["TRACER"], "dynamo")
+            torch._dynamo.reset()
+            loaded = torch.compiler.precompile.load(code, cache)
+            x = torch.randn(3)
+            with torch.no_grad():
+                self.assertEqual(loaded(x, 2), x * 2)
+                if policy == "all":
+                    with self.assertRaisesRegex(RuntimeError, "no captured variant"):
+                        loaded(x, 5)
+                else:
+                    self.assertEqual(loaded(x, 5), x * 2)
+        self.assertLess(sizes["varying"], sizes["all"])
+
+    def test_guard_policy_varying_keeps_what_discriminates(self):
+        # flag DOES vary across the examples, so its guard is what selects
+        # between the two variants and must survive the policy.
+        x = torch.randn(4)
+        with torch.no_grad():
+            expected = {f: _precompile_branchy(x, f) for f in (False, True)}
+        code, cache = torch.compiler.precompile(
+            _precompile_branchy,
+            backend="eager",
+            dynamic=False,
+            example_inputs=[(x, False), (x, True)],
+            guard_policy="varying",
+        )
+        torch._dynamo.reset()
+        loaded = torch.compiler.precompile.load(code, cache)
+        with torch.no_grad():
+            for flag in (False, True):
+                self.assertEqual(loaded(x, flag), expected[flag])
 
     def test_multi_graph_installed_entry_with_closure_is_refused(self):
         # An installed artifact rebuilds the entry from its code object, and
