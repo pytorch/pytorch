@@ -11,12 +11,14 @@ from torch._inductor import config as inductor_config
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_cuda import tf32_on_and_off
 from torch.testing._internal.common_device_type import (
-    Capability,
     instantiate_device_type_tests,
-    requires_capabilities,
+    skipCPUIf,
+    skipCUDAIf,
+    skipXPUIf,
 )
 from torch.testing._internal.common_utils import HardwareClassification
 from torch.testing._internal.inductor_utils import HAS_CPU
+from torch.utils._triton import has_triton
 
 
 importlib.import_module("functorch")
@@ -91,7 +93,9 @@ class MultiUserConvOp(nn.Module):
 class EfficientConvBNEvalTests(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @requires_capabilities(Capability.lib.triton)
+    @skipCPUIf(not HAS_CPU, "requires C++ compiler")
+    @skipCUDAIf(not has_triton(), "requires triton")
+    @skipXPUIf(not has_triton(), "requires triton")
     @tf32_on_and_off(0.003)
     @inductor_config.patch({"efficient_conv_bn_eval_fx_passes": True})
     def test_functional_batch_norm_defaults(self, device):
@@ -112,7 +116,9 @@ class EfficientConvBNEvalTests(TestCase):
         opt = torch.compile(mod, backend="inductor")
         opt(x, mean, var)
 
-    @requires_capabilities(Capability.lib.triton)
+    @skipCPUIf(not HAS_CPU, "requires C++ compiler")
+    @skipCUDAIf(not has_triton(), "requires triton")
+    @skipXPUIf(not has_triton(), "requires triton")
     @tf32_on_and_off(0.003)
     @inductor_config.patch({"efficient_conv_bn_eval_fx_passes": True})
     def test_fx_graph_batch_norm_defaults(self, device):
@@ -154,7 +160,9 @@ class EfficientConvBNEvalTests(TestCase):
         expected = gm(inp_tensor, mean_tensor, var_tensor)
         self.assertEqual(out, expected)
 
-    @requires_capabilities(Capability.lib.triton)
+    @skipCPUIf(not HAS_CPU, "requires C++ compiler")
+    @skipCUDAIf(not has_triton(), "requires triton")
+    @skipXPUIf(not has_triton(), "requires triton")
     @tf32_on_and_off(0.003)
     @inductor_config.patch({"efficient_conv_bn_eval_fx_passes": True})
     @functorch_config.patch({"enable_autograd_cache": False})
@@ -263,10 +271,15 @@ class EfficientConvBNEvalTests(TestCase):
             )
 
 
-instantiate_device_type_tests(EfficientConvBNEvalTests, globals(), allow_xpu=True)
+instantiate_device_type_tests(
+    EfficientConvBNEvalTests,
+    globals(),
+    allow_xpu=True,
+    except_for="cpu" if torch.backends.mps.is_available() else None,
+)
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_CPU:
+    if HAS_CPU or has_triton():
         run_tests(needs="filelock")
