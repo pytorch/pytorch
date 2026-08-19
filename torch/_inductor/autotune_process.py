@@ -1725,7 +1725,8 @@ class AsyncAutotuner:
         Get autotuning results, blocking until complete.
 
         Args:
-            timeout: Maximum time to wait in seconds. None means wait forever.
+            choices: Candidate choices whose scheduled results should be collected.
+            inputs_key: Cache key used to identify each choice's Future.
 
         Returns:
             Dict mapping ChoiceCaller to benchmark timing
@@ -1734,5 +1735,12 @@ class AsyncAutotuner:
         timings = {}
         for choice in choices:
             choice_hash = AsyncAutotuner.get_choice_hash(choice, inputs_key)
-            timings[choice] = AsyncAutotuner.choice_hash_to_future[choice_hash].result()
+            future = AsyncAutotuner.choice_hash_to_future.get(choice_hash)
+            if future is None:
+                autotuning_log.debug(
+                    "Skipping choice without a scheduled autotuning Future: %s",
+                    choice_hash,
+                )
+                continue
+            timings[choice] = future.result()
         return timings

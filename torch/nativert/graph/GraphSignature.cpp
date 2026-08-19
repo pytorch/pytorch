@@ -158,7 +158,7 @@ void checkOutputNames(
   }
 
   for (const auto& name : validNames) {
-    if (graphNames.find(name) == graphNames.end()) {
+    if (!graphNames.contains(name)) {
       std::string errorMsg = fmt::format(
           "Error: Value name difference detected between graph signature and graph nodes:\n"
           "Signature value names:\n[{}]\n"
