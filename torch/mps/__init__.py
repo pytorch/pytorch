@@ -239,82 +239,129 @@ def _host_alias_storage(storage: "torch.UntypedStorage") -> "torch.UntypedStorag
 from contextlib import contextmanager
 
 
-@contextmanager
-def metal_graph_capture():
-    r"""Context manager that records a sequence of MPS operations
-    for later replay via :func:`metal_graph_replay`.
+class MetalGraph:
+    r"""Wraps a captured sequence of MPS operations for repeated replay.
 
-    On entry the stream begins recording; every op executed inside
-    the block is encoded normally (outputs are valid) and its executable +
-    buffer bindings are saved. On exit recording stops. The block yields an
-    opaque handle (via ``as``) identifying this particular capture; pass it to
-    :func:`metal_graph_replay` to replay it, and to :func:`metal_graph_free`
-    to release its retained buffers/executables once it is no longer needed.
+    Mirrors :class:`torch.cuda.CUDAGraph`. The captured resources (compiled
+    executables and retained buffers) are owned by this object and released when
+    it is garbage collected, so dropping the graph is sufficient to free them.
+    :meth:`reset` releases them eagerly.
 
-    Subsequent calls to :func:`metal_graph_replay` re-encode all saved ops in a
-    single ``dispatch_sync`` block, collapsing N per-op dispatches to one and
-    eliminating their CPU overhead.
+    Every op run inside the :func:`metal_graph` block is encoded normally, so the
+    capture pass produces valid outputs, and its executable plus buffer bindings
+    are recorded. :meth:`replay` re-encodes all recorded ops inside a single
+    ``dispatch_sync``, collapsing N per-op dispatches into one.
 
-    Constraints (identical to ``torch.cuda.graph``):
+    Constraints:
 
     * Tensor shapes must not change between the capture pass and replays.
     * Input data must be updated **in-place** via ``.copy_()`` before each
       replay - do **not** create new tensors or reassign variables. This only
       propagates for buffer-backed inputs; scalar / 0-dim tensor inputs are
       encoded via ``setBytes`` at capture time and are **frozen** on replay.
-      Materialize scalars as 1-element tensors to make them buffer-backed if
-      you need to vary them across replays.
+      Materialize scalars as 1-element tensors to make them buffer-backed if you
+      need to vary them across replays.
+    * Do not let ANY MPS tensor go out of scope, anywhere in the process,
+      between capturing a graph and its last replay - not just tensors
+      obviously related to this graph. Unlike :class:`torch.cuda.CUDAGraph`
+      there is no private memory pool behind a capture, so replay re-binds the
+      exact buffers seen during capture by address, not by tensor identity.
+      Even a single multi-op expression like ``x * 2 + 1`` allocates an
+      invisible intermediate that is freed the moment the capture block exits;
+      if any later allocation (including one that has nothing to do with this
+      graph, e.g. a tensor built for comparison in test code) reuses that
+      freed address, every subsequent replay silently overwrites it. The safe
+      rule is not "keep this graph's own tensors alive" but "do not free
+      anything on MPS while any captured graph you intend to replay again is
+      still live" - for example by holding every relevant tensor and graph in
+      one object that outlives the replay loop.
+    * Random number generation is not supported inside a capture: the philox seed
+      and offset are recorded as fixed bytes, so replays would repeat the capture
+      pass's values. Ops that consume the MPS generator raise inside a capture.
     * MPS profiling must be disabled during capture.
-    * Multiple independent captures may be alive at once, each replayed and
-      freed via its own handle. Recording itself is exclusive: nesting
-      ``metal_graph_capture()`` blocks raises ``RuntimeError``.
+    * Ops that encode opaque MPS-framework kernels or fall back to CPU cannot be
+      recorded, and raise inside a capture block rather than silently producing a
+      graph that omits them.
+
+    Multiple graphs may be alive at once and are fully independent. Recording is
+    exclusive, so beginning a capture while another is recording raises
+    ``RuntimeError``.
 
     Example::
 
-        model_a.eval()
-        model_b.eval()
-        x1 = torch.randn(batch, seq, d_model, device="mps")
-        x2 = torch.randn(batch, seq, d_model, device="mps")
+        g = torch.mps.MetalGraph()
+        x = torch.randn(batch, seq, d_model, device="mps")
 
-        with torch.mps.metal_graph_capture() as g1:
-            out1 = model_a(x1)  # runs once; ops recorded
-        with torch.mps.metal_graph_capture() as g2:
-            out2 = model_b(x2)  # independent of g1
+        with torch.mps.metal_graph(g):
+            out = model(x)  # runs once; ops recorded
 
-        for batch1, batch2 in loader:
-            x1.copy_(batch1)  # update inputs in-place
-            x2.copy_(batch2)
-            torch.mps.metal_graph_replay(g1)
-            torch.mps.metal_graph_replay(g2)
-            results.append((out1.cpu(), out2.cpu()))
-
-        torch.mps.metal_graph_free(g1)
-        torch.mps.metal_graph_free(g2)
+        for data in loader:
+            x.copy_(data)  # update inputs in-place
+            g.replay()
+            results.append(out.cpu())
     """
-    handle = torch._C._mps_metalGraphCaptureBegin()
+
+    def __init__(self) -> None:
+        self._graph = torch._C._MetalGraph()
+
+    def capture_begin(self) -> None:
+        r"""Begins recording. Prefer the :func:`metal_graph` context manager,
+        which pairs this with :meth:`capture_end` even if the block raises."""
+        self._graph.capture_begin()
+
+    def capture_end(self) -> None:
+        r"""Stops recording."""
+        self._graph.capture_end()
+
+    def replay(self) -> None:
+        r"""Re-encodes every recorded op in a single dispatch. Inputs must have
+        been updated in-place beforehand."""
+        self._graph.replay()
+
+    def reset(self) -> None:
+        r"""Releases the captured resources now instead of waiting for this
+        object to be collected. Safe to call more than once."""
+        self._graph.reset()
+
+    def step_count(self) -> int:
+        r"""Number of recorded ops, or 0 if nothing has been captured."""
+        return self._graph.step_count()
+
+    def is_captured(self) -> bool:
+        r"""Whether this graph currently holds a capture."""
+        return self._graph.is_captured()
+
+
+def is_current_stream_capturing() -> bool:
+    r"""Returns True if a :class:`MetalGraph` capture is currently recording on
+    the current MPS stream.
+
+    Mirrors :func:`torch.cuda.is_current_stream_capturing`. Useful for code that
+    must take a capture-safe path, since ops that cannot be recorded raise while
+    a capture is in progress.
+    """
+    return torch._C._mps_isCurrentStreamCapturing()
+
+
+@contextmanager
+def metal_graph(g: "MetalGraph"):
+    r"""Context manager that records everything executed inside it into ``g``.
+
+    Mirrors :func:`torch.cuda.graph`. See :class:`MetalGraph` for constraints and
+    a full example.
+
+    Example::
+
+        g = torch.mps.MetalGraph()
+        with torch.mps.metal_graph(g):
+            out = model(x)
+        g.replay()
+    """
+    g.capture_begin()
     try:
-        yield handle
+        yield g
     finally:
-        torch._C._mps_metalGraphCaptureEnd()
-
-
-def metal_graph_replay(handle: int) -> None:
-    r"""Replays the ops recorded by the :func:`metal_graph_capture` block that
-    produced ``handle``.
-
-    All captured ops are encoded to the command buffer inside a single
-    ``dispatch_sync``, eliminating per-op dispatch overhead. Input tensors must
-    have been updated in-place before calling this function.
-    """
-    torch._C._mps_metalGraphReplay(handle)
-
-
-def metal_graph_free(handle: int) -> None:
-    r"""Releases the resources (compiled executables, retained buffers) held by
-    the completed capture identified by ``handle``. Do not reuse ``handle``
-    after calling this.
-    """
-    torch._C._mps_metalGraphCaptureFree(handle)
+        g.capture_end()
 
 
 from . import profiler
@@ -326,9 +373,9 @@ __all__ = [
     "load_metallib",
     "device_count",
     "get_rng_state",
-    "metal_graph_capture",
-    "metal_graph_replay",
-    "metal_graph_free",
+    "MetalGraph",
+    "metal_graph",
+    "is_current_stream_capturing",
     "manual_seed",
     "seed",
     "set_rng_state",

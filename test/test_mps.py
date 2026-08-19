@@ -17642,7 +17642,7 @@ class TestMetalLibrary(TestCaseMPS):
 
 
 class TestGraphCapture(TestCaseMPS):
-    """Tests for torch.mps.metal_graph_capture / metal_graph_replay.
+    """Tests for torch.mps.MetalGraph / torch.mps.metal_graph.
 
     Capture records all MPS ops: both MPSGraph-routed ops (matmul, linear, etc.)
     and raw Metal kernel dispatches (elementwise +, *, sigmoid, etc.) via the
@@ -17652,17 +17652,21 @@ class TestGraphCapture(TestCaseMPS):
     def _simple_model(self, x):
         return torch.relu(x @ x)
 
-    def test_replay_matches_eager(self):
-        # Output from replay must match a fresh eager call on the same input.
-        x = torch.randn(16, 16, device="mps")
-        expected = self._simple_model(x)
-
-        with torch.mps.metal_graph_capture() as g:
+    def test_replay_reruns_the_captured_work(self):
+        # A replay must actually re-execute the recorded ops, so this changes the
+        # input in place between capture and replay. Asserting only that the
+        # capture-pass output matches eager would pass even with the replay
+        # removed, since the capture pass executes normally.
+        x = torch.ones(16, 16, device="mps")
+        g = torch.mps.MetalGraph()
+        with torch.mps.metal_graph(g):
             out = self._simple_model(x)
+        self.assertEqual(out[0, 0].item(), 16.0)  # relu(ones @ ones)[0,0] = 16
 
-        torch.mps.metal_graph_replay(g)
-        self.assertEqual(out, expected)
-        torch.mps.metal_graph_free(g)
+        x.copy_(torch.full((16, 16), 2.0, device="mps"))
+        g.replay()
+        self.assertEqual(out[0, 0].item(), 64.0)  # relu(2s @ 2s)[0,0] = 4*16
+        g.reset()
 
     def test_inplace_input_update_respected(self):
         # After updating input in-place, replay must produce the new result.
@@ -17671,16 +17675,17 @@ class TestGraphCapture(TestCaseMPS):
         x = torch.ones(8, 8, device="mps")
         x2 = torch.full((8, 8), 2.0, device="mps")
 
-        with torch.mps.metal_graph_capture() as g:
+        g = torch.mps.MetalGraph()
+        with torch.mps.metal_graph(g):
             out = self._simple_model(x)
 
         self.assertEqual(out[0, 0].item(), 8.0)  # relu(ones @ ones)[0,0] = 8
 
         x.copy_(x2)
-        torch.mps.metal_graph_replay(g)
+        g.replay()
 
         self.assertEqual(out[0, 0].item(), 32.0)  # relu(2s @ 2s)[0,0] = 32
-        torch.mps.metal_graph_free(g)
+        g.reset()
 
     def test_multiple_replays_independent(self):
         # N successive replays after distinct in-place updates each produce
@@ -17689,14 +17694,15 @@ class TestGraphCapture(TestCaseMPS):
         x2 = torch.full((4, 4), 2.0, device="mps")
         x3 = torch.full((4, 4), 3.0, device="mps")
 
-        with torch.mps.metal_graph_capture() as g:
+        g = torch.mps.MetalGraph()
+        with torch.mps.metal_graph(g):
             out = self._simple_model(x)
 
         for val, expected_val in [(x2, 16.0), (x3, 36.0), (x2, 16.0)]:
             x.copy_(val)
-            torch.mps.metal_graph_replay(g)
+            g.replay()
             self.assertEqual(out[0, 0].item(), expected_val)
-        torch.mps.metal_graph_free(g)
+        g.reset()
 
     def test_multi_op_chain(self):
         # Capture a longer MPSGraph-routed chain (matmul + layer_norm + relu)
@@ -17711,86 +17717,100 @@ class TestGraphCapture(TestCaseMPS):
             h = torch.nn.functional.layer_norm(h, [d])
             return torch.relu(h)
 
-        with torch.mps.metal_graph_capture() as g:
+        g = torch.mps.MetalGraph()
+        with torch.mps.metal_graph(g):
             out = model(x)
 
         x.copy_(x2)
-        torch.mps.metal_graph_replay(g)
+        g.replay()
 
         expected = model(x2.clone())
         self.assertEqual(out, expected, atol=1e-5, rtol=1e-5)
-        torch.mps.metal_graph_free(g)
+        g.reset()
 
-    def test_replay_without_capture_warns(self):
-        # replay() on a capture with no recorded ops must be a no-op (C++
-        # TORCH_WARN to stderr), not raise an exception.
-        with torch.mps.metal_graph_capture() as g:
+    def test_replay_semantics_match_cudagraph(self):
+        # Replaying a graph that never captured raises, matching
+        # CUDAGraph::replay()'s "Called CUDAGraph::replay without a preceding
+        # successful capture." An empty-but-completed capture is instead a no-op,
+        # the same as replaying an empty CUDA graph.
+        never_captured = torch.mps.MetalGraph()
+        with self.assertRaisesRegex(RuntimeError, "nothing captured"):
+            never_captured.replay()
+
+        empty = torch.mps.MetalGraph()
+        with torch.mps.metal_graph(empty):
             pass
-        torch.mps.metal_graph_replay(g)  # must not raise
-        torch.mps.metal_graph_free(g)
+        empty.replay()  # completed, recorded nothing: no-op rather than an error
+        self.assertEqual(empty.step_count(), 0)
+        empty.reset()
 
     def test_nn_linear_captured(self):
-        # nn.Linear (addmm) must be captured: with the MPSGraph path active during
-        # capture, the nograph shortcut is skipped and the op goes through executeMPSGraph.
+        # nn.Linear must be replayable. Which internal path it takes is an
+        # implementation detail; what matters is that replay re-runs it against
+        # updated input rather than silently omitting it.
         d = 8
+        torch.manual_seed(0)
         linear = torch.nn.Linear(d, d, bias=False, device="mps")
         x = torch.ones(4, d, device="mps")
         x2 = torch.full((4, d), 2.0, device="mps")
 
-        with torch.mps.metal_graph_capture() as g:
+        g = torch.mps.MetalGraph()
+        with torch.mps.metal_graph(g):
             out = linear(x)
         captured_val = out[0, 0].item()
+        # The 2x relation below is self-satisfying near zero, so require a value
+        # far enough from 0 for it to mean something.
+        self.assertGreater(abs(captured_val), 1e-2)
 
         x.copy_(x2)
-        torch.mps.metal_graph_replay(g)
+        g.replay()
         replayed_val = out[0, 0].item()
 
-        # After updating input to 2s the output must change (2x the original).
+        # After updating input to 2s the output must be 2x (bias-free linear).
         self.assertAlmostEqual(replayed_val, captured_val * 2.0, places=4)
-        torch.mps.metal_graph_free(g)
+        g.reset()
 
     def test_capture_produces_valid_output_on_first_pass(self):
         # The capture pass itself must produce valid (non-garbage) output.
         x = torch.randn(8, 8, device="mps")
         expected = self._simple_model(x)
 
-        with torch.mps.metal_graph_capture() as g:
+        g = torch.mps.MetalGraph()
+        with torch.mps.metal_graph(g):
             out = self._simple_model(x)
 
         self.assertEqual(out, expected)
-        torch.mps.metal_graph_free(g)
+        g.reset()
 
     def test_transformer_encoder_correctness(self):
-        # TransformerEncoderLayer uses both MPSGraph ops and raw Metal kernels.
-        # With the MPSRecordingEncoder wrapper, all ops are captured.
-        # Known issue: replay with new input diverges for TransformerEncoder
-        # (likely SDPA internal temporaries not bound to captured buffers).
-        # Capture pass correctness and replay stability are verified here;
-        # full replay-with-new-input correctness is covered by test_mlp_correctness.
+        # TransformerEncoderLayer exercises both MPSGraph-routed ops and raw Metal
+        # kernels, so it covers the MPSRecordingEncoder path end to end. Replay
+        # against a new input must equal eager on that input: capture and replay
+        # run the same ops against the same buffers, so there is no reason for any
+        # divergence.
         d_model, nhead, seq, batch = 64, 4, 16, 2
         layer = torch.nn.TransformerEncoderLayer(
             d_model=d_model, nhead=nhead, dim_feedforward=128,
             batch_first=True, norm_first=True,
         ).to("mps").eval()
         x = torch.randn(batch, seq, d_model, device="mps")
+        x2 = torch.randn(batch, seq, d_model, device="mps")
 
         with torch.no_grad():
-            eager_out = layer(x).cpu()
+            eager_out = layer(x)
 
-        with torch.mps.metal_graph_capture() as g:
-            with torch.no_grad():
-                cap_out = layer(x)
-        self.assertTrue(
-            torch.allclose(eager_out, cap_out.cpu(), atol=1e-4, rtol=1e-4),
-            f"capture vs eager max_diff={(eager_out - cap_out.cpu()).abs().max():.5f}",
-        )
+        g = torch.mps.MetalGraph()
+        with torch.no_grad(), torch.mps.metal_graph(g):
+            cap_out = layer(x)
+        self.assertEqual(cap_out, eager_out, atol=1e-4, rtol=1e-4)
 
-        # Replay must not crash and must produce finite values.
-        torch.mps.metal_graph_replay(g)
-        result = cap_out.cpu()
-        self.assertFalse(result.isnan().any(), "replay produced NaN")
-        self.assertFalse(result.isinf().any(), "replay produced Inf")
-        torch.mps.metal_graph_free(g)
+        # Replay against a fresh input must match eager on that same input.
+        x.copy_(x2)
+        g.replay()
+        with torch.no_grad():
+            expected = layer(x2)
+        self.assertEqual(cap_out, expected, atol=1e-4, rtol=1e-4)
+        g.reset()
 
     def test_mlp_correctness(self):
         # Deep MLP (Linear + ReLU stack): capture + replay numerically match eager.
@@ -17804,7 +17824,8 @@ class TestGraphCapture(TestCaseMPS):
         with torch.no_grad():
             eager_out = model(x).cpu()
 
-        with torch.mps.metal_graph_capture() as g:
+        g = torch.mps.MetalGraph()
+        with torch.mps.metal_graph(g):
             with torch.no_grad():
                 cap_out = model(x)
         self.assertTrue(
@@ -17812,12 +17833,16 @@ class TestGraphCapture(TestCaseMPS):
             f"capture vs eager max_diff={(eager_out - cap_out.cpu()).abs().max():.6f}",
         )
 
-        torch.mps.metal_graph_replay(g)
+        # Scribble the output first: replaying with an unchanged input and
+        # re-asserting the capture-pass value would pass even if replay did
+        # nothing at all.
+        cap_out.fill_(float("nan"))
+        g.replay()
         self.assertTrue(
             torch.allclose(eager_out, cap_out.cpu(), atol=1e-4, rtol=1e-4),
             f"replay vs eager max_diff={(eager_out - cap_out.cpu()).abs().max():.6f}",
         )
-        torch.mps.metal_graph_free(g)
+        g.reset()
 
     def test_embedding_correctness(self):
         # Embedding lookup: capture + replay must produce identical output to eager.
@@ -17828,7 +17853,8 @@ class TestGraphCapture(TestCaseMPS):
         with torch.no_grad():
             eager_out = emb(idx).cpu()
 
-        with torch.mps.metal_graph_capture() as g:
+        g = torch.mps.MetalGraph()
+        with torch.mps.metal_graph(g):
             with torch.no_grad():
                 cap_out = emb(idx)
         self.assertTrue(
@@ -17836,12 +17862,14 @@ class TestGraphCapture(TestCaseMPS):
             f"capture vs eager max_diff={(eager_out - cap_out.cpu()).abs().max():.6f}",
         )
 
-        torch.mps.metal_graph_replay(g)
+        # Scribble first, so a replay that did nothing would be caught.
+        cap_out.fill_(float("nan"))
+        g.replay()
         self.assertTrue(
             torch.allclose(eager_out, cap_out.cpu()),
             f"replay vs eager max_diff={(eager_out - cap_out.cpu()).abs().max():.6f}",
         )
-        torch.mps.metal_graph_free(g)
+        g.reset()
 
     def test_capture_reset_and_recapture(self):
         # reset must allow a fresh capture with a different computation, and
@@ -17849,7 +17877,8 @@ class TestGraphCapture(TestCaseMPS):
         x = torch.ones(4, 4, device="mps")
         x2 = torch.full((4, 4), 3.0, device="mps")
 
-        with torch.mps.metal_graph_capture() as g1:
+        g1 = torch.mps.MetalGraph()
+        with torch.mps.metal_graph(g1):
             out1 = x @ x
         first_val = out1[0, 0].item()  # 4.0
 
@@ -17857,36 +17886,40 @@ class TestGraphCapture(TestCaseMPS):
 
         # g1 was freed by the reset; replaying it must now raise.
         with self.assertRaises(RuntimeError):
-            torch.mps.metal_graph_replay(g1)
+            g1.replay()
 
         # Recapture a different computation.
-        with torch.mps.metal_graph_capture() as g2:
+        g2 = torch.mps.MetalGraph()
+        with torch.mps.metal_graph(g2):
             out2 = x2 @ x2
         second_val = out2[0, 0].item()  # 36.0
 
         self.assertAlmostEqual(first_val, 4.0, places=4)
         self.assertAlmostEqual(second_val, 36.0, places=4)
 
-        # Replaying the new capture must produce the second result, not the first.
-        torch.mps.metal_graph_replay(g2)
+        # Replaying the new capture must recompute the second result, not simply
+        # leave the capture-pass value in place.
+        out2.fill_(float("nan"))
+        g2.replay()
         self.assertAlmostEqual(out2[0, 0].item(), 36.0, places=4)
-        torch.mps.metal_graph_free(g2)
+        g2.reset()
 
     def test_nested_capture_raises(self):
         # captureBegin() while already capturing must raise, not silently corrupt state.
         handle = torch._C._mps_metalGraphCaptureBegin()
         with self.assertRaises(RuntimeError):
             torch._C._mps_metalGraphCaptureBegin()
-        torch._C._mps_metalGraphCaptureEnd()
+        torch._C._mps_metalGraphCaptureEnd(handle)
         torch._C._mps_metalGraphCaptureFree(handle)
 
     def test_nested_capture_context_manager_raises(self):
-        # Nesting metal_graph_capture() context managers must raise: recording
-        # is exclusive even though multiple independent (non-nested) captures
-        # are allowed.
+        # Nesting metal_graph() context managers must raise: recording is
+        # exclusive even though multiple independent (non-nested) captures are
+        # allowed.
+        outer, inner = torch.mps.MetalGraph(), torch.mps.MetalGraph()
         with self.assertRaises(RuntimeError):
-            with torch.mps.metal_graph_capture():
-                with torch.mps.metal_graph_capture():
+            with torch.mps.metal_graph(outer):
+                with torch.mps.metal_graph(inner):
                     pass
 
     def test_multiple_independent_graphs(self):
@@ -17895,24 +17928,31 @@ class TestGraphCapture(TestCaseMPS):
         x1 = torch.randn(4, 4, device="mps")
         x2 = torch.randn(8, 8, device="mps")
 
-        with torch.mps.metal_graph_capture() as g1:
+        g1 = torch.mps.MetalGraph()
+        with torch.mps.metal_graph(g1):
             out1 = x1 @ x1
-        with torch.mps.metal_graph_capture() as g2:
+        g2 = torch.mps.MetalGraph()
+        with torch.mps.metal_graph(g2):
             out2 = x2 @ x2
 
         expected1 = x1.clone() @ x1.clone()
         expected2 = x2.clone() @ x2.clone()
 
-        torch.mps.metal_graph_replay(g2)
-        torch.mps.metal_graph_replay(g1)
+        # Scribble both outputs so a replay that did nothing, or that replayed the
+        # wrong graph, cannot pass by leaving the capture-pass values in place.
+        out1.fill_(float("nan"))
+        out2.fill_(float("nan"))
+        g2.replay()
+        g1.replay()
         self.assertEqual(out1, expected1)
         self.assertEqual(out2, expected2)
 
-        torch.mps.metal_graph_free(g1)
-        # g2 must still be usable after g1 is freed.
-        torch.mps.metal_graph_replay(g2)
+        g1.reset()
+        # g2 must still be usable after g1 is freed, and must still recompute.
+        out2.fill_(float("nan"))
+        g2.replay()
         self.assertEqual(out2, expected2)
-        torch.mps.metal_graph_free(g2)
+        g2.reset()
 
     def test_capture_rejects_when_profiling_enabled(self):
         # captureBegin() must fail loud when MPSProfiler operation profiling is
@@ -17923,7 +17963,7 @@ class TestGraphCapture(TestCaseMPS):
                 torch._C._mps_metalGraphCaptureBegin()
         # After the profiler stops, capture must be usable again.
         handle = torch._C._mps_metalGraphCaptureBegin()
-        torch._C._mps_metalGraphCaptureEnd()
+        torch._C._mps_metalGraphCaptureEnd(handle)
         torch._C._mps_metalGraphCaptureFree(handle)
 
     def test_blit_op_captured(self):
@@ -17931,13 +17971,14 @@ class TestGraphCapture(TestCaseMPS):
         # compute encoder or MPSGraph. It must be recorded and replay correctly.
         a = torch.randn(64, 128, device="mps")
         b = torch.randn(64, 128, device="mps")
-        with torch.mps.metal_graph_capture() as g:
+        g = torch.mps.MetalGraph()
+        with torch.mps.metal_graph(g):
             out = torch.cat([a, b], dim=0)
         a.copy_(torch.randn_like(a))
         b.copy_(torch.randn_like(b))
-        torch.mps.metal_graph_replay(g)
+        g.replay()
         self.assertEqual(out, torch.cat([a, b], dim=0))
-        torch.mps.metal_graph_free(g)
+        g.reset()
 
     def test_threadgroup_memory_kernel_captured(self):
         # Batched small eigh uses the on-GPU jacobi kernel, which binds dynamic
@@ -17947,13 +17988,32 @@ class TestGraphCapture(TestCaseMPS):
             g = torch.randn(8, 64, 64, device="mps")
             return (g + g.transpose(-1, -2)) / 2
         s = make(0)
-        with torch.mps.metal_graph_capture() as g:
+        g = torch.mps.MetalGraph()
+        with torch.mps.metal_graph(g):
             out = torch.linalg.eigh(s).eigenvalues
         s2 = make(1)
         s.copy_(s2)
-        torch.mps.metal_graph_replay(g)
+        g.replay()
         self.assertEqual(out, torch.linalg.eigh(s2).eigenvalues, atol=1e-2, rtol=1e-2)
-        torch.mps.metal_graph_free(g)
+        g.reset()
+
+    def test_advanced_indexing_captured(self):
+        # x[idx] with a Long index tensor references the index tensor's buffer
+        # only indirectly (its GPU address is embedded in an argument buffer),
+        # so the kernel declares it via useResource: rather than setBuffer:.
+        # That declaration must be recorded too, or replay risks dispatching
+        # without the index tensor's residency ever being (re-)declared.
+        x = torch.arange(16, dtype=torch.float32, device="mps")
+        idx = torch.tensor([0, 1, 2], dtype=torch.int64, device="mps")
+        g = torch.mps.MetalGraph()
+        with torch.mps.metal_graph(g):
+            out = x[idx]
+        x.copy_(torch.arange(100, 116, dtype=torch.float32, device="mps"))
+        idx.copy_(torch.tensor([5, 6, 7], dtype=torch.int64, device="mps"))
+        out.fill_(float("nan"))
+        g.replay()
+        self.assertEqual(out, torch.tensor([105.0, 106.0, 107.0], device="mps"))
+        g.reset()
 
     def test_uncapturable_op_fails_loud(self):
         # Ops that fall back to CPU (single-matrix eigh) or encode opaque MPS
@@ -17962,17 +18022,50 @@ class TestGraphCapture(TestCaseMPS):
         # wrong results on replay.
         sm = torch.randn(64, 64, device="mps")
         sm = (sm + sm.t()) / 2
-        with self.assertRaisesRegex(RuntimeError, "metal_graph_capture"):
-            with torch.mps.metal_graph_capture() as g1:
+        with self.assertRaisesRegex(RuntimeError, "metal_graph"):
+            g1 = torch.mps.MetalGraph()
+            with torch.mps.metal_graph(g1):
                 torch.linalg.eigh(sm)
-        torch.mps.metal_graph_free(g1)
+        g1.reset()
 
         tri = torch.tril(torch.randn(128, 128, device="mps")) + 5 * torch.eye(128, device="mps")
         rhs = torch.randn(128, 64, device="mps")
-        with self.assertRaisesRegex(RuntimeError, "metal_graph_capture"):
-            with torch.mps.metal_graph_capture() as g2:
+        with self.assertRaisesRegex(RuntimeError, "metal_graph"):
+            g2 = torch.mps.MetalGraph()
+            with torch.mps.metal_graph(g2):
                 torch.linalg.solve_triangular(tri, rhs, upper=False)
-        torch.mps.metal_graph_free(g2)
+        g2.reset()
+
+    def test_rng_op_inside_capture_raises(self):
+        # A captured randn/dropout would bake the philox seed and offset into
+        # the recorded dispatch, so every replay would draw the exact same
+        # values instead of fresh ones. Must raise rather than silently hand
+        # back non-random results.
+        with self.assertRaisesRegex(RuntimeError, "Random number generation"):
+            g = torch.mps.MetalGraph()
+            with torch.mps.metal_graph(g):
+                torch.randn(8, 8, device="mps")
+        g.reset()
+
+        x = torch.randn(8, 8, device="mps")
+        with self.assertRaisesRegex(RuntimeError, "Random number generation"):
+            g2 = torch.mps.MetalGraph()
+            with torch.mps.metal_graph(g2):
+                torch.nn.functional.dropout(x, p=0.5, training=True)
+        g2.reset()
+
+    def test_lstm_dropout_inside_capture_raises(self):
+        # LSTM's inter-layer dropout mask reaches update_philox_counters()
+        # directly rather than through set_offset(), so it needs the same
+        # capture guard for the same reason: a captured LSTM's dropout mask
+        # would otherwise be frozen across every replay.
+        lstm = torch.nn.LSTM(4, 4, num_layers=2, dropout=0.5).to("mps")
+        x = torch.randn(3, 2, 4, device="mps")
+        with self.assertRaisesRegex(RuntimeError, "Random number generation"):
+            g = torch.mps.MetalGraph()
+            with torch.mps.metal_graph(g):
+                lstm(x)
+        g.reset()
 
     def test_f16_capture(self):
         # f16 tensors must be captured and replayed correctly.
@@ -17981,30 +18074,32 @@ class TestGraphCapture(TestCaseMPS):
         x = torch.randn(8, d, device="mps", dtype=torch.float16)
         x2 = torch.randn(8, d, device="mps", dtype=torch.float16)
 
-        with torch.mps.metal_graph_capture() as g:
+        g = torch.mps.MetalGraph()
+        with torch.mps.metal_graph(g):
             out = torch.relu(x @ w)
 
         expected_first = torch.relu(x.clone() @ w)
         self.assertEqual(out, expected_first, atol=1e-3, rtol=1e-3)
 
         x.copy_(x2)
-        torch.mps.metal_graph_replay(g)
+        g.replay()
 
         expected_second = torch.relu(x2 @ w)
         self.assertEqual(out, expected_second, atol=1e-3, rtol=1e-3)
-        torch.mps.metal_graph_free(g)
+        g.reset()
 
     def test_step_count_nonzero_after_capture(self):
         # _mps_metalGraphCapturedStepCount(handle) must return > 0 after capturing
         # MPSGraph-routed ops, and 0 once the handle has been freed.
         x = torch.randn(8, 8, device="mps")
-        with torch.mps.metal_graph_capture() as g:
+        g = torch.mps.MetalGraph()
+        with torch.mps.metal_graph(g):
             self._simple_model(x)
 
-        self.assertGreater(torch._C._mps_metalGraphCapturedStepCount(g), 0)
+        self.assertGreater(g.step_count(), 0)
 
-        torch.mps.metal_graph_free(g)
-        self.assertEqual(torch._C._mps_metalGraphCapturedStepCount(g), 0)
+        g.reset()
+        self.assertEqual(g.step_count(), 0)
 
     def test_recapture_after_reset(self):
         # After reset(), a fresh capture with different ops must produce an
@@ -18012,20 +18107,21 @@ class TestGraphCapture(TestCaseMPS):
         x_soft = torch.randn(4, 4, device="mps")
         x_soft2 = torch.randn(4, 4, device="mps")
 
-        with torch.mps.metal_graph_capture():
+        g_old = torch.mps.MetalGraph()
+        with torch.mps.metal_graph(g_old):
             torch.sigmoid(x_soft)
+        g_old.reset()
 
-        torch._C._mps_metalGraphCaptureReset()
-
-        with torch.mps.metal_graph_capture() as g:
+        g = torch.mps.MetalGraph()
+        with torch.mps.metal_graph(g):
             out2 = torch.softmax(x_soft, dim=-1)
 
         x_soft.copy_(x_soft2)
-        torch.mps.metal_graph_replay(g)
+        g.replay()
 
         expected = torch.softmax(x_soft2, dim=-1)
         self.assertEqual(out2, expected, atol=1e-5, rtol=1e-5)
-        torch.mps.metal_graph_free(g)
+        g.reset()
 
     def test_full_mlp_capture_new_input(self):
         # Replay with a fresh input must produce a different (correct) result,
@@ -18043,7 +18139,8 @@ class TestGraphCapture(TestCaseMPS):
         x2 = torch.randn(16, width, device="mps")
 
         with torch.no_grad():
-            with torch.mps.metal_graph_capture() as g:
+            g = torch.mps.MetalGraph()
+            with torch.mps.metal_graph(g):
                 out = mlp(x)
 
         with torch.no_grad():
@@ -18051,12 +18148,183 @@ class TestGraphCapture(TestCaseMPS):
         self.assertEqual(out, expected_first, atol=1e-4, rtol=1e-4)
 
         x.copy_(x2)
-        torch.mps.metal_graph_replay(g)
+        g.replay()
 
         with torch.no_grad():
             expected_second = mlp(x2)
         self.assertEqual(out, expected_second, atol=1e-4, rtol=1e-4)
-        torch.mps.metal_graph_free(g)
+        g.reset()
+
+    def test_replay_while_recording_raises(self):
+        # Replaying the graph that is currently recording must raise: the step
+        # list is still being appended to. This is a distinct guard from the
+        # nested-capture one, which is covered separately.
+        x = torch.ones(4, 4, device="mps")
+        g = torch.mps.MetalGraph()
+        with self.assertRaisesRegex(RuntimeError, "still being recorded"):
+            with torch.mps.metal_graph(g):
+                torch.relu(x @ x)
+                g.replay()
+        g.reset()
+
+    def test_capture_of_a_finished_graphs_replay(self):
+        # Replaying a finished graph while a different capture is recording is
+        # allowed. Pin what it records: EVERY step inner.replay() re-executes
+        # must land in outer's own capture, not just whichever steps happen to
+        # dispatch through the recording compute encoder. x @ x is an
+        # MPSGraph-kind step and relu is a MetalKernel-kind step, so this
+        # exercises both; step_count must match exactly, and changing x before
+        # replaying outer alone (without ever calling inner.replay() again)
+        # must still produce the new value -- proving the matmul itself was
+        # captured into outer, not just the relu applied to a stale buffer.
+        x = torch.ones(4, 4, device="mps")
+        inner = torch.mps.MetalGraph()
+        with torch.mps.metal_graph(inner):
+            inner_out = torch.relu(x @ x)
+        self.assertEqual(inner_out[0, 0].item(), 4.0)
+        self.assertEqual(inner.step_count(), 2)
+
+        outer = torch.mps.MetalGraph()
+        with torch.mps.metal_graph(outer):
+            inner.replay()
+        self.assertEqual(outer.step_count(), inner.step_count())
+
+        x.copy_(torch.full((4, 4), 2.0, device="mps"))
+        inner_out.fill_(float("nan"))
+        outer.replay()
+        self.assertEqual(inner_out[0, 0].item(), 16.0)
+        inner.reset()
+        outer.reset()
+
+    def test_capture_with_cpu_copies(self):
+        # Device-to-host and host-to-device copies inside a capture must either be
+        # recorded or fail loud, never be silently dropped so that replay quietly
+        # computes on stale data. Whichever it does, this asserts it explicitly
+        # rather than passing on an unexamined exception.
+        x = torch.ones(8, 8, device="mps")
+        host_dst = torch.zeros(8, 8)
+
+        g = torch.mps.MetalGraph()
+        d2h_raised = False
+        try:
+            with torch.mps.metal_graph(g):
+                out = torch.relu(x @ x)
+                host_dst.copy_(out)  # device -> host inside capture
+        except RuntimeError:
+            d2h_raised = True
+        if d2h_raised:
+            g.reset()
+        else:
+            # Allowed: the capture pass must be correct, and a replay after an
+            # in-place input update must recompute both the device output and,
+            # if the copy was recorded, the host destination.
+            self.assertEqual(out[0, 0].item(), 8.0)
+            self.assertEqual(host_dst[0, 0].item(), 8.0)
+            x.copy_(torch.full((8, 8), 2.0, device="mps"))
+            g.replay()
+            self.assertEqual(out[0, 0].item(), 32.0)
+            g.reset()
+
+        # Host-to-device direction, tested separately so a failure names which one.
+        y = torch.ones(8, 8, device="mps")
+        host_src = torch.full((8, 8), 3.0)
+        g2 = torch.mps.MetalGraph()
+        try:
+            with torch.mps.metal_graph(g2):
+                y.copy_(host_src)  # host -> device inside capture
+                out2 = torch.relu(y @ y)
+        except RuntimeError:
+            g2.reset()
+            return
+        self.assertEqual(out2[0, 0].item(), 72.0)  # relu(3s @ 3s) = 8*9
+        g2.reset()
+
+    def test_is_current_stream_capturing(self):
+        # The query exists so library code can branch onto a capture-safe path,
+        # so it must be true only while a capture is actually recording, and must
+        # go back to false even when the capture block raises.
+        x = torch.ones(4, 4, device="mps")
+        self.assertFalse(torch.mps.is_current_stream_capturing())
+
+        g = torch.mps.MetalGraph()
+        with torch.mps.metal_graph(g):
+            self.assertTrue(torch.mps.is_current_stream_capturing())
+            _ = x @ x
+        self.assertFalse(torch.mps.is_current_stream_capturing())
+        g.reset()
+
+        g2 = torch.mps.MetalGraph()
+        with self.assertRaises(ValueError):
+            with torch.mps.metal_graph(g2):
+                _ = x @ x
+                raise ValueError("boom")
+        self.assertFalse(torch.mps.is_current_stream_capturing())
+
+    def test_capture_free_is_not_idempotent(self):
+        # captureFree() is what a MetalGraph destructor calls, so freeing a handle
+        # must actually drop it from the stream's capture table rather than leave a
+        # stale entry behind. A second free of the same handle proves it is gone.
+        x = torch.ones(4, 4, device="mps")
+        handle = torch._C._mps_metalGraphCaptureBegin()
+        _ = x @ x
+        torch._C._mps_metalGraphCaptureEnd(handle)
+        self.assertGreater(torch._C._mps_metalGraphCapturedStepCount(handle), 0)
+
+        torch._C._mps_metalGraphCaptureFree(handle)
+        self.assertEqual(torch._C._mps_metalGraphCapturedStepCount(handle), 0)
+        with self.assertRaisesRegex(RuntimeError, "No such capture handle"):
+            torch._C._mps_metalGraphCaptureFree(handle)
+        with self.assertRaisesRegex(RuntimeError, "No such capture handle"):
+            torch._C._mps_metalGraphReplay(handle)
+
+    def test_dropping_graphs_without_reset_leaves_stream_usable(self):
+        # Graphs are released by their destructor, not by an explicit reset(). If
+        # that release were skipped or partial the stream would accumulate live
+        # captures and eventually stop accepting new ones, so churn a batch and
+        # then require a fresh capture to still record and replay correctly.
+        x = torch.ones(64, 64, device="mps")
+        for _ in range(64):
+            g = torch.mps.MetalGraph()
+            with torch.mps.metal_graph(g):
+                torch.relu(x @ x)
+            del g
+        gc.collect()
+
+        g = torch.mps.MetalGraph()
+        with torch.mps.metal_graph(g):
+            out = x @ x
+        expected = x.clone() @ x.clone()
+        out.fill_(float("nan"))
+        g.replay()
+        self.assertEqual(out, expected)
+        g.reset()
+
+    def test_reset_then_recapture_and_replay(self):
+        # reset() must leave the graph genuinely reusable, so this recaptures
+        # different work afterwards and replays it, rather than only checking the
+        # is_captured() flag.
+        g = torch.mps.MetalGraph()
+        g.reset()  # harmless on a fresh graph
+        self.assertFalse(g.is_captured())
+
+        x = torch.ones(4, 4, device="mps")
+        with torch.mps.metal_graph(g):
+            first = torch.relu(x @ x)
+        self.assertEqual(first[0, 0].item(), 4.0)
+        g.reset()
+        g.reset()  # idempotent
+        self.assertFalse(g.is_captured())
+
+        # Recapture different work into the same object and prove replay reruns it.
+        y = torch.ones(4, 4, device="mps")
+        with torch.mps.metal_graph(g):
+            second = torch.sigmoid(y + y)
+        self.assertTrue(g.is_captured())
+        y.copy_(torch.full((4, 4), 4.0, device="mps"))
+        g.replay()
+        expected = torch.sigmoid(torch.full((4, 4), 8.0, device="mps"))
+        self.assertEqual(second, expected, atol=1e-5, rtol=1e-5)
+        g.reset()
 
 
 # TODO: Actually instantiate that test for the "mps" device to better reflect what it is doing.

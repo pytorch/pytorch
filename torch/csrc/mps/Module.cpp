@@ -570,24 +570,68 @@ void initModule(PyObject* module) {
     pybind11::gil_scoped_release no_gil;
     at::mps::getMPSProfiler().stopCapture();
   });
+  // Capture must observe the stream ops actually enqueue on. Every MPS operator
+  // dispatches through getCurrentMPSStream(), so capturing against
+  // getDefaultMPSStream() would record nothing whenever a non-default stream is
+  // current. These entry points block on that stream's serial queue, so they
+  // release the GIL rather than stall other Python threads.
   m.def("_mps_metalGraphCaptureBegin", []() {
-    return at::mps::getDefaultMPSStream()->captureBegin();
+    pybind11::gil_scoped_release no_gil;
+    return at::mps::getCurrentMPSStream()->captureBegin();
   });
-  m.def("_mps_metalGraphCaptureEnd", []() {
-    at::mps::getDefaultMPSStream()->captureEnd();
+  m.def("_mps_metalGraphCaptureEnd", [](uint64_t handle) {
+    pybind11::gil_scoped_release no_gil;
+    at::mps::getCurrentMPSStream()->captureEnd(handle);
   });
   m.def("_mps_metalGraphCaptureFree", [](uint64_t handle) {
-    at::mps::getDefaultMPSStream()->captureFree(handle);
+    pybind11::gil_scoped_release no_gil;
+    TORCH_CHECK(
+        at::mps::getCurrentMPSStream()->captureFree(handle),
+        "No such capture handle: ",
+        handle,
+        ". It may have already been freed.");
   });
   m.def("_mps_metalGraphCaptureReset", []() {
-    at::mps::getDefaultMPSStream()->captureReset();
+    pybind11::gil_scoped_release no_gil;
+    at::mps::getCurrentMPSStream()->captureReset();
   });
   m.def("_mps_metalGraphCapturedStepCount", [](uint64_t handle) {
-    return at::mps::getDefaultMPSStream()->capturedStepCount(handle);
+    pybind11::gil_scoped_release no_gil;
+    return at::mps::getCurrentMPSStream()->capturedStepCount(handle);
   });
   m.def("_mps_metalGraphReplay", [](uint64_t handle) {
-    at::mps::getDefaultMPSStream()->replay(handle);
+    pybind11::gil_scoped_release no_gil;
+    at::mps::getCurrentMPSStream()->replay(handle);
   });
+  m.def("_mps_isCurrentStreamCapturing", []() {
+    return at::mps::getCurrentMPSStream()->captureMode();
+  });
+  // Owning capture handle behind torch.mps.MetalGraph. Python object lifetime
+  // drives release, so dropping the object frees the capture the way dropping a
+  // torch.cuda.CUDAGraph does.
+  py::class_<at::mps::MPSStream::MetalGraph>(m, "_MetalGraph")
+      .def(py::init<>())
+      .def(
+          "capture_begin",
+          &at::mps::MPSStream::MetalGraph::captureBegin,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "capture_end",
+          &at::mps::MPSStream::MetalGraph::captureEnd,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "replay",
+          &at::mps::MPSStream::MetalGraph::replay,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "reset",
+          &at::mps::MPSStream::MetalGraph::reset,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "step_count",
+          &at::mps::MPSStream::MetalGraph::stepCount,
+          py::call_guard<py::gil_scoped_release>())
+      .def("is_captured", &at::mps::MPSStream::MetalGraph::isCaptured);
   m.def("_mps_get_name", []() {
     return at::mps::MPSDevice::getInstance()->getName();
   });
