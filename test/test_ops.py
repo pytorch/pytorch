@@ -57,7 +57,6 @@ from torch.testing._internal.common_methods_invocations import (
 from torch.testing._internal.common_utils import (
     clone_input_helper,
     first_sample,
-    getRocmVersion,
     HardwareClassification,
     IS_CI,
     IS_FBCODE,
@@ -72,7 +71,6 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     skipIfTorchInductor,
     suppress_warnings,
-    TEST_WITH_ROCM,
     TEST_WITH_TORCHDYNAMO,
     TEST_WITH_TORCHINDUCTOR,
     TestCase,
@@ -1611,12 +1609,6 @@ class TestCommon(TestCase):
     @onlyNativeDeviceTypesAnd(["hpu"])
     @ops(ops_and_refs, dtypes=OpDTypes.none)
     def test_dtypes(self, device, op):
-        if (
-            TEST_WITH_ROCM
-            and getRocmVersion() >= (7, 14)
-            and op.name == "sparse.sampled_addmm"
-        ):
-            self.skipTest("stale sparse.sampled_addmm OpInfo dtypes on ROCm 7.14")
         # Check complex32 support only if the op claims.
         # TODO: Once the complex32 support is better, we should add check for complex32 unconditionally.
         device_type = torch.device(device).type
