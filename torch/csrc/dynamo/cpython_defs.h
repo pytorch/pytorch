@@ -14,15 +14,19 @@ PyFunctionObject* _PyFunction_CopyWithNewCode(
     PyFunctionObject* o,
     PyCodeObject* code);
 
+#if !IS_PYTHON_3_13_PLUS
 void THP_PyFrame_Clear(_PyInterpreterFrame* frame);
+#endif
 
 _PyInterpreterFrame* THP_PyThreadState_BumpFramePointerSlow(
     PyThreadState* tstate,
     size_t size);
 
+#if !IS_PYTHON_3_13_PLUS
 void THP_PyThreadState_PopFrame(
     PyThreadState* tstate,
     _PyInterpreterFrame* frame);
+#endif
 
 #endif
 
