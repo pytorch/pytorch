@@ -4,7 +4,8 @@ import copy
 import csv
 import logging
 import os
-from unittest.mock import MagicMock, patch
+import tempfile
+from unittest.mock import create_autospec, MagicMock, patch
 
 from model_registry import MultiMLP
 
@@ -28,10 +29,12 @@ from torch.distributed.pipelining.schedules import (
     _add_reduce_grad,
     _add_send_recv,
     _add_unshard_reshard,
+    _add_wait_send,
     _batch_p2p,
     _defer_recv_ops,
     _format_pipeline_order,
     _merge_bw,
+    _PendingSendTracker,
     _PipelineSchedule,
     _PipelineScheduleRuntime,
     _simulate_comms_compute,
@@ -40,16 +43,22 @@ from torch.distributed.pipelining.schedules import (
     F,
     get_schedule_class,
     I,
+    OVERLAP_F_B,
     PipelineScheduleMulti,
     PipelineScheduleSingle,
     RECV_B,
     RECV_F,
+    REDUCE_GRAD,
     RESHARD,
     SEND_B,
+    SEND_F,
     UNSHARD,
     W,
+    WAIT_SEND_B,
+    WAIT_SEND_F,
 )
 from torch.distributed.pipelining.stage import (
+    _early_send_release_default,
     _PipelineStageBase,
     _RecvInfo,
     PipelineStage,
@@ -84,6 +93,9 @@ class MockPipelineStage(_PipelineStageBase):
         self.group_size = kwargs.get("group_size", 1)
         self.group_rank = kwargs.get("group_rank", 0)
         self.group = kwargs.get("group")
+        self.early_send_release = kwargs.get(
+            "early_send_release", _early_send_release_default()
+        )
 
     def _create_grad_recv_info(self, *args, **kwargs):
         return None
@@ -1460,6 +1472,205 @@ class TestScheduleLowering(TestCase):
                 )
             self.assertEqual(len(result_sch[rank]), len(expected_sch[rank]))
 
+    def _wait_send_schedule(self, num_stages, num_microbatches):
+        """Build a lowered 1F1B-shaped schedule."""
+        compute = {
+            rank: [_Action(rank, F, mb) for mb in range(num_microbatches)]
+            + [_Action(rank, B, mb) for mb in range(num_microbatches)]
+            for rank in range(num_stages)
+        }
+        with_comms = _add_send_recv(
+            compute, stage_to_rank=lambda s: s, num_stages=num_stages
+        )
+        return _add_wait_send(with_comms)
+
+    def test_add_wait_send_pairs_every_forward_send(self):
+        num_stages, num_microbatches = 4, 4
+        lowered = self._wait_send_schedule(num_stages, num_microbatches)
+
+        for rank, actions in lowered.items():
+            sends = [a for a in actions if a.computation_type == SEND_F]
+            waits = [a for a in actions if a.computation_type == WAIT_SEND_F]
+            self.assertEqual(
+                [(a.stage_index, a.microbatch_index) for a in sends],
+                [(a.stage_index, a.microbatch_index) for a in waits],
+                f"rank {rank} sends and waits disagree",
+            )
+        # The last stage has no sends or waits.
+        self.assertEqual(
+            [a for a in lowered[num_stages - 1] if a.computation_type == WAIT_SEND_F],
+            [],
+        )
+
+    def test_add_wait_send_places_wait_after_backward(self):
+        lowered = self._wait_send_schedule(4, 4)
+        actions = lowered[0]
+        for mb in range(4):
+            backward = actions.index(_Action(0, B, mb))
+            wait = actions.index(_Action(0, WAIT_SEND_F, mb))
+            send = actions.index(_Action(0, SEND_F, mb))
+            # Backward implies that the peer received the activation.
+            self.assertLess(send, backward)
+            self.assertEqual(wait, backward + 1)
+
+    def test_add_wait_send_does_not_deadlock(self):
+        for num_stages, num_microbatches in ((2, 2), (4, 4), (4, 8)):
+            lowered = self._wait_send_schedule(num_stages, num_microbatches)
+            _simulate_comms_compute(
+                lowered, stage_to_rank=lambda s: s, num_stages=num_stages
+            )
+
+    def test_simulator_rejects_wait_before_the_peer_receive(self):
+        """Reject a wait whose peer never receives."""
+        # A send cannot complete before its peer receives it.
+        order = {
+            0: [
+                _Action(0, F, 0),
+                _Action(0, SEND_F, 0),
+                _Action(0, WAIT_SEND_F, 0),
+            ],
+            1: [],
+        }
+
+        with self.assertRaisesRegex(ValueError, "not progressing"):
+            _simulate_comms_compute(order, stage_to_rank=lambda s: s, num_stages=2)
+
+    def test_waits_survive_a_compute_comms_csv_round_trip(self):
+        """Preserve WAIT_SEND actions across CSV round trips."""
+
+        def stage(index, enabled):
+            mock_stage = create_autospec(PipelineStage, instance=True)
+            mock_stage.stage_index, mock_stage.num_stages = index, 4
+            mock_stage.group_rank, mock_stage.group_size = 0, 2
+            mock_stage.submod, mock_stage.early_send_release = None, enabled
+            return mock_stage
+
+        lowered = ScheduleInterleaved1F1B(
+            [stage(i, True) for i in (0, 2)], n_microbatches=4, loss_fn=None
+        )
+        self.assertTrue(lowered._early_send_release)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "schedule.csv")
+            lowered._dump_csv(path, "compute_comms")
+
+            # Disabled stages require the file to restore early release.
+            reloaded = ScheduleInterleaved1F1B(
+                [stage(i, False) for i in (0, 2)], n_microbatches=4, loss_fn=None
+            )
+            reloaded._load_csv(path, "compute_comms")
+
+        self.assertTrue(
+            reloaded._early_send_release,
+            "a reloaded schedule ignored the waits it was dumped with",
+        )
+        self.assertEqual(
+            sum(
+                1
+                for rank_actions in reloaded.pipeline_order_with_comms.values()
+                for a in rank_actions
+                if a.computation_type == WAIT_SEND_F
+            ),
+            sum(
+                1
+                for rank_actions in lowered.pipeline_order_with_comms.values()
+                for a in rank_actions
+                if a.computation_type == WAIT_SEND_F
+            ),
+        )
+
+    def test_enabling_after_construction_does_not_take_effect(self):
+        """Read early-release state only during lowering."""
+
+        def stage(index):
+            mock_stage = create_autospec(PipelineStage, instance=True)
+            mock_stage.stage_index, mock_stage.num_stages = index, 4
+            mock_stage.group_rank, mock_stage.group_size = 0, 2
+            mock_stage.submod, mock_stage.early_send_release = None, False
+            return mock_stage
+
+        stages = [stage(i) for i in (0, 2)]
+        schedule = ScheduleInterleaved1F1B(stages, n_microbatches=4, loss_fn=None)
+        self.assertFalse(schedule._early_send_release)
+
+        for mock_stage in stages:
+            mock_stage.early_send_release = True
+        self.assertFalse(
+            schedule._early_send_release,
+            "the setting is read once, when the schedule is lowered",
+        )
+        self.assertEqual(
+            [
+                a
+                for rank in schedule.pipeline_order_with_comms
+                for a in schedule.pipeline_order_with_comms[rank]
+                if a.computation_type == WAIT_SEND_F
+            ],
+            [],
+        )
+
+    def test_lowered_dualpipev_simulates_without_deadlock(self):
+        """Simulate DualPipeV backwards stored in sub-actions."""
+
+        def stage(index):
+            mock_stage = create_autospec(PipelineStage, instance=True)
+            mock_stage.stage_index, mock_stage.num_stages = index, 4
+            mock_stage.group_rank, mock_stage.group_size = 0, 2
+            mock_stage.submod, mock_stage.early_send_release = None, True
+            return mock_stage
+
+        order = ScheduleDualPipeV(
+            [stage(i) for i in (0, 3)], n_microbatches=8, loss_fn=None
+        ).pipeline_order_with_comms
+
+        sends = sum(1 for r in order for a in order[r] if a.computation_type == SEND_F)
+        waits = sum(
+            1 for r in order for a in order[r] if a.computation_type == WAIT_SEND_F
+        )
+        self.assertEqual(waits, sends)
+
+        # FSDP actions are unrelated to send ownership.
+        skipped = (UNSHARD, RESHARD, REDUCE_GRAD)
+        _simulate_comms_compute(
+            {
+                rank: [a for a in acts if a.computation_type not in skipped]
+                for rank, acts in order.items()
+            },
+            stage_to_rank=lambda s: 0 if s in (0, 3) else 1,
+            num_stages=4,
+        )
+
+    def test_add_wait_send_pairs_sends_completed_by_a_compound_backward(self):
+        """Pair sends with backwards inside OVERLAP_F_B."""
+        compute = {
+            0: [
+                _Action(0, F, 0),
+                _Action(
+                    -1,
+                    OVERLAP_F_B,
+                    None,
+                    (_Action(0, F, 1), _Action(0, B, 0)),
+                ),
+            ],
+            1: [_Action(1, F, 0), _Action(1, B, 0)],
+        }
+        with_comms = _add_send_recv(compute, stage_to_rank=lambda s: s, num_stages=2)
+        lowered = _add_wait_send(with_comms)
+
+        # Only microbatch 0 has a backward.
+        waits = [a for a in lowered[0] if a.computation_type == WAIT_SEND_F]
+        self.assertEqual(waits, [_Action(0, WAIT_SEND_F, 0)])
+
+        overlap = next(
+            i for i, a in enumerate(lowered[0]) if a.computation_type == OVERLAP_F_B
+        )
+        self.assertEqual(lowered[0].index(waits[0]), overlap + 1)
+
+    def test_wait_send_action_round_trips_through_str(self):
+        # Do not parse WAIT_SEND_F as the "W" prefix.
+        for action in (_Action(0, WAIT_SEND_F, 7), _Action(3, WAIT_SEND_B, 0)):
+            self.assertEqual(_Action.from_str(str(action)), action)
+
     def test_defer_recv_ops_no_deadlock(self):
         """Tests the issue from pytorch/pytorch#172668: RECV_F for stage 2 should not
         be placed before unrelated compute op 0F1 on the same rank, and the deferred
@@ -2076,6 +2287,238 @@ class TestBatchP2P(TestCase):
         mock_isend.assert_not_called()
         mock_irecv.assert_not_called()
         self.assertEqual(len(result), 4)
+
+
+class _FakeWork:
+    """Test-controlled ``dist.Work`` stub."""
+
+    def __init__(self, error: Exception | None = None):
+        self.completed = False
+        self.wait_count = 0
+        # Failed NCCL work reports complete but raises from wait().
+        self.error = error
+
+    def is_completed(self):
+        return self.completed or self.error is not None
+
+    def wait(self):
+        self.wait_count += 1
+        if self.error is not None:
+            raise self.error
+        self.completed = True
+        return True
+
+
+class TestPendingSendTracker(TestCase):
+    """Tests send-buffer lifetime tracking."""
+
+    def _make_batch(self, num_works=1):
+        works = [_FakeWork() for _ in range(num_works)]
+        op = MagicMock()
+        op.tensor = torch.zeros(4)
+        return works, [op]
+
+    def test_poll_retires_only_completed_batches(self):
+        tracker = _PendingSendTracker()
+        retired = []
+
+        slow_works, slow_ops = self._make_batch()
+        fast_works, fast_ops = self._make_batch()
+        tracker.register(slow_ops, slow_works, lambda: retired.append("slow"))
+        tracker.register(fast_ops, fast_works, lambda: retired.append("fast"))
+
+        tracker.poll()
+        self.assertEqual(retired, [])
+
+        fast_works[0].completed = True
+        tracker.poll()
+        self.assertEqual(retired, ["fast"])
+        # Only the completed batch releases its buffer.
+        self.assertEqual(fast_ops, [])
+        self.assertEqual(len(slow_ops), 1)
+
+        slow_works[0].completed = True
+        tracker.poll()
+        self.assertEqual(retired, ["fast", "slow"])
+        self.assertEqual(slow_ops, [])
+
+    def test_batch_retires_only_when_all_works_complete(self):
+        tracker = _PendingSendTracker()
+        retired = []
+        works, ops = self._make_batch(num_works=2)
+        tracker.register(ops, works, lambda: retired.append("batch"))
+
+        works[0].completed = True
+        tracker.poll()
+        self.assertEqual(retired, [])
+
+        works[1].completed = True
+        tracker.poll()
+        self.assertEqual(retired, ["batch"])
+
+    def test_poll_never_waits(self):
+        tracker = _PendingSendTracker()
+        works, ops = self._make_batch()
+        tracker.register(ops, works)
+
+        tracker.poll()
+        self.assertEqual(works[0].wait_count, 0)
+
+    def test_drain_waits_for_stragglers(self):
+        tracker = _PendingSendTracker()
+        retired = []
+        works, ops = self._make_batch()
+        work = works[0]
+        tracker.register(ops, works, lambda: retired.append("batch"))
+
+        tracker.drain()
+
+        self.assertEqual(work.wait_count, 1)
+        self.assertEqual(retired, ["batch"])
+        self.assertEqual(ops, [])
+        # A second drain must not retire the batch again.
+        tracker.drain()
+        self.assertEqual(retired, ["batch"])
+
+    def test_poll_is_a_noop_during_cuda_graph_capture(self):
+        """Avoid completion queries during graph capture."""
+        tracker = _PendingSendTracker()
+        retired = []
+
+        class _ExplodingWork(_FakeWork):
+            def is_completed(self):
+                raise AssertionError("queried completion during capture")
+
+        works, ops = [_ExplodingWork()], [MagicMock()]
+        tracker.register(ops, works, lambda: retired.append("batch"))
+
+        with patch(
+            "torch.distributed.pipelining.schedules._stream_is_capturing",
+            return_value=True,
+        ):
+            tracker.poll()
+        self.assertEqual(retired, [])
+
+        # Poll normally outside capture.
+        works[0].is_completed = lambda: True
+        with patch(
+            "torch.distributed.pipelining.schedules._stream_is_capturing",
+            return_value=False,
+        ):
+            tracker.poll()
+        self.assertEqual(retired, ["batch"])
+
+    def test_disabled_tracker_defers_everything_to_drain(self):
+        """Preserve end-of-step ownership when disabled."""
+        tracker = _PendingSendTracker(enabled=False)
+        retired = []
+        works, ops = self._make_batch()
+        works[0].completed = True
+        tracker.register(ops, works, lambda: retired.append("batch"))
+
+        tracker.poll()
+        self.assertEqual(retired, [])
+        self.assertEqual(len(ops), 1)
+
+        tracker.drain()
+        self.assertEqual(retired, ["batch"])
+
+    def test_poll_surfaces_a_failed_send(self):
+        # Waiting surfaces errors from completed work.
+        tracker = _PendingSendTracker()
+        retired = []
+        works = [_FakeWork(error=RuntimeError("NCCL send failed"))]
+        ops = [object()]
+        tracker.register(ops, works, lambda: retired.append("batch"))
+
+        with self.assertRaisesRegex(RuntimeError, "NCCL send failed"):
+            tracker.poll()
+        self.assertEqual(retired, [])
+
+    def test_disabled_tracker_ignores_a_lowered_wait(self):
+        # Ignore waits left by an earlier lowering pass.
+        tracker = _PendingSendTracker(enabled=False)
+        retired = []
+        works, ops = self._make_batch()
+        key = (SEND_F, 0, 0)
+        tracker.register(ops, works, lambda: retired.append("batch"), key)
+
+        tracker.wait_send(key)
+        self.assertEqual(retired, [])
+        self.assertEqual(len(ops), 1, "the batch stays owned until the drain")
+
+        tracker.drain()
+        self.assertEqual(retired, ["batch"])
+
+    def test_static_mode_retires_only_at_the_lowered_wait(self):
+        # Polling off reproduces capture's release strategy without capturing,
+        # so the two can be compared on the same run.
+        tracker = _PendingSendTracker(poll=False)
+        retired = []
+        works, ops = self._make_batch()
+        key = (SEND_F, 1, 2)
+        tracker.register(ops, works, lambda: retired.append("batch"), key)
+
+        works[0].completed = True
+        tracker.poll()
+        self.assertEqual(retired, [], "polling should be off")
+
+        tracker.wait_send(key)
+        self.assertEqual(retired, ["batch"])
+
+    def test_wait_send_waits_the_stream_instead_of_polling(self):
+        # WAIT_SEND releases buffers without polling during capture.
+        tracker = _PendingSendTracker()
+        retired = []
+        works, ops = self._make_batch()
+        work = works[0]
+        key = (SEND_F, 3, 7)
+        tracker.register(ops, works, lambda: retired.append("batch"), key)
+
+        with patch(
+            "torch.distributed.pipelining.schedules._stream_is_capturing",
+            return_value=True,
+        ):
+            tracker.poll()
+            self.assertEqual(retired, [], "poll must not retire during capture")
+            tracker.wait_send(key)
+
+        self.assertEqual(retired, ["batch"])
+        self.assertEqual(work.wait_count, 1)
+        self.assertEqual(ops, [])
+
+    def test_wait_send_is_a_noop_for_an_already_polled_batch(self):
+        # Eager polling may retire the batch before WAIT_SEND.
+        tracker = _PendingSendTracker()
+        retired = []
+        works, ops = self._make_batch()
+        key = (SEND_F, 0, 0)
+        tracker.register(ops, works, lambda: retired.append("batch"), key)
+
+        works[0].completed = True
+        tracker.poll()
+        self.assertEqual(retired, ["batch"])
+
+        tracker.wait_send(key)
+        self.assertEqual(retired, ["batch"], "retire must not run twice")
+
+    def test_wait_send_ignores_an_unknown_key(self):
+        tracker = _PendingSendTracker()
+        works, ops = self._make_batch()
+        tracker.register(ops, works, None, (SEND_F, 0, 0))
+
+        tracker.wait_send((SEND_B, 0, 0))
+        self.assertEqual(works[0].wait_count, 0)
+        self.assertEqual(len(ops), 1, "the unmatched batch stays owned")
+
+    def test_empty_batch_retires_immediately(self):
+        # Stages with nothing to send may still register a batch.
+        tracker = _PendingSendTracker()
+        retired = []
+        tracker.register([], [], lambda: retired.append("empty"))
+
+        tracker.poll()
+        self.assertEqual(retired, ["empty"])
 
 
 if __name__ == "__main__":
