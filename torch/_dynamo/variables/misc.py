@@ -78,7 +78,6 @@ from .base import (
     AsPythonConstantNotImplementedError,
     GetSet,
     getset_build,
-    getset_read,
     Member,
     Method,
     NO_SUCH_SUBOBJ,
@@ -567,7 +566,7 @@ class TracebackVariable(VariableTracker):
     tp_getset = {
         "tb_next": GetSet(_get_tb_next, _set_tb_next),
         "tb_lineno": GetSet(_get_tb_lineno, None),
-        "frame_summary": GetSet(getset_read(lambda s: s.frame_summary), None),
+        "frame_summary": GetSet(lambda s, _: s.frame_summary, None),
     }
 
     # ref: CPython Objects/traceback.c tb_memberlist, where tb_lasti is
@@ -840,16 +839,16 @@ class ExceptionVariable(VariableTracker):
 
     tp_getset = {
         "__class__": GetSet(getset_build(lambda s: s.exc_type), None),
-        "__context__": GetSet(getset_read(lambda s: s.__context__), _set_context),
-        "__cause__": GetSet(getset_read(lambda s: s.__cause__), _set_cause),
-        "__traceback__": GetSet(getset_read(lambda s: s.__traceback__), _set_traceback),
+        "__context__": GetSet(lambda s, _: s.__context__, _set_context),
+        "__cause__": GetSet(lambda s, _: s.__cause__, _set_cause),
+        "__traceback__": GetSet(lambda s, _: s.__traceback__, _set_traceback),
         "args": GetSet(_get_args, _set_args),
     }
     # __suppress_context__ is a writable PyMemberDef on BaseException, not a
     # getset, so it lives in tp_members.
     tp_members = {
         "__suppress_context__": Member(
-            getset_read(lambda s: s.__suppress_context__), _set_suppress_context
+            lambda s, _: s.__suppress_context__, _set_suppress_context
         ),
     }
 
@@ -906,7 +905,7 @@ class StopIterationVariable(ExceptionVariable):
 
     # ref: StopIteration_members in CPython Objects/exceptions.c
     tp_members = {
-        "value": Member(getset_read(lambda s: s.value), _set_value),
+        "value": Member(lambda s, _: s.value, _set_value),
     }
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
@@ -962,10 +961,8 @@ class AttributeErrorVariable(_KwargAttrExceptionVariable):
     # https://docs.python.org/3/library/exceptions.html#AttributeError
     _kwarg_attrs = ("name", "obj")
     tp_members = {
-        "name": Member(
-            getset_read(lambda s: s._attrs["name"]), _set_kwarg_attr("name")
-        ),
-        "obj": Member(getset_read(lambda s: s._attrs["obj"]), _set_kwarg_attr("obj")),
+        "name": Member(lambda s, _: s._attrs["name"], _set_kwarg_attr("name")),
+        "obj": Member(lambda s, _: s._attrs["obj"], _set_kwarg_attr("obj")),
     }
 
 
@@ -973,9 +970,7 @@ class NameErrorVariable(_KwargAttrExceptionVariable):
     # https://docs.python.org/3/library/exceptions.html#NameError
     _kwarg_attrs = ("name",)
     tp_members = {
-        "name": Member(
-            getset_read(lambda s: s._attrs["name"]), _set_kwarg_attr("name")
-        ),
+        "name": Member(lambda s, _: s._attrs["name"], _set_kwarg_attr("name")),
     }
 
 
