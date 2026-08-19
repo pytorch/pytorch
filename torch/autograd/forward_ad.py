@@ -70,7 +70,7 @@ def exit_dual_level(*, level=None):
 
 
 def _maybe_load_decompositions():
-    if os.environ.get("PYTORCH_JIT", "1") == "1" and __debug__:
+    if os.environ.get("PYTORCH_JIT", "1") == "1":
         from torch._decomp import decompositions_for_jvp  # noqa: F401
 
 
@@ -103,19 +103,7 @@ def make_dual(tensor, tangent, *, level=None):
     # Import from torch._decomp import decompositions_for_jvp to register
     # decompositions for jvp to the jit registry
     #
-    # FIXME: We specify that __debug__ must be True because
-    # if python is run with -OO or -O flags (i.e., __debug__ is False), we encounter the
-    # following error:
-    #
-    # Return value was annotated as having type Tuple[NoneType, NoneType] but is actually of
-    # type Tuple[Tensor, Tensor]:
-    #   File ".../torch/_decomp/__init__.py", line 1585
-    #     else:
-    #         buffer = z
-    #     return min - torch.log1p(z), buffer
-    #     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
     _maybe_load_decompositions()
-
     if level is None:
         level = _current_level
 
