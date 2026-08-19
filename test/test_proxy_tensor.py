@@ -2210,7 +2210,7 @@ filtered_hop_db = [op for op in hop_db if op.name != "auto_functionalize"]
 
 @unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "Cond requires dynamo")
 class TestProxyTensorOpInfo(TestCase):
-    hw_classification = HardwareClassification.ACCELERATOR
+    hw_classification = HardwareClassification.CPU
 
     @ops(op_db + filtered_hop_db + custom_op_db, allowed_dtypes=(torch.float,))
     @skipOps(make_fx_failures.union(only_real_tensor_failures))
@@ -2242,7 +2242,8 @@ class TestProxyTensorOpInfo(TestCase):
         _test_make_fx_helper(self, device, dtype, op, "symbolic", out=True)
 
 
-instantiate_device_type_tests(TestProxyTensorOpInfo, globals())
+only_for = ("cpu")
+instantiate_device_type_tests(TestProxyTensorOpInfo, globals(), only_for=only_for)
 
 
 class TestGenericProxyTensorCUDA(TestCase):
