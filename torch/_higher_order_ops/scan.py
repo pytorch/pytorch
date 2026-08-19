@@ -188,7 +188,7 @@ def scan(
     """
     # The reason we flatten init and xs before calling into dynamo is that
     # we want to create a consistent input ordering for combine_fn
-    # and we also want to the input ordering matches the output ordering.
+    # and we also want the input ordering to match the output ordering.
     leaves_init, spec_init = pytree.tree_flatten(init)
     leaves_xs_orig, spec_xs = pytree.tree_flatten(xs)
 
