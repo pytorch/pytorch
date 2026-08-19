@@ -1,8 +1,10 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 import copy
+import gc
 import logging
 import os
+from collections import Counter
 from dataclasses import dataclass
 
 from model_registry import (
@@ -43,6 +45,7 @@ from torch.distributed.pipelining.schedules import (
     _wait_batch_p2p,
     FORWARD,
     OVERLAP_F_B,
+    PipelineScheduleSingle,
 )
 from torch.distributed.pipelining.stage import _PipelineStageBase  # noqa: TC002
 from torch.nn.attention.flex_attention import BlockMask, create_block_mask
@@ -69,6 +72,9 @@ d_hid = 512
 batch_size = 64
 none_grad_d_hid = 32
 none_grad_microbatches = 8
+# Large activations make release visible in peak memory.
+release_d_hid = 512
+release_batch_size = 16384
 torch.manual_seed(0)
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 backend = dist.get_default_backend_for_device(device_type)
@@ -1414,6 +1420,148 @@ class ScheduleTest(MultiProcContinuousTest):
     @skip_if_lt_x_gpu(4)
     def test_NoneGrad_conditional_input_grad(self, ScheduleClass, pattern):
         self._run_none_grad_schedule(ScheduleClass, pattern)
+
+    @staticmethod
+    def _count_released_activations(stages):
+        """Count outputs dropped by ``retire_fwd_sends``."""
+        counter = Counter()
+
+        def make_counting_retire(stage, retire):
+            def counting_retire(chunk_id):
+                entry = stage.fwd_cache.get(chunk_id)
+                if entry is None:
+                    return retire(chunk_id)
+                before = sum(out is not None for out in entry.live_outputs)
+                retire(chunk_id)
+                after = sum(out is not None for out in entry.live_outputs)
+                counter["released"] += before - after
+
+            return counting_retire
+
+        for stage in stages:
+            stage.retire_fwd_sends = make_counting_retire(stage, stage.retire_fwd_sends)
+        return counter
+
+    def _run_release_sent_activations(self, ScheduleClass, release: bool):
+        """Measure peak memory, gradients, and releases for one schedule."""
+        single_stage = issubclass(ScheduleClass, PipelineScheduleSingle)
+        v_shaped = issubclass(ScheduleClass, (ScheduleZBVZeroBubble, ScheduleDualPipeV))
+        stages_per_rank = 1 if single_stage else 2
+        n_stages = stages_per_rank * self.world_size
+        num_microbatches = 2 * self.world_size
+
+        torch.manual_seed(0)
+        mod = MultiMLP(release_d_hid, n_layers=n_stages).to(self.device)
+        x = torch.randn(release_batch_size, release_d_hid, device=self.device)
+        target = torch.randn(release_batch_size, release_d_hid, device=self.device)
+        loss_fn = torch.nn.MSELoss(reduction="sum")
+
+        # V schedules place mirrored stages on each rank.
+        stage_indices = [self.rank, n_stages - 1 - self.rank] if v_shaped else None
+        stages, stage_modules, _ = create_multi_stage_pipeline(
+            self.config, mod, stages_per_rank, n_stages, stage_indices
+        )
+        for stage in stages:
+            stage.early_send_release = release
+        released_count = self._count_released_activations(stages)
+        schedule = ScheduleClass(
+            stages[0] if single_stage else stages,
+            num_microbatches,
+            loss_fn=loss_fn,
+            scale_grads=False,
+        )
+
+        peak = 0
+        # Measure the second step after buffers and metadata are initialized.
+        for step in range(2):
+            zero_gradients(stage_modules)
+            if step == 1:
+                torch.accelerator.synchronize(self.device)
+                torch.accelerator.reset_peak_memory_stats(self.device)
+                baseline = torch.accelerator.memory_allocated(self.device)
+
+            if v_shaped:
+                if self.rank == 0:
+                    schedule.step(x, target=target, losses=[])
+                else:
+                    schedule.step()
+            elif self.rank == 0:
+                schedule.step(x)
+            elif self.rank == self.world_size - 1:
+                schedule.step(target=target, losses=[])
+            else:
+                schedule.step()
+
+        torch.accelerator.synchronize(self.device)
+        peak = torch.accelerator.max_memory_allocated(self.device) - baseline
+        grads = {
+            f"{i}.{name}": p.grad.clone()
+            for i, stage_module in enumerate(stage_modules)
+            for name, p in stage_module.named_parameters()
+        }
+        return peak, grads, released_count["released"]
+
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+    )
+    @skip_if_lt_x_gpu(4)
+    @parametrize(
+        "ScheduleClass",
+        [
+            ScheduleGPipe,
+            Schedule1F1B,
+            ScheduleInterleaved1F1B,
+            ScheduleInterleavedZeroBubble,
+            ScheduleZBVZeroBubble,
+        ],
+    )
+    def test_release_sent_activations(self, ScheduleClass):
+        """Early release lowers peak memory and leaves gradients untouched."""
+        kept_peak, kept_grads, kept_released = self._run_release_sent_activations(
+            ScheduleClass, release=False
+        )
+        gc.collect()
+        torch.accelerator.empty_cache()
+        (
+            released_peak,
+            released_grads,
+            released_count,
+        ) = self._run_release_sent_activations(ScheduleClass, release=True)
+
+        self.assertEqual(kept_grads.keys(), released_grads.keys())
+        for name, kept in kept_grads.items():
+            torch.testing.assert_close(
+                released_grads[name], kept, rtol=0, atol=0, msg=f"grad differs: {name}"
+            )
+
+        # Only a rank that owns just the last stage has nothing to release.
+        owns_only_last_stage = (
+            issubclass(ScheduleClass, PipelineScheduleSingle)
+            and self.rank == self.world_size - 1
+        )
+        activation_bytes = (
+            release_batch_size
+            // (2 * self.world_size)
+            * release_d_hid
+            * torch.float32.itemsize
+        )
+        saved = kept_peak - released_peak
+        logger.info(
+            "rank %d %s peak kept=%d released=%d saved=%d slots=%d",
+            self.rank,
+            ScheduleClass.__name__,
+            kept_peak,
+            released_peak,
+            saved,
+            released_count,
+        )
+        self.assertEqual(kept_released, 0)
+        if owns_only_last_stage:
+            self.assertEqual(released_count, 0)
+        else:
+            self.assertGreater(released_count, 0)
+            self.assertGreaterEqual(saved, activation_bytes)
 
 
 instantiate_parametrized_tests(ScheduleTest)
