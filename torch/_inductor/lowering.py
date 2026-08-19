@@ -580,23 +580,30 @@ def broadcast_symbolic_shapes(a, b):
     return tuple(reversed(output))
 
 
+def _round_scalar_constants_for_add_sub(device_type: str) -> bool:
+    # Eager CPU/MPS add/sub consume wrapped scalars at tensor precision.
+    return device_type in ("cpu", "mps")
+
+
+def _round_scalar_constants_for_fmod_remainder(device_type: str) -> bool:
+    # MPS is the known opmath exception; preserve tensor-precision rounding on
+    # other backends.
+    return device_type != "mps"
+
+
 def promote_constants(
     inputs: Sequence[_T],
     override_return_dtype: torch.dtype | None = None,
     type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND | None = None,
-    round_scalar_constants: bool = False,
-    round_scalars_to_tensor_dtype: bool = False,
+    scalar_rounding_predicate: Callable[[str], bool] | None = None,
 ) -> Sequence[_T | BaseView | BaseConstant]:
     """Convert raw Python scalars and sympy expressions in inputs to IR constants.
 
     When a tensor input is present, scalars become Constants of the tensor's
     dtype, broadcast to its size. For bf16/fp16 tensors, the scalar value is
-    additionally rounded to the tensor dtype to match eager kernels that cast
-    scalar operands to the common dtype: always for comparison ops
-    (override_return_dtype == torch.bool) and for callers passing
-    round_scalar_constants (e.g. remainder); on CPU and MPS only for ops
-    passing round_scalars_to_tensor_dtype (e.g. add/sub, whose CUDA eager
-    kernels keep scalars at opmath precision).
+    additionally rounded to the tensor dtype for comparison ops, or when a
+    caller-provided device predicate says the eager kernel consumes the scalar
+    at tensor precision rather than opmath precision.
     """
     if not (override_return_dtype is None or type_promotion_kind is None):
         raise AssertionError(
@@ -627,16 +634,14 @@ def promote_constants(
     ex = next(x for x in inputs if isinstance(x, (TensorBox, ExpandView, ir.Constant)))
     tensor_dtype = ex.get_dtype()
 
-    # Round scalars to the tensor's dtype where eager does; see docstring.
     if tensor_dtype in (
         torch.bfloat16,
         torch.float16,
     ) and (
         override_return_dtype == torch.bool
-        or round_scalar_constants
         or (
-            round_scalars_to_tensor_dtype
-            and ex.get_device_or_error().type in ("cpu", "mps")
+            scalar_rounding_predicate is not None
+            and scalar_rounding_predicate(ex.get_device_or_error().type)
         )
     ):
         _round_scalar = lambda v: torch.tensor(v, dtype=tensor_dtype).item()  # noqa: E731
@@ -737,7 +742,7 @@ def make_pointwise(
     allow_alpha: bool = False,
     use_fma_for_alpha: bool = False,
     triton_fallback: Callable[..., _T] | None = None,
-    round_scalars_to_tensor_dtype: bool = False,
+    scalar_rounding_predicate: Callable[[str], bool] | None = None,
 ) -> Callable[..., TensorBox | _T]:
     """Wraps a pointwise fn and returns a function representing the pointwise in
     the define-by-run IR."""
@@ -754,7 +759,7 @@ def make_pointwise(
         inputs = promote_constants(
             inputs,
             override_return_dtype,
-            round_scalars_to_tensor_dtype=round_scalars_to_tensor_dtype,
+            scalar_rounding_predicate=scalar_rounding_predicate,
         )
         if allow_alpha:
             if alpha is not None and alpha != 1:
@@ -1145,7 +1150,7 @@ def register_pointwise(
     allow_alpha=False,
     use_fma_for_alpha=False,
     triton_fallback=None,
-    round_scalars_to_tensor_dtype=False,
+    scalar_rounding_predicate=None,
 ):
     """A pointwise function that maps ops.{name} to inputs"""
     name = name or aten_fn.__name__
@@ -1165,7 +1170,7 @@ def register_pointwise(
         allow_alpha=allow_alpha,
         use_fma_for_alpha=use_fma_for_alpha,
         triton_fallback=triton_fallback,
-        round_scalars_to_tensor_dtype=round_scalars_to_tensor_dtype,
+        scalar_rounding_predicate=scalar_rounding_predicate,
     )
     fn = register_lowering(
         aten_fn,
@@ -7889,6 +7894,10 @@ def div(a, b):
 @register_lowering([aten.fmod, prims.fmod], broadcast=True)
 def fmod(a, b):
     is_integral = is_boolean_type(a) or is_integer_type(a)
+    a, b = promote_constants(
+        (a, b),
+        scalar_rounding_predicate=_round_scalar_constants_for_fmod_remainder,
+    )
 
     if is_integral:
 
@@ -8206,7 +8215,7 @@ add = register_pointwise(
     allow_alpha=True,
     use_fma_for_alpha=True,
     override_fn_when_input_bool="logical_or",
-    round_scalars_to_tensor_dtype=True,
+    scalar_rounding_predicate=_round_scalar_constants_for_add_sub,
 )
 
 sort_fallback = fallback_handler(aten.sort.stable, add_to_fallback_set=False)
@@ -8485,7 +8494,11 @@ relu = register_pointwise(aten.relu)
 sigmoid = register_pointwise_numeric_ldf64(aten.sigmoid)
 sqrt = register_pointwise_numeric_ldf64(aten.sqrt)
 square = register_pointwise(aten.square)
-sub = register_pointwise(aten.sub, allow_alpha=True, round_scalars_to_tensor_dtype=True)
+sub = register_pointwise(
+    aten.sub,
+    allow_alpha=True,
+    scalar_rounding_predicate=_round_scalar_constants_for_add_sub,
+)
 
 
 @register_lowering(aten.addcmul, broadcast=True)
@@ -8705,7 +8718,10 @@ register_op_dtype_propagation_rules(
 
 @register_lowering(aten.remainder, broadcast=True)
 def remainder(a, b):
-    a, b = promote_constants((a, b), round_scalar_constants=True)
+    a, b = promote_constants(
+        (a, b),
+        scalar_rounding_predicate=_round_scalar_constants_for_fmod_remainder,
+    )
     fn = ops_wrapper("remainder")
     return make_pointwise(fn)(a, b)
 
