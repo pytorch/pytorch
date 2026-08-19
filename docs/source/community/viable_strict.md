@@ -19,8 +19,8 @@ Let **Failures %** (given a job, over an N-day window) be defined as the percent
     - The job owner is responsible for ensuring these requirements are met.
 2. *viable/strict*-blocking jobs that exceed **Failures % greater than 15% over the last 7 days should be removed from the viable/strict-blocking set**, outside of sustained breakages across the *viable/strict*-blocking set. Qualifying events include GitHub SEVs and *viable/strict* lag greater than 24 hours, typically coinciding with systemic outages. Jobs should also not be demoted due to transient runner shortages that affect queue times.
     - Latency expectations:
-        - *pull runtime*: **Jobs that cause the *pull* workflow P50 runtime to exceed 90 minutes** should be removed from the viable/strict-blocking set. This regression will be actioned upon if consistent for more than 7 days.
-        - *trunk runtime*: **Jobs that cause the *trunk* workflow P50 runtime to exceed 315 minutes, or individual test jobs that exceed 240 minutes in P50 individual runtime,** should be removed from the viable/strict-blocking set. This regression will be actioned upon if consistent for more than 7 days.
+        - *pull runtime*: **Jobs that cause the *pull* workflow P50 runtime to exceed 75 minutes** should be removed from the viable/strict-blocking set. This regression will be actioned upon if consistent for more than 7 days.
+        - *trunk runtime*: **Jobs that cause the *trunk* workflow P50 runtime to exceed 270 minutes, or individual test jobs that exceed 240 minutes in P50 individual runtime,** should be removed from the viable/strict-blocking set. This regression will be actioned upon if consistent for more than 7 days.
     - The PyTorch Dev Infra team will assist with cordoning regressing jobs.
 
 ### Unstable Jobs and Introducing New Jobs
