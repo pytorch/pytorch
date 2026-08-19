@@ -3028,12 +3028,16 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
             e.self_device_time_total for e in events if e.device_type != DeviceType.CPU
         )
 
-        for e in events:
-            if e.activity_type == "overhead":
-                self.assertEqual(e.self_device_time_total, 0)
-                self.assertEqual(e.device_time_total, 0)
+        overhead_events = [e for e in events if e.activity_type == "overhead"]
+        self.assertGreater(
+            len(overhead_events), 0, "Expected at least one overhead event"
+        )
+        for e in overhead_events:
+            self.assertEqual(e.self_device_time_total, 0)
+            self.assertEqual(e.device_time_total, 0)
 
-            # No single row may own more device time than the whole trace spent on device.
+        # No single row may own more device time than the whole trace spent on device.
+        for e in events:
             self.assertLessEqual(
                 e.self_device_time_total,
                 total_device_time,
