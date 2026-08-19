@@ -48,6 +48,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_GPU
 from torch.utils._triton import has_datacenter_blackwell_tma_device
 
 
@@ -109,7 +110,6 @@ class TestMaxAutotuneBlackwell(TestCase):
     hw_classification = HardwareClassification.CUDA
 
     @requires_capabilities(Capability.lib.triton)
-    @requires_capabilities(Capability.big_gpu.big_gpu)
     @unittest.skipIf(
         not has_datacenter_blackwell_tma_device(),
         "Need Blackwell with device-side TMA support in Triton",
@@ -394,7 +394,6 @@ class TestMaxAutotuneBlackwell(TestCase):
         ).run(code[0])
 
     @requires_capabilities(Capability.lib.triton)
-    @requires_capabilities(Capability.big_gpu.big_gpu)
     @unittest.skipIf(
         not has_datacenter_blackwell_tma_device(),
         "Need Blackwell with device-side TMA support in Triton",
@@ -462,7 +461,6 @@ class TestMaxAutotuneBlackwell(TestCase):
         fc.check("_desc.load(").check(write_api).run(code[0])
 
     @requires_capabilities(Capability.lib.triton)
-    @requires_capabilities(Capability.big_gpu.big_gpu)
     @unittest.skipIf(
         not has_datacenter_blackwell_tma_device(),
         "Need Blackwell with device-side TMA support in Triton",
@@ -538,7 +536,6 @@ class TestMaxAutotuneBlackwell(TestCase):
         fc.check("_desc.load(").check(write_api).run(code[0])
 
     @requires_capabilities(Capability.lib.triton)
-    @requires_capabilities(Capability.big_gpu.big_gpu)
     @unittest.skipIf(
         not has_datacenter_blackwell_tma_device(),
         "Need Blackwell with device-side TMA support in Triton",
@@ -757,7 +754,6 @@ class TestBlackwellTMAStoreFusion(TestCase):
         )
 
     @requires_capabilities(Capability.lib.triton)
-    @requires_capabilities(Capability.big_gpu.big_gpu)
     @unittest.skipIf(
         not has_datacenter_blackwell_tma_device(),
         "Need Blackwell with device-side TMA support in Triton",
@@ -816,7 +812,6 @@ class TestBlackwellTMAStoreFusion(TestCase):
         ).run(code[0])
 
     @requires_capabilities(Capability.lib.triton)
-    @requires_capabilities(Capability.big_gpu.big_gpu)
     @unittest.skipIf(
         not has_datacenter_blackwell_tma_device(),
         "Need Blackwell with device-side TMA support in Triton",
@@ -895,7 +890,6 @@ class TestBlackwellTMALoadFusion(TestCase):
         )
 
     @requires_capabilities(Capability.lib.triton)
-    @requires_capabilities(Capability.big_gpu.big_gpu)
     @unittest.skipIf(
         not has_datacenter_blackwell_tma_device(),
         "Need Blackwell with device-side TMA support in Triton",
@@ -953,7 +947,6 @@ class TestBlackwellTMALoadFusion(TestCase):
         ).run(code[0])
 
     @requires_capabilities(Capability.lib.triton)
-    @requires_capabilities(Capability.big_gpu.big_gpu)
     @unittest.skipIf(
         not has_datacenter_blackwell_tma_device(),
         "Need Blackwell with device-side TMA support in Triton",
@@ -1012,7 +1005,6 @@ class TestBlackwellTMALoadFusion(TestCase):
         ).run(code[0])
 
     @requires_capabilities(Capability.lib.triton)
-    @requires_capabilities(Capability.big_gpu.big_gpu)
     @unittest.skipIf(
         not has_datacenter_blackwell_tma_device(),
         "Need Blackwell with device-side TMA support in Triton",
@@ -2006,4 +1998,8 @@ instantiate_device_type_tests(TestBlackwellTMALoadFusion, globals(), only_for="c
 
 
 if __name__ == "__main__":
-    run_tests()
+    from torch._inductor.utils import is_big_gpu
+
+    # Set env to make it work in CI.
+    if HAS_GPU and HAS_CPU and is_big_gpu():
+        run_tests()
