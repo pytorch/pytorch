@@ -2559,6 +2559,17 @@ def getRocmVersion() -> tuple[int, int]:
     rocm_version = _get_torch_rocm_version()
     return (rocm_version[0], rocm_version[1])
 
+def getRocmSdkVersion() -> tuple[int, int]:
+    """Major.minor of torch.version.rocm (SDK). getRocmVersion() still reads HIP."""
+    ver = getattr(torch.version, "rocm", None)
+    if not ver:
+        return (0, 0)
+    parts = str(ver).split(".")[:2]
+    try:
+        return (int(parts[0]), int(parts[1]))
+    except (ValueError, IndexError):
+        return (0, 0)
+
 # Skips a test on CUDA if ROCm is available and its version is lower than requested.
 def skipIfRocmVersionLessThan(version=None):
     def _should_skip():
