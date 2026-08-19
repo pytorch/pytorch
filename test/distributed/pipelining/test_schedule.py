@@ -30,6 +30,7 @@ from torch.distributed.pipelining.schedules import (
     _add_send_recv,
     _add_unshard_reshard,
     _add_wait_send,
+    _add_wait_send_budget,
     _batch_p2p,
     _defer_recv_ops,
     _format_pipeline_order,
@@ -61,6 +62,7 @@ from torch.distributed.pipelining.stage import (
     _early_send_release_default,
     _PipelineStageBase,
     _RecvInfo,
+    _send_release_budget_default,
     PipelineStage,
 )
 from torch.testing._internal.common_distributed import requires_accelerator_dist_backend
@@ -1519,6 +1521,150 @@ class TestScheduleLowering(TestCase):
             _simulate_comms_compute(
                 lowered, stage_to_rank=lambda s: s, num_stages=num_stages
             )
+
+    def _outstanding_sends(self, actions):
+        """Peak sends a rank holds, and how many are left for the drain."""
+        held: set[tuple] = set()
+        peak = 0
+        for action in actions:
+            comp_type = action.computation_type
+            if comp_type in (SEND_F, SEND_B):
+                held.add((comp_type, action.stage_index, action.microbatch_index))
+                peak = max(peak, len(held))
+            elif comp_type in (WAIT_SEND_F, WAIT_SEND_B):
+                send = SEND_F if comp_type == WAIT_SEND_F else SEND_B
+                held.discard((send, action.stage_index, action.microbatch_index))
+        return peak, len(held)
+
+    def test_budget_caps_the_sends_a_rank_holds(self):
+        num_stages, num_microbatches, budget = 4, 8, 4
+        lowered = self._wait_send_schedule(num_stages, num_microbatches)
+        capped = _add_wait_send_budget(lowered, lambda s: s, budget)
+
+        drained, uncapped_drained = 0, 0
+        for rank in capped:
+            uncapped_peak, uncapped_drain = self._outstanding_sends(lowered[rank])
+            peak, drain = self._outstanding_sends(capped[rank])
+            self.assertGreater(uncapped_peak, budget, f"rank {rank} was never over")
+            self.assertLessEqual(peak, budget, f"rank {rank} stays over budget")
+            self.assertLessEqual(drain, uncapped_drain, f"rank {rank} drains later")
+            drained += drain
+            uncapped_drained += uncapped_drain
+        # Backward sends are what the local backward leaves for the drain.
+        self.assertLess(drained, uncapped_drained)
+
+    def test_budget_releases_backward_sends(self):
+        """Cover the direction the local backward cannot prove."""
+        lowered = self._wait_send_schedule(4, 8)
+        self.assertEqual(
+            [
+                a
+                for actions in lowered.values()
+                for a in actions
+                if a.computation_type == WAIT_SEND_B
+            ],
+            [],
+        )
+
+        capped = _add_wait_send_budget(lowered, lambda s: s, 4)
+        self.assertNotEqual(
+            [
+                a
+                for actions in capped.values()
+                for a in actions
+                if a.computation_type == WAIT_SEND_B
+            ],
+            [],
+        )
+
+    def test_budget_waits_once_per_send(self):
+        capped = _add_wait_send_budget(self._wait_send_schedule(4, 8), lambda s: s, 4)
+        wait_types = (WAIT_SEND_F, WAIT_SEND_B)
+        for rank, actions in capped.items():
+            waits = [a for a in actions if a.computation_type in wait_types]
+            self.assertEqual(
+                len(waits), len(set(waits)), f"rank {rank} waits for a send twice"
+            )
+            waited = {
+                (
+                    SEND_F if a.computation_type == WAIT_SEND_F else SEND_B,
+                    a.stage_index,
+                    a.microbatch_index,
+                )
+                for a in waits
+            }
+            issued = {
+                (a.computation_type, a.stage_index, a.microbatch_index)
+                for a in actions
+                if a.computation_type in (SEND_F, SEND_B)
+            }
+            self.assertTrue(
+                waited <= issued, f"rank {rank} waits for a send it never issues"
+            )
+
+    def test_budget_keeps_the_rest_of_the_schedule_intact(self):
+        lowered = self._wait_send_schedule(4, 8)
+        capped = _add_wait_send_budget(lowered, lambda s: s, 4)
+        wait_types = (WAIT_SEND_F, WAIT_SEND_B)
+        for rank, actions in capped.items():
+            self.assertEqual(
+                [a for a in actions if a.computation_type not in wait_types],
+                [a for a in lowered[rank] if a.computation_type not in wait_types],
+            )
+
+    def test_budget_does_not_deadlock(self):
+        for num_stages, num_microbatches in ((2, 2), (4, 4), (4, 8)):
+            lowered = self._wait_send_schedule(num_stages, num_microbatches)
+            for budget in (0, 1, 2, 4):
+                capped = _add_wait_send_budget(lowered, lambda s: s, budget)
+                _simulate_comms_compute(
+                    capped, stage_to_rank=lambda s: s, num_stages=num_stages
+                )
+
+    def test_budget_reports_what_it_could_not_release(self):
+        """Warn rather than silently hold more than asked."""
+        lowered = self._wait_send_schedule(4, 8)
+        with self.assertLogs(
+            "torch.distributed.pipelining.schedules", level="WARNING"
+        ) as logs:
+            _add_wait_send_budget(lowered, lambda s: s, 0)
+        self.assertRegex("\n".join(logs.output), "budget of 0 not met")
+
+    def test_budget_setting_rejects_a_non_count(self):
+        with patch.dict(os.environ, {"TORCH_PIPELINING_SEND_RELEASE_BUDGET": "4"}):
+            self.assertEqual(_send_release_budget_default(), 4)
+        for bad in ("-1", "some"):
+            with patch.dict(os.environ, {"TORCH_PIPELINING_SEND_RELEASE_BUDGET": bad}):
+                with self.assertRaisesRegex(ValueError, "non-negative integer"):
+                    _send_release_budget_default()
+
+    def test_budget_applies_to_a_lowered_interleaved_schedule(self):
+        def build(budget):
+            def stage(index):
+                mock_stage = create_autospec(PipelineStage, instance=True)
+                mock_stage.stage_index, mock_stage.num_stages = index, 8
+                mock_stage.group_rank, mock_stage.group_size = 0, 4
+                mock_stage.submod, mock_stage.early_send_release = None, True
+                return mock_stage
+
+            setting = "TORCH_PIPELINING_SEND_RELEASE_BUDGET"
+            with patch.dict(os.environ):
+                os.environ.pop(setting, None)
+                if budget is not None:
+                    os.environ[setting] = str(budget)
+                schedule = ScheduleInterleaved1F1B(
+                    [stage(i) for i in (0, 4)], n_microbatches=8, loss_fn=None
+                )
+            order = schedule.pipeline_order_with_comms
+            return [self._outstanding_sends(order[rank]) for rank in sorted(order)]
+
+        budget = 4
+        for (uncapped_peak, uncapped_drain), (peak, drain) in zip(
+            build(None), build(budget)
+        ):
+            self.assertGreater(uncapped_peak, budget)
+            self.assertLessEqual(peak, budget)
+            self.assertLess(drain, uncapped_drain)
 
     def test_simulator_rejects_wait_before_the_peer_receive(self):
         """Reject a wait whose peer never receives."""
