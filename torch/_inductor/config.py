@@ -364,9 +364,11 @@ batch_fusion = True
 # merge_splits_pass
 # mutate_cat_pass
 # split_cat_pass
+# batch_linear_lhs is disabled until the XPU layout-safety validation lands;
+# it emits non-contiguous split views that break layout-sensitive consumers.
 pre_grad_fusion_options: dict[str, dict[str, Any]] = {
     "batch_linear_lhs": {
-        "devices": ("xpu",),
+        "devices": (),
         "min_fuse_set_size": 2,
     },
 }
