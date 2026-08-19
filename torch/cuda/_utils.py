@@ -519,11 +519,15 @@ class _CudaKernel:
         device_props = torch.cuda.get_device_properties()
         # HIP doesn't have shared_memory_per_block_optin in device properties, so we hard-code it here
         if torch.version.hip:
-            # navi, CDNA1-CDNA3 allows a max of 64KB shared memory
-            # CDNA4 allows a max of 160KB shared memory
-            max_shared_mem = (
-                65536 if device_props.gcnArchName != "gfx950" else 160 * 1024
-            )
+            # navi, CDNA1-CDNA3 allows a max of 64KB shared memory,
+            # CDNA4 (gfx950) 160KB, and CDNA5 (gfx1250) 320KB.
+            gcn_arch = device_props.gcnArchName.split(":", 1)[0]
+            if gcn_arch == "gfx950":
+                max_shared_mem = 160 * 1024
+            elif gcn_arch == "gfx1250":
+                max_shared_mem = 320 * 1024
+            else:
+                max_shared_mem = 65536
         else:
             max_shared_mem = getattr(
                 device_props, "shared_memory_per_block_optin", 49152

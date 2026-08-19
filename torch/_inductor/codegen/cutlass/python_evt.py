@@ -100,6 +100,53 @@ def _match_gelu_erf(node: ast.expr) -> "ast.expr | None":
     return None
 
 
+def _match_silu(node: ast.expr) -> "ast.expr | None":
+    """Match SiLU decomposition ``x / (1 + exp(0.0 - x))`` and return ``x``.
+
+    Inductor decomposes silu(x) as x / (1 + exp(-x)). With our neg() op
+    emitting (0.0 - x), the generated code is: x / (1.0 + exp((0.0 - x))).
+    """
+    # Must be a division: x / denom
+    if not (isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div)):
+        return None
+    x = node.left
+    denom = node.right
+
+    # denom must be: 1.0 + exp(neg_x) or exp(neg_x) + 1.0
+    if not (isinstance(denom, ast.BinOp) and isinstance(denom.op, ast.Add)):
+        return None
+
+    operands = [denom.left, denom.right]
+    one = next((o for o in operands if _is_close_constant(o, 1.0)), None)
+    if one is None:
+        return None
+    exp_part = next((o for o in operands if o is not one), None)
+    if exp_part is None:
+        return None
+
+    # exp_part must be exp(neg_x)
+    exp_call = _match_call(exp_part, "exp")
+    if exp_call is None:
+        return None
+    neg_x = exp_call.args[0]
+
+    # neg_x must be (0.0 - x) where x matches the numerator
+    if (
+        isinstance(neg_x, ast.BinOp)
+        and isinstance(neg_x.op, ast.Sub)
+        and _is_close_constant(neg_x.left, 0.0)
+        and _same(neg_x.right, x)
+    ):
+        return x
+
+    # Also handle unary minus: -x
+    if isinstance(neg_x, ast.UnaryOp) and isinstance(neg_x.op, ast.USub):
+        if _same(neg_x.operand, x):
+            return x
+
+    return None
+
+
 @dataclass(frozen=True)
 class _ActivationPattern:
     # ``name`` must be a functor the CUTLASS EVT frontend binds natively (see
@@ -115,6 +162,7 @@ class _ActivationPattern:
 # Add new entries here to re-fuse additional decomposed activations.
 _ACTIVATION_PATTERNS: tuple[_ActivationPattern, ...] = (
     _ActivationPattern("gelu", "erf", _match_gelu_erf),
+    _ActivationPattern("silu", "0.0 -", _match_silu),
 )
 
 
@@ -149,7 +197,11 @@ def _fuse_activations(code: str) -> str:
         ):
             assigns[stmt.targets[0].id] = stmt.value
 
-    def inline(node: ast.expr, seen: OrderedSet[str] = OrderedSet()) -> ast.expr:
+    _EMPTY_SET: OrderedSet[str] = OrderedSet()
+
+    def inline(node: ast.expr, seen: OrderedSet[str] | None = None) -> ast.expr:
+        if seen is None:
+            seen = _EMPTY_SET
         # Fully inline temporary assignments so the expression tree only refers
         # to function parameters (accum / read buffers) and literal constants.
         if isinstance(node, ast.Name) and node.id in assigns:
@@ -284,6 +336,12 @@ class CutlassEVTOpsMixIn:
         return str(float(value))
 
     @staticmethod
+    def neg(x0: str) -> str:
+        # Use subtraction from zero instead of unary minus because the
+        # CUTLASS PythonASTFrontend has visit_BinOp but no visit_UnaryOp.
+        return f"(0.0 - {x0})"
+
+    @staticmethod
     def mul(x0: str, x1: str) -> str:
         return CutlassEVTOpsMixIn._infix_bin_op("*", x0, x1)
 
@@ -322,6 +380,10 @@ class CutlassEVTOpsMixIn:
     @staticmethod
     def erf(x0: str) -> str:
         return CutlassEVTOpsMixIn._prefix_un_op("erf", x0)
+
+    @staticmethod
+    def silu(x0: str) -> str:
+        return CutlassEVTOpsMixIn._prefix_un_op("silu", x0)
 
 
 class MockCutlassHandler(CutlassEVTOpsMixIn, WrapperHandler):
@@ -378,9 +440,9 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
         self.accumulator_node_name: str = accumulator_node_name  #
         self.body: IndentedBuffer = IndentedBuffer(1)  # The body buffer for codegen
         self.var_counter: Iterator[int] = itertools.count()
-        self.store_name_to_value: dict[str, OpsValue] = (
-            dict()
-        )  # Aliases for subexpression functors
+        self.store_name_to_value: dict[
+            str, OpsValue
+        ] = {}  # Aliases for subexpression functors
         self.reads: OrderedSet[str] = OrderedSet([])
         # Used for creating example tensors
         self.var_name_to_buffer_name: dict[str, str] = {
@@ -565,7 +627,7 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
         # Same length: direct comparison
         if len(left_list) == len(right_list):
             return all(
-                _provably_equal_or_zero(l, r) for l, r in zip(left_list, right_list)
+                _provably_equal_or_zero(lv, rv) for lv, rv in zip(left_list, right_list)
             )
         # Different lengths: allow compatible reshapes where trailing strides match.
         # This handles view/reshape between template output and consumer, e.g.,

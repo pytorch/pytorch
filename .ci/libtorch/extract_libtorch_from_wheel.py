@@ -100,6 +100,176 @@ def copy_libraries(torch_dir: Path, libtorch_lib: Path, platform: str) -> None:
                     shutil.copy2(item, libtorch_lib / item.name)
 
 
+def fix_rpath(libtorch_lib: Path) -> None:
+    # Wheel RPATHs are relative to pip's site-packages layout; rewrite to
+    # $ORIGIN for the flat libtorch lib/ directory. Requires patchelf
+    # (available in manylinux2_28-builder containers).
+    if sys.platform != "linux":
+        raise RuntimeError(f"fix_rpath is only supported on Linux, got {sys.platform}")
+
+    patchelf = shutil.which("patchelf")
+    if not patchelf:
+        raise FileNotFoundError(
+            "patchelf not found; the extraction job must run inside a "
+            "manylinux2_28-builder container that ships patchelf"
+        )
+
+    for item in libtorch_lib.iterdir():
+        if item.is_file() and (item.name.endswith(".so") or ".so." in item.name):
+            result = subprocess.run(
+                [patchelf, "--set-rpath", "$ORIGIN", "--force-rpath", str(item)],
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode == 0:
+                print(f"  Fixed rpath: {item.name}")
+            else:
+                raise RuntimeError(
+                    f"patchelf failed on {item.name}: {result.stderr.strip()}"
+                )
+
+
+# CUDA toolkit dirs in the manylinux builder holding the NVIDIA runtime libs the
+# wheel needs. Only sonames found here are bundled, so system libs and the driver
+# stub (in stubs/, never searched) are left to the runtime environment.
+_CUDA_LIB_DIRS = ("/usr/local/cuda/lib64", "/usr/local/cuda/extras/CUPTI/lib64")
+
+
+def _is_cuda_variant(desired_cuda: str) -> bool:
+    return desired_cuda.startswith("cu")
+
+
+def _is_rocm_sdk_wheel_variant(desired_cuda: str) -> bool:
+    """True for TheRock pip-SDK ROCm; legacy /opt/rocm bundles deps in-wheel."""
+    if not desired_cuda.startswith("rocm"):
+        return False
+    return (
+        subprocess.run(
+            [sys.executable, "-m", "pip", "show", "rocm"],
+            capture_output=True,
+            text=True,
+        ).returncode
+        == 0
+    )
+
+
+def _needed(patchelf: str, so: Path) -> list[str]:
+    r = subprocess.run(
+        [patchelf, "--print-needed", str(so)], capture_output=True, text=True
+    )
+    return r.stdout.split() if r.returncode == 0 else []
+
+
+def bundle_cuda_deps(libtorch_lib: Path) -> None:
+    """Copy the NVIDIA runtime deps the small CUDA wheel omits into lib/ so the
+    shared-with-deps tarball is self-contained (pytorch/pytorch#183971). Resolves
+    NEEDED transitively from the torch libs; fix_rpath then adds $ORIGIN so the
+    flat lib/ self-resolves. Must run in a CUDA manylinux builder."""
+    patchelf = shutil.which("patchelf")
+    search = [Path(d) for d in _CUDA_LIB_DIRS if Path(d).is_dir()]
+    if not patchelf or not search:
+        raise FileNotFoundError(
+            "needs a CUDA manylinux builder (patchelf + /usr/local/cuda)"
+        )
+    present = {p.name for p in libtorch_lib.iterdir() if p.is_file()}
+    queue = [p for p in libtorch_lib.iterdir() if p.is_file() and ".so" in p.name]
+    while queue:
+        for needed in _needed(patchelf, queue.pop()):
+            if needed in present:
+                continue
+            src = next((d / needed for d in search if (d / needed).exists()), None)
+            if not src:
+                continue
+            dest = libtorch_lib / needed
+            shutil.copy2(src, dest)  # follows symlinks -> real file named by soname
+            present.add(needed)
+            queue.append(dest)
+            print(f"  bundled CUDA dep: {needed}")
+
+
+def _resolve_needed_lib(search: list[Path], needed: str) -> Path | None:
+    for lib_dir in search:
+        direct = lib_dir / needed
+        if direct.is_file():
+            return direct
+    if ".so" not in needed:
+        return None
+    base = needed.split(".so", 1)[0] + ".so"
+    for lib_dir in search:
+        for hit in sorted(lib_dir.glob(f"{base}*")):
+            if hit.is_file():
+                # copy2 follows devel symlinks and names the copy by NEEDED soname.
+                return hit
+    return None
+
+
+def _rocm_sdk_search_dirs(site_packages: Path) -> list[Path]:
+    core = site_packages / "_rocm_sdk_core" / "lib"
+    libs = site_packages / "_rocm_sdk_libraries" / "lib"
+    candidates = [
+        core,
+        core / "rocm_sysdeps" / "lib",
+        core / "host-math" / "lib",
+        core / "llvm" / "lib",
+        libs,
+    ]
+    return [path for path in candidates if path.is_dir()]
+
+
+def _installed_rocm_site_packages() -> Path:
+    """Return the site-packages root for the SDK baked into the ROCm image."""
+    result = subprocess.run(
+        [sys.executable, "-m", "pip", "show", "rocm"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    for line in result.stdout.splitlines():
+        if line.startswith("Location:"):
+            return Path(line.split(":", 1)[1].strip())
+    raise FileNotFoundError("Cannot locate the ROCm SDK installed in the builder image")
+
+
+def bundle_rocm_deps(libtorch_lib: Path) -> None:
+    """Copy ROCm runtime deps from TheRock pip packages into lib/ for shared-with-deps.
+
+    Wheel-based ROCm manywheels point RPATH at sibling _rocm_sdk_* packages under
+    site-packages; libtorch extraction flattens to $ORIGIN, so copy the transitive
+    NEEDED closure from the pip SDK layout first (pytorch/pytorch#192997).
+    """
+    patchelf = shutil.which("patchelf")
+    if not patchelf:
+        raise FileNotFoundError(
+            "patchelf not found; the extraction job must run inside a "
+            "manylinux2_28-builder container that ships patchelf"
+        )
+
+    site_packages = _installed_rocm_site_packages()
+    search = _rocm_sdk_search_dirs(site_packages)
+    if not search:
+        raise FileNotFoundError(
+            f"No _rocm_sdk_* lib dirs found under {site_packages}; the extraction "
+            "job must use the matching ROCm builder image"
+        )
+
+    present = {path.name for path in libtorch_lib.iterdir() if path.is_file()}
+    queue = [
+        path for path in libtorch_lib.iterdir() if path.is_file() and ".so" in path.name
+    ]
+    while queue:
+        for needed in _needed(patchelf, queue.pop()):
+            if needed in present:
+                continue
+            src = _resolve_needed_lib(search, needed)
+            if src is None:
+                continue
+            dest = libtorch_lib / needed
+            shutil.copy2(src, dest)
+            present.add(needed)
+            queue.append(dest)
+            print(f"  bundled ROCm dep: {needed}")
+
+
 def copy_includes(torch_dir: Path, libtorch_include: Path) -> None:
     torch_include = torch_dir / "include"
     if not torch_include.is_dir():
@@ -319,6 +489,17 @@ def main() -> None:
 
         # Copy components
         copy_libraries(torch_dir, libtorch_dir / "lib", args.platform)
+        if args.platform == "linux":
+            # shared-with-deps must be self-contained: bundle the NVIDIA runtime
+            # libs the small wheel omits, then rewrite all RPATHs to $ORIGIN so
+            # the flat lib/ resolves both torch and bundled deps.
+            with_deps = "with-deps" in args.libtorch_variant
+            if with_deps and _is_cuda_variant(args.desired_cuda):
+                bundle_cuda_deps(libtorch_dir / "lib")
+            elif with_deps and _is_rocm_sdk_wheel_variant(args.desired_cuda):
+                bundle_rocm_deps(libtorch_dir / "lib")
+            # XPU also uses sibling pip packages, but has no libtorch extract job.
+            fix_rpath(libtorch_dir / "lib")
         copy_includes(torch_dir, libtorch_dir / "include")
         copy_cmake(torch_dir, libtorch_dir / "share")
         copy_bin(torch_dir, libtorch_dir / "bin", args.platform)

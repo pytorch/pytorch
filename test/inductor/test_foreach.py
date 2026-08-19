@@ -87,7 +87,6 @@ foreach_map_copy = foreach_map_wrapper(aten.copy)
 # More general functions
 foreach_map_add_fn = foreach_map_wrapper(add_op)
 foreach_map_add_inplace = foreach_map_wrapper(add_inplace_op)
-foreach_map_recipaddmul = foreach_map_wrapper(addrecip_op)
 foreach_map_addcmul = foreach_map_wrapper(addcmul_op)
 foreach_map_recipaddmul = foreach_map_wrapper(recipaddmul_op)
 
@@ -1394,7 +1393,6 @@ class ForeachTests(TestCase):
         for eager, compiled in zip(eager_result2, compiled_result2):
             self.assertEqual(eager, compiled, atol=atol, rtol=rtol)
 
-    @skipIfRocm
     @requires_cuda_and_triton
     @config.patch({"emulate_precision_casts": True})
     def test_foreach_addcmul_uses_fma_instruction(self):
