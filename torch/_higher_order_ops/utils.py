@@ -577,11 +577,24 @@ def clone_outputs_aliasing_inputs(args):
     return maybe_clone
 
 
+def query_requires_grad(t: torch.Tensor) -> bool:
+    """requires_grad of ``t``, looking through a functional wrapper.
+
+    A FunctionalTensor does not carry the autograd metadata of the tensor it
+    wraps, so asking it directly reports False for something that does require
+    grad. This matters when the joint is traced with functionalization active.
+    """
+    if torch._is_functional_tensor(t):
+        t = torch._from_functional_tensor(t)
+    return t.requires_grad
+
+
 def prepare_fw_with_masks(fn):
     def fw_with_masks(*args):
         fw_out = fn(*args)
         return fw_out, [
-            bool(isinstance(ret, torch.Tensor) and ret.requires_grad) for ret in fw_out
+            bool(isinstance(ret, torch.Tensor) and query_requires_grad(ret))
+            for ret in fw_out
         ]
 
     return fw_with_masks
@@ -603,12 +616,7 @@ def prepare_fw_with_masks_all_requires_grad(fn):
                 fw_out,
             )
 
-        def _query_requires_grad(t: torch.Tensor) -> bool:
-            if torch._is_functional_tensor(t):
-                t = torch._from_functional_tensor(t)
-            return t.requires_grad
-
-        return fw_out, pytree.tree_map_only(torch.Tensor, _query_requires_grad, fw_out)
+        return fw_out, pytree.tree_map_only(torch.Tensor, query_requires_grad, fw_out)
 
     return fw_with_masks
 

@@ -11,6 +11,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from sys import platform
+from unittest import mock
 
 import torch
 import torch.distributed as dist
@@ -392,7 +393,7 @@ class TCPStoreTest(TestCase, StoreTestBase):
         addr = DEFAULT_HOSTNAME
         port = common.find_free_port()
 
-        err_msg_reg = f"^The server socket has failed to listen on any local .*{port}"
+        err_msg_reg = "^The server socket has failed to listen on any local .*(?i:address already in use)"
         with self.assertRaisesRegex(dist.DistNetworkError, err_msg_reg):
             # Use noqa to silence flake8.
             # Need to store in an unused variable here to ensure the first
@@ -934,6 +935,40 @@ class RendezvousTCPTest(TestCase):
         gen0 = dist.rendezvous(url + "&rank=0&use_libuv=1")
         store0, _, _ = next(gen0)
         self.assertTrue(store0.libuvBackend)
+
+    def test_agent_store_ignored_for_other_address(self):
+        # torchrun's elastic agent exports TORCHELASTIC_USE_AGENT_STORE into
+        # every worker, meaning "the agent serves a store at
+        # MASTER_ADDR:MASTER_PORT". _create_c10d_store used to honor it for any
+        # address it was handed, so a private store on a caller-chosen port
+        # became client-only on every rank, nobody ever started a server and
+        # every rank blocked in connect-retry until the store timeout.
+        url = self.create_tcp_url()
+        env = {
+            "TORCHELASTIC_USE_AGENT_STORE": "True",
+            "MASTER_ADDR": DEFAULT_HOSTNAME,
+            "MASTER_PORT": str(common.find_free_port()),
+        }
+        with mock.patch.dict(os.environ, env):
+            gen0 = dist.rendezvous(url + "&rank=0", timeout=timedelta(seconds=10))
+            store0, _, _ = next(gen0)
+        store0.set("key0", "value0")
+        self.assertEqual(b"value0", store0.get("key0"))
+
+    def test_agent_store_honored_for_master_address(self):
+        # The flip side: at MASTER_ADDR:MASTER_PORT the agent is the server, so
+        # every rank must stay a client. Point at a port nothing listens on and
+        # check we fail to connect rather than silently starting a server.
+        port = common.find_free_port()
+        url = f"tcp://{DEFAULT_HOSTNAME}:{port:d}?world_size=1&rank=0"
+        env = {
+            "TORCHELASTIC_USE_AGENT_STORE": "True",
+            "MASTER_ADDR": DEFAULT_HOSTNAME,
+            "MASTER_PORT": str(port),
+        }
+        with mock.patch.dict(os.environ, env):
+            with self.assertRaises(DistNetworkError):
+                next(dist.rendezvous(url, timeout=timedelta(seconds=1)))
 
 
 class DummyStore(dist.Store):
