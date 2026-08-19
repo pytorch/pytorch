@@ -621,12 +621,7 @@ class GraphLowering(torch.fx.Interpreter):
         # track the current placeholder index that we are processing
         self.placeholder_idx = -1
 
-        # bw_donated_idxs index the top-level backward graph's placeholders.
-        # HOP subgraph's inputs are never donatable as they may be mutated
-        # in place across iterations.
-        self.bw_donated_idxs = (
-            None if getattr(self, "parent", None) is not None else get_donated_idxs()
-        )
+        self.bw_donated_idxs = get_donated_idxs()
 
         # Cache for dep size hints to avoid expensive recomputation
         self.dep_size_hint_cache: dict[tuple[Dep, bool], int] = {}
