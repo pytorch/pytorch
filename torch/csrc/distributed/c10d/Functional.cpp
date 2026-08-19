@@ -477,7 +477,6 @@ std::vector<at::Tensor> batch_p2p_ops(
           static_cast<int64_t>(tag_list[i]));
       auto placeholder = at::empty({0}, t.options());
       if (!should_coalesce && work) {
-        c10d::register_work(t, work);
         c10d::register_work(placeholder, work);
       }
       result_tensors.push_back(std::move(placeholder));
@@ -755,6 +754,13 @@ TORCH_LIBRARY(_c10d_functional, m) {
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd, c10d::wait_tensor),
       {at::Tag::pt2_compliant_tag});
+
+  m.def(
+      "wait_tensors(Tensor[] tensors) -> Tensor[]",
+      torch::dispatch(
+          c10::DispatchKey::CompositeExplicitAutograd, c10d::wait_tensors),
+      {at::Tag::pt2_compliant_tag});
+
   m.def(
       "isend(Tensor tensor, int dst, int tag, str group_name) -> Tensor",
       torch::dispatch(c10::DispatchKey::CompositeExplicitAutograd, c10d::isend),

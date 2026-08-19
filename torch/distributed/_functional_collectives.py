@@ -143,6 +143,13 @@ def wait_tensor(tensor):
     return torch.ops._c10d_functional.wait_tensor(tensor)  # type: ignore[attr-defined]
 
 
+def wait_tensors(tensors: list[torch.Tensor]) -> list[torch.Tensor]:
+    """
+    Wait on tensors returned by the same multi-output collective.
+    """
+    return torch.ops._c10d_functional.wait_tensors(tensors)  # type: ignore[attr-defined, no-any-return]
+
+
 def broadcast(self: torch.Tensor, src: int, group: RANK_TYPES, tag: str = ""):
     """
     Broadcasts the tensor to all processes in the given process group.
@@ -409,7 +416,7 @@ def all_reduce_coalesced(
         reduceOp.lower(),
         _group_or_group_name(group),
     )
-    return list(map(_maybe_wrap_tensor, tensor_list))
+    return _maybe_wrap_tensors(tensor_list)
 
 
 def all_gather_single_coalesced(
@@ -438,7 +445,7 @@ def all_gather_single_coalesced(
         group_size,
         _group_or_group_name(group),
     )
-    return list(map(_maybe_wrap_tensor, tensor_list))
+    return _maybe_wrap_tensors(tensor_list)
 
 
 def reduce_scatter_single_coalesced(
@@ -486,7 +493,7 @@ def reduce_scatter_single_coalesced(
         _group_or_group_name(group),
     )
 
-    return list(map(_maybe_wrap_tensor, tensor_list))
+    return _maybe_wrap_tensors(tensor_list)
 
 
 # Guarded warning rather than the @deprecated wrapper so Dynamo can trace
@@ -926,7 +933,7 @@ def all_reduce_coalesced_backward(ctx, grad_outputs: list[torch.Tensor]):
         reduce_op,
         group_name,
     )
-    return (list(map(wait_tensor, grad_inputs)), None, None)
+    return (wait_tensors(grad_inputs), None, None)
 
 
 def all_reduce_coalesced_setup_context(ctx, inputs, output):
@@ -975,7 +982,7 @@ def all_gather_into_tensor_coalesced_backward(ctx, grad_outputs: list[torch.Tens
         group_size,
         group_name,
     )
-    return (list(map(wait_tensor, grad_inputs)), None, None)
+    return (wait_tensors(grad_inputs), None, None)
 
 
 def all_gather_into_tensor_coalesced_setup_context(ctx, inputs, output):
@@ -1030,7 +1037,7 @@ def reduce_scatter_tensor_coalesced_backward(ctx, grad_outputs: list[torch.Tenso
         group_size,
         group_name,
     )
-    return (list(map(wait_tensor, grad_inputs)), None, None, None)
+    return (wait_tensors(grad_inputs), None, None, None)
 
 
 def reduce_scatter_tensor_coalesced_setup_context(ctx, inputs, output):
@@ -1439,6 +1446,12 @@ def _maybe_wrap_tensor(self) -> torch.Tensor:
     return _wrap_tensor_autograd(self)
 
 
+def _maybe_wrap_tensors(tensors: list[torch.Tensor]) -> list[torch.Tensor]:
+    if _are_we_tracing():
+        return wait_tensors(tensors)
+    return list(map(_wrap_tensor_autograd, tensors))
+
+
 @contextlib.contextmanager
 def allow_inflight_collective_as_graph_input_ctx(value: bool = True):
     """
@@ -1503,6 +1516,10 @@ def _all_reduce_meta(self, *args):
 
 def _wait_tensor_meta(self, *args):
     return torch.empty_like(self)
+
+
+def _wait_tensors_meta(tensors):
+    return list(tensors)
 
 
 def _isend_meta(self, *args):
@@ -1619,6 +1636,7 @@ lib_impl.impl("all_reduce_", _all_reduce__meta, "Meta")
 lib_impl.impl("all_reduce_coalesced", _all_reduce_coalesced_meta, "Meta")
 lib_impl.impl("all_reduce_coalesced_", _all_reduce_coalesced__meta, "Meta")
 lib_impl.impl("wait_tensor", _wait_tensor_meta, "Meta")
+lib_impl.impl("wait_tensors", _wait_tensors_meta, "Meta")
 lib_impl.impl("isend", _isend_meta, "Meta")
 lib_impl.impl("irecv", _irecv_meta, "Meta")
 lib_impl.impl("batch_p2p_ops", _batch_p2p_ops_meta, "Meta")
@@ -1661,6 +1679,8 @@ lib_impl_autograd.impl("all_to_all_single", _all_to_all_single_meta, "Meta")
 # whose result tensors are ignored by user code.
 torch.fx.node.has_side_effect(torch.ops._c10d_functional.wait_tensor.default)  # type: ignore[has-type]
 torch.fx.node.has_side_effect(torch.ops._c10d_functional.wait_tensor)  # type: ignore[has-type]
+torch.fx.node.has_side_effect(torch.ops._c10d_functional.wait_tensors.default)  # type: ignore[has-type]
+torch.fx.node.has_side_effect(torch.ops._c10d_functional.wait_tensors)  # type: ignore[has-type]
 torch.fx.node.has_side_effect(torch.ops._c10d_functional.isend.default)  # type: ignore[has-type]
 torch.fx.node.has_side_effect(torch.ops._c10d_functional.isend)  # type: ignore[has-type]
 torch.fx.node.has_side_effect(torch.ops._c10d_functional.irecv.default)  # type: ignore[has-type]
@@ -1945,10 +1965,7 @@ def batch_p2p_ops_inplace(
         op_list, peer_list, tag_list, tensors, group_name
     )
     if _are_we_tracing():
-        return [
-            _maybe_wrap_tensor(t) if op == "irecv" else t
-            for op, t in zip(op_list, tensors)
-        ]
+        return tensors
     return list(map(_maybe_wrap_tensor, tensors))
 
 

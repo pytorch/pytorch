@@ -12081,6 +12081,16 @@ class _WaitKernel(_CollectiveKernel):
         self.set_cpp_kernel_name("aoti_torch_cpu__c10d_functional_wait_tensor")
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
+        if (
+            self.op_overload is torch.ops._c10d_functional.wait_tensors.default
+            and V.graph.cpp_wrapper
+        ):
+            from .exc import CppWrapperCodegenError
+
+            raise CppWrapperCodegenError(
+                "_c10d_functional.wait_tensors is not supported with "
+                "C++ wrapper/AOTInductor"
+            )
         wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
         wrapper.generate_extern_kernel_alloc(self)
 
@@ -12088,7 +12098,15 @@ class _WaitKernel(_CollectiveKernel):
             self.codegen_size_asserts(wrapper)
 
     def get_volatile_reads(self) -> Sequence[IRNode]:
-        inp = self.inputs[0]
+        volatile_reads: list[IRNode] = []
+        for inp in pytree.tree_leaves(self.inputs):
+            if not isinstance(inp, IRNode):
+                raise AssertionError("Expected isinstance(inp, IRNode)")
+            volatile_reads.extend(self._get_volatile_reads(inp))
+        return volatile_reads
+
+    @staticmethod
+    def _get_volatile_reads(inp: IRNode) -> Sequence[IRNode]:
         if not isinstance(inp, IRNode):
             raise AssertionError("Expected isinstance(inp, IRNode)")
         if isinstance(inp, _CollectiveKernel):
@@ -12115,20 +12133,26 @@ class _WaitKernel(_CollectiveKernel):
             return []
 
     @classmethod
-    def create_wait(cls, kernel: _OpOverloads, inp: TensorBox) -> None:
+    def create_wait(
+        cls, kernel: _OpOverloads, inp: TensorBox | list[TensorBox]
+    ) -> None:
         with V.graph.fake_mode:
             result = cls.process_kernel(kernel, inp)
         if result.unbacked_bindings:
             raise AssertionError(f"{kernel} {result.unbacked_bindings}")
+        inps = pytree.tree_leaves(inp)
+        if not inps:
+            raise AssertionError(f"{kernel} requires at least one tensor")
+        device = inps[0].get_device()
         packed = cls(
-            NoneLayout(device=inp.get_device()),
+            NoneLayout(device=device),
             kernel,
             result.tensor_args,
             result.non_tensor_args,
             result.unflatten_args,
         )
-        packed.mutation_outputs.append(
-            MutationOutput(NoneLayout(device=inp.get_device()), inp, packed)
+        packed.mutation_outputs.extend(
+            MutationOutput(NoneLayout(device=device), tensor, packed) for tensor in inps
         )
 
     def get_read_writes(self) -> dependencies.ReadWrites:

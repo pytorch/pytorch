@@ -1424,7 +1424,11 @@ def _extract_fwd_bwd_modules(
         # then the collective will generally by followed by a wait_tensor() call.
         # we need to peek one node further to see if this wait_tensor is dead as well.
         elif distributed_enabled and all(
-            n.target is torch.ops._c10d_functional.wait_tensor.default
+            n.target
+            in (
+                torch.ops._c10d_functional.wait_tensor.default,
+                torch.ops._c10d_functional.wait_tensors.default,
+            )
             and len(n.users) == 0
             for n in node.users
         ):
@@ -1719,7 +1723,11 @@ def default_partition(
             )
             and (
                 not distributed_enabled
-                or node.target is not torch.ops._c10d_functional.wait_tensor.default
+                or node.target
+                not in (
+                    torch.ops._c10d_functional.wait_tensor.default,
+                    torch.ops._c10d_functional.wait_tensors.default,
+                )
             )
         )
 
