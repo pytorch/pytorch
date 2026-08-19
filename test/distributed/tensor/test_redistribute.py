@@ -45,6 +45,7 @@ from torch.distributed.tensor._redistribute import (
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.placement_types import _MaskPartial, _StridedShard
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -1177,9 +1178,6 @@ class RedistributeTest(DTensorContinuousTestBase):
                 comm_mode.get_comm_counts()[funcol.all_gather_into_tensor], 1
             )
             self.assertEqual(weight_ref.grad, weight.grad.full_tensor())
-
-
-instantiate_parametrized_tests(RedistributeTest)
 
 
 class MultiDimRedistributeTest(DTensorContinuousTestBase):
@@ -3221,6 +3219,7 @@ RedistributeTestWithLocalTensor = create_local_tensor_test_class(
     RedistributeTest,
     base_class=LocalDTensorContinuousTestBase,
 )
+instantiate_parametrized_tests(RedistributeTestWithLocalTensor)
 
 MultiDimRedistributeTestWithLocalTensor = create_local_tensor_test_class(
     MultiDimRedistributeTest,
@@ -3320,6 +3319,50 @@ class RedistributeBackwardDtypeTest(TestCase):
         self.assertEqual(tracer.dtypes_for("all_gather_into_tensor"), [torch.bfloat16])
         self.assertEqual(tracer.dtypes_for("reduce_scatter_tensor"), [torch.float32])
         self.assertEqual(local.grad.dtype, torch.float32)
+
+
+instantiate_device_type_tests(
+    RedistributeTest,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    MultiDimRedistributeTest,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    DistributeWithDeviceOrderTest,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    DistributeWithStridedShardTest,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    MultiDimRedistributeOptimizationTest,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    FlattenedReductionIntegrationTest,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    UnevenFlattenedReduceScatterTest,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":

@@ -18,6 +18,7 @@ from torch.distributed.tensor import (
 from torch.distributed.tensor._dtensor_spec import TensorMeta
 from torch.distributed.tensor._sharding_prop import ShardingPropagator
 from torch.distributed.tensor.debug import CommDebugMode
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -1735,11 +1736,11 @@ DistArgMaxArgMinTestWithLocalTensor = create_local_tensor_test_class(
     base_class=LocalDTensorContinuousTestBase,
 )
 
-instantiate_parametrized_tests(DistTensorOpsTest)
 DistTensorOpsTestWithLocalTensor = create_local_tensor_test_class(
     DistTensorOpsTest,
     base_class=LocalDTensorContinuousTestBase,
 )
+instantiate_parametrized_tests(DistTensorOpsTestWithLocalTensor)
 
 
 @torch.library.custom_op("testlib::optional_clamp_op", mutates_args=())
@@ -2040,6 +2041,44 @@ class TestNewEmptyStridedUneven(DTensorTestBase):
             dt.grad._local_tensor,
             torch.full_like(dt.grad._local_tensor, 2.0),
         )
+
+
+instantiate_device_type_tests(
+    DistTensorOpsTest,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    DistBucketizeTest,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    DistToCopyTest,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    DistArgMaxArgMinTest,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    DistTensorCppPyTree,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestNewEmptyStridedUneven,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":

@@ -6,6 +6,7 @@ from unittest.mock import patch
 import torch
 from torch.distributed.tensor import distribute_tensor, DTensor
 from torch.distributed.tensor.placement_types import Replicate
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -17,7 +18,6 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE
 from torch.testing._internal.triton_utils import requires_gpu
 
 
@@ -41,7 +41,7 @@ class TestDynamic(DTensorTestBase):
                 torch.rand(
                     [num_embeddings, embedding_dim],
                     dtype=torch.float32,
-                    device=GPU_TYPE,
+                    device=self.device_type,
                     requires_grad=True,
                 ),
                 device_mesh,
@@ -54,15 +54,17 @@ class TestDynamic(DTensorTestBase):
                 return emb
 
             arg0 = torch.randint(
-                low=0, high=100, size=(2, 512), dtype=torch.int64, device=GPU_TYPE
+                low=0,
+                high=100,
+                size=(2, 512),
+                dtype=torch.int64,
+                device=self.device_type,
             )
             arg0 = DTensor.from_local(arg0, device_mesh, placements)
 
             compiled_forward = torch.compile(forward, fullgraph=True, dynamic=True)
             _out = compiled_forward(arg0)
 
-
-instantiate_parametrized_tests(TestDynamic)
 
 TestDynamicWithLocalTensor = create_local_tensor_test_class(
     TestDynamic,
@@ -73,6 +75,16 @@ TestDynamicWithLocalTensor = create_local_tensor_test_class(
         "test_embedding_fake_tensor_cache_enabled_True",
     ],
 )
+instantiate_parametrized_tests(TestDynamicWithLocalTensor)
+
+
+instantiate_device_type_tests(
+    TestDynamic,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+
 
 if __name__ == "__main__":
     run_tests()

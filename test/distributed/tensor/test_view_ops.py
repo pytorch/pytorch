@@ -33,6 +33,7 @@ from torch.distributed.tensor._ops._view_ops import (
 )
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.placement_types import _StridedShard, Placement
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import HardwareClassification, run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
@@ -3164,6 +3165,14 @@ TestViewOpsWithLocalTensor = create_local_tensor_test_class(
         "test_dtensor_flatten_split_multi_mesh",
     ],
     base_class=LocalDTensorContinuousTestBase,
+)
+
+
+instantiate_device_type_tests(
+    TestViewOps,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
 )
 
 

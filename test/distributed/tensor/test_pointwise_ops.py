@@ -21,6 +21,7 @@ from torch.distributed.tensor import (
 from torch.distributed.tensor._ops._math_ops import _NormPartial
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.placement_types import _StridedShard
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -1340,9 +1341,6 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
             self.assertEqual(op(dx, dn).to_local(), op(x, n))
 
 
-instantiate_parametrized_tests(DistElementwiseOpsTest)
-
-
 class TestPointwiseRuleValidation(TestCase):
     """Validate registered partial-placement rules via OpInfo samples."""
 
@@ -1439,6 +1437,15 @@ class TestPointwiseRuleValidation(TestCase):
 
 DistElementwiseOpsTestWithLocalTensor = create_local_tensor_test_class(
     DistElementwiseOpsTest, base_class=LocalDTensorOpTestBase
+)
+instantiate_parametrized_tests(DistElementwiseOpsTestWithLocalTensor)
+
+
+instantiate_device_type_tests(
+    DistElementwiseOpsTest,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
 )
 
 

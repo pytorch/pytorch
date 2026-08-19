@@ -11,6 +11,7 @@ from torch.distributed.tensor import (
     Shard,
 )
 from torch.distributed.tensor.debug import CommDebugMode
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -269,6 +270,15 @@ class TestEmbeddingOp(DTensorTestBase):
 TestEmbeddingOpWithLocalTensor = create_local_tensor_test_class(
     TestEmbeddingOp,
 )
+
+
+instantiate_device_type_tests(
+    TestEmbeddingOp,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+
 
 if __name__ == "__main__":
     run_tests()
