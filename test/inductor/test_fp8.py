@@ -40,6 +40,7 @@ from torch.testing._internal.inductor_utils import (
     _quantize_rowwise,
     _quantize_tensorwise,
     _to_fp8_saturated,
+    is_big_gpu,
 )
 from torch.utils._sympy.symbol import SymT
 from torch.utils._triton import has_triton_tma_device
@@ -1343,6 +1344,7 @@ class TestFP8LoweringAccelerator(TestCase):
         self.assertEqual(y_eager.dtype, dtype)
         self.assertEqual(y_compiled.dtype, dtype)
         torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.07)
+
     @requires_capabilities(Capability.dtype.fp8)
     @skipCPUIf(True, "not supported on cpu")
     def test_unacceptable_input_dims(self, device):
@@ -1514,9 +1516,8 @@ class TestFP8LoweringCuda(TestCase):
             torch.compile(fn, fullgraph=True)(x_fp8, w_fp8, scale_a, scale_b)
 
     @requires_capabilities(Capability.dtype.fp8)
-    @requires_capabilities(Capability.big_gpu.big_gpu)
     @unittest.skipIf(
-        not has_triton_tma_device(),
+        not has_triton_tma_device() or not is_big_gpu(),
         "Need device-side TMA support in Triton and max-autotune",
     )
     @parametrize("dtype", (torch.bfloat16, torch.float32))
@@ -1603,9 +1604,8 @@ class TestFP8LoweringCuda(TestCase):
             torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.05)
 
     @requires_capabilities(Capability.dtype.fp8)
-    @requires_capabilities(Capability.big_gpu.big_gpu)
     @unittest.skipIf(
-        not has_triton_tma_device(),
+        not has_triton_tma_device() or not is_big_gpu(),
         "Need device-side TMA support in Triton and max-autotune",
     )
     @parametrize("shape", ("16,32,32", "1024,1024,512"))
@@ -1951,8 +1951,6 @@ class TestFP8LoweringCuda(TestCase):
 
 
 class TestE8M0ToFloat(TestCase):
-    hw_classification = HardwareClassification.ACCELERATOR
-
     @parametrize(
         "dtype",
         (torch.float64, torch.float32, torch.float16, torch.bfloat16),
@@ -2249,7 +2247,7 @@ instantiate_device_type_tests(TestFP8TypesAccelerator, globals(), allow_xpu=True
 instantiate_device_type_tests(TestFP8TypesCuda, globals(), only_for="cuda")
 instantiate_device_type_tests(TestFP8LoweringAccelerator, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestFP8LoweringCuda, globals(), only_for="cuda")
-instantiate_device_type_tests(TestE8M0ToFloat, globals())
+instantiate_device_type_tests(TestE8M0ToFloat, globals(), only_for=("cpu", "cuda"))
 instantiate_device_type_tests(TestE8M0Log2PatternBitManip, globals(), only_for="cuda")
 instantiate_device_type_tests(TestCvtE8M0Rceil, globals(), only_for="cuda")
 
