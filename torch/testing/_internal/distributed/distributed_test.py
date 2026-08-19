@@ -2143,7 +2143,7 @@ class DistributedTest:
             self._barrier()
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
+            BACKEND == "nccl", "Nccl does not support CPU tensors"
         )
         def test_broadcast(self):
             group, group_id, rank = self._init_global_test()
@@ -2163,14 +2163,14 @@ class DistributedTest:
 
         @skip_if_small_worldsize
         @skip_but_pass_in_sandcastle_if(
-            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
+            BACKEND == "nccl", "Nccl does not support CPU tensors"
         )
         def test_broadcast_group(self):
             group, group_id, rank = self._init_group_test()
             self._test_broadcast_helper(group, group_id, rank)
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
+            BACKEND == "nccl", "Nccl does not support CPU tensors"
         )
         def test_broadcast_full_group(self):
             group, group_id, rank = self._init_full_group_test()
@@ -2234,7 +2234,7 @@ class DistributedTest:
             self._barrier()
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
+            BACKEND == "nccl", "Nccl does not support CPU tensors"
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND in DistTestCases.skip_collective["reduce"],
@@ -2278,7 +2278,7 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
+            BACKEND == "nccl", "Nccl does not support CPU tensors"
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND in DistTestCases.skip_collective["reduce"],
@@ -2297,7 +2297,7 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
+            BACKEND == "nccl", "Nccl does not support CPU tensors"
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND in DistTestCases.skip_collective["reduce"],
@@ -2310,7 +2310,7 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
+            BACKEND == "nccl", "Nccl does not support CPU tensors"
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND in DistTestCases.skip_collective["reduce"],
@@ -2323,7 +2323,7 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
+            BACKEND == "nccl", "Nccl does not support CPU tensors"
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND in DistTestCases.skip_collective["reduce"],
@@ -2343,7 +2343,7 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
+            BACKEND == "nccl", "Nccl does not support CPU tensors"
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND in DistTestCases.skip_collective["reduce"],
@@ -2363,7 +2363,7 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
+            BACKEND == "nccl", "Nccl does not support CPU tensors"
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND in DistTestCases.skip_collective["reduce"],
@@ -2377,7 +2377,7 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
+            BACKEND == "nccl", "Nccl does not support CPU tensors"
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND in DistTestCases.skip_collective["reduce"],
@@ -2391,7 +2391,7 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
+            BACKEND == "nccl", "Nccl does not support CPU tensors"
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND in DistTestCases.skip_collective["reduce"],
@@ -2410,7 +2410,7 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
+            BACKEND == "nccl", "Nccl does not support CPU tensors"
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND in DistTestCases.skip_collective["reduce"],
@@ -2429,7 +2429,7 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
+            BACKEND == "nccl", "Nccl does not support CPU tensors"
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND in DistTestCases.skip_collective["reduce"],
@@ -2443,7 +2443,7 @@ class DistributedTest:
 
         @unittest.skipIf(IS_MACOS, "https://github.com/pytorch/pytorch/issues/75168")
         @skip_but_pass_in_sandcastle_if(
-            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
+            BACKEND == "nccl", "Nccl does not support CPU tensors"
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND in DistTestCases.skip_collective["reduce"],
@@ -2498,7 +2498,7 @@ class DistributedTest:
             self._barrier()
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
+            BACKEND == "nccl", "Nccl does not support CPU tensors"
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND in DistTestCases.skip_collective["reduce"],
@@ -2756,7 +2756,7 @@ class DistributedTest:
             self._barrier()
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
+            BACKEND == "nccl", "Nccl does not support CPU tensors"
         )
         def test_all_reduce_sum(self):
             group, group_id, rank = self._init_global_test()
@@ -2771,7 +2771,7 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
+            BACKEND == "nccl", "Nccl does not support CPU tensors"
         )
         def test_all_reduce_sum_async(self):
             group, group_id, rank = self._init_global_test()
@@ -2830,7 +2830,7 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
+            BACKEND == "nccl", "Nccl does not support CPU tensors"
         )
         def test_all_reduce_sum_complex(self):
             group, group_id, rank = self._init_global_test()
@@ -2846,7 +2846,7 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
+            BACKEND == "nccl", "Nccl does not support CPU tensors"
         )
         def test_all_reduce_complex_unsupported_ops(self):
             unsupported_ops = [
@@ -2887,7 +2887,7 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
+            BACKEND == "nccl", "Nccl does not support CPU tensors"
         )
         def test_all_reduce_product(self):
             group, group_id, rank = self._init_global_test()
@@ -2902,7 +2902,7 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
+            BACKEND == "nccl", "Nccl does not support CPU tensors"
         )
         def test_all_reduce_min(self):
             group, group_id, rank = self._init_global_test()
@@ -2911,7 +2911,7 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
+            BACKEND == "nccl", "Nccl does not support CPU tensors"
         )
         def test_all_reduce_max(self):
             group, group_id, rank = self._init_global_test()
@@ -2921,7 +2921,7 @@ class DistributedTest:
 
         @skip_if_small_worldsize
         @skip_but_pass_in_sandcastle_if(
-            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
+            BACKEND == "nccl", "Nccl does not support CPU tensors"
         )
         def test_all_reduce_group_sum(self):
             group, group_id, rank = self._init_group_test()
@@ -2937,7 +2937,7 @@ class DistributedTest:
 
         @skip_if_small_worldsize
         @skip_but_pass_in_sandcastle_if(
-            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
+            BACKEND == "nccl", "Nccl does not support CPU tensors"
         )
         def test_all_reduce_group_product(self):
             group, group_id, rank = self._init_group_test()
@@ -2953,7 +2953,7 @@ class DistributedTest:
 
         @skip_if_small_worldsize
         @skip_but_pass_in_sandcastle_if(
-            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
+            BACKEND == "nccl", "Nccl does not support CPU tensors"
         )
         def test_all_reduce_group_min(self):
             group, group_id, rank = self._init_group_test()
@@ -2963,7 +2963,7 @@ class DistributedTest:
 
         @skip_if_small_worldsize
         @skip_but_pass_in_sandcastle_if(
-            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
+            BACKEND == "nccl", "Nccl does not support CPU tensors"
         )
         def test_all_reduce_group_max(self):
             group, group_id, rank = self._init_group_test()
@@ -2972,7 +2972,7 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
+            BACKEND == "nccl", "Nccl does not support CPU tensors"
         )
         def test_all_reduce_full_group_sum(self):
             group, group_id, rank = self._init_full_group_test()
@@ -2987,7 +2987,7 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
+            BACKEND == "nccl", "Nccl does not support CPU tensors"
         )
         def test_all_reduce_full_group_product(self):
             group, group_id, rank = self._init_full_group_test()
@@ -3002,7 +3002,7 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
+            BACKEND == "nccl", "Nccl does not support CPU tensors"
         )
         def test_all_reduce_full_group_min(self):
             group, group_id, rank = self._init_full_group_test()
@@ -3011,7 +3011,7 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
+            BACKEND == "nccl", "Nccl does not support CPU tensors"
         )
         def test_all_reduce_full_group_max(self):
             group, group_id, rank = self._init_full_group_test()
@@ -3086,7 +3086,7 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
+            BACKEND == "nccl", "Nccl does not support CPU tensors"
         )
         def test_all_reduce_coalesced_max_complex_unsupported(self):
             _group, group_id, _rank = self._init_global_test()
@@ -3302,7 +3302,7 @@ class DistributedTest:
             self._barrier()
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
+            BACKEND == "nccl", "Nccl does not support CPU tensors"
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND == "ucc", "CPU tensor ops not supported by UCP TL"
@@ -3330,7 +3330,7 @@ class DistributedTest:
             self.assertEqual(output, one * rank)
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
+            BACKEND == "nccl", "Nccl does not support CPU tensors"
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND == "ucc", "CPU tensor ops not supported by UCP TL"
@@ -3349,7 +3349,7 @@ class DistributedTest:
             self._test_scatter_helper(group, group_id, rank, True, rank_to_GPU)
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
+            BACKEND == "nccl", "Nccl does not support CPU tensors"
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND == "ucc", "CPU tensor ops not supported by UCP TL"
@@ -3370,7 +3370,7 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
+            BACKEND == "nccl", "Nccl does not support CPU tensors"
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND == "ucc", "CPU tensor ops not supported by UCP TL"
@@ -3381,7 +3381,7 @@ class DistributedTest:
             self._test_scatter_helper(group, group_id, rank)
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
+            BACKEND == "nccl", "Nccl does not support CPU tensors"
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND == "ucc", "CPU tensor ops not supported by UCP TL"
@@ -3421,7 +3421,7 @@ class DistributedTest:
             self._barrier()
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
+            BACKEND == "nccl", "Nccl does not support CPU tensors"
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND == "ucc", "CPU tensor ops not supported by UCP TL"
@@ -3449,7 +3449,7 @@ class DistributedTest:
                 dist.gather(one * rank)
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
+            BACKEND == "nccl", "Nccl does not support CPU tensors"
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND == "ucc", "CPU tensor ops not supported by UCP TL"
@@ -3468,7 +3468,7 @@ class DistributedTest:
             self._test_gather_helper(group, group_id, rank, True, rank_to_GPU)
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
+            BACKEND == "nccl", "Nccl does not support CPU tensors"
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND == "ucc", "CPU tensor ops not supported by UCP TL"
@@ -3479,7 +3479,7 @@ class DistributedTest:
             self._test_gather_helper(group, group_id, rank)
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
+            BACKEND == "nccl", "Nccl does not support CPU tensors"
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND == "ucc", "CPU tensor ops not supported by UCP TL"
@@ -3523,7 +3523,7 @@ class DistributedTest:
             self._barrier()
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
+            BACKEND == "nccl", "Nccl does not support CPU tensors"
         )
         def test_all_gather(self):
             group, group_id, rank = self._init_global_test()
@@ -3539,7 +3539,7 @@ class DistributedTest:
             self._test_all_gather_helper(group, group_id, rank, True, rank_to_GPU)
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
+            BACKEND == "nccl", "Nccl does not support CPU tensors"
         )
         def test_all_gather_complex(self):
             group, group_id, rank = self._init_global_test()
@@ -3558,14 +3558,14 @@ class DistributedTest:
 
         @skip_if_small_worldsize
         @skip_but_pass_in_sandcastle_if(
-            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
+            BACKEND == "nccl", "Nccl does not support CPU tensors"
         )
         def test_all_gather_group(self):
             group, group_id, rank = self._init_group_test()
             self._test_all_gather_helper(group, group_id, rank)
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
+            BACKEND == "nccl", "Nccl does not support CPU tensors"
         )
         def test_all_gather_full_group(self):
             group, group_id, rank = self._init_full_group_test()
@@ -4456,13 +4456,13 @@ class DistributedTest:
             return model_DDP
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND in {"nccl", "hccl"}, "nccl/hccl does not support DDP on CPU models"
+            BACKEND == "nccl", "nccl does not support DDP on CPU models"
         )
         def test_DistributedDataParallelCPU(self):
             self._test_DistributedDataParallelCPU()
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND in {"nccl", "hccl"}, "nccl/hccl does not support DDP on CPU models"
+            BACKEND == "nccl", "nccl does not support DDP on CPU models"
         )
         def test_DistributedDataParallelCPU_grad_is_view(self):
             self._test_DistributedDataParallelCPU(gradient_as_bucket_view=True)
@@ -4494,7 +4494,7 @@ class DistributedTest:
             model = ToyModel().to(self.rank)
             nn.parallel.DistributedDataParallel(model, device_ids=[self.rank])
 
-        @skip_but_pass_in_sandcastle_if(BACKEND in {"nccl", "hccl"}, "Gloo-only test")
+        @skip_but_pass_in_sandcastle_if(BACKEND == "nccl", "Gloo-only test")
         def test_ddp_create_graph(self):
             class Model(nn.Module):
                 def __init__(self) -> None:
@@ -6308,7 +6308,7 @@ class DistributedTest:
             return model_DDP
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support DDP on CPU models"
+            BACKEND == "nccl", "nccl does not support DDP on CPU models"
         )
         def test_ddp_logging_data_cpu(self):
             def parse_env(var):
@@ -6576,7 +6576,7 @@ class DistributedTest:
             self.assertEqual(ddp_without_list.bucket_bytes_cap_list, [])
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support DDP on CPU models"
+            BACKEND == "nccl", "nccl does not support DDP on CPU models"
         )
         def test_static_graph_api_cpu(self):
             model_DDP = nn.parallel.DistributedDataParallel(Net())
