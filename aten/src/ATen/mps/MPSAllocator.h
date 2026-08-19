@@ -396,7 +396,10 @@ class MPSHeapAllocatorImpl {
   // currently active memory allocations in use (i.e., blocks not in pools);
   // tracked as a Stat to expose current/peak/accumulated allocated bytes
   c10::CachingAllocator::Stat m_current_allocated_memory;
-  // max buffer size allowed by Metal
+  // bytes unavailable for reuse: in-use plus freed-but-pending GPU completion;
+  // feeds active_bytes in getDeviceStats (semantics follow CUDACachingAllocator)
+  c10::CachingAllocator::Stat m_active_bytes;
+  // max buffer size allowed by Metalpython -c "import torch; print(torch.__version__)"
   size_t m_max_buffer_size = 0;
   // maximum total size allowed to be allocated
   size_t m_max_total_allowed_size = 0;
@@ -421,9 +424,6 @@ class MPSHeapAllocatorImpl {
   MPSStream* m_stream;
   // we hold a reference to MPSEventPool so it could get destroyed after MPSAllocator
   std::shared_ptr<MPSEventPool> m_event_pool;
-  // bytes unavailable for reuse: in-use plus freed-but-pending GPU completion;
-  // feeds active_bytes in getDeviceStats (semantics follow CUDACachingAllocator)
-  c10::CachingAllocator::Stat m_active_bytes;
 
   void init_allocator();
   void init_buffer_pools();

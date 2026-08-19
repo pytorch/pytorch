@@ -19,6 +19,12 @@ from torch.testing._internal.common_utils import (
 )
 
 
+# Pinned memory doesn't make sense on UMA systems (MPS) (see https://github.com/pytorch/pytorch/issues/193845 )
+# see test_pin_memory_on_non_blocking_copy
+
+xfailIfMPS = unittest.expectedFailure if TEST_MPS else (lambda f: f)
+
+
 if not TEST_ACCELERATOR:
     print("No available accelerator detected, skipping tests", file=sys.stderr)
     TestCase = NoTest
@@ -171,9 +177,8 @@ class TestAccelerator(TestCase):
         self.assertEqual(torch.accelerator.current_stream(), src_prev_stream)
         self.assertEqual(torch.accelerator.current_stream(dst_device), dst_prev_stream)
 
-    @unittest.skipIf(
-        TEST_MPS, "non-blocking MPS->CPU copy does not yet return pinned storage"
-    )
+    # Non-blocking MPS=>CPU copies currently return unpinned storage
+    @xfailIfMPS
     def test_pin_memory_on_non_blocking_copy(self):
         t_acc = torch.randn(100).to(torch.accelerator.current_accelerator())
         t_host = t_acc.to("cpu", non_blocking=True)
