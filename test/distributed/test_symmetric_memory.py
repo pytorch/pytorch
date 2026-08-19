@@ -7,7 +7,7 @@ import random
 import re
 import tempfile
 from contextlib import contextmanager, nullcontext
-from unittest import skip, skipIf, skipUnless
+from unittest import skipIf, skipUnless
 from unittest.mock import MagicMock, patch
 
 import torch
