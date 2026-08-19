@@ -17,7 +17,7 @@ def _ensure_triton(test_case, device):
 
     try:
         get_interface_for_device(torch_device.type).raise_if_triton_unavailable(torch_device)
-    except (ImportError, NotImplementedError, RuntimeError, GPUTooOldForTriton) as e:
+    except (ImportError, RuntimeError, GPUTooOldForTriton) as e:
         test_case.skipTest(str(e) or f"requires triton on {torch_device.type}")
 
 
