@@ -1030,23 +1030,6 @@ class TestMPS(TestCaseMPS):
         self.assertEqual(torch.sinh(a).imag, zero)
         self.assertEqual(torch.cosh(a).imag, zero)
 
-    @xfailIf(MACOS_VERSION > 15.0)
-    def test_conv_raises_error(self, device='mps', dtype=torch.float):
-        conv = nn.Conv1d(1, 65537, 3, padding=1).to('mps')
-
-        x = torch.ones([1, 1, 3])
-        with self.assertRaises(NotImplementedError):
-            y = conv(x.to("mps"))
-
-    @xfailIf(MACOS_VERSION < 15.1)
-    def test_conv_high_channel_size(self):
-        out_channels = 65537
-        weight = torch.randn(out_channels, 1, 1)
-        x = torch.ones([1, 1, 1])
-        y_cpu = F.conv1d(x.to("cpu"), weight.to("cpu"))
-        y_mps = F.conv1d(x.to("mps"), weight.to("mps"))
-        self.assertEqual(y_cpu, y_mps)
-
     def test_triu_inf(self, device="mps", dtype=torch.float):
         for diag in [-1, 0, 1]:
             mask = torch.full((3, 6, 6), float("-inf"))
@@ -10943,6 +10926,50 @@ class TestLargeTensors(TestCaseMPS):
         gc.collect()
         torch.mps.empty_cache()
 
+    @largeTensorTest("16GB", device="mps")
+    @serialTest()
+    @parametrize("input_channels,output_channels", [(65536, 8), (8, 65536)])
+    def test_conv1d_int32_overflow(self, input_channels, output_channels):
+        input_length = 182 * 181
+        input_tensor = torch.randn(1, input_channels, input_length, dtype=torch.float16, device="mps")
+        weight = torch.randn(output_channels, input_channels, 2, dtype=torch.float16, device="mps") * 0.01
+        output = F.conv1d(input_tensor, weight)
+        positions = [0, (input_length - 1) // 2, input_length - 2]
+        input_at_positions = input_tensor[0, :, positions].float().cpu()
+        input_at_next_positions = input_tensor[0, :, [position + 1 for position in positions]].float().cpu()
+        expected = (
+            weight[:, :, 0].float().cpu() @ input_at_positions
+            + weight[:, :, 1].float().cpu() @ input_at_next_positions
+        )
+        self.assertEqual(output[0, :, positions].float().cpu(), expected, atol=2e-2, rtol=2e-2)
+        del input_tensor, weight, output
+        gc.collect()
+        torch.mps.empty_cache()
+
+    @largeTensorTest("16GB", device="mps")
+    @serialTest()
+    def test_conv1d_int32_overflow_backward(self):
+        input_length = 182 * 181
+        input_tensor = torch.randn(1, 65536, input_length, dtype=torch.float16, device="mps", requires_grad=True)
+        weight = torch.randn(8, 65536, 2, dtype=torch.float16, device="mps", requires_grad=True)
+        output = F.conv1d(input_tensor, weight)
+        output.sum().backward()
+        expected_grad_input = weight.detach().float().sum((0, 2)).cpu()
+        for position in [1, (input_length - 1) // 2, input_length - 2]:
+            actual_grad_input = input_tensor.grad[0, :, position].float().cpu()
+            self.assertEqual(actual_grad_input, expected_grad_input, atol=2e-2, rtol=2e-2)
+        checked_channels = [0, 32768, 65535]
+        channel_rows = input_tensor.detach()[0, checked_channels].float()
+        output_length = output.size(2)
+        taps = [channel_rows[:, k:k + output_length].sum(-1) for k in (0, 1)]
+        expected_grad_weight = torch.stack(taps, dim=1).cpu()
+        for out_channel in (0, 7):
+            actual_grad_weight = weight.grad[out_channel, checked_channels].float().cpu()
+            self.assertEqual(actual_grad_weight, expected_grad_weight, atol=2e-2, rtol=2e-2)
+        del input_tensor, weight, output, channel_rows, taps
+        gc.collect()
+        torch.mps.empty_cache()
+
     @serialTest()
     def test_64bit_index_copy(self):
         if torch.mps.recommended_max_memory() < 16_000_000_000:
@@ -14185,6 +14212,63 @@ class TestViewOpsMPS(TestCaseMPS):
             self.assertEqual(x.view(6).shape, [6])
 
 class TestConvolutionMPS(TestCaseMPS):
+    @parametrize("case", ("dimension", "parameter"))
+    def test_conv1d_large_kernel_int32_overflow(self, case):
+        int32_max = torch.iinfo(torch.int32).max
+        weight = torch.ones(1, 1, 256, device="mps")
+        if case == "dimension":
+            input_tensor = torch.empty(0, 1, 1, int32_max + 1, device="mps")
+            weight = weight.unsqueeze(2)
+        else:
+            input_tensor = torch.ones(1, 1, 1, device="mps")
+        with self.assertRaisesRegex(RuntimeError, "signed 32-bit"):
+            if case == "dimension":
+                torch.ops.aten._mps_convolution(
+                    input_tensor, weight, None, [0, 0], [1, 1], [1, 1], 1
+                )
+            else:
+                F.conv1d(input_tensor, weight, stride=1 << 32, padding=1 << 32)
+
+    def test_conv1d_large_kernel(self):
+        input_tensor = torch.arange(2 * 260, dtype=torch.float32).reshape(1, 2, 260)
+        weight = torch.ones(3, 2, 256)
+        bias = torch.tensor([0.0, 1.0, 2.0])
+        expected = F.conv1d(input_tensor, weight, bias)
+        actual = F.conv1d(input_tensor.to("mps"), weight.to("mps"), bias.to("mps"))
+        self.assertEqual(actual.cpu(), expected)
+
+    def test_conv2d_h1_large_kernel(self):
+        input_tensor = torch.arange(2 * 260, dtype=torch.float32).reshape(1, 2, 1, 260)
+        input_tensor = input_tensor.contiguous(memory_format=torch.channels_last)
+        weight = torch.ones(3, 2, 1, 256)
+        bias = torch.tensor([0.0, 1.0, 2.0])
+        expected = F.conv2d(input_tensor, weight, bias)
+        actual = F.conv2d(input_tensor.to("mps"), weight.to("mps"), bias.to("mps"))
+        self.assertEqual(actual.cpu(), expected)
+        self.assertTrue(actual.is_contiguous(memory_format=torch.channels_last))
+
+    @serialTest()
+    def test_conv1d_huge_padding(self):
+        int32_max = torch.iinfo(torch.int32).max
+        input_tensor = torch.zeros(1, 64, 1, device="mps")
+        input_tensor[0, 0, 0] = 2
+        weight = torch.zeros(1, 64, 3, device="mps")
+        weight[0, 0, 0] = 5
+        bias = torch.tensor([13.0], device="mps")
+        actual = F.conv1d(
+            input_tensor, weight, bias, stride=int32_max, padding=int32_max
+        )
+        expected = torch.tensor([[[13.0, 23.0]]], device="mps")
+        self.assertEqual(actual, expected)
+
+    def test_conv1d_high_channel_size(self):
+        output_channels = 65537
+        input_tensor = torch.ones(1, 1, 3)
+        weight = torch.ones(output_channels, 1, 3)
+        expected = F.conv1d(input_tensor, weight, padding=1)
+        actual = F.conv1d(input_tensor.to("mps"), weight.to("mps"), padding=1)
+        self.assertEqual(actual.cpu(), expected)
+
     @serialTest()
     def test_conv1d_im2col_int32_overflow(self):
         input_channels = 8
@@ -14332,6 +14416,20 @@ class TestConvolutionMPS(TestCaseMPS):
         )
         tol = self._conv1d_tolerance(dtype, weight.size(1) * weight.size(2))
         self.assertEqual(actual.float().cpu(), expected, atol=tol, rtol=tol)
+
+    @parametrize(
+        "kernel_size,stride,padding,dilation",
+        [
+            (1, 1 << 32, 1 << 32, 1),
+            (3, torch.iinfo(torch.int32).max, torch.iinfo(torch.int32).max, torch.iinfo(torch.int32).max),
+        ],
+        name_fn=lambda kernel_size, stride, padding, dilation: "parameter" if stride > torch.iinfo(torch.int32).max else "index",
+    )
+    def test_conv1d_parameter_and_index_int32_overflow(self, kernel_size, stride, padding, dilation):
+        input_tensor = torch.ones(1, 1, 1, device="mps")
+        weight = torch.ones(1, 1, kernel_size, device="mps")
+        with self.assertRaisesRegex(RuntimeError, "signed 32-bit"):
+            F.conv1d(input_tensor, weight, stride=stride, padding=padding, dilation=dilation)
 
     @unittest.skipIf(MACOS_VERSION < 26.2, "MPP Conv1d requires macOS 26.2 or newer")
     @parametrize(
