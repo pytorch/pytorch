@@ -73,6 +73,7 @@ class PartitionArgs:
     BLOCK_N: gl.constexpr
     BLOCK_K: gl.constexpr
     NUM_BLOCKS: gl.constexpr
+    GROUP_SIZE_N: gl.constexpr
 
 
 @aggregate
@@ -178,12 +179,14 @@ class TileIterator:
     BLOCK_M: gl.constexpr
     BLOCK_N: gl.constexpr
     NUM_BLOCKS: gl.constexpr
+    GROUP_SIZE_N: gl.constexpr
 
     @gluon.jit
     def create(
         tile_idx,
         m_start_offset, m_size, n_start_offset, n_size,
-        BLOCK_M: gl.constexpr, BLOCK_N: gl.constexpr, NUM_BLOCKS: gl.constexpr
+        BLOCK_M: gl.constexpr, BLOCK_N: gl.constexpr, NUM_BLOCKS: gl.constexpr,
+        GROUP_SIZE_N: gl.constexpr
     ):
         num_m_tiles = gl.cdiv(m_size, BLOCK_M)
         num_n_tiles = gl.cdiv(n_size, BLOCK_N)
@@ -194,7 +197,7 @@ class TileIterator:
             m_start_offset, m_size, n_start_offset, n_size,
             zero, zero, zero, zero,
             gl.to_tensor(False),
-            BLOCK_M, BLOCK_N, NUM_BLOCKS
+            BLOCK_M, BLOCK_N, NUM_BLOCKS, GROUP_SIZE_N
         ).next()
 
     @gluon.jit
@@ -205,8 +208,16 @@ class TileIterator:
     @gluon.jit
     def next(self):
         tile_idx = self.tile_idx + (self.NUM_BLOCKS if self.has_started else 0)
-        tile_m_idx = tile_idx % self.num_m_tiles
-        tile_n_idx = tile_idx // self.num_m_tiles
+        # Walk GROUP_SIZE_N columns of tiles at a time so concurrent CTAs
+        # touch a 2D block rather than one column, improving L2 reuse.
+        # GROUP_SIZE_N == 1 is plain m-fastest order.
+        tiles_per_group = self.num_m_tiles * self.GROUP_SIZE_N
+        group_idx = tile_idx // tiles_per_group
+        idx_in_group = tile_idx % tiles_per_group
+        first_n = group_idx * self.GROUP_SIZE_N
+        group_n = gl.minimum(self.num_n_tiles - first_n, self.GROUP_SIZE_N)
+        tile_m_idx = idx_in_group // group_n
+        tile_n_idx = first_n + idx_in_group % group_n
         m_tile_offset = tile_m_idx * self.BLOCK_M
         n_tile_offset = tile_n_idx * self.BLOCK_N
         m_offset = self.m_start_offset + m_tile_offset
@@ -217,7 +228,7 @@ class TileIterator:
             self.m_start_offset, self.m_size, self.n_start_offset, self.n_size,
             m_offset, n_offset, m_tile_offset, n_tile_offset,
             gl.to_tensor(True),
-            self.BLOCK_M, self.BLOCK_N, self.NUM_BLOCKS
+            self.BLOCK_M, self.BLOCK_N, self.NUM_BLOCKS, self.GROUP_SIZE_N
         )
 
 
@@ -256,11 +267,13 @@ def load_partition(pargs: PartitionArgs):
     BLOCK_N: gl.constexpr = pargs.BLOCK_N
     BLOCK_K: gl.constexpr = pargs.BLOCK_K
     NUM_BLOCKS: gl.constexpr = pargs.NUM_BLOCKS
+    GROUP_SIZE_N: gl.constexpr = pargs.GROUP_SIZE_N
 
     load_buf_empty_bars = pargs.load_buf_empty_bars
     load_buf_full_bars = pargs.load_buf_full_bars
     state = Counter.create(1, load_buf_empty_bars.shape[0])
 
+    _proton_enter_scope("load_group_iter")
     group_iter = GroupIterator.create(
         G, M, N, K,
 {%- if M_IS_VARYING or N_IS_VARYING or K_IS_VARYING %}
@@ -268,12 +281,15 @@ def load_partition(pargs: PartitionArgs):
 {%- endif %}
         BLOCK_M, BLOCK_N, NUM_BLOCKS
     )
+    _proton_exit_scope("load_group_iter")
     while group_iter.should_process():
+        _proton_enter_scope("load_tile_iter")
         tile_iter = TileIterator.create(
             group_iter.tile_idx - group_iter.tiles_processed,
             group_iter.m_start_offset, group_iter.m_size, group_iter.n_start_offset, group_iter.n_size,
-            BLOCK_M, BLOCK_N, NUM_BLOCKS
+            BLOCK_M, BLOCK_N, NUM_BLOCKS, GROUP_SIZE_N
         )
+        _proton_exit_scope("load_tile_iter")
         while tile_iter.should_process():
             for k in range(0, group_iter.k_size, BLOCK_K):
                 k_offset = group_iter.k_start_offset + k
@@ -336,9 +352,13 @@ def load_partition(pargs: PartitionArgs):
 
                 state = state.next()
 
+            _proton_enter_scope("load_tile_iter")
             tile_iter = tile_iter.next()
+            _proton_exit_scope("load_tile_iter")
 
+        _proton_enter_scope("load_group_iter")
         group_iter = group_iter.next()
+        _proton_exit_scope("load_group_iter")
 
     _proton_exit_scope("load_partition")
 
@@ -355,6 +375,7 @@ def compute_partition(pargs: PartitionArgs):
     BLOCK_N: gl.constexpr = pargs.BLOCK_N
     BLOCK_K: gl.constexpr = pargs.BLOCK_K
     NUM_BLOCKS: gl.constexpr = pargs.NUM_BLOCKS
+    GROUP_SIZE_N: gl.constexpr = pargs.GROUP_SIZE_N
 
     load_buf_empty_bars = pargs.load_buf_empty_bars
     load_buf_full_bars = pargs.load_buf_full_bars
@@ -377,6 +398,7 @@ def compute_partition(pargs: PartitionArgs):
     )
 {%- endif %}
 
+    _proton_enter_scope("compute_group_iter")
     group_iter = GroupIterator.create(
         G, M, N, K,
 {%- if M_IS_VARYING or N_IS_VARYING or K_IS_VARYING %}
@@ -384,12 +406,15 @@ def compute_partition(pargs: PartitionArgs):
 {%- endif %}
         BLOCK_M, BLOCK_N, NUM_BLOCKS
     )
+    _proton_exit_scope("compute_group_iter")
     while group_iter.should_process():
+        _proton_enter_scope("compute_tile_iter")
         tile_iter = TileIterator.create(
             group_iter.tile_idx - group_iter.tiles_processed,
             group_iter.m_start_offset, group_iter.m_size, group_iter.n_start_offset, group_iter.n_size,
-            BLOCK_M, BLOCK_N, NUM_BLOCKS
+            BLOCK_M, BLOCK_N, NUM_BLOCKS, GROUP_SIZE_N
         )
+        _proton_exit_scope("compute_tile_iter")
         while tile_iter.should_process():
             acc_buf_empty_bar = acc_buf_empty_bars.index(acc_state.index)
 
@@ -452,9 +477,13 @@ def compute_partition(pargs: PartitionArgs):
 
             acc_state = acc_state.next()
 
+            _proton_enter_scope("compute_tile_iter")
             tile_iter = tile_iter.next()
+            _proton_exit_scope("compute_tile_iter")
 
+        _proton_enter_scope("compute_group_iter")
         group_iter = group_iter.next()
+        _proton_exit_scope("compute_group_iter")
 
     _proton_exit_scope("compute_partition")
 
@@ -470,6 +499,7 @@ def store_partition(pargs: PartitionArgs):
     BLOCK_M: gl.constexpr = pargs.BLOCK_M
     BLOCK_N: gl.constexpr = pargs.BLOCK_N
     NUM_BLOCKS: gl.constexpr = pargs.NUM_BLOCKS
+    GROUP_SIZE_N: gl.constexpr = pargs.GROUP_SIZE_N
 
     acc_buf_empty_bars = pargs.acc_buf_empty_bars
     acc_buf_full_bars = pargs.acc_buf_full_bars
@@ -481,6 +511,7 @@ def store_partition(pargs: PartitionArgs):
     )
 {%- endif %}
 
+    _proton_enter_scope("store_group_iter")
     group_iter = GroupIterator.create(
         G, M, N, K,
 {%- if M_IS_VARYING or N_IS_VARYING or K_IS_VARYING %}
@@ -488,12 +519,15 @@ def store_partition(pargs: PartitionArgs):
 {%- endif %}
         BLOCK_M, BLOCK_N, NUM_BLOCKS
     )
+    _proton_exit_scope("store_group_iter")
     while group_iter.should_process():
+        _proton_enter_scope("store_tile_iter")
         tile_iter = TileIterator.create(
             group_iter.tile_idx - group_iter.tiles_processed,
             group_iter.m_start_offset, group_iter.m_size, group_iter.n_start_offset, group_iter.n_size,
-            BLOCK_M, BLOCK_N, NUM_BLOCKS
+            BLOCK_M, BLOCK_N, NUM_BLOCKS, GROUP_SIZE_N
         )
+        _proton_exit_scope("store_tile_iter")
         while tile_iter.should_process():
             # FIXME: add epilogue here!
 
@@ -562,9 +596,13 @@ def store_partition(pargs: PartitionArgs):
             _proton_exit_scope("store_fence_and_tma")
 {%- endif %}
 
+            _proton_enter_scope("store_tile_iter")
             tile_iter = tile_iter.next()
+            _proton_exit_scope("store_tile_iter")
 
+        _proton_enter_scope("store_group_iter")
         group_iter = group_iter.next()
+        _proton_exit_scope("store_group_iter")
 
 {%- if USE_TMA_STORE %}
     _proton_enter_scope("store_final_tma_wait")
@@ -767,6 +805,7 @@ def store_partition(pargs: PartitionArgs):
         BLOCK_N,
         BLOCK_K,
         NUM_BLOCKS,
+        GROUP_SIZE_N,
     )
 
     # Launch warp-specialized kernel

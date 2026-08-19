@@ -2,9 +2,9 @@
 """
 Gluon template support for PyTorch Inductor.
 
-Gluon is a DSL from the Triton project for writing Blackwell GPU kernels.
-Since Gluon uses the same compilation infrastructure as Triton, this
-implementation is kept minimal and reuses Triton's compilation pipeline.
+Gluon is a DSL from the Triton project for writing Blackwell GPU
+kernels. It shares Triton's compilation infrastructure, so this
+implementation reuses Triton's pipeline.
 """
 
 import functools
@@ -43,8 +43,8 @@ def _get_gluon_template_kernel_class():
             """
             Kernel class for Gluon templates.
 
-            Inherits from TritonTemplateKernel and overrides jit_lines() to return
-            @gluon.jit decorator with necessary imports.
+            Overrides jit_lines() to emit the @gluon.jit decorator
+            with the necessary imports.
             """
 
             def _jit_decorator(self):
@@ -101,9 +101,9 @@ from triton.experimental.gluon import language as gl
                 kwargs["OUTPUT_DTYPE"] = torch_dtype_to_gluon_str(output_torch_dtype)
                 kwargs["INDEX_DTYPE_EXPR"] = _gluon_index_dtype(self.index_dtype)
 
-                # Flip to True manually (no config knob) to enable Proton
-                # profiling scopes inside the generated kernel.
-                kwargs["ENABLE_PROTON_PROFILING"] = False
+                from torch._inductor import config
+
+                kwargs["ENABLE_PROTON_PROFILING"] = config.gluon_enable_proton_profiling
 
                 return kwargs
 
@@ -135,8 +135,8 @@ _gluon_triton_template_class = None
 
 def _get_gluon_triton_template_class():
     """
-    Lazily create and cache the TritonTemplate subclass that drives Gluon
-    codegen. This avoids circular imports while ensuring proper inheritance.
+    Lazily create and cache the TritonTemplate subclass driving Gluon
+    codegen, avoiding circular imports.
     """
     global _gluon_triton_template_class
     if _gluon_triton_template_class is None:
@@ -158,8 +158,8 @@ class GluonTemplate(KernelTemplate):
     """
     Template for Gluon kernels.
 
-    Uses TritonTemplate infrastructure but with GluonTemplateKernel which
-    overrides compilation to use Gluon's ASTSource and extended IR builder.
+    Uses TritonTemplate infrastructure, but GluonTemplateKernel
+    compiles via Gluon's ASTSource and extended IR builder.
     """
 
     all_templates: dict[str, "GluonTemplate"] = {}
@@ -202,8 +202,8 @@ class GluonTemplate(KernelTemplate):
         self, choices: list[Any], **kwargs: Any
     ) -> NotImplementedError | None:
         """
-        Maybe generates a new ChoiceCaller and appends it into existing choices.
-        Returns None if success, otherwise returns the error.
+        Maybe generate a ChoiceCaller and append it to choices.
+        Returns None on success, otherwise the error.
         """
         try:
             choice = self.generate(**kwargs)
@@ -223,23 +223,23 @@ class GluonTemplate(KernelTemplate):
         """
         Generate a Gluon kernel choice.
 
-        Uses TritonTemplate infrastructure with GluonTemplateKernel which
-        overrides compilation to use Gluon's ASTSource and extended IR builder.
+        Uses TritonTemplate infrastructure, but GluonTemplateKernel
+        compiles via Gluon's ASTSource and extended IR builder.
         """
         from ...select_algorithm import identity
 
         input_nodes = kwargs.get("input_nodes", ())
 
-        # Extract required positional/named arguments for TritonTemplate.generate
+        # Arguments TritonTemplate.generate takes positionally.
         layout = kwargs.pop("layout")
         num_stages = kwargs.pop("num_stages", 1)
         num_warps = kwargs.pop("num_warps", 4)
 
-        # Remove input_nodes from kwargs since we'll pass it as positional
+        # Passed positionally below.
         kwargs.pop("input_nodes", None)
 
-        # Use TritonTemplate's generate with fusion disabled
-        # GluonTemplateKernel will override compilation to use Gluon's compiler
+        # Fusion is disabled; GluonTemplateKernel overrides compilation
+        # to use Gluon's compiler.
         result = self._triton_template.generate(
             input_nodes=input_nodes,
             layout=layout,

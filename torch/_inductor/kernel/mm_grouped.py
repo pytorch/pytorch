@@ -113,7 +113,7 @@ def early_config_prune(g, m, dtsize, configs, named_args):
     return pruned_configs
 
 
-def gluon_grouped_mm_configs(dtype_AB):
+def gluon_grouped_mm_configs(dtype_AB, uses_c_smem):
     import torch._inductor.config as config
     from torch._inductor.template_heuristics.gluon import get_grouped_mm_configs
 
@@ -122,6 +122,7 @@ def gluon_grouped_mm_configs(dtype_AB):
     gluon_configs = get_grouped_mm_configs(
         dtype_AB=dtype_AB,
         exhaustive=exhaustive,
+        uses_c_smem=uses_c_smem,
     )
 
     configs = []
@@ -135,6 +136,7 @@ def gluon_grouped_mm_configs(dtype_AB):
                     "NUM_LOAD_BUFFERS": gluon_config.NUM_LOAD_BUFFERS,
                     "NUM_ACC_BUFFERS": gluon_config.NUM_ACC_BUFFERS,
                     "NUM_STORE_WARPS": gluon_config.NUM_STORE_WARPS,
+                    "GROUP_SIZE_N": gluon_config.GROUP_SIZE_N,
                     "NUM_SMS": get_num_sms(),
                 },
                 num_stages=1,  # Dummy value, the kernel uses NUM_LOAD_BUFFERS/NUM_ACC_BUFFERS for this purpose.
@@ -586,7 +588,12 @@ def _tuned_grouped_mm_common(
             "A_IS_K_MAJOR": a_is_k_major,
             "B_IS_K_MAJOR": b_is_k_major,
         }
-        for config in gluon_grouped_mm_configs(dtype_AB=mat_a.get_dtype()):
+        # The C staging buffer is only allocated on the TMA store path,
+        # i.e. when C is not 2D.
+        uses_c_smem = a_is_2d == b_is_2d
+        for config in gluon_grouped_mm_configs(
+            dtype_AB=mat_a.get_dtype(), uses_c_smem=uses_c_smem
+        ):
             gluon_grouped_mm_template.maybe_append_choice(
                 choices,
                 input_nodes=input_nodes,

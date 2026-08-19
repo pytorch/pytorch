@@ -4764,9 +4764,9 @@ def load_template(
             with open(path, encoding="utf-8") as f:
                 return f.read()
         except UnicodeDecodeError as e:
-            # Name the offending file: a bare UnicodeDecodeError hides which
-            # template is malformed, which is easy to misdiagnose when it surfaces
-            # deep inside kernel lowering.
+            # Name the offending file: a bare UnicodeDecodeError hides
+            # which template is malformed, and surfaces deep inside
+            # kernel lowering.
             raise ValueError(f"Template {path} is not valid UTF-8: {e}") from e
 
     content_parts = []

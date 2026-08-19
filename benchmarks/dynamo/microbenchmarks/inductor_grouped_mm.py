@@ -255,6 +255,56 @@ def _maybe_wrap_cuda_graph(fn, label, use_cuda_graphs):
 BACKEND_CHOICES = ["aten", "triton", "cutedsl", "gluon"]
 
 
+def _proton_profile_gluon(
+    A,
+    B,
+    offs,
+    proton_out,
+    buffer_type,
+    buffer_size,
+    sample_warps,
+    output_format,
+):
+    """Profile one call of the Gluon kernel with Proton scopes.
+
+    Instrumentation costs enough that autotuning under it would pick a
+    different config, so this recompiles after autotuning has already
+    settled on a winner, and profiles that.
+    """
+    import triton.profiler as proton
+
+    torch._dynamo.reset()
+    compiled = torch.compile(
+        torch._grouped_mm,
+        options={
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "GLUON",
+            "gluon_enable_proton_profiling": True,
+        },
+        dynamic=False,
+    )
+
+    mode_kwargs = {
+        "name": "default",
+        "granularity": "warp",
+        "buffer_type": buffer_type,
+        "buffer_size": buffer_size,
+    }
+    if sample_warps:
+        mode_kwargs["sampling_strategy"] = "selective"
+        mode_kwargs["sampling_options"] = sample_warps
+
+    session = proton.start(
+        proton_out,
+        backend="instrumentation",
+        mode=proton.mode.InstrumentationMode(**mode_kwargs),
+    )
+    compiled(A, B.transpose(-2, -1), offs)
+    torch.cuda.synchronize()
+    proton.finalize(session, output_format=output_format)
+    print(f"  Proton profile written for {proton_out}")
+
+
 def benchmark_grouped_mm(
     gmnk=None,
     a_dim=2,
@@ -270,6 +320,11 @@ def benchmark_grouped_mm(
     warmup=10,
     rep=100,
     grouping="random",
+    proton_out=None,
+    proton_buffer_size=0,
+    proton_buffer_type="global",
+    proton_sample_warps="",
+    proton_format="hatchet",
 ):
     torch.manual_seed(seed)
     if backends is None:
@@ -513,6 +568,18 @@ def benchmark_grouped_mm(
                         print("  ✓ Gluon correctness check passed")
                     except AssertionError:
                         print("  ✗ Gluon correctness check FAILED")
+
+                    if proton_out is not None:
+                        _proton_profile_gluon(
+                            A,
+                            B,
+                            offs,
+                            proton_out,
+                            proton_buffer_type,
+                            proton_buffer_size,
+                            proton_sample_warps,
+                            proton_format,
+                        )
                 except Exception as e:
                     print(f"  Gluon: Failed ({e})")
                 gc.collect()
@@ -624,6 +691,58 @@ if __name__ == "__main__":
             "(equal-sized groups, remainder in the last group(s))."
         ),
     )
+    parser.add_argument(
+        "--proton-out",
+        dest="proton_out",
+        type=str,
+        default=None,
+        help=(
+            "Path prefix for a Proton instrumentation profile of the Gluon "
+            "kernel. Passing this also compiles the kernel with Proton scopes "
+            "enabled, which adds significant runtime overhead."
+        ),
+    )
+    parser.add_argument(
+        "--proton-buffer-size",
+        dest="proton_buffer_size",
+        type=int,
+        default=0,
+        help=(
+            "Proton per-warp event buffer size in bytes (0 = auto). Total "
+            "allocation is this times sampled warps times CTAs, capped at 4GB."
+        ),
+    )
+    parser.add_argument(
+        "--proton-buffer-type",
+        dest="proton_buffer_type",
+        choices=["global", "shared"],
+        default="global",
+        help=(
+            "Where Proton stages its event buffer. 'shared' is much cheaper "
+            "per event but far smaller, so it needs a smaller problem to avoid "
+            "dropped events."
+        ),
+    )
+    parser.add_argument(
+        "--proton-sample-warps",
+        dest="proton_sample_warps",
+        type=str,
+        default="",
+        help=(
+            "Comma-separated warp indices to profile (e.g. '6,7'). Restricting "
+            "to the warps of interest leaves a larger buffer for each of them."
+        ),
+    )
+    parser.add_argument(
+        "--proton-format",
+        dest="proton_format",
+        choices=["hatchet", "chrome_trace"],
+        default="hatchet",
+        help=(
+            "Proton output format: 'hatchet' for proton-viewer, 'chrome_trace' "
+            "for a Perfetto/chrome://tracing timeline."
+        ),
+    )
     args = parser.parse_args()
     a_dim, a_k_major = args.a_spec
     b_dim, b_k_major = args.b_spec
@@ -644,4 +763,9 @@ if __name__ == "__main__":
         warmup=args.warmup,
         rep=args.iterations,
         grouping=args.grouping,
+        proton_out=args.proton_out,
+        proton_buffer_size=args.proton_buffer_size,
+        proton_buffer_type=args.proton_buffer_type,
+        proton_sample_warps=args.proton_sample_warps,
+        proton_format=args.proton_format,
     )
