@@ -530,7 +530,7 @@ class BaseListVariable(VariableTracker):
         # CPython has a series of checks to optimize list.extend for different data types
         # ref: https://github.com/python/cpython/blob/0fd4fd4496c557b68477a99c1c231a5870c91daf/Objects/listobject.c#L1389-L1444
         from .dicts import ConstDictVariable
-        from .sets import SetVariable
+        from .sets import FrozensetVariable, SetVariable
         from .user_defined import UserDefinedObjectVariable
 
         sz = len(self.items)
@@ -538,7 +538,7 @@ class BaseListVariable(VariableTracker):
             self.items.extend(args[0].items)
         elif isinstance(args[0], UserDefinedObjectVariable):
             self.items.extend(unpack_iterable(tx, args[0]))
-        elif isinstance(args[0], (ConstDictVariable, SetVariable)):
+        elif isinstance(args[0], (ConstDictVariable, SetVariable, FrozensetVariable)):
             items = [item.vt for item in args[0].items]
             self.items.extend(items)
         elif isinstance(args[0], ConstantVariable):
@@ -2345,9 +2345,9 @@ class SliceVariable(VariableTracker):
     tp_methods = {"indices": Method(indices)}
 
 
-class ListIteratorVariable(IteratorVariable):
-    # PyListIter_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c#L3842
-    _cpython_type = type(iter([]))
+class BaseListIteratorVariable(IteratorVariable):
+    # In CPython list_iterator and _deque_iterator are siblings, not subclasses
+    # of one another, so the concrete VTs share this base rather than each other.
 
     _nonvar_fields = {
         "index",
@@ -2374,7 +2374,7 @@ class ListIteratorVariable(IteratorVariable):
     def tp_iternext_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/6280bb547840b609feedb78887c6491af75548e8/Objects/listobject.c#L4110-L4133
         if not self.is_mutable():
-            raise AssertionError("ListIteratorVariable must be mutable to iterate")
+            raise AssertionError("list iterator must be mutable to iterate")
         old_index = self.index
         if old_index >= len(self.items) or self.is_exhausted:
             self.is_exhausted = True
@@ -2420,17 +2420,22 @@ class ListIteratorVariable(IteratorVariable):
         codegen.extend_output(create_call_function(1, False))
 
 
+class ListIteratorVariable(BaseListIteratorVariable):
+    # PyListIter_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c#L3842
+    _cpython_type = type(iter([]))
+
+
 class TupleIteratorVariable(ListIteratorVariable):
     # PyTupleIter_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/tupleobject.c#L1067
     _cpython_type = type(iter(()))
 
 
-class DequeIteratorVariable(ListIteratorVariable):
+class DequeIteratorVariable(BaseListIteratorVariable):
     _cpython_type = type(iter(collections.deque()))
 
     _nonvar_fields = {
         "saved_state",
-        *ListIteratorVariable._nonvar_fields,
+        *BaseListIteratorVariable._nonvar_fields,
     }
 
     def __init__(
