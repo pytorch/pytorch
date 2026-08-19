@@ -632,11 +632,11 @@ class TestShapeOps(TestCase):
 
     @dtypes(torch.int64, torch.double, torch.cdouble)
     def test_fliplr_invalid(self, device, dtype):
-        x = torch.randn(42).to(dtype)
+        x = torch.randn(42, device=device).to(dtype)
         with self.assertRaisesRegex(RuntimeError, "Input must be >= 2-d."):
             torch.fliplr(x)
         with self.assertRaisesRegex(RuntimeError, "Input must be >= 2-d."):
-            torch.fliplr(x.to(device))
+            torch.fliplr(torch.tensor(42, device=device, dtype=dtype))
 
     @dtypes(torch.int64, torch.double, torch.cdouble)
     def test_flipud(self, device, dtype):
@@ -872,7 +872,7 @@ class TestShapeOps(TestCase):
             torch.ops.aten.unfold_backward(grad_in, input_sizes, 0, -1, 1)
 
 
-class TestShapeOpsOnCPU(TestCase):
+class TestShapeOpsCPUOnly(TestCase):
     hw_classification = HardwareClassification.CPU
 
     @unittest.expectedFailure
@@ -889,7 +889,7 @@ class TestShapeOpsOnCPU(TestCase):
 
 
 instantiate_device_type_tests(TestShapeOps, globals())
-instantiate_device_type_tests(TestShapeOpsOnCPU, globals(), only_for="cpu")
+instantiate_device_type_tests(TestShapeOpsCPUOnly, globals(), only_for="cpu")
 
 if __name__ == "__main__":
     run_tests()
