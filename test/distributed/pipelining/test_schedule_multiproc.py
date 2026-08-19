@@ -1,11 +1,13 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
+import contextlib
 import copy
 import gc
 import logging
 import os
 from collections import Counter
 from dataclasses import dataclass
+from unittest.mock import patch
 
 from model_registry import (
     ConditionalGradStack,
@@ -35,11 +37,13 @@ from torch.distributed.pipelining import (
     ScheduleInterleaved1F1B,
     ScheduleInterleavedZeroBubble,
     ScheduleLoopedBFS,
+    schedules as pipelining_schedules,
     ScheduleZBVZeroBubble,
 )
 from torch.distributed.pipelining.microbatch import split_args_kwargs_into_chunks
 from torch.distributed.pipelining.schedules import (
     _Action,
+    _PendingSendTracker,
     _PipelineContext,
     _PipelineScheduleRuntime,
     _wait_batch_p2p,
@@ -1442,7 +1446,9 @@ class ScheduleTest(MultiProcContinuousTest):
             stage.retire_fwd_sends = make_counting_retire(stage, stage.retire_fwd_sends)
         return counter
 
-    def _run_release_sent_activations(self, ScheduleClass, release: bool):
+    def _run_release_sent_activations(
+        self, ScheduleClass, release: bool, forbid_polling: bool = False
+    ):
         """Measure peak memory, gradients, and releases for one schedule."""
         single_stage = issubclass(ScheduleClass, PipelineScheduleSingle)
         v_shaped = issubclass(ScheduleClass, (ScheduleZBVZeroBubble, ScheduleDualPipeV))
@@ -1471,26 +1477,37 @@ class ScheduleTest(MultiProcContinuousTest):
             scale_grads=False,
         )
 
+        # Reused workers skip unittest cleanups, so this must unwind normally.
+        capturing = (
+            patch(
+                "torch.distributed.pipelining.schedules._stream_is_capturing",
+                return_value=True,
+            )
+            if forbid_polling
+            else contextlib.nullcontext()
+        )
+
         peak = 0
         # Measure the second step after buffers and metadata are initialized.
-        for step in range(2):
-            zero_gradients(stage_modules)
-            if step == 1:
-                torch.accelerator.synchronize(self.device)
-                torch.accelerator.reset_peak_memory_stats(self.device)
-                baseline = torch.accelerator.memory_allocated(self.device)
+        with capturing:
+            for step in range(2):
+                zero_gradients(stage_modules)
+                if step == 1:
+                    torch.accelerator.synchronize(self.device)
+                    torch.accelerator.reset_peak_memory_stats(self.device)
+                    baseline = torch.accelerator.memory_allocated(self.device)
 
-            if v_shaped:
-                if self.rank == 0:
-                    schedule.step(x, target=target, losses=[])
+                if v_shaped:
+                    if self.rank == 0:
+                        schedule.step(x, target=target, losses=[])
+                    else:
+                        schedule.step()
+                elif self.rank == 0:
+                    schedule.step(x)
+                elif self.rank == self.world_size - 1:
+                    schedule.step(target=target, losses=[])
                 else:
                     schedule.step()
-            elif self.rank == 0:
-                schedule.step(x)
-            elif self.rank == self.world_size - 1:
-                schedule.step(target=target, losses=[])
-            else:
-                schedule.step()
 
         torch.accelerator.synchronize(self.device)
         peak = torch.accelerator.max_memory_allocated(self.device) - baseline
@@ -1562,6 +1579,38 @@ class ScheduleTest(MultiProcContinuousTest):
         else:
             self.assertGreater(released_count, 0)
             self.assertGreaterEqual(saved, activation_bytes)
+
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+    )
+    @skip_if_lt_x_gpu(4)
+    def test_release_sent_activations_without_polling(self):
+        """Verify WAIT_SEND releases buffers without polling."""
+        # Count retired transport references; backward already popped fwd_cache.
+        retired = Counter()
+        wait_send = _PendingSendTracker.wait_send
+        stream_is_capturing = pipelining_schedules._stream_is_capturing
+
+        def counting_wait_send(tracker, key):
+            before = len(tracker._pending)
+            wait_send(tracker, key)
+            retired["batches"] += before - len(tracker._pending)
+
+        with patch.object(_PendingSendTracker, "wait_send", counting_wait_send):
+            self._run_release_sent_activations(
+                ScheduleInterleaved1F1B, release=True, forbid_polling=True
+            )
+
+        self.assertGreater(
+            retired["batches"], 0, "no send was retired by a lowered WAIT_SEND"
+        )
+        # Ensure the reused worker did not retain the capture mock.
+        self.assertIs(
+            pipelining_schedules._stream_is_capturing,
+            stream_is_capturing,
+            "the capture mock outlived the run that installed it",
+        )
 
 
 instantiate_parametrized_tests(ScheduleTest)

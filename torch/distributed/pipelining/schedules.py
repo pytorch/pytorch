@@ -32,7 +32,12 @@ from .microbatch import (
     split_args_kwargs_into_chunks,
     TensorChunkSpec,
 )
-from .stage import _PipelineStageBase, _RecvInfo, PipelineStage
+from .stage import (
+    _PipelineStageBase,
+    _RecvInfo,
+    _send_release_poll_default,
+    PipelineStage,
+)
 
 
 __all__ = [
@@ -62,6 +67,9 @@ class _ComputationType(str, Enum):
     RECV_F = "RECV_F"
     SEND_B = "SEND_B"
     RECV_B = "RECV_B"
+    # Wait for a send without querying completion during graph capture.
+    WAIT_SEND_F = "WAIT_SEND_F"
+    WAIT_SEND_B = "WAIT_SEND_B"
     FULL_BACKWARD = "B"
     OVERLAP_F_B = "OVERLAP_F_B"
     REDUCE_GRAD = "REDUCE_GRAD"
@@ -83,6 +91,8 @@ SEND_F = _ComputationType.SEND_F
 RECV_F = _ComputationType.RECV_F
 SEND_B = _ComputationType.SEND_B
 RECV_B = _ComputationType.RECV_B
+WAIT_SEND_F = _ComputationType.WAIT_SEND_F
+WAIT_SEND_B = _ComputationType.WAIT_SEND_B
 FULL_BACKWARD = _ComputationType.FULL_BACKWARD
 OVERLAP_F_B = _ComputationType.OVERLAP_F_B
 REDUCE_GRAD = _ComputationType.REDUCE_GRAD
@@ -101,8 +111,10 @@ W = BACKWARD_WEIGHT
 B = FULL_BACKWARD
 
 # Helper to parse an action string like 1F0 into a tuple of (stage_index, computation_type, microbatch_index)
+# Match long names before prefixes such as W.
 _action_regex = re.compile(
-    r"(\d+)(F|I|B|W|UNSHARD|RESHARD|REDUCE_GRAD|SEND_F|RECV_F|SEND_B|RECV_B)(\d*)"
+    r"(\d+)(WAIT_SEND_F|WAIT_SEND_B|SEND_F|SEND_B|RECV_F|RECV_B|UNSHARD|RESHARD"
+    r"|REDUCE_GRAD|F|I|B|W)(\d*)"
 )
 
 
@@ -854,6 +866,10 @@ def _flatten_sorted_works(work_by_peer: dict[int, list[dist.Work]]) -> list[dist
     return [work for peer_works in work_by_peer.values() for work in peer_works]
 
 
+# Identifies a send batch by direction, stage, and microbatch.
+_SendKey = tuple[_ComputationType, int, int]
+
+
 @dataclass
 class _PendingSendBatch:
     """An in-flight send batch and its release callback."""
@@ -862,6 +878,7 @@ class _PendingSendBatch:
     # Keep transport buffers alive explicitly.
     ops: list[dist.P2POp]
     retire: Callable[[], None] | None
+    key: _SendKey | None = None
 
 
 def _stream_is_capturing() -> bool:
@@ -872,8 +889,11 @@ def _stream_is_capturing() -> bool:
 class _PendingSendTracker:
     """Own send buffers until completion or the end-of-step drain."""
 
-    def __init__(self, enabled: bool = True) -> None:
+    def __init__(self, enabled: bool = True, poll: bool | None = None) -> None:
         self._enabled = enabled
+        # Polling retires as soon as a send lands. Without it only the lowered
+        # WAIT_SEND actions retire, which is how a captured step behaves.
+        self._poll = _send_release_poll_default() if poll is None else poll
         self._pending: list[_PendingSendBatch] = []
 
     def register(
@@ -881,15 +901,37 @@ class _PendingSendTracker:
         ops: list[dist.P2POp],
         works: list[dist.Work],
         retire: Callable[[], None] | None = None,
+        key: _SendKey | None = None,
     ) -> None:
-        self._pending.append(_PendingSendBatch(works, ops, retire))
+        self._pending.append(_PendingSendBatch(works, ops, retire, key))
+
+    def wait_send(self, key: _SendKey) -> None:
+        """Wait for and retire a keyed send without querying completion.
+
+        Missing keys are allowed because eager polling may retire them first.
+        Disabled trackers preserve end-of-step ownership.
+        """
+        if not self._enabled:
+            return
+
+        for i, batch in enumerate(self._pending):
+            if batch.key == key:
+                _wait_batch_p2p(batch.works)
+                self._retire(batch)
+                del self._pending[i]
+                return
 
     def poll(self) -> None:
         """Retire completed batches without blocking.
 
         Poll all batches independently, except during graph capture.
         """
-        if not self._enabled or not self._pending or _stream_is_capturing():
+        if (
+            not self._enabled
+            or not self._poll
+            or not self._pending
+            or _stream_is_capturing()
+        ):
             return
 
         still_pending = []
@@ -1701,6 +1743,42 @@ def _merge_bw(
         else:
             merged_actions.append(action)
     return merged_actions
+
+
+def _add_wait_send(
+    comm_actions: dict[int, list[_Action]],
+) -> dict[int, list[_Action]]:
+    """Insert WAIT_SEND_F after each matching backward.
+
+    The returned gradient proves the peer received the activation, so this wait
+    cannot deadlock. Backward sends remain in the end-of-step drain.
+    """
+    backward_types = (FULL_BACKWARD, BACKWARD_INPUT)
+
+    def backward_slots(action: _Action) -> list[tuple[int, int | None]]:
+        """Return backward slots, including compound sub-actions."""
+        return [
+            (part.stage_index, part.microbatch_index)
+            for part in (action.sub_actions or (action,))
+            if part.computation_type in backward_types
+        ]
+
+    out: dict[int, list[_Action]] = {}
+    for rank, actions in comm_actions.items():
+        sent = {
+            (a.stage_index, a.microbatch_index)
+            for a in actions
+            if a.computation_type == SEND_F
+        }
+        lowered: list[_Action] = []
+        for action in actions:
+            lowered.append(action)
+            for stage_index, microbatch_index in backward_slots(action):
+                if (stage_index, microbatch_index) in sent:
+                    lowered.append(_Action(stage_index, WAIT_SEND_F, microbatch_index))
+                    sent.discard((stage_index, microbatch_index))
+        out[rank] = lowered
+    return out
 
 
 def _add_send_recv(
@@ -2575,6 +2653,8 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
 
     def __init__(self, *args, **kwargs):
         self._defer_pp_recv: bool = kwargs.pop("defer_pp_recv", False)
+        # Set when the schedule is prepared or loaded.
+        self._early_send_release: bool = False
         super().__init__(*args, **kwargs)
         # Action to custom function mapping
         self._comp_type_to_function_map: dict[_ComputationType, Callable] = {}
@@ -2680,6 +2760,11 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                 num_stages=self._num_stages,
             )
 
+            if any(stage.early_send_release for stage in self._stages):
+                self.pipeline_order_with_comms = _add_wait_send(
+                    self.pipeline_order_with_comms
+                )
+
             if self._defer_pp_recv:
                 self.pipeline_order_with_comms = _defer_recv_ops(
                     self.pipeline_order_with_comms,
@@ -2687,6 +2772,15 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                 )
         else:
             raise NotImplementedError(f"{format=} is not implemented")
+
+        # Loaded schedules infer early release from their WAIT_SEND actions.
+        self._early_send_release = any(
+            stage.early_send_release for stage in self._stages
+        ) or any(
+            action.computation_type in (WAIT_SEND_F, WAIT_SEND_B)
+            for rank_actions in self.pipeline_order_with_comms.values()
+            for action in rank_actions
+        )
 
     def _load_csv(
         self,
@@ -2789,9 +2883,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
             )
 
         # Release completed send buffers between actions.
-        pending_sends = _PendingSendTracker(
-            any(stage.early_send_release for stage in self._stages)
-        )
+        pending_sends = _PendingSendTracker(self._early_send_release)
 
         def _perform_action(action: _Action) -> None:
             comp_type = action.computation_type
@@ -2826,10 +2918,17 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                     ops,
                     _batch_p2p(ops),
                     partial(stage.retire_fwd_sends, mb_index),
+                    (SEND_F, stage_idx, mb_index),
                 )
             elif comp_type == SEND_B:
                 ops = stage.get_bwd_send_ops(mb_index)
-                pending_sends.register(ops, _batch_p2p(ops))
+                pending_sends.register(
+                    ops, _batch_p2p(ops), None, (SEND_B, stage_idx, mb_index)
+                )
+            elif comp_type == WAIT_SEND_F:
+                pending_sends.wait_send((SEND_F, stage_idx, mb_index))
+            elif comp_type == WAIT_SEND_B:
+                pending_sends.wait_send((SEND_B, stage_idx, mb_index))
             elif comp_type == RECV_F:
                 if (stage_idx, mb_index) in self.fwd_recv_ops:
                     raise AssertionError(
@@ -4030,10 +4129,16 @@ def _simulate_comms_compute(
         _schedule[rank].append(action)
         if action is not None:
             _prev_ops_rank[rank].add(action)
+            # Record compound sub-actions for dependency checks.
+            for sub_action in action.sub_actions or ():
+                _prev_ops_rank[rank].add(sub_action)
 
     def _ready_to_schedule(action: _Action | None) -> bool:
         if action is None:
             return True
+
+        if action.sub_actions is not None:
+            return all(_ready_to_schedule(sub) for sub in action.sub_actions)
 
         stage_idx = action.stage_index
         prev_ops = _prev_ops_rank[stage_to_rank(stage_idx)]
@@ -4086,6 +4191,17 @@ def _simulate_comms_compute(
             peer_stage_idx = stage_idx + 1
             expected_send = _Action(peer_stage_idx, SEND_B, action.microbatch_index)
             return expected_send in _prev_ops_rank[stage_to_rank(peer_stage_idx)]
+        elif action.computation_type in (WAIT_SEND_F, WAIT_SEND_B):
+            # A wait requires both the send and its peer receive.
+            forward = action.computation_type == WAIT_SEND_F
+            send = SEND_F if forward else SEND_B
+            if _Action(stage_idx, send, action.microbatch_index) not in prev_ops:
+                return False
+            peer_stage_idx = stage_idx + 1 if forward else stage_idx - 1
+            expected_recv = _Action(
+                peer_stage_idx, RECV_F if forward else RECV_B, action.microbatch_index
+            )
+            return expected_recv in _prev_ops_rank[stage_to_rank(peer_stage_idx)]
         else:
             raise ValueError(f"Unsupported action type {action}")
 

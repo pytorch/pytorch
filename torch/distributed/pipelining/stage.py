@@ -106,6 +106,17 @@ def _early_send_release_default() -> bool:
     return os.environ.get("TORCH_PIPELINING_EARLY_SEND_RELEASE", "1") != "0"
 
 
+def _send_release_poll_default() -> bool:
+    """Return whether completed sends are retired by polling.
+
+    Set ``TORCH_PIPELINING_SEND_RELEASE_POLL=0`` to retire only at the points
+    the schedule names, which is what a captured step does because it cannot
+    query completion. Running that way eagerly makes the two release strategies
+    comparable without capturing anything.
+    """
+    return os.environ.get("TORCH_PIPELINING_SEND_RELEASE_POLL", "1") != "0"
+
+
 @dataclass
 class _ForwardCacheEntry:
     """Forward state retained per microbatch.
