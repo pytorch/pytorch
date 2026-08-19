@@ -6,7 +6,8 @@
 
 namespace c10d::nccl2 {
 
-WorkNCCL::WorkStatus WorkNCCLQueue::garbageCollectLocked() {
+WorkNCCL::WorkStatus WorkNCCLQueue::garbageCollectLocked(
+    std::vector<c10::intrusive_ptr<WorkNCCL>>& completed) {
   WorkNCCL::WorkStatus last_status = WorkNCCL::WorkStatus::COMPLETED;
 
   // Keep popping completed elements until we hit an in-progress element
@@ -24,6 +25,10 @@ WorkNCCL::WorkStatus WorkNCCLQueue::garbageCollectLocked() {
       WorkNCCL::WorkStatus status = work->checkStatus();
 
       if (status == WorkNCCL::WorkStatus::COMPLETED) {
+        // Reported to the completion hooks once the lock is dropped. The
+        // reference kept here is what makes that safe: the completed queue is
+        // swapped out and destroyed by the next enqueueWork, on another thread.
+        completed.push_back(work);
         // Tensor references must be released by a caller thread, not by the
         // watchdog that runs garbageCollect().
         completed_work_queue_.push(std::move(work_queue.front()));
@@ -57,8 +62,21 @@ WorkNCCL::WorkStatus WorkNCCLQueue::garbageCollectLocked() {
 // work_queues_mutex_ ensures proper synchronization - both garbageCollect() and
 // enqueueWork() acquire the mutex before accessing stream_work_queues_.
 WorkNCCL::WorkStatus WorkNCCLQueue::garbageCollect() {
-  std::lock_guard<std::mutex> lock(work_queues_mutex_);
-  return garbageCollectLocked();
+  std::vector<c10::intrusive_ptr<WorkNCCL>> completed;
+  WorkNCCL::WorkStatus status = WorkNCCL::WorkStatus::COMPLETED;
+  {
+    std::lock_guard<std::mutex> lock(work_queues_mutex_);
+    status = garbageCollectLocked(completed);
+  }
+  // Reported with no queue lock held on purpose: a completion hook may take a
+  // lock of its own (c10d::FlightRecorderHook takes the recorder's, which a
+  // concurrent dump can hold while it waits on the GIL), and holding
+  // work_queues_mutex_ across it would put enqueueWork -- every collective on
+  // this backend -- behind that wait.
+  for (const auto& work : completed) {
+    work->notifyCompletion();
+  }
+  return status;
 }
 
 WorkNCCL::WorkStatus WorkNCCLQueue::finalize() {
@@ -71,9 +89,10 @@ WorkNCCL::WorkStatus WorkNCCLQueue::finalize() {
 
   // Initialize the status to COMPLETED to cover the case where the queue is
   // empty
+  std::vector<c10::intrusive_ptr<WorkNCCL>> completed;
   WorkNCCL::WorkStatus status = WorkNCCL::WorkStatus::COMPLETED;
   while (!stream_work_queues_.empty()) {
-    status = garbageCollectLocked();
+    status = garbageCollectLocked(completed);
     if (status == WorkNCCL::WorkStatus::ERROR ||
         status == WorkNCCL::WorkStatus::TIMEDOUT ||
         status == WorkNCCL::WorkStatus::COMPLETED) {
@@ -90,6 +109,9 @@ WorkNCCL::WorkStatus WorkNCCLQueue::finalize() {
   completed_work_queue.swap(completed_work_queue_);
   lock.unlock();
 
+  for (const auto& work : completed) {
+    work->notifyCompletion();
+  }
   return status;
 }
 
