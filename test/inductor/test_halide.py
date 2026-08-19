@@ -244,14 +244,6 @@ class HalideTestsGeneric(TestCase):
         )
         self.assertIn("@hl.generator", code)
 
-        if torch.cuda.is_available():
-            _, (code,) = run_and_get_code(
-                halide,
-                torch.randn(1024, 1024, device="cuda"),
-                torch.randn(1024, 1024, device="cuda"),
-            )
-            self.assertIn("@hl.generator", code)
-
     def test_inplace_add_broadcast_input_alias(self):
         @torch.compile(backend="inductor", options={"cpu_backend": "halide"})
         def fn(x, y):
@@ -271,6 +263,26 @@ class HalideTestsGeneric(TestCase):
 @unittest.skipUnless(HAS_HALIDE, "requires halide")
 class HalideTestsCuda(TestCase):
     hw_classification = HardwareClassification.CUDA
+
+    def test_compile_options(self, device):
+        @torch.compile(
+            backend="inductor",
+            options={
+                "cuda_backend": "halide",
+                "cpu_backend": "halide",
+                "halide.scheduler_cuda": "Anderson2021",
+                "halide.scheduler_cpu": "Adams2019",
+            },
+        )
+        def halide(a, b):
+            return torch.softmax(a, -1) + torch.softmax(b, -1)
+
+        _, (code,) = run_and_get_code(
+            halide,
+            torch.randn(1024, 1024, device=device),
+            torch.randn(1024, 1024, device=device),
+        )
+        self.assertIn("@hl.generator", code)
 
     @requires_capabilities(Capability.lib.triton)
     def test_random_consistency(self, device):
