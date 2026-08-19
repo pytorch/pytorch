@@ -22,6 +22,7 @@ from itertools import product
 from unittest.mock import patch
 
 import torch
+import torch.multiprocessing as mp
 import torch.xpu._gpu_trace as gpu_trace
 from torch.testing import make_tensor
 from torch.testing._internal.autocast_test_lists import AutocastTestLists, TestAutocast
@@ -48,6 +49,7 @@ from torch.testing._internal.common_utils import (
     serialTest,
     subtest,
     suppress_warnings,
+    TEST_WITH_TSAN,
     TEST_XPU,
     TestCase,
 )
@@ -717,6 +719,87 @@ print(torch.xpu.is_initialized())
             "expected stream to be a torch.Stream or torch.xpu.Stream object",
         ):
             e2.wait(e2)
+
+    @unittest.skipIf(not Xe2_Or_Later, "XPU IPC not available")
+    def test_event_ipc_handle(self):
+        if int(torch.version.xpu) < 20260200:
+            with self.assertRaisesRegex(
+                RuntimeError, "XPU IPC events require SYCL compiler 2026.2 or later"
+            ):
+                e0 = torch.xpu.Event(enable_timing=False, interprocess=True)
+                e0.record()
+
+            with self.assertRaisesRegex(
+                RuntimeError, "XPU IPC events require SYCL compiler 2026.2 or later"
+            ):
+                e1 = torch.xpu.Event(enable_timing=False, interprocess=True)
+                e1.ipc_handle()
+            return
+
+        if IS_WINDOWS:
+            with self.assertRaisesRegex(
+                RuntimeError, "XPU IPC events are not supported on Windows"
+            ):
+                e2 = torch.xpu.Event(enable_timing=False, interprocess=True)
+                e2.record()
+
+            with self.assertRaisesRegex(
+                RuntimeError, "XPU IPC events are not supported on Windows"
+            ):
+                e3 = torch.xpu.Event(enable_timing=False, interprocess=True)
+                e3.ipc_handle()
+            return
+
+        # IPC and timing cannot both be enabled; error fires at record() time.
+        with self.assertRaisesRegex(
+            RuntimeError, "XPUEvent cannot have both IPC and timing enabled"
+        ):
+            e4 = torch.xpu.Event(enable_timing=True, interprocess=True)
+            e4.record()
+
+        # Same constraint enforced when ipc_handle() triggers lazy initialization.
+        with self.assertRaisesRegex(
+            RuntimeError, "XPUEvent cannot have both IPC and timing enabled"
+        ):
+            e5 = torch.xpu.Event(enable_timing=True, interprocess=True)
+            e5.ipc_handle()
+
+        # ipc_handle() requires interprocess=True.
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "XPUEvent ipc_handle\\(\\) requires the event to be constructed with enable_ipc=True",
+        ):
+            e6 = torch.xpu.Event(enable_timing=False, interprocess=False)
+            e6.ipc_handle()
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "XPUEvent ipc_handle\\(\\) requires the event to be constructed with enable_ipc=True",
+        ):
+            e7 = torch.xpu.Event(enable_timing=False, interprocess=False)
+            e7.record()
+            e7.ipc_handle()
+
+        # Roundtrip: serialize an in-flight event to a handle and reconstruct it.
+        e8 = torch.xpu.Event(enable_timing=False, interprocess=True)
+        stream = torch.xpu.Stream()
+        with stream:
+            torch.xpu._sleep(200_000_000)  # spin for about 200 ms at 1 GHz
+        e8.record(stream)
+        handle = e8.ipc_handle()
+        e9 = torch.xpu.Event.from_ipc_handle(torch.xpu.current_device(), handle)
+        e8.synchronize()
+        self.assertTrue(e9.query())
+        event_ptr = e9.sycl_event
+        e9.record()
+        self.assertEqual(event_ptr, e9.sycl_event)
+
+        # ipc_handle() cannot be called on the reconstructed event;
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "XPUEvent ipc_handle\\(\\) requires the event to be constructed with enable_ipc=True",
+        ):
+            handle = e9.ipc_handle()
 
     def test_device_context_manager(self):
         prev_device = torch.xpu.current_device()
@@ -2943,6 +3026,81 @@ if __name__ == "__main__":
         self.assertTrue(torch.all(x == 6.0))
 
 
+@unittest.skipIf(not Xe2_Or_Later, "XPU IPC not available")
+@unittest.skipIf(IS_WINDOWS, "XPU IPC not available on non-Linux platforms")
+@unittest.skipIf(
+    TEST_WITH_TSAN,
+    "TSAN is not fork-safe since we're forking in a multi-threaded environment",
+)
+@unittest.skipIf(
+    torch.version.xpu is None or int(torch.version.xpu) < 20260200,
+    "XPU IPC events require SYCL compiler 2026.2 or later",
+)
+class TestXPUMultiprocessing(TestCase):
+    @staticmethod
+    def _event_handle_importer_consumer(handle, p2c, c2p):
+        e1 = torch.xpu.Event.from_ipc_handle(torch.xpu.current_device(), handle)
+        c2p.put(0)  # notify parent child is ready
+        p2c.get()  # wait for record in parent
+        e1.synchronize()
+        c2p.put(1)  # notify synchronization is done in child
+        p2c.get()  # wait for parent to finish
+
+    @staticmethod
+    def _event_handle_exporter_consumer(handle, p2c, c2p):
+        stream = torch.xpu.Stream()
+        with stream:
+            e1 = torch.xpu.Event.from_ipc_handle(torch.xpu.current_device(), handle)
+            torch.xpu._sleep(200_000_000)  # spin for about 200 ms
+            e1.record()
+            c2p.put(0)
+            p2c.get()  # wait for parent to finish
+
+    def test_event_handle_importer(self):
+        e0 = torch.xpu.Event(enable_timing=False, interprocess=True)
+        self.assertTrue(e0.query())
+
+        ctx = mp.get_context("spawn")
+        p2c = ctx.SimpleQueue()
+        c2p = ctx.SimpleQueue()
+        p = ctx.Process(
+            target=TestXPUMultiprocessing._event_handle_importer_consumer,
+            args=(e0.ipc_handle(), p2c, c2p),
+        )
+        p.start()
+
+        c2p.get()  # wait for child to become ready
+        torch.xpu._sleep(200_000_000)  # spin for about 200 ms
+        e0.record()
+        p2c.put(0)  # notify child event is recorded
+
+        self.assertFalse(e0.query())
+        c2p.get()  # wait for synchronization in child
+        self.assertTrue(e0.query())
+        p2c.put(1)  # notify child to finish
+        p.join()
+
+    def test_event_handle_exporter(self):
+        e0 = torch.xpu.Event(enable_timing=False, interprocess=True)
+
+        ctx = mp.get_context("spawn")
+        p2c = ctx.SimpleQueue()
+        c2p = ctx.SimpleQueue()
+        p = ctx.Process(
+            target=TestXPUMultiprocessing._event_handle_exporter_consumer,
+            args=(e0.ipc_handle(), p2c, c2p),
+        )
+        p.start()
+
+        c2p.get()  # wait for event in child process is recorded
+
+        self.assertFalse(e0.query())
+        e0.synchronize()
+        self.assertTrue(e0.query())
+        p2c.put(0)  # notify child to finish
+        p.join()
+
+
 @contextlib.contextmanager
 def caching_host_allocator_use_host_register(use_xpu_host_register: bool):
     if use_xpu_host_register:
@@ -3538,6 +3696,23 @@ class TestXpuAutocast(TestAutocast):
         self.assertEqual(torch.is_autocast_enabled("xpu"), torch.is_autocast_enabled())
         self.assertEqual(is_enabled, torch.is_autocast_enabled())
 
+    def test_fft_fp16_promotion(self):
+        shapes = [tuple(range(5, 5 + ndim)) for ndim in range(1, 6)]
+        for shape in shapes:
+            # r2c: rfftn with float16 input should produce complex32
+            x_r = torch.randn(shape, device="xpu", dtype=torch.float16)
+            result_r2c = torch.fft.rfftn(x_r)
+            self.assertEqual(result_r2c.dtype, torch.complex32)
+            expected_r2c = torch.fft.rfftn(x_r.to(torch.float32)).to(torch.complex32)
+            self.assertEqual(result_r2c, expected_r2c, atol=1e-6, rtol=1e-3)
+
+            # c2r: irfftn with complex32 input should produce float16
+            freq = torch.fft.rfftn(x_r)
+            result_c2r = torch.fft.irfftn(freq)
+            self.assertEqual(result_c2r.dtype, torch.float16)
+            expected_c2r = torch.fft.irfftn(freq.to(torch.complex64)).to(torch.float16)
+            self.assertEqual(result_c2r, expected_c2r, atol=1e-6, rtol=1e-3)
+
 
 @unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
 class TestXpuTrace(TestCase):
@@ -3773,6 +3948,9 @@ class TestMemPool(TestCase):
 
 
 instantiate_parametrized_tests(TestXpu)
+instantiate_device_type_tests(
+    TestXPUMultiprocessing, globals(), only_for="xpu", allow_xpu=True
+)
 instantiate_parametrized_tests(TestCachingHostAllocatorXpuGraph)
 instantiate_device_type_tests(TestXpuOptims, globals())
 
