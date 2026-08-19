@@ -86,7 +86,8 @@ class Measured(NamedTuple):
     needs: dict[str, dict[str, set[str]]]  # {file: {label: concrete tests}}
     errors: dict[str, str]  # {file: why it was not measured}
     gates: dict[str, dict[str, list[str]]]  # {file: {test: names its skip reads}}
-    probes: dict[str, dict[str, bool]]  # {job: {name: value at that capability}}
+    probes: dict[str, dict[str, dict[str, bool]]]  # {file: {job: {name: value}}}
+    undecidable: dict[str, list[str]]  # {file: descriptor-forced predicates it uses}
 
 
 def measure(files: list[str]) -> Measured:
@@ -95,7 +96,7 @@ def measure(files: list[str]) -> Measured:
     ran: dict[str, dict[str, set[str]]] = {}
     errors: dict[str, str] = {}
     gates: dict[str, dict[str, list[str]]] = {}
-    probes: dict[str, dict[str, bool]] = {}
+    probes: dict[str, dict[str, dict[str, bool]]] = {}
     for job in [BASELINE_JOB] + [j for _, j, _ in TARGETS]:
         for rel, payload in collector.collect(
             platforms.get_job(job), "status", files
@@ -115,7 +116,9 @@ def measure(files: list[str]) -> Measured:
                 continue
             ran.setdefault(rel, {})[job] = set(payload["ran"])
             gates.setdefault(rel, {}).update(payload["hidden_gates"])
-            probes.setdefault(job, {}).update(payload["probes"])
+            # Per file, not merged: two files can gate on the same name with
+            # different module-local values, and merging picks whichever ran last.
+            probes.setdefault(rel, {})[job] = payload["probes"]
 
     needs = {}
     for rel, by_job in ran.items():
@@ -126,7 +129,27 @@ def measure(files: list[str]) -> Measured:
         needs[rel] = {
             label: by_job[job] - by_job[BASELINE_JOB] for label, job, _ in TARGETS
         }
-    return Measured(needs=needs, errors=errors, gates=gates, probes=probes)
+
+    # A predicate the descriptor pins to one value cannot distinguish the runners,
+    # so a decorator gating on it hides the test from the difference entirely --
+    # no gap, no warning. Derived from the descriptor rather than listed here.
+    forced = forced_predicates()
+    undecidable = {}
+    for rel in needs:
+        src = (REPO_ROOT / rel).read_text(encoding="utf-8", errors="ignore")
+        if hits := sorted(n for n in forced if n in src):
+            undecidable[rel] = hits
+    return Measured(
+        needs=needs, errors=errors, gates=gates, probes=probes, undecidable=undecidable
+    )
+
+
+def forced_predicates() -> list[str]:
+    """Capability overrides the descriptor pins to the same value everywhere."""
+    from tools.testing.introspection import platforms
+
+    caps = {c: platforms._cuda_caps(c, rocm=False) for c in [(8, 6), (9, 0), (10, 0)]}
+    return [n for n in caps[(9, 0)] if len({caps[c][n] for c in caps}) == 1]
 
 
 def unjudged(rel: str, m: Measured) -> list[tuple[str, str, str]]:
@@ -137,11 +160,26 @@ def unjudged(rel: str, m: Measured) -> list[tuple[str, str, str]]:
     want different things from different people, so they are reported apart.
     """
     out = []
+    by_job = m.probes.get(rel, {})
+    judged = {t for tests in m.needs.get(rel, {}).values() for t in tests}
+
+    if forced := m.undecidable.get(rel):
+        out.append(
+            (
+                rel,
+                f"{', '.join(forced)} is pinned to one value by the descriptor at "
+                f"every capability, so a test gating on it shows no difference",
+                "if such a test needs an H100 or B200, list it by hand",
+            )
+        )
+
     for test, names in sorted(m.gates.get(rel, {}).items()):
+        if test in judged:
+            continue  # already reported, as a gap or above
         seen = [
-            (n, [m.probes.get(j, {}).get(n) for j in m.probes])
+            (n, [by_job.get(j, {}).get(n) for j in by_job])
             for n in names
-            if any(n in p for p in m.probes.values())
+            if any(n in p for p in by_job.values())
         ]
         dark = [n for n, vals in seen if not any(vals)]
         if dark:
@@ -387,7 +425,8 @@ def main() -> int:
                 f"::warning file={rel},title=GPU coverage incomplete::"
                 f"{test} could not be classified: {cause}. {action}."
             )
-            print(f"\ngpu_coverage: {rel}::{test} not classified")
+            label = rel if test == rel else f"{rel}::{test}"
+            print(f"\n{label} not classified")
             print(f"    why:  {cause}")
             print(f"    fix:  {action}")
 
@@ -401,8 +440,13 @@ def main() -> int:
             f"ciflow label applied by hand."
         )
         return 1
+    # "OK" must mean measured-and-clean. A file that could not be measured is
+    # counted apart, so the summary never credits a file the check never read.
+    measured = len(files) - len(errors)
     suffix = f", {incomplete} incomplete" if incomplete else ""
-    print(f"gpu_coverage: {len(files)} file(s) OK{suffix}")
+    if errors:
+        suffix += f", {len(errors)} NOT MEASURED"
+    print(f"gpu_coverage: {measured} of {len(files)} file(s) OK{suffix}")
     return 0
 
 
