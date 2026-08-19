@@ -309,6 +309,15 @@ def _collect_importable_constexpr_types(
                 f"{repr_qualname} in its repr, which generated code cannot import. "
                 "Use the type's qualified name in its repr."
             )
+        if dataclasses.is_dataclass(value) and not isinstance(value, type):
+            for field in dataclasses.fields(value):
+                if field.repr and not field.init:
+                    raise ImportError(
+                        "Triton constexpr dataclass value type "
+                        f"{type_module}.{type_qualname} has repr-visible field "
+                        f"{field.name} with init=False, so its repr cannot be "
+                        "evaluated as a constructor call. Set repr=False or init=True."
+                    )
         root_name = type_qualname.split(".", 1)[0]
         existing = result.get(root_name)
         # Generated imports bind the root, so sibling nested types from the

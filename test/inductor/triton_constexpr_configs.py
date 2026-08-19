@@ -40,6 +40,12 @@ class UserDefinedTritonKernelHiddenConfig:
     hidden: object = dataclasses.field(repr=False)
 
 
+@dataclasses.dataclass(frozen=True)
+class UserDefinedTritonKernelNonInitConfig:
+    offset: int
+    derived: int = dataclasses.field(init=False, default=0)
+
+
 class UserDefinedAttrsLikeConfig:
     # attrs publishes this metadata for the fields used by its generated repr.
     __attrs_attrs__ = (

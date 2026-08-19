@@ -62,6 +62,7 @@ try:
         UserDefinedTritonKernelEnumConfig,
         UserDefinedTritonKernelHiddenConfig,
         UserDefinedTritonKernelNestedConfig,
+        UserDefinedTritonKernelNonInitConfig,
     )
 except ImportError:
     from test.inductor.triton_constexpr_configs import (
@@ -72,6 +73,7 @@ except ImportError:
         UserDefinedTritonKernelEnumConfig,
         UserDefinedTritonKernelHiddenConfig,
         UserDefinedTritonKernelNestedConfig,
+        UserDefinedTritonKernelNonInitConfig,
     )
 
 
@@ -231,6 +233,13 @@ class TestCodegenTriton(InductorTestCase):
             type_specs[0].qualname,
             UserDefinedTritonKernelHiddenConfig.__qualname__,
         )
+
+    def test_importable_constexpr_types_non_init_dataclass_field_error(self):
+        value = UserDefinedTritonKernelNonInitConfig(offset=2)
+        with self.assertRaisesRegex(
+            ImportError, "repr-visible field derived with init=False"
+        ):
+            get_importable_constexpr_types([value])
 
     def test_importable_constexpr_types_set(self):
         namespace = UserDefinedTritonKernelConfigNamespace
