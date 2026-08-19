@@ -1552,14 +1552,7 @@ if(USE_ROCM)
       foreach(_arch ${PYTORCH_ROCM_ARCH})
         list(FIND ROCSHMEM_SUPPORTED_ARCH "${_arch}" _rocsmem_supported_idx)
         if(NOT _rocsmem_supported_idx EQUAL -1)
-          # rocSHMEM device archives are commonly built for gfx90a xnack variants,
-          # so map plain gfx90a to gfx90a:xnack-/gfx90a:xnack+ to match device
-          # symbols during HIP RDC link.
-          if(_arch STREQUAL "gfx90a")
-            list(APPEND _torch_rocshmem_build_arches "gfx90a:xnack-" "gfx90a:xnack+")
-          else()
-            list(APPEND _torch_rocshmem_build_arches "${_arch}")
-          endif()
+          list(APPEND _torch_rocshmem_build_arches "${_arch}")
         endif()
       endforeach()
       if(_torch_rocshmem_build_arches)
