@@ -46,6 +46,7 @@ from torch._inductor.runtime.hints import (
     TRITON_MAX_BLOCK,
     TRITON_MAX_TENSOR_NUMEL,
 )
+from torch._inductor.runtime.runtime_utils import triton_hash_to_path_key
 from torch._inductor.runtime.triton_helpers import math as tl_math
 from torch._inductor.runtime.triton_heuristics import (
     _check_max_grid_x,
@@ -94,6 +95,33 @@ def get_autotuned_amd_sqr_kernel():
 @instantiate_parametrized_tests
 class TestTritonHeuristics(TestCase):
     device_type = GPU_TYPE
+
+    def test_triton_hash_to_path_key_prefers_base64(self):
+        with (
+            patch.object(
+                triton.runtime.cache, "_base64", return_value="base64", create=True
+            ),
+            patch.object(
+                triton.runtime.cache, "_base32", return_value="base32", create=True
+            ),
+        ):
+            self.assertEqual(triton_hash_to_path_key("key"), "base64")
+
+    def test_triton_hash_to_path_key_falls_back_to_base32(self):
+        with (
+            patch.object(triton.runtime.cache, "_base64", None, create=True),
+            patch.object(
+                triton.runtime.cache, "_base32", return_value="base32", create=True
+            ),
+        ):
+            self.assertEqual(triton_hash_to_path_key("key"), "base32")
+
+    def test_triton_hash_to_path_key_falls_back_to_key(self):
+        with (
+            patch.object(triton.runtime.cache, "_base64", None, create=True),
+            patch.object(triton.runtime.cache, "_base32", None, create=True),
+        ):
+            self.assertEqual(triton_hash_to_path_key("key"), "key")
 
     def test_triton_config(self):
         """

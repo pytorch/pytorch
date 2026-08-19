@@ -189,21 +189,20 @@ def triton_hash_to_path_key(key: str) -> str:
     # Later, the hash is converted to base64 before being used in the path name.
     # Later, the base64 conversion was replaced to the base32
     #
-    # This code tries to import _base64 and falls back to _base32 if _base64 is unavailable.
-    #
-    # To handle this, try to import the to-base64-conversion function.
-    # If it exists, use it; otherwise, try using _base32; if both are unavailable, use the hash directly.
+    # Avoid from-import probes for removed private attributes. Some Python
+    # runtimes can fail while constructing the resulting ImportError.
     try:
-        from triton.runtime.cache import _base64
-
-        return _base64(key)
+        from triton.runtime import cache
     except Exception:
-        try:
-            from triton.runtime.cache import _base32
+        return key
 
-            return _base32(key)
-        except Exception:
-            return key
+    base64_fn = getattr(cache, "_base64", None)
+    if base64_fn is not None:
+        return base64_fn(key)
+    base32_fn = getattr(cache, "_base32", None)
+    if base32_fn is not None:
+        return base32_fn(key)
+    return key
 
 
 def compile_mps_shader(source: str) -> Any:
