@@ -264,54 +264,6 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
                 reduce_scatter_dtype=torch.float16,
             )
 
-    @skip_if_lt_x_gpu(1)
-    def test_reduce_scatter_records_consumer_stream(self):
-        self.run_subtests(
-            {"needs_record_stream": [True, False]},
-            self._test_reduce_scatter_record_stream,
-        )
-
-    def _test_reduce_scatter_record_stream(self, needs_record_stream: bool):
-        param_sizes = self._get_param_sizes()
-        orig_params = self._init_params(param_sizes)
-        fsdp_param_group = self._init_fsdp_param_group(orig_params, True)
-        fsdp_params = fsdp_param_group.fsdp_params
-        fsdp_param_group.comm_ctx.lazy_init(self.device)
-        unsharded_grads = [torch.ones_like(param) * self.rank for param in orig_params]
-        group = fsdp_param_group.mesh_info.shard_process_group
-
-        calls = []
-
-        def _record_stream_spy(tensor, stream):
-            calls.append(tensor.untyped_storage().data_ptr())
-
-        with patch.object(
-            device_module, "_needs_record_stream_on_free", needs_record_stream, create=True
-        ), patch.object(torch.Tensor, "record_stream", _record_stream_spy):
-            foreach_reduce(
-                fsdp_params,
-                unsharded_grads,
-                group,
-                device_module.Stream(),
-                DefaultReduceScatter(),
-                orig_dtype=orig_params[0].dtype,
-                reduce_dtype=torch.float32,
-                device=self.device,
-                gradient_divide_factor=None,
-                all_reduce_group=None,
-                all_reduce_stream=device_module.Stream(),
-                all_reduce_hook=None,
-                all_reduce_grads=True,
-                partial_reduce_output=None,
-            )
-
-        if needs_record_stream:
-            self.assertTrue(calls, "expected record_stream on the reduce-scatter output")
-        else:
-            self.assertEqual(
-                calls, [], "record_stream must not be called without the capability"
-            )
-
     def _test_reduce_scatter(
         self,
         param_sizes: list[torch.Size],
@@ -2141,6 +2093,78 @@ class TestFullyShardReduceOpWorldSize1(FSDPTest):
             all_reduce_op,
         ) = _get_gradient_divide_factors(group, None, torch.float32)
         self.assertEqual(all_reduce_op, ReduceOp.SUM)
+
+
+class TestFullyShardReduceScatterRecordStream(FSDPTest):
+    @property
+    def world_size(self) -> int:
+        return min(2, device_module.device_count())
+
+    @skip_if_lt_x_gpu(2)
+    def test_reduce_scatter_records_consumer_stream(self):
+        self.run_subtests(
+            {"needs_record_stream": [True, False], "mixed_precision": [False, True]},
+            self._test_reduce_scatter_records_consumer_stream,
+        )
+
+    def _test_reduce_scatter_records_consumer_stream(
+        self, needs_record_stream: bool, mixed_precision: bool
+    ):
+        torch.manual_seed(42)
+        model = nn.Sequential(*[nn.Linear(1024, 1024) for _ in range(3)]).to(device_type)
+        if mixed_precision:
+            model = model.to(torch.bfloat16)
+        for param in model.parameters():
+            dist.broadcast(param.detach(), src=0)
+        mp_policy = (
+            MixedPrecisionPolicy(param_dtype=torch.bfloat16, reduce_dtype=torch.float32)
+            if mixed_precision
+            else None
+        )
+        for module in model:
+            if mp_policy is not None:
+                fully_shard(module, mp_policy=mp_policy)
+            else:
+                fully_shard(module)
+        if mp_policy is not None:
+            fully_shard(model, mp_policy=mp_policy)
+        else:
+            fully_shard(model)
+
+        recorded_dtypes = []
+        orig_record_stream = torch.Tensor.record_stream
+
+        def _record_stream_spy(tensor, stream):
+            recorded_dtypes.append(tensor.dtype)
+            return orig_record_stream(tensor, stream)
+
+        inp_dtype = torch.bfloat16 if mixed_precision else torch.float32
+        with patch.object(
+            device_module, "_needs_record_stream_on_free", needs_record_stream, create=True
+        ), patch.object(torch.Tensor, "record_stream", _record_stream_spy):
+            for _ in range(2):
+                inp = torch.randn(8, 1024, device=device_type, dtype=inp_dtype)
+                model(inp).sum().backward()
+            device_module.synchronize()
+
+        if needs_record_stream:
+            # The reduce-scatter output that backs the sharded gradient is the POST-cast
+            # tensor (orig_dtype). In mixed precision that is bf16, not the reduce_dtype
+            # (fp32) buffer, so record_stream must land on the orig_dtype tensor.
+            expected_dtype = torch.bfloat16 if mixed_precision else torch.float32
+            self.assertIn(
+                expected_dtype,
+                recorded_dtypes,
+                f"expected record_stream on the post-cast (orig_dtype={expected_dtype}) "
+                f"reduce-scatter output; got {recorded_dtypes}",
+            )
+        else:
+            self.assertEqual(
+                recorded_dtypes,
+                [],
+                "record_stream must not be called when the backend does not advertise "
+                "_needs_record_stream_on_free",
+            )
 
 
 if __name__ == "__main__":
