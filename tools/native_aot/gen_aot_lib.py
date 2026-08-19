@@ -39,7 +39,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import re
 import sys
@@ -70,13 +69,15 @@ FILE_TMPL = """\
 // NativeFunctions.h, i.e. ~1300 ATen/ops/*.h each, so every generated file
 // depended on unrelated ops (conv2d, lstm, fft) and any schema edit rebuilt
 // all of them -- exactly what AT_PER_OPERATOR_HEADERS exists to avoid.
-// Declaration bodies that call an at:: FACTORY need its op header added
-// here (empty is pre-added for the reduction family's accumulator).
+// TensorIterator.h and ops/empty.h are unconditional: declaration preludes
+// commonly need one or both (shape analysis, the reduction family's
+// accumulator), and there is no per-declaration include hook yet. A body that
+// calls some other at:: FACTORY needs its op header added here.
 //
-// torch/library.h is emitted only for ops with cpp_covers: the covers
-// registration at the end of this file is its only consumer, and it pulls the
-// dispatcher in with it (~110 transitive headers, measured), so declarations
-// without a covers fast path should not pay for it.
+// torch/library.h is the exception, emitted only for ops with cpp_covers,
+// because it is in a different weight class: the covers registration at the end
+// of this file is its only consumer and it pulls the whole dispatcher in with
+// it (~110 transitive headers, measured).
 #include <ATen/core/Tensor.h>
 #include <ATen/NativeAotStubs.h>
 #include <ATen/TensorIterator.h>
@@ -209,35 +210,28 @@ def _device_match(major: int, minor: int, props: str = _CURRENT_PROPS) -> str:
     return f"{props}->major == {major} && {props}->minor == {minor}"
 
 
-# Compute capabilities the emitted gate can be built for. Not a support claim --
-# what an op ships for is its ARCHS -- but a bound, so a malformed arch cannot
-# produce a gate that is silently false on every device.
-_KNOWN_MAJORS = range(7, 13)
+# One implementation, shared with the exporter: see decl.cc_of, which also holds
+# the bound on plausible capabilities so a malformed arch cannot produce a gate
+# that is silently false on every device.
+_cc_of = decl.cc_of
 
 
-def _cc_of(arch: str) -> tuple[int, int]:
-    """sm string -> compute capability. "sm_90" -> (9, 0), "sm_103a" -> (10, 3).
+def _spec_from_json(spec):
+    """A recorded spec as the DECLARATION stated it: sequences back to tuples.
 
-    Rejects anything it cannot parse into a plausible capability rather than
-    computing one: "sm_9" would give (0, 9) and "sm_1000" (100, 0), each
-    emitting a gate no device can satisfy, so the op would ship, link, and
-    decline every call with nothing reported. Suffixes other than the
-    arch-conditional "a" (e.g. the family-conditional "f" of CUDA 12.9+) are
-    refused too -- they mean something this generator has not been taught."""
-    digits = arch.removeprefix("sm_").removesuffix("a")
-    if not arch.startswith("sm_") or not digits.isdigit() or len(digits) not in (2, 3):
-        raise RuntimeError(
-            f"cannot read a compute capability from arch {arch!r}: expected "
-            f"sm_<major><minor>[a], e.g. sm_90a or sm_100"
-        )
-    major, minor = divmod(int(digits), 10)
-    if major not in _KNOWN_MAJORS:
-        raise RuntimeError(
-            f"arch {arch!r} parses as compute capability {major}.{minor}, "
-            f"outside the known range {_KNOWN_MAJORS.start}-"
-            f"{_KNOWN_MAJORS.stop - 1}; a gate for it would match no device"
-        )
-    return major, minor
+    The grid distinguishes the two -- expand_specs treats a list as an axis and a
+    tuple as one compound value -- but JSON has only arrays, so a tuple-valued
+    grid field reached cpp_dispatch as a list. `spec["dtypes"] == ("f32", "bf16")`
+    was then silently False (emitting a cond that never fires, so the kernel
+    shipped and every call declined) and `_CTYPE[spec["dtypes"]]` raised
+    "unhashable type: 'list'" inside generation. The restore is exact rather than
+    a guess: expand_specs consumed every list as an axis, so a sequence still in a
+    recorded point can only have come from a tuple."""
+    if isinstance(spec, list):
+        return tuple(_spec_from_json(v) for v in spec)
+    if isinstance(spec, dict):
+        return {k: _spec_from_json(v) for k, v in spec.items()}
+    return spec
 
 
 def _by_arch(sidecars: list[dict]) -> dict[tuple[int, int], list[dict]]:
@@ -290,7 +284,9 @@ _TENSOR_ISH = re.compile(r"\bat::\w*Tensor\w*|\bc10::List<")
 
 # A sidecar prefix must be usable as a C identifier: it is pasted into
 # extern "C" declarations, launcher names and version-script patterns.
-_C_IDENT = re.compile(r"[A-Za-z_]\w*")
+# Spelled out rather than \w, which is Unicode by default: "héllo" would satisfy
+# a check whose entire contract is "usable as a C identifier".
+_C_IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
 def _int32_size_gate(params: str) -> str:
@@ -381,8 +377,9 @@ def gen_op(
     decl_path: str = "",
 ) -> str:
     def _branch(s: dict, pad: str) -> str:
-        dispatch = d.cpp_dispatch(s["spec"]).strip()
-        launch = d.cpp_launch(s["spec"], f"launch_{s['prefix']}")
+        spec = _spec_from_json(s["spec"])
+        dispatch = d.cpp_dispatch(spec).strip()
+        launch = d.cpp_launch(spec, f"launch_{s['prefix']}")
         return (
             f"{pad}if ({dispatch}) {{\n{indent(launch, pad + '  ')}\n"
             f"{pad}  return true;\n{pad}}}"
@@ -404,10 +401,25 @@ def gen_op(
     # than gate on kernels the op does not claim to support.
     shipped = {sc["arch"] for sc in sidecars}
     if unclaimed := shipped - set(decl.archs_of(d)):
+        # Name the directories and say DELETE. "Re-export" cannot fix this:
+        # _collect_jobs skips (declaration x arch) pairs outside ARCHS, so export
+        # never visits these trees, never prunes them, and every later
+        # generation -- hence every build -- fails identically. The usual cause is
+        # an author narrowing ARCHS after having exported.
+        # .get: gen_op is also called directly (tests, and any future caller) with
+        # sidecars that carry no generation-time _dir.
+        trees = sorted(
+            {sc.get("_dir", "?") for sc in sidecars if sc["arch"] in unclaimed}
+        )
         raise RuntimeError(
             f"{op}: artifacts exported for {sorted(unclaimed)} but the "
-            f"declaration supports only {decl.archs_of(d)}; re-export "
-            f"(export.py skips unsupported arches)"
+            f"declaration supports only {decl.archs_of(d)}. Delete "
+            f"{', '.join(trees) or 'those arch trees'} -- export.py skips "
+            f"unsupported arches, so it will not remove them -- then re-export. "
+            f"A bare re-export alone will NOT clear this: only deleting the tree "
+            f"does. (This is a backstop. Export resolves an on-device arch to the "
+            f"spelling the declaration claims for that capability, so reaching it "
+            f"means the tree predates that resolution or was narrowed since.)"
         )
 
     def _gate_for(props: str) -> str:
@@ -453,25 +465,49 @@ def gen_op(
         # router before any device guard, so on a mixed-capability host the
         # current device need not be the one the op will run on -- and the
         # declarations' own covers bodies already use
-        # getDeviceProperties(self.device().index()). Falls back to the current
-        # device only for a signature with no plain Tensor, which cannot be
-        # device-specific anyway.
+        # getDeviceProperties(self.device().index()).
         _cov_t = _first_tensor_name(covers_params)
-        covers_props = (
-            f"at::cuda::getDeviceProperties({_cov_t}.device().index())"
-            if _cov_t
-            else _CURRENT_PROPS
-        )
+        if _cov_t is None:
+            # Refused rather than falling back to the current device. Without a
+            # tensor there is nothing to ask is_cuda() of, so the predicate would
+            # read current-device properties on every call of a catch-all custom
+            # op -- initializing a CUDA context from a predicate, and ABORTING on
+            # a GPU-less host (num_gpus=0) where the answer is simply false.
+            raise RuntimeError(
+                f"{op}: cpp_covers needs a plain at::Tensor parameter to read the "
+                f"device from, and this signature has none ({covers_params}). "
+                f"Drop cpp_covers for this op -- the Python covered_axes path "
+                f"still applies -- or route it through an op whose schema takes a "
+                f"Tensor."
+            )
+        covers_props = f"at::cuda::getDeviceProperties({_cov_t}.device().index())"
+        # is_cuda BEFORE reading properties. covers is registered as a catch-all
+        # custom op, so it is callable with a CPU tensor, and
+        # getDeviceProperties(-1) falls back to the current device: that
+        # initializes a CUDA context as a side effect of a predicate the router
+        # runs on every call, and on a GPU-less host it aborts
+        # (num_gpus=0) where the answer should simply be false. The declarations'
+        # own bodies end in `return self.is_cuda();` -- this restores their
+        # ability to decline.
+        cuda_first = f"  if (!{_cov_t}.is_cuda()) return false;\n"
         covers_fn = COVERS_FN_TMPL.format(
             op=op,
             key_lc=key.lower(),
             params=covers_params,
-            body=_gate_for(covers_props)
+            body=cuda_first
+            + _gate_for(covers_props)
             + (_int32_size_gate(covers_params) if narrows else "")
             + indent(covers_body, "  "),
         )
+        # Escaped: the schema goes into a C++ string literal, and a default
+        # spelled with double quotes in native_functions.yaml (str mode="constant"
+        # on pad, str padding="valid" on conv1d.padding, str UPLO="L" on
+        # _linalg_eigh) closed the literal early -- a compile error inside a
+        # @generated file, far from the declaration that caused it.
         covers_reg = COVERS_REG_TMPL.format(
-            op=op, key_lc=key.lower(), schema=covers_schema
+            op=op,
+            key_lc=key.lower(),
+            schema=covers_schema.replace("\\", "\\\\").replace('"', '\\"'),
         )
     # State the group's precompute behavior where authors debug: a raw
     # dim compared unwrapped against self.dim()-1 silently declines
@@ -626,6 +662,217 @@ VER_TMPL = """\
 """
 
 
+def surviving_sidecars(op: str, sidecars: list[dict]) -> list[dict]:
+    """The sidecars generation will actually wire a launcher up to.
+
+    The arch tie-break in _by_arch drops candidates, and EVERY consumer has to
+    agree on that set: the launchers, the object list CMake links, the version
+    script, and the reported kernel count. gen_op used to compute it privately,
+    so main() built the list and the script from the UNFILTERED sidecars and the
+    dropped objects shipped inside libtorch_cuda unreferenced -- the exact dead
+    weight the object list exists to prevent (measured: 3 of 6 listed objects
+    with no launcher). Called by main() ahead of gen_op, which re-groups the
+    already-filtered list idempotently."""
+    kept = [sc for scs in _by_arch(sidecars).values() for sc in scs]
+    if dropped := {sc["arch"] for sc in sidecars} - {sc["arch"] for sc in kept}:
+        print(
+            f"{op}: ignoring artifacts for {sorted(dropped)} -- an "
+            f"arch-conditional build for the same capability wins. They are not "
+            f"linked; delete those trees to reclaim the disk."
+        )
+    return kept
+
+
+# The one file CMake reads. It is not data for CMake to interpret: it IS the
+# CMake calls, emitted here, so caffe2/CMakeLists.txt is a single
+# include(... OPTIONAL) with no logic of its own. Named .cmake rather than .txt
+# for exactly that reason.
+CMAKE_INCLUDE = "native_aot.cmake"
+
+
+def _cmake_str(value: str) -> str:
+    """A python string as a quoted CMake argument.
+
+    Escaped in this order, because each character means something to CMake's
+    parser: backslash (a path on any platform can hold one), double quote (ends
+    the argument), dollar (starts a variable reference, and a build directory can
+    contain one), and semicolon (CMake's list separator -- unescaped, one path
+    with a semicolon becomes two)."""
+    for char in ("\\", '"', "$", ";"):
+        value = value.replace(char, "\\" + char)
+    return f'"{value}"'
+
+
+def _write_atomic(path: str, text: str) -> str:
+    """Write via a temp file + rename, so a crash cannot leave a partial file
+    that CMake would read as authoritative."""
+    tmp = path + ".tmp"
+    try:
+        with open(tmp, "w") as f:
+            f.write(text)
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+    return path
+
+
+def _delete_generated(artifacts_dir: str, decl_id: str, why: str) -> None:
+    """Drop a declaration's generated source. Regenerating one is free; the
+    artifacts it describes are never touched.
+
+    Called from both places a declaration can stop contributing: its arch trees
+    are gone (or excluded by --archs), and its trees are present but hold no
+    sidecar. The second case used to `continue` silently, leaving a source that
+    compiles and then references module entry points whose object is not in the
+    link set -- green link, symbol lookup error at first use."""
+    src_dir = os.path.join(artifacts_dir, decl_id)
+    if not os.path.isdir(src_dir):
+        return
+    for fn in sorted(os.listdir(src_dir)):
+        if fn.startswith("aot_") and fn.endswith(".cpp"):
+            os.remove(os.path.join(src_dir, fn))
+            print(f"{decl_id}: {why}, deleted stale {fn}")
+
+
+def write_cmake_include(
+    artifacts_dir: str,
+    sources: list[str],
+    objects: list[str],
+    version_script: str,
+    dsl_runtime: str | None,
+    arch_list: str | None,
+) -> str:
+    """Emit the CMake calls that embed this generation into torch_cuda.
+
+    Written atomically and LAST, so its presence is the only evidence that a
+    generation finished. CMake does nothing but include it, which is why every
+    decision -- and every diagnostic -- has to be resolved here:
+
+      * the OPT-OUT is a generated `return()`, because only CMake is running at
+        configure time and a previous run's file may be on disk; checking it here
+        keeps the branch out of caffe2/CMakeLists.txt;
+      * paths are ABSOLUTE and escaped, since CMake resolves relative ones
+        against a different directory than this process;
+      * the version script and --exclude-libs go through `SHELL:-Xlinker`, and
+        the quoting is not optional: -Wl, (what LINKER: expands to) is split on
+        commas by the compiler driver, bare -Xlinker tokens are collapsed by
+        target_link_options' de-duplication, and SHELL: splits its own value on
+        spaces;
+      * BUILD_WITH_INSTALL_RPATH, because stage 2 copies build/lib/libtorch_cuda.so
+        over the installed one and the two must agree; it is set here rather than
+        for every CUDA build because building with the install RPATH drops link
+        directories inside the source or binary tree.
+
+    Nothing is emitted when there is nothing to embed: an absent or empty file is
+    the "no kernels" state, so a tree that never exported and a generation that
+    refused look the same to the build, which is what keeps the main build
+    independent of stage 2 having run."""
+    if not sources:
+        return _write_atomic(
+            os.path.join(artifacts_dir, CMAKE_INCLUDE),
+            "# @generated by tools/native_aot/gen_aot_lib.py -- do not edit.\n"
+            "# Nothing to embed for this build.\n",
+        )
+
+    srcs = [os.path.abspath(p) for p in sorted(sources)]
+    objs = [os.path.abspath(p) for p in sorted(objects)]
+    # A SEMICOLON cannot be carried through. Escaping it as \; does produce a
+    # literal semicolon in the value, but CMake re-splits a source list on it
+    # downstream, so the build asks for the prefix before the semicolon
+    # ("ninja: error: '/tmp/x/semi', needed by libtorch_cuda.so, missing") --
+    # verified. Refused here, naming the path, rather than emitted as a file that
+    # configures cleanly and then cannot build. Quotes, backslashes and dollars DO
+    # survive _cmake_str, so only this one is fatal.
+    for path in srcs + objs + [version_script] + ([dsl_runtime] if dsl_runtime else []):
+        if ";" in path or "\n" in path:
+            raise RuntimeError(
+                f"native-AOT: cannot embed {path!r} -- CMake splits source lists on "
+                f"';' (and a newline cannot appear in a CMake argument), so this "
+                f"path cannot reach the build intact. Move the build directory (or "
+                f"the DSL wheel) somewhere without those characters, or set "
+                f"TORCH_NATIVE_AOT=0 to build without embedded kernels."
+            )
+    out = [
+        "# @generated by tools/native_aot/gen_aot_lib.py -- do not edit.",
+        "#",
+        "# Included by caffe2/CMakeLists.txt. Every decision behind these calls was",
+        "# made by the generator; edit tools/native_aot/gen_aot_lib.py instead.",
+        f"# Generated for TORCH_CUDA_ARCH_LIST={arch_list!r}."
+        if arch_list is not None
+        else "# Generated without an arch list (a hand run, or an on-device export).",
+        "",
+        "# The opt-out, checked here because only CMake runs at configure time and a",
+        "# previous run's file can still be on disk. A blank value reads as absent, and",
+        "# CMake truthiness means OFF/false/no work as well as 0 -- matching",
+        "# build_stage2._OPT_OUT_VALUES, so the two sides cannot disagree.",
+        'if(DEFINED ENV{TORCH_NATIVE_AOT} AND NOT "$ENV{TORCH_NATIVE_AOT}" STREQUAL ""',
+        '   AND NOT "$ENV{TORCH_NATIVE_AOT}")',
+        '  message(STATUS "native-AOT: TORCH_NATIVE_AOT=$ENV{TORCH_NATIVE_AOT}, not embedding kernels")',
+        "  return()",
+        "endif()",
+        "if(DEFINED TORCH_NATIVE_AOT AND NOT TORCH_NATIVE_AOT)",
+        '  message(STATUS "native-AOT: TORCH_NATIVE_AOT=${TORCH_NATIVE_AOT}, not embedding kernels")',
+        "  return()",
+        "endif()",
+        "",
+        "# Re-run configure when this file changes, so a later export + relink picks the",
+        "# new kernels up even without stage 2 asking for a reconfigure.",
+        # No DIRECTORY argument: inside an included file CMAKE_CURRENT_LIST_DIR is
+        # the ARTIFACTS dir, which CMake has not processed as a directory, so
+        # naming it is an error ("requested directory was not found"). Omitted, the
+        # property lands on the directory doing the include, which is the one whose
+        # configure has to re-run.
+        "set_property(DIRECTORY APPEND PROPERTY",
+        f"    CMAKE_CONFIGURE_DEPENDS {_cmake_str(os.path.join(os.path.abspath(artifacts_dir), CMAKE_INCLUDE))})",
+        "",
+        f'message(STATUS "native-AOT: embedding {len(objs)} object(s) from '
+        f'{len(srcs)} generated source(s)")',
+        "",
+    ]
+    if objs:
+        # EXTERNAL_OBJECT but NOT GENERATED: nothing in this build produces these
+        # objects, and GENERATED tells CMake to stop checking they exist -- which
+        # defers a missing one to "ninja: error: ... missing and no known rule to
+        # make it", naming neither native-AOT nor a remedy.
+        out += [
+            "set_source_files_properties(",
+            *[f"    {_cmake_str(o)}" for o in objs],
+            "    PROPERTIES EXTERNAL_OBJECT TRUE)",
+            "",
+        ]
+    out += [
+        "target_sources(torch_cuda PRIVATE",
+        *[f"    {_cmake_str(p)}" for p in srcs + objs],
+        ")",
+        "",
+        "if(UNIX AND NOT APPLE)",
+        "  set_target_properties(torch_cuda PROPERTIES BUILD_WITH_INSTALL_RPATH TRUE)",
+        "  target_link_options(torch_cuda PRIVATE",
+        f'      "SHELL:-Xlinker --version-script -Xlinker \\"{os.path.abspath(version_script)}\\"")',
+        "  # LINK_DEPENDS as well as the option: without it ninja does not relink when",
+        "  # only the script changes, so new entry points would stay public.",
+        "  set_property(TARGET torch_cuda APPEND PROPERTY",
+        f"      LINK_DEPENDS {_cmake_str(os.path.abspath(version_script))})",
+        "endif()",
+    ]
+    if dsl_runtime:
+        name = os.path.basename(dsl_runtime)
+        out += [
+            "",
+            "# whole-archive is NOT needed (the kernels reference it directly); exclude-libs",
+            "# keeps its symbols out of torch_cuda's export table.",
+            f"target_link_libraries(torch_cuda PRIVATE {_cmake_str(os.path.abspath(dsl_runtime))})",
+            "if(UNIX AND NOT APPLE)",
+            "  target_link_options(torch_cuda PRIVATE",
+            f'      "SHELL:-Xlinker --exclude-libs -Xlinker \\"{name}\\"")',
+            "endif()",
+        ]
+    return _write_atomic(
+        os.path.join(artifacts_dir, CMAKE_INCLUDE), "\n".join(out) + "\n"
+    )
+
+
 def write_version_script(artifacts_dir: str, prefixes: list[str]) -> str:
     """Emit the linker version script localizing every exported kernel's
     symbols. Two spellings per prefix: the DSL emits a bare _mlir_<...>
@@ -642,16 +889,41 @@ def write_version_script(artifacts_dir: str, prefixes: list[str]) -> str:
         lines.append(f"    /* {prefix} */")
         lines.append(f"    {prefix}_*;")
         lines.append(f"    _mlir_*{prefix}*;")
-    out = os.path.join(artifacts_dir, VERSION_SCRIPT)
-    with open(out, "w") as f:
-        f.write(VER_TMPL.format(patterns="\n".join(lines)))
-    return out
+    # Atomically, like the manifest: a truncated version script passes CMake's
+    # EXISTS check and reaches the linker as a syntax error that names nothing.
+    return _write_atomic(
+        os.path.join(artifacts_dir, VERSION_SCRIPT),
+        VER_TMPL.format(patterns="\n".join(lines)),
+    )
 
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--artifacts-dir", default=os.path.join(REPO, "build", "native_aot")
+    )
+    parser.add_argument(
+        "--archs",
+        nargs="*",
+        help="restrict generation to these arch trees (sm strings). Stage 2 "
+        "passes the arches this build targets, so a tree left by a build with "
+        "a different TORCH_CUDA_ARCH_LIST is ignored rather than shipped",
+    )
+    parser.add_argument(
+        "--dsl-runtime",
+        default=None,
+        help="the DSL runtime static archive to link (build_stage2 finds it; "
+        "CMake used to glob for it per CUDA major)",
+    )
+    parser.add_argument(
+        "--arch-list",
+        default=None,
+        help="the raw TORCH_CUDA_ARCH_LIST this generation is for, recorded in "
+        "the manifest so caffe2/CMakeLists.txt can refuse artifacts generated "
+        "for another one. Passed by stage 2; omit it for a hand run and the "
+        "manifest records no claim rather than an empty one (reading the "
+        "environment here instead let a hand run overwrite -- or fabricate -- a "
+        "claim about a list it never consulted)",
     )
     parser.add_argument(
         "--allow-stale",
@@ -698,14 +970,41 @@ def main(argv: list[str] | None = None) -> None:
         # arch. So every top-level directory is an arch, and its subdirectories
         # are declarations; a top-level directory with no subdirectories is a
         # generated-source dir and has nothing to discover.
-        for child in sorted(os.listdir(art_dir)):
-            sub = os.path.join(art_dir, child)
-            if os.path.isdir(sub):
-                dirs_by_id.setdefault(child, []).append(sub)
+        children = [
+            c
+            for c in sorted(os.listdir(art_dir))
+            if os.path.isdir(os.path.join(art_dir, c))
+        ]
+        # An arch tree this build did not ask for is left ALONE, not generated
+        # from and not linked: nothing prunes trees, so an incremental build
+        # whose TORCH_CUDA_ARCH_LIST changed still has the old one. Generating
+        # from it would ship a capability nobody requested, and its staleness
+        # would fail the build telling you to re-export an arch you dropped.
+        if children and args.archs and entry not in args.archs:
+            print(f"{entry}: not in this build's arch list, ignoring its artifacts")
+            continue
+        for child in children:
+            dirs_by_id.setdefault(child, []).append(os.path.join(art_dir, child))
+
+    # A generated source whose artifacts are all gone -- an arch tree deleted by
+    # hand, or every tree it had skipped by --archs -- is deleted here. It is not
+    # reached by the loop below (that walks decl_ids that still HAVE artifacts),
+    # and leaving it means the link glob compiles a file whose
+    # #include "../<arch>/<id>/..." no longer resolves: a compile error naming a
+    # generated file, with nothing pointing at the tree the user removed.
+    # Regenerating a source is free, so deleting is safe; artifacts never are.
+    for entry in sorted(os.listdir(args.artifacts_dir)):
+        src_dir = os.path.join(args.artifacts_dir, entry)
+        if not os.path.isdir(src_dir) or entry in dirs_by_id:
+            continue
+        _delete_generated(args.artifacts_dir, entry, "no artifacts remain")
 
     all_prefixes: list[str] = []
+    link_objects: list[str] = []
+    # (out_dir, path, source, kernel count) -- written only once every
+    # declaration has passed its refusals; see the commit step after the loop.
+    pending: list[tuple[str, str, str, int]] = []
     for entry, art_dirs in sorted(dirs_by_id.items()):
-        art_dir = art_dirs[0]
         d, decl_path = by_id.get(entry, (None, ""))
         if d is None:
             # Orphaned artifact dir (declaration renamed/removed): its
@@ -739,30 +1038,54 @@ def main(argv: list[str] | None = None) -> None:
                 f"{entry}: no declaration (renamed or removed?); "
                 + (f"deleted stale {', '.join(removed)}" if removed else "skipped")
             )
+            # Reported, not fatal. Under the manifest design nothing links an
+            # artifact the manifest does not name, and the stale .cpp that COULD
+            # have referenced one was just deleted above -- so what is left on
+            # disk is inert, exactly like the two states already reported rather
+            # than refused (an arch tie-break loser, and a tree outside --archs).
+            # As a fatal it also failed every later build until the user deleted a
+            # full export by hand, and it fired for a directory holding only the
+            # ABI header, which is never a link input at all.
+            #
+            # Per arch dir, because `entries` spans all of them: naming
+            # art_dirs[0] while listing basenames gathered from every tree told
+            # the user to look for files that were not in the directory named.
             leftover_exts = toolchains.all_artifact_exts()
-            leftover = sorted(
-                os.path.basename(p)
-                for p in entries
-                if os.path.splitext(p)[1] in leftover_exts
-            )
-            if leftover:
-                raise RuntimeError(
-                    f"{art_dir}: kernel artifacts with no declaration "
-                    f"({', '.join(leftover[:4])}"
-                    f"{', ...' if len(leftover) > 4 else ''}). The embedded-link "
-                    f"glob would compile them into torch_cuda with no launcher "
-                    f"referencing them. Delete the directory and re-export."
+            for one in art_dirs:
+                leftover = sorted(
+                    fn
+                    for fn in os.listdir(one)
+                    if os.path.splitext(fn)[1] in leftover_exts
                 )
+                if leftover:
+                    print(
+                        f"{one}: {len(leftover)} artifact(s) with no declaration "
+                        f"({', '.join(leftover[:4])}"
+                        f"{', ...' if len(leftover) > 4 else ''}); not linked -- "
+                        f"delete this directory to reclaim the disk."
+                    )
             continue
         sidecars = []
-        stale = []
         # Across every arch dir this declaration exported into.
         for one_dir in art_dirs:
             for fn in sorted(os.listdir(one_dir)):
                 if fn.endswith(".json"):
                     path = os.path.join(one_dir, fn)
-                    with open(path) as f:
-                        sc = json.load(f)
+                    sc = export_mod._read_sidecar(path)
+                    # SCHEMA FIRST: every check below reads fields by name, and a
+                    # different version may not mean by them what this generator
+                    # thinks. A bump is not waivable by --allow-stale, which
+                    # exists for artifacts whose SOURCES drifted while still
+                    # describing themselves in a shape this generator reads.
+                    if sc.get("version") != export_mod.SIDECAR_VERSION:
+                        raise RuntimeError(
+                            f"{path}: sidecar schema version {sc.get('version')!r}, "
+                            f"but this generator reads version "
+                            f"{export_mod.SIDECAR_VERSION}. Re-export this arch "
+                            f"({sc.get('arch') or 'unknown arch'}) or delete the "
+                            f"tree; generation cannot be forced past a schema "
+                            f"change."
+                        )
                     # The prefix names this kernel's extern "C" entry points and
                     # its launcher, so a value that is not a C identifier reaches
                     # the compiler as a syntax error inside a @generated file --
@@ -775,27 +1098,8 @@ def main(argv: list[str] | None = None) -> None:
                             f"launcher, so generation would emit C++ that does "
                             f"not compile."
                         )
-                    # A schema bump is NOT waivable by --allow-stale: that flag
-                    # exists for artifacts whose sources drifted, which still
-                    # describe themselves in a shape this generator reads. A
-                    # different version may not, so emitting from it would
-                    # silently read the wrong fields.
-                    if sc.get("version") != export_mod.SIDECAR_VERSION:
-                        raise RuntimeError(
-                            f"{path}: sidecar schema version {sc.get('version')!r}, "
-                            f"but this generator reads version "
-                            f"{export_mod.SIDECAR_VERSION}. Re-export this arch "
-                            f"({sc.get('arch') or 'unknown arch'}) or delete the "
-                            f"tree; generation cannot be forced past a schema "
-                            f"change."
-                        )
-                    # Staleness guard: the sidecar records the builder's
-                    # source closure at export; a mismatch means the kernel
-                    # source changed since the artifact was compiled.
-                    if not export_mod.sources_current(sc):
-                        stale.append(sc)
-                    # Generation-time context: toolchains that embed artifact
-                    # bytes (e.g. raw cubins) read them from the sidecar's dir.
+                    # Generation-time context: a toolchain whose launcher embeds
+                    # the artifact's bytes reads them from the sidecar's dir.
                     sc["_dir"] = one_dir
                     # Include path from where the generated .cpp lands (always
                     # <root>/<decl_id>/, see out_dir below): "../<arch>/<id>"
@@ -824,6 +1128,21 @@ def main(argv: list[str] | None = None) -> None:
                     f"Delete whichever is stale and re-run generation."
                 )
             seen[p] = sc["_dir"]
+        # Filter BEFORE judging staleness: a candidate the tie-break drops can
+        # never reach the library, so a stale leftover `sm_100` beside a fresh
+        # `sm_100a` used to fail the whole run -- and the advice it printed
+        # re-exported a full set of kernels that generation drops again.
+        sidecars = surviving_sidecars(entry, sidecars)
+        # The sidecar records the builder's source closure AND the DSL versions
+        # that compiled it. A mismatch in either means the artifact no longer
+        # corresponds to what this tree would produce: edited kernel source, or
+        # an upgraded compiler, which changes nothing on disk and so cannot be
+        # caught by the closure.
+        stale = [
+            sc
+            for sc in sidecars
+            if not (export_mod.sources_current(sc) and export_mod.runtimes_current(sc))
+        ]
         if stale and not args.allow_stale:
             # Name the arches, and re-export THEM: a bare export.py run only
             # maintains the one arch it resolves for (--arch, a toolchain's arch
@@ -840,6 +1159,13 @@ def main(argv: list[str] | None = None) -> None:
                 f"--allow-stale to generate anyway."
             )
         if not sidecars:
+            # A declaration whose artifacts are gone but whose directory remains
+            # (a partial `rm`, or the "delete their trees" advice above taken
+            # literally). Its generated source must go with them: it would still
+            # compile -- the ABI header is a separate file -- and then reference
+            # module entry points whose object this run did not list, which links
+            # green (nothing passes --no-undefined) and fails at symbol lookup.
+            _delete_generated(args.artifacts_dir, entry, "no sidecars remain")
             continue
         did, key = decl.decl_id(d), d.DISPATCH_KEY
         covers = None
@@ -848,6 +1174,31 @@ def main(argv: list[str] | None = None) -> None:
         if covers_body:
             params, schema = covers_signature(d.ATEN_OP)
             covers = (params, schema, covers_body)
+        # Everything that can REFUSE this declaration runs before anything is
+        # written, and the sources are BUFFERED to the end of the loop: a refusal
+        # in declaration N used to leave declaration 1..N-1's fresh sources
+        # paired with the previous run's manifest, which the next main build
+        # linked into an undefined-symbol failure that only stage 2 -- running
+        # after it -- could have repaired.
+        entry_objects = []
+        for sc in sidecars:
+            tc = toolchains.get_toolchain(sc["kind"])
+            tc.validate_abi(sc)
+            # EVERY artifact the sidecar claims must be on disk, not just the
+            # link inputs: a missing ABI header otherwise became a `fatal error:
+            # no such file` inside a @generated file, and silently turned
+            # validate_abi (which reads that header) into a no-op.
+            for ext in tc.artifact_exts:
+                art = os.path.join(sc["_dir"], sc["prefix"] + ext)
+                if not os.path.exists(art):
+                    raise RuntimeError(
+                        f"{art}: sidecar describes an artifact that is not on "
+                        f"disk. The launcher would be emitted and the artifact "
+                        f"missing at compile or link time; re-export this arch "
+                        f"({sc.get('arch')}) or delete {sc['_dir']}."
+                    )
+                if ext in tc.link_exts:
+                    entry_objects.append(art)
         src = gen_op(
             did,
             key,
@@ -860,18 +1211,41 @@ def main(argv: list[str] | None = None) -> None:
         )
         # The source covers every arch this declaration shipped, so it belongs
         # to no single arch tree: always <root>/<decl_id>/, one arch or many.
-        # That also keeps generated sources one level deep for the CMake globs
-        # while only the .o files nest.
         out_dir = os.path.join(args.artifacts_dir, entry)
-        os.makedirs(out_dir, exist_ok=True)
         out = os.path.join(out_dir, f"aot_{did}_{key.lower()}.cpp")
-        with open(out, "w") as f:
-            f.write(src)
-        print(f"wrote {out} ({len(sidecars)} kernels)")
+        pending.append((out_dir, out, src, len(sidecars)))
         all_prefixes.extend(sc["prefix"] for sc in sidecars)
+        link_objects.extend(entry_objects)
 
-    if all_prefixes:
-        print(f"wrote {write_version_script(args.artifacts_dir, all_prefixes)}")
+    # Past every refusal: INVALIDATE the old manifest, then commit the sources,
+    # then the version script, then the new manifest LAST -- its presence is what
+    # tells CMake a generation finished.
+    #
+    # Removing it first is what makes the window between sources harmless. Each
+    # source is written atomically, but the paths are deterministic, so the
+    # previous manifest already names them: a run that died after source 1 left
+    # THAT source fresh beside the previous run's OBJECT list, and the main build
+    # then failed on undefined symbols -- with stage 2, the only writer that could
+    # repair it, running after that build. With no manifest present, the same state
+    # reads as "not generated yet" and the build proceeds without embedding.
+    stale = os.path.join(args.artifacts_dir, CMAKE_INCLUDE)
+    if os.path.exists(stale):
+        os.remove(stale)
+    for out_dir, out, src, n in pending:
+        os.makedirs(out_dir, exist_ok=True)
+        # Atomically, like the manifest and the version script: the path is
+        # deterministic, so the PREVIOUS run's manifest already names it, and
+        # CMake validates only that it exists. A run killed here (hard kill,
+        # ENOSPC) left a truncated @generated .cpp that the old manifest still
+        # pointed at, so the MAIN build failed compiling it -- and stage 2, the
+        # only writer that could repair it, runs after that build.
+        _write_atomic(out, src)
+        print(f"wrote {out} ({n} kernels)")
+    ver = write_version_script(args.artifacts_dir, all_prefixes)
+    print(f"wrote {ver}")
+    print(
+        f"wrote {write_cmake_include(args.artifacts_dir, [p[1] for p in pending], link_objects, ver, args.dsl_runtime, args.arch_list)}"
+    )
 
 
 if __name__ == "__main__":
