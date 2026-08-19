@@ -8420,6 +8420,35 @@ class TestMPS(TestCaseMPS):
         actual_sp = torch.erfc(torch.tensor(vals, device='mps')).cpu()
         self.assertEqual(actual_sp, expected_sp, rtol=0, atol=0)
 
+    def test_frexp_subnormals(self):
+        # Metal's frexp() computes in float32 and Apple GPUs flush float32
+        # subnormals to zero; bfloat16 shares float32's exponent range so it is
+        # lost the same way, while float16 subnormals are ordinary float32
+        # values. The OpInfo samples contain no subnormals, so a float-based
+        # implementation passes test_output_match while returning (0, 0) here.
+        for dtype, bits in [(torch.float32, torch.int32),
+                            (torch.float16, torch.int16),
+                            (torch.bfloat16, torch.int16)]:
+            # every value below is subnormal in all three formats
+            x = torch.tensor([1, 2, 3, 7, 127], dtype=bits).view(dtype)
+            cpu_mantissa, cpu_exponent = torch.frexp(x)
+            mantissa, exponent = torch.frexp(x.to('mps'))
+            self.assertEqual(mantissa.cpu().view(bits), cpu_mantissa.view(bits), rtol=0, atol=0)
+            self.assertEqual(exponent.cpu(), cpu_exponent, rtol=0, atol=0)
+
+    def test_frexp_specials(self):
+        # +-0, +-inf are returned unchanged with a zero exponent; the sign of
+        # zero must survive, so compare bit patterns rather than values.
+        x = torch.tensor([0.0, -0.0, float('inf'), float('-inf')])
+        cpu_mantissa, cpu_exponent = torch.frexp(x)
+        mantissa, exponent = torch.frexp(x.to('mps'))
+        self.assertEqual(mantissa.cpu().view(torch.int32), cpu_mantissa.view(torch.int32), rtol=0, atol=0)
+        self.assertEqual(exponent.cpu(), cpu_exponent, rtol=0, atol=0)
+
+        nan_mantissa, nan_exponent = torch.frexp(torch.tensor([float('nan')], device='mps'))
+        self.assertTrue(nan_mantissa.isnan().item())
+        self.assertEqual(nan_exponent.cpu(), torch.zeros(1, dtype=torch.int32), rtol=0, atol=0)
+
     def test_igammac_tail_accuracy(self):
         # igamma.h evaluates 0.5 * erfc(...) on its large-a asymptotic path,
         # so the erfc rewrite fixes the igammac tail too

@@ -98,6 +98,48 @@ static void nan_to_num_kernel_mps(TensorIteratorBase& iter,
   });
 }
 
+// frexp writes two outputs, so it cannot use the shared exec_unary_kernel path.
+static void frexp_kernel_mps(TensorIteratorBase& iter) {
+  if (iter.numel() == 0) {
+    return;
+  }
+  // Keeps every operand's byte offsets inside int32, which the kernels index with.
+  if (!iter.can_use_32bit_indexing()) {
+    for (auto&& sub_iter : iter.with_32bit_indexing()) {
+      frexp_kernel_mps(sub_iter);
+    }
+    return;
+  }
+
+  const bool is_dense = iter.is_contiguous();
+  // dtype(0) is the mantissa's, which frexp_out pins to the input's dtype.
+  const auto kernel_name =
+      fmt::format("frexp_{}_{}", is_dense ? "dense" : "strided", mps::scalarToMetalTypeString(iter.dtype(0)));
+  auto pipelineState = lib.getPipelineStateForFunc(kernel_name);
+  auto stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      auto computeEncoder = stream->commandEncoder();
+
+      getMPSProfiler().beginProfileKernel(pipelineState, kernel_name, /*isGraph=*/false, stream);
+
+      [computeEncoder setComputePipelineState:pipelineState];
+      mps::bind_iter_tensors(computeEncoder, iter);
+      if (!is_dense) {
+        mps::mtl_setArgs<3>(computeEncoder,
+                            iter.shape(),
+                            iter.strides(0),
+                            iter.strides(1),
+                            iter.strides(2),
+                            static_cast<uint32_t>(iter.ndim()));
+      }
+      mps::mtl_dispatch1DJob(computeEncoder, pipelineState, iter.numel());
+
+      getMPSProfiler().endProfileKernel(pipelineState, stream);
+    }
+  });
+}
+
 REGISTER_UNARY_TI_DISPATCH(exp);
 REGISTER_UNARY_TI_DISPATCH(expm1);
 REGISTER_UNARY_TI_DISPATCH(erf);
@@ -129,6 +171,7 @@ REGISTER_UNARY_TI_DISPATCH(digamma);
 REGISTER_UNARY_TI_DISPATCH(bitwise_not);
 REGISTER_UNARY_TI_DISPATCH(round);
 REGISTER_UNARY_TI_DISPATCH(sigmoid);
+REGISTER_DISPATCH(frexp_stub, frexp_kernel_mps);
 REGISTER_DISPATCH(logical_not_stub, logical_not_kernel);
 REGISTER_DISPATCH(special_erfcx_stub, erfcx_kernel);
 REGISTER_DISPATCH(round_decimals_stub, round_decimals_kernel);
