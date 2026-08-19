@@ -327,6 +327,7 @@ void TensorImpl::release_resources() {
   if (extra_meta_) {
     extra_meta_->fake_constant_.reset();
     extra_meta_->real_tensor_.reset();
+    extra_meta_->fake_item_memo_.reset();
     extra_meta_->fake_tensor_mode_.reset();
   }
 }
@@ -1111,6 +1112,9 @@ void FakeTensorMode::set_constant(
                 return impl && impl.get() == fake_impl.get();
               }),
           tensors.end());
+      if (tensors.empty()) {
+        constant_storage_mapping_.erase(old_it);
+      }
     }
   }
   if (constant->has_storage()) {
