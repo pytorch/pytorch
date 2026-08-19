@@ -4417,7 +4417,8 @@ def _full(fill_value, device, dtype, size):
         value_loader = value.make_loader()
 
         def inner_fn(index):
-            return value_loader([])
+            return ops.to_dtype(value_loader([]), dtype)
+
 
     return Pointwise.create(
         device=device,

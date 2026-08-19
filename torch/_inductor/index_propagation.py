@@ -108,7 +108,12 @@ class SymPyOps:
         src_dtype: torch.dtype | None = None,
         use_compute_types: bool = False,
     ) -> TypedExpr:
-        return TypedExpr(value.expr, dtype)
+        if value.dtype == dtype:
+            return value
+        if _is_constant(value.expr):
+            return TypedExpr(value.expr, dtype)
+        return NotImplemented
+
 
     @staticmethod
     def abs(x: TypedExpr) -> TypedExpr:

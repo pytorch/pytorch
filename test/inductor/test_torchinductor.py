@@ -2245,6 +2245,22 @@ class CommonTemplate:
 
         self.common(fn, ())
 
+    def test_index_propagation_symbolic_fill_to_dtype(self):
+        # Issue #194062: Ensure torch.full with symbolic fill_value does not drop dtype cast
+        def f(x):
+            return torch.full((2,), x.item(), dtype=torch.bool, device=self.device).sum()
+
+        with torch._dynamo.config.patch(capture_scalar_outputs=True):
+            self.common(f, (torch.tensor(3, device=self.device),))
+
+    def test_full_0d_tensor_fill_value_dtype(self):
+        # Issue #194062: Ensure 0D tensor fill_value is cast to target dtype
+        def f(x):
+            return torch.full((2,), x, dtype=torch.bool, device=self.device).sum()
+
+        self.common(f, (torch.tensor(3, device=self.device),))
+
+
     def test_index_propagation_floordiv(self):
         def repeat_interleave(x, n):
             # e.g. x=[1, 2, 3], n=2 => returns [1, 1, 2, 2, 3, 3]
