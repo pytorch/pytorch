@@ -4093,6 +4093,15 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                                     re.escape("input tensor must have at least one element, but got input_sizes = [0, 1]")):
             torch.batch_norm_update_stats(input=input, momentum=0.0, running_mean=running_mean, running_var=running_var)
 
+    def test_native_batch_norm_eval_requires_running_stats(self):
+        # The raw aten op in eval mode with no running statistics used to
+        # segfault inside the kernel; it must raise instead (#194014).
+        x = torch.full((9, 2, 8, 8), 1.11e15)
+        w = torch.ones(2)
+        b = torch.zeros(2)
+        with self.assertRaisesRegex(ValueError, "running_mean must be defined in evaluation mode"):
+            torch.ops.aten.native_batch_norm(x, w, b, None, None, False, 0.1, 1e-5)
+
     def test_pairwise_distance(self):
         input1 = torch.randn(4, 4, requires_grad=True, dtype=torch.double)
         input2 = torch.randn(4, 4, requires_grad=True, dtype=torch.double)
