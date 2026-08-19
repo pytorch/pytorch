@@ -1162,7 +1162,7 @@ test_better_benchmark() {
     --device 0
   python scripts/build_model_accounting.py \
     --occdir "${accounting_dir}/occurrences" \
-    --output "${accounting_dir}/model_accounting_b200.json"
+    --output "${test_reports_dir}/model_accounting_b200.json"
   popd
 }
 
