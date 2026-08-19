@@ -4,13 +4,11 @@ import math
 import os
 import shutil
 import tempfile
-import unittest
 
 import torch
 import torch._dynamo
 import torch._inductor.config as inductor_config
 from torch._inductor.test_case import run_tests, TestCase
-from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FUSED_ATTENTION
 from torch.testing._internal.common_device_type import (
     Capability,
     instantiate_device_type_tests,
@@ -23,7 +21,7 @@ class TestGraphTransformObserver(TestCase):
     hw_classification = HardwareClassification.CUDA
 
     @requires_capabilities(Capability.lib.triton)
-    @unittest.skipUnless(PLATFORM_SUPPORTS_FUSED_ATTENTION, "Requires fused attention")
+    @requires_capabilities(Capability.attention.fused_attention)
     def test_sdpa_rewriter(self, device):
         if shutil.which("dot") is None:
             self.skipTest("Requires dot")
