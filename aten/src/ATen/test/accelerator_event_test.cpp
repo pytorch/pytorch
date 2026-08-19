@@ -6,7 +6,7 @@
 #include <ATen/Context.h>
 
 TEST(EventTest, testEventFlag) {
-// This intentionally tests a deprecated EventFlag
+// This intentionally tests the deprecated EventFlag::BACKEND_DEFAULT
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
   c10::EventFlag flag = c10::EventFlag::BLOCKING | c10::EventFlag::TIMING | c10::EventFlag::INTERPROCESS;
@@ -56,7 +56,7 @@ TEST(EventTest, testEventFlag) {
   event2.record(stream);
   event2.synchronize();
 
-  EXPECT_TRUE(event2.elapsedTime(event1) > 0);
+  EXPECT_TRUE(event1.elapsedTime(event2) > 0);
 }
 
 int main(int argc, char* argv[]) {
