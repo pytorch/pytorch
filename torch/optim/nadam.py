@@ -260,7 +260,7 @@ NAdam.__doc__ = (
         eps (float, optional): term added to the denominator to improve
             numerical stability (default: 1e-8)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
-        momentum_decay (float, optional): momentum momentum_decay (default: 4e-3)
+        momentum_decay (float, optional): momentum decay (default: 4e-3)
         decoupled_weight_decay (bool, optional): whether to decouple the weight
             decay as in AdamW to obtain NAdamW. If True, the algorithm does not
             accumulate weight decay in the momentum nor variance. (default: False)
@@ -288,7 +288,7 @@ def _single_tensor_nadam(
     *,
     beta1: float,
     beta2: float,
-    lr: float,
+    lr: float | Tensor,
     weight_decay: float,
     momentum_decay: float,
     eps: float,
@@ -338,7 +338,7 @@ def _single_tensor_nadam(
 
         if weight_decay != 0:
             if decoupled_weight_decay:
-                # Perform stepweight decay
+                # Perform step weight decay
                 param.mul_(1 - lr * weight_decay)
             else:
                 grad = grad.add(param, alpha=weight_decay)
@@ -369,7 +369,9 @@ def _single_tensor_nadam(
             mu_product_next = _get_value(mu_product) * mu_next
             denom.add_(eps)
             param.addcdiv_(
-                grad, denom, value=(-lr * (1.0 - mu) / (1.0 - _get_value(mu_product)))
+                grad,
+                denom,
+                value=(-lr * (1.0 - mu) / (1.0 - _get_value(mu_product))),  # type: ignore[arg-type]
             )
             param.addcdiv_(
                 exp_avg,
@@ -388,7 +390,7 @@ def _multi_tensor_nadam(
     *,
     beta1: float,
     beta2: float,
-    lr: float,
+    lr: float | Tensor,
     weight_decay: float,
     momentum_decay: float,
     eps: float,
@@ -462,7 +464,7 @@ def _multi_tensor_nadam(
 
         if weight_decay != 0:
             if decoupled_weight_decay:
-                # Perform stepweight decay
+                # Perform step weight decay
                 torch._foreach_mul_(grouped_params, 1 - lr * weight_decay)
             else:
                 # Reuse the intermediate memory (grouped_grads) already allocated for maximize
@@ -587,17 +589,17 @@ def _multi_tensor_nadam(
                 ]
             )
 
-            torch._foreach_addcdiv_(
+            torch._foreach_addcdiv_(  # type: ignore[arg-type]
                 grouped_params,
                 grouped_grads,
                 exp_avg_sq_sqrt,
-                step_size_grads,  # type: ignore[arg-type]
+                step_size_grads,
             )
-            torch._foreach_addcdiv_(
+            torch._foreach_addcdiv_(  # type: ignore[arg-type]
                 grouped_params,
                 grouped_exp_avgs,
                 exp_avg_sq_sqrt,
-                step_size_expavg,  # type: ignore[arg-type]
+                step_size_expavg,
             )
 
 
@@ -620,7 +622,7 @@ def nadam(
     *,
     beta1: float,
     beta2: float,
-    lr: float,
+    lr: float | Tensor,
     weight_decay: float,
     momentum_decay: float,
     eps: float,

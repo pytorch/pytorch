@@ -930,7 +930,7 @@ static CacheNode* _compiled_autograd_impl(
         for (const auto& [k, _] : cache->next) {
           cached_keys.emplace(k);
         }
-        if (cached_keys.find(key) == cached_keys.end()) {
+        if (!cached_keys.contains(key)) {
           // new autograd node found, compile
           compile_reason = vlogger->log_node_check(
               *fn, compiler_call.all_size_inputs.size(), cached_keys, key, i);

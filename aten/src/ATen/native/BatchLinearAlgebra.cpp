@@ -41,10 +41,8 @@
 #include <ATen/ops/all.h>
 #include <ATen/ops/arange.h>
 #include <ATen/ops/cat.h>
-#include <ATen/ops/cholesky.h>
 #include <ATen/ops/cholesky_inverse.h>
 #include <ATen/ops/cholesky_inverse_native.h>
-#include <ATen/ops/cholesky_native.h>
 #include <ATen/ops/cholesky_solve.h>
 #include <ATen/ops/cholesky_solve_native.h>
 #include <ATen/ops/clone.h>
@@ -88,6 +86,9 @@
 #include <ATen/ops/linalg_lu_solve.h>
 #include <ATen/ops/linalg_lu_solve_meta.h>
 #include <ATen/ops/linalg_lu_solve_native.h>
+#include <ATen/ops/linalg_polar.h>
+#include <ATen/ops/linalg_polar_meta.h>
+#include <ATen/ops/linalg_polar_native.h>
 #include <ATen/ops/linalg_qr.h>
 #include <ATen/ops/linalg_qr_meta.h>
 #include <ATen/ops/linalg_qr_native.h>
@@ -107,7 +108,6 @@
 #include <ATen/ops/lu_unpack_native.h>
 #include <ATen/ops/orgqr_native.h>
 #include <ATen/ops/ormqr_native.h>
-#include <ATen/ops/qr_native.h>
 #include <ATen/ops/real.h>
 #include <ATen/ops/resize_as_native.h>
 #include <ATen/ops/sum.h>
@@ -640,8 +640,8 @@ TORCH_META_FUNC(linalg_lu_factor_ex)(const Tensor& A, bool pivot, bool check_err
   const auto m = sizes.cend()[-2];
   const auto n = sizes.cend()[-1];
 
-  // row major for MPS device, otherwise column major strides for BLAS
-  auto LU_strides = at::native::batched_matrix_contiguous_strides(sizes, /*f-contig*=*/A.device().type() != at::kMPS);
+  // column major strides for BLAS
+  auto LU_strides = at::native::batched_matrix_contiguous_strides(sizes, /*f-contig*=*/true);
   set_output_strided(0, sizes, LU_strides, A.options());
 
   // Set sizes to the size of pivots
@@ -731,6 +731,33 @@ TORCH_META_FUNC(linalg_qr)(const Tensor& A,
   set_output_strided(1, R_shape, R_strides, A.options());
 }
 
+TORCH_META_FUNC(linalg_polar)(const Tensor& A) {
+  at::native::checkIsMatrix(A, "linalg.polar");
+  at::native::checkFloatingOrComplex(A, "linalg.polar");
+
+  // Use a symbolic comparison for the shape check so a dynamic (exported /
+  // compiled) row dimension is not specialized to a constant here. Output
+  // allocation below uses the concrete sizes, matching linalg_qr / _linalg_svd.
+  const auto sym_m = A.sym_size(-2);
+  const auto sym_n = A.sym_size(-1);
+  TORCH_SYM_CHECK(
+      sym_m.sym_ge(sym_n),
+      "linalg.polar: input must have at least as many rows as columns, but got ",
+      sym_m, " by ", sym_n, " matrices");
+
+  auto A_shape = A.sizes().vec();
+  const auto n = A_shape.cend()[-1];
+
+  // U has the same shape as A; H is the (n x n) symmetric/Hermitian factor.
+  // Both are row-major contiguous: the SVD-based kernel and the CUDA override
+  // both materialize contiguous outputs, so the meta must promise the same
+  // layout (otherwise compiled/exported graphs would assume the wrong strides).
+  set_output_contiguous(0, A_shape, A.options());
+
+  auto H_shape = std::move(A_shape);
+  H_shape.end()[-2] = n;
+  set_output_contiguous(1, H_shape, A.options());
+}
 
 TORCH_META_FUNC(_linalg_svd)(const Tensor& A,
                              bool full_matrices,
@@ -782,6 +809,18 @@ TORCH_META_FUNC(lu_unpack)(const Tensor& LU, const Tensor& pivots, bool unpack_d
   const auto m = sizes.cend()[-2];
   const auto n = sizes.cend()[-1];
   const auto k = std::min(m, n);
+
+  if (unpack_pivots) {
+    // pivots is produced by lu_factor and must have shape (*LU.shape[:-2], min(m, n)).
+    // Without this check, a mismatched pivots tensor leads to out-of-bounds reads in
+    // the unpack_pivots kernel.
+    auto expected_pivots_sizes = LU.sizes().vec();
+    expected_pivots_sizes.pop_back();
+    expected_pivots_sizes.back() = k;
+    TORCH_CHECK_VALUE(pivots.sizes() == IntArrayRef(expected_pivots_sizes),
+        "Expected LU_pivots to have shape ", IntArrayRef(expected_pivots_sizes),
+        " but got ", pivots.sizes(), " instead.");
+  }
 
   // P.shape[-2:] == (m, m) (or size zero if pivot == False)
   sizes.end()[-1] = m;
@@ -1761,62 +1800,6 @@ Tensor& cholesky_solve_out(const Tensor& self, const Tensor& A, bool upper, Tens
 
 DEFINE_DISPATCH(cholesky_stub);
 
-Tensor cholesky(const Tensor &self, bool upper) {
-   TORCH_WARN_ONCE(
-    "torch.cholesky is deprecated in favor of torch.linalg.cholesky and will be ",
-    "removed in a future PyTorch release.\n",
-    "L = torch.cholesky(A)\n",
-    "should be replaced with\n",
-    "L = torch.linalg.cholesky(A)\n",
-    "and\n"
-    "U = torch.cholesky(A, upper=True)\n",
-    "should be replaced with\n",
-    "U = torch.linalg.cholesky(A).mH\n"
-    "This transform will produce equivalent results for all valid (symmetric positive definite) inputs."
-  );
-  if (self.numel() == 0) {
-    return at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  }
-  squareCheckInputs(self, "cholesky");
-
-  auto raw_cholesky_output = cloneBatchedColumnMajor(self);
-  auto info_shape = IntArrayRef(
-      self.sizes().cbegin(), self.sizes().cend() - 2); // self.shape[:-2]
-  auto info = at::empty({info_shape}, self.options().dtype(kInt));
-
-  // fill the raw_cholesky_output with the result
-  cholesky_stub(self.device().type(), raw_cholesky_output, info, upper);
-
-  at::_linalg_check_errors(info, "cholesky", self.dim() == 2);
-
-  if (upper) {
-    return raw_cholesky_output.triu_();
-  } else {
-    return raw_cholesky_output.tril_();
-  }
-}
-
-Tensor& cholesky_out(const Tensor &self, bool upper, Tensor &result) {
-   TORCH_WARN_ONCE(
-    "torch.cholesky is deprecated in favor of torch.linalg.cholesky and will be ",
-    "removed in a future PyTorch release.\n",
-    "L = torch.cholesky(A)\n",
-    "should be replaced with\n",
-    "L = torch.linalg.cholesky(A)\n",
-    "and\n"
-    "U = torch.cholesky(A, upper=True)\n",
-    "should be replaced with\n",
-    "U = torch.linalg.cholesky(A).mH\n"
-    "This transform will produce equivalent results for all valid (symmetric positive definite) inputs."
-  );
-  checkSameDevice("cholesky", result, self);
-  checkLinalgCompatibleDtype("cholesky", result, self);
-  Tensor result_tmp = at::cholesky(self, upper);
-  at::native::resize_output(result, result_tmp.sizes());
-  result.copy_(result_tmp);
-  return result;
-}
-
 TORCH_IMPL_FUNC(linalg_cholesky_ex_out)(const Tensor& A,
                                         bool upper,
                                         bool check_errors,
@@ -2500,30 +2483,24 @@ TORCH_IMPL_FUNC(linalg_qr_out)(const Tensor& A,
   }
 }
 
-
-std::tuple<Tensor,Tensor> qr(const Tensor& self, bool some) {
-  TORCH_WARN_ONCE(
-    "torch.qr is deprecated in favor of torch.linalg.qr and will be removed in a future PyTorch release.\n",
-    "The boolean parameter 'some' has been replaced with a string parameter 'mode'.\n",
-    "Q, R = torch.qr(A, some)\n",
-    "should be replaced with\n",
-    "Q, R = torch.linalg.qr(A, 'reduced' if some else 'complete')"
-  );
-  const char* mode = some ? "reduced" : "complete";
-  return at::linalg_qr(self, mode);
+TORCH_IMPL_FUNC(linalg_polar_out)(const Tensor& A,
+                                  const Tensor& U,
+                                  const Tensor& H) {
+  // Polar decomposition A = U @ H via the (reduced) SVD A = Up diag(S) Vh:
+  //   U = Up @ Vh           (orthonormal columns)
+  //   H = Vh^H diag(S) Vh   (symmetric/Hermitian positive-semidefinite)
+  // This is the portable backend kernel. On CUDA a Python native-op override
+  // (cuSOLVER QDWH/Xpolar via nvmath-python) intercepts the functional op for
+  // supported inputs and only falls through to here when unavailable, so this
+  // path also serves as the CUDA fallback and the CPU/compile/out= path.
+  auto [Up, S, Vh] = at::linalg_svd(A, /*full_matrices=*/false);
+  auto Hsym = Vh.mH().matmul(S.unsqueeze(-1) * Vh);
+  // Symmetrize/Hermitianize to remove round-off asymmetry.
+  Hsym = 0.5 * (Hsym + Hsym.mH());
+  U.copy_(Up.matmul(Vh));
+  H.copy_(Hsym);
 }
 
-std::tuple<Tensor&,Tensor&> qr_out(const Tensor& self, bool some, Tensor& Q, Tensor& R) {
-  TORCH_WARN_ONCE(
-    "torch.qr is deprecated in favor of torch.linalg.qr and will be removed in a future PyTorch release.\n",
-    "The boolean parameter 'some' has been replaced with a string parameter 'mode'.\n",
-    "Q, R = torch.qr(A, some)\n",
-    "should be replaced with\n",
-    "Q, R = torch.linalg.qr(A, 'reduced' if some else 'complete')"
-  );
-  const char* mode = some ? "reduced" : "complete";
-  return at::linalg_qr_out(Q, R, self, mode);
-}
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ orgqr ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -3519,16 +3496,17 @@ static std::string get_default_lstsq_driver(std::optional<std::string_view> driv
     static std::unordered_set<std::string_view> allowed_drivers = {
       "gels", "gelsy", "gelsd", "gelss"
     };
-    if (input.device() == at::kCPU) {
+    // CUDA supports only the 'gels' driver; CPU and MPS support all four.
+    if (input.is_cuda()) {
+      TORCH_CHECK(
+        driver_str == "gels",
+        "torch.linalg.lstsq: `driver` other than `gels` is not supported on CUDA"
+      );
+    } else { // CPU and MPS
       TORCH_CHECK(
         allowed_drivers.find(driver_str) != allowed_drivers.end(),
         "torch.linalg.lstsq: parameter `driver` should be one of "
         "(gels, gelsy, gelsd, gelss)"
-      );
-    } else { // else if (input.is_cuda())
-      TORCH_CHECK(
-        driver_str == "gels",
-        "torch.linalg.lstsq: `driver` other than `gels` is not supported on CUDA"
       );
     }
   } else {

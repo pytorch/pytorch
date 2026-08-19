@@ -56,13 +56,13 @@ inline std::string toString(at::IntArrayRef l) {
     ss << l[i];
   }
   ss << ')';
-  return ss.str();
+  return std::move(ss).str();
 }
 
 inline std::string toString(const c10::Layout& layout) {
   std::stringstream ss;
   ss << layout;
-  return ss.str();
+  return std::move(ss).str();
 }
 
 inline void assertSameType(
@@ -605,6 +605,9 @@ inline void checkSplitSizes(
     const std::vector<int64_t>& split_sizes,
     const at::Tensor& tensor,
     int group_size) {
+  for (const auto split_size : split_sizes) {
+    TORCH_CHECK(split_size >= 0, "Split sizes must be non-negative");
+  }
   if (split_sizes.empty()) {
     TORCH_CHECK(
         tensor.size(0) % group_size == 0,

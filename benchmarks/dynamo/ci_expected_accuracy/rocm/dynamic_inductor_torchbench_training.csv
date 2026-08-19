@@ -82,7 +82,7 @@ llava,eager_fail_to_run,0
 
 
 
-maml_omniglot,fail_accuracy,7
+maml_omniglot,pass,7
 
 
 

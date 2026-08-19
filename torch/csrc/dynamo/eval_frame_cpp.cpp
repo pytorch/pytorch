@@ -321,7 +321,7 @@ struct CRecursionLimitRAII {
       ss << "new c_recursion limit (" << limit
          << ") is lower than thread's current c_recursion_remaining ("
          << remaining << ").";
-      PyErr_WarnEx(PyExc_RuntimeWarning, ss.str().c_str(), 1);
+      PyErr_WarnEx(PyExc_RuntimeWarning, std::move(ss).str().c_str(), 1);
     }
     remaining = limit;
   }
@@ -460,7 +460,7 @@ PyObject* dynamo__custom_eval_frame(
     // DebugContextGuard calls __enter__ on construction and __exit__ on
     // destruction, so the debug session is scoped to this eval_custom call.
     std::optional<DebugContextGuard> debug_guard;
-    if (breakpoint_code_objects.count(cached_code) &&
+    if (breakpoint_code_objects.contains(cached_code) &&
         bytecode_debugger_callback_obj == nullptr) {
       auto ctx = py::module_::import("torch._dynamo.bytecode_debugger")
                      .attr("_DebugContext")();
