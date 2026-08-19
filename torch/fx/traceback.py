@@ -3,11 +3,12 @@ import logging
 import threading
 import traceback
 from collections import defaultdict
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, MutableMapping
 from contextlib import contextmanager
 from enum import Enum
-from typing import Any, Optional, ParamSpec, TypeVar, Union
+from typing import Any, cast, Generic, Optional, ParamSpec, TypeVar, Union
 
+import torch
 from torch._utils_internal import signpost_event
 
 from ._compatibility import compatibility
@@ -18,6 +19,7 @@ from .node import Node
 
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
+_T = TypeVar("_T")
 
 log = logging.getLogger(__name__)
 
@@ -39,8 +41,121 @@ __all__ = [
     "get_current_replay_node",
 ]
 
-current_meta: dict[str, Any] = {}
-current_replay_node: Node | None = None
+_traceback_tls = threading.local()
+# Python ``threading.local`` state is not carried into autograd engine workers.
+# Preservation contexts bridge their state through this native TLS slot, which
+# AOTAutograd hooks fork per GraphTask and the engine restores after each NodeTask.
+_AUTOGRAD_ENGINE_STATE_KEY = "fx_traceback_autograd_engine_state"
+
+
+def _copy_current_meta(meta: dict[str, Any]) -> dict[str, Any]:
+    result = meta.copy()
+    if "custom" in result:
+        result["custom"] = copy.copy(result["custom"])
+    return result
+
+
+class _CapturedTracebackState:
+    def __init__(
+        self,
+        current_meta: dict[str, Any],
+        current_replay_node: Node | None,
+        should_preserve_node_meta: bool,
+        should_preserve_node_seq_nr: bool,
+        graph_task_id: int = -1,
+    ) -> None:
+        self.current_meta = current_meta
+        self.current_replay_node = current_replay_node
+        self.should_preserve_node_meta = should_preserve_node_meta
+        self.should_preserve_node_seq_nr = should_preserve_node_seq_nr
+        self.graph_task_id = graph_task_id
+
+    def copy(self) -> "_CapturedTracebackState":
+        return _CapturedTracebackState(
+            _copy_current_meta(self.current_meta),
+            self.current_replay_node,
+            self.should_preserve_node_meta,
+            self.should_preserve_node_seq_nr,
+            self.graph_task_id,
+        )
+
+
+def _get_autograd_engine_state() -> _CapturedTracebackState | None:
+    if torch._C._is_key_in_tls(_AUTOGRAD_ENGINE_STATE_KEY):
+        return cast(
+            _CapturedTracebackState,
+            torch._C._get_obj_in_tls(_AUTOGRAD_ENGINE_STATE_KEY),
+        )
+    return None
+
+
+class _ThreadLocalValue(Generic[_T]):
+    def __init__(self, name: str, default_factory: Callable[[], _T]) -> None:
+        self._name = name
+        self._default_factory = default_factory
+
+    def get(self) -> _T:
+        if (state := _get_autograd_engine_state()) is not None:
+            return cast(_T, getattr(state, self._name))
+        if not hasattr(_traceback_tls, self._name):
+            setattr(_traceback_tls, self._name, self._default_factory())
+        return cast(_T, getattr(_traceback_tls, self._name))
+
+    def set(self, value: _T) -> None:
+        if (state := _get_autograd_engine_state()) is not None:
+            setattr(state, self._name, value)
+        else:
+            setattr(_traceback_tls, self._name, value)
+
+    def __bool__(self) -> bool:
+        return bool(self.get())
+
+    def __repr__(self) -> str:
+        return repr(self.get())
+
+    def __eq__(self, other: object) -> bool:
+        return self.get() == other
+
+
+_current_meta: _ThreadLocalValue[dict[str, Any]] = _ThreadLocalValue(
+    "current_meta", dict
+)
+
+
+class _ThreadLocalCurrentMeta(MutableMapping[str, Any]):
+    def _dict(self) -> dict[str, Any]:
+        return _current_meta.get()
+
+    def __getitem__(self, key: str) -> Any:
+        return self._dict()[key]
+
+    def __setitem__(self, key: str, value: Any) -> None:
+        self._dict()[key] = value
+
+    def __delitem__(self, key: str) -> None:
+        del self._dict()[key]
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._dict())
+
+    def __len__(self) -> int:
+        return len(self._dict())
+
+    def copy(self) -> dict[str, Any]:
+        return self._dict().copy()
+
+    def __repr__(self) -> str:
+        return repr(self._dict())
+
+
+def _set_current_meta(meta: dict[str, Any]) -> None:
+    _current_meta.set(meta)
+
+
+current_meta: _ThreadLocalCurrentMeta = _ThreadLocalCurrentMeta()
+current_replay_node: _ThreadLocalValue[Node | None] = _ThreadLocalValue(
+    "current_replay_node", lambda: None
+)
 # Thread-local holder for the optional name of the subgraph being compiled by a
 # nested/regional inductor compile (e.g. a regional inductor scooped-out region
 # or an invoke_subgraph submodule). Used to disambiguate trace_structured
@@ -48,9 +163,49 @@ current_replay_node: Node | None = None
 # only!
 _regional_inductor_subgraph_name_tls = threading.local()
 # Preserve the node meta fields in torch.fx.proxy._COPY_META_FIELDS
-should_preserve_node_meta = False
+should_preserve_node_meta: _ThreadLocalValue[bool] = _ThreadLocalValue(
+    "should_preserve_node_meta", lambda: False
+)
 # Preserve the "seq_nr" node meta field
-_should_preserve_node_meta = False
+_should_preserve_node_meta: _ThreadLocalValue[bool] = _ThreadLocalValue(
+    "should_preserve_node_seq_nr", lambda: False
+)
+
+
+def _capture_thread_local_state() -> _CapturedTracebackState:
+    return _CapturedTracebackState(
+        current_meta=_copy_current_meta(_current_meta.get()),
+        current_replay_node=current_replay_node.get(),
+        should_preserve_node_meta=should_preserve_node_meta.get(),
+        should_preserve_node_seq_nr=_should_preserve_node_meta.get(),
+    )
+
+
+@contextmanager
+def _propagate_thread_local_state_for_autograd() -> Iterator[None]:
+    if _get_autograd_engine_state() is not None:
+        yield
+        return
+
+    torch._C._stash_obj_in_tls(
+        _AUTOGRAD_ENGINE_STATE_KEY, _capture_thread_local_state()
+    )
+    try:
+        yield
+    finally:
+        torch._C._remove_obj_from_tls(_AUTOGRAD_ENGINE_STATE_KEY)
+
+
+def _install_thread_local_state_for_autograd() -> None:
+    graph_task_id = torch._C._current_graph_task_id()
+    current_state = _get_autograd_engine_state()
+    if current_state is None or current_state.graph_task_id != graph_task_id:
+        # Reentrant backwards inherit the outer task's live metadata stack.
+        # Duplicate hook pairs within one task reuse it instead of resetting it.
+        new_state = (current_state or _capture_thread_local_state()).copy()
+        new_state.graph_task_id = graph_task_id
+        torch._C._stash_obj_in_tls(_AUTOGRAD_ENGINE_STATE_KEY, new_state)
+
 
 GRADIENT_ACC_SPECIAL_STACK = (
     "Gradient addition node due to multiple use of tensor around:"
@@ -266,17 +421,16 @@ class NodeSource:
 @compatibility(is_backward_compatible=False)
 @contextmanager
 def preserve_node_meta(enable: bool = True) -> Iterator[None]:
-    global should_preserve_node_meta
-    global current_meta
-    saved_should_preserve_node_meta = should_preserve_node_meta
-    # Shallow copy is OK since fields of current_meta are not mutated
-    saved_current_meta = current_meta.copy()
-    try:
-        should_preserve_node_meta = enable
-        yield
-    finally:
-        should_preserve_node_meta = saved_should_preserve_node_meta
-        current_meta = saved_current_meta
+    with _propagate_thread_local_state_for_autograd():
+        saved_should_preserve_node_meta = should_preserve_node_meta.get()
+        # Shallow copy is OK since fields of current_meta are not mutated
+        saved_current_meta = current_meta.copy()
+        try:
+            should_preserve_node_meta.set(enable)
+            yield
+        finally:
+            should_preserve_node_meta.set(saved_should_preserve_node_meta)
+            _set_current_meta(saved_current_meta)
 
 
 @contextmanager
@@ -285,21 +439,18 @@ def _preserve_node_seq_nr(preserve_seq_nr: bool = True) -> Iterator[None]:
     Temporarily enables or disables the preservation of node.meta["seq_nr"] in the
     tracing context.
     """
-    global _should_preserve_node_meta
-    saved = _should_preserve_node_meta
+    saved = _should_preserve_node_meta.get()
 
     try:
-        _should_preserve_node_meta = preserve_seq_nr
+        _should_preserve_node_meta.set(preserve_seq_nr)
         yield
     finally:
-        _should_preserve_node_meta = saved
+        _should_preserve_node_meta.set(saved)
 
 
 @compatibility(is_backward_compatible=False)
 def set_stack_trace(stack: list[str]) -> None:
-    global current_meta
-
-    if should_preserve_node_meta:
+    if should_preserve_node_meta.get():
         if stack:
             current_meta["stack_trace"] = "".join(stack)
         else:
@@ -342,8 +493,6 @@ def annotate(annotation_dict: dict[str, Any]) -> Iterator[None]:
         >>> with annotate({"source": "custom_pass", "tag": 42}):
         ...     pass  # Your computation here
     """
-
-    global current_meta
 
     has_custom = "custom" in current_meta
     old_custom = copy.copy(current_meta.get("custom", {}))
@@ -435,8 +584,6 @@ def annotate_fn(
 
 @contextmanager
 def _set_autograd_backward(enable: bool = True) -> Iterator[None]:
-    global current_meta
-
     had_autograd_backward = "autograd_backward" in current_meta
     old_autograd_backward = current_meta.get("autograd_backward", False)
 
@@ -453,23 +600,17 @@ def _set_autograd_backward(enable: bool = True) -> Iterator[None]:
 
 @compatibility(is_backward_compatible=False)
 def _mark_autograd_backward() -> None:
-    global current_meta
-
     current_meta["autograd_backward"] = True
 
 
 @compatibility(is_backward_compatible=False)
 def _reset_autograd_backward() -> None:
-    global current_meta
-
     current_meta.pop("autograd_backward", None)
 
 
 @compatibility(is_backward_compatible=False)
 def set_grad_fn_seq_nr(seq_nr: int) -> None:
-    global current_meta
-
-    if should_preserve_node_meta:
+    if should_preserve_node_meta.get():
         # The seq_nr is captured by eager mode in the grad_fn during forward
         current_meta["grad_fn_seq_nr"] = current_meta.get("grad_fn_seq_nr", []) + [
             seq_nr
@@ -481,8 +622,7 @@ def set_grad_fn_seq_nr(seq_nr: int) -> None:
 def reset_grad_fn_seq_nr() -> None:
     # NB: reset state properly, this would be helpful towards supporting
     #     reentrant autograd if we actually wanted to do that.
-    global current_meta
-    if should_preserve_node_meta:
+    if should_preserve_node_meta.get():
         current_level = current_meta.get("in_grad_fn", 0)
         if current_level <= 0:
             raise AssertionError(f"Expected current_level > 0, got {current_level}")
@@ -496,7 +636,7 @@ def reset_grad_fn_seq_nr() -> None:
 
 @compatibility(is_backward_compatible=False)
 def format_stack() -> list[str]:
-    if should_preserve_node_meta:
+    if should_preserve_node_meta.get():
         return [current_meta.get("stack_trace", "")]
     else:
         # fallback to traceback.format_stack()
@@ -505,39 +645,39 @@ def format_stack() -> list[str]:
 
 @compatibility(is_backward_compatible=False)
 def has_preserved_node_meta() -> bool:
-    return should_preserve_node_meta
+    return should_preserve_node_meta.get()
 
 
 def _is_preserving_node_seq_nr() -> bool:
-    return _should_preserve_node_meta
+    return _should_preserve_node_meta.get()
 
 
 @compatibility(is_backward_compatible=False)
 @contextmanager
 def set_current_meta(node: Node, pass_name: str = "") -> Iterator[None]:
-    global current_meta
-    if should_preserve_node_meta and node.meta:
-        saved_meta = current_meta
+    if should_preserve_node_meta.get() and node.meta:
+        saved_meta = get_current_meta()
         try:
-            current_meta = node.meta.copy()
+            new_meta = node.meta.copy()
 
             # Update the "from_node" field in current_meta for provenance tracking.
             # Instead of appending, overwrite the "from_node" field because current_meta
             # will be assigned to the new node. The new NodeSource(node, ...) will
             # include the information from the previous current_meta["from_node"].
-            current_meta["from_node"] = [
+            new_meta["from_node"] = [
                 NodeSource(node, pass_name, NodeSourceAction.CREATE)
             ]
+            _set_current_meta(new_meta)
             yield
         finally:
-            current_meta = saved_meta
+            _set_current_meta(saved_meta)
     else:
         yield
 
 
 @compatibility(is_backward_compatible=False)
 def get_current_meta() -> dict[str, Any]:
-    return current_meta
+    return _current_meta.get()
 
 
 @compatibility(is_backward_compatible=False)
@@ -548,13 +688,12 @@ def set_current_replay_node(node: Node | None) -> Iterator[None]:
     then we're re-generating the `current_replay_node` in FunctionalTensorMode.
     """
     # See [Note] annotation for more details.
-    global current_replay_node
-    saved_current_replay_node = current_replay_node
+    saved_current_replay_node = current_replay_node.get()
     try:
-        current_replay_node = node
+        current_replay_node.set(node)
         yield
     finally:
-        current_replay_node = saved_current_replay_node
+        current_replay_node.set(saved_current_replay_node)
 
 
 @compatibility(is_backward_compatible=False)
@@ -562,7 +701,7 @@ def get_current_replay_node() -> Node | None:
     """
     Get the current replay node
     """
-    return current_replay_node
+    return current_replay_node.get()
 
 
 @compatibility(is_backward_compatible=False)
