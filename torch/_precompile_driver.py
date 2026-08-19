@@ -41,12 +41,16 @@ if TYPE_CHECKING:
     # torch._precompile._build_multigraph_python_source. _FRAMES is one entry
     # per Dynamo frame (its code, its variants' guard state and transformed
     # bytecode, the globals it reads); _BACKENDS is the compiled subgraphs.
+    # The backend the capture used; the drivers key their autocast handling and
+    # their re-serve off it.
+    BACKEND: str = ""
     _FRAMES: str = ""
     _BACKENDS: str = ""
     # An INSTALLED multi-graph artifact carries the whole captured package in
     # one blob instead of the per-frame records above, because it hands the
     # frames to the frame evaluator rather than dispatching them itself.
     _PACKAGE: str = ""
+    _ENTRY_BINDING: str = ""
     NUM_POSITIONAL_ARGS: int = 0
     PARAM_NAMES: list[str] = []
     BUFFER_NAMES: list[str] = []
@@ -66,22 +70,6 @@ if TYPE_CHECKING:
     # Device types the captured graph dispatches on. The drivers neutralize
     # ambient autocast on these; see _autocast_off.
     GRAPH_DEVICES: tuple[str, ...] = ()
-
-    # Dynamo-tracer calling-convention metadata, emitted (only for tracer="dynamo") by
-    # torch._precompile._build_dynamo_metadata_section ahead of the driver. BACKEND_ID is
-    # the global name the transformed bytecode calls the compiled subgraph by (None when
-    # the trace produced no subgraph); IMPORT_SOURCES maps each import alias the bytecode
-    # references to its module name; _DYNAMO_CODE is base64(marshal(transformed bytecode));
-    # _DYNAMO_STATE is base64(pickle({used_globals, closure, argdefs, kwdefaults})).
-    BACKEND: str = ""
-    BACKEND_ID: str | None = None
-    IMPORT_SOURCES: dict[str, str] = {}
-    # (frame arg index, path from that arg to the owning module, param name) per
-    # param the captured backward accumulates a gradient into; empty for a forward
-    # capture. The path is a list of ("index"|"key"|"attr", accessor) steps.
-    GRAD_ACCUM_PARAMS: list[tuple[int, list[tuple[str, object]], str]] = []
-    _DYNAMO_CODE: str = ""
-    _DYNAMO_STATE: str = ""
 
     # The compiled/captured graph's entry point, emitted before the driver.
     def call(flat_inputs: list[object]) -> list[object]: ...
@@ -436,181 +424,6 @@ def _rebuild_cell(value):
     return _inner.__closure__[0]
 
 
-def _build_dynamo_forward():
-    """Reconstruct the Dynamo-transformed function (tracer="dynamo") from the inlined
-    bytecode + state, and return it as the runnable ``forward``.
-
-    Unlike the make_fx drivers, the transformed bytecode IS the calling convention: it
-    extracts the runtime model's params/buffers itself (so structural drift surfaces as
-    the model is read, invariant 2), calls the compiled subgraph, and reassembles fn's
-    output. This driver only rehydrates that bytecode (marshalled into _DYNAMO_CODE) and
-    wires the names it references: module aliases from IMPORT_SOURCES, plain globals from
-    _DYNAMO_STATE's used_globals, and BACKEND_ID -> the compiled subgraph. The returned
-    function takes the same args fn took (the model(s) in their positions plus the
-    runtime inputs). Nothing reads an external cache: the subgraph's kernels JIT-compile
-    from the inlined source on first call (the cache, when present, only primes them)."""
-    import base64
-    import importlib
-    import marshal
-    import pickle
-    import sys
-    import types
-
-    try:
-        produced_on = globals().get("_DYNAMO_PYTHON_VERSION")
-        if produced_on is not None and tuple(produced_on) != sys.version_info[:2]:
-            # Explicit, because marshal is not the guard it looks like: only the
-            # 3.10 -> 3.11 layout change makes it raise. A 3.12 blob loads on 3.13
-            # and then segfaults when the code object is executed, so refuse first.
-            raise ValueError(
-                f"artifact was produced on Python {produced_on[0]}.{produced_on[1]}"
-            )
-        code = marshal.loads(base64.b64decode(_DYNAMO_CODE))
-        if not isinstance(code, types.CodeType):
-            # marshal can successfully deserialize a non-code object (int, list, ...) from a
-            # corrupt blob; types.FunctionType below would then raise a raw TypeError. Turn
-            # that into the same clean diagnostic the decode/load failures below emit.
-            raise ValueError("marshalled blob is not a code object")
-    except Exception as e:
-        # The inlined bytecode is marshalled CPython bytecode, specific to the Python
-        # version that produced it; loading it under a different CPython (or a corrupt
-        # blob) fails here. Surface a clean PrecompileError naming the version lock-in
-        # rather than a raw marshal error.
-        from torch._precompile import PrecompileError as _PrecompileError
-
-        raise _PrecompileError(
-            "precompile: could not rehydrate the tracer='dynamo' artifact's inlined "
-            "bytecode. It embeds marshalled CPython bytecode, which is specific to the "
-            "Python version that produced it; loading it under a different Python (this "
-            f"is {sys.version_info.major}.{sys.version_info.minor}) fails. Regenerate the "
-            "artifact under this Python version, or use tracer='make_fx' (portable "
-            f"source). Underlying: {type(e).__name__}: {e}"
-        ) from e
-    try:
-        state = pickle.loads(base64.b64decode(_DYNAMO_STATE))
-        required = {"used_globals", "closure", "argdefs", "kwdefaults"}
-        if not isinstance(state, dict) or not required <= state.keys():
-            # A corrupt blob can unpickle to a non-dict (or a dict missing a key); the
-            # state[...] accesses below would then raise a raw TypeError / KeyError. Turn
-            # that into the same clean captured-state diagnostic as an unpickle failure.
-            raise ValueError("captured-state blob is not the expected dict")
-    except Exception as e:
-        # The pickled state (the globals / closure / defaults fn referenced) failed to
-        # unpickle. Unlike the marshalled bytecode this is NOT a Python-version lock: it
-        # usually means a captured object's class or module is not importable in this
-        # environment. Surface that distinctly rather than misdirecting to the Python
-        # version.
-        from torch._precompile import PrecompileError as _PrecompileError
-
-        raise _PrecompileError(
-            "precompile: could not unpickle the tracer='dynamo' artifact's captured state "
-            "(the globals / closure / default arguments fn referenced). This usually "
-            "means a captured object's class or module is not importable here (an "
-            "environment / torch-build mismatch), not a Python-version issue. Load in an "
-            "environment matching the producer, or use tracer='make_fx'. Underlying: "
-            f"{type(e).__name__}: {e}"
-        ) from e
-    try:
-        f_globals: dict[str, object] = {
-            alias: importlib.import_module(name)
-            for alias, name in IMPORT_SOURCES.items()
-        }
-    except Exception as e:
-        # The transformed bytecode's import aliases can include PRIVATE torch._dynamo
-        # runtime modules, so the artifact is locked to a compatible torch build (not just
-        # the Python version); a renamed / moved module fails here. Surface a clean error
-        # rather than a raw ImportError from the artifact's module exec.
-        from torch._precompile import PrecompileError as _PrecompileError
-
-        raise _PrecompileError(
-            "precompile: could not import a module the tracer='dynamo' artifact "
-            "references (IMPORT_SOURCES). The dynamo artifact can reference private "
-            "torch._dynamo runtime modules, so it is locked to a compatible torch build; "
-            "regenerate under a matching torch build, or use tracer='make_fx' "
-            f"(backend='eager' for portable source). Underlying: {type(e).__name__}: {e}"
-        ) from e
-    f_globals.update(state["used_globals"])
-    if BACKEND_ID is not None:
-
-        def _compiled_subgraph(*args):
-            # The transformed bytecode calls the subgraph UNBOXED (one positional arg per
-            # graph input, reconstructed from its source); ``call`` takes the flat list
-            # (boxed). Bridge unboxed -> boxed here so the emitted subgraph is exactly the
-            # shared inductor/eager ``call`` the make_fx path already emits.
-            #
-            # The eager subgraph pins the capture-time autocast state itself (its
-            # graph is torch-level, so it must REPRODUCE that state rather than
-            # merely disable). An inductor subgraph has the casts baked and only
-            # needs ambient autocast kept off its extern_kernels calls.
-            if BACKEND == "inductor":
-                with _autocast_off(GRAPH_DEVICES):
-                    return call(list(args))
-            return call(list(args))
-
-        f_globals[BACKEND_ID] = _compiled_subgraph
-    closure = state["closure"]
-    cells = tuple(_rebuild_cell(v) for v in closure) if closure else None
-    fn = types.FunctionType(code, f_globals, closure=cells, argdefs=state["argdefs"])
-    if state["kwdefaults"]:
-        fn.__kwdefaults__ = state["kwdefaults"]
-    if not GRAD_ACCUM_PARAMS:
-        return fn
-
-    import torch
-
-    def forward(*args, **kwargs):
-        # Training capture: the baked backward ACCUMULATES into each param's .grad in
-        # place (p.grad.add_(new)), matching eager .backward(). That needs the tensor to
-        # exist, so materialize a zero one wherever the runtime model left .grad at None
-        # (a fresh model, or the usual zero_grad(set_to_none=True)); zero + accumulate is
-        # exactly eager's first-step assign. Only the params the captured graph actually
-        # accumulates into are listed, so a frozen or non-contributing param keeps
-        # .grad = None as eager leaves it.
-        for _pos, _path, _name in GRAD_ACCUM_PARAMS:
-            # Replay the exact path capture recorded, rather than searching for
-            # a module that has a parameter of this name: two same-shaped
-            # modules in one container are indistinguishable by name, so a
-            # search stamps the first one twice and leaves the second unseeded.
-            _obj = args[_pos] if _pos < len(args) else None
-            for _kind, _acc in _path:
-                if _obj is None:
-                    break
-                try:
-                    if _kind == "index":
-                        _obj = _obj[_acc]
-                    elif _kind == "key":
-                        _obj = _obj[_acc]
-                    else:
-                        _obj = getattr(_obj, str(_acc))
-                except (LookupError, AttributeError, TypeError):
-                    _obj = None
-            _p = None
-            if isinstance(_obj, torch.nn.Module):
-                try:
-                    _p = _obj.get_parameter(_name)
-                except AttributeError:
-                    _p = None
-            if _p is None:
-                from torch._precompile import PrecompileError as _PrecompileError
-
-                _where = "".join(
-                    f"[{_a!r}]" if _k != "attr" else f".{_a}" for _k, _a in _path
-                )
-                raise _PrecompileError(
-                    f"precompile: this training artifact accumulates a gradient into "
-                    f"parameter {_name!r} of the model at positional argument "
-                    f"{_pos}{_where} (0-based, counting the bound self for a method or "
-                    f"nn.Module fn). This call passed {len(args)} positional "
-                    f"argument(s) and nothing with that parameter is at that path. Pass "
-                    f"the model in the same position and shape as at capture."
-                )
-            if _p.grad is None:
-                _p.grad = torch.zeros_like(_p)
-        return fn(*args, **kwargs)
-
-    return forward
-
-
 def _build_multigraph_forward():
     """Reconstruct a multi-graph artifact and return the runnable ``forward``.
 
@@ -688,9 +501,21 @@ def _build_multigraph_forward():
             ns[_alias] = importlib.import_module(_module_name)
         ns.update(_frame["used_globals"])
 
+    entry_binding = (
+        pickle.loads(base64.b64decode(_ENTRY_BINDING)) if _ENTRY_BINDING else {}
+    )
+
     def _make_dispatcher(frame):
         target = SerializedCode.to_code_object(frame["code"])
         arg_names = target.co_varnames[: target.co_argcount]
+        is_entry = frame["is_entry"]
+        # A code object carries neither defaults nor closure values, so the
+        # entry gets them back from the artifact. Without the defaults an
+        # omitted parameter is missing from f_locals and every guard misses;
+        # without the closure a closure entry cannot be built at all.
+        entry_defaults = entry_binding.get("defaults") if is_entry else None
+        entry_kwdefaults = entry_binding.get("kwdefaults") if is_entry else None
+        entry_cells = entry_binding.get("closure") if is_entry else None
         variants = []
         for guarded in frame["variants"]:
             guards_state = load_guards_state(guarded["guards_state"])
@@ -699,10 +524,15 @@ def _build_multigraph_forward():
             variants.append((manager, body))
 
         def _bind(closure):
-            return [
-                (manager, types.FunctionType(body, ns, target.co_name, None, closure))
-                for manager, body in variants
-            ]
+            bound = []
+            for manager, body in variants:
+                f = types.FunctionType(
+                    body, ns, target.co_name, entry_defaults, closure
+                )
+                if entry_kwdefaults:
+                    f.__kwdefaults__ = dict(entry_kwdefaults)
+                bound.append((manager, f))
+            return bound
 
         def _dispatch_with(bound, args, kwargs):
             # Guards are written against the frame's locals, so rebuild that
@@ -710,6 +540,15 @@ def _build_multigraph_forward():
             # the frame Python actually entered, and its parameters are bound by
             # then.
             f_locals = dict(zip(arg_names, args))
+            # Fill omitted parameters from the entry's defaults BEFORE checking:
+            # a guard written against a defaulted argument has nothing to bind to
+            # otherwise, and every variant misses on a call that omitted it.
+            if entry_defaults:
+                for name, value in zip(arg_names[len(args) :], entry_defaults):
+                    f_locals.setdefault(name, value)
+            if entry_kwdefaults:
+                for name, value in entry_kwdefaults.items():
+                    f_locals.setdefault(name, value)
             f_locals.update(kwargs)
             for manager, variant in bound:
                 if manager.check(f_locals):
@@ -720,6 +559,16 @@ def _build_multigraph_forward():
                 f"example covering it and recapture. Captured "
                 f"{len(variants)} variant(s)."
             )
+
+        if is_entry and target.co_freevars:
+            # The entry's cells come from the artifact, not from a caller: only
+            # a continuation is handed a closure per call.
+            bound = _bind(tuple(types.CellType(v) for v in (entry_cells or ())))
+
+            def entry_dispatch(*args, **kwargs):
+                return _dispatch_with(bound, args, kwargs)
+
+            return entry_dispatch, target
 
         if target.co_freevars:
             # Dynamo binds a continuation that closes over locals as a FACTORY

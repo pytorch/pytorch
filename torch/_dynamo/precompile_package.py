@@ -1108,6 +1108,7 @@ class PrecompileSession:
         # eagerly, so the artifact carries AOTAutograd's CompiledFunction and
         # calling .backward() on a served output runs precompiled code.
         self._training = training
+        self._policy_dropped_guards: set[tuple[str, str]] = set()
         self._dropped_guards: set[tuple[str, str]] = set()
         self._kept_guards: set[tuple[str, str]] = set()
         self._risky_dropped_guards: set[tuple[str, str]] = set()
@@ -1886,6 +1887,7 @@ class PrecompileSession:
             self._collect_backends(),
             summary,
             self._backend,
+            _entry_fn_of(self._fn),
         )
 
 
