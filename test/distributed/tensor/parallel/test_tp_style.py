@@ -17,6 +17,7 @@ from torch.distributed.tensor.parallel.style import (
     SequenceParallel,
 )
 from torch.distributed.tensor.placement_types import _Partial
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import HardwareClassification, run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
@@ -466,6 +467,15 @@ class TensorParallelStyleTest(DTensorTestBase):
 TensorParallelStyleTestWithLocalTensor = create_local_tensor_test_class(
     TensorParallelStyleTest,
 )
+
+
+instantiate_device_type_tests(
+    TensorParallelStyleTest,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+
 
 if __name__ == "__main__":
     run_tests()

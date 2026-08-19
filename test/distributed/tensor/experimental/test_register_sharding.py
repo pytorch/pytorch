@@ -6,6 +6,7 @@ import torch
 from torch.distributed.tensor import distribute_tensor, DTensor, Replicate, Shard
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor.experimental import register_sharding
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import HardwareClassification, run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -184,6 +185,14 @@ class TestRegisterSharding(DTensorTestBase):
 
         self.assertIsInstance(result, DTensor)
         self.assertEqual(result.full_tensor(), x)
+
+
+instantiate_device_type_tests(
+    TestRegisterSharding,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":

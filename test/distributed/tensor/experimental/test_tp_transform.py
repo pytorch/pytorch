@@ -10,6 +10,7 @@ from torch.distributed.tensor.parallel.style import (
     ParallelStyle,
     RowwiseParallel,
 )
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import HardwareClassification, run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -166,6 +167,14 @@ class TensorParallelTest(DTensorTestBase):
                 "_c10d_functional.wait_tensor.default": 1,
             },
         )
+
+
+instantiate_device_type_tests(
+    TensorParallelTest,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":

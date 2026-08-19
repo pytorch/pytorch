@@ -18,6 +18,7 @@ from torch.distributed.tensor import (
 from torch.distributed.tensor._utils import ExplicitRedistributionContext
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.experimental import local_map
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -1087,6 +1088,20 @@ class TestLocalMapSpmdTypesMesh(TestCase):
             lambda: wrapped(X_dt),
             """Output tensor has no spmd_types annotation on DeviceMesh dimension dp but out_placements expects S(0). Actual annotations on this DeviceMesh are: []""",
         )
+
+
+instantiate_device_type_tests(
+    TestLocalMap,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestLocalMapSpmdTypesMultiGPU,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":

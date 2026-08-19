@@ -23,6 +23,7 @@ from torch.distributed.tensor import (
 )
 from torch.distributed.tensor._dtensor_spec import ShardOrderEntry
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     requires_nccl,
@@ -30,7 +31,6 @@ from torch.testing._internal.common_distributed import (
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
-    instantiate_parametrized_tests,
     parametrize,
     requires_cuda,
     run_tests,
@@ -230,7 +230,6 @@ class TestDTensorDebugMode(TestCase):
         dist.init_process_group(
             backend="fake", rank=0, world_size=self.world_size, store=store
         )
-        self.device_type = "cuda"
 
     def test_debug_mode_mm(self):
         mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
@@ -1437,7 +1436,16 @@ class TestDTensorDebugModeNCCLBackend(MultiProcessTestCase):
         self._destroy_process_group()
 
 
-instantiate_parametrized_tests(TestDTensorDebugMode)
+instantiate_device_type_tests(
+    TestDTensorDebugMode,
+    globals(),
+    only_for=["cuda"],
+)
+instantiate_device_type_tests(
+    TestDTensorDebugModeNCCLBackend,
+    globals(),
+    only_for=["cuda"],
+)
 
 
 if __name__ == "__main__":

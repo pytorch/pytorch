@@ -13,6 +13,7 @@ from torch.distributed.tensor.parallel.style import (
     PrepareModuleOutput,
     RowwiseParallel,
 )
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import HardwareClassification, run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
@@ -421,6 +422,14 @@ TensorParallelAPITestsWithLocalTensor = create_local_tensor_test_class(
         # Uses mesh_scatter that has local rank dependent logic
         "test_parallelize_module_src_data_rank",
     ],
+)
+
+
+instantiate_device_type_tests(
+    TensorParallelAPITests,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
 )
 
 

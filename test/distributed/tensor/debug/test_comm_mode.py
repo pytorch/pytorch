@@ -139,11 +139,11 @@ class TestCommMode(DeviceTypeTestBase):
         return
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
-    def test_comm_mode_with_c10d(self):
+    def test_comm_mode_with_c10d(self, device):
         if not torch.accelerator.is_available():
             return
 
-        inp = torch.rand(2, 8, 16).to(self.device_type)
+        inp = torch.rand(2, 8, 16).to(device)
         all_gather_out = inp.new_empty(self.world_size * 2, 8, 16)
 
         comm_mode = CommDebugMode()
@@ -293,7 +293,13 @@ class TestCommModeModuleReuse(TestCase):
         self.assertEqual(len(m.fc2._forward_hooks), 0)
 
 
-instantiate_device_type_tests(TestCommMode, globals())
+instantiate_device_type_tests(
+    TestCommMode,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+
 
 if __name__ == "__main__":
     run_tests()

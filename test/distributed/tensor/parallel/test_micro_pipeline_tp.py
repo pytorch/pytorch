@@ -28,10 +28,12 @@ from torch.distributed.tensor.parallel import (
     RowwiseParallel,
 )
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
-from torch.testing._internal.common_device_type import e4m3_type
+from torch.testing._internal.common_device_type import (
+    e4m3_type,
+    instantiate_device_type_tests,
+)
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     HardwareClassification,
-    instantiate_parametrized_tests,
     IS_LINUX,
     parametrize,
     run_tests,
@@ -64,7 +66,6 @@ def _fp8_all_gather(
     return torch.cat(chunks, dim=gather_dim).view(tensor.dtype)
 
 
-@instantiate_parametrized_tests
 class MicroPipelineTPTest(TestCase):
     hw_classification = HardwareClassification.CUDA
 
@@ -652,7 +653,6 @@ class MicroPipelineTPTest(TestCase):
         self.assertNotIn("reduce_scatter_tensor", code)
 
 
-@instantiate_parametrized_tests
 class MicroPipelineTP4GPUTest(TestCase):
     hw_classification = HardwareClassification.CUDA
 
@@ -734,6 +734,17 @@ class MicroPipelineTP4GPUTest(TestCase):
         micro_pipeline_tp_pass(gm.graph)
         self.assertIn("fused_matmul_reduce_scatter", str(gm.graph))
         self.assertNotIn("reduce_scatter_tensor", str(gm.graph))
+
+instantiate_device_type_tests(
+    MicroPipelineTPTest,
+    globals(),
+    only_for=["cuda"],
+)
+instantiate_device_type_tests(
+    MicroPipelineTP4GPUTest,
+    globals(),
+    only_for=["cuda"],
+)
 
 
 if __name__ == "__main__":
