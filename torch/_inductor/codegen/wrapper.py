@@ -771,6 +771,8 @@ class KernelDefinitionLine(WrapperLine):
     metadata: str | None = None
     gpu: bool = True
     cpp_definition: str | None = None
+    standalone: bool = False
+    autotune_body: str | None = None
 
     def codegen(self, code: IndentedBuffer) -> None:
         self.wrapper._define_kernel_helper(
@@ -779,6 +781,8 @@ class KernelDefinitionLine(WrapperLine):
             metadata=self.metadata,
             gpu=self.gpu,
             cpp_definition=self.cpp_definition,
+            standalone=self.standalone,
+            autotune_body=self.autotune_body,
         )
 
     def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
@@ -1404,6 +1408,9 @@ class PythonWrapperCodegen(CodeGen):
         # If the generated source code is exactly the same, reuse the
         # pre-existing kernel for it
         self.src_to_kernel: dict[str, str] = {}
+        # Set by define_kernel when a backend binds its kernel through AsyncCompile.
+        # Only meaningful once every kernel has been defined, i.e. after line replay.
+        self.uses_async_compile = False
         self.kernel_numel_expr: OrderedSet[tuple[str, GraphLowering]] = OrderedSet()
         self.lines: list[Line] = []
         self.declare = ""
@@ -1507,6 +1514,99 @@ class PythonWrapperCodegen(CodeGen):
     def write_constant(self, name: str, hashed: str) -> None:
         self.header.writeline(f"{name} = None  # {hashed}")
 
+    def _preamble_imports(self) -> tuple[tuple[tuple[str, ...], str], ...]:
+        """The imports every graph gets, as (names bound, source line).
+
+        Named rather than written as one blob so a wrapper that cares whether the
+        emitted module is minimal can decide per entry; see write_preamble_line.
+        """
+        return (
+            (
+                ("c_void_p", "c_long", "c_int"),
+                "from ctypes import c_void_p, c_long, c_int",
+            ),
+            (("torch",), "import torch"),
+            (("math",), "import math"),
+            (("random",), "import random"),
+            (("os",), "import os"),
+            (("tempfile",), "import tempfile"),
+            (("inf", "nan"), "from math import inf, nan"),
+            (("nanj",), "from cmath import nanj"),
+            (
+                ("run_intermediate_hooks",),
+                "from torch._inductor.hooks import run_intermediate_hooks",
+            ),
+            (("maybe_profile",), "from torch._inductor.utils import maybe_profile"),
+            (
+                ("align",),
+                "from torch._inductor.codegen.memory_planning import _align as align",
+            ),
+            (("device", "empty_strided"), "from torch import device, empty_strided"),
+            (("AsyncCompile",), f"from {async_compile.__name__} import AsyncCompile"),
+            (
+                ("extern_kernels",),
+                "from torch._inductor.select_algorithm import extern_kernels",
+            ),
+        )
+
+    def _preamble_bindings(self) -> tuple[tuple[tuple[str, ...], str], ...]:
+        """The module-scope bindings every graph gets, as (names bound, source line)."""
+        return (
+            (("aten",), "aten = torch.ops.aten"),
+            (("inductor_ops",), "inductor_ops = torch.ops.inductor"),
+            (("_quantized",), "_quantized = torch.ops._quantized"),
+            (
+                ("assert_size_stride",),
+                "assert_size_stride = torch._C._dynamo.guards.assert_size_stride",
+            ),
+            (
+                ("assert_size_stride_grouped",),
+                "assert_size_stride_grouped = torch._C._dynamo.guards.assert_size_stride_grouped",
+            ),
+            (
+                ("assert_alignment",),
+                "assert_alignment = torch._C._dynamo.guards.assert_alignment",
+            ),
+            (
+                ("empty_strided_cpu",),
+                "empty_strided_cpu = torch._C._dynamo.guards._empty_strided_cpu",
+            ),
+            (
+                ("empty_strided_cpu_pinned",),
+                "empty_strided_cpu_pinned = torch._C._dynamo.guards._empty_strided_cpu_pinned",
+            ),
+            (
+                ("empty_strided_cuda",),
+                "empty_strided_cuda = torch._C._dynamo.guards._empty_strided_cuda",
+            ),
+            (
+                ("empty_strided_xpu",),
+                "empty_strided_xpu = torch._C._dynamo.guards._empty_strided_xpu",
+            ),
+            (
+                ("empty_strided_mtia",),
+                "empty_strided_mtia = torch._C._dynamo.guards._empty_strided_mtia",
+            ),
+            (
+                ("reinterpret_tensor",),
+                "reinterpret_tensor = torch._C._dynamo.guards._reinterpret_tensor",
+            ),
+            (
+                ("alloc_from_pool",),
+                "alloc_from_pool = torch.ops.inductor._alloc_from_pool",
+            ),
+        )
+
+    def write_preamble_line(
+        self, buf: IndentedBuffer, names: tuple[str, ...], line: str
+    ) -> None:
+        """Emit one preamble line binding ``names``.
+
+        The default emits every line: which of them a given graph will use is not known
+        here, since write_header runs before anything has been lowered.
+        """
+        buf.writeline(line)
+
     def write_header(self) -> None:
         """Write the header section of the generated Python wrapper code."""
         context = torch._guards.TracingContext.try_get()
@@ -1519,56 +1619,24 @@ class PythonWrapperCodegen(CodeGen):
         elif torch._inductor.config.test_configs.track_memory_lifecycle:
             inductor_debug_utils = "from torch._inductor.runtime.debug_utils import tracked_empty_strided\n"
 
-        self.imports.splice(
-            f"""
-                {aot_config_comment}
-                from ctypes import c_void_p, c_long, c_int
-                import torch
-                import math
-                import random
-                import os
-                import tempfile
-                from math import inf, nan
-                from cmath import nanj
-                from torch._inductor.hooks import run_intermediate_hooks
-                from torch._inductor.utils import maybe_profile
-                from torch._inductor.codegen.memory_planning import _align as align
-                from torch import device, empty_strided
-                from {async_compile.__name__} import AsyncCompile
-                from torch._inductor.select_algorithm import extern_kernels
-                {inductor_debug_utils}
-            """,
-            strip=True,
-        )
-        self.header.splice(
-            """
-                aten = torch.ops.aten
-                inductor_ops = torch.ops.inductor
-                _quantized = torch.ops._quantized
-                assert_size_stride = torch._C._dynamo.guards.assert_size_stride
-                assert_size_stride_grouped = torch._C._dynamo.guards.assert_size_stride_grouped
-                assert_alignment = torch._C._dynamo.guards.assert_alignment
-                empty_strided_cpu = torch._C._dynamo.guards._empty_strided_cpu
-                empty_strided_cpu_pinned = torch._C._dynamo.guards._empty_strided_cpu_pinned
-                empty_strided_cuda = torch._C._dynamo.guards._empty_strided_cuda
-                empty_strided_xpu = torch._C._dynamo.guards._empty_strided_xpu
-                empty_strided_mtia = torch._C._dynamo.guards._empty_strided_mtia
-                reinterpret_tensor = torch._C._dynamo.guards._reinterpret_tensor
-                alloc_from_pool = torch.ops.inductor._alloc_from_pool
-                async_compile = AsyncCompile()
-            """,
-            strip=True,
-        )
+        if aot_config_comment:
+            self.imports.writeline(aot_config_comment)
+        for names, line in self._preamble_imports():
+            self.write_preamble_line(self.imports, names, line)
+        if inductor_debug_utils:
+            self.imports.splice(inductor_debug_utils, strip=True)
+        for names, line in self._preamble_bindings():
+            self.write_preamble_line(self.header, names, line)
+        self.write_async_compile_binding()
         try:
             # Only add empty_strided_p2p() if distributed and SymmetricMemory
             # is available
             from torch._C._distributed_c10d import _SymmetricMemory  # noqa: F401
 
-            self.header.splice(
-                """
-                empty_strided_p2p = torch._C._distributed_c10d._SymmetricMemory.empty_strided_p2p
-                """,
-                strip=True,
+            self.write_preamble_line(
+                self.header,
+                ("empty_strided_p2p",),
+                "empty_strided_p2p = torch._C._distributed_c10d._SymmetricMemory.empty_strided_p2p",
             )
         except (AttributeError, ImportError):
             pass
@@ -1750,6 +1818,9 @@ class PythonWrapperCodegen(CodeGen):
             self.prefix.writeline(line)
             line = f"assert not {name}.isinf().any().item()"
             self.prefix.writeline(line)
+
+    def write_async_compile_binding(self) -> None:
+        self.header.writeline("async_compile = AsyncCompile()")
 
     def write_async_compile_wait(self) -> None:
         self.prefix.splice(
@@ -3246,7 +3317,14 @@ class PythonWrapperCodegen(CodeGen):
         metadata: str | None = None,
         gpu: bool = True,
         cpp_definition: str | None = None,
+        standalone: bool = False,
+        autotune_body: str | None = None,
     ):
+        # Every backend's kernel definition funnels through here, so this is the one
+        # place that can tell whether the emitted module still needs an AsyncCompile at
+        # all -- ten of the eleven backends bind their kernel by calling one.
+        if "async_compile." in kernel_body:
+            self.uses_async_compile = True
         self.writeline(
             KernelDefinitionLine(
                 self,
@@ -3255,18 +3333,27 @@ class PythonWrapperCodegen(CodeGen):
                 metadata=metadata,
                 gpu=gpu,
                 cpp_definition=cpp_definition,
+                standalone=standalone,
+                autotune_body=autotune_body,
             )
         )
 
     @staticmethod
     def _format_kernel_definition(
-        kernel_name: str, kernel_body: str, metadata: str | None = None
+        kernel_name: str,
+        kernel_body: str,
+        metadata: str | None = None,
+        standalone: bool = False,
     ):
         if config.triton.autotune_at_compile_time and metadata:
             # Generating autotune block
             # Need to replace C++ comment starter with Python comment starter
             metadata = re.sub(r"^// ", "# ", metadata, flags=re.MULTILINE)
         metadata_comment = f"{metadata}\n" if metadata else ""
+        # A standalone body already binds kernel_name itself (it is a decorated def, not
+        # an expression), so assigning it would be a syntax error rather than a rebind.
+        if standalone:
+            return f"\n\n{metadata_comment}{kernel_body}"
         body = f"\n\n{metadata_comment}{kernel_name} = {kernel_body}"
         return body
 
@@ -3277,10 +3364,18 @@ class PythonWrapperCodegen(CodeGen):
         metadata: str | None = None,
         gpu: bool = True,
         cpp_definition: str | None = None,
+        standalone: bool = False,
+        autotune_body: str | None = None,
     ):
         if config.triton.autotune_at_compile_time and gpu:
+            # The autotune block is exec'd rather than emitted, so it wants whichever
+            # form runs there, not the one meant to be read: a standalone kernel carries
+            # filename=__file__, which is undefined in that exec.
             body = self._format_kernel_definition(
-                kernel_name, kernel_body, metadata=metadata
+                kernel_name,
+                autotune_body if autotune_body is not None else kernel_body,
+                metadata=metadata,
+                standalone=standalone and autotune_body is None,
             )
             self.kernel_autotune_defs.splice(body)
             if V.graph.cpp_wrapper:
@@ -3288,9 +3383,44 @@ class PythonWrapperCodegen(CodeGen):
                 return
 
         body = self._format_kernel_definition(
-            kernel_name, kernel_body, metadata=metadata
+            kernel_name, kernel_body, metadata=metadata, standalone=standalone
         )
         self.header.splice(body)
+
+    # Whether Triton kernels are bound by handing their source to AsyncCompile (the
+    # default) or defined directly at module level. Only the former can fan compilation
+    # out to the worker pool, so this also decides whether priming it pays.
+    async_compiles_triton_kernels = True
+
+    def emit_triton_kernel_definition(
+        self,
+        kernel_name: str,
+        subs_name: str,
+        src_code: str,
+        device_type: str,
+        metadata: str | None = None,
+    ) -> None:
+        """Bind ``kernel_name`` to a launchable Triton kernel at module scope.
+
+        The default form hands the kernel to AsyncCompile as a source STRING, which is
+        what lets compilation fan out to the worker pool. Subclasses that care more
+        about the emitted module being readable can define the kernel as code instead.
+        """
+        self.define_kernel(
+            kernel_name,
+            self.async_compile_triton_body(subs_name, src_code, device_type),
+            metadata,
+        )
+
+    @staticmethod
+    def async_compile_triton_body(
+        subs_name: str, src_code: str, device_type: str
+    ) -> str:
+        compile_wrapper = IndentedBuffer()
+        compile_wrapper.writeline(f"async_compile.triton({subs_name!r}, '''")
+        compile_wrapper.splice(src_code, strip=True)
+        compile_wrapper.writeline(f"''', device_str='{device_type}')")
+        return compile_wrapper.getvalue()
 
     def define_subgraph_launcher_fn(self, name: str, subgraph_code):
         self.subgraph_definitions.splice(subgraph_code.value)

@@ -8031,24 +8031,24 @@ class TritonScheduling(SIMDScheduling):
         ):
             return  # External handler handled it
 
-        compile_wrapper = IndentedBuffer()
+        current_device = V.graph.get_current_device_or_throw()
 
-        if async_compile.use_process_pool():
+        if wrapper.async_compiles_triton_kernels and async_compile.use_process_pool():
             # The process pool is warm, we can shell out to workers right away. This
             # allows us to save the result in async_compile.CompiledTritonKernels,
             # so that the second time we call async_compile.triton, we do no work.
             async_compile.triton(subs_name, src_code)
 
-        compile_wrapper.writeline(f"async_compile.triton({subs_name!r}, '''")
-
-        compile_wrapper.splice(src_code, strip=True)
-        current_device = V.graph.get_current_device_or_throw()
-        compile_wrapper.writeline(f"''', device_str='{current_device.type}')")
-
         metadata_comment = f"# kernel path: {kernel_path}"
         origins, detailed_origins = get_kernel_metadata(node_schedule, wrapper)
         metadata_comment += "\n" + origins + "\n" + detailed_origins
-        wrapper.define_kernel(kernel_name, compile_wrapper.getvalue(), metadata_comment)
+        wrapper.emit_triton_kernel_definition(
+            kernel_name,
+            subs_name,
+            src_code,
+            current_device.type,
+            metadata=metadata_comment,
+        )
 
     def define_kernel(self, src_code, node_schedule, kernel):
         wrapper = V.graph.wrapper_code
