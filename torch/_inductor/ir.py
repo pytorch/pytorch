@@ -56,7 +56,7 @@ from torch._inductor import metrics
 from torch._inductor.utils import get_free_symbols
 from torch._library.fake_class_registry import FakeScriptObject, maybe_to_fake_obj
 from torch._library.opaque_object import get_opaque_obj_repr, is_custom_class_obj
-from torch._native.ops.sum import inner_tree_plan
+from torch._native.ops.reductions import inner_tree_plan
 from torch._prims_common import (
     compute_required_storage_length,
     is_boolean_dtype,
@@ -1406,8 +1406,8 @@ class Reduction(Loops):
     src_dtype: torch.dtype
     reduction_hint: ReductionHint
     # Exact eager tile; rblock 1 is the split final stage.
-    strict_sum_multirow: bool = False
-    strict_sum_rblock: int | None = None
+    strict_reduction_multirow: bool = False
+    strict_reduction_rblock: int | None = None
 
     def __str__(self) -> str:
         return self._to_str(("ranges", "reduction_ranges", "reduction_type"))
@@ -1469,8 +1469,8 @@ class Reduction(Loops):
             reduction_type=self.reduction_type,
             src_dtype=self.src_dtype,
             reduction_hint=ReductionHint.DEFAULT,
-            strict_sum_multirow=self.strict_sum_multirow,
-            strict_sum_rblock=self.strict_sum_rblock,
+            strict_reduction_multirow=self.strict_reduction_multirow,
+            strict_reduction_rblock=self.strict_reduction_rblock,
         )
 
     @staticmethod
@@ -1760,7 +1760,7 @@ class Reduction(Loops):
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
         input_node: IRNode | None = None,
         *,
-        strict_sum: bool = False,
+        strict_reduction: bool = False,
     ) -> TensorBox:
         """
         Create a reduction node. May split the reduction to multiple layers to expose
@@ -1808,9 +1808,9 @@ class Reduction(Loops):
             )
 
         strict_split = None
-        strict_sum_multirow = False
-        strict_sum_rblock = None
-        if strict_sum and reduction_hint in (
+        strict_reduction_multirow = False
+        strict_reduction_rblock = None
+        if strict_reduction and reduction_hint in (
             ReductionHint.DEFAULT,
             ReductionHint.INNER,
         ):
@@ -1835,31 +1835,33 @@ class Reduction(Loops):
                 )
                 if indexing_safe:
                     strict_split = 1
-                    strict_sum_multirow = (
+                    strict_reduction_multirow = (
                         guarded_reduction_numel
                         <= vector_size * inner_tree_plan._K_MULTIROW_MAX_LOADS
                     )
-                    if strict_sum_multirow:
+                    if strict_reduction_multirow:
                         num_loads = ceildiv(guarded_reduction_numel, vector_size)
                         num_loads = 1 << (num_loads - 1).bit_length()
-                        strict_sum_rblock = num_loads * vector_size
+                        strict_reduction_rblock = num_loads * vector_size
                     else:
                         params = inner_tree_plan.compute_inner_tree_params(
                             guarded_reduction_numel,
                             1,
                             vector_size,
                         )
-                        strict_sum_rblock = params.batch_total_elements
+                        strict_reduction_rblock = params.batch_total_elements
                         if (
                             params.num_batches > inner_tree_plan._K_TWO_KERNEL_THRESHOLD
-                            and guarded_reduction_numel % strict_sum_rblock == 0
+                            and guarded_reduction_numel % strict_reduction_rblock == 0
                         ):
                             strict_split = params.num_batches
-        strict_sum = strict_split is not None
+        strict_reduction = strict_split is not None
 
-        if strict_sum_multirow:
-            if strict_sum_rblock is None:
-                raise AssertionError("strict multirow sum requires a reduction block")
+        if strict_reduction_multirow:
+            if strict_reduction_rblock is None:
+                raise AssertionError(
+                    "strict multirow reduction requires a reduction block"
+                )
             actual_reduction_numel = reduction_numel
             original_inner_fn = inner_fn
             default = cls.default_value(reduction_type, dst_dtype)
@@ -1878,10 +1880,10 @@ class Reduction(Loops):
                 return ops.masked(mask, body, default)
 
             inner_fn = cast(Callable[..., Any], padded_inner_fn)
-            reduction_ranges = [sympy.Integer(strict_sum_rblock)]
-            reduction_numel = sympy.Integer(strict_sum_rblock)
+            reduction_ranges = [sympy.Integer(strict_reduction_rblock)]
+            reduction_numel = sympy.Integer(strict_reduction_rblock)
 
-        if reduction_numel == 1 and not strict_sum:
+        if reduction_numel == 1 and not strict_reduction:
             # this reduction is actually a pointwise op
             if reduction_type in ("argmin", "argmax"):
 
@@ -1903,7 +1905,7 @@ class Reduction(Loops):
             and int(reduction_numel) < config.unroll_reductions_threshold
             and (sympy_product(ranges) != 1 or is_gpu(device.type))
             and reduction_type != "dot"
-            and not strict_sum
+            and not strict_reduction
         ):
             # When native matmul, don't unroll the dot reduction.
 
@@ -1987,7 +1989,7 @@ class Reduction(Loops):
                 split,
                 reduction_hint,
                 input_node,
-                strict_sum=strict_sum,
+                strict_reduction=strict_reduction,
             )
 
             # Find the reduction that get split
@@ -2042,8 +2044,8 @@ class Reduction(Loops):
                 reduction_type=reduction_type,
                 src_dtype=src_dtype,
                 reduction_hint=reduction_hint,
-                strict_sum_multirow=strict_sum_multirow,
-                strict_sum_rblock=strict_sum_rblock,
+                strict_reduction_multirow=strict_reduction_multirow,
+                strict_reduction_rblock=strict_reduction_rblock,
             )
         )
         return out
@@ -2230,7 +2232,7 @@ class Reduction(Loops):
         reduction_type: ReductionType,
         split: _IntLike,
         reduction_hint: ReductionHint,
-        strict_sum: bool = False,
+        strict_reduction: bool = False,
     ) -> TensorBox:
         """
         Break a large reduction up into multiple smaller reductions
@@ -2253,7 +2255,7 @@ class Reduction(Loops):
             new_reduction_ranges,
             reduction_type,
             reduction_hint,
-            strict_sum=strict_sum,
+            strict_reduction=strict_reduction,
         )
         intermediate.realize()
         intermediate_loader = intermediate.make_loader()
@@ -2282,7 +2284,7 @@ class Reduction(Loops):
                 reduction_type=reduction_type,
                 src_dtype=src_dtype,
                 reduction_hint=reduction_hint,
-                strict_sum_rblock=1 if strict_sum else None,
+                strict_reduction_rblock=1 if strict_reduction else None,
             )
         )
 
@@ -2300,7 +2302,7 @@ class Reduction(Loops):
         reduction_hint: ReductionHint,
         input_node: IRNode | None = None,
         *,
-        strict_sum: bool = False,
+        strict_reduction: bool = False,
     ) -> TensorBox:
         """
         Break a large reduction up into multiple smaller reductions
@@ -2332,7 +2334,7 @@ class Reduction(Loops):
             reduction_type,
             split,
             reduction_hint,
-            strict_sum,
+            strict_reduction,
         )
 
     @classmethod
@@ -3973,7 +3975,9 @@ class View(GenericView):
             return handle_unbacked_or_dynamic_reshape(x)
 
         # Try to compute valid output strides.
-        storage, old_layout = as_storage_and_layout(x, freeze=False)
+        # ReinterpretView stores an index map derived from this layout, so the
+        # backing storage must not remain flexible after the view is created.
+        storage, old_layout = as_storage_and_layout(x)
 
         old_stride = old_layout.stride
 
@@ -5566,8 +5570,8 @@ class ComputedBuffer(OperationBuffer):
                 reduction_type=old_data.reduction_type,
                 src_dtype=old_data.src_dtype,
                 reduction_hint=old_data.reduction_hint,
-                strict_sum_multirow=old_data.strict_sum_multirow,
-                strict_sum_rblock=old_data.strict_sum_rblock,
+                strict_reduction_multirow=old_data.strict_reduction_multirow,
+                strict_reduction_rblock=old_data.strict_reduction_rblock,
             )
             self.data = new_data
             # this layout does not matter since we skip tl.store
@@ -6611,6 +6615,40 @@ class CuteDSLTemplateBuffer(TemplateBuffer):
     """
     Buffer for CuteDSL (CUTLASS Python DSL) template kernels.
     Similar to other template buffers but specialized for CuteDSL operations.
+    """
+
+    def __init__(
+        self,
+        layout: Layout,
+        inputs: Sequence[IRNode],
+        make_kernel_render: Callable[_P, _T],
+        template: Any,
+        mutated_inputs: Iterable[IRNode] | None = None,
+    ) -> None:
+        super().__init__(layout, inputs, make_kernel_render)
+        self.template = template
+        self.mutated_inputs = mutated_inputs
+        self.outputs: list[Buffer] = [self]
+
+        if mutated_inputs is not None:
+            if not isinstance(self.inputs[0], IRNode):
+                raise AssertionError(type(self.inputs[0]))
+            device = self.inputs[0].get_device()
+            self.outputs += [
+                MutationOutput(NoneLayout(device=device), buf, self)
+                for buf in mutated_inputs
+            ]
+
+    def get_outputs(self) -> list[Buffer]:
+        return self.outputs
+
+
+# TODO: Factor out a common DSL template buffer base shared with
+# CuteDSLTemplateBuffer.
+class FlyDSLTemplateBuffer(TemplateBuffer):
+    """
+    Buffer for FlyDSL template kernels.
+    Similar to CuteDSLTemplateBuffer but routed through FlyDSL scheduling.
     """
 
     def __init__(
@@ -10054,16 +10092,156 @@ class FallbackKernel(ExternKernelAlloc):
                         qualname,
                     )
 
+    @staticmethod
+    def _uses_aot_proxy_executor(kernel: torch._ops.OpOverload) -> bool:
+        # Mirror FallbackKernel.codegen's c-shim availability check: an op with no c-shim
+        # is dispatched through the AOT ProxyExecutor, whose only runtime channels are an
+        # int64[] and an AtenTensorHandle[]. That is the path where a Python scalar bound
+        # to a Tensor-typed schema arg cannot be serialized (fill_args has no channel for
+        # it). C-shim ops handle scalar-in-Tensor-slot already (codegen_scalar_to_tensor),
+        # so restricting to the proxy path keeps this change to cases that otherwise fail.
+        if not V.graph.cpp_wrapper:
+            return False
+        if kernel.namespace == "aten":
+            from torchgen.aoti.fallback_ops import inductor_fallback_ops
+
+            return str(kernel) not in inductor_fallback_ops
+        if kernel.namespace == "_quantized":
+            return False
+        return kernel not in config.aot_inductor.custom_ops_to_c_shims
+
+    @classmethod
+    def _materialize_scalar_tensor_args(
+        cls, kernel: _OpOverloads, args: Any, kwargs: Any
+    ) -> tuple[Any, Any, bool]:
+        # A scalar bound to a Tensor-typed schema arg ("scalar in place of a tensor", a
+        # wrapped number) cannot be serialized by the AOT ProxyExecutor fill_args path.
+        # Materialize it into a real constant tensor buffer up front so it flows through
+        # the tensor path uniformly (arg classification, serialization, and the host proxy
+        # executor all agree that it is a TensorArgument). The constant dtype follows
+        # eager's weak-scalar promotion (torch.result_type) so numerics match normal
+        # lowering, which inlines the scalar via promote_constants.
+        #
+        # Returns the rewritten (args, kwargs) plus whether anything was materialized;
+        # the caller needs to know because process_kernel feeds graph constants back in
+        # as *real* tensors (see the V.graph.constants branch there).
+        if not isinstance(kernel, torch._ops.OpOverload):
+            return args, kwargs, False
+        if not cls._uses_aot_proxy_executor(kernel):
+            return args, kwargs, False
+
+        tensor_dtypes: list[torch.dtype] = []
+        device: torch.device | None = None
+        for v in itertools.chain(args, kwargs.values()):
+            if not isinstance(v, IRNode):
+                continue
+            # Not every IRNode exposes a dtype/device (e.g. non-tensor outputs); skip
+            # those for scalar-promotion inference rather than failing the compile.
+            try:
+                dt = v.get_dtype()
+            except (AttributeError, NotImplementedError):
+                dt = None
+            if dt is not None:
+                tensor_dtypes.append(dt)
+            if device is None:
+                try:
+                    device = v.get_device()
+                except (AttributeError, NotImplementedError):
+                    device = None
+        if device is None:
+            device = torch.device("cpu")
+
+        def scalar_dtype(value: int | float | complex) -> torch.dtype:
+            if tensor_dtypes:
+                acc = tensor_dtypes[0]
+                for dt in tensor_dtypes[1:]:
+                    acc = torch.promote_types(acc, dt)
+                ref = torch.empty((), dtype=acc, device="cpu")
+                promoted = torch.result_type(ref, value)
+                # Keep the promotion CATEGORY but not a sub-single-precision width:
+                # eager keeps a wrapped float scalar at double precision and casts it
+                # inside the kernel, so storing e.g. an fp16 epsilon in an fp16 tensor
+                # would flush it to zero. A 0-d tensor only contributes its category to
+                # type promotion, so widening here leaves the op's output dtype alone.
+                if promoted.is_floating_point and promoted.itemsize < 4:
+                    return torch.float32
+                return promoted
+            if isinstance(value, bool):
+                return torch.bool
+            if isinstance(value, int):
+                return torch.int64
+            if isinstance(value, complex):
+                return torch.complex64
+            return torch.get_default_dtype()
+
+        def is_tensor_slot(arg_info: torch._C.Argument) -> bool:
+            t = arg_info.real_type
+            if isinstance(t, torch.OptionalType):
+                t = t.getElementType()
+            return isinstance(t, torch.TensorType)
+
+        def maybe_wrap(value: Any, arg_info: torch._C.Argument) -> Any:
+            # bool is a subclass of int; SymInt/SymFloat/SymBool are not int/float/complex.
+            if not isinstance(value, (int, float, complex)):
+                return value
+            if not is_tensor_slot(arg_info):
+                return value
+            alias = arg_info.alias_info
+            if alias is not None and alias.is_write:
+                return value
+            with torch.utils._python_dispatch._disable_current_modes():
+                const = torch.tensor(value, dtype=scalar_dtype(value), device=device)
+            materialized.append(True)
+            return V.graph.add_tensor_constant(const)
+
+        materialized: list[bool] = []
+        new_args = list(args)
+        new_kwargs = dict(kwargs)
+        for i, arg_info in enumerate(kernel._schema.arguments):
+            if arg_info.name in new_kwargs:
+                new_kwargs[arg_info.name] = maybe_wrap(
+                    new_kwargs[arg_info.name], arg_info
+                )
+            elif not arg_info.kwarg_only and i < len(new_args):
+                new_args[i] = maybe_wrap(new_args[i], arg_info)
+        return tuple(new_args), new_kwargs, bool(materialized)
+
+    @staticmethod
+    @contextlib.contextmanager
+    def _allow_non_fake_constant_args(enabled: bool) -> Iterator[None]:
+        # process_kernel deliberately re-runs fake propagation with the *real* tensor
+        # for anything registered in V.graph.constants, so that ops which inspect their
+        # operand values do not hit a DataDependentError. A constant we just created in
+        # _materialize_scalar_tensor_args therefore reaches the op as a real tensor
+        # alongside fake ones, which FakeTensorMode rejects with "Please convert all
+        # Tensors to FakeTensors first". Let the mode absorb it for this one
+        # propagation; it is a compile-time constant we synthesised ourselves, and the
+        # scope is a single kernel. Mirrors force_allow_non_fake_inputs in
+        # compile_fx.fake_tensor_prop.
+        fake_mode = V.graph.fake_mode
+        if not enabled or fake_mode is None:
+            yield
+            return
+        prev = fake_mode.allow_non_fake_inputs
+        fake_mode.allow_non_fake_inputs = True
+        try:
+            yield
+        finally:
+            fake_mode.allow_non_fake_inputs = prev
+
     @classmethod
     def create(cls, kernel: _OpOverloads, *args: Any, **kwargs: Any) -> FallbackKernel:
         """Create an instance of FallbackKernel from an _OpOverloads"""
+        args, kwargs, materialized = cls._materialize_scalar_tensor_args(
+            kernel, args, kwargs
+        )
         fake_incorrect_kernels = (aten._fused_moving_avg_obs_fq_helper_functional,)
         if kernel not in fake_incorrect_kernels:
             context = cast(AbstractContextManager[None], V.graph.fake_mode)
         else:
             context = nullcontext()
 
-        with context:
+        with context, cls._allow_non_fake_constant_args(materialized):
             result = cls.process_kernel(kernel, *args, **kwargs)
         example_output = result.example_output
         tensor_args = result.tensor_args
@@ -12104,11 +12282,10 @@ class _WaitKernel(_CollectiveKernel):
         return read_writes
 
 
-# NB: recursive structure here reflects val_to_arg_str, avoid
-# calling free_unbacked_symbols on "exotic" types that don't get pexpr
-# treatment
+# NB: relationals reach constant_args via ShapeAsConstantBuffer and need symbol
+# scanning even though codegen_switch, rather than val_to_arg_str, emits them.
 def maybe_free_unbacked_symbols(s: object) -> OrderedSet[Symbol]:
-    if isinstance(s, (SymTypes, Expr)):
+    if isinstance(s, (SymTypes, sympy.Basic)):
         # This branch should be impossible in return position
         return free_unbacked_symbols(s)
     elif isinstance(s, (tuple, list)):
@@ -12124,7 +12301,7 @@ def maybe_free_unbacked_symbols(s: object) -> OrderedSet[Symbol]:
 
 
 def maybe_free_symbols(s: object) -> OrderedSet[Symbol]:
-    if isinstance(s, (SymTypes, Expr)):
+    if isinstance(s, (SymTypes, sympy.Basic)):
         # This branch should be impossible in return position
         return free_symbols(s)
     elif isinstance(s, (tuple, list)):

@@ -14,11 +14,16 @@ class _Color(enum.Enum):
 
 import torch.nn
 from torch._dynamo.test_case import run_tests, TestCase
-from torch.testing._internal.common_utils import make_dynamo_test
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    make_dynamo_test,
+)
 
 
 @torch._dynamo.config.patch("enable_trace_unittest", True)
 class NbBoolTests(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     # --- Scalar constants (ConstantVariable path) ---
 
     @make_dynamo_test

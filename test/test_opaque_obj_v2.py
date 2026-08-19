@@ -1512,10 +1512,10 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     sym_size_int_1 = torch.ops.aten.sym_size.int(getitem_7, 0)
     ge_1 = sym_size_int_1 >= 0
     _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u1 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_1 = None
-    eq_2 = sym_size_int == sym_size_int_1;  sym_size_int = sym_size_int_1 = None
-    _assert_scalar_2 = torch.ops.aten._assert_scalar.default(eq_2, "Runtime assertion failed for expression Eq(u0, u1) on node 'eq'");  eq_2 = _assert_scalar_2 = None
-    add_4 = torch.ops.aten.add.Tensor(getitem_5, getitem_7);  getitem_5 = getitem_7 = None
-    return (getitem_6, add_4)""",
+    eq = sym_size_int == sym_size_int_1;  sym_size_int = sym_size_int_1 = None
+    _assert_scalar_2 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(u0, u1) on node 'eq'");  eq = _assert_scalar_2 = None
+    add = torch.ops.aten.add.Tensor(getitem_5, getitem_7);  getitem_5 = getitem_7 = None
+    return (getitem_6, add)""",
         )
 
     def test_compile_global(self):
@@ -1767,8 +1767,8 @@ def forward(self, primals, tangents):
     _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(primals_2);  primals_2 = None
     _opaque_obj0 = self._opaque_obj0
     module_mul = torch.ops._TestOpaqueObject.module_mul.default(_opaque_obj0, primals_1, _local_scalar_dense);  _opaque_obj0 = primals_1 = None
-    mul_1 = torch.ops.aten.mul.Tensor(tangents_1, _local_scalar_dense);  tangents_1 = _local_scalar_dense = None
-    return pytree.tree_unflatten([module_mul, mul_1, None], self._out_spec)""",
+    mul = torch.ops.aten.mul.Tensor(tangents_1, _local_scalar_dense);  tangents_1 = _local_scalar_dense = None
+    return pytree.tree_unflatten([module_mul, mul, None], self._out_spec)""",
                 )
                 compiled_fn = aot_compile_joint_with_descriptors(joint)
 
@@ -2321,6 +2321,94 @@ class GraphModule(torch.nn.Module):
 
         # Recompile since SizeStore has changed
         self.assertEqual(cnt.frame_count, 3)
+
+    def test_tensor_subclass_with_callable_opaque_attr(self):
+        """Callable value-opaque objects on a tensor subclass should allow method access."""
+
+        class CallableConfig(CustomClassBase):
+            def __init__(self, scale):
+                self.scale = scale
+
+            def __call__(self, x):
+                return x * self.scale
+
+            def get_scale(self):
+                return self.scale
+
+            def __eq__(self, other):
+                return isinstance(other, CallableConfig) and self.scale == other.scale
+
+            def __hash__(self):
+                return hash(self.scale)
+
+            def __fx_repr__(self):
+                return (
+                    f"CallableConfig(scale={self.scale!r})",
+                    {"CallableConfig": CallableConfig},
+                )
+
+        register_custom_class(CallableConfig, typ="constant")
+
+        class TensorWithCallableOpaque(torch.Tensor):
+            @staticmethod
+            def __new__(cls, data, config):
+                return torch.Tensor._make_wrapper_subclass(
+                    cls,
+                    data.size(),
+                    strides=data.stride(),
+                    storage_offset=data.storage_offset(),
+                    device=data.device,
+                    dtype=data.dtype,
+                )
+
+            def __init__(self, data, config):
+                self._data = data
+                self._config = config
+
+            def __tensor_flatten__(self):
+                return ["_data"], (self._config,)
+
+            @staticmethod
+            def __tensor_unflatten__(inner_tensors, ctx, outer_size, outer_stride):
+                return TensorWithCallableOpaque(inner_tensors["_data"], ctx[0])
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args, kwargs):
+                if kwargs is None:
+                    kwargs = {}
+
+                def unwrap(x):
+                    return x._data if isinstance(x, TensorWithCallableOpaque) else x
+
+                config = None
+                for arg in torch.utils._pytree.tree_leaves(args):
+                    if isinstance(arg, TensorWithCallableOpaque):
+                        config = arg._config
+                        break
+                out = func(
+                    *torch.utils._pytree.tree_map(unwrap, args),
+                    **torch.utils._pytree.tree_map(unwrap, kwargs),
+                )
+                return torch.utils._pytree.tree_map(
+                    lambda x: TensorWithCallableOpaque(x, config)
+                    if isinstance(x, torch.Tensor)
+                    else x,
+                    out,
+                )
+
+        def fn(x):
+            y = x * 2
+            scale = y._config.get_scale()
+            return y + scale
+
+        config = CallableConfig(scale=5)
+        x = TensorWithCallableOpaque(torch.randn(4), config)
+
+        cnt = CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        result = opt_fn(x)
+        self.assertEqual(result, fn(x))
+        self.assertEqual(cnt.frame_count, 1)
 
     def test_tensor_subclass_with_opaque_attr_backward(self):
         """Test opaque objects in tensor subclass are correctly remapped through backward."""
