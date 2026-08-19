@@ -54,8 +54,8 @@ from torch.testing._internal.common_methods_invocations import (
     unary_ufuncs,
 )
 from torch.testing._internal.common_utils import (
-    HardwareClassification,
     getRocmVersion,
+    HardwareClassification,
     IS_FBCODE,
     IS_WINDOWS,
     parametrize,
