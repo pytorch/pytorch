@@ -671,6 +671,13 @@ void initTorchFunctions(PyObject* module) {
         return impl->was_inductor_storage_resized();
       });
   py_module.def(
+      "_functionalize_was_shallow_copy_data", [](const at::Tensor& t) {
+        TORCH_INTERNAL_ASSERT(
+            at::functionalization::impl::isFunctionalTensor(t));
+        auto impl = at::functionalization::impl::unsafeGetFunctionalWrapper(t);
+        return impl->was_shallow_copy_data();
+      });
+  py_module.def(
       "_functionalize_inductor_storage_resized_counter",
       [](const at::Tensor& t) {
         TORCH_INTERNAL_ASSERT(
@@ -793,13 +800,25 @@ void initTorchFunctions(PyObject* module) {
         // - non-differentiable aliasing: aliasing of subclass_x and subclass_y
         //   is defined recursively based on the aliasing of their inner
         //   tensors.
-        at::native::checkSetStorage(
-            dst,
-            src.storage(),
-            dst.sym_storage_offset(),
-            dst.sym_sizes(),
-            dst.sym_strides(),
-            /*check_offset_in_bounds=*/false);
+        if (dst.device() == src.device()) {
+          at::native::checkSetStorage(
+              dst,
+              src.storage(),
+              dst.sym_storage_offset(),
+              dst.sym_sizes(),
+              dst.sym_strides(),
+              /*check_offset_in_bounds=*/false);
+        } else {
+          TORCH_CHECK(
+              dst.sym_sizes() == src.sym_sizes() &&
+                  dst.sym_strides() == src.sym_strides() &&
+                  dst.dtype() == src.dtype(),
+              "cross-device .data requires matching dtype, sizes, "
+              "and strides");
+          dst.unsafeGetTensorImpl()->_change_backend_component_keys(
+              src.device());
+          dst.unsafeGetTensorImpl()->set_storage_keep_dtype(src.storage());
+        }
       });
   py_module.def("_is_functional_tensor", [](const at::Tensor& t) {
     return at::functionalization::impl::isFunctionalTensor(t);
@@ -849,6 +868,7 @@ void initTorchFunctions(PyObject* module) {
             auto new_grad_fn = c10::make_intrusive<torch::autograd::Error>(
                 "Cannot backprop through mirrored meta, file a bug in PyTorch");
             torch::autograd::set_history(dst_, new_grad_fn);
+            torch::autograd::fire_node_creation_hooks(new_grad_fn);
           }
         }
       });

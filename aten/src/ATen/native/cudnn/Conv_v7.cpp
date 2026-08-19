@@ -241,7 +241,8 @@ template <typename perf_t>
 std::vector<perf_t> getValidAlgorithms(
     perf_t* perfResults,
     const ConvolutionArgs& args,
-    int n_algo) {
+    int n_algo,
+    bool allow_empty = false) {
   std::vector<perf_t> result;
   result.reserve(n_algo);
   for (const auto i : c10::irange(n_algo)) {
@@ -256,10 +257,19 @@ std::vector<perf_t> getValidAlgorithms(
       }
     }
   }
+  if (allow_empty && result.empty()) {
+    return result;
+  }
   TORCH_CHECK(
       result.size() > 0, "no valid convolution algorithms available in CuDNN");
   return result;
 }
+
+template <typename perf_t>
+struct AlgorithmSearchResult {
+  std::vector<perf_t> perfResults;
+  int perf_count;
+};
 
 template <>
 struct algorithm_search<cudnnConvolutionFwdAlgoPerf_t> {
@@ -272,9 +282,10 @@ struct algorithm_search<cudnnConvolutionFwdAlgoPerf_t> {
     return fwd_algos;
   }
 
-  static std::vector<perf_t> findAlgorithms(
+  static AlgorithmSearchResult<perf_t> findAlgorithms(
       const ConvolutionArgs& args,
-      bool benchmark) {
+      bool benchmark,
+      bool get_all_algorithms = false) {
     static const algo_t algos[] = {
         CUDNN_CONVOLUTION_FWD_ALGO_GEMM,
         CUDNN_CONVOLUTION_FWD_ALGO_FFT,
@@ -292,6 +303,7 @@ struct algorithm_search<cudnnConvolutionFwdAlgoPerf_t> {
     int perf_count;
     c10::SmallVector<perf_t, CUDNN_CONVOLUTION_FWD_ALGO_COUNT> perf_results;
     if (!benchmark) {
+      const auto requested_algo_count = get_all_algorithms ? num_algos : 1;
       AT_CUDNN_CHECK_WITH_SHAPES(
           cudnnGetConvolutionForwardAlgorithm_v7(
               args.handle,
@@ -299,7 +311,7 @@ struct algorithm_search<cudnnConvolutionFwdAlgoPerf_t> {
               args.wdesc.desc(),
               args.cdesc.desc(),
               args.odesc.desc(),
-              num_algos,
+              requested_algo_count,
               &perf_count,
               perf_results.data()),
           args);
@@ -329,7 +341,13 @@ struct algorithm_search<cudnnConvolutionFwdAlgoPerf_t> {
       // memory, e.g. a few GBs.
       c10::cuda::CUDACachingAllocator::emptyCache();
     }
-    return getValidAlgorithms<perf_t>(perf_results.data(), args, perf_count);
+    return AlgorithmSearchResult<perf_t>{
+        getValidAlgorithms<perf_t>(
+            perf_results.data(),
+            args,
+            perf_count,
+            !benchmark && !get_all_algorithms),
+        perf_count};
   }
 
   static void getWorkspaceSize(
@@ -359,9 +377,10 @@ struct algorithm_search<cudnnConvolutionBwdDataAlgoPerf_t> {
     return bwd_data_algos;
   }
 
-  static std::vector<perf_t> findAlgorithms(
+  static AlgorithmSearchResult<perf_t> findAlgorithms(
       const ConvolutionArgs& args,
-      bool benchmark) {
+      bool benchmark,
+      bool get_all_algorithms = false) {
     static const algo_t algos[] = {
         CUDNN_CONVOLUTION_BWD_DATA_ALGO_0,
         CUDNN_CONVOLUTION_BWD_DATA_ALGO_1,
@@ -377,6 +396,7 @@ struct algorithm_search<cudnnConvolutionBwdDataAlgoPerf_t> {
     c10::SmallVector<perf_t, CUDNN_CONVOLUTION_BWD_DATA_ALGO_COUNT>
         perf_results;
     if (!benchmark) {
+      const auto requested_algo_count = get_all_algorithms ? num_algos : 1;
       AT_CUDNN_CHECK_WITH_SHAPES(
           cudnnGetConvolutionBackwardDataAlgorithm_v7(
               args.handle,
@@ -384,7 +404,7 @@ struct algorithm_search<cudnnConvolutionBwdDataAlgoPerf_t> {
               args.odesc.desc(),
               args.cdesc.desc(),
               args.idesc.desc(),
-              num_algos,
+              requested_algo_count,
               &perf_count,
               perf_results.data()),
           args);
@@ -414,7 +434,13 @@ struct algorithm_search<cudnnConvolutionBwdDataAlgoPerf_t> {
       // memory, e.g. a few GBs.
       c10::cuda::CUDACachingAllocator::emptyCache();
     }
-    return getValidAlgorithms<perf_t>(perf_results.data(), args, perf_count);
+    return AlgorithmSearchResult<perf_t>{
+        getValidAlgorithms<perf_t>(
+            perf_results.data(),
+            args,
+            perf_count,
+            !benchmark && !get_all_algorithms),
+        perf_count};
   }
 
   static void getWorkspaceSize(
@@ -445,9 +471,10 @@ struct algorithm_search<cudnnConvolutionBwdFilterAlgoPerf_t> {
     return bwd_filter_algos;
   }
 
-  static std::vector<perf_t> findAlgorithms(
+  static AlgorithmSearchResult<perf_t> findAlgorithms(
       const ConvolutionArgs& args,
-      bool benchmark) {
+      bool benchmark,
+      bool get_all_algorithms = false) {
     static const algo_t algos[] = {
         CUDNN_CONVOLUTION_BWD_FILTER_ALGO_0,
         CUDNN_CONVOLUTION_BWD_FILTER_ALGO_1,
@@ -466,6 +493,7 @@ struct algorithm_search<cudnnConvolutionBwdFilterAlgoPerf_t> {
         perf_results;
     int perf_count;
     if (!benchmark) {
+      const auto requested_algo_count = get_all_algorithms ? num_algos : 1;
       AT_CUDNN_CHECK_WITH_SHAPES(
           cudnnGetConvolutionBackwardFilterAlgorithm_v7(
               args.handle,
@@ -473,7 +501,7 @@ struct algorithm_search<cudnnConvolutionBwdFilterAlgoPerf_t> {
               args.odesc.desc(),
               args.cdesc.desc(),
               args.wdesc.desc(),
-              num_algos,
+              requested_algo_count,
               &perf_count,
               perf_results.data()),
           args);
@@ -503,7 +531,13 @@ struct algorithm_search<cudnnConvolutionBwdFilterAlgoPerf_t> {
       // memory, e.g. a few GBs.
       c10::cuda::CUDACachingAllocator::emptyCache();
     }
-    return getValidAlgorithms<perf_t>(perf_results.data(), args, perf_count);
+    return AlgorithmSearchResult<perf_t>{
+        getValidAlgorithms<perf_t>(
+            perf_results.data(),
+            args,
+            perf_count,
+            !benchmark && !get_all_algorithms),
+        perf_count};
   }
 
   static void getWorkspaceSize(
@@ -563,18 +597,41 @@ class AlgoIterator {
       }
     }
 
-    auto perfResults = only_use_default
-        ? onlyDefaultAlgorithm(args)
+    auto try_perf_results = [&](auto perf_begin, auto perf_end) {
+      for (auto perf_iter = perf_begin; perf_iter != perf_end; ++perf_iter) {
+        try {
+          f(*perf_iter);
+          cache.insert(args.params, *perf_iter);
+          return true;
+        } catch (c10::OutOfMemoryError&) {
+          std::ignore = cudaGetLastError(); // clear CUDA error
+        } catch (c10::CuDNNError&) {
+          std::ignore = cudaGetLastError(); // clear CUDA error
+        }
+      }
+      return false;
+    };
+
+    auto searchResult = only_use_default
+        ? AlgorithmSearchResult<perf_t>{onlyDefaultAlgorithm(args), 1}
         : search::findAlgorithms(args, benchmark);
-    for (auto& algoPerf : perfResults) {
-      try {
-        f(algoPerf);
-        cache.insert(args.params, algoPerf);
+    auto& perfResults = searchResult.perfResults;
+
+    if (!perfResults.empty()) {
+      if (try_perf_results(perfResults.begin(), perfResults.end())) {
         return;
-      } catch (c10::OutOfMemoryError&) {
-        std::ignore = cudaGetLastError(); // clear CUDA error
-      } catch (c10::CuDNNError&) {
-        std::ignore = cudaGetLastError(); // clear CUDA error
+      }
+    }
+
+    if (!only_use_default && !benchmark && searchResult.perf_count > 0) {
+      auto fallbackSearchResult = search::findAlgorithms(args, benchmark, true);
+      auto& fallbackPerfResults = fallbackSearchResult.perfResults;
+      auto perf_begin = fallbackPerfResults.begin();
+      if (!perfResults.empty() && perf_begin != fallbackPerfResults.end()) {
+        perf_begin = std::next(perf_begin);
+      }
+      if (try_perf_results(perf_begin, fallbackPerfResults.end())) {
+        return;
       }
     }
     TORCH_CHECK(

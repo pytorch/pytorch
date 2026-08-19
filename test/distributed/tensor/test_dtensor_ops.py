@@ -161,8 +161,7 @@ dtensor_fails = {
     xfail("sparse.mm", "reduce"),
     # meta tensor data not allocated yet during tensor_split
     xfail("tensor_split"),
-    # output_specs count mismatch in unsafe_split strategy
-    xfail("unsafe_split"),
+    xfail("torch.ops.aten._scaled_dot_product_flash_attention_for_cpu"),
     # /TODO(whc) debug/triage
     # ops inside this might even fail without dtensor
     # tests, as we rescale op db common test size factor (i.e. L, M, S)
@@ -213,7 +212,9 @@ dtensor_multi_threaded_fails = {
     xfail("nn.functional.dropout2d"),
     xfail("nn.functional.dropout3d"),
     skip("nn.functional.multi_head_attention_forward"),
-    xfail("multinomial"),
+    # Nondeterministic: DTensor vs reference sample from the shared RNG at
+    # different points, so an xfail is flaky (occasional "unexpected success").
+    skip("multinomial"),
     # Flaky in CI: https://github.com/pytorch/pytorch/issues/167252
     skip("full_like"),
     # Flaky in CI: https://github.com/pytorch/pytorch/issues/179779
@@ -233,8 +234,11 @@ dtensor_compiled_fails = {
     xfail("reshape_as"),
     xfail("view"),
     xfail("view_as"),
+    # No sharding strategy for aten.transpose_copy.int on 0-d inputs.
+    xfail("transpose_copy"),
     # View-type ops that decompose into as_strided (at autograd level).
-    # DTensor doesn't have a sharding strategy for as_strided.
+    # DTensor only answers as_strided when it is a permutation of the base
+    # dims, which these are not.
     xfail("atleast_1d"),
     xfail("atleast_2d"),
     xfail("atleast_3d"),
@@ -246,15 +250,11 @@ dtensor_compiled_fails = {
     xfail("expand_as"),
     xfail("hsplit"),
     xfail("linalg.diagonal"),
-    xfail("movedim"),
     xfail("narrow"),
-    xfail("permute"),
     xfail("select"),
     xfail("slice"),
     xfail("squeeze"),
     xfail("squeeze", "multiple"),
-    xfail("t"),
-    xfail("transpose_copy"),
     xfail("unsqueeze"),
     xfail("vsplit"),
     # Decompositions that use plain tensor constructors (e.g. arange),
@@ -354,6 +354,9 @@ dtensor_fails_no_strategy = {
     xfail("histogramdd"),
     xfail("isin"),
     xfail("linalg.matrix_power"),
+    # Full-matrix op; matrix dims can't be sharded, like matrix_exp/matrix_power.
+    xfail("linalg.matrix_sqrth"),
+    xfail("linalg.polar"),
     xfail("linspace", "tensor_overload"),
     xfail("log_normal"),
     xfail("logspace", "tensor_overload"),
@@ -769,6 +772,7 @@ ops_unbacked_dtensor_dde = {
     skip("broadcast_to"),
     xfail("bucketize"),
     xfail("cartesian_prod"),
+    xfail("combinations"),
     xfail("constant_pad_nd"),
     xfail("cumprod"),
     xfail("diagonal_scatter"),
@@ -857,6 +861,7 @@ ops_unbacked_dtensor_dde = {
     xfail("view"),
     xfail("view_as"),
     xfail("view_as_complex"),
+    xfail("torch.ops.aten._scaled_dot_product_flash_attention_for_cpu"),
 }
 
 
@@ -1001,11 +1006,12 @@ class TestSingleDimStrategies(DTensorOpTestBase):
     @ops(op_db, allowed_dtypes=(torch.float,))
     @skipOps(
         {
-            # Stochastic: each shard gets independent RNG, so
-            # op(full) != cat(op(shard0), op(shard1)).
+            # Value validation cannot compare nondeterministic or
+            # uninitialized outputs shard-by-shard.
             skip("exponential"),
             skip("geometric"),
             skip("log_normal"),
+            skip("nn.functional.rrelu"),
             skip("normal", "in_place"),
             skip("uniform"),
         },
@@ -1098,7 +1104,7 @@ class TestSingleDimStrategies(DTensorOpTestBase):
                     tuple(output_placements),
                     mesh,
                 ),
-                f"{op.name}: forward {input_placements} -> {tuple(output_placements)} failed",
+                lambda msg: f"{msg}\n{op.name}: forward {input_placements} -> {tuple(output_placements)} failed",
             )
 
             bwd = validate_sharding_rule_sample_backward(
@@ -1111,7 +1117,7 @@ class TestSingleDimStrategies(DTensorOpTestBase):
             if bwd is not None:
                 self.assertTrue(
                     bwd,
-                    f"{op.name}: backward {input_placements} failed",
+                    lambda msg: f"{msg}\n{op.name}: backward {input_placements} failed",
                 )
 
 

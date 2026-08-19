@@ -8,7 +8,7 @@ timeline (CUPTI delivers buffers in fill order, so a delivered record starting a
 boundary means every earlier one is in hand). This mixin owns the boundary queue, poll
 thread, cover-detection, and teardown; the subclass supplies ``_collect_delivered(sync)``,
 ``_window_watermark_ns()`` (max delivered record start, native clock), and
-``_finalize_window(window_id, boundary_ns)``. Boundaries use ``now_native_ns()`` from
+``_finalize_window(window_id, boundary_ns)``. Boundaries use ``now_record_ns()`` from
 :class:`CuptiMonitorObserver`, the same timebase as record START/END.
 """
 
@@ -118,12 +118,12 @@ class WindowFinalizerMixin:
         Default: CUPTI's native record clock (matches raw START/END). Override to a
         converted clock if the subclass stores records converted (convert the boundary the
         same way; convert_time is monotonic, so the comparison stays order-equivalent)."""
-        return self.now_native_ns()
+        return self.now_record_ns()
 
     if TYPE_CHECKING:
         # Provided by the co-class CuptiMonitorObserver in the MRO; declared here only for
         # the type checker (a real def would shadow it at runtime).
-        def now_native_ns(self) -> int: ...
+        def now_record_ns(self) -> int: ...
 
     def _collect_delivered(self, *, sync: bool) -> None:
         raise NotImplementedError

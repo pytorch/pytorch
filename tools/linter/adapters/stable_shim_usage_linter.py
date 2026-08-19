@@ -52,6 +52,9 @@ def get_shim_functions(
         shim_files_to_check = [
             repo_root / "torch/csrc/stable/c/shim.h",
             repo_root / "torch/csrc/inductor/aoti_torch/c/shim.h",
+            repo_root / "torch/csrc/inductor/aoti_torch/c/shim_cpu.h",
+            repo_root / "torch/csrc/inductor/aoti_torch/c/shim_mps.h",
+            repo_root / "torch/csrc/inductor/aoti_torch/c/shim_xpu.h",
             repo_root / "torch/csrc/inductor/aoti_torch/generated/c_shim_aten.h",
             repo_root / "torch/csrc/inductor/aoti_torch/generated/c_shim_cpu.h",
             repo_root / "torch/csrc/inductor/aoti_torch/generated/c_shim_cuda.h",
@@ -129,8 +132,10 @@ def write_shim_function_versions(
         )
         f.write("# DO NOT EDIT MANUALLY.\n\n")
 
-        for func_name, (major, minor, patch) in sorted_functions:
-            f.write(f"{func_name}: TORCH_VERSION_{major}_{minor}_{patch}\n")
+        f.writelines(
+            f"{func_name}: TORCH_VERSION_{major}_{minor}_{patch}\n"
+            for func_name, (major, minor, patch) in sorted_functions
+        )
 
 
 def check_file(

@@ -102,7 +102,6 @@ jobs:
         ]}
       selected-test-configs: ${{ inputs.benchmark_configs }}
       build-additional-packages: "vision audio torchao"
-      use-arc: true
       python-version: "3.10"
       compiler: gcc11
     secrets: inherit
@@ -122,7 +121,6 @@ jobs:
       disable-monitor: false
       monitor-log-interval: 15
       monitor-data-collect-interval: 4
-      use-arc: true
       python-version: "3.10"
       compiler: gcc11
     secrets: inherit
@@ -142,7 +140,6 @@ jobs:
       disable-monitor: false
       monitor-log-interval: 15
       monitor-data-collect-interval: 4
-      use-arc: true
       python-version: "3.10"
       compiler: gcc11
     secrets: inherit

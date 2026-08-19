@@ -382,7 +382,7 @@ class TestDTensorPPUnitTests(MultiProcContinuousTest):
                 self.assertEqual(
                     InferenceMode.needs_dynamic(meta, has_bwd),
                     expected,
-                    f"Case {i} failed",
+                    lambda msg: f"{msg}\nCase {i} failed",
                 )
 
     @_requires_multi_gpu
@@ -658,11 +658,13 @@ class TestDTensorPPUnitTests(MultiProcContinuousTest):
             self.assertEqual(len(chunks), num_chunks)
             for i, chunk in enumerate(chunks):
                 # Each chunk must be a DTensor with preserved placements
-                self.assertIsInstance(chunk, DTensor, f"chunk {i} is not a DTensor")
+                self.assertIsInstance(
+                    chunk, DTensor, lambda msg: f"{msg}\nchunk {i} is not a DTensor"
+                )
                 self.assertEqual(
                     chunk.placements,
                     tuple(placements),
-                    f"chunk {i} placements differ",
+                    lambda msg: f"{msg}\nchunk {i} placements differ",
                 )
                 # Each chunk must have the same device mesh
                 self.assertIs(chunk.device_mesh, mesh)
@@ -777,11 +779,13 @@ class TestDTensorPPUnitTests(MultiProcContinuousTest):
                 self.assertEqual(len(chunks), n_microbatches)
                 total = 0
                 for i, chunk in enumerate(chunks):
-                    self.assertIsInstance(chunk, DTensor, f"chunk {i} not DTensor")
+                    self.assertIsInstance(
+                        chunk, DTensor, lambda msg: f"{msg}\nchunk {i} not DTensor"
+                    )
                     self.assertEqual(
                         chunk.placements,
                         tuple(placements),
-                        f"chunk {i} placements changed from {placements} "
+                        lambda msg: f"{msg}\nchunk {i} placements changed from {placements} "
                         f"to {chunk.placements}",
                     )
                     total += chunk.shape[0]

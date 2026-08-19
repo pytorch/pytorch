@@ -69,7 +69,7 @@ def _add_op_to_registry(registry, op, fn):
     If op is OpOverload, it will be added to the registry directly.
     If op is OpOverloadPacket, all the valid overload_ops in the packet will be added to the registry.
     """
-    overloads: list[torch._ops.OperatorBase] = []
+    overloads: list[torch._ops.OpOverload] = []
     if isinstance(op, HigherOrderOperator):
         # There's no concept of overloads for HigherOrderOperator
         registry[op] = fn
@@ -89,6 +89,21 @@ def _add_op_to_registry(registry, op, fn):
         # to filter those out, e.g aten.add.float_int
         if torch._C._dispatch_has_kernel(op_overload.name()):
             registry[op_overload] = fn
+            schema = op_overload._schema
+            if registry is decomposition_table:
+                torch._C._fake_dispatch_register_decomp(
+                    schema.name, schema.overload_name
+                )
+            elif registry is meta_table:
+                torch._C._fake_dispatch_register_meta(schema.name, schema.overload_name)
+            elif registry is pre_autograd_decomposition_table:
+                # pre-autograd decomp not used by C++ faketensor
+                pass
+            elif any(registry is t for t in global_decomposition_table.values()):
+                raise AssertionError(
+                    f"decomposition registry {registry!r} is not mirrored into "
+                    "the C++ fake dispatch tables"
+                )
 
 
 def _convert_out_params(f):
@@ -397,6 +412,7 @@ def _core_aten_decompositions_post_autograd() -> dict[
             aten.leaky_relu_backward,
             aten.lerp,
             aten.lerp_,
+            aten.linalg_vector_norm,
             aten.linspace,
             aten.logaddexp,
             aten.logaddexp2,

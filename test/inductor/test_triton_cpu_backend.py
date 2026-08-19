@@ -21,6 +21,9 @@ TRITON_CPU_SLOW_TESTS = (
     "test_avg_pool3d_backward2_cpu",
     "test_pattern_matcher_multi_user_cpu",
     "test_split_cumsum_cpu",
+    # ~50-150s
+    "test_large_strided_reduction_cpu",
+    "test_large_block_sizes_cpu",
 )
 
 if HAS_CPU and TRITON_HAS_CPU:
