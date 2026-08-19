@@ -954,7 +954,7 @@ class FakeIdVariable(VariableTracker):
     def nb_bool_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
         # Mirrors long_bool. The fake value is only meaningful at compile time,
         # but its truthiness is, like tp_repr_impl, a plain function of it.
-        return ConstantVariable.create(self.value != 0)
+        return ConstantVariable.create(bool(self.value))
 
     def tp_richcompare_impl(
         self, tx: InstructionTranslatorBase, other: VariableTracker, op: str
