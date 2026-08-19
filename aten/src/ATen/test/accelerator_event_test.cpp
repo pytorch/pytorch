@@ -20,6 +20,7 @@ TEST(EventTest, testEventFlag) {
   EXPECT_FALSE(flag & c10::EventFlag::TIMING);
   EXPECT_FALSE(flag & c10::EventFlag::INTERPROCESS);
   EXPECT_FALSE(flag == c10::EventFlag::BACKEND_DEFAULT);
+  EXPECT_FALSE(flag == c10::EventFlag::INTERPROCESS);
 
   flag = c10::EventFlag::TIMING | c10::EventFlag::PYTORCH_DEFAULT;
   EXPECT_FALSE(flag & c10::EventFlag::BLOCKING);
