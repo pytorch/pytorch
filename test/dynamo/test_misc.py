@@ -99,7 +99,6 @@ from torch.testing._internal.common_utils import (
     recover_orig_fp32_precision,
     scoped_load_inline,
     set_default_dtype,
-    skipCUDAMemoryLeakCheckIf,
     skipIfHpu,
     skipIfNNModuleInlined,
     skipIfWindows,
@@ -2211,6 +2210,25 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         f(torch.tensor([3]))
         f(torch.tensor([4]))
         self.assertEqual(cnts.frame_count, 1)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_torch_check_symbool_python_not(self):
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+
+        @torch.compile(backend=backend, fullgraph=True)
+        def f(x):
+            c = x.item()
+            torch._check(not (c * 2 == 0))
+            return torch.ones(c * 2)
+
+        out = f(torch.tensor(3, dtype=torch.int64))
+        self.assertEqual(out.shape, (6,))
+        self.assertEqual(len(backend.graphs), 1)
+
+        targets = [node.target for node in backend.graphs[0].graph.nodes]
+        self.assertIn(torch.sym_not, targets)
+        self.assertIn(torch.ops.aten._assert_scalar.default, targets)
+        self.assertNotIn(operator.not_, targets)
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_torch_check_symbolic_shape_rel(self):
@@ -7591,7 +7609,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             "addcmul_positional",
             "addcdiv",
             "addcdiv_positional",
-            subtest("baddbmm", decorators=[expectedFailureDynamic]),
+            "baddbmm",
         ],
     )
     def test_scalar_arg_0d_tensor(self, op):
@@ -7612,8 +7630,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             "addcmul_positional": lambda: a.addcmul(beta, b, c),
             "addcdiv": lambda: a.addcdiv(b, c.abs() + 1, value=beta),
             "addcdiv_positional": lambda: a.addcdiv(beta, b, c.abs() + 1),
-            # Z3 translation validation doesn't support unbacked symbols from
-            # baddbmm's scalar args (https://github.com/pytorch/pytorch/issues/162287).
             "baddbmm": lambda: m_batch.baddbmm(batch1, batch2, alpha=alpha, beta=beta),
         }
 
@@ -11192,6 +11208,136 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         fn(torch.randn(4, 6))
 
         self.assertEqual(counter.frame_count, 1)
+
+    @torch.compiler.config.patch(static_sources="L['x']")
+    def test_static_sources_tensor(self):
+        builder._STATIC_SOURCES = None
+
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter)
+        def fn(x):
+            return x * x
+
+        # Without static-sources automatic dynamic would kick in on the second
+        # call and give us 2 frames; here every size specializes.
+        fn(torch.randn(2))
+        fn(torch.randn(3))
+        fn(torch.randn(4))
+
+        self.assertEqual(counter.frame_count, 3)
+
+    @torch.compiler.config.patch(static_sources="L['x']")
+    def test_static_sources_int(self):
+        builder._STATIC_SOURCES = None
+
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter)
+        def fn(x):
+            return torch.randn(5) * x
+
+        fn(1)
+        fn(2)
+        fn(3)
+
+        self.assertEqual(counter.frame_count, 3)
+
+    @torch.compiler.config.patch(static_sources="L['x']")
+    def test_static_sources_dynamic_override(self):
+        builder._STATIC_SOURCES = None
+
+        counter = CompileCounter()
+
+        @torch.compile(dynamic=True, backend=counter)
+        def fn(x):
+            return x * x
+
+        fn(torch.randn(2))
+        fn(torch.randn(3))
+        fn(torch.randn(4))
+
+        self.assertEqual(counter.frame_count, 3)
+
+    @torch.compiler.config.patch(static_sources="L\\['x.*'\\]")
+    def test_static_sources_regex(self):
+        builder._STATIC_SOURCES = None
+
+        counter = CompileCounter()
+
+        @torch.compile(dynamic=True, backend=counter)
+        def fn(x1):
+            return x1 * x1
+
+        fn(torch.randn(2))
+        fn(torch.randn(3))
+
+        self.assertEqual(counter.frame_count, 2)
+
+    @torch.compiler.config.patch(static_sources="L['x']:1")
+    def test_static_sources_per_dim(self):
+        builder._STATIC_SOURCES = None
+
+        counter = CompileCounter()
+
+        @torch.compile(dynamic=True, backend=counter)
+        def fn(x):
+            return x * x
+
+        # Dim 0 stays dynamic, so varying it does not recompile.
+        fn(torch.randn(2, 4))
+        fn(torch.randn(3, 4))
+        self.assertEqual(counter.frame_count, 1)
+
+        # Dim 1 is static, so varying it does.
+        fn(torch.randn(3, 5))
+        self.assertEqual(counter.frame_count, 2)
+
+    @torch.compiler.config.patch(
+        dynamic_values="1111",
+        static_sources="L['x']",
+    )
+    def test_static_sources_beat_dynamic_values_tensor(self):
+        builder._DYNAMIC_VALUES = None
+        builder._STATIC_SOURCES = None
+
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter)
+        def fn(x):
+            return x * x
+
+        # Same shapes as test_dynamic_values_tensor, which gets 1 frame: the
+        # sentinel dim 1111 marks the dim dynamic. static-sources undoes that,
+        # so every size specializes instead.
+        fn(torch.randn(1111))
+        fn(torch.randn(3))
+        fn(torch.randn(4))
+
+        self.assertEqual(counter.frame_count, 3)
+
+    @torch.compiler.config.patch(
+        dynamic_values="1111",
+        static_sources="L['x']",
+    )
+    def test_static_sources_beat_dynamic_values_int(self):
+        builder._DYNAMIC_VALUES = None
+        builder._STATIC_SOURCES = None
+
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter)
+        def fn(x):
+            return torch.randn(5) * x
+
+        # Same values as test_dynamic_values_int, which gets 1 frame. Unlike the
+        # tensor path, precedence here comes from is_static_source being checked
+        # before is_dynamic_value in wrap_literal -- this pins that ordering.
+        fn(1111)
+        fn(2)
+        fn(3)
+
+        self.assertEqual(counter.frame_count, 3)
 
     @torch.compiler.config.patch(unbacked_sources="L['x']:0")
     def test_unbacked_sources_per_dim(self):
@@ -15159,13 +15305,13 @@ fn
         from torch._dynamo.variables.user_defined import InspectVariable
 
         redirected_attrs = []
-        original_getattro_impl = InspectVariable.getattro_impl
+        original_redirect = InspectVariable._redirect
 
-        def tracking_getattro_impl(self, tx, name):
+        def tracking_redirect(self, tx, name):
             redirects = self._PROPERTY_REDIRECTS.get(type(self.value), {})
             if name in redirects:
                 redirected_attrs.append(name)
-            return original_getattro_impl(self, tx, name)
+            return original_redirect(self, tx, name)
 
         def fn(x, gn):
             sig = inspect.signature(gn)
@@ -15177,7 +15323,7 @@ fn
             return a + b
 
         x = torch.randn(2, 3)
-        with patch.object(InspectVariable, "getattro_impl", tracking_getattro_impl):
+        with patch.object(InspectVariable, "_redirect", tracking_redirect):
             opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
             result = opt_fn(x, gn)
 
@@ -18103,15 +18249,20 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
             res = opt_func(a)
             self.assertIsInstance(res, torch.Tensor)
 
-    # Known CUDA memory leak: under propagate_real_tensors, a data-dependent
-    # .tolist() retains the real input tensor (via FakeTensor.real_tensor held by
-    # a TrackedFake) past torch._dynamo.reset(). See #190093.
-    @skipCUDAMemoryLeakCheckIf(True)
     @torch._dynamo.config.patch(
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
     )
     @torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True)
     def test_interpolate_propagate_real_tensors(self, device):
+        real_tensor_refs = []
+        from_tensor = torch._subclasses.FakeTensorMode.from_tensor
+
+        def record_real_tensor(mode, tensor, **kwargs):
+            fake = from_tensor(mode, tensor, **kwargs)
+            if mode.propagate_real_tensors and fake.real_tensor is not None:
+                real_tensor_refs.append(weakref.ref(fake.real_tensor))
+            return fake
+
         @torch.compile(backend="eager", fullgraph=True)
         def f(mask, box):
             # u0, u1 = mask.tolist()
@@ -18121,7 +18272,18 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
                 mask, (h, w), mode="bilinear", align_corners=False
             )
 
-        f(torch.tensor([30, 30], device=device), torch.tensor([68, 32], device=device))
+        with mock.patch.object(
+            torch._subclasses.FakeTensorMode, "from_tensor", record_real_tensor
+        ):
+            f(
+                torch.tensor([30, 30], device=device),
+                torch.tensor([68, 32], device=device),
+            )
+
+        self.assertTrue(real_tensor_refs)
+        torch._dynamo.reset()
+        gc.collect()
+        self.assertTrue(all(ref() is None for ref in real_tensor_refs))
 
     def test_scalar_isin_decomposition(self):
         def f():

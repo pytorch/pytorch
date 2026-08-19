@@ -304,7 +304,7 @@ class AbstractCollectivesTest(C10dBackendTest):
             with self.assertRaises((RuntimeError, ValueError)):
                 dist.gather_single(input, output, dst=0)
 
-    def test_gather_into_tensor_deprecated(self):
+    def test_gather_into_tensor(self):
         if not self.supports_gather_single:
             self.skipTest(f"{self.backend_name} does not support gather_single")
         self._init_pg()
@@ -314,8 +314,7 @@ class AbstractCollectivesTest(C10dBackendTest):
             if self.rank == 0
             else None
         )
-        with self.assertWarnsRegex(FutureWarning, "gather_into_tensor` is deprecated"):
-            dist.gather_into_tensor(tensor, output, dst=0)
+        dist.gather_into_tensor(tensor, output, dst=0)
         if self.rank == 0:
             expected = torch.cat(
                 [
@@ -596,6 +595,23 @@ class AbstractCollectivesTest(C10dBackendTest):
                             self.assertEqual(
                                 output, self._expected_reduce(count, dtype, op)
                             )
+
+    def test_premul_sum(self):
+        if not self.premul_sum_dtypes:
+            self.skipTest(f"{self.backend_name} does not support PREMUL_SUM")
+        self._init_pg()
+        expected = sum(range(1, self.world_size + 1)) * 0.5
+        for dtype in self.premul_sum_dtypes:
+            for factor in (
+                0.5,
+                torch.tensor(0.5, dtype=dtype, device=self.device),
+            ):
+                with self.subTest(dtype=dtype, factor_type=type(factor).__name__):
+                    tensor = torch.full(
+                        (4,), float(self.rank + 1), dtype=dtype, device=self.device
+                    )
+                    dist.all_reduce(tensor, op=dist.ReduceOp.PREMUL_SUM(factor))
+                    self.assertEqual(tensor, torch.full_like(tensor, expected))
 
     def test_barrier(self):
         self._init_pg()
