@@ -786,7 +786,7 @@ class TestLocalTensorWorld4(LocalTensorWorldTest):
         # LocalTensorMode implementations must accept either a string group
         # name or a ProcessGroup. Covers the four handlers that share the
         # widened group-name signature. See pytorch/pytorch#184746.
-        import torch.distributed.config as dist_config
+        import torch.compiler.config as compiler_config
         from torch.distributed._functional_collectives import (
             all_to_all_single,
             reduce_scatter_tensor,
@@ -848,7 +848,7 @@ class TestLocalTensorWorld4(LocalTensorWorldTest):
 
         with (
             LocalTensorMode(ws),
-            dist_config.patch(compile_on_one_rank=True),
+            compiler_config.patch(compile_on_one_rank=True),
         ):
             lt = LocalTensor(per_rank)
             result = run(lt)
@@ -865,7 +865,7 @@ class TestLocalTensorWorld4(LocalTensorWorldTest):
         # both (a) survive the ProcessGroup-as-group_name path through
         # LocalTensorMode's _local_functional_* handlers and (b) return a
         # LocalTensor whose per-rank shards are the correct concatenation.
-        import torch.distributed.config as dist_config
+        import torch.compiler.config as compiler_config
 
         fake_pg = dist.distributed_c10d._get_default_group()
 
@@ -877,7 +877,7 @@ class TestLocalTensorWorld4(LocalTensorWorldTest):
         per_rank = {r: torch.full((2, 3), float(r)) for r in range(ws)}
         with (
             LocalTensorMode(ws),
-            dist_config.patch(compile_on_one_rank=True),
+            compiler_config.patch(compile_on_one_rank=True),
         ):
             lt = LocalTensor(per_rank)
             result = f(lt)

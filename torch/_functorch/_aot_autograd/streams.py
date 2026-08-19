@@ -188,7 +188,7 @@ def handle_synced_deallocation(
     if not torch.accelerator.is_available():
         # fallback to record_stream in this case
         with graph.inserting_after(node):
-            graph.call_function(
+            rs = graph.call_function(
                 torch.ops.streams.record_stream.default,
                 (
                     node,
@@ -196,7 +196,7 @@ def handle_synced_deallocation(
                 ),
                 {},
             )
-        node.meta["partitioner_tag"] = "must_be_in_backward"
+        rs.meta["partitioner_tag"] = "must_be_in_backward"
 
     allocating_stream_trace = populate_stream_timeline(
         stream_to_exec_trace, graph, allocating_stream
@@ -223,12 +223,12 @@ def handle_synced_deallocation(
     wait_event = new_event()
     record_node = insert_record_event_after_node(graph, last_usage, wait_event)
     with graph.inserting_after(max(alloc_ptr, record_node)):
-        graph.call_function(
+        sd = graph.call_function(
             torch.ops.streams.sync_dealloc.default,
             (wait_event, get_stream_or_current_stream(alloc_ptr), node),
             {},
         )
-        node.meta["partitioner_tag"] = "must_be_in_backward"
+        sd.meta["partitioner_tag"] = "must_be_in_backward"
 
 
 def insert_sync(
@@ -520,6 +520,13 @@ def _wrap_sync_node(
     visited.add(control_deps_node)
 
     # The output is (sync_result, *deps_with_uses_after_sync)
+    # Reuse the val the subgraph output already carries: the min-cut
+    # partitioner's _size_of() raises on any node without `val`, and its escape
+    # hatch covers only get_attr and zero-return OpOverloads, not a schema-less
+    # HOP.  The subgraph output is unwrapped when it has no pass-through deps.
+    sg_val = subgraph_module.graph.output_node().meta.get("val")
+    control_deps_node.meta["val"] = sg_val if isinstance(sg_val, tuple) else (sg_val,)
+
     # Create getitem nodes only for dependencies that have uses after sync
     replacements: dict[Node, Node] = {}
     with graph.inserting_after(control_deps_node):
