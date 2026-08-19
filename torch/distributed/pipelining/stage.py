@@ -777,10 +777,13 @@ class _PipelineStageBase(ABC):
                     activation = info.buffer.requires_grad_(effective_requires_grad)
                 # Activation must be a leaf so backward terminates here.
                 if effective_requires_grad and not activation.is_leaf:
+                    # Use the grad_fn type name, not its repr: the repr embeds
+                    # a fresh object address every microbatch, which defeats
+                    # the warnings module's dedup and spams every step.
                     warnings.warn(
                         f"Stage {self.stage_index}: activation "
                         f"'{info.input_name}' is not a leaf "
-                        f"(grad_fn={activation.grad_fn}); using "
+                        f"(grad_fn={type(activation.grad_fn).__name__}); using "
                         f"retain_grad() as fallback",
                         stacklevel=2,
                     )

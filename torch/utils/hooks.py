@@ -85,7 +85,11 @@ def warn_if_has_hooks(tensor) -> None:
         for k in tensor._backward_hooks:
             hook = tensor._backward_hooks[k]
             if not hasattr(hook, "__torch_unserializable__"):
-                warnings.warn(f"backward hook {repr(hook)} on tensor will not be "
+                # Use a stable name rather than repr(hook): the repr embeds
+                # the object's address, which defeats the warnings module's
+                # dedup and re-warns for every new hook object.
+                name = getattr(hook, "__qualname__", None) or type(hook).__name__
+                warnings.warn(f"backward hook {name} on tensor will not be "
                               "serialized.  If this is expected, you can "
                               "decorate the function with @torch.utils.hooks.unserializable_hook "
                               "to suppress this warning", stacklevel=2)

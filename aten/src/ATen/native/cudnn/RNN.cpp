@@ -1478,7 +1478,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
   auto input = input_r;
   auto weight_buf = weight_buf_r;
   if (!weight_buf.defined()) {
-    TORCH_WARN(WEIGHT_FORMAT_WARN);
+    TORCH_WARN_ONCE(WEIGHT_FORMAT_WARN);
   }
   if (fn_dropout_state.defined()) {
     auto input_arg = TensorArg(input, "input", 1);

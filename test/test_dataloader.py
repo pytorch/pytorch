@@ -1754,13 +1754,16 @@ except RuntimeError as e:
                 self.assertNotWarn(
                     lambda: next(it), "Should not warn before exceeding length"
                 )
-            for _ in range(3):
-                with self.assertWarnsRegex(
-                    UserWarning,
-                    r"but [0-9]+ samples have been fetched\. For multiprocessing data-loading, this",
-                    msg="Should always warn after exceeding length",
-                ):
-                    next(it)
+            with self.assertWarnsRegex(
+                UserWarning,
+                r"but [0-9]+ samples have been fetched\. For multiprocessing data-loading, this",
+                msg="Should warn after exceeding length",
+            ):
+                next(it)
+            for _ in range(2):
+                self.assertNotWarn(
+                    lambda: next(it), "Should warn only once after exceeding length"
+                )
         # [no auto-batching] test that workers exit gracefully
         workers = dataloader_iter._workers
         del dataloader_iter

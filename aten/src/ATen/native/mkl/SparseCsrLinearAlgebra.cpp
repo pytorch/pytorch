@@ -221,20 +221,20 @@ Tensor& _sparse_mm_mkl_(
     const Scalar& beta) {
   if (is_mkl_int32_index()) {
     if (sparse_.crow_indices().scalar_type() != kInt) {
-      TORCH_WARN(
+      TORCH_WARN_ONCE(
           "Pytorch is compiled with MKL LP64 and will convert crow_indices to int32.");
     }
     if (sparse_.col_indices().scalar_type() != kInt) {
-      TORCH_WARN(
+      TORCH_WARN_ONCE(
           "Pytorch is compiled with MKL LP64 and will convert col_indices to int32.");
     }
   } else { // This is for future proofing if we ever change to using MKL ILP64.
     if (sparse_.crow_indices().scalar_type() != kLong) {
-      TORCH_WARN(
+      TORCH_WARN_ONCE(
           "Pytorch is compiled with MKL ILP64 and will convert crow_indices dtype to int64.");
     }
     if (sparse_.col_indices().scalar_type() != kLong) {
-      TORCH_WARN(
+      TORCH_WARN_ONCE(
           "Pytorch is compiled with MKL ILP64 and will convert col_indices dtype to int64.");
     }
   }

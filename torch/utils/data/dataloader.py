@@ -694,6 +694,7 @@ class _BaseDataLoaderIter:
         )
         self._persistent_workers = loader.persistent_workers
         self._num_yielded = 0
+        self._len_warned = False
         self._profile_name = f"enumerate(DataLoader)#{self.__class__.__name__}.__next__"
 
     def __iter__(self) -> Self:
@@ -728,7 +729,11 @@ class _BaseDataLoaderIter:
                 self._dataset_kind == _DatasetKind.Iterable
                 and self._IterableDataset_len_called is not None
                 and self._num_yielded > self._IterableDataset_len_called
+                and not self._len_warned
             ):
+                # The message embeds _num_yielded, so it defeats the warnings
+                # module's dedup; guard with a flag to warn only once.
+                self._len_warned = True
                 warn_msg = (
                     f"Length of IterableDataset {self._dataset} was reported to be {self._IterableDataset_len_called}"
                     f"(when accessing len(dataloader)), but {self._num_yielded} samples have been fetched. "

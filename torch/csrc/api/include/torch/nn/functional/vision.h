@@ -77,7 +77,7 @@ inline Tensor grid_sample(
   }
 
   if (!align_corners.has_value()) {
-    TORCH_WARN(
+    TORCH_WARN_ONCE(
         "Default grid_sample and affine_grid behavior has changed ",
         "to align_corners=False since 1.3.0. Please specify ",
         "align_corners=True if the old behavior is desired. ",

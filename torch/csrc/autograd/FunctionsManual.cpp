@@ -5715,7 +5715,7 @@ Tensor log1p_backward(const Tensor& grad, const Tensor& self) {
     // The warning only applies to the sparsity of self, dense grad is never
     // materialized so if self is strided and grad is sparse nothing unexpected
     // happens memory wise
-    TORCH_WARN(
+    TORCH_WARN_ONCE(
         "log1p_backward: received self with sparse layout, but backward requires materialization of a dense tensor with this shape");
     self_p1_conj = (self.to_dense() + 1).conj();
   } else {
