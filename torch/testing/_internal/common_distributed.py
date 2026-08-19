@@ -644,6 +644,23 @@ def skip_if_rocm_ver_lessthan_multiprocess(version=None):
     return decorator
 
 
+def skip_if_rocm_ver_atleast_multiprocess(version=None):
+    """Skips a test for ROCm if the version is at least the given tuple - multiprocess UTs"""
+
+    def decorator(func):
+        reason = None
+        if TEST_WITH_ROCM:
+            rocm_version = str(torch.version.hip)
+            rocm_version = rocm_version.split("-", maxsplit=1)[0]  # ignore git sha
+            rocm_version_tuple = tuple(int(x) for x in rocm_version.split("."))
+            if version is not None and rocm_version_tuple >= tuple(version):
+                reason = f"skip_if_rocm_ver_atleast_multiprocess: known failure on ROCm {rocm_version_tuple} (>= {version})"
+
+        return unittest.skipIf(reason is not None, reason)(func)
+
+    return decorator
+
+
 def skip_if_win32():
     return skip_but_pass_in_sandcastle_if(
         sys.platform == "win32",
@@ -1946,6 +1963,9 @@ class MultiProcContinuousTest(TestCase):
                 cls._run_test_given_id(test_id)
                 completion_queue.put(test_id)
             except BaseException as ex:
+                if isinstance(ex, unittest.SkipTest):
+                    completion_queue.put(ex)
+                    continue
                 if isinstance(ex, SystemExit):
                     # Get exit code from the process
                     exit_code = getattr(ex, "code", None)

@@ -386,6 +386,10 @@ PYTORCH_RELEASES_CODE_CC: dict[str, dict[str, set[int]]] = {
         "x86_64": {75, 80, 86, 90, 100, 120},
         "aarch64": {80, 90, 100, 110, 120},
     },
+    "13.4": {
+        "x86_64": {75, 80, 86, 90, 100, 120},
+        "aarch64": {80, 90, 100, 110, 120},
+    },
 }
 
 
@@ -513,9 +517,18 @@ def is_initialized():
 
 
 def _lazy_call(callable, **kwargs):
+    # Do not invoke user callbacks while holding _initialization_lock;
+    # they may call back into _lazy_call. The is_initializing check
+    # mirrors _lazy_init: while it drains _queued_calls this thread
+    # already holds the lock, so run reentrant callbacks immediately.
+    if is_initialized() or hasattr(_tls, "is_initializing"):
+        callable()
+        return
+
+    run_now = False
     with _initialization_lock:
         if is_initialized():
-            callable()
+            run_now = True
         else:
             # TODO(torch_deploy): this accesses linecache, which attempts to read the
             # file system to get traceback info. Patch linecache or do something
@@ -528,6 +541,9 @@ def _lazy_call(callable, **kwargs):
             else:
                 # Don't store the actual traceback to avoid memory cycle
                 _queued_calls.append((callable, traceback.format_stack()))
+
+    if run_now:
+        callable()
 
 
 _lazy_call(_check_capability)
@@ -1362,62 +1378,6 @@ def current_solver_handle():
     r"""Return cusolverDnHandle_t pointer to current cuSOLVER handle"""
     _lazy_init()
     return torch._C._cuda_getCurrentSolverHandle()
-
-
-_ClearCublasWorkspaces = None
-
-
-def _clear_cublas_workspaces() -> None:
-    r"""Clear cuBLAS workspaces on this thread and current CUDA device's autograd worker."""
-    if not hasattr(torch._C, "_cuda_clearCublasWorkspaces"):
-        return
-
-    torch._C._cuda_clearCublasWorkspaces()
-    if not is_initialized():
-        return
-
-    global _ClearCublasWorkspaces
-    if _ClearCublasWorkspaces is None:
-        from torch.autograd import Function
-
-        class ClearCublasWorkspaces(Function):
-            @staticmethod
-            def forward(ctx, dummy):
-                return dummy
-
-            @staticmethod
-            def backward(ctx: Any, *grad_outputs: Any) -> Any:
-                torch._C._cuda_clearCublasWorkspaces()
-                return None
-
-        _ClearCublasWorkspaces = ClearCublasWorkspaces
-
-    # This synthetic backward is internal cleanup; keep it out of compiled
-    # autograd to avoid tracing it while still routing through the CUDA worker.
-    compiled_autograd = getattr(
-        getattr(torch._C, "_dynamo", None), "compiled_autograd", None
-    )
-    set_autograd_compiler = (
-        getattr(compiled_autograd, "set_autograd_compiler", None)
-        if compiled_autograd is not None
-        else None
-    )
-    prior_compiler = prior_dynamic = None
-    if set_autograd_compiler is not None:
-        prior_compiler, prior_dynamic = set_autograd_compiler(None, False)
-
-    try:
-        with (
-            torch.autograd.set_multithreading_enabled(True),
-            torch.inference_mode(False),
-            torch.enable_grad(),
-        ):
-            dummy = torch.empty(0, device="cuda", requires_grad=True)
-            output = _ClearCublasWorkspaces.apply(dummy)
-            output.backward(output.detach())
-    finally:
-        if set_autograd_compiler is not None:
-            set_autograd_compiler(prior_compiler, prior_dynamic)
 
 
 def set_sync_debug_mode(debug_mode: int | str) -> None:

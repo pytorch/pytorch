@@ -18,15 +18,19 @@ from torch.testing._internal.common_cuda import (
     IS_SM90,
     PLATFORM_SUPPORTS_CK_SDPA,
     PLATFORM_SUPPORTS_CUDNN_ATTENTION,
-    PLATFORM_SUPPORTS_FLASH_ATTENTION,
     SM100OrLater,
     SM120OrLater,
     SM90OrLater,
 )
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
+)
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
     decorateIf,
+    HardwareClassification,
     parametrize,
     run_tests,
     setSdpaBackendsToDefaultFinally,
@@ -101,7 +105,7 @@ def _use_cudnn_varlen(_should_use_cudnn, device):
 def _varlen_backends(*, include_fa4_paged_kv: bool) -> list[str]:
     fa4_supported = (
         SM100OrLater if include_fa4_paged_kv else SM90OrLater
-    ) and not SM120OrLater
+    ) and torch.cuda.get_device_capability()[0] in (9, 10)
     return ["fa2"] + (["fa3"] if IS_SM90 else []) + (["fa4"] if fa4_supported else [])
 
 
@@ -543,9 +547,9 @@ class _VarlenAttentionTestMixin:
 
 
 class TestVarlenAttention(_VarlenAttentionTestMixin, NNTestCase):
-    @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
-    )
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @requires_capabilities(Capability.attention.flash_attention)
     @setSdpaBackendsToDefaultFinally
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     @parametrize(
@@ -628,9 +632,7 @@ class TestVarlenAttention(_VarlenAttentionTestMixin, NNTestCase):
             self.assertEqual(varlen_grad.shape, x_packed.shape)
             self.assertEqual(varlen_grad.dtype, x_packed.dtype)
 
-    @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
-    )
+    @requires_capabilities(Capability.attention.flash_attention)
     @setSdpaBackendsToDefaultFinally
     @parametrize(
         "sdpa_backend",
@@ -710,9 +712,7 @@ class TestVarlenAttention(_VarlenAttentionTestMixin, NNTestCase):
             test_utils=["test_schema", "test_faketensor"],
         )
 
-    @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
-    )
+    @requires_capabilities(Capability.attention.flash_attention)
     @setSdpaBackendsToDefaultFinally
     @parametrize(
         "sdpa_backend",
@@ -781,9 +781,7 @@ class TestVarlenAttention(_VarlenAttentionTestMixin, NNTestCase):
         if not any("torch_attn._varlen_attn_out" in op for op in out_mode.called_ops):
             raise AssertionError("custom _varlen_attn_out op should have been called")
 
-    @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
-    )
+    @requires_capabilities(Capability.attention.flash_attention)
     @setSdpaBackendsToDefaultFinally
     @parametrize(
         "sdpa_backend",
@@ -827,9 +825,7 @@ class TestVarlenAttention(_VarlenAttentionTestMixin, NNTestCase):
         )
 
     @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179968")
-    @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
-    )
+    @requires_capabilities(Capability.attention.flash_attention)
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     @parametrize("num_splits", [1, None])
     @parametrize(
@@ -981,9 +977,7 @@ class TestVarlenAttention(_VarlenAttentionTestMixin, NNTestCase):
                 "cuDNN varlen attention forward should have been called"
             )
 
-    @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
-    )
+    @requires_capabilities(Capability.attention.flash_attention)
     @decorateIf(
         unittest.expectedFailure,
         lambda params: params["backend"] != "fa2"
@@ -1113,9 +1107,7 @@ class TestVarlenAttention(_VarlenAttentionTestMixin, NNTestCase):
             self.assertEqual(output_out.data_ptr(), out_buf.data_ptr())
             self.assertEqual(out_buf, output_cached)
 
-    @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
-    )
+    @requires_capabilities(Capability.attention.flash_attention)
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm does not support block_table")
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     @parametrize("page_size", [32, 64, 128, 256])
@@ -1293,9 +1285,7 @@ class TestVarlenAttention(_VarlenAttentionTestMixin, NNTestCase):
                 )
             self.assertTrue(torch.equal(paged_num_splits, ref_num_splits))
 
-    @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
-    )
+    @requires_capabilities(Capability.attention.flash_attention)
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     @parametrize(
         "backend",
@@ -1345,6 +1335,8 @@ class TestVarlenAttention(_VarlenAttentionTestMixin, NNTestCase):
 
 
 class TestVarlenAttentionCUDA(_VarlenAttentionTestMixin, NNTestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @skipIfRocm
     @setSdpaBackendsToDefaultFinally
     @parametrize("dtype", [torch.bfloat16, torch.float16])
@@ -1502,9 +1494,7 @@ class TestVarlenAttentionCUDA(_VarlenAttentionTestMixin, NNTestCase):
             expected[:, lo:hi] = (scores * scale).logsumexp(-1)
         self.assertEqual(lse, expected, atol=2e-2, rtol=2e-2)
 
-    @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
-    )
+    @requires_capabilities(Capability.attention.flash_attention)
     @skipIfRocm
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     def test_cudnn_varlen_cached_graph_grad_out_layout(self, device, dtype):

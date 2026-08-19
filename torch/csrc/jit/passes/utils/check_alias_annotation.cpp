@@ -115,7 +115,7 @@ void checkAliases(
         AT_ASSERT(inputSet && outputSet);
         bool found = false;
         for (const auto& set : inputSet->beforeSets()) {
-          if (outputSet->beforeSets().count(set)) {
+          if (outputSet->beforeSets().contains(set)) {
             found = true;
             break;
           }
