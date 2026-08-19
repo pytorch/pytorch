@@ -47,6 +47,21 @@ if(NOT BUILD_LIBTORCHLESS)
   # ---[ Dependency of c10_hip
   target_link_libraries(c10_hip PUBLIC ${C10_LIB} hip::host)
 
+  # hip::host resolves to hip::amdhip64 (libamdhip64.so under $ROCM_PATH/lib),
+  # whose own DT_NEEDED on libhsa-runtime64.so must resolve at link time.
+  # Nothing here propagates $ROCM_PATH/lib as an -rpath-link entry, so if some
+  # OTHER -rpath-link source (e.g. c10's NUMA workaround above, pointing at
+  # libnuma's directory) happens to also contain an unrelated system
+  # libhsa-runtime64.so (a stray apt package sharing that multiarch dir), the
+  # linker's rpath-link search -- which is checked before -rpath -- resolves
+  # against that wrong/incompatible version instead, causing "undefined
+  # reference to hsa_amd_vmem_*"-style failures. Explicitly propagate this
+  # ROCm install's own lib dir first. ELF/GNU-ld only.
+  if(NOT WIN32 AND NOT APPLE AND DEFINED ENV{ROCM_PATH})
+    target_link_options(
+      c10_hip INTERFACE "$<BUILD_INTERFACE:LINKER:-rpath-link,$ENV{ROCM_PATH}/lib>")
+  endif()
+
   target_include_directories(
       c10_hip PUBLIC
       $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../..>
