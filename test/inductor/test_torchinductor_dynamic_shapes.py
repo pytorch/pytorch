@@ -45,6 +45,7 @@ from torch.testing._internal.inductor_utils import (
     HAS_MPS,
     patch_inductor_backend,
 )
+from torch.utils._triton import has_triton
 
 
 # Make the helper files in test/ importable
@@ -1380,9 +1381,7 @@ class TestInductorDynamic(DynamicShapesTestCase):
             fn_c = torch.compile(fn)
             actual, source_codes = run_and_get_code(fn_c, x)
             self.assertEqual(fn(x), actual)
-            from torch._inductor.ir import has_triton
-
-            if has_triton:
+            if has_triton():
                 FileCheck().check("R0_BLOCK: tl.constexpr = 64").run(source_codes[0])
             torch._dynamo.reset()
 
@@ -1390,7 +1389,7 @@ class TestInductorDynamic(DynamicShapesTestCase):
             fn_c = torch.compile(fn)
             actual, source_codes = run_and_get_code(fn_c, x)
             self.assertEqual(fn(x), actual)
-            if has_triton:
+            if has_triton():
                 FileCheck().check("R0_BLOCK: tl.constexpr = 64").run(source_codes[0])
 
     def test_non_persistent_dynamic_rblock(self, device):
@@ -1454,7 +1453,7 @@ class TestInductorDynamic(DynamicShapesTestCase):
 
     @skipIfRocm(msg="sort kernel exceeds the inductor compile-worker timeout")
     def test_sort_dynamic_shape_with_check(self, device):
-        if torch.device(device).type != GPU_TYPE:
+        if not has_triton():
 
             def check_count(n):
                 self.assertEqual(metrics.generated_kernel_count, 0)
