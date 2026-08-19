@@ -11,6 +11,7 @@
 #include <ATen/native/cuda/KernelUtils.cuh>
 #include <ATen/native/cuda/LaunchUtils.h>
 #include <c10/macros/Macros.h>
+#include <utility>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -686,7 +687,8 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cuda_template(const Tenso
      save_mean, save_invstd, train, epsilon);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
-  return std::make_tuple(grad_input_, grad_weight_, grad_bias_);
+  return std::make_tuple(
+      std::move(grad_input_), std::move(grad_weight_), std::move(grad_bias_));
 }
 
 template<typename scalar_t, typename index_t, typename VarTransform>
@@ -803,7 +805,7 @@ std::tuple<Tensor, Tensor> batch_norm_gather_stats_cuda_template(const Tensor& m
       (mean, invstd, save_mean, save_invstd, running_mean, running_var, epsilon, momentum, counts);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
-  return std::make_tuple(save_mean_, save_invstd_);
+  return std::make_tuple(std::move(save_mean_), std::move(save_invstd_));
 }
 
 template<typename input_scalar_t, typename stat_scalar_t, typename index_t>
@@ -863,7 +865,11 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> batch_norm_backward_reduce_cuda_templ
     (input, grad_output, mean, invstd, sum_dy, sum_dy_xmu, grad_weight, grad_bias);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
-  return std::make_tuple(sum_dy_, sum_dy_xmu_, grad_weight_, grad_bias_);
+  return std::make_tuple(
+      std::move(sum_dy_),
+      std::move(sum_dy_xmu_),
+      std::move(grad_weight_),
+      std::move(grad_bias_));
 }
 
 template<typename input_scalar_t, typename stat_scalar_t, typename index_t>
@@ -1659,7 +1665,11 @@ batch_norm_backward_reduce_cuda_channels_last_template(const at::Tensor& grad_ou
     });
   }
 
-  return std::make_tuple(sumn_dy, sum_dy_xmu, grad_weight, grad_bias);
+  return std::make_tuple(
+      std::move(sumn_dy),
+      std::move(sum_dy_xmu),
+      std::move(grad_weight),
+      std::move(grad_bias));
 }
 
 at::Tensor batch_norm_backward_elemt_channels_last_cuda_template(

@@ -30,17 +30,20 @@ def _print_debugging_tensor_value_info(msg, arg):
     if not isinstance(arg, torch.Tensor):
         print("Value: ", arg)
         return
-    numel = arg.float().numel()
+    numel = arg.numel()
     # print the debug printing stats
     if numel <= max_numel_to_print:
         print(arg)
     print("Number of elements: ", numel)
-    print("Size: ", arg.float().size())
-    print("Dtype: ", arg.float().mean().item())
-    print("Mean: ", arg.float().mean().item())
-    print("Min: ", arg.float().min().item())
-    print("Max: ", arg.float().max().item())
-    print("Std: ", arg.float().std().item())
+    print("Size: ", arg.size())
+    print("Dtype: ", arg.dtype)
+    arg_f = arg.float()
+    std, mean = torch.std_mean(arg_f)
+    amin, amax = torch.aminmax(arg_f)
+    print("Mean: ", mean.item())
+    print("Min: ", amin.item())
+    print("Max: ", amax.item())
+    print("Std: ", std.item())
 
 
 # AOTI debug printing related configs
@@ -52,7 +55,7 @@ class IntermediateValueDebuggingLevel(Enum):
     # LEVEL 2: Print all intermediate tensor values by default to the console. No debug saving will be performed.
     PRINT_ONLY = "2"
     # LEVEL 3: Print all kernel names to the console only. No debug saving/printing for input tensor value info will be performed.
-    # This mode can be helpful in cases when you just want to pinpointing what kernel is running into a CUDA IMA issue, etc.
+    # This mode can be helpful in cases when you just want to pinpoint what kernel is running into a CUDA IMA issue, etc.
     PRINT_KERNEL_NAMES_ONLY = "3"
 
 

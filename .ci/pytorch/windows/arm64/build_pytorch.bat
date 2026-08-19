@@ -15,7 +15,6 @@ if defined PYTORCH_BUILD_VERSION (
 :: Set BLAS type
 if %ENABLE_APL% == 1 (
     set BLAS=APL
-    set USE_LAPACK=1
 ) else if %ENABLE_OPENBLAS% == 1 (
     set BLAS=OpenBLAS
     set OpenBLAS_HOME=%DEPENDENCIES_DIR%\OpenBLAS\install

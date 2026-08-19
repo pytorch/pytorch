@@ -1,5 +1,7 @@
 #include <ATen/native/mkldnn/xpu/FusionUtils.h>
 
+#include <unordered_set>
+
 using namespace at::native::onednn;
 
 namespace at::native::xpu {
@@ -121,17 +123,17 @@ onednn::Attr& construct_unary_attr(
   // Category `need_algorithm`: require algorithm specification, only gelu now.
   // If further unary operations required, they can be added to these sets or
   // add new sets according to their new categories.
-  static const std::set<std::string_view> argument_less = {
+  static const std::unordered_set<std::string_view> argument_less = {
       "none", "relu", "sigmoid", "tanh", "hardswish", "swish", "hardsigmoid"};
-  static const std::set<std::string_view> need_scalars = {
+  static const std::unordered_set<std::string_view> need_scalars = {
       "leaky_relu", "hardtanh"};
-  static const std::set<std::string_view> need_algorithm = {"gelu"};
+  static const std::unordered_set<std::string_view> need_algorithm = {"gelu"};
 
-  if (argument_less.find(unary) != argument_less.end()) {
+  if (argument_less.contains(unary)) {
     return handle_argument_less(unary, attr);
-  } else if (need_scalars.find(unary) != need_scalars.end()) {
+  } else if (need_scalars.contains(unary)) {
     return handle_need_sclars(unary, attr, scalars);
-  } else if (need_algorithm.find(unary) != need_algorithm.end()) {
+  } else if (need_algorithm.contains(unary)) {
     return handle_need_algorithm(unary, attr, algorithm);
   } else {
     TORCH_CHECK(

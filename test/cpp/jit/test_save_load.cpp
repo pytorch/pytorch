@@ -69,7 +69,7 @@ TEST(SerializationTest, ExtraFilesHookPreference) {
   module->save(oss, extra_files);
   SetExportModuleExtraFilesHook(nullptr);
 
-  std::istringstream iss(oss.str());
+  std::istringstream iss(std::move(oss).str());
   caffe2::serialize::IStreamAdapter adapter{&iss};
   std::unordered_map<std::string, std::string> loaded_extra_files;
   loaded_extra_files["metadata.json"] = "";

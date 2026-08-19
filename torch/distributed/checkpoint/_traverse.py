@@ -77,7 +77,7 @@ def traverse_state_dict_v_2_3(
     keep_traversing: Callable[[STATE_DICT_ITEM], bool] = _keep_visiting_tensors,
 ) -> None:
     """
-    Traversal is short-circuited when if finds a collection for which ``keep_visiting_tensors`` evaluates
+    Traversal is short-circuited when it finds a collection for which ``keep_visiting_tensors`` evaluates
     to false for all elements.
     By default, all collections with at least one ``torch.Tensor`` element are traversed.
     Visitor takes a path argument that is a tuple of the keys used to reach it.
@@ -203,6 +203,6 @@ def print_tensor(
     Use this callback with traverse_state_dict to print its content.
 
     By default the content is printed using the builtin ``print`` but this can
-    be change by passing a different ``print_fun` callable.
+    be changed by passing a different ``print_fun`` callable.
     """
     _print_nested(value, prefix=str(path), print_fun=print_fun)

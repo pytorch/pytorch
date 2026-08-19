@@ -1,11 +1,13 @@
 # Owner(s): ["module: tests"]
 
 import gc
+import operator
 import sys
 import unittest
 from contextlib import nullcontext
 
 import torch
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     NoTest,
     run_tests,
@@ -27,17 +29,12 @@ if not TEST_ACCELERATOR:
 class TestAccelerator(TestCase):
     def test_current_accelerator(self):
         self.assertTrue(torch.accelerator.is_available())
-        accelerators = ["cuda", "xpu", "mps"]
-        for accelerator in accelerators:
-            if torch.get_device_module(accelerator).is_available():
-                self.assertEqual(
-                    torch.accelerator.current_accelerator().type, accelerator
-                )
-                self.assertIsNone(torch.accelerator.current_accelerator().index)
-                with self.assertRaisesRegex(
-                    ValueError, "doesn't match the current accelerator"
-                ):
-                    torch.accelerator.set_device_index("cpu")
+        self.assertEqual(torch.accelerator.current_accelerator().type, self.device_type)
+        self.assertIsNone(torch.accelerator.current_accelerator().index)
+        with self.assertRaisesRegex(
+            ValueError, "doesn't match the current accelerator"
+        ):
+            torch.accelerator.set_device_index("cpu")
 
     @unittest.skipIf(not TEST_MULTIACCELERATOR, "only one accelerator detected")
     def test_generic_multi_device_behavior(self):
@@ -88,6 +85,23 @@ class TestAccelerator(TestCase):
             ValueError, "doesn't match the current accelerator"
         ):
             torch.accelerator.current_stream(other_device)
+
+    def test_stream_compare_with_non_stream(self):
+        # Comparing with a non-Stream must not blindly cast it to THPStream*
+        # and read garbage fields (#188033)
+        s1 = torch.Stream()
+        for other in (42, "hello", 3.14, None, object()):
+            self.assertFalse(s1 == other)
+            self.assertTrue(s1 != other)
+        self.assertTrue(s1 in [1, "a", s1])
+        s2 = torch.Stream()
+        for op in (operator.lt, operator.le, operator.gt, operator.ge):
+            with self.assertRaises(TypeError):
+                op(s1, s2)
+        sid, di, dt = s1.stream_id, s1.device_index, s1.device_type
+        same = torch.Stream(stream_id=sid, device_index=di, device_type=dt)
+        self.assertTrue(s1 == same)
+        self.assertFalse(s1 != same)
 
     def test_device_context_manager(self):
         prev_device = torch.accelerator.current_device_index()
@@ -220,7 +234,7 @@ class TestAccelerator(TestCase):
         self.assertEqual(
             len(missing_stats),
             0,
-            f"Missing expected memory statistics: {missing_stats}",
+            lambda msg: f"{msg}\nMissing expected memory statistics: {missing_stats}",
         )
 
         prev_allocated = torch.accelerator.memory_allocated()
@@ -307,6 +321,15 @@ class TestAccelerator(TestCase):
                     t = torch.empty(16, dtype=dtype, device=acc)
                     t = t.to(reference_dtype)
                     t = t.to(dtype)
+
+
+instantiate_device_type_tests(
+    TestAccelerator,
+    globals(),
+    except_for=("cpu",),
+    allow_mps=True,
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":

@@ -81,6 +81,15 @@ inline float rand(long seed, long index) {
   return detail::uint32_to_uniform_float(value.x);
 }
 
+struct RandSampler {
+  long seed;
+  long index;
+  RandSampler(long seed, long index) : seed(seed), index(index) {}
+  float operator()() {
+    return rand(seed, index++);
+  }
+};
+
 inline long randint64(long seed, long index, long low, long high) {
   auto range = high - low;
   auto value = philox4::rand(seed, index);

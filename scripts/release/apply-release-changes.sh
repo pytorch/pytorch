@@ -44,10 +44,6 @@ echo "XLA Changes"
 sed -i -e s#--quiet#-b\ r"${RELEASE_VERSION}"# .ci/pytorch/common_utils.sh
 sed -i -e s#.*#r"${RELEASE_VERSION}"# .github/ci_commit_pins/xla.txt
 
-# Strip +PTX from CUDA arch lists in release builds
-echo "Stripping +PTX from CUDA arch lists"
-sed -i 's/+PTX//' .ci/manywheel/build_cuda.sh
-
 # Regenerate templates
 export RELEASE_VERSION_TAG=${RELEASE_VERSION}
 ./.github/regenerate.sh
