@@ -630,7 +630,7 @@ def reduce_storage(storage):
 
 
 def init_reductions():
-    ipc_event_classes = [torch.cuda.Event, torch.xpu.Event]
+    ipc_event_classes = [torch.cuda.Event, torch.xpu.Event, torch.Event]
     for event_cls in ipc_event_classes:
         reduction.register(event_cls, _reduce_event)
 
