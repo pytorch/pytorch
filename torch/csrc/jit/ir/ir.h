@@ -1250,6 +1250,9 @@ struct Graph : std::enable_shared_from_this<Graph> {
     const Block& block = *block_;
     return block.nodes();
   }
+  size_t numNodes() const {
+    return all_nodes.size();
+  }
   Node* param_node() {
     return block_->param_node();
   }

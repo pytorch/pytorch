@@ -4,30 +4,15 @@ import time
 import unittest
 
 import torch
+from torch.testing._internal.common_cuda import TEST_CUPTI, TEST_CUPTI_V13_3
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
-# cupti-python imports its enums at module load, so the import gates on the
-# package being installed; the version gate below additionally requires a loaded
+# The decode tests drive the real libcupti (pylibcupti); guard its import on TEST_CUPTI
+# (cupti-python imports its enums at load). TEST_CUPTI_V13_3 additionally requires a loaded
 # libcupti >= 13.3 (the v2 user-defined-record API the decode worker drives).
-try:
+if TEST_CUPTI:
     from torch.profiler._cupti.cupti_python import pylibcupti
-
-    _HAS_CUPTI = True
-except ModuleNotFoundError:
-    _HAS_CUPTI = False
-
-
-def _cupti_version() -> int:
-    if not _HAS_CUPTI:
-        return 0
-    try:
-        return pylibcupti().get_version()
-    except Exception:
-        return 0
-
-
-TEST_CUPTI_V13_3 = _cupti_version() >= 130300
 
 
 class TestCuptiDecoder(TestCase):

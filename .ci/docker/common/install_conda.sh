@@ -92,9 +92,6 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   # Install some other packages, including those needed for Python test reporting
   pip_install -r /opt/conda/requirements-ci.txt
 
-  # Installed spmd-types with --no-deps to avoid pulling torch dependency at this point
-  pip_install --no-deps spmd-types==0.2.1
-
   if [ -n "$DOCS" ]; then
     apt-get update
     apt-get -y install expect-dev

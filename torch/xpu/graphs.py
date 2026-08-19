@@ -295,7 +295,7 @@ def make_graphed_callables(
         The automatic mixed precision is supported in :func:`~torch.xpu.make_graphed_callables` only with disabled
         caching. The context manager `torch.amp.autocast()` must have `cache_enabled=False`.
     """
-    if torch.is_autocast_enabled() and torch.is_autocast_cache_enabled():
+    if torch.is_autocast_enabled("xpu") and torch.is_autocast_cache_enabled():
         raise RuntimeError(
             "make_graphed_callables does not support the autocast caching. Please set `cache_enabled=False`."
         )

@@ -3,6 +3,9 @@
 # TODO: move set tests from test_functions.py/test_misc.py to this file
 
 
+import collections
+import sys
+
 import torch
 import torch._dynamo.test_case
 from torch.testing._internal.common_utils import make_dynamo_test
@@ -52,10 +55,10 @@ class TupleTests(torch._dynamo.test_case.TestCase):
         return super().tearDown()
 
     def assertEqual(self, a, b):
-        return self.assertTrue(a == b, f"{a} != {b}")
+        return self.assertTrue(a == b, lambda msg: f"{msg}\n{a} != {b}")
 
     def assertNotEqual(self, x, y, msg=None, *, atol=None, rtol=None, **kwargs):
-        return self.assertTrue(x != y, f"{x} == {y}")
+        return self.assertTrue(x != y, lambda msg: f"{msg}\n{x} == {y}")
 
     @make_dynamo_test
     def test_count(self):
@@ -482,6 +485,121 @@ class ListTests(TupleTests):
         self.assertRaises(TypeError, p.__delitem__)
         self.assertRaises(TypeError, p.__delitem__, 1.1)
         self.assertRaises(TypeError, p.__delitem__, 1, 2)
+
+    @make_dynamo_test
+    def test___setitem___slice_non_iterable(self):
+        # ref: https://github.com/python/cpython/pull/120442 (gh-120384),
+        # which fixed an array-out-of-bounds crash by moving the
+        # PySequence_Fast check ahead of the step==1 branch in
+        # list_ass_subscript. Before this landed, simple (step is None or
+        # 1) slices raised "can only assign an iterable" instead of the
+        # unified extended-slice message. Verified empirically against
+        # real CPython builds (cross-checked via two independent
+        # toolchains): the fix shipped in 3.10.20, 3.11.15, and 3.12.5
+        # (3.12.0 is the first 3.12 release, so 3.12.0-3.12.4 predate it);
+        # 3.13+ never had the bug.
+        v = sys.version_info
+        has_bug = (
+            (v[:2] == (3, 10) and v < (3, 10, 20))
+            or (v[:2] == (3, 11) and v < (3, 11, 15))
+            or (v[:2] == (3, 12) and v < (3, 12, 5))
+        )
+        p = self.thetype("abcdef")
+        if has_bug:
+            self.assertRaisesRegex(
+                TypeError,
+                "can only assign an iterable",
+                p.__setitem__,
+                slice(1, 3),
+                1,
+            )
+        else:
+            self.assertRaisesRegex(
+                TypeError,
+                "must assign iterable to extended slice",
+                p.__setitem__,
+                slice(1, 3),
+                1,
+            )
+
+        # Extended slices (step != 1) always use the extended-slice message.
+        self.assertRaisesRegex(
+            TypeError,
+            "must assign iterable to extended slice",
+            p.__setitem__,
+            slice(1, 5, 2),
+            1,
+        )
+
+        # Valid iterable assignments are unaffected.
+        p[1:3] = ["x", "y"]
+        self.assertEqual(p, ["a", "x", "y", "d", "e", "f"])
+
+
+class IndexNotFoundTests(torch._dynamo.test_case.TestCase):
+    # list/tuple/deque share BaseListVariable.list_index, but CPython's
+    # ValueError text does not: on <=3.13 list and deque repr the missing
+    # value while tuple ignores it; 3.14 dropped the repr everywhere
+    # (gh-121288). Each sequence is built twice: from constants (the inline
+    # fast path) and from opaque objects (the polyfills.index path).
+    def _check(self, fn):
+        x = torch.ones(2)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x), fn(x))
+
+    def test_list(self):
+        def fn(x):
+            try:
+                [1, 2, 3].index("z")
+            except ValueError as e:
+                return str(e)
+
+        self._check(fn)
+
+    def test_tuple(self):
+        def fn(x):
+            try:
+                (1, 2, 3).index("z")
+            except ValueError as e:
+                return str(e)
+
+        self._check(fn)
+
+    def test_deque(self):
+        def fn(x):
+            try:
+                collections.deque([1, 2, 3]).index("z")
+            except ValueError as e:
+                return str(e)
+
+        self._check(fn)
+
+    def test_list_nonconst(self):
+        def fn(x):
+            try:
+                [NeverEqualForListRemove()].index("z")
+            except ValueError as e:
+                return str(e)
+
+        self._check(fn)
+
+    def test_tuple_nonconst(self):
+        def fn(x):
+            try:
+                (NeverEqualForListRemove(),).index("z")
+            except ValueError as e:
+                return str(e)
+
+        self._check(fn)
+
+    def test_deque_nonconst(self):
+        def fn(x):
+            try:
+                collections.deque([NeverEqualForListRemove()]).index("z")
+            except ValueError as e:
+                return str(e)
+
+        self._check(fn)
 
 
 if __name__ == "__main__":
