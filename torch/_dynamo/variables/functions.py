@@ -93,8 +93,6 @@ from .base import (
     AttributeMutationNew,
     GetSet,
     getset_build,
-    getset_load_or_build,
-    getset_read,
     getset_set,
     Member,
     Method,
@@ -1894,7 +1892,7 @@ class UserMethodVariable(UserFunctionVariable):
     # __self__ / __func__ are read-only members on method objects.
     # https://github.com/python/cpython/blob/v3.13.0/Objects/classobject.c#L20-L24
     tp_members = {
-        "__self__": Member(getset_read(lambda s: s.obj), None),
+        "__self__": Member(lambda s, _: s.obj, None),
         "__func__": Member(_get_func, None),
     }
 
@@ -4942,7 +4940,7 @@ class TupleGetterVariable(VariableTracker):
     tp_members = {
         "__doc__": Member(
             getset_build(lambda s: s.descriptor.__doc__),
-            _side_effect_setter("__doc__"),
+            getset_set("__doc__"),
         )
     }
 
