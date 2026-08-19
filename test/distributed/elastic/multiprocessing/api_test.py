@@ -1076,7 +1076,8 @@ class BoundedCloseTest(TestCase):
         self.assertTrue(join_calls, "expected proc.join() to be called")
         for t in join_calls:
             self.assertIsNotNone(t, "proc.join() must be called with a bounded timeout")
-            assert t is not None  # noqa: S101  # for type narrowing
+            if t is None:  # for type narrowing
+                raise AssertionError("expected t to be not None")
             self.assertGreater(t, 0)
 
     def test_subprocess_context_close_bounded_when_unkillable(self):
@@ -1117,7 +1118,8 @@ class BoundedCloseTest(TestCase):
         self.assertTrue(wait_calls, "expected proc.wait() to be called")
         for t in wait_calls:
             self.assertIsNotNone(t, "proc.wait() must be called with a bounded timeout")
-            assert t is not None  # noqa: S101  # for type narrowing
+            if t is None:  # for type narrowing
+                raise AssertionError("expected t to be not None")
             self.assertGreater(t, 0)
 
 

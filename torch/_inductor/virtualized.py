@@ -256,6 +256,11 @@ def _choices_default():
     """
     from torch._inductor import config
     from torch._inductor.choices import InductorChoices
+    from torch._inductor.heuristics.template import tlx
+
+    # Has to precede the inductor_choices_class read: installing the torchTLX
+    # integration is what sets it.
+    tlx.maybe_install()
 
     if config.inductor_choices_class is not None:
         rv = config.inductor_choices_class()
