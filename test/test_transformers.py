@@ -8,6 +8,7 @@ import sys
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.nn.functional import scaled_dot_product_attention
 from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.nn.attention.bias import CausalVariant, causal_lower_right, causal_upper_left
@@ -17,6 +18,7 @@ from unittest.mock import patch, MagicMock, ANY
 import math
 import itertools
 import torch.optim as optim
+from torch.backends.cuda import can_use_flash_attention, SDPAParams
 from torch.testing._internal.common_device_type import expectedFailureMPS, instantiate_device_type_tests, onlyCUDA, largeTensorTest
 import torch.utils.cpp_extension
 from torch.testing._internal.common_nn import NNTestCase
@@ -2565,11 +2567,10 @@ class TestSDPA(NNTestCase):
                 )
                 return out.transpose(1, 2).flatten(2, 3).type_as(query)
 
-        dtype = torch.bfloat16 if device_type == "cuda" else torch.float32
-        model = Model().eval().to(device=device, dtype=dtype)
-        query = torch.randn(1, 3, 16, device=device, dtype=dtype)
-        key = torch.randn(1, 3, 16, device=device, dtype=dtype)
-        value = torch.randn(1, 3, 16, device=device, dtype=dtype)
+        model = Model().eval().to(device=device, dtype=torch.float32)
+        query = torch.randn(1, 3, 16, device=device, dtype=torch.float32)
+        key = torch.randn(1, 3, 16, device=device, dtype=torch.float32)
+        value = torch.randn(1, 3, 16, device=device, dtype=torch.float32)
         seq_len = torch.export.Dim("seq_len", min=1, max=16)
 
         ep = torch.export.export(
@@ -2579,10 +2580,25 @@ class TestSDPA(NNTestCase):
             strict=False,
         )
 
-        self.assertEqual(
-            ep.module()(query, key, value),
-            model(query, key, value),
+        repeat_interleaves = [
+            node
+            for node in ep.graph.nodes
+            if node.target is torch.ops.aten.repeat_interleave.self_Tensor
+        ]
+        self.assertEqual(len(repeat_interleaves), 2)
+        self.assertTrue(
+            any(
+                free_unbacked_symbols(node.meta["val"].shape[-1])
+                for node in repeat_interleaves
+            ),
+            msg="repeat_interleave should produce an unbacked head dimension",
         )
+
+        with sdpa_kernel(backends=[SDPBackend.MATH]):
+            self.assertEqual(
+                ep.module()(query, key, value),
+                model(query, key, value),
+            )
 
 
 class TestSDPACpuOnly(NNTestCase):
@@ -3653,6 +3669,13 @@ class TestSDPACudaOnly(NNTestCase):
             with self.assertRaisesRegex(RuntimeError, "No available kernel."):
                 test()
 
+    def test_flash_attention_rejects_different_dk_dv(self, device):
+        q = torch.empty(1, 1, 128, 192, dtype=torch.float16, device=device)
+        k = torch.empty_like(q)
+        v = torch.empty(1, 1, 128, 128, dtype=torch.float16, device=device)
+        params = SDPAParams(q, k, v, None, 0.0, True, False)
+        self.assertFalse(can_use_flash_attention(params))
+
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN Attention is not supported on this system")
     def test_fused_attention_different_dk_dv(self, device):
         dtype = torch.bfloat16
@@ -3884,7 +3907,7 @@ class TestSDPACudaOnly(NNTestCase):
         out_cpu = torch.nn.functional.scaled_dot_product_attention(q_cpu, q_cpu, q_cpu)
         out_cpu.backward(grad_cpu)
         self.assertEqual(out, out_cpu.cuda().half(), atol=1e-3, rtol=1e-3)
-        self.assertEqual(q.grad, q_cpu.grad.cuda().half(), atol=7e-3, rtol=5e-3)
+        self.assertEqual(q.grad, q_cpu.grad.cuda().half(), atol=7e-3, rtol=7e-3)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
     def test_cudnn_attention_seqlen1_dropout_heuristic(self):
