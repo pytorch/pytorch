@@ -523,6 +523,23 @@ class TpHashTests(torch._dynamo.test_case.TestCase):
         p = Point(1, 2)
         self._assert_hash_equals(p)
 
+    def test_hash_frozen_dataclass_custom_hash(self):
+        """A frozen dataclass with a custom __hash__ is traced, not replaced by
+        the generated field-tuple hash. The unhashable ``payload`` field would
+        make the field hash raise, so this also covers specs (e.g. the cxx
+        pytree TreeSpec) that hold unhashable metadata."""
+        from dataclasses import dataclass
+
+        @dataclass(frozen=True, eq=False)
+        class Custom:
+            key: int
+            payload: list  # unhashable; excluded by __hash__
+
+            def __hash__(self):
+                return hash(self.key)
+
+        self._assert_hash_equals(Custom(7, [1, 2, 3]))
+
     # --- Weakref ---
 
     def test_hash_weakref(self):
@@ -637,11 +654,11 @@ class TpHashTests(torch._dynamo.test_case.TestCase):
 
         self._assert_hash_equals(dist.GroupMember)
 
-    # --- OpaqueObjectClassVariable ---
+    # --- CustomClassVariable ---
 
     def test_hash_opaque_value_type(self):
-        """OpaqueObjectClassVariable: hash of registered opaque value type."""
-        from torch._library.opaque_object import register_opaque_type
+        """CustomClassVariable: hash of registered opaque value type."""
+        from torch._library.opaque_object import register_custom_class
 
         class _HashTestOpaque:
             def __init__(self, x):
@@ -656,7 +673,7 @@ class TpHashTests(torch._dynamo.test_case.TestCase):
             def __fx_repr__(self):
                 return (f"_HashTestOpaque({self.x})", {})
 
-        register_opaque_type(_HashTestOpaque, typ="value")
+        register_custom_class(_HashTestOpaque, typ="constant")
         self._assert_hash_equals(_HashTestOpaque(42))
 
     # --- Dunder __hash__ and consistency ---

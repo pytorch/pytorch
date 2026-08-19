@@ -9,7 +9,12 @@ from typing import Any, IO, Literal, Optional, TYPE_CHECKING, Union
 
 import torch.fx
 
-from .standalone_compile import CompiledArtifact, DynamicShapesType  # noqa: TC001
+from .standalone_compile import (
+    compile_to_python,
+    CompiledArtifact,
+    DynamicShapesType,
+    load_from_python,
+)
 
 
 if TYPE_CHECKING:
@@ -22,6 +27,8 @@ if TYPE_CHECKING:
 
 __all__ = [
     "compile",
+    "compile_to_python",
+    "load_from_python",
     "list_mode_options",
     "list_options",
     "cudagraph_mark_step_begin",
@@ -125,7 +132,7 @@ def aoti_compile_and_package(
             "as we can get this information from exported_program.example_inputs."
         )
 
-    assert (
+    if not (
         package_path is None
         or (
             isinstance(package_path, (io.IOBase, IO))
@@ -136,9 +143,10 @@ def aoti_compile_and_package(
             isinstance(package_path, (str, os.PathLike))
             and os.fspath(package_path).endswith(".pt2")
         )
-    ), (
-        f"Expect package path to be a file ending in .pt2, is None, or is a buffer. Instead got {package_path}"
-    )
+    ):
+        raise AssertionError(
+            f"Expect package path to be a file ending in .pt2, is None, or is a buffer. Instead got {package_path}"
+        )
 
     inductor_configs = inductor_configs or {}
     inductor_configs["aot_inductor.package"] = True
@@ -183,18 +191,23 @@ def _aoti_compile_and_package_inner(
     """
 
     if check_accuracy:
-        assert kwargs is None or len(kwargs) == 0, (
-            "when checking for accuracy, the inputs must have been flattened and kwargs is None"
-        )
+        if not (kwargs is None or len(kwargs) == 0):
+            raise AssertionError(
+                "when checking for accuracy, the inputs must have been flattened and kwargs is None"
+            )
 
     from .package import package_aoti
 
-    assert isinstance(gm, torch.fx.GraphModule)
+    if not isinstance(gm, torch.fx.GraphModule):
+        raise AssertionError(f"expected torch.fx.GraphModule, got {type(gm)}")
 
     kwargs = kwargs or {}
 
     aoti_files = aot_compile(gm, args, kwargs, options=inductor_configs)
-    assert isinstance(aoti_files, list)
+    if not isinstance(aoti_files, list):
+        raise AssertionError(
+            f"expected aoti_files to be a list, got {type(aoti_files)}"
+        )
 
     if package_path is None:
         path = [
@@ -211,7 +224,10 @@ def _aoti_compile_and_package_inner(
         package_path = path[0] + ".pt2"
 
     res = package_aoti(package_path, aoti_files)
-    assert res == package_path
+    if res != package_path:
+        raise AssertionError(
+            f"expected res == package_path, got {res} != {package_path}"
+        )
 
     if load_and_run or check_accuracy:
         compiled_model = aoti_load_package(package_path)

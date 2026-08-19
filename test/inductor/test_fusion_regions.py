@@ -9,6 +9,7 @@ from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.ops import aten
+from torch.testing._internal.common_utils import xfailIfNoAcceleratorTriton
 
 
 HAS_GPU = torch.cuda.is_available()
@@ -103,6 +104,7 @@ class TestFusionRegionDetection(InductorTestCase):
             "Ops before and after mm should not be in the same fusion region",
         )
 
+    @xfailIfNoAcceleratorTriton
     def test_estimate_fused_node_costs(self):
         """Test that fused costs correctly exclude internal I/O."""
         from torch._inductor.fx_passes.fusion_regions import (
@@ -179,6 +181,7 @@ class TestFusionRegionDetection(InductorTestCase):
         self.assertIsNotNone(qr_node)
         self.assertFalse(is_fusible_node(qr_node))
 
+    @xfailIfNoAcceleratorTriton
     def test_fused_costs_does_not_mutate_graph(self):
         """estimate_fused_node_costs must not mutate the graph."""
         from torch._inductor.fx_passes.fusion_regions import (
@@ -213,6 +216,7 @@ class TestFusionRegionDetection(InductorTestCase):
             "Graph must not be mutated by estimate_fused_node_costs",
         )
 
+    @xfailIfNoAcceleratorTriton
     def test_fused_costs_handles_forced_bad_region(self):
         """estimate_fused_node_costs works for any region_of mapping."""
         from torch._inductor.fx_passes.fusion_regions import estimate_fused_node_costs

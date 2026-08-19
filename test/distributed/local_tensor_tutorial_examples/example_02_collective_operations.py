@@ -120,7 +120,7 @@ def reduce_scatter_tensors(process_group):
         output_shape = (tensors[0].size(0) // num_ranks, tensors[0].size(1))
         lt_output = torch.zeros(output_shape, dtype=lt_input.dtype)
 
-        dist.reduce_scatter_tensor(lt_output, lt_input, group=process_group)
+        dist.reduce_scatter_single(lt_output, lt_input, group=process_group)
 
         rank_outputs = {
             rank: lt_output._local_tensors[rank].clone() for rank in range(num_ranks)

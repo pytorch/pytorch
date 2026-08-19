@@ -106,9 +106,7 @@ def to_out_variant(op: torch._ops.OpOverload) -> torch._ops.OpOverload | None:
     torch_packet = getattr(getattr(torch.ops, namespace), op_name)
 
     # Search through all overloads for matching out variant
-    for overload_name in torch_packet.overloads():
-        candidate = getattr(torch_packet, overload_name)
-
+    for candidate in torch_packet.op_overloads():
         # pyrefly: ignore [missing-attribute]
         if torch.Tag.out not in candidate.tags:
             continue

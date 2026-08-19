@@ -21,7 +21,7 @@ The profiler instruments PyTorch to collect information about the model's execut
 
 ## Codebase Structure ##
 
-This section highlights directories an files that are significant to the profiler. Lesser relevant files, directories, and modules are omitted.
+This section highlights directories and files that are significant to the profiler. Lesser relevant files, directories, and modules are omitted.
 ```
 torch/
 │

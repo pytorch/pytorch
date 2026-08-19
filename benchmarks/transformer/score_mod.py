@@ -737,6 +737,8 @@ def generate_score_mod(attn_type: str, shape: tuple[int, ...]) -> Callable | Non
     def head_bias(score, b, h, m, n):
         return score + 2 * h
 
+    on_cuda = torch.cuda.is_available() and torch.version.hip is None
+
     function_dict = {
         "noop": None,
         "causal": None,
@@ -746,7 +748,8 @@ def generate_score_mod(attn_type: str, shape: tuple[int, ...]) -> Callable | Non
         "sliding_window": None,
         "document_mask": None,
         "prefix_lm": None,
-        "softcap": generate_tanh_softcap(softcap_value, approx=True),
+        # approx=True is only supported by CUDA. It uses inline PTX
+        "softcap": generate_tanh_softcap(softcap_value, approx=on_cuda),
     }
 
     score_mod = function_dict[attn_type]

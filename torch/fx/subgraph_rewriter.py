@@ -245,7 +245,7 @@ def replace_pattern_with_filters(
         ``replacement_callback``: A function that takes in a match and returns a
             Graph to be used as the replacement. This allows you to construct a
             replacement graph based on the match.
-        ``replacement_callback``: Node name to match. If not empty, it will try to match the node name.
+        ``node_name_match``: Node name to match. If not empty, it will try to match the node name.
     """
 
     return _replace_pattern(
