@@ -4313,6 +4313,59 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                             with cudnn.flags(enabled=False):
                                 test(N, C, H, W, mode, padding_mode, align_corners, input_requires_grad)
 
+    @set_default_dtype(torch.double)
+    def test_affine_grid_3d(self):
+        # test known input on CPU
+        input = torch.arange(1., 13).view(1, 3, 4)
+        output = F.affine_grid(input, torch.Size([1, 1, 2, 2, 2]), align_corners=True)
+        groundtruth = torch.tensor(
+            [[[[[-2., -10., -18.], [0., 0., 0.]], [[2., 2., 2.], [4., 12., 20.]]],
+              [[[4., 4., 4.], [6., 14., 22.]], [[8., 16., 24.], [10., 26., 42.]]]]]).view(1, 2, 2, 2, 3)
+        self.assertEqual(output, groundtruth)
+        output = F.affine_grid(input, torch.Size([1, 1, 2, 2, 2]), align_corners=False)
+        groundtruth = torch.tensor(
+            [[[[[1., -1., -3.], [2., 4., 6.]], [[3., 5., 7.], [4., 10., 16.]]],
+              [[[4., 6., 8.], [5., 11., 17.]], [[6., 12., 18.], [7., 17., 27.]]]]]).view(1, 2, 2, 2, 3)
+        self.assertEqual(output, groundtruth)
+
+        for align_corners in (True, False):
+            # do gradcheck
+            N = random.randint(1, 8)
+            C = random.randint(1, 8)
+            D = random.randint(1, 8)
+            H = random.randint(1, 8)
+            W = random.randint(1, 8)
+            sz = torch.Size([N, C, D, H, W])
+            inp = torch.randn(N, 3, 4, requires_grad=True)
+            with warnings.catch_warnings(record=True):
+                warnings.simplefilter("always")  # python2 requires this so other tests can trigger
+                self.assertTrue(gradcheck(
+                    lambda inp: F.affine_grid(inp, sz, align_corners=align_corners),
+                    (inp,), check_forward_ad=True))
+
+        # test CPU against CUDA
+        if TEST_CUDA:
+            N = random.randint(1, 8)
+            C = random.randint(1, 8)
+            D = random.randint(1, 8)
+            H = random.randint(1, 8)
+            W = random.randint(1, 8)
+            sz = torch.Size([N, C, D, H, W])
+            for align_corners in (True, False):
+                input_cpu = torch.randn(N, 3, 4, requires_grad=True)
+                with warnings.catch_warnings(record=True):
+                    warnings.simplefilter("always")  # python2 requires this so other tests can trigger
+                    out_cpu = F.affine_grid(input_cpu, sz, align_corners=align_corners)
+                gradients = torch.randn(out_cpu.size())
+                out_cpu.backward(gradients)
+                input_gpu = input_cpu.detach().cuda().requires_grad_()
+                with warnings.catch_warnings(record=True):
+                    warnings.simplefilter("always")  # python2 requires this so other tests can trigger
+                    out_cuda = F.affine_grid(input_gpu, sz, align_corners=align_corners)
+                out_cuda.backward(gradients.cuda())
+                self.assertEqual(out_cpu, out_cuda)
+                self.assertEqual(input_cpu.grad, input_gpu.grad)
+
     def test_channel_shuffle_return_alias_of_self(self):
         # gh-76616: nn.ChannelShuffle will return alias of self with an empty input tensor
         groups = 3
@@ -6148,60 +6201,6 @@ class TestNNDeviceType(NNTestCase):
             sz = torch.Size([N, C, H, W])
             for align_corners in (True, False):
                 input_cpu = torch.randn(N, 2, 3, requires_grad=True)
-                with warnings.catch_warnings(record=True):
-                    warnings.simplefilter("always")  # python2 requires this so other tests can trigger
-                    out_cpu = F.affine_grid(input_cpu, sz, align_corners=align_corners)
-                gradients = torch.randn(out_cpu.size())
-                out_cpu.backward(gradients)
-                input_device = input_cpu.detach().to(device).requires_grad_()
-                with warnings.catch_warnings(record=True):
-                    warnings.simplefilter("always")  # python2 requires this so other tests can trigger
-                    out_device = F.affine_grid(input_device, sz, align_corners=align_corners)
-                out_device.backward(gradients.to(device))
-                self.assertEqual(out_cpu, out_device)
-                self.assertEqual(input_cpu.grad, input_device.grad)
-
-    @skipMPS  # MPS does not support double dtype, which this test relies on via set_default_dtype
-    @set_default_dtype(torch.double)
-    def test_affine_grid_3d(self, device):
-        # test known input on CPU
-        input = torch.arange(1., 13).view(1, 3, 4)
-        output = F.affine_grid(input, torch.Size([1, 1, 2, 2, 2]), align_corners=True)
-        groundtruth = torch.tensor(
-            [[[[[-2., -10., -18.], [0., 0., 0.]], [[2., 2., 2.], [4., 12., 20.]]],
-              [[[4., 4., 4.], [6., 14., 22.]], [[8., 16., 24.], [10., 26., 42.]]]]]).view(1, 2, 2, 2, 3)
-        self.assertEqual(output, groundtruth)
-        output = F.affine_grid(input, torch.Size([1, 1, 2, 2, 2]), align_corners=False)
-        groundtruth = torch.tensor(
-            [[[[[1., -1., -3.], [2., 4., 6.]], [[3., 5., 7.], [4., 10., 16.]]],
-              [[[4., 6., 8.], [5., 11., 17.]], [[6., 12., 18.], [7., 17., 27.]]]]]).view(1, 2, 2, 2, 3)
-        self.assertEqual(output, groundtruth)
-
-        for align_corners in (True, False):
-            # do gradcheck
-            N = random.randint(1, 8)
-            C = random.randint(1, 8)
-            D = random.randint(1, 8)
-            H = random.randint(1, 8)
-            W = random.randint(1, 8)
-            sz = torch.Size([N, C, D, H, W])
-            inp = torch.randn(N, 3, 4, requires_grad=True)
-            with warnings.catch_warnings(record=True):
-                warnings.simplefilter("always")  # python2 requires this so other tests can trigger
-                self.assertTrue(gradcheck(
-                    lambda inp: F.affine_grid(inp, sz, align_corners=align_corners),
-                    (inp,), check_forward_ad=True))
-
-        # test CPU against accelerator
-        if torch.device(device).type != 'cpu':
-            N = random.randint(1, 8)
-            C = random.randint(1, 8)
-            D = random.randint(1, 8)
-            H = random.randint(1, 8)
-            W = random.randint(1, 8)
-            sz = torch.Size([N, C, D, H, W])
-            for align_corners in (True, False):
-                input_cpu = torch.randn(N, 3, 4, requires_grad=True)
                 with warnings.catch_warnings(record=True):
                     warnings.simplefilter("always")  # python2 requires this so other tests can trigger
                     out_cpu = F.affine_grid(input_cpu, sz, align_corners=align_corners)
@@ -16166,7 +16165,7 @@ class TestNNCUDA(NNTestCase):
     @set_default_dtype(torch.double)
     @parametrize_test('train', [True, False])
     @parametrize_test('p', [0, 0.276, 0.731, 1])
-    def test_RNN_dropout(self, p, train):
+    def test_RNN_dropout(self, device, p, train):
         # checking the assumption that cuDNN sticks dropout in between
         # RNN layers
         for cuda in (True, False):
@@ -16210,12 +16209,12 @@ class TestNNCUDA(NNTestCase):
     @set_default_dtype(torch.double)
     @parametrize_test('bidirectional', [True, False])
     @parametrize_test('mode', ['RNN', 'LSTM', 'GRU'])
-    def test_error_RNN_seq_len_zero(self, mode, bidirectional):
+    def test_error_RNN_seq_len_zero(self, device, mode, bidirectional):
         # checking error message when RNN has seq_len = 0
-        for device in get_all_device_types():
+        for dev in get_all_device_types():
             input = torch.ones(0, 10, 5)
             rnn = getattr(nn, mode)(5, 6, bidirectional=bidirectional)
-            if device == 'cuda':
+            if dev == 'cuda':
                 rnn.cuda()
                 input = input.cuda()
 
@@ -16225,7 +16224,7 @@ class TestNNCUDA(NNTestCase):
     @skipCUDAIfNoCudnn
     @parametrize_test('train', [True, False])
     @parametrize_test('p', [0, 0.1234])
-    def test_RNN_dropout_state(self, p, train):
+    def test_RNN_dropout_state(self, device, p, train):
         for cuda in (True, False):
             rnn = nn.RNN(100, 100, 2, bias=False, dropout=p, nonlinearity='relu')
             if cuda:
@@ -16266,7 +16265,7 @@ class TestNNCUDA(NNTestCase):
     @skipCUDAIfNoCudnn
     @set_default_dtype(torch.double)
     @parametrize_test('train', [True, False])
-    def test_RNN_change_dropout(self, train):
+    def test_RNN_change_dropout(self, device, train):
         for cuda in (True, False):
             rnn = nn.RNN(100, 100, 2, dropout=0, nonlinearity='relu')
             input = torch.rand(3, 2, 100)
