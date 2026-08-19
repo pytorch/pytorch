@@ -1445,9 +1445,7 @@ class DeviceCachingAllocator {
   // NCCL registration, inductor cudagraph_trees warmup, internal
   // try_mempool_fallback).
   //
-  // Plain int because all access is serialized through `mutex`. Promote to
-  // std::atomic<int> (relaxed) if begin/end ever need to race or if any
-  // reader wants lock-free access.
+  // Plain int because all access is serialized through `mutex`.
   int num_active_captures_ = 0;
 
   // tracks which pools we can use as a last resort before ooming
@@ -3627,8 +3625,6 @@ class DeviceCachingAllocator {
   //      device that has another stream capturing (eager-eligible) from the
   //      capturing stream itself (must follow capture rules).
   //
-  // The counter read is safe because all callers hold `mutex`
-  // (see num_active_captures_).
   bool is_capture_context() {
     if (C10_LIKELY(num_active_captures_ == 0)) {
       return false;
@@ -5397,5 +5393,41 @@ struct BackendStaticInitializer {
 
 std::atomic<CUDAAllocator*> allocator;
 static BackendStaticInitializer backend_static_initializer;
+
+namespace {
+static_assert(std::atomic<int>::is_always_lock_free);
+// DeviceCachingAllocator::num_active_captures_ is mutex-protected and used by
+// the native allocator. This backend-independent mirror provides a lock-free
+// gate for queries outside the allocator. Relaxed ordering is sufficient
+// because the per-stream capture query is authoritative.
+std::array<std::atomic<int>, C10_COMPILE_TIME_MAX_GPUS> active_captures{};
+
+void assertValidCaptureDevice(c10::DeviceIndex device) {
+  TORCH_INTERNAL_ASSERT(
+      device >= 0 && device < C10_COMPILE_TIME_MAX_GPUS,
+      "Invalid device index ",
+      static_cast<int>(device));
+}
+} // namespace
+
+void markCaptureBegin(c10::DeviceIndex device) {
+  assertValidCaptureDevice(device);
+  get()->markCaptureBegin(device);
+  active_captures[device].fetch_add(1, std::memory_order_relaxed);
+}
+
+void markCaptureEnd(c10::DeviceIndex device) {
+  assertValidCaptureDevice(device);
+  get()->markCaptureEnd(device);
+  auto previous =
+      active_captures[device].fetch_sub(1, std::memory_order_relaxed);
+  TORCH_INTERNAL_ASSERT(
+      previous > 0, "markCaptureEnd called with no captures in progress");
+}
+
+bool hasActiveCapture(c10::DeviceIndex device) {
+  assertValidCaptureDevice(device);
+  return active_captures[device].load(std::memory_order_relaxed) != 0;
+}
 } // namespace cuda::CUDACachingAllocator
 } // namespace c10
