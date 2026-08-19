@@ -2525,7 +2525,7 @@ class TestReductions(TestCase):
         x[-1] = 1
         # MPS reduction kernels index in 32 bits and should raise
         if self.device_type == "mps":
-            self.assertRaisesRegex(RuntimeError, "64-bit indexing", fn, x)
+            self.assertRaisesRegex(NotImplementedError, "64-bit indexing", fn, x)
         else:
             self.assertEqual(fn(x), expected)
 

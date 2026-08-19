@@ -275,10 +275,10 @@ static void norm_kernel_mps(TensorIterator& iter, const Scalar& p_scalar) {
     return;
   }
 
-  TORCH_CHECK(canUse32BitIndexMath(input, 1LL << 32),
-              "MPS norm: tensors requiring 64-bit indexing are not supported (numel=",
-              input.numel(),
-              ")");
+  TORCH_CHECK_NOT_IMPLEMENTED(canUse32BitIndexMath(input, 1LL << 32),
+                              "MPS norm: tensors requiring 64-bit indexing are not supported (numel=",
+                              input.numel(),
+                              ")");
   // Number of input elements that are reduced into one output element
   uint32_t reduction_size = input.numel() / output.numel();
 
@@ -925,11 +925,11 @@ static void argmax_argmin_out_mps(const Tensor& input_t,
     return;
   }
 
-  TORCH_CHECK(canUse32BitIndexMath(input, 1LL << 32),
-              func_name,
-              ": tensors requiring 64-bit indexing are not supported on MPS (numel=",
-              input.numel(),
-              ")");
+  TORCH_CHECK_NOT_IMPLEMENTED(canUse32BitIndexMath(input, 1LL << 32),
+                              func_name,
+                              ": tensors requiring 64-bit indexing are not supported on MPS (numel=",
+                              input.numel(),
+                              ")");
   const auto kernel_name = fmt::format("{}_reduction_{}_long", op_prefix, in_str);
 
   NormParams params{};
@@ -1015,12 +1015,12 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
     }
   }
 
-  TORCH_CHECK(canUse32BitIndexMath(input_orig, 1LL << 32),
-              "MPS ",
-              opts.prefix,
-              "reduction: tensors requiring 64-bit indexing are not supported (numel=",
-              input_orig.numel(),
-              ")");
+  TORCH_CHECK_NOT_IMPLEMENTED(canUse32BitIndexMath(input_orig, 1LL << 32),
+                              "MPS ",
+                              opts.prefix,
+                              "reduction: tensors requiring 64-bit indexing are not supported (numel=",
+                              input_orig.numel(),
+                              ")");
   const uint32_t reduction_size = input_orig.numel() / output.numel();
   constexpr uint32_t NCHAINS = SUM_NCHAINS;
   MPSStream* stream = getCurrentMPSStream();
