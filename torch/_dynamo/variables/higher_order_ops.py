@@ -67,7 +67,7 @@ from .base import VariableTracker
 from .dicts import ConstDictVariable
 from .lazy import LazyVariableTracker
 from .lists import ListVariable, TupleVariable
-from .sets import SetVariable
+from .sets import FrozensetVariable, SetVariable
 
 
 if TYPE_CHECKING:
@@ -249,7 +249,7 @@ def find_mismatched_vars(
     elif isinstance(var, ConstDictVariable):
         for value in var.items.values():
             mismatched_vars.update(find_mismatched_vars(value, types, allow_none))
-    elif isinstance(var, SetVariable):
+    elif isinstance(var, (SetVariable, FrozensetVariable)):
         for key in var.items:
             mismatched_vars.update(find_mismatched_vars(key.vt, types, allow_none))
     else:
@@ -1462,6 +1462,7 @@ def move_lifted_freevars_phs_to_end(
 def check_aliasing_and_input_mutation(
     subtracer: "SubgraphTracer",
     graph: torch.fx.Graph,
+    *,
     supports_input_mutation: bool,
     supports_aliasing: bool,
     supports_input_input_aliasing: bool,
@@ -1707,8 +1708,9 @@ def speculate_subgraph_with_auto_output_flattening(
     filter_aliased_intermediates: bool = False,
     supports_input_mutation: bool = False,
     supports_aliasing: bool = False,
-    # Whether multiple subgraph inputs may share storage. Input-to-output and
-    # output-to-output aliases still require supports_aliasing=True.
+    # Whether multiple subgraph inputs may share storage when supports_aliasing
+    # is False. Input-to-output and output-to-output aliases still require
+    # supports_aliasing=True.
     supports_input_input_aliasing: bool = False,
     # Pass in an originating tracer - this is needed for preserving context
     # across fwd-bwd for autograd.Function
@@ -1967,10 +1969,10 @@ def speculate_subgraph_with_auto_output_flattening(
             check_aliasing_and_input_mutation(
                 subtracer,
                 graph,
-                supports_input_mutation,
-                supports_aliasing,
-                supports_input_input_aliasing,
-                source_target,
+                supports_input_mutation=supports_input_mutation,
+                supports_aliasing=supports_aliasing,
+                supports_input_input_aliasing=supports_input_input_aliasing,
+                source_target=source_target,
             )
             # Return both the output VT and the graph output VTs separately:
             # - `output`: The VT that Dynamo continues tracing with (may be
@@ -2037,8 +2039,9 @@ def speculate_subgraph(
     remove_consts_from_outputs: bool = True,
     supports_input_mutation: bool = False,
     supports_aliasing: bool = False,
-    # Whether multiple subgraph inputs may share storage. Input-to-output and
-    # output-to-output aliases still require supports_aliasing=True.
+    # Whether multiple subgraph inputs may share storage when supports_aliasing
+    # is False. Input-to-output and output-to-output aliases still require
+    # supports_aliasing=True.
     supports_input_input_aliasing: bool = False,
     # Pass in an originating tracer - this is needed for preserving context
     # across fwd-bwd for autograd.Function
@@ -2171,10 +2174,10 @@ def speculate_subgraph(
                 check_aliasing_and_input_mutation(
                     subtracer,
                     graph,
-                    supports_input_mutation,
-                    supports_aliasing,
-                    supports_input_input_aliasing,
-                    source_target,
+                    supports_input_mutation=supports_input_mutation,
+                    supports_aliasing=supports_aliasing,
+                    supports_input_input_aliasing=supports_input_input_aliasing,
+                    source_target=source_target,
                 )
                 mutation_info = subtracer.has_input_mutation()
                 graph._dynamo_mutated_input_indices = (  # pyrefly: ignore[missing-attribute]
@@ -3793,9 +3796,11 @@ class ReparametrizeModuleCallVariable(FunctorchHigherOrderVariable):
 
 
 class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
-    _HOP_NAME = "torch.ops.higher_order.wrap"
-    supports_input_mutation = True
-    supports_aliasing = True
+    # Shared implementation for wrapping HOPs. Concrete wrappers must opt in
+    # when their runtime semantics permit body mutation or aliasing.
+    _HOP_NAME = "wrapped higher order operator"
+    supports_input_mutation = False
+    supports_aliasing = False
     allow_side_effects = False
 
     def install_subgraph_in_output_graph(
@@ -3936,6 +3941,12 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             body_r,
             body_graph_output_vts,
         )
+
+
+class WrapOperatorHigherOrderVariable(WrapHigherOrderVariable):
+    _HOP_NAME = "torch.ops.higher_order.wrap"
+    supports_input_mutation = True
+    supports_aliasing = True
 
 
 class WrapWithSetGradEnabledHigherOrderVariable(TorchHigherOrderOperatorVariable):
@@ -4139,6 +4150,8 @@ class WrapWithAutocastHigherOrderVariable(TorchHigherOrderOperatorVariable):
 class FlexGemmHigherOrderVariable(WrapHigherOrderVariable):
     _HOP_NAME = "torch.ops.higher_order.flex_gemm"
     _ALLOW_FALLBACK_TO_EAGER = False
+    supports_input_mutation = True
+    supports_aliasing = True
 
     def _call_function(
         self,
@@ -4223,10 +4236,6 @@ class FlexGemmHigherOrderVariable(WrapHigherOrderVariable):
 class HintsWrapperHigherOrderVariable(WrapHigherOrderVariable):
     _HOP_NAME = "torch.ops.higher_order.hints_wrapper"
     _ALLOW_FALLBACK_TO_EAGER = False
-    # Override WrapHigherOrderVariable's permissive defaults: hints_wrapper's
-    # functionalization path rejects body input mutation and output aliasing.
-    supports_input_mutation = False
-    supports_aliasing = False
 
     def install_subgraph_in_output_graph(
         self,
@@ -4373,7 +4382,14 @@ class StrictModeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # TODO (tmanlaibaatar) support pytree here
         for arg in unpacked_sequence:
             if isinstance(
-                arg, (ListVariable, TupleVariable, ConstDictVariable, SetVariable)
+                arg,
+                (
+                    ListVariable,
+                    TupleVariable,
+                    ConstDictVariable,
+                    SetVariable,
+                    FrozensetVariable,
+                ),
             ):
                 unimplemented(
                     gb_type="strict_mode: improper args",
@@ -4442,6 +4458,8 @@ class StrictModeHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
     _HOP_NAME = "torch.utils.checkpoint.checkpoint"
+    supports_input_mutation = True
+    supports_aliasing = True
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
@@ -4510,6 +4528,8 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
 
 class DynamoBypassingWrapperHigherOrderVariable(WrapHigherOrderVariable):
     _HOP_NAME = "torch.ops.higher_order.dynamo_bypassing_wrapper"
+    supports_input_mutation = True
+    supports_aliasing = True
 
     def __init__(self, hop: HigherOrderOperator, source: Source | None) -> None:
         super().__init__(hop, source)
@@ -6411,7 +6431,7 @@ _hop_name_to_variable_class = {
     "map_impl": MapHigherOrderVariable,
     "executorch_call_delegate": ExecutorchCallDelegateHigherOrderVariable,
     "out_dtype": OutDtypeHigherOrderVariable,
-    "wrap": WrapHigherOrderVariable,
+    "wrap": WrapOperatorHigherOrderVariable,
     "hints_wrapper": HintsWrapperHigherOrderVariable,
     "flex_gemm": FlexGemmHigherOrderVariable,
     "flex_attention": FlexAttentionHigherOrderVariable,

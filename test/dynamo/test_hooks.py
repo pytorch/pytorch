@@ -343,6 +343,44 @@ class HooksTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(actual, expected)
         self.assertEqual(x.grad, x_ref.grad)
 
+    def test_register_hook_input_mutation_rejected(self):
+        def fn(x):
+            y = x * x
+            y.register_hook(lambda grad: grad.mul_(2))
+            return y
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Encountered input mutation during higher order op tracing",
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(
+                torch.randn(3, requires_grad=True)
+            )
+
+        torch._dynamo.reset()
+        torch._dynamo.utils.counters.clear()
+
+        x = torch.randn(3, requires_grad=True)
+        x_ref = x.detach().clone().requires_grad_(True)
+        grad = torch.randn_like(x)
+
+        expected = fn(x_ref)
+        expected.backward(grad.clone())
+
+        actual = torch.compile(fn, backend="eager")(x)
+        actual.backward(grad.clone())
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(x.grad, x_ref.grad)
+        graph_breaks = torch._dynamo.utils.counters["graph_break"]
+        self.assertEqual(sum(graph_breaks.values()), 1)
+        self.assertTrue(
+            any(
+                "Encountered input mutation during higher order op tracing" in reason
+                for reason in graph_breaks
+            )
+        )
+
     def test_hook_on_intermediate_with_container(self):
         glb_list = []
         glb_dict = {}

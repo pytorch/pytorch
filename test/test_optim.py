@@ -41,7 +41,6 @@ from torch.testing._internal.common_optimizers import (
     TensorTracker,
 )
 from torch.testing._internal.common_utils import (
-    getRocmVersion,
     markDynamoStrictTest,
     parametrize,
     run_tests,
@@ -453,19 +452,6 @@ class TestOptimRenewed(TestCase):
     )
     def test_rosenbrock_sparse(self, device, dtype, optim_info, with_lrsched):
         optim_cls = optim_info.optim_cls
-
-        if (
-            TEST_WITH_ROCM
-            and getRocmVersion() >= (7, 14)
-            and optim_cls.__name__ == "SGD"
-            and not with_lrsched
-            and torch.device(device).type == "cuda"
-            and dtype == torch.float64
-        ):
-            self.skipTest(
-                "order/state-dependent sparse SGD step timeout on ROCm 7.14+ "
-                "(with_lrsched=False, SGD, cuda, float64)"
-            )
 
         # Skip differentiable testing for now, see https://github.com/pytorch/pytorch/issues/116490
         # Fused impls do not support sparse gradients
