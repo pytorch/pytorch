@@ -192,11 +192,16 @@ def _create_file_store(params: RendezvousParameters) -> FileStore:
         try:
             # The temporary file is readable and writable only by the user of
             # this process.
-            _, path = tempfile.mkstemp()
+            fd, path = tempfile.mkstemp()
         except OSError as exc:
             raise RendezvousError(
                 "The file creation for C10d store has failed. See inner exception for details."
             ) from exc
+
+        # ``FileStore`` opens the path itself, so the descriptor returned by
+        # ``mkstemp()`` is never used. Close it here -- before ``FileStore`` is
+        # constructed -- so that it is released even if construction fails.
+        os.close(fd)
 
     try:
         store = FileStore(path)
