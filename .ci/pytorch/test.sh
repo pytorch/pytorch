@@ -1153,16 +1153,27 @@ test_better_benchmark() {
     https://github.com/karthickai/better-benchmark.git "${benchmark_dir}"
   pushd "${benchmark_dir}"
 
+  local gpu_indices
+  gpu_indices="$(python - <<'PY'
+import torch
+
+count = torch.cuda.device_count()
+if count < 1:
+    raise RuntimeError("Expected at least one GPU")
+print(",".join(str(index) for index in range(count)))
+PY
+)"
   local accounting_dir="${debug_dir}/model-accounting"
   python scripts/generate_occurrence_sidecars.py \
     --corpus-root repros \
     --output-dir "${accounting_dir}/occurrences" \
     --extern-cache "${accounting_dir}/extern-cache.json" \
     --all \
-    --device 0
+    --devices "${gpu_indices}"
   python scripts/build_model_accounting.py \
     --occdir "${accounting_dir}/occurrences" \
-    --output "${test_reports_dir}/model_accounting_b200.json"
+    --output "${test_reports_dir}/model_accounting/b200" \
+    --prune
   popd
 }
 
