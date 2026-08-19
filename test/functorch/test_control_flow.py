@@ -4231,8 +4231,7 @@ class GraphModule(torch.nn.Module):
     @skipIfTorchDynamo("not a dynamo test")
     @parametrize("layers", [1, 2, 3])
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
-    # donated_buffer defaults to False; force it on so the fix (which
-    # excludes scan-fed saved buffers from donation) is actually exercised.
+    # donated_buffer defaults to False;
     @torch._functorch.config.patch(donated_buffer=True)
     def test_scan_chained_closure_gradient_inductor(self, layers):
         B, T, D, DT = 2, 8, 4, 0.1
