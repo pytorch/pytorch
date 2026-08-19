@@ -8,7 +8,6 @@ from torch.distributed._shard import shard_parameter
 from torch.testing._internal.common_device_type import (
     Capability,
     instantiate_device_type_tests,
-    onlyAccelerator,
     requires_capabilities,
 )
 from torch.testing._internal.common_distributed import (
@@ -140,7 +139,6 @@ class TestShardedEmbedding(ShardedTensorTestBase):
     @with_comms(init_rpc=False, backend=backend)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_capabilities(Capability.distributed.backend)
-    @onlyAccelerator
     def test_sharded_embedding_colwise(self, device):
         for spec in generate_chunk_sharding_specs_for_test(1):
             self._run_sharded_embedding(spec, [5, 4], 17, 12, device)
@@ -180,7 +178,6 @@ class TestShardedEmbedding(ShardedTensorTestBase):
     @with_comms(init_rpc=False, backend=backend)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_capabilities(Capability.distributed.backend)
-    @onlyAccelerator
     def test_sharded_embedding_rowwise(self, device):
         for spec in generate_chunk_sharding_specs_for_test(0):
             # Test even split.
@@ -221,7 +218,7 @@ class TestShardedEmbedding(ShardedTensorTestBase):
             self._run_sharded_embedding(spec, [4], 14, 11, device, max_norm=2.5)
 
 
-instantiate_device_type_tests(TestShardedEmbedding, globals())
+instantiate_device_type_tests(TestShardedEmbedding, globals(), except_for="cpu")
 
 
 if __name__ == "__main__":
