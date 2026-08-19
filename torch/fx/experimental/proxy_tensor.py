@@ -555,7 +555,7 @@ def _nary_sym_min(*args: Any) -> Any:
 def _sympy_handlers() -> dict[type[sympy.Expr], Callable[..., Any]]:
     """
     Returns a dict mapping sympy types to Python callables
-    (e.g. ``sympy.Mul`` -> ``operator.mul``, ``sympy.Add`` -> ``torch.sym_sum``).
+    (e.g. ``sympy.Mul`` -> a fold over ``operator.mul``).
     """
     import sympy
 
@@ -676,7 +676,7 @@ def _build_proxy_for_sym_expr(
     if expr.is_Float:
         return float(expr)
 
-    args = []
+    args: list[Any] = []
     for arg in expr.args:
         if (arg_value := _build_proxy_for_sym_expr(tracer, arg)) is None:
             return None
@@ -686,9 +686,18 @@ def _build_proxy_for_sym_expr(
     if not func:
         return None
 
+    # sympy Mul and Add are n-ary, but the handlers they map to (operator.mul,
+    # operator.add) take exactly two arguments, so an expression like s0*s1*s2
+    # has to be folded into a chain of binary ops. Fold rather than passing a
+    # variadic wrapper: the handler becomes the fx node's target, and that has
+    # to stay a real operator for downstream consumers.
     if out is None:
+        if len(args) > 2:
+            return functools.reduce(func, args)
         out = func(*args)
     else:
+        if len(args) > 2:
+            args = [functools.reduce(func, args[:-1]), args[-1]]
         _sym_register(tracer, func, tuple(args), out)
     return out
 
