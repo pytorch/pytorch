@@ -14160,9 +14160,9 @@ op_db: list[OpInfo] = [
 
                # Off-by-one issue when casting floats to ints
                DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_quick',
-                            dtypes=(torch.int16, torch.int32, torch.int64), device_type="cuda"),
+                            dtypes=(torch.int16, torch.int32, torch.int64), device_type=("cuda", "xpu")),
                DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_comprehensive',
-                            dtypes=(torch.int16, torch.int32, torch.int64), device_type="cuda"),
+                            dtypes=(torch.int16, torch.int32, torch.int64), device_type=("cuda", "xpu")),
                # UserWarning: CUDA caching allocator reports a memory leak not verified by the driver API
                # in __main__.TestJitCUDA.test_variant_consistency_jit_logspace_cuda_complex64!
                # Caching allocator allocated memory was 0 and is now reported as 307200 on device 0.
@@ -16561,6 +16561,9 @@ op_db: list[OpInfo] = [
             # NotImplementedError: The operator 'aten::multilabel_margin_loss' is not
             # currently implemented for the MPS device
             DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps'),
+            # torch-xpu-ops/issues/5020
+            DecorateInfo(unittest.expectedFailure, 'TestMeta',
+                         "test_dispatch_symbolic_meta_outplace", device_type='xpu'),
         ),
     ),
     OpInfo('nn.functional.leaky_relu',
@@ -18514,6 +18517,9 @@ op_db: list[OpInfo] = [
                # https://github.com/pytorch/pytorch/issues/71774
                DecorateInfo(unittest.skip('Skipped!'), 'TestNNCOpInfo', 'test_nnc_correctness',
                             device_type='cpu', dtypes=(torch.long,)),
+               # NotImplementedError: "dot_xpu_mkl" not implemented for 'Char', torch-xpu-ops/issues/4438
+               DecorateInfo(unittest.skip("NotImplementedError: 'dot_xpu_mkl' not implemented for 'Char'"),
+                            'TestMeta', device_type='xpu', dtypes=(torch.uint8, torch.int8)),
            )),
     BinaryUfuncInfo('__rmod__',
                     op=torch.Tensor.__rmod__,
@@ -21043,6 +21049,9 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
                # intel/torch-xpu-ops/issues/4452
                DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta_outplace', device_type="xpu", dtypes=(torch.uint8, torch.int8)),
+               # NotImplementedError: "dot_xpu_mkl" not implemented for 'Char', torch-xpu-ops/issues/4438
+               DecorateInfo(unittest.skip("NotImplementedError: 'dot_xpu_mkl' not implemented for 'Char'"),
+                            'TestMeta', device_type='xpu', dtypes=(torch.uint8, torch.int8)),
            )
            ),
     OpInfo('to_sparse',
