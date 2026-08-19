@@ -1069,6 +1069,59 @@ class _DimRange:
     max: int | None
 
 
+def _set_dim_range(t: Any, dim: int, min: int | None, max: int | None) -> None:
+    """
+    Records the range declared for ``dim`` by mark_dynamic or maybe_mark_dynamic,
+    replacing any range an earlier call declared for that dim. Dims without a
+    declared range get no entry, the range is guarded on by value.
+    """
+    if min is None and max is None:
+        ranges = getattr(t, "_dynamo_dynamic_range", None)
+        if ranges is not None:
+            previous = next((dr for dr in ranges if dr.dim == dim), None)
+            if previous is not None:
+                ranges.discard(previous)
+        return
+
+    if not hasattr(t, "_dynamo_dynamic_range"):
+        t._dynamo_dynamic_range = {_DimRange(dim, min, max)}
+        return
+
+    ranges = t._dynamo_dynamic_range
+    previous = next((dr for dr in ranges if dr.dim == dim), None)
+    if previous is not None:
+        ranges.discard(previous)
+    ranges.add(_DimRange(dim, min, max))
+
+
+def _get_dim_range(t: Any, dim: int) -> _DimRange | None:
+    """
+    Returns the range declared for ``dim`` by mark_dynamic or maybe_mark_dynamic, or
+    None. A dim can be dynamic without a declared range, for example when dynamism
+    was propagated by AOTAutograd instead of a marking API.
+    """
+    return next(
+        (dr for dr in getattr(t, "_dynamo_dynamic_range", ()) if dr.dim == dim), None
+    )
+
+
+def _dim_range_to_value_ranges(dim_range: _DimRange, *, default_min: int) -> Any:
+    """
+    Converts a _DimRange to a ValueRanges, filling in the bound the user left out
+    since ValueRanges rejects None. ``default_min`` is the lower bound to assume for
+    the kind of size at hand, 2 for backed sizes since 0 and 1 are specialized and 0
+    for size oblivious unbacked sizes. Symbols that are not tensor sizes, an
+    unspecialized int input for instance, are unbounded and do not belong here.
+    """
+    from torch.utils._sympy.numbers import int_oo
+    from torch.utils._sympy.value_ranges import ValueRanges
+
+    return ValueRanges(
+        lower=default_min if dim_range.min is None else dim_range.min,
+        upper=int_oo if dim_range.max is None else dim_range.max,
+    )
+
+
 @forbid_in_graph
 def mark_unbacked(
     t: Any,
@@ -1234,10 +1287,13 @@ def mark_dynamic(
         )
 
     if isinstance(index, int):
+        if index in getattr(t, "_dynamo_weak_dynamic_indices", ()):
+            raise RuntimeError(
+                f"dim {index} is already marked with maybe_mark_dynamic, marking it "
+                "with mark_dynamic as well is ambiguous"
+            )
         if not hasattr(t, "_dynamo_dynamic_indices"):
             t._dynamo_dynamic_indices = set()
-
-            t._dynamo_dynamic_range = set()
 
             # pyrefly: ignore [implicit-any]
             t._dynamo_hint_overrides = {}
@@ -1251,7 +1307,7 @@ def mark_dynamic(
         # TODO(voz): Should we bounds check?
 
         t._dynamo_dynamic_indices.add(index)
-        t._dynamo_dynamic_range.add(_DimRange(index, min, max))  # type: ignore[arg-type]
+        _set_dim_range(t, index, min, max)
         t._has_dynamo_dim_marking = True  # type: ignore[attr-defined]
 
         # FX tracers don't respect @forbid_in_graph and choke on the following error since it passes in proxies:
@@ -1294,14 +1350,17 @@ def maybe_mark_dynamic(
         )
 
     if isinstance(index, int):
+        if index in getattr(t, "_dynamo_dynamic_indices", ()):
+            raise RuntimeError(
+                f"dim {index} is already marked with mark_dynamic, which enforces its "
+                "range, calling maybe_mark_dynamic on it as well is ambiguous"
+            )
         if not hasattr(t, "_dynamo_weak_dynamic_indices"):
             t._dynamo_weak_dynamic_indices = set()
-        if not hasattr(t, "_dynamo_weak_dynamic_range"):
-            t._dynamo_weak_dynamic_range = set()
         # TODO(voz): Should we bounds check?
 
         t._dynamo_weak_dynamic_indices.add(index)
-        t._dynamo_weak_dynamic_range.add(_DimRange(index, min, max))
+        _set_dim_range(t, index, min, max)
         t._has_dynamo_dim_marking = True  # type: ignore[attr-defined]
         return
 

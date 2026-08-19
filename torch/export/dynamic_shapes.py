@@ -1430,7 +1430,6 @@ def _process_dynamic_shapes(
         # clean out decorators from user side, or previous export call
         # we also delete these attributes in non_strict_utils.py/make_constraints()
         tensor._dynamo_weak_dynamic_indices = set()
-        tensor._dynamo_weak_dynamic_range = set()
         tensor._dynamo_dynamic_indices = set()
         tensor._dynamo_dynamic_range = set()
         tensor._dynamo_static_indices = set()

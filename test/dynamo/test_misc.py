@@ -46,6 +46,7 @@ from torch import Tensor
 from torch._C import FileCheck
 from torch._dynamo import allow_in_graph
 from torch._dynamo.comptime import comptime
+from torch._dynamo.decorators import _DimRange
 from torch._dynamo.eval_frame import _debug_get_cache_entry_list
 from torch._dynamo.exc import Unsupported
 from torch._dynamo.source import ConstantSource, GetItemSource, LocalSource
@@ -109,6 +110,7 @@ from torch.testing._internal.common_utils import (
     wrapDeterministicFlagAPITest,
 )
 from torch.testing._internal.jit_utils import JitTestCase
+from torch.utils._sympy.numbers import int_oo
 
 
 pytree_modules = {
@@ -10766,6 +10768,22 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         res = f(torch.tensor([20, 21]))
         self.assertEqual(torch.tensor(True), res)
 
+    @staticmethod
+    def _range_recording_backend(compiled_ranges):
+        """Records the range of the single dynamic dim of each compiled graph."""
+
+        def backend(gm, example_inputs):
+            symints = [arg for arg in example_inputs if isinstance(arg, torch.SymInt)]
+            if not symints:
+                compiled_ranges.append("static")
+                return gm.forward
+            (symint,) = symints
+            vr = symint.node.shape_env.var_to_range[symint.node.expr]
+            compiled_ranges.append((vr.lower, vr.upper))
+            return gm.forward
+
+        return backend
+
     # Translation validation changes the exception type, don't run with it
     @torch.fx.experimental._config.patch(translation_validation=False)
     def test_mark_dynamic_with_ranges(self):
@@ -10783,42 +10801,169 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
     def test_maybe_mark_dynamic_with_ranges(self):
         compiled_ranges = []
 
-        def backend(gm, example_inputs):
-            sizes = [arg for arg in example_inputs if isinstance(arg, torch.SymInt)]
-            size = sizes[0] if sizes else example_inputs[0].shape[0]
-            if isinstance(size, torch.SymInt):
-                shape_env = size.node.shape_env
-                if shape_env is None:
-                    raise AssertionError("expected SymInt to have a ShapeEnv")
-                vr = shape_env.var_to_range[size.node.expr]
-                compiled_ranges.append((vr.lower, vr.upper))
-            else:
-                compiled_ranges.append(size)
-            return gm.forward
-
         def fn(x):
             if x.shape[0] == 3:
                 return x.sin()
             return x.cos() * x.shape[0]
 
+        opt_fn = torch.compile(
+            fn, backend=self._range_recording_backend(compiled_ranges)
+        )
+
+        # min/max do not prevent specialization, the shape[0] == 3 branch
+        # specializes the dim instead of raising a constraint violation.
         x = torch.randn(3)
         torch._dynamo.maybe_mark_dynamic(x, 0, min=2, max=5)
-        opt_fn = torch.compile(fn, backend=backend)
         self.assertEqual(opt_fn(x), fn(x))
-        self.assertEqual(compiled_ranges, [3])
+        self.assertEqual(compiled_ranges, ["static"])
 
+        # The user provided range is used for the dynamic dim.
         x = torch.randn(4)
         torch._dynamo.maybe_mark_dynamic(x, 0, min=2, max=5)
         self.assertEqual(opt_fn(x), fn(x))
-        self.assertEqual(compiled_ranges, [3, (2, 5)])
+        self.assertEqual(compiled_ranges, ["static", (2, 5)])
 
+        # 5 is within [2, 5], the graph above is reused.
         x = torch.randn(5)
         self.assertEqual(opt_fn(x), fn(x))
-        self.assertEqual(compiled_ranges, [3, (2, 5)])
+        self.assertEqual(compiled_ranges, ["static", (2, 5)])
 
+        # 6 is outside [2, 5] and unmarked, recompile with automatic dynamic.
         x = torch.randn(6)
         self.assertEqual(opt_fn(x), fn(x))
-        self.assertEqual(len(compiled_ranges), 3)
+        self.assertEqual(compiled_ranges, ["static", (2, 5), (2, int_oo)])
+
+        # A different range is a different request, it recompiles even though the
+        # size fits the graphs compiled above.
+        x = torch.randn(4)
+        torch._dynamo.maybe_mark_dynamic(x, 0, min=3, max=5)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(compiled_ranges, ["static", (2, 5), (2, int_oo), (3, 5)])
+
+        # Re-declaring a range that was already compiled reuses its graph.
+        x = torch.randn(4)
+        torch._dynamo.maybe_mark_dynamic(x, 0, min=3, max=5)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(compiled_ranges, ["static", (2, 5), (2, int_oo), (3, 5)])
+
+    def test_maybe_mark_dynamic_range_narrow_and_extend(self):
+        compiled_ranges = []
+
+        def fn(x):
+            if x.shape[0] < 5:
+                return x.sin()
+            return x.cos() * x.shape[0]
+
+        opt_fn = torch.compile(
+            fn, backend=self._range_recording_backend(compiled_ranges)
+        )
+
+        # Guards may narrow the requested range, [2, 5] becomes [2, 4].
+        x = torch.randn(4)
+        torch._dynamo.maybe_mark_dynamic(x, 0, min=2, max=5)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(compiled_ranges, [(2, 4)])
+
+        # The range is never extended to fit the input, a hint outside of it is an
+        # error even though a graph compiled for a wider range is cached.
+        x = torch.randn(6)
+        torch._dynamo.maybe_mark_dynamic(x, 0, min=2, max=5)
+        with self.assertRaisesRegex(
+            ConstraintViolationError, r"6 not in range \[2, 5\]"
+        ):
+            opt_fn(x)
+
+    def test_maybe_mark_dynamic_with_partial_range(self):
+        for kwargs, expected in (
+            ({"min": 3}, (3, int_oo)),
+            ({"max": 8}, (2, 8)),
+            ({}, (2, int_oo)),
+        ):
+            with self.subTest(kwargs=kwargs):
+                torch._dynamo.reset()
+                compiled_ranges = []
+
+                def fn(x):
+                    return x.cos() * x.shape[0]
+
+                x = torch.randn(4)
+                torch._dynamo.maybe_mark_dynamic(x, 0, **kwargs)
+                opt_fn = torch.compile(
+                    fn, backend=self._range_recording_backend(compiled_ranges)
+                )
+                self.assertEqual(opt_fn(x), fn(x))
+                self.assertEqual(compiled_ranges, [expected])
+
+    def test_maybe_mark_dynamic_range_override(self):
+        compiled_ranges = []
+
+        def fn(x):
+            return x.cos() * x.shape[0]
+
+        # A second call for the same dim overrides the range of the first one.
+        x = torch.randn(4)
+        torch._dynamo.maybe_mark_dynamic(x, 0, min=2, max=5)
+        torch._dynamo.maybe_mark_dynamic(x, 0, min=3, max=4)
+        opt_fn = torch.compile(
+            fn, backend=self._range_recording_backend(compiled_ranges)
+        )
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(compiled_ranges, [(3, 4)])
+
+    def test_maybe_mark_dynamic_conflicting_with_mark_dynamic(self):
+        # The two APIs disagree on whether the range is enforced, marking the same
+        # dim with both is rejected regardless of the order.
+        x = torch.randn(4)
+        torch._dynamo.mark_dynamic(x, 0, min=2, max=5)
+        with self.assertRaisesRegex(RuntimeError, "already marked with mark_dynamic"):
+            torch._dynamo.maybe_mark_dynamic(x, 0, min=3, max=4)
+
+        y = torch.randn(4)
+        torch._dynamo.maybe_mark_dynamic(y, 0, min=3, max=4)
+        with self.assertRaisesRegex(
+            RuntimeError, "already marked with maybe_mark_dynamic"
+        ):
+            torch._dynamo.mark_dynamic(y, 0, min=2, max=5)
+
+        # Different dims of the same tensor may use different APIs.
+        z = torch.randn(4, 4)
+        torch._dynamo.mark_dynamic(z, 0)
+        torch._dynamo.maybe_mark_dynamic(z, 1, min=2, max=5)
+        self.assertEqual(z._dynamo_dynamic_range, {_DimRange(1, 2, 5)})
+
+    def test_mark_dynamic_range_change_recompiles(self):
+        compiled_ranges = []
+
+        def fn(x):
+            return x.cos() * x.shape[0]
+
+        opt_fn = torch.compile(
+            fn, backend=self._range_recording_backend(compiled_ranges)
+        )
+
+        # mark_dynamic shares the range attribute with maybe_mark_dynamic, so a
+        # changed range recompiles here as well. A range the user left half open is
+        # completed with the bounds a backed size already has.
+        x = torch.randn(4)
+        torch._dynamo.mark_dynamic(x, 0, min=2, max=5)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(compiled_ranges, [(2, 5)])
+
+        x = torch.randn(4)
+        torch._dynamo.mark_dynamic(x, 0, min=3)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(compiled_ranges, [(2, 5), (3, int_oo)])
+
+    def test_maybe_mark_dynamic_range_with_propagated_dynamic_dim(self):
+        def fn(x):
+            return x.cos() * x.shape[0] * x.shape[1]
+
+        x = torch.randn(4, 4)
+        torch._dynamo.maybe_mark_dynamic(x, 0, min=2, max=5)
+        # dim 1 is weakly dynamic without a declared range, this used to raise
+        # IndexError while looking up its range.
+        x._dynamo_propagated_dynamic_indices = {1}
+        self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
 
     def test_mark_static(self):
         counter = CompileCounter()
