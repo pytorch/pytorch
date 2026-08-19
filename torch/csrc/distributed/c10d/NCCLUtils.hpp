@@ -19,8 +19,40 @@
 constexpr int64_t kCommInitBusyWaitMillis = 2;
 
 static_assert(
-    NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0),
-    "NCCL version must be 2.27 or later");
+    NCCL_VERSION_CODE >= NCCL_VERSION(2, 23, 0),
+    "NCCL version must be 2.23 or later");
+
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 24, 0)
+#define NCCL_SUPPORTS_FP8
+#endif
+
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 26, 0)
+#define NCCL_HAS_QOS
+#endif
+
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
+#define NCCL_HAS_COMM_WINDOW_REGISTER
+#endif
+
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
+#define NCCL_HAS_COLLNET
+#endif
+
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 3)
+#define NCCL_HAS_COMM_NAME
+#endif
+
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
+#define NCCL_HAS_CTA_POLICY
+#endif
+
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
+#define NCCL_HAS_NVLS_CTAS
+#endif
+
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
+#define NCCL_HAS_COMM_SHRINK
+#endif
 
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 29, 7)
 #define NCCL_HAS_COMM_OFFLOAD
@@ -28,6 +60,15 @@ static_assert(
 
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 30, 0)
 #define NCCL_HAS_MAX_P2P_PEERS
+#endif
+
+// `ncclConfig_t::hostCftMode` asks NCCL to create the communicator's CFT
+// (Compute Fabric Transport) logical endpoints during the first
+// `ncclCommWindowRegister`, which is what makes the host-side LE queries
+// (`ncclGetPeerDeviceLeInfo` and friends) usable without first building a
+// `ncclDevComm`. See NCCLSymmetricMemory::get_peer_cft_handle.
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 31, 2)
+#define NCCL_HAS_HOST_CFT_MODE
 #endif
 
 // Macro to throw on a non-successful NCCL return value.
@@ -159,8 +200,13 @@ static std::map<at::ScalarType, ncclDataType_t> ncclDataType = {
     {at::kLong, ncclInt64},
     {at::kHalf, ncclHalf},
     {at::kBool, ncclUint8},
+#ifdef NCCL_SUPPORTS_FP8
     {at::kFloat8_e5m2, ncclFloat8e5m2},
     {at::kFloat8_e4m3fn, ncclFloat8e4m3},
+#else
+    {at::kFloat8_e5m2, ncclUint8},
+    {at::kFloat8_e4m3fn, ncclUint8},
+#endif
     // NVIDIA GPUs does not support the UZ version standing for "no negative
     // zero".  See https://onnx.ai/onnx/technical/float8.html
     {at::kFloat8_e4m3fnuz, ncclUint8},
@@ -184,7 +230,7 @@ TORCH_API std::string getNcclErrorDetailStr(
     std::optional<std::string> processGroupFailureReason = std::nullopt);
 
 // Helper function that gets the data type and issues error if not supported
-ncclDataType_t getNcclDataType(at::ScalarType type);
+TORCH_API ncclDataType_t getNcclDataType(at::ScalarType type);
 
 // RAII wrapper for NCCL communicator
 class NCCLComm {
@@ -227,11 +273,13 @@ class NCCLComm {
       int rank,
       ncclConfig_t& config);
 
+#ifdef NCCL_HAS_COMM_SHRINK
   static std::shared_ptr<NCCLComm> shrink(
       NCCLComm* source,
       std::vector<int>& ranks_to_exclude,
       ncclConfig_t* config,
       int shrinkFlags = 0);
+#endif // NCCL_HAS_COMM_SHRINK
 
 #if (defined(IS_NCCLX) || defined(USE_ROCM)) && defined(NCCL_COMM_DUMP)
   std::unordered_map<std::string, std::string> ncclCommDump();

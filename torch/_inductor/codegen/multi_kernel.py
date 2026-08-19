@@ -113,9 +113,15 @@ class MultiKernelState:
                     buf.writeline(f"{name},")
             buf.writeline("], arg_index=arg_index)")
         else:  # call with dict[size hint key, kernel]
-            assert isinstance(kernels[0], TritonTemplateKernel)
-            assert isinstance(kernel_shape_keys, list)
-            assert len(kernels) == len(kernel_shape_keys)
+            if not isinstance(kernels[0], TritonTemplateKernel):
+                raise AssertionError("expected kernels[0] to be a TritonTemplateKernel")
+            if not isinstance(kernel_shape_keys, list):
+                raise AssertionError("expected kernel_shape_keys to be a list")
+            if len(kernels) != len(kernel_shape_keys):
+                raise AssertionError(
+                    f"expected len(kernels) == len(kernel_shape_keys), "
+                    f"got {len(kernels)} != {len(kernel_shape_keys)}"
+                )
             buf.writeline(
                 f"{multi_kernel_name} = async_compile.size_hint_multi_kernel({multi_kernel_name!r}, {{"
             )
@@ -148,7 +154,8 @@ class MultiKernel:
     """
 
     def __init__(self, kernels):
-        assert len(kernels) >= 2
+        if len(kernels) < 2:
+            raise AssertionError(f"expected at least 2 kernels, got {len(kernels)}")
 
         self.kernels = kernels
         self.kernel_name = V.graph.wrapper_code.multi_kernel_state.define_kernel(
@@ -194,13 +201,22 @@ class MultiKernel:
         # Prevent circular import
         from ..select_algorithm import TritonTemplateKernel
 
-        assert kernel_name == self.kernel_name
+        if kernel_name != self.kernel_name:
+            raise AssertionError(
+                f"expected kernel_name == self.kernel_name, "
+                f"got {kernel_name} != {self.kernel_name}"
+            )
         V.graph.wrapper_code.write_triton_header_once()
         _, call_args, _, arg_types = self.kernels[0].args.python_argdefs()
         for kernel in self.kernels[1:]:
             _, other_call_args, _, other_arg_types = kernel.args.python_argdefs()
-            assert call_args == other_call_args, (call_args, other_call_args)
-            assert arg_types == other_arg_types
+            if call_args != other_call_args:
+                raise AssertionError((call_args, other_call_args))
+            if arg_types != other_arg_types:
+                raise AssertionError(
+                    f"expected arg_types == other_arg_types, "
+                    f"got {arg_types} != {other_arg_types}"
+                )
 
         if V.graph.cpp_wrapper and not config.triton.autotune_at_compile_time:
             # for the second pass of cpp-wrapper codegen, we should call
@@ -277,7 +293,10 @@ class MultiKernel:
         Make sure all kernels have the same inplace update mappings.
         """
         for k in self.kernels[1:]:
-            assert k.inplace_update_buffers == self.kernels[0].inplace_update_buffers
+            if k.inplace_update_buffers != self.kernels[0].inplace_update_buffers:
+                raise AssertionError(
+                    "expected all kernels to share the same inplace_update_buffers"
+                )
         return self.kernels[0].inplace_update_buffers
 
     def warn_mix_layout(self, kernel_name: str):
@@ -290,7 +309,8 @@ class MultiKernelCall:
     """
 
     def __init__(self, multi_kernel_name, kernels, arg_index):
-        assert len(kernels) >= 1
+        if len(kernels) < 1:
+            raise AssertionError(f"expected at least 1 kernel, got {len(kernels)}")
         self._kernels = kernels
         self.multi_kernel_name = multi_kernel_name
 
@@ -303,7 +323,11 @@ class MultiKernelCall:
         if config.triton.multi_kernel > 1:
             # manually force a subkernel to ease perf testing
             picked_by_config = config.triton.multi_kernel - 2
-            assert picked_by_config < len(self._kernels)
+            if picked_by_config >= len(self._kernels):
+                raise AssertionError(
+                    f"expected picked_by_config < len(self._kernels), "
+                    f"got {picked_by_config} >= {len(self._kernels)}"
+                )
             # pyrefly: ignore [bad-assignment]
             self.picked_kernel = picked_by_config
         elif not self.disable_cache:
@@ -324,22 +348,28 @@ class MultiKernelCall:
         return pathlib.Path(path)
 
     def load_cache(self):
-        assert self.picked_kernel is None
+        if self.picked_kernel is not None:
+            raise AssertionError("expected self.picked_kernel to be None")
         path = self.cache_file_path()
         if path.exists():
             with path.open() as fd:
                 # pyrefly: ignore [bad-assignment]
                 self.picked_kernel = int(fd.read())
                 # pyrefly: ignore [unsupported-operation]
-                assert self.picked_kernel >= 0 and self.picked_kernel < len(
-                    self._kernels
-                )
+                if not (
+                    self.picked_kernel >= 0 and self.picked_kernel < len(self._kernels)
+                ):
+                    raise AssertionError(
+                        f"expected 0 <= picked_kernel < {len(self._kernels)}, "
+                        f"got {self.picked_kernel}"
+                    )
                 log.debug(
                     "Load picked kernel %d from cache file %s", self.picked_kernel, path
                 )
 
     def store_cache(self):
-        assert self.picked_kernel is not None
+        if self.picked_kernel is None:
+            raise AssertionError("expected self.picked_kernel to not be None")
         path = self.cache_file_path()
         path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -431,10 +461,14 @@ class MultiKernelCall:
     @staticmethod
     def lookup_choice(multi_kernel_name: str) -> str:
         # this should always been done during cpp-wrapper codegen
-        assert (
+        if not (
             V.graph.record_multi_kernel_choice
             and multi_kernel_name in V.graph.multi_kernel_to_choice
-        )
+        ):
+            raise AssertionError(
+                f"expected multi_kernel_name {multi_kernel_name} to be recorded "
+                f"during cpp-wrapper codegen"
+            )
         # there should be no miss
         return V.graph.multi_kernel_to_choice[multi_kernel_name]
 
@@ -463,7 +497,8 @@ class MultiKernelCall:
             picked_kernel_name = self.kernels[self.picked_kernel].inductor_meta.get(
                 "kernel_name"
             )
-            assert picked_kernel_name is not None
+            if picked_kernel_name is None:
+                raise AssertionError("expected picked_kernel_name to not be None")
             self.record_choice(self.multi_kernel_name, picked_kernel_name)
 
         run = self.kernels[self.picked_kernel].run  # type: ignore[method-assign]
@@ -480,7 +515,10 @@ class MultiKernelCall:
             "reduction_hint": k0.inductor_meta.get("reduction_hint"),
         }
         max_kernels = 4
-        assert len(timings) <= max_kernels
+        if len(timings) > max_kernels:
+            raise AssertionError(
+                f"expected len(timings) <= {max_kernels}, got {len(timings)}"
+            )
         for i in range(max_kernels):
             if i < len(self.kernels):
                 row[f"kernel{i}_path"] = get_kernel_path(self.kernels[i])
@@ -502,7 +540,8 @@ class SizeHintMultiKernel(MultiKernel):
     """
 
     def __init__(self, kernels):
-        assert isinstance(kernels, dict) and len(kernels) >= 1
+        if not (isinstance(kernels, dict) and len(kernels) >= 1):
+            raise AssertionError("expected kernels to be a non-empty dict")
 
         self.kernels, self.kernel_shape_keys = [], []
         for shape_key, kernel in kernels.items():
@@ -588,7 +627,8 @@ class SizeHintMultiKernelCall(MultiKernelCall):
             picked_kernel_name = self.kernels[self.picked_kernel].inductor_meta.get(
                 "kernel_name"
             )
-            assert picked_kernel_name is not None
+            if picked_kernel_name is None:
+                raise AssertionError("expected picked_kernel_name to not be None")
             self.record_choice(self.multi_kernel_name, picked_kernel_name)
 
         run = self.kernels[self.picked_kernel].run  # type: ignore[method-assign]

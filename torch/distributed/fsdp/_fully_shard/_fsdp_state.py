@@ -10,6 +10,7 @@ import torch
 import torch.nn as nn
 from torch.autograd import Variable
 from torch.autograd.graph import _MultiHandle
+from torch.distributed import _spmd_no_typecheck
 from torch.distributed._composable_state import (
     _get_module_state,
     _insert_module_state,
@@ -26,7 +27,6 @@ from ._fsdp_param_group import FSDPCommContext, FSDPParamGroup
 
 if TYPE_CHECKING:
     from ._fsdp_param import FSDPParam
-
 
 logger = logging.getLogger("torch.distributed.fsdp.fully_shard")
 
@@ -239,6 +239,18 @@ class FSDPState(_State):
                 fsdp_param_group.comm_ctx = self._comm_ctx
                 fsdp_param_group._param_group_index = i
                 fsdp_param_group._num_param_groups = num_groups
+        # The reduce-scatter input-buffer cap governs the single shared
+        # reduce_scatter_states list, so resolve the per-group caps into one
+        # effective value (the most aggressive); a lower-cap group must not
+        # silently undo a higher-cap group's retention.
+        self._comm_ctx.reduce_scatter_max_input_buffers = max(
+            (
+                fsdp_param_group.reduce_scatter_max_input_buffers
+                for state in self._state_ctx.all_states
+                for fsdp_param_group in state._fsdp_param_groups
+            ),
+            default=1,
+        )
 
     def _init_fqns(self) -> None:
         """Sets module and parameter FQN attributes for debugging."""
@@ -281,55 +293,60 @@ class FSDPState(_State):
         # When composing with module-hook-based activation checkpointing, the
         # pre-backward hook is responsible for the unshard
         if self._training_state == TrainingState.PRE_BACKWARD:
-            # With nested FSDP and multiple forward passes before backward,
-            # the params might have been resharded by a previous post_backward.
-            # We need to ensure params are unsharded for AC recomputation.
-            for fsdp_param_group in self._fsdp_param_groups:
-                if not fsdp_param_group.is_unsharded:
-                    fsdp_param_group.unshard()
-                    fsdp_param_group.wait_for_unshard()
+            with _spmd_no_typecheck():
+                # With nested FSDP and multiple forward passes before backward,
+                # the params might have been resharded by a previous post_backward.
+                # We need to ensure params are unsharded for AC recomputation.
+                for fsdp_param_group in self._fsdp_param_groups:
+                    if not fsdp_param_group.is_unsharded:
+                        fsdp_param_group.unshard()
+                        fsdp_param_group.wait_for_unshard()
             return self._cast_forward_inputs(args, kwargs)
+
         # With grouped ``fully_shard([a, b, ...])`` the pre-hook fires per
         # module (so ``cast_forward_inputs`` and ``fsdp_param_group.pre_forward``
         # run for each). Root setup and forward prefetch are one-shot, gated
         # on the first module's entry.
-        state_first_in_pass = self._training_state != TrainingState.FORWARD
-        self._training_state = TrainingState.FORWARD
-        if state_first_in_pass:
-            args, kwargs = self._root_pre_forward(module, args, kwargs)
+        with _spmd_no_typecheck():
+            state_first_in_pass = self._training_state != TrainingState.FORWARD
+            self._training_state = TrainingState.FORWARD
+            if state_first_in_pass:
+                args, kwargs = self._root_pre_forward(module, args, kwargs)
         args, kwargs = self._cast_forward_inputs(args, kwargs)
         for fsdp_param_group in self._fsdp_param_groups:
             args, kwargs = fsdp_param_group.pre_forward(module, args, kwargs)
-        if state_first_in_pass:
-            for fsdp_state in self._states_to_forward_prefetch:
-                # Forward order (not reversed) to match forward execution order;
-                # contrast with reversed() in _pre_backward for backward order.
-                for target_param_group in fsdp_state._fsdp_param_groups:
-                    FSDPParamGroup._prefetch_unshard(target_param_group, "forward")
-        return args, kwargs
+        with _spmd_no_typecheck():
+            if state_first_in_pass:
+                for fsdp_state in self._states_to_forward_prefetch:
+                    # Forward order (not reversed) to match forward execution
+                    # order; contrast with reversed() in _pre_backward.
+                    for target_param_group in fsdp_state._fsdp_param_groups:
+                        FSDPParamGroup._prefetch_unshard(target_param_group, "forward")
+            return args, kwargs
 
     @_dynamo_disable
     def _post_forward(self, module: nn.Module, input: Any, output: Any) -> Any:
-        # When composing with module-hook-based activation checkpointing, the
-        # post-backward hook is responsible for the reshard
-        if self._training_state == TrainingState.PRE_BACKWARD:
+        with _spmd_no_typecheck():
+            # When composing with module-hook-based activation checkpointing, the
+            # post-backward hook is responsible for the reshard
+            if self._training_state == TrainingState.PRE_BACKWARD:
+                return self._cast_output_dtype(output)
+            for fsdp_param_group in self._fsdp_param_groups:
+                output = fsdp_param_group.post_forward(module, input, output)
+            output = self._register_pre_backward_hook(output)
+            self._training_state = TrainingState.IDLE
+            if self._state_ctx.iter_forward_root is self:
+                output = self._force_complete_incomplete_states(output)
+                if all_gather_state := self._comm_ctx.all_gather_state:
+                    # Free the last all-gather result if needed; refer to
+                    # [Note: Overlapping all-gather copy-in and all-gather]
+                    self._comm_ctx.all_gather_copy_in_stream.wait_event(
+                        all_gather_state.event
+                    )
+                    self._comm_ctx.all_gather_stream.wait_event(all_gather_state.event)
+                    self._comm_ctx.all_gather_state = None  # free the all-gather result
+                self._state_ctx.iter_forward_root = None
             return self._cast_output_dtype(output)
-        for fsdp_param_group in self._fsdp_param_groups:
-            output = fsdp_param_group.post_forward(module, input, output)
-        output = self._register_pre_backward_hook(output)
-        self._training_state = TrainingState.IDLE
-        if self._state_ctx.iter_forward_root is self:
-            output = self._force_complete_incomplete_states(output)
-            if all_gather_state := self._comm_ctx.all_gather_state:
-                # Free the last all-gather result if needed; refer to
-                # [Note: Overlapping all-gather copy-in and all-gather]
-                self._comm_ctx.all_gather_copy_in_stream.wait_event(
-                    all_gather_state.event
-                )
-                self._comm_ctx.all_gather_stream.wait_event(all_gather_state.event)
-                self._comm_ctx.all_gather_state = None  # free the all-gather result
-            self._state_ctx.iter_forward_root = None
-        return self._cast_output_dtype(output)
 
     def _cast_forward_inputs(
         self, args: tuple[Any, ...], kwargs: dict[str, Any]
@@ -367,17 +384,18 @@ class FSDPState(_State):
 
     @_dynamo_disable
     def _pre_backward(self, grad: torch.Tensor) -> torch.Tensor:
-        self._training_state = TrainingState.PRE_BACKWARD
-        self._register_root_post_backward_final_callback()
-        default_prefetch = len(self._states_to_backward_prefetch) == 0
-        for fsdp_param_group in self._fsdp_param_groups:
-            fsdp_param_group.pre_backward(default_prefetch)
-        for fsdp_state in self._states_to_backward_prefetch:
-            # Reverse so higher-indexed groups are prefetched first,
-            # matching backward execution order (reverse of forward).
-            for target_param_group in reversed(fsdp_state._fsdp_param_groups):
-                FSDPParamGroup._prefetch_unshard(target_param_group, "backward")
-        return grad
+        with _spmd_no_typecheck():
+            self._training_state = TrainingState.PRE_BACKWARD
+            self._register_root_post_backward_final_callback()
+            default_prefetch = len(self._states_to_backward_prefetch) == 0
+            for fsdp_param_group in self._fsdp_param_groups:
+                fsdp_param_group.pre_backward(default_prefetch)
+            for fsdp_state in self._states_to_backward_prefetch:
+                # Reverse so higher-indexed groups are prefetched first,
+                # matching backward execution order (reverse of forward).
+                for target_param_group in reversed(fsdp_state._fsdp_param_groups):
+                    FSDPParamGroup._prefetch_unshard(target_param_group, "backward")
+            return grad
 
     @_dynamo_disable
     def _root_post_backward_final_callback(self) -> None:
@@ -408,8 +426,11 @@ class FSDPState(_State):
                         fsdp_param_group.finalize_backward()
             if self._state_ctx.is_last_backward:
                 self._comm_ctx.post_forward_order.clear()
-                # Catch the last module's RS states that no subsequent
-                # module's group N-1 wait will clear.
+                # Wait on and release any retained reduce-scatter input buffers:
+                # the last module's (which no later module's rs_wait clears) and,
+                # when set_reduce_scatter_max_input_buffers retains more than
+                # one in flight, the rest. The compute stream (which reuses the
+                # memory) is ordered past each reduce-scatter first.
                 for rs_state in self._comm_ctx.reduce_scatter_states:
                     if rs_state.event is not None:
                         self._device_handle.current_stream().wait_event(rs_state.event)

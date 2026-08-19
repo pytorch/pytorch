@@ -13,6 +13,7 @@
 #include <torch/csrc/autograd/python_anomaly_mode.h>
 #include <torch/csrc/autograd/python_cpp_function.h>
 #include <torch/csrc/autograd/python_function.h>
+#include <torch/csrc/autograd/python_node_creation_hook.h>
 #include <torch/csrc/autograd/python_saved_variable_hooks.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
@@ -108,6 +109,11 @@ std::unique_ptr<AnomalyMetadata> PythonEngine::make_anomaly_metadata() {
 std::unique_ptr<SavedVariableHooks> PythonEngine::
     get_default_saved_variable_hooks() {
   return PyDefaultSavedVariableHooks::get_hooks();
+}
+
+std::vector<std::unique_ptr<NodeCreationHook>> PythonEngine::
+    get_node_creation_hooks() {
+  return PyDefaultNodeCreationHooks::get_hooks();
 }
 
 variable_list PythonEngine::execute(
@@ -274,14 +280,6 @@ static PyObject* THPEngine_run_backward(
     PyObject* grad = PyTuple_GET_ITEM(grad_tensors, i);
     if (THPVariable_Check(grad)) {
       const Variable& grad_var = THPVariable_Unpack(grad);
-      if (grad_var.has_names()) {
-        TORCH_WARN(
-            "Autograd was passed a named grad tensor with dims ",
-            grad_var.names(),
-            ". Autograd does not yet support named tensor semantics, so all names ",
-            "will be ignored. In practice all computed gradients will still be correct "
-            "according to regular tensor semantics.");
-      }
       grads.push_back(grad_var);
     } else {
       TORCH_CHECK(
