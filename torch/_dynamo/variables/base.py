@@ -394,6 +394,19 @@ class Method:
         return self.handler(vt, tx, args, kwargs)
 
 
+Getter: TypeAlias = Callable[
+    [Any, "InstructionTranslatorBase"], "VariableTracker | None"
+]
+
+Setter: TypeAlias = (
+    Callable[
+        [Any, "InstructionTranslatorBase", "VariableTracker | None"],
+        "VariableTracker | None",
+    ]
+    | None
+)
+
+
 @dataclasses.dataclass(slots=True)
 class GetSet:
     """`tp_getset` entry, analogous to CPython's PyGetSetDef. `getter`
@@ -401,8 +414,8 @@ class GetSet:
     `(self, tx, value) -> VT | None` (None declines), and a `setter` of None
     means read-only."""
 
-    getter: Callable[..., VariableTracker | None]
-    setter: Callable[..., VariableTracker | None] | None
+    getter: Getter
+    setter: Setter
 
 
 @dataclasses.dataclass(slots=True)
@@ -410,29 +423,53 @@ class Member:
     """`tp_members` entry, analogous to CPython's PyMemberDef. Same shape as
     GetSet; a distinct type so members and getsets never share a class."""
 
-    getter: Callable[..., VariableTracker | None]
-    setter: Callable[..., VariableTracker | None] | None
+    getter: Getter
+    setter: Setter
 
 
 def getset_read(
     accessor: Callable[[Any], VariableTracker],
-) -> Callable[..., VariableTracker]:
+) -> Getter:
     """Getter for a GetSet/Member whose value is an already-built VT."""
     return lambda self, tx: accessor(self)
 
 
 def getset_build(
     accessor: Callable[[Any], Any],
-) -> Callable[..., VariableTracker]:
+) -> Getter:
     """Getter that builds a VT from the raw value returned by `accessor`."""
     return lambda self, tx: VariableTracker.build(tx, accessor(self))
 
 
-def getset_set(
-    accessor: Callable[[Any, Any, VariableTracker], None],
-) -> Callable[..., None]:
+def store_attr_mutation(
+    tx: InstructionTranslatorBase,
+    item: VariableTracker,
+    name: str,
+    value: VariableTracker | None,
+) -> None:
+    """Store an attribute mutation in the side effects tracker."""
+    se = tx.output.side_effects
+    if not se.is_attribute_mutation(item):
+        se.track_attribute_mutation_new(item)
+    value_to_store = variables.DeletedVariable() if value is None else value
+    se.store_attr(item, name, value_to_store)
+
+
+def getset_load_or_build(accessor: Callable[[Any], Any], name: str) -> Getter:
+    """Getter that builds a VT from the raw value returned by `accessor`."""
+
+    def getter(self, tx: InstructionTranslatorBase) -> VariableTracker:
+        if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
+            return tx.output.side_effects.load_attr(self, name)
+        return VariableTracker.build(tx, accessor(self))
+
+    return getter
+
+
+def getset_set(name: str) -> Callable[..., None]:
     """Setter for a GetSet/Member whose value is an already-built VT."""
-    return lambda self, tx, val: accessor(self, tx, val)
+
+    return lambda self, tx, val: store_attr_mutation(tx, self, name, val)
 
 
 # This helps users of `as_python_constant` to catch unimplemented error with
@@ -1952,6 +1989,36 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         UDOV overrides to check self.value.__dict__ + side effects.
         """
         return None
+
+    def tp_setattro_impl(
+        self,
+        tx: InstructionTranslatorBase,
+        name: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        """Default attribute assignment via object_generic_setattr"""
+        from .object_protocol import object_generic_setattr
+
+        return object_generic_setattr(tx, self, name, value)
+
+    def tp_descr_set_impl(
+        self,
+        tx: InstructionTranslatorBase,
+        obj: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        """Mirrors CPython's tp_descr_set slot (``value is None`` deletes).
+
+        Called when type_implements_tp_descr_set returns True for this type.
+        Subclasses override to provide the actual descriptor write.
+        """
+        unimplemented(
+            gb_type="tp_descr_set_impl not implemented",
+            context=f"{type(self).__name__} has tp_descr_set slot but no tp_descr_set_impl override",
+            explanation=f"The type {self.python_type_name()} has a tp_descr_set C slot but "
+            "Dynamo has no model for it.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
 
     def call_getattr_fallback(
         self, tx: InstructionTranslatorBase, name: str
