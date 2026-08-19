@@ -16175,7 +16175,7 @@ class TestNNCUDA(NNTestCase):
     @set_default_dtype(torch.double)
     @parametrize_test('train', [True, False])
     @parametrize_test('p', [0, 0.276, 0.731, 1])
-    def test_RNN_dropout(self, p, train):
+    def test_RNN_dropout(self, device, p, train):
         # checking the assumption that cuDNN sticks dropout in between
         # RNN layers
         for cuda in (True, False):
@@ -16219,12 +16219,12 @@ class TestNNCUDA(NNTestCase):
     @set_default_dtype(torch.double)
     @parametrize_test('bidirectional', [True, False])
     @parametrize_test('mode', ['RNN', 'LSTM', 'GRU'])
-    def test_error_RNN_seq_len_zero(self, mode, bidirectional):
+    def test_error_RNN_seq_len_zero(self, device, mode, bidirectional):
         # checking error message when RNN has seq_len = 0
-        for device in get_all_device_types():
+        for dev in get_all_device_types():
             input = torch.ones(0, 10, 5)
             rnn = getattr(nn, mode)(5, 6, bidirectional=bidirectional)
-            if device == 'cuda':
+            if dev == 'cuda':
                 rnn.cuda()
                 input = input.cuda()
 
@@ -16234,7 +16234,7 @@ class TestNNCUDA(NNTestCase):
     @skipCUDAIfNoCudnn
     @parametrize_test('train', [True, False])
     @parametrize_test('p', [0, 0.1234])
-    def test_RNN_dropout_state(self, p, train):
+    def test_RNN_dropout_state(self, device, p, train):
         for cuda in (True, False):
             rnn = nn.RNN(100, 100, 2, bias=False, dropout=p, nonlinearity='relu')
             if cuda:
@@ -16275,7 +16275,7 @@ class TestNNCUDA(NNTestCase):
     @skipCUDAIfNoCudnn
     @set_default_dtype(torch.double)
     @parametrize_test('train', [True, False])
-    def test_RNN_change_dropout(self, train):
+    def test_RNN_change_dropout(self, device, train):
         for cuda in (True, False):
             rnn = nn.RNN(100, 100, 2, dropout=0, nonlinearity='relu')
             input = torch.rand(3, 2, 100)
