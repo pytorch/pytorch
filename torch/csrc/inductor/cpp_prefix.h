@@ -664,11 +664,17 @@ inline IndexValueVec<T, NV, NI>& argmax_combine_vec(
   return argmax_vec_impl(a, next_value, next_index, tail_size);
 }
 
+// The index vector always has exactly one lane per active element, while for
+// dtypes narrower than the vector lane width the value vector has extra
+// (inactive) lanes past that, so reduce over the index lane count, not the
+// value lane count.
 template <typename T, int NV, int NI>
 inline IndexValue<T> argmin_vec_reduce_all(
     const IndexValueVec<T, NV, NI>& vec) {
-  constexpr int len = at::vec::VectorizedN<T, NV>::size();
-  __at_align__ T tmpval[len];
+  constexpr int max_len = at::vec::VectorizedN<T, NV>::size();
+  constexpr int len = at::vec::VectorizedN<int64_t, NI>::size();
+  static_assert(len <= max_len);
+  __at_align__ T tmpval[max_len];
   __at_align__ int64_t tmpidx[len];
   vec.value.store(tmpval);
   vec.index.store(tmpidx);
@@ -682,8 +688,10 @@ inline IndexValue<T> argmin_vec_reduce_all(
 template <typename T, int NV, int NI>
 inline IndexValue<T> argmax_vec_reduce_all(
     const IndexValueVec<T, NV, NI>& vec) {
-  constexpr int len = at::vec::VectorizedN<T, NV>::size();
-  __at_align__ T tmpval[len];
+  constexpr int max_len = at::vec::VectorizedN<T, NV>::size();
+  constexpr int len = at::vec::VectorizedN<int64_t, NI>::size();
+  static_assert(len <= max_len);
+  __at_align__ T tmpval[max_len];
   __at_align__ int64_t tmpidx[len];
   vec.value.store(tmpval);
   vec.index.store(tmpidx);

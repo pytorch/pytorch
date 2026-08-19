@@ -3484,6 +3484,15 @@ class CppVecKernel(CppKernel):
                     if reduction_type != "sum":
                         raise AssertionError('expected reduction_type == "sum"')
                     result_vec = f"{acc_vec} + {masked_acc_vec}"
+                if self._get_raw_num_vectors(vec_dtype) < 1:
+                    # Partial loads fill at most tiling_factor lanes and zero the
+                    # rest, while vec_reduce_all reduces all lanes, so reset the
+                    # lanes past tiling_factor to the reduction identity first.
+                    result_vec = (
+                        f"{acc_type_vec}::set("
+                        f"{self.reduction_init_vec(reduction_type, dtype)}, "
+                        f"{result_vec}, {self.tiling_factor})"
+                    )
                 next_value = f"{vec_reduce_all_func}([]({vec}& x, {vec}& y) {reduce_all_body}, {result_vec})"
 
             self.reduction_suffix.writeline(

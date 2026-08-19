@@ -19,6 +19,7 @@ from torch._dynamo.testing import CompileCounterWithBackend, rand_strided
 from torch._dynamo.utils import same
 from torch._inductor import config, cpu_vec_isa, metrics, test_operators
 from torch._inductor.codegen.cpp import CppOverrides, CppVecOverrides
+from torch._inductor.codegen.cpp_utils import DTYPE_TO_CPP
 from torch._inductor.compile_fx import compile_fx, compile_fx_inner
 from torch._inductor.exc import InductorError
 from torch._inductor.graph import GraphLowering
@@ -7481,6 +7482,42 @@ class CPUReproTests(TestCase):
                 # Compiled output should match eager mode (whether Eager produces
                 # inf or finite numbers, it shouldn't degrade into unexpected NaNs).
                 self.assertEqual(eager_out, compiled_out)
+
+    @requires_vectorization
+    @parametrize("dtype", (torch.uint8, torch.int8))
+    def test_int8_min_max_reduction(self, dtype):
+        # https://github.com/pytorch/pytorch/issues/191499
+        # Partial vector loads of int8/uint8 fill only the first tiling-factor
+        # lanes of the reduction accumulator; the inactive lanes used to leak
+        # zeros into the horizontal min/max, and argmin/argmax additionally
+        # read uninitialized index lanes.
+        def fn(x):
+            return (
+                torch.amin(x),
+                torch.amax(x),
+                torch.aminmax(x),
+                torch.argmin(x),
+                torch.argmax(x),
+                torch.min(x, 0),
+                torch.max(x, 0),
+            )
+
+        low, high = (5, 100) if dtype == torch.uint8 else (-100, -5)
+        for simdlen in simd_lengths_to_test():
+            with config.patch({"cpp.simdlen": simdlen}):
+                for size in (4, 64, 129):
+                    torch._dynamo.reset()
+                    metrics.reset()
+                    x = torch.randint(low, high, (size,), dtype=dtype)
+                    self.common(fn, (x,))
+                    # the number of tiled loop nests varies with size and ISA,
+                    # so only assert that the reduction vectorized at all
+                    if _can_check_vec_metrics():
+                        self.assertGreater(metrics.generated_cpp_vec_kernel_count, 0)
+                        _, code = run_and_get_cpp_code(torch.compile(fn), x)
+                        # the min/max suffix must blend the inactive lanes back
+                        # to the reduction identity before vec_reduce_all
+                        FileCheck().check(f"{DTYPE_TO_CPP[dtype]}>::set(").run(code)
 
     def test_cpu_realization_thresholds(self):
         from torch._inductor.ir import Pointwise, StorageBox
