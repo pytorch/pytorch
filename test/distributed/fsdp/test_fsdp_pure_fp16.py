@@ -10,7 +10,11 @@ from torch.distributed.fsdp import (
     FullyShardedDataParallel as FSDP,
     MixedPrecision,
 )
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
+)
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     DEVICEInitMode,
@@ -19,7 +23,11 @@ from torch.testing._internal.common_fsdp import (
     get_devtype,
     NestedWrappedModule,
 )
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TEST_WITH_DEV_DBG_ASAN,
+)
 
 
 device_type = torch.device(get_devtype())
@@ -37,6 +45,9 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 
 class TestPureFP16(FSDPTestContinuous):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     def test_pure_fp16_training(self):
         """Tests pure FP16 training, including when the parameter's dtype is
@@ -62,6 +73,7 @@ class TestPureFP16(FSDPTestContinuous):
             use_pure_fp16=True,
         )
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     def test_fp16_dtypes(self):
         """
@@ -115,7 +127,7 @@ class TestPureFP16(FSDPTestContinuous):
             self.assertEqual(param.dtype, torch.float16)
         inp = tuple(
             t.half() if torch.is_tensor(t) else t
-            for t in fsdp_model.module.get_input(self.device_type)
+            for t in fsdp_model.module.get_input(device_type)
         )
         out = fsdp_model(*inp)
         out.sum().backward()
@@ -151,7 +163,7 @@ class TestPureFP16(FSDPTestContinuous):
                 self.assertEqual(param.grad.dtype, torch.float16)
 
 
-devices = ("cuda", "hpu", "xpu")
+devices = ("cuda", "hpu", "xpu", "privateuse1")
 instantiate_device_type_tests(TestPureFP16, globals(), only_for=devices, allow_xpu=True)
 if __name__ == "__main__":
     run_tests()
