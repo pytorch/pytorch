@@ -112,9 +112,12 @@ class TORCH_API MPSStream {
   //   - tensor shapes and allocations must not change between replays
   //   - profiling must be disabled during capture
   uint64_t captureBegin();
-  void captureEnd();
+  // Takes the id so one capture cannot end another's recording.
+  void captureEnd(uint64_t captureId);
   // Releases the capture identified by `captureId` (retained buffers/executables).
-  void captureFree(uint64_t captureId);
+  // Returns false if it was not live, so a destructor can distinguish an
+  // already-freed handle from a real failure without a separate lookup.
+  bool captureFree(uint64_t captureId);
   // Releases every live capture and stops any capture currently recording.
   void captureReset();
   void replay(uint64_t captureId);
@@ -126,25 +129,74 @@ class TORCH_API MPSStream {
   }
 
   // Fail loud when an op that cannot be captured runs inside a capture block.
-  // Ops that encode opaque MPS kernels (e.g. MPSMatrix* via
-  // encodeToCommandBuffer:) or fall back to CPU are not recorded as
-  // CapturedSteps, so replay would silently drop them and produce wrong
-  // results, the worst failure mode for users. Such ops call this so capture
-  // raises a clear error instead.
+  // Our own Metal shaders are recorded, since MPSRecordingEncoder intercepts the
+  // encoder calls that issue them. Ops that instead hand encoding to an
+  // MPS-framework kernel (e.g. MPSMatrix*/MPSNDArray* via
+  // encodeToCommandEncoder:/encodeToCommandBuffer:) drive the encoder through
+  // selectors the proxy does not override, so the work runs but is never recorded;
+  // the same applies to ops that fall back to CPU. Replay would silently drop
+  // them and produce wrong results, the worst failure mode for users, so such ops
+  // call this to raise a clear error instead.
   void assertCapturable(const char* op) const {
     TORCH_CHECK(!captureMode(),
                 op,
-                " is not supported inside torch.mps.metal_graph_capture(): it uses a path "
-                "(opaque MPS kernel encode or CPU fallback) that cannot be captured for replay. "
-                "Run it outside the capture block.");
+                " is not supported inside a torch.mps.metal_graph() capture: it uses a path "
+                "(opaque MPS-framework kernel encode or CPU fallback) that cannot be recorded for "
+                "replay. Run it outside the capture block.");
   }
 
   // Returns 0 if `captureId` does not refer to a live capture (never captured, or
-  // already freed).
-  size_t capturedStepCount(uint64_t captureId) const {
-    auto it = _captures.find(captureId);
-    return it != _captures.end() ? it->second.size() : 0;
-  }
+  // already freed). Queue-confined: every mutation of _captures happens on
+  // _serialQueue, so the read must too.
+  size_t capturedStepCount(uint64_t captureId) const;
+
+  // Owning handle for one capture, so captured resources are released when the
+  // owner goes out of scope rather than only on an explicit free. This is what
+  // backs torch.mps.MetalGraph and gives it the same ownership semantics as
+  // torch.cuda.CUDAGraph: dropping the object releases the capture.
+  //
+  // The stream is captured at captureBegin() time and reused for replay and
+  // release, so a graph recorded on one stream is never replayed against a
+  // different stream's capture table.
+  class TORCH_API MetalGraph {
+   public:
+    MetalGraph() = default;
+    ~MetalGraph() {
+      reset();
+    }
+    // Non-copyable: two owners of one capture id would double-free it.
+    MetalGraph(const MetalGraph&) = delete;
+    MetalGraph& operator=(const MetalGraph&) = delete;
+    MetalGraph(MetalGraph&& other) noexcept : _id(other._id), _stream(other._stream) {
+      other._id = 0;
+      other._stream = nullptr;
+    }
+    MetalGraph& operator=(MetalGraph&& other) noexcept {
+      if (this != &other) {
+        reset();
+        _id = other._id;
+        _stream = other._stream;
+        other._id = 0;
+        other._stream = nullptr;
+      }
+      return *this;
+    }
+
+    void captureBegin();
+    void captureEnd();
+    void replay();
+    // Releases the capture. Safe to call more than once, and on a graph that
+    // never captured anything.
+    void reset();
+    size_t stepCount() const;
+    bool isCaptured() const {
+      return _id != 0;
+    }
+
+   private:
+    uint64_t _id = 0; // 0 = nothing captured
+    MPSStream* _stream = nullptr;
+  };
 
   struct CapturedMetalKernel {
     void* pso = nullptr; // id<MTLComputePipelineState>, retained
@@ -162,9 +214,18 @@ class TORCH_API MPSStream {
       size_t length;
       unsigned index;
     };
+    // useResource:usage: declares a resource accessed only indirectly (e.g. via
+    // a raw GPU address embedded in an argument buffer) so Metal can track it
+    // for residency/hazards; it is not implied by setBuffer/setBytes, so it
+    // must be captured and reissued separately on replay.
+    struct ResourceUsage {
+      void* resource; // id<MTLResource>, retained
+      unsigned long usage; // MTLResourceUsage bitmask
+    };
     std::vector<BufferBinding> buffers;
     std::vector<BytesBinding> bytes;
     std::vector<ThreadgroupMemoryBinding> threadgroupMemory;
+    std::vector<ResourceUsage> resourceUsages;
     uint64_t gridX = 0, gridY = 0, gridZ = 0;
     uint64_t tgX = 0, tgY = 0, tgZ = 0;
     bool useThreadgroups = false; // true = dispatchThreadgroups, false = dispatchThreads

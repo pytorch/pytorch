@@ -171,10 +171,15 @@ Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const std::opt
   // No-graph execution causes nonsense if these are non-contiguous.
   const bool is_contiguous = input.is_contiguous() && weight.is_contiguous() && bias.is_contiguous();
 
-  // Skip the fused no-graph fast path during MPS graph capture: it dispatches
-  // a raw Metal kernel that bypasses executeMPSGraph, so the op would not be
-  // recorded on the CapturedSteps list and replay would silently omit it.
-  // Falling through to the graph-based path keeps linear ops replayable.
+  // Skip the fused no-graph fast path during capture. Our own Metal shaders are
+  // capturable: MPSRecordingEncoder intercepts setComputePipelineState/setBuffer/
+  // setBytes/setThreadgroupMemoryLength/dispatchThreads and records them. This
+  // path is different, it hands encoding to an MPS-framework kernel
+  // (MPSNDArrayMatrixMultiplication encodeToCommandEncoder:), which drives the
+  // encoder through selectors the proxy does not override; those get forwarded
+  // straight to the inner encoder, so the work executes but is never recorded and
+  // replay would silently omit this op. Falling through to the MPSGraph path keeps
+  // linear replayable.
   if (is_macos_at_least(MacOSVersion::MACOS_15_0) && is_contiguous && !is_complex &&
       !getCurrentMPSStream()->captureMode()) {
     // The fused 3-source kernel drops the bias for vector-shaped (M==1) inputs on the M1
