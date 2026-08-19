@@ -341,16 +341,12 @@ class MarkStepBox:
     mark_step_counter = 0
 
 
-_IS_GIL_ENABLED_CHECKER = getattr(sys, "_is_gil_enabled", None)
-
-
-def _gil_enabled() -> bool:
-    # under free-threaded Python, refcounts are biased and imprecise, so the
-    # destructive detach must not trust an exact refcount read. Skipping it
-    # fails toward "live": vacuous pins then never collapse there, so the
-    # stale-grad_fn path-growth issue is unmitigated (not merely delayed) on
-    # free-threaded builds; a synchronized sweep is required to support them.
-    return True if _IS_GIL_ENABLED_CHECKER is None else _IS_GIL_ENABLED_CHECKER()
+@dataclasses.dataclass
+class _LivenessCheckState:
+    # set by check_refcount on a stale-grad_fn detach; liveness sweeps reset
+    # it per pass to decide whether the pass could have freed earlier outputs.
+    # one instance per manager, shared by all its nodes.
+    detached: bool = False
 
 
 def mark_step_begin() -> None:
@@ -962,12 +958,14 @@ class CUDAGraphNode:
         stream: torch.cuda.Stream,
         mode: CompilationMode | None,
         compile_id: CompileId | None,
+        liveness_check_state: _LivenessCheckState,
     ) -> None:
         if not isinstance(inputs, (list, tuple)):
             raise AssertionError(
                 f"expected inputs to be list or tuple, got {type(inputs)}"
             )
 
+        self.liveness_check_state = liveness_check_state
         self.wrapped_function = wrapped_function
         self.user_visible_output_idxs = wrapped_function.user_visible_output_idxs
         self.id = id
@@ -1410,29 +1408,27 @@ class CUDAGraphNode:
     def all_outputs_are_dead(self) -> bool:
         """All outputs of the path from this node to its root are dead.
 
-        Evaluated to a fixpoint: is_live's check_refcount detaches vacuous
-        stale-grad_fn pins, and one output's detach can release an output an
-        earlier index already reported live, so a single fixed-order pass can
-        stay permanently one collapse behind (e.g. multi-graph inference where
-        each iteration creates a fresh pin). Consecutive live SETS are
-        compared, not counts: a late detach can kill an already-counted early
-        entry without changing the count. Deadness is monotone within a call,
-        so each pass either strictly shrinks the live set or repeats it; the
-        pass bound makes termination unconditional even if a user callback
-        (__del__/weakref) resurrects an entry mid-sweep, failing toward live.
+        is_live is not a pure read: check_refcount may detach_() a dead
+        output's stale grad_fn, and that detach can drop the last reference
+        to an output we already visited and counted as live this pass. If a
+        pass performed no detach it was a pure read and its result is final;
+        otherwise rescan. Every extra pass requires a detach and each detach
+        permanently clears one grad_fn, so the pass bound is defensive only;
+        hitting it reports live, the safe direction. NB: a pass must visit
+        every output even after finding a live one -- early exit would skip
+        the very checks whose detaches free it.
         """
-        prev: list[PathOutputIndex] | None = None
+        state = self.liveness_check_state
         for _ in range(len(self.live_indices_after_graph) + 1):
-            live = [
-                (depth, output_index)
-                for depth, output_index in self.live_indices_after_graph
-                if is_live(self.path_weakrefs[depth][output_index])
-            ]
-            if not live:
+            state.detached = False
+            any_live = False
+            for depth, output_index in self.live_indices_after_graph:
+                if is_live(self.path_weakrefs[depth][output_index]):
+                    any_live = True
+            if not any_live:
                 return True
-            if live == prev:
+            if not state.detached:
                 return False
-            prev = live
         return False
 
     def _record(self, model: ModelType, inputs: list[InputType]) -> OutputType:
@@ -1689,20 +1685,21 @@ class CUDAGraphNode:
                 if self_loc is None:
                     return False
                 if self_loc.cached_tensor_outputs[i] is None:
-                    # defensive: entries are only nulled after
-                    # remove_extra_reference detaches this check, so this is
-                    # unreachable today; returning live is the safe direction
-                    return False
+                    # checks are installed only on cached entries and are
+                    # uninstalled before entries are cleared
+                    raise AssertionError(f"cached output {i} cleared while its liveness check was still installed")
                 # NB: the refcount must be measured before binding any local
                 # reference to the tensor, or the local itself inflates it
                 refcount = self_loc.get_output_refcount(i)
                 # pyrefly: ignore
                 cached = self_loc.cached_tensor_outputs[i]
+                # TODO: under free-threaded Python sys.getrefcount is biased /
+                # imprecise; use PyUnstable_Object_IsUniquelyReferenced (or
+                # query the real refcount) for this check instead
                 if (
                     refcount == 2
                     and cached._use_count() == 1
                     and cached.grad_fn is not None
-                    and _gil_enabled()
                 ):
                     # refcount == 2 is exactly the cache-only baseline (our
                     # list entry + getrefcount's argument), so no user code
@@ -1718,6 +1715,7 @@ class CUDAGraphNode:
                     # pending backward survives the detach through external
                     # edges to the node (e.g. a downstream loss tensor).
                     cached.detach_()
+                    self_loc.liveness_check_state.detached = True
                 if cached._use_count() > 1:
                     # a C++ holder still references this output -- after the
                     # detach above, this is a real external holder, typically
@@ -2369,6 +2367,9 @@ class CUDAGraphTreeManager:
         # warn only once if a function mutates inputs
         self.warned_mutation: OrderedSet[FunctionID] = OrderedSet()
 
+        # shared by all this manager's nodes; see _LivenessCheckState
+        self.liveness_check_state = _LivenessCheckState()
+
         # NB: cuda caching allocator will remember the stream a segment is allocated to
         # and only allocate that segment to the same stream. we need to use a single stream
         # for all allocations to the memory pool, otherwise the allocations to separate streams
@@ -2732,6 +2733,7 @@ class CUDAGraphTreeManager:
                 self.stream,
                 self.mode,
                 self.compile_id,
+                self.liveness_check_state,
             )
             if self.current_node is None:
                 self.roots[function_id].append(node)

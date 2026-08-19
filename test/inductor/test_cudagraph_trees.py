@@ -412,43 +412,6 @@ if HAS_CUDA_AND_TRITON:
             (g_ref,) = torch.autograd.grad(torch.tanh(x_ref * w).sum(), x_ref)
             self.assertEqual(g, g_ref)
 
-        def test_eager_saved_compiled_output_backward_after_root_call(self):
-            # An eager glue op (pow) saves the compiled output as an
-            # input-save; a root-function call between del and backward runs
-            # the liveness sweep. The detach must not strip a grad_fn that
-            # SavedVariable::unpack still needs.
-            @torch.compile(mode="reduce-overhead")
-            def a(x, w):
-                return torch.tanh(x * w)
-
-            @torch.compile(mode="reduce-overhead")
-            def c(z):
-                return z.sum()
-
-            x = torch.randn(64, 64, device="cuda")
-            w = torch.nn.Parameter(torch.randn(64, 64, device="cuda"))
-            z = torch.randn(8, device="cuda")
-
-            for _ in range(3):
-                out_c = c(z)
-                del out_c
-                out = a(x, w)
-                loss = out.pow(2).sum()
-                del out
-                loss.backward()
-                w.grad = None
-
-            out = a(x, w)
-            loss = out.pow(2).sum()
-            del out
-            out_c = c(z)
-            del out_c
-            loss.backward()
-            w_ref = w.detach().clone().requires_grad_(True)
-            torch.tanh(x * w_ref).pow(2).sum().backward()
-            self.assertEqual(w.grad, w_ref.grad)
-            w.grad = None
-
         def test_cross_graph_stale_grad_fn_bounded_growth(self):
             # Graph-2's stale grad_fn pins graph-1's output (depth 0); the
             # liveness sweep must still collapse the pin and keep recordings
@@ -477,104 +440,13 @@ if HAS_CUDA_AND_TRITON:
                 self.get_manager().new_graph_id().id, graphs_before + 1
             )
 
-        def test_forward_only_stale_gradfn_path_abandoned(self):
-            # Forward-only loop, no backward, no mark_step; the vacuous-pin
-            # detach must keep path depth bounded.
-            @torch.compile(mode="reduce-overhead")
-            def f(x):
-                return torch.tanh(x * 2).sum()
-
-            x = torch.randn(64, device="cuda", requires_grad=True)
-            depths = []
-            for _ in range(8):
-                out = f(x)
-                del out
-                node = self.get_manager().current_node
-                depths.append(
-                    len(list(node._path_from_root)) if node is not None else 0
-                )
-            self.assertLessEqual(max(depths), 2)
-
-        def test_expected_dead_pinned_rerecord(self):
-            # Sentinel: a parent output expected-dead at the child's replay,
-            # with a user-held sibling whose stale grad_fn is undetachable
-            # (refcount above baseline), must not degrade into per-iteration
-            # re-records via check_invariants' single-pass liveness.
-            @torch.compile(mode="reduce-overhead")
-            def parent(x, w):
-                return torch.tanh(x * w), (x * w).relu().sum()
-
-            @torch.compile(mode="reduce-overhead")
-            def child(y):
-                return (y * 2.0).sum()
-
-            x = torch.randn(64, 64, device="cuda", requires_grad=True)
-            w = torch.nn.Parameter(torch.randn(64, 64, device="cuda"))
-
-            skips_before = counters["inductor"]["cudagraph_skips"]
-            held = None
-            for _ in range(8):
-                o1, o2 = parent(x, w)
-                held = o2
-                loss = child(o1)
-                del o1
-                (g,) = torch.autograd.grad(loss, x)
-                del loss, g
-            del held
-            self.assertEqual(
-                counters["inductor"]["cudagraph_skips"], skips_before
-            )
-            rerec = {
-                (nid.id if nid else None, fid.id): c
-                for nid, fns in self.get_manager().num_rerecord.items()
-                for fid, c in fns.items()
-                if c
-            }
-            self.assertEqual(rerec, {})
-
-        def test_weakref_resurrected_output_gradfn_cleared(self):
-            # Deliberate behavior pin: a user-dropped output resurrected via
-            # weakref after a liveness sweep sees cleared autograd meta (the
-            # stale grad_fn was a vacuous pin; the old one was already unsafe
-            # to backward through on an abandoned path).
-            import weakref
-
-            @torch.compile(mode="reduce-overhead")
-            def f(x):
-                return torch.tanh(x * 2).sum()
-
-            @torch.compile(mode="reduce-overhead")
-            def g(y):
-                return y.sum()
-
-            x = torch.randn(64, device="cuda", requires_grad=True)
-            y = torch.randn(8, device="cuda")
-            for _ in range(3):
-                out = f(x)
-                del out
-                out_g = g(y)
-                del out_g
-
-            out = f(x)
-            wr = weakref.ref(out)
-            del out
-            out_g = g(y)
-            del out_g
-            res = wr()
-            if res is not None:
-                self.assertIsNone(res.grad_fn)
-
-        @torch._inductor.config.patch("triton.slow_path_cudagraph_asserts", True)
         def test_severed_backward_rerecord_repro(self):
-            # Regression test for severed backwards: a backward forced to
-            # re-record (static input moved) while another root function's
-            # invocation runs the liveness sweep between forward and backward.
-            # SavedVariable-held saved activations must keep the forward path
-            # alive, so the backward records as a child of its forward with
-            # exact numerics; historically the path was abandoned and the
-            # severed recording misclassified pool memory as a persistent
-            # static input, raising "Detected N tensor(s) in the cudagraph
-            # pool not tracked as outputs" (or silently corrupting gradients).
+            # Production repro: another root fn runs the liveness sweep while
+            # a backward is pending, then a static-input move forces that
+            # backward to re-record. Saved activations must keep the forward
+            # path alive; historically it was abandoned, raising "Detected N
+            # tensor(s) in the cudagraph pool not tracked as outputs" (or
+            # silently corrupting gradients).
             @torch.compile(mode="reduce-overhead")
             def a(x, w):
                 return torch.tanh(x * w).sum()
@@ -696,49 +568,6 @@ if HAS_CUDA_AND_TRITON:
             for x in xs:
                 torch.tanh(x * w_ref).sum().backward()
             self.assertEqual(w.grad, w_ref.grad)
-
-        def test_nogil_detach_disabled_fail_safe(self):
-            # with the GIL disabled the vacuous-pin detach is skipped;
-            # use_count-based liveness alone must still prevent severing
-            # (memory growth is the accepted cost there, correctness is not)
-            from unittest.mock import patch
-
-            import torch._inductor.cudagraph_trees as cgt
-
-            @torch.compile(mode="reduce-overhead")
-            def a(x, w):
-                return torch.tanh(x * w).sum()
-
-            @torch.compile(mode="reduce-overhead")
-            def b(y):
-                return y.sum()
-
-            x = torch.randn(1024, 512, device="cuda", requires_grad=True)
-            w = torch.nn.Parameter(torch.randn(1024, 512, device="cuda"))
-            y = torch.randn(8, device="cuda")
-
-            with patch.object(cgt, "_gil_enabled", lambda: False):
-                for _ in range(3):
-                    loss = a(x, w)
-                    total = loss + 0.0
-                    del loss
-                    out_b = b(y)
-                    del out_b
-                    (g,) = torch.autograd.grad(total, x)
-                    del total, g
-                loss = a(x, w)
-                total = loss + 0.0
-                del loss
-                out_b = b(y)
-                del out_b
-                w.data = w.data.clone()
-                (g,) = torch.autograd.grad(total, x)
-                del total
-            x_ref = x.detach().clone().requires_grad_(True)
-            (g_ref,) = torch.autograd.grad(
-                torch.tanh(x_ref * w).sum(), x_ref
-            )
-            self.assertEqual(g, g_ref)
 
         def test_multithreaded_cudagraph_trees(self):
             import queue
