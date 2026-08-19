@@ -138,7 +138,7 @@ class TpSetattroTests(TestCase):
             if dunder:
                 obj.__setattr__("y", x + 1)
             else:
-                setattr(obj, "y", x + 1)
+                obj.y = x + 1
             got = obj.y
             if dunder:
                 obj.__delattr__("y")
