@@ -32,7 +32,6 @@ from torch.testing._internal.common_device_type import (
     onlyMPS,
     onlyNativeDeviceTypes,
     onlyOn,
-    skipXPUIf,
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.common_dtype import floating_types_and
@@ -1523,7 +1522,6 @@ torch.{device_type}.synchronize()
         helper(1, 129, 8, 8, 3, stride=2)
 
     @expectedFailureMPS  # TODO: Fixme
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/4731")
     @dtypes(torch.half, torch.bfloat16, torch.float, torch.double)
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypesIfXPU(torch.half, torch.float, torch.double)
