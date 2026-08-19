@@ -18,15 +18,19 @@ from torch.testing._internal.common_cuda import (
     IS_SM90,
     PLATFORM_SUPPORTS_CK_SDPA,
     PLATFORM_SUPPORTS_CUDNN_ATTENTION,
-    PLATFORM_SUPPORTS_FLASH_ATTENTION,
     SM100OrLater,
     SM120OrLater,
     SM90OrLater,
 )
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
+)
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
     decorateIf,
+    HardwareClassification,
     parametrize,
     run_tests,
     setSdpaBackendsToDefaultFinally,
@@ -340,7 +344,7 @@ def create_variable_length_batch(
     }
 
 
-class TestVarlenAttention(NNTestCase):
+class _VarlenAttentionTestMixin:
     def _test_varlen_vs_sdpa(
         self,
         device,
@@ -541,9 +545,11 @@ class TestVarlenAttention(NNTestCase):
 
             start_idx = end_idx
 
-    @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
-    )
+
+class TestVarlenAttentionDevice(_VarlenAttentionTestMixin, NNTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @requires_capabilities(Capability.attention.flash_attention)
     @setSdpaBackendsToDefaultFinally
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     @parametrize(
@@ -626,9 +632,7 @@ class TestVarlenAttention(NNTestCase):
             self.assertEqual(varlen_grad.shape, x_packed.shape)
             self.assertEqual(varlen_grad.dtype, x_packed.dtype)
 
-    @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
-    )
+    @requires_capabilities(Capability.attention.flash_attention)
     @setSdpaBackendsToDefaultFinally
     @parametrize(
         "sdpa_backend",
@@ -708,9 +712,7 @@ class TestVarlenAttention(NNTestCase):
             test_utils=["test_schema", "test_faketensor"],
         )
 
-    @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
-    )
+    @requires_capabilities(Capability.attention.flash_attention)
     @setSdpaBackendsToDefaultFinally
     @parametrize(
         "sdpa_backend",
@@ -779,9 +781,7 @@ class TestVarlenAttention(NNTestCase):
         if not any("torch_attn._varlen_attn_out" in op for op in out_mode.called_ops):
             raise AssertionError("custom _varlen_attn_out op should have been called")
 
-    @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
-    )
+    @requires_capabilities(Capability.attention.flash_attention)
     @setSdpaBackendsToDefaultFinally
     @parametrize(
         "sdpa_backend",
@@ -824,25 +824,8 @@ class TestVarlenAttention(NNTestCase):
             sdpa_backend=sdpa_backend,
         )
 
-    @skipIfRocm
-    @setSdpaBackendsToDefaultFinally
-    @parametrize("dtype", [torch.bfloat16, torch.float16])
-    @parametrize("_should_use_cudnn", [True])
-    def test_cudnn_attention_varlen(self, device, dtype, _should_use_cudnn):
-        self._test_varlen_vs_sdpa(
-            device,
-            dtype,
-            scale=None,
-            window_size=(-1, -1),
-            backend="fa2",
-            enable_gqa=False,
-            _should_use_cudnn=_should_use_cudnn,
-        )
-
     @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179968")
-    @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
-    )
+    @requires_capabilities(Capability.attention.flash_attention)
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     @parametrize("num_splits", [1, None])
     @parametrize(
@@ -994,9 +977,7 @@ class TestVarlenAttention(NNTestCase):
                 "cuDNN varlen attention forward should have been called"
             )
 
-    @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
-    )
+    @requires_capabilities(Capability.attention.flash_attention)
     @decorateIf(
         unittest.expectedFailure,
         lambda params: params["backend"] != "fa2"
@@ -1126,9 +1107,7 @@ class TestVarlenAttention(NNTestCase):
             self.assertEqual(output_out.data_ptr(), out_buf.data_ptr())
             self.assertEqual(out_buf, output_cached)
 
-    @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
-    )
+    @requires_capabilities(Capability.attention.flash_attention)
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm does not support block_table")
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     @parametrize("page_size", [32, 64, 128, 256])
@@ -1305,6 +1284,73 @@ class TestVarlenAttention(NNTestCase):
                     num_splits=1,
                 )
             self.assertTrue(torch.equal(paged_num_splits, ref_num_splits))
+
+    @requires_capabilities(Capability.attention.flash_attention)
+    @parametrize("dtype", [torch.bfloat16, torch.float16])
+    @parametrize(
+        "backend",
+        ["fa2"]
+        + (["fa3"] if IS_SM90 else [])
+        + (["fa4"] if SM100OrLater and not SM120OrLater else []),
+    )
+    def test_enable_gqa(self, device, dtype, backend):
+        torch.manual_seed(42)
+
+        head_dim = 64
+        seq_len = 512
+        num_heads_q, num_heads_k = 16, 4
+        total_tokens = 2 * seq_len
+
+        q = torch.randn(total_tokens, num_heads_q, head_dim, device=device, dtype=dtype)
+        k = torch.randn(total_tokens, num_heads_k, head_dim, device=device, dtype=dtype)
+        v = torch.randn(total_tokens, num_heads_k, head_dim, device=device, dtype=dtype)
+        cu_seq = torch.tensor(
+            [0, seq_len, total_tokens], device=device, dtype=torch.int32
+        )
+
+        with self.assertRaisesRegex(ValueError, "enable_gqa=True"):
+            varlen_attn(q, k, v, cu_seq, cu_seq, seq_len, seq_len)
+
+        with self.assertRaisesRegex(ValueError, "enable_gqa=True"):
+            varlen_attn_out(
+                torch.empty_like(q), q, k, v, cu_seq, cu_seq, seq_len, seq_len
+            )
+
+        k_bad = torch.randn(total_tokens, 3, head_dim, device=device, dtype=dtype)
+        v_bad = torch.randn(total_tokens, 3, head_dim, device=device, dtype=dtype)
+        with self.assertRaisesRegex(ValueError, "multiple of kv heads"):
+            varlen_attn(
+                q, k_bad, v_bad, cu_seq, cu_seq, seq_len, seq_len, enable_gqa=True
+            )
+
+        with _use_backend(backend), torch.no_grad():
+            out = varlen_attn(
+                q, k, v, cu_seq, cu_seq, seq_len, seq_len, enable_gqa=True
+            )
+            out_buf = torch.empty_like(q)
+            varlen_attn_out(
+                out_buf, q, k, v, cu_seq, cu_seq, seq_len, seq_len, enable_gqa=True
+            )
+            self.assertEqual(out_buf, out)
+
+
+class TestVarlenAttentionCUDA(_VarlenAttentionTestMixin, NNTestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    @skipIfRocm
+    @setSdpaBackendsToDefaultFinally
+    @parametrize("dtype", [torch.bfloat16, torch.float16])
+    @parametrize("_should_use_cudnn", [True])
+    def test_cudnn_attention_varlen(self, device, dtype, _should_use_cudnn):
+        self._test_varlen_vs_sdpa(
+            device,
+            dtype,
+            scale=None,
+            window_size=(-1, -1),
+            backend="fa2",
+            enable_gqa=False,
+            _should_use_cudnn=_should_use_cudnn,
+        )
 
     @skipIfRocm
     @parametrize("dtype", [torch.bfloat16, torch.float16])
@@ -1712,60 +1758,9 @@ class TestVarlenAttention(NNTestCase):
         ):
             torch.ops.aten._cudnn_attention_forward(**(aten_kwargs | {"query": q_grad}))
 
-    @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
-    )
-    @parametrize("dtype", [torch.bfloat16, torch.float16])
-    @parametrize(
-        "backend",
-        ["fa2"]
-        + (["fa3"] if IS_SM90 else [])
-        + (["fa4"] if SM100OrLater and not SM120OrLater else []),
-    )
-    def test_enable_gqa(self, device, dtype, backend):
-        torch.manual_seed(42)
 
-        head_dim = 64
-        seq_len = 512
-        num_heads_q, num_heads_k = 16, 4
-        total_tokens = 2 * seq_len
-
-        q = torch.randn(total_tokens, num_heads_q, head_dim, device=device, dtype=dtype)
-        k = torch.randn(total_tokens, num_heads_k, head_dim, device=device, dtype=dtype)
-        v = torch.randn(total_tokens, num_heads_k, head_dim, device=device, dtype=dtype)
-        cu_seq = torch.tensor(
-            [0, seq_len, total_tokens], device=device, dtype=torch.int32
-        )
-
-        with self.assertRaisesRegex(ValueError, "enable_gqa=True"):
-            varlen_attn(q, k, v, cu_seq, cu_seq, seq_len, seq_len)
-
-        with self.assertRaisesRegex(ValueError, "enable_gqa=True"):
-            varlen_attn_out(
-                torch.empty_like(q), q, k, v, cu_seq, cu_seq, seq_len, seq_len
-            )
-
-        k_bad = torch.randn(total_tokens, 3, head_dim, device=device, dtype=dtype)
-        v_bad = torch.randn(total_tokens, 3, head_dim, device=device, dtype=dtype)
-        with self.assertRaisesRegex(ValueError, "multiple of kv heads"):
-            varlen_attn(
-                q, k_bad, v_bad, cu_seq, cu_seq, seq_len, seq_len, enable_gqa=True
-            )
-
-        with _use_backend(backend), torch.no_grad():
-            out = varlen_attn(
-                q, k, v, cu_seq, cu_seq, seq_len, seq_len, enable_gqa=True
-            )
-            out_buf = torch.empty_like(q)
-            varlen_attn_out(
-                out_buf, q, k, v, cu_seq, cu_seq, seq_len, seq_len, enable_gqa=True
-            )
-            self.assertEqual(out_buf, out)
-
-
-device_types = ("cuda",)
-
-instantiate_device_type_tests(TestVarlenAttention, globals(), only_for=device_types)
+instantiate_device_type_tests(TestVarlenAttentionDevice, globals(), except_for=("cpu",))
+instantiate_device_type_tests(TestVarlenAttentionCUDA, globals(), only_for=("cuda",))
 
 if __name__ == "__main__":
     run_tests()
