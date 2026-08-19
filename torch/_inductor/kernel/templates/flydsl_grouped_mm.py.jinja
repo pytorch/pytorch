@@ -1,0 +1,184 @@
+import contextlib
+import os
+import threading
+
+from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
+    get_grouped_gemm_persistent_grid_size,
+    infer_has_k_tail,
+    launch_gemm_gfx950_grouped,
+    make_gemm_param_and_validate,
+)
+from torch._inductor.runtime.flydsl_cache import (
+    ensure_flydsl_cache_dir,
+    run_cached_flydsl,
+)
+
+{{gen_defines()}}
+
+
+_grouped_param = None
+_grouped_param_lock = threading.Lock()
+
+
+def _inductor_tensor_arg(tensor):
+    return flyc.from_torch_tensor(tensor).mark_layout_dynamic()
+
+
+@contextlib.contextmanager
+def _temporary_env(updates):
+    old_values = {key: os.environ.get(key) for key in updates}
+    os.environ.update(
+        {key: value for key, value in updates.items() if value is not None}
+    )
+    try:
+        yield
+    finally:
+        for key, old_value in old_values.items():
+            if old_value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = old_value
+
+
+def _flydsl_grouped_mm(output, mat1, mat2, offs, stream):
+    global _grouped_param
+    group_count, k, n = mat2.shape
+    total_m = mat1.shape[0]
+    if total_m == 0:
+        return output
+
+    param = _grouped_param
+    if param is None:
+        with _grouped_param_lock:
+            param = _grouped_param
+            if param is None:
+                has_k_tail = infer_has_k_tail(GEMM_K, TILE_K, STAGES)
+                if USE_HALF_TILE_INTERLEAVED:
+                    has_k_tail = has_k_tail or (((GEMM_K + TILE_K - 1) // TILE_K) % 2 != 0)
+                param = make_gemm_param_and_validate(
+                    GEMM_M,
+                    GEMM_N,
+                    GEMM_K,
+                    {
+                        "dtype_id": GEMM_DTYPE_ID,
+                        "block_m": TILE_M,
+                        "block_n": TILE_N,
+                        "block_k": TILE_K,
+                        "stages": STAGES,
+                        "m_waves": BLOCK_M_WARPS,
+                        "n_waves": BLOCK_N_WARPS,
+                        "group_m": GROUP_M,
+                        "use_half_tile_interleaved": USE_HALF_TILE_INTERLEAVED,
+                        "has_bias": False,
+                        "has_k_tail": has_k_tail,
+                    },
+                )
+                if param is None:
+                    raise RuntimeError(
+                        f"unsupported FlyDSL grouped GEMM shape/config: M={GEMM_M}, "
+                        f"N={GEMM_N}, K={GEMM_K}, "
+                        f"tile=({TILE_M}, {TILE_N}, {TILE_K}), stages={STAGES}"
+                    )
+                _grouped_param = param
+
+    group_count = int(group_count)
+    total_m = int(total_m)
+    n_int = int(n)
+    k_int = int(k)
+    compile_only = bool(os.environ.get("FLYDSL_COMPILE_ONLY"))
+    if compile_only:
+        # Precompilation runs on fake tensors that have no device to query, and
+        # the persistent kernel reads its grid from gridDim, so the size the disk
+        # cache is warmed with does not have to match the one used at runtime.
+        grid_size = 1
+    else:
+        grid_size = get_grouped_gemm_persistent_grid_size(
+            param,
+            total_m,
+            n_int,
+            group_count,
+            torch.cuda.get_device_properties(mat1.device),
+        )
+    compile_args = (
+        _inductor_tensor_arg(output),
+        _inductor_tensor_arg(mat1),
+        _inductor_tensor_arg(mat2),
+        _inductor_tensor_arg(offs),
+        group_count,
+        n_int,
+        k_int,
+        grid_size,
+        param,
+        stream,
+    )
+    ensure_flydsl_cache_dir()
+    if compile_only:
+        flyc.compile(launch_gemm_gfx950_grouped, *compile_args)
+    else:
+        run_cached_flydsl(
+            launch_gemm_gfx950_grouped,
+            *compile_args,
+            constexpr_param=param,
+            compiler=flyc.compile,
+            dispatch_args=(
+                output,
+                mat1,
+                mat2,
+                offs,
+                group_count,
+                n_int,
+                k_int,
+                grid_size,
+                param,
+                stream,
+            ),
+        )
+    return output
+
+
+{{def_kernel("mat1", "mat2", "offs")}}
+    output = {{get_output()}}
+    return _flydsl_grouped_mm(output, mat1, mat2, offs, stream)
+
+
+def {{kernel_name}}_precompile(
+    precompile_shapes,
+    precompile_strides,
+    precompile_dtypes,
+    device_index=0,
+    device_capability=None,
+    flydsl_gpu_arch=None,
+):
+    """Warm FlyDSL's disk cache using metadata-only fake tensors."""
+    dtype_mat1 = getattr(torch, precompile_dtypes["mat1"])
+    dtype_mat2 = getattr(torch, precompile_dtypes["mat2"])
+    dtype_offs = getattr(torch, precompile_dtypes["offs"])
+    dtype_output = getattr(torch, precompile_dtypes["output"])
+
+    shape_mat1 = tuple(precompile_shapes["mat1"])
+    shape_mat2 = tuple(precompile_shapes["mat2"])
+    shape_offs = tuple(precompile_shapes["offs"])
+    shape_output = tuple(precompile_shapes["output"])
+
+    stride_mat1 = tuple(precompile_strides["mat1"])
+    stride_mat2 = tuple(precompile_strides["mat2"])
+    stride_offs = tuple(precompile_strides["offs"])
+    stride_output = tuple(precompile_strides["output"])
+
+    env_updates = {"FLYDSL_COMPILE_ONLY": "1"}
+    if flydsl_gpu_arch is not None:
+        env_updates["FLYDSL_GPU_ARCH"] = flydsl_gpu_arch
+
+    with _temporary_env(env_updates):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        with FakeTensorMode():
+
+            def _fake_proxy(shape, stride, dtype):
+                return torch.empty_strided(shape, stride, dtype=dtype, device="cpu")
+
+            mat1 = _fake_proxy(shape_mat1, stride_mat1, dtype_mat1)
+            mat2 = _fake_proxy(shape_mat2, stride_mat2, dtype_mat2)
+            offs = _fake_proxy(shape_offs, stride_offs, dtype_offs)
+            output = _fake_proxy(shape_output, stride_output, dtype_output)
+            {{kernel_name}}_main(mat1, mat2, offs, output, stream=0)
