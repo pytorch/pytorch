@@ -11,11 +11,11 @@ from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
     TEST_CUDA,
-    TEST_HPU,
     TEST_WITH_DEV_DBG_ASAN,
 )
 from torch.utils.checkpoint import checkpoint
@@ -108,6 +108,8 @@ def create_model(with_fsdp, with_checkpoint, model_hidden_dim):
 
 
 class TestFSDPMemory(FSDPTest):
+    hw_classification = HardwareClassification.CUDA
+
     @property
     def world_size(self):
         return 2
@@ -162,7 +164,7 @@ class TestFSDPMemory(FSDPTest):
         output = cmp(results, expected)
         self.assertEqual(output, "")
 
-    @unittest.skipIf(TEST_HPU, "Memory will be different for CUDA and HPU, skipping")
+    @unittest.skipIf(not TEST_CUDA, "Memory expectations are CUDA-specific")
     @skip_if_lt_x_gpu(2)
     @parametrize("ckpt", ["no_ckpt", "ckpt"])
     def test_fsdp_memory(self, ckpt):
