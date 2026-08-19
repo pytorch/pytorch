@@ -100,7 +100,6 @@ class FakeProfilerEvent:
         self.cpu_children = cpu_children or []
 
 
-@instantiate_parametrized_tests
 class TestBenchGeneric(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
