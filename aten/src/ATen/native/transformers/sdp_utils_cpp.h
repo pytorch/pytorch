@@ -524,9 +524,11 @@ inline bool check_batch_size_nested(sdp_params const& params, bool debug) {
 inline bool check_nonzero_sequence_lengths_dense(sdp_params const& params, bool debug) {
   // In some cases people will pass in 0 sized tensors, this will
   // cause the fused path to error with unaligned mask
-  bool zero_seq_len_q = params.query.sym_size(-2) == 0;
-  bool zero_seq_len_k = params.key.sym_size(-2) == 0;
-  if (zero_seq_len_q || zero_seq_len_k) {
+  const bool nonzero_seq_len_q =
+      TORCH_GUARD_OR_FALSE(params.query.sym_size(-2).sym_ne(0));
+  const bool nonzero_seq_len_k =
+      TORCH_GUARD_OR_FALSE(params.key.sym_size(-2).sym_ne(0));
+  if (!(nonzero_seq_len_q && nonzero_seq_len_k)) {
     if (debug) {
       TORCH_WARN(
           "All fused kernels do not support zero seq_len_q or seq_len_kv.");
@@ -543,18 +545,22 @@ inline bool check_last_dim_stride_equals_1_dense(sdp_params const& params, bool 
 
   // This function checks that the last dimension of the inputs to
   // fused_attention have stride 1
-  bool qkv_strides_equal_1 = params.query.sym_stride(-1) == 1 &&
-      params.key.sym_stride(-1) == 1 && params.value.sym_stride(-1) == 1;
+  bool qkv_strides_equal_1 =
+      TORCH_GUARD_OR_FALSE(params.query.sym_stride(-1).sym_eq(1)) &&
+      TORCH_GUARD_OR_FALSE(params.key.sym_stride(-1).sym_eq(1)) &&
+      TORCH_GUARD_OR_FALSE(params.value.sym_stride(-1).sym_eq(1));
 
   // https://github.com/pytorch/pytorch/issues/116333
   // If the head_dim is size 1 the stride won't matter, but we
   // check this condition before padding the head_dim to 1
   if (ignore_singleton_dim){
-    qkv_strides_equal_1 = qkv_strides_equal_1 || params.query.sym_size(-1) == 1;
+    qkv_strides_equal_1 = qkv_strides_equal_1 ||
+        TORCH_GUARD_OR_FALSE(params.query.sym_size(-1).sym_eq(1));
   }
   bool is_cpu = params.query.device().type() == c10::DeviceType::CPU;
   bool mask_stride_equal_1 = params.attn_mask.has_value()
-      ? params.attn_mask.value().sym_stride(-1) == 1
+      ? TORCH_GUARD_OR_FALSE(
+            params.attn_mask.value().sym_stride(-1).sym_eq(1))
       : true;
   bool mask_stride_valid = is_cpu ? true : mask_stride_equal_1;
   if (!(qkv_strides_equal_1 && mask_stride_valid)) {
