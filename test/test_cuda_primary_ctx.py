@@ -4,7 +4,6 @@ import sys
 import unittest
 
 import torch
-import torch
 from torch.testing._internal.common_cuda import (
     _get_torch_rocm_version,
     TEST_CUDA,
@@ -14,7 +13,6 @@ from torch.testing._internal.common_utils import (
     HardwareClassification,
     NoTest,
     run_tests,
-    skipIfRocm,
     TEST_WITH_ROCM,
     TestCase,
 )
