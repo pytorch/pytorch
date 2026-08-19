@@ -20,6 +20,8 @@ import re
 import sys
 from os import path
 
+from sphinx.ext.autodoc import DocstringSignatureMixin, FunctionDocumenter
+
 # source code directory, relative to this file, for sphinx-autobuild
 # sys.path.insert(0, os.path.abspath('../..'))
 import torch
@@ -2430,7 +2432,23 @@ def process_docstring(app, what_, name, obj, options, lines):
         lines.append("")
 
 
+class ForeachFunctionDocumenter(FunctionDocumenter):
+    def format_signature(self, **kwargs):
+        if not self.fullname.startswith("torch.foreach."):
+            return super().format_signature(**kwargs)
+
+        overloads = (
+            self.analyzer.overloads.get(".".join(self.objpath), ())
+            if self.analyzer is not None
+            else ()
+        )
+        if len(overloads) > 1:
+            return DocstringSignatureMixin.format_signature(self, **kwargs)
+        return super().format_signature(**kwargs)
+
+
 def setup(app):
+    app.add_autodocumenter(ForeachFunctionDocumenter, override=True)
     app.connect("build-finished", coverage_post_process)
     app.connect("autodoc-process-docstring", process_docstring)
     app.connect("html-page-context", hide_edit_button_for_pages)

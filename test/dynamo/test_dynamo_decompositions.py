@@ -338,7 +338,7 @@ class GraphModule(torch.nn.Module):
         # WLOG can use any public foreach op, they're all exposed similarly
         # we use an inplace op to test aliasing on inputs being returned
         def fn(tensors):
-            return torch.foreach.add_(inputs=tensors, other=1.0)
+            return torch.foreach.add_(tensors, 1.0)
 
         eager = EagerAndRecordGraphs()
         compiled = torch.compile(fn, backend=eager, fullgraph=True)
@@ -513,7 +513,7 @@ class GraphModule(torch.nn.Module):
         """With decompositions enabled, foreach_pow with scalar base should decompose."""
 
         def fn(scalar, exps):
-            return torch.foreach.pow(input=scalar, exponent=exps)
+            return torch.foreach.pow(scalar, exps)
 
         eager = EagerAndRecordGraphs()
         with torch._dynamo.config.patch(enable_dynamo_decompositions=True):

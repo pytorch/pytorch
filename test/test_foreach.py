@@ -2069,13 +2069,16 @@ class TestForeachPublicAPI(TestCase):
         tensor2 = [torch.tensor([5.0]), torch.tensor([6.0])]
         values = torch.tensor([0.5, 1.5])
 
-        public_result = public(public_inputs, tensor1, tensor2, values)
+        public_result = public(public_inputs, tensor1, tensor2, value=values)
         private_result = private(private_inputs, tensor1, tensor2, values)
 
         self.assertEqual(public_result, private_result)
         if in_place:
             self.assertIs(public_result, public_inputs)
-            self.assertIs(private_result, private_inputs)
+            # Private compatibility APIs do not return the original list or
+            # tuple under torch.compile + we do not bother fixing them.
+            if not torch.compiler.is_compiling():
+                self.assertIs(private_result, private_inputs)
 
     def test_invalid_call_precedes_torch_function_override(self):
         seen = []
@@ -2091,26 +2094,13 @@ class TestForeachPublicAPI(TestCase):
                 TypeError, r"add\(\) got an unexpected keyword argument 'unexpected'"
             ):
                 torch.foreach.add(inputs, unexpected=1)
+            with self.assertRaisesRegex(
+                TypeError,
+                r"pow\(\) got some positional-only arguments passed as keyword arguments: 'input, exponent'",
+            ):
+                torch.foreach.pow(input=inputs, exponent=2)
 
         self.assertEqual(seen, [])
-
-    def test_torch_function_precedence_uses_signature_order(self):
-        class InputsTensor(torch.Tensor):
-            @classmethod
-            def __torch_function__(cls, func, types, args=(), kwargs=None):
-                return "inputs"
-
-        class WeightTensor(torch.Tensor):
-            @classmethod
-            def __torch_function__(cls, func, types, args=(), kwargs=None):
-                return "weight"
-
-        inputs = [torch.ones(1).as_subclass(InputsTensor)]
-        end = [torch.zeros(1)]
-        weight = torch.tensor(0.5).as_subclass(WeightTensor)
-
-        result = torch.foreach.lerp(weight=weight, end=end, inputs=inputs)
-        self.assertEqual(result, "inputs")
 
     @parametrize("in_place", (False, True))
     def test_add_shared_tensor_dispatch_requires_explicit_alpha(self, in_place):

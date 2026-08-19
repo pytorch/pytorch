@@ -49,7 +49,15 @@ torch._foreach_add(inputs, other)  # Private spelling
 torch.foreach.add(inputs, other)   # Public beta spelling
 ```
 
-The private spellings remain available with unchanged signatures for backward compatibility. Public functions call the same ATen operators but use parameter names aligned with the corresponding ordinary operation. The primary tensor-list argument is named `inputs`; other arguments retain the ordinary operation's logical name, even when the currently supported form requires a list. This allows future overloads to accept shared operands without changing keyword names.
+The private spellings remain available with unchanged signatures for backward compatibility.
+Public functions call the same ATen operators but improve API consistency in two ways:
+
+1. All required operands are positional-only, and all optional parameters are keyword-only.
+2. Parameter names align with the corresponding ordinary operation.
+
+The primary tensor-list argument that the foreach API applies over is named `inputs`, and other
+arguments retain the ordinary operation's logical name, even when the currently supported form
+requires a list. This keeps signatures descriptive as operand forms evolve.
 
 ## Unary operations
 
