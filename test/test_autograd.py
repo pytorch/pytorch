@@ -49,7 +49,6 @@ from torch.autograd.profiler_util import (
     FunctionEventAvg,
 )
 from torch.testing import make_tensor
-from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
     dtypes,
@@ -17416,7 +17415,6 @@ class TestSelectiveActivationCheckpoint(TestCase):
 class TestSelectiveActivationCheckpointCudaOnly(TestCase):
     hw_classification = HardwareClassification.CUDA
 
-    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
     def test_flops_and_mem(self):
         # From https://github.com/pytorch/pytorch/pull/126320
         def get_act_mem(f):
