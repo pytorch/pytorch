@@ -193,8 +193,8 @@ class TestProfilerCUDA(TestCase):
         # Only testing that emit_nvtx runs when
         # record_shapes option is enabled.
         with torch.autograd.profiler.emit_nvtx(record_shapes=True) as prof:
-            x = torch.randn(10, 10, requires_grad=True)
-            y = torch.randn(10, 10, requires_grad=True)
+            x = torch.randn(10, 10, device=device, requires_grad=True)
+            y = torch.randn(10, 10, device=device, requires_grad=True)
             z = x + y
             s = custom_layer(z)
             q = s.sum()
@@ -210,7 +210,7 @@ class TestProfilerCUDA(TestCase):
             [
                 sys.executable,
                 "-c",
-                """
+                f"""
 import os
 import torch
 from torch.profiler import ProfilerActivity, profile
@@ -218,16 +218,16 @@ from torch.profiler import ProfilerActivity, profile
 def add_one(in_: torch.Tensor):
     return in_ + 1
 
-sample_arg = torch.zeros(10, device="cuda").requires_grad_(True)
+sample_arg = torch.zeros(10, device="{device}").requires_grad_(True)
 
 # add this before cuda graphs are created
 torch.profiler._utils._init_for_cuda_graphs()
 
 add_one_graphed = torch.cuda.graphs.make_graphed_callables(add_one, sample_args=(sample_arg,))
-zeros = torch.zeros(10, device="cuda")
+zeros = torch.zeros(10, device="{device}")
 out = add_one_graphed(zeros)
 if out[0] != 1:
-    raise AssertionError(f"Expected out[0] == 1, got {out[0]}")
+    raise AssertionError(f"Expected out[0] == 1, got {{out[0]}}")
 
 with profile(activities=[ProfilerActivity.CPU]):
     add_one_graphed(zeros)
@@ -245,10 +245,11 @@ with profile(activities=[ProfilerActivity.CUDA]):
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     @unittest.skipIf(not TEST_MULTIGPU, "Multiple GPUs needed")
     def test_kineto_multigpu(self, device):
+        device_type = device.split(":")[0]
         with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
             for gpu_id in [0, 1]:
-                x = torch.randn(10, 10).cuda(gpu_id)
-                y = torch.randn(10, 10).cuda(gpu_id)
+                x = torch.randn(10, 10, device=f"{device_type}:{gpu_id}")
+                y = torch.randn(10, 10, device=f"{device_type}:{gpu_id}")
                 z = x.matmul(y)
                 torch.cuda.synchronize(gpu_id)
 
