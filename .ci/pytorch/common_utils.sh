@@ -351,16 +351,15 @@ function install_spmd_types() {
 
 function install_flash_attn_cute() {
   echo "Installing FlashAttention 4 from PyPI..."
-  # b17 adds aux_scalars; CUDA 13 wheels are behind the cu13 extra.
+  local flash_attn_package=flash-attn-4==4.0.0b17
   if [[ "${DESIRED_CUDA:-}" == 13.* || "${CUDA_VERSION:-}" == 13.* || "${BUILD_ENVIRONMENT:-}" == *cuda13* ]]; then
-    pip_install "flash-attn-4[cu13]==4.0.0b17"
-  else
-    pip_install flash-attn-4==4.0.0b17
+    flash_attn_package="flash-attn-4[cu13]==4.0.0b17"
   fi
-  # flash-attn-4 pulls quack unpinned; newer quack needs cutlass._mlir_helpers,
-  # absent from the gated cutlass-dsl 4.5.2. Pin quack to the SHA torch vendors
-  # (torch/_vendor/quack), which uses cutlass._mlir and works with 4.5.2. See #188477.
-  pip_install "git+https://github.com/Dao-AILab/quack.git@99bd7973bf3dc6db40961e413d4bdfea6c6fee3e"
+  # QuACK 0.6.4 pins the CuTeDSL version accepted by torch._native.
+  pip_install \
+    "$flash_attn_package" \
+    quack-kernels==0.6.4 \
+    apache-tvm-ffi==0.1.11
   echo "FlashAttention 4 installation complete."
 }
 
@@ -369,7 +368,20 @@ function install_cutlass_dsl() {
   # Pin to a version accepted by torch._native's cutedsl version gate
   # (_CUTEDSL_REQUIRED_VERSIONS); apache-tvm-ffi is a required runtime dep of
   # the CuTeDSL op overrides but is not pulled in by nvidia-cutlass-dsl.
-  pip_install nvidia-cutlass-dsl==4.5.2 apache-tvm-ffi==0.1.11
+  #
+  # Installs unconditionally: native-AOT stage 2 calls this only after deciding
+  # it WILL export, and then treats a missing runtime as a build failure -- so a
+  # silent skip here would turn into a failed build rather than a slower one.
+  # (A Python-version guard used to live here, on the premise that the DSL needs
+  # 3.12. Dropped because the real floor is lower, not because there is no floor:
+  # nvidia-cutlass-dsl itself is py3-none-any, but its mandatory
+  # nvidia-cutlass-dsl-libs-* and apache-tvm-ffi are cp-tagged manylinux wheels,
+  # published for cp310-cp314 (plus cp314t) as of the pin above -- so 3.10 and
+  # 3.11 resolve fine, while a future pin whose libs-* floor rises would fail
+  # here. build_stage2.should_run() carries the matching interpreter gate; the
+  # sibling install_cutlass_api keeps its own >=3.12 guard because THAT package
+  # requires 3.12.)
+  pip_install nvidia-cutlass-dsl==4.6.2 apache-tvm-ffi==0.1.11
   echo "NVIDIA CUTLASS DSL installation complete."
 }
 

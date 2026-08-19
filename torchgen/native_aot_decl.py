@@ -111,6 +111,42 @@ def archs_of(d: AotDeclaration) -> tuple[str, ...]:
     return tuple(getattr(d, "ARCHS", _DEFAULT_ARCHS))
 
 
+# Majors a generated gate could plausibly match. Narrow on purpose: see cc_of.
+_KNOWN_MAJORS = range(3, 13)
+
+
+def cc_of(arch: str) -> tuple[int, int]:
+    """sm string -> compute capability. "sm_90" -> (9, 0), "sm_103a" -> (10, 3).
+
+    Here rather than in one of its two consumers because both the exporter (which
+    matches a detected arch against a declaration's ARCHS) and the generator
+    (which groups sidecars by capability) have to agree about what an sm string
+    means; they disagreed while one compared capabilities and the other compared
+    strings, and a declaration pinning only ('sm_100a',) then disowned the
+    'sm_100' its own on-device export produced.
+
+    Rejects anything it cannot parse into a plausible capability rather than
+    computing one: "sm_9" would give (0, 9) and "sm_1000" (100, 0), each emitting
+    a gate no device can satisfy, so the op would ship, link, and decline every
+    call with nothing reported. Suffixes other than the arch-conditional "a"
+    (e.g. the family-conditional "f" of CUDA 12.9+) are refused too -- they mean
+    something the generator has not been taught."""
+    digits = arch.removeprefix("sm_").removesuffix("a")
+    if not arch.startswith("sm_") or not digits.isdigit() or len(digits) not in (2, 3):
+        raise RuntimeError(
+            f"cannot read a compute capability from arch {arch!r}: expected "
+            f"sm_<major><minor>[a], e.g. sm_90a or sm_100"
+        )
+    major, minor = divmod(int(digits), 10)
+    if major not in _KNOWN_MAJORS:
+        raise RuntimeError(
+            f"arch {arch!r} parses as compute capability {major}.{minor}, "
+            f"outside the known range {_KNOWN_MAJORS.start}-"
+            f"{_KNOWN_MAJORS.stop - 1}; a gate for it would match no device"
+        )
+    return major, minor
+
+
 def _check_arity(mod, name: str, want: int, path: str) -> None:
     fn = getattr(mod, name)
     params = [
@@ -152,6 +188,17 @@ def _validate(d, path: str, label: str) -> None:
             f"{path}: {label} ARCHS must be a non-empty sequence of sm "
             f"strings (e.g. ('sm_90a', 'sm_100a')), got {archs!r}"
         )
+    # ...and each one must name a capability, not merely look like an sm string.
+    # _SM_RE accepts "sm_9" and "sm_1000", which cc_of refuses -- and export
+    # compares ARCHS entries by STRING, so a typo silently matched nothing: the
+    # declaration exported no kernels, generation had no tree to complain about,
+    # and the build shipped without that op, green. Refused here because this is
+    # the only place that knows which file to name.
+    for a in archs:
+        try:
+            cc_of(a)
+        except RuntimeError as e:
+            raise RuntimeError(f"{path}: {label} ARCHS entry {a!r}: {e}") from e
 
     grid = d.kernel_precompile_grid()
     if not isinstance(grid, list) or not grid:
