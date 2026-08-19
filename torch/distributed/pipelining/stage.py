@@ -117,6 +117,26 @@ def _send_release_poll_default() -> bool:
     return os.environ.get("TORCH_PIPELINING_SEND_RELEASE_POLL", "1") != "0"
 
 
+def _send_release_budget_default() -> int | None:
+    """Return how many sends a rank may keep outstanding, or None for no cap.
+
+    Set ``TORCH_PIPELINING_SEND_RELEASE_BUDGET`` to a non-negative count to have
+    the schedule name a release point as soon as a rank holds more sends than
+    that, bounding the memory they occupy at roughly the count times the size of
+    a stage boundary. Unset, release points are only named where the local
+    backward implies the send has landed.
+    """
+    budget = os.environ.get("TORCH_PIPELINING_SEND_RELEASE_BUDGET")
+    if budget is None:
+        return None
+    if not budget.isdigit():
+        raise ValueError(
+            "TORCH_PIPELINING_SEND_RELEASE_BUDGET must be a non-negative "
+            f"integer, got {budget!r}"
+        )
+    return int(budget)
+
+
 @dataclass
 class _ForwardCacheEntry:
     """Forward state retained per microbatch.

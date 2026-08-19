@@ -7,7 +7,7 @@ import itertools
 import logging
 import re
 from abc import ABC, abstractmethod
-from collections import Counter, defaultdict
+from collections import Counter, defaultdict, deque
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
@@ -35,6 +35,7 @@ from .microbatch import (
 from .stage import (
     _PipelineStageBase,
     _RecvInfo,
+    _send_release_budget_default,
     _send_release_poll_default,
     PipelineStage,
 )
@@ -1781,6 +1782,190 @@ def _add_wait_send(
     return out
 
 
+def _add_wait_send_budget(
+    comm_actions: dict[int, list[_Action]],
+    stage_to_rank: Callable[[int], int],
+    budget: int,
+) -> dict[int, list[_Action]]:
+    """Cap the sends a rank keeps outstanding, holding their memory to a budget.
+
+    Waiting for a send is safe once the peer has posted the matching receive:
+    the transfer then needs nothing further from either side. This walks the
+    schedule in causal order, so the walk position itself proves which receives
+    the peer reaches first, and adds a release point whenever a rank holds more
+    than ``budget`` sends.
+
+    Two proofs, and they differ in cost rather than in safety. A rank has word
+    of a peer only through the messages it has received, so the walk also
+    carries that knowledge: every send stamps what its sender knew and every
+    receive hands the stamp to the rank consuming it. A send that knowledge
+    covers has already landed, so waiting for it is free; a send only the walk
+    order covers has not, so waiting for it stalls the rank until the peer posts
+    its receive. Free releases therefore come first, and the budget decides how
+    much of the second kind to buy.
+    """
+    ranks = sorted(comm_actions)
+    # Direction of a send, as the step to the peer stage and the receive it pairs with.
+    send_types = {SEND_F: (1, RECV_F), SEND_B: (-1, RECV_B)}
+
+    recv_at: dict[tuple[int, _ComputationType, int, int | None], int] = {}
+    for rank in ranks:
+        for index, action in enumerate(comm_actions[rank]):
+            if action.computation_type in (RECV_F, RECV_B):
+                key = (
+                    rank,
+                    action.computation_type,
+                    action.stage_index,
+                    action.microbatch_index,
+                )
+                recv_at[key] = index
+
+    # Pair every send with its receive, addressed both ways.
+    recv_of_send: dict[tuple[int, int], tuple[int, int]] = {}
+    send_of_recv: dict[tuple[int, int], tuple[int, int]] = {}
+    for rank in ranks:
+        for index, action in enumerate(comm_actions[rank]):
+            if action.computation_type not in send_types:
+                continue
+            step, recv_type = send_types[action.computation_type]
+            peer_stage = action.stage_index + step
+            peer_rank = stage_to_rank(peer_stage)
+            recv = (
+                peer_rank,
+                recv_at[(peer_rank, recv_type, peer_stage, action.microbatch_index)],
+            )
+            recv_of_send[(rank, index)] = recv
+            send_of_recv[recv] = (rank, index)
+
+    # Causal order: each rank's own sequence, plus every send before its receive.
+    successors: dict[tuple[int, int], list[tuple[int, int]]] = defaultdict(list)
+    in_degree: dict[tuple[int, int], int] = {
+        (rank, index): 0 for rank in ranks for index in range(len(comm_actions[rank]))
+    }
+    for rank in ranks:
+        for index in range(1, len(comm_actions[rank])):
+            successors[(rank, index - 1)].append((rank, index))
+            in_degree[(rank, index)] += 1
+    for send, recv in recv_of_send.items():
+        successors[send].append(recv)
+        in_degree[recv] += 1
+
+    def consumed_recvs(action: _Action, rank: int) -> list[int]:
+        """Positions of the receives an action has waited on before it runs."""
+        found = []
+        for part in action.sub_actions or (action,):
+            if part.computation_type == F:
+                recv_type = RECV_F
+            elif part.computation_type in (FULL_BACKWARD, BACKWARD_INPUT):
+                recv_type = RECV_B
+            else:
+                continue
+            key = (rank, recv_type, part.stage_index, part.microbatch_index)
+            if key in recv_at:
+                found.append(recv_at[key])
+        return found
+
+    # What each rank knows of every other rank's progress, as an action position.
+    knowledge: dict[int, dict[int, int]] = {
+        rank: dict.fromkeys(ranks, -1) for rank in ranks
+    }
+    knowledge_at_send: dict[tuple[int, int], dict[int, int]] = {}
+    outstanding: dict[int, dict[_Action, tuple[int, int]]] = {
+        rank: {} for rank in ranks
+    }
+    lowered: dict[int, list[_Action]] = {rank: [] for rank in ranks}
+    # Receives the walk has passed, so the peer posts them before this point.
+    posted_recvs: set[tuple[int, int]] = set()
+    peak = 0
+    stalling = {SEND_F: 0, SEND_B: 0}
+
+    def release(rank: int, keep: int) -> None:
+        """Wait for sends until at most ``keep`` remain, free proofs first."""
+        known = knowledge[rank]
+        held = outstanding[rank]
+        for landed in (True, False):
+            for send, (peer_rank, recv_index) in list(held.items()):
+                if len(held) <= keep:
+                    return
+                if landed:
+                    if known[peer_rank] < recv_index:
+                        continue
+                else:
+                    if (peer_rank, recv_index) not in posted_recvs:
+                        continue
+                    stalling[send.computation_type] += 1
+                wait_type = (
+                    WAIT_SEND_F if send.computation_type == SEND_F else WAIT_SEND_B
+                )
+                lowered[rank].append(
+                    _Action(send.stage_index, wait_type, send.microbatch_index)
+                )
+                del held[send]
+
+    queue = deque(sorted(node for node, degree in in_degree.items() if degree == 0))
+    walked = 0
+    while queue:
+        rank, index = queue.popleft()
+        walked += 1
+        action = comm_actions[rank][index]
+        known = knowledge[rank]
+        known[rank] = index
+        comp_type = action.computation_type
+
+        if comp_type in send_types:
+            release(rank, budget - 1)
+            lowered[rank].append(action)
+            knowledge_at_send[(rank, index)] = dict(known)
+            outstanding[rank][action] = recv_of_send[(rank, index)]
+            peak = max(peak, len(outstanding[rank]))
+        elif comp_type in (WAIT_SEND_F, WAIT_SEND_B):
+            send = _Action(
+                action.stage_index,
+                SEND_F if comp_type == WAIT_SEND_F else SEND_B,
+                action.microbatch_index,
+            )
+            # Drop a wait for a send the budget already released.
+            if outstanding[rank].pop(send, None) is not None:
+                lowered[rank].append(action)
+        else:
+            if comp_type in (RECV_F, RECV_B):
+                posted_recvs.add((rank, index))
+            lowered[rank].append(action)
+            for recv_index in consumed_recvs(action, rank):
+                for peer_rank, position in knowledge_at_send[
+                    send_of_recv[(rank, recv_index)]
+                ].items():
+                    known[peer_rank] = max(known[peer_rank], position)
+            release(rank, budget)
+
+        for successor in successors[(rank, index)]:
+            in_degree[successor] -= 1
+            if in_degree[successor] == 0:
+                queue.append(successor)
+
+    if walked != len(in_degree):
+        raise AssertionError("Schedule sends and receives form a cycle")
+
+    if peak > budget:
+        logger.warning(
+            "Send release budget of %d not met everywhere: a rank holds up to "
+            "%d sends at points where no release can be proven safe.",
+            budget,
+            peak,
+        )
+    logger.info(
+        "Send release budget %d: a rank holds at most %d sends, and %d forward "
+        "and %d backward release points wait for a peer rather than for a send "
+        "already known to have landed. Raise the budget to buy that waiting "
+        "back; the useful setting is the smallest one reporting none.",
+        budget,
+        peak,
+        stalling[SEND_F],
+        stalling[SEND_B],
+    )
+    return lowered
+
+
 def _add_send_recv(
     compute_actions: dict[int, list[_Action]],
     stage_to_rank: Callable[[int], int],
@@ -2760,7 +2945,8 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                 num_stages=self._num_stages,
             )
 
-            if any(stage.early_send_release for stage in self._stages):
+            early_send_release = any(stage.early_send_release for stage in self._stages)
+            if early_send_release:
                 self.pipeline_order_with_comms = _add_wait_send(
                     self.pipeline_order_with_comms
                 )
@@ -2769,6 +2955,15 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                 self.pipeline_order_with_comms = _defer_recv_ops(
                     self.pipeline_order_with_comms,
                     stage_to_rank=lambda s: self.stage_index_to_group_rank[s],
+                )
+
+            # Runs last so it reasons about the positions the schedule ends up with.
+            budget = _send_release_budget_default()
+            if early_send_release and budget is not None:
+                self.pipeline_order_with_comms = _add_wait_send_budget(
+                    self.pipeline_order_with_comms,
+                    stage_to_rank=lambda s: self.stage_index_to_group_rank[s],
+                    budget=budget,
                 )
         else:
             raise NotImplementedError(f"{format=} is not implemented")
