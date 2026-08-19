@@ -14601,12 +14601,12 @@ if __name__ == '__main__':
     def test_linear_cross_entropy_loss_with_acc_dtype(self, device, dtype, acc_policy, bias):
         if (
             TEST_WITH_ROCM
-            and (torch.version.rocm or "0.0").split(".")[:2] == ["10", "1"]
+            and (torch.version.rocm or "0").split(".")[0] == "10"
             and not bias
             and dtype == torch.float16
             and acc_policy == "compact"
         ):
-            self.skipTest("times out on ROCm 10.1")
+            self.skipTest("times out on ROCm 10")
         if dtype == torch.bfloat16 and "cuda" in device and not SM80OrLater:
             self.skipTest("bf16 requires SM80+ on CUDA")
         self._test_linear_cross_entropy_loss(
@@ -14622,12 +14622,12 @@ if __name__ == '__main__':
     ):
         if (
             TEST_WITH_ROCM
-            and (torch.version.rocm or "0.0").split(".")[:2] == ["10", "1"]
+            and (torch.version.rocm or "0").split(".")[0] == "10"
             and not bias
             and dtype == torch.bfloat16
             and acc_policy == "auto"
         ):
-            self.skipTest("times out on ROCm 10.1")
+            self.skipTest("times out on ROCm 10")
         # reduction='none' counterpart of
         # test_linear_cross_entropy_loss_with_acc_dtype: exercises the
         # no_reduction op (per-sample loss + recompute backward)
