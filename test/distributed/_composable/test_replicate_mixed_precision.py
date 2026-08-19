@@ -36,6 +36,7 @@ from torch.testing._internal.common_utils import (
     MI300_ARCH,
     run_tests,
     skipIfRocmArch,
+    TEST_HPU,
 )
 
 
@@ -645,8 +646,7 @@ class TestReplicateMixedPrecisionCasts(FSDPTestMultiThread):
         model = nn.Sequential(nn.Conv2d(1, 5, 3), nn.BatchNorm2d(5), nn.Conv2d(5, 4, 3))
         for module in (model[0], model[1], model[2], model):
             replicate(module, mp_policy=mp_policy)
-        acc = torch.accelerator.current_accelerator()
-        if acc is not None and acc.type in ("npu", "hpu"):
+        if TEST_HPU:
             inner(model, torch.randn((3, 1, 9, 9), device=device))
         else:
             with self.assertRaisesRegex(
