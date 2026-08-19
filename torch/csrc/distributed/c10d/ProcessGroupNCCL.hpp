@@ -848,9 +848,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   c10::intrusive_ptr<Work> endCoalescing() override;
 
-  void startTimeEstimate();
+  void startTimeEstimate() override;
 
-  float endTimeEstimate();
+  float endTimeEstimate() override;
 
   // For specifying a composite optype, such as ALLGATHER and REDUCE_SCATTER
   c10::intrusive_ptr<Work> endCoalescing(OpType optype);

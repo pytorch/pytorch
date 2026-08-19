@@ -366,6 +366,49 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
 
     @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    @requires_nccl_version(
+        (2, 28), "NCCL Symmetric Memory support device API from nccl 2.28"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_nccl_symmem_barrier_channel_out_of_bounds(self):
+        symm_mem.set_backend("NCCL")
+        torch.cuda.set_device(self.rank)
+        c10d.all_reduce(torch.ones(1, device=self.device))
+        group_name = c10d.group.WORLD.group_name
+
+        t = symm_mem.empty(64, dtype=torch.float32, device=self.device)
+        handle = symm_mem.rendezvous(t, group=group_name)
+
+        num_slots = handle.signal_pad_size // 4
+        max_channel = num_slots // self.world_size
+
+        # check_channel() is shared with the CUDA backend; an over-capacity
+        # channel must be rejected host-side before the kernel launch (#191618).
+        with self.assertRaisesRegex(RuntimeError, "maximum supported channel"):
+            handle.barrier(channel=max_channel)
+        handle.barrier(channel=max_channel - 1)
+
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
+    @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    @requires_nccl_version((2, 29), "NCCL one-sided host API support from nccl 2.29")
+    @skip_if_lt_x_gpu(2)
+    def test_nccl_symmem_signal_rank_out_of_bounds(self):
+        symm_mem.set_backend("NCCL")
+        torch.cuda.set_device(self.rank)
+        c10d.all_reduce(torch.ones(1, device=self.device))
+        group_name = c10d.group.WORLD.group_name
+
+        t = symm_mem.empty(64, dtype=torch.float32, device=self.device)
+        handle = symm_mem.rendezvous(t, group=group_name)
+
+        for bad_rank in (-1, self.world_size):
+            with self.assertRaisesRegex(RuntimeError, r"must be in \[0"):
+                handle.put_signal(dst_rank=bad_rank)
+            with self.assertRaisesRegex(RuntimeError, r"must be in \[0"):
+                handle.wait_signal(src_rank=bad_rank)
+
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
+    @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
     @skip_if_lt_x_gpu(2)
     def test_nccl_symmem_rendezvous_subgroup(self):
         symm_mem.set_backend("NCCL")

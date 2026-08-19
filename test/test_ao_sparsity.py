@@ -21,8 +21,9 @@ from ao.sparsity.test_sparsifier import (  # noqa: F401
 )
 
 # Structured Pruning
-from ao.sparsity.test_structured_sparsifier import (
-    TestBaseStructuredSparsifier,
+from ao.sparsity.test_structured_sparsifier import (  # noqa: F401
+    TestBaseStructuredSparsifierCPU,
+    TestBaseStructuredSparsifierDevice,
     TestFPGMPruner,
     TestSaliencyPruner,
 )
@@ -58,7 +59,7 @@ from ao.sparsity.test_sparsity_utils import TestSparsityUtilFunctions  # noqa: F
 
 
 instantiate_device_type_tests(TestSaliencyPruner, globals())
-instantiate_device_type_tests(TestBaseStructuredSparsifier, globals())
+instantiate_device_type_tests(TestBaseStructuredSparsifierDevice, globals())
 instantiate_device_type_tests(TestFPGMPruner, globals())
 
 
