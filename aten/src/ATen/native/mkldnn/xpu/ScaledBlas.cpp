@@ -268,7 +268,7 @@ Tensor& _scaled_gemm(
   // Note: XPU does not support fast_accum for now, we will warn and always pass
   // false to the call.
   if (use_fast_accum) {
-    TORCH_WARN(
+    TORCH_WARN_ONCE(
         "scaled_mm: fast_accum is not supported in XPU for now. It would silently set use_fast_accum to false.");
   }
   // TODO: scale_result is not defined or used!
@@ -337,7 +337,7 @@ Tensor& _scaled_mm_out_xpu(
   // Note: XPU does not support fast_accum for now, we will warn and always pass
   // false to the call.
   if (use_fast_accum) {
-    TORCH_WARN(
+    TORCH_WARN_ONCE(
         "scaled_mm: fast_accum is not supported in XPU for now. It would silently set use_fast_accum to false.");
   }
 

@@ -204,7 +204,7 @@ class QLeakyRelu final {
   static Tensor run(Tensor self, const Scalar& negative_slope, bool inplace, double output_scale, int64_t output_zero_point) {
     // inplace argument is ignored now, TODO:support inplace
     if (inplace) {
-      TORCH_WARN("inplace=True is not supported for quantized::leaky_relu yet");
+      TORCH_WARN_ONCE("inplace=True is not supported for quantized::leaky_relu yet");
     }
     const auto qx = self.contiguous(self.suggest_memory_format());
     auto qy = at::_empty_affine_quantized(qx.sizes(),

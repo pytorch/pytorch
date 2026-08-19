@@ -53,7 +53,7 @@ inline std::vector<int64_t> _interp_output_size(
       }
     }
     if (is_float_scale_factor) {
-      TORCH_WARN(
+      TORCH_WARN_ONCE(
           "The default behavior for interpolate/upsample with float scale_factor changed "
           "in 1.6.0 to align with other frameworks/libraries, and uses scale_factor directly, "
           "instead of relying on the computed output size. "
@@ -90,7 +90,7 @@ inline Tensor interpolate(
     }
   } else {
     if (align_corners == std::nullopt) {
-      TORCH_WARN(
+      TORCH_WARN_ONCE(
           "Default upsampling behavior when mode=",
           enumtype::get_enum_name(mode),
           " is changed "

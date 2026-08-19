@@ -164,7 +164,7 @@ Tensor cat_quantized_cpu(const ITensorListRef& qxs, int64_t dim) {
 
   if (!all_inputs_sharing_qparams(materialized)) {
       // TODO: if possible change this warning to an error T194501002
-      TORCH_WARN("All inputs of this cat operator must share the same quantization parameters. Otherwise large numerical inaccuracies may occur.");
+      TORCH_WARN_ONCE("All inputs of this cat operator must share the same quantization parameters. Otherwise large numerical inaccuracies may occur.");
   }
   check_cat_no_zero_dim(materialized);
   dim = legacy_cat_wrap_dim(dim, materialized);

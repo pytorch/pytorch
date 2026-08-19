@@ -3764,7 +3764,7 @@ Tensor& _int_mm_out_cpu(const Tensor& self, const Tensor& mat2, Tensor& result) 
       mkldnn_matmul_i8i8i32(self, mat2, result);
       dispatched = true;
     } catch ([[maybe_unused]] const std::exception& e) {
-      TORCH_WARN(func_name, " failed, switching to BLAS gemm: ", e.what());
+      TORCH_WARN_ONCE(func_name, " failed, switching to BLAS gemm: ", e.what());
     }
   }
   if (!dispatched) {
