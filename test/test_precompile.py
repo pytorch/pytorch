@@ -5031,6 +5031,55 @@ class TestExportPython(TestCase):
         torch.compiler.export_python(path=path)(fn)(x, w, b)
         self.assertEqual(sorted(os.listdir(directory)), ["artifact.py"])
 
+    def test_a_missing_cpu_isa_stamp_warns_like_every_other_stamp(self, device):
+        # It was the only checked stamp with no missing-stamp branch, so deleting one
+        # comment line switched off the only guard that RAISES -- the one standing
+        # between a C++ kernel and a host whose vector width it was not built for.
+        if torch.device(device).type != "cpu":
+            self.skipTest("the stamp is about C++ kernels")
+        from torch.compiler._export_python import _CPU_ISA_TAG
+
+        path = self._tmp_path("isa_missing.py")
+
+        def fn(x, y):
+            return ((x * 2.0 + y).tanh() * x).sum(dim=0)
+
+        x = make_tensor((256, 256), device=device, dtype=torch.float32)
+        y = make_tensor((256, 256), device=device, dtype=torch.float32)
+        expected = torch.compiler.export_python(path=path)(fn)(x, y)
+        with open(path, encoding="utf-8") as f:
+            source = f.read()
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("\n".join(l for l in source.splitlines() if _CPU_ISA_TAG not in l))
+        with self.assertLogs("torch.compiler._export_python", level="WARNING") as logs:
+            self.assertEqual(
+                torch.compiler.export_python(path=path)(fn)(x, y), expected
+            )
+        self.assertTrue(
+            any("no recorded cpu-vec-isa stamp" in line for line in logs.output),
+            logs.output,
+        )
+
+    def test_a_graph_with_no_cpp_kernel_does_not_warn_about_the_isa(self, device):
+        # "recorded as None" and "stamp deleted" both read back as None. Only the second
+        # is a missing guard; warning on the first would make every CUDA artifact noisy.
+        if torch.device(device).type != "cuda":
+            self.skipTest("needs a graph with no C++ kernel")
+        path = self._tmp_path("isa_none.py")
+
+        def fn(x):
+            return (x * 2).relu()
+
+        x = make_tensor((1024,), device=device, dtype=torch.float32)
+        torch.compiler.export_python(path=path)(fn)(x)
+        # Every load logs the trusted-exec warning; the point is that nothing complains
+        # about the stamp.
+        with self.assertLogs("torch.compiler._export_python", level="WARNING") as logs:
+            torch.compiler.export_python(path=path)(fn)(x)
+        self.assertFalse(
+            [line for line in logs.output if "cpu-vec-isa" in line], logs.output
+        )
+
 
 instantiate_device_type_tests(TestExportPython, globals())
 

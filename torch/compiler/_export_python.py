@@ -132,6 +132,40 @@ def _atomic_publish(path: str, data: bytes) -> bool:
             pass
 
 
+# Elements below this fraction of the reference's peak are too small for a relative diff
+# to say anything; they are covered by the absolute term instead.
+_REL_REPORT_FLOOR = 1e-6
+
+
+def _allclose(a: torch.Tensor, b: torch.Tensor, rtol: float, atol: float) -> bool:
+    """torch.allclose, but tolerant of dtypes that have no comparison kernel.
+
+    float8 reaches allclose and dies inside it on a missing mul (as NotImplementedError,
+    which is a RuntimeError); promote and compare there rather than failing an artifact
+    that is perfectly honest.
+    """
+    try:
+        return bool(torch.allclose(a, b, rtol=rtol, atol=atol, equal_nan=True))
+    except RuntimeError:
+        return bool(
+            torch.allclose(a.double(), b.double(), rtol=rtol, atol=atol, equal_nan=True)
+        )
+
+
+def _finite_mask(t: torch.Tensor) -> torch.Tensor | None:
+    """Where ``t`` is finite, or None for a dtype that cannot answer.
+
+    float8 is is_floating_point() but has no isfinite kernel, so asking crashes the
+    check on an artifact that is perfectly honest.
+    """
+    if not t.is_floating_point():
+        return None
+    try:
+        return torch.isfinite(t)
+    except RuntimeError:
+        return None
+
+
 def _precompile_error(msg: str) -> Exception:
     from torch._precompile import PrecompileError
 
@@ -507,6 +541,7 @@ class ExportedPythonArtifact:
         self._input_duplicates: list[list[int]] | None = None
         self._global_state: list[list[str]] | None = None
         self._cpu_isa: str | None = None
+        self._cpu_isa_stamped = False
         self._code_devices: set[str] = set()
         self._autocast: list[list[Any]] | None = None
         self._loaded: Callable[..., Any] | None = None
@@ -694,7 +729,7 @@ class ExportedPythonArtifact:
             log.warning(
                 "torch.compiler.export_python: the artifact at %s carries no recorded "
                 "global-state stamp, so calling it under a different default dtype, "
-                "default device, matmul precision or determinism setting than capture "
+                "default device or determinism setting than capture "
                 "is unchecked. Delete %s to regenerate it.",
                 self._path,
                 self._path,
@@ -750,7 +785,20 @@ class ExportedPythonArtifact:
                     "Autocast dtypes are baked into the artifact; capture under the "
                     "same autocast context you call it in."
                 )
-        if self._cpu_isa is not None:
+        if not self._cpu_isa_stamped:
+            # Every other checked stamp warns per call while it is missing. This one was
+            # silent, which made it the only guard a hand-edit could switch off without
+            # saying anything -- and it is the one guarding the loudest failure, a C++
+            # kernel whose baked vector width does not match the host's.
+            log.warning(
+                "torch.compiler.export_python: the artifact at %s carries no recorded "
+                "cpu-vec-isa stamp, so running a C++ kernel built for a different "
+                "vector width than this host's is unchecked, and that failure is "
+                "silent. Delete %s to regenerate it.",
+                self._path,
+                self._path,
+            )
+        elif self._cpu_isa is not None:
             live_isa = _cpu_vec_isa("cpp_fused")
             if live_isa is not None and live_isa != self._cpu_isa:
                 raise _precompile_error(
@@ -873,6 +921,7 @@ class ExportedPythonArtifact:
         self._autocast = self._read_stamp(code, _AUTOCAST_TAG)
         self._global_state = self._read_stamp(code, _GLOBAL_STATE_TAG)
         self._cpu_isa = self._read_stamp(code, _CPU_ISA_TAG)
+        self._cpu_isa_stamped = self._read_raw_stamp(code, _CPU_ISA_TAG) is not None
         self._code_devices = _code_devices(code)
         entry = self._load(code, from_disk=from_disk)
         self._example_inputs = None
