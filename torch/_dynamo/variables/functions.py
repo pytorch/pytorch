@@ -56,6 +56,7 @@ from ..exc import (
     ObservedException,
     ObservedGeneratorExit,
     ObservedUserStopIteration,
+    raise_attribute_error,
     raise_observed_exception,
     raise_type_error,
     raise_value_error,
@@ -4841,6 +4842,21 @@ class GetSetDescriptorVariable(DescriptorVariable):
                 result_source = TypeMROSource(obj.source)
         return VariableTracker.build(tx, resolved, result_source)
 
+    def tp_descr_set_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        obj: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        name = self.descriptor.__name__
+        getset = obj.lookup_tp_getset_member(name)
+        if getset and getset.setter is not None:
+            return getset.setter(obj, tx, value)
+        raise_attribute_error(
+            tx,
+            f"attribute '{name}' of '{obj.python_type_name()}' objects is not writable",
+        )
+
 
 class PropertyVariable(DescriptorVariable):
     """Python property descriptor.
@@ -4889,6 +4905,34 @@ class PropertyVariable(DescriptorVariable):
             tx, self.descriptor.fget, source=fget_source, realize=True
         )
         return fget_vt.call_function(tx, [obj], {})
+
+    def tp_descr_set_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        obj: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        # Mirrors property_descr_set: fdel for __delete__ (value is None),
+        # fset otherwise.  The result of the call is discarded.
+        # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L1695-L1737
+        attr = "fdel" if value is None else "fset"
+        func = getattr(self.descriptor, attr)
+        if func is None:
+            action = "deleter" if value is None else "setter"
+            # prop_name is unset for a property built without an fget and never
+            # bound to a class, which is when CPython falls back to the terse
+            # message.
+            name = getattr(self.descriptor, "__name__", None)
+            if name is None:
+                msg = f"can't {'delete' if value is None else 'set'} attribute"
+            else:
+                msg = f"property {name!r} of {obj.python_type().__qualname__!r} object has no {action}"
+            raise_attribute_error(tx, msg)
+        func_source = self.source and AttrSource(self.source, attr)
+        func_vt = VariableTracker.build(tx, func, source=func_source, realize=True)
+        args = [obj] if value is None else [obj, value]
+        func_vt.call_function(tx, args, {})
+        return variables.ConstantVariable.create(None)
 
 
 class TupleGetterVariable(VariableTracker):
