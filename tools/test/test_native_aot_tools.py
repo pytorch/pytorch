@@ -13,8 +13,16 @@ import unittest
 from tools.native_aot import export, toolchains
 
 
+_TOOLS_FILE = os.path.abspath(toolchains.__file__)
+REPO = os.path.dirname(os.path.dirname(os.path.dirname(_TOOLS_FILE)))
+
 SIDECAR = {
     "prefix": "fakeop_f32_n1024_k8",
+    # Every sidecar records the arch it was compiled for and the kind that
+    # built it; generation reads both rather than defaulting either, so a
+    # fixture missing them is not a sidecar export could have written.
+    "arch": "sm_100a",
+    "kind": "cutedsl",
     "spec": {"dtype": "float32", "N": 1024, "K": 8, "deterministic": False},
     "tensor_args": [
         {"name": "mX", "dynamic_sizes": [0], "dynamic_strides": [0]},
@@ -554,6 +562,455 @@ class TestLauncherCodegen(unittest.TestCase):
         self.assertIn("c10::call_once", src)
 
 
+# mX with one size and one stride slot, and with none at all: the two claims the
+# per-argument checks are made against, with SIDECAR's own mOut beside them.
+_MX_ONE_SLOT = [
+    {"name": "mX", "dynamic_sizes": [0], "dynamic_strides": [0]},
+    SIDECAR["tensor_args"][1],
+]
+_MX_NO_SLOTS = [{"name": "mX"}, SIDECAR["tensor_args"][1]]
+
+
+class TestAbiValidation(unittest.TestCase):
+    """The launcher is a fixed template and the ABI comes from the DSL, so a width
+    or slot-count mismatch is a wrong value at runtime, not a compile error.
+
+    Every fixture here is in the layout the DSL actually emits -- `typedef struct
+    { ...fields... } <prefix>_Tensor_<name>_t;`, one struct PER TENSOR ARGUMENT.
+    Fixtures shaped like `struct x { ... }` cannot exercise a per-argument check
+    at all."""
+
+    def _struct(self, name, shapes=1, strides=1, stride_t="int64_t", shape_t="int32_t"):
+        p = SIDECAR["prefix"]
+        fields = ["  void* data;"]
+        if shapes:
+            fields.append(f"  {shape_t} dynamic_shapes[{shapes}];")
+        if strides:
+            fields.append(f"  {stride_t} dynamic_strides[{strides}];")
+        return "typedef struct {\n" + "\n".join(fields) + f"\n}} {p}_Tensor_{name}_t;\n"
+
+    def _header(self, mx=None, mout=None):
+        # Defaults match SIDECAR's claims: mX one shape + one stride, mOut two
+        # shapes + one stride. A fixture that does NOT match them describes an ABI
+        # no export could produce.
+        return (
+            "#pragma once\n#include <stdint.h>\n"
+            + (mx if mx is not None else self._struct("mX", shapes=1, strides=1))
+            + (mout if mout is not None else self._struct("mOut", shapes=2, strides=1))
+        )
+
+    def _mx_header(self, member):
+        """A whole header whose mX struct declares `member` where its
+        dynamic_strides go, with SIDECAR's mOut struct beside it."""
+        p = SIDECAR["prefix"]
+        return (
+            "#pragma once\n#include <stdint.h>\n"
+            "typedef struct {\n  void* data;\n"
+            f"  int32_t dynamic_shapes[1];\n  {member}\n}} {p}_Tensor_mX_t;\n"
+            + self._struct("mOut", shapes=2, strides=1)
+        )
+
+    def _sidecar(self, tmpdir, header: str, **over) -> dict:
+        with open(os.path.join(tmpdir, SIDECAR["prefix"] + ".h"), "w") as f:
+            f.write(header)
+        return dict(SIDECAR, _dir=tmpdir, **over)
+
+    def _refuses(self, header, pattern, **over):
+        tc = toolchains.CuteDslToolchain()
+        with tempfile.TemporaryDirectory() as d:
+            with self.assertRaisesRegex(RuntimeError, pattern):
+                tc.validate_abi(self._sidecar(d, header, **over))
+
+    def _accepts(self, header, **over):
+        tc = toolchains.CuteDslToolchain()
+        with tempfile.TemporaryDirectory() as d:
+            tc.validate_abi(self._sidecar(d, header, **over))
+
+    def test_a_matching_header_is_accepted(self):
+        # int32 SHAPE slots are expected and handled (explicit cast + size gate);
+        # only the stride WIDTH and both slot COUNTS are the subject.
+        self._accepts(self._header())
+
+    def test_int32_stride_slots_are_refused(self):
+        # aten strides are int64 and the launcher assigns them straight across, so
+        # int32 slots truncate silently -- an implicit conversion, no warning.
+        self._refuses(
+            self._header(mx=self._struct("mX", stride_t="int32_t")),
+            "must be declared 64-bit",
+        )
+
+    def test_the_width_is_checked_per_argument(self):
+        # use_32bit_stride is a per-argument kwarg of the DSL's fake-tensor
+        # constructor, so a whole-file search for one "int64_t dynamic_strides"
+        # passed a header declaring int64 for mX and int32 for mOut, and the
+        # launcher then narrowed mOut's stride.
+        self._refuses(
+            self._header(mout=self._struct("mOut", shapes=2, stride_t="int32_t")),
+            "mOut",
+        )
+
+    def test_a_longer_argument_name_does_not_shadow_a_shorter_one(self):
+        # header.find("<prefix>_Tensor_mX_t") also matched inside
+        # "<prefix>_Tensor_mX_tile_t", so with the longer name declared FIRST the
+        # check read the wrong tensor's struct -- accepting a truncating stride
+        # and an out-of-bounds store, depending only on argument order.
+        for label, header in (
+            (
+                "longer first",
+                self._struct("mX_tile", shapes=4, strides=3)
+                + self._header(mx=self._struct("mX", stride_t="int32_t")),
+            ),
+            (
+                "longer last",
+                self._header(mx=self._struct("mX", stride_t="int32_t"))
+                + self._struct("mX_tile", shapes=4, strides=3),
+            ),
+        ):
+            with self.subTest(order=label):
+                self._refuses(header, "mX's dynamic_strides|must be declared")
+
+    def test_a_slot_count_must_match_exactly(self):
+        # The bound and the sidecar list are independent statements about one
+        # number -- the bound from the DSL's fake args, the list hand-written in
+        # the builder -- and the launcher fills exactly the slots the sidecar
+        # lists, into an UNINITIALIZED local. Over-claiming stores past the end;
+        # under-claiming leaves the kernel reading an indeterminate value. Only
+        # the over-claim was checked, so the silent one got through.
+        for label, header in (
+            (
+                "header declares more",
+                self._header(mx=self._struct("mX", shapes=1, strides=2)),
+            ),
+            (
+                "header declares fewer",
+                self._header(mx=self._struct("mX", shapes=3, strides=1)),
+            ),
+        ):
+            with self.subTest(case=label):
+                self._refuses(header, r"claims \d+ dynamic_\w+ slot")
+
+    def test_a_missing_member_must_match_a_zero_claim(self):
+        # The DSL omits the array entirely at zero slots, so absent means zero --
+        # which still has to equal what the sidecar claims.
+        self._refuses(
+            self._header(mx=self._struct("mX", shapes=1, strides=0)),
+            "declares no dynamic_strides",
+        )
+        # ...and a tensor claiming nothing is fine with no arrays at all.
+        self._accepts(
+            self._header(mx=self._struct("mX", shapes=0, strides=0)),
+            tensor_args=_MX_NO_SLOTS,
+        )
+
+    def test_whitespace_variants_are_accepted(self):
+        # `int64_t  dynamic_strides [ 1 ]` is the same declaration. Exact
+        # single-space matching refused a perfect export -- and the DSL's own
+        # C-type table stores these spellings WITH a trailing space, so one
+        # upstream refactor would have failed every build.
+        for label, decl in (
+            ("two spaces", "int64_t  dynamic_strides[1];"),
+            ("space before bracket", "int64_t dynamic_strides [1];"),
+            ("spaces inside", "int64_t dynamic_strides[ 1 ];"),
+            ("newline separated", "int64_t\n  dynamic_strides[1];"),
+        ):
+            with self.subTest(spelling=label):
+                self._accepts(self._mx_header(decl))
+
+    def test_a_non_literal_bound_is_refused(self):
+        # Accepting it skipped the count check in silence, which is the mode this
+        # guard exists to rule out.
+        for bound in ("MX_NDYN", "1 + 1", ""):
+            with self.subTest(bound=bound):
+                member = f"int64_t dynamic_strides[{bound}];"
+                self._refuses(self._mx_header(member), "not a literal count")
+
+    def test_a_struct_declared_twice_is_refused(self):
+        # An #ifdef'd 32-bit variant: which widths the compiler sees would depend
+        # on the preprocessor, so there is no single answer to give.
+        self._refuses(
+            self._header() + self._struct("mX", stride_t="int32_t"),
+            "declared 2 times",
+        )
+
+    def test_an_unparsable_header_is_refused_not_skipped(self):
+        # Fails CLOSED on a layout this code cannot read. Skipping there is how the
+        # guard would switch off silently after an upstream header change. The
+        # anchored parse also means a mere MENTION of the type name (a banner
+        # comment naming the wrapper signature) is no longer mistaken for it.
+        self._refuses(
+            "struct x { int64_t dynamic_strides[1]; };\n", "no `typedef struct"
+        )
+        self._refuses(
+            f"/* ABI: {SIDECAR['prefix']}_Tensor_mX_t* */\n" + self._header(mx=""),
+            "no `typedef struct",
+        )
+
+    def test_a_malformed_sidecar_is_refused_with_a_useful_message(self):
+        # These used to surface as a bare KeyError/TypeError out of a build step.
+        self._refuses(
+            self._header(), "names no tensor", tensor_args=[{"dynamic_strides": [0]}]
+        )
+        self._refuses(self._header(), "not a list", tensor_args={"mX": {}})
+        self._refuses(
+            self._header(),
+            "not a list of",
+            tensor_args=[dict(SIDECAR["tensor_args"][0], dynamic_strides="01")],
+        )
+
+    def test_a_kernel_with_no_stride_slots_is_not_checked_for_width(self):
+        # Nothing to get wrong: the launcher emits no stride assignment at all.
+        self._accepts(
+            self._header(mx=self._struct("mX", shapes=1, strides=0)),
+            tensor_args=[
+                {"name": "mX", "dynamic_sizes": [0]},
+                SIDECAR["tensor_args"][1],
+            ],
+        )
+
+    def test_a_comment_is_not_read_as_the_declaration(self):
+        # re.search over the raw body took the FIRST textual match, so a
+        # commented-out declaration above the real one was read instead: the
+        # int32 case then shipped a narrowing assignment, and the over-claim case
+        # ASan-faulted where the compiler said nothing. Members are parsed whole,
+        # between semicolons, with comments stripped first.
+        p = SIDECAR["prefix"]
+
+        def hdr(comment, member):
+            return (
+                "#pragma once\n#include <stdint.h>\n"
+                "typedef struct {\n  void* data;\n  int32_t dynamic_shapes[1];\n"
+                f"  {comment}\n  {member}\n}} {p}_Tensor_mX_t;\n"
+                + self._struct("mOut", shapes=2, strides=1)
+            )
+
+        one = _MX_ONE_SLOT
+        for label, comment, member, targs in (
+            (
+                "hides int32",
+                "/* int64_t dynamic_strides[1]; */",
+                "int32_t dynamic_strides[1];",
+                one,
+            ),
+            (
+                "hides an under-claim",
+                "/* int64_t dynamic_strides[1]; */",
+                "int64_t dynamic_strides[3];",
+                one,
+            ),
+            (
+                "hides an over-claim",
+                "/* room for int64_t dynamic_strides[3]; */",
+                "int64_t dynamic_strides[1];",
+                [dict(one[0], dynamic_strides=[0, 1, 2]), one[1]],
+            ),
+        ):
+            with self.subTest(case=label):
+                self._refuses(
+                    hdr(comment, member), "dynamic_strides", tensor_args=targs
+                )
+        # ...while a comment BETWEEN the type and the member name is still the
+        # same declaration, and must be accepted.
+        self._accepts(
+            hdr("", "int64_t /* 64-bit */ dynamic_strides[1];"), tensor_args=one
+        )
+
+    def test_a_terminator_this_parser_cannot_read_does_not_swallow_the_next_struct(
+        self,
+    ):
+        # `} *Ptr_t;` is ordinary C, and the body regex used to run past it into
+        # the NEXT struct -- so tensor B was checked against tensor A's
+        # declarations. A brace-free body cannot reach beyond its own closing
+        # brace, so the unreadable declaration is simply not registered.
+        p = SIDECAR["prefix"]
+        self._refuses(
+            "#pragma once\n#include <stdint.h>\n"
+            "typedef struct {\n  void* data;\n  int64_t dynamic_strides[1];\n"
+            f"}} *{p}_TensorPtr_mA_t;\n"
+            "typedef struct {\n  void* data;\n  int32_t dynamic_shapes[1];\n"
+            f"  int32_t dynamic_strides[1];\n}} {p}_Tensor_mX_t;\n"
+            + self._struct("mOut", shapes=2, strides=1),
+            "dynamic_strides",
+            tensor_args=_MX_ONE_SLOT,
+        )
+
+    def test_an_unreadable_struct_is_refused_even_when_nothing_is_claimed(self):
+        # The "claims nothing, so nothing to check" escape kept the under-claim
+        # direction open: claiming nothing is exactly the state that leaves every
+        # slot the header DOES declare unwritten in an uninitialized local. Proved
+        # by running the generated launcher: the unfilled stride read as
+        # 140461696592624.
+        p = SIDECAR["prefix"]
+        self._refuses(
+            "#pragma once\n#include <stdint.h>\n"
+            f"typedef struct {p}_Tensor_mX_s {{\n  void* data;\n"
+            "  int32_t dynamic_shapes[2];\n  int64_t dynamic_strides[2];\n"
+            f"}} {p}_Tensor_mX_t;\n" + self._struct("mOut", shapes=2, strides=1),
+            # The tag form IS readable now, so this refuses on the real problem --
+            # the header declares slots the sidecar claims none of.
+            r"claims 0 dynamic_\w+ slot",
+            tensor_args=_MX_NO_SLOTS,
+        )
+        # ...and where the declaration genuinely cannot be parsed, a zero claim is
+        # refused too, rather than skipped: that is the state which leaves every
+        # declared slot unwritten.
+        self._refuses(
+            "#pragma once\n#include <stdint.h>\n"
+            "typedef struct {\n  void* data;\n  int64_t dynamic_strides[2];\n"
+            f"}} *{p}_TensorPtr_mX_t;\n" + self._struct("mOut", shapes=2, strides=1),
+            "no `typedef struct",
+            tensor_args=_MX_NO_SLOTS,
+        )
+
+    def test_an_unreadable_MEMBER_is_refused_even_when_nothing_is_claimed(self):
+        # The struct-level escape above was closed while the MEMBER-level one stayed
+        # open: a declaration this parser cannot classify never entered `declared`,
+        # and the absent-member arm read that as zero slots -- so a sidecar claiming
+        # zero passed against a struct that declares some, which is the state that
+        # leaves every declared slot of an uninitialized local unwritten.
+        #
+        # Both spellings below are ordinary C, and both were ACCEPTED against the
+        # real exported scatter_add header before the fix.
+        for label, member in (
+            ("comma-separated declarator", "int64_t reserved[1], dynamic_strides[1];"),
+            (
+                "attribute before the name",
+                "int64_t __attribute__((aligned(8))) dynamic_strides[1];",
+            ),
+        ):
+            with self.subTest(spelling=label):
+                self._refuses(
+                    self._mx_header(member),
+                    "could not read as a declaration",
+                    tensor_args=_MX_NO_SLOTS,
+                )
+
+    def test_an_octal_bound_is_not_read_as_decimal(self):
+        # C reads [010] as 8; int("010") is 10. Comparing the sidecar's count with
+        # the header's is this check's entire job, so a bound whose value differs
+        # between the two languages is refused rather than parsed.
+        self._refuses(
+            self._mx_header("int64_t dynamic_strides[010];"),
+            "has a leading zero, which C reads as octal",
+            tensor_args=[
+                {
+                    "name": "mX",
+                    "dynamic_sizes": [0],
+                    "dynamic_strides": list(range(10)),
+                },
+                SIDECAR["tensor_args"][1],
+            ],
+        )
+
+    def test_ordinary_c_spellings_of_the_same_declaration_are_accepted(self):
+        # None of these comes out of today's wheel (the generator uses literals),
+        # but each is what an upstream refactor would emit, and refusing one fails
+        # every build. The type is an allowlist rather than "not int32_t": an
+        # unknown spelling is refused loudly, since treating it as 64-bit would
+        # restore the silent truncation.
+        p = SIDECAR["prefix"]
+        for label, decl in (
+            ("long long", "long long dynamic_strides[1];"),
+            ("signed long long", "signed long long dynamic_strides[1];"),
+            ("std::int64_t", "std::int64_t dynamic_strides[1];"),
+            ("u-suffixed bound", "int64_t dynamic_strides[1u];"),
+        ):
+            with self.subTest(spelling=label):
+                self._accepts(self._mx_header(decl), tensor_args=_MX_ONE_SLOT)
+        # The tag form and an attribute before the name are the same declaration.
+        for label, header in (
+            (
+                "tag form",
+                f"typedef struct Tag_mX {{\n  void* data;\n"
+                f"  int32_t dynamic_shapes[1];\n  int64_t dynamic_strides[1];\n"
+                f"}} {p}_Tensor_mX_t;\n",
+            ),
+            (
+                "attribute",
+                "typedef struct {\n  void* data;\n"
+                "  int32_t dynamic_shapes[1];\n  int64_t dynamic_strides[1];\n"
+                f"}} __attribute__((aligned(16))) {p}_Tensor_mX_t;\n",
+            ),
+        ):
+            with self.subTest(form=label):
+                self._accepts(
+                    "#pragma once\n#include <stdint.h>\n"
+                    + header
+                    + self._struct("mOut", shapes=2, strides=1),
+                    tensor_args=_MX_ONE_SLOT,
+                )
+
+    def test_an_unrelated_pointer_typedef_does_not_disturb_the_parse(self):
+        # `typedef struct {...} *Ptr_t;` is ordinary C. A body that could run past
+        # its own closing brace merged it into the NEXT struct, which now reads as
+        # two declarations of one member and is refused -- so this legitimate
+        # header would fail to build. A brace-free body keeps them separate.
+        p = SIDECAR["prefix"]
+        self._accepts(
+            "#pragma once\n#include <stdint.h>\n"
+            "typedef struct {\n  void* data;\n  int64_t dynamic_strides[1];\n"
+            f"}} *{p}_TensorPtr_scratch_t;\n" + self._header(),
+        )
+
+    def test_an_unknown_stride_spelling_is_refused(self):
+        # The width check is an ALLOWLIST of 64-bit spellings, not a refusal of
+        # int32_t: an unrecognized type could be any width, and treating it as
+        # 64-bit restores the silent truncation. The message says how to extend it.
+        for spelling in ("int32_t", "int", "short", "cute_i64", "uint64_t", "float"):
+            with self.subTest(type=spelling):
+                self._refuses(
+                    self._mx_header(f"{spelling} dynamic_strides[1];"),
+                    "must be declared 64-bit",
+                    tensor_args=_MX_ONE_SLOT,
+                )
+
+    def test_a_pathological_bound_is_refused_not_a_traceback(self):
+        # int(bound) after bound.isdigit() raised ValueError for '\u00b2' (isdigit
+        # is True) and for a bound past CPython's 4300-digit limit.
+        for label, bound in (
+            ("superscript two", "\u00b2"),
+            ("5000 digits", "9" * 5000),
+        ):
+            with self.subTest(bound=label):
+                self._refuses(
+                    self._mx_header(f"int64_t dynamic_strides[{bound}];"),
+                    "not a literal count",
+                    tensor_args=_MX_ONE_SLOT,
+                )
+
+    def test_a_non_ascii_header_is_read_not_a_decode_error(self):
+        # open() used the ambient locale encoding, so a valid UTF-8 header raised
+        # UnicodeDecodeError under LC_ALL=C -- neither the documented skip nor a
+        # diagnosis.
+        tc = toolchains.CuteDslToolchain()
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, SIDECAR["prefix"] + ".h")
+            # Invalid UTF-8 (a lone 0xFF), not merely non-ASCII: that raises for
+            # a plain open() whatever the runner's locale is, where a valid UTF-8
+            # header only fails under LC_ALL=C and the test would pass here while
+            # the build broke in a container.
+            with open(path, "wb") as f:
+                f.write(b"/* \xff */\n" + self._header().encode("utf-8"))
+            tc.validate_abi(dict(SIDECAR, _dir=d))
+
+    def test_absent_header_is_not_an_error(self):
+        # Unit fixtures have no header; a real generation always does.
+        toolchains.CuteDslToolchain().validate_abi(dict(SIDECAR, _dir="/nonexistent"))
+
+
+class TestToolchainRegistry(unittest.TestCase):
+    def test_cutedsl_registered(self):
+        self.assertIn("cutedsl", toolchains.TOOLCHAINS)
+
+    def test_unknown_kind_raises(self):
+        with self.assertRaisesRegex(RuntimeError, "unknown toolchain kind"):
+            toolchains.get_toolchain("nvfuser")
+
+    def test_builder_validation_names_missing_keys(self):
+        tc = toolchains.get_toolchain("cutedsl")
+        with self.assertRaisesRegex(RuntimeError, "missing keys.*fake_args"):
+            tc.validate_build_result({"prefix": "x", "fn": object(), "tensor_args": []})
+
+
 class TestDeclarationStaleness(unittest.TestCase):
     def test_source_closure_includes_the_declaration(self):
         # Declarations load by file path and never enter sys.modules, so
@@ -593,6 +1050,27 @@ class TestStaleGridPointArtifacts(unittest.TestCase):
             with open(os.path.join(tmpdir, "live.json"), "w") as f:
                 json.dump({"prefix": "live", "spec": {"N": 1024}}, f)
             export._check_no_orphan_artifacts(tmpdir)
+
+
+class TestRegistryConsistency(unittest.TestCase):
+    def test_link_exts_must_be_a_subset_of_artifact_exts(self):
+        # Generation iterates artifact_exts and links `if ext in link_exts`, so a
+        # kind whose link_exts names something artifact_exts does not contributes
+        # NO objects: nothing is listed to link, nothing passes
+        # --no-undefined, torch_cuda links green, and the first call of the op
+        # fails on an undefined symbol.
+        class _Bad(toolchains.Toolchain):
+            kind = "bad"
+            artifact_exts = (".cubin", ".h")
+            link_exts = (".o",)
+
+        with self.assertRaisesRegex(RuntimeError, "not a subset"):
+            toolchains._assert_link_exts_are_exportable({"bad": _Bad()})
+
+    def test_the_shipped_toolchains_are_consistent(self):
+        # The import-time call, re-run explicitly so this is a test rather than a
+        # side effect of collection.
+        toolchains._assert_link_exts_are_exportable(toolchains.TOOLCHAINS)
 
 
 class TestMissingArtifacts(unittest.TestCase):
