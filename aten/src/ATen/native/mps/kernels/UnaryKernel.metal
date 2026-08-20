@@ -905,9 +905,9 @@ kernel void frexp_dense(
 
 template <typename T>
 kernel void frexp_strided(
-    device void* mantissa [[buffer(0)]],
-    device void* exponent [[buffer(1)]],
-    constant void* input [[buffer(2)]],
+    device T* mantissa [[buffer(0)]],
+    device int* exponent [[buffer(1)]],
+    constant T* input [[buffer(2)]],
     constant FrexpParams& params [[buffer(3)]],
     uint index [[thread_position_in_grid]]) {
   int rem = int(index);
@@ -920,16 +920,15 @@ kernel void frexp_strided(
     input_offs += pos * params.input_strides[i];
   }
   int exp = 0;
-  ref_at_offs<T>(mantissa, mantissa_offs) =
-      frexp_(val_at_offs<T>(input, input_offs), exp);
-  ref_at_offs<int>(exponent, exponent_offs) = exp;
+  mantissa[mantissa_offs] = frexp_(input[input_offs], exp);
+  exponent[exponent_offs] = exp;
 }
 
 #define REGISTER_FREXP_OP(T)                                                \
   template [[host_name("frexp_dense_" #T)]] kernel void frexp_dense<T>(     \
       device T*, device int*, constant T*, uint);                           \
   template [[host_name("frexp_strided_" #T)]] kernel void frexp_strided<T>( \
-      device void*, device void*, constant void*, constant FrexpParams&, uint)
+      device T*, device int*, constant T*, constant FrexpParams&, uint)
 
 REGISTER_FREXP_OP(float);
 REGISTER_FREXP_OP(half);
