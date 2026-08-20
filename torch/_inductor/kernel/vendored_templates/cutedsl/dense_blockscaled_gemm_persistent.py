@@ -355,8 +355,12 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         self.epi_tile_n = cute.size(self.epi_tile[1])
 
         # Setup A/B/C stage count in shared memory and ACC stage count in tensor memory
-        # Cross-warp reductions need three Float32 partial/feed values per N column.
-        self.local_reduce_smem_cols = 3
+        # Cross-warp reductions need three partials plus one feed value per group.
+        self.local_reduce_smem_cols = (
+            3 + self.cta_tile_shape_mnk[0] // self.local_reduce_group
+            if self.local_reduce_feeds_main and self.local_reduce_axis == 0
+            else 3
+        )
         self.local_reduce_smem_shape = (
             (self.cta_tile_shape_mnk[1], self.local_reduce_smem_cols)
             if self.has_cross_warp_local_reduce
@@ -2045,6 +2049,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                                             offset = (
                                                 n_idx * self.local_reduce_smem_cols
                                                 + group_idx
+                                                + 3
                                             )
                                             shared_value = cute.make_tensor(
                                                 sLocalReduce.iterator + offset,
@@ -2077,6 +2082,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                                         offset = (
                                             n_idx * self.local_reduce_smem_cols
                                             + row_idx // group
+                                            + 3
                                         )
                                         reduced_flt[i] = cute.make_tensor(
                                             sLocalReduce.iterator + offset,
