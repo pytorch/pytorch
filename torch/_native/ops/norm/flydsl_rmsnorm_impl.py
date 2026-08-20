@@ -24,11 +24,8 @@ def _is_supported_arch(device_index: int) -> bool:
     are read once per process: changing either afterwards needs a restart to
     take effect.
     """
-    # HSA_OVERRIDE_GFX_VERSION may carry feature flags ("gfx950:sramecc+") and
-    # _resolve_rocm_arch passes those through, so compare the base arch only --
-    # the band tuning below does not depend on sramecc/xnack.
     arch = fu._resolve_rocm_arch(device_index)
-    return arch is not None and arch.split(":", 1)[0] in _SUPPORTED_ARCHES
+    return arch in _SUPPORTED_ARCHES
 
 
 def _fits_int32_buffer_span(rows_m: int, n: int, itemsize: int) -> bool:

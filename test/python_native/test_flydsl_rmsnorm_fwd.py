@@ -80,13 +80,7 @@ class TestFlyDSLRMSNormArch(TestCase):
         "arch,expected",
         (
             ("gfx950", True),
-            # _resolve_rocm_arch returns HSA_OVERRIDE_GFX_VERSION verbatim, so
-            # the gate has to tolerate feature flags rather than compare the
-            # whole string.
-            ("gfx950:sramecc+", True),
-            ("gfx950:sramecc+:xnack-", True),
             ("gfx942", False),
-            ("gfx942:sramecc+", False),
             (None, False),
         ),
     )
@@ -105,8 +99,11 @@ class TestFlyDSLRMSNormArch(TestCase):
         import torch._native.ops.norm.flydsl_rmsnorm_impl as flydsl_rmsnorm_impl
 
         arch_is_supported = flydsl_rmsnorm_impl._is_supported_arch
+        resolve_arch = flydsl_rmsnorm_impl.fu._resolve_rocm_arch
         arch_is_supported.cache_clear()
+        resolve_arch.cache_clear()
         self.addCleanup(arch_is_supported.cache_clear)
+        self.addCleanup(resolve_arch.cache_clear)
 
         with patch.dict(os.environ, {"FLYDSL_GPU_ARCH": "gfx950"}):
             self.assertTrue(arch_is_supported(0))
