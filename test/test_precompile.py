@@ -2812,6 +2812,38 @@ class TestPrecompile(TestCase):
         with self.assertRaisesRegex(PrecompileError, "not valid Python"):
             torch.compiler.precompile.load("not an artifact {", b"")
 
+    def test_no_dispatchable_graph_reports_a_bypass_reason_when_there_is_one(self):
+        # An entry frame with no variants has two very different causes. If
+        # Dynamo BYPASSED the frame it recorded why, and saying so beats the
+        # thin-wrapper advice, which in that case is simply wrong -- it sent one
+        # user restructuring a callable that was never the problem.
+        from torch._precompile import _reject_uninstallable_entry
+
+        class _Code:
+            bypassed = True
+            bypass_reason = "cannot pickle 'generator' object"
+
+        class _Entry:
+            fn_name = "fwd_loss_bwd"
+            codes = [_Code()]
+
+        frames = [{"is_entry": True, "variants": []}]
+        with self.assertRaisesRegex(PrecompileError, "were BYPASSED during capture"):
+            _reject_uninstallable_entry(frames, _Entry())
+        with self.assertRaisesRegex(PrecompileError, "cannot pickle 'generator'"):
+            _reject_uninstallable_entry(frames, _Entry())
+
+    def test_no_dispatchable_graph_keeps_the_wrapper_hint_when_nothing_bypassed(self):
+        from torch._precompile import _reject_uninstallable_entry
+
+        class _Entry:
+            fn_name = "step"
+            codes = []
+
+        frames = [{"is_entry": True, "variants": []}]
+        with self.assertRaisesRegex(PrecompileError, "thin wrapper"):
+            _reject_uninstallable_entry(frames, _Entry())
+
     def test_guarded_user_object_prunes_its_unguarded_attributes(self):
         # Pruning used to apply only to nn.Module, so a guarded object that is
         # NOT a module -- a train pipeline holding a dataloader -- was pickled
