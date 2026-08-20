@@ -85,6 +85,8 @@ size_hints_regex = re.compile(
     r"size_hints=(\{.*?\})",
 )
 
+class_private_mangling_regex = re.compile(r"^_[A-Za-z0-9_]+?__")
+non_word_char_regex = re.compile(r"[^\w]")
 
 def _pycodecache_kernel_compile_env() -> dict[str, str | None]:
     env_vars = [
@@ -156,10 +158,10 @@ def _add_triton_kernel_info(kernel_name: str, info: dict[str, Any]):
 
 def _sanitize_kernel_name(name: str) -> str:
     # Strip Python class-private attribute mangling (e.g., _ClassName__kernel_name -> kernel_name)
-    name = re.sub(r"^_[A-Za-z0-9_]+?__", "", name)
-    
-    # Existing sanitization logic below...
-    name = re.sub(r"[^\w]", "_", name)
+    name = class_private_mangling_regex.sub("", name)
+
+    # Sanitization logic
+    name = non_word_char_regex.sub("_", name)
     return name
 
 def _emit_triton_kernel_compile_metric(
@@ -681,7 +683,7 @@ class AsyncCompile:
 
     def _load_kernel_wrapper(self, kernel_name, main_suffix, wrapper_cls, key, path):
         """Reload a kernel module from PyCodeCache and wrap the entry point."""
-        mod = torch._inductor.codecache.PyCodeCache.load_by_key_path(key, path)     
+        mod = torch._inductor.codecache.PyCodeCache.load_by_key_path(key, path)
         sanitized_name = _sanitize_kernel_name(kernel_name)
         main_func_name = f"{sanitized_name}_{main_suffix}"
         # f"{kernel_name}_{main_suffix}"
@@ -841,7 +843,6 @@ class AsyncCompile:
             # Find our special entry point named function
             sanitized_name = _sanitize_kernel_name(kernel_name)
             main_func_name = f"{sanitized_name}_{MAIN_SUFFIX}"
-            
 
             if not hasattr(mod, main_func_name):
                 available = [name for name in dir(mod) if callable(getattr(mod, name))]
