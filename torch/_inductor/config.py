@@ -364,13 +364,7 @@ batch_fusion = True
 # merge_splits_pass
 # mutate_cat_pass
 # split_cat_pass
-# For each fusion, the "devices" key specifies the devices on which the fusion is enabled.
-# e.g. pre_grad_fusion_options = {
-#     "batch_linear_lhs": {
-#         "devices": ("xpu",),
-#         "min_fuse_set_size": 2,
-#     },
-# }
+
 pre_grad_fusion_options: dict[str, dict[str, Any]] = {}
 
 # Post grad fusion and options, set to empty dict to disable fusion.
