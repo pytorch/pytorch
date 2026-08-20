@@ -101,10 +101,10 @@ class TestFSSpec(ShardedTensorTestBase):
         "test requires 2+ accelerators",
     )
     @with_temp_dir
-    def test_fsspec(self, device):
+    def test_fsspec(self):
         CHECKPOINT_DIR = self.temp_dir
 
-        model = FSDP(MyTestModule().to(device))
+        model = FSDP(MyTestModule().to(device_type))
         optim = torch.optim.Adam(model.parameters(), lr=0.1)
         model(torch.rand(8, 8, device=dist.get_rank())).sum().backward()
         optim.step()
@@ -121,7 +121,7 @@ class TestFSSpec(ShardedTensorTestBase):
                 planner=dcp.DefaultSavePlanner(),
             )
 
-        model_2 = FSDP(MyTestModule().to(device))
+        model_2 = FSDP(MyTestModule().to(device_type))
         optim_2 = torch.optim.Adam(model_2.parameters(), lr=0.1)
 
         with FSDP.summon_full_params(model):
@@ -178,7 +178,7 @@ class TestFSSpec(ShardedTensorTestBase):
         "test requires 2+ accelerators",
     )
     @with_temp_dir
-    def test_overwrite(self, device):
+    def test_overwrite(self):
         t1, t2 = torch.randn(10), torch.randn(10)
 
         dcp.save(
