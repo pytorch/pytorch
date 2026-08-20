@@ -2,13 +2,14 @@
 """Tests for tp_richcompare_impl: unified comparison protocol in Dynamo."""
 
 import operator
-import unittest
 
 import torch
 import torch._dynamo
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._library.opaque_object import register_custom_class
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class _OpaqueVal(torch._custom_class_base.CustomClassBase):
@@ -34,6 +35,8 @@ register_custom_class(_OpaqueVal, typ="constant", hoist=True)
 
 
 class TpRichcompareTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _assert_cmp_equals(self, a, b, op, *, expect_type_error=None):
         """Assert Dynamo's op(a, b) matches eager Python's op(a, b).
 
@@ -1574,21 +1577,6 @@ class TpRichcompareTests(torch._dynamo.test_case.TestCase):
             torch.compile(fn, backend="eager", fullgraph=True)([1, 2])
 
     # =====================================================================
-    # Event comparison (EventVariable)
-    # =====================================================================
-
-    @unittest.skipUnless(torch.cuda.is_available(), "requires CUDA")
-    def test_cuda_event_eq(self):
-        def fn(e1, e2):
-            return e1 == e2, e1 != e2, e1 == e1
-
-        e1 = torch.cuda.Event()
-        e2 = torch.cuda.Event()
-        expected = fn(e1, e2)
-        result = torch.compile(fn, backend="eager", fullgraph=True)(e1, e2)
-        self.assertEqual(result, expected)
-
-    # =====================================================================
     # itertools module comparison (ItertoolsVariable)
     # =====================================================================
 
@@ -1925,6 +1913,38 @@ class TpRichcompareTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(len(expected), len(result))
         for e, r in zip(expected, result):
             self.assertIs(r, e)
+
+
+# =====================================================================
+# Event comparison (EventVariable)
+# =====================================================================
+
+
+class TestEventComparisonDevice(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_accelerator_event_eq(self, device):
+        def fn(e1, e2):
+            return e1 == e2, e1 != e2, e1 == e1
+
+        # torch.Event(device=device) and torch.<device>.Event() are
+        # different classes; test both to ensure Dynamo handles them
+        # correctly.
+        def Event():
+            return torch.Event(device=device)
+
+        def DeviceEvent():
+            return torch.get_device_module(device).Event()
+
+        for EventFactory in (Event, DeviceEvent):
+            e1 = EventFactory()
+            e2 = EventFactory()
+            expected = fn(e1, e2)
+            result = torch.compile(fn, backend="eager", fullgraph=True)(e1, e2)
+            self.assertEqual(result, expected)
+
+
+instantiate_device_type_tests(TestEventComparisonDevice, globals(), except_for="cpu")
 
 
 if __name__ == "__main__":
