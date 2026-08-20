@@ -42,6 +42,12 @@ from torch.testing._internal.distributed.checkpoint_utils import (
     get_test_extension_registry,
     Rot13Example,
 )
+from torch.distributed.checkpoint.api import (
+    CheckpointException,
+)
+from torch.distributed.checkpoint.default_planner import (
+    DefaultLoadPlanner,
+)
 
 
 if TEST_WITH_DEV_DBG_ASAN:
@@ -155,6 +161,35 @@ class TestDistributedStateDictSaveLoad(TestCase):
 
             assert_state_dict_equal(self, state_dict_to_load_to, state_dict_to_save)
 
+    def test_dtype_mismatch_casting(self):
+        with tempfile.TemporaryDirectory() as path:
+            state_dict_fp32 = {"w": torch.rand(4, 3, dtype=torch.float32)}
+            save(state_dict_fp32, checkpoint_id=path)
+            
+            # unsafe narrowing (fp32 checkpoint -> bf16 template)
+            # by default (allow_unsafe_types=True), it silently casts for backward compatibility
+            template_bf16_default = {"w": torch.zeros(4, 3, dtype=torch.bfloat16)}
+            load(state_dict=template_bf16_default, checkpoint_id=path)
+            self.assertEqual(template_bf16_default["w"].dtype, torch.bfloat16)
+
+            # strict mode (allow_unsafe_types=False) should block narrowing casts
+            planner_strict = DefaultLoadPlanner(allow_unsafe_types=False)
+            template_bf16_strict = {"w": torch.zeros(4, 3, dtype=torch.bfloat16)}
+
+            with self.assertRaises(CheckpointException) as context:
+                load(state_dict=template_bf16_strict, checkpoint_id=path, planner=planner_strict)
+            self.assertIn("dtype mismatch", str(context.exception))
+            self.assertIn("Silent casting is not allowed", str(context.exception))
+
+            # safe widening (bf16 checkpoint -> fp32 template)
+            # even in strict mode, widening casts should be completely fine
+            path_wide = path + "_wide"
+            state_dict_bf16 = {"w": torch.rand(4, 3, dtype=torch.bfloat16)}
+            save(state_dict_bf16, checkpoint_id=path_wide)
+            
+            template_fp32_wide = {"w": torch.zeros(4, 3, dtype=torch.float32)}
+            load(state_dict=template_fp32_wide, checkpoint_id=path_wide, planner=planner_strict)
+            self.assertEqual(template_fp32_wide["w"].dtype, torch.float32)
 
 class TestDistributedStateDictSaveLoadRot13(TestCase):
     @parametrize("thread_count", _THREAD_COUNTS)
