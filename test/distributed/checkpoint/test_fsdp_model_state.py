@@ -11,10 +11,7 @@ from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.fully_sharded_data_parallel import StateDictType
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import (
-    HardwareClassification,
-    run_tests,
-)
+from torch.testing._internal.common_utils import HardwareClassification, run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
@@ -77,7 +74,7 @@ class FsdpModelStateCheckpoint(DTensorTestBase):
     @skip_if_lt_x_gpu(2)
     @with_comms
     @with_temp_dir
-    def test_fsdp_model_state_no_resharding(self):
+    def test_fsdp_model_state_no_resharding(self, device):
         self._test_fsdp_model_state(process_group=None)
 
     def _create_new_dist_group(self):
@@ -98,7 +95,7 @@ class FsdpModelStateCheckpoint(DTensorTestBase):
     @skip_if_lt_x_gpu(4)
     @with_comms
     @with_temp_dir
-    def test_fsdp_model_state_with_resharding(self):
+    def test_fsdp_model_state_with_resharding(self, device):
         self._test_fsdp_model_state(process_group=self._create_new_dist_group())
 
 
