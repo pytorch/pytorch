@@ -722,6 +722,26 @@ class DistTensorRandomOpTest(DTensorTestBase):
 
             blockwise_iter_if_localtensor(local_tensor, local_shard_offset)
 
+    @skip_unless_torch_gpu
+    def test_run_dtensor_rng_op_on_accelerator(self):
+        """run_dtensor_rng_op runs on the accelerator and advances the offset."""
+        from torch._prims.rng_prims import run_dtensor_rng_op
+        from torch.distributed.tensor._random import _PhiloxState
+
+        device_module = torch.get_device_module(self.device_type)
+        if not hasattr(device_module, "get_rng_state"):
+            self.skipTest(f"{self.device_type} does not support get_rng_state")
+
+        device_module.manual_seed(0)
+        x = torch.empty(8, device=self.device_type)
+        offset_before = _PhiloxState(device_module.get_rng_state()).offset.clone()
+
+        out = run_dtensor_rng_op(0, 4, torch.ops.aten.rand_like.default, x)
+
+        offset_after = _PhiloxState(device_module.get_rng_state()).offset
+        self.assertEqual(out.device.type, self.device_type)
+        self.assertEqual(offset_after, offset_before + 4)
+
 
 class TestPhiloxState(TestCase):
     hw_classification = HardwareClassification.CPU
@@ -746,7 +766,11 @@ class TestPhiloxState(TestCase):
         philox.seed = test_seed
         philox.seed = philox.seed.clone()
 
-    def test_run_dtensor_rng_op_rejects_non_accelerator(self):
+
+class TestDTensorRandomCPU(TestCase):
+    hw_classification = HardwareClassification.CPU
+
+    def test_run_dtensor_rng_op_rejects_non_accelerator(self, device):
         """run_dtensor_rng_op only supports the current accelerator device."""
         from torch._prims.rng_prims import run_dtensor_rng_op
 
@@ -754,25 +778,8 @@ class TestPhiloxState(TestCase):
             RuntimeError, "run_dtensor_rng_op only supports the current accelerator"
         ):
             run_dtensor_rng_op(
-                0, 4, torch.ops.aten.rand_like.default, torch.empty(8, device="cpu")
+                0, 4, torch.ops.aten.rand_like.default, torch.empty(8, device=device)
             )
-
-    @skip_unless_torch_gpu
-    def test_run_dtensor_rng_op_on_accelerator(self):
-        """run_dtensor_rng_op runs on the accelerator and advances the offset."""
-        from torch._prims.rng_prims import run_dtensor_rng_op
-        from torch.distributed.tensor._random import _PhiloxState
-
-        device_mod = torch.get_device_module(self.device_type)
-        device_mod.manual_seed(0)
-        x = torch.empty(8, device=self.device_type)
-        offset_before = _PhiloxState(device_mod.get_rng_state()).offset.clone()
-
-        out = run_dtensor_rng_op(0, 4, torch.ops.aten.rand_like.default, x)
-
-        offset_after = _PhiloxState(device_mod.get_rng_state()).offset
-        self.assertEqual(out.device.type, self.device_type)
-        self.assertEqual(offset_after, offset_before + 4)
 
 
 @requires_gpu
@@ -1094,7 +1101,6 @@ DistTensorRandomOpTestWithLocalTensor = create_local_tensor_test_class(
         # cross-pp-stage seeding is not simulated in local tensor mode
         "test_pipeline_parallel_manual_seed",
         # LocalTensorMode has no rule for the run_dtensor_rng_op HigherOrderOperator
-        "test_run_dtensor_rng_op_rejects_non_accelerator",
         "test_run_dtensor_rng_op_on_accelerator",
     ],
 )
@@ -1106,6 +1112,11 @@ DistTensorRandomOpsTest3DWithLocalTensor = create_local_tensor_test_class(
 
 instantiate_device_type_tests(
     TestPhiloxState,
+    globals(),
+    only_for=["cpu"],
+)
+instantiate_device_type_tests(
+    TestDTensorRandomCPU,
     globals(),
     only_for=["cpu"],
 )
