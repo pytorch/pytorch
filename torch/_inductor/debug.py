@@ -27,6 +27,7 @@ from torch._functorch import config as functorch_config
 from torch._inductor import utils
 from torch._logging import getArtifactLogger
 from torch._logging._internal import trace_structured
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch._utils_internal import signpost_event
 from torch.fx.graph_module import GraphModule
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
@@ -1519,9 +1520,7 @@ def load_args_and_run_compile_fx_inner(path: str) -> Any:
         else:
             return x
 
-    fake_mode = torch._subclasses.FakeTensorMode(
-        allow_non_fake_inputs=True, shape_env=shape_env
-    )
+    fake_mode = FakeTensorMode(allow_non_fake_inputs=True)
     with fake_mode, config.patch("save_args", False):
         args, kwargs = tree_map(handle_tensor, (args, kwargs))
         return compile_fx_inner(*args, **kwargs)

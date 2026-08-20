@@ -1,3 +1,4 @@
+#include <c10/core/impl/FakeTensorModeTLS.h>
 #include <c10/core/impl/TorchDispatchModeTLS.h>
 #include <c10/util/CallOnce.h>
 #include <torch/csrc/utils/device_lazy_init.h>
@@ -34,6 +35,11 @@ void device_lazy_init(at::DeviceType device_type) {
   auto maybe_mode = c10::impl::TorchDispatchModeTLS::get_mode(
       c10::impl::TorchDispatchModeKey::FAKE);
   if (maybe_mode) {
+    return;
+  }
+  // The C++ FakeTensorMode uses the Fake dispatch key instead of a Python
+  // FAKE dispatch mode, so check it separately to avoid real device init.
+  if (c10::impl::FakeTensorModeTLS::get_state() != nullptr) {
     return;
   }
 

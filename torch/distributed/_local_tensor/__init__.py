@@ -93,6 +93,8 @@ from . import _c10d
 
 
 def _is_in_fake_tensor_mode() -> bool:
+    if torch._C._current_cpp_fake_tensor_mode() is not None:
+        return True
     return any(
         isinstance(mode, FakeTensorMode) for mode in _get_current_dispatch_mode_stack()
     )

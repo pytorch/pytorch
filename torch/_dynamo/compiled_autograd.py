@@ -337,9 +337,7 @@ class AutogradCompilerInstance:
         self.close = self.stack.close
         self.shape_env = ShapeEnv()
         self.fake_tensor_mode = FakeTensorMode(
-            allow_fallback_kernels=True,
-            allow_non_fake_inputs=True,
-            shape_env=self.shape_env,
+            shape_env=self.shape_env, allow_non_fake_inputs=True
         )
         self.fx_tracer = PythonKeyTracer()
         self.proxy_mode = ProxyTorchDispatchMode(self.fx_tracer, "symbolic")

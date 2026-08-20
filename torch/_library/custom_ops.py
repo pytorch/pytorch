@@ -771,18 +771,32 @@ class CustomOpDef:
 
     def _register_fake_dispatcher_impl(self) -> None:
         def fake_impl(*args, **kwargs):
+            from torch._subclasses.fake_tensor import CppFakeTensorMode
+
+            fake_mode = torch._guards.detect_fake_mode((args, kwargs))
             if self._abstract_fn is None:
                 if utils.can_generate_trivial_fake_impl(self._opoverload):
-                    return utils.generate_trivial_fake_impl(
+                    result = utils.generate_trivial_fake_impl(
                         self._opoverload, *args, **kwargs
                     )
-                raise RuntimeError(
-                    f"There was no fake impl registered for {self}. "
-                    f"This is necessary for torch.compile/export/fx tracing to work. "
-                    f"Please use `{self._init_fn.__name__}.register_fake` to add an "
-                    f"fake impl."
-                )
-            return self._abstract_fn(*args, **kwargs)
+                elif (
+                    isinstance(fake_mode, CppFakeTensorMode)
+                    and fake_mode.propagate_real_tensors
+                    and fake_mode.shape_env is not None
+                ):
+                    from torch._library.fake_impl import _INFER_FAKE_FROM_REAL
+
+                    return _INFER_FAKE_FROM_REAL
+                else:
+                    raise RuntimeError(
+                        f"There was no fake impl registered for {self}. "
+                        f"This is necessary for torch.compile/export/fx tracing to work. "
+                        f"Please use `{self._init_fn.__name__}.register_fake` to add an "
+                        f"fake impl."
+                    )
+            else:
+                result = self._abstract_fn(*args, **kwargs)
+            return result
 
         self._lib._register_fake(self._name, fake_impl, _stacklevel=5)
 

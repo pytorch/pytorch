@@ -1006,6 +1006,10 @@ def prepare_aot_config(
         if fake_mode is not None:
             dynamic_shapes = fake_mode.shape_env is not None
             break
+        if isinstance(x, torch.Tensor) and torch._C._is_fake_tensor(x):
+            if tracing_context := torch._guards.TracingContext.try_get():
+                dynamic_shapes = tracing_context.fake_mode.shape_env is not None
+            break
 
     aot_config = AOTConfig(
         fw_compiler=None,

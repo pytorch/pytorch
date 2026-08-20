@@ -6,10 +6,12 @@ from collections.abc import Callable
 from typing_extensions import deprecated
 
 import torch
-from torch._library.utils import Kernel, RegistrationHandle
+from torch._library.utils import is_builtin, Kernel, lookup_op, RegistrationHandle
 
 
 log = logging.getLogger(__name__)
+
+_INFER_FAKE_FROM_REAL = object()
 
 
 class FakeImplHolder:
@@ -36,7 +38,12 @@ class FakeImplHolder:
         raise RuntimeError("Unable to directly set kernel.")
 
     def register(
-        self, func: Callable, source: str, lib, *, allow_override=True
+        self,
+        func: Callable,
+        source: str,
+        lib,
+        *,
+        allow_override=True,
     ) -> RegistrationHandle:
         """Register a fake impl.
 
@@ -83,8 +90,14 @@ class FakeImplHolder:
             self.kernels.remove(kernel)
 
         meta_kernel = construct_meta_kernel(self.qualname, self)
+        # The Fake kernel is what CPP FakeTensorMode dispatches to; it installs
+        # the real FakeImplCtx so data-dependent ops can call get_ctx(). The Meta
+        # kernel stays registered so running with real meta tensors (no fake mode)
+        # still raises the "use FakeTensors" error for data-dependent ops.
+        fake_kernel = construct_fake_kernel(self.qualname, self)
         try:
             lib.impl(self.qualname, meta_kernel, "Meta", allow_override=allow_override)
+            lib.impl(self.qualname, fake_kernel, "Fake", allow_override=allow_override)
         except Exception:
             log.info(
                 "Failed to register fake_impl '%s':",
@@ -123,6 +136,50 @@ def construct_meta_kernel(qualname: str, fake_impl_holder: FakeImplHolder) -> Ca
             return fake_impl_holder.kernel(*args, **kwargs)
 
     return meta_kernel
+
+
+def construct_fake_kernel(qualname: str, fake_impl_holder: FakeImplHolder) -> Callable:
+    """Fake-key kernel for CPP FakeTensorMode.
+
+    Analogous to Python FakeTensorMode's maybe_fake_impl dispatch: run the fake
+    kernel with the real FakeImplCtx installed so data-dependent ops can call
+    torch.library.get_ctx() and allocate unbacked symints.
+    """
+
+    @functools.wraps(fake_impl_holder.kernel.func)
+    def fake_kernel(*args, **kwargs):
+        if fake_impl_holder.kernel is None:
+            raise AssertionError("fake_impl_holder.kernel must not be None")
+        mode = torch._C._current_cpp_fake_tensor_mode()
+        if mode is None:
+            for a in (*args, *kwargs.values()):
+                candidates = a if isinstance(a, (list, tuple)) else (a,)
+                for t in candidates:
+                    if isinstance(t, torch.Tensor):
+                        mode = torch._C._maybe_get_fake_mode(t)
+                        if mode is not None:
+                            break
+                if mode is not None:
+                    break
+        if mode is None:
+            raise AssertionError("No active CPP FakeTensorMode for fake kernel")
+        op = lookup_op(qualname)
+        ctx = FakeImplCtx(mode, op)
+        with set_ctx_getter(lambda: ctx), mode:
+            result = fake_impl_holder.kernel(*args, **kwargs)
+        if result is _INFER_FAKE_FROM_REAL:
+            from torch._subclasses.fake_tensor import infer_fake_from_real_tensors
+
+            return infer_fake_from_real_tensors(mode, op, args, kwargs)
+        if mode.propagate_real_tensors and not is_builtin(op):
+            from torch._subclasses.fake_tensor import propagate_real_tensors
+
+            propagated = propagate_real_tensors(mode, op, args, kwargs, [result])
+            if propagated is not None:
+                result = propagated
+        return result
+
+    return fake_kernel
 
 
 def get_none():
