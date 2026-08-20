@@ -12,6 +12,12 @@ _EXPORT_MODULES = {
     "make_gemm_param_and_validate": "gemm_gfx950",
     "get_grouped_gemm_persistent_grid_size": "grouped_gemm_gfx950",
     "launch_gemm_gfx950_grouped": "grouped_gemm_gfx950",
+    "get_mxfp8_grouped_gemm_grid_size": "mxfp8_grouped_gemm_gfx950",
+    "launch_mxfp8_grouped_gemm_gfx950": "mxfp8_grouped_gemm_gfx950",
+    "make_mxfp8_grouped_gemm_param": "mxfp8_grouped_gemm_gfx950",
+    "make_mxfp8_grouped_gemm_param_and_validate": "mxfp8_grouped_gemm_gfx950",
+    "pick_mxfp8_grouped_gemm_tile": "mxfp8_grouped_gemm_gfx950",
+    "MXFP8_SCALE_BLOCK": "mxfp8_grouped_gemm_gfx950",
 }
 __all__ = list(_EXPORT_MODULES)
 
