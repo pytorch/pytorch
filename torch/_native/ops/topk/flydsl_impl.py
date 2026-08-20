@@ -8,15 +8,17 @@ Two kernels, picked by (K, N) - see ``flydsl_kernels.py``:
     ``torch.use_deterministic_algorithms``; only the gather invariant is
     checked against aten, not the tie order.
   * radix: (K, N) in a row of ``_RADIX_GATE_RANGES``, K padded up to a
-    power of 2 for the bitonic network. Deterministic mode gathers in
-    input order and matches aten on values and indices; otherwise indices
-    on threshold ties vary across runs.
+    power of 2 for the bitonic network. For finite inputs, deterministic
+    mode gathers in input order and matches aten on values and indices;
+    otherwise indices on threshold ties vary across runs. All NaNs share
+    one ordinal, so distinct NaN payload/index choices can differ from aten.
 
 ``_cond`` also requires fp32 on ``_SUPPORTED_ARCHES``, largest+sorted, a
-contiguous last-axis reduction, one CU-wave of rows, and ``M * N *
-itemsize`` inside the 32-bit span an AMD buffer descriptor addresses. The
-N bounds are closed intervals - both kernels lose to aten again at large
-N; anything outside falls through.
+contiguous last-axis reduction, one CU-wave of rows, and the input
+(``M * N * itemsize``) plus indices output (``M * K * 8``) buffers inside
+the 32-bit span an AMD buffer descriptor addresses. The N bounds are closed
+intervals - both kernels lose to aten again at large N; anything outside
+falls through.
 
 ``self`` is read through ``ConstTensorWrapper`` so a COW input dispatches
 without materialising; ``out=`` is written, so ``_out_cond`` declines COW.
@@ -37,20 +39,27 @@ from ._common import (
 )
 
 
-_RUNTIME_AVAILABLE: bool = fu.runtime_available()
 _SUPPORTED_ARCHES = ("gfx950",)
 _REGISTER_KS: frozenset[int] = frozenset({2, 4, 8, 16})
 
 # One (min, max) N range shared by every K in _REGISTER_KS, tuned on MI355.
 _REGISTER_N_BOUNDS: tuple[int, int] = (1024, 8192)
 
-# Per-K-range (min, max) N ranges tuned on MI355.
+# Per-K-range (min, max) N ranges tuned on MI355.  Each row keeps
+# ``2 * K <= N`` so ``M * K * 8 <= M * N * 4`` whenever the input fits the
+# 32-bit buffer span.
 _RADIX_GATE_RANGES = (
     ((64, 256), (8192, 32768)),
     ((257, 383), (16384, 32768)),
     ((384, 831), (32768, 131072)),
     ((832, 1024), (32768, 262144)),
 )
+
+
+def _fits_topk_buffer_span(rows_m: int, n: int, k: int, itemsize: int) -> bool:
+    if not fu._fits_int32_buffer_span(rows_m, n, itemsize):
+        return False
+    return rows_m * k * 8 <= (1 << 32) - 1
 
 
 def _is_pow2(x: int) -> bool:
@@ -75,22 +84,6 @@ def _kernel_for(k: int, n: int) -> str | None:
 
 
 @functools.cache
-def _is_supported_arch(device_index: int) -> bool:
-    arch = fu._resolve_rocm_arch(device_index)
-    return arch is not None and arch.split(":", 1)[0] in _SUPPORTED_ARCHES
-
-
-def _fits_int32_buffer_span(rows_m: int, n: int, itemsize: int) -> bool:
-    int32_max = (1 << 31) - 1
-    buffer_bytes_max = (1 << 32) - 1
-    return (
-        0 < rows_m <= int32_max
-        and 0 < n <= int32_max
-        and rows_m * n * itemsize <= buffer_bytes_max
-    )
-
-
-@functools.cache
 def _min_rows_for_full_wave(device_idx: int) -> int:
     return torch.cuda.get_device_properties(device_idx).multi_processor_count
 
@@ -98,14 +91,12 @@ def _min_rows_for_full_wave(device_idx: int) -> int:
 def _eligible(
     self: torch.Tensor, k: int, dim: int, largest: bool, sorted_: bool
 ) -> bool:
-    if not _RUNTIME_AVAILABLE:
-        return False
-    if torch.version.hip is None:
-        return False
     if not self.is_cuda or self.dtype != torch.float32:
         return False
     device_index = self.device.index
-    if device_index is None or not _is_supported_arch(device_index):
+    if device_index is None or not fu._is_supported_arch(
+        device_index, _SUPPORTED_ARCHES
+    ):
         return False
     if not largest or not sorted_:
         return False
@@ -115,7 +106,7 @@ def _eligible(
         return False
     N = self.shape[-1] if self.ndim >= 1 else 0
     M = self.numel() // N if N else 0
-    if not _fits_int32_buffer_span(M, N, self.element_size()):
+    if not _fits_topk_buffer_span(M, N, k, self.element_size()):
         return False
     if M < _min_rows_for_full_wave(device_index):
         return False
@@ -174,8 +165,6 @@ def _run(self: torch.Tensor, k: int) -> tuple[torch.Tensor, torch.Tensor]:
 def _flatten_topk_out(out: torch.Tensor, k: int) -> torch.Tensor:
     if out.ndim == 2:
         return out
-    if out.ndim == 1:
-        return out.view(1, k)
     return out.view(-1, k)
 
 

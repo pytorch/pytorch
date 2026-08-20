@@ -5513,6 +5513,13 @@ def sample_inputs_topk(op_info, device, dtype, requires_grad, **kwargs):
     yield SampleInput(get_tensor_input(()), 1, 0, True, True)
     yield SampleInput(get_tensor_input(()), 1, -1, True, True)
 
+
+def _make_dsl_topk_arg(shape, *, device, dtype):
+    # Generic tests compare indices exactly; tie behavior has dedicated tests.
+    values = torch.randperm(math.prod(shape), dtype=torch.int64, device=device)
+    return values.reshape(shape).to(dtype)
+
+
 def sample_inputs_cutedsl_topk(op_info, device, dtype, requires_grad, **kwargs):
     """Samples for the CuTeDSL ``topk`` override.
 
@@ -5527,10 +5534,7 @@ def sample_inputs_cutedsl_topk(op_info, device, dtype, requires_grad, **kwargs):
         _REGISTER_N_RANGE,
     )
 
-    def make_arg(shape):
-        # Generic tests compare indices exactly; tie behavior has dedicated tests.
-        values = torch.randperm(math.prod(shape), dtype=torch.int64, device=device)
-        return values.reshape(shape).to(dtype)
+    make_arg = partial(_make_dsl_topk_arg, device=device, dtype=dtype)
 
     # M=256 is >= typical GPU SM count so the cond's SM-wave gate passes.
     for K in (64, 128, 256, 512, 1024):
@@ -5548,9 +5552,7 @@ def sample_inputs_cutedsl_topk(op_info, device, dtype, requires_grad, **kwargs):
 def sample_inputs_flydsl_topk(op_info, device, dtype, requires_grad, **kwargs):
     from torch._native.ops.topk.flydsl_impl import _radix_n_range, _REGISTER_N_BOUNDS
 
-    def make_arg(shape):
-        values = torch.randperm(math.prod(shape), dtype=torch.int64, device=device)
-        return values.reshape(shape).to(dtype)
+    make_arg = partial(_make_dsl_topk_arg, device=device, dtype=dtype)
 
     # M=256 covers the gfx950 occupancy gate.
     for K in (64, 256, 257, 383, 384, 831, 832, 1024):
@@ -5583,6 +5585,44 @@ def _topk_method_deterministic(self, *args, **kwargs):
         return self.topk(*args, **kwargs)
     finally:
         torch.use_deterministic_algorithms(prior)
+
+
+def _topk_dsl_skips(availability_decorator):
+    return (
+        DecorateInfo(
+            skipCUDAIf(not torch.cuda.is_available(), "CUDA not available")
+        ),
+        DecorateInfo(availability_decorator),
+        DecorateInfo(
+            unittest.skip("topk override requires contiguous input"),
+            "TestCommon",
+            "test_noncontiguous_samples",
+        ),
+        DecorateInfo(
+            unittest.skip("Sample generator allocates on the primary CUDA device"),
+            "TestCommon",
+            "test_multiple_devices",
+        ),
+        # These are deterministic OpInfo assertion failures, not crashes.
+        # Keep them as xfails so an XPASS signals that coverage can be restored.
+        DecorateInfo(unittest.expectedFailure, "TestCommon", "test_dtypes"),
+        DecorateInfo(
+            unittest.skip("topk override incompatible with FakeTensor"),
+            "TestFakeTensor",
+        ),
+        DecorateInfo(
+            unittest.skip("topk override not introspectable for tag inference"),
+            "TestTags",
+        ),
+        DecorateInfo(
+            unittest.skip(
+                "topk override not introspectable for conjugate/negate views"
+            ),
+            "TestMathBits",
+        ),
+        DecorateInfo(unittest.expectedFailure, "TestCommon", "test_out"),
+        DecorateInfo(unittest.expectedFailure, "TestCommon", "test_out_warning"),
+    )
 
 
 def reference_topk(a, k, dim=-1, largest=True, sorted=True):
@@ -23005,26 +23045,7 @@ if "cutedsl" in dsl_ops_by_dsl:
     # falls through to aten. Two variants exercise both kernel paths:
     # default (atomic gather, ord-only sort) and deterministic
     # (prefix-sum gather, lex (ord, -idx) sort).
-    _cutedsl_topk_skips = (
-        DecorateInfo(skipCUDAIf(not torch.cuda.is_available(), "CUDA not available")),
-        DecorateInfo(skipIfNoCuteDSL),
-        DecorateInfo(unittest.skip("topk override requires contiguous input"),
-                     "TestCommon", "test_noncontiguous_samples"),
-        DecorateInfo(unittest.skip("Sample generator allocates on the primary CUDA device"),
-                     "TestCommon", "test_multiple_devices"),
-        DecorateInfo(unittest.skip("torch.topk supports more dtypes than the DSL override"),
-                     "TestCommon", "test_dtypes"),
-        DecorateInfo(unittest.skip("topk override incompatible with FakeTensor"),
-                     "TestFakeTensor"),
-        DecorateInfo(unittest.skip("topk override not introspectable for tag inference"),
-                     "TestTags"),
-        DecorateInfo(unittest.skip("topk override not introspectable for conjugate/negate views"),
-                     "TestMathBits"),
-        DecorateInfo(unittest.skip("torch.topk supports out= even though the DSL OpInfo does not exercise it"),
-                     "TestCommon", "test_out"),
-        DecorateInfo(unittest.skip("torch.topk supports out= even though the DSL OpInfo does not exercise it"),
-                     "TestCommon", "test_out_warning"),
-    )
+    _cutedsl_topk_skips = _topk_dsl_skips(skipIfNoCuteDSL)
     _cutedsl_topk_kwargs = dict(
         dtypes=_dispatch_dtypes((torch.float32,)),
         dtypesIfCUDA=_dispatch_dtypes((torch.float32,)),
@@ -23060,11 +23081,9 @@ if "cutedsl" in dsl_ops_by_dsl:
     ])
 
 if "flydsl" in dsl_ops_by_dsl:
-    from torch._native.flydsl_utils import (
-        _is_supported_arch as _is_flydsl_supported_arch,
-    )
+    from torch._native import flydsl_utils as _flydsl_utils
     from torch._native.ops.norm.flydsl_rmsnorm_impl import (
-        _SUPPORTED_ARCHES as _FLYDSL_RMSNORM_ARCHES,
+        _SUPPORTED_ARCHES as _flydsl_rmsnorm_supported_arches,
     )
 
     dsl_ops_by_dsl["flydsl"].append(
@@ -23085,8 +23104,9 @@ if "flydsl" in dsl_ops_by_dsl:
                 skipCUDAIf(
                     not (
                         TEST_CUDA
-                        and _is_flydsl_supported_arch(
-                            torch.cuda.current_device(), _FLYDSL_RMSNORM_ARCHES
+                        and _flydsl_utils._is_supported_arch(
+                            torch.cuda.current_device(),
+                            _flydsl_rmsnorm_supported_arches,
                         )
                     ),
                     "flydsl rms_norm override requires gfx950",
@@ -23106,28 +23126,10 @@ if "flydsl" in dsl_ops_by_dsl:
     )
 
     from torch._native.ops.topk.flydsl_impl import (
-        _is_supported_arch as _is_flydsl_topk_supported_arch,
+        _SUPPORTED_ARCHES as _flydsl_topk_supported_arches,
     )
 
-    _flydsl_topk_skips = (
-        DecorateInfo(skipCUDAIf(not torch.cuda.is_available(), "CUDA not available")),
-        DecorateInfo(unittest.skip("topk override requires contiguous input"),
-                     "TestCommon", "test_noncontiguous_samples"),
-        DecorateInfo(unittest.skip("Sample generator allocates on the primary CUDA device"),
-                     "TestCommon", "test_multiple_devices"),
-        DecorateInfo(unittest.skip("torch.topk supports more dtypes than the DSL override"),
-                     "TestCommon", "test_dtypes"),
-        DecorateInfo(unittest.skip("topk override incompatible with FakeTensor"),
-                     "TestFakeTensor"),
-        DecorateInfo(unittest.skip("topk override not introspectable for tag inference"),
-                     "TestTags"),
-        DecorateInfo(unittest.skip("topk override not introspectable for conjugate/negate views"),
-                     "TestMathBits"),
-        DecorateInfo(unittest.skip("torch.topk supports out= even though the DSL OpInfo does not exercise it"),
-                     "TestCommon", "test_out"),
-        DecorateInfo(unittest.skip("torch.topk supports out= even though the DSL OpInfo does not exercise it"),
-                     "TestCommon", "test_out_warning"),
-    )
+    _flydsl_topk_skips = _topk_dsl_skips(skipIfNoFlyDSL)
     _flydsl_topk_kwargs = dict(
         dtypes=_dispatch_dtypes((torch.float32,)),
         dtypesIfCUDA=_dispatch_dtypes((torch.float32,)),
@@ -23139,13 +23141,13 @@ if "flydsl" in dsl_ops_by_dsl:
         supports_out=False,
         decorators=[
             DecorateInfo(onlyCUDA),
-            DecorateInfo(skipIfNoFlyDSL),
             DecorateInfo(
                 skipCUDAIf(
                     not (
                         torch.cuda.is_available()
-                        and _is_flydsl_topk_supported_arch(
-                            torch.cuda.current_device()
+                        and _flydsl_utils._is_supported_arch(
+                            torch.cuda.current_device(),
+                            _flydsl_topk_supported_arches,
                         )
                     ),
                     "flydsl topk override requires gfx950",
