@@ -36,13 +36,16 @@ from torch.testing._internal.common_cuda import (
     xfailIfSM12X,
 )
 from torch.testing._internal.common_device_type import (
+    Capability,
     dtypes,
     e4m3_type,
     instantiate_device_type_tests,
+    requires_capabilities,
 )
 from torch.testing._internal.common_utils import (
     decorateIf,
     DeterministicGuard,
+    HardwareClassification,
     parametrize,
 )
 
@@ -908,9 +911,12 @@ GQA_MQA_BLOCK_MASK_CASES = [
 )
 @xfailIfSM12X
 class TestFlexFlash(InductorTestCase):
+    hw_classification = HardwareClassification.CUDA
+
     # `FlashAttentionForwardSm120` does not have `apply_score_mod`.
+    @requires_capabilities(Capability.lib.triton)
     @xfailIfSM120OrLater
-    def test_vectorized_group_per_lane_gather(self):
+    def test_vectorized_group_per_lane_gather(self, device):
         """Per-lane gather + lane-uniform load in one vec group (#188871).
 
         The uniform scale load enables score_mod vectorization; the rel-pos
@@ -918,24 +924,25 @@ class TestFlexFlash(InductorTestCase):
         (which silently broadcast lane 0's bias across the group).
         """
         seq_len = 512
-        rel_bias = torch.randn(2 * seq_len, device="cuda")
-        head_scale = torch.randn(4, device="cuda")
+        rel_bias = torch.randn(2 * seq_len, device=device)
+        head_scale = torch.randn(4, device=device)
         offset = seq_len - 1
 
         def score_mod(score, _b, h, q_idx, kv_idx):
             return score + rel_bias[q_idx - kv_idx + offset] * head_scale[h]
 
-        q, k, v = create_test_tensors(seq_len=seq_len, device="cuda")
+        q, k, v = create_test_tensors(seq_len=seq_len, device=device)
         flash_vs_triton(q, k, v, score_mod=score_mod)
 
+    @requires_capabilities(Capability.lib.triton)
     @xfailIfSM120OrLater
-    def test_vectorized_group_untraceable_index_op(self):
+    def test_vectorized_group_untraceable_index_op(self, device):
         """Nonlinear index ops (abs/clamp/min/max) must keep per-lane index
         semantics under vectorization — whether traced to sympy or treated as
         opaque, never classified lane-uniform (#188878)."""
         seq_len = 512
-        tbl = torch.randn(2 * seq_len, device="cuda")
-        head_scale = torch.randn(4, device="cuda")
+        tbl = torch.randn(2 * seq_len, device=device)
+        head_scale = torch.randn(4, device=device)
 
         index_fns = {
             "abs": lambda q_idx, kv_idx: (q_idx - kv_idx).abs(),
@@ -951,36 +958,39 @@ class TestFlexFlash(InductorTestCase):
                 def score_mod(score, _b, h, q_idx, kv_idx):
                     return score + tbl[index_fn(q_idx, kv_idx)] * head_scale[h]
 
-                q, k, v = create_test_tensors(seq_len=seq_len, device="cuda")
+                q, k, v = create_test_tensors(seq_len=seq_len, device=device)
                 flash_vs_triton(q, k, v, score_mod=score_mod)
 
+    @requires_capabilities(Capability.lib.triton)
     @xfailIfSM120OrLater
-    def test_chained_kv_gather(self):
+    def test_chained_kv_gather(self, device):
         """Document-style chained gather: the contiguous inner load promotes
         vectorization and the outer loaded-value index is opaque; it must stay
         a per-lane gather (#188878)."""
         seq_len = 512
-        doc_bias = torch.randn(8, device="cuda")
-        doc_id = torch.arange(seq_len, device="cuda") % 8
+        doc_bias = torch.randn(8, device=device)
+        doc_id = torch.arange(seq_len, device=device) % 8
 
         def score_mod(score, _b, _h, _q, kv_idx):
             return score + doc_bias[doc_id[kv_idx]]
 
-        q, k, v = create_test_tensors(seq_len=seq_len, device="cuda")
+        q, k, v = create_test_tensors(seq_len=seq_len, device=device)
         flash_vs_triton(q, k, v, score_mod=score_mod)
 
+    @requires_capabilities(Capability.lib.triton)
     @xfailIfSM120OrLater
-    def test_captured_table_int64_index(self):
+    def test_captured_table_int64_index(self, device):
         """Widening index casts must not break index-fragment materialization (#188871)."""
         seq_len = 512
-        tbl = torch.randn(seq_len, device="cuda")
+        tbl = torch.randn(seq_len, device=device)
 
         def score_mod(score, _b, _h, _q, kv_idx):
             return score + tbl[kv_idx.to(torch.int64)]
 
-        q, k, v = create_test_tensors(seq_len=seq_len, device="cuda")
+        q, k, v = create_test_tensors(seq_len=seq_len, device=device)
         flash_vs_triton(q, k, v, score_mod=score_mod)
 
+    @requires_capabilities(Capability.lib.triton)
     @xfailIfSM120OrLater
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("case", SCORE_MOD_CASES, name_fn=score_case_name)
@@ -1002,6 +1012,7 @@ class TestFlexFlash(InductorTestCase):
             score_mod=case.score_mod_factory(dtype, device),
         )
 
+    @requires_capabilities(Capability.lib.triton)
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("case", DETERMINISTIC_SCORE_MOD_CASES, name_fn=score_case_name)
     def test_flash_attention_backward_deterministic_score_mod_cases(
@@ -1044,6 +1055,7 @@ class TestFlexFlash(InductorTestCase):
                     else None,
                 )
 
+    @requires_capabilities(Capability.lib.triton)
     @xfailIfSM120OrLater
     @decorateIf(
         unittest.expectedFailure,
@@ -1090,6 +1102,7 @@ class TestFlexFlash(InductorTestCase):
             ),
         )
 
+    @requires_capabilities(Capability.lib.triton)
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("case", DETERMINISTIC_MASK_MOD_CASES, name_fn=mask_case_name)
     def test_flash_attention_backward_deterministic_block_mask_raises(
@@ -1142,6 +1155,7 @@ class TestFlexFlash(InductorTestCase):
                 )
                 out.sum().backward()
 
+    @requires_capabilities(Capability.lib.triton)
     @dtypes(torch.bfloat16)
     def test_flash_deterministic_block_mask_without_write_order_raises(
         self, device, dtype
@@ -1178,6 +1192,7 @@ class TestFlexFlash(InductorTestCase):
             ):
                 out.sum().backward()
 
+    @requires_capabilities(Capability.lib.triton)
     @dtypes(torch.bfloat16)
     def test_flash_deterministic_block_mask_without_scheduler_order_raises(
         self, device, dtype
@@ -1225,6 +1240,7 @@ class TestFlexFlash(InductorTestCase):
             ):
                 out.sum().backward()
 
+    @requires_capabilities(Capability.lib.triton)
     @dtypes(torch.bfloat16)
     def test_flash_deterministic_block_mask_warn_only_runs_nondeterministic(
         self, device, dtype
@@ -1259,6 +1275,7 @@ class TestFlexFlash(InductorTestCase):
                 )
                 out.sum().backward()
 
+    @requires_capabilities(Capability.lib.triton)
     @dtypes(torch.bfloat16)
     @parametrize("dq_kv_order", [False, True])
     def test_flash_attention_backward_deterministic_block_mask_with_write_order(
@@ -1295,6 +1312,7 @@ class TestFlexFlash(InductorTestCase):
         with DeterministicGuard(True):
             flash_vs_triton(q, k, v, block_mask=block_mask)
 
+    @requires_capabilities(Capability.lib.triton)
     @decorateIf(
         unittest.expectedFailure,
         lambda params: (
@@ -1357,6 +1375,7 @@ class TestFlexFlash(InductorTestCase):
             ):
                 out.sum().backward()
 
+    @requires_capabilities(Capability.lib.triton)
     @decorateIf(
         unittest.expectedFailure,
         lambda params: (
@@ -1423,6 +1442,7 @@ class TestFlexFlash(InductorTestCase):
             ),
         )
 
+    @requires_capabilities(Capability.lib.triton)
     @xfailIfSM120OrLater
     @parametrize("case", ["offset", "stride"])
     def test_cutedsl_captured_alias_views_keep_distinct_layouts(self, device, case):
@@ -1479,6 +1499,7 @@ class TestFlexFlash(InductorTestCase):
         for expected_reinterpret_tensor in expected_reinterpret_tensors:
             self.assertIn(expected_reinterpret_tensor, src)
 
+    @requires_capabilities(Capability.lib.triton)
     @unittest.skipUnless(
         torch.cuda.is_available() and torch.cuda.get_device_capability()[0] >= 10,
         "SM100+ only",
@@ -1489,7 +1510,7 @@ class TestFlexFlash(InductorTestCase):
         SM100_AUX_SCORE_MOD_CASES,
         name_fn=sm100_aux_score_mod_case_name,
     )
-    def test_flash_attention_sm100_aux_score_mod_vec_selection(self, case):
+    def test_flash_attention_sm100_aux_score_mod_vec_selection(self, device, case):
         seq_len, index_dim, bias_factory, expected_vec_size, expect_autovec = case
         torch.manual_seed(0)
         q, k, v = create_test_tensors(
@@ -1498,7 +1519,7 @@ class TestFlexFlash(InductorTestCase):
             seq_len=seq_len,
             dim=64,
             dtype=torch.float16,
-            device="cuda",
+            device=device,
         )
         biases = bias_factory(seq_len)
 
@@ -1575,12 +1596,13 @@ class TestFlexFlash(InductorTestCase):
             self.assertIn("cute.autovec_copy", src)
         return src
 
+    @requires_capabilities(Capability.lib.triton)
     @unittest.skipUnless(
         torch.cuda.is_available() and torch.cuda.get_device_capability()[0] in (10, 11),
         "SM100/SM110 only",
     )
     @torch._inductor.config.patch(force_disable_caches=True)
-    def test_flash_attention_sm100_score_and_mask_mod_vec_selection(self):
+    def test_flash_attention_sm100_score_and_mask_mod_vec_selection(self, device):
         seq_len = 128
         q, k, v = create_test_tensors(
             batch_size=1,
@@ -1588,10 +1610,10 @@ class TestFlexFlash(InductorTestCase):
             seq_len=seq_len,
             dim=64,
             dtype=torch.float16,
-            device="cuda",
+            device=device,
         )
-        score_bias = torch.randn(seq_len, device="cuda", dtype=torch.float16)
-        mask_bias = torch.randn(seq_len, seq_len, device="cuda", dtype=torch.float16)
+        score_bias = torch.randn(seq_len, device=device, dtype=torch.float16)
+        mask_bias = torch.randn(seq_len, seq_len, device=device, dtype=torch.float16)
 
         def fn(q, k, v, score_bias, mask_bias):
             def score_mod(score, _b, _h, _q_idx, kv_idx):
@@ -1601,7 +1623,7 @@ class TestFlexFlash(InductorTestCase):
                 return (q_idx >= kv_idx) | (mask_bias[q_idx, kv_idx] > 0)
 
             block_mask = _create_block_mask_for_device(
-                mask_mod, 1, 1, seq_len, seq_len, device="cuda"
+                mask_mod, 1, 1, seq_len, seq_len, device=device
             )
             return flex_attention(
                 q,
@@ -1632,12 +1654,13 @@ class TestFlexFlash(InductorTestCase):
         self.assertIn("mask_mod.__vec_size__ = 32", src)
         self.assertIn("cute.autovec_copy", src)
 
+    @requires_capabilities(Capability.lib.triton)
     @unittest.skipUnless(
         torch.cuda.is_available() and torch.cuda.get_device_capability()[0] in (10, 11),
         "SM100/SM110 only",
     )
     @torch._inductor.config.patch(force_disable_caches=True)
-    def test_flash_attention_sm100_mask_mod_rank1_aux_stays_scalar(self):
+    def test_flash_attention_sm100_mask_mod_rank1_aux_stays_scalar(self, device):
         seq_len = 128
         q, k, v = create_test_tensors(
             batch_size=1,
@@ -1645,16 +1668,16 @@ class TestFlexFlash(InductorTestCase):
             seq_len=seq_len,
             dim=64,
             dtype=torch.float16,
-            device="cuda",
+            device=device,
         )
-        col_mask = torch.randn(seq_len, device="cuda", dtype=torch.float16)
+        col_mask = torch.randn(seq_len, device=device, dtype=torch.float16)
 
         def fn(q, k, v, col_mask):
             def mask_mod(_b, _h, q_idx, kv_idx):
                 return (q_idx >= kv_idx) & (col_mask[kv_idx] > 0)
 
             block_mask = _create_block_mask_for_device(
-                mask_mod, 1, 1, seq_len, seq_len, device="cuda"
+                mask_mod, 1, 1, seq_len, seq_len, device=device
             )
             return flex_attention(
                 q, k, v, block_mask=block_mask, kernel_options={"BACKEND": "FLASH"}
@@ -1671,12 +1694,13 @@ class TestFlexFlash(InductorTestCase):
         self.assertNotIn("mask_mod.__vec_size__", src)
         self.assertNotIn("cute.autovec_copy", src)
 
+    @requires_capabilities(Capability.lib.triton)
     @unittest.skipUnless(
         torch.cuda.is_available() and torch.cuda.get_device_capability()[0] in (10, 11),
         "SM100/SM110 only",
     )
     @torch._inductor.config.patch(force_disable_caches=True)
-    def test_flash_attention_sm100_mask_mod_vec_lane_uniform_no_aux(self):
+    def test_flash_attention_sm100_mask_mod_vec_lane_uniform_no_aux(self, device):
         seq_len = 128
         q, k, v = create_test_tensors(
             batch_size=1,
@@ -1684,7 +1708,7 @@ class TestFlexFlash(InductorTestCase):
             seq_len=seq_len,
             dim=64,
             dtype=torch.float16,
-            device="cuda",
+            device=device,
         )
 
         def fn(q, k, v):
@@ -1692,7 +1716,7 @@ class TestFlexFlash(InductorTestCase):
                 return q_idx < 64
 
             block_mask = _create_block_mask_for_device(
-                mask_mod, 1, 1, seq_len, seq_len, device="cuda"
+                mask_mod, 1, 1, seq_len, seq_len, device=device
             )
             return flex_attention(
                 q, k, v, block_mask=block_mask, kernel_options={"BACKEND": "FLASH"}
@@ -1700,13 +1724,16 @@ class TestFlexFlash(InductorTestCase):
 
         self._assert_sm100_mask_vec_matches_scalar(fn, q, k, v, expect_autovec=False)
 
+    @requires_capabilities(Capability.lib.triton)
     @unittest.skipUnless(
         torch.cuda.is_available() and torch.cuda.get_device_capability()[0] in (10, 11),
         "SM100/SM110 only",
     )
     @torch._inductor.config.patch(force_disable_caches=True)
     @parametrize("dynamic", [False, True], name_fn=lambda dynamic: str(dynamic))
-    def test_flash_attention_sm100_sliding_window_uses_packed_shift_mask(self, dynamic):
+    def test_flash_attention_sm100_sliding_window_uses_packed_shift_mask(
+        self, device, dynamic
+    ):
         seq_len = 128
         q, k, v = create_test_tensors(
             batch_size=1,
@@ -1714,7 +1741,7 @@ class TestFlexFlash(InductorTestCase):
             seq_len=seq_len,
             dim=64,
             dtype=torch.float16,
-            device="cuda",
+            device=device,
         )
         if dynamic:
             for tensor in (q, k, v):
@@ -1728,7 +1755,7 @@ class TestFlexFlash(InductorTestCase):
                 return (q_idx >= kv_idx) & (q_idx - kv_idx <= 32)
 
             block_mask = _create_block_mask_for_device(
-                mask_mod, 1, 1, q_len, kv_len, device="cuda"
+                mask_mod, 1, 1, q_len, kv_len, device=device
             )
             return flex_attention(
                 q, k, v, block_mask=block_mask, kernel_options={"BACKEND": "FLASH"}
@@ -1747,12 +1774,15 @@ class TestFlexFlash(InductorTestCase):
         self.assertIn("utils.shl_u32", src)
         self.assertNotIn("for mask_lane_idx in cutlass.range_constexpr", src)
 
+    @requires_capabilities(Capability.lib.triton)
     @unittest.skipUnless(
         torch.cuda.is_available() and torch.cuda.get_device_capability()[0] in (10, 11),
         "SM100/SM110 only",
     )
     @torch._inductor.config.patch(force_disable_caches=True)
-    def test_flash_attention_sm100_packed_mask_disabled_by_explicit_vec_config(self):
+    def test_flash_attention_sm100_packed_mask_disabled_by_explicit_vec_config(
+        self, device
+    ):
         seq_len = 128
         q, k, v = create_test_tensors(
             batch_size=1,
@@ -1760,7 +1790,7 @@ class TestFlexFlash(InductorTestCase):
             seq_len=seq_len,
             dim=64,
             dtype=torch.float16,
-            device="cuda",
+            device=device,
         )
 
         def fn(q, k, v):
@@ -1768,7 +1798,7 @@ class TestFlexFlash(InductorTestCase):
                 return (q_idx >= kv_idx) & (q_idx - kv_idx <= 32)
 
             block_mask = _create_block_mask_for_device(
-                mask_mod, 1, 1, seq_len, seq_len, device="cuda"
+                mask_mod, 1, 1, seq_len, seq_len, device=device
             )
             return flex_attention(
                 q, k, v, block_mask=block_mask, kernel_options={"BACKEND": "FLASH"}
@@ -1786,6 +1816,7 @@ class TestFlexFlash(InductorTestCase):
         self.assertIn("mask_mod.__vec_size__ = 16", src)
         self.assertNotIn("utils.shr_u32", src)
 
+    @requires_capabilities(Capability.lib.triton)
     @unittest.skipUnless(
         torch.cuda.is_available() and torch.cuda.get_device_capability()[0] in (10, 11),
         "SM100/SM110 only",
@@ -1797,7 +1828,7 @@ class TestFlexFlash(InductorTestCase):
         name_fn=lambda dynamic, expect_packed: f"dynamic_{dynamic}",
     )
     def test_flash_attention_sm100_document_offsets_packed_mask(
-        self, dynamic, expect_packed
+        self, device, dynamic, expect_packed
     ):
         seq_len = 128
         q, k, v = create_test_tensors(
@@ -1806,17 +1837,17 @@ class TestFlexFlash(InductorTestCase):
             seq_len=seq_len,
             dim=64,
             dtype=torch.float16,
-            device="cuda",
+            device=device,
         )
         if dynamic:
             for tensor in (q, k, v):
                 torch._dynamo.mark_dynamic(tensor, 2, min=seq_len, max=seq_len)
-        positions = torch.arange(seq_len, device="cuda", dtype=torch.int32)
+        positions = torch.arange(seq_len, device=device, dtype=torch.int32)
         doc_ids = (positions // 32).expand(1, -1).contiguous()
         if dynamic:
             torch._dynamo.mark_dynamic(doc_ids, 1, min=seq_len, max=seq_len)
-        offsets = torch.arange(0, seq_len + 32, 32, device="cuda", dtype=torch.int32)
-        score_bias = torch.randn(seq_len, device="cuda", dtype=torch.float16)
+        offsets = torch.arange(0, seq_len + 32, 32, device=device, dtype=torch.int32)
+        score_bias = torch.randn(seq_len, device=device, dtype=torch.float16)
 
         def fn(q, k, v, doc_ids, offsets, score_bias):
             q_len = q.size(2) if dynamic else seq_len
@@ -1831,7 +1862,7 @@ class TestFlexFlash(InductorTestCase):
                 return (kv_idx >= start) & (kv_idx <= q_idx)
 
             block_mask = _create_block_mask_for_device(
-                mask_mod, 1, 1, q_len, kv_len, device="cuda"
+                mask_mod, 1, 1, q_len, kv_len, device=device
             )
             return flex_attention(
                 q,
@@ -1859,12 +1890,13 @@ class TestFlexFlash(InductorTestCase):
             self.assertNotIn("utils.shr_u32", src)
             self.assertIn("for mask_lane_idx in cutlass.range_constexpr", src)
 
+    @requires_capabilities(Capability.lib.triton)
     @unittest.skipUnless(
         torch.cuda.is_available() and torch.cuda.get_device_capability()[0] in (10, 11),
         "SM100/SM110 only",
     )
     @torch._inductor.config.patch(force_disable_caches=True)
-    def test_flash_attention_sm100_mask_mod_explicit_vec_size(self):
+    def test_flash_attention_sm100_mask_mod_explicit_vec_size(self, device):
         seq_len = 128
         q, k, v = create_test_tensors(
             batch_size=1,
@@ -1872,7 +1904,7 @@ class TestFlexFlash(InductorTestCase):
             seq_len=seq_len,
             dim=64,
             dtype=torch.float16,
-            device="cuda",
+            device=device,
         )
 
         def fn(q, k, v):
@@ -1883,7 +1915,7 @@ class TestFlexFlash(InductorTestCase):
                 )
 
             block_mask = _create_block_mask_for_device(
-                mask_mod, 1, 1, seq_len, seq_len, device="cuda"
+                mask_mod, 1, 1, seq_len, seq_len, device=device
             )
             return flex_attention(
                 q, k, v, block_mask=block_mask, kernel_options={"BACKEND": "FLASH"}
@@ -1899,12 +1931,13 @@ class TestFlexFlash(InductorTestCase):
         self.assertEqual(actual, expected, atol=3e-2, rtol=3e-2)
         self.assertIn("mask_mod.__vec_size__ = 8", "\n".join(code))
 
+    @requires_capabilities(Capability.lib.triton)
     @unittest.skipUnless(
         torch.cuda.is_available() and torch.cuda.get_device_capability()[0] in (10, 11),
         "SM100/SM110 only",
     )
     @torch._inductor.config.patch(force_disable_caches=True)
-    def test_flash_attention_sm100_aux_mask_mod_vec_mixed_gather_tail(self):
+    def test_flash_attention_sm100_aux_mask_mod_vec_mixed_gather_tail(self, device):
         seq_len = 130
         padded_len = 160
         q, k, v = create_test_tensors(
@@ -1913,19 +1946,19 @@ class TestFlexFlash(InductorTestCase):
             seq_len=seq_len,
             dim=64,
             dtype=torch.float16,
-            device="cuda",
+            device=device,
         )
         mask_bias = torch.randn(
-            padded_len, padded_len, device="cuda", dtype=torch.float16
+            padded_len, padded_len, device=device, dtype=torch.float16
         )
-        col_mask = torch.randn(seq_len, device="cuda", dtype=torch.float16)
+        col_mask = torch.randn(seq_len, device=device, dtype=torch.float16)
 
         def fn(q, k, v, mask_bias, col_mask):
             def mask_mod(_b, _h, q_idx, kv_idx):
                 return (mask_bias[q_idx, kv_idx] > 0) & (col_mask[kv_idx] > 0)
 
             block_mask = _create_block_mask_for_device(
-                mask_mod, 1, 1, seq_len, seq_len, device="cuda"
+                mask_mod, 1, 1, seq_len, seq_len, device=device
             )
             return flex_attention(
                 q, k, v, block_mask=block_mask, kernel_options={"BACKEND": "FLASH"}
@@ -1933,6 +1966,7 @@ class TestFlexFlash(InductorTestCase):
 
         self._assert_sm100_mask_vec_matches_scalar(fn, q, k, v, mask_bias, col_mask)
 
+    @requires_capabilities(Capability.lib.triton)
     @xfailIfSM120OrLater
     @dtypes(torch.float16, torch.bfloat16)
     def test_flash_attention_shared_captured_buffers(self, device, dtype):
@@ -1991,6 +2025,7 @@ class TestFlexFlash(InductorTestCase):
         for actual, expected in zip(flash_grads, ref_grads):
             torch.testing.assert_close(actual, expected, atol=1e-2, rtol=1e-2)
 
+    @requires_capabilities(Capability.lib.triton)
     @xfailIfSM120OrLater
     @dtypes(torch.float16, torch.bfloat16)
     def test_flash_attention_viewable_captured_buffer_no_copy(self, device, dtype):
@@ -2033,6 +2068,7 @@ class TestFlexFlash(InductorTestCase):
         self.assertIn("reinterpret_tensor(", wrapper_code)
         self.assertNotIn("triton_poi_fused_view", wrapper_code)
 
+    @requires_capabilities(Capability.lib.triton)
     @xfailIfSM120OrLater
     @dtypes(torch.float16, torch.bfloat16)
     def test_flash_attention_kernel_called(self, device, dtype):
@@ -2044,7 +2080,9 @@ class TestFlexFlash(InductorTestCase):
 
         self.assertTrue(
             prof_result["found"],
-            lambda msg: f"{msg}\nFlash attention kernel not found. Available kernels: {prof_result['kernel_names']}",
+            lambda msg: (
+                f"{msg}\nFlash attention kernel not found. Available kernels: {prof_result['kernel_names']}"
+            ),
         )
 
         with cuda_kernel_profiler("flash_attncute") as prof_result:
@@ -2054,9 +2092,12 @@ class TestFlexFlash(InductorTestCase):
 
         self.assertFalse(
             prof_result["found"],
-            lambda msg: f"{msg}\nFlash attention kernel unexpectedly found when BACKEND='TRITON'. Kernels: {prof_result['kernel_names']}",
+            lambda msg: (
+                f"{msg}\nFlash attention kernel unexpectedly found when BACKEND='TRITON'. Kernels: {prof_result['kernel_names']}"
+            ),
         )
 
+    @requires_capabilities(Capability.lib.triton)
     @dtypes(torch.float16, torch.bfloat16)
     def test_flash_impl_error_with_requires_grad(self, device, dtype):
         q, k, v = create_test_tensors(dtype=dtype, device=device)
@@ -2078,6 +2119,7 @@ class TestFlexFlash(InductorTestCase):
                 kernel_options={"BACKEND": "FLASH"},
             )
 
+    @requires_capabilities(Capability.lib.triton)
     def test_mixed_dtypes(self, device):
         dtype_high = torch.float16 if PLATFORM_SUPPORTS_FP8 else torch.float32
         dtype_low = e4m3_type if PLATFORM_SUPPORTS_FP8 else torch.float16
@@ -2098,6 +2140,7 @@ class TestFlexFlash(InductorTestCase):
         ):
             compiled_fn(query, key, value, kernel_options={"BACKEND": "FLASH"})
 
+    @requires_capabilities(Capability.lib.triton)
     @dtypes(torch.float16, torch.bfloat16)
     def test_flash_attention_backward_rejects_captured_buffer_with_grad(
         self, device, dtype
@@ -2122,6 +2165,7 @@ class TestFlexFlash(InductorTestCase):
                 kernel_options={"BACKEND": "FLASH"},
             ).sum().backward()
 
+    @requires_capabilities(Capability.lib.triton)
     @xfailIfSM120OrLater
     @dtypes(torch.float16, torch.bfloat16)
     def test_flash_attention_backward_kernel_called(self, device, dtype):
@@ -2145,9 +2189,12 @@ class TestFlexFlash(InductorTestCase):
 
         self.assertTrue(
             prof_result["found"],
-            lambda msg: f"{msg}\nFlash attention backward kernel not found. Kernels: {prof_result['kernel_names']}",
+            lambda msg: (
+                f"{msg}\nFlash attention backward kernel not found. Kernels: {prof_result['kernel_names']}"
+            ),
         )
 
+    @requires_capabilities(Capability.lib.triton)
     @xfailIfSM120OrLater
     @dtypes(torch.float16, torch.bfloat16)
     def test_flash_attention_backward_forwards_deterministic_flag(self, device, dtype):
@@ -2190,6 +2237,7 @@ class TestFlexFlash(InductorTestCase):
             "Expected flash backward deterministic setting to be compile-time baked",
         )
 
+    @requires_capabilities(Capability.lib.triton)
     @dtypes(torch.bfloat16)
     @parametrize("dq_kv_order", [False, True])
     def test_flash_attention_backward_wires_write_order_codegen(
@@ -2265,6 +2313,7 @@ class TestFlexFlash(InductorTestCase):
         else:
             self.assertNotIn('block_sparse_kwargs["dq_write_order_full"]', code_str)
 
+    @requires_capabilities(Capability.lib.triton)
     @xfailIfSM120OrLater
     @dtypes(torch.float16, torch.bfloat16)
     def test_flash_attention_generates_cute_hash(self, device, dtype):
@@ -2286,6 +2335,7 @@ class TestFlexFlash(InductorTestCase):
             "Generated code should set __cute_hash__ on score_mod for fast hashing",
         )
 
+    @requires_capabilities(Capability.lib.triton)
     @xfailIfSM120OrLater
     @dtypes(torch.float16, torch.bfloat16)
     def test_flash_attention_fused_qkv_reinterpret_view(self, device, dtype):
@@ -2306,6 +2356,7 @@ class TestFlexFlash(InductorTestCase):
         out = compiled_fn(x, weight)
         self.assertEqual(out.shape, (B, H, M, D))
 
+    @requires_capabilities(Capability.lib.triton)
     @xfailIfSM120OrLater
     @dtypes(torch.float16, torch.bfloat16)
     def test_gqa_expand_stride_zero_backward(self, device, dtype):
@@ -2350,6 +2401,7 @@ class TestFlexFlash(InductorTestCase):
         else:
             flash_vs_triton(q, k, v, block_mask=block_mask)
 
+    @requires_capabilities(Capability.lib.triton)
     @xfailIfSM120OrLater
     @dtypes(torch.float16, torch.bfloat16)
     def test_flash_backend_return_lse_matches_triton_and_reference(self, device, dtype):
@@ -2392,6 +2444,7 @@ class TestFlexFlash(InductorTestCase):
             lse_flash.float(), lse_triton.float(), atol=1e-4, rtol=1e-4
         )
 
+    @requires_capabilities(Capability.lib.triton)
     @xfailIfSM120OrLater
     @dtypes(torch.float16, torch.bfloat16)
     def test_flash_backend_supports_grad_logsumexp(self, device, dtype):
@@ -2461,6 +2514,7 @@ class TestFlexFlash(InductorTestCase):
             )
             self.assertLessEqual(flash_error, 2 * triton_error + atol)
 
+    @requires_capabilities(Capability.lib.triton)
     @dtypes(torch.float16, torch.bfloat16)
     def test_flash_backend_raises_on_return_max_scores(self, device, dtype):
         q, k, v = create_test_tensors(dtype=dtype, device=device)
@@ -2477,6 +2531,7 @@ class TestFlexFlash(InductorTestCase):
             )
 
     # 'FlashAttentionForwardSm120' object has no attribute 'apply_score_mod'
+    @requires_capabilities(Capability.lib.triton)
     @xfailIfSM120OrLater
     @decorateIf(
         unittest.expectedFailure,
@@ -2502,27 +2557,31 @@ class TestFlexFlash(InductorTestCase):
         flash_vs_triton(q, k, v, score_mod=score_mod_fn)
 
 
-instantiate_device_type_tests(TestFlexFlash, globals(), only_for="cuda")
-
-
 @unittest.skipIf(
     not ensure_flash_available(), "Flash attention (CUTE) library is not available"
 )
 class TestFlexFlashDynamicShapes(InductorTestCase):
+    hw_classification = HardwareClassification.CUDA
+
     """
     Dynamic-shape coverage for flex flash attention: score_mod captures and masks,
     plus backward, batch, and length variants.
     """
 
     def _run_dynamic_test(
-        self, seq_lens, score_mod=None, block_mask_factory=None, requires_grad=False
+        self,
+        device,
+        seq_lens,
+        score_mod=None,
+        block_mask_factory=None,
+        requires_grad=False,
     ):
         """Helper to run dynamic=True tests across multiple sequence lengths."""
 
         for seq_len in seq_lens:
             q, k, v = create_test_tensors(
                 seq_len=seq_len,
-                device="cuda",
+                device=device,
                 dtype=torch.float16,
                 requires_grad=requires_grad,
             )
@@ -2540,35 +2599,41 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
         flash_vs_triton(q, k, v, dynamic=True, **kwargs)
 
     # sm120: AttributeError: 'NoneType' object has no attribute '_trait'
+    @requires_capabilities(Capability.lib.triton)
     @xfailIfSM120OrLater
-    def test_dynamic_seq_len_no_score_mod(self):
+    def test_dynamic_seq_len_no_score_mod(self, device):
         """Test dynamic sequence lengths without score_mod."""
-        self._run_dynamic_test(seq_lens=[128, 256, 512])
+        self._run_dynamic_test(device, seq_lens=[128, 256, 512])
 
+    @requires_capabilities(Capability.lib.triton)
     @xfailIfSM120OrLater
-    def test_dynamic_seq_len_inline_literal(self):
+    def test_dynamic_seq_len_inline_literal(self, device):
         """Test dynamic sequence lengths with inline literal score_mod."""
 
         def score_mod(score, _b, _h, _q, _k):
             return score * 2.0  # Inline literal, not captured
 
-        self._run_dynamic_test(seq_lens=[128, 256, 512], score_mod=score_mod)
+        self._run_dynamic_test(device, seq_lens=[128, 256, 512], score_mod=score_mod)
 
+    @requires_capabilities(Capability.lib.triton)
     @xfailIfSM120OrLater
-    def test_dynamic_seq_len_captured_tensor_buffer(self):
+    def test_dynamic_seq_len_captured_tensor_buffer(self, device):
         """Test dynamic sequence lengths with captured tensor buffer (ALiBi-style)."""
         num_heads = 4
         slopes = torch.exp2(
-            -torch.linspace(1, 8, num_heads, device="cuda", dtype=torch.float16)
+            -torch.linspace(1, 8, num_heads, device=device, dtype=torch.float16)
         )
 
         def alibi_score_mod(score, b, h, q_idx, kv_idx):
             return score + (kv_idx - q_idx) * slopes[h]
 
-        self._run_dynamic_test(seq_lens=[128, 256, 512], score_mod=alibi_score_mod)
+        self._run_dynamic_test(
+            device, seq_lens=[128, 256, 512], score_mod=alibi_score_mod
+        )
 
+    @requires_capabilities(Capability.lib.triton)
     @xfailIfSM120OrLater
-    def test_dynamic_captured_table_negative_index_wrap(self):
+    def test_dynamic_captured_table_negative_index_wrap(self, device):
         """Rel-pos table gather with a shape-dependent offset (#188871).
 
         Once shapes go dynamic, the table length and offset are rendered as Int64
@@ -2576,56 +2641,61 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
         index dtype or cute.where rejects the mixed operands.
         """
         for seq_len in [512, 1024]:
-            tbl = torch.randn(2 * seq_len, device="cuda")
+            tbl = torch.randn(2 * seq_len, device=device)
             offset = seq_len - 1
 
             def score_mod(score, _b, _h, q_idx, kv_idx):
                 return score + tbl[q_idx - kv_idx + offset]
 
-            q, k, v = create_test_tensors(seq_len=seq_len, device="cuda")
+            q, k, v = create_test_tensors(seq_len=seq_len, device=device)
             flash_vs_triton(q, k, v, score_mod=score_mod, dynamic=True)
 
+    @requires_capabilities(Capability.lib.triton)
     @xfailIfSM120OrLater
-    def test_dynamic_seq_len_with_block_mask(self):
+    def test_dynamic_seq_len_with_block_mask(self, device):
         """Test dynamic sequence lengths with block mask."""
 
         def block_mask_factory(seq_len):
             return _create_block_mask_for_device(
-                _causal_mask, 2, 4, seq_len, seq_len, device="cuda"
+                _causal_mask, 2, 4, seq_len, seq_len, device=device
             )
 
         self._run_dynamic_test(
-            seq_lens=[128, 256, 512], block_mask_factory=block_mask_factory
+            device, seq_lens=[128, 256, 512], block_mask_factory=block_mask_factory
         )
 
+    @requires_capabilities(Capability.lib.triton)
     @xfailIfSM120OrLater
-    def test_dynamic_batch_size(self):
+    def test_dynamic_batch_size(self, device):
         """Test dynamic batch sizes."""
         for batch_size in [1, 2, 4, 8]:
             q, k, v = create_test_tensors(
-                batch_size=batch_size, seq_len=256, device="cuda", dtype=torch.float16
+                batch_size=batch_size, seq_len=256, device=device, dtype=torch.float16
             )
             self._flash_triton_dynamic(q, k, v)
 
+    @requires_capabilities(Capability.lib.triton)
     @xfailIfSM120OrLater
-    def test_dynamic_backward(self):
+    def test_dynamic_backward(self, device):
         """Test backward with dynamic sequence lengths."""
-        self._run_dynamic_test(seq_lens=[128, 256, 512], requires_grad=True)
+        self._run_dynamic_test(device, seq_lens=[128, 256, 512], requires_grad=True)
 
     # 'FlashAttentionForwardSm120' object has no attribute 'apply_score_mod'
+    @requires_capabilities(Capability.lib.triton)
     @xfailIfSM120OrLater
-    def test_dynamic_backward_with_score_mod(self):
+    def test_dynamic_backward_with_score_mod(self, device):
         """Test backward with score_mod and dynamic sequence lengths."""
 
         def score_mod(score, _b, _h, _q, _k):
             return score * 2.0
 
         self._run_dynamic_test(
-            seq_lens=[128, 256, 512], score_mod=score_mod, requires_grad=True
+            device, seq_lens=[128, 256, 512], score_mod=score_mod, requires_grad=True
         )
 
+    @requires_capabilities(Capability.lib.triton)
     @xfailIfSM120OrLater
-    def test_dynamic_backward_with_block_mask(self):
+    def test_dynamic_backward_with_block_mask(self, device):
         """Test backward with block mask and dynamic sequence lengths."""
         major, _ = torch.cuda.get_device_capability()
         if major < 9:
@@ -2633,63 +2703,69 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
 
         def block_mask_factory(seq_len):
             return _create_block_mask_for_device(
-                _causal_mask, 2, 4, seq_len, seq_len, device="cuda"
+                _causal_mask, 2, 4, seq_len, seq_len, device=device
             )
 
         self._run_dynamic_test(
+            device,
             seq_lens=[128, 256, 512],
             block_mask_factory=block_mask_factory,
             requires_grad=True,
         )
 
+    @requires_capabilities(Capability.lib.triton)
     @xfailIfSM120OrLater
-    def test_dynamic_gqa(self):
+    def test_dynamic_gqa(self, device):
         """Test GQA with dynamic sequence lengths."""
         q_heads, kv_heads = 8, 2
         for seq_len in [128, 256, 512]:
-            q = torch.randn(2, q_heads, seq_len, 64, device="cuda", dtype=torch.float16)
+            q = torch.randn(2, q_heads, seq_len, 64, device=device, dtype=torch.float16)
             k = torch.randn(
-                2, kv_heads, seq_len, 64, device="cuda", dtype=torch.float16
+                2, kv_heads, seq_len, 64, device=device, dtype=torch.float16
             )
             v = torch.randn(
-                2, kv_heads, seq_len, 64, device="cuda", dtype=torch.float16
+                2, kv_heads, seq_len, 64, device=device, dtype=torch.float16
             )
             self._flash_triton_dynamic(q, k, v, score_mod=None, block_mask=None)
 
+    @requires_capabilities(Capability.lib.triton)
     @xfailIfSM120OrLater
-    def test_dynamic_mqa(self):
+    def test_dynamic_mqa(self, device):
         """Test MQA with dynamic sequence lengths."""
         q_heads, kv_heads = 8, 1
         for seq_len in [128, 256, 512]:
-            q = torch.randn(2, q_heads, seq_len, 64, device="cuda", dtype=torch.float16)
+            q = torch.randn(2, q_heads, seq_len, 64, device=device, dtype=torch.float16)
             k = torch.randn(
-                2, kv_heads, seq_len, 64, device="cuda", dtype=torch.float16
+                2, kv_heads, seq_len, 64, device=device, dtype=torch.float16
             )
             v = torch.randn(
-                2, kv_heads, seq_len, 64, device="cuda", dtype=torch.float16
+                2, kv_heads, seq_len, 64, device=device, dtype=torch.float16
             )
             self._flash_triton_dynamic(q, k, v)
 
+    @requires_capabilities(Capability.lib.triton)
     @xfailIfSM120OrLater
-    def test_dynamic_non_divisible_seq_len(self):
+    def test_dynamic_non_divisible_seq_len(self, device):
         """Test non-block-divisible sequence lengths with dynamic shapes."""
         for seq_len in [127, 255, 383, 511, 513]:
             q, k, v = create_test_tensors(
-                seq_len=seq_len, device="cuda", dtype=torch.float16
+                seq_len=seq_len, device=device, dtype=torch.float16
             )
             self._flash_triton_dynamic(q, k, v)
 
+    @requires_capabilities(Capability.lib.triton)
     @xfailIfSM120OrLater
-    def test_dynamic_asymmetric_qkv_lengths(self):
+    def test_dynamic_asymmetric_qkv_lengths(self, device):
         """Test asymmetric Q and KV lengths with dynamic shapes."""
         test_cases = [(256, 512), (512, 256), (128, 1024)]
         for q_len, kv_len in test_cases:
-            q = torch.randn(2, 4, q_len, 64, device="cuda", dtype=torch.float16)
-            k = torch.randn(2, 4, kv_len, 64, device="cuda", dtype=torch.float16)
-            v = torch.randn(2, 4, kv_len, 64, device="cuda", dtype=torch.float16)
+            q = torch.randn(2, 4, q_len, 64, device=device, dtype=torch.float16)
+            k = torch.randn(2, 4, kv_len, 64, device=device, dtype=torch.float16)
+            v = torch.randn(2, 4, kv_len, 64, device=device, dtype=torch.float16)
             self._flash_triton_dynamic(q, k, v)
 
-    def test_captured_float_fails_with_dynamic(self):
+    @requires_capabilities(Capability.lib.triton)
+    def test_captured_float_fails_with_dynamic(self, device):
         """Test that captured Python float still fails as a CPU scalar tensor."""
         val = 2.0
 
@@ -2697,27 +2773,29 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
             return score * val
 
         compiled_fn = torch.compile(flex_attention, dynamic=True)
-        q, k, v = create_test_tensors(seq_len=256, device="cuda", dtype=torch.float16)
+        q, k, v = create_test_tensors(seq_len=256, device=device, dtype=torch.float16)
 
         with self.assertRaisesRegex(RuntimeError, r"captures a 0-dim CPU tensor"):
             compiled_fn(
                 q, k, v, score_mod=score_mod, kernel_options={"BACKEND": "FLASH"}
             )
 
+    @requires_capabilities(Capability.lib.triton)
     @xfailIfSM120OrLater
-    def test_captured_int_works_with_dynamic(self):
+    def test_captured_int_works_with_dynamic(self, device):
         """Captured Python int should work with dynamic=True."""
         val = 2
 
         def score_mod(score, _b, _h, _q, _k):
             return score * val
 
-        q, k, v = create_test_tensors(seq_len=256, device="cuda", dtype=torch.float16)
+        q, k, v = create_test_tensors(seq_len=256, device=device, dtype=torch.float16)
 
         flash_vs_triton(q, k, v, score_mod=score_mod, dynamic=True)
 
+    @requires_capabilities(Capability.lib.triton)
     @xfailIfSM120OrLater
-    def test_captured_float_works_with_static(self):
+    def test_captured_float_works_with_static(self, device):
         """Test that captured Python float works with dynamic=False."""
         val = 2.0  # Captured float
 
@@ -2725,15 +2803,16 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
             return score * val
 
         compiled_fn = torch.compile(flex_attention, dynamic=False)
-        q, k, v = create_test_tensors(seq_len=256, device="cuda", dtype=torch.float16)
+        q, k, v = create_test_tensors(seq_len=256, device=device, dtype=torch.float16)
 
         out = compiled_fn(
             q, k, v, score_mod=score_mod, kernel_options={"BACKEND": "FLASH"}
         )
         self.assertEqual(out.shape, q.shape)
 
+    @requires_capabilities(Capability.lib.triton)
     @xfailIfSM120OrLater
-    def test_dynamic_mask_from_input_lengths_single_graph(self):
+    def test_dynamic_mask_from_input_lengths_single_graph(self, device):
         """Dynamic mask creation driven by input lengths should stay single-graph."""
         counter = CompileCounterWithBackend("inductor")
 
@@ -2768,11 +2847,11 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
                     flex_attention, dynamic=True, fullgraph=True, backend=counter
                 )(x, x, x, block_mask=mask, kernel_options={"BACKEND": "FLASH"})
 
-        model = Model().cuda().half()
+        model = Model().to(device).half()
         B, T, F = 8, 64, 128
         for _ in range(3):
-            x = torch.randn(B, T, F, device="cuda", dtype=torch.float16)
-            lens = torch.randint(1, T + 1, (B,), device="cuda")
+            x = torch.randn(B, T, F, device=device, dtype=torch.float16)
+            lens = torch.randint(1, T + 1, (B,), device=device)
             model(x, lens)
 
         self.assertEqual(
@@ -2781,14 +2860,15 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
             lambda msg: f"{msg}\nExpected 1 graph, got {counter.frame_count}",
         )
 
+    @requires_capabilities(Capability.lib.triton)
     @xfailIfSM120OrLater
-    def test_dynamic_free_symbol_mask_single_graph(self):
+    def test_dynamic_free_symbol_mask_single_graph(self, device):
         """Free-symbol dense mask under dynamic=True should not recompile."""
         counter = CompileCounterWithBackend("inductor")
 
         def make_mask(batch_shape, seq_len):
             rand_mask = torch.randint(
-                0, 2, (batch_shape, seq_len), device="cuda"
+                0, 2, (batch_shape, seq_len), device=device
             ).bool()
             return torch.compile(create_block_mask, dynamic=True)(
                 B=batch_shape,
@@ -2797,7 +2877,7 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
                 H=None,
                 Q_LEN=seq_len,
                 KV_LEN=seq_len,
-                device="cuda",
+                device=device,
             )
 
         @torch.compile(dynamic=True, fullgraph=True, backend=counter)
@@ -2809,7 +2889,7 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
         seq_len = 128
         for batch_shape in [2, 4, 8]:
             q, k, v = create_test_tensors(
-                batch_shape, 4, seq_len, 64, device="cuda", dtype=torch.float16
+                batch_shape, 4, seq_len, 64, device=device, dtype=torch.float16
             )
             block_mask = make_mask(batch_shape, seq_len)
             run(q, k, v, block_mask)
@@ -2820,8 +2900,9 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
             lambda msg: f"{msg}\nExpected 1 graph, got {counter.frame_count}",
         )
 
+    @requires_capabilities(Capability.lib.triton)
     @xfailIfSM120OrLater
-    def test_dynamic_max_autotune_with_block_mask(self):
+    def test_dynamic_max_autotune_with_block_mask(self, device):
         """Dynamic=True with max-autotune should succeed for FLASH backend."""
         q, k, v = create_test_tensors(
             batch_size=2,
@@ -2829,10 +2910,10 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
             seq_len=256,
             dim=64,
             dtype=torch.bfloat16,
-            device="cuda",
+            device=device,
         )
         block_mask = _create_block_mask_for_device(
-            _causal_mask, 2, 4, 256, 256, device="cuda"
+            _causal_mask, 2, 4, 256, 256, device=device
         )
 
         compiled_fn = torch.compile(
@@ -2847,14 +2928,15 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
         )
         self.assertEqual(out.shape, q.shape)
 
+    @requires_capabilities(Capability.lib.triton)
     @xfailIfSM120OrLater
-    def test_dynamic_captured_buffer_varying_heads(self):
+    def test_dynamic_captured_buffer_varying_heads(self, device):
         """Dynamic head_count with captured tensor buffer under FLASH/TRITON parity."""
         torch._dynamo.reset()
 
         def run_with_head_count(head_count):
             head_scale = torch.randn(
-                head_count, device="cuda", dtype=torch.float16, requires_grad=False
+                head_count, device=device, dtype=torch.float16, requires_grad=False
             )
 
             def score_mod(score, batch, head, token_q, token_kv):
@@ -2866,7 +2948,7 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
                 seq_len=256,
                 dim=64,
                 dtype=torch.float16,
-                device="cuda",
+                device=device,
                 requires_grad=True,
             )
             self._flash_triton_dynamic(q, k, v, score_mod=score_mod)
@@ -2874,7 +2956,8 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
         for head_count in [4, 8, 4, 16, 4]:
             run_with_head_count(head_count)
 
-    def test_dynamic_symbol_closure_in_score_mod(self):
+    @requires_capabilities(Capability.lib.triton)
+    def test_dynamic_symbol_closure_in_score_mod(self, device):
         """Capturing a SymInt in score_mod should compile to one dynamic graph."""
 
         class SimpleAttention(torch.nn.Module):
@@ -2897,13 +2980,13 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
                     kernel_options={"BACKEND": "FLASH"},
                 )
 
-        model = SimpleAttention().cuda()
+        model = SimpleAttention().to(device)
         backend = EagerAndRecordGraphs()
         model.compile(mode="default", dynamic=True, backend=backend)
 
         torch._dynamo.reset()
         for batch_shape in [2, 4, 8]:
-            x = torch.randn(batch_shape, 256, 512, device="cuda")
+            x = torch.randn(batch_shape, 256, 512, device=device)
             model(x)
 
         self.assertEqual(len(backend.graphs), 1, "Expected a single dynamic graph")
@@ -2926,12 +3009,13 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
 
         return fn
 
-    def test_dynamic_multiple_scalar_closures_in_score_mod_codegen(self):
+    @requires_capabilities(Capability.lib.triton)
+    def test_dynamic_multiple_scalar_closures_in_score_mod_codegen(self, device):
         if SM120OrLater:
             self.skipTest("score_mod is not supported on SM120")
 
         fn = self._dynamic_multiple_scalar_closures_fn()
-        q, k, v = create_test_tensors(seq_len=128, device="cuda", dtype=torch.float16)
+        q, k, v = create_test_tensors(seq_len=128, device=device, dtype=torch.float16)
         expected = fn(q, k, v)
         actual, code = run_and_get_code(
             torch.compile(fn, dynamic=True, fullgraph=True), q, k, v
@@ -2946,14 +3030,15 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
         self.assertIn("aux_scalars[0]", src)
         self.assertIn("aux_scalars[1]", src)
 
+    @requires_capabilities(Capability.lib.triton)
     @xfailIfSM120OrLater
     @decorateIf(
         unittest.expectedFailure,
         lambda params: IS_SM90,
     )
-    def test_dynamic_multiple_scalar_closures_with_max_autotune(self):
+    def test_dynamic_multiple_scalar_closures_with_max_autotune(self, device):
         fn = self._dynamic_multiple_scalar_closures_fn()
-        q, k, v = create_test_tensors(seq_len=128, device="cuda", dtype=torch.float16)
+        q, k, v = create_test_tensors(seq_len=128, device=device, dtype=torch.float16)
         expected = fn(q, k, v)
         actual = torch.compile(
             fn,
@@ -2964,15 +3049,16 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
 
         self.assertEqual(actual, expected, atol=3e-2, rtol=3e-2)
 
-    def _offset_block_mask(self, offset, q_len=128, kv_len=128):
+    def _offset_block_mask(self, offset, device, q_len=128, kv_len=128):
         def mask_mod(_b, _h, q_idx, kv_idx):
             return kv_idx <= q_idx + offset
 
         return _create_block_mask_for_device(
-            mask_mod, 2, None, q_len, kv_len, device="cuda"
+            mask_mod, 2, None, q_len, kv_len, device=device
         )
 
-    def test_dynamic_scalar_closure_in_mask_mod(self):
+    @requires_capabilities(Capability.lib.triton)
+    def test_dynamic_scalar_closure_in_mask_mod(self, device):
         if not flash_supports_aux_scalars():
             self.skipTest(
                 "Flash attention (CUTE) scalar capture support is not available"
@@ -3016,26 +3102,26 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
             torch.manual_seed(1234)
             q = torch.randn(
                 (2, 4, 1, 64),
-                device="cuda",
+                device=device,
                 dtype=torch.float16,
                 requires_grad=True,
             )
             k = torch.randn(
                 (2, 4, 128, 64),
-                device="cuda",
+                device=device,
                 dtype=torch.float16,
                 requires_grad=True,
             )
             v = torch.randn(
                 (2, 4, 128, 64),
-                device="cuda",
+                device=device,
                 dtype=torch.float16,
                 requires_grad=True,
             )
             q_ref, k_ref, v_ref = [
                 x.detach().clone().requires_grad_() for x in (q, k, v)
             ]
-            block_mask = self._offset_block_mask(offset, q_len=1, kv_len=128)
+            block_mask = self._offset_block_mask(offset, device, q_len=1, kv_len=128)
 
             with torch.no_grad():
                 out_ref = flex_attention(
@@ -3055,7 +3141,7 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
         self.assertEqual(flash_counter.frame_count, 1, "Expected one FLASH graph")
         self.assertEqual(triton_counter.frame_count, 1, "Expected one TRITON graph")
 
-    def _compare_flash_triton_backward(self, score_mod_factory):
+    def _compare_flash_triton_backward(self, score_mod_factory, device):
         def run(q, k, v, backend):
             batch = q.size(0)
             return flex_attention(
@@ -3070,7 +3156,7 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
         triton = torch.compile(lambda q, k, v: run(q, k, v, "TRITON"), dynamic=True)
 
         q, k, v = create_test_tensors(
-            seq_len=128, device="cuda", dtype=torch.float16, requires_grad=True
+            seq_len=128, device=device, dtype=torch.float16, requires_grad=True
         )
         q_ref, k_ref, v_ref = [x.detach().clone().requires_grad_() for x in (q, k, v)]
         out_flash = flash(q, k, v)
@@ -3083,22 +3169,27 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
         for actual, expected in zip(grads_flash, grads_triton):
             self.assertEqual(actual, expected, atol=3e-2, rtol=3e-2)
 
+    @requires_capabilities(Capability.lib.triton)
     @xfailIfSM120OrLater
-    def test_dynamic_symbol_closure_in_score_mod_backward(self):
+    def test_dynamic_symbol_closure_in_score_mod_backward(self, device):
         """Captured SymInt in score_mod should propagate through FLASH backward."""
         self._compare_flash_triton_backward(
-            lambda batch: lambda score, _b, _h, _q, _kv: score * (batch + 1)
+            lambda batch: lambda score, _b, _h, _q, _kv: score * (batch + 1), device
         )
 
+    @requires_capabilities(Capability.lib.triton)
     @xfailIfSM120OrLater
-    def test_dynamic_symfloat_closure_in_score_mod_backward(self):
+    def test_dynamic_symfloat_closure_in_score_mod_backward(self, device):
         """SymFloat expressions in score_mod should lower inside FLASH backward."""
         self._compare_flash_triton_backward(
-            lambda batch: lambda score, _b, _h, _q, _kv: score * ((batch + 1) / 2.0)
+            lambda batch: lambda score, _b, _h, _q, _kv: score * ((batch + 1) / 2.0),
+            device,
         )
 
 
-class TestHierarchicalIndex(InductorTestCase):
+class TestHierarchicalIndexGeneric(InductorTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_flash_attention_unavailable_message_has_install_link(self):
         message = _flash_attention_unavailable_message()
         self.assertIn("pip install --pre flash-attn-4", message)
@@ -3173,16 +3264,20 @@ class TestHierarchicalIndex(InductorTestCase):
             indexer([b])
         self.assertIn("Rank mismatch", str(ctx.exception))
 
+
+@unittest.skipIf(
+    not ensure_flash_available(), "Flash attention (CUTE) library is not available"
+)
+class TestHierarchicalIndexCuda(InductorTestCase):
+    hw_classification = HardwareClassification.CUDA
+    _do_cuda_non_default_stream = False
+
     # 'FlashAttentionForwardSm120' object has no attribute 'apply_score_mod'
+    @requires_capabilities(Capability.lib.triton)
     @xfailIfSM120OrLater
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
-    @unittest.skipIf(
-        not ensure_flash_available(), "Flash attention (CUTE) library not available"
-    )
-    def test_hierarchical_indexing_2d(self):
+    def test_hierarchical_indexing_2d(self, device):
         batch_size, num_heads, seq_len, dim = 2, 4, 512, 64
         dtype = torch.float16
-        device = "cuda"
 
         bias_2d = torch.randn(batch_size, num_heads, device=device, dtype=dtype)
 
@@ -3215,19 +3310,17 @@ class TestHierarchicalIndex(InductorTestCase):
         self.assertIn(
             expected_pattern,
             code_str,
-            lambda msg: f"{msg}\nExpected '{expected_pattern}' in generated code.\nExcerpt:\n{code_str[:2000]}",
+            lambda msg: (
+                f"{msg}\nExpected '{expected_pattern}' in generated code.\nExcerpt:\n{code_str[:2000]}"
+            ),
         )
 
     # 'FlashAttentionForwardSm120' object has no attribute 'apply_score_mod'
+    @requires_capabilities(Capability.lib.triton)
     @xfailIfSM120OrLater
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
-    @unittest.skipIf(
-        not ensure_flash_available(), "Flash attention (CUTE) library not available"
-    )
-    def test_hierarchical_indexing_3d(self):
+    def test_hierarchical_indexing_3d(self, device):
         batch_size, num_heads, seq_len, dim = 2, 4, 512, 64
         dtype = torch.float16
-        device = "cuda"
 
         bias_3d = torch.randn(
             batch_size, num_heads, seq_len, device=device, dtype=dtype
@@ -3262,18 +3355,16 @@ class TestHierarchicalIndex(InductorTestCase):
         self.assertIn(
             expected_pattern,
             code_str,
-            lambda msg: f"{msg}\nExpected '{expected_pattern}' in generated code.\nExcerpt:\n{code_str[:2000]}",
+            lambda msg: (
+                f"{msg}\nExpected '{expected_pattern}' in generated code.\nExcerpt:\n{code_str[:2000]}"
+            ),
         )
 
+    @requires_capabilities(Capability.lib.triton)
     @xfailIfSM120OrLater
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
-    @unittest.skipIf(
-        not ensure_flash_available(), "Flash attention (CUTE) library not available"
-    )
-    def test_hierarchical_indexing_4d(self):
+    def test_hierarchical_indexing_4d(self, device):
         batch_size, num_heads, seq_len, dim = 2, 4, 512, 64
         dtype = torch.float16
-        device = "cuda"
 
         bias_4d = torch.randn(
             batch_size, num_heads, seq_len, seq_len, device=device, dtype=dtype
@@ -3313,6 +3404,11 @@ class TestHierarchicalIndex(InductorTestCase):
             r"cute\.local_tile\(in_ptr4, \(1, 1, 1, cute\.size\([^)]*\.shape\)\), "
             r"\([^,]+\[0\], [^,]+\[0\], [^,]+\[0\], [^)]* // cute\.size\([^)]*\.shape\)\)\)",
         )
+
+
+instantiate_device_type_tests(TestFlexFlash, globals(), only_for="cuda")
+instantiate_device_type_tests(TestFlexFlashDynamicShapes, globals(), only_for="cuda")
+instantiate_device_type_tests(TestHierarchicalIndexCuda, globals(), only_for="cuda")
 
 
 if __name__ == "__main__":
