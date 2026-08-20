@@ -79,6 +79,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
+from torch.utils.checkpoint import checkpoint
 
 
 USE_TORCHVISION = False
@@ -3948,6 +3949,22 @@ class TestComposability(TestCase):
         for call in higher_order:
             with self.assertRaisesRegex(RuntimeError, "saved tensor hooks"):
                 call()
+
+    @skipIfTorchDynamo(_SAVED_TENSOR_HOOKS_EAGER_ONLY)
+    def test_failed_compile_does_not_leak_saved_tensor_hook_state(self, device):
+        def f(x):
+            return checkpoint(
+                lambda x: (torch.sin(x) * x).sum(), x, use_reentrant=False
+            )
+
+        x = torch.randn(5, 3, device=device)
+        expected = vmap(grad(lambda x: (torch.sin(x) * x).sum()))(x)
+        compiled = torch.compile(vmap(grad(f)), backend="aot_eager", fullgraph=True)
+
+        with self.assertRaisesRegex(RuntimeError, "saved tensor hooks.*torch.compile"):
+            compiled(x)
+
+        self.assertEqual(vmap(grad(f))(x), expected)
 
     @parametrize(
         "pin_memory",
