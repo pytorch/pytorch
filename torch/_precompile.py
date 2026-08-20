@@ -1551,6 +1551,11 @@ def _filter_dynamo_guards(
     return filtered_states
 
 
+def _dynamo_backend_source_literal(source: str) -> str:
+    escaped = source.replace("\\", "\\\\").replace('"""', '\\"\\"\\"')
+    return f'    """\n{escaped}\n"""[1:-1],'
+
+
 def _build_dynamo_python_source(
     *,
     backend: str,
@@ -1591,10 +1596,13 @@ def _build_dynamo_python_source(
         f"DYNAMIC_GRAPH_COUNT = {dynamic_count}",
         f"_DYNAMO_PYTHON_VERSION = {tuple(sys.version_info[:2])!r}",
         f"_DYNAMO_BACKEND_IDS = {tuple(backend_ids)!r}",
+        "# Each block is a standalone backend module. Keep them in separate strings so",
+        "# load can execute each in an isolated namespace without graph-global collisions.",
         "_DYNAMO_BACKEND_SOURCES = (",
     ]
-    for compiled in compiled_backends:
-        parts.append(f"    {compiled.python_code!r},")
+    for index, compiled in enumerate(compiled_backends):
+        parts.append(f"    # Backend graph {index}")
+        parts.append(_dynamo_backend_source_literal(compiled.python_code))
     parts.extend(
         [
             ")",
