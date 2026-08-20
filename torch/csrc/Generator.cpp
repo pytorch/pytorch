@@ -24,8 +24,7 @@ static bool generatorMetaclassSet = false;
 PyObject* THPGenerator_initDefaultGenerator(const at::Generator& cdata) {
   auto type = reinterpret_cast<PyTypeObject*>(THPGeneratorClass);
   auto self = THPObjectPtr{type->tp_alloc(type, 0)};
-  if (!self)
-    throw python_error(); // @allow-raw-throw
+  TORCH_CHECK_PYTHON(self);
   auto self_ = reinterpret_cast<THPGenerator*>(self.get());
   self_->cdata = cdata;
   self_->weakreflist = nullptr;
@@ -247,8 +246,7 @@ static PyObject* THPGenerator_philoxState(
   auto& [seed_t, offset_t, intragraph_t] = state;
 
   auto ret = THPObjectPtr{PyTuple_New(3)};
-  if (!ret)
-    throw python_error(); // @allow-raw-throw
+  TORCH_CHECK_PYTHON(ret);
   PyTuple_SET_ITEM(ret.get(), 0, THPVariable_Wrap(std::move(seed_t)));
   PyTuple_SET_ITEM(ret.get(), 1, THPVariable_Wrap(std::move(offset_t)));
   PyTuple_SET_ITEM(ret.get(), 2, THPVariable_Wrap(std::move(intragraph_t)));
@@ -268,23 +266,20 @@ static PyObject* THPGenerator_reduce(PyObject* _self, PyObject* noargs) {
   auto& gen = self->cdata;
 
   auto ret = THPObjectPtr{PyTuple_New(3)};
-  if (!ret)
-    throw python_error(); // @allow-raw-throw
+  TORCH_CHECK_PYTHON(ret);
 
   py::object torch_module = py::module::import("torch");
   py::object torch_generator = torch_module.attr("Generator");
   PyTuple_SET_ITEM(ret.get(), 0, torch_generator.release().ptr());
 
   auto args = THPObjectPtr{PyTuple_New(1)};
-  if (!args)
-    throw python_error(); // @allow-raw-throw
+  TORCH_CHECK_PYTHON(args);
 
   PyTuple_SET_ITEM(args.get(), 0, THPGenerator_get_device(self, nullptr));
   PyTuple_SET_ITEM(ret.get(), 1, args.release());
 
   auto state = THPObjectPtr{PyTuple_New(3)};
-  if (!state)
-    throw python_error(); // @allow-raw-throw
+  TORCH_CHECK_PYTHON(state);
 
   c10::DeviceType device_type = gen.device().type();
   PyTuple_SET_ITEM(state.get(), 0, THPGenerator_initialSeed(_self, nullptr));
