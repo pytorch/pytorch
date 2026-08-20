@@ -132,9 +132,17 @@ def dropout_parity(device, shape, p=0.3, dtype=torch.float32, seed=1234):
 # Test class (Inductor idioms)
 # ───────────────────────────────────────────────────────────────
 @unittest.skipIf(not IS_LINUX, "Inductor dropout alignment tests require Linux")
-@config.patch(align_random_eager=True)
 class TestDropoutAlignRandomEager(InductorTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
+
+    def setUp(self):
+        super().setUp()
+        self._config_ctx = config.patch(align_random_eager=True)
+        self._config_ctx.__enter__()
+
+    def tearDown(self):
+        self._config_ctx.__exit__(None, None, None)
+        super().tearDown()
 
     def assertSmallMismatchFraction(self, a, b, atol=1e-5, max_fraction=1e-3):
         """Assert that only a small fraction of elements differ significantly.
