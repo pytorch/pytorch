@@ -314,5 +314,45 @@ REGISTER_NO_CPU_DISPATCH(embfoo_aot_stub)
         self.assertEqual(actual, textwrap.dedent(expected))
 
 
+class TestNativeAotWorkflow(unittest.TestCase):
+    """The workflow that validates this feature, asserted as text: it is the only
+    job that builds and runs the embedded kernels, so what it triggers on and what
+    it may reuse decide whether a change is tested at all."""
+
+    REPO = os.path.normpath(
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
+    )
+
+    def _workflow(self) -> str:
+        path = os.path.join(self.REPO, ".github/workflows/b200-native-aot.yml")
+        with open(path) as f:
+            return f.read()
+
+    def test_it_never_reuses_a_prebuilt_wheel(self):
+        # reuse_old_whl.ok_changed_file() waves through every torch/**.py outside
+        # torch/csrc/, but the kernel bodies and declarations under
+        # torch/_native/ops/ are compile-time inputs to libtorch_cuda. Reusing a
+        # wheel republishes the previous commit's kernels, and the test job's
+        # _native_aot_embedded() assertion still passes: green, with the change
+        # under test never compiled.
+        self.assertIn("allow-reuse-old-whl: false", self._workflow())
+
+    def test_it_triggers_on_the_build_wiring_too(self):
+        # Stage 2 is reached from these shells and configured by this CMake, so a
+        # change to them that breaks the path must not merge unexercised.
+        wf = self._workflow()
+        for path in (
+            ".ci/pytorch/build.sh",
+            ".ci/pytorch/test.sh",
+            ".ci/pytorch/common_utils.sh",
+            ".ci/manywheel/build.sh",
+            "caffe2/CMakeLists.txt",
+            "cmake/EnvVarForwarding.cmake",
+            "torchgen/native_aot_decl.py",
+        ):
+            with self.subTest(path=path):
+                self.assertIn(f"- {path}\n", wf)
+
+
 if __name__ == "__main__":
     unittest.main()
