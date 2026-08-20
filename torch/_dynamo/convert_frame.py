@@ -159,6 +159,7 @@ from .utils import (
     CleanupManager,
     CompileTimeInstructionCounter,
     counters,
+    deferred_full_gc,
     dynamo_timed,
     format_bytecode,
     gen_record_file_name,
@@ -1729,6 +1730,7 @@ def _compile(
             # (wrapper-subclass __torch_dispatch__ invoked by AOTAutograd,
             # make_fx invoked from a custom backend, etc.). Export sets the
             # flag itself via _compiling_state_context, so skip there.
+            stack.enter_context(deferred_full_gc())
             if not export:
                 stack.enter_context(torch.compiler._compile_session_context())
             stack.enter_context(

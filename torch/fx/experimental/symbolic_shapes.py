@@ -4150,6 +4150,22 @@ class ShapeEnv:
         # SymNode.expr
         self._replacements_version_counter = 0
 
+        # Note [symbolic op memo]
+        # Symbolic binary arithmetic is overwhelmingly repetitive: deriving
+        # numel and contiguity for every fake tensor recomputes the same
+        # products and comparisons over and over: on one model over 99% of a
+        # few hundred thousand ops were repeats of about two thousand distinct
+        # computations. Memoize on
+        # (op, lhs expr, rhs expr, replacement version); the version keeps a hit
+        # valid only while replacements have not moved.
+        #
+        # What is cached is the result sympy expression. Every call site still
+        # builds its own SymNode around it, and must: see the comment in
+        # SymNode's binary_magic_impl for why two sites cannot share one. Under
+        # proxy tracing binary_magic_impl returns before it reaches this cache,
+        # so nothing being traced is served from here.
+        self._symop_cache: dict[Any, Any] = {}
+
         # Each time divisible is changed this should be set to True, this is set in _update_version_counter.
         self._resimplify_floor_div_axioms = True
 
@@ -4347,6 +4363,7 @@ class ShapeEnv:
             "var_to_range_sloc",
             "replacements_slocs",
             "_replacements_version_counter",
+            "_symop_cache",
             "_resimplify_floor_div_axioms",
             "_expr_sym_node_id",
             "specialization_stacks",
