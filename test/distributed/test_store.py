@@ -1144,6 +1144,8 @@ class TimeoutTest(TestCase):
                 else:
                     my_store.wait(["foo"], datetime.timedelta(seconds=10))
                 rank_res[rank] = True
+            except torch.distributed.DistNetworkError as e:
+                rank_res[rank] = e
             except BaseException as e:  # noqa: E261
                 rank_res[rank] = e
             time.sleep(1)
@@ -1186,6 +1188,66 @@ class TimeoutTest(TestCase):
             t.join()
         self.assertTrue(rank_res[0], "rank0")
         self.assertTrue(rank_res[1], "rank1")
+
+    def test_sigint_breaks_wait(self):
+        import signal
+
+        rank_res = [None, None]
+
+        def run(rank, my_store):
+            nonlocal rank_res
+            try:
+                if rank == 0:
+                    time.sleep(4)
+                    my_store.set("foo", "bar")
+                else:
+                    my_store.wait(["foo"], datetime.timedelta(seconds=10))
+                rank_res[rank] = True
+            except torch.distributed.DistNetworkError as e:
+                rank_res[rank] = e
+            except BaseException as e:  # noqa: E261
+                rank_res[rank] = e
+            time.sleep(1)
+
+        def handler(a, b):
+            pass
+
+        signal.signal(signal.SIGINT, handler)
+
+        rank0_store = dist.TCPStore(
+            host_name=DEFAULT_HOSTNAME,
+            port=0,
+            world_size=2,
+            is_master=True,
+            wait_for_workers=False,
+        )
+        rank1_store = dist.TCPStore(
+            host_name=DEFAULT_HOSTNAME,
+            port=rank0_store.port,
+            world_size=2,
+            is_master=False,
+            wait_for_workers=False,
+        )
+
+        threads = []
+        for i in range(2):
+            t = threading.Thread(
+                target=run,
+                args=(
+                    i,
+                    [rank0_store, rank1_store][i],
+                ),
+            )
+            t.start()
+            threads.append(t)
+
+        time.sleep(1)
+        signal.pthread_kill(threads[1].ident, signal.SIGINT)
+
+        for t in threads:
+            t.join()
+        self.assertTrue(rank_res[0], "rank0")
+        self.assertIsInstance(rank_res[1], torch.distributed.DistNetworkError)
 
 
 class InitPgWithNonUvStore(TestCase):
