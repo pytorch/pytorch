@@ -840,7 +840,7 @@ class FSDPParam:
         if has_fsdp_pre_all_gather:
             self._extensions_data = ExtensionsData()
         self._release_all_gather_outputs_after_post_all_gather = False
-        if has_release_all_gather_outputs:
+        if release_all_gather_outputs_fn is not None:
             # The extension owns whether its post-all-gather representation
             # aliases the raw all-gather outputs, so it must declare when those
             # outputs are no longer needed.
