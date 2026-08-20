@@ -27,19 +27,19 @@ from torch._inductor.utils import fresh_inductor_cache, snode_args_kwargs
 from torch._inductor.virtualized import V
 from torch.testing._internal.common_cuda import SM70OrLater
 from torch.testing._internal.common_device_type import (
+    Capability,
     dtypes,
     instantiate_device_type_tests,
+    requires_capabilities,
     skipCUDAIf,
     skipXPU,
 )
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
     HardwareClassification,
-    instantiate_parametrized_tests,
     parametrize,
     run_tests,
     TestCase,
-    xfailIfNoAcceleratorTriton,
 )
 from torch.testing._internal.inductor_utils import IS_BIG_GPU
 from torch.utils._ordered_set import OrderedSet
@@ -746,7 +746,7 @@ class TestSchedulerAccelerator(TestCase):
 
     @dtypes(torch.float, torch.float16)
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
-    @xfailIfNoAcceleratorTriton
+    @requires_capabilities(Capability.lib.triton)
     def test_disable_get_estimated_runtime_logging(self, device, dtype):
         tc = _test_cases(device, dtype)
         # turn off logging of inductor metrics so that they don't get logged
@@ -763,7 +763,6 @@ class TestSchedulerAccelerator(TestCase):
             metrics.reset()
         torch._logging.set_logs()
 
-    @xfailIfNoAcceleratorTriton
     @dtypes(torch.float, torch.float16)
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     @parametrize(
@@ -783,6 +782,7 @@ class TestSchedulerAccelerator(TestCase):
         {"force_disable_caches": True, "shape_padding": False}
     )
     @skipIf(not IS_BIG_GPU, "we can't use Triton only as a backend for max autotune")
+    @requires_capabilities(Capability.lib.triton)
     def test_flop_counter_op(self, device, dtype, options):
         tc = _test_cases(device, dtype)
 
@@ -812,8 +812,8 @@ class TestSchedulerAccelerator(TestCase):
             counters["inductor"]["flop_count"] = 0
         torch._logging.set_logs()
 
-    @xfailIfNoAcceleratorTriton
     @skipXPU
+    @requires_capabilities(Capability.lib.triton)
     def test_index_add_fusion_prevented(self, device):
         """
         Test that index_add_ (scatter with atomic_add mode) is not fused with
@@ -854,8 +854,8 @@ class TestSchedulerAccelerator(TestCase):
             ),
         )
 
-    @xfailIfNoAcceleratorTriton
     @skipXPU
+    @requires_capabilities(Capability.lib.triton)
     def test_atomic_add_no_fusion_correctness(self, device):
         """
         Test that atomic_add operations produce correct results.
@@ -886,8 +886,8 @@ class TestSchedulerAccelerator(TestCase):
             ),
         )
 
-    @xfailIfNoAcceleratorTriton
     @skipXPU
+    @requires_capabilities(Capability.lib.triton)
     def test_expand_reuse_does_not_realize_before_reduction(self, device):
         def fn(icrd1, icrd2, wcrd, ocrd, meta, input1, input2, weight, output):
             input1_selected = torch.index_select(input1, 2, icrd1)
@@ -956,8 +956,8 @@ class TestSchedulerAccelerator(TestCase):
         self.assertEqual(metrics.ir_nodes_pre_fusion, 2)
         self.assertEqual(metrics.generated_kernel_count, 1)
 
-    @xfailIfNoAcceleratorTriton
     @skipXPU
+    @requires_capabilities(Capability.lib.triton)
     def test_expand_reuse_realizes_in_deterministic_mode(self, device):
         def fn(a, b, c, d, e):
             x = a * b * c * d * e
@@ -993,13 +993,13 @@ class TestSchedulerAccelerator(TestCase):
         with inductor_config.patch(deterministic=True):
             check_realizes()
 
-    @xfailIfNoAcceleratorTriton
     @skipXPU
     @parametrize("op", ["select_scatter", "index_put"])
     # Both settings are pinned so the test can only pass via graph_fanout:
     # deterministic mode makes expand realize src on its own, and the read
     # threshold decides whether src counts as expensive at all.
     @inductor_config.patch(deterministic=False, realize_reads_threshold=4)
+    @requires_capabilities(Capability.lib.triton)
     def test_scatter_realizes_expensive_src(self, device, op):
         def src(a, b, c, d, e):
             return a[..., 1] * b[..., 0] + c[..., 1] * d[..., 0] + e[..., 2]
@@ -1037,7 +1037,6 @@ class TestSchedulerAccelerator(TestCase):
         self.assertEqual(metrics.generated_kernel_count, 2)
 
 
-@xfailIfNoAcceleratorTriton
 class TestScoreFusionMemory(TestCase):
     """
     Tests for _score_fusion_memory_by_buffer_overlap.
@@ -1056,6 +1055,7 @@ class TestScoreFusionMemory(TestCase):
 
     @inductor_config.patch("score_fusion_memory_threshold", 1)
     @inductor_config.patch("min_overlap_ratio", 0.5)
+    @requires_capabilities(Capability.lib.triton)
     def test_exact_same_reads_should_fuse(self, device) -> None:
         """
         Case 1: Exact matches in read/write → should fuse into 1 kernel.
@@ -1086,6 +1086,7 @@ class TestScoreFusionMemory(TestCase):
 
     @inductor_config.patch("score_fusion_memory_threshold", 1)
     @inductor_config.patch("min_overlap_ratio", 0.5)
+    @requires_capabilities(Capability.lib.triton)
     def test_split_cat_large_overlap_should_fuse(self, device) -> None:
         """
         Case 2: Reads on different offset but overlap is huge (split/cat) → should fuse into 1 kernel.
@@ -1118,6 +1119,7 @@ class TestScoreFusionMemory(TestCase):
         self.assertEqual(metrics.generated_kernel_count, 1)
 
     @inductor_config.patch("score_fusion_memory_threshold", 1)
+    @requires_capabilities(Capability.lib.triton)
     def test_partial_overlap_below_threshold(self, device) -> None:
         """
         Case 3: Partial overlap below the 0.5 threshold → should NOT fuse (2 kernels).
@@ -1171,8 +1173,6 @@ class TestScoreFusionMemory(TestCase):
         # The _score_fusion_memory_by_buffer_overlap returns 0 for this case
         self.assertEqual(metrics.generated_kernel_count, 2)
 
-
-instantiate_parametrized_tests(TestSchedulerGeneric)
 
 instantiate_device_type_tests(
     TestSchedulerAccelerator, globals(), except_for="cpu", allow_xpu=True
