@@ -92,6 +92,14 @@ class VendoredDenseGemmEFCOperator(PersistentDenseGemmEFCOperator):
                 "Dense M-axis feed-main requires a "
                 f"{GEMM_REDUCTION_FRAGMENT_WIDTH}-column tile"
             )
+        if (
+            reduction.feeds_main
+            and axis == 1
+            and (self.impl.use_2cta_instrs or self.cta_tile_m != 128)
+        ):
+            return Status.fail(
+                "Dense N-axis feed-main requires a single 128-row CTA tile"
+            )
         if not DENSE_GEMM_REDUCTION_CAPABILITIES.supports_contract(reduction):
             return Status.fail("Unsupported dense EFC local reduction contract")
         return status
@@ -132,7 +140,7 @@ class VendoredDenseGemmEFCOperator(PersistentDenseGemmEFCOperator):
             reduction_tensors.output,
             reduction_tensors.feed_output,
             reduction_tensors.secondary_feed_output,
-            *reduction_config.constexprs(include_consumers=False),
+            *reduction_config.constexprs(),
             *epilogue_params,
             target_sm=target_sm,
         )

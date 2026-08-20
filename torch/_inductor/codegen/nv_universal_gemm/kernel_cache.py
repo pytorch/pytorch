@@ -212,10 +212,14 @@ def _args_query_candidates(args: Any, cc: int, efc_only: bool) -> list[Any]:
     metadata_filter = (
         (lambda md: "EFC" in md.operator_class.__name__) if efc_only else None
     )
-    return _replace_dense_efc_with_vendored(
-        cutlass.operators.get_operators(
-            args=args, target_sm=f"{cc}a", metadata_filter=metadata_filter
-        )
+    return _filter_supported(
+        _replace_dense_efc_with_vendored(
+            cutlass.operators.get_operators(
+                args=args, target_sm=f"{cc}a", metadata_filter=metadata_filter
+            )
+        ),
+        args,
+        cc,
     )
 
 
@@ -302,7 +306,11 @@ def _manifest_candidates(args: Any, cc: int, efc_only: bool) -> list[Any]:
             for kernel in kernels
             if "EFC" in kernel.metadata.operator_class.__name__
         )
-    return _replace_dense_efc_with_vendored(_filter_supported(kernels, args, cc))
+    return _filter_supported(
+        _replace_dense_efc_with_vendored(_filter_supported(kernels, args, cc)),
+        args,
+        cc,
+    )
 
 
 def _blockscaled_provider_classes() -> list[Any]:

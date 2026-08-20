@@ -28,6 +28,7 @@ from torch._inductor.utils import (
 from torch.testing._internal.common_utils import (
     dtype_name,
     instantiate_parametrized_tests,
+    IS_FBCODE,
     parametrize,
 )
 from torch.utils._ordered_set import OrderedSet
@@ -240,6 +241,52 @@ class TestNVUniversalGemm(TestCase):
                 result = compiled_fn(bias, x, w)
 
         torch.testing.assert_close(result, expected, rtol=1.6e-2, atol=1e-1)
+
+    @unittest.skipIf(IS_FBCODE, "CUTLASS Operator API is not available in fbcode")
+    def test_vendored_dense_grouped_n_feed_main_filters_cta_shapes(self):
+        from cutlass import Float32
+
+        from torch._inductor.codegen.nv_universal_gemm.kernel_cache import (
+            _args_query_candidates,
+        )
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
+            _create_gemm_arguments,
+        )
+        from torch._inductor.kernel.gemm_epilogue import GemmReductionArguments
+
+        m, n, k = 128, 128, 64
+        a = torch.empty((m, k), device="cuda", dtype=torch.bfloat16)
+        b = torch.empty((k, n), device="cuda", dtype=torch.bfloat16)
+        out = torch.empty((m, n), device="cuda", dtype=torch.bfloat16)
+        feed = torch.empty((m, n), device="cuda")
+        args = _create_gemm_arguments(
+            "GEMM",
+            (a, b),
+            out,
+            Float32,
+            local_reduce=GemmReductionArguments(
+                group=16,
+                axis=1,
+                reduction_type="sum",
+                feeds_main=True,
+                feed_output=feed,
+                consumer_fn=(
+                    "def consumer(accumulator, reduction, _secondary):\n"
+                    "    return accumulator + reduction"
+                ),
+            ),
+        )
+        kernels = [
+            kernel
+            for kernel in _args_query_candidates(args, 100, efc_only=True)
+            if "VendoredDenseGemmEFCOperator" in kernel.metadata.operator_name
+        ]
+
+        self.assertTrue(kernels)
+        for kernel in kernels:
+            design = kernel.metadata.design
+            self.assertFalse(design.use_2cta_mma)
+            self.assertEqual(design.tile_shape[0], 128)
 
     def test_efc_epilogue_lookup_no_deadlock(self):
         """get_efc_kernel_with_epilogue holds _cache_lock and, when the base EFC
@@ -835,7 +882,7 @@ class TestNVUniversalGemmHeuristics(TestCase):
             consumer_fn="generated_consumer",
         )
         self.assertFalse(GemmVariant.GEMM.supports_reduction(wide_consumer))
-        self.assertTrue(GemmVariant.SCALED_GEMM.supports_reduction(wide_consumer))
+        self.assertFalse(GemmVariant.SCALED_GEMM.supports_reduction(wide_consumer))
         unsupported = dataclasses.replace(plan, reduction_type="unsupported")
         self.assertFalse(GemmVariant.GEMM.supports_reduction(unsupported))
         self.assertTrue(GemmVariant.SCALED_GEMM.supports_reduction(plan))
@@ -862,7 +909,12 @@ class TestNVUniversalGemmHeuristics(TestCase):
         custom_secondary = dataclasses.replace(
             secondary, secondary_consumer_fn="generated_consumer"
         )
-        self.assertTrue(GemmVariant.GEMM.supports_reduction(custom_secondary))
+        self.assertFalse(GemmVariant.GEMM.supports_reduction(custom_secondary))
+        self.assertTrue(
+            GemmVariant.GEMM.supports_reduction(
+                dataclasses.replace(custom_secondary, feeds_main=True)
+            )
+        )
         self.assertFalse(GemmVariant.SCALED_GEMM.supports_reduction(custom_secondary))
         normalized_secondary = dataclasses.replace(
             secondary,
