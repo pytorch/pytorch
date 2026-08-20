@@ -225,26 +225,7 @@ std::vector<Tensor> foreach_tensor_max_cuda(TensorList tensors) {
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
 
-  // correctly assign values to only non-empty slots, as the empty slots should
-  // get skipped
-  std::vector<Tensor> result;
-  result.reserve(ntensors);
-  int i = 0;
-  for (const auto& t : tensors) {
-    if (t.numel() != 0) {
-      result.emplace_back(std::move(vec_res[i]));
-      i++;
-    } else {
-      result.emplace_back(at::native::empty_cuda(
-          {},
-          optTypeMetaToScalarType(options.dtype_opt()),
-          options.layout_opt(),
-          options.device_opt(),
-          options.pinned_memory_opt(),
-          options.memory_format_opt()));
-    }
-  }
-  return result;
+  return vec_res;
 }
 
 template <
@@ -446,12 +427,17 @@ std::vector<Tensor> foreach_tensor_norm_cuda_internal(
     TensorList tensors,
     double p,
     std::optional<ScalarType> dtype) {
-  const size_t ntensors = tensors.size();
-  int max_chunks_per_tensor = -1;
+  int max_chunks_per_tensor = 0;
 
-  for (const auto t : c10::irange(ntensors)) {
-    int max_chunks_this_tensor =
-        (tensors[t].numel() + kChunkSize - 1) / kChunkSize;
+  // multi_tensor_apply skips empty tensors, so nothing writes their rows.
+  size_t nonempty_tensors = 0;
+  for (const auto& t : tensors) {
+    const int64_t numel = t.numel();
+    if (numel == 0) {
+      continue;
+    }
+    nonempty_tensors++;
+    const int max_chunks_this_tensor = ceil_div(numel, kChunkSize);
     if (max_chunks_this_tensor > max_chunks_per_tensor) {
       max_chunks_per_tensor = max_chunks_this_tensor;
     }
@@ -461,13 +447,13 @@ std::vector<Tensor> foreach_tensor_norm_cuda_internal(
       dtype.has_value() ? dtype.value() : tensors[0].scalar_type();
   const ScalarType output_per_tensor_dtype = toOpMathType(output_dtype);
   auto output_per_tensor = at::zeros(
-      {static_cast<int64_t>(ntensors) * max_chunks_per_tensor},
+      {static_cast<int64_t>(nonempty_tensors) * max_chunks_per_tensor},
       options.dtype(output_per_tensor_dtype));
 
   std::vector<at::Tensor> vec_res;
-  vec_res.reserve(ntensors);
+  vec_res.reserve(nonempty_tensors);
   const auto res_option = options.dtype(output_dtype);
-  for ([[maybe_unused]] const auto i : c10::irange(ntensors)) {
+  for ([[maybe_unused]] const auto i : c10::irange(nonempty_tensors)) {
     vec_res.push_back(at::native::empty_cuda(
         {},
         optTypeMetaToScalarType(res_option.dtype_opt()),
@@ -522,13 +508,13 @@ std::vector<Tensor> foreach_tensor_norm_cuda_internal(
               auto stream = at::cuda::getCurrentCUDAStream();
 
               const size_t num_kernels =
-                  ceil_div(ntensors, MAX_TENSORS_PER_KERNEL);
+                  ceil_div(nonempty_tensors, MAX_TENSORS_PER_KERNEL);
               for (const auto i : c10::irange(num_kernels)) {
                 const size_t num_tensors_this_kernel =
                     (i < num_kernels - 1 ||
-                     ntensors % MAX_TENSORS_PER_KERNEL == 0)
+                     nonempty_tensors % MAX_TENSORS_PER_KERNEL == 0)
                     ? MAX_TENSORS_PER_KERNEL
-                    : (ntensors % MAX_TENSORS_PER_KERNEL);
+                    : (nonempty_tensors % MAX_TENSORS_PER_KERNEL);
 
                 TensorListAddresses addr_struct;
                 for (const auto j : c10::irange(num_tensors_this_kernel)) {
