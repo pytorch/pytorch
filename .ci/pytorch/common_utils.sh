@@ -364,21 +364,19 @@ function install_flash_attn_cute() {
 }
 
 function install_cutlass_dsl() {
+  # cutlass-dsl requires Python >= 3.12
+  local py_version
+  py_version=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+  if [[ "$(echo -e "3.12\n$py_version" | sort -V | head -n1)" != "3.12" ]]; then
+    echo "Skipping CUTLASS DSL install: requires Python >= 3.12, have $py_version"
+    return 0
+  fi
+
   echo "Installing NVIDIA CUTLASS DSL from PyPI..."
   # Pin to a version accepted by torch._native's cutedsl version gate
   # (_CUTEDSL_REQUIRED_VERSIONS); apache-tvm-ffi is a required runtime dep of
   # the CuTeDSL op overrides but is not pulled in by nvidia-cutlass-dsl.
-  #
-  # No interpreter guard: stage 2 calls this only after deciding it WILL export,
-  # and build_stage2.should_run() carries the gate for the interpreters whose
-  # cp-tagged libs-* wheels do not exist. A silent skip here would turn into a
-  # failed build rather than a slower one.
-  #
-  # [cu13]: as of 4.6.x the dialect runtime archive that native-AOT kernels link
-  # against ships per CUDA major, and only cu12 is a hard dependency -- cu13 is
-  # behind this extra. Without it _dsl_runtime_archive() warns and links cu12,
-  # which works today (same objects) but is not the supported pairing.
-  pip_install "nvidia-cutlass-dsl[cu13]==4.6.2" apache-tvm-ffi==0.1.11
+  pip_install nvidia-cutlass-dsl==4.6.2 apache-tvm-ffi==0.1.11
   echo "NVIDIA CUTLASS DSL installation complete."
 }
 
