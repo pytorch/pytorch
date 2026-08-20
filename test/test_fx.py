@@ -26,7 +26,10 @@ from math import sqrt
 from torch.multiprocessing import Process
 from torch.testing import FileCheck
 from torch.testing._internal.common_methods_invocations import op_db
-from torch.testing._internal.common_device_type import ops, instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    ops,
+)
 import torch.utils._pytree as pytree
 import torch.fx._pytree as fx_pytree
 from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Interpreter, Tracer, Transformer, Graph, wrap, PH, CodeGen
@@ -74,11 +77,10 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     IS_MACOS,
     IS_WINDOWS,
-    TEST_WITH_CROSSREF,
-    TEST_WITH_ROCM,
     run_tests,
     skipIfTorchDynamo,
-    xfailIf,
+    TEST_WITH_CROSSREF,
+    TEST_WITH_ROCM,
     xfailIfNoAcceleratorTriton,
 )
 from torch.testing._internal.jit_utils import JitTestCase
@@ -4937,7 +4939,9 @@ class TestFXCUDA(JitTestCase):
         node_requirements: dict[str, tuple[str, ...]],
     ) -> None:
         parsed = _parse_profiler_trace_lines(traces)
-        self.assertTrue(len(parsed) > 0, "expected enriched profiler events with stack traces")
+        self.assertTrue(
+            len(parsed) > 0, "expected enriched profiler events with stack traces"
+        )
 
         by_node: dict[str, list[str]] = collections.defaultdict(list)
         for _event, node, stack_trace in parsed:
@@ -4996,7 +5000,8 @@ class TestFXCUDA(JitTestCase):
 
         if torch.version.hip:
             actual_traces = '\n'.join(
-                line for line in actual_traces.split('\n')
+                line
+                for line in actual_traces.split('\n')
                 if 'hipGetDeviceProperties' not in line
             )
             kernel_event = "hipExtModuleLaunchKernel"
@@ -5067,11 +5072,13 @@ event={kernel_event} node=addmm_1 stack_trace=x = self.linear2(x)"""
 
         actual_traces = _enrich_profiler_traces(prof)
         kernel_event = "hipLaunchKernel" if torch.version.hip else "cudaLaunchKernel"
-        self.assertExpectedInline(actual_traces, f"""\
+        self.assertExpectedInline(
+            actual_traces,
+            f"""\
 event=aten::add node=add stack_trace=return x + 1
 event={kernel_event} node=add stack_trace=return x + 1
 event=aten::sub node=sub stack_trace=return x - 1
-event={kernel_event} node=sub stack_trace=return x - 1"""
+event={kernel_event} node=sub stack_trace=return x - 1""",
             )
 
     @torch.fx.experimental._config.patch("enrich_profiler_metadata", True)
@@ -5101,23 +5108,29 @@ event={kernel_event} node=sub stack_trace=return x - 1"""
 
         # Warmup
         for _ in range(3):
-            _ = compiled_model(torch.randn(10, 10, device=device), torch.randn(10, 10, device=device))
+            _ = compiled_model(
+                torch.randn(10, 10, device=device), torch.randn(10, 10, device=device)
+            )
 
         # Profile
         with profile(
             activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
         ) as prof:
-            result = compiled_model(torch.randn(10, 10, device=device), torch.randn(10, 10, device=device))
+            result = compiled_model(
+                torch.randn(10, 10, device=device), torch.randn(10, 10, device=device)
+            )
 
         actual_traces = _enrich_profiler_traces(prof)
         kernel_event = "hipLaunchKernel" if torch.version.hip else "cudaLaunchKernel"
-        self.assertExpectedInline(actual_traces, f"""\
+        self.assertExpectedInline(
+        actual_traces,
+        f"""\
 event=aten::mul node=mul stack_trace=m = torch.mul(x, y)
 event={kernel_event} node=mul stack_trace=m = torch.mul(x, y)
 event=aten::sin node=sin stack_trace=s = m.sin()
 event={kernel_event} node=sin stack_trace=s = m.sin()
 event=aten::add node=add stack_trace=a = s + self.c
-event={kernel_event} node=add stack_trace=a = s + self.c"""
+event={kernel_event} node=add stack_trace=a = s + self.c""",
             )
 
     @xfailIfNoAcceleratorTriton
@@ -5189,7 +5202,9 @@ event={kernel_event} node=add stack_trace=a = s + self.c"""
             "Deserialized graph should contain triton_kernel_wrapper_functional",
         )
 
+
 instantiate_device_type_tests(TestFXCUDA, globals(), only_for="cuda")
+
 
 class TestOperatorSignatures(JitTestCase):
     hw_classification = HardwareClassification.CPU
