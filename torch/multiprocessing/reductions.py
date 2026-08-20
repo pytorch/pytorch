@@ -2,6 +2,7 @@
 import multiprocessing
 import os
 import threading
+from collections.abc import Callable as _Callable
 from multiprocessing import reduction
 from multiprocessing.util import register_after_fork
 
@@ -97,6 +98,36 @@ shared_cache = SharedCache()
 
 
 # Kept for BC only.
+_ipc_tensor_reduce_registry: dict[str, _Callable] = {}
+_ipc_storage_reduce_check_registry: dict[str, _Callable] = {}
+
+
+def register_ipc_tensor_reducer(device_type: str, reduce_fn: _Callable) -> None:
+    r"""Register an IPC tensor reducer for a device type.
+
+    The reducer must follow the :mod:`multiprocessing` reducer contract and
+    return a callable plus the arguments used to rebuild the tensor.
+    """
+    device_type = torch.device(device_type).type
+    if device_type in _ipc_tensor_reduce_registry:
+        raise RuntimeError(
+            f"An IPC tensor reducer for '{device_type}' has already been registered"
+        )
+    _ipc_tensor_reduce_registry[device_type] = reduce_fn
+
+
+def register_ipc_storage_check(device_type: str, check_fn: _Callable) -> None:
+    r"""Register a direct storage pickling check for a device type.
+
+    The check must return ``True`` when the storage must not be pickled directly.
+    """
+    device_type = torch.device(device_type).type
+    if device_type in _ipc_storage_reduce_check_registry:
+        raise RuntimeError(
+            f"An IPC storage check for '{device_type}' has already been registered"
+        )
+    _ipc_storage_reduce_check_registry[device_type] = check_fn
+
 def rebuild_event(device, handle):
     return torch.cuda.Event.from_ipc_handle(device, handle)
 
@@ -343,7 +374,12 @@ def reduce_tensor(tensor):
 
     storage = tensor._typed_storage()
 
-    if storage._untyped_storage.device.type == "cuda":
+    device_type = storage._untyped_storage.device.type
+    reduce_fn = _ipc_tensor_reduce_registry.get(device_type)
+    if reduce_fn is not None:
+        return reduce_fn(tensor)
+
+    if device_type == "cuda":
         (
             device,
             handle,
@@ -378,7 +414,7 @@ def reduce_tensor(tensor):
                 event_sync_required,
             ),
         )
-    elif storage._untyped_storage.device.type == "meta":
+    elif device_type == "meta":
         return (
             rebuild_meta_tensor,
             (
@@ -594,6 +630,14 @@ def reduce_typed_storage_child(storage):
 
 def reduce_storage(storage):
     from . import get_sharing_strategy
+
+    device_type = storage.device.type
+    check_fn = _ipc_storage_reduce_check_registry.get(device_type)
+    if check_fn is not None and check_fn(storage):
+        raise RuntimeError(
+            f"Cannot pickle {device_type} storage; "
+            f"try pickling a {device_type} tensor instead"
+        )
 
     if storage.is_cuda:
         raise RuntimeError(

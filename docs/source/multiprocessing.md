@@ -223,3 +223,13 @@ terminate processes upon detecting an error in one of them.
 ```{eval-rst}
 .. py:module:: torch.multiprocessing.reductions
 ```
+
+## IPC reduction registration
+
+Accelerator backends can register tensor reducers and prevent their storages
+from being pickled directly without replacing the reducers provided by PyTorch.
+
+```{eval-rst}
+.. autofunction:: register_ipc_tensor_reducer
+.. autofunction:: register_ipc_storage_check
+```
