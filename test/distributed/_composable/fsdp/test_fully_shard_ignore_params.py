@@ -11,9 +11,7 @@ from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import DTensor
 from torch.distributed.tensor.experimental import implicit_replication
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, get_devtype
 from torch.testing._internal.common_utils import (
@@ -219,7 +217,6 @@ class TestFullyShardIgnoreParams(FSDPTest):
 
     hw_classification = HardwareClassification.ACCELERATOR
 
-
     def compare_params(self, name, ref_param, test_param):
         ref_full_tensor = _get_full_tensor(name, ref_param)
         test_full_tensor = _get_full_tensor(name, test_param)
@@ -237,7 +234,7 @@ class TestFullyShardIgnoreParams(FSDPTest):
             self.compare_params(name, ref_param, test_param)
 
     @skip_if_lt_x_gpu(2)
-    def test_ddp_A_fsdp_B_ddp_C(self):
+    def test_ddp_A_fsdp_B_ddp_C(self, device):
         default_pg = dist.distributed_c10d._get_default_group()
         mesh = init_device_mesh(device_type.type, mesh_shape=(default_pg.size(),))
 
