@@ -126,7 +126,19 @@ Tensor masked_softmax(
     attn_mask = attn_mask->to(at::kBool);
   }
   if (attn_mask) {
-    return _masked_softmax(attn_scores, *attn_mask, attn_scores.dim() - 1, mask_type);
+    auto out =
+        _masked_softmax(attn_scores, *attn_mask, attn_scores.dim() - 1, mask_type);
+    // A row whose every key is masked softmaxes over the empty set: _masked_softmax
+    // yields NaN there, while the SDPA fallback (_safe_softmax) yields 0 -- so the
+    // same module silently diverges between the native fast path and the SDPA path.
+    // Adopt the safe-softmax convention: fully-masked rows attend to nothing.
+    auto mask = *attn_mask;
+    if (mask_type == 1 && mask.dim() == 2) {
+      // key_padding_mask [B, S] broadcasts over heads and query rows, as the
+      // _masked_softmax kernels do internally.
+      mask = mask.view({mask.size(0), 1, 1, mask.size(1)});
+    }
+    return out.masked_fill_(mask.all(-1, /*keepdim=*/true), 0.0);
   } else {
     return _softmax_out(attn_scores, attn_scores, attn_scores.dim() - 1, false);
   }
