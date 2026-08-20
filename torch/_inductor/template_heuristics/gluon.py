@@ -42,10 +42,6 @@ def compute_stage_variants_gluon(
     c_bytes_per_stage = BLOCK_M * BLOCK_N * dtype_bytes if uses_c_smem else 0
     ab_bytes_per_stage = a_bytes_per_stage + b_bytes_per_stage
 
-    # The masked store path converts the accumulator to a coalesced
-    # layout, staging through a fixed-size shared memory scratch.
-    convert_layout_smem = 0 if uses_c_smem else 16 * 1024
-
     min_load_buffers = 1
     min_acc_buffers = 1
     compiler_overhead = 256
@@ -53,7 +49,6 @@ def compute_stage_variants_gluon(
     min_smem = (
         ab_bytes_per_stage * min_load_buffers
         + c_bytes_per_stage
-        + convert_layout_smem
         + 8 * min_load_buffers * 2
         + 8 * min_acc_buffers * 2
         + compiler_overhead
@@ -64,9 +59,7 @@ def compute_stage_variants_gluon(
 
     # Pipeline depth dominates: one CTA per SM leaves no spare warps to
     # hide load latency. Bound it by shared memory, not a constant.
-    max_load_buffers = (smem_limit - c_bytes_per_stage - convert_layout_smem) // (
-        ab_bytes_per_stage + 8 * 2
-    )
+    max_load_buffers = (smem_limit - c_bytes_per_stage) // (ab_bytes_per_stage + 8 * 2)
 
     all_valid = []
     for num_load_buffers in range(max_load_buffers, 0, -1):
@@ -74,13 +67,7 @@ def compute_stage_variants_gluon(
         c_smem = c_bytes_per_stage
         load_barrier_smem = 8 * num_load_buffers * 2
 
-        base_smem = (
-            ab_smem
-            + c_smem
-            + convert_layout_smem
-            + load_barrier_smem
-            + compiler_overhead
-        )
+        base_smem = ab_smem + c_smem + load_barrier_smem + compiler_overhead
 
         if base_smem > smem_limit:
             continue
@@ -110,6 +97,7 @@ def get_grouped_mm_configs(
     dtype_AB,
     exhaustive: bool = False,
     uses_c_smem: bool = True,
+    k_is_varying: bool = False,
 ) -> list[GluonGroupedMMConfig]:
     """
     Returns the configuration set for the Gluon Grouped MM kernel,
@@ -120,14 +108,15 @@ def get_grouped_mm_configs(
         dtype_AB: Data type for A and B matrices
         exhaustive: If True, use the full search space
         uses_c_smem: Whether the kernel allocates the C staging buffer
+        k_is_varying: Whether offs partitions K
 
     Returns:
         List of GluonGroupedMMConfig objects
     """
     # NUM_STORE_WARPS measured under 1% across 4/8/16, and the deepest
     # pipeline that fits won on every shape tried, so neither earns a
-    # search dimension. BLOCK_K=32 never won either, so it is only kept
-    # in the exhaustive space.
+    # search dimension. BLOCK_K=32 only wins when offs partitions K,
+    # where a group's K can be far smaller than the tile.
     if exhaustive:
         block_combos = list(itertools.product([64, 128], [32, 64, 128, 256]))
         BLOCK_K_vals = [32, 64, 128, 256]
@@ -144,7 +133,7 @@ def get_grouped_mm_configs(
             (128, 128),
             (128, 256),
         ]
-        BLOCK_K_vals = [64, 128]
+        BLOCK_K_vals = [32, 64, 128] if k_is_varying else [64, 128]
         NUM_STORE_WARP_vals = [8]
         GROUP_SIZE_N_vals = [1, 8]
         buffer_configs_per_combo = 1

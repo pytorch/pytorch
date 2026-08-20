@@ -436,10 +436,10 @@ def benchmark_grouped_mm(
     grouping="random",
     proton_out=None,
     proton_buffer_size=0,
-    proton_buffer_type="global",
+    proton_buffer_type="shared",
     proton_sample_warps="",
-    proton_format="hatchet",
-    proton_optimizations="clock32,sched_stores",
+    proton_format="chrome_trace",
+    proton_optimizations="clock32,time_shift",
 ):
     torch.manual_seed(seed)
     if backends is None:

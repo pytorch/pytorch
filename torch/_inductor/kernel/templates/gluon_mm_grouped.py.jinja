@@ -46,6 +46,14 @@ def _proton_exit_scope(name: gl.constexpr):
 class PartitionArgs:
     a_desc: tma.tensor_descriptor
     b_desc: tma.tensor_descriptor
+{%- if K_IS_VARYING %}
+    a_ptr: gl.tensor
+    b_ptr: gl.tensor
+    a_stride_outer: gl.tensor
+    b_stride_outer: gl.tensor
+    a_smem_layout: gl.constexpr
+    b_smem_layout: gl.constexpr
+{%- endif %}
 {%- if USE_TMA_STORE %}
     c_desc: tma.tensor_descriptor
 {%- endif %}
@@ -282,6 +290,40 @@ def load_partition(pargs: PartitionArgs):
         BLOCK_M, BLOCK_N, NUM_BLOCKS
     )
     while group_iter.should_process():
+{%- if K_IS_VARYING %}
+        # Clamp K to this group's end: the ragged tail then lands out
+        # of bounds and the TMA zero-fills it.
+        k_end = group_iter.k_start_offset + group_iter.k_size
+        a_desc = tma.make_tensor_descriptor(
+            pargs.a_ptr,
+{%- if A_IS_K_MAJOR %}
+            shape=[M, k_end],
+            strides=[pargs.a_stride_outer, 1],
+            block_shape=[BLOCK_M, BLOCK_K],
+{%- else %}
+            shape=[k_end, M],
+            strides=[pargs.a_stride_outer, 1],
+            block_shape=[BLOCK_K, BLOCK_M],
+{%- endif %}
+            layout=pargs.a_smem_layout,
+        )
+        b_desc = tma.make_tensor_descriptor(
+            pargs.b_ptr,
+{%- if B_IS_K_MAJOR %}
+            shape=[N, k_end],
+            strides=[pargs.b_stride_outer, 1],
+            block_shape=[BLOCK_N, BLOCK_K],
+{%- else %}
+            shape=[k_end, N],
+            strides=[pargs.b_stride_outer, 1],
+            block_shape=[BLOCK_K, BLOCK_N],
+{%- endif %}
+            layout=pargs.b_smem_layout,
+        )
+{%- else %}
+        a_desc = pargs.a_desc
+        b_desc = pargs.b_desc
+{%- endif %}
         tile_iter = TileIterator.create(
             group_iter.tile_idx - group_iter.tiles_processed,
             group_iter.m_start_offset, group_iter.m_size, group_iter.n_start_offset, group_iter.n_size,
@@ -303,11 +345,11 @@ def load_partition(pargs: PartitionArgs):
                 _proton_enter_scope("load_work")
                 mbarrier.expect(
                     load_buf_full_bar,
-                    pargs.a_desc.block_type.nbytes + pargs.b_desc.block_type.nbytes,
+                    a_desc.block_type.nbytes + b_desc.block_type.nbytes,
                 )
 
-                tma.async_copy_global_to_shared(
-                    pargs.a_desc,
+                tma.async_load(
+                    a_desc,
 {%- if A_IS_2D %}
 {%- if A_IS_K_MAJOR %}
                     [tile_iter.m_offset, k_offset],
@@ -325,8 +367,8 @@ def load_partition(pargs: PartitionArgs):
                     load_buf_full_bar,
                     a_smem
                 )
-                tma.async_copy_global_to_shared(
-                    pargs.b_desc,
+                tma.async_load(
+                    b_desc,
 {%- if B_IS_2D %}
 {%- if B_IS_K_MAJOR %}
                     [tile_iter.n_offset, k_offset],
@@ -376,19 +418,6 @@ def compute_partition(pargs: PartitionArgs):
     acc_buf_full_bars = pargs.acc_buf_full_bars
     acc_state = Counter.create(1, acc_buf_empty_bars.shape[0])
 
-{%- if K_IS_VARYING %}
-    range_layout: gl.constexpr = gl.SliceLayout(
-        0,
-        gl.BlockedLayout(
-            size_per_thread=[1, BLOCK_K // 32],
-            threads_per_warp=[1, 32],
-            warps_per_cta=[1, 1],
-            order=[1, 0],
-            cga_layout=[],
-        ),
-    )
-{%- endif %}
-
     group_iter = GroupIterator.create(
         G, M, N, K,
 {%- if M_IS_VARYING or N_IS_VARYING or K_IS_VARYING %}
@@ -428,17 +457,6 @@ def compute_partition(pargs: PartitionArgs):
 {%- endif %}
 {%- if B_IS_K_MAJOR %}
                 b_smem = b_smem.permute((1, 0))
-{%- endif %}
-
-{%- if K_IS_VARYING %}
-                if k + BLOCK_K > group_iter.k_size:
-                    mask = k + gl.arange(0, BLOCK_K, layout=range_layout) < group_iter.k_size
-                    a = a_smem.load(gl.AutoLayout())
-                    # Only mask A, as zeroing A's columns makes
-                    # corresponding B rows irrelevant.
-                    a = gl.where(mask[None, :], a, 0)
-                    a_smem.store(a)
-                    fence_async_shared()
 {%- endif %}
 
                 tcgen05_mma(a_smem, b_smem, acc, use_acc=use_acc)
@@ -509,6 +527,11 @@ def store_partition(pargs: PartitionArgs):
             _proton_enter_scope("store_work")
             acc_tmem = pargs.acc_tmem_bufs.index(acc_state.index)
             acc = acc_tmem.load()
+{%- if K_IS_VARYING %}
+            # An empty group gets no MMA, so its accumulator was
+            # never written.
+            acc = gl.where(group_iter.k_size > 0, acc, 0.0)
+{%- endif %}
 
             acc_buf_empty_bar = acc_buf_empty_bars.index(acc_state.index)
             acc_state = acc_state.next()
@@ -534,22 +557,14 @@ def store_partition(pargs: PartitionArgs):
 
             c_ptrs = pargs.c_ptr + idx_m[:, None] * pargs.c_stride_m + idx_n[None, :] * pargs.c_stride_n
 
-            NUM_STORE_WARPS: gl.constexpr = gl.num_warps()
-            store_layout: gl.constexpr = gl.BlockedLayout(
-                size_per_thread=[1, BLOCK_N // 32],
-                threads_per_warp=[1, 32],
-                warps_per_cta=[NUM_STORE_WARPS, 1],
-                order=[1, 0],
-            )
-            c_coalesced = gl.convert_layout(c, store_layout)
-            gl.store(c_ptrs, c_coalesced, mask=mask)
+            gl.store(c_ptrs, c, mask=mask)
 {%- else %}
             tma.store_wait(pendings=0)
 
             c_smem.store(c)
 
             fence_async_shared()
-            tma.async_copy_shared_to_global(pargs.c_desc, [group_iter.g, tile_iter.m_offset, tile_iter.n_offset], c_smem)
+            tma.async_store(pargs.c_desc, [group_iter.g, tile_iter.m_offset, tile_iter.n_offset], c_smem)
 {%- endif %}
             _proton_exit_scope("store_work")
 
@@ -728,6 +743,22 @@ def store_partition(pargs: PartitionArgs):
     pargs = PartitionArgs(
         a_desc,
         b_desc,
+{%- if K_IS_VARYING %}
+        a_ptr,
+        b_ptr,
+{%- if A_IS_K_MAJOR %}
+        gl.to_tensor(a_stride_m),
+{%- else %}
+        gl.to_tensor(a_stride_k),
+{%- endif %}
+{%- if B_IS_K_MAJOR %}
+        gl.to_tensor(b_stride_n),
+{%- else %}
+        gl.to_tensor(b_stride_k),
+{%- endif %}
+        a_smem_layout,
+        b_smem_layout,
+{%- endif %}
 {%- if USE_TMA_STORE %}
         c_desc,
 {%- endif %}

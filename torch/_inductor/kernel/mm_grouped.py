@@ -113,7 +113,7 @@ def early_config_prune(g, m, dtsize, configs, named_args):
     return pruned_configs
 
 
-def gluon_grouped_mm_configs(dtype_AB, uses_c_smem):
+def gluon_grouped_mm_configs(dtype_AB, uses_c_smem, k_is_varying):
     import torch._inductor.config as config
     from torch._inductor.template_heuristics.gluon import get_grouped_mm_configs
 
@@ -123,6 +123,7 @@ def gluon_grouped_mm_configs(dtype_AB, uses_c_smem):
         dtype_AB=dtype_AB,
         exhaustive=exhaustive,
         uses_c_smem=uses_c_smem,
+        k_is_varying=k_is_varying,
     )
 
     configs = []
@@ -597,7 +598,9 @@ def _tuned_grouped_mm_common(
         # i.e. when C is not 2D.
         uses_c_smem = a_is_2d == b_is_2d
         for config in gluon_grouped_mm_configs(
-            dtype_AB=mat_a.get_dtype(), uses_c_smem=uses_c_smem
+            dtype_AB=mat_a.get_dtype(),
+            uses_c_smem=uses_c_smem,
+            k_is_varying=a_is_2d and b_is_2d,
         ):
             gluon_grouped_mm_template.maybe_append_choice(
                 choices,
