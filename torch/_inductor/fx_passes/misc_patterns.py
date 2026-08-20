@@ -26,6 +26,8 @@ def _misc_patterns_init(input_device: torch.device | None = None):
         if torch.cuda.is_available():
             # workaround https://github.com/pytorch/pytorch/issues/97894
             device = "cuda"
+        elif torch.xpu.is_available():
+            device = "xpu"
         else:
             device = "cpu"
 
@@ -105,7 +107,7 @@ def _misc_patterns_init(input_device: torch.device | None = None):
     )
 
     # Pattern: e8m0 extraction with ceiling rounding (for MX format scaling)
-    if device.startswith("cuda"):
+    if device.startswith(("cuda", "xpu")):
 
         def e8m0_extra_check(match):
             inp = match.kwargs.get("inp")
@@ -114,7 +116,7 @@ def _misc_patterns_init(input_device: torch.device | None = None):
             inp_val = inp.meta.get("val")
             return (
                 inp_val is not None
-                and inp_val.device.type == "cuda"
+                and inp_val.device.type in ("cuda", "xpu")
                 and inp_val.dtype == torch.float32
             )
 
@@ -186,6 +188,8 @@ def _misc_patterns_init(input_device: torch.device | None = None):
             # log2 imprecision near exact powers of 2.
             # Clamp to [0, 254] to match the satfinite semantics of the original
             # pattern (clamp(ceil_val, -127, 127) + 127 gives at most 254).
+            # Keep in sync with the eager reference _cvt_e8m0_rceil_aten and the
+            # software fallback in lowering.cvt_e8m0_rceil_lowering.
             def e8m0_rceil_log2_replacement(inp):
                 inp_bits = inp.view(torch.int32)
                 biased_exp = (inp_bits >> 23) & 0xFF
@@ -200,7 +204,7 @@ def _misc_patterns_init(input_device: torch.device | None = None):
             e8m0_rceil_log2_pattern,
             # pyrefly: ignore [bad-argument-type]
             e8m0_rceil_log2_replacement,
-            [torch.randn(32, device="cuda", dtype=torch.float32).abs() + 1e-10],
+            [torch.randn(32, device=device, dtype=torch.float32).abs() + 1e-10],
             # pyrefly: ignore [bad-argument-type]
             fwd_only,
             # pyrefly: ignore [bad-argument-type]

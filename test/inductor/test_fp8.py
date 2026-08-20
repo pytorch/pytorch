@@ -2134,6 +2134,17 @@ class TestCvtE8M0Rceil(TestCase):
         self.assertEqual(compiled_result, expected)
 
 
+_E8M0_ONE_ULP_ABOVE = [
+    torch.nextafter(torch.tensor(float(2**e)), torch.tensor(float("inf"))).item()
+    for e in range(8)
+]
+_E8M0_ONE_ULP_EXPECTED = [127 + e + 1 for e in range(8)]
+
+
+def _cvt_e8m0_rceil(inp):
+    return inductor_prims.cvt_e8m0_rceil(inp)
+
+
 class TestCvtE8M0RceilFallback(TestCase):
     """Tests for cvt_e8m0_rceil prim with the software fallback (non-SM100).
 
@@ -2147,12 +2158,9 @@ class TestCvtE8M0RceilFallback(TestCase):
         utils.is_nvidia_sm100_or_later(),
         "SM100+ uses the PTX instruction, not the software fallback",
     )
-    @onlyOn(["cpu", "cuda"])
+    @onlyOn(["cpu", "cuda", "xpu"])
     def test_correctness(self, device):
         """Compiled output matches eager for finite values, subnormals, and zero."""
-
-        def fn(inp):
-            return inductor_prims.cvt_e8m0_rceil(inp)
 
         inp = torch.tensor(
             [
@@ -2177,49 +2185,28 @@ class TestCvtE8M0RceilFallback(TestCase):
             device=device,
             dtype=torch.float32,
         )
-        self.assertEqual(torch.compile(fn, fullgraph=True)(inp), fn(inp))
+        self.assertEqual(
+            torch.compile(_cvt_e8m0_rceil, fullgraph=True)(inp), _cvt_e8m0_rceil(inp)
+        )
 
     @skipCUDAIf(
         utils.is_nvidia_sm100_or_later(),
         "SM100+ uses the PTX instruction, not the software fallback",
     )
-    @onlyOn(["cpu", "cuda"])
-    def test_values_just_above_power_of_two(self, device):
-        """1 ULP above 2^e must ceil to e+1, not round down to e (gh-178045)."""
-        E8M0_BIAS = 127
-
-        def fn(inp):
-            return inductor_prims.cvt_e8m0_rceil(inp)
-
-        powers = [float(2**e) for e in range(8)]
-        one_ulp_above = [
-            torch.nextafter(torch.tensor(p), torch.tensor(float("inf"))).item()
-            for p in powers
-        ]
-        inp = torch.tensor(one_ulp_above, device=device, dtype=torch.float32)
-        expected = torch.tensor(
-            [E8M0_BIAS + e + 1 for e in range(8)], device=device, dtype=torch.uint8
-        )
-        self.assertEqual(torch.compile(fn, fullgraph=True)(inp), expected)
-
-    @skipCUDAIf(
-        utils.is_nvidia_sm100_or_later(),
-        "SM100+ uses the PTX instruction, not the software fallback",
+    @onlyOn(["cpu", "cuda", "xpu"])
+    @parametrize(
+        "inp_values, expected_values",
+        [
+            # 1 ULP above each power of 2 must ceil to e+1, not round down (gh-178045).
+            (_E8M0_ONE_ULP_ABOVE, _E8M0_ONE_ULP_EXPECTED),
+            # inf and nan (both signs) saturate to the max finite e8m0 value 254.
+            ([float("inf"), float("-inf"), float("nan"), float("-nan")], [254] * 4),
+        ],
     )
-    @onlyOn(["cpu", "cuda"])
-    def test_inf_nan_saturate_to_254(self, device):
-        """inf and nan (both signs) saturate to the max finite e8m0 value 254."""
-
-        def fn(inp):
-            return inductor_prims.cvt_e8m0_rceil(inp)
-
-        inp = torch.tensor(
-            [float("inf"), float("-inf"), float("nan"), float("-nan")],
-            device=device,
-            dtype=torch.float32,
-        )
-        expected = torch.tensor([254, 254, 254, 254], device=device, dtype=torch.uint8)
-        self.assertEqual(torch.compile(fn, fullgraph=True)(inp), expected)
+    def test_known_values(self, device, inp_values, expected_values):
+        inp = torch.tensor(inp_values, device=device, dtype=torch.float32)
+        expected = torch.tensor(expected_values, device=device, dtype=torch.uint8)
+        self.assertEqual(torch.compile(_cvt_e8m0_rceil, fullgraph=True)(inp), expected)
 
 
 @unittest.skipIf(not HAS_CUDA_AND_TRITON, "Requires CUDA + Triton")
@@ -2340,7 +2327,10 @@ instantiate_device_type_tests(TestFP8Types, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestFP8Lowering, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestE8M0ToFloat, globals(), only_for=("cpu", "cuda"))
 instantiate_device_type_tests(
-    TestCvtE8M0RceilFallback, globals(), only_for=("cpu", "cuda")
+    TestCvtE8M0RceilFallback,
+    globals(),
+    only_for=("cpu", "cuda", "xpu"),
+    allow_xpu=True,
 )
 
 
