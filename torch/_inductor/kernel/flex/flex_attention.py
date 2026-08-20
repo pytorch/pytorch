@@ -697,7 +697,7 @@ def process_joint_outputs(
     joint_buffer = all_joint_outputs[0]
     other_grads = all_joint_outputs[num_placeholders - 1 :]
 
-    # outer_grads has the structure: Len(other_buffer_grads) if buffer doesn't require grad than it will be None
+    # outer_grads has the structure: Len(other_buffer_grads) if buffer doesn't require grad then it will be None
     # We only grab the buffers that require grad for inlining into kernel
     grads_compute = [buf for buf in other_grads if buf is not None]
 

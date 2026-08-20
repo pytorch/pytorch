@@ -23,7 +23,7 @@ namespace torch::jit::interpreter {
 template <class Ttarget, class Tsource>
 Ttarget safe_narrow_cast(Tsource v) {
   Ttarget res = static_cast<Ttarget>(v);
-  // Casting it back to check whether it overflew.
+  // Casting it back to check whether it overflowed.
   if (static_cast<Tsource>(res) != v) {
     TORCH_WARN(
         "ATTENTION: your model computation is overflowing, safe_narrow_cast<>() failed");
