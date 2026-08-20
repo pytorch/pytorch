@@ -13,7 +13,7 @@ import tokenize
 import unittest
 from collections.abc import Callable
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import FunctionType, ModuleType
 from typing import Any, Generic, NoReturn, Optional, TYPE_CHECKING, TypeVar
 from typing_extensions import deprecated
@@ -334,6 +334,12 @@ class _ConfigEntry:
     # upstream bug - python/cpython#126886
     hide: bool = False
     alias: str | None = None
+    # Memoized (container, attr_name) resolution of ``alias``. ``None`` means
+    # not resolved yet; resolution is stable for the process lifetime. Excluded
+    # from repr/eq so caching a live module doesn't pollute either.
+    _resolved_alias: "tuple[ModuleType | SubConfigProxy, str] | None" = field(
+        default=None, repr=False, compare=False
+    )
     # Deprecation support
     deprecated: bool = False
     deprecation_message: str | None = None
@@ -346,6 +352,7 @@ class _ConfigEntry:
         )
         self.justknob = config.justknob
         self.alias = config.alias
+        self._resolved_alias = None
         # Deprecation fields
         self.deprecated = config.deprecated
         self.deprecation_message = config.deprecation_message
@@ -434,11 +441,11 @@ class ConfigModule(ModuleType):
                 config.user_override.set(value)
                 self._hash_dirty_var.set(True)
                 self._mark_get_dict_dirty(name)
-                # Avoid a redundant instance-__dict__ write: hide defaults to False on
-                # the class and is only ever set True by __delattr__ (the mock.patch
-                # workaround), so only clear it when it is actually set.
-                if config.hide:
-                    config.hide = False
+            # delattr sets hide=True; mock.patch's teardown setattr must clear
+            # it (for both alias and non-alias entries). Avoid a redundant
+            # instance-__dict__ write when hide is already False.
+            if config.hide:
+                config.hide = False
 
     def __getattr__(self, name: str) -> Any:
         try:
@@ -480,33 +487,110 @@ class ConfigModule(ModuleType):
             raise AttributeError(f"{self.__name__}.{name} does not exist") from e
 
     def __delattr__(self, name: str) -> None:
-        self._hash_dirty_var.set(True)
-        self._mark_get_dict_dirty(name)
         # must support delete because unittest.mock.patch deletes
         # then recreate things
-        self._config[name].user_override.set(_UNSET_SENTINEL)
-        self._config[name].hide = True
+        config = self._config[name]
+        if config.alias is not None:
+            # Reset the aliased-to target rather than the alias entry, whose
+            # own user_override is never read. Route the reset through the
+            # target module so its hash/get_dict dirty state is updated too;
+            # otherwise get_hash()/save_config() keep returning the stale value.
+            # `name` itself is never dirtied here: `_get_dict` always skips
+            # alias keys, so it can't be stale on `self`.
+            target = self._get_alias_target_entry(config)
+            if target is not None:
+                target_module, target_key = target
+                target_module._hash_dirty_var.set(True)
+                target_module._mark_get_dict_dirty(target_key)
+                target_module._config[target_key].user_override.set(_UNSET_SENTINEL)
+        else:
+            self._hash_dirty_var.set(True)
+            self._mark_get_dict_dirty(name)
+            config.user_override.set(_UNSET_SENTINEL)
+        config.hide = True
 
     def _get_alias_module_and_name(
         self, entry: _ConfigEntry
-    ) -> tuple[ModuleType, str] | None:
+    ) -> "tuple[ModuleType | SubConfigProxy, str] | None":
         alias = entry.alias
         if alias is None:
             return None
-        module_name, constant_name = alias.rsplit(".", 1)
-        try:
-            module = importlib.import_module(module_name)
-        except ImportError as e:
-            raise AttributeError(f"config alias {alias} does not exist") from e
-        return module, constant_name
+        if entry._resolved_alias is not None:
+            return entry._resolved_alias
+        # The leading components of the alias form an importable module and the
+        # trailing components are attributes on it (e.g. a `cutlass.foo`
+        # sub-config field of torch._inductor.config). Import the longest
+        # importable module prefix, then walk the remaining attributes.
+        parts = alias.split(".")
+        last_error: ModuleNotFoundError | None = None
+        for i in range(len(parts) - 1, 0, -1):
+            module_name = ".".join(parts[:i])
+            try:
+                module = importlib.import_module(module_name)
+            except ModuleNotFoundError as e:
+                # Only swallow the case where this prefix itself isn't a
+                # module; a shorter prefix may still resolve. A genuine
+                # import failure *inside* an existing module (some deeper
+                # missing dependency) must propagate rather than be masked.
+                if e.name is not None and (
+                    module_name == e.name or module_name.startswith(e.name + ".")
+                ):
+                    last_error = e
+                    continue
+                raise
+            container: ModuleType | SubConfigProxy = module
+            for attr in parts[i:-1]:
+                container = getattr(container, attr)
+            resolved = (container, parts[-1])
+            entry._resolved_alias = resolved
+            return resolved
+        raise AttributeError(f"config alias {alias} does not exist") from last_error
+
+    def _get_alias_target_entry(
+        self, entry: _ConfigEntry
+    ) -> "tuple[ConfigModule, str] | None":
+        """Resolve the config module and key an alias points at, if the target
+        is itself a config entry (rather than a plain module constant).
+
+        Returns ``(owning_config_module, key)`` so callers can both read the
+        target ``_ConfigEntry`` and mark that module's dirty state. Returns
+        ``None`` if the target isn't a config entry at all (e.g. a plain
+        module constant): there's no override state to reset, so the only
+        caller (``__delattr__``) is a no-op beyond hiding the alias entry.
+
+        Single-hop only: raises if the resolved target is itself aliased,
+        rather than silently returning that entry unresolved, since no
+        in-tree alias chains exist for this to chase.
+        """
+        data = self._get_alias_module_and_name(entry)
+        if data is None:
+            return None
+        container, name = data
+        if isinstance(container, SubConfigProxy):
+            owner = container._config
+            key = container._prefix + name
+        elif isinstance(container, ConfigModule):
+            owner = container
+            key = name
+        else:
+            return None
+        if key not in owner._config:  # type: ignore[attr-defined]
+            return None
+        target_entry = owner._config[key]  # type: ignore[attr-defined]
+        if target_entry.alias is not None:
+            raise NotImplementedError(
+                f"chained config aliases are not supported: {entry.alias!r} "
+                f"resolves to {key!r}, which is itself aliased to "
+                f"{target_entry.alias!r}"
+            )
+        return owner, key  # type: ignore[return-value]
 
     def _get_alias_val(self, entry: _ConfigEntry) -> Any:
         data = self._get_alias_module_and_name(entry)
         if data is None:
             return _UNSET_SENTINEL
-        module, constant_name = data
-        constant_value = getattr(module, constant_name)
-        return constant_value
+        container, constant_name = data
+        return getattr(container, constant_name)
 
     def _set_alias_val(self, entry: _ConfigEntry, val: Any) -> None:
         data = self._get_alias_module_and_name(entry)
@@ -514,8 +598,8 @@ class ConfigModule(ModuleType):
             raise AssertionError(
                 "alias data should not be None when setting alias value"
             )
-        module, constant_name = data
-        setattr(module, constant_name, val)
+        container, constant_name = data
+        setattr(container, constant_name, val)
 
     _GET_DICT_DIRTY_KEYS_CAP = 16
 
@@ -986,8 +1070,17 @@ class ConfigModule(ModuleType):
             finally:
                 revert()
 
+        Raises immediately, here at the factory call rather than from
+        `change()`/`revert()`, if any key is aliased -- this closure-based
+        fast path writes straight to `user_override` and can't redirect to
+        another module. Use patch() instead for aliased keys.
         """
         config = self._config
+        for k in changes:
+            if config[k].alias is not None:
+                raise AssertionError(
+                    f"_make_closure_patcher does not support aliased config {k}"
+                )
 
         def change() -> Callable[[], None]:
             prior = {k: config[k].user_override.get() for k in changes}
@@ -1084,6 +1177,83 @@ def inherit_fields_from(parent_cls):
             # copy fields that are not private and not overridden
             if not k.startswith("_") and k not in child_cls.__dict__:
                 setattr(child_cls, k, v)
+        return child_cls
+
+    return wrapper
+
+
+def alias_fields_from(parent_cls: type) -> Callable[[type], type]:
+    """Class decorator adding an alias for every public field of ``parent_cls``
+    that the decorated class does not override.
+
+    Unlike copying, aliases resolve dynamically: reading or writing an aliased
+    field on the child reads/writes the parent's field, so later changes to the
+    parent (e.g. user overrides) are reflected on the child.
+
+    Because reads and writes both resolve to the shared parent entry, sibling
+    children that alias the same parent are *not* isolated: writing an aliased
+    field through one child (or through the parent) is observed through the
+    other. For mutable defaults (lists, dicts) the child and parent share the
+    same object, so in-place mutation is visible through either name.
+    """
+    # install_config_module's visit() already requires every subconfig class
+    # to be defined at module scope (it raises "subconfig class ... must be
+    # defined in module ..." otherwise), which is what keeps a subconfig
+    # class's __qualname__ a bare name. Check the same thing here so a
+    # nested/relocated parent fails at decoration time instead of at first
+    # field access.
+    if "." in parent_cls.__qualname__:
+        raise AssertionError(
+            f"alias_fields_from parent must be defined at module scope, "
+            f"like any subconfig class -- got {parent_cls.__qualname__}"
+        )
+    prefix = f"{parent_cls.__module__}.{parent_cls.__qualname__}"
+    annotations = inspect.get_annotations(parent_cls)
+
+    def wrapper(child_cls: type) -> type:
+        for k, v in parent_cls.__dict__.items():
+            if k.startswith("_") or k in child_cls.__dict__:
+                continue
+            if (
+                isinstance(v, type)
+                and not issubclass(v, _Config)
+                and v.__module__ == parent_cls.__module__
+            ):
+                # A nested subconfig class of the parent; alias_fields_from can't alias a whole subtree.
+                raise AssertionError(
+                    f"alias_fields_from cannot alias nested subconfig class "
+                    f"{parent_cls.__name__}.{k}"
+                )
+            # Only alias actual config fields. Functions and other non-field
+            # members of the parent must not become entries.
+            if not isinstance(v, (*CONFIG_TYPES, _Config)):
+                continue
+            if isinstance(v, _Config):
+                if v.alias is not None:
+                    # Chaining aliases is unsupported: _Config.__post_init__
+                    # forbids a default alongside alias, so an intermediate
+                    # alias with no explicit value_type or class annotation
+                    # would silently resolve to `object` here, defeating
+                    # isinstance-based type checks downstream (e.g.
+                    # torch.compile's apply_options()).
+                    raise AssertionError(
+                        f"alias_fields_from cannot alias {parent_cls.__name__}.{k}, "
+                        f"which is itself an alias (chained aliases are not supported)"
+                    )
+                # ``type(v)`` would be ``_Config`` itself; recover the real
+                # value type from the field's declared type or its default.
+                # Annotations are only back-filled into _Config by
+                # install_config_module, which runs after this decorator, so
+                # check the class annotation as a fallback before defaulting
+                # to type(default). Explicit value_type= still wins.
+                value_type = (
+                    v.value_type
+                    if v.value_type is not None
+                    else annotations.get(k, type(v.default))
+                )
+            else:
+                value_type = annotations.get(k, type(v))
+            setattr(child_cls, k, Config(alias=f"{prefix}.{k}", value_type=value_type))
         return child_cls
 
     return wrapper
