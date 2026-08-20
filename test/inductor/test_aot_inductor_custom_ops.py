@@ -168,8 +168,6 @@ def fn_with_layout_arg_abstract(x, layout):
 
 
 class AOTInductorTestsTemplate:
-    hw_classification = HardwareClassification.ACCELERATOR
-
     def test_custom_op_add(self) -> None:
         class M(torch.nn.Module):
             def __init__(self, device):
