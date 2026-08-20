@@ -16,28 +16,28 @@ from torch._dispatch.python import enable_python_dispatcher
 from torch._ops import OpOverload, OpOverloadPacket
 from torch.fx.experimental import _config as exp_config
 from torch.testing import make_tensor
-from torch.testing._internal.common_utils import unMarkDynamoStrictTest
 from torch.testing._internal.common_utils import (
-    HardwareClassification,
-    instantiate_parametrized_tests,
-    TestCase,
-    skipIfCrossRef,
-    skipIfTorchDynamo,
-    suppress_warnings,
-    TEST_WITH_TORCHDYNAMO,
-    run_tests,
-    parametrize,
-    xfailIfTorchDynamo,
-    skipIfXpu,
+     HardwareClassification,
+     instantiate_parametrized_tests,
+     parametrize,
+     run_tests,
+     skipIfCrossRef,
+     skipIfTorchDynamo,
+     skipIfXpu,
+     suppress_warnings,
+     TEST_WITH_TORCHDYNAMO,
+     TestCase,
+     unMarkDynamoStrictTest,
+     xfailIfTorchDynamo,
 )
 from torch.testing._internal.common_device_type import (
-    ops,
-    instantiate_device_type_tests,
-    OpDTypes,
-    skipOps,
-    xfail,
-    skip,
-)
+     instantiate_device_type_tests,
+     OpDTypes,
+     ops,
+     skip,
+     skipOps,
+     xfail,
+ )
 from torch.testing._internal.common_dtype import (
     complex_types,
     integral_types_and,
@@ -1660,6 +1660,7 @@ class TestMeta(TestCase):
 
     def test_meta__fused_moving_avg_obs_fq_helper(self, device):
         from torch.ao.quantization import FusedMovingAvgObsFakeQuantize
+
         to_meta = MetaConverter()
 
         x = torch.randn(5, 5, device=device)
@@ -1701,7 +1702,9 @@ class TestMeta(TestCase):
 
         for kwargs in kwargss:
             ref_out = aten._fused_moving_avg_obs_fq_helper.default(*args, **kwargs)
-            meta_out = aten._fused_moving_avg_obs_fq_helper.default(*meta_args, **kwargs)
+            meta_out = aten._fused_moving_avg_obs_fq_helper.default(
+                *meta_args, **kwargs
+            )
 
             self.assertEqual(ref_out[0].size(), meta_out[0].size())
             self.assertEqual(ref_out[0].stride(), meta_out[0].stride())
@@ -1716,8 +1719,9 @@ class TestMeta(TestCase):
         for compute_mode in (None, 1, 2):
             ref = aten._cdist_forward.default(x1, x2, p, compute_mode)
             res = aten._cdist_forward.default(to_meta(x1), to_meta(x2), p, compute_mode)
-            self.assertEqual(res.device.type, 'meta')
+            self.assertEqual(res.device.type, "meta")
             self.assertEqual(ref.shape, res.shape)
+
 
 @instantiate_parametrized_tests
 class TestMetaCore(TestCase):
@@ -2783,7 +2787,7 @@ class TestMetaKernelRegistrations(TestCase):
         self.assertEqual(diff_b2.shape, expected_bias_shape)
 
 
-instantiate_device_type_tests(TestMeta, globals(), only_for='cuda')
+instantiate_device_type_tests(TestMeta, globals(), only_for="cuda")
 
 
 def print_op_str_if_not_supported(op_str):
