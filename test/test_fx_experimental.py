@@ -55,14 +55,14 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_nn import module_tests, get_new_module_tests
 from torch.testing._internal.common_utils import (
-    HardwareClassification,
-    instantiate_parametrized_tests,
-    parametrize,
-    TEST_Z3,
-    run_tests,
-    TestCase,
-    TEST_WITH_CROSSREF,
-)
+     HardwareClassification,
+     instantiate_parametrized_tests,
+     parametrize,
+     run_tests,
+     TEST_WITH_CROSSREF,
+     TEST_Z3,
+     TestCase,
+ )
 from torch.testing._internal.jit_utils import JitTestCase
 import torch.utils._pytree as pytree
 
@@ -2257,6 +2257,7 @@ class TestModule(torch.nn.Module):
 
             test_out = traced(*param_values)
             self.assertEqual(test_out, ref_out)
+
 
 class TestNormalizeOperatorsGeneric(JitTestCase):
     hw_classification = HardwareClassification.GENERIC
