@@ -286,7 +286,7 @@ class TORCH_API LazyGraphExecutor {
 
     std::vector<LazyTensorPtr> GetLiveTensors(const BackendDevice* device);
 
-    // Overriding it allow derived class to use their own IRs for Value.
+    // Overriding it allows derived classes to use their own IRs for Value.
     virtual Value GetRngSeed(const BackendDevice& device);
     uint64_t GetRunningSeed(const BackendDevice& device);
     void SetRngSeed(const BackendDevice& device, uint64_t seed);
@@ -302,7 +302,7 @@ class TORCH_API LazyGraphExecutor {
         const std::function<void(DeviceContext*)>& fn,
         const BackendDevice* device);
 
-    // Overriding it allow derived class to use their own conversions.
+    // Overriding it allows derived classes to use their own conversions.
     virtual Value IrValueFromScalar(
         const at::Scalar& value,
         at::ScalarType scalar_type,
