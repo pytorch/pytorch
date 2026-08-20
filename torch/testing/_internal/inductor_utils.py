@@ -23,7 +23,7 @@ from torch._inductor.utils import (
 )
 from torch.utils._helion import has_helion
 from torch.utils._pallas import has_pallas_package, has_tpu_pallas
-from torch.utils._triton import has_triton
+from torch.utils._triton import has_triton, has_triton_block_ptr
 from torch.utils._config_module import ConfigModule
 from torch.testing._internal.common_device_type import (
     get_desired_device_type_test_bases,
@@ -177,6 +177,12 @@ requires_gpu = functools.partial(
 )
 requires_triton = functools.partial(unittest.skipIf, not HAS_TRITON, "requires triton")
 requires_helion = functools.partial(unittest.skipIf, not HAS_HELION, "requires helion")
+# Only run tests that assert Triton block-pointer codegen where the frontend API
+# still exists (removed in triton-lang/triton#10833); elsewhere Inductor falls back
+# to masked indexing, so there is nothing to assert.
+requires_block_ptr = unittest.skipUnless(
+    has_triton_block_ptr(), "requires Triton block-pointer API"
+)
 
 
 def requires_gpu_with_enough_memory(min_mem_required):

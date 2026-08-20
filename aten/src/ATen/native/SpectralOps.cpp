@@ -89,11 +89,11 @@ ScalarType promote_type_fft(ScalarType type, bool require_complex, Device device
     device.is_cuda() || device.is_meta() || device.is_xpu()
   );
   if (maybe_support_half) {
-    // XPU has no native float16 or bfloat16 FFT kernel; promote both to float32.
+    // XPU has no native bfloat16 FFT kernel; promote to float32.
     // ROCm (hipFFT) has no native bfloat16 FFT kernel; promote to float32.
     // On CUDA, cuFFT handles them natively (see CuFFTPlanCache.h for constraints),
     // so we leave them unchanged here and let the cuFFT planner decide.
-    if ((type == kHalf || type == kBFloat16) && device.is_xpu()) {
+    if (type == kBFloat16 && device.is_xpu()) {
       type = kFloat;
     }
     // ROCm/hipFFT does not support bfloat16; promote to float32
