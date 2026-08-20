@@ -687,7 +687,7 @@ class TestDTensorOps(TestCase):
 
 
 class TestMultiThreadedDTensorOps(DTensorOpTestBase, TestDTensorOps):
-    hw_classification = HardwareClassification.GENERIC
+    hw_classification = HardwareClassification.ACCELERATOR
 
     _op_db = repurpose_ops(op_db, "TestDTensorOps", "TestMultiThreadedDTensorOps")
     _op_db_sample_lock = threading.Lock()
@@ -708,7 +708,7 @@ class TestMultiThreadedDTensorOps(DTensorOpTestBase, TestDTensorOps):
 
 
 class TestLocalDTensorOps(TestDTensorOps):
-    hw_classification = HardwareClassification.GENERIC
+    hw_classification = HardwareClassification.ACCELERATOR
 
     _op_db = repurpose_ops(op_db, "TestDTensorOps", "TestLocalDTensorOps")
 
@@ -879,7 +879,7 @@ class TestUnbackedDTensorOps(TestDTensorOps):
     and the op compiled with fullgraph=True to catch DDEs during tracing.
     """
 
-    hw_classification = HardwareClassification.GENERIC
+    hw_classification = HardwareClassification.ACCELERATOR
 
     _op_db = repurpose_ops(op_db, "TestDTensorOps", "TestUnbackedDTensorOps")
 
@@ -993,7 +993,7 @@ class TestUnbackedDTensorOps(TestDTensorOps):
 
 
 class TestSingleDimStrategies(DTensorOpTestBase):
-    hw_classification = HardwareClassification.GENERIC
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @property
     def world_size(self) -> int:
@@ -1137,7 +1137,7 @@ class TestCompiledDTensorOps(TestDTensorOps):
     Uses fake PG for speed - focuses on compilation, not output correctness.
     """
 
-    hw_classification = HardwareClassification.GENERIC
+    hw_classification = HardwareClassification.ACCELERATOR
 
     _op_db = repurpose_ops(op_db, "TestDTensorOps", "TestCompiledDTensorOps")
 
