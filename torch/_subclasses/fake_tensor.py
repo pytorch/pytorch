@@ -207,6 +207,8 @@ class FakeTensorTLS(threading.local):
 fake_tensor_tls = FakeTensorTLS()
 
 
+# C++ fake tensors have no Python __init__, and constructor-only tracking misses
+# memoized tensors reused during non-strict export.
 def track_fake_tensor_for_export(t: object) -> None:
     if (
         torch.compiler.is_exporting()
@@ -758,6 +760,7 @@ def init_gpu_context(device: torch.device) -> None:
         )
 
 
+# Restore explicitly because mock.patch.object cannot delete C++-backed properties.
 @contextlib.contextmanager
 def allow_non_fake_inputs_temporarily(
     fake_mode: FakeTensorMode | None,

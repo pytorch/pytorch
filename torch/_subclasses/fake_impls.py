@@ -2490,7 +2490,6 @@ def make_fast_binary_impl(
     return fast_binary_impl
 
 
-# TODO: Refactor the following code so detach() persists item_memo
 # disable the python dispatcher to avoid decomposing detach() further
 # (proxy_mode should still decompose detach() though)
 def fast_detach(

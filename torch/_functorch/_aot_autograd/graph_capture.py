@@ -185,6 +185,7 @@ def _create_graph(
     return fx_g
 
 
+# TODO: Refactor the following code so detach() persists item_memo
 def _detach_and_copy_item_memo(t: torch.Tensor) -> torch.Tensor:
     detached_t = t.detach()
     if (item_memo := maybe_get_item_memo(t)) is not None:

@@ -103,6 +103,7 @@ class InputPickler(pickle.Pickler):
         )
         self.fast = True
 
+    # cannot rely on python faketensor type for c++ fakes
     # pyrefly: ignore [bad-override]
     def reducer_override(self, obj: Any) -> Any:
         if is_fake_tensor(obj):
