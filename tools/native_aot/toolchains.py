@@ -36,13 +36,13 @@ Properties consumed by the driver scripts:
     spot artifacts left with no sidecar (export._check_no_orphan_artifacts).
     The idempotency skip keys on the sidecar itself, not on these.
   * ``link_exts``: which of ``artifact_exts`` go to the LINKER. The
-    generator lists exactly these files, for the sidecars that survived
-    the arch tie-break, as OBJECT= lines in native_aot_manifest.txt -- and
-    CMake links that manifest rather than a glob, so an artifact no
-    launcher references cannot ride along into libtorch_cuda. Empty for a
-    kind that embeds its artifact in the generated source instead
-    (Triton's cubin bytes); it must be a subset of ``artifact_exts``,
-    which _assert_link_exts_are_exportable checks at import.
+    generator names exactly these files, for the sidecars that survived
+    the arch tie-break, in the CMake it emits -- exact paths rather than a
+    glob, so an artifact no launcher references cannot ride along into
+    libtorch_cuda. Empty for a kind that embeds its artifact in the
+    generated source instead (Triton's cubin bytes); it must be a subset
+    of ``artifact_exts``, which _assert_link_exts_are_exportable checks
+    at import.
   * ``launcher_includes``: per-kind includes for the generated .cpp.
   * ``kernel_includes(sidecar)``: per-kernel includes for that same file,
     for toolchains whose export writes a header (CuTeDSL's ABI struct).
@@ -81,35 +81,28 @@ class Toolchain:
 
     # Importable modules this kind needs to COMPILE a kernel. Absence is
     # FATAL once a declaration targeting this build's backend reaches
-    # export: its kernels were asked for, and exporting only some of them
-    # ships a wheel that silently underperforms. Build without the DSL
-    # wheels via TORCH_NATIVE_AOT=0 instead (see build_stage2.should_run
-    # and test_missing_runtime_is_fatal_not_skipped). Nothing at RUNTIME
-    # needs these -- the exported artifacts are self-contained.
+    # export: its kernels were asked for, and exporting only some ships a wheel
+    # that silently underperforms (TORCH_NATIVE_AOT=0 builds without them).
+    # Nothing at RUNTIME needs these; the exported artifacts are self-contained.
     REQUIRED_RUNTIMES: tuple[str, ...] = ()
 
-    # Distribution names whose versions define this kind's COMPILER. Recorded
-    # per sidecar and compared on the next run, because the DSL version appears
-    # in no file the source closure hashes: upgrading the wheel (4.5.2 -> 4.6.2)
-    # otherwise invalidates nothing, and the tree keeps artifacts built by the
-    # old compiler while the build reports the new one. Distribution names, not
-    # the REQUIRED_RUNTIMES module names, so the lookup is metadata-only --
-    # importing cutlass to read __version__ would cost the skip path an MLIR
-    # import on every run (the two differ: module `cutlass` ships in the
-    # nvidia-cutlass-dsl distribution).
+    # Distribution names whose versions define this kind's COMPILER, recorded per
+    # sidecar and compared on the next run: the DSL version appears in no file the
+    # source closure hashes, so an upgraded wheel otherwise invalidates nothing and
+    # the tree mixes compilers. DISTRIBUTION names, not REQUIRED_RUNTIMES' module
+    # names, keep the lookup metadata-only -- importing cutlass for __version__
+    # would cost the skip path an MLIR import every run.
     RUNTIME_DISTS: tuple[str, ...] = ()
 
-    # True when this kind's exported ABI carries int32_t shape slots, so a
-    # dim past INT32_MAX cannot be passed and the generated stub must
-    # decline the call (gen_aot_lib's _int32_size_gate). A property of the
-    # exported ABI, not of aten, so it lives per-kind: Triton takes its
-    # scalar widths from the kernel's own signature and needs no such gate.
+    # True when this kind's exported ABI carries int32_t shape slots, so the
+    # generated stub must decline a dim past INT32_MAX (_int32_size_gate). A
+    # property of the exported ABI, hence per-kind: Triton takes its scalar widths
+    # from the kernel's own signature.
     NARROWS_SHAPES_TO_INT32: bool = False
 
-    # Env var this kind falls back to when no explicit arch is given. The
-    # sidecar records the arch it resolves to, so a run that changes only
-    # this variable is not mistaken for one that already exported (see
-    # export._effective_arch).
+    # Env var this kind falls back to with no explicit arch. The sidecar records
+    # what it resolves to, so a run changing only this variable is not mistaken
+    # for one that already exported (export._effective_arch).
     ARCH_ENV_VAR: str | None = None
 
     REQUIRED_BUILD_KEYS: tuple[str, ...] = ()
@@ -135,12 +128,10 @@ class Toolchain:
     def export(self, b: dict, out_dir: str, arch: str | None = None) -> dict:
         """Compile one spec point; return sidecar marshalling metadata.
 
-        ``arch`` is an sm string ("sm_90a") or None for detect-from-
-        device. With an explicit arch no toolchain touches the CUDA
-        driver, so export runs on GPU-less machines, and the arch is
-        per-compile state rather than per-process: CuTeDSL passes
-        --gpu-arch, Triton kinds install a fixed GPUTarget driver. One
-        process may therefore export for several arches."""
+        ``arch`` is an sm string or None for detect-from-device. With an explicit
+        one no toolchain touches the CUDA driver, so export runs on GPU-less
+        machines, and it is per-COMPILE state rather than per-process -- so one
+        process may export for several arches."""
         raise NotImplementedError
 
     def gen_launcher(self, sidecar: dict) -> str:
@@ -172,7 +163,6 @@ class CuteDslToolchain(Toolchain):
     artifact_exts = (".o", ".h")
     # The .h feeds the compiler; only the .o reaches the linker.
     link_exts = (".o",)
-    # One depth: artifacts always live at <arch>/<op>/, whatever the arch count.
     launcher_includes = ()  # per-kernel header, included by prefix below
 
     # export_to_c emits `int32_t dynamic_shapes[]`, so the generated stub
@@ -261,27 +251,21 @@ void launch_{prefix}({tparams}, c10::Stream stream) {{
 
     def kernel_includes(self, sidecar: dict) -> list[str]:
         # _include_dir is the path from the generated source to this artifact's
-        # tree (the source sits at <root>/<op>/, kernels at <root>/<arch>/<op>/).
-        # Joined with "/" rather than os.path.join: an #include takes forward
-        # slashes on every platform, and this module has no os import to rely on
-        # at the commit that introduces it.
+        # tree (source at <root>/<op>/, kernels at <root>/<arch>/<op>/). Joined
+        # with "/", not os.path.join: an #include takes forward slashes on every
+        # platform.
         rel = sidecar.get("_include_dir", "")
         name = f"{sidecar['prefix']}.h"
         return [f'#include "{rel + "/" + name if rel else name}"']
 
-    # One struct per tensor argument. PARSED, not pattern-matched against the raw
-    # text, because every text shortcut here has been wrong in a way that accepts
-    # a silently truncating or out-of-bounds launcher:
-    #   * a bare find() of the type name also matched inside a LONGER argument's
-    #     name (mA inside mA_transposed), so the check read the wrong tensor's
-    #     struct depending on declaration order;
-    #   * re.search for the member took the first textual match, so a
-    #     commented-out `int64_t dynamic_strides[1];` above the real `int32_t`
-    #     one was read as the declaration.
-    # So: comments are stripped, the body is captured brace-free (a body that
-    # could run past its own terminator swallowed the next struct, e.g. after a
-    # pointer typedef `} *Ptr_t;`), and each member declaration must match AS A
-    # WHOLE between semicolons.
+    # One struct per tensor argument, PARSED rather than pattern-matched: every
+    # text shortcut here accepted a truncating or out-of-bounds launcher. A bare
+    # find() of the type name matched inside a LONGER argument's name (mA inside
+    # mA_transposed), and re.search for the member took the first textual match, so
+    # a commented-out `int64_t dynamic_strides[1];` stood in for the real int32_t
+    # one. Hence: comments stripped, bodies captured brace-free (one that could run
+    # past its terminator swallowed the next struct), members matched AS A WHOLE
+    # between semicolons.
     _ABI_COMMENT = re.compile(r"/\*.*?\*/|//[^\n]*", re.DOTALL)
     # An optional struct TAG (`typedef struct Tag {`) and optional attributes
     # before the name are both ordinary C for the same declaration.
@@ -296,51 +280,41 @@ void launch_{prefix}({tparams}, c10::Stream stream) {{
         r"\s+(?P<field>dynamic_strides|dynamic_shapes)\s*\[\s*(?P<bound>[^\]]*?)\s*\]\s*$",
         re.DOTALL,
     )
-    # Spellings of a 64-bit integer this toolchain accepts for a stride slot.
-    # An allowlist rather than "not int32_t": a typedef alias or an unknown
-    # spelling is refused LOUDLY, where treating it as 64-bit would restore the
-    # silent truncation this whole check exists to prevent.
+    # An allowlist rather than "not int32_t": an unknown spelling or typedef alias
+    # is refused LOUDLY, where assuming 64-bit restores the silent truncation this
+    # check exists to prevent.
     _ABI_INT64 = frozenset({"int64_t", "std::int64_t", "long long", "signed long long"})
 
     def validate_abi(self, sidecar: dict) -> None:
         """Refuse a header whose stride slots are not int64, or whose slot counts
         do not EQUAL what the sidecar claims.
 
-        The launcher assigns strides straight across --
-        `s.dynamic_strides[i] = t.stride(d)` -- because aten strides are int64.
-        The declared width is a PER-ARGUMENT property (use_32bit_stride is a
-        per-argument kwarg of the DSL's fake-tensor constructor), so int32 slots
-        truncate silently: a plain implicit conversion, no warning, no error, just
-        a wrong stride. Shapes cannot reach this, being cast explicitly behind the
-        size gate, so only their COUNT is checked.
+        The launcher assigns aten's int64 strides straight across, and the declared
+        width is a PER-ARGUMENT property (use_32bit_stride is a per-argument kwarg),
+        so int32 slots truncate through a plain implicit conversion: no warning, no
+        error, a wrong stride. Shapes are cast explicitly behind the size gate, so
+        only their COUNT is checked.
 
-        EQUALITY, in both directions, because the array bound and the sidecar list
-        are independent statements about one number -- the bound comes from the
-        DSL's fake args, the list is hand-written in the builder -- and the
-        launcher indexes from the sidecar:
-          * claiming MORE slots than the header declares stores past the end of
-            the struct, and torch compiles with -Wno-array-bounds
-            (cmake/public/utils.cmake), so nothing warns (confirmed: ASan reports
-            a stack-buffer-overflow where the compiler says nothing);
-          * claiming FEWER leaves slots of an UNINITIALIZED local unwritten, so
-            the kernel reads an indeterminate extent or stride.
+        EQUALITY in both directions, because the array bound and the sidecar list
+        are independent statements about one number -- the bound from the DSL's fake
+        args, the list hand-written in the builder -- and the launcher indexes from
+        the sidecar:
+          * claiming MORE stores past the end of the struct, and torch compiles with
+            -Wno-array-bounds, so nothing warns (ASan reports the overflow where the
+            compiler is silent);
+          * claiming FEWER leaves slots of an UNINITIALIZED local unwritten.
 
         Anything this parser cannot read unambiguously is REFUSED, including a
-        tensor that claims no slots at all: skipping the check there was how the
-        under-claim direction stayed open, since "claims nothing" is exactly the
-        state that leaves every declared slot unwritten.
+        tensor claiming no slots: skipping there is how the under-claim direction
+        stayed open, "claims nothing" being exactly the state that leaves every
+        declared slot unwritten.
 
-        Read from the header rather than the sidecar so it needs no schema change,
-        and skipped only when the header is ABSENT (unit fixtures); a real
-        generation always has it -- the manifest step verifies the artifacts are
-        on disk."""
-        import os
-
+        Read from the header, so no schema change is needed, and skipped only when
+        the header is ABSENT (unit fixtures); generation checks it is on disk."""
         path = os.path.join(sidecar.get("_dir") or "", f"{sidecar['prefix']}.h")
         try:
             # utf-8 with replacement, not the ambient locale: a valid non-ASCII
-            # header raised UnicodeDecodeError under LC_ALL=C -- neither the
-            # documented skip nor a diagnosis.
+            # header raised UnicodeDecodeError under LC_ALL=C.
             with open(path, encoding="utf-8", errors="replace") as f:
                 header = f.read()
         except OSError:
@@ -396,10 +370,9 @@ void launch_{prefix}({tparams}, c10::Stream stream) {{
                     f"Re-export this point; if the DSL now emits conditional ABI "
                     f"variants, update validate_abi to pick the right one."
                 )
-            # Every member declaration in this struct, keyed by field. Parsing
-            # each one whole is what stops a comment or a neighbouring member from
-            # standing in for the declaration.
-            declared: dict[str, str] = {}
+            # Keyed by field. Parsing each declaration WHOLE is what stops a
+            # neighbouring member standing in for it.
+            declared: dict[str, tuple[str, str]] = {}
             for decl_text in found[0].split(";"):
                 m = self._ABI_MEMBER.match(decl_text)
                 if not m:
@@ -418,8 +391,23 @@ void launch_{prefix}({tparams}, c10::Stream stream) {{
                 )
             for field, slots in claims.items():
                 if field not in declared:
-                    # The DSL omits the member entirely at zero slots, so absent
-                    # means zero -- which still has to equal what the sidecar says.
+                    # MENTIONED but unread is not the same as absent: a spelling
+                    # this parser cannot classify (a comma-separated declarator,
+                    # an attribute between the type and the name) otherwise counted
+                    # as zero slots, so a sidecar claiming zero passed while the
+                    # struct declared some -- the launcher then leaves those slots
+                    # of an uninitialized local unwritten. Fails closed here for the
+                    # same reason the struct level does.
+                    if field in found[0]:
+                        raise RuntimeError(
+                            f"{path}: {tname} contains text mentioning {field} that "
+                            f"this parser could not read as a declaration, so its "
+                            f"slot count cannot be compared with the {len(slots)} "
+                            f"the sidecar claims. Re-export this point; if the DSL "
+                            f"changed its C header shape, update validate_abi."
+                        )
+                    # The DSL omits the member at zero slots, so absent means
+                    # zero -- which still has to equal the sidecar's count.
                     if slots:
                         raise RuntimeError(
                             f"{path}: {name} declares no {field} this parser can "
@@ -441,8 +429,19 @@ void launch_{prefix}({tparams}, c10::Stream stream) {{
                         f"use_32bit_stride=True for this argument) and re-export; "
                         f"if `{ctype}` IS a 64-bit spelling, add it to _ABI_INT64."
                     )
-                # A C integer bound may carry u/U/l/L suffixes. Bounded length so
-                # a pathological literal cannot raise out of int().
+                # C reads a leading-zero literal as OCTAL -- [010] is 8 where
+                # int() gives 10 -- and comparing those two counts is this check's
+                # entire job, so refuse rather than parse it.
+                if re.fullmatch(r"0[0-9]+[uUlL]*", bound):
+                    raise RuntimeError(
+                        f"{path}: {name}'s {field} bound `{bound}` has a leading "
+                        f"zero, which C reads as octal, so the count this parser "
+                        f"would compare is not the array's size. Re-export this "
+                        f"point; if the DSL now emits octal bounds, teach "
+                        f"validate_abi to read them."
+                    )
+                # A C bound may carry u/U/l/L suffixes; length-bounded so a
+                # pathological literal cannot raise out of int().
                 digits = re.fullmatch(r"(?P<n>[0-9]{1,6})[uUlL]*", bound)
                 if not digits:
                     raise RuntimeError(
@@ -506,12 +505,10 @@ TOOLCHAINS: dict[str, Toolchain] = {tc.kind: tc for tc in (CuteDslToolchain(),)}
 def _assert_link_exts_are_exportable(registry: dict[str, Toolchain]) -> None:
     """Every link input a kind names must be something it also exports.
 
-    link_exts names which of a kind's OWN artifacts are link inputs, so anything
-    in it that artifact_exts does not list can never be produced. Generation
-    iterates artifact_exts and links `if ext in link_exts`, so the mismatch is
-    silent: the kind contributes no OBJECT= line, nothing passes --no-undefined,
-    torch_cuda links green, and the first call of the op fails on an undefined
-    symbol. Called at import so a new toolchain cannot ship the inconsistency."""
+    Generation iterates artifact_exts and links `if ext in link_exts`, so an ext
+    the kind cannot produce is silent: it contributes no link input, nothing
+    passes --no-undefined, torch_cuda links green, and the first call fails on an
+    undefined symbol. Checked at import so a new toolchain cannot ship it."""
     for tc in registry.values():
         extra = sorted(set(tc.link_exts) - set(tc.artifact_exts))
         if extra:
@@ -536,10 +533,9 @@ def get_toolchain(kind: str) -> Toolchain:
 def all_artifact_exts() -> set[str]:
     """Every extension some toolchain writes beside a sidecar.
 
-    ONE notion of "kernel artifact" for both sweeps that hunt undescribed
-    files: export's per-directory orphan check and generation's
-    no-declaration check. Computed in two places, they could disagree about
-    a newly added toolchain and leave one sweep blind to its objects."""
+    ONE notion of "kernel artifact" for both sweeps that hunt undescribed files
+    (export's orphan check and generation's no-declaration check), which computed
+    separately could disagree about a new toolchain and leave one sweep blind."""
     return {e for tc in TOOLCHAINS.values() for e in tc.artifact_exts}
 
 
