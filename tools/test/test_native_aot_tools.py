@@ -3076,10 +3076,23 @@ class TestDslRuntimeArchive(unittest.TestCase):
         self.assertEqual(got, os.path.join(root, "cu13", "lib", self.ARCHIVE))
 
     def test_a_matching_major_warns_about_nothing(self):
+        # Absence of THIS warning, not an empty stream: asserting emptiness failed in
+        # the torch-less lint image, where _cuda_major's torch probe reported itself
+        # (fixed -- the probes are lazy now -- but the assertion should not have been
+        # coupled to unrelated output either way).
         with self._wheel(("cu12", "cu13"), cuda_major="13"):
             with contextlib.redirect_stderr(io.StringIO()) as err:
                 build_stage2._dsl_runtime_archive()
-        self.assertEqual(err.getvalue(), "")
+        self.assertNotIn("no dialect runtime", err.getvalue())
+
+    def test_the_cache_answering_skips_the_torch_probe(self):
+        # The torch subprocess is the expensive probe and the only one that can fail
+        # noisily; a configured build never needs it.
+        with self._wheel(("cu13",), cuda_major="13"):
+            with mock.patch.object(
+                build_stage2, "_torch_value", side_effect=AssertionError("probed torch")
+            ):
+                self.assertEqual(build_stage2._cuda_major(), 13)
 
     def test_an_unsplit_wheel_is_taken_as_is(self):
         # Pre-4.6 shipped one archive at <root>/lib/ with no major in the path.
@@ -3885,6 +3898,10 @@ class TestCollectJobsRefusals(unittest.TestCase):
         said = printed.getvalue()
         self.assertIn("declares kernels but none for this build", said)
         self.assertIn("sm_100", said)
+        # The report is the ONLY thing that surfaces this, so it has to state the
+        # declaration's real ARCHS: it used to end with a fixed illustration, which
+        # read "an ARCHS of ('sm_100a',)" for declarations claiming something else.
+        self.assertIn("ARCHS (sm_100a)", said)
 
     def test_a_declaration_that_does_ship_is_not_reported(self):
         # The control: the report must not fire for the ordinary case, or it is
@@ -4319,6 +4336,24 @@ class TestRelinkNeverStrandsTheInstalledTorch(unittest.TestCase):
         with self._main() as (outcome, _, _, _):
             self.assertEqual(outcome, "returned 0")
         self.assertIn("--log-level=STATUS", self.reconfigure_argv)
+
+    def test_an_explicit_opt_out_beats_even_the_wheel_refusal(self):
+        # The kill switch has to work where no pull-request CI runs: the binary
+        # builds install an UNREPAIRED wheel and then --wheel makes `import torch` a
+        # hard precondition, so without this the nightly matrix could only be fixed
+        # by a revert. The opt-out is read from env and the CMake cache, so it needs
+        # no torch -- every other gate stays behind the refusal.
+        with tempfile.TemporaryDirectory() as d:
+            whl = os.path.join(d, "torch-0.0.0-cp312-cp312-linux_x86_64.whl")
+            open(whl, "w").close()
+            with (
+                mock.patch.dict(os.environ, {"TORCH_NATIVE_AOT": "0"}, clear=False),
+                mock.patch.object(
+                    build_stage2, "_torch_probe", side_effect=AssertionError("imported")
+                ),
+                contextlib.redirect_stderr(io.StringIO()),
+            ):
+                self.assertEqual(build_stage2.main(["--wheel", whl]), 0)
 
     def test_the_wheel_is_patched_with_the_relinked_library(self):
         # --wheel is how both CI shells call this (the wheel is built BEFORE the

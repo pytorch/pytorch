@@ -1308,6 +1308,7 @@ def _unpack_fast_types() -> tuple[type, ...]:
             variables.DequeVariable,
             variables.ListVariable,
             variables.ListIteratorVariable,
+            variables.DequeIteratorVariable,
             variables.RangeVariable,
             variables.SetVariable,
             variables.FrozensetVariable,
@@ -1535,6 +1536,12 @@ def make_cell(val: Any = None) -> types.CellType:
             f"Expected f.__closure__ to have exactly 1 element, got {len(f.__closure__)}"
         )
     return f.__closure__[0]
+
+
+def clear_cell(cell: types.CellType) -> None:
+    """Empty `cell` regardless of its current state (replays DELETE_DEREF)."""
+    cell.cell_contents = None
+    del cell.cell_contents
 
 
 def proxy_args_kwargs(args: Any, kwargs: Any) -> tuple[tuple[Any, ...], dict[str, Any]]:
