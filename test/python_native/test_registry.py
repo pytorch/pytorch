@@ -903,6 +903,58 @@ class TestRegistryRuntime(TestCase):
         )
         self.assertEqual(call_count[0], 2)
 
+    # torch.equal, not assertEqual, in the two tests below -- assertEqual
+    # computes its tolerances with tensor*float, and an UNCONDITIONAL
+    # override on mul.Tensor catches that traffic too, so the comparison
+    # helper would run through the very override under test. Same reason
+    # test_unconditional_override_cond_none above uses torch.equal.
+    def _register_unconditional_mul(self):
+        def impl(a, b):
+            return torch.full_like(a, 5.0)
+
+        self.registry.register_op_override(
+            "test_dsl",
+            "aten",
+            "mul.Tensor",
+            "CPU",
+            None,
+            impl,
+            unconditional_override=True,
+        )
+        self._install("mul.Tensor", "CPU")
+        return torch.tensor([2.0, 3.0]), torch.tensor([4.0, 5.0])
+
+    def test_unconditional_override_survives_disable(self):
+        """An unconditional override IS the implementation, so the
+        user-facing disable must leave it installed -- masking it would
+        change what the op computes, not just how fast it computes it."""
+        a, b = self._register_unconditional_mul()
+        overridden = torch.tensor([5.0, 5.0])
+        self.assertTrue(torch.equal(torch.ops.aten.mul.Tensor(a, b), overridden))
+
+        try:
+            self.registry.deregister_op_overrides(disable_dsl_names="test_dsl")
+            self.assertTrue(torch.equal(torch.ops.aten.mul.Tensor(a, b), overridden))
+        finally:
+            self.registry.reenable_op_overrides(enable_dsl_names="test_dsl")
+
+    def test_private_hatch_masks_unconditional_override(self):
+        """The reference-computation hatch is the one thing that may mask it,
+        so a numerics test can still obtain stock aten values. It only lifts
+        the exemption: the ordinary disable still has to be in effect."""
+        a, b = self._register_unconditional_mul()
+        overridden = torch.tensor([5.0, 5.0])
+        stock = torch.tensor([8.0, 15.0])
+        try:
+            self.registry.deregister_op_overrides(disable_dsl_names="test_dsl")
+            with torch._native._unconditional_masked():
+                self.assertTrue(torch.equal(torch.ops.aten.mul.Tensor(a, b), stock))
+            # Exiting restores it: the hatch is scoped, not a way to turn the
+            # implementation off for good.
+            self.assertTrue(torch.equal(torch.ops.aten.mul.Tensor(a, b), overridden))
+        finally:
+            self.registry.reenable_op_overrides(enable_dsl_names="test_dsl")
+
 
 if __name__ == "__main__":
     run_tests()
