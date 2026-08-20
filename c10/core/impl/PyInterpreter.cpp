@@ -145,6 +145,12 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
 
   bool fake_try_decomp(
       const c10::OperatorHandle& /*op*/,
+      torch::jit::Stack* /*stack*/,
+      bool /*has_symbolic_sizes*/) const override {
+    return false;
+  }
+  bool fake_try_custom_op_impl(
+      const c10::OperatorHandle& /*op*/,
       torch::jit::Stack* /*stack*/) const override {
     return false;
   }
@@ -165,12 +171,23 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
       torch::jit::Stack* /*stack*/) const override {
     return false;
   }
+  bool fake_infer_from_real_tensors(
+      const c10::OperatorHandle& /*op*/,
+      torch::jit::Stack* /*stack*/) const override {
+    return false;
+  }
   c10::intrusive_ptr<TensorImpl> to_meta_tensor(
       const c10::intrusive_ptr<TensorImpl>& /*real*/) const override {
     PANIC(to_meta_tensor);
   }
   bool allow_non_fake_inputs() const override {
     PANIC(allow_non_fake_inputs);
+  }
+  void propagate_real_tensors(
+      const c10::OperatorHandle& /*op*/,
+      const torch::jit::Stack& /*fake_args*/,
+      torch::jit::Stack* /*stack*/) const override {
+    PANIC(propagate_real_tensors);
   }
 };
 

@@ -53,6 +53,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_LINUX,
     parametrize,
+    skipIfCppFakeTensor,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -1446,6 +1447,7 @@ def forward(self, L_nested_counter_c_0_ : {fx_class}, L_nested_counter_c_1_ : {f
     return (add_1,)""",
         )
 
+    @skipIfCppFakeTensor("C++ FakeTensor has different FX node names")
     def test_nested_reference_trace(self):
         def foo(nested_queue, x):
             q1 = nested_queue.q
@@ -1515,7 +1517,32 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     eq_2 = sym_size_int == sym_size_int_1;  sym_size_int = sym_size_int_1 = None
     _assert_scalar_2 = torch.ops.aten._assert_scalar.default(eq_2, "Runtime assertion failed for expression Eq(u0, u1) on node 'eq'");  eq_2 = _assert_scalar_2 = None
     add_4 = torch.ops.aten.add.Tensor(getitem_5, getitem_7);  getitem_5 = getitem_7 = None
-    return (getitem_6, add_4)""",
+    return (getitem_6, add_4)"""
+            if torch._dynamo.config.use_cpp_fake_tensor
+            else """\
+def forward(self, arg0_1, arg1_1, arg2_1):
+    tan = torch.ops.aten.tan.default(arg2_1)
+    with_effects = torch.ops.higher_order.with_effects(arg0_1, torch.ops._TestOpaqueObject.queue_push.default, arg1_1, tan);  arg0_1 = tan = None
+    getitem = with_effects[0];  with_effects = None
+    cos = torch.ops.aten.cos.default(arg2_1);  arg2_1 = None
+    with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops._TestOpaqueObject.queue_push.default, arg1_1, cos);  getitem = cos = None
+    getitem_2 = with_effects_1[0];  with_effects_1 = None
+    with_effects_2 = torch.ops.higher_order.with_effects(getitem_2, torch.ops._TestOpaqueObject.queue_pop.default, arg1_1);  getitem_2 = None
+    getitem_4 = with_effects_2[0]
+    getitem_5 = with_effects_2[1];  with_effects_2 = None
+    sym_size_int = torch.ops.aten.sym_size.int(getitem_5, 0)
+    ge = sym_size_int >= 0
+    _assert_scalar = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar = None
+    with_effects_3 = torch.ops.higher_order.with_effects(getitem_4, torch.ops._TestOpaqueObject.queue_pop.default, arg1_1);  getitem_4 = arg1_1 = None
+    getitem_6 = with_effects_3[0]
+    getitem_7 = with_effects_3[1];  with_effects_3 = None
+    sym_size_int_1 = torch.ops.aten.sym_size.int(getitem_7, 0)
+    ge_1 = sym_size_int_1 >= 0
+    _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u1 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_1 = None
+    eq = sym_size_int == sym_size_int_1;  sym_size_int = sym_size_int_1 = None
+    _assert_scalar_2 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(u0, u1) on node 'eq'");  eq = _assert_scalar_2 = None
+    add = torch.ops.aten.add.Tensor(getitem_5, getitem_7);  getitem_5 = getitem_7 = None
+    return (getitem_6, add)""",
         )
 
     def test_compile_global(self):
@@ -1712,6 +1739,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         expected = x * 4.0
         self.assertEqual(result, expected)
 
+    @skipIfCppFakeTensor("C++ FakeTensor has different FX node names")
     def test_export_joint(self):
         torch.library.define(
             "_TestOpaqueObject::module_mul",

@@ -228,8 +228,13 @@ struct C10_API PyInterpreterVTable {
   virtual void reset_backward_hooks(const TensorImpl* self) const = 0;
 
   // C++ FakeTensor callbacks; each returns true if it handled the op.
-  // try a registered Python decomposition for op
+  // try a registered Python decomposition for op.
   virtual bool fake_try_decomp(
+      const c10::OperatorHandle& op,
+      torch::jit::Stack* stack,
+      bool has_symbolic_sizes) const = 0;
+  // try a torch.library registered fake implementation for op
+  virtual bool fake_try_custom_op_impl(
       const c10::OperatorHandle& op,
       torch::jit::Stack* stack) const = 0;
   // try the Python op_implementations handlers for op
@@ -246,12 +251,20 @@ struct C10_API PyInterpreterVTable {
   virtual bool fake_try_prim_meta(
       const c10::OperatorHandle& op,
       torch::jit::Stack* stack) const = 0;
+  virtual bool fake_infer_from_real_tensors(
+      const c10::OperatorHandle& op,
+      torch::jit::Stack* stack) const = 0;
   // delegates to the mode's fake tensor converter to build a meta tensor
   virtual c10::intrusive_ptr<TensorImpl> to_meta_tensor(
       const c10::intrusive_ptr<TensorImpl>& real) const = 0;
   // whether the active fake mode permits non-fake (real) tensor inputs, reading
   // the live Python value (mode attr + fake_tensor_tls override)
   virtual bool allow_non_fake_inputs() const = 0;
+  // run op on real tensors to add hints to fake outputs
+  virtual void propagate_real_tensors(
+      const c10::OperatorHandle& op,
+      const torch::jit::Stack& fake_args,
+      torch::jit::Stack* stack) const = 0;
 };
 
 struct C10_API PyInterpreter {

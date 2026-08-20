@@ -78,6 +78,7 @@ from torch._subclasses.fake_tensor import (
     is_fake,
     is_fake_tensor,
     maybe_get_fake_mode,
+    maybe_get_item_memo,
 )
 from torch._subclasses.meta_utils import is_sparse_any, safe_grad
 from torch._utils_internal import justknobs_check
@@ -2888,7 +2889,7 @@ class VariableBuilder:
         return LazyConstantVariable.create(value, source=self.source)
 
     def assert_not_wrapped_by_this_graph(self, value: torch.Tensor) -> None:
-        if is_fake(value) and maybe_get_fake_mode(value) is self.tx.fake_mode:
+        if maybe_get_fake_mode(value) is self.tx.fake_mode:
             raise InternalTorchDynamoError(
                 "Cannot wrap a Tensor that has already been",
                 "wrapped by this instance of Dynamo",
@@ -3747,8 +3748,11 @@ def _clone_input(value: Any, fake_mode: FakeTensorMode | None) -> Any:
             )
             or value.is_nested
         ):
-            # NB: ensure strides are preserved
-            value = clone_input(value)
+            # NB: ensure strides are preserved.
+            from torch._subclasses.fake_tensor import unset_fake_temporarily
+
+            with unset_fake_temporarily():
+                value = clone_input(value)
 
     return value
 
@@ -4980,7 +4984,10 @@ def _wrap_to_fake_tensor_and_record_impl(
         if (
             source is not None
             and is_fake_tensor(fake_e)
-            and (sym_val := getattr(fake_e, "item_memo", None)) is not None
+            and isinstance(
+                sym_val := maybe_get_item_memo(fake_e),
+                (torch.SymFloat, torch.SymInt),
+            )
         ):
             # Match the peephole in FakeTensorConverter.from_real_tensor that
             # strips FloatTensorSource before calling create_symbol.  Without
