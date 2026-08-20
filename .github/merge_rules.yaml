@@ -637,7 +637,7 @@
   patterns:
   - '*'
   approved_by:
-  - pytorchgreenlight[bot]
+  - pytorchgreenlight
   mandatory_checks_name:
   - EasyCLA
   - Lint
