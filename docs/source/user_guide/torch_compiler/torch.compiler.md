@@ -48,6 +48,9 @@ one from all capture examples can silently miscompute. Initial support is for Py
 functions with tensor, scalar, and Python-container arguments. Graph breaks and
 closure-free `torch._dynamo.disable` functions are preserved; top-level closures,
 nested functions that capture locals, and `nn.Module` arguments are not supported yet.
+With `training=True` and the Inductor backend, Dynamo graphs include readable compiled
+forward and backward code, so served outputs retain a `grad_fn` and can be passed to
+`backward()`. This training mode works across captured recompilations and graph breaks.
 See the {ref}`API reference <torch.compiler_api>` for details.
 
 :::{warning}
