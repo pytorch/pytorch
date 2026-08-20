@@ -106,7 +106,7 @@ class TestClipGradNormWorldSize2(_TestClipGradNormBase):
         return min(torch.get_device_module(device_type).device_count(), 2)
 
     @skip_if_lt_x_gpu(2)
-    def test_clip_grad_norm_1d(self):
+    def test_clip_grad_norm_1d(self, device):
         for norm_type in (2, 1, float("inf")):
             torch.manual_seed(42)
             model_args = ModelArgs(dropout_p=0.0)
@@ -136,7 +136,7 @@ class TestClipGradNormWorldSize4(_TestClipGradNormBase):
     @skip_if_lt_x_gpu(4)
     @xfailIf(TEST_XPU)  # https://github.com/intel/torch-xpu-ops/issues/1661
     @skipIfRocmArch(MI350_ARCH)
-    def test_clip_grad_norm_2d(self):
+    def test_clip_grad_norm_2d(self, device):
         for norm_type in (2, 1, 3, float("inf")):
             dp_size = 2
             global_mesh = init_device_mesh(
