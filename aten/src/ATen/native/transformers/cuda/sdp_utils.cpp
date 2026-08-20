@@ -161,14 +161,20 @@ int64_t minimum_gemm_alignment(sdp_params const& params) {
 #if USE_ROCM_ATTENTION
 inline int aotriton_max_hdim() {
   static const int max_hdim = []() {
-#if AOTRITON_VERSION_CURRENT == AOTRITON_VERSION_INT(0, 11)
+#if AOTRITON_VERSION_CURRENT >= AOTRITON_VERSION_INT(0, 11)
     // gfx11xx only support hdim <= 256 on AOTriton 0.11/0.12
     auto dprops = at::cuda::getCurrentDeviceProperties();
     const c10::basic_string_view<char> arch(dprops->gcnArchName);
+#if AOTRITON_VERSION_CURRENT == AOTRITON_VERSION_INT(0, 11)
     if (arch.starts_with("gfx11")) {
       return 256;
     }
-#endif // AOTriton 0.11
+#endif // AOTriton == 0.11
+    // Fix issue #189849
+    if (arch.starts_with("gfx115")) {
+      return 256;
+    }
+#endif // AOTriton >= 0.11
 #if AOTRITON_VERSION_CURRENT >= AOTRITON_VERSION_INT(0, 9)
     return 512;
 #else
