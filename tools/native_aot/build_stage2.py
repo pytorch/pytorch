@@ -210,12 +210,19 @@ def _cuda_major() -> int | None:
     """This build's CUDA major, or None if it cannot be determined.
 
     The cache first -- it is what the build was configured with -- then the
-    installed torch, out of process."""
-    for value in (
-        _cmake_cache_value("CUDAToolkit_VERSION_MAJOR") or "",
-        (_cmake_cache_value("CUDA_VERSION") or "").split(".")[0],
-        (_torch_value("torch.version.cuda or ''") or "").split(".")[0],
-    ):
+    installed torch, out of process.
+
+    LAZILY, one probe at a time: as a tuple every probe ran, so the torch
+    subprocess fired even when the cache had answered -- and where torch is not
+    importable it reported a failed probe, which is noise in every build and broke a
+    test that (correctly) expected a matching major to say nothing."""
+    probes = (
+        lambda: _cmake_cache_value("CUDAToolkit_VERSION_MAJOR") or "",
+        lambda: (_cmake_cache_value("CUDA_VERSION") or "").split(".")[0],
+        lambda: (_torch_value("torch.version.cuda or ''") or "").split(".")[0],
+    )
+    for probe in probes:
+        value = probe()
         if value.strip().isdigit():
             return int(value)
     return None
@@ -614,6 +621,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.print_verdict:
         print("RUN" if should_run() else "SKIP", flush=True)
         return 0
+    # An EXPLICIT opt-out first, and only that: it is read from the environment and
+    # the CMake cache, so it needs no torch, and honouring it keeps
+    # TORCH_NATIVE_AOT=0 a real kill switch on the binary-build path -- which no
+    # pull-request CI exercises, so a failure there first appears in the nightly
+    # matrix. Every other gate stays behind the refusal below.
+    if _opted_out():
+        _report("TORCH_NATIVE_AOT is falsy; skipping")
+        return 0
     # --wheel means the caller installed torch on the line above, so "not
     # importable" is a broken build rather than "not applicable". Degrading it to
     # a skip shipped a green, kernel-free release wheel.
@@ -624,9 +639,9 @@ def main(argv: list[str] | None = None) -> int:
             "without kernels. Fix the install, or do not pass --wheel for a build "
             "where a plain `import torch` cannot work -- the ASan and TSan images "
             "need LD_PRELOAD or a different interpreter, which is why the CI "
-            "shells guard this call with a CUDA check. TORCH_NATIVE_AOT=0 does NOT "
-            "exempt it: this refusal is deliberately ahead of every applicability "
-            "gate, since deciding them requires importing torch."
+            "shells guard this call with a CUDA check. TORCH_NATIVE_AOT=0 does "
+            "exempt it, and nothing else does: every other gate needs torch to "
+            "decide, so this refusal stays ahead of them."
         )
     if not should_run():
         return 0

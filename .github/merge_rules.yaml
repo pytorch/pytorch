@@ -534,7 +534,6 @@
   approved_by:
   - lolpack
   - maggiemoss
-  - ndmitchell
   - kinto0
   mandatory_checks_name:
   - EasyCLA
@@ -616,6 +615,7 @@
   - sanketpurandare
   - scotts
   - seemethere
+  - sevenEng
   - SherlockNoMad
   - slayton58
   - soulitzer

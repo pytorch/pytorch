@@ -332,6 +332,7 @@ def _collect_jobs(ops_filter, out_root: str, archs):
     # matched ops embed and pass the post-relink check while the rest are simply
     # absent, with no tree for generation to complain about.
     skipped: dict[str, list[str]] = {}
+    declared: dict[str, tuple[str, ...]] = {}
     for entry in sorted(os.listdir(OPS_DIR)):
         op_dir = os.path.join(OPS_DIR, entry)
         if not os.path.exists(os.path.join(op_dir, "aot.py")):
@@ -374,6 +375,7 @@ def _collect_jobs(ops_filter, out_root: str, archs):
                     decl.cc_of(layout_arch)
                     if layout_arch not in decl.archs_of(d):
                         skipped.setdefault(did, []).append(layout_arch)
+                        declared[did] = tuple(decl.archs_of(d))
                         continue
                 else:
                     claimed = _claimed_spelling(layout_arch, decl.archs_of(d))
@@ -391,11 +393,14 @@ def _collect_jobs(ops_filter, out_root: str, archs):
     shipped = {os.path.basename(j[3]) for j in jobs}
     for did, missed in sorted(skipped.items()):
         if did not in shipped:
+            # The declaration's OWN ARCHS, not an illustration: a fixed example
+            # contradicted the case at hand (it read "an ARCHS of ('sm_100a',)" for a
+            # declaration claiming sm_100), which sends the reader the wrong way.
             print(
                 f"{did}: declares kernels but none for this build -- requested "
-                f"{' '.join(missed)}, and the declaration's ARCHS names none of "
-                f"them, so this op falls back to aten. The spellings must match "
-                f"exactly: an ARCHS of ('sm_100a',) does not cover a build for 10.0."
+                f"{' '.join(missed)}, and the declaration's ARCHS "
+                f"({' '.join(declared[did])}) names none of them, so this op falls back "
+                f"to aten. The spellings must match exactly."
             )
     return jobs
 

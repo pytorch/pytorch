@@ -653,6 +653,14 @@ max_autotune_gemm_backends = os.environ.get(
     "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS", "ATEN,TRITON,CPP"
 ).upper()
 
+# Opt-in for the shared-A bmm template (see kernel/bmm.py), off by default. The
+# template is only ever an extra autotune choice, so leaving it off keeps the
+# stock bmm choices and changes nothing else.
+bmm_shared_a: bool = Config(
+    default=False,
+    env_name_force="TORCHINDUCTOR_BMM_SHARED_A_TEMPLATE_ENABLED",
+)
+
 
 # Configures the maximum number of NVIDIA Universal GEMM (NVGEMM) configs to profile
 # in max_autotune. Default 10: a sweep over GDN2/attn/MoE + FLUX shapes (bf16 and
@@ -1340,7 +1348,7 @@ class aten_distributed_optimizations:
     profile_guided_estimations_profile_path: str | None = None
 
     # Maximum memory increase above baseline for prefetch operations
-    # Uses minimum of absolute cap and ratio of baseline
+    # Uses maximum of absolute cap and ratio of baseline
     max_memory_increase_gb: float | None = None  # Absolute cap in GB
     max_memory_increase_ratio: float | None = None  # Ratio of baseline peak memory
 
@@ -3057,11 +3065,17 @@ _cache_config_ignore_prefix: list[str] = [
     "autotune_remote_cache",
 ]
 
-# Config keys whose values are callable factories. save_config_portable will
-# instantiate the factory and use .uuid() for serialization.
-_cache_config_factory_keys: list[str] = [
-    "inductor_choices_class",
-]
+
+def _serialize_inductor_choices(config: dict[str, Any]) -> None:
+    from .choices import inductor_choices_cache_key
+
+    if "inductor_choices_class" in config:
+        config["inductor_choices_class"] = inductor_choices_cache_key(
+            config["inductor_choices_class"]
+        )
+
+
+_cache_config_serializer = _serialize_inductor_choices
 
 # External callable for matmul tuning candidates
 external_matmul: list[Callable[[torch.Tensor, torch.Tensor, torch.Tensor], None]] = []
