@@ -542,14 +542,10 @@ PyObject* c10d_init(PyObject* _unused, PyObject* noargs) {
   C10_LOG_API_USAGE_ONCE("c10d.python.import");
 
   auto c10d_module = THPObjectPtr(PyImport_ImportModule("torch.distributed"));
-  if (!c10d_module) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(c10d_module);
 
   auto torch_C_module = THPObjectPtr(PyImport_ImportModule("torch._C"));
-  if (!torch_C_module) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(torch_C_module);
 
   auto torch_C_m = py::handle(torch_C_module).cast<py::module>();
   auto m =
@@ -1103,6 +1099,14 @@ Example:
       "_resolve_process_group",
       [](const std::string& group_name) {
         return ::c10d::resolve_process_group(group_name);
+      },
+      py::arg("group_name"));
+
+  // Check the native registry without throwing on unknown group names
+  module.def(
+      "_is_process_group_registered",
+      [](const std::string& group_name) {
+        return ::c10d::is_process_group_registered(group_name);
       },
       py::arg("group_name"));
 
