@@ -98,6 +98,21 @@ jobs:
       cuda-version: "13.0"
     secrets: inherit
 
+  # Once a day rather than on every periodic run: the query window is a week, so
+  # running more often returns the same answer.
+  dark-tests:
+    if: github.event_name != 'schedule' || github.event.schedule == '29 8 * * *'
+    name: dark-tests
+    uses: ./.github/workflows/_dark-tests.yml
+    needs:
+      - linux-jammy-cuda13_0-py3_10-gcc11-build
+      - get-label-type
+    with:
+      build-environment: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-build.outputs.build-environment }}
+      docker-image: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-build.outputs.docker-image }}
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+    secrets: inherit
+
   linux-jammy-cuda13_4-py3_10-gcc11-build:
     name: linux-jammy-cuda13.4-py3.10-gcc11
     uses: ./.github/workflows/_linux-build.yml
