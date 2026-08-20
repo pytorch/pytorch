@@ -21,8 +21,8 @@
 #include <ATen/ops/_foreach_norm_native.h>
 #include <ATen/ops/_foreach_powsum_native.h>
 
+#include <ATen/ops/empty.h>
 #include <ATen/ops/empty_native.h>
-#include <ATen/ops/full.h>
 #include <ATen/ops/zeros.h>
 #endif
 
@@ -50,6 +50,20 @@ static constexpr size_t MAX_TENSORS_PER_KERNEL = 400;
 struct TensorListAddresses {
   const void* addresses[MAX_TENSORS_PER_KERNEL];
 };
+
+// Cleanup reduces a whole max_chunks_per_tensor row, so slots past a tensor's
+// chunk count must hold the identity.
+template <typename T>
+__device__ __forceinline__ void pad_unused_chunks(
+    T* output_this_tensor,
+    int chunk_idx,
+    int max_chunks_per_tensor,
+    T identity_element) {
+  for (int i = chunk_idx + 1 + threadIdx.x; i < max_chunks_per_tensor;
+       i += blockDim.x) {
+    output_this_tensor[i] = identity_element;
+  }
+}
 
 template <
     typename T,
@@ -108,10 +122,18 @@ struct LpMaxFunctor {
     }
     auto final_val = at::native::cuda_utils::BlockReduceMax(val, s_vals);
 
+    T* const output_this_tensor = output_per_tensor_ptr +
+        (tl.start_tensor_this_launch + tensor_loc) * max_chunks_per_tensor;
     if (threadIdx.x == 0) {
-      output_per_tensor_ptr
-          [(tl.start_tensor_this_launch + tensor_loc) * max_chunks_per_tensor +
-           chunk_idx] = final_val;
+      output_this_tensor[chunk_idx] = final_val;
+    }
+
+    if (n <= chunk_size) { // last chunk of this tensor
+      pad_unused_chunks(
+          output_this_tensor,
+          chunk_idx,
+          max_chunks_per_tensor,
+          T(std::numeric_limits<T>::lowest()));
     }
   }
 };
@@ -161,9 +183,9 @@ std::vector<Tensor> foreach_tensor_max_cuda(TensorList tensors) {
     }
   }
   const auto options = tensors[0].options();
-
-  // Initialize output_per_tensor with lowest value
-  Tensor output_per_tensor;
+  // No empty tensors (checked above), so every row gets written.
+  const auto output_per_tensor = at::empty(
+      {static_cast<int64_t>(ntensors) * max_chunks_per_tensor}, options);
 
   std::vector<at::Tensor> vec_res;
   vec_res.reserve(ntensors);
@@ -186,12 +208,6 @@ std::vector<Tensor> foreach_tensor_max_cuda(TensorList tensors) {
       tensor_lists[0][0].scalar_type(),
       "foreach_tensor_max_cuda_scalar_type",
       [&]() {
-        // Initialize intermediate buffer with lowest()
-        output_per_tensor = at::full(
-            {static_cast<int64_t>(ntensors) * max_chunks_per_tensor},
-            std::numeric_limits<scalar_t>::lowest(),
-            options);
-
         multi_tensor_apply<1>(
             tensor_lists,
             LpMaxFunctor<scalar_t>(),
@@ -311,10 +327,18 @@ struct LpNormFunctor {
         ? at::native::cuda_utils::BlockReduceSum(val, s_vals)
         : at::native::cuda_utils::BlockReduceMax(val, s_vals);
 
+    out_opmath_t* const output_this_tensor = output_per_tensor_ptr +
+        (tl.start_tensor_this_launch + tensor_loc) * max_chunks_per_tensor;
     if (threadIdx.x == 0) {
-      output_per_tensor_ptr
-          [(tl.start_tensor_this_launch + tensor_loc) * max_chunks_per_tensor +
-           chunk_idx] = final_val;
+      output_this_tensor[chunk_idx] = final_val;
+    }
+
+    if (n <= chunk_size) { // last chunk of this tensor
+      pad_unused_chunks(
+          output_this_tensor,
+          chunk_idx,
+          max_chunks_per_tensor,
+          out_opmath_t(0));
     }
   }
 };
@@ -446,7 +470,7 @@ std::vector<Tensor> foreach_tensor_norm_cuda_internal(
   const ScalarType output_dtype =
       dtype.has_value() ? dtype.value() : tensors[0].scalar_type();
   const ScalarType output_per_tensor_dtype = toOpMathType(output_dtype);
-  auto output_per_tensor = at::zeros(
+  const auto output_per_tensor = at::empty(
       {static_cast<int64_t>(nonempty_tensors) * max_chunks_per_tensor},
       options.dtype(output_per_tensor_dtype));
 
@@ -570,7 +594,7 @@ std::vector<Tensor> foreach_tensor_norm_cuda_internal(
   // correctly assign values to only non-empty slots, as the empty slots should
   // get skipped
   std::vector<Tensor> result;
-  result.reserve(ntensors);
+  result.reserve(tensors.size());
   int i = 0;
   for (const auto& t : tensors) {
     if (t.numel() != 0) {
