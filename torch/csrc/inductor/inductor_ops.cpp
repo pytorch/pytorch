@@ -4,6 +4,7 @@
 #include <ATen/ops/mm.h>
 #endif
 
+#include <ATen/native/Resize.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/inductor/inductor_ops.h>
 #include <torch/library.h>
@@ -61,10 +62,14 @@ Tensor _reinterpret_tensor(
     IntArrayRef size,
     IntArrayRef stride,
     int64_t offset_increment) {
+  auto storage_offset = self.storage_offset() + offset_increment;
+  at::native::checkAsStridedArgs(size, stride, storage_offset);
+  at::native::checkInBoundsForStorage(
+      size, stride, storage_offset, self.dtype(), self.storage());
   Tensor self_ = at::detail::make_tensor<TensorImpl>(
       Storage(self.storage()), self.key_set(), self.dtype());
   auto* self_tmp_ = self_.unsafeGetTensorImpl();
-  self_tmp_->set_storage_offset(self.storage_offset() + offset_increment);
+  self_tmp_->set_storage_offset(storage_offset);
   self_tmp_->set_sizes_and_strides(size, stride);
   return self_;
 }
