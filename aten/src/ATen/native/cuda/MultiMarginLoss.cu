@@ -77,6 +77,7 @@ __global__ void MultiMarginLoss_backward_kernel(
   const scalar_t *input_k = input + k*dim;
   scalar_t *gradInput_k = gradInput + k*dim;
   int target_k = static_cast<int>(target[k]);
+  CUDA_KERNEL_ASSERT(target_k >= 0 && target_k < dim && "target index is out of bounds");
   scalar_t input_target_k = input_k[target_k];
 
   const scalar_t *gradOutput_k = gradOutput;
