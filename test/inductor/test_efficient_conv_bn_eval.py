@@ -11,10 +11,9 @@ from torch._inductor import config as inductor_config
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_cuda import tf32_on_and_off
 from torch.testing._internal.common_device_type import (
+    Capability,
     instantiate_device_type_tests,
-    skipCPUIf,
-    skipCUDAIf,
-    skipXPUIf,
+    requires_capabilities,
 )
 from torch.testing._internal.common_utils import HardwareClassification
 from torch.testing._internal.inductor_utils import HAS_CPU
@@ -93,9 +92,7 @@ class MultiUserConvOp(nn.Module):
 class EfficientConvBNEvalTests(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @skipCPUIf(not HAS_CPU, "requires C++ compiler")
-    @skipCUDAIf(not has_triton(), "requires triton")
-    @skipXPUIf(not has_triton(), "requires triton")
+    @requires_capabilities(Capability.lib.triton)
     @tf32_on_and_off(0.003)
     @inductor_config.patch({"efficient_conv_bn_eval_fx_passes": True})
     def test_functional_batch_norm_defaults(self, device):
@@ -116,9 +113,7 @@ class EfficientConvBNEvalTests(TestCase):
         opt = torch.compile(mod, backend="inductor")
         opt(x, mean, var)
 
-    @skipCPUIf(not HAS_CPU, "requires C++ compiler")
-    @skipCUDAIf(not has_triton(), "requires triton")
-    @skipXPUIf(not has_triton(), "requires triton")
+    @requires_capabilities(Capability.lib.triton)
     @tf32_on_and_off(0.003)
     @inductor_config.patch({"efficient_conv_bn_eval_fx_passes": True})
     def test_fx_graph_batch_norm_defaults(self, device):
@@ -160,9 +155,7 @@ class EfficientConvBNEvalTests(TestCase):
         expected = gm(inp_tensor, mean_tensor, var_tensor)
         self.assertEqual(out, expected)
 
-    @skipCPUIf(not HAS_CPU, "requires C++ compiler")
-    @skipCUDAIf(not has_triton(), "requires triton")
-    @skipXPUIf(not has_triton(), "requires triton")
+    @requires_capabilities(Capability.lib.triton)
     @tf32_on_and_off(0.003)
     @inductor_config.patch({"efficient_conv_bn_eval_fx_passes": True})
     @functorch_config.patch({"enable_autograd_cache": False})
