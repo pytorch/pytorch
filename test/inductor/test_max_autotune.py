@@ -1881,6 +1881,58 @@ class TestMaxAutotune(TestCase):
         config.triton.native_matmul,
         "ignore decompose_k when native matmul codegen",
     )
+    @parametrize("search_space", ("DEFAULT", "EXHAUSTIVE"))
+    def test_decompose_k_shape_keeps_mm_template_when_exhaustive(self, search_space):
+        """On a shape where decompose_k applies even at threshold_multiple=2, tuned_mm
+        drops the plain mm template to save autotuning time -- except under EXHAUSTIVE,
+        where the user asked for every choice."""
+        a, b = self._make_matrices(
+            M=32,
+            K=32768,
+            N=64,
+            dtype=torch.bfloat16,
+            device=GPU_TYPE,
+            requires_grad=False,
+        )
+
+        names: list[str] = []
+
+        def record(choices):
+            names.extend(c.name for c in choices)
+            return choices
+
+        torch._dynamo.reset()
+        add_preprocessing_fn(record)
+        try:
+            with config.patch(
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "ATEN,TRITON",
+                    "max_autotune_gemm_search_space": search_space,
+                    # keeps the exhaustive space from dominating test runtime
+                    "test_configs.max_mm_configs": 1,
+                    **_DECOMPOSE_K_PATCH_ROCM,
+                }
+            ):
+                torch.compile(lambda x, y: x @ y)(a, b)
+        finally:
+            clear_preprocessing_fns(clear_defaults=False)
+
+        # the shape must actually be in decompose_k territory, else the test is vacuous
+        self.assertTrue(any(n.startswith("decompose_k") for n in names), names)
+        plain_mm = [n for n in names if n.startswith("triton_mm")]
+        if search_space == "EXHAUSTIVE":
+            self.assertTrue(plain_mm, f"mm_template dropped under EXHAUSTIVE: {names}")
+        else:
+            self.assertFalse(plain_mm, f"mm_template should be skipped: {names}")
+
+    @unittest.skipIf(
+        config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
+    )
+    @unittest.skipIf(
+        config.triton.native_matmul,
+        "ignore decompose_k when native matmul codegen",
+    )
     @config.patch(
         max_autotune=True,
         max_autotune_gemm_backends="TRITON",
@@ -3917,6 +3969,24 @@ class TestMaxAutotuneSubproc(TestCase):
                 torch.device(f"{GPU_TYPE}:0"), dtype=torch.float32, size=shape
             ),
         )
+
+    def test_async_autotuner_skips_unscheduled_choices(self):
+        inputs_key = "inputs"
+        scheduled_choice = mock.Mock(hash_key=lambda: "scheduled")
+        unscheduled_choice = mock.Mock(hash_key=lambda: "unscheduled")
+        future = mock.Mock()
+        future.result.return_value = 1.0
+        with mock.patch.object(
+            AsyncAutotuner,
+            "choice_hash_to_future",
+            {"scheduled" + inputs_key: future},
+        ):
+            self.assertEqual(
+                {scheduled_choice: 1.0},
+                AsyncAutotuner.get_results(
+                    [scheduled_choice, unscheduled_choice], inputs_key
+                ),
+            )
 
     @skipIfXpu(msg="XPU not support multiprocessing tensor reduction")
     def test_benchmark_choice_in_subproc(self):

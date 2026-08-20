@@ -215,7 +215,7 @@ class SideEffects:
     id_to_variable: dict[int, VariableTracker]
     store_attr_mutations: dict[VariableTracker, dict[str, VariableTracker]]
     attr_mutation_kinds: dict[VariableTracker, dict[str, AttrMutationKind]]
-    keepalive: list[Any]
+    keepalive: list[object]
     # Maps variable tracker to list of user stacks (StackSummary objects, formatted lazily)
     mutation_user_stacks: dict[VariableTracker, list[traceback.StackSummary]]
 
@@ -229,7 +229,7 @@ class SideEffects:
         | None = None,
         mutation_user_stacks: dict[VariableTracker, list[traceback.StackSummary]]
         | None = None,
-        keepalive: list[Any] | None = None,
+        keepalive: list[object] | None = None,
         save_for_backward: list[
             tuple[AutogradFunctionContextVariable, list[VariableTracker]]
         ]
@@ -276,7 +276,7 @@ class SideEffects:
         # Deferred side-effect checking for nullified attribute mutations.
         # Maps (vt_id, attr_name) → (original_value, current_value).
         # On validation, we check original == current.
-        self.deferred_attr_mutations: dict[tuple[int, str], tuple[Any, Any]] = {}
+        self.deferred_attr_mutations: dict[tuple[int, str], tuple[object, object]] = {}
 
     def ignore_mutations_on(self, var: VariableTracker) -> None:
         """Mutations to this variable will be executed but not tracked,
@@ -315,7 +315,7 @@ class SideEffects:
         """Record an attribute mutation for deferred validation.
 
         Returns True if successfully deferred, False if we cannot read the
-        original value (getattro_impl raises NotImplementedError) or the
+        original value (tp_getattro_impl raises NotImplementedError) or the
         original is not a python constant — caller should fall back to
         check_allowed_side_effect.
         """
@@ -333,7 +333,7 @@ class SideEffects:
                 raise AssertionError("output_graph weakref is dead")
             tx = output_graph.current_tx
             try:
-                original_vt = item.getattro_impl(tx, name)  # type: ignore[arg-type]
+                original_vt = item.tp_getattro_impl(tx, name)  # type: ignore[arg-type]
             except NotImplementedError:
                 return False
             if not original_vt.is_python_constant():
@@ -425,10 +425,10 @@ class SideEffects:
             tensor_hooks=self.tensor_hooks,
         )
 
-    def __contains__(self, item: Any) -> bool:
+    def __contains__(self, item: object) -> bool:
         return id(item) in self.id_to_variable
 
-    def __getitem__(self, item: Any) -> VariableTracker:
+    def __getitem__(self, item: object) -> VariableTracker:
         return self.id_to_variable[id(item)]
 
     def should_allow_externally_visible_side_effects_in_subtracer(self) -> bool:
@@ -739,7 +739,7 @@ class SideEffects:
 
     def _track_obj(
         self,
-        item: Any,
+        item: object,
         variable: VariableTracker,
         mutation_type_cls: type = ValueMutationExisting,
     ) -> VariableTracker:
@@ -762,7 +762,7 @@ class SideEffects:
 
     def track_object_existing(
         self,
-        item: Any,
+        item: object,
         variable: VariableTracker,
     ) -> VariableTracker:
         # TODO: Modify this API so that we preserve type info of
@@ -978,7 +978,7 @@ class SideEffects:
         self.keepalive.append(cell)
         return variable
 
-    def track_global_existing(self, source: Source, item: Any) -> VariableTracker:
+    def track_global_existing(self, source: Source, item: object) -> VariableTracker:
         variable = variables.NewGlobalVariable(
             mutation_type=AttributeMutationExisting(),
             source=source,
@@ -1710,9 +1710,22 @@ def _codegen_cell_mutation(ctx: SideEffectReplayContext) -> None:
     # Emit more readable and performant bytecode.
     # TODO generalize this for cells created during inlining.
     if var in ctx.side_effects.store_attr_mutations:
-        contents_var = ctx.side_effects.load_cell(var)
-        cg(contents_var)
-        ctx.suffixes.append([cg.create_store_deref(var.local_name)])
+        contents_var = ctx.side_effects.load_attr(var, "cell_contents", deleted_ok=True)
+        if isinstance(contents_var, variables.DeletedVariable):
+            # DELETE_DEREF on an already-empty cell raises NameError, and the
+            # real cell may be empty at replay time (e.g. a fresh MAKE_CELL
+            # cell whose store happened only in the traced region), so store a
+            # dummy value first to make the delete unconditional.
+            ctx.suffixes.append(
+                [
+                    create_instruction("LOAD_CONST", argval=None),
+                    cg.create_store_deref(var.local_name),
+                    create_instruction("DELETE_DEREF", argval=var.local_name),
+                ]
+            )
+        else:
+            cg(contents_var)
+            ctx.suffixes.append([cg.create_store_deref(var.local_name)])
         ctx.log(var)
 
 
@@ -1939,7 +1952,20 @@ def _codegen_attribute_mutation(ctx: SideEffectReplayContext) -> None:
             ctx.suffixes.append([create_instruction("STORE_GLOBAL", argval=name)])
             side_effect_occurred = True
         elif isinstance(value, variables.DeletedVariable):
-            if (
+            if isinstance(var, variables.CellVariable):
+                # Cells created during inlining (no local_name) are rebuilt via
+                # make_cell(), which leaves None in the cell; existing cells
+                # keep their pre-graph contents. Replay the DELETE_DEREF by
+                # emptying the cell so later reads raise NameError.
+                cg.add_push_null(
+                    lambda: cg.load_import_from(utils.__name__, "clear_cell")
+                )
+                cg(var.source)  # type: ignore[attr-defined]
+                ctx.suffixes.append(
+                    [*create_call_function(1, False), create_instruction("POP_TOP")]
+                )
+                side_effect_occurred = True
+            elif (
                 isinstance(var, variables.UserDefinedObjectVariable)
                 and mutation_kind is AttrMutationKind.INSTANCE_DICT
             ):

@@ -29,7 +29,6 @@ from torch.testing._internal.common_utils import (
     IS_SANDCASTLE,
     IS_WINDOWS,
     parametrize,
-    skipIfRocmVersionAtLeast,
     skipIfXpu,
     slowTest,
 )
@@ -523,8 +522,6 @@ class TestGpuWrapper(InductorTestCase):
         self.assertEqual(actual, expected)
         self.assertIn("needs_vec_isa=False", code)
 
-    # The vec-ISA probe child cannot resolve ROCm SDK libraries in CI.
-    @skipIfRocmVersionAtLeast([7, 14])
     def test_cuda_cpp_wrapper_keeps_vec_isa_for_host_vectorized_code(self):
         if not RUN_GPU:
             self.skipTest("GPU not available")

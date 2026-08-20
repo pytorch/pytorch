@@ -209,7 +209,7 @@ If you want to compile with CUDA support, [select a supported version of CUDA fr
 Note: You could refer to the [cuDNN Support Matrix](https://docs.nvidia.com/deeplearning/cudnn/backend/latest/reference/support-matrix.html) for cuDNN versions with the various supported CUDA, CUDA driver, and NVIDIA hardware.
 
 If you want to disable CUDA support, export the environment variable `USE_CUDA=0`.
-Other potentially useful environment variables are documented in `cmake/EnvVarForwarding.cmake`.  If
+Other potentially useful environment variables are documented in [`cmake/EnvVarForwarding.cmake`](./cmake/EnvVarForwarding.cmake).  If
 CUDA is installed in a non-standard location, set PATH so that the nvcc you
 want to use can be found (e.g., `export PATH=/usr/local/cuda-12.8/bin:$PATH`).
 
@@ -223,7 +223,7 @@ If you want to compile with ROCm support, install
 By default the build system expects ROCm to be installed in `/opt/rocm`. If ROCm is installed in a different directory, the `ROCM_PATH` environment variable must be set to the ROCm installation directory. The build system automatically detects the AMD GPU architecture. Optionally, the AMD GPU architecture can be explicitly set with the `PYTORCH_ROCM_ARCH` environment variable [AMD GPU architecture](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html#supported-gpus)
 
 If you want to disable ROCm support, export the environment variable `USE_ROCM=0`.
-Other potentially useful environment variables are documented in `cmake/EnvVarForwarding.cmake`.
+Other potentially useful environment variables are documented in [`cmake/EnvVarForwarding.cmake`](./cmake/EnvVarForwarding.cmake).
 
 ##### Intel GPU Support
 If you want to compile with Intel GPU support, follow these
@@ -231,7 +231,7 @@ If you want to compile with Intel GPU support, follow these
 - Intel GPU is supported for Linux and Windows.
 
 If you want to disable Intel GPU support, export the environment variable `USE_XPU=0`.
-Other potentially useful environment variables are documented in `cmake/EnvVarForwarding.cmake`.
+Other potentially useful environment variables are documented in [`cmake/EnvVarForwarding.cmake`](./cmake/EnvVarForwarding.cmake).
 
 #### Get the PyTorch Source
 
@@ -423,7 +423,7 @@ should increase shared memory size either with `--ipc=host` or `--shm-size` comm
 
 **NOTE:** Must be built with a Docker version >= 23.0
 
-The Dockerfile is supplied to build images with CUDA 12.1 support and cuDNN v9.
+The Dockerfile is supplied to build images with CUDA 12.6 support and cuDNN v9.
 You can pass `PYTHON_VERSION=x.y` make variable to specify which Python version is to be used by Miniconda, or leave it
 unset to use the default, as the Dockerfile uses system Python.
 
@@ -583,8 +583,7 @@ Pointers to get you started:
 ## Communication
 * Forums: Discuss implementations, research, etc. https://discuss.pytorch.org
 * GitHub Issues: Bug reports, feature requests, install issues, RFCs, thoughts, etc.
-* Slack: The [PyTorch Slack](https://pytorch.slack.com/) hosts a primary audience of moderate to experienced PyTorch users and developers for general chat, online discussions, collaboration, etc. If you are a beginner looking for help, the primary medium is [PyTorch Forums](https://discuss.pytorch.org). If you need a slack invite, please fill this form: https://goo.gl/forms/PP1AGvNHpSaJP8to1
-* Newsletter: No-noise, a one-way email newsletter with important announcements about PyTorch. You can sign-up here: https://eepurl.com/cbG0rv
+* Slack: The [PyTorch Slack](https://pytorch.slack.com/) hosts a primary audience of moderate to experienced PyTorch users and developers for general chat, online discussions, collaboration, etc.
 * Facebook Page: Important announcements about PyTorch. https://www.facebook.com/pytorch
 * For brand guidelines, please visit our website at [pytorch.org](https://pytorch.org/)
 

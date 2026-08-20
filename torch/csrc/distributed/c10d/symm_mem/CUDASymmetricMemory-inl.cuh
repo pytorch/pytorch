@@ -63,7 +63,7 @@ __device__ __forceinline__ size_t global_timer_ns() {
   return clock64() / MI300_FREQ_GHZ;
 #else
   size_t val;
-  asm volatile("mov.u64 %0, %globaltimer;" : "=l"(val) : : "memory");
+  asm volatile("mov.u64 %0, %%globaltimer;" : "=l"(val) : : "memory");
   return val;
 #endif
 }
@@ -116,7 +116,7 @@ inline void check_channel(int channel, int world_size, size_t signal_pad_size) {
   TORCH_CHECK(
       channel >= 0,
       "channel for barrier(), put_signal() and wait_signal() ",
-      "must be greater than 0 (got ",
+      "must be non-negative (got ",
       channel,
       ")");
   const size_t num_channels =
@@ -171,6 +171,141 @@ inline void check_channel(int channel, int world_size, size_t signal_pad_size) {
       trap();
     }
   }
+}
+
+#if defined(USE_ROCM) || !defined(NVCC_SUPPORTS_MULTICAST)
+__device__ __forceinline__ void multimem_red_add1_release_u32(uint32_t* addr) {
+  (void)addr;
+  CUDA_KERNEL_ASSERT(false);
+}
+
+__device__ __forceinline__ uint32_t ld_acquire_sys_u32(uint32_t* addr) {
+  (void)addr;
+  CUDA_KERNEL_ASSERT(false);
+  return 0;
+}
+
+__device__ __forceinline__ void red_sub_relaxed_sys_u32(
+    uint32_t* addr,
+    uint32_t val) {
+  (void)addr;
+  (void)val;
+  CUDA_KERNEL_ASSERT(false);
+}
+#else
+__device__ __forceinline__ void multimem_red_add1_release_u32(uint32_t* addr) {
+  asm("multimem.red.release.sys.global.add.u32 [%0], 1;"
+      :
+      : "l"(addr)
+      : "memory");
+}
+
+__device__ __forceinline__ uint32_t ld_acquire_sys_u32(uint32_t* addr) {
+  ::cuda::atomic_ref<uint32_t, ::cuda::thread_scope_system> ref(*addr);
+  return ref.load(::cuda::std::memory_order_acquire);
+}
+
+__device__ __forceinline__ void red_sub_relaxed_sys_u32(
+    uint32_t* addr,
+    uint32_t val) {
+  asm("red.relaxed.sys.global.add.u32 [%0], %1;"
+      :
+      : "l"(addr), "r"(0U - val)
+      : "memory");
+}
+#endif
+
+__device__ __forceinline__ bool wait_wrap_ge_u32(
+    uint32_t* addr,
+    uint32_t val,
+    size_t timeout_ms) {
+  size_t deadline = global_timer_ns() + timeout_ms * ns_per_ms;
+  while (ld_acquire_sys_u32(addr) < val) {
+    if (timeout_ms != 0 && global_timer_ns() > deadline) {
+      return false;
+    }
+  }
+  return true;
+}
+
+[[maybe_unused]] static __global__ void multimem_barrier_kernel(
+    uint32_t* local_signal_pad,
+    uint32_t* mc_signal_pad,
+    int channel,
+    int rank,
+    int world_size,
+    size_t timeout_ms) {
+  if (threadIdx.x == 0) {
+    auto local_flag_ptr = local_signal_pad + world_size * channel;
+    auto mc_flag_ptr = mc_signal_pad + world_size * channel;
+    multimem_red_add1_release_u32(mc_flag_ptr);
+    auto wait_success = wait_wrap_ge_u32(
+        local_flag_ptr, static_cast<uint32_t>(world_size), timeout_ms);
+    if (!wait_success) {
+      printf(
+          "[FATAL] SymmetricMemory::barrier: rank %d failed to observe "
+          "multimem barrier completion on channel %d after %lu milliseconds\n",
+          rank,
+          channel,
+          timeout_ms);
+      trap();
+    }
+    red_sub_relaxed_sys_u32(
+        local_flag_ptr, static_cast<uint32_t>(world_size));
+  }
+}
+
+// One-sided signal send over the symmetric-memory signal pads, shared by the
+// backends that use the CAS-based signaling protocol. Sets the caller's slot
+// in dst_rank's signal pad; the matching wait_signal_kernel on dst_rank
+// consumes it.
+[[maybe_unused]] static __global__ void put_signal_kernel(
+    uint32_t** signal_pads,
+    int dst_rank,
+    int channel,
+    int rank,
+    int world_size,
+    size_t timeout_ms) {
+  if (threadIdx.x == 0) {
+    bool success = try_put_signal<std::memory_order_release>(
+        signal_pads[dst_rank] + world_size * channel + rank, timeout_ms);
+    if (!success) {
+      printf(
+          "[FATAL] SymmetricMemory::put_signal: rank %d failed to send signal "
+          "to rank %d on channel %d after %lu milliseconds\n",
+          rank,
+          dst_rank,
+          channel,
+          timeout_ms);
+      trap();
+    }
+  }
+}
+
+// Counterpart of put_signal_kernel: consumes the signal that src_rank set in
+// the caller's own signal pad, resetting the slot to zero.
+[[maybe_unused]] static __global__ void wait_signal_kernel(
+    uint32_t** signal_pads,
+    int src_rank,
+    int channel,
+    int rank,
+    int world_size,
+    size_t timeout_ms) {
+  if (threadIdx.x == 0) {
+    bool success = try_wait_signal<std::memory_order_acquire>(
+        signal_pads[rank] + world_size * channel + src_rank, timeout_ms);
+    if (!success) {
+      printf(
+          "[FATAL] SymmetricMemory::wait_signal: rank %d failed to receive signal "
+          "from rank %d on channel %d after %lu milliseconds\n",
+          rank,
+          src_rank,
+          channel,
+          timeout_ms);
+      trap();
+    }
+  }
+  __threadfence_system();
 }
 
 // Synchronizes blocks with matching blockIdx across participating devices.

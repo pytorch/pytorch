@@ -1308,8 +1308,10 @@ def _unpack_fast_types() -> tuple[type, ...]:
             variables.DequeVariable,
             variables.ListVariable,
             variables.ListIteratorVariable,
+            variables.DequeIteratorVariable,
             variables.RangeVariable,
             variables.SetVariable,
+            variables.FrozensetVariable,
             variables.TensorVariable,
             variables.TupleVariable,
         )
@@ -1534,6 +1536,12 @@ def make_cell(val: Any = None) -> types.CellType:
             f"Expected f.__closure__ to have exactly 1 element, got {len(f.__closure__)}"
         )
     return f.__closure__[0]
+
+
+def clear_cell(cell: types.CellType) -> None:
+    """Empty `cell` regardless of its current state (replays DELETE_DEREF)."""
+    cell.cell_contents = None
+    del cell.cell_contents
 
 
 def proxy_args_kwargs(args: Any, kwargs: Any) -> tuple[tuple[Any, ...], dict[str, Any]]:
@@ -5931,7 +5939,6 @@ def _is_tensorify_enabled() -> bool:
     return justknobs_check("pytorch/compiler:tensorify_python_scalars")
 
 
-@torch._disable_dynamo
 def record_pregraph_bytecode_enter() -> AbstractContextManager[None]:
     cm: AbstractContextManager[None] = (
         torch._C._profiler._RecordFunctionFast("Pregraph bytecode")
@@ -5942,9 +5949,31 @@ def record_pregraph_bytecode_enter() -> AbstractContextManager[None]:
     return cm
 
 
-@torch._disable_dynamo
 def record_pregraph_bytecode_exit(cm: AbstractContextManager[None]) -> None:
     cm.__exit__(None, None, None)
+
+
+# skip_code the two marker fns above: they are called from compiled bytecode
+# (behind PyCodegen's profiler gate) with the eval-frame callback active, so they
+# must not be traced. skip_code makes the eval-frame hook skip the frame via a
+# static flag with no per-call disable wrapper. Skip recursively (SKIP frame AND
+# callees) so nothing in the marker's dynamic extent is ever traced -- the same
+# guarantee the old @torch._disable_dynamo gave, but for free: unlike a disable
+# wrapper the recursive skip is just a flag with no per-call cost, so there is no
+# reason to leave callees traceable. The C set_code_exec_strategy is used directly
+# because torch._dynamo.disable / .skip cannot be imported at utils import time
+# (circular import).
+_pregraph_marker_skip = torch._C._dynamo.eval_frame._FrameExecStrategy(
+    torch._C._dynamo.eval_frame._FrameAction.SKIP,
+    torch._C._dynamo.eval_frame._FrameAction.SKIP,
+)
+torch._C._dynamo.eval_frame.set_code_exec_strategy(
+    record_pregraph_bytecode_enter.__code__, _pregraph_marker_skip
+)
+torch._C._dynamo.eval_frame.set_code_exec_strategy(
+    record_pregraph_bytecode_exit.__code__, _pregraph_marker_skip
+)
+del _pregraph_marker_skip
 
 
 # Active `torch._dynamo.override_cudagraphs` override, set/restored at RUNTIME by
