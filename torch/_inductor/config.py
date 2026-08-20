@@ -7,9 +7,9 @@ import torch
 import torch._inductor.custom_graph_pass
 from torch._environment import is_fbcode
 from torch.utils._config_module import (
+    alias_fields_from,
     Config,
     get_tristate_env,
-    inherit_fields_from,
     install_config_module,
 )
 
@@ -2682,8 +2682,11 @@ class cutlass:
     enable_caching_codegen: bool = True
 
 
-@inherit_fields_from(cutlass)
-class cuda(cutlass):
+# cutlass fields not overridden below are aliased to `cutlass.*`: reads resolve
+# to the cutlass entry and writes mutate it, so `cuda`, `xpu` and `cutlass` share
+# those values (they are not isolated). Fields defined here stay independent.
+@alias_fields_from(cutlass)
+class cuda:
     # CUDA arch to use for CUDA template kernel compilation.
     # e.g. "70", "75", "80", "90", etc.
     # When arch is None, Inductor uses torch.cuda.get_device_capability(0).
@@ -2709,8 +2712,10 @@ class cuda(cutlass):
     enable_ptxas_info = False
 
 
-@inherit_fields_from(cutlass)
-class xpu(cutlass):
+# See the note on `cuda` above: unoverridden cutlass fields are aliased to
+# `cutlass.*` and thus shared, not copied.
+@alias_fields_from(cutlass)
+class xpu:
     # Xe arch to use for SYCL kernel compilation.
     # eg. 12, 20, which corresponding to Xe12(PVC) and Xe20 (BMG)
     arch: str | None = None
@@ -3025,8 +3030,8 @@ _save_config_ignore: list[str] = [
 _cache_config_ignore_prefix: list[str] = [
     # trace functions are not relevant to config caching
     "trace",
-    # uses absolute path
-    "cuda.cutlass_dir",
+    # uses absolute path (cuda.cutlass_dir aliases cutlass.cutlass_dir, so it is
+    # skipped from serialization and needs no entry here)
     "cutlass.cutlass_dir",
     "xpu.cutlass_dir",
     # not relevant
