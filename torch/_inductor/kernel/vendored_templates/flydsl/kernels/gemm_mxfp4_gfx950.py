@@ -51,6 +51,13 @@ MXFP4_MFMA_K = 128
 MXFP4_ELEMS_PER_BYTE = 2
 GFX950_WAVE_SIZE = 64
 GFX950_DMA_BYTES = 16
+# BufferCopyLDS32b moves one dword per lane. It is the widest direct-to-LDS
+# copy usable for the scale tile: the 128b atom needs its 16-byte granule
+# contiguous in global memory, i.e. 512 | block_k, which 6 of the 13 champion
+# configs fail. (BufferCopyLDS64b must not be used -- FlyDSL 0.3.0 has no
+# verifier for it, so it constructs silently and then fails instruction
+# selection, i.e. the copy never happens.)
+GFX950_SCALE_DMA_BYTES = 4
 GFX950_LDS_CAPACITY = 163840
 GFX950_NUM_XCD = 8
 GFX950_MAX_BLOCK_THREADS = 1024
@@ -83,6 +90,10 @@ class MXFP4GemmParams:
     # None means "same as stages", which reproduces the symmetric kernel.
     stages_a: int = None
     stages_b: int = None
+    # Autotune dimension: 1 stages the E8M0 scales through LDS, 0 keeps the
+    # in-register lane-group transpose. Part of the kernel identity, so the two
+    # variants get separate cache entries.
+    lds_scale: int = 0
 
     def __cache_signature__(self):
         return (
@@ -116,7 +127,18 @@ class MXFP4GemmDerived:
     granules_per_row: int
     ldg_a_iters: int
     ldg_b_iters: int
+    # Tile DMA plus scale DMA, in program order. The pipeline schedule counts
+    # load instructions, and the scale copies are issued immediately after the
+    # tile copies for the same K tile, so they simply add to that operand's cost.
+    dma_a_iters: int
+    dma_b_iters: int
     ldg_wait_count: int
+    lds_scale: bool
+    sc_a_iters: int
+    sc_b_iters: int
+    sc_a_bytes: int
+    sc_b_bytes: int
+    scale_row_bytes: int
     a_stage_bytes: int
     b_stage_bytes: int
     smem_bytes: int
@@ -211,6 +233,7 @@ def mxfp4_gemm_derived(
     stages_a: int = None,
     stages_b: int = None,
     k: int = None,
+    lds_scale_req: int = 0,
 ) -> MXFP4GemmDerived:
     """Validate a tile config and return its derived quantities.
 
@@ -284,26 +307,57 @@ def mxfp4_gemm_derived(
         )
     ldg_a_iters = (block_m * block_k_bytes) // dma_bytes_per_pass
     ldg_b_iters = (block_n * block_k_bytes) // dma_bytes_per_pass
-    ldg_wait_count = ldg_a_iters + ldg_b_iters
 
     a_stage_bytes = block_m * block_k_bytes
     b_stage_bytes = block_n * block_k_bytes
 
+    # ---- LDS-staged E8M0 scales -------------------------------------------
+    # The global scale path costs the loop body at both ends. Each dword load
+    # serves four MMA repeats, but row_base carries lane_row, so a wave's 64
+    # lanes read 64 DIFFERENT scale rows -- 64 distinct cache lines per
+    # instruction, which at 64,128,512 is 67% of the loop's L1 traffic. Then a
+    # three-swap permlane transpose plus a per-lane shift turns those dwords
+    # into one word per (repeat, K step): 64 instructions at 128,128,512, the
+    # same count as the MFMAs themselves, and they drag 24 v_mov and 15 hazard
+    # s_nop along with them.
+    #
+    # Staging the tile's scales in LDS collapses both. The tile is fetched once
+    # cooperatively by a linear direct-to-LDS DMA, and each lane then does one
+    # ds_read_u8 per (repeat, K step) -- which lands the E8M0 exponent in bits
+    # 7:0, exactly the byte the scaled MFMA reads at opsel 0, so there is no
+    # shift, no mask and no transpose. The address is a loop-invariant per-lane
+    # base plus a compile-time constant, so it folds into the instruction's
+    # offset field and costs no address arithmetic either.
+    #
+    # It is not free: the ds_read_u8 results are live where the transpose's
+    # were rematerialisable, which costs registers. Configs where that does not
+    # fit fall back below rather than spilling.
+    scale_row_bytes = block_k // MXFP4_SCALE_BLOCK_K
+    sc_bytes_per_pass = block_threads * GFX950_SCALE_DMA_BYTES
+    sc_a_bytes = block_m * scale_row_bytes
+    sc_b_bytes = block_n * scale_row_bytes
+    # The scale DMA has to cover its tile exactly, for the same reason the tile
+    # DMA does: a partial pass would need predication the barrier accounting
+    # cannot express.
+    scale_dma_exact = (
+        sc_a_bytes % sc_bytes_per_pass == 0 and sc_b_bytes % sc_bytes_per_pass == 0
+    )
+
+    # The pipeline depth is chosen exactly as it would be WITHOUT the scale
+    # region, and the scale region is then only taken if it fits in whatever
+    # headroom is left. Letting it buy space by dropping a B stage was measured
+    # and is a clear loss: on the three champion configs whose tiles already sit
+    # at the 163840 cap, stages_b 3 -> 2 turned a +2..+5% scale win into
+    # -4.6% / -6.9% / -12.0%. The kernel's own reason is in the stages_b comment
+    # above -- B's extra buffer is what makes the K-tile boundary a counted wait
+    # instead of a full vmcnt(0) drain, and that is worth more than the scales.
     if stages_b is None:
-        # Give B one staged buffer more than A when every precondition holds.
-        # B's DMA lands last in program order, so deepening only B is what turns
-        # the K-tile boundary from a full vmcnt(0) drain into a counted wait.
-        #
-        # Every failure mode falls back to the symmetric depth rather than
-        # raising, because raising would drop a tile config that used to be
-        # valid and a shape whose autotune winner it was would silently fall
-        # back to ATen.
         stages_b = stages
-        deeper = stages_a * a_stage_bytes + (stages + 1) * b_stage_bytes
         deeper_ok = (
             k is not None
-            and deeper <= GFX950_LDS_CAPACITY
-            and (max(stages_a, stages + 1) - 2) * ldg_wait_count < 63
+            and stages_a * a_stage_bytes + (stages + 1) * b_stage_bytes
+            <= GFX950_LDS_CAPACITY
+            and (max(stages_a, stages + 1) - 2) * (ldg_a_iters + ldg_b_iters) < 63
         )
         if deeper_ok:
             try:
@@ -315,14 +369,59 @@ def mxfp4_gemm_derived(
             else:
                 stages_b = stages + 1
 
-    smem_bytes = stages_a * a_stage_bytes + stages_b * b_stage_bytes
-    if smem_bytes > GFX950_LDS_CAPACITY:
+    tile_bytes = stages_a * a_stage_bytes + stages_b * b_stage_bytes
+    if tile_bytes > GFX950_LDS_CAPACITY:
         raise ValueError(
             "staged LDS buffers exceed the device shared-memory capacity: "
             f"stages_a={stages_a}, stages_b={stages_b}, block_m={block_m}, "
-            f"block_n={block_n}, block_k={block_k}, smem_bytes={smem_bytes}, "
+            f"block_n={block_n}, block_k={block_k}, smem_bytes={tile_bytes}, "
             f"capacity={GFX950_LDS_CAPACITY}"
         )
+
+    # lds_scale_req is an autotune dimension, not a heuristic: 0 keeps the
+    # in-register transpose, 1 demands the LDS path. Requesting a path the
+    # config cannot express raises, so the two variants never collapse onto the
+    # same kernel and the search space carries no duplicates.
+    #
+    # It has to be searched rather than derived. The dominant term is LDS
+    # occupancy -- a scale region that pushes workgroups-per-CU from 2 to 1 cost
+    # -12% to -38% -- but that is not sufficient: the SAME tile 64,64,512 gained
+    # +13.0% at 256x4096x4096 and lost 11.9% at 4096^3, because at the first
+    # shape the grid already limited occupancy to 1 WG/CU so the LDS ceiling
+    # never bound. Two further configs regress with no occupancy change at all,
+    # and mma_m_repeat does not separate the sample either (m_repeat 8 gained
+    # 11.1%, m_repeat 2 lost 11.9%). Gating on a rule that does not fit the
+    # measurements would be worse than letting autotune decide.
+    lds_scale = scale_dma_exact and bool(lds_scale_req)
+    if lds_scale_req and not scale_dma_exact:
+        raise ValueError(
+            "LDS-staged scales need each scale tile to cover a whole DMA pass: "
+            f"block_m={block_m}, block_n={block_n}, block_k={block_k}, "
+            f"block_threads={block_threads}"
+        )
+    sc_a_iters = sc_a_bytes // sc_bytes_per_pass if lds_scale else 0
+    sc_b_iters = sc_b_bytes // sc_bytes_per_pass if lds_scale else 0
+    scale_bytes = stages_a * sc_a_bytes + stages_b * sc_b_bytes if lds_scale else 0
+    if lds_scale and tile_bytes + scale_bytes > GFX950_LDS_CAPACITY:
+        raise ValueError(
+            "LDS-staged scales do not fit beside the staged tiles: "
+            f"tile_bytes={tile_bytes}, scale_bytes={scale_bytes}, "
+            f"capacity={GFX950_LDS_CAPACITY}"
+        )
+
+    dma_a_iters = ldg_a_iters + sc_a_iters
+    dma_b_iters = ldg_b_iters + sc_b_iters
+    ldg_wait_count = dma_a_iters + dma_b_iters
+    # The scale DMA lengthens the in-order vmcnt chain, so the wait budget has
+    # to be rechecked against it -- and given up rather than raised, since the
+    # config is perfectly valid without the scale region.
+    if lds_scale and (max(stages_a, stages_b) - 2) * ldg_wait_count >= 63:
+        raise ValueError(
+            "the scale DMA lengthens the in-order vmcnt chain past the wait "
+            "budget for this pipeline depth"
+        )
+
+    smem_bytes = tile_bytes + scale_bytes
     # The exact wait counts need k_tiles, so the >= 63 check lives in
     # mxfp4_pipeline_schedule; this is the shape-independent upper bound.
     if (max(stages_a, stages_b) - 2) * ldg_wait_count >= 63:
@@ -337,7 +436,15 @@ def mxfp4_gemm_derived(
         granules_per_row=granules_per_row,
         ldg_a_iters=ldg_a_iters,
         ldg_b_iters=ldg_b_iters,
+        dma_a_iters=dma_a_iters,
+        dma_b_iters=dma_b_iters,
         ldg_wait_count=ldg_wait_count,
+        lds_scale=lds_scale,
+        sc_a_iters=sc_a_iters,
+        sc_b_iters=sc_b_iters,
+        sc_a_bytes=sc_a_bytes,
+        sc_b_bytes=sc_b_bytes,
+        scale_row_bytes=scale_row_bytes,
         a_stage_bytes=a_stage_bytes,
         b_stage_bytes=b_stage_bytes,
         smem_bytes=smem_bytes,
@@ -365,6 +472,7 @@ def make_mxfp4_param_and_validate(m, n, k, out_dtype, gemm_config):
     stages_b = gemm_config.get("STAGES_B")
     stages_a = None if stages_a is None else int(stages_a)
     stages_b = None if stages_b is None else int(stages_b)
+    lds_scale = int(gemm_config.get("LDS_SCALE", 0))
     try:
         derived = mxfp4_gemm_derived(
             block_m,
@@ -377,6 +485,7 @@ def make_mxfp4_param_and_validate(m, n, k, out_dtype, gemm_config):
             stages_a,
             stages_b,
             k=k,
+            lds_scale_req=lds_scale,
         )
     except Exception:
         return None
@@ -392,8 +501,8 @@ def make_mxfp4_param_and_validate(m, n, k, out_dtype, gemm_config):
             k // block_k,
             derived.stages_a,
             derived.stages_b,
-            derived.ldg_a_iters,
-            derived.ldg_b_iters,
+            derived.dma_a_iters,
+            derived.dma_b_iters,
         )
     except Exception:
         return None
@@ -412,6 +521,7 @@ def make_mxfp4_param_and_validate(m, n, k, out_dtype, gemm_config):
         group_m=group_m,
         stages_a=stages_a,
         stages_b=stages_b,
+        lds_scale=lds_scale,
     )
 
 
@@ -425,6 +535,7 @@ def make_mxfp4_gemm_kernel_name(param: MXFP4GemmParams) -> str:
         f"_s{param.stages}_mw{param.m_waves}_nw{param.n_waves}"
         f"_g{param.group_m}"
         f"_sa{sa}_sb{sb}"
+        f"_ls{param.lds_scale}"
     )
 
 
@@ -455,6 +566,7 @@ def make_mxfp4_scaled_mm_gfx950(
     group_m: int = 0,
     stages_a: int = None,
     stages_b: int = None,
+    lds_scale: int = 0,
 ):
     """Build a tiled gfx950 MXFP4 scaled GEMM launcher for one tile config.
 
@@ -474,6 +586,7 @@ def make_mxfp4_scaled_mm_gfx950(
         stages_a,
         stages_b,
         k=k,
+        lds_scale_req=lds_scale,
     )
     stages_a = d.stages_a
     stages_b = d.stages_b
@@ -496,7 +609,7 @@ def make_mxfp4_scaled_mm_gfx950(
         wrap_a,
         wrap_b,
     ) = mxfp4_pipeline_schedule(
-        k_tiles, stages_a, stages_b, d.ldg_a_iters, d.ldg_b_iters
+        k_tiles, stages_a, stages_b, d.dma_a_iters, d.dma_b_iters
     )
 
     if out_dtype == "bfloat16":
@@ -591,10 +704,22 @@ def make_mxfp4_scaled_mm_gfx950(
 
         # Sized in elements; fx.Array converts with the 4-bit element width, so
         # the allocation is block_m * block_k_bytes bytes per staged buffer.
-        @fx.struct
-        class SharedStorage:
-            a: fx.Array[fx.Float4E2M1FN, stages_a * block_m * block_k, 16]
-            b: fx.Array[fx.Float4E2M1FN, stages_b * block_n * block_k, 16]
+        if const_expr(d.lds_scale):
+
+            @fx.struct
+            class SharedStorage:
+                a: fx.Array[fx.Float4E2M1FN, stages_a * block_m * block_k, 16]
+                b: fx.Array[fx.Float4E2M1FN, stages_b * block_n * block_k, 16]
+                # E8M0 bytes, one per 32 elements, staged on the same schedule.
+                sca: fx.Array[fx.Uint8, stages_a * d.sc_a_bytes, 16]
+                scb: fx.Array[fx.Uint8, stages_b * d.sc_b_bytes, 16]
+
+        else:
+
+            @fx.struct
+            class SharedStorage:
+                a: fx.Array[fx.Float4E2M1FN, stages_a * block_m * block_k, 16]
+                b: fx.Array[fx.Float4E2M1FN, stages_b * block_n * block_k, 16]
 
         storage = fx.SharedAllocator().allocate(SharedStorage).peek()
         smem_a = storage.a.ptr
@@ -604,6 +729,9 @@ def make_mxfp4_scaled_mm_gfx950(
         # write side gets its own byte-typed iterator over the same allocation.
         smem_a_bytes = fx.recast_iter(fx.Uint8, storage.a.ptr)
         smem_b_bytes = fx.recast_iter(fx.Uint8, storage.b.ptr)
+        if const_expr(d.lds_scale):
+            smem_sca = fx.recast_iter(fx.Uint8, storage.sca.ptr)
+            smem_scb = fx.recast_iter(fx.Uint8, storage.scb.ptr)
 
         def make_flat_buffer(tensor, elems):
             flat = fx.Tensor(
@@ -798,6 +926,52 @@ def make_mxfp4_scaled_mm_gfx950(
                 if i < ldg_iters - 1:
                     lds_ptr = lds_ptr + fx.Int32(block_threads * GFX950_DMA_BYTES)
 
+        if const_expr(d.lds_scale):
+            sc_dma_atom = fx.make_copy_atom(fx.rocdl.BufferCopyLDS32b(), 32)
+            sc_lds_atom = fx.make_copy_atom(fx.UniversalCopy8b(), fx.Uint8)
+            # Each wave writes its own 64-lane * 4-byte chunk; the hardware
+            # supplies the per-lane 4-byte stride within it.
+            sc_wave_offset = rocdl.readfirstlane(
+                fx.Int64.ir_type,
+                fx.Int64(
+                    fx.Int32(tid)
+                    // fx.Int32(GFX950_WAVE_SIZE)
+                    * fx.Int32(GFX950_WAVE_SIZE * GFX950_SCALE_DMA_BYTES)
+                ),
+            )
+
+        def async_load_scale(gmem, smem, stage_bytes, sc_iters, rows_base, k_tile,
+                             stage):
+            """Linear direct-to-LDS copy of one K tile's E8M0 scales.
+
+            No swizzle: the read side gathers single bytes, so the only thing a
+            swizzle would buy is bank spreading, and the write side is linear by
+            construction (the DMA lays lane i at lds_ptr + i * 4).
+            """
+            lds_ptr = (
+                smem + stage * fx.Int32(stage_bytes) + fx.Int32(sc_wave_offset)
+            )
+            for i in range_constexpr(sc_iters):
+                lin = (
+                    fx.Int32(i * block_threads) + fx.Int32(tid)
+                ) * fx.Int32(GFX950_SCALE_DMA_BYTES)
+                row = lin // fx.Int32(d.scale_row_bytes)
+                col = lin % fx.Int32(d.scale_row_bytes)
+                src_offset = (
+                    (rows_base + row) * fx.Int32(scale_k)
+                    + k_tile * fx.Int32(d.scale_row_bytes)
+                    + col
+                )
+                fx.copy(
+                    sc_dma_atom,
+                    fx.slice(gmem, (None, src_offset)),
+                    fx.make_view(lds_ptr, fx.make_layout(1, 1)),
+                )
+                if i < sc_iters - 1:
+                    lds_ptr = lds_ptr + fx.Int32(
+                        block_threads * GFX950_SCALE_DMA_BYTES
+                    )
+
         def async_load_a(k_tile, stage):
             async_load_tile(
                 a_flat,
@@ -809,6 +983,14 @@ def make_mxfp4_scaled_mm_gfx950(
                 stage,
                 a_lds_layout_bytes,
             )
+            # Issued immediately after the tile copy for the same K tile, which
+            # is what lets the pipeline schedule just add sc_a_iters to this
+            # operand's cost: vmcnt is in-order.
+            if const_expr(d.lds_scale):
+                async_load_scale(
+                    sa_flat, smem_sca, d.sc_a_bytes, d.sc_a_iters,
+                    m_base, k_tile, stage,
+                )
 
         def async_load_b(k_tile, stage):
             async_load_tile(
@@ -821,6 +1003,11 @@ def make_mxfp4_scaled_mm_gfx950(
                 stage,
                 b_lds_layout_bytes,
             )
+            if const_expr(d.lds_scale):
+                async_load_scale(
+                    sb_flat, smem_scb, d.sc_b_bytes, d.sc_b_iters,
+                    n_base, k_tile, stage,
+                )
 
         def load_scale_word(scale, row_global, scale_col):
             scale_offset = fx.Int32(row_global) * fx.Int32(scale_k) + fx.Int32(
@@ -1006,12 +1193,76 @@ def make_mxfp4_scaled_mm_gfx950(
                     )
             return av, bv
 
-        def mma_stage(k_tile, mid):
+        if const_expr(d.lds_scale):
+            # row_base already carries lane_row; scale_group is this lane's
+            # K-block. Both are loop-invariant, so this whole expression is
+            # hoisted and every read below differs from it only by a
+            # compile-time constant that folds into ds_read_u8's offset field.
+            sc_lane_base_a = (
+                a_row_base * fx.Int32(d.scale_row_bytes) + scale_group
+            )
+            sc_lane_base_b = (
+                b_row_base * fx.Int32(d.scale_row_bytes) + scale_group
+            )
+
+        def lds_scale_read(base_bytes, dyn_base, repeat_stride, n_repeat):
+            """Scale words indexed [repeat * k_halves + kh], one ds_read_u8 each.
+
+            ds_read_u8 zero-extends the E8M0 byte into bits 7:0, which is the
+            byte the scaled MFMA reads at opsel 0 -- so there is no shift, no
+            mask, and no lane-group transpose. LLVM does not fuse adjacent byte
+            reads, so the count is exactly (m_repeat + n_repeat) * k_halves.
+            """
+            words = []
+            for r in range_constexpr(n_repeat):
+                for kh in range_constexpr(d.k_halves):
+                    off = dyn_base + fx.Int32(
+                        r * repeat_stride * d.scale_row_bytes
+                        + kh * (MXFP4_MFMA_K // MXFP4_SCALE_BLOCK_K)
+                    )
+                    reg = fx.make_rmem_tensor(1, fx.Uint8)
+                    fx.copy(
+                        sc_lds_atom,
+                        fx.make_view(
+                            fx.add_offset(base_bytes, off), fx.make_layout(1, 1)
+                        ),
+                        reg,
+                    )
+                    words.append(fx.get_scalar(reg[0]).to(fx.Int32))
+            return words
+
+        def mma_stage(k_tile, mid, cur_a, cur_b):
             """Run one K-tile's MFMAs. `mid` performs the tile's fragment reads
             and direct-to-LDS DMA and returns the fragments; it runs between
             issuing the scale loads and consuming them so those loads get the
             whole DMA block as latency shadow.
             """
+            if const_expr(d.lds_scale):
+                av, bv = mid()
+                sa_words = lds_scale_read(
+                    smem_sca,
+                    sc_lane_base_a + cur_a * fx.Int32(d.sc_a_bytes),
+                    m_repeat_stride,
+                    d.mma_m_repeat,
+                )
+                sb_words = lds_scale_read(
+                    smem_scb,
+                    sc_lane_base_b + cur_b * fx.Int32(d.sc_b_bytes),
+                    n_repeat_stride,
+                    d.mma_n_repeat,
+                )
+                for kh in range_constexpr(d.k_halves):
+                    for ni in range_constexpr(d.mma_n_repeat):
+                        for mi in range_constexpr(d.mma_m_repeat):
+                            scaled_mma(
+                                frag_C[(None, 0), mi, ni],
+                                av[kh * d.mma_m_repeat + mi],
+                                bv[kh * d.mma_n_repeat + ni],
+                                sa_words[mi * d.k_halves + kh],
+                                sb_words[ni * d.k_halves + kh],
+                            )
+                return
+
             if const_expr(packed_unit_scale):
                 col_base = k_tile * fx.Int32(block_k // MXFP4_MFMA_K)
                 a_regs = packed_unit_issue(
@@ -1157,7 +1408,7 @@ def make_mxfp4_scaled_mm_gfx950(
                 async_load_b(tb, write_b)
                 return frags
 
-            mma_stage(k_tile, _mid)
+            mma_stage(k_tile, _mid, cur_a, cur_b)
 
         # Drain: exactly one peeled tile. Everything it consumes is already in
         # flight, so it issues no loads and only has to walk vmcnt down.
@@ -1166,7 +1417,7 @@ def make_mxfp4_scaled_mm_gfx950(
         cur_a = fx.Int32(kt % stages_a)
         cur_b = fx.Int32(kt % stages_b)
         __barrier(tail_waits[0])
-        mma_stage(k_tile, lambda: load_fragments(cur_a, cur_b))
+        mma_stage(k_tile, lambda: load_fragments(cur_a, cur_b), cur_a, cur_b)
 
         frag_C_out = fx.make_fragment_like(frag_C, out_elem)
         frag_C_out.store(frag_C.load().to(out_elem))
@@ -1188,6 +1439,7 @@ def make_mxfp4_scaled_mm_gfx950(
             group_m=group_m,
             stages_a=stages_a,
             stages_b=stages_b,
+            lds_scale=lds_scale,
         )
     )
 

@@ -206,6 +206,11 @@ class FlyDSLMXFP4Config:
     BLOCK_M_WARPS: int = 2
     BLOCK_N_WARPS: int = 2
     GROUP_M: int = 0
+    # 1 stages the E8M0 block scales through LDS and reads each one back with a
+    # single ds_read_u8; 0 keeps the in-register lane-group transpose. Searched
+    # rather than derived -- see the comment in mxfp4_gemm_derived. Declared
+    # last and defaulted so the 7-tuples in the default list stay valid.
+    LDS_SCALE: int = 0
 
 
 class FlyDSLMXFP4ConfigDict(TypedDict):
@@ -216,6 +221,7 @@ class FlyDSLMXFP4ConfigDict(TypedDict):
     BLOCK_M_WARPS: int
     BLOCK_N_WARPS: int
     GROUP_M: int
+    LDS_SCALE: int
 
 
 FlyDSLMXFP4ConfigArgs = tuple[int, int, int, int, int, int, int]
@@ -236,6 +242,7 @@ def _check_mxfp4_gemm_config(gemm_config: dict[str, int]) -> None:
         m_waves=int(gemm_config["BLOCK_M_WARPS"]),
         n_waves=int(gemm_config["BLOCK_N_WARPS"]),
         group_m=int(gemm_config["GROUP_M"]),
+        lds_scale_req=int(gemm_config.get("LDS_SCALE", 0)),
     )
 
 
@@ -269,6 +276,10 @@ def get_exhaustive_mxfp4_gemm_configs() -> list[FlyDSLMXFP4Config]:
         "BLOCK_M_WARPS": [1, 2, 4],
         "BLOCK_N_WARPS": [1, 2, 4],
         "GROUP_M": [0, 4],
+        # Both variants are generated; a config that cannot express the LDS path
+        # raises in _check_mxfp4_gemm_config and is dropped, so this adds
+        # candidates only where the two are genuinely different kernels.
+        "LDS_SCALE": [0, 1],
     }
     keys = selections.keys()
     values = selections.values()
@@ -349,6 +360,25 @@ def get_default_mxfp4_gemm_configs() -> list[FlyDSLMXFP4Config]:
         (128, 128, 512, 2, 2, 2, 4),  # 1024x4096x4096
         (256, 256, 256, 2, 4, 4, 4),  # 4096x4096x4096
         (256, 256, 256, 2, 4, 2, 0),  # 8192x8192x8192
+        # LDS-staged block scales (8th field = LDS_SCALE). Each of these was
+        # measured against its own LDS_SCALE=0 twin in a paired A/B and won by
+        # more than the 3.4% noise floor of this box:
+        #   32,32,512,2,1,2,0   +18.5%  (128 x 4096 x 4096)
+        #   32,32,512,2,1,1,0   +18.9%  (4096^3)
+        #   32,64,512,2,1,2,0   +17.9%  (4096^3)
+        #   64,64,512,2,2,2,4   +13.0%  (256 x 4096 x 4096)
+        #   64,128,512,2,2,2,4  +11.5%  (512 x 4096 x 4096)
+        #   128,64,512,2,1,2,0  +11.1%  (4096^3)
+        #   64,128,512,2,2,2,0   +8.7%  (4096^3)
+        #   32,64,1024,3,1,4,0   +5.8%  (32 x 14336 x 4096)
+        (32, 32, 512, 2, 1, 2, 0, 1),
+        (32, 32, 512, 2, 1, 1, 0, 1),
+        (32, 64, 512, 2, 1, 2, 0, 1),
+        (64, 64, 512, 2, 2, 2, 4, 1),
+        (64, 128, 512, 2, 2, 2, 4, 1),
+        (128, 64, 512, 2, 1, 2, 0, 1),
+        (64, 128, 512, 2, 2, 2, 0, 1),
+        (32, 64, 1024, 3, 1, 4, 0, 1),
     ]
     # Tuple order must match the FlyDSLMXFP4Config field declaration order.
     configs = [FlyDSLMXFP4Config(*args) for args in tile_tuples]

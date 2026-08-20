@@ -28,6 +28,7 @@ _mxfp4_param = MXFP4GemmParams(
     m_waves=BLOCK_M_WARPS,
     n_waves=BLOCK_N_WARPS,
     group_m=GROUP_M,
+    lds_scale=LDS_SCALE,
 )
 _mxfp4_launcher = make_mxfp4_scaled_mm_gfx950(
     m=GEMM_M,
@@ -41,6 +42,7 @@ _mxfp4_launcher = make_mxfp4_scaled_mm_gfx950(
     m_waves=BLOCK_M_WARPS,
     n_waves=BLOCK_N_WARPS,
     group_m=GROUP_M,
+    lds_scale=LDS_SCALE,
 )
 _mxfp4_executor = None
 _mxfp4_init_lock = threading.Lock()
