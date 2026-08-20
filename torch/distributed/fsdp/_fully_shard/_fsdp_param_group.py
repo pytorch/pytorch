@@ -406,6 +406,8 @@ class FSDPParamGroup:
                 all_gather_output=self._all_gather_output,
                 all_gather_event=self.device_handle.Event().record(),
                 all_gather_work=None,
+                all_gather_comm=self._all_gather_comm,
+                output_metadata=None,
                 param_all_gather_input_dtypes=[],
                 param_all_gather_input_numels=[],
                 all_gather_input_split_sizes=[],

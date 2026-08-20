@@ -24,6 +24,9 @@ class AllGatherResult(NamedTuple):
     all_gather_output: torch.Tensor
     all_gather_event: torch.Event | None
     all_gather_work: dist.distributed_c10d.Work | None
+    all_gather_comm: AllGather
+    # Opaque metadata returned by `AllGather.prepare_output`
+    output_metadata: object | None
     # For each parameter, the all-gather input dtype for each input
     param_all_gather_input_dtypes: list[list[torch.dtype]]
     # For each parameter, the all-gather input numel for each input
@@ -348,15 +351,27 @@ def foreach_all_gather(
             all_gather_inputs = [*chain.from_iterable(param_all_gather_inputs)]
         inp_split_sizes = [t.numel() for t in all_gather_inputs]
         all_gather_input_numel = sum(inp_split_sizes)
+        all_gather_comm.clear_output()
+        output_metadata = all_gather_comm.prepare_output(
+            inp_split_sizes,
+            all_gather_input_numel,
+            world_size,
+            dtype,
+            device,
+            fsdp_params,
+            param_all_gather_input_dtypes,
+            param_all_gather_input_numels,
+        )
         all_gather_output = all_gather_comm.allocate(
             (all_gather_input_numel * world_size,), dtype=dtype, device=device
         )
-        all_gather_input, all_gather_output = torch.ops.fsdp.all_gather_copy_in(
+        all_gather_input, all_gather_output = all_gather_comm.copy_in(
             all_gather_inputs,
             all_gather_output,
             inp_split_sizes,
             all_gather_input_numel,
             rank,
+            output_metadata,
         )
         del param_all_gather_inputs
     all_gather_stream.wait_stream(all_gather_copy_in_stream)
@@ -372,6 +387,8 @@ def foreach_all_gather(
             all_gather_output,
             all_gather_event,
             all_gather_work,
+            all_gather_comm,
+            output_metadata,
             param_all_gather_input_dtypes,
             param_all_gather_input_numels,
             inp_split_sizes,
@@ -433,20 +450,43 @@ def foreach_all_gather_copy_out(
     fsdp_params: list[FSDPParam],
     group: dist.ProcessGroup,
 ) -> None:
-    (
-        all_gather_output,
-        all_gather_event,
-        all_gather_work,
-        param_all_gather_input_dtypes,
-        param_all_gather_input_numels,
-        all_gather_input_split_sizes,
-    ) = all_gather_result
-    _dtype, device = all_gather_output.dtype, all_gather_output.device
+    all_gather_output = all_gather_result.all_gather_output
+    all_gather_event = all_gather_result.all_gather_event
+    all_gather_work = all_gather_result.all_gather_work
+    device = all_gather_output.device
     device_handle = _get_device_handle(device.type)
     if all_gather_event is not None:  # sync op
         device_handle.current_stream().wait_event(all_gather_event)
     if isinstance(all_gather_work, dist.distributed_c10d.Work):  # async op
         all_gather_work.wait()
+
+    def default_finalize() -> None:
+        _default_all_gather_copy_out(all_gather_result, fsdp_params, group)
+
+    all_gather_result.all_gather_comm.finalize_outputs(
+        all_gather_result,
+        fsdp_params,
+        group,
+        default_finalize,
+    )
+
+
+@torch.no_grad()
+def _default_all_gather_copy_out(
+    all_gather_result: AllGatherResult,
+    fsdp_params: list[FSDPParam],
+    group: dist.ProcessGroup,
+) -> None:
+    (
+        all_gather_output,
+        _all_gather_event,
+        _all_gather_work,
+        _all_gather_comm,
+        _output_metadata,
+        param_all_gather_input_dtypes,
+        param_all_gather_input_numels,
+        all_gather_input_split_sizes,
+    ) = all_gather_result
     world_size, device = group.size(), all_gather_output.device
 
     split_with_sizes_out: list[torch.Tensor] = []
@@ -516,6 +556,88 @@ def foreach_all_gather_copy_out(
                 post_param_size[shard_dim] *= world_size
                 cat_out = target_all_gather_output.view(post_param_size)
                 torch.cat(chunks, dim=shard_dim, out=cat_out)
+
+
+def _can_use_param_contiguous_output(
+    fsdp_params: list[FSDPParam],
+    param_all_gather_input_dtypes: list[list[torch.dtype]],
+    param_all_gather_input_numels: list[list[int]],
+    all_gather_output_dtype: torch.dtype,
+) -> bool:
+    """Whether the no-copy parameter-contiguous output fast path is eligible.
+
+    This implements the RFC's conservative eligibility gate (pytorch/pytorch#
+    186601): the unsharded parameters become views aliasing the backend's
+    all-gather output, so the path is only taken when that aliasing is known to
+    be both correct and safe. Each excluded case below falls back to the
+    rank-major ``split_with_sizes_copy`` copy-out.
+    """
+    # Compiled autograd / Traceable FSDP2: the in-place aliasing and the
+    # Python-level view bookkeeping are not traceable today.
+    if _compile_active():
+        return False
+    if len(fsdp_params) != len(param_all_gather_input_numels):
+        return False
+    for fsdp_param, input_dtypes, input_numels in zip(
+        fsdp_params, param_all_gather_input_dtypes, param_all_gather_input_numels
+    ):
+        if (
+            # A single dtype-preserving input: more than one input, or an
+            # input whose dtype differs from the output (mixed precision / fp8),
+            # means the output is not a plain reinterpretation of the shard.
+            len(input_dtypes) != 1
+            or len(input_numels) != 1
+            or input_dtypes[0] != all_gather_output_dtype
+            # Only dim-0 sharding leaves each parameter contiguous in the
+            # ``[param][rank]`` output; Shard(i>0) still needs the chunk-cat.
+            or fsdp_param.fsdp_placement.dim != 0
+            # TP/EP DTensor params and the ``fsdp_pre_all_gather`` /
+            # ``fsdp_post_all_gather`` extensions (fp8, custom layouts, ...)
+            # transform the data around the collective, so the gathered output
+            # is not the parameter itself; the RFC excludes them until each is
+            # explicitly validated.
+            or fsdp_param.is_dtensor
+            or hasattr(fsdp_param._sharded_local_tensor, "fsdp_pre_all_gather")
+            or hasattr(fsdp_param._sharded_local_tensor, "fsdp_post_all_gather")
+            # Post-forward mesh reshard all-gathers over a different mesh; the
+            # backing-storage lifetime across that reshard is not yet validated.
+            or fsdp_param.sharded_state == ShardedState.SHARDED_POST_FORWARD
+        ):
+            return False
+    return True
+
+
+def _compile_active() -> bool:
+    """Whether FSDP is running under torch.compile or compiled autograd."""
+    if torch.compiler.is_compiling():
+        return True
+    from torch._dynamo.compiled_autograd import compiled_autograd_enabled
+
+    return compiled_autograd_enabled
+
+
+def _init_param_contiguous_outputs(
+    all_gather_output: torch.Tensor,
+    fsdp_params: list[FSDPParam],
+    param_all_gather_input_numels: list[list[int]],
+    world_size: int,
+) -> None:
+    """Point each parameter at its slice of a parameter-contiguous output.
+
+    Eligibility was already validated in ``foreach_all_gather``; here we only
+    carve ``all_gather_output`` into the per-parameter ``[param][rank]`` views.
+    """
+    output_offset = 0
+    for fsdp_param, input_numels in zip(fsdp_params, param_all_gather_input_numels):
+        output_numel = input_numels[0] * world_size
+        param_output = all_gather_output.narrow(0, output_offset, output_numel)
+        fsdp_param.init_param_contiguous_all_gather_outputs(param_output)
+        output_offset += output_numel
+    if output_offset != all_gather_output.numel():
+        raise AssertionError(
+            "parameter-contiguous all-gather output covered "
+            f"{output_offset} of {all_gather_output.numel()} elements"
+        )
 
 
 @torch.no_grad()

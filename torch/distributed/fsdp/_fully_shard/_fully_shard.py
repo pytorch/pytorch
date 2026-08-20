@@ -556,6 +556,11 @@ class FSDPModule:
         to have better control over the communication and memory usage.
         See `Comm` and `ReduceScatter` for details.
 
+        A backend can override ``AllGather.prepare_output``,
+        ``AllGather.copy_in``, and ``AllGather.finalize_outputs`` to decide how
+        FSDP materializes all-gather inputs and per-parameter outputs (see
+        `AllGather`).
+
         Args:
             comm (AllGather): Custom all-gather communication.
         """

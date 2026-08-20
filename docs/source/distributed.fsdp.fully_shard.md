@@ -161,6 +161,58 @@ Compared to PyTorch FSDP1 (`FullyShardedDataParallel`):
   details.
 
 
+### Custom Collective Backends
+
+FSDP2 issues its all-gather and reduce-scatter through pluggable backends. By
+default it uses `DefaultAllGather` / `DefaultReduceScatter`, but you can
+override them per module with `FSDPModule.set_custom_all_gather` and
+`FSDPModule.set_custom_reduce_scatter` to control how and where communication
+buffers are allocated and which collective is invoked. See `Comm` for the
+interface a backend implements.
+
+By default the all-gather output uses a rank-major (`[rank][param]`) layout and
+FSDP copies each parameter out into its own storage. A backend that can instead
+write a parameter-contiguous (`[param][rank]`) output may implement
+`AllGather.prepare_output` / `AllGather.copy_in` /
+`AllGather.finalize_outputs`. The backend can then choose an input layout that
+matches its output layout and view each unsharded parameter directly on top of
+its output buffer, skipping the copy-out and its extra allocation. Because the
+unsharded parameters alias the backend output, this fast path follows a
+conservative eligibility policy and is
+only used when every parameter has a single dtype-preserving all-gather input,
+is sharded on dim-0, and uses no all-gather extension or DTensor
+post-processing. It also
+falls back to the rank-major copy-out under `torch.compile` / compiled autograd
+(the aliasing is not traceable today) and during a post-forward mesh reshard.
+Backends can use the default `AllGather.can_use_param_contiguous_output` and
+`AllGather.init_param_contiguous_outputs` helpers to apply this policy and
+initialize the parameter views.
+
+A backend is selected explicitly per module with `set_custom_all_gather`. For
+example, the ROCm MORI SDMA backend (`MoriSdmaAllGather`) — which produces the
+parameter-contiguous output described above — is opted in as:
+
+```python
+from torch.distributed.fsdp import fully_shard
+from torch.distributed.fsdp._fully_shard._mori_sdma_allgather import (
+    MoriSdmaAllGather,
+)
+
+modules = [*model.layers, model]
+for module in modules:
+    fully_shard(module)
+
+# Route every FSDP all-gather through the MORI SDMA backend; the zero-copy
+# (parameter-contiguous) output is used wherever the group is eligible.
+all_gather = MoriSdmaAllGather(zero_copy_output=True)
+for module in modules:
+    module.set_custom_all_gather(all_gather)
+```
+
+`MoriSdmaAllGather` requires the optional ROCm MORI runtime/package and imports
+it lazily only when the backend is used.
+
+
 ```{eval-rst}
 .. currentmodule:: torch.distributed.fsdp
 ```
