@@ -10,8 +10,9 @@ phase 1 zero the 256 histogram bins one per thread).
      preserve input order, lowest-index ties win. Otherwise LDS atomic
      counters claim slots and ties resolve per run.
   3. Bitonic sort over ``sort_len`` slots; padding carries ordinal
-     INT32_MIN, which no float maps to. Comparator is lex
-     ``(ord desc, idx asc)`` when deterministic, ord-only otherwise.
+     INT32_MIN, which no float maps to. Comparator is always lexicographic
+     ``(ord desc, idx asc)``; ``deterministic`` only controls which
+     threshold-tied elements phase 2 gathers.
   4. Write K (value, index) pairs.
 
 ``topk_register`` - one wave per row. Each lane bitonic-sorts its
@@ -22,8 +23,9 @@ hit gmem.
 ``_f32_to_ord`` leaves positives alone and inverts all but the sign bit of
 negatives, so ordinals compare as signed i32 in float order; NaN
 canonicalises to INT32_MAX. Not injective on NaN, so ``decode_key``
-re-reads gmem for that case. Phase 1's xor by ``_RADIX_SIGN_BIT`` is
-separate: it puts the top byte in unsigned bin order for the scan.
+re-reads gmem for that case, but exact aten NaN payload/index selection is
+not guaranteed. Phase 1's xor by ``_RADIX_SIGN_BIT`` is separate: it puts
+the top byte in unsigned bin order for the scan.
 
 ``_make_topk_storage`` unions ``s_hist``, the phase-2 counters, ``s_scan``
 and ``s_keys`` - they alias, each live only within its phase. Anything
@@ -97,7 +99,7 @@ def _make_topk_storage(sort_len: int, block_threads: int):
 
     @fx.union
     class PhaseStorage:
-        s_hist: Array[Int32, 256, 16]
+        s_hist: Array[Int32, _N_HIST_BINS, 16]
         s_counters: CounterStorage
         s_scan: Array[Int32, block_threads + 1, 16]
         s_keys: Array[Int64, sort_len, 16]
@@ -162,7 +164,7 @@ def _build_radix_select_topk_module(n: int, k: int, deterministic: bool, arch: s
         s_idxs = storage.s_idxs.peek().view(fx.make_layout(sort_len, 1))
 
         def load_vec_f32(idx):
-            r = fx.make_rmem_tensor(4, Float32)
+            r = fx.make_rmem_tensor(_VEC, Float32)
             fx.copy_atom_call(copy_atom_v, fx.slice(input_div, (None, idx)), r)
             return fx.memref_load_vec(r)
 
@@ -476,7 +478,10 @@ def _build_register_topk_module(n: int, k: int, arch: str, rows_per_cta: int = 2
     # power of two, with threads_per_row = 32 or 64.
     group = max(k, _VEC)
     if vec % group or group % _VEC:
-        raise AssertionError(f"vec={vec} and group={group} must divide by _VEC")
+        raise AssertionError(
+            f"group={group} must divide vec={vec}, and "
+            f"_VEC={_VEC} must divide group={group}"
+        )
     group_loads = group // _VEC
     num_groups = vec // group
     num_stages_group = int(math.log2(group))

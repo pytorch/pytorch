@@ -4,7 +4,11 @@ import unittest
 
 import torch
 import torch.backends.python_native as pn
-from torch._native.ops.topk.flydsl_impl import _REGISTER_KS as _impl_register_ks
+from torch._native import flydsl_utils as fu
+from torch._native.ops.topk.flydsl_impl import (
+    _REGISTER_KS as _impl_register_ks,
+    _SUPPORTED_ARCHES,
+)
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import (
@@ -28,8 +32,6 @@ def _unsupported_environment_reason() -> str | None:
     if not TEST_CUDA or torch.version.hip is None:
         return "ROCm required"
 
-    from torch._native import flydsl_utils as fu
-
     if fu.check_native_jit_disabled():
         return "native DSL overrides are disabled via TORCH_DISABLE_NATIVE_JIT"
     if not fu.runtime_available():
@@ -37,9 +39,7 @@ def _unsupported_environment_reason() -> str | None:
     if not fu._version_is_ok():
         return f"FlyDSL {fu.runtime_version()} is outside the supported release"
 
-    from torch._native.ops.topk.flydsl_impl import _is_supported_arch
-
-    if not _is_supported_arch(torch.cuda.current_device()):
+    if not fu._is_supported_arch(torch.cuda.current_device(), _SUPPORTED_ARCHES):
         return "FlyDSL TopK override requires gfx950"
     return None
 
@@ -108,9 +108,7 @@ class TestFlyDSLTopKGates(TestCase):
     def test_int32_buffer_span(
         self, rows_m: int, n: int, itemsize: int, expected: bool
     ):
-        from torch._native.ops.topk.flydsl_impl import _fits_int32_buffer_span
-
-        self.assertEqual(_fits_int32_buffer_span(rows_m, n, itemsize), expected)
+        self.assertEqual(fu._fits_int32_buffer_span(rows_m, n, itemsize), expected)
 
 
 @unittest.skipIf(_UNSUPPORTED_REASON is not None, str(_UNSUPPORTED_REASON))
@@ -156,6 +154,14 @@ class TestFlyDSLTopK(TestCase):
         x = make_tensor((_test_m(), _test_n(k)), device="cuda", dtype=torch.float32)
         self._assert_topk_matches_aten(x, k)
 
+    def test_register_correctness_with_odd_rows(self):
+        k = 8
+        rows = _test_m()
+        if rows % 2 == 0:
+            rows += 1
+        x = make_tensor((rows, _test_n(k)), device="cuda", dtype=torch.float32)
+        self._assert_topk_matches_aten(x, k)
+
     @parametrize("k", (8, 64, 257, 704, 1023))
     def test_correctness_with_duplicates(self, k: int):
         torch.manual_seed(1)
@@ -176,7 +182,7 @@ class TestFlyDSLTopK(TestCase):
         self._assert_topk_matches_aten(x, k)
 
     @parametrize("k", (8, 512))
-    def test_correctness_with_nan(self, k: int):
+    def test_nan_count_and_finite_subsequence_match_aten(self, k: int):
         from torch._native.ops.topk.flydsl_kernels import topk_cache_info
 
         torch.manual_seed(10)
@@ -196,6 +202,8 @@ class TestFlyDSLTopK(TestCase):
         self.assertEqual(topk_cache_info(_expected_kernel(k, n)).misses, 1)
         gathered = torch.gather(x, -1, got_i)
         self.assertEqual(gathered.view(torch.int32), got_v.view(torch.int32))
+        # NaN ordinals are canonicalized, so payload and index choices may
+        # differ while the NaN count and finite subsequence still match aten.
         self.assertEqual(got_v.isnan().sum(dim=-1), ref_v.isnan().sum(dim=-1))
         ref_finite = ref_v.masked_select(~ref_v.isnan()).reshape(m, -1)
         got_finite = got_v.masked_select(~got_v.isnan()).reshape(m, -1)
@@ -361,7 +369,7 @@ class TestFlyDSLTopK(TestCase):
         self.assertEqual(torch.gather(x, -1, got_i), got_v)
 
     @parametrize("k", (64, 257, 704, 1023))
-    def test_deterministic_mode_matches_aten_with_heavy_ties(self, k: int):
+    def test_deterministic_radix_matches_aten_with_heavy_ties(self, k: int):
         from torch._native.ops.topk.flydsl_kernels import topk_cache_info
 
         torch.manual_seed(6)
@@ -450,10 +458,9 @@ class TestFlyDSLTopK(TestCase):
     )
     @parametrize("k", (8, 704))
     def test_each_device_gets_its_own_specialization(self, k: int):
-        from torch._native.ops.topk.flydsl_impl import _is_supported_arch
         from torch._native.ops.topk.flydsl_kernels import topk_cache_info
 
-        if not all(_is_supported_arch(index) for index in (0, 1)):
+        if not all(fu._is_supported_arch(index, _SUPPORTED_ARCHES) for index in (0, 1)):
             self.skipTest("requires two gfx950 devices")
 
         old_device = torch.cuda.current_device()
