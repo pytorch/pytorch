@@ -1862,9 +1862,7 @@ class UserMethodVariable(UserFunctionVariable):
             return var.call_function(tx, call_args, kwargs)
 
         constant_implicit_args = (
-            self._constant_implicit_args(tx, args, kwargs)
-            if self.is_constant
-            else []
+            self._constant_implicit_args(tx, args, kwargs) if self.is_constant else []
         )
 
         # For nn.Module methods, redirecting to NNModuleVariable.call_method for optimized solution
@@ -2137,9 +2135,7 @@ def _is_stateless_namedtuple(value: Any) -> bool:
         return False
     if hasattr(value, "__dict__"):
         return False
-    return all(
-        not klass.__dict__.get("__slots__", ()) for klass in type(value).__mro__
-    )
+    return all(not klass.__dict__.get("__slots__", ()) for klass in type(value).__mro__)
 
 
 def _install_constant_arg_guards(

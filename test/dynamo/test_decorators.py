@@ -2037,9 +2037,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
             fn(torch.ones(4))
 
     @parametrize("kw_only", [False, True])
-    def test_assume_constant_result_specialize_args_dataclass_default(
-        self, kw_only
-    ):
+    def test_assume_constant_result_specialize_args_dataclass_default(self, kw_only):
         import dataclasses
 
         @dataclasses.dataclass
