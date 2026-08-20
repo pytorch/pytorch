@@ -4829,7 +4829,15 @@ def shift_dtype_check(fn_name, self, val):
         )
 
 
-@register_meta([aten.__rshift__.Tensor, aten.__rshift__.Scalar])
+@register_meta(
+    [
+        aten.__rshift__.Tensor,
+        aten.__rshift__.Scalar,
+        aten.__rshift__.Scalar_out,
+        aten.__rshift__.Tensor_out,
+    ]
+)
+@out_wrapper(exact_dtype=True)
 def meta_rshifts(self, other):
     shift_dtype_check("rshift", self, other)
     return elementwise_meta(
@@ -4837,7 +4845,15 @@ def meta_rshifts(self, other):
     )
 
 
-@register_meta([aten.__lshift__.Tensor, aten.__lshift__.Scalar])
+@register_meta(
+    [
+        aten.__lshift__.Tensor,
+        aten.__lshift__.Scalar,
+        aten.__lshift__.Scalar_out,
+        aten.__lshift__.Tensor_out,
+    ]
+)
+@out_wrapper(exact_dtype=True)
 def meta_lshifts(self, other):
     shift_dtype_check("lshift", self, other)
     return elementwise_meta(
