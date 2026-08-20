@@ -30,8 +30,10 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_device_type import (
+    Capability,
     instantiate_device_type_tests,
     onlyAccelerator,
+    requires_capabilities,
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -341,6 +343,7 @@ class ReplicateTest(MultiProcessInductorTestCase):
 class ReplicateTestGPU(ReplicateTest):
     hw_classification = HardwareClassification.CUDA
 
+    @requires_capabilities(Capability.distributed.backend)
     @skip_if_lt_x_gpu(2)
     @torch._inductor.config.patch(
         reorder_for_locality=False, reorder_for_peak_memory=False
@@ -348,6 +351,7 @@ class ReplicateTestGPU(ReplicateTest):
     def test_compile_gpu(self, device):
         self._test_compile(no_sync=False, checkpoint=False, device=device)
 
+    @requires_capabilities(Capability.distributed.backend)
     @skip_if_lt_x_gpu(2)
     @torch._inductor.config.patch(
         reorder_for_locality=False, reorder_for_peak_memory=False
@@ -355,6 +359,7 @@ class ReplicateTestGPU(ReplicateTest):
     def test_compile_gpu_ac(self, device):
         self._test_compile(no_sync=False, checkpoint=True, device=device)
 
+    @requires_capabilities(Capability.distributed.backend)
     @skip_if_lt_x_gpu(2)
     def test_compile_bf16(self, device):
         major, _ = torch.cuda.get_device_capability()
@@ -371,6 +376,7 @@ class ReplicateTestGPU(ReplicateTest):
 
         self._test_compile(no_sync=False, setup_func=setup, device=device)
 
+    @requires_capabilities(Capability.distributed.backend)
     @skip_if_lt_x_gpu(2)
     def test_compile_fp16(self, device):
         def setup(model, compiled_replicate_model, compiled_ddp_model) -> None:
@@ -385,6 +391,7 @@ class ReplicateTestGPU(ReplicateTest):
             no_sync=False, setup_func=setup, no_inductor=True, device=device
         )
 
+    @requires_capabilities(Capability.distributed.backend)
     @skip_if_lt_x_gpu(2)
     def test_compile_backward_only(self, device):
         self._test_compile(no_sync=False, no_compile_forward=True, device=device)
@@ -416,6 +423,7 @@ class DDP_TP_Test(InductorTestCase):
     @unittest.skip(
         "Temporarily disabled due to SymInt error: `unhashable type: non-nested SymInt`"
     )
+    @requires_capabilities(Capability.distributed.dtensor, Capability.distributed.backend)
     def test_ddp_tp(self, device):
         ref_model = Net()
         compiled_replicate_model = deepcopy(ref_model)
