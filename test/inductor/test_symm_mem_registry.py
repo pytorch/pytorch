@@ -12,7 +12,11 @@ from unittest.mock import patch
 import torch
 from torch._library.simple_registry import singleton, SymmMemArgsHolder
 from torch.library import Library  # noqa: SCOPED_LIBRARY
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
+)
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -350,6 +354,7 @@ class TestFunctionalOpCompileDevice(TestCase):
         torch._dynamo.reset()
         super().tearDown()
 
+    @requires_capabilities(Capability.lib.triton)
     def test_functional_op_compiles_with_symm_mem_args(self, device):
         """Test that a functional op with registered symm_mem_args compiles and runs."""
         lib = Library("test_func_symm", "DEF")  # noqa: SCOPED_LIBRARY
@@ -360,15 +365,9 @@ class TestFunctionalOpCompileDevice(TestCase):
         def meta_impl(input, group_name):
             return torch.empty_like(input)
 
-        def cuda_impl(input, group_name):
+        @torch.library.impl(lib, "my_functional_op", torch.device(device).type)
+        def device_impl(input, group_name):
             return input + 1.0
-
-        torch.library.impl(
-            "test_func_symm::my_functional_op",
-            torch.device(device).type,
-            cuda_impl,
-            lib=lib,
-        )
 
         def f_eager(x):
             return torch.ops.test_func_symm.my_functional_op(x, "test_group")
@@ -381,10 +380,10 @@ class TestFunctionalOpCompileDevice(TestCase):
 
         eager_result = f_eager(x.clone())
         compiled_result = f_compiled(x.clone())
-        torch.testing.assert_close(compiled_result, eager_result)
+        self.assertEqual(compiled_result, eager_result)
 
         expected = x + 1.0
-        torch.testing.assert_close(compiled_result, expected)
+        self.assertEqual(compiled_result, expected)
 
         # Verify the registration is visible in the registry
         entry = singleton.find("test_func_symm::my_functional_op")
@@ -392,6 +391,7 @@ class TestFunctionalOpCompileDevice(TestCase):
         self.assertTrue(entry.symm_mem_args.is_symm_mem_arg("input"))
         self.assertFalse(entry.symm_mem_args.is_symm_mem_arg("group_name"))
 
+    @requires_capabilities(Capability.lib.triton)
     def test_functional_op_with_multiple_symm_mem_args(self, device):
         """Test that multiple symm_mem args are registered and visible during compilation."""
         lib = Library("test_func_multi", "DEF")  # noqa: SCOPED_LIBRARY
@@ -404,16 +404,10 @@ class TestFunctionalOpCompileDevice(TestCase):
         def meta_impl(input, out, group_name):
             return torch.empty_like(input)
 
-        def cuda_impl(input, out, group_name):
+        @torch.library.impl(lib, "my_multi_arg_op", torch.device(device).type)
+        def device_impl(input, out, group_name):
             # use both symm_mem args to verify functionality
             return input + out
-
-        torch.library.impl(
-            "test_func_multi::my_multi_arg_op",
-            torch.device(device).type,
-            cuda_impl,
-            lib=lib,
-        )
 
         def f_eager(x, y):
             return torch.ops.test_func_multi.my_multi_arg_op(x, y, "test_group")
@@ -427,10 +421,10 @@ class TestFunctionalOpCompileDevice(TestCase):
 
         eager_result = f_eager(x.clone(), y.clone())
         compiled_result = f_compiled(x.clone(), y.clone())
-        torch.testing.assert_close(compiled_result, eager_result)
+        self.assertEqual(compiled_result, eager_result)
 
         expected = x + y
-        torch.testing.assert_close(compiled_result, expected)
+        self.assertEqual(compiled_result, expected)
 
         # Verify both args are registered
         entry = singleton.find("test_func_multi::my_multi_arg_op")
@@ -440,7 +434,7 @@ class TestFunctionalOpCompileDevice(TestCase):
 
 
 instantiate_device_type_tests(
-    TestFunctionalOpCompileDevice, globals(), except_for="cpu"
+    TestFunctionalOpCompileDevice, globals(), except_for="cpu", allow_xpu=True
 )
 
 
