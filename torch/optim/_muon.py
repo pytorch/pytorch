@@ -70,8 +70,17 @@ def _zeropower_via_newtonschulz(
     return ortho_grad
 
 
-def _adjust_lr(lr: float, adjust_lr_fn: str | None, param_shape: torch.Size) -> float:
-    """Default learning rate adjustment used by Muon."""
+def _adjust_lr(
+    lr: float,
+    adjust_lr_fn: str | None,
+    param_shape: torch.Size,
+    extra_scale_factor: float = 1.0,
+) -> float:
+    """Default learning rate adjustment used by Muon.
+
+    extra_scale_factor is a plain multiplier on top of the shape-derived ratio,
+    applied whatever adjust_lr_fn is in use. 1.0 leaves the adjustment alone.
+    """
     A, B = param_shape[:2]
 
     if adjust_lr_fn is None or adjust_lr_fn == "original":
@@ -83,7 +92,7 @@ def _adjust_lr(lr: float, adjust_lr_fn: str | None, param_shape: torch.Size) -> 
         adjusted_ratio = math.sqrt(A / B)
     else:
         adjusted_ratio = 1.0
-    return lr * adjusted_ratio
+    return lr * adjusted_ratio * extra_scale_factor
 
 
 class Muon(Optimizer):
@@ -98,6 +107,7 @@ class Muon(Optimizer):
         eps: float = EPS,
         ns_steps: int = DEFAULT_NS_STEPS,
         adjust_lr_fn: str | None = None,
+        extra_scale_factor: float = 1.0,
     ) -> None:
         if isinstance(lr, Tensor) and lr.numel() != 1:
             raise ValueError("Tensor lr must be 1-element")
@@ -115,6 +125,10 @@ class Muon(Optimizer):
             raise ValueError(
                 f"Adjust learning rate function {adjust_lr_fn} is not supported"
             )
+        if not 0.0 <= extra_scale_factor:
+            raise ValueError(
+                f"extra_scale_factor should be >= 0 but is: {extra_scale_factor}"
+            )
 
         defaults = {
             "lr": lr,
@@ -125,6 +139,7 @@ class Muon(Optimizer):
             "eps": eps,
             "ns_steps": ns_steps,
             "adjust_lr_fn": adjust_lr_fn,
+            "extra_scale_factor": extra_scale_factor,
         }
         super().__init__(params, defaults)
 
@@ -200,6 +215,7 @@ class Muon(Optimizer):
                 eps=group["eps"],
                 ns_steps=group["ns_steps"],
                 adjust_lr_fn=group["adjust_lr_fn"],
+                extra_scale_factor=group["extra_scale_factor"],
                 has_complex=has_complex,
             )
         return loss
@@ -215,7 +231,8 @@ Muon.__doc__ = (
                \mu \text{ (momentum)},\ \textit{nesterov}\in\{True,False\},\\
             &\hspace{13mm}(a,b,c)\ \text{ (NS coefficients)},\
                \varepsilon \text{ (epsilon)},\ k \text{ (NS steps)},\
-               \theta_0 \text{ (params)},\ f(\theta) \text{ (objective)} \\
+               s \text{ (extra scale factor)},\\
+            &\hspace{13mm}\theta_0 \text{ (params)},\ f(\theta) \text{ (objective)} \\
             &\textbf{initialize} : B_0 \leftarrow 0 \text{ (momentum buffer)} \\[-1.ex]
             &\rule{110mm}{0.4pt} \\
             &\textbf{for}\ t=1\ \textbf{to}\ \ldots\ \textbf{do} \\[0.25ex]
@@ -230,7 +247,7 @@ Muon.__doc__ = (
             &\hspace{5mm} \theta_t \leftarrow \theta_{t-1} - \gamma\,\lambda\,\theta_{t-1}
                \quad\text{(decoupled weight decay)} \\[0.25ex]
 
-            &\hspace{5mm} \gamma \leftarrow \mathrm{AdjustLR}\!\big(\gamma;\ \mathrm{shape}\!\big(\theta_t \big) \big) \\[0.25ex]
+            &\hspace{5mm} \gamma \leftarrow s\,\mathrm{AdjustLR}\!\big(\gamma;\ \mathrm{shape}\!\big(\theta_t \big) \big) \\[0.25ex]
             &\hspace{5mm} \theta_t \leftarrow \theta_t - \gamma\, O_t \\
             &\rule{110mm}{0.4pt} \\[-1.ex]
             &\mathbf{return}\ \theta_t \\[-1.ex]
@@ -262,6 +279,12 @@ Muon.__doc__ = (
     implementation, "match_rms_adamw", which refers to Moonshot's implementation, and "spectral_unclamped",
     which matches Bernstein's implementation. If `adjust_lr_fn` is not specified, the default is "original".
 
+    On top of whichever option is selected, `extra_scale_factor` :math:`s` is a plain multiplier on the
+    adjusted learning rate. It is orthogonal to `adjust_lr_fn` -- it scales whichever adjustment is in
+    use -- and lets you sweep the update scale without rewriting the shape-derived term, for instance to
+    recover a "match_rms_adamw" variant with a constant other than the hardcoded 0.2. The default of 1.0
+    leaves the adjustment alone.
+
     For further details regarding the algorithm we refer to `Muon: An optimizer for hidden layers in neural networks`_,
     `Muon is Scalable for LLM Training`_, and `Deriving Muon`_.
     """
@@ -280,6 +303,8 @@ Muon.__doc__ = (
         ns_steps (int, optional): number of Newton–Schulz iteration steps. (default: {DEFAULT_NS_STEPS})
         adjust_lr_fn (str, optional): function to adjust learning rate. One of "original", "match_rms_adamw", and "spectral_unclamped".
             If not specified, we will default to use "original". (default: None)
+        extra_scale_factor (float, optional): plain multiplier applied to the adjusted learning rate,
+            whatever `adjust_lr_fn` is in use. 1.0 leaves the adjustment alone. (default: 1.0)
 
     Example:
         >>> # xdoctest: +SKIP
@@ -328,6 +353,7 @@ def _single_tensor_muon(
     ns_steps: int,
     eps: float,
     adjust_lr_fn: str | None,
+    extra_scale_factor: float,
     has_complex: bool,
 ) -> None:
     lr = _to_scalar(lr)
@@ -345,7 +371,7 @@ def _single_tensor_muon(
 
         update = _zeropower_via_newtonschulz(update, ns_coefficients, ns_steps, eps)
 
-        adjusted_lr = _adjust_lr(lr, adjust_lr_fn, param.shape)
+        adjusted_lr = _adjust_lr(lr, adjust_lr_fn, param.shape, extra_scale_factor)
 
         param.mul_(1 - lr * weight_decay)
         param.add_(update, alpha=-adjusted_lr)
@@ -366,6 +392,7 @@ def muon(
     ns_steps: int,
     eps: float,
     adjust_lr_fn: str | None,
+    extra_scale_factor: float = 1.0,
     has_complex: bool,
 ) -> None:
     r"""Functional API that performs Muon algorithm computation.
@@ -389,5 +416,6 @@ def muon(
         ns_steps=ns_steps,
         eps=eps,
         adjust_lr_fn=adjust_lr_fn,
+        extra_scale_factor=extra_scale_factor,
         has_complex=has_complex,
     )
