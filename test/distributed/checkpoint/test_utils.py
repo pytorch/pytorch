@@ -24,13 +24,16 @@ from torch.distributed.checkpoint.utils import (
 )
 from torch.distributed.distributed_c10d import _object_to_tensor, _tensor_to_object
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_distributed import MultiProcContinuousTest
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
-    skip_but_pass_in_sandcastle_if,
     TEST_WITH_DEV_DBG_ASAN,
     TestCase,
+)
+from torch.testing._internal.distributed._tensor.common_dtensor import (
+    DTensorTestBase,
+    skip_if_lt_x_gpu,
+    with_comms,
 )
 from torch.testing._internal.distributed.distributed_utils import with_fake_comms
 
@@ -242,28 +245,17 @@ class TestReaderView(TestCase):
         self.assertEqual(ba, b"VWXYZ\0\0\0")
 
 
-class TestDistWrapper(MultiProcContinuousTest):
+class TestDistWrapper(DTensorTestBase):
     hw_classification = HardwareClassification.ACCELERATOR
-
-    @classmethod
-    def backend_str(cls) -> str:
-        return dist.get_default_backend_for_device(cls.device_type)
-
-    @property
-    def device(self) -> torch.device:
-        return self._dev
 
     @property
     def world_size(self):
         return min(4, torch.accelerator.device_count())
 
-    @skip_but_pass_in_sandcastle_if(
-        torch.accelerator.device_count() < 4,
-        "test requires 4+ accelerators",
-    )
-    def test_gather_object(self, device):
-        self._dev = torch.device(device, self.rank)
-        mesh_2d = dist.init_device_mesh(device, (2, self.world_size // 2))
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    def test_gather_object(self):
+        mesh_2d = dist.init_device_mesh(self.device_type, (2, self.world_size // 2))
         torch.random.manual_seed(dist.get_rank())
 
         dist_wrapper = _DistWrapper(
@@ -281,13 +273,10 @@ class TestDistWrapper(MultiProcContinuousTest):
         if gathered_objects != expected_objects:
             raise AssertionError(f"Expected {expected_objects}, got {gathered_objects}")
 
-    @skip_but_pass_in_sandcastle_if(
-        torch.accelerator.device_count() < 4,
-        "test requires 4+ accelerators",
-    )
-    def test_scatter_object(self, device):
-        self._dev = torch.device(device, self.rank)
-        mesh_2d = dist.init_device_mesh(device, (2, self.world_size // 2))
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    def test_scatter_object(self):
+        mesh_2d = dist.init_device_mesh(self.device_type, (2, self.world_size // 2))
         torch.random.manual_seed(dist.get_rank())
 
         dist_wrapper = _DistWrapper(
@@ -309,12 +298,9 @@ class TestDistWrapper(MultiProcContinuousTest):
                 f"Expected {expected_objects}, got {scattered_objects}"
             )
 
-    @skip_but_pass_in_sandcastle_if(
-        torch.accelerator.device_count() < 2,
-        "test requires 2+ accelerators",
-    )
-    def test_broadcast_object_with_nonzero_coordinator(self, device):
-        self._dev = torch.device(device, self.rank)
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    def test_broadcast_object_with_nonzero_coordinator(self):
         # Everybody uses WORLD, but src is coordinator_rank=1
         dist_wrapper = _DistWrapper(
             group=dist.group.WORLD,
@@ -331,15 +317,12 @@ class TestDistWrapper(MultiProcContinuousTest):
         if result != 1:
             raise AssertionError(f"Expected 1, got {result}")
 
-    @skip_but_pass_in_sandcastle_if(
-        torch.accelerator.device_count() < 4,
-        "test requires 4+ accelerators",
-    )
-    def test_broadcast_object_global_local_mismatch(self, device):
-        self._dev = torch.device(device, self.rank)
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    def test_broadcast_object_global_local_mismatch(self):
         # reproduces issue 152310
 
-        mesh_2d = dist.init_device_mesh(device, (2, self.world_size // 2))
+        mesh_2d = dist.init_device_mesh(self.device_type, (2, self.world_size // 2))
         dist_wrapper = _DistWrapper(
             group=mesh_2d.get_group(1),
             use_dist=True,
@@ -359,13 +342,10 @@ class TestDistWrapper(MultiProcContinuousTest):
         if got != expected:
             raise AssertionError(f"Expected {expected}, got {got}")
 
-    @skip_but_pass_in_sandcastle_if(
-        torch.accelerator.device_count() < 2,
-        "test requires 2+ accelerators",
-    )
-    def test_barrier(self, device):
-        self._dev = torch.device(device, self.rank)
-        mesh_2d = dist.init_device_mesh(device, (2, self.world_size // 2))
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    def test_barrier(self):
+        mesh_2d = dist.init_device_mesh(self.device_type, (2, self.world_size // 2))
         torch.random.manual_seed(dist.get_rank())
 
         dist_wrapper = _DistWrapper(
@@ -379,6 +359,7 @@ class TestDistWrapper(MultiProcContinuousTest):
 instantiate_device_type_tests(
     TestDistWrapper,
     globals(),
+    except_for=("cpu",),
 )
 
 if __name__ == "__main__":
