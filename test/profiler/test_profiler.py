@@ -3013,6 +3013,7 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
             )
 
     @onlyAccelerator
+    @skipIfRocm(msg="ROCm does not emit OVERHEAD activity records")
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_overhead_activities_own_no_device_time(self, device):
         """
