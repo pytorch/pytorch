@@ -13,8 +13,11 @@ from torch._inductor import aot_compile, ir
 from torch._inductor.codecache import WritableTempFile
 from torch._inductor.package import package_aoti
 from torch._inductor.test_case import run_tests, TestCase
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
+)
 from torch.testing._internal.common_utils import HardwareClassification, skipIfWindows
-from torch.testing._internal.inductor_utils import GPU_TYPE, requires_gpu
 from torch.testing._internal.torchbind_impls import (
     _empty_tensor_queue,
     init_torchbind_implementations,
@@ -374,10 +377,10 @@ class TestTorchbind(TestCase):
         result = optimized(*inputs)
         self.assertEqual(result, orig_res)
 
-    @requires_gpu()
+    @onlyAccelerator
     @torch._dynamo.config.patch("capture_dynamic_output_shape_ops", True)
     @torch._inductor.config.patch("graph_partition", True)
-    def test_torchbind_compile_gpu_op_symint_graph_partition(self):
+    def test_torchbind_compile_gpu_op_symint_graph_partition(self, device):
         class M(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -385,7 +388,7 @@ class TestTorchbind(TestCase):
 
             def forward(self, x):
                 a = torch.ops._TorchScriptTesting.takes_foo_tensor_return(self.attr, x)
-                a_cuda = a.to(device=GPU_TYPE)
+                a_cuda = a.to(device=device)
                 return a_cuda + 1
 
         m = M()
@@ -441,6 +444,9 @@ class TestTorchbind(TestCase):
         optimized = torch._inductor.aoti_load_package(pt2_path)
         result = optimized(*inputs)
         self.assertEqual(result, orig_res)
+
+
+instantiate_device_type_tests(TestTorchbind, globals(), allow_xpu=True)
 
 
 if __name__ == "__main__":
