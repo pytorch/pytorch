@@ -616,6 +616,7 @@ class TritonTemplateKernel(TritonKernel):
         always_freeze_layout: bool = False,
         index_dtype_override: str | None = None,
         template_local_reduction_tile: tuple[int, int] | None = None,
+        template_local_reduction_grid: tuple[str, str] | None = None,
     ) -> None:
         tma_2d = tma_store or tma_load_for_template_epilogue
         if tma_store:
@@ -709,6 +710,7 @@ class TritonTemplateKernel(TritonKernel):
         self.root_var_renames: dict[str, str] = {}
         self.template_local_reduction_block: tuple[int, int] | None = None
         self.template_local_reduction_tile = template_local_reduction_tile
+        self.template_local_reduction_grid = template_local_reduction_grid
 
         # When caching is enabled, the generated code is not dependent on the input nodes names, or
         # symbolic sizes names.
@@ -763,14 +765,7 @@ class TritonTemplateKernel(TritonKernel):
             return None
 
         nodes = [node for epilogue in epilogue_nodes for node in epilogue.get_nodes()]
-        block = TritonScheduling._template_local_reduction_block(
-            self.output_node, nodes
-        )
-        if block is None or not TritonScheduling._template_local_nodes_are_compatible(
-            self.output_node, block, nodes
-        ):
-            return None
-        return block
+        return TritonScheduling._template_local_reduction_block(self.output_node, nodes)
 
     def _template_local_range_trees(
         self,
@@ -788,8 +783,11 @@ class TritonTemplateKernel(TritonKernel):
         block_m, block_n = block
         groups_m = tile_m // block_m
         groups_n = tile_n // block_n
-        pid_m = sympy.Symbol("pid_m", integer=True, nonnegative=True)
-        pid_n = sympy.Symbol("pid_n", integer=True, nonnegative=True)
+        if self.template_local_reduction_grid is None:
+            raise AssertionError("expected template-local reduction grid")
+        grid_m, grid_n = self.template_local_reduction_grid
+        pid_m = sympy.Symbol(grid_m, integer=True, nonnegative=True)
+        pid_n = sympy.Symbol(grid_n, integer=True, nonnegative=True)
         is_reduction = node.is_reduction()
         range_trees = self.construct_range_trees(
             pid_cache=None,
@@ -2906,6 +2904,12 @@ class GeneratedCodeCache:
         self._cache.update({cache_key: entry})
 
 
+@dataclasses.dataclass(frozen=True)
+class TemplateLocalReductionConfig:
+    tile: Callable[[dict[str, Any]], tuple[int, int]]
+    grid: tuple[str, str]
+
+
 class TritonTemplate(KernelTemplate):
     """
     A Triton template is a template that can be used to generate a Triton kernel.
@@ -2925,7 +2929,7 @@ class TritonTemplate(KernelTemplate):
         cache_codegen_enabled_for_template=False,
         prologue_loads_all_inputs=False,
         always_freeze_layout: bool = False,
-        supports_template_local_reduction: bool = False,
+        template_local_reduction: TemplateLocalReductionConfig | None = None,
     ) -> None:
         super().__init__(name, hash=hashlib.sha256(source.encode("utf-8")).hexdigest())
         self.grid = grid
@@ -2949,7 +2953,7 @@ class TritonTemplate(KernelTemplate):
         # immediately instead of using layout constraints. This is used by
         # FlexAttention templates which require frozen layouts.
         self.always_freeze_layout = always_freeze_layout
-        self.supports_template_local_reduction = supports_template_local_reduction
+        self.template_local_reduction = template_local_reduction
 
     # When this flag is on, we ensure that the cached results and the generated result if cache
     # was not used are the same.
@@ -3065,8 +3069,13 @@ class TritonTemplate(KernelTemplate):
         defines.write(f"INDEX_DTYPE : tl.constexpr = {index_dtype}\n")
         defines = defines.getvalue()
         template_local_reduction_tile = (
-            (kwargs["BLOCK_M"], kwargs["BLOCK_N"])
-            if self.supports_template_local_reduction
+            self.template_local_reduction.tile(kwargs)
+            if self.template_local_reduction is not None
+            else None
+        )
+        template_local_reduction_grid = (
+            self.template_local_reduction.grid
+            if self.template_local_reduction is not None
             else None
         )
 
@@ -3086,6 +3095,7 @@ class TritonTemplate(KernelTemplate):
             "always_freeze_layout": self.always_freeze_layout,
             "index_dtype_override": index_dtype,
             "template_local_reduction_tile": template_local_reduction_tile,
+            "template_local_reduction_grid": template_local_reduction_grid,
         }
 
         if HAS_WARP_SPEC:

@@ -260,6 +260,36 @@ class TestMaxAutotune(TestCase):
         has_datacenter_blackwell_tma_device(),
         "Hopper persistent TMA template is shadowed on Blackwell",
     )
+    def test_persistent_tma_block_local_reduction_mixed_index_sibling(self):
+        def f(a, b):
+            mm = a @ b
+            transposed = mm.T + 1
+            reduced = mm.view(2, 128, 2, 128).amax((1, 3))
+            return transposed, reduced
+
+        a = torch.randn(256, 64, device=GPU_TYPE, dtype=torch.bfloat16)
+        b = torch.randn(64, 256, device=GPU_TYPE, dtype=torch.bfloat16)
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+                "triton.enable_persistent_tma_matmul": "1",
+                "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
+            }
+        ):
+            actual, code = run_and_get_code(torch.compile(f), a, b)
+
+        self.assertEqual(actual, f(a, b))
+        self.assertGreaterEqual(code[0].count("async_compile.triton"), 2)
+        FileCheck().check("block_local_xindex").run(code[0])
+
+    @unittest.skipIf(
+        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+    )
+    @unittest.skipIf(
+        has_datacenter_blackwell_tma_device(),
+        "Hopper persistent TMA template is shadowed on Blackwell",
+    )
     @parametrize(
         "case",
         (
@@ -278,6 +308,7 @@ class TestMaxAutotune(TestCase):
             "larger_tile_relu",
             "smaller_tile",
             "nondivisible_tile",
+            "disabled_epilogue",
         ),
     )
     def test_persistent_tma_block_local_reduction_cases(self, case):
@@ -325,6 +356,8 @@ class TestMaxAutotune(TestCase):
             "triton.enable_persistent_tma_matmul": "1",
             "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
         }
+        if case == "disabled_epilogue":
+            patches["epilogue_fusion"] = False
         stack = contextlib.ExitStack()
         tile = {
             "larger_tile_m": (256, 128),

@@ -157,6 +157,13 @@ class FusionResult:
         return FusionResult(callable_fn=callable_fn, future=future)
 
 
+@dataclasses.dataclass(frozen=True)
+class ReductionEpilogueFusion:
+    block: tuple[int, int]
+    prevalidated_dep_names: frozenset[str] = frozenset()
+    index_equivalent_dep_names: frozenset[str] = frozenset()
+
+
 @dataclasses.dataclass
 class PendingFusion:
     callable_fn: Callable[[], bool]
@@ -5786,16 +5793,20 @@ class Scheduler:
             from torch._inductor.codegen.simd import CantSplit
 
             backend = self.get_backend(device)
-            template_local_reduction = backend.can_fuse_reduction_epilogue(node1, node2)
+            reduction_epilogue = backend.analyze_reduction_epilogue(node1, node2)
+            reduction_block = (
+                reduction_epilogue.block if reduction_epilogue is not None else None
+            )
+            template_local_reduction = reduction_block is not None
 
             def choice_supports_fusion(choice: ir.ChoiceCaller) -> bool:
-                if template_local_reduction:
+                if reduction_block is not None:
                     if not isinstance(
                         choice, torch._inductor.select_algorithm.TritonTemplateCaller
                     ):
                         return False
                     if not backend.can_fuse_reduction_epilogue_choice(
-                        node1, node2, choice
+                        choice, reduction_block
                     ):
                         return False
                 # For prologue fusion we check if the underlying template of the choice
@@ -8206,12 +8217,18 @@ class Scheduler:
             node1.get_device()
         ).can_fuse_multi_outputs_template(node1, node2):
             return True
-        if (
-            node1.is_template() or isinstance(node1, FusedSchedulerNode)
-        ) and self.get_backend(node1.get_device()).can_fuse_reduction_epilogue(
-            node1, node2
-        ):
-            return True
+        reduction_epilogue = None
+        reduction_epilogue_supported = False
+        if node1.is_template() and node2.is_reduction():
+            backend = self.get_backend(node1.get_device())
+            reduction_epilogue = backend.analyze_reduction_epilogue(node1, node2)
+            reduction_epilogue_supported = reduction_epilogue is not None
+            if not reduction_epilogue_supported:
+                reduction_epilogue_supported = backend.can_fuse_reduction_epilogue(
+                    node1, node2
+                )
+                if reduction_epilogue_supported:
+                    return True
         if isinstance(node1, GroupedSchedulerNode) or isinstance(
             node2, GroupedSchedulerNode
         ):
@@ -8390,10 +8407,7 @@ class Scheduler:
             backend = self.get_backend(node1.get_device())
             if (
                 (node2.has_aliasing_or_mutation() and not atomic_add_mutation_epilogue)
-                or (
-                    node2.is_reduction()
-                    and not backend.can_fuse_reduction_epilogue(node1, node2)
-                )
+                or (node2.is_reduction() and not reduction_epilogue_supported)
                 or not _is_epilogue_fusion_enabled(node1)
             ):
                 why("template epilogue not satisfied")
@@ -8423,6 +8437,20 @@ class Scheduler:
             index_equivalent_dep_names = self._nested_index_equivalent_dep_names(
                 node1, node2
             )
+        prevalidated_dep_names: OrderedSet[str] | None = None
+        if reduction_epilogue is not None:
+            prevalidated_dep_names = OrderedSet(
+                self.mutation_renames.get(name, name)
+                for name in reduction_epilogue.prevalidated_dep_names
+            )
+            reduction_index_equivalent = OrderedSet(
+                self.mutation_renames.get(name, name)
+                for name in reduction_epilogue.index_equivalent_dep_names
+            )
+            if index_equivalent_dep_names is None:
+                index_equivalent_dep_names = reduction_index_equivalent
+            else:
+                index_equivalent_dep_names |= reduction_index_equivalent
         shared_data_score = self._score_fusion_memory_for_can_fuse(
             node1,
             node2,
@@ -8480,6 +8508,7 @@ class Scheduler:
                     node1,
                     node2,
                     index_equivalent_dep_names=index_equivalent_dep_names,
+                    prevalidated_dep_names=prevalidated_dep_names,
                 )
                 and V.choices.can_fuse_vertical(self, node1, node2, shared_data_score)
                 and self.get_backend(device).can_fuse_vertical(node1, node2)
@@ -8499,6 +8528,7 @@ class Scheduler:
                         node1,
                         node2,
                         index_equivalent_dep_names=index_equivalent_dep_names,
+                        prevalidated_dep_names=prevalidated_dep_names,
                     )
                     and V.choices.can_fuse_vertical(
                         self, node1, node2, shared_data_score
@@ -8518,6 +8548,7 @@ class Scheduler:
         node2: BaseSchedulerNode,
         *,
         index_equivalent_dep_names: OrderedSet[str] | None = None,
+        prevalidated_dep_names: OrderedSet[str] | None = None,
     ) -> bool:
         """
         Check if it is legal to fuse a consumer (node2) into a producer (node1).
@@ -8529,6 +8560,9 @@ class Scheduler:
         ``index_equivalent_dep_names`` relaxes write/read matching only for
         named producer outputs; the remaining intermediate-dependency checks
         still run normally.
+
+        ``prevalidated_dep_names`` identifies producer/consumer accesses whose
+        backend-specific index mapping was already proven by fusion analysis.
         """
         node1_buf_names = node1.get_buffer_names()
         why = WhyNoFuse(node1, node2)
@@ -8546,6 +8580,10 @@ class Scheduler:
             write_name = self.mutation_renames.get(cd.name, cd.name)
             remaining = remaining_deps_by_name.get(write_name)
             if remaining:
+                if prevalidated_dep_names and write_name in prevalidated_dep_names:
+                    remaining[:] = [
+                        dep for dep in remaining if not isinstance(dep, MemoryDep)
+                    ]
                 for rd in remaining:
                     if isinstance(cd, MemoryDep) and self.fusable_read_and_write(
                         rd.rename(self.mutation_renames),
@@ -10668,11 +10706,15 @@ class BaseScheduling:  # noqa: docstring_linter
     ) -> bool:
         return False
 
+    def analyze_reduction_epilogue(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> ReductionEpilogueFusion | None:
+        return None
+
     def can_fuse_reduction_epilogue_choice(
         self,
-        node1: BaseSchedulerNode,
-        node2: BaseSchedulerNode,
         choice: Any,
+        block: tuple[int, int],
     ) -> bool:
         return False
 
