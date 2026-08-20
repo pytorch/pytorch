@@ -47,7 +47,13 @@ from torch.testing._internal.common_dist_composable import (
     UnitModule,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TEST_WITH_DEV_DBG_ASAN,
+    TestCase,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     MultiProcessTestCase,
@@ -716,34 +722,42 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         2. We can load optimizer state dict with/without flattening
         3. The resulting optimizer state is equivalent regardless of flattening options
         """
-        for flatten_to_save, flatten_to_load in product([True, False], repeat=2):
-            device_mesh = init_device_mesh(device_type, (self.world_size,))
-            model = CompositeParamModel(device=torch.device(device_type))
-            fsdp_model = fully_shard(copy.deepcopy(model), mesh=device_mesh)
-            fsdp_optim = torch.optim.AdamW(fsdp_model.parameters())
-            batch = torch.rand(8, 100, device=device_type)
-            fsdp_model(batch).sum().backward()
-            fsdp_optim.step()
-            fsdp_optim.zero_grad()
+        for Optim, optim_kwargs in (
+            (torch.optim.AdamW, {}),
+            (torch.optim.SGD, {"lr": 0.1, "momentum": 0.0}),
+        ):
+            for flatten_to_save, flatten_to_load in product([True, False], repeat=2):
+                device_mesh = init_device_mesh(device_type, (self.world_size,))
+                model = CompositeParamModel(device=torch.device(device_type))
+                fsdp_model = fully_shard(copy.deepcopy(model), mesh=device_mesh)
+                fsdp_optim = Optim(fsdp_model.parameters(), **optim_kwargs)
+                batch = torch.rand(8, 100, device=device_type)
+                fsdp_model(batch).sum().backward()
+                fsdp_optim.step()
+                fsdp_optim.zero_grad()
 
-            # Get optimizer state dict with/without flattening option
-            osd = get_optimizer_state_dict(
-                fsdp_model,
-                fsdp_optim,
-                options=StateDictOptions(flatten_optimizer_state_dict=flatten_to_save),
-            )
+                # Get optimizer state dict with/without flattening option
+                osd = get_optimizer_state_dict(
+                    fsdp_model,
+                    fsdp_optim,
+                    options=StateDictOptions(
+                        flatten_optimizer_state_dict=flatten_to_save
+                    ),
+                )
 
-            # Create a new optimizer and load the state from osd
-            fsdp_optim2 = torch.optim.AdamW(fsdp_model.parameters())
-            set_optimizer_state_dict(
-                fsdp_model,
-                optimizers=fsdp_optim2,
-                optim_state_dict=osd,
-                options=StateDictOptions(flatten_optimizer_state_dict=flatten_to_load),
-            )
+                # Create a new optimizer and load the state from osd
+                fsdp_optim2 = Optim(fsdp_model.parameters(), **optim_kwargs)
+                set_optimizer_state_dict(
+                    fsdp_model,
+                    optimizers=fsdp_optim2,
+                    optim_state_dict=osd,
+                    options=StateDictOptions(
+                        flatten_optimizer_state_dict=flatten_to_load
+                    ),
+                )
 
-            # Verify the loaded optimizer state matches the original
-            self.assertEqual(fsdp_optim.state_dict(), fsdp_optim2.state_dict())
+                # Verify the loaded optimizer state matches the original
+                self.assertEqual(fsdp_optim.state_dict(), fsdp_optim2.state_dict())
 
     def _test_deprecate_partial(self) -> None:
         model = CompositeParamModel(device=torch.device(device_type))
@@ -1109,6 +1123,32 @@ class TestNoComm(MultiProcessTestCase):
         set_optimizer_state_dict(model, optim, osd)
         set_optimizer_state_dict(model, optim, optim.state_dict())
 
+
+class TestFlattenOptimStateDict(TestCase):
+    @parametrize("momentum", [0.0, 0.9])
+    def test_flattened_osd_sgd(self, momentum: float) -> None:
+        model = nn.Sequential(
+            nn.Linear(2, 2, bias=False),
+            nn.Linear(2, 2, bias=False),
+        )
+        optim = torch.optim.SGD(model.parameters(), lr=0.1, momentum=momentum)
+        model(torch.randn(2, 2)).sum().backward()
+        optim.step()
+        optim.zero_grad()
+
+        opts = StateDictOptions(flatten_optimizer_state_dict=True)
+        osd = get_optimizer_state_dict(model, optim, options=opts)
+        has_state_keys = any(k.startswith("state.") for k in osd)
+        self.assertEqual(has_state_keys, momentum != 0.0)
+
+        new_optim = torch.optim.SGD(model.parameters(), lr=0.1, momentum=momentum)
+        set_optimizer_state_dict(model, new_optim, osd, options=opts)
+        self.assertEqual(optim.state_dict(), new_optim.state_dict())
+        if momentum == 0.0:
+            self.assertEqual(new_optim.state, {})
+
+
+instantiate_parametrized_tests(TestFlattenOptimStateDict)
 
 if __name__ == "__main__":
     run_tests()
