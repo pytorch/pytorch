@@ -285,7 +285,7 @@ def _create_symbolic_context_for_tensor(
             dim_range = _get_dim_range(t, i)
             if dim_range is not None:
                 constraint_sizes[i] = StrictMinMaxConstraint(  # type: ignore[call-overload]
-                    vr=_dim_range_to_value_ranges(dim_range, default_min=2),
+                    vr=_dim_range_to_value_ranges(dim_range),
                     warn_only=True,
                 )
         elif i in getattr(t, "_dynamo_dynamic_indices", {}):
@@ -298,7 +298,7 @@ def _create_symbolic_context_for_tensor(
                 constraint_sizes[i] = RelaxedUnspecConstraint(warn_only=False)  # type: ignore[call-overload]
             else:
                 constraint_sizes[i] = StrictMinMaxConstraint(  # type: ignore[call-overload]
-                    vr=_dim_range_to_value_ranges(dim_range, default_min=2),
+                    vr=_dim_range_to_value_ranges(dim_range),
                     warn_only=False,
                 )
         else:

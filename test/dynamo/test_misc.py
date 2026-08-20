@@ -10845,6 +10845,15 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(opt_fn(x), fn(x))
         self.assertEqual(compiled_ranges, ["static", (2, 5), (2, int_oo), (3, 5)])
 
+        # Re-marking the same tensor object also recompiles. The guard holds a snapshot
+        # of the declared ranges, so mutating the tensor it was compiled with cannot make
+        # the stale graph look like a match.
+        torch._dynamo.maybe_mark_dynamic(x, 0, min=3, max=4)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(
+            compiled_ranges, ["static", (2, 5), (2, int_oo), (3, 5), (3, 4)]
+        )
+
     # Translation validation changes the exception type, don't run with it: the
     # constraint violation is raised by create_symbol, nested inside the recorded
     # top level _create_symbolic_sizes_strides_storage_offset event. recording.py pops
@@ -10877,6 +10886,79 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             ConstraintViolationError, r"6 not in range \[2, 5\]"
         ):
             opt_fn(x)
+
+    def test_maybe_mark_dynamic_half_open_range_small_hint(self):
+        compiled_ranges = []
+
+        def fn(x):
+            return x.cos() * x.shape[0]
+
+        opt_fn = torch.compile(
+            fn, backend=self._range_recording_backend(compiled_ranges)
+        )
+
+        # A half open range must not imply a lower bound the user never declared: a size
+        # 1 input satisfies max=8 and specializes, which this API allows, rather than
+        # raising "1 not in range [2, 8]".
+        x = torch.randn(1)
+        torch._dynamo.maybe_mark_dynamic(x, 0, max=8)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(compiled_ranges, ["static"])
+
+        # For a hint that does not specialize, the shape env still narrows the lower
+        # bound to 2 on its own, since 0 and 1 are specialized for backed sizes.
+        x = torch.randn(4)
+        torch._dynamo.maybe_mark_dynamic(x, 0, max=8)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(compiled_ranges, ["static", (2, 8)])
+
+    # Translation validation changes the exception type, don't run with it
+    @torch.fx.experimental._config.patch(translation_validation=False)
+    def test_mark_dynamic_half_open_range_small_hint(self):
+        compiled_ranges = []
+
+        def fn(x):
+            return x.cos() * x.shape[0]
+
+        opt_fn = torch.compile(
+            fn, backend=self._range_recording_backend(compiled_ranges)
+        )
+
+        # Same rule as maybe_mark_dynamic: max=8 declares no lower bound, the shape env
+        # narrows it to 2 on its own for a backed size.
+        x = torch.randn(4)
+        torch._dynamo.mark_dynamic(x, 0, max=8)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(compiled_ranges, [(2, 8)])
+
+        # min alone leaves the upper bound open.
+        x = torch.randn(4)
+        torch._dynamo.mark_dynamic(x, 0, min=3)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(compiled_ranges, [(2, 8), (3, int_oo)])
+
+        # Where maybe_mark_dynamic accepts a size 1 hint by specializing, mark_dynamic
+        # errors, since it does not allow the dim to specialize.
+        x = torch.randn(1)
+        torch._dynamo.mark_dynamic(x, 0, max=8)
+        with self.assertRaises(ConstraintViolationError):
+            opt_fn(x)
+
+    @torch.fx.experimental._config.patch(backed_size_oblivious=True)
+    def test_maybe_mark_dynamic_half_open_range_backed_size_oblivious(self):
+        compiled_ranges = []
+
+        def fn(x):
+            return x.cos() * x.shape[0]
+
+        # Nothing specializes 0 and 1 here, so the dim stays dynamic from 0.
+        x = torch.randn(1)
+        torch._dynamo.maybe_mark_dynamic(x, 0, max=8)
+        opt_fn = torch.compile(
+            fn, backend=self._range_recording_backend(compiled_ranges)
+        )
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(compiled_ranges, [(0, 8)])
 
     def test_maybe_mark_dynamic_with_partial_range(self):
         for kwargs, expected in (
@@ -10915,26 +10997,131 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(opt_fn(x), fn(x))
         self.assertEqual(compiled_ranges, [(3, 4)])
 
-    def test_maybe_mark_dynamic_conflicting_with_mark_dynamic(self):
-        # The two APIs disagree on whether the range is enforced, marking the same
-        # dim with both is rejected regardless of the order.
+    def test_mark_dynamic_range_cleared_by_bare_remark(self):
+        # Last call wins: a call without min/max declares no range for the dim, which
+        # drops a range an earlier call declared. The attribute goes away with the last
+        # entry, so "no range declared" has a single representation.
+        for mark in (torch._dynamo.mark_dynamic, torch._dynamo.maybe_mark_dynamic):
+            with self.subTest(mark=mark.__name__):
+                x = torch.randn(4)
+                mark(x, 0, min=2, max=5)
+                mark(x, 0)
+                self.assertFalse(hasattr(x, "_dynamo_dynamic_range"))
+
+    def test_maybe_mark_dynamic_range_with_index_list(self):
+        # The list form applies the same range to every listed dim.
+        x = torch.randn(4, 6)
+        torch._dynamo.maybe_mark_dynamic(x, [0, 1], min=2, max=8)
+        self.assertEqual(x._dynamo_weak_dynamic_indices, {0, 1})
+        self.assertEqual(
+            x._dynamo_dynamic_range, {_DimRange(0, 2, 8), _DimRange(1, 2, 8)}
+        )
+
+    def test_maybe_mark_dynamic_range_mirrored_to_subclass_inner_tensors(self):
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        # Marking a traceable wrapper subclass mirrors onto the inner tensors of the
+        # same dim, bounds included.
+        x = TwoTensor(torch.randn(4, 6), torch.randn(4, 6))
+        torch._dynamo.maybe_mark_dynamic(x, 0, min=2, max=5)
+        for inner in (x.a, x.b):
+            self.assertEqual(inner._dynamo_weak_dynamic_indices, {0})
+            self.assertEqual(inner._dynamo_dynamic_range, {_DimRange(0, 2, 5)})
+
+    def test_mark_dynamic_range_copied_with_tensor_attributes(self):
+        from torch._dynamo.utils import copy_dynamo_tensor_attributes
+
+        # A clone keeps the marking and its declared range, otherwise it would
+        # compile under different constraints than the tensor it came from.
+        src = torch.randn(4)
+        torch._dynamo.maybe_mark_dynamic(src, 0, min=2, max=5)
+        dst = torch.randn(4)
+        copy_dynamo_tensor_attributes(src, dst)
+        self.assertEqual(dst._dynamo_weak_dynamic_indices, {0})
+        self.assertEqual(dst._dynamo_dynamic_range, {_DimRange(0, 2, 5)})
+        # The copy must not alias the source, mutating one must not touch the other.
+        torch._dynamo.maybe_mark_dynamic(dst, 0, min=3, max=4)
+        self.assertEqual(src._dynamo_dynamic_range, {_DimRange(0, 2, 5)})
+
+    # Translation validation changes the exception type, don't run with it
+    @torch.fx.experimental._config.patch(translation_validation=False)
+    def test_mark_dynamic_takes_precedence_over_maybe_mark_dynamic(self):
+        compiled_ranges = []
+
+        def fn(x):
+            return x.cos() * x.shape[0]
+
+        # A dim may carry both markings, marked_dynamic is tested first in
+        # _automatic_dynamic so mark_dynamic wins, and the range is the one the last
+        # call to declare bounds left behind.
         x = torch.randn(4)
-        torch._dynamo.mark_dynamic(x, 0, min=2, max=5)
-        with self.assertRaisesRegex(RuntimeError, "already marked with mark_dynamic"):
-            torch._dynamo.maybe_mark_dynamic(x, 0, min=3, max=4)
+        torch._dynamo.maybe_mark_dynamic(x, 0, min=2, max=5)
+        torch._dynamo.mark_dynamic(x, 0, min=3, max=6)
+        opt_fn = torch.compile(
+            fn, backend=self._range_recording_backend(compiled_ranges)
+        )
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(compiled_ranges, [(3, 6)])
+
+        # Enforcement follows mark_dynamic too: specializing the dim is an error rather
+        # than the warning maybe_mark_dynamic alone would give.
+        def specializing_fn(x):
+            if x.shape[0] == 4:
+                return x.sin()
+            return x.cos()
 
         y = torch.randn(4)
-        torch._dynamo.maybe_mark_dynamic(y, 0, min=3, max=4)
-        with self.assertRaisesRegex(
-            RuntimeError, "already marked with maybe_mark_dynamic"
-        ):
-            torch._dynamo.mark_dynamic(y, 0, min=2, max=5)
+        torch._dynamo.maybe_mark_dynamic(y, 0)
+        torch._dynamo.mark_dynamic(y, 0)
+        with self.assertRaises(ConstraintViolationError):
+            torch.compile(specializing_fn, backend="eager")(y)
+
+        # mark_dynamic drops the dim from the weak set, so every consumer agrees on the
+        # semantics rather than depending on which index set it tests first. Non strict
+        # export tests the weak set first, and must enforce the dim like dynamo does.
+        class Specializing(torch.nn.Module):
+            def forward(self, x):
+                return specializing_fn(x)
+
+        for strict in (True, False):
+            with self.subTest(strict=strict):
+                e = torch.randn(4)
+                torch._dynamo.maybe_mark_dynamic(e, 0, min=2, max=5)
+                torch._dynamo.mark_dynamic(e, 0)
+                self.assertEqual(e._dynamo_dynamic_indices, {0})
+                self.assertEqual(e._dynamo_weak_dynamic_indices, set())
+                with self.assertRaises(
+                    (
+                        torch._dynamo.exc.UserError,
+                        ConstraintViolationError,
+                    )
+                ):
+                    torch.export.export(Specializing(), (e,), strict=strict)
 
         # Different dims of the same tensor may use different APIs.
         z = torch.randn(4, 4)
         torch._dynamo.mark_dynamic(z, 0)
         torch._dynamo.maybe_mark_dynamic(z, 1, min=2, max=5)
         self.assertEqual(z._dynamo_dynamic_range, {_DimRange(1, 2, 5)})
+
+        # A weak marking of a dim mark_dynamic already covers is ignored, its bounds
+        # included: they would otherwise be enforced by the mark_dynamic path.
+        w = torch.randn(4)
+        torch._dynamo.mark_dynamic(w, 0)
+        torch._dynamo.maybe_mark_dynamic(w, 0, min=2, max=5)
+        self.assertFalse(hasattr(w, "_dynamo_weak_dynamic_indices"))
+        self.assertFalse(hasattr(w, "_dynamo_dynamic_range"))
+
+        # so narrowing the dim stays allowed, RelaxedUnspecConstraint only forbids
+        # collapsing it to a single value.
+        def narrowing_fn(x):
+            if x.shape[0] < 5:
+                return x.sin()
+            return x.cos()
+
+        self.assertEqual(
+            torch.compile(narrowing_fn, backend="eager")(w), narrowing_fn(w)
+        )
 
     def test_mark_dynamic_range_change_recompiles(self):
         compiled_ranges = []
