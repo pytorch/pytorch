@@ -3884,6 +3884,103 @@ def forward(self, tangents_1):
     return (tangents_1,)""",
         )
 
+    def _bw_output_names(self, bw_graph):
+        output_node = next(
+            n for n in reversed(bw_graph.graph.nodes) if n.op == "output"
+        )
+        return [n.name if n is not None else None for n in output_node.args[0]]
+
+    def _bw_graph(self, f, *inputs, partition_fn=min_cut_rematerialization_partition):
+        bw_graph_cell = [None]
+        compiled_f = aot_function(
+            f,
+            fw_compiler=nop,
+            bw_compiler=partial(extract_graph, graph_cell=bw_graph_cell),
+            partition_fn=partition_fn,
+        )
+        compiled_f(*inputs).sum().backward()
+        return bw_graph_cell[0]
+
+    def test_backward_grad_output_names(self):
+        # The returned gradient is named grad_<primal>. See issue 110700.
+        bw_graph = self._bw_graph(
+            lambda x: x.sin() @ x.sin(), torch.randn(3, requires_grad=True)
+        )
+        self.assertEqual(self._bw_output_names(bw_graph), ["grad_primals_1"])
+
+    def test_backward_grad_output_names_multiple_and_non_differentiable(self):
+        # Each gradient is named after the input it differentiates; a slot for a
+        # non-differentiable input stays None. Uses default_partition to cover
+        # the other partitioner.
+        def f(a, b):
+            return a.sin() * b.cos()
+
+        bw_graph = self._bw_graph(
+            f,
+            torch.randn(4, requires_grad=True),
+            torch.randn(4, requires_grad=True),
+            partition_fn=default_partition,
+        )
+        self.assertEqual(
+            self._bw_output_names(bw_graph), ["grad_primals_1", "grad_primals_2"]
+        )
+
+        bw_graph = self._bw_graph(
+            f,
+            torch.randn(4, requires_grad=True),
+            torch.randn(4, requires_grad=False),
+            partition_fn=default_partition,
+        )
+        self.assertEqual(self._bw_output_names(bw_graph), ["grad_primals_1", None])
+
+    def test_backward_grad_output_names_parameters(self):
+        # Parameter gradients (ParamAOTInput descriptors) are named too.
+        mod = torch.nn.Linear(3, 2)
+        bw_graph_cell = [None]
+        compiled = aot_module(
+            mod,
+            fw_compiler=nop,
+            bw_compiler=partial(extract_graph, graph_cell=bw_graph_cell),
+            partition_fn=min_cut_rematerialization_partition,
+        )
+        compiled(torch.randn(4, 3, requires_grad=True)).sum().backward()
+
+        # Distinct names (not dedup-collapsed) tie weight/bias/input grads apart.
+        self.assertEqual(
+            self._bw_output_names(bw_graph_cell[0]),
+            ["grad_primals_1", "grad_primals_2", "grad_primals_3"],
+        )
+
+    def test_backward_grad_output_names_passthrough_not_renamed(self):
+        # A gradient that is a passed-through tangent is a graph input
+        # (placeholder); it must not be renamed.
+        bw_graph = self._bw_graph(
+            lambda x: x.clone(), torch.randn(4, requires_grad=True)
+        )
+        self.assertEqual(self._bw_output_names(bw_graph), ["tangents_1"])
+
+    def test_backward_grad_output_names_shared_grad(self):
+        # When two inputs share one gradient node, it is returned in both slots
+        # and named after the first input it differentiates.
+        bw_graph = self._bw_graph(
+            lambda a, b: (a + b).sum(),
+            torch.randn(4, requires_grad=True),
+            torch.randn(4, requires_grad=True),
+        )
+        self.assertEqual(
+            self._bw_output_names(bw_graph), ["grad_primals_1", "grad_primals_1"]
+        )
+
+    def test_backward_grad_output_names_subclass_unchanged(self):
+        # Subclass-input gradients (SubclassGetAttrAOTOutput, no 1-1 grad/input
+        # correspondence) are left as-is, not renamed grad_<...>.
+        a = TwoTensor(torch.randn(4), torch.randn(4)).detach().requires_grad_(True)
+        bw_graph = self._bw_graph(lambda x: x.sin(), a)
+
+        names = self._bw_output_names(bw_graph)
+        self.assertTrue(names)
+        self.assertFalse(any(n is not None and n.startswith("grad_") for n in names))
+
     def test_no_grad_input_output(self):
         def f(a, b):
             return a.cos(), b.cos(), a * b
