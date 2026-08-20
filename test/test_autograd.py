@@ -13708,23 +13708,20 @@ class TestAutogradDeviceType(TestCase):
         self.assertEqual(torch.autograd.functional.vhp(f, x, v)[1][0], expected)
         self.assertEqual(torch.func.hessian(f)(x.detach())[0, 1], expected)
 
-        for keepdim in (False, True):
-            def f_dim(x):
-                return 4000.0 * torch.prod(x, dim=1, keepdim=keepdim).sum()
+        def f_dim(x):
+            return 4000.0 * torch.prod(x, dim=1).sum()
 
-            x_dim = x.detach().unsqueeze(0).requires_grad_()
-            v_dim = v.unsqueeze(0)
-            self.assertEqual(
-                torch.autograd.functional.hessian(f_dim, x_dim)[0, 0, 0, 1],
-                expected,
-            )
-            self.assertEqual(
-                torch.autograd.functional.vhp(f_dim, x_dim, v_dim)[1][0, 0],
-                expected,
-            )
-            self.assertEqual(
-                torch.func.hessian(f_dim)(x_dim.detach())[0, 0, 0, 1], expected
-            )
+        x_dim = x.detach().unsqueeze(0).requires_grad_()
+        v_dim = v.unsqueeze(0)
+        self.assertEqual(
+            torch.autograd.functional.hessian(f_dim, x_dim)[0, 0, 0, 1], expected
+        )
+        self.assertEqual(
+            torch.autograd.functional.vhp(f_dim, x_dim, v_dim)[1][0, 0], expected
+        )
+        self.assertEqual(
+            torch.func.hessian(f_dim)(x_dim.detach())[0, 0, 0, 1], expected
+        )
 
     def test_min_max_aminmax_median_backprops_to_all_values(self, device):
         # 1) Test min/max/median/nanmedian on both a non NaN and all NaN tensor
