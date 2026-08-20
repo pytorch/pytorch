@@ -37,6 +37,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     skip_unless_torch_gpu,
     with_comms,
 )
+from torch.testing._internal.triton_utils import requires_gpu
 from torch.utils._typing_utils import not_none
 
 
@@ -723,9 +724,9 @@ class DistTensorRandomOpTest(DTensorTestBase):
 
 
 class TestPhiloxState(TestCase):
-    hw_classification = HardwareClassification.GENERIC
+    hw_classification = HardwareClassification.CPU
 
-    def test_philox_state_seed_roundtrip(self):
+    def test_philox_state_seed_roundtrip(self, device):
         """
         Test that _PhiloxState seed can be read and re-set without error.
 
@@ -738,10 +739,10 @@ class TestPhiloxState(TestCase):
         """
         from torch.distributed.tensor._random import _PhiloxState
 
-        state = torch.zeros(16, dtype=torch.uint8, device="cpu")
+        state = torch.zeros(16, dtype=torch.uint8, device=device)
         philox = _PhiloxState(state)
         # Create a seed with the sign bit set (valid uint64, negative as int64)
-        test_seed = torch.tensor([2**63 + 42], dtype=torch.uint64)
+        test_seed = torch.tensor([2**63 + 42], dtype=torch.uint64, device=device)
         philox.seed = test_seed
         philox.seed = philox.seed.clone()
 
@@ -774,6 +775,7 @@ class TestPhiloxState(TestCase):
         self.assertEqual(offset_after, offset_before + 4)
 
 
+@requires_gpu
 class DistTensorRandomOpCompileTest(DTensorTestBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
@@ -1103,28 +1105,9 @@ DistTensorRandomOpsTest3DWithLocalTensor = create_local_tensor_test_class(
 
 
 instantiate_device_type_tests(
-    DistTensorRandomInitTest,
+    TestPhiloxState,
     globals(),
-    except_for=["cpu"],
-    allow_xpu=True,
-)
-instantiate_device_type_tests(
-    DistTensorRandomOpTest,
-    globals(),
-    except_for=["cpu"],
-    allow_xpu=True,
-)
-instantiate_device_type_tests(
-    DistTensorRandomOpCompileTest,
-    globals(),
-    except_for=["cpu"],
-    allow_xpu=True,
-)
-instantiate_device_type_tests(
-    DistTensorRandomOpsTest3D,
-    globals(),
-    except_for=["cpu"],
-    allow_xpu=True,
+    only_for=["cpu"],
 )
 
 
