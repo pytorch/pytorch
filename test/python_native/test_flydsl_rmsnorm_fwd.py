@@ -8,6 +8,7 @@ import torch
 import torch.backends.python_native as pn
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -450,6 +451,31 @@ class TestFlyDSLRMSNorm(TestCase):
         self.assertEqual(rmsnorm_cache_info()["fwd"].misses, 1 if dispatches else 0)
         self.assertEqual(got, ref)
         self.assertEqual(got_rstd, ref_rstd)
+
+    @largeTensorTest("9GB", device="cuda")  # 3.5 GiB in and out
+    def test_large_span_matches_aten(self):
+        # Nothing else here clears 0.5 GiB, so if FlyDSL ever indexed in signed
+        # 32-bit bytes, rows past the crossover would read out of bounds unseen.
+        from torch._native.ops.norm.flydsl_rmsnorm_fwd import rmsnorm_cache_info
+
+        m, n = 8192, 114688
+        x, weight = self._make_inputs(m, n, torch.float32)
+        got, got_rstd = torch.ops.aten._fused_rms_norm(x, [n], weight, EPS)
+        self.assertEqual(rmsnorm_cache_info()["fwd"].misses, 1)
+
+        # rms_norm is row-independent, so only rows around the crossover need a
+        # reference; comparing the whole tensor would hide a broken tail.
+        crossover = ((1 << 31) - 1) // (n * x.element_size())
+        self.assertLess(crossover, m)
+        rows = torch.tensor(
+            [0, crossover - 1, crossover, crossover + 1, m - 1], device=x.device
+        )
+        probe = x[rows].contiguous()
+        with pn.flydsl.disabled():
+            ref, ref_rstd = torch.ops.aten._fused_rms_norm(probe, [n], weight, EPS)
+
+        self.assertEqual(got[rows], ref)
+        self.assertEqual(got_rstd[rows], ref_rstd)
 
     def test_nd_input_dispatches_and_matches_aten(self):
         # rmsnorm_fwd flattens to (M, N) and rebuilds a different stat_shape for

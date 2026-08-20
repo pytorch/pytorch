@@ -29,7 +29,11 @@ def _is_supported_arch(device_index: int) -> bool:
 
 
 def _fits_int32_buffer_span(rows_m: int, n: int, itemsize: int) -> bool:
-    """Whether a contiguous (rows_m, n) tensor fits FlyDSL buffer indexing."""
+    """Whether a contiguous (rows_m, n) tensor fits FlyDSL buffer indexing.
+
+    The byte span gets the wider bound because it lands in the descriptor's
+    num_records, which is unsigned; the kernel itself indexes in elements.
+    """
     int32_max = (1 << 31) - 1
     uint32_max = (1 << 32) - 1
     return (
