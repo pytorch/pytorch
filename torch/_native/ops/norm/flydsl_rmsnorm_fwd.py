@@ -13,6 +13,7 @@ from flydsl.expr import const_expr, gpu, math as fmath, range_constexpr
 from flydsl.runtime.device import is_rdna_arch
 
 import torch
+from torch._native.flydsl.compile_args import make_compile_arg, read_only_tensor
 from torch._native.flydsl_utils import _resolve_rocm_arch
 from torch._native.instrumentation import instrumented_flydsl_cache
 from torch._native.ops.norm.flydsl_rmsnorm_utils import (
@@ -254,19 +255,6 @@ def _build_rmsnorm_module(
     return launch_rmsnorm
 
 
-def _read_only(tensor: torch.Tensor):
-    from torch._native.const_tensor_wrapper import ConstTensorWrapper
-
-    return ConstTensorWrapper(tensor)
-
-
-def _make_compile_arg(tensor: torch.Tensor, *, read_only: bool = False):
-    """Make only the row dimension dynamic so one kernel supports many M values."""
-    tensor_arg = _read_only(tensor) if read_only else tensor
-    arg = flyc.from_torch_tensor(tensor_arg)
-    return arg.mark_shape_dynamic(0)
-
-
 @instrumented_flydsl_cache(
     "aten::_fused_rms_norm",
     key_fn=lambda n, dtype, arch, backend, device_index, *a, **k: (
@@ -291,10 +279,10 @@ def _compile_rmsnorm_fwd(
     launch = _build_rmsnorm_module(n, dtype, arch)
     return flyc.compile(
         launch,
-        _make_compile_arg(input_2d, read_only=True),
-        flyc.from_torch_tensor(_read_only(weight)),
-        _make_compile_arg(output_2d),
-        _make_compile_arg(rstd),
+        make_compile_arg(input_2d, read_only=True),
+        flyc.from_torch_tensor(read_only_tensor(weight)),
+        make_compile_arg(output_2d),
+        make_compile_arg(rstd),
         rows_m,
         eps,
         stream,
@@ -344,8 +332,8 @@ def rmsnorm_fwd(
         )
 
         compiled(
-            _read_only(input_2d),
-            _read_only(weight),
+            read_only_tensor(input_2d),
+            read_only_tensor(weight),
             output_2d,
             rstd_flat,
             rows_m,
