@@ -54,9 +54,10 @@ syclDevicePtr_t getPointer(
     PyObject* obj,
     int idx,
     const sycl::queue* queuePtr) {
-  syclDevicePtr_t data_ptr = 0;
+  syclDevicePtr_t data_ptr = nullptr;
 
   if (THPUtils_checkLong(obj)) {
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
     data_ptr = reinterpret_cast<syclDevicePtr_t>(THPUtils_unpackUInt64(obj));
 
     return data_ptr;
@@ -75,6 +76,7 @@ syclDevicePtr_t getPointer(
       THPUtils_checkLong(ret),
       "data_ptr method of Pointer object must return 64-bit int");
 
+  // NOLINTNEXTLINE(performance-no-int-to-ptr)
   data_ptr = reinterpret_cast<syclDevicePtr_t>(THPUtils_unpackUInt64(ret));
 
   if (!data_ptr)
@@ -191,7 +193,8 @@ inline ze_module_handle_t _createModule(
     const uint8_t* binaryPtr,
     size_t binarySize,
     const int device_idx) {
-  auto& syclDevice = c10::xpu::get_raw_device(device_idx);
+  auto& syclDevice =
+      c10::xpu::get_raw_device(static_cast<c10::DeviceIndex>(device_idx));
   auto& syclContext = c10::xpu::get_device_context();
   auto device =
       sycl::get_native<sycl::backend::ext_oneapi_level_zero>(syclDevice);
@@ -204,19 +207,26 @@ inline ze_module_handle_t _createModule(
   moduleDescription.stype = ZE_STRUCTURE_TYPE_MODULE_DESC;
   moduleDescription.format = format;
   moduleDescription.inputSize = binarySize;
-  moduleDescription.pInputModule = (uint8_t*)binaryPtr;
+  moduleDescription.pInputModule = binaryPtr;
   moduleDescription.pBuildFlags = buildFlags;
   ze_module_build_log_handle_t buildLog = nullptr;
   ze_module_handle_t module = nullptr;
-  auto error_no = ze().zeModuleCreate(
+  ze_result_t error_no = ze().zeModuleCreate(
       context, device, &moduleDescription, &module, &buildLog);
 
   if (error_no != ZE_RESULT_SUCCESS) {
+    // Retrieve the build log on a best-effort basis; failures here must not
+    // mask the real build error reported via ZE_CHECK(error_no) below, and
+    // must not skip the buildLog cleanup that follows.
     size_t szLog = 0;
-    ZE_CHECK(ze().zeModuleBuildLogGetString(buildLog, &szLog, nullptr));
-    std::vector<char> log(szLog);
-    ZE_CHECK(ze().zeModuleBuildLogGetString(buildLog, &szLog, log.data()));
-    std::cerr << "L0 build module failed. Log: " << log.data() << std::endl;
+    std::string strLog;
+    if (ze().zeModuleBuildLogGetString(buildLog, &szLog, nullptr) ==
+            ZE_RESULT_SUCCESS &&
+        szLog > 0) {
+      strLog.resize(szLog);
+      ze().zeModuleBuildLogGetString(buildLog, &szLog, strLog.data());
+    }
+    std::cerr << "L0 build module failed. Log: " << strLog.c_str() << '\n';
   }
   if (buildLog) {
     ZE_CHECK(ze().zeModuleBuildLogDestroy(buildLog));
@@ -289,13 +299,11 @@ void launchKernel(
   if (threadsPerWarp == 0) {
     threadsPerWarp = 32; // default to 32 if not set
   }
-  std::string kernelName =
-      kernelPtr->get_info<sycl::info::kernel::function_name>();
   uint32_t numParams = kernelPtr->get_info<sycl::info::kernel::num_args>();
   size_t globalRangeX = static_cast<size_t>(gridX) * threadsPerWarp * numWarps;
   size_t globalRangeY = gridY;
   size_t globalRangeZ = gridZ;
-  size_t localRangeX = numWarps * threadsPerWarp;
+  size_t localRangeX = static_cast<size_t>(numWarps) * threadsPerWarp;
   size_t localRangeY = 1;
   size_t localRangeZ = 1;
   sycl::range<3> globalRange(globalRangeZ, globalRangeY, globalRangeX);
@@ -308,19 +316,19 @@ void launchKernel(
   // Submit the imported kernel.
   auto cgf = [&](sycl::handler& cgh) {
     for (uint32_t i = 0; i < numParams; ++i) {
-      cgh.set_arg(i, *(static_cast<void**>(params[i])));
+      cgh.set_arg(static_cast<int>(i), *(static_cast<void**>(params[i])));
     }
 
     if (sharedMemBytes > 0) {
       using share_mem_t = sycl::local_accessor<int8_t, 1>;
       share_mem_t localBuffer = share_mem_t(sharedMemBytes, cgh);
-      cgh.set_arg(numParams, localBuffer);
+      cgh.set_arg(static_cast<int>(numParams), localBuffer);
       cgh.parallel_for(parallelWorkSize, *kernelPtr);
     } else {
       cgh.parallel_for(parallelWorkSize, *kernelPtr);
     }
   };
-  auto event = queuePtr->submit(cgf);
+  queuePtr->submit(cgf);
 }
 
 /* Load the kernel into memory (called during torch.compile), and

@@ -63,7 +63,7 @@ void sort_cuda_kernel(
     "The dimension being sorted can not have more than INT_MAX elements.");
 
   const auto self_dtype = self.dtype();
-  TORCH_CHECK(self_dtype != ScalarType::ComplexFloat && self_dtype != ScalarType::ComplexDouble,
+  TORCH_CHECK_TYPE(self_dtype != ScalarType::ComplexFloat && self_dtype != ScalarType::ComplexDouble,
     "Sort currently does not support complex dtypes on CUDA.");
 #if defined(USE_ROCM)
   // ROCm has undefined behavior for non-standard bools. Here we are converting bool to uint8 which will

@@ -258,7 +258,7 @@ class NodeTimerObserver(CuptiMonitorObserver):
         span_names = np.empty(len(gnode), dtype=object)
         span_names[:] = ""
 
-        resolver = self._resolver
+        resolver = self._annotation_resolver
         if resolver is not None:
             uniq_g, inv_g = np.unique(gnode, return_inverse=True)
             g_names = np.array(
