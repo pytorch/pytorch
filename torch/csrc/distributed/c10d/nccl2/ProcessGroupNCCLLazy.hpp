@@ -48,6 +48,10 @@ class TORCH_API ProcessGroupNCCLLazy
       const ::c10d::ReconfigureOptions& opts) override {
     return ::c10d::Backend::reconfigure(opts);
   }
+
+  void addEphemeralTimeout(const std::chrono::milliseconds& timeout) override {
+    getPrimary()->addEphemeralTimeout(timeout);
+  }
 };
 
 } // namespace c10d::nccl2

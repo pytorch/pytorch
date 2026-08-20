@@ -182,8 +182,13 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       test-matrix: |
         { include: [
-          { config: "inductor_amx", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx" },
-          { config: "inductor_amx", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx" },
+          { config: "inductor_amx", shard: 1, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx" },
+          { config: "inductor_amx", shard: 2, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx" },
+          { config: "inductor_amx", shard: 3, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx" },
+          { config: "inductor_amx", shard: 4, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx" },
+          { config: "inductor_amx", shard: 5, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx" },
+          { config: "inductor_amx", shard: 6, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx" },
+          { config: "inductor_amx", shard: 7, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx" },
         ]}
       python-version: "3.10"
       compiler: gcc11
