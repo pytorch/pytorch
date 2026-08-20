@@ -40,6 +40,7 @@ from ..select_algorithm import (
     ExternKernelChoice,
     KernelTemplate,
     realize_inputs,
+    TemplateLocalReductionConfig,
     TritonTemplate,
 )
 from ..utils import (
@@ -101,6 +102,10 @@ persistent_tma_mm_template = TritonTemplate(
     name="mm_persistent_tma",
     grid=persistent_mm_grid,
     source=load_kernel_template("triton_persistent_tma_mm"),
+    template_local_reduction=TemplateLocalReductionConfig(
+        tile=lambda meta: (meta["BLOCK_M"], meta["BLOCK_N"]),
+        grid=("pid_m", "pid_n"),
+    ),
 )
 
 # Non-TMA Triton template for persistent MM

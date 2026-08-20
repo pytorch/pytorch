@@ -157,6 +157,13 @@ class FusionResult:
         return FusionResult(callable_fn=callable_fn, future=future)
 
 
+@dataclasses.dataclass(frozen=True)
+class ReductionEpilogueFusion:
+    block: tuple[int, int]
+    prevalidated_dep_names: frozenset[str] = frozenset()
+    index_equivalent_dep_names: frozenset[str] = frozenset()
+
+
 @dataclasses.dataclass
 class PendingFusion:
     callable_fn: Callable[[], bool]
@@ -5783,6 +5790,36 @@ class Scheduler:
             if self._has_layout_conflict_for_template(multi_node):
                 return FusionResult.fuse(False)
 
+            from torch._inductor.codegen.simd import CantSplit
+
+            backend = self.get_backend(device)
+            reduction_epilogue = backend.analyze_reduction_epilogue(node1, node2)
+            reduction_block = (
+                reduction_epilogue.block if reduction_epilogue is not None else None
+            )
+            template_local_reduction = reduction_block is not None
+
+            def choice_supports_fusion(choice: ir.ChoiceCaller) -> bool:
+                if reduction_block is not None:
+                    if not isinstance(
+                        choice, torch._inductor.select_algorithm.TritonTemplateCaller
+                    ):
+                        return False
+                    if not backend.can_fuse_reduction_epilogue_choice(
+                        choice, reduction_block
+                    ):
+                        return False
+                # For prologue fusion we check if the underlying template of the choice
+                # supports all allowed prologue inputs. If not, we skip this choice in
+                # the fusion benchmark.
+                # TODO: Remove this check after all Triton templates support prologue fusion.
+                # Currently, persistent+TMA Triton template does not due to the TMA-based loads.
+                return not (
+                    not epilogue_fusion
+                    and hasattr(choice, "allowed_prologue_inps")
+                    and choice.allowed_prologue_inps != multi_node.allowed_prologue_inps
+                )
+
             hint_override_best_fusion_choice: dict[int | None, ir.ChoiceCaller] = {}
             if not has_atomic_add:
                 for hint_override in config.multi_kernel_hints:
@@ -5794,18 +5831,25 @@ class Scheduler:
                         if not isinstance(
                             choice,
                             torch._inductor.select_algorithm.TritonTemplateCaller,
-                        ):
+                        ) or not choice_supports_fusion(choice):
                             continue
-                        with multi_node.swap_as_triton_caller(choice):
-                            future_choices.append(
-                                (
-                                    choice,
-                                    *self.compile_kernel(
-                                        node_list_fused,
-                                        hint_override=choice.hint_override,
-                                    ),
+                        triton_choice = typing.cast(
+                            torch._inductor.select_algorithm.TritonTemplateCaller,
+                            choice,
+                        )
+                        try:
+                            with multi_node.swap_as_triton_caller(triton_choice):
+                                future_choices.append(
+                                    (
+                                        triton_choice,
+                                        *self.compile_kernel(
+                                            node_list_fused,
+                                            hint_override=triton_choice.hint_override,
+                                        ),
+                                    )
                                 )
-                            )
+                        except CantSplit:
+                            continue
 
                     min_ms_fused = float("inf")
                     ms_fused_choice: TritonTemplateCallerBase | None = None
@@ -5843,7 +5887,9 @@ class Scheduler:
 
             from torch._inductor.codegen.nv_universal_gemm import NVUniversalGemmCaller
 
-            bench_epilogue = config.benchmark_epilogue_fusion
+            bench_epilogue = (
+                config.benchmark_epilogue_fusion and not template_local_reduction
+            )
             num_fusible_callers = sum(
                 isinstance(c, (TritonTemplateCallerBase, NVUniversalGemmCaller))
                 for c in multi_node.choices
@@ -5868,24 +5914,6 @@ class Scheduler:
                 # Use 0 for unfused time, won't be used as bench_epilogue
                 # is guaranteed to be False here
                 choice_timings_iter = [(c, 0) for c in multi_node.choices]
-
-            from torch._inductor.codegen.simd import CantSplit
-
-            def choice_supports_fusion(choice: ir.ChoiceCaller) -> bool:
-                if not isinstance(
-                    choice, torch._inductor.select_algorithm.TritonTemplateCaller
-                ):
-                    return False
-                # For prologue fusion we check if the underlying template of the choice
-                # supports all allowed prologue inputs. If not, we skip this choice in
-                # the fusion benchmark.
-                # TODO: Remove this check after all Triton templates support prologue fusion.
-                # Currently, persistent+TMA Triton template does not due to the TMA-based loads.
-                return not (
-                    not epilogue_fusion
-                    and hasattr(choice, "allowed_prologue_inps")
-                    and choice.allowed_prologue_inps != multi_node.allowed_prologue_inps
-                )
 
             def compile_without_benchmarking(
                 choice: torch._inductor.select_algorithm.TritonTemplateCaller,
@@ -5921,7 +5949,10 @@ class Scheduler:
                     for choice, _ in sorted(
                         choice_timings.items(), key=operator.itemgetter(1)
                     ):
-                        if not choice_supports_fusion(choice):
+                        if not isinstance(
+                            choice,
+                            torch._inductor.select_algorithm.TritonTemplateCaller,
+                        ) or not choice_supports_fusion(choice):
                             continue
                         triton_choice = typing.cast(
                             torch._inductor.select_algorithm.TritonTemplateCaller,
@@ -5968,6 +5999,8 @@ class Scheduler:
 
                 if not is_triton and not is_nvgemm:
                     continue
+                if is_triton and not choice_supports_fusion(choice):
+                    continue
 
                 # pyrefly: ignore [missing-attribute]
                 if is_nvgemm and not choice.supports_epilogue_fusion:
@@ -5977,19 +6010,6 @@ class Scheduler:
                 # the prologue direction (epilogue_fusion is False when node1 is
                 # the pointwise prologue, node2 is the template).
                 if is_nvgemm and not epilogue_fusion:
-                    continue
-
-                # For prologue fusion we check if the underlying template of the choice
-                # supports all allowed prologue inputs. If not, we skip this choice in
-                # the fusion benchmark.
-                # TODO: Remove this check after all Triton templates support prologue fusion.
-                # Currently, persistent+TMA Triton template does not due to the TMA-based loads.
-                if (
-                    is_triton
-                    and not epilogue_fusion
-                    and hasattr(choice, "allowed_prologue_inps")
-                    and choice.allowed_prologue_inps != multi_node.allowed_prologue_inps
-                ):
                     continue
 
                 if bench_epilogue and unfused_time >= ms1 + ms2:
@@ -6021,6 +6041,7 @@ class Scheduler:
                                 (choice, *self.compile_kernel(node_list_fused))
                             )
                 except CantSplit:
+                    template_choices -= 1
                     continue
 
             if len(future_choices) == 0:
@@ -6098,6 +6119,9 @@ class Scheduler:
                                 min_ms_fused = ms_fused
                                 ms_fused_choice = choice
                     else:
+                        if template_local_reduction and res:
+                            ms_fused_choice = choice
+                            break
                         fusible_choice = (
                             min_choice == choice
                             or ms2 + ms1 > choice_timings[choice] + ms2_fused
@@ -8193,11 +8217,18 @@ class Scheduler:
             node1.get_device()
         ).can_fuse_multi_outputs_template(node1, node2):
             return True
-        if node1.is_template() and self.get_backend(
-            node1.get_device()
-        ).can_fuse_reduction_epilogue(node1, node2):
-            return True
-
+        reduction_epilogue = None
+        reduction_epilogue_supported = False
+        if node1.is_template() and node2.is_reduction():
+            backend = self.get_backend(node1.get_device())
+            reduction_epilogue = backend.analyze_reduction_epilogue(node1, node2)
+            reduction_epilogue_supported = reduction_epilogue is not None
+            if not reduction_epilogue_supported:
+                reduction_epilogue_supported = backend.can_fuse_reduction_epilogue(
+                    node1, node2
+                )
+                if reduction_epilogue_supported:
+                    return True
         if isinstance(node1, GroupedSchedulerNode) or isinstance(
             node2, GroupedSchedulerNode
         ):
@@ -8376,10 +8407,7 @@ class Scheduler:
             backend = self.get_backend(node1.get_device())
             if (
                 (node2.has_aliasing_or_mutation() and not atomic_add_mutation_epilogue)
-                or (
-                    node2.is_reduction()
-                    and not backend.can_fuse_reduction_epilogue(node1, node2)
-                )
+                or (node2.is_reduction() and not reduction_epilogue_supported)
                 or not _is_epilogue_fusion_enabled(node1)
             ):
                 why("template epilogue not satisfied")
@@ -8409,6 +8437,20 @@ class Scheduler:
             index_equivalent_dep_names = self._nested_index_equivalent_dep_names(
                 node1, node2
             )
+        prevalidated_dep_names: OrderedSet[str] | None = None
+        if reduction_epilogue is not None:
+            prevalidated_dep_names = OrderedSet(
+                self.mutation_renames.get(name, name)
+                for name in reduction_epilogue.prevalidated_dep_names
+            )
+            reduction_index_equivalent = OrderedSet(
+                self.mutation_renames.get(name, name)
+                for name in reduction_epilogue.index_equivalent_dep_names
+            )
+            if index_equivalent_dep_names is None:
+                index_equivalent_dep_names = reduction_index_equivalent
+            else:
+                index_equivalent_dep_names |= reduction_index_equivalent
         shared_data_score = self._score_fusion_memory_for_can_fuse(
             node1,
             node2,
@@ -8439,7 +8481,8 @@ class Scheduler:
                 shared_data_score = new_shared_data_score
 
         if (
-            config.loop_index_inversion_in_fusion
+            reduction_epilogue is None
+            and config.loop_index_inversion_in_fusion
             and shared_data_score < config.score_fusion_memory_threshold
         ):
             new_shared_data_score = self.shared_data_after_inverting_indexing(
@@ -8466,9 +8509,13 @@ class Scheduler:
                     node1,
                     node2,
                     index_equivalent_dep_names=index_equivalent_dep_names,
+                    prevalidated_dep_names=prevalidated_dep_names,
                 )
                 and V.choices.can_fuse_vertical(self, node1, node2, shared_data_score)
-                and self.get_backend(device).can_fuse_vertical(node1, node2)
+                and (
+                    reduction_epilogue is not None
+                    or self.get_backend(device).can_fuse_vertical(node1, node2)
+                )
             ):
                 return True
 
@@ -8477,7 +8524,8 @@ class Scheduler:
             # writes buf[x]).  Try reindexing the pointwise to the
             # reduction's domain and retry.
             if (
-                config.loop_reindexing_after_fusion
+                reduction_epilogue is None
+                and config.loop_reindexing_after_fusion
                 and self._try_reindex_pointwise_for_reduction(node1, node2)
             ):
                 return (
@@ -8485,6 +8533,7 @@ class Scheduler:
                         node1,
                         node2,
                         index_equivalent_dep_names=index_equivalent_dep_names,
+                        prevalidated_dep_names=prevalidated_dep_names,
                     )
                     and V.choices.can_fuse_vertical(
                         self, node1, node2, shared_data_score
@@ -8504,6 +8553,7 @@ class Scheduler:
         node2: BaseSchedulerNode,
         *,
         index_equivalent_dep_names: OrderedSet[str] | None = None,
+        prevalidated_dep_names: OrderedSet[str] | None = None,
     ) -> bool:
         """
         Check if it is legal to fuse a consumer (node2) into a producer (node1).
@@ -8515,6 +8565,9 @@ class Scheduler:
         ``index_equivalent_dep_names`` relaxes write/read matching only for
         named producer outputs; the remaining intermediate-dependency checks
         still run normally.
+
+        ``prevalidated_dep_names`` identifies producer/consumer accesses whose
+        backend-specific index mapping was already proven by fusion analysis.
         """
         node1_buf_names = node1.get_buffer_names()
         why = WhyNoFuse(node1, node2)
@@ -8532,6 +8585,10 @@ class Scheduler:
             write_name = self.mutation_renames.get(cd.name, cd.name)
             remaining = remaining_deps_by_name.get(write_name)
             if remaining:
+                if prevalidated_dep_names and write_name in prevalidated_dep_names:
+                    remaining[:] = [
+                        dep for dep in remaining if not isinstance(dep, MemoryDep)
+                    ]
                 for rd in remaining:
                     if isinstance(cd, MemoryDep) and self.fusable_read_and_write(
                         rd.rename(self.mutation_renames),
@@ -10651,6 +10708,18 @@ class BaseScheduling:  # noqa: docstring_linter
 
     def can_fuse_reduction_epilogue(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> bool:
+        return False
+
+    def analyze_reduction_epilogue(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> ReductionEpilogueFusion | None:
+        return None
+
+    def can_fuse_reduction_epilogue_choice(
+        self,
+        choice: Any,
+        block: tuple[int, int],
     ) -> bool:
         return False
 
