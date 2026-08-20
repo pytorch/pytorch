@@ -26,6 +26,10 @@
 #   * `MXFP8GroupedGemmParam` carries the compile key so the template can hand
 #     it to `run_cached_flydsl` the same way the dense and BF16-grouped
 #     templates hand over their `GemmGfx950Param`.
+#   * `pick_block_r` scores MFMA density against actual overhang instead of
+#     comparing m_avg to a constant. This is the ONE divergence from upstream
+#     in a decision the kernel body relies on; it is measured over 43 shapes in
+#     the comment on that function and should be ported back.
 #
 # Exactly four things differ from the even-groups parent. Everything else --
 # the 8-buffer LDS ping-pong, the AGPR-pinned scaled MFMA, the cooperative
@@ -165,12 +169,40 @@ def pick_block_r(m_total: int, e: int) -> int:
     """
     if e <= 0:
         return 256
-    m_avg = m_total // e
-    if m_avg <= 96:
-        return 64
-    if m_avg <= 320:
-        return 128
-    return 256
+    m_avg = max(m_total // e, 1)
+
+    # OVERHANG, NOT A THRESHOLD ON m_avg. The docstring above says the waste is
+    # (BLOCK_R / m_g), but that only holds while m_g < BLOCK_R; in general a
+    # group of m_avg rows under a BLOCK_R tile is charged
+    # ceildiv(m_avg, BLOCK_R) * BLOCK_R rows. At m_avg = 256 that factor is 1.0
+    # for every legal tile -- a 256-row group fills a 256-row tile exactly -- so
+    # the ladder's "m_avg <= 320 -> 128" narrowed the tile to remove an overhang
+    # that was not there, paying the MFMA-per-ds_read ratio (2.0 at 4x4 against
+    # 1.33 at 2x4) for nothing.
+    #
+    # Scoring density against actual overhang instead. Measured on MI350X over
+    # 43 shapes (the 19 benchmark shapes plus an m_avg ladder of 64..512 at
+    # K=N=4096 and K=N=8192, all six tiles timed interleaved in one process,
+    # median of 3 runs of 21), against the best tile for each shape:
+    #
+    #   rule       geomean loss vs best tile   >2% off
+    #   ladder     1.0271x                     12/43
+    #   this       1.0055x                      4/43
+    #
+    # Biggest single gain 1.158x at m_avg=96, K=N=8192, where the ladder picked
+    # 64 and the right answer is 128. Shapes with m_avg >= 384 -- including the
+    # DSV3 shape this kernel was tuned on, m_g=24576 -- score 256 exactly as the
+    # ladder did, so the original calibration is unchanged.
+    best_block_r, best_score = 256, -1.0
+    for block_r in (64, 128, 256):
+        n_tiles_a = block_r // 64
+        # MFMA-per-ds_read ratio at this tile height, against a 4-wide tile.
+        density = n_tiles_a * 4 / (n_tiles_a + 4)
+        overhang = ceildiv(m_avg, block_r) * block_r / m_avg
+        score = density / overhang
+        if score > best_score:
+            best_block_r, best_score = block_r, score
+    return best_block_r
 
 
 def pick_tile(m_total: int, e: int, n: int) -> tuple:
