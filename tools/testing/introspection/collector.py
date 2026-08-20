@@ -12,6 +12,7 @@ Run directly as a worker (by path, so the wheel torch isn't shadowed by repo/tor
 from __future__ import annotations
 
 import ast
+import functools
 import hashlib
 import importlib.util
 import inspect
@@ -446,44 +447,84 @@ class _Recorder(unittest.TestResult):
         self.skipped_reasons[self._key(test)] = reason
 
 
-def _hidden_gates(path: str) -> dict[str, list[str]]:
-    """{Class::method or Class::setUp: [names its skip depends on]}.
-
-    setUp, tearDown and test bodies are gutted before the suite runs, so a skip
-    raised inside one is never observed and the test looks unconditionally live.
-    Recording which names those skips read lets a consumer say which tests it
-    could not judge, instead of reporting them as having no requirement.
-    """
+@functools.cache
+def _parsed(filename: str) -> dict[int, ast.AST]:
+    """{first line of a def: its node} for one source file, parsed once."""
     try:
-        tree = ast.parse(Path(path).read_text(encoding="utf-8"), filename=path)
+        tree = ast.parse(Path(filename).read_text(encoding="utf-8"), filename=filename)
     except (OSError, SyntaxError):
         return {}
+    return {
+        n.lineno: n
+        for n in ast.walk(tree)
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
 
-    out: dict[str, list[str]] = {}
-    for cls in ast.walk(tree):
-        if not isinstance(cls, ast.ClassDef):
-            continue
-        for fn in cls.body:
-            if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                continue
-            if not (fn.name.startswith("test") or fn.name in _GUT_METHODS):
-                continue
-            names: set[str] = set()
-            for node in ast.walk(ast.Module(body=fn.body, type_ignores=[])):
-                # Only what guards a skip. A test body mentions plenty of names
-                # that have nothing to do with whether it runs.
-                if not isinstance(node, ast.If):
-                    continue
-                src = ast.unparse(node)
-                if "skipTest" not in src and "SkipTest" not in src:
-                    continue
-                for ref in ast.walk(node.test):
+
+def _skip_names(node: ast.AST) -> tuple[set[str], set[str]]:
+    """(names guarding a skip in this body, self.<method> calls it makes)."""
+    names: set[str] = set()
+    calls: set[str] = set()
+    for sub in ast.walk(node):
+        if isinstance(sub, ast.If):
+            src = ast.unparse(sub)
+            if "skipTest" in src or "SkipTest" in src:
+                for ref in ast.walk(sub.test):
                     if isinstance(ref, ast.Name):
                         names.add(ref.id)
                     elif isinstance(ref, ast.Attribute):
                         names.add(ref.attr)
-            if names:
-                out[f"{cls.name}::{fn.name}"] = sorted(names)
+        elif isinstance(sub, ast.Call):
+            fn = sub.func
+            if (
+                isinstance(fn, ast.Attribute)
+                and isinstance(fn.value, ast.Name)
+                and fn.value.id == "self"
+            ):
+                calls.add(fn.attr)
+    return names, calls
+
+
+def _gate_names(cls: type, method: str, seen: set[str], depth: int = 0) -> set[str]:
+    """Names guarding a skip reachable from cls.method, following self-calls.
+
+    Resolution goes through the class rather than the file's AST, so a helper on a
+    base class -- including one in torch.testing._internal -- is found the same way
+    Python finds it. The common idiom is setUp calling self._require_sm90(), which a
+    single-file scan cannot see at all.
+    """
+    if depth > 5 or method in seen:
+        return set()
+    seen.add(method)
+    fn = inspect.unwrap(getattr(cls, method, None))
+    code = getattr(fn, "__code__", None)
+    if code is None:
+        return set()
+    node = _parsed(code.co_filename).get(code.co_firstlineno)
+    if node is None:
+        return set()
+    names, calls = _skip_names(ast.Module(body=node.body, type_ignores=[]))
+    for callee in calls:
+        names |= _gate_names(cls, callee, seen, depth + 1)
+    return names
+
+
+def _hidden_gates(mod: ModuleType) -> dict[str, list[str]]:
+    """{Class::method: [names its skip depends on]}.
+
+    setUp, tearDown and test bodies are gutted before the suite runs, so a skip
+    raised inside one never fires and the test looks unconditionally live. Recording
+    which names those skips read lets a consumer say which tests it could not judge,
+    rather than reporting them as having no requirement.
+    """
+    out: dict[str, list[str]] = {}
+    for cname, cls in _testcase_classes(mod).items():
+        for method in unittest.defaultTestLoader.getTestCaseNames(cls):
+            if names := _gate_names(cls, method, set()):
+                out[f"{cname}::{method}"] = sorted(names)
+        for method in sorted(_GUT_METHODS):
+            if names := _gate_names(cls, method, set()):
+                out[f"{cname}::{method}"] = sorted(names)
     return out
 
 
@@ -539,7 +580,7 @@ def _status(mod: ModuleType) -> dict:
     # Reported so a caller can tell a file with no requirements from one whose suite
     # was abandoned partway: an aborted run leaves the remaining tests in neither
     # bucket, which is indistinguishable from their having no requirement at all.
-    gates = _hidden_gates(str(mod.__file__))
+    gates = _hidden_gates(mod)
     return {
         "ran": sorted(result.ran),
         "skipped": sorted(result.skipped_reasons.items()),
