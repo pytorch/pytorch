@@ -4669,6 +4669,34 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @skip_on_cpu
     @skip_on_mps
     @skip_on_xpu
+    @unittest.skipUnless(torch.version.hip is not None, "ROCm-specific kernel_options")
+    def test_rocm_kernel_options_are_respected(self, device):
+        """kpack/matrix_instr_nonkdim/waves_per_eu are documented FlexKernelOptions.
+
+        They used to be assigned from the heuristic config unconditionally, which
+        overwrote whatever the caller passed, so none of the three could be tuned.
+        """
+        make_tensor = functools.partial(
+            torch.randn, (2, 2, 128, 64), device=device, dtype=torch.float16
+        )
+        q, k, v = make_tensor(), make_tensor(), make_tensor()
+
+        # Values chosen to differ from every default the heuristic produces.
+        _, code = run_and_get_code(
+            torch.compile(flex_attention, fullgraph=True),
+            q,
+            k,
+            v,
+            kernel_options={"kpack": 1, "matrix_instr_nonkdim": 16, "waves_per_eu": 3},
+        )
+        FileCheck().check("kpack : tl.constexpr = 1").run(code[0])
+        FileCheck().check("matrix_instr_nonkdim : tl.constexpr = 16").run(code[0])
+        FileCheck().check("waves_per_eu : tl.constexpr = 3").run(code[0])
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_mps
+    @skip_on_xpu
     def test_backward_kernel_options_filtering(self, device):
         if not PLATFORM_SUPPORTS_BF16:
             self.skipTest("bf16 is required for this regression test")

@@ -506,10 +506,12 @@ def flex_attention(
                 )
             continue
 
-        # ROCm specific kernargs
+        # ROCm specific kernargs. setdefault rather than assignment: these are
+        # documented kernel_options, so a user-supplied value has to win over the
+        # heuristic's, as it does for BLOCK_M/BLOCK_N/num_stages/num_warps above.
         for attrib in ["kpack", "matrix_instr_nonkdim", "waves_per_eu"]:
             if hasattr(conf, attrib):
-                cur_kernel_options[attrib] = getattr(conf, attrib)
+                cur_kernel_options.setdefault(attrib, getattr(conf, attrib))
 
         error = flex_attention_template.maybe_append_choice(
             choices=choices,
@@ -1096,10 +1098,12 @@ def flex_attention_backward(*args, **kwargs):
                 )
             continue
 
-        # ROCm specific kernargs
+        # ROCm specific kernargs. setdefault rather than assignment: these are
+        # documented kernel_options, so a user-supplied value has to win over the
+        # heuristic's, as it does for BLOCK_M/BLOCK_N/num_stages/num_warps above.
         for attrib in ["kpack", "matrix_instr_nonkdim", "waves_per_eu"]:
             if hasattr(conf, attrib):
-                cur_kernel_options[attrib] = getattr(conf, attrib)
+                cur_kernel_options.setdefault(attrib, getattr(conf, attrib))
 
         flex_attention_backward_template.maybe_append_choice(
             choices=choices,
