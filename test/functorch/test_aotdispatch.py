@@ -251,24 +251,13 @@ _pack_body_calls: list[int] = []
 
 @torch.fx.wrap
 def _alloc_unbacked_symint(t):
-    # Directly exercise the unbacked-symbol allocation path: `.item()` on a
-    # fake tensor allocates a fresh unbacked SymInt. Bare (no if/bool, no
-    # try/except) so an unrelated swallowed exception can't turn the
-    # regression into a no-op.
-    #
-    # Also records each execution of the enclosing pack body. torch.fx.wrap
-    # means symbolic_trace turns this into a node without calling it, so the
-    # count only reflects real executions of the pack GraphModule.
     _pack_body_calls.append(1)
     torch.all(torch.isfinite(t)).item()
     return t
 
 
 # `type(c) is`, not isinstance: immutable_list / immutable_dict subclass
-# list / dict, so isinstance cannot tell them apart. These are torch.fx.wrap'd
-# so the check survives symbolic_trace as a call_function node and runs against
-# the real container when the unpack GraphModule is traced, rather than being
-# constant-folded away against a Proxy.
+# list / dict, so isinstance cannot tell them apart.
 @torch.fx.wrap
 def _unwrap_exact_list(c):
     if type(c) is not list:
@@ -4970,9 +4959,7 @@ def forward(self, tangents_1):
         # The list / dict variants additionally pin the immutable_list /
         # immutable_dict -> list / dict normalization of the pack output. Their
         # unpack hooks check `type(c) is list` / `type(c) is dict`, which is the
-        # only way the container type is observable: the immutable types are
-        # list / dict subclasses, so an isinstance-based unpack hook (or one that
-        # only does getitem) cannot distinguish them and passes either way.
+        # only way the container type is observable.
 
         def fn(x, w):
             return torch.matmul(x, w).sin()
