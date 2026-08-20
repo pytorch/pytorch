@@ -1072,10 +1072,10 @@ Tensor prod_backward(
   }
   if (input.is_meta() || isTensorSubclassLike(input) ||
       at::GradMode::is_enabled()) {
-    // Always take the safer path for Composite Compliance and higher-order
-    // derivatives. In low-precision dtypes, the result/input intermediate can
-    // overflow or underflow, and its magnitude is unrelated to the final
-    // Hessian.
+    // For Composite Compliance and to keep backward-graph evaluation off the
+    // result / input division, always take the safer path. In low-precision
+    // dtypes, that intermediate can overflow or underflow even when the final
+    // Hessian is representable.
     return prod_safe_zeros_backward(grad, input.contiguous().view(-1), 0)
         .view_as(input);
   }
