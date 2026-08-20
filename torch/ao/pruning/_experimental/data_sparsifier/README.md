@@ -17,7 +17,7 @@ The BaseDataSparsifier handles all the housekeeping while allowing the user to j
 
 `add_data`: Accepts name, data tuple and registers the data as a parametrized buffer inside the container model. Note that the data is always associated to a name. A custom sparse config can be provided along with the name, data pair. If not provided, the default config will be applied while doing the sparsification.
 If the named data already exists, then it is replaced with the new data. The config and mask will be retained for the new data unless not specified to.
-To not the old mask, set `reuse_mask=False`. If the `config` is explicitly passed in, it will be updated.
+To not reuse the old mask, set `reuse_mask=False`. If the `config` is explicitly passed in, it will be updated.
 
 **Note**: name containing '.' is not a valid name for the data sparsifier
 

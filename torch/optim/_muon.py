@@ -20,7 +20,7 @@ from .optimizer import (
 __all__ = ["Muon"]
 
 # Constants from Keller Jordan's Muon post: https://kellerjordan.github.io/posts/muon/
-# github permlink: https://github.com/KellerJordan/Muon/blob/f90a42b28e00b8d9d2d05865fe90d9f39abcbcbd/muon.py#L16
+# github permalink: https://github.com/KellerJordan/Muon/blob/f90a42b28e00b8d9d2d05865fe90d9f39abcbcbd/muon.py#L16
 EPS = 1e-7
 DEFAULT_A = 3.4445
 DEFAULT_B = -4.7750

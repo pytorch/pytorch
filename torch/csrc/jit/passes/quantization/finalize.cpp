@@ -264,7 +264,7 @@ Module FinalizeOnDevicePTQ(
   removePackedParamInsertionAndFPWeightsSetAttr(
       quantized_graph, packed_param_attr_names);
   // Removing packed params is not sufficient since that does not do DCE
-  // for observer node's getatts and callmethods because callmethods have side
+  // for observer node's getattrs and callmethods because callmethods have side
   // effects
   removeObserverCallMethods(quantized_graph);
   // This step removed the return output from the graph and subsequent
