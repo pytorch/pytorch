@@ -904,6 +904,7 @@ class TestHopPrintDTensor(DTensorTestBase):
         self.assertEqual(compiled_result.to_local(), eager_result.to_local())
         self.assertEqual(compiled_output, expected)
 
+
 instantiate_device_type_tests(TestHopPrintDTensor, globals())
 
 if __name__ == "__main__":
