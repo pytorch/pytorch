@@ -59,6 +59,10 @@ def smoke_patterns(text: str, function: str) -> dict[str, list[str | None]]:
         for tok in toks[toks.index("--include") + 1 :]:
             if tok.startswith("-"):
                 break
+            # The run_test.py invocations end with shell variables, which are not
+            # arguments to --include and are not test files.
+            if tok.startswith("$"):
+                continue
             files.append(tok.removesuffix(".py"))
         kexpr = toks[toks.index("-k") + 1] if "-k" in toks[:-1] else None
         for f in files:
@@ -306,10 +310,16 @@ def show(rev: str, rel: str) -> str:
     return r.stdout
 
 
-def smoke_files(text: str) -> set[str]:
-    """The test files named by either smoke function."""
+def smoke_files(text: str) -> tuple[set[str], set[str]]:
+    """(test files either smoke function names, entries that name no such file).
+
+    run_test.py ignores an --include naming a file that does not exist, so deleting
+    a test file leaves its entry behind selecting nothing, and dropping those
+    silently would let the list rot unnoticed.
+    """
     named = {f for _, _, fn in TARGETS for f in smoke_patterns(text, fn)}
-    return {f"test/{f}.py" for f in named if is_test_file(f"test/{f}.py")}
+    live = {f for f in named if is_test_file(f"test/{f}.py")}
+    return {f"test/{f}.py" for f in live}, named - live
 
 
 def resolve(paths: list[str]) -> list[str]:
@@ -351,11 +361,17 @@ def main() -> int:
     # to account for pre-existing gaps in files it never touched is what the
     # changed-file scoping exists to prevent.
     direct = sorted(set(files))
-    regress_only = (
-        (smoke_files(base_text) | smoke_files(text)) - set(direct)
-        if base_text is not None
-        else set()
-    )
+    listed, stale = smoke_files(text)
+    if base_text is not None:
+        was_listed, _ = smoke_files(base_text)
+        listed |= was_listed
+    regress_only = listed - set(direct) if base_text is not None else set()
+    for name in sorted(stale):
+        print(
+            f"::warning file={TEST_SH_REL},title=Stale smoke-list entry::"
+            f"--include {name} names no test file, so it selects nothing."
+        )
+        print(f"gpu_coverage: {TEST_SH_REL} lists {name}, which no longer exists")
     files = direct + sorted(regress_only)
     if not files:
         print("gpu_coverage: no test files to check")
