@@ -331,7 +331,7 @@ class DistTensorParallelExampleTestACC(DTensorTestBase):
                 optim, optim_tp = self._setup_optimizer(
                     model, model_tp
                 )  # Step 3: Setup optimizers for both models
-                DistTensorParallelExampleTest._thaw_params(
+                DistTensorParallelExampleTestACC._thaw_params(
                     thaw_params, model, model_tp
                 )  # Step 4: set `requires_grad` patterns
 
