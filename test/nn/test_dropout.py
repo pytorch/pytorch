@@ -321,7 +321,7 @@ class TestDropoutNNDeviceType(NNTestCase):
                         )
 
 
-instantiate_device_type_tests(TestDropoutNNDeviceType, globals(), allow_mps=True)
+instantiate_device_type_tests(TestDropoutNNDeviceType, globals(), allow_mps=True, allow_xpu=True)
 instantiate_parametrized_tests(TestDropoutNN)
 
 if __name__ == "__main__":
