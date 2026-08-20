@@ -29,10 +29,7 @@ from torch.distributed.tensor.parallel import (
     RowwiseParallel,
 )
 from torch.distributed.tensor.parallel.input_reshard import input_reshard
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-    skipXPUIf,
-)
+from torch.testing._internal.common_device_type import skipXPUIf
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -871,17 +868,9 @@ class DistTensorParallelExampleTest(DTensorTestBase):
                 F.cross_entropy(dist_x, target, reduction="sum")
 
 
+instantiate_parametrized_tests(DistTensorParallelExampleTest)
 DistTensorParallelExampleTestWithLocalTensor = create_local_tensor_test_class(
     DistTensorParallelExampleTest,
-)
-instantiate_parametrized_tests(DistTensorParallelExampleTestWithLocalTensor)
-
-
-instantiate_device_type_tests(
-    DistTensorParallelExampleTest,
-    globals(),
-    except_for=["cpu"],
-    allow_xpu=True,
 )
 
 

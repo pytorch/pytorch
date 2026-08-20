@@ -56,10 +56,10 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FUSED_ATTENTION,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
 )
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    requires_cuda,
     run_tests,
     skipIfRocm,
     TestCase,
@@ -105,6 +105,7 @@ class SDPAWrapper(torch.nn.Module):
             return self.sdpa(*args, **kwargs)
 
 
+@requires_cuda
 class RingAttentionTest(DTensorTestBase):
     hw_classification = HardwareClassification.CUDA
 
@@ -548,6 +549,7 @@ class FlexAttentionWrapper(torch.nn.Module):
         return FlexAttentionWrapper._flex_attn(*args, **kwargs)
 
 
+@requires_cuda
 class CPFlexAttentionTest(DTensorTestBase):
     hw_classification = HardwareClassification.CUDA
 
@@ -1430,42 +1432,6 @@ class PerDocumentHeadTailLoadBalancerTest(TestCase):
         rearranged = lb._generate_indices()[0]
         restore = lb._generate_indices(restore=True)[0]
         self.assertEqual(rearranged[restore].tolist(), list(range(16)))
-
-
-instantiate_device_type_tests(
-    TestCPCustomOps,
-    globals(),
-    except_for=["cpu"],
-    allow_xpu=True,
-)
-instantiate_device_type_tests(
-    TestSharding,
-    globals(),
-    except_for=["cpu"],
-    allow_xpu=True,
-)
-instantiate_device_type_tests(
-    TestContextParallelStyle,
-    globals(),
-    except_for=["cpu"],
-    allow_xpu=True,
-)
-instantiate_device_type_tests(
-    TestContextParallelStyleSDPA,
-    globals(),
-    except_for=["cpu"],
-    allow_xpu=True,
-)
-instantiate_device_type_tests(
-    RingAttentionTest,
-    globals(),
-    only_for=["cuda"],
-)
-instantiate_device_type_tests(
-    CPFlexAttentionTest,
-    globals(),
-    only_for=["cuda"],
-)
 
 
 if __name__ == "__main__":

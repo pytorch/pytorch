@@ -7,7 +7,6 @@ from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import Replicate
 from torch.distributed.tensor.parallel.api import parallelize_module
 from torch.distributed.tensor.parallel.style import ColwiseParallel
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import HardwareClassification, run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -139,14 +138,6 @@ class TensorParallelRandomStateTests(DTensorTestBase):
 
 TensorParallelRandomStateTestsWithLocalTensor = create_local_tensor_test_class(
     TensorParallelRandomStateTests
-)
-
-
-instantiate_device_type_tests(
-    TensorParallelRandomStateTests,
-    globals(),
-    except_for=["cpu"],
-    allow_xpu=True,
 )
 
 
