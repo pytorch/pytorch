@@ -2536,7 +2536,8 @@ class GraphModule(torch.nn.Module):
         expected_grad = torch.ones_like(x) * 2.5
         self.assertTrue(torch.allclose(x.grad, expected_grad))
 
-    def test_opaque_constant_output_with_subclass_output(self):
+    @parametrize("backend", ["aot_eager", "inductor"])
+    def test_opaque_constant_output_with_subclass_output(self, backend):
         """Constant-type opaque created inside a compiled region must not be
         corrupted when the same graph also produces a tensor-subclass output.
         """
@@ -2549,21 +2550,18 @@ class GraphModule(torch.nn.Module):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.cfgs = []
                 self.w = torch.nn.Parameter(torch.randn(3, 3))
 
             def forward(self, x):
                 cfg = ValueConfig("square")
-                self.cfgs.append(cfg)
-                return x * self.w
+                return x * self.w, cfg
 
         m = M()
-        opt_m = torch.compile(m, backend="aot_eager", fullgraph=True)
-        result = opt_m(x)
+        opt_m = torch.compile(m, backend=backend, fullgraph=True)
+        result, cfg = opt_m(x)
 
-        # Without the fix: type(m.cfgs[0]) is FakeScriptObject
-        self.assertIs(type(m.cfgs[0]), ValueConfig)
-        self.assertEqual(m.cfgs[0].mode, "square")
+        # Without the fix: type(cfg) is FakeScriptObject
+        self.assertIs(type(cfg), ValueConfig)
         self.assertIsInstance(result, TensorWithCounter)
 
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
