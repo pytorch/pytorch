@@ -2104,6 +2104,29 @@ def _descriptor_shape_fits_in_int32(
     )
 
 
+def _tma_descriptor_max_offset_fits_in_int32(
+    mat: IRNode, add_guards: bool = False
+) -> bool:
+    # Unlike _descriptor_shape_fits_in_int32, catches overflow in the
+    # descriptor's max addressable offset even when every per-dim size
+    # fits.
+    int32_max = torch.iinfo(torch.int32).max
+    max_offset = sum(
+        (size - 1) * stride for size, stride in zip(mat.get_size(), mat.get_stride())
+    )
+    if isinstance(max_offset, (int, sympy.Integer)):
+        return max_offset <= int32_max
+
+    from .virtualized import V
+
+    condition = sympy.Le(max_offset, int32_max)
+    return (
+        V.graph.sizevars.guard_or_false(condition)
+        if add_guards
+        else V.graph.sizevars.statically_known_true(condition)
+    )
+
+
 def use_triton_tma_template(
     *matrices: IRNode, output_layout: Layout, add_guards: bool = False
 ) -> bool:
