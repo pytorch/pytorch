@@ -1245,6 +1245,18 @@ def emit_body(
         and (not returns_void)
     )
 
+    # See Note [Saving inputs that the operator mutates]
+    mutated_arg_names = {a.name for a in f.func.arguments.post_self_positional_mutable}
+
+    def is_mutated_by_call(arg: SavedAttribute) -> bool:
+        return str(arg.nctype.name) in mutated_arg_names
+
+    saved_inputs_mutated_by_call: list[SavedAttribute] = (
+        [arg for arg in info.all_saved_inputs if is_mutated_by_call(arg)]
+        if info is not None and info.has_derivatives
+        else []
+    )
+
     def emit_save_inputs() -> list[str]:
         setup: list[str] = []
         if info is None or not info.has_derivatives:
@@ -1333,8 +1345,11 @@ def emit_body(
                 raise AssertionError
             return f"grad_fn->should_compute_output({edge_off})"
 
+        saved_inputs = [
+            arg for arg in info.all_saved_inputs if not is_mutated_by_call(arg)
+        ]
         if is_inplace_foreach:
-            save_input_stmts = save_variables(info.all_saved_inputs, False, guard_for)
+            save_input_stmts = save_variables(saved_inputs, False, guard_for)
             if save_input_stmts:
                 setup.append(
                     LOOP_OVER_VECTOR_OF_GRAD_FNS.substitute(
@@ -1342,7 +1357,7 @@ def emit_body(
                     )
                 )
         else:
-            setup.extend(save_variables(info.all_saved_inputs, False, guard_for))
+            setup.extend(save_variables(saved_inputs, False, guard_for))
             for arg in args_with_derivatives:
                 if is_tensor_list_type(arg.type):
                     setup.append(f"grad_fn->{arg.name}_size_ = {arg.name}.size();")
@@ -1863,6 +1878,26 @@ def emit_body(
                 "}\n"
             )
 
+    # Note [Saving inputs that the operator mutates]
+    # An argument annotated as mutable (e.g. `noise` in
+    # `rrelu_with_noise(Tensor self, Tensor(b!) noise, ...)`) is really an extra
+    # output: the kernel only fills it during the call, so the value the backward
+    # formula needs does not exist yet when the grad_fn is set up. Saving it
+    # up front happens to work when the SavedVariable just holds on to the
+    # argument, because it aliases the buffer the kernel writes into. It breaks
+    # as soon as a saved tensor hook materializes the data at pack time
+    # (non-reentrant checkpointing, save_on_cpu, ...): the hook then captures the
+    # pre-call contents, which for a freshly allocated buffer is uninitialized
+    # memory, and backward silently computes garbage. Save those arguments after
+    # the call instead, which is the value backward reads today anyway.
+    def emit_save_mutated_inputs() -> str:
+        stmts = save_variables(saved_inputs_mutated_by_call, False)
+        if len(stmts) == 0:
+            return ""
+        if not is_inplace_foreach:
+            return CONDITIONAL.substitute(cond="grad_fn", statements=stmts)
+        return LOOP_OVER_VECTOR_OF_GRAD_FNS.substitute(preamble="", statements=stmts)
+
     def emit_save_outputs() -> str:
         if is_out_fn:
             # out functions don't currently support differentiation
@@ -2292,6 +2327,7 @@ def emit_body(
 
     if requires_derivative:
         # Save only after the forward AD has been set up
+        body.append(emit_save_mutated_inputs())
         body.append(emit_save_outputs())
         # Fire node creation hooks only once the node is fully populated,
         # including saved outputs above.
