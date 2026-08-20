@@ -3049,144 +3049,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             with self.assertRaisesRegex(ValueError, error_msg):
                 rnn = getattr(nn, mode)(30, 20, 2, proj_size=10)
 
-    @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
-    @set_default_dtype(torch.double)
-    def test_RNN_dropout(self):
-        # checking the assumption that cuDNN sticks dropout in between
-        # RNN layers
-        for p in (0, 0.276, 0.731, 1):
-            for train in (True, False):
-                for cuda in (True, False):
-                    rnn = nn.RNN(10, 1000, 2, bias=False, dropout=p, nonlinearity='relu')
-                    if cuda:
-                        rnn.cuda()
-
-                    if train:
-                        rnn.train()
-                    else:
-                        rnn.eval()
-                    rnn.weight_ih_l0.data.fill_(1)
-                    rnn.weight_hh_l0.data.fill_(1)
-                    rnn.weight_ih_l1.data.fill_(1)
-                    rnn.weight_hh_l1.data.fill_(1)
-                    input = torch.ones(1, 1, 10)
-                    hx = torch.zeros(2, 1, 1000)
-                    if cuda:
-                        input = input.cuda()
-                        hx = hx.cuda()
-
-                    output, hy = rnn(input, hx)
-                    self.assertEqual(output.data.min(), output.data.max())
-                    output_val = output.data[0][0][0]
-                    if p == 0 or not train:
-                        self.assertEqual(output_val, 10000)
-                    elif p == 1:
-                        self.assertEqual(output_val, 0)
-                    else:
-                        self.assertGreater(output_val, 8000)
-                        self.assertLess(output_val, 12000)
-                        denorm_mod = (output_val * (1 - p)) % 10
-                        self.assertLess(min(denorm_mod, 10 - denorm_mod), 1e-2)
-
-                    self.assertEqual(hy[0].data.min(), hy[0].data.max())
-                    self.assertEqual(hy[1].data.min(), hy[1].data.max())
-                    self.assertEqual(hy.data[0][0][0], 10)
-                    self.assertEqual(hy.data[1][0][0], output_val)
-
-    @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
-    @set_default_dtype(torch.double)
-    def test_error_RNN_seq_len_zero(self):
-        # checking error message when RNN has seq_len = 0
-        for module in (nn.RNN, nn.LSTM, nn.GRU):
-            for bidirectional in [True, False]:
-                for device in get_all_device_types():
-                    input = torch.ones(0, 10, 5)
-                    rnn = module(5, 6, bidirectional=bidirectional)
-                    if device == 'cuda':
-                        rnn.cuda()
-                        input = input.cuda()
-
-                    with self.assertRaisesRegex(RuntimeError, "Expected sequence length to be larger than 0 in RNN"):
-                        rnn(input)
-
-    @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
-    def test_RNN_dropout_state(self):
-        for p in (0, 0.1234):
-            for train in (True, False):
-                for cuda in (True, False):
-                    rnn = nn.RNN(100, 100, 2, bias=False, dropout=p, nonlinearity='relu')
-                    if cuda:
-                        rnn.cuda()
-
-                    if train:
-                        rnn.train()
-                    else:
-                        rnn.eval()
-                    input = torch.rand(1, 1, 100)
-                    hx = torch.rand(2, 1, 100)
-                    if cuda:
-                        input = input.cuda()
-                        hx = hx.cuda()
-
-                    output1, hy1 = rnn(input, hx)
-                    output2, hy2 = rnn(input, hx)
-
-                    buf = io.BytesIO()
-                    rnn_pickle = torch.save(rnn, buf)
-                    buf.seek(0)
-                    # weights_only=False as this is legacy code that saves the model
-                    rnn2 = torch.load(buf, weights_only=False)
-                    rnn2.flatten_parameters()
-                    output3, hy3 = rnn2(input, hx)
-
-                    if p == 0 or not train:
-                        self.assertEqual(output1, output2)
-                        self.assertEqual(output1, output3)
-                        self.assertEqual(hy1, hy2)
-                        self.assertEqual(hy1, hy3)
-                    else:
-                        self.assertNotEqual(output1, output2)
-                        self.assertNotEqual(output1, output3)
-                        self.assertNotEqual(hy1, hy2)
-                        self.assertNotEqual(hy1, hy3)
-
-    @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
-    @set_default_dtype(torch.double)
-    def test_RNN_change_dropout(self):
-        for train, cuda in product((True, False), repeat=2):
-            rnn = nn.RNN(100, 100, 2, dropout=0, nonlinearity='relu')
-            input = torch.rand(3, 2, 100)
-            if cuda:
-                input.data = input.data.cuda()
-                rnn.cuda()
-
-            if train:
-                rnn.train()
-            else:
-                rnn.eval()
-
-            prev_output = None
-            for p in (0, 0.5, 0, 0.7, 0.2, 1, 0.2, 0):
-                rnn.dropout = p
-                output1, hy1 = rnn(input)
-                output2, hy2 = rnn(input)
-
-                if p == 0 or p == 1 or not train:
-                    self.assertEqual(output1, output2)
-                    self.assertEqual(hy1, hy2)
-                else:
-                    self.assertNotEqual(output1, output2)
-                    self.assertNotEqual(hy1, hy2)
-
-                if prev_output is not None:
-                    if not train:
-                        self.assertEqual(output1.data, prev_output)
-                        self.assertEqual(output2.data, prev_output)
-                    else:
-                        self.assertNotEqual(output1.data, prev_output)
-                        self.assertNotEqual(output2.data, prev_output)
-                prev_output = output1.data
-
     def test_inplace_thnn(self):
         modules = [nn.ReLU, nn.ELU, nn.SELU, nn.CELU, nn.RReLU]
         for mod in modules:
@@ -3711,63 +3573,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         helper(self, torch.bfloat16)
         helper(self, torch.float16)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
-    def test_batchnorm_cudnn_nhwc(self):
-        def run_test(input, grad_output):
-            c = input.size(1)
-            mod = nn.BatchNorm2d(c).cuda().float()
-            mod.weight.data.uniform_()
-            mod.bias.data.uniform_()
-            ref_input = input.detach().clone().contiguous().requires_grad_(True)
-            ref_grad = grad.detach().clone().contiguous()
-            ref_mod = nn.BatchNorm2d(c).cuda().float()
-            ref_mod.load_state_dict(mod.state_dict())
-            out = mod(input)
-            out.backward(grad_output)
-            ref_out = ref_mod(ref_input)
-            ref_out.backward(ref_grad)
-            self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
-            self.assertTrue(ref_out.is_contiguous())
-            self.assertEqual(out, ref_out)
-            self.assertEqual(mod.weight.grad, ref_mod.weight.grad)
-            self.assertEqual(mod.bias.grad, ref_mod.bias.grad)
-            self.assertEqual(input.grad, ref_input.grad)
-
-        input = torch.randint(1, 10, (4, 8, 2, 2), dtype=torch.float32, device="cuda")
-        input = input.contiguous(memory_format=torch.channels_last).detach().requires_grad_()
-
-        grad = torch.randint(1, 10, (4, 8, 2, 2), dtype=torch.float32, device="cuda")
-        grad = grad.contiguous(memory_format=torch.channels_last)
-        run_test(input, grad)
-        # see #42588, grad is channels_last contiguous, but grad.suggest_memory_format (rightly) return "contiguous"
-        # not channels_last
-        input = torch.randint(1, 10, (2, 8, 8, 1), dtype=torch.float32, device="cuda")
-        input = input.contiguous(memory_format=torch.channels_last).detach().requires_grad_()
-        grad = torch.randint(1, 10, (2, 8, 8, 1), dtype=torch.float32, device="cuda")
-        grad = grad.permute(0, 2, 1, 3)
-        run_test(input, grad)
-
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    def test_batchnorm_cudnn_half(self):
-        # THNN
-        input = torch.randint(1, 10, (2, 3, 2, 2), dtype=torch.half, device="cuda", requires_grad=True)
-        m = nn.BatchNorm2d(3).half().cuda()
-        thnn_output = m(input)
-        thnn_output.sum().backward()
-        thnn_input_grad = input.grad.data.clone()
-        self.assertEqualTypeString(thnn_output, input)
-        # cuDNN
-        if TEST_CUDNN:
-            input.grad = None
-            m = m.float()
-            cudnn_output = m(input)
-            cudnn_output.sum().backward()
-            cudnn_input_grad = input.grad.data.clone()
-            self.assertEqualTypeString(cudnn_output, input)
-            self.assertEqual(cudnn_output, thnn_output)
-            self.assertEqual(cudnn_input_grad, thnn_input_grad, atol=1e-3, rtol=0)
-
     def test_batchnorm_raises_error_if_less_than_one_value_per_channel(self):
         x = torch.rand(10)[None, :, None]
         with self.assertRaises(ValueError):
@@ -3847,177 +3652,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertTrue(torch.equal(running_mean, bn.running_mean))
         self.assertTrue(torch.equal(running_var, bn.running_var))
 
-
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
-    @parametrize_test("dims", [2, 3], name_fn=lambda x: f"{x}D")
-    @parametrize_test("mode", ["train", "inference"], name_fn=lambda x: x)
-    @parametrize_test(
-        # test verifies cudnn/miopen batchnorm with the reference backend or memory format
-        # memory_format - one of ("NCHW", NHWC")
-        # ref_backend - one of ("cpu", "native", "NCHW", "NHWC")
-        #   "cpu"    - cpu backend with the same memory_format will be used as reference
-        #   "native" - native backend (`with torch.backends.cudnn.flags(enabled=False)`)
-        #              with the same memory_format will be used
-        #   "NCHW" or "NHWC" - the same backend will be used but another memory format
-        # mixed - True or False. Mixed batchnorm mode where inputs are 16-bit and batchnorm is fp32
-        #
-        "memory_format,ref_backend,mixed,dtype",
-        [
-            ("NCHW", "cpu", False, torch.float),
-            ("NCHW", "cpu", True, torch.half),
-            ("NCHW", "cpu", True, torch.bfloat16),
-
-            ("NCHW", "native", False, torch.float),
-            ("NCHW", "native", True, torch.half),
-            ("NCHW", "native", True, torch.bfloat16),
-
-            ("NHWC", "cpu", False, torch.float),
-            ("NHWC", "cpu", True, torch.half),
-            ("NHWC", "cpu", True, torch.bfloat16),
-
-            ("NHWC", "native", False, torch.float),
-            ("NHWC", "native", True, torch.half),
-            ("NHWC", "native", True, torch.bfloat16),
-
-            ("NHWC", "NCHW", False, torch.float),
-            ("NHWC", "NCHW", True, torch.half),
-            ("NHWC", "NCHW", True, torch.bfloat16),
-        ],
-        name_fn=lambda f, b, m, t: f"{f}_vs_{b}{'_mixed' if m else ''}_{dtype_name(t)}"
-    )
-    def test_batchnorm(self, dims, mode, memory_format, ref_backend, mixed, dtype):
-        if torch.version.cuda:
-            if self._testMethodName in ("test_batchnorm_2D_train_NCHW_vs_cpu_mixed_bfloat16",
-                                        "test_batchnorm_3D_train_NCHW_vs_cpu_mixed_bfloat16",
-                                        "test_batchnorm_2D_train_NHWC_vs_NCHW_mixed_bfloat16",
-                                        "test_batchnorm_3D_train_NHWC_vs_NCHW_mixed_bfloat16",
-                                        "test_batchnorm_3D_train_NCHW_vs_native_mixed_float16"):
-                self.skipTest("Failed on CUDA")
-
-        if torch.version.hip:
-            if self._testMethodName in ("test_batchnorm_2D_train_NCHW_vs_native_mixed_bfloat16",
-                                        "test_batchnorm_3D_train_NCHW_vs_native_mixed_bfloat16") \
-                    and _get_torch_rocm_version() >= (6, 4):
-                # https://github.com/pytorch/pytorch/issues/156513
-                self.skipTest("bfloat16 NCHW train failed due to native tolerance issue")
-
-            if self._testMethodName == "test_batchnorm_3D_train_NCHW_vs_native_mixed_float16":
-                self.skipTest("3D float16 NCHW train failed on ROCm")
-
-        if dims == 3 and memory_format in ("NHWC", "NCHW"):
-            memory_format = memory_format + "3D"
-
-        def _create_tensor(size, memory_format, dtype, device):
-            t = torch.empty(size=size, memory_format=memory_format, dtype=dtype, device=device)
-            t = t.random_(1, 10)
-            return t
-
-        def _get_ref_device(backend: str , device: str):
-            # If 'backend' specifies the memory format, return 'device' arg, otherwise return a device matches the backend
-            if backend in ("NHWC", "NHWC3D", "NCHW", "NCHW3D"):
-                return device
-            if backend == "native":
-                return "cuda"
-            if backend == "cpu":
-                return "cpu"
-            else:
-                raise ValueError("Unknown backend")
-
-        def _get_backend_memory_format(backend: str, memory_format: torch.memory_format) -> torch.memory_format:
-            # If 'backend' specifies the memory format, return it, otherwise look at 'memory_format' arg
-            if backend == "NHWC":
-                return torch.channels_last
-            if backend == "NHWC3D":
-                return torch.channels_last_3d
-            if backend in ("NCHW", "NCHW3D"):
-                return torch.contiguous_format
-            if memory_format in (torch.contiguous_format, torch.channels_last, torch.channels_last_3d):
-                return memory_format
-            raise ValueError(f"Unable to detect memory format for backend={backend} and memory_format={memory_format}")
-
-        def _get_memory_format(t: torch.Tensor) -> torch.memory_format:
-            if t.is_contiguous(memory_format=torch.contiguous_format):
-                return torch.contiguous_format
-            if t.is_contiguous(memory_format=torch.channels_last):
-                return torch.channels_last
-            if t.is_contiguous(memory_format=torch.channels_last_3d):
-                return torch.channels_last_3d
-            return ValueError("Unsupported memory_format")
-
-        def _get_memory_format_from_name(memory_format_name: str) -> torch.memory_format:
-            if memory_format_name == "NHWC":
-                return torch.channels_last
-            elif memory_format_name == "NHWC3D":
-                return torch.channels_last_3d
-            elif memory_format_name in ("NCHW", "NCHW3D"):
-                return torch.contiguous_format
-            return ValueError("Unsupported memory_format")
-
-        def _create_backend(inp: torch.Tensor, mixed: bool = False):
-            if inp.dim() == 4:
-                return nn.BatchNorm2d(inp.size(1), device=inp.device, dtype=torch.float if mixed else inp.dtype)
-            else:
-                return nn.BatchNorm3d(inp.size(1), device=inp.device, dtype=torch.float if mixed else inp.dtype)
-
-        def _test_batchnorm_train(inp, grad, mixed, ref_inp, ref_grad, ref_backend):
-            mod = _create_backend(inp, mixed).train()
-            mod.weight.data.uniform_()
-            mod.bias.data.uniform_()
-
-            ref_mod = _create_backend(ref_inp, mixed).train()
-            ref_mod.load_state_dict(mod.state_dict())
-
-            out = mod(inp)
-            out.backward(grad)
-
-            with torch.backends.cudnn.flags(enabled=False) if ref_backend == "native" else contextlib.nullcontext():
-                ref_out = ref_mod(ref_inp)
-                ref_out.backward(ref_grad)
-
-            self.assertTrue(out.is_contiguous(memory_format=_get_memory_format(inp)))
-            self.assertTrue(ref_out.is_contiguous(memory_format=_get_memory_format(ref_inp)))
-            self.assertEqual(out, ref_out)
-            self.assertEqual(mod.weight.grad, ref_mod.weight.grad)
-            self.assertEqual(mod.bias.grad, ref_mod.bias.grad)
-            self.assertEqual(mod.running_mean, ref_mod.running_mean)
-            self.assertEqual(mod.running_var, ref_mod.running_var)
-            self.assertEqual(inp.grad, ref_inp.grad)
-
-        def _train(memory_format_name, ref_backend, mixed, dtype):
-            memory_format = _get_memory_format_from_name(memory_format_name)
-
-            ref_memory_format = _get_backend_memory_format(ref_backend, memory_format)
-            ref_device = _get_ref_device(ref_backend, device="cuda")
-
-            size = (4, 8, 2, 2, 2) if memory_format_name in ("NCHW3D", "NHWC3D") else (4, 8, 2, 2)
-            inp = _create_tensor(size, memory_format, dtype, device="cuda").detach().requires_grad_()
-            grad = _create_tensor(size, memory_format, dtype, device="cuda")
-            ref_inp = inp.detach().clone(memory_format=ref_memory_format).to(device=ref_device).requires_grad_()
-            ref_grad = grad.detach().clone(memory_format=ref_memory_format).to(device=ref_device)
-
-            _test_batchnorm_train(inp=inp, grad=grad, mixed=mixed,
-                                  ref_inp=ref_inp, ref_grad=ref_grad, ref_backend=ref_backend)
-
-        def _inference(memory_format_name, ref_backend, mixed, dtype):
-            memory_format = _get_memory_format_from_name(memory_format_name)
-            ref_memory_format = _get_backend_memory_format(ref_backend, memory_format)
-            ref_device = _get_ref_device(ref_backend, device="cuda")
-
-            size = (2, 64, 50, 50, 50) if memory_format_name in ("NCHW3D", "NHWC3D") else (2, 64, 50, 50)
-            inp = _create_tensor(size, memory_format, dtype, device="cuda")
-            ref_inp = inp.detach().clone(memory_format=ref_memory_format).to(device=ref_device)
-            mod = _create_backend(inp, mixed).eval()
-            ref_mod = _create_backend(ref_inp, mixed).eval()
-
-            out = mod(inp)
-            with torch.backends.cudnn.flags(enabled=False) if ref_backend == "native" else contextlib.nullcontext():
-                ref_out = ref_mod(ref_inp)
-            self.assertEqual(out, ref_out)
-
-        if mode == "train":
-            _train(memory_format, ref_backend, mixed, dtype)
-        else:
-            _inference(memory_format, ref_backend, mixed, dtype)
 
     def test_batchnorm_load_state_dict(self):
         bn = torch.nn.BatchNorm2d(3)
@@ -4242,41 +3876,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(out, torch.ones(2, dtype=torch.float))
 
 
-    def test_grid_sample_error_checking(self):
-        input = torch.empty(1, 1, 2, 2)
-        grid = torch.empty(1, 1, 1, 2)
-
-        # assert no error
-        F.grid_sample(input, grid, align_corners=False)
-
-        with self.assertRaisesRegex(ValueError, "but got: 'garbage'"):
-            F.grid_sample(input, grid, mode='garbage', align_corners=False)
-
-        with self.assertRaisesRegex(ValueError, "but got: 'garbage'"):
-            F.grid_sample(input, grid, padding_mode='garbage', align_corners=False)
-
-        with self.assertRaisesRegex(RuntimeError, "expected grid to have size 1 in last dimension"):
-            F.grid_sample(input[0], grid, align_corners=False)
-
-        with self.assertRaisesRegex(RuntimeError, "expected grid to have size 2 in last dimension"):
-            F.grid_sample(input, torch.empty(1, 1, 1, 1, 3), align_corners=False)
-
-        with self.assertRaisesRegex(RuntimeError, "expected grid and input to have same batch size"):
-            F.grid_sample(input, torch.empty(2, 1, 1, 2), align_corners=False)
-
-        with self.assertRaisesRegex(RuntimeError, "expected grid to have size 2 in last dimension"):
-            F.grid_sample(input, torch.empty(1, 1, 1, 3), align_corners=False)
-
-        with self.assertRaisesRegex(RuntimeError, "expected input to have non-empty spatial dimensions"):
-            F.grid_sample(torch.empty(1, 1, 0, 2), grid, align_corners=False)
-
-        with self.assertRaisesRegex(RuntimeError, "bicubic interpolation only supports 4D input"):
-            F.grid_sample(torch.empty(1, 1, 2, 2, 2), torch.empty(1, 1, 1, 1, 3), mode='bicubic')
-
-        if TEST_CUDA:
-            with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
-                F.grid_sample(input.cuda(), grid, align_corners=False)
-
     def test_affine_grid_error_checking(self):
         # 2D affine
         theta = torch.empty(1, 2, 3, dtype=torch.double)
@@ -4350,31 +3949,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
         with self.assertRaisesRegex(NotImplementedError, "affine_grid only supports 4D and 5D sizes"):
             F.affine_grid(theta, torch.Size([1, 1, 2, 2, 2, 2]), align_corners=False)
-
-    @parametrize_test('device', ['cpu'] + (['cuda'] if TEST_CUDA else []))
-    @parametrize_test('nd', [2, 3])
-    def test_affine_grid_backward_cl_cf_consistency(self, device, nd):
-        # Test based on reported issue: https://github.com/pytorch/pytorch/issues/124154
-
-        theta = torch.rand([6, nd, nd + 1], requires_grad=True, device=device)
-        size = [6, 3, 4, 5] if nd == 2 else [6, 3, 4, 5, 5]
-        grid = torch.nn.functional.affine_grid(theta, size, align_corners=False)
-
-        grad_tensor = torch.rand(grid.shape, device=device)
-
-        memory_format_cl = torch.channels_last if nd == 2 else torch.channels_last_3d
-        grad_tensor_cl = grad_tensor.contiguous(memory_format=memory_format_cl)
-
-        if theta.grad is not None:
-            raise AssertionError("expected theta.grad to be None")
-        grid.backward(grad_tensor_cl)
-        theta_grad_cl = theta.grad.clone().contiguous()
-
-        theta.grad.zero_()
-        grid.backward(grad_tensor)
-        theta_grad_cf = theta.grad
-
-        self.assertEqual(theta_grad_cf, theta_grad_cl)
 
     @set_default_dtype(torch.double)
     def test_grid_sample(self):
@@ -4740,297 +4314,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                                 test(N, C, H, W, mode, padding_mode, align_corners, input_requires_grad)
 
     @set_default_dtype(torch.double)
-    def test_grid_sample_3d(self):
-        # Backward pass of native C++ and CUDA kernels branch depending on whether input requires gradient,
-        # so we test both cases.
-        def test(N, C, D, H, W, mode, padding_mode, align_corners, input_requires_grad):
-            def test_shape(N, C, ID, IH, IW, D, H, W, mode, padding_mode, align_corners):
-                input_cpu = torch.randn(C, N, ID, IH, IW).transpose(0, 1).requires_grad_(input_requires_grad)
-                grid_cpu = torch.randn(D, N, H, W, 3).transpose(0, 1).requires_grad_()
-                out_cpu = F.grid_sample(input_cpu, grid_cpu, mode=mode, padding_mode=padding_mode,
-                                        align_corners=align_corners)
-                self.assertTrue(out_cpu.size() == torch.Size([N, C, D, H, W]))
-
-                gradients = torch.randn_like(out_cpu)
-                out_cpu.backward(gradients)
-
-                if TEST_CUDA:
-                    input_cuda = input_cpu.detach().transpose(0, 1).cuda().transpose(0, 1).requires_grad_(input_requires_grad)
-                    grid_cuda = grid_cpu.detach().transpose(0, 1).cuda().transpose(0, 1).requires_grad_()
-                    out_cuda = F.grid_sample(input_cuda, grid_cuda, mode=mode, padding_mode=padding_mode,
-                                             align_corners=align_corners)
-                    self.assertEqual(out_cpu, out_cuda)
-
-                    out_cuda.backward(gradients.cuda())
-                    if input_requires_grad:
-                        self.assertEqual(input_cpu.grad, input_cuda.grad)
-                    self.assertEqual(grid_cpu.grad, grid_cuda.grad, atol=5e-5, rtol=0)
-
-                    # check that zero-dimensional input strides don't error out
-                    base_input = torch.randn(N, C, 1, IH, IW)
-                    input_cpu = base_input.expand_as(input_cuda).requires_grad_(input_requires_grad)
-                    grid_cpu = torch.randn(N, D, H, W, 3, requires_grad=True)
-                    out_cpu = F.grid_sample(input_cpu, grid_cpu, mode=mode, padding_mode=padding_mode,
-                                            align_corners=align_corners)
-
-                    input_cuda = base_input.cuda().expand_as(input_cuda).requires_grad_(input_requires_grad)
-                    grid_cuda = grid_cpu.detach().cuda().requires_grad_()
-                    out_cuda = F.grid_sample(input_cuda, grid_cuda, mode=mode, padding_mode=padding_mode,
-                                             align_corners=align_corners)
-                    self.assertEqual(out_cpu, out_cuda)
-
-            # test same size output
-            test_shape(N, C, D, H, W, D, H, W, mode, padding_mode, align_corners)
-
-            # test larger output
-            N = random.randint(2, 7)
-            C = random.randint(2, 5)
-            ID = random.randint(2, 7)
-            IH = random.randint(2, 7)
-            IW = random.randint(2, 7)
-            D = random.randint(ID + 1, 10)
-            H = random.randint(IH + 1, 10)
-            W = random.randint(IW + 1, 10)
-            test_shape(N, C, ID, IH, IW, D, H, W, mode, padding_mode, align_corners)
-
-            # test smaller output
-            N = random.randint(2, 7)
-            C = random.randint(2, 5)
-            ID = random.randint(2, 7)
-            IH = random.randint(2, 7)
-            IW = random.randint(2, 7)
-            D = random.randint(2, ID)
-            H = random.randint(2, IH)
-            W = random.randint(2, IW)
-            test_shape(N, C, ID, IH, IW, D, H, W, mode, padding_mode, align_corners)
-
-            # test 1x1 inpput
-            N = random.randint(2, 7)
-            C = random.randint(2, 7)
-            ID = 1
-            IH = 1
-            IW = 1
-            H = random.randint(2, 5)
-            W = random.randint(2, 5)
-            test_shape(N, C, ID, IH, IW, D, H, W, mode, padding_mode, align_corners)
-
-            # testing empty grid
-            N = random.randint(2, 7)
-            C = random.randint(2, 5)
-            ID = random.randint(2, 7)
-            IH = random.randint(2, 7)
-            IW = random.randint(2, 7)
-            D = random.randint(3, ID + 2)
-            W = random.randint(3, IW + 2)
-            test_shape(N, C, ID, IH, IW, D, 0, W, mode, padding_mode, align_corners)
-
-            # testing empty channel
-            N = random.randint(2, 7)
-            ID = random.randint(2, 5)
-            IH = random.randint(2, 7)
-            IW = random.randint(2, 7)
-            D = random.randint(3, ID + 2)
-            H = random.randint(3, IH + 2)
-            W = random.randint(3, IW + 2)
-            test_shape(N, 0, ID, IH, IW, D, H, W, mode, padding_mode, align_corners)
-
-            # testing empty batch
-            C = random.randint(2, 5)
-            ID = random.randint(2, 7)
-            IH = random.randint(2, 7)
-            IW = random.randint(2, 7)
-            D = random.randint(3, ID + 2)
-            H = random.randint(3, IH + 2)
-            W = random.randint(3, IW + 2)
-            test_shape(0, C, ID, IH, IW, D, H, W, mode, padding_mode, align_corners)
-
-        for mode in ('bilinear', 'nearest'):
-            for padding_mode in ('zeros', 'border', 'reflection'):
-                for align_corners in (True, False):
-                    # do gradcheck
-                    N = random.randint(2, 5)
-                    C = random.randint(2, 4)
-                    D = random.randint(2, 5)
-                    H = random.randint(2, 5)
-                    W = random.randint(2, 5)
-                    input = torch.randn(N, C, D, H, W, requires_grad=True)
-                    grid = torch.randn(N, D, H, W, 3, requires_grad=True)
-                    self.assertTrue(gradcheck(
-                        lambda inp, grid: F.grid_sample(inp, grid, mode=mode, padding_mode=padding_mode,
-                                                        align_corners=align_corners),
-                        (input, grid)))
-                    input = input.requires_grad_(False)
-                    self.assertTrue(gradcheck(
-                        lambda grid: F.grid_sample(input, grid, mode=mode, padding_mode=padding_mode,
-                                                   align_corners=align_corners),
-                        (grid,)))
-
-                    for input_requires_grad in [False, True]:
-                        test(N, C, D, H, W, mode, padding_mode, align_corners, input_requires_grad)
-
-    def test_grid_sample_nearest_neighbor_rounding_mode_consistency(self):
-
-        device_list = ['cpu']
-        if TEST_CUDA:
-            device_list.append('cuda')
-
-        def normalize_indices(indices_unnormalized: torch.Tensor, dim_size: int, align_corners: bool):
-            if align_corners:
-                indices_normalized = 2 * indices_unnormalized / (dim_size - 1) - 1
-            else:
-                indices_normalized = (indices_unnormalized * 2 + 1) / dim_size - 1
-            return indices_normalized
-
-        test_dim_size = 10
-        non_test_dim_size = 9
-        step_size = 0.1
-
-        batch_size = 1
-        channel_size = 1
-
-        mode = 'nearest'
-        for device in device_list:
-            for padding_mode in ('zeros', 'border', 'reflection'):
-                for align_corners in (True, False):
-                    # Unnormalized inquiry indices
-                    inquiry_indices_unnormalized = torch.arange(
-                        0,
-                        test_dim_size - 1 + step_size, step_size,
-                        dtype=torch.float32,
-                        device=device
-                    )
-                    # Note that even though we are trying to create normalized indices
-                    # which results in x.0 and x.5 indices after unnormalization,
-                    # because of the numerical error,
-                    # the rounding direction might not always be expected as designed.
-                    # The best we could do is to ensure the rounding behaviors across
-                    # different implementations for different dimensions are
-                    # exactly the same.
-                    inquiry_indices = normalize_indices(
-                        indices_unnormalized=inquiry_indices_unnormalized,
-                        dim_size=test_dim_size,
-                        align_corners=align_corners
-                    )
-                    num_inqueries = inquiry_indices.shape[0]
-                    inquiry_fixed_indices = torch.full((num_inqueries,), 0.5, dtype=torch.float32, device=device)
-                    array_data = torch.rand(test_dim_size, dtype=torch.float32, device=device)
-                    # 2D grid sample x-dim interpolation
-                    # The input_tensor_2d_x is of shape
-                    # [batch_size, channel_size, non_test_dim_size, test_dim_size]
-                    input_tensor_2d_x = array_data.reshape(1, test_dim_size).repeat(
-                        batch_size,
-                        channel_size,
-                        non_test_dim_size,
-                        1
-                    )
-                    # The grid_tensor_2d_x is of shape
-                    # [batch_size, 1, num_inqueries]
-                    grid_tensor_2d_x = torch.cat(
-                        tensors=(
-                            inquiry_indices.reshape(num_inqueries, 1),
-                            inquiry_fixed_indices.reshape(num_inqueries, 1),
-                        ),
-                        dim=1
-                    ).repeat(batch_size, 1, 1, 1)
-                    # The output_tensor_2d_x is of shape
-                    # [batch_size, channel_size, 1, num_inqueries]
-                    output_tensor_2d_x = F.grid_sample(
-                        input=input_tensor_2d_x,
-                        grid=grid_tensor_2d_x,
-                        mode=mode,
-                        padding_mode=padding_mode,
-                        align_corners=align_corners,
-                    )
-                    # 2D grid sample y-dim interpolation
-                    # The input_tensor_2d_y is of shape
-                    # [batch_size, channel_size, test_dim_size, non_test_dim_size]
-                    input_tensor_2d_y = torch.transpose(input_tensor_2d_x, 3, 2)
-                    # The grid_tensor_2d_y is of shape
-                    # [batch_size, 1, num_inqueries]
-                    grid_tensor_2d_y = torch.index_select(
-                        grid_tensor_2d_x,
-                        -1,
-                        torch.tensor([1, 0], dtype=torch.int64, device=device)
-                    )
-                    # The output_tensor_2d_y is of shape
-                    # [batch_size, channel_size, 1, num_inqueries]
-                    output_tensor_2d_y = F.grid_sample(
-                        input=input_tensor_2d_y,
-                        grid=grid_tensor_2d_y,
-                        mode=mode,
-                        padding_mode=padding_mode,
-                        align_corners=align_corners,
-                    )
-                    self.assertEqual(output_tensor_2d_x[0, 0, 0, :], output_tensor_2d_y[0, 0, 0, :], atol=0, rtol=0)
-                    # 3D grid sample x-dim interpolation
-                    # The input_tensor_3d_x is of shape
-                    # [batch_size, channel_size, non_test_dim_size, non_test_dim_size, test_dim_size]
-                    input_tensor_3d_x = array_data.reshape(1, test_dim_size).repeat(
-                        batch_size, channel_size, non_test_dim_size, non_test_dim_size, 1)
-                    # The grid_tensor_3d_x is of shape
-                    # [batch_size, 1, 1, num_inqueries]
-                    grid_tensor_3d_x = torch.cat(
-                        tensors=(
-                            inquiry_indices.reshape(num_inqueries, 1),
-                            inquiry_fixed_indices.reshape(num_inqueries, 1),
-                            inquiry_fixed_indices.reshape(num_inqueries, 1),
-                        ),
-                        dim=1
-                    ).repeat(batch_size, 1, 1, 1, 1)
-                    # The output_tensor_3d_x is of shape
-                    # [batch_size, channel_size, 1, 1, num_inqueries]
-                    output_tensor_3d_x = F.grid_sample(
-                        input=input_tensor_3d_x,
-                        grid=grid_tensor_3d_x,
-                        mode=mode,
-                        padding_mode=padding_mode,
-                        align_corners=align_corners,
-                    )
-                    self.assertEqual(output_tensor_2d_x[0, 0, 0, :], output_tensor_3d_x[0, 0, 0, 0, :], atol=0, rtol=0)
-                    # 3D grid sample y-dim interpolation
-                    # The input_tensor_3d_y is of shape
-                    # [batch_size, channel_size, non_test_dim_size, test_dim_size, non_test_dim_size]
-                    input_tensor_3d_y = torch.transpose(input_tensor_3d_x, 4, 3)
-                    # The grid_tensor_3d_y is of shape
-                    # [batch_size, 1, 1, num_inqueries]
-                    grid_tensor_3d_y = torch.index_select(
-                        grid_tensor_3d_x,
-                        -1,
-                        torch.tensor([1, 0, 2], dtype=torch.int64, device=device)
-                    )
-                    # The output_tensor_3d_y is of shape
-                    # [batch_size, channel_size, 1, 1, num_inqueries]
-                    output_tensor_3d_y = F.grid_sample(
-                        input=input_tensor_3d_y,
-                        grid=grid_tensor_3d_y,
-                        mode=mode,
-                        padding_mode=padding_mode,
-                        align_corners=align_corners,
-                    )
-                    self.assertEqual(output_tensor_2d_x[0, 0, 0, :], output_tensor_3d_y[0, 0, 0, 0, :], atol=0, rtol=0)
-                    # 3D grid sample z-dim interpolation
-                    # The input_tensor_3d_z is of shape
-                    # [batch_size, channel_size, non_test_dim_size, non_test_dim_size, test_dim_size]
-                    input_tensor_3d_z = torch.transpose(input_tensor_3d_x, 4, 2)
-                    # The grid_tensor_3d_z is of shape
-                    # [batch_size, 1, 1, num_inqueries]
-                    grid_tensor_3d_z = torch.index_select(
-                        grid_tensor_3d_x,
-                        -1,
-                        torch.tensor([1, 2, 0], dtype=torch.int64, device=device)
-                    )
-                    # The output_tensor_3d_z is of shape
-                    # [batch_size, channel_size, 1, 1, num_inqueries]
-                    output_tensor_3d_z = F.grid_sample(
-                        input=input_tensor_3d_z,
-                        grid=grid_tensor_3d_z,
-                        mode=mode,
-                        padding_mode=padding_mode,
-                        align_corners=align_corners,
-                    )
-                    self.assertEqual(output_tensor_2d_x[0, 0, 0, :], output_tensor_3d_z[0, 0, 0, 0, :], atol=0, rtol=0)
-
-    @set_default_dtype(torch.double)
     def test_affine_grid(self):
         # test known input on CPU
         input = torch.arange(1., 7).view(1, 2, 3)
@@ -5210,53 +4493,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             out_t_5 = m(in_t_9[:, :, :5])
         self.assertEqual(out_t_9[:, :, :15], out_t_5)
 
-    @set_default_dtype(torch.double)
-    def test_upsampling_not_recompute_scale_factor(self):
-        # test output against known input: result must match opencv
-        in_t = torch.arange(8.).view(1, 2, 2, 2)
-        expected_out_t = torch.tensor(
-            [[[[-0.32725, -0.08843, 0.37933, 0.79744],
-              [0.15039, 0.38921, 0.85697, 1.27508],
-              [1.08591, 1.32473, 1.79249, 2.21060],
-              [1.92213, 2.16095, 2.62871, 3.04682]],
-
-             [[3.67275, 3.91157, 4.37933, 4.79744],
-              [4.15039, 4.38921, 4.85697, 5.27508],
-              [5.08591, 5.32473, 5.79249, 6.21060],
-              [5.92213, 6.16095, 6.62871, 7.04682]]]])
-        if IS_PPC:
-            # Both OpenCV and PyTorch give a slightly different result on PPC
-            expected_out_t = torch.tensor(
-                [[[[-0.32725, -0.08843, 0.37933, 0.79744],
-                  [0.15039, 0.38921, 0.85697, 1.27508],
-                  [1.08591, 1.32473, 1.79249, 2.21060],
-                  [1.92212, 2.16094, 2.62870, 3.04681]],
-
-                 [[3.67275, 3.91157, 4.37933, 4.79743],
-                  [4.15039, 4.38921, 4.85697, 5.27508],
-                  [5.08591, 5.32473, 5.79249, 6.21059],
-                  [5.92212, 6.16094, 6.62870, 7.04680]]]])
-        out_t = F.interpolate(in_t, scale_factor=2.3, mode='bicubic', align_corners=False, recompute_scale_factor=False)
-        torch.set_printoptions(precision=5)
-        self.assertEqual(out_t, expected_out_t, atol=1e-4, rtol=0)
-
-        device_list = ['cpu']
-        if TEST_CUDA:
-            device_list.append('cuda')
-
-        for align_corners in [True, False]:
-            kwargs = dict(mode='bicubic', align_corners=align_corners)
-            # test float scale factor up & downsampling
-            for device in device_list:
-                for scale_factor in [0.6, 1.6, 2.3]:
-                    in_t = torch.ones(2, 2, 2, 2).to(device)
-                    out_t = F.interpolate(in_t, scale_factor=scale_factor, **kwargs)
-                    out_size = int(math.floor(in_t.shape[-1] * scale_factor))
-                    self.assertEqual(torch.ones(2, 2, out_size, out_size), out_t.data, atol=1e-5, rtol=0)
-
-                    input = torch.randn(2, 2, 2, 2, requires_grad=True)
-                    gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
-
     def test_upsamplingBilinear2d_spatial_invariance(self):
         m = nn.Upsample(scale_factor=3, mode='bilinear', align_corners=False)
         in_t_9 = torch.zeros(1, 1, 9, 9)
@@ -5328,29 +4564,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             helper([1, 1, 11, 7], 257, 'bicubic', device)
             helper([3, 2, 11, 7, 3], 20, 'trilinear', device)
             helper([3, 2, 11, 7, 3], 20, 'trilinear', device, torch.channels_last_3d)
-
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    def test_interpolate_illegal_memory_access(self):
-        in_s = 45
-        out_s = 14
-
-        input = torch.ones((1, 1, in_s), device='cuda', requires_grad=True)
-        # note we allocated grad_output to be larger so out of bound access
-        # would be visible in grad_input
-        grad = torch.ones((1, 1, out_s * 2), device='cuda', requires_grad=True)
-        grad = grad[:, :, :out_s]
-
-        input_ref = input.detach().cpu().requires_grad_()
-        grad_ref = grad.cpu()
-
-        out = F.interpolate(input, size=(out_s,), mode='nearest')
-        out.backward(grad)
-
-        out_ref = F.interpolate(input_ref, size=(out_s,), mode='nearest')
-        out_ref.backward(grad_ref)
-
-        self.assertEqual(out_ref, out)
-        self.assertEqual(input_ref.grad, input.grad)
 
     def test_interpolate_undefined_behavior_casting(self):
         x = torch.ones([1, 1, 16, 16])
@@ -5563,53 +4776,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         inp = torch.ones(1).squeeze()
         with self.assertRaisesRegex(RuntimeError, ".*both arguments.*1D.*"):
             m(inp)
-
-    @tf32_on_and_off(0.005)
-    @parametrize_test('device', ['cpu'] + (['cuda'] if TEST_CUDA else []))
-    @parametrize_test('bias', [
-        subtest(False, name='nobias'), subtest(True, name='bias')])
-    @parametrize_test('weight_layout', [
-        subtest(torch.strided, name='weightStrided'),
-        subtest(torch.sparse_coo, name='weightCOO'),
-        subtest(torch.sparse_csr, name='weightCSR'),
-        subtest(torch.sparse_csc, name='weightCSC'),
-        # TODO: addmm: computation on CPU is not implemented for Strided + Strided @ SparseBsr
-        # subtest(torch.sparse_bsr, name='weightBSR'),
-        # subtest(torch.sparse_bsc, name='weightBSC'),
-    ])
-    def test_linear_autograd(self, device, bias, weight_layout):
-        module = nn.Linear(4, 4, bias=bias, device=device)
-        if weight_layout == torch.strided:
-            pass
-        elif weight_layout == torch.sparse_csr:
-            module.weight = nn.Parameter(module.weight.to_sparse_csr())
-        elif weight_layout == torch.sparse_csc:
-            module.weight = nn.Parameter(module.weight.to_sparse_csc())
-        elif weight_layout == torch.sparse_bsr:
-            module.weight = nn.Parameter(module.weight.to_sparse_bsr((2, 2)))
-        elif weight_layout == torch.sparse_bsc:
-            module.weight = nn.Parameter(module.weight.to_sparse_bsc((2, 2)))
-        elif weight_layout == torch.sparse_coo:
-            module.weight = nn.Parameter(module.weight.to_sparse_coo())
-        else:
-            raise AssertionError
-
-        inp = torch.randn(4, requires_grad=True, device=device)
-        res = module(inp)
-        if bias:
-            expected = (torch.einsum("i,ji->j", inp, module.weight.to_dense())) + module.bias
-        else:
-            expected = (torch.einsum("i,ji->j", inp, module.weight.to_dense()))
-        self.assertEqual(res, expected)
-
-        grad_output = torch.randn(4, device=device)
-        grads = torch.autograd.grad(res, [module.weight, inp], grad_output)
-        grads_expected = torch.autograd.grad(expected, [module.weight, inp], grad_output)
-
-        self.assertEqual(grads_expected[0].layout, weight_layout)
-
-        for g, ge in zip(grads, grads_expected):
-            self.assertEqual(g, ge)
 
     def test_bilinear(self):
         module = nn.Bilinear(10, 10, 8)
@@ -6107,120 +5273,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             4096,
         )
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
-    def test_convert_sync_batchnorm(self):
-        module = torch.nn.Sequential(
-            torch.nn.BatchNorm1d(100),
-            torch.nn.InstanceNorm1d(100)
-        ).cuda()
-
-        # necessary to have an anchor point for comparison, in case the
-        # convert_sync_batchnorm updates in place
-        comp_module = torch.nn.Sequential(
-            torch.nn.BatchNorm1d(100),
-            torch.nn.InstanceNorm1d(100)
-        ).cuda()
-        comp_module.load_state_dict(module.state_dict())
-
-        sync_bn_module = torch.nn.SyncBatchNorm.convert_sync_batchnorm(module)
-        children = list(sync_bn_module.children())
-        self.assertEqual(children[0].__class__, torch.nn.SyncBatchNorm)
-        self.assertEqual(children[1].__class__, torch.nn.InstanceNorm1d)
-
-        for layer, converted_layer in zip(comp_module.children(), sync_bn_module.children()):
-            for key in layer.state_dict():
-                self.assertEqual(layer.state_dict()[key].device, converted_layer.state_dict()[key].device)
-                self.assertEqual(layer.state_dict()[key], converted_layer.state_dict()[key])
-
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-    def test_sync_batchnorm_backward_elemt(self):
-        device = 'cuda'
-        saved_input = torch.rand(2, 3, 2, 1, device=device)
-        grad_output = torch.rand(2, 3, 2, 1, device=device)
-        mean = torch.rand(3, device=device)
-        invstd = torch.rand(3, device=device)
-        weight = torch.rand(3, device=device)
-        sum_dy = torch.rand(3, device=device)
-        sum_dy_xmu = torch.rand(3, device=device)
-        count_tensor = torch.tensor([5, 5, 5], dtype=torch.int32, device=device)
-
-        gI_contiguous = torch.batch_norm_backward_elemt(
-            grad_output,
-            saved_input,
-            mean,
-            invstd,
-            weight,
-            sum_dy,
-            sum_dy_xmu,
-            count_tensor
-        )
-
-        # Test batch_norm_backward_element gives the same answer for all
-        # combinations of contiguous as channels_last input
-        for a, b in [
-                (torch.channels_last, torch.contiguous_format),
-                (torch.contiguous_format, torch.channels_last),
-                (torch.channels_last, torch.channels_last),
-        ]:
-            gI_actual = torch.batch_norm_backward_elemt(
-                grad_output.contiguous(memory_format=a),
-                saved_input.contiguous(memory_format=b),
-                mean,
-                invstd,
-                weight,
-                sum_dy,
-                sum_dy_xmu,
-                count_tensor
-            )
-            self.assertEqual(gI_actual, gI_contiguous)
-
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-    def test_sync_batchnorm_accuracy_cuda(self):
-        # The target of this test is to test the functionality and accuracy of
-        #   those single-GPU cuda kernels used in SyncBatchNorm
-        # They are:
-        #   fwd: torch.batch_norm_stats, torch.batch_norm_gather_stats_with_counts, torch.batch_norm_elemt
-        #   bwd: torch.batch_norm_backward_reduce, torch.batch_norm_backward_elemt
-
-        def _batch_norm_stats(data, memory_format, mean_axes):
-            mean1, _ = torch.batch_norm_stats(data, 1e-5)
-            mean2, _ = torch.batch_norm_stats(data.to(memory_format=memory_format), 1e-5)
-            mean_ref = torch.mean(data, mean_axes, keepdim=False)
-
-            self.assertEqual(mean_ref, mean1)
-            self.assertEqual(mean_ref, mean2)
-
-        _batch_norm_stats(torch.randn(1, 96, 112, 112, dtype=torch.float, device='cuda'), torch.channels_last, (0, 2, 3))
-        _batch_norm_stats(torch.randn(1, 96, 112, 112, 112, dtype=torch.float, device='cuda'), torch.channels_last_3d, (0, 2, 3, 4))
-
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-    def test_batch_norm_gather_stats_invalid_shapes_cuda(self):
-        # Regression test for https://github.com/pytorch/pytorch/issues/189828.
-        # batch_norm_reduce_statistics_kernel takes both of its loop bounds from mean, then
-        # indexes invstd and counts with them, so an invstd that disagrees with mean used to
-        # be read out of bounds. The op must validate the shapes instead.
-        input = torch.full((1, 3, 3, 0), 1.0, dtype=torch.float32, device='cuda')
-        mean = torch.full((2, 3), 1.15215e+25, dtype=torch.float32, device='cuda')
-        invstd = torch.full((2, 0), 1.0, dtype=torch.float32, device='cuda')
-        with self.assertRaisesRegex(RuntimeError, "invstd to have the same shape as mean"):
-            torch.batch_norm_gather_stats(input, mean, invstd, None, None, float('-inf'), float('-inf'),
-                                          -9223372036854775808)
-
-        # mean must be (world_size, num_features); a 1-D mean would index past its dims
-        with self.assertRaisesRegex(RuntimeError, "expected mean to be 2-dimensional"):
-            torch.batch_norm_gather_stats(input, torch.ones(3, device='cuda'), torch.ones(3, device='cuda'),
-                                          None, None, 0.1, 1e-5, 2)
-
-        # counts is indexed up to mean.size(0), so it must have at least that many elements
-        with self.assertRaisesRegex(RuntimeError, "counts to have at least one element"):
-            torch.batch_norm_gather_stats_with_counts(
-                torch.randn(1, 3, 3, 3, device='cuda'),
-                torch.ones(2, 3, device='cuda'),
-                torch.ones(2, 3, device='cuda'),
-                None, None, 0.1, 1e-5,
-                torch.ones(1, device='cuda'),
-            )
-
     def test_flatten(self):
         tensor_input = torch.randn(2, 1, 2, 3)
 
@@ -6248,120 +5300,12 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 r"unflattened_size must be tuple of ints, but found element of type float at pos 2"):
             nn.Unflatten(dim=1, unflattened_size=(2, 5, 5.0))
 
-    def test_layer_norm_grads_with_create_graph_flag(self):
-        atol = 1e-5
-        rtol = 1e-3
-
-        x = torch.randn((4, 4, 16), requires_grad=True)
-        layer_norm = nn.LayerNorm((16,), 1e-5, True)
-        with torch.no_grad():
-            layer_norm.weight = torch.nn.Parameter(0.1 * torch.ones_like(layer_norm.weight))
-
-        grads1 = torch.autograd.grad(layer_norm(x).sum(), x, create_graph=False)[0]
-        grads2 = torch.autograd.grad(layer_norm(x).sum(), x, create_graph=True)[0]
-
-        self.assertEqual(grads1, grads2, rtol=rtol, atol=atol)
-
-        if TEST_CUDA:
-            x = x.to('cuda')
-            layer_norm = layer_norm.to('cuda')
-
-            grads1 = torch.autograd.grad(layer_norm(x).sum(), x, create_graph=False)[0]
-            grads2 = torch.autograd.grad(layer_norm(x).sum(), x, create_graph=True)[0]
-
-            self.assertEqual(grads1, grads2, rtol=rtol, atol=atol)
-
     def test_layer_norm_eps(self):
         # test for https://github.com/pytorch/pytorch/issues/108072
         x = torch.Tensor([[[2.0, 2.0], [14.0, 14.0]], [[2.0, 2.0], [14.0, 14.0]]])
         ln = torch.nn.LayerNorm(2, eps=1e-6, elementwise_affine=False)
         self.assertEqual(ln.forward(x), torch.zeros_like(x))
 
-
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-    def test_layer_norm_backwards_eps(self):
-        dtype = torch.float
-        m_x_n_list = [(3, 3), (5, 5), (11, 11), (55, 55),
-                      (32, 32), (1024, 32), (1024, 1024),
-                      (33, 33), (1025, 33), (1025, 1025),
-                      (128 * 1024, 32), (32, 128 * 1024)]
-        boolean = [True, False]
-        combinations = itertools.product(boolean, repeat=2)
-        for elementwise_affine, bias in combinations:
-            for m, n in m_x_n_list:
-                x = torch.randn((m, n), dtype=dtype, requires_grad=True)
-                grad_output = torch.rand_like(x)
-                x_cuda = x.clone().detach().to("cuda").requires_grad_()
-                grad_output_cuda = grad_output.clone().detach().to("cuda")
-                ln = nn.LayerNorm(n, dtype=dtype, elementwise_affine=elementwise_affine, bias=bias)
-                ln_cuda = nn.LayerNorm(n, device="cuda", dtype=dtype, elementwise_affine=elementwise_affine, bias=bias)
-                ln_out = ln(x)
-                ln_out_cuda = ln_cuda(x_cuda)
-                ln_out.backward(grad_output)
-                ln_out_cuda.backward(grad_output_cuda)
-                atol = 1e-4
-                rtol = 1e-5
-                if m > 64 * 1024:
-                    atol = 1e-3
-                    rtol = 1e-3
-                if elementwise_affine:
-                    self.assertEqual(ln.weight.grad, ln_cuda.weight.grad, lambda msg: f"{msg}\nweight grad failed: {m=} {n=}", rtol=rtol, atol=atol)
-                if bias and elementwise_affine:
-                    self.assertEqual(ln.bias.grad, ln_cuda.bias.grad, lambda msg: f"{msg}\nbias grad failed: {m=} {n=}", rtol=rtol, atol=atol)
-
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-    @largeTensorTest("40GB", device="cuda")
-    def test_layer_norm_large_tensor(self):
-        # test for https://github.com/pytorch/pytorch/issues/136291
-        device = torch.device("cuda")
-        b, n, dp = 16, 3000, 16
-        pairwise_repr = torch.randn(b, n, n, dp)
-
-        attn_bias_norm = nn.LayerNorm(dp).to(device=device)
-        pairwise_repr = pairwise_repr.to(dtype=torch.float32, device=device)
-        # we want a smaller copy to compare the results
-        pairwise_small = pairwise_repr[-1, -1, -1].detach().clone()
-        norm = attn_bias_norm(pairwise_repr)
-        norm_small = attn_bias_norm(pairwise_small)
-
-        self.assertEqual(norm.shape, torch.Size([16, 3000, 3000, 16]))
-        # Check output to make sure it is correct.
-        torch.testing.assert_close(norm_small, norm[-1, -1, -1])
-
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-    @largeTensorTest("20GB", device="cuda")
-    def test_layer_norm_32bit_overflow(self):
-        # test for https://github.com/pytorch/pytorch/issues/181555
-        N = 4096
-        M = (2**32 // N) + 2  # M*N just over 2^32
-        x = torch.randn(M, N, dtype=torch.bfloat16, device="cuda")
-        gamma = torch.ones(N, dtype=torch.bfloat16, device="cuda")
-        beta = torch.zeros(N, dtype=torch.bfloat16, device="cuda")
-
-        y = torch.layer_norm(x, [N], gamma, beta)
-
-        # Rows past the 2^32 element boundary must not be zero
-        boundary_row = 2**32 // N
-        for row in [boundary_row, boundary_row + 1]:
-            ref = torch.layer_norm(x[row:row + 1], [N], gamma, beta)
-            self.assertEqual(y[row], ref[0])
-
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-    @largeTensorTest("1GB", device="cuda")
-    def test_layer_norm_large_m_non_vectorized(self):
-        # test for https://github.com/pytorch/pytorch/issues/184826
-        # N is intentionally not divisible by 4 so the vectorized kernel is skipped.
-        N = 3
-        gamma = torch.ones(N, dtype=torch.float32, device="cuda")
-
-        for M in (2**23, 2**23 + 1):
-            x = torch.randn(M, N, dtype=torch.float32, device="cuda")
-            y = torch.layer_norm(x, [N], gamma, None)
-
-            for start in (0, M - 8192):
-                x_chunk = x[start:start + 8192].contiguous()
-                ref = torch.layer_norm(x_chunk, [N], gamma, None)
-                self.assertEqual(y[start:start + 8192], ref, atol=1e-5, rtol=1e-5)
 
     def test_padding_list(self):
         # Padding can be a list, or tuple (regression test for gh-54452)
@@ -6383,19 +5327,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         with self.assertRaisesRegex(ValueError,
                                     "fractional_max_pool2d requires output_ratio to either be a single Int or tuple of Ints."):
             res = arg_class(*arg_3)
-
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-    @largeTensorTest("20GB", device="cuda")
-    def test_large_max_pool2d_ch_last(self):
-        # https://github.com/pytorch/pytorch/issues/165297
-        N, C, H, W = 70, 64, 512, 960  # dims to extend > int32
-        device = torch.device("cuda")
-        x_cuda = torch.randn(N, C, H, W, device=device, dtype=torch.float16)
-        x_cuda = x_cuda.to(memory_format=torch.channels_last)
-        pool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
-        y_cuda_ch_last = pool(x_cuda)
-        y_cuda_contig = pool(x_cuda.contiguous())
-        self.assertEqual(y_cuda_ch_last, y_cuda_contig)
 
     def test_max_pool1d_invalid_output_size(self):
         arg_1 = 3
@@ -7012,6 +5943,7 @@ def _buildEquivalentAffineTransforms3d(device, input_size, output_size, angle_ra
 # end TestNN.test_affine_* helpers
 
 
+
 class TestNNDeviceType(NNTestCase):
 
     def test_grid_sample_backward_error_checking(self, device):
@@ -7036,6 +5968,293 @@ class TestNNDeviceType(NNTestCase):
         with self.assertRaisesRegex(ValueError, "expected grad_output to have sizes"):
             invalid_grad_output = torch.empty(2, 1, 1, 1, 1, device=device)
             torch.ops.aten.grid_sampler_3d_backward(invalid_grad_output, input, grid, 0, 0, False, (True, True))
+
+    @skipMPS  # MPS does not support double dtype, which this test relies on via set_default_dtype
+    @set_default_dtype(torch.double)
+    def test_grid_sample_3d(self, device):
+        # Backward pass of native C++ and CUDA/accelerator kernels branch depending on whether input
+        # requires gradient, so we test both cases.
+        def test(N, C, D, H, W, mode, padding_mode, align_corners, input_requires_grad):
+            def test_shape(N, C, ID, IH, IW, D, H, W, mode, padding_mode, align_corners):
+                input_cpu = torch.randn(C, N, ID, IH, IW).transpose(0, 1).requires_grad_(input_requires_grad)
+                grid_cpu = torch.randn(D, N, H, W, 3).transpose(0, 1).requires_grad_()
+                out_cpu = F.grid_sample(input_cpu, grid_cpu, mode=mode, padding_mode=padding_mode,
+                                        align_corners=align_corners)
+                self.assertTrue(out_cpu.size() == torch.Size([N, C, D, H, W]))
+
+                gradients = torch.randn_like(out_cpu)
+                out_cpu.backward(gradients)
+
+                if torch.device(device).type != 'cpu':
+                    input_device = input_cpu.detach().transpose(0, 1).to(device).transpose(0, 1).requires_grad_(
+                        input_requires_grad)
+                    grid_device = grid_cpu.detach().transpose(0, 1).to(device).transpose(0, 1).requires_grad_()
+                    out_device = F.grid_sample(input_device, grid_device, mode=mode, padding_mode=padding_mode,
+                                               align_corners=align_corners)
+                    self.assertEqual(out_cpu, out_device)
+
+                    out_device.backward(gradients.to(device))
+                    if input_requires_grad:
+                        self.assertEqual(input_cpu.grad, input_device.grad)
+                    self.assertEqual(grid_cpu.grad, grid_device.grad, atol=5e-5, rtol=0)
+
+                    # check that zero-dimensional input strides don't error out
+                    base_input = torch.randn(N, C, 1, IH, IW)
+                    input_cpu = base_input.expand_as(input_device).requires_grad_(input_requires_grad)
+                    grid_cpu = torch.randn(N, D, H, W, 3, requires_grad=True)
+                    out_cpu = F.grid_sample(input_cpu, grid_cpu, mode=mode, padding_mode=padding_mode,
+                                            align_corners=align_corners)
+
+                    input_device = base_input.to(device).expand_as(input_device).requires_grad_(input_requires_grad)
+                    grid_device = grid_cpu.detach().to(device).requires_grad_()
+                    out_device = F.grid_sample(input_device, grid_device, mode=mode, padding_mode=padding_mode,
+                                               align_corners=align_corners)
+                    self.assertEqual(out_cpu, out_device)
+
+            # test same size output
+            test_shape(N, C, D, H, W, D, H, W, mode, padding_mode, align_corners)
+
+            # test larger output
+            N = random.randint(2, 7)
+            C = random.randint(2, 5)
+            ID = random.randint(2, 7)
+            IH = random.randint(2, 7)
+            IW = random.randint(2, 7)
+            D = random.randint(ID + 1, 10)
+            H = random.randint(IH + 1, 10)
+            W = random.randint(IW + 1, 10)
+            test_shape(N, C, ID, IH, IW, D, H, W, mode, padding_mode, align_corners)
+
+            # test smaller output
+            N = random.randint(2, 7)
+            C = random.randint(2, 5)
+            ID = random.randint(2, 7)
+            IH = random.randint(2, 7)
+            IW = random.randint(2, 7)
+            D = random.randint(2, ID)
+            H = random.randint(2, IH)
+            W = random.randint(2, IW)
+            test_shape(N, C, ID, IH, IW, D, H, W, mode, padding_mode, align_corners)
+
+            # test 1x1 inpput
+            N = random.randint(2, 7)
+            C = random.randint(2, 7)
+            ID = 1
+            IH = 1
+            IW = 1
+            H = random.randint(2, 5)
+            W = random.randint(2, 5)
+            test_shape(N, C, ID, IH, IW, D, H, W, mode, padding_mode, align_corners)
+
+            # testing empty grid
+            N = random.randint(2, 7)
+            C = random.randint(2, 5)
+            ID = random.randint(2, 7)
+            IH = random.randint(2, 7)
+            IW = random.randint(2, 7)
+            D = random.randint(3, ID + 2)
+            W = random.randint(3, IW + 2)
+            test_shape(N, C, ID, IH, IW, D, 0, W, mode, padding_mode, align_corners)
+
+            # testing empty channel
+            N = random.randint(2, 7)
+            ID = random.randint(2, 5)
+            IH = random.randint(2, 7)
+            IW = random.randint(2, 7)
+            D = random.randint(3, ID + 2)
+            H = random.randint(3, IH + 2)
+            W = random.randint(3, IW + 2)
+            test_shape(N, 0, ID, IH, IW, D, H, W, mode, padding_mode, align_corners)
+
+            # testing empty batch
+            C = random.randint(2, 5)
+            ID = random.randint(2, 7)
+            IH = random.randint(2, 7)
+            IW = random.randint(2, 7)
+            D = random.randint(3, ID + 2)
+            H = random.randint(3, IH + 2)
+            W = random.randint(3, IW + 2)
+            test_shape(0, C, ID, IH, IW, D, H, W, mode, padding_mode, align_corners)
+
+        for mode in ('bilinear', 'nearest'):
+            for padding_mode in ('zeros', 'border', 'reflection'):
+                for align_corners in (True, False):
+                    # do gradcheck
+                    N = random.randint(2, 5)
+                    C = random.randint(2, 4)
+                    D = random.randint(2, 5)
+                    H = random.randint(2, 5)
+                    W = random.randint(2, 5)
+                    input = torch.randn(N, C, D, H, W, requires_grad=True)
+                    grid = torch.randn(N, D, H, W, 3, requires_grad=True)
+                    self.assertTrue(gradcheck(
+                        lambda inp, grid: F.grid_sample(inp, grid, mode=mode, padding_mode=padding_mode,
+                                                        align_corners=align_corners),
+                        (input, grid)))
+                    input = input.requires_grad_(False)
+                    self.assertTrue(gradcheck(
+                        lambda grid: F.grid_sample(input, grid, mode=mode, padding_mode=padding_mode,
+                                                   align_corners=align_corners),
+                        (grid,)))
+
+                    for input_requires_grad in [False, True]:
+                        test(N, C, D, H, W, mode, padding_mode, align_corners, input_requires_grad)
+
+    def test_grid_sample_nearest_neighbor_rounding_mode_consistency(self, device):
+        def normalize_indices(indices_unnormalized: torch.Tensor, dim_size: int, align_corners: bool):
+            if align_corners:
+                indices_normalized = 2 * indices_unnormalized / (dim_size - 1) - 1
+            else:
+                indices_normalized = (indices_unnormalized * 2 + 1) / dim_size - 1
+            return indices_normalized
+
+        test_dim_size = 10
+        non_test_dim_size = 9
+        step_size = 0.1
+
+        batch_size = 1
+        channel_size = 1
+
+        mode = 'nearest'
+        for padding_mode in ('zeros', 'border', 'reflection'):
+            for align_corners in (True, False):
+                # Unnormalized inquiry indices
+                inquiry_indices_unnormalized = torch.arange(
+                    0,
+                    test_dim_size - 1 + step_size, step_size,
+                    dtype=torch.float32,
+                    device=device
+                )
+                # Note that even though we are trying to create normalized indices
+                # which results in x.0 and x.5 indices after unnormalization,
+                # because of the numerical error,
+                # the rounding direction might not always be expected as designed.
+                # The best we could do is to ensure the rounding behaviors across
+                # different implementations for different dimensions are
+                # exactly the same.
+                inquiry_indices = normalize_indices(
+                    indices_unnormalized=inquiry_indices_unnormalized,
+                    dim_size=test_dim_size,
+                    align_corners=align_corners
+                )
+                num_inqueries = inquiry_indices.shape[0]
+                inquiry_fixed_indices = torch.full((num_inqueries,), 0.5, dtype=torch.float32, device=device)
+                array_data = torch.rand(test_dim_size, dtype=torch.float32, device=device)
+                # 2D grid sample x-dim interpolation
+                # The input_tensor_2d_x is of shape
+                # [batch_size, channel_size, non_test_dim_size, test_dim_size]
+                input_tensor_2d_x = array_data.reshape(1, test_dim_size).repeat(
+                    batch_size,
+                    channel_size,
+                    non_test_dim_size,
+                    1
+                )
+                # The grid_tensor_2d_x is of shape
+                # [batch_size, 1, num_inqueries]
+                grid_tensor_2d_x = torch.cat(
+                    tensors=(
+                        inquiry_indices.reshape(num_inqueries, 1),
+                        inquiry_fixed_indices.reshape(num_inqueries, 1),
+                    ),
+                    dim=1
+                ).repeat(batch_size, 1, 1, 1)
+                # The output_tensor_2d_x is of shape
+                # [batch_size, channel_size, 1, num_inqueries]
+                output_tensor_2d_x = F.grid_sample(
+                    input=input_tensor_2d_x,
+                    grid=grid_tensor_2d_x,
+                    mode=mode,
+                    padding_mode=padding_mode,
+                    align_corners=align_corners,
+                )
+                # 2D grid sample y-dim interpolation
+                # The input_tensor_2d_y is of shape
+                # [batch_size, channel_size, test_dim_size, non_test_dim_size]
+                input_tensor_2d_y = torch.transpose(input_tensor_2d_x, 3, 2)
+                # The grid_tensor_2d_y is of shape
+                # [batch_size, 1, num_inqueries]
+                grid_tensor_2d_y = torch.index_select(
+                    grid_tensor_2d_x,
+                    -1,
+                    torch.tensor([1, 0], dtype=torch.int64, device=device)
+                )
+                # The output_tensor_2d_y is of shape
+                # [batch_size, channel_size, 1, num_inqueries]
+                output_tensor_2d_y = F.grid_sample(
+                    input=input_tensor_2d_y,
+                    grid=grid_tensor_2d_y,
+                    mode=mode,
+                    padding_mode=padding_mode,
+                    align_corners=align_corners,
+                )
+                self.assertEqual(output_tensor_2d_x[0, 0, 0, :], output_tensor_2d_y[0, 0, 0, :], atol=0, rtol=0)
+                # 3D grid sample x-dim interpolation
+                # The input_tensor_3d_x is of shape
+                # [batch_size, channel_size, non_test_dim_size, non_test_dim_size, test_dim_size]
+                input_tensor_3d_x = array_data.reshape(1, test_dim_size).repeat(
+                    batch_size, channel_size, non_test_dim_size, non_test_dim_size, 1)
+                # The grid_tensor_3d_x is of shape
+                # [batch_size, 1, 1, num_inqueries]
+                grid_tensor_3d_x = torch.cat(
+                    tensors=(
+                        inquiry_indices.reshape(num_inqueries, 1),
+                        inquiry_fixed_indices.reshape(num_inqueries, 1),
+                        inquiry_fixed_indices.reshape(num_inqueries, 1),
+                    ),
+                    dim=1
+                ).repeat(batch_size, 1, 1, 1, 1)
+                # The output_tensor_3d_x is of shape
+                # [batch_size, channel_size, 1, 1, num_inqueries]
+                output_tensor_3d_x = F.grid_sample(
+                    input=input_tensor_3d_x,
+                    grid=grid_tensor_3d_x,
+                    mode=mode,
+                    padding_mode=padding_mode,
+                    align_corners=align_corners,
+                )
+                self.assertEqual(output_tensor_2d_x[0, 0, 0, :], output_tensor_3d_x[0, 0, 0, 0, :], atol=0, rtol=0)
+                # 3D grid sample y-dim interpolation
+                # The input_tensor_3d_y is of shape
+                # [batch_size, channel_size, non_test_dim_size, test_dim_size, non_test_dim_size]
+                input_tensor_3d_y = torch.transpose(input_tensor_3d_x, 4, 3)
+                # The grid_tensor_3d_y is of shape
+                # [batch_size, 1, 1, num_inqueries]
+                grid_tensor_3d_y = torch.index_select(
+                    grid_tensor_3d_x,
+                    -1,
+                    torch.tensor([1, 0, 2], dtype=torch.int64, device=device)
+                )
+                # The output_tensor_3d_y is of shape
+                # [batch_size, channel_size, 1, 1, num_inqueries]
+                output_tensor_3d_y = F.grid_sample(
+                    input=input_tensor_3d_y,
+                    grid=grid_tensor_3d_y,
+                    mode=mode,
+                    padding_mode=padding_mode,
+                    align_corners=align_corners,
+                )
+                self.assertEqual(output_tensor_2d_x[0, 0, 0, :], output_tensor_3d_y[0, 0, 0, 0, :], atol=0, rtol=0)
+                # 3D grid sample z-dim interpolation
+                # The input_tensor_3d_z is of shape
+                # [batch_size, channel_size, non_test_dim_size, non_test_dim_size, test_dim_size]
+                input_tensor_3d_z = torch.transpose(input_tensor_3d_x, 4, 2)
+                # The grid_tensor_3d_z is of shape
+                # [batch_size, 1, 1, num_inqueries]
+                grid_tensor_3d_z = torch.index_select(
+                    grid_tensor_3d_x,
+                    -1,
+                    torch.tensor([1, 2, 0], dtype=torch.int64, device=device)
+                )
+                # The output_tensor_3d_z is of shape
+                # [batch_size, channel_size, 1, 1, num_inqueries]
+                output_tensor_3d_z = F.grid_sample(
+                    input=input_tensor_3d_z,
+                    grid=grid_tensor_3d_z,
+                    mode=mode,
+                    padding_mode=padding_mode,
+                    align_corners=align_corners,
+                )
+                self.assertEqual(output_tensor_2d_x[0, 0, 0, :], output_tensor_3d_z[0, 0, 0, 0, :], atol=0, rtol=0)
 
     def _get_mixed_dtypes(self, device):
         """Get appropriate mixed dtype pair (param_dtype, input_dtype) for the device.
@@ -8266,6 +7485,113 @@ class TestNNDeviceType(NNTestCase):
         out_cpu.backward(grad_out.cpu())
 
         self.assertEqual(bias.grad.cpu(), bias_cpu.grad, f"M={M} N={N}", atol=1e-4, rtol=1e-4)
+
+    def test_layer_norm_grads_with_create_graph_flag(self, device):
+        atol = 1e-5
+        rtol = 1e-3
+
+        x = torch.randn((4, 4, 16), requires_grad=True)
+        layer_norm = nn.LayerNorm((16,), 1e-5, True)
+        with torch.no_grad():
+            layer_norm.weight = torch.nn.Parameter(0.1 * torch.ones_like(layer_norm.weight))
+
+        grads1 = torch.autograd.grad(layer_norm(x).sum(), x, create_graph=False)[0]
+        grads2 = torch.autograd.grad(layer_norm(x).sum(), x, create_graph=True)[0]
+
+        self.assertEqual(grads1, grads2, rtol=rtol, atol=atol)
+
+        if torch.device(device).type != 'cpu':
+            x = x.to(device)
+            layer_norm = layer_norm.to(device)
+
+            grads1 = torch.autograd.grad(layer_norm(x).sum(), x, create_graph=False)[0]
+            grads2 = torch.autograd.grad(layer_norm(x).sum(), x, create_graph=True)[0]
+
+            self.assertEqual(grads1, grads2, rtol=rtol, atol=atol)
+
+    @onlyAccelerator
+    def test_layer_norm_backwards_eps(self, device):
+        dtype = torch.float
+        m_x_n_list = [(3, 3), (5, 5), (11, 11), (55, 55),
+                      (32, 32), (1024, 32), (1024, 1024),
+                      (33, 33), (1025, 33), (1025, 1025),
+                      (128 * 1024, 32), (32, 128 * 1024)]
+        boolean = [True, False]
+        combinations = itertools.product(boolean, repeat=2)
+        for elementwise_affine, bias in combinations:
+            for m, n in m_x_n_list:
+                x = torch.randn((m, n), dtype=dtype, requires_grad=True)
+                grad_output = torch.rand_like(x)
+                x_device = x.clone().detach().to(device).requires_grad_()
+                grad_output_device = grad_output.clone().detach().to(device)
+                ln = nn.LayerNorm(n, dtype=dtype, elementwise_affine=elementwise_affine, bias=bias)
+                ln_device = nn.LayerNorm(n, device=device, dtype=dtype, elementwise_affine=elementwise_affine, bias=bias)
+                ln_out = ln(x)
+                ln_out_device = ln_device(x_device)
+                ln_out.backward(grad_output)
+                ln_out_device.backward(grad_output_device)
+                atol = 1e-4
+                rtol = 1e-5
+                if m > 64 * 1024:
+                    atol = 1e-3
+                    rtol = 1e-3
+                if elementwise_affine:
+                    self.assertEqual(ln.weight.grad, ln_device.weight.grad, lambda msg: f"{msg}\nweight grad failed: {m=} {n=}", rtol=rtol, atol=atol)
+                if bias and elementwise_affine:
+                    self.assertEqual(ln.bias.grad, ln_device.bias.grad, lambda msg: f"{msg}\nbias grad failed: {m=} {n=}", rtol=rtol, atol=atol)
+
+    @onlyAccelerator
+    @largeTensorTest("40GB")
+    def test_layer_norm_large_tensor(self, device):
+        # test for https://github.com/pytorch/pytorch/issues/136291
+        b, n, dp = 16, 3000, 16
+        pairwise_repr = torch.randn(b, n, n, dp)
+
+        attn_bias_norm = nn.LayerNorm(dp).to(device=device)
+        pairwise_repr = pairwise_repr.to(dtype=torch.float32, device=device)
+        # we want a smaller copy to compare the results
+        pairwise_small = pairwise_repr[-1, -1, -1].detach().clone()
+        norm = attn_bias_norm(pairwise_repr)
+        norm_small = attn_bias_norm(pairwise_small)
+
+        self.assertEqual(norm.shape, torch.Size([16, 3000, 3000, 16]))
+        # Check output to make sure it is correct.
+        torch.testing.assert_close(norm_small, norm[-1, -1, -1])
+
+    @onlyAccelerator
+    @largeTensorTest("20GB")
+    def test_layer_norm_32bit_overflow(self, device):
+        # test for https://github.com/pytorch/pytorch/issues/181555
+        N = 4096
+        M = (2**32 // N) + 2  # M*N just over 2^32
+        x = torch.randn(M, N, dtype=torch.bfloat16, device=device)
+        gamma = torch.ones(N, dtype=torch.bfloat16, device=device)
+        beta = torch.zeros(N, dtype=torch.bfloat16, device=device)
+
+        y = torch.layer_norm(x, [N], gamma, beta)
+
+        # Rows past the 2^32 element boundary must not be zero
+        boundary_row = 2**32 // N
+        for row in [boundary_row, boundary_row + 1]:
+            ref = torch.layer_norm(x[row:row + 1], [N], gamma, beta)
+            self.assertEqual(y[row], ref[0])
+
+    @onlyAccelerator
+    @largeTensorTest("1GB")
+    def test_layer_norm_large_m_non_vectorized(self, device):
+        # test for https://github.com/pytorch/pytorch/issues/184826
+        # N is intentionally not divisible by 4 so the vectorized kernel is skipped.
+        N = 3
+        gamma = torch.ones(N, dtype=torch.float32, device=device)
+
+        for M in (2**23, 2**23 + 1):
+            x = torch.randn(M, N, dtype=torch.float32, device=device)
+            y = torch.layer_norm(x, [N], gamma, None)
+
+            for start in (0, M - 8192):
+                x_chunk = x[start:start + 8192].contiguous()
+                ref = torch.layer_norm(x_chunk, [N], gamma, None)
+                self.assertEqual(y[start:start + 8192], ref, atol=1e-5, rtol=1e-5)
 
     @onlyCPU
     def test_glu_bfloat16(self, device):
@@ -16002,6 +15328,451 @@ if __name__ == '__main__':
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
         torch.testing.assert_close(result, ref_output, rtol=1e-7, atol=1e-5)
 
+    @skipMPS
+    @onlyAccelerator
+    def test_batchnorm_half(self, device):
+        # THNN
+        input = torch.randint(1, 10, (2, 3, 2, 2), dtype=torch.half, device=device, requires_grad=True)
+        m = nn.BatchNorm2d(3).half().to(device)
+        thnn_output = m(input)
+        thnn_output.sum().backward()
+        thnn_input_grad = input.grad.data.clone()
+        self.assertEqualTypeString(thnn_output, input)
+
+    @skipMPS
+    @onlyAccelerator
+    def test_convert_sync_batchnorm(self, device):
+        module = torch.nn.Sequential(
+            torch.nn.BatchNorm1d(100),
+            torch.nn.InstanceNorm1d(100)
+        ).to(device)
+
+        # necessary to have an anchor point for comparison, in case the
+        # convert_sync_batchnorm updates in place
+        comp_module = torch.nn.Sequential(
+            torch.nn.BatchNorm1d(100),
+            torch.nn.InstanceNorm1d(100)
+        ).to(device)
+        comp_module.load_state_dict(module.state_dict())
+
+        sync_bn_module = torch.nn.SyncBatchNorm.convert_sync_batchnorm(module)
+        children = list(sync_bn_module.children())
+        self.assertEqual(children[0].__class__, torch.nn.SyncBatchNorm)
+        self.assertEqual(children[1].__class__, torch.nn.InstanceNorm1d)
+
+        for layer, converted_layer in zip(comp_module.children(), sync_bn_module.children()):
+            for key in layer.state_dict():
+                self.assertEqual(layer.state_dict()[key].device, converted_layer.state_dict()[key].device)
+                self.assertEqual(layer.state_dict()[key], converted_layer.state_dict()[key])
+
+    @skipMPS
+    @onlyAccelerator
+    def test_sync_batchnorm_backward_elemt(self, device):
+        saved_input = torch.rand(2, 3, 2, 1, device=device)
+        grad_output = torch.rand(2, 3, 2, 1, device=device)
+        mean = torch.rand(3, device=device)
+        invstd = torch.rand(3, device=device)
+        weight = torch.rand(3, device=device)
+        sum_dy = torch.rand(3, device=device)
+        sum_dy_xmu = torch.rand(3, device=device)
+        count_tensor = torch.tensor([5, 5, 5], dtype=torch.int32, device=device)
+
+        gI_contiguous = torch.batch_norm_backward_elemt(
+            grad_output,
+            saved_input,
+            mean,
+            invstd,
+            weight,
+            sum_dy,
+            sum_dy_xmu,
+            count_tensor
+        )
+
+        # Test batch_norm_backward_element gives the same answer for all
+        # combinations of contiguous as channels_last input
+        for a, b in [
+                (torch.channels_last, torch.contiguous_format),
+                (torch.contiguous_format, torch.channels_last),
+                (torch.channels_last, torch.channels_last),
+        ]:
+            gI_actual = torch.batch_norm_backward_elemt(
+                grad_output.contiguous(memory_format=a),
+                saved_input.contiguous(memory_format=b),
+                mean,
+                invstd,
+                weight,
+                sum_dy,
+                sum_dy_xmu,
+                count_tensor
+            )
+            self.assertEqual(gI_actual, gI_contiguous)
+
+    @skipMPS
+    @onlyAccelerator
+    def test_sync_batchnorm_accuracy(self, device):
+        # The target of this test is to test the functionality and accuracy of
+        #   those single-device kernels used in SyncBatchNorm
+        # They are:
+        #   fwd: torch.batch_norm_stats, torch.batch_norm_gather_stats_with_counts, torch.batch_norm_elemt
+        #   bwd: torch.batch_norm_backward_reduce, torch.batch_norm_backward_elemt
+
+        def _batch_norm_stats(data, memory_format, mean_axes):
+            mean1, _ = torch.batch_norm_stats(data, 1e-5)
+            mean2, _ = torch.batch_norm_stats(data.to(memory_format=memory_format), 1e-5)
+            mean_ref = torch.mean(data, mean_axes, keepdim=False)
+
+            self.assertEqual(mean_ref, mean1)
+            self.assertEqual(mean_ref, mean2)
+
+        _batch_norm_stats(torch.randn(1, 96, 112, 112, dtype=torch.float, device=device), torch.channels_last, (0, 2, 3))
+        _batch_norm_stats(
+            torch.randn(1, 96, 112, 112, 112, dtype=torch.float, device=device), torch.channels_last_3d, (0, 2, 3, 4))
+
+    @parametrize_test("dims", [2, 3], name_fn=lambda x: f"{x}D")
+    @parametrize_test("mode", ["train", "inference"], name_fn=lambda x: x)
+    @parametrize_test(
+        # test verifies cudnn/miopen batchnorm with the reference backend or memory format
+        # memory_format - one of ("NCHW", NHWC")
+        # ref_backend - one of ("cpu", "native", "NCHW", "NHWC")
+        #   "cpu"    - cpu backend with the same memory_format will be used as reference
+        #   "native" - native backend (`with torch.backends.cudnn.flags(enabled=False)`)
+        #              with the same memory_format will be used
+        #   "NCHW" or "NHWC" - the same backend will be used but another memory format
+        # mixed - True or False. Mixed batchnorm mode where inputs are 16-bit and batchnorm is fp32
+        #
+        "memory_format,ref_backend,mixed,dtype",
+        [
+            ("NCHW", "cpu", False, torch.float),
+            ("NCHW", "cpu", True, torch.half),
+            ("NCHW", "cpu", True, torch.bfloat16),
+
+            ("NCHW", "native", False, torch.float),
+            ("NCHW", "native", True, torch.half),
+            ("NCHW", "native", True, torch.bfloat16),
+
+            ("NHWC", "cpu", False, torch.float),
+            ("NHWC", "cpu", True, torch.half),
+            ("NHWC", "cpu", True, torch.bfloat16),
+
+            ("NHWC", "native", False, torch.float),
+            ("NHWC", "native", True, torch.half),
+            ("NHWC", "native", True, torch.bfloat16),
+
+            ("NHWC", "NCHW", False, torch.float),
+            ("NHWC", "NCHW", True, torch.half),
+            ("NHWC", "NCHW", True, torch.bfloat16),
+        ],
+        name_fn=lambda f, b, m, t: f"{f}_vs_{b}{'_mixed' if m else ''}_{dtype_name(t)}"
+    )
+    def test_batchnorm(self, device, dims, mode, memory_format, ref_backend, mixed, dtype):
+        # skip conditions are expressed via the test parameters instead of
+        # self._testMethodName because instantiated names carry device/dtype suffixes
+        fmt_ref = (memory_format, ref_backend)
+        if torch.version.cuda:
+            if mode == "train" and mixed and dtype == torch.bfloat16 and fmt_ref in (("NCHW", "cpu"), ("NHWC", "NCHW")):
+                self.skipTest("Failed on CUDA")
+
+            if mode == "train" and mixed and dims == 3 and dtype == torch.half and fmt_ref == ("NCHW", "native"):
+                self.skipTest("Failed on CUDA")
+
+        if torch.version.hip:
+            if mode == "train" and mixed and dtype == torch.bfloat16 and fmt_ref == ("NCHW", "native") \
+                    and _get_torch_rocm_version() >= (6, 4):
+                # https://github.com/pytorch/pytorch/issues/156513
+                self.skipTest("bfloat16 NCHW train failed due to native tolerance issue")
+
+            if mode == "train" and mixed and dims == 3 and dtype == torch.half and fmt_ref == ("NCHW", "native"):
+                self.skipTest("3D float16 NCHW train failed on ROCm")
+
+        if dims == 3 and memory_format in ("NHWC", "NCHW"):
+            memory_format = memory_format + "3D"
+
+        def _create_tensor(size, memory_format, dtype, device):
+            t = torch.empty(size=size, memory_format=memory_format, dtype=dtype, device=device)
+            t = t.random_(1, 10)
+            return t
+
+        def _get_ref_device(backend: str , device: str):
+            # If 'backend' specifies the memory format, return 'device' arg, otherwise return a device matches the backend
+            if backend in ("NHWC", "NHWC3D", "NCHW", "NCHW3D"):
+                return device
+            if backend == "native":
+                return device
+            if backend == "cpu":
+                return "cpu"
+            else:
+                raise ValueError("Unknown backend")
+
+        def _get_backend_memory_format(backend: str, memory_format: torch.memory_format) -> torch.memory_format:
+            # If 'backend' specifies the memory format, return it, otherwise look at 'memory_format' arg
+            if backend == "NHWC":
+                return torch.channels_last
+            if backend == "NHWC3D":
+                return torch.channels_last_3d
+            if backend in ("NCHW", "NCHW3D"):
+                return torch.contiguous_format
+            if memory_format in (torch.contiguous_format, torch.channels_last, torch.channels_last_3d):
+                return memory_format
+            raise ValueError(f"Unable to detect memory format for backend={backend} and memory_format={memory_format}")
+
+        def _get_memory_format(t: torch.Tensor) -> torch.memory_format:
+            if t.is_contiguous(memory_format=torch.contiguous_format):
+                return torch.contiguous_format
+            if t.is_contiguous(memory_format=torch.channels_last):
+                return torch.channels_last
+            if t.is_contiguous(memory_format=torch.channels_last_3d):
+                return torch.channels_last_3d
+            return ValueError("Unsupported memory_format")
+
+        def _get_memory_format_from_name(memory_format_name: str) -> torch.memory_format:
+            if memory_format_name == "NHWC":
+                return torch.channels_last
+            elif memory_format_name == "NHWC3D":
+                return torch.channels_last_3d
+            elif memory_format_name in ("NCHW", "NCHW3D"):
+                return torch.contiguous_format
+            return ValueError("Unsupported memory_format")
+
+        def _create_backend(inp: torch.Tensor, mixed: bool = False):
+            if inp.dim() == 4:
+                return nn.BatchNorm2d(inp.size(1), device=inp.device, dtype=torch.float if mixed else inp.dtype)
+            else:
+                return nn.BatchNorm3d(inp.size(1), device=inp.device, dtype=torch.float if mixed else inp.dtype)
+
+        def _test_batchnorm_train(inp, grad, mixed, ref_inp, ref_grad, ref_backend):
+            mod = _create_backend(inp, mixed).train()
+            mod.weight.data.uniform_()
+            mod.bias.data.uniform_()
+
+            ref_mod = _create_backend(ref_inp, mixed).train()
+            ref_mod.load_state_dict(mod.state_dict())
+
+            out = mod(inp)
+            out.backward(grad)
+
+            with torch.backends.cudnn.flags(enabled=False) if ref_backend == "native" else contextlib.nullcontext():
+                ref_out = ref_mod(ref_inp)
+                ref_out.backward(ref_grad)
+
+            self.assertTrue(out.is_contiguous(memory_format=_get_memory_format(inp)))
+            self.assertTrue(ref_out.is_contiguous(memory_format=_get_memory_format(ref_inp)))
+            self.assertEqual(out, ref_out)
+            self.assertEqual(mod.weight.grad, ref_mod.weight.grad)
+            self.assertEqual(mod.bias.grad, ref_mod.bias.grad)
+            self.assertEqual(mod.running_mean, ref_mod.running_mean)
+            self.assertEqual(mod.running_var, ref_mod.running_var)
+            self.assertEqual(inp.grad, ref_inp.grad)
+
+        def _train(memory_format_name, ref_backend, mixed, dtype):
+            memory_format = _get_memory_format_from_name(memory_format_name)
+
+            ref_memory_format = _get_backend_memory_format(ref_backend, memory_format)
+            ref_device = _get_ref_device(ref_backend, device=device)
+
+            size = (4, 8, 2, 2, 2) if memory_format_name in ("NCHW3D", "NHWC3D") else (4, 8, 2, 2)
+            inp = _create_tensor(size, memory_format, dtype, device=device).detach().requires_grad_()
+            grad = _create_tensor(size, memory_format, dtype, device=device)
+            ref_inp = inp.detach().clone(memory_format=ref_memory_format).to(device=ref_device).requires_grad_()
+            ref_grad = grad.detach().clone(memory_format=ref_memory_format).to(device=ref_device)
+
+            _test_batchnorm_train(inp=inp, grad=grad, mixed=mixed,
+                                  ref_inp=ref_inp, ref_grad=ref_grad, ref_backend=ref_backend)
+
+        def _inference(memory_format_name, ref_backend, mixed, dtype):
+            memory_format = _get_memory_format_from_name(memory_format_name)
+            ref_memory_format = _get_backend_memory_format(ref_backend, memory_format)
+            ref_device = _get_ref_device(ref_backend, device=device)
+
+            size = (2, 64, 50, 50, 50) if memory_format_name in ("NCHW3D", "NHWC3D") else (2, 64, 50, 50)
+            inp = _create_tensor(size, memory_format, dtype, device=device)
+            ref_inp = inp.detach().clone(memory_format=ref_memory_format).to(device=ref_device)
+            mod = _create_backend(inp, mixed).eval()
+            ref_mod = _create_backend(ref_inp, mixed).eval()
+
+            out = mod(inp)
+            with torch.backends.cudnn.flags(enabled=False) if ref_backend == "native" else contextlib.nullcontext():
+                ref_out = ref_mod(ref_inp)
+            self.assertEqual(out, ref_out)
+
+        if mode == "train":
+            _train(memory_format, ref_backend, mixed, dtype)
+        else:
+            _inference(memory_format, ref_backend, mixed, dtype)
+
+    def test_grid_sample_error_checking(self, device):
+        input = torch.empty(1, 1, 2, 2, device=device)
+        grid = torch.empty(1, 1, 1, 2, device=device)
+
+        # assert no error
+        F.grid_sample(input, grid, align_corners=False)
+
+        with self.assertRaisesRegex(ValueError, "but got: 'garbage'"):
+            F.grid_sample(input, grid, mode='garbage', align_corners=False)
+
+        with self.assertRaisesRegex(ValueError, "but got: 'garbage'"):
+            F.grid_sample(input, grid, padding_mode='garbage', align_corners=False)
+
+        with self.assertRaisesRegex(RuntimeError, "expected grid to have size 1 in last dimension"):
+            F.grid_sample(input[0], grid, align_corners=False)
+
+        with self.assertRaisesRegex(RuntimeError, "expected grid to have size 2 in last dimension"):
+            F.grid_sample(input, torch.empty(1, 1, 1, 1, 3, device=device), align_corners=False)
+
+        with self.assertRaisesRegex(RuntimeError, "expected grid and input to have same batch size"):
+            F.grid_sample(input, torch.empty(2, 1, 1, 2, device=device), align_corners=False)
+
+        with self.assertRaisesRegex(RuntimeError, "expected grid to have size 2 in last dimension"):
+            F.grid_sample(input, torch.empty(1, 1, 1, 3, device=device), align_corners=False)
+
+        with self.assertRaisesRegex(RuntimeError, "expected input to have non-empty spatial dimensions"):
+            F.grid_sample(torch.empty(1, 1, 0, 2, device=device), grid, align_corners=False)
+
+        input_5d = torch.empty(1, 1, 2, 2, 2, device=device)
+        grid_5d = torch.empty(1, 1, 1, 1, 3, device=device)
+        with self.assertRaisesRegex(RuntimeError, "bicubic interpolation only supports 4D input"):
+            F.grid_sample(input_5d, grid_5d, mode='bicubic')
+
+        if torch.device(device).type != 'cpu':
+            with self.assertRaisesRegex(RuntimeError, "[Ee]xpected.*same device"):
+                F.grid_sample(input, grid.cpu(), align_corners=False)
+
+    @parametrize_test('nd', [2, 3])
+    def test_affine_grid_backward_cl_cf_consistency(self, device, nd):
+        # Test based on reported issue: https://github.com/pytorch/pytorch/issues/124154
+
+        theta = torch.rand([6, nd, nd + 1], requires_grad=True, device=device)
+        size = [6, 3, 4, 5] if nd == 2 else [6, 3, 4, 5, 5]
+        grid = torch.nn.functional.affine_grid(theta, size, align_corners=False)
+
+        grad_tensor = torch.rand(grid.shape, device=device)
+
+        memory_format_cl = torch.channels_last if nd == 2 else torch.channels_last_3d
+        grad_tensor_cl = grad_tensor.contiguous(memory_format=memory_format_cl)
+
+        if theta.grad is not None:
+            raise AssertionError("expected theta.grad to be None")
+        grid.backward(grad_tensor_cl)
+        theta_grad_cl = theta.grad.clone().contiguous()
+
+        theta.grad.zero_()
+        grid.backward(grad_tensor)
+        theta_grad_cf = theta.grad
+
+        self.assertEqual(theta_grad_cf, theta_grad_cl)
+
+    @skipMPS  # MPS does not support double dtype, which this test relies on via set_default_dtype
+    @set_default_dtype(torch.double)
+    def test_upsampling_not_recompute_scale_factor(self, device):
+        # test output against known input: result must match opencv
+        in_t = torch.arange(8.).view(1, 2, 2, 2)
+        expected_out_t = torch.tensor(
+            [[[[-0.32725, -0.08843, 0.37933, 0.79744],
+              [0.15039, 0.38921, 0.85697, 1.27508],
+              [1.08591, 1.32473, 1.79249, 2.21060],
+              [1.92213, 2.16095, 2.62871, 3.04682]],
+
+             [[3.67275, 3.91157, 4.37933, 4.79744],
+              [4.15039, 4.38921, 4.85697, 5.27508],
+              [5.08591, 5.32473, 5.79249, 6.21060],
+              [5.92213, 6.16095, 6.62871, 7.04682]]]])
+        if IS_PPC:
+            # Both OpenCV and PyTorch give a slightly different result on PPC
+            expected_out_t = torch.tensor(
+                [[[[-0.32725, -0.08843, 0.37933, 0.79744],
+                  [0.15039, 0.38921, 0.85697, 1.27508],
+                  [1.08591, 1.32473, 1.79249, 2.21060],
+                  [1.92212, 2.16094, 2.62870, 3.04681]],
+
+                 [[3.67275, 3.91157, 4.37933, 4.79743],
+                  [4.15039, 4.38921, 4.85697, 5.27508],
+                  [5.08591, 5.32473, 5.79249, 6.21059],
+                  [5.92212, 6.16094, 6.62870, 7.04680]]]])
+        out_t = F.interpolate(in_t, scale_factor=2.3, mode='bicubic', align_corners=False, recompute_scale_factor=False)
+        torch.set_printoptions(precision=5)
+        self.assertEqual(out_t, expected_out_t, atol=1e-4, rtol=0)
+
+        for align_corners in [True, False]:
+            kwargs = dict(mode='bicubic', align_corners=align_corners)
+            # test float scale factor up & downsampling
+            for scale_factor in [0.6, 1.6, 2.3]:
+                in_t = torch.ones(2, 2, 2, 2).to(device)
+                out_t = F.interpolate(in_t, scale_factor=scale_factor, **kwargs)
+                out_size = int(math.floor(in_t.shape[-1] * scale_factor))
+                self.assertEqual(torch.ones(2, 2, out_size, out_size), out_t.data, atol=1e-5, rtol=0)
+
+                input = torch.randn(2, 2, 2, 2, requires_grad=True)
+                gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
+
+    @onlyAccelerator
+    def test_interpolate_illegal_memory_access(self, device):
+        in_s = 45
+        out_s = 14
+
+        input = torch.ones((1, 1, in_s), device=device, requires_grad=True)
+        # note we allocated grad_output to be larger so out of bound access
+        # would be visible in grad_input
+        grad = torch.ones((1, 1, out_s * 2), device=device, requires_grad=True)
+        grad = grad[:, :, :out_s]
+
+        input_ref = input.detach().cpu().requires_grad_()
+        grad_ref = grad.cpu()
+
+        out = F.interpolate(input, size=(out_s,), mode='nearest')
+        out.backward(grad)
+
+        out_ref = F.interpolate(input_ref, size=(out_s,), mode='nearest')
+        out_ref.backward(grad_ref)
+
+        self.assertEqual(out_ref, out)
+        self.assertEqual(input_ref.grad, input.grad)
+
+    @skipMPS
+    @tf32_on_and_off(0.005)
+    @parametrize_test('bias', [
+        subtest(False, name='nobias'), subtest(True, name='bias')])
+    @parametrize_test('weight_layout', [
+        subtest(torch.strided, name='weightStrided'),
+        subtest(torch.sparse_coo, name='weightCOO'),
+        subtest(torch.sparse_csr, name='weightCSR'),
+        subtest(torch.sparse_csc, name='weightCSC'),
+        # TODO: addmm: computation on CPU is not implemented for Strided + Strided @ SparseBsr
+        # subtest(torch.sparse_bsr, name='weightBSR'),
+        # subtest(torch.sparse_bsc, name='weightBSC'),
+    ])
+    def test_linear_autograd(self, device, bias, weight_layout):
+        module = nn.Linear(4, 4, bias=bias, device=device)
+        if weight_layout == torch.strided:
+            pass
+        elif weight_layout == torch.sparse_csr:
+            module.weight = nn.Parameter(module.weight.to_sparse_csr())
+        elif weight_layout == torch.sparse_csc:
+            module.weight = nn.Parameter(module.weight.to_sparse_csc())
+        elif weight_layout == torch.sparse_bsr:
+            module.weight = nn.Parameter(module.weight.to_sparse_bsr((2, 2)))
+        elif weight_layout == torch.sparse_bsc:
+            module.weight = nn.Parameter(module.weight.to_sparse_bsc((2, 2)))
+        elif weight_layout == torch.sparse_coo:
+            module.weight = nn.Parameter(module.weight.to_sparse_coo())
+        else:
+            raise AssertionError
+
+        inp = torch.randn(4, requires_grad=True, device=device)
+        res = module(inp)
+        if bias:
+            expected = (torch.einsum("i,ji->j", inp, module.weight.to_dense())) + module.bias
+        else:
+            expected = (torch.einsum("i,ji->j", inp, module.weight.to_dense()))
+        self.assertEqual(res, expected)
+
+        grad_output = torch.randn(4, device=device)
+        grads = torch.autograd.grad(res, [module.weight, inp], grad_output)
+        grads_expected = torch.autograd.grad(expected, [module.weight, inp], grad_output)
+
+        self.assertEqual(grads_expected[0].layout, weight_layout)
+
+        for g, ge in zip(grads, grads_expected):
+            self.assertEqual(g, ge)
+
 
 class TestNNCUDA(NNTestCase):
     @skipCUDAIfNoCudnn
@@ -16350,6 +16121,227 @@ class TestNNCUDA(NNTestCase):
     def test_RNN_cpu_vs_device_with_dropout(self, device):
         # Because of dropout randomness, can only compare dropout=0 and dropout=1
         self._test_RNN_cpu_vs_device(device, 1)
+
+    @skipCUDAIfNoCudnn
+    @set_default_dtype(torch.double)
+    @parametrize_test('train', [True, False])
+    @parametrize_test('p', [0, 0.276, 0.731, 1])
+    def test_RNN_dropout(self, device, p, train):
+        # checking the assumption that cuDNN sticks dropout in between
+        # RNN layers
+        for cuda in (True, False):
+            rnn = nn.RNN(10, 1000, 2, bias=False, dropout=p, nonlinearity='relu')
+            if cuda:
+                rnn.cuda()
+
+            if train:
+                rnn.train()
+            else:
+                rnn.eval()
+            rnn.weight_ih_l0.data.fill_(1)
+            rnn.weight_hh_l0.data.fill_(1)
+            rnn.weight_ih_l1.data.fill_(1)
+            rnn.weight_hh_l1.data.fill_(1)
+            input = torch.ones(1, 1, 10)
+            hx = torch.zeros(2, 1, 1000)
+            if cuda:
+                input = input.cuda()
+                hx = hx.cuda()
+
+            output, hy = rnn(input, hx)
+            self.assertEqual(output.data.min(), output.data.max())
+            output_val = output.data[0][0][0]
+            if p == 0 or not train:
+                self.assertEqual(output_val, 10000)
+            elif p == 1:
+                self.assertEqual(output_val, 0)
+            else:
+                self.assertGreater(output_val, 8000)
+                self.assertLess(output_val, 12000)
+                denorm_mod = (output_val * (1 - p)) % 10
+                self.assertLess(min(denorm_mod, 10 - denorm_mod), 1e-2)
+
+            self.assertEqual(hy[0].data.min(), hy[0].data.max())
+            self.assertEqual(hy[1].data.min(), hy[1].data.max())
+            self.assertEqual(hy.data[0][0][0], 10)
+            self.assertEqual(hy.data[1][0][0], output_val)
+
+    @skipCUDAIfNoCudnn
+    @set_default_dtype(torch.double)
+    @parametrize_test('bidirectional', [True, False])
+    @parametrize_test('mode', ['RNN', 'LSTM', 'GRU'])
+    def test_error_RNN_seq_len_zero(self, device, mode, bidirectional):
+        # checking error message when RNN has seq_len = 0
+        for dev in get_all_device_types():
+            input = torch.ones(0, 10, 5)
+            rnn = getattr(nn, mode)(5, 6, bidirectional=bidirectional)
+            if dev == 'cuda':
+                rnn.cuda()
+                input = input.cuda()
+
+            with self.assertRaisesRegex(RuntimeError, "Expected sequence length to be larger than 0 in RNN"):
+                rnn(input)
+
+    @skipCUDAIfNoCudnn
+    @parametrize_test('train', [True, False])
+    @parametrize_test('p', [0, 0.1234])
+    def test_RNN_dropout_state(self, device, p, train):
+        for cuda in (True, False):
+            rnn = nn.RNN(100, 100, 2, bias=False, dropout=p, nonlinearity='relu')
+            if cuda:
+                rnn.cuda()
+
+            if train:
+                rnn.train()
+            else:
+                rnn.eval()
+            input = torch.rand(1, 1, 100)
+            hx = torch.rand(2, 1, 100)
+            if cuda:
+                input = input.cuda()
+                hx = hx.cuda()
+
+            output1, hy1 = rnn(input, hx)
+            output2, hy2 = rnn(input, hx)
+
+            buf = io.BytesIO()
+            rnn_pickle = torch.save(rnn, buf)
+            buf.seek(0)
+            # weights_only=False as this is legacy code that saves the model
+            rnn2 = torch.load(buf, weights_only=False)
+            rnn2.flatten_parameters()
+            output3, hy3 = rnn2(input, hx)
+
+            if p == 0 or not train:
+                self.assertEqual(output1, output2)
+                self.assertEqual(output1, output3)
+                self.assertEqual(hy1, hy2)
+                self.assertEqual(hy1, hy3)
+            else:
+                self.assertNotEqual(output1, output2)
+                self.assertNotEqual(output1, output3)
+                self.assertNotEqual(hy1, hy2)
+                self.assertNotEqual(hy1, hy3)
+
+    @skipCUDAIfNoCudnn
+    @set_default_dtype(torch.double)
+    @parametrize_test('train', [True, False])
+    def test_RNN_change_dropout(self, device, train):
+        for cuda in (True, False):
+            rnn = nn.RNN(100, 100, 2, dropout=0, nonlinearity='relu')
+            input = torch.rand(3, 2, 100)
+            if cuda:
+                input.data = input.data.cuda()
+                rnn.cuda()
+
+            if train:
+                rnn.train()
+            else:
+                rnn.eval()
+
+            prev_output = None
+            for p in (0, 0.5, 0, 0.7, 0.2, 1, 0.2, 0):
+                rnn.dropout = p
+                output1, hy1 = rnn(input)
+                output2, hy2 = rnn(input)
+
+                if p == 0 or p == 1 or not train:
+                    self.assertEqual(output1, output2)
+                    self.assertEqual(hy1, hy2)
+                else:
+                    self.assertNotEqual(output1, output2)
+                    self.assertNotEqual(hy1, hy2)
+
+                if prev_output is not None:
+                    if not train:
+                        self.assertEqual(output1.data, prev_output)
+                        self.assertEqual(output2.data, prev_output)
+                    else:
+                        self.assertNotEqual(output1.data, prev_output)
+                        self.assertNotEqual(output2.data, prev_output)
+                prev_output = output1.data
+
+    @skipCUDAIfNoCudnn
+    def test_batchnorm_cudnn_nhwc(self, device):
+        def run_test(input, grad_output):
+            c = input.size(1)
+            mod = nn.BatchNorm2d(c).cuda().float()
+            mod.weight.data.uniform_()
+            mod.bias.data.uniform_()
+            ref_input = input.detach().clone().contiguous().requires_grad_(True)
+            ref_grad = grad.detach().clone().contiguous()
+            ref_mod = nn.BatchNorm2d(c).cuda().float()
+            ref_mod.load_state_dict(mod.state_dict())
+            out = mod(input)
+            out.backward(grad_output)
+            ref_out = ref_mod(ref_input)
+            ref_out.backward(ref_grad)
+            self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+            self.assertTrue(ref_out.is_contiguous())
+            self.assertEqual(out, ref_out)
+            self.assertEqual(mod.weight.grad, ref_mod.weight.grad)
+            self.assertEqual(mod.bias.grad, ref_mod.bias.grad)
+            self.assertEqual(input.grad, ref_input.grad)
+
+        input = torch.randint(1, 10, (4, 8, 2, 2), dtype=torch.float32, device="cuda")
+        input = input.contiguous(memory_format=torch.channels_last).detach().requires_grad_()
+
+        grad = torch.randint(1, 10, (4, 8, 2, 2), dtype=torch.float32, device="cuda")
+        grad = grad.contiguous(memory_format=torch.channels_last)
+        run_test(input, grad)
+        # see #42588, grad is channels_last contiguous, but grad.suggest_memory_format (rightly) return "contiguous"
+        # not channels_last
+        input = torch.randint(1, 10, (2, 8, 8, 1), dtype=torch.float32, device="cuda")
+        input = input.contiguous(memory_format=torch.channels_last).detach().requires_grad_()
+        grad = torch.randint(1, 10, (2, 8, 8, 1), dtype=torch.float32, device="cuda")
+        grad = grad.permute(0, 2, 1, 3)
+        run_test(input, grad)
+
+    @skipCUDAIfNoCudnn
+    def test_batchnorm_cudnn_half(self, device):
+        # THNN
+        input = torch.randint(1, 10, (2, 3, 2, 2), dtype=torch.half, device=device, requires_grad=True)
+        m = nn.BatchNorm2d(3).half().to(device)
+        thnn_output = m(input)
+        thnn_output.sum().backward()
+        thnn_input_grad = input.grad.data.clone()
+        self.assertEqualTypeString(thnn_output, input)
+        # cuDNN
+        input.grad = None
+        m = m.float()
+        cudnn_output = m(input)
+        cudnn_output.sum().backward()
+        cudnn_input_grad = input.grad.data.clone()
+        self.assertEqualTypeString(cudnn_output, input)
+        self.assertEqual(cudnn_output, thnn_output)
+        self.assertEqual(cudnn_input_grad, thnn_input_grad, atol=1e-3, rtol=0)
+
+    def test_batch_norm_gather_stats_invalid_shapes_cuda(self, device):
+        # Regression test for https://github.com/pytorch/pytorch/issues/189828.
+        # batch_norm_reduce_statistics_kernel takes both of its loop bounds from mean, then
+        # indexes invstd and counts with them, so an invstd that disagrees with mean used to
+        # be read out of bounds. The op must validate the shapes instead.
+        input = torch.full((1, 3, 3, 0), 1.0, dtype=torch.float32, device='cuda')
+        mean = torch.full((2, 3), 1.15215e+25, dtype=torch.float32, device='cuda')
+        invstd = torch.full((2, 0), 1.0, dtype=torch.float32, device='cuda')
+        with self.assertRaisesRegex(RuntimeError, "invstd to have the same shape as mean"):
+            torch.batch_norm_gather_stats(input, mean, invstd, None, None, float('-inf'), float('-inf'),
+                                          -9223372036854775808)
+
+        # mean must be (world_size, num_features); a 1-D mean would index past its dims
+        with self.assertRaisesRegex(RuntimeError, "expected mean to be 2-dimensional"):
+            torch.batch_norm_gather_stats(input, torch.ones(3, device='cuda'), torch.ones(3, device='cuda'),
+                                          None, None, 0.1, 1e-5, 2)
+
+        # counts is indexed up to mean.size(0), so it must have at least that many elements
+        with self.assertRaisesRegex(RuntimeError, "counts to have at least one element"):
+            torch.batch_norm_gather_stats_with_counts(
+                torch.randn(1, 3, 3, 3, device='cuda'),
+                torch.ones(2, 3, device='cuda'),
+                torch.ones(2, 3, device='cuda'),
+                None, None, 0.1, 1e-5,
+                torch.ones(1, device='cuda'),
+            )
 
 
 class TestFunctionalPickle(TestCase):
