@@ -2877,35 +2877,14 @@ class _PrecompileApi:
         # caught it.
         #
         # Which guards discriminate is only knowable once every variant
-        # exists, and guards are serialized per compilation as each one is
-        # produced. So learn it from a throwaway capture first, then capture
-        # again keeping only those. The examples fully determine the
-        # capture, and PrecompileSession gives each session a fresh PGO
-        # state, so the second pass reproduces the first: measured identical
-        # on that model (53 frames, 121 variants, no frame differing).
-        from torch._dynamo.precompile_package import varying_guard_slots
-
-        probe = _capture_session(
-            fn,
-            backend=backend,
-            guard_filter_fn=guard_filter_fn,
-            recompile_limit=recompile_limit,
-            dynamic=dynamic,
-            example_inputs=example_inputs,
-            training=bool(training),
-        )
-        # The probe runs the same calls, so it raises the same things the
-        # real capture would -- and it raises them FIRST. Translate here too,
-        # or a package error surfaces raw from a pass the caller cannot see.
-        from torch._dynamo.exc import PackageError as _PackageError
-
-        try:
-            with probe:
-                pass
-        except _PackageError as e:
-            raise PrecompileError(str(e)) from e
-        keep_only = varying_guard_slots(probe._guard_sets)
-        torch._dynamo.reset()
+        # exists, but guards are serialized per compilation, as each one is
+        # produced. So capture once and apply the policy on the way out, by
+        # re-serializing each frame's guards from the pickle the capture
+        # already made -- see PrecompileSession._apply_guard_policy. Running
+        # the examples a second time to learn the policy first would be
+        # simpler, but a capture is not free of side effects: it would double
+        # a training step's gradients, and a region that mutates state would
+        # be guarded on values the second pass had already advanced past.
         session = PrecompileSession(
             _capture_session(
                 fn,
@@ -2915,14 +2894,14 @@ class _PrecompileApi:
                 dynamic=dynamic,
                 example_inputs=example_inputs,
                 invariants=invariants,
-                keep_only=keep_only,
                 training=bool(training),
             )
         )
-        # Retain graphs only where they will actually be rendered: the probe
-        # above threw its lowering away, and an eager "backend" is an fx graph
-        # with no source to emit. Retaining otherwise would deepcopy every
-        # compiled graph and hold it for the session to produce nothing.
+        session._session._prune_invariant_guards = True
+        # Retain graphs only where they will actually be rendered: an eager
+        # "backend" is an fx graph with no source to emit. Retaining otherwise
+        # would deepcopy every compiled graph and hold it for the session to
+        # produce nothing.
         session._session._keep_graphs = backend != "eager"
         with session:
             pass
