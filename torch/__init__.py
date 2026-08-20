@@ -181,6 +181,7 @@ if sys.platform == "win32":
 
     def _load_dll_libraries() -> None:
         import importlib.util
+        import site
         import sysconfig
 
         from torch.version import cuda as cuda_version
@@ -201,13 +202,43 @@ if sys.platform == "win32":
         py_root_bin_path = os.path.join(sys.exec_prefix, "bin")
         nvidia_dll_paths = []
         if cuda_version:
-            nvidia_dll_paths = [
-                p
-                for path in sys.path
-                for p in glob.glob(os.path.join(path, "nvidia", "*", "bin"))
-                + glob.glob(os.path.join(path, "nvidia", "*", "bin", "*"))
-                if os.path.isdir(p)
-            ]
+            # CUDA Pathfinder locates and loads the CUDA runtime DLLs installed
+            # by NVIDIA's PyPI packages on Windows.
+
+            try:
+                from cuda.pathfinder import load_nvidia_dynamic_lib
+                for lib in (
+                    "cudart",
+                    "nvJitLink",
+                    "nvrtc",
+                    "cublas",
+                    "cublasLt",
+                    "cufft",
+                    "curand",
+                    "cusolver",
+                    "cusparse",
+                    "cupti",
+                ):
+                    load_nvidia_dynamic_lib(lib)
+            except Exception as err:
+                warnings.warn(
+                    f"CUDA Pathfinder failed to load CUDA {cuda_version}: {err}. "
+                    "Falling back to NVIDIA wheel DLL directories.",
+                    stacklevel=2,
+                )
+                nvidia_dll_paths = glob.glob(
+                    os.path.join(site.getsitepackages()[-1], "nvidia", "*", "bin")
+                )
+            else:
+                # CUDA Pathfinder does not support cuDNN or cuSPARSELt.
+                nvidia_dll_paths = [
+                    path
+                    for path in glob.glob(
+                        os.path.join(site.getsitepackages()[-1], "nvidia", "*", "bin")
+                    )
+                    if glob.glob(os.path.join(path, "cudnn*.dll"))
+                    or glob.glob(os.path.join(path, "cusparseLt*.dll"))
+                ]
 
         # When users create a virtualenv that inherits the base environment,
         # we will need to add the corresponding library directory into
@@ -287,7 +318,12 @@ if sys.platform == "win32":
                 ).strip()
             )
 
-        dlls = glob.glob(os.path.join(th_dll_path, "*.dll"))
+        dlls = [
+            dll
+            for nvidia_dll_path in nvidia_dll_paths
+            for dll in glob.glob(os.path.join(nvidia_dll_path, "*.dll"))
+        ]
+        dlls.extend(glob.glob(os.path.join(th_dll_path, "*.dll")))
         path_patched = False
         for dll in dlls:
             is_loaded = False

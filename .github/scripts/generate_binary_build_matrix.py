@@ -72,6 +72,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         ),
         "windows": (
             "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvtx]==12.6.2; platform_system == 'Windows' and platform_machine == 'AMD64' | "
+            "cuda-pathfinder; platform_system == 'Windows' and platform_machine == 'AMD64' | "
             "nvidia-cudnn-cu12==9.10.2.21; platform_system == 'Windows' and platform_machine == 'AMD64' | "
             "nvidia-cusparselt-cu12==0.7.1; platform_system == 'Windows' and platform_machine == 'AMD64' | "
             "nvidia-nvjitlink-cu12>=12.6.85,<13; platform_system == 'Windows' and platform_machine == 'AMD64'"
@@ -88,6 +89,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         ),
         "windows": (
             "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.0; platform_system == 'Windows' and platform_machine == 'AMD64' | "
+            "cuda-pathfinder; platform_system == 'Windows' and platform_machine == 'AMD64' | "
             "nvidia-cudnn-cu13==9.24.0.43; platform_system == 'Windows' and platform_machine == 'AMD64' | "
             "nvidia-cusparselt-cu13==0.8.1; platform_system == 'Windows' and platform_machine == 'AMD64'"
         ),
@@ -103,6 +105,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         ),
         "windows": (
             "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.2.1; platform_system == 'Windows' and platform_machine == 'AMD64' | "
+            "cuda-pathfinder; platform_system == 'Windows' and platform_machine == 'AMD64' | "
             "nvidia-cudnn-cu13==9.24.0.43; platform_system == 'Windows' and platform_machine == 'AMD64' | "
             "nvidia-cusparselt-cu13==0.8.1; platform_system == 'Windows' and platform_machine == 'AMD64'"
         ),
