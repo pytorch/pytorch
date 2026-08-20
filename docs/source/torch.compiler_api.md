@@ -50,14 +50,15 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 % intentionally omitted from the autosummary block above.
 
 ```{eval-rst}
-.. py:function:: precompile(fn, *example_args, backend="inductor", tracer=None, decompositions=None, example_inputs=None, guard_filter_fn=None, recompile_limit=256, dynamic=None, invariants=None)
+.. py:function:: precompile(fn, *, backend="inductor", tracer="make_fx", decompositions=None, example_inputs, guard_filter_fn=None, recompile_limit=256, dynamic=None, invariants=None, training=False)
 
-   Ahead-of-time precompile ``fn`` using one of two input forms. Positional example
-   arguments select the single-graph source-artifact path and return a self-contained,
-   runnable Python source string plus an acceleration cache as ``(python_code, cache)``.
-   The ``example_inputs`` keyword accepts a sequence of positional-argument tuples,
-   captures every graph-break continuation and guarded recompilation exercised by those
-   calls under full runtime guards, and returns the same ``(python_code, cache)`` pair.
+   Ahead-of-time precompile ``fn`` against ``example_inputs``, a sequence of calls each
+   given as a tuple of positional arguments. precompile makes those calls itself and
+   returns a self-contained, runnable Python source string plus an acceleration cache as
+   ``(python_code, cache)``. ``tracer`` picks the capture front-end: ``"make_fx"`` (the
+   default) is one non-strict ATen trace and takes exactly one call, while ``"dynamo"``
+   takes as many as you give it and captures every graph-break continuation and guarded
+   recompilation those calls exercise, under full runtime guards.
    This is execution-driven coverage, not an
    exhaustive analysis: paths and values that no example executes are absent. ``fn`` is
    the whole computation, taking the model(s) as
@@ -91,32 +92,32 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 
    :param fn: The whole computation to capture, taking the model(s) and runtime inputs
        as positional arguments.
-   :param example_args: Example positional arguments for the single-graph source artifact;
-       the ``nn.Module`` arguments are lifted and the rest are the runtime inputs.
-   :param example_inputs: Sequence of positional-argument tuples for multi-graph capture.
-       Calls run automatically under ordinary ``torch.no_grad()`` even if the caller is in
-       ``torch.inference_mode()``; serve the resulting inference artifact under
-       ``torch.no_grad()`` too. Inference mode is a distinct guarded state and must be
-       captured manually if needed. Tensors created inside inference mode remain inference
-       tensors after that context is disabled, so automatic examples reject them; create
-       those inputs outside inference mode. Do not combine this with
-       positional example arguments.
+   :param example_inputs: Required. Sequence of calls to capture, each a tuple of
+       positional arguments (or a ``torch.compiler.precompile.ExampleInput`` when keyword
+       arguments are needed; ``tracer="make_fx"`` is positional-only). ``tracer="make_fx"``
+       requires exactly one; ``tracer="dynamo"`` accepts any number, and what differs
+       between them is what the artifact can discriminate on. The ``nn.Module`` arguments
+       are lifted and the rest are the runtime inputs. Calls run under ordinary
+       ``torch.no_grad()`` unless ``training=True``, even if the caller is in
+       ``torch.inference_mode()``; serve the resulting artifact under the same grad mode.
+       Inference mode is a distinct guarded state and must be captured manually if needed.
+       Tensors created inside inference mode remain inference tensors after that context is
+       disabled, so they are rejected; create those inputs outside inference mode.
    :param backend: ``"inductor"`` (default) lowers through AOTAutograd + Inductor;
        ``"eager"`` keeps the captured ATen graph (layout-flexible, no kernels; shapes
        are still specialized to the example).
-   :param tracer: capture front-end for the POSITIONAL path, where leaving it unset
-       means ``"make_fx"``. It must not be passed at all alongside ``example_inputs``,
-       which always uses Dynamo; that combination raises. ``"make_fx"`` is a non-strict
-       make_fx trace. ``"dynamo"`` analyzes the Python (bytecode) rather than tracing one path and
+   :param tracer: capture front-end, defaulting to ``"make_fx"``. ``"make_fx"`` is a
+       non-strict make_fx trace of a single call; passing more than one entry in
+       ``example_inputs`` raises. ``"dynamo"`` analyzes the Python (bytecode) rather than tracing one path and
        inlines the transformed bytecode Dynamo produces into ``python_code``, lowering the
        compiled subgraph through the same ``backend`` choices; it honors ``mark_unbacked``
        dynamic shapes (on either backend, though ``mark_unbacked(strict=True)`` raises --
        Dynamo captures a strict mark as a guardable backed dim), ``decompositions``, and
        training steps (a ``.backward()`` / ``torch.autograd.grad`` is traced into the graph
-       and the parameter gradients are accumulated onto the runtime model like eager). A
-       source-artifact path requires one full graph; pass a list of calls through the
-       ``example_inputs`` keyword when Python graph-breaks or when several guarded/recompiled
-       variants must be retained. Unlike ``make_fx``, the dynamo driver
+       and the parameter gradients are accumulated onto the runtime model like eager).
+       ``make_fx`` requires one full graph; use ``tracer="dynamo"`` when Python
+       graph-breaks or when several guarded/recompiled variants must be retained.
+       Unlike ``make_fx``, the dynamo driver
        does NOT re-validate the
        runtime model/inputs, so on the eager backend a drifted model (broken weight tying,
        a retyped/reshaped weight) or a broadcast-compatible input-shape mismatch can
@@ -130,9 +131,8 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
    :param decompositions: Optional decomposition table (``dict`` of ``OpOverload`` to a
        decomposition function) controlling how ATen ops are broken down in the captured
        graph; defaults to ``None``. ``tracer="make_fx"`` forwards it to ``make_fx`` during
-       capture; ``tracer="dynamo"`` applies the same table by re-tracing Dynamo's captured
-       subgraph with it. ``tracer`` and ``decompositions`` apply only to positional input;
-       keyword ``example_inputs`` always selects multi-graph Dynamo capture.
+       capture. It applies only to ``tracer="make_fx"``; the dynamo tracer lowers through
+       the backend instead and rejects it.
    :param guard_filter_fn: Multi-graph serialization filter; returns one boolean per guard
        entry. Live capture retains all guards so later examples trigger their recompiles.
        Risky dropped guards are rejected by default when saving, and every
@@ -199,7 +199,8 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 .. py:class:: precompile.ExampleInput(args=(), kwargs={})
 
    One capture call for ``example_inputs`` when positional arguments alone are not
-   enough. A plain tuple in ``example_inputs`` is the positional arguments of one
+   enough (``tracer="dynamo"`` only). A plain tuple in ``example_inputs`` is the
+   positional arguments of one
    call; wrap a call that needs keyword arguments in this instead::
 
        torch.compiler.precompile(

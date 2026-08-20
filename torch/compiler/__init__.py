@@ -8,10 +8,11 @@ from typing_extensions import ParamSpec
 import torch
 from torch._higher_order_ops.invoke_subgraph import NestedCompileRegionOptions
 
-# ``torch.compiler.precompile``: positional examples produce a self-contained Python
-# source plus an acceleration cache; example_inputs=[...] produces a guarded multi-graph
-# session spanning graph breaks and recompilations. capture/load_package expose the manual
-# form. Re-exported from the private impl, whose ``_PrecompileApi.__module__`` is forced to
+# ``torch.compiler.precompile``: example_inputs=[(...), ...] is the one calling
+# convention, and ``tracer`` picks the front-end -- make_fx takes a single call and
+# produces a self-contained Python source plus an acceleration cache, dynamo takes
+# several and produces a guarded multi-graph artifact spanning graph breaks and
+# recompilations. capture/load_package expose the manual form. Re-exported from the private impl, whose ``_PrecompileApi.__module__`` is forced to
 # "torch.compiler" so this is the single public location. Distinct from
 # ``torch._dynamo.config.caching_precompile``
 # (a ``torch.compile`` guard-serialization caching mode), despite the shared word.
