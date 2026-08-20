@@ -1721,7 +1721,7 @@ class TestForeach(TestCase):
         copy_ = op.ref_inplace
 
         def fn(self_tensor, src_tensor, non_blocking):
-            return foreach_copy(self_tensor, src_tensor, non_blocking)
+            return foreach_copy(self_tensor, src_tensor, non_blocking=non_blocking)
 
         fn = torch.compile(fn)
         for non_blocking in (False,):
