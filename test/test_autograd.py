@@ -6845,6 +6845,13 @@ Done""",
         check(fast_mode=True)
         check(fast_mode=False)
 
+    def test_gradcheck_mixed_differentiable_outputs(self):
+        def fn(x):
+            return torch.ones_like(x), x.square()
+
+        x = torch.randn(2, dtype=torch.double, requires_grad=True)
+        self.assertTrue(gradcheck(fn, (x,), fast_mode=True))
+
     @parametrize(
         "layout",
         (

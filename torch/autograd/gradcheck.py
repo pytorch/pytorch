@@ -695,7 +695,7 @@ def _get_numerical_vJu(
         all_Ju = _get_numerical_jvp_wrt_specific_input(
             fn, inp_idx, inputs, u, eps, is_forward_ad
         )
-        # Filter out the Ju for non floating point outputs
+        # Keep numerical JVPs aligned with outputs checked by the analytical path.
         filtered_Ju = []
         func_out = _as_tuple(func_out)
         if len(all_Ju) != len(func_out):
@@ -704,11 +704,11 @@ def _get_numerical_vJu(
                 f"but got {len(all_Ju)} and {len(func_out)}"
             )
         for Ju, output in zip(all_Ju, func_out):
-            if _is_float_or_complex_tensor(output):
-                filtered_Ju.append(Ju)
-            else:
+            if not _is_float_or_complex_tensor(output):
                 # TODO: handle the other Ju
-                pass
+                continue
+            if is_forward_ad or output.requires_grad:
+                filtered_Ju.append(Ju)
         if all_v is not None:
             jacobian_scalars: list[torch.Tensor] = []
             for v, Ju in zip(all_v, filtered_Ju):
@@ -1950,7 +1950,6 @@ def _fast_gradcheck(
         eps,
         is_forward_ad=use_forward_ad,
     )
-    # TODO: replicate https://github.com/pytorch/pytorch/pull/77743 for fast gradcheck as well
     if use_forward_ad:
         if all_v is not None:
             raise AssertionError("Expected all_v to be None.")
