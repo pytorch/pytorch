@@ -5,6 +5,7 @@ import sys
 
 import torch
 import torch._dynamo.test_case
+import torch._dynamo.testing
 from torch._C._dynamo.eval_frame import set_eval_frame
 from torch._dynamo.types import ConvertFrameReturn, GuardedCode, wrap_guarded_code
 from torch._guards import CompileId
