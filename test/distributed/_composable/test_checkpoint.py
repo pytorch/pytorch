@@ -337,7 +337,7 @@ class TestCheckpoint(TestCase):
 class TestCheckpointAccelerator(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    def test_tensor_only_gpu(self):
+    def test_tensor_only_gpu(self, device):
         x = torch.randn(20, 100, device=f"{device_type}:0")
         net = ToyModel().to(f"{device_type}:0")
         check_tensor_only(self, net, x)
