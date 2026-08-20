@@ -745,6 +745,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
         )
 
         epilogue_fn_code: str | None = None
+        epilogue_is_cutedsl = False
         epilogue_reads: list[str] = []
         epilogue_writes: list[str] = []
         epilogue_var_renames: dict[str, Any] = {}
@@ -770,6 +771,12 @@ class NVUniversalGemmScheduling(BaseScheduling):
                     )
                 feed_main = plan.feed_main
                 if feed_main is not None:
+                    (feed_scheduler_node,) = epilogue_nodes[0].get_nodes()
+                    feed_buffer = feed_scheduler_node.node
+                    if not isinstance(feed_buffer, ComputedBuffer):
+                        raise AssertionError(
+                            f"expected ComputedBuffer, got {type(feed_buffer)}"
+                        )
                     local_reduce = GemmReductionPlan(
                         reduction_output=None,
                         group=feed_main.group,
@@ -778,6 +785,13 @@ class NVUniversalGemmScheduling(BaseScheduling):
                         source_type=feed_main.source_type,
                         primary_output=feed_main.output_name,
                         feeds_main=True,
+                        consumer_fn=LoopIRCuteDSLCodegen.consumer_from_buffer(
+                            original_buffer_name,
+                            None,
+                            feed_buffer,
+                            "_local_reduce_consumer",
+                            feed_main.group,
+                        ),
                     )
                     epilogue_fn_code = (
                         f"def {EPILOGUE_FN_NAME}(accum):\n    D = accum\n    return D"
@@ -804,14 +818,25 @@ class NVUniversalGemmScheduling(BaseScheduling):
                         for node in evt_nodes
                         if isinstance(node.node, ComputedBuffer)
                     ]
-                    try:
-                        lowered_epilogue = LoopIRCuteDSLCodegen.from_buffers(
-                            original_buffer_name,
-                            evt_buffers,
-                            removed_buffers_with_gemm,
-                            EPILOGUE_FN_NAME,
-                        )
-                    except NotImplementedError:
+                    from .nv_universal_gemm import GemmVariant
+
+                    if ctb.variant == GemmVariant.SCALED_GEMM:
+                        try:
+                            lowered_epilogue = LoopIRCuteDSLCodegen.from_buffers(
+                                original_buffer_name,
+                                evt_buffers,
+                                removed_buffers_with_gemm,
+                                EPILOGUE_FN_NAME,
+                            )
+                        except NotImplementedError:
+                            lowered_epilogue = CutlassEVTCodegen.ir_to_evt_python_code(
+                                original_buffer_name,
+                                list(evt_nodes),
+                                removed_buffers_with_gemm,
+                                fn_name=EPILOGUE_FN_NAME,
+                                as_standalone_function=True,
+                            )
+                    else:
                         lowered_epilogue = CutlassEVTCodegen.ir_to_evt_python_code(
                             original_buffer_name,
                             list(evt_nodes),
@@ -820,6 +845,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
                             as_standalone_function=True,
                         )
                     epilogue_fn_code = lowered_epilogue.source
+                    epilogue_is_cutedsl = lowered_epilogue.is_cutedsl
                     epilogue_reads = list(lowered_epilogue.reads)
                     epilogue_writes = list(lowered_epilogue.writes)
                     epilogue_var_renames = lowered_epilogue.renames
@@ -862,6 +888,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
         kernel, render = ctb.make_kernel_render(
             ctb,
             epilogue_fn_code=epilogue_fn_code,
+            epilogue_is_cutedsl=epilogue_is_cutedsl,
             epilogue_reads=epilogue_reads,
             epilogue_writes=epilogue_writes,
             epilogue_var_renames=epilogue_var_renames,
