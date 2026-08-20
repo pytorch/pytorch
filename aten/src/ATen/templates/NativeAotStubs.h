@@ -16,7 +16,11 @@
 // from static initializers.
 // The whole path is gated on at::globalContext().allowNativeAot().
 
-#include <ATen/core/Tensor.h>
+// TensorBase.h, not Tensor.h: every stub signature takes `const at::Tensor &`,
+// so a declaration is all this header needs -- and Tensor.h drags in the
+// generated TensorBody.h, which makes every includer rebuild on any
+// native_functions.yaml change.
+#include <ATen/core/TensorBase.h>
 #include <ATen/native/DispatchStub.h>
 
 namespace at::native {

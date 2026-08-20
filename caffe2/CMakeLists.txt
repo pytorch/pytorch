@@ -1033,19 +1033,11 @@ elseif(USE_CUDA)
   # native-AOT: embed the AOT-exported DSL kernels into torch_cuda.
   #
   # ONE include, and no logic here on purpose. tools/native_aot/gen_aot_lib.py
-  # decides everything -- which generated sources to compile, which prebuilt
-  # objects to link, the linker version script that keeps the DSL's entry points
-  # out of the public ABI, the DSL runtime archive to link against, and whether
-  # TORCH_NATIVE_AOT opted out -- and EMITS this file as the CMake calls that
-  # follow from those decisions. Absent file (a clean tree, or a build that
-  # embeds nothing) means nothing happens: no branches, no policy, no parsing.
-  #
-  # It used to be ~370 lines here: a hand-rolled manifest parser, an arch-list
-  # normalizer, a staleness comparison, a path-validation loop and a per-CUDA-major
-  # archive search -- none of it reachable by any test, in the language least able
-  # to express it. The generator is Python with a test suite, so that is where it
-  # belongs. Stage 2 reconfigures explicitly after writing this file, so its
-  # appearance needs no CONFIGURE_DEPENDS bootstrap either.
+  # decides everything -- sources, objects, the version script, the DSL runtime
+  # archive, the TORCH_NATIVE_AOT opt-out -- and EMITS this file as the resulting
+  # CMake calls. OPTIONAL, so a tree that embeds nothing does nothing. Stage 2
+  # reconfigures explicitly after writing it, so its appearance needs no
+  # CONFIGURE_DEPENDS bootstrap.
   include("${CMAKE_BINARY_DIR}/native_aot/native_aot.cmake" OPTIONAL)
 
   if(USE_CUFILE)
