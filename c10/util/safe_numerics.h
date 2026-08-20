@@ -8,8 +8,8 @@
 // GCC has __builtin_mul_overflow from before it supported __has_builtin
 #ifdef _MSC_VER
 #define C10_HAS_BUILTIN_OVERFLOW() (0)
-#include <c10/util/llvmMathExtras.h>
 #include <intrin.h>
+#include <bit>
 #else
 #define C10_HAS_BUILTIN_OVERFLOW() (1)
 #endif
@@ -68,9 +68,7 @@ C10_ALWAYS_INLINE bool mul_overflows(T a, T b, T* out) {
     // This test isn't exact, but avoids doing integer division
     *out = a * b;
     constexpr int bits = sizeof(T) * 8;
-    return (
-        (c10::llvm::countLeadingZeros(a) + c10::llvm::countLeadingZeros(b)) <
-        bits);
+    return (std::countl_zero(a) + std::countl_zero(b)) < bits;
   }
 #endif
 }
@@ -98,7 +96,7 @@ bool safe_multiplies_u64(It first, It last, uint64_t* out) {
     prod *= x;
     // log2(0) isn't valid, so need to track it specially
     is_zero |= (x == 0);
-    prod_log2 += c10::llvm::Log2_64_Ceil(x);
+    prod_log2 += std::bit_width(x - 1);
   }
   *out = prod;
   // This test isn't exact, but avoids doing integer division
