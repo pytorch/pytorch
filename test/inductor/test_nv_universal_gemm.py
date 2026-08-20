@@ -782,6 +782,7 @@ class TestNVUniversalGemm(TestCase):
 
         torch.testing.assert_close(result, expected, equal_nan=True)
 
+    @unittest.skipIf(IS_FBCODE, "CUTLASS Operator API is not available in fbcode")
     def test_scaled_gemm_grouped_n_reduce_provider(self):
         from cutlass import Float32
         from cutlass.operators import ScaleMode, ScaleSwizzleMode
@@ -848,6 +849,7 @@ class TestNVUniversalGemm(TestCase):
             out.float().view(m, -1, group).sum(-1),
         )
 
+    @unittest.skipIf(IS_FBCODE, "CUTLASS Operator API is not available in fbcode")
     def test_scaled_gemm_unit_dim_epilogue_non_current_stream(self):
         from cutlass import Float32
         from cutlass.operators import ScaleMode, ScaleSwizzleMode
