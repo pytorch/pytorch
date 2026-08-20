@@ -61,6 +61,7 @@ from torch.testing._internal.distributed.multi_threaded_pg import (
 TORCHCOMM_HAS_GLOO = False
 TORCHCOMM_HAS_XCCL = False
 TORCHCOMM_HAS_NCCL = False
+TORCHCOMM_HAS_HCCL = False
 TORCHCOMM_HAS_RCCL = False
 TORCHCOMM_HAS_NCCLX = False
 TORCHCOMM_HAS_RCCLX = False
@@ -71,7 +72,7 @@ if _TORCHCOMM_AVAILABLE:
         ("gloo", "TORCHCOMM_HAS_GLOO"),
         ("xccl", "TORCHCOMM_HAS_XCCL"),
         ("nccl", "TORCHCOMM_HAS_NCCL"),
-        ("rccl", "TORCHCOMM_HAS_RCCL"),
+        ("hccl", "TORCHCOMM_HAS_HCCL"),
         ("rcclx", "TORCHCOMM_HAS_RCCLX"),
         ("ncclx", "TORCHCOMM_HAS_NCCLX"),
     ]:
@@ -1316,14 +1317,9 @@ class DistributedTestBase(MultiProcessTestCase):
             pass
 
     def backend(self, device) -> str:
-        if "cuda" in device:
-            return "nccl"
-        elif "hpu" in device:  # intel gaudi
-            return "hccl"
-        elif "xpu" in device:
-            return "xccl"
-        else:
-            return "gloo"
+        if device == "privateuse1":
+            device = torch._C._get_privateuse1_backend_name()
+        return c10d.get_default_backend_for_device(device)
 
     def create_pg(self, device, world_size=None, backend=None):
         if world_size is None:
@@ -1331,7 +1327,7 @@ class DistributedTestBase(MultiProcessTestCase):
         backend = backend or self.backend(device)
         num_visible_devices = torch.get_device_module(device).device_count()
         store = torch.distributed.FileStore(self.file_name, num_visible_devices)
-        if "nccl" in backend or "xccl" in backend:
+        if backend != "gloo":
             accelerator = torch.accelerator.current_accelerator()
             if accelerator:
                 device_type = accelerator.type
@@ -2283,14 +2279,9 @@ class C10dTorchCommsTestBase(MultiProcContinuousTest):
 
     @staticmethod
     def backend(device) -> str:
-        if "cuda" in device:
-            return "nccl"
-        elif "hpu" in device:
-            return "hccl"
-        elif "xpu" in device:
-            return "xccl"
-        else:
-            return "gloo"
+        if device == "privateuse1":
+            device = torch._C._get_privateuse1_backend_name()
+        return c10d.get_default_backend_for_device(device)
 
     @classmethod
     def backend_str(cls) -> str:
@@ -2304,6 +2295,7 @@ class C10dTorchCommsTestBase(MultiProcContinuousTest):
             "gloo": TORCHCOMM_HAS_GLOO,
             "xccl": TORCHCOMM_HAS_XCCL,
             "nccl": TORCHCOMM_HAS_NCCL,
+            "hccl": TORCHCOMM_HAS_HCCL,
             "rccl": TORCHCOMM_HAS_RCCL,
             "ncclx": TORCHCOMM_HAS_NCCLX,
             "rcclx": TORCHCOMM_HAS_RCCLX,
@@ -2323,9 +2315,12 @@ class C10dTorchCommsTestBase(MultiProcContinuousTest):
         os.environ["TORCHCOMM_SIZE"] = str(world_size)
         os.environ["TORCHCOMM_STORE_PATH"] = rdvz_file
         super()._init_pg(rank, world_size, rdvz_file)
-        # Set up accelerator device if using nccl/xccl backend
+        # Set up accelerator device for any non-gloo (accelerator comm) backend.
+        # gloo is the only CPU backend in default_device_backend_map; every
+        # other resolved backend (nccl/xccl/hccl/...) is an accelerator comm
+        # backend that requires the device to be set per-rank.
         backend = cls.backend_str()
-        if "nccl" in backend or "xccl" in backend:
+        if backend != "gloo":
             accelerator = torch.accelerator.current_accelerator()
             if accelerator:
                 device = torch.device(f"{accelerator.type}:{rank}")
