@@ -39,7 +39,8 @@ from torch.testing._internal.common_utils import dtype_name, freeze_rng_state, r
     download_file, get_function_arglist, load_tests, skipIfMPS, MACOS_VERSION, \
     IS_PPC, IS_ARM64, IS_MACOS, IS_WINDOWS, IS_CPU_CAPABILITY_SVE, IS_CPU_EXT_SVE_SUPPORTED, xfailIf, \
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, \
-    skipIfTorchDynamo, gcIfJetson, set_default_dtype, skipIfNoCuteDSL, isRocmArchAnyOf, MI200_ARCH
+    skipIfTorchDynamo, gcIfJetson, set_default_dtype, skipIfNoCuteDSL, isRocmArchAnyOf, MI200_ARCH, \
+    TEST_WITH_TORCHDYNAMO
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUDNN, \
     SM80OrLater, SM90OrLater, _get_torch_rocm_version, has_device_side_assert
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
@@ -9278,9 +9279,15 @@ class TestNNDeviceType(NNTestCase):
         if x.numel() > 0:
             def fn(x, w, b):
                 return F.linear(x, w, b).relu_()
-            self.assertTrue(gradcheck(fn, (x, w, b)))
-            self.assertTrue(gradgradcheck(fn, (x, w, b)))
+            # dynamo_wrapped runs backward through compiled autograd, which freezes
+            # double backward's gradient accumulation into torch.add nodes. Those
+            # cannot take the None cotangent the undefined-grad probe feeds them,
+            # while eager just treats it as zero.
+            undef = not TEST_WITH_TORCHDYNAMO
+            self.assertTrue(gradcheck(fn, (x, w, b), check_undefined_grad=undef))
+            self.assertTrue(gradgradcheck(fn, (x, w, b), check_undefined_grad=undef))
 
+    @skipIfTorchDynamo("compiled autograd crashes tracing the sparse backward (pgo.is_stride_dynamic IndexError)")
     @skipMeta
     @onlyNativeDeviceTypes
     @skipMPS
