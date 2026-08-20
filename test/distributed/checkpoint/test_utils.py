@@ -254,8 +254,9 @@ class TestDistWrapper(DTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    def test_gather_object(self):
-        mesh_2d = dist.init_device_mesh(self.device_type, (2, self.world_size // 2))
+    def test_gather_object(self, device):
+        device_type = torch.device(device).type
+        mesh_2d = dist.init_device_mesh(device_type, (2, self.world_size // 2))
         torch.random.manual_seed(dist.get_rank())
 
         dist_wrapper = _DistWrapper(
@@ -275,8 +276,9 @@ class TestDistWrapper(DTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    def test_scatter_object(self):
-        mesh_2d = dist.init_device_mesh(self.device_type, (2, self.world_size // 2))
+    def test_scatter_object(self, device):
+        device_type = torch.device(device).type
+        mesh_2d = dist.init_device_mesh(device_type, (2, self.world_size // 2))
         torch.random.manual_seed(dist.get_rank())
 
         dist_wrapper = _DistWrapper(
@@ -300,7 +302,7 @@ class TestDistWrapper(DTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(2)
-    def test_broadcast_object_with_nonzero_coordinator(self):
+    def test_broadcast_object_with_nonzero_coordinator(self, device):
         # Everybody uses WORLD, but src is coordinator_rank=1
         dist_wrapper = _DistWrapper(
             group=dist.group.WORLD,
@@ -319,10 +321,11 @@ class TestDistWrapper(DTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    def test_broadcast_object_global_local_mismatch(self):
+    def test_broadcast_object_global_local_mismatch(self, device):
         # reproduces issue 152310
 
-        mesh_2d = dist.init_device_mesh(self.device_type, (2, self.world_size // 2))
+        device_type = torch.device(device).type
+        mesh_2d = dist.init_device_mesh(device_type, (2, self.world_size // 2))
         dist_wrapper = _DistWrapper(
             group=mesh_2d.get_group(1),
             use_dist=True,
@@ -344,8 +347,9 @@ class TestDistWrapper(DTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(2)
-    def test_barrier(self):
-        mesh_2d = dist.init_device_mesh(self.device_type, (2, self.world_size // 2))
+    def test_barrier(self, device):
+        device_type = torch.device(device).type
+        mesh_2d = dist.init_device_mesh(device_type, (2, self.world_size // 2))
         torch.random.manual_seed(dist.get_rank())
 
         dist_wrapper = _DistWrapper(
