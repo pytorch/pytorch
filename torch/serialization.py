@@ -1023,6 +1023,7 @@ def _legacy_save(obj, f, pickle_module, pickle_protocol) -> None:
 
     serialized_container_types = {}
     serialized_storages: dict[str, tuple[torch.UntypedStorage, torch.dtype]] = {}
+    id_map: dict[int, str] = {}
 
     # Since loading storages that view the same data with different dtypes is
     # not supported, we need to keep track of the dtype associated with each
@@ -1095,7 +1096,7 @@ def _legacy_save(obj, f, pickle_module, pickle_protocol) -> None:
             # Offset is always 0, but we keep it for backwards compatibility
             # with the old serialization format (which supported storage views)
             offset = 0
-            storage_key = str(storage._cdata)
+            storage_key = id_map.setdefault(storage._cdata, str(len(id_map)))
             location = location_tag(storage)
 
             # TODO: There's an issue here with FC. It might be impossible to
@@ -1170,7 +1171,7 @@ def _legacy_save(obj, f, pickle_module, pickle_protocol) -> None:
     # The class def keeps the persistent_id closure alive, leaking memory.
     del persistent_id
 
-    serialized_storage_keys = sorted(serialized_storages.keys())
+    serialized_storage_keys = sorted(serialized_storages.keys(), key=int)
     pickle_module.dump(serialized_storage_keys, f, protocol=pickle_protocol)
     f.flush()
     for key in serialized_storage_keys:
