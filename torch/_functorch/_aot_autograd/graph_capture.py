@@ -121,11 +121,13 @@ def _create_graph(
             export=aot_config.is_export,
             # Allow token discovery for joint fn tracing as tokens can be used in backward.
             _allow_token_discovery=True,
+            _keep_input_mutations=aot_config.keep_inference_input_mutations,
         )
 
     with (
         enable_python_dispatcher(),
         ctx,
+        torch._dynamo.eval_frame._use_eager_on_nested_compile(),
     ):
         fx_g = make_fx(
             inner_f,

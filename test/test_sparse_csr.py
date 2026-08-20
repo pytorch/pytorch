@@ -1071,6 +1071,18 @@ class TestSparseCSR(TestCase):
             a.is_contiguous()
 
     @onlyCPU
+    def test_malformed_bsr_to_dense_fpe(self, device):
+        # Regression test for FPE (Division by Zero) in sparse_compressed_to_dense
+        # when block size contains a zero dimension
+        crow = torch.tensor([0, 1, 1], dtype=torch.int64, device=device)
+        col = torch.tensor([0], dtype=torch.int64, device=device)
+        values = torch.empty((0, 0, 3, 2, 1), dtype=torch.int64, device=device)
+        t = torch.sparse_bsr_tensor(crow, col, values, check_invariants=False)
+
+        with self.assertRaisesRegex(RuntimeError, "expected block sizes to be strictly positive"):
+            t.to_dense()
+
+    @onlyCPU
     @largeTensorTest("20GB", "cpu")
     def test_csr_nnz(self):
         # Tests the limits of the number of specified elements in CSR tensors, see gh-102520.

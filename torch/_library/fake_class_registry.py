@@ -406,11 +406,11 @@ def register_fake_class(qualname, fake_class: HasStaticMethodFromReal | None = N
             def size(self):
                 return len(self.queue)
 
-    In this example, the original TensorQeue need to add a __obj_flatten__ method
+    In this example, the original TensorQueue need to add a __obj_flatten__ method
     to the class TensorQueue and the flattened result is passed into FakeTensorQueue's
     __obj_unflatten__ as inputs to create a fake class. This protocol allows pytorch to look
     at the contents of the script object and properly handle them in the subsystems
-    like dynamo, aot_aotugrad or more.
+    like dynamo, aot_autograd or more.
     """
 
     def inner(fake_class: HasStaticMethodFromReal):

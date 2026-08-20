@@ -35,7 +35,7 @@ TORCH_CUDA_CPP_API MempoolId_t graph_pool_handle();
 // Returns true if any CUDAGraph capture is currently active in this process.
 // Used by ProcessGroupNCCL's ROCm watchdog workaround to avoid calling
 // hipEventQuery during active capture on HIP runtimes without the
-// event-query capture-mode fix (https://github.com/ROCm/clr/pull/3176).
+// event-query capture-mode fix (https://github.com/ROCm/rocm-systems/pull/3176).
 // Not needed on CUDA/NVIDIA where cross-thread event query does not have this
 // restriction.
 #if defined(USE_ROCM)
@@ -133,6 +133,18 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   bool capture_ended_ = false;
   // Set to true in capture_end if cudaGraphInstantiate succeeded
   bool has_graph_exec_ = false;
+
+  // Set to true in capture_begin once a private pool has been acquired
+  // (beginAllocateToPool). Tells reset() it must release the pool, even if the
+  // capture failed before capture_end() completed. Otherwise a failed capture
+  // leaks the pool: its use_count never returns to zero, so empty_cache can
+  // never reclaim its segments for the rest of the process.
+  bool allocated_pool_ = false;
+  // Set to true in capture_begin after beginAllocateToPool and cleared in
+  // capture_end after endAllocateToPool. Tells reset() whether the allocator is
+  // still routing allocations to the pool (capture abandoned before capture_end
+  // ran) and must be ended before the pool can be released.
+  bool capturing_to_pool_ = false;
 
   // the ID assigned by cuda during graph capture,
   // used to identify when a stream is participating in capture
