@@ -118,19 +118,17 @@ _KNOWN_MAJORS = range(3, 13)
 def cc_of(arch: str) -> tuple[int, int]:
     """sm string -> compute capability. "sm_90" -> (9, 0), "sm_103a" -> (10, 3).
 
-    Here rather than in one of its two consumers because both the exporter (which
-    matches a detected arch against a declaration's ARCHS) and the generator
-    (which groups sidecars by capability) have to agree about what an sm string
-    means; they disagreed while one compared capabilities and the other compared
-    strings, and a declaration pinning only ('sm_100a',) then disowned the
-    'sm_100' its own on-device export produced.
+    Shared, because the exporter (matching a detected arch against ARCHS) and the
+    generator (grouping sidecars by capability) must agree what an sm string
+    means: they disagreed while one compared capabilities and the other strings,
+    and a declaration pinning ('sm_100a',) disowned the 'sm_100' its own on-device
+    export produced.
 
-    Rejects anything it cannot parse into a plausible capability rather than
-    computing one: "sm_9" would give (0, 9) and "sm_1000" (100, 0), each emitting
-    a gate no device can satisfy, so the op would ship, link, and decline every
-    call with nothing reported. Suffixes other than the arch-conditional "a"
-    (e.g. the family-conditional "f" of CUDA 12.9+) are refused too -- they mean
-    something the generator has not been taught."""
+    Refuses what it cannot parse rather than computing a capability: "sm_9" gives
+    (0, 9) and "sm_1000" (100, 0), each a gate no device satisfies, so the op
+    ships, links and declines every call unreported. Suffixes other than the
+    arch-conditional "a" (CUDA 12.9+'s family-conditional "f") are refused too --
+    they mean something the generator has not been taught."""
     digits = arch.removeprefix("sm_").removesuffix("a")
     if not arch.startswith("sm_") or not digits.isdigit() or len(digits) not in (2, 3):
         raise RuntimeError(
