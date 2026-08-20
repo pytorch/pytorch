@@ -43,12 +43,39 @@ jobs:
         with:
           path: magma_*_cuda*_*.7z
           name: artifact_${{ matrix.cuda_version }}_${{ matrix.config }}
+  build-windows-arm64-magma:
+    if: github.repository_owner == 'pytorch'
+    runs-on: "windows-11-arm64-preview"
+    strategy:
+      matrix:
+        cuda_version: ["TODO"]
+        config: ["Release", "Debug"]
+    env:
+      CUDA_VERSION: ${{ matrix.cuda_version }}
+      CONFIG: ${{ matrix.config }}
+      VC_YEAR: "2022"
+    steps:
+      - name: Checkout pytorch/pytorch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Enable MSVC dev commands to enable cl.exe  # FYI incompatible with shell: bash
+        uses: ilammy/msvc-dev-cmd@dd5e2fa0a7de1e7929605d9ecc020e749d9856a3
+        with:
+          arch: arm64
+      - name: Install CUDA Toolkit
+        run: .ci/pytorch/windows/internal/cuda_install.bat
+      - name: Build MAGMA and push to S3
+        run: .github/scripts/windows/build_magma.bat
+      - name: Save as artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          path: magma_*_cuda*_*_arm64.7z
+          name: artifact_arm64_${{ matrix.cuda_version }}_${{ matrix.config }}
   push-windows-magma:
     if: github.repository_owner == 'pytorch'
     runs-on: ubuntu-22.04
     permissions:
       id-token: write
-    needs: build-windows-magma
+    needs: [build-windows-magma, build-windows-arm64-magma]
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2

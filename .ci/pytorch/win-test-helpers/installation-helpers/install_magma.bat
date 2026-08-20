@@ -22,15 +22,18 @@ if "%CUDA_SUFFIX%" == "" (
   exit /b 1
 )
 
+set MAGMA_ARCH_SUFFIX=
+if /I "%PROCESSOR_ARCHITECTURE%"=="ARM64" set MAGMA_ARCH_SUFFIX=_arm64
+
 if "%REBUILD%"=="" (
   if "%BUILD_ENVIRONMENT%"=="" (
-    curl --retry 3 --retry-all-errors -k https://s3.amazonaws.com/ossci-windows/magma_2.5.4_%CUDA_SUFFIX%_%BUILD_TYPE%.7z --output %TMP_DIR_WIN%\magma_2.5.4_%CUDA_SUFFIX%_%BUILD_TYPE%.7z & REM @lint-ignore
+    curl --retry 3 --retry-all-errors -k https://s3.amazonaws.com/ossci-windows/magma_2.5.4_%CUDA_SUFFIX%_%BUILD_TYPE%%MAGMA_ARCH_SUFFIX%.7z --output %TMP_DIR_WIN%\magma_2.5.4_%CUDA_SUFFIX%_%BUILD_TYPE%%MAGMA_ARCH_SUFFIX%.7z & REM @lint-ignore
   ) else (
-    aws s3 cp s3://ossci-windows/magma_2.5.4_%CUDA_SUFFIX%_%BUILD_TYPE%.7z %TMP_DIR_WIN%\magma_2.5.4_%CUDA_SUFFIX%_%BUILD_TYPE%.7z --quiet
+    aws s3 cp s3://ossci-windows/magma_2.5.4_%CUDA_SUFFIX%_%BUILD_TYPE%%MAGMA_ARCH_SUFFIX%.7z %TMP_DIR_WIN%\magma_2.5.4_%CUDA_SUFFIX%_%BUILD_TYPE%%MAGMA_ARCH_SUFFIX%.7z --quiet
   )
   if errorlevel 1 exit /b
   if not errorlevel 0 exit /b
-  7z x -aoa %TMP_DIR_WIN%\magma_2.5.4_%CUDA_SUFFIX%_%BUILD_TYPE%.7z -o%TMP_DIR_WIN%\magma
+  7z x -aoa %TMP_DIR_WIN%\magma_2.5.4_%CUDA_SUFFIX%_%BUILD_TYPE%%MAGMA_ARCH_SUFFIX%.7z -o%TMP_DIR_WIN%\magma
   if errorlevel 1 exit /b
   if not errorlevel 0 exit /b
 )
