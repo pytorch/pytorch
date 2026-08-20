@@ -1,47 +1,33 @@
 """Stage-2 driver for the standard torch build: export AOT kernels,
 generate the stub sources, and relink torch_cuda with them embedded.
 
-The kernel builders package-import torch, so stage 2 needs a BUILT,
-INSTALLED torch -- and scikit-build-core has no post-build hook inside
-the PEP 517 backend (the wheel is assembled before torch is ever
-importable). Stage 2 is therefore a post-install step:
+A post-install step because the kernel builders package-import torch, and
+scikit-build-core has no post-build hook inside the PEP 517 backend (the wheel
+is assembled before torch is importable):
 
-  * CI: .ci/pytorch/build.sh runs it after installing the built wheel,
-    passing --wheel so the relinked library is patched back into that
-    wheel (see patch_wheel) before it ships to test jobs
-  * dev: `spin develop` / `spin install` chain it after the pip
-    install; after a raw `pip install -e .`, run it manually:
-    python tools/native_aot/build_stage2.py
+  * CI: .ci/pytorch/build.sh, after installing the built wheel, with --wheel so
+    the relinked library is patched back into it before test jobs get it
+  * dev: chained by `spin develop` / `spin install`; after a raw
+    `pip install -e .`, run `python tools/native_aot/build_stage2.py`
 
-Skips -- leaving a normal artifacts-free build -- when AOT kernels are
-not applicable to this build:
+Skips -- leaving a normal artifacts-free build -- when AOT kernels are not
+applicable. Keep this list in sync with should_run(), which reports each one,
+and with CONTRIBUTING.md, which states them for users:
 
-  * TORCH_NATIVE_AOT=0 (explicit opt-out); read from the environment,
-    else from the CMake cache, which is where a configure recorded it
-  * not Linux: everything downstream is ELF (the relink targets
-    libtorch_cuda.so, and the version script is a GNU-ld option)
+  * TORCH_NATIVE_AOT=0 (the environment, else the CMake cache)
+  * not Linux: everything downstream is ELF
   * the built torch does not import, or was built without CUDA
-  * no toolchain targets this build's backend (Toolchain.BACKENDS); a
-    ROCm build skips here today, and gains AOT support by adding a
-    toolchain class rather than by editing this gate
+  * no toolchain targets this backend (Toolchain.BACKENDS), e.g. ROCm
+  * CUDA older than _MIN_CUDA_MAJOR, or a version it cannot determine
   * the interpreter has no published DSL wheel and none is installed
-    (free-threaded below 3.14, or newer than the published cp tags)
+  * a static torch_cuda, which cannot take the version script
   * nothing declares kernels (no torch/_native/ops/*/aot.py)
-  * TORCH_CUDA_ARCH_LIST contains no exportable arch (Hopper and
-    Blackwell today -- see export.EXPORTABLE_ARCHES); on-device export
-    runs when the arch list is unset and a supported GPU is present.
-    Several exportable arches export one tree per arch, and the
-    generated stub selects per compute capability at runtime.
+  * TORCH_CUDA_ARCH_LIST names no exportable arch (export.EXPORTABLE_ARCHES);
+    with it unset, on-device export runs if a supported GPU is present
 
-Keep this list in sync with should_run() and with CONTRIBUTING.md.
-
-Only once every one of those checks has passed are the DSL runtimes
-REQUIRED, not optional: a toolchain that targets this backend was asked
-for declared kernels, and a wheel missing some of them underperforms
-silently instead of failing. So a missing runtime -- or any later
-failure -- fails the build, while a build that was going to skip anyway
-never demands them. Set TORCH_NATIVE_AOT=0 to build without embedded DSL
-kernels.
+Past those gates the DSL runtimes are REQUIRED, and any failure fails the build:
+a wheel missing declared kernels underperforms silently instead of failing.
+TORCH_NATIVE_AOT=0 builds without them.
 """
 
 import glob
@@ -56,9 +42,9 @@ import zipfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.normpath(os.path.join(HERE, "..", ".."))
 BUILD_DIR = os.path.join(REPO, "build")
-# Must match NATIVE_AOT_ARTIFACTS_DIR in caffe2/CMakeLists.txt, which is a plain
-# (deliberately non-cache) ${CMAKE_BINARY_DIR}/native_aot: the relink below only
-# embeds what the manifest in THAT directory names.
+# Where caffe2/CMakeLists.txt include()s native_aot.cmake from, spelled there as
+# ${CMAKE_BINARY_DIR}/native_aot: the generator writes the file here, so a change
+# on either side has to move both.
 NATIVE_AOT_ARTIFACTS_DIR = os.path.join(BUILD_DIR, "native_aot")
 # See export.py: as a script sys.path[0] is this directory, so the repo root
 # has to go on the path for `tools.native_aot` to import from any cwd. Appended,
@@ -69,40 +55,31 @@ sys.path.append(REPO)
 def _report(msg: str) -> None:
     """Progress/diagnostics, on STDERR.
 
-    Not stdout: --print-verdict writes a machine-read word there, and the CI
-    shells compare it with ==. A report line landing on the same stream made
-    the multi-arch build (the one case that reports AND proceeds) answer
-    "-- native-AOT stage 2: multi-arch: sm_90 sm_100\\nRUN", which matches
-    nothing. Build logs interleave both streams, so nothing else changes."""
+    Not stdout: --print-verdict writes a machine-read word there and the CI
+    shells compare it with ==, so a report on the same stream corrupts the
+    verdict of the one case that reports AND proceeds (multi-arch)."""
     print(f"-- native-AOT stage 2: {msg}", file=sys.stderr, flush=True)
 
 
 def _torch_probe(expr: str) -> bool:
     """Evaluate a torch expression in a SUBPROCESS and return its truth.
-    Never imports torch in this process: a torch that hard-crashes on
-    import (e.g. an ASan build aborting because the sanitizer runtime
-    is not LD_PRELOADed into plain python) must degrade to a skip, not
-    kill the build script -- an in-process ImportError-only check
-    misses those, and any crash would also poison the later checks.
 
-    cwd=HERE: `python -c` puts the cwd on sys.path (unlike `python
-    script.py`, which uses the script's dir), so probing from the repo
-    root would import the SOURCE torch/ tree instead of the installed
-    wheel and always fail.
-
-    The verdict travels via stdout, not the exit code: a CUDA torch
-    can segfault in interpreter-shutdown teardown on GPU-less
-    machines AFTER the expression evaluated (observed on the B200
-    build job), which would corrupt an exit-code verdict."""
+    Three deliberate details, each for a failure an in-process check has:
+      * subprocess: a torch that hard-crashes on import (an ASan build without
+        the sanitizer LD_PRELOADed) must degrade to a skip, not kill the build
+      * cwd=HERE: `python -c` puts the cwd on sys.path, so probing from the repo
+        root imports the SOURCE torch/ tree instead of the installed wheel
+      * verdict via stdout, not the exit code: a CUDA torch can segfault in
+        interpreter teardown AFTER the expression evaluated (seen on B200)"""
     code = f"import torch; print('PROBE_OK' if ({expr}) else 'PROBE_NO', flush=True)"
     probe = subprocess.run(
         [sys.executable, "-c", code], capture_output=True, text=True, cwd=HERE
     )
     ok = "PROBE_OK" in probe.stdout
     if not ok and "PROBE_NO" not in probe.stdout:
-        # The expression never evaluated, so torch itself failed to import or
-        # crashed. That degrades to a skip by design, but silently swallowing
-        # the reason makes a real import regression look like an absent CUDA.
+        # torch failed to import or crashed. Degrading to a skip is by
+        # design; doing it silently makes an import regression look like
+        # an absent CUDA.
         _report_probe_failure(expr, probe.stderr, probe.returncode)
     return ok
 
@@ -110,11 +87,8 @@ def _torch_probe(expr: str) -> bool:
 def _torch_value(expr: str) -> str | None:
     """Evaluate a torch expression in a SUBPROCESS and return its str value.
 
-    The value-returning sibling of _torch_probe, and required for the same
-    reason: reading e.g. the local device capability by importing torch HERE
-    would initialize CUDA in the driver process and let an import that
-    hard-crashes take the build script down with it -- the exact failure mode
-    _torch_probe was introduced for."""
+    Out of process for _torch_probe's reasons: reading the device capability in
+    here would initialize CUDA in the driver process."""
     code = f"import torch; print('NAOT_VALUE:' + str({expr}), flush=True)"
     out = subprocess.run(
         [sys.executable, "-c", code], capture_output=True, text=True, cwd=HERE
@@ -122,10 +96,8 @@ def _torch_value(expr: str) -> str | None:
     for line in out.stdout.splitlines():
         if line.startswith("NAOT_VALUE:"):
             return line[len("NAOT_VALUE:") :]
-    # No value: report WHY. Swallowing it turned a real CUDA error (driver/runtime
-    # mismatch, cudaErrorNoDevice, a mangled CUDA_VISIBLE_DEVICES) into
-    # "local GPU is undetectable" -- on a dev box that is the difference between
-    # "install a driver" and "your hardware is unsupported".
+    # Report WHY: swallowed, a real CUDA error (driver mismatch, mangled
+    # CUDA_VISIBLE_DEVICES) reads as "local GPU is undetectable".
     _report_probe_failure(expr, out.stderr, out.returncode)
     return None
 
@@ -133,10 +105,9 @@ def _torch_value(expr: str) -> str | None:
 def _report_probe_failure(expr: str, stderr: str, returncode: int) -> None:
     """Say why a subprocess probe produced no verdict, on stderr.
 
-    The returncode is reported as well as the stderr because a child killed by a
-    SIGNAL writes neither: an OOM kill or an import-time segfault produced
-    rc=-9/-11 with both streams empty, so the caller logged a confident wrong
-    reason ("torch built without CUDA") with nothing at all explaining it."""
+    The returncode as well as the stderr: a child killed by a signal (OOM,
+    import-time segfault) writes neither, and the caller then logs a confident
+    wrong reason with nothing explaining it."""
     _report(f"probe {expr!r} produced no verdict (exit {returncode})")
     if stderr.strip():
         print(stderr.rstrip(), file=sys.stderr, flush=True)
@@ -148,20 +119,19 @@ def _arch_list() -> str:
     """The arch list THIS build targets: the environment, else the CMake cache.
 
     The cache half matters because CMake resolves the variable first and the
-    environment only as its default (cmake/Dependencies.cmake), so a build
-    configured with -DTORCH_CUDA_ARCH_LIST=... has no such environment variable.
-    Reading only the environment made stage 2 record ARCH_LIST_ABSENT for those
-    builds, which caffe2/CMakeLists.txt treats as "no claim, take the artifacts as
-    they are" -- so the staleness guard was dead exactly there, and a -D build
-    embedded kernels for whatever arch the previous build or the local GPU
-    produced."""
-    return os.getenv("TORCH_CUDA_ARCH_LIST") or _cmake_cache_value(
-        "TORCH_CUDA_ARCH_LIST"
+    environment only as its default (cmake/Dependencies.cmake), so a
+    -DTORCH_CUDA_ARCH_LIST=... build has no such environment variable and used
+    to export for the local GPU instead."""
+    return os.getenv("TORCH_CUDA_ARCH_LIST") or (
+        _cmake_cache_value("TORCH_CUDA_ARCH_LIST") or ""
     )
 
 
-def _cmake_cache_value(name: str) -> str:
-    """One entry from this build's CMakeCache.txt, or "" if there is none."""
+def _cmake_cache_value(name: str) -> str | None:
+    """One entry from this build's CMakeCache.txt, or None if the key is absent.
+
+    None rather than "": CMake calls a DEFINED-but-EMPTY entry false, so the two
+    cannot be collapsed without the opt-out disagreeing with the build."""
     cache = os.path.join(BUILD_DIR, "CMakeCache.txt")
     try:
         with open(cache, errors="replace") as f:
@@ -170,43 +140,56 @@ def _cmake_cache_value(name: str) -> str:
                 if sep and key.split(":")[0] == name:
                     return value.strip()
     except OSError:
-        # should_run() promises never to raise, and this is the FIRST thing it
-        # reads: a build/ created by a root or container run and then rebuilt as a
-        # normal user gives PermissionError, a directory named CMakeCache.txt gives
-        # IsADirectoryError. Either turned --print-verdict into a traceback, so the
-        # shell read "" != RUN, skipped installing the runtimes, and the real
-        # invocation then failed demanding them.
+        # should_run() promises never to raise and this is the first thing it
+        # reads. A root-created build/ gives PermissionError, a directory named
+        # CMakeCache.txt gives IsADirectoryError; either turned --print-verdict
+        # into a traceback, so the shell read "" != RUN and skipped the install
+        # that the real invocation then demanded.
         _report(f"could not read {cache}; treating {name} as unset")
-    return ""
+    return None
 
 
-# What CMake treats as false for an if(<var>) test, lower-cased. The two sides
-# have to agree: a spelling one honours and the other ignores means the build
-# embeds kernels while stage 2 thinks it opted out, or the reverse.
-_OPT_OUT_VALUES = frozenset({"0", "off", "false", "no", "n", "ignore", "notfound"})
+# What CMake treats as TRUE for a QUOTED if() argument, which is the form the
+# generated native_aot.cmake uses. Both sides read the same variable, and a spelling
+# only one honours means the build and stage 2 disagree about whether kernels were
+# asked for.
+_CMAKE_TRUE_VALUES = frozenset({"1", "on", "yes", "true", "y"})
+
+
+def _cmake_false(value: str) -> bool:
+    """Whether the generated native_aot.cmake reads this value as "do not embed".
+
+    Stated as "not a TRUE constant", because that is what CMake does with the QUOTED
+    argument that file uses: only 1/ON/YES/TRUE/Y and non-zero numbers are true, and
+    everything else is false -- OFF, `00`, `xyz-NOTFOUND`, and junk like `disable`
+    alike. An allowlist of falsy spellings instead left the two sides disagreeing on
+    anything outside it, so the build skipped while stage 2 exported and relinked,
+    then failed its own post-relink check complaining about the wrong thing."""
+    v = value.strip().lower()
+    if v in _CMAKE_TRUE_VALUES:
+        return False
+    try:
+        return float(v) == 0.0
+    except ValueError:
+        return True
 
 
 def _opted_out() -> bool:
-    """Whether this build asked for no embedded kernels.
-
-    Environment first, then the CMake cache, because caffe2/CMakeLists.txt caches
-    the variable so the opt-out survives a reconfigure with no environment. If
-    only the environment were read here, a manual stage-2 run in a tree
-    configured with TORCH_NATIVE_AOT=0 would export, relink a library CMake had
-    already declined to embed anything into, and then fail its own post-relink
-    "reports no embedded kernels" check."""
-    # An EMPTY value reads as absent, matching the CMake side (where "" is falsy)
-    # and _arch_list here: otherwise TORCH_NATIVE_AOT="" -- which is how a shell
-    # blanks a variable it does not want to unset -- would count as "set, and not
-    # 0", so the cached opt-out below could never be reached.
+    """Whether this build asked for no embedded kernels."""
+    # An EMPTY value reads as absent, matching CMake (where "" is falsy) and
+    # _arch_list: `TORCH_NATIVE_AOT=` is how a shell blanks a variable without
+    # unsetting it, and counting that as "set" hid the cached opt-out below.
     env = os.getenv("TORCH_NATIVE_AOT") or ""
     if env:
-        return env.strip().lower() in _OPT_OUT_VALUES
-    # The cache, so a manual stage-2 run in a tree configured with the opt-out does
-    # not export, relink a library CMake declined to embed anything into, and then
-    # fail its own post-relink "reports no embedded kernels" check.
+        return _cmake_false(env)
+    # The cache too (where -DTORCH_NATIVE_AOT=0 lands), so a manual stage-2 run in
+    # a tree configured that way does not export, relink a library the generated
+    # CMake embeds nothing into, and then fail its own post-relink check.
     cached = _cmake_cache_value("TORCH_NATIVE_AOT")
-    if cached and cached.strip().lower() in _OPT_OUT_VALUES:
+    # `is not None`, not truthiness: CMake calls a DEFINED-but-empty entry FALSE, so
+    # `-DTORCH_NATIVE_AOT=` embeds nothing -- and reading that as "unset" had stage 2
+    # export and relink for a build that wanted neither.
+    if cached is not None and _cmake_false(cached):
         _report(
             f"disabled (TORCH_NATIVE_AOT={cached} in {BUILD_DIR}/CMakeCache.txt, "
             f"not in this environment; pass TORCH_NATIVE_AOT=1 to re-enable)"
@@ -215,95 +198,102 @@ def _opted_out() -> bool:
     return False
 
 
+# The oldest CUDA major that gets embedded kernels. CUDA 12 tops out at sm_90
+# (.ci/manywheel/build_env_setup.py's arch table) and every 13.x config builds
+# sm_90 too, so a 12.x export is a strict subset of what the 13.x wheels already
+# ship. In should_run() rather than per-toolchain because the CI shells install
+# the DSL wheels only when it says RUN, so 12.x also skips the ~440MB install.
+_MIN_CUDA_MAJOR = 13
+
+
+def _cuda_major() -> int | None:
+    """This build's CUDA major, or None if it cannot be determined.
+
+    The cache first -- it is what the build was configured with -- then the
+    installed torch, out of process."""
+    for value in (
+        _cmake_cache_value("CUDAToolkit_VERSION_MAJOR") or "",
+        (_cmake_cache_value("CUDA_VERSION") or "").split(".")[0],
+        (_torch_value("torch.version.cuda or ''") or "").split(".")[0],
+    ):
+        if value.strip().isdigit():
+            return int(value)
+    return None
+
+
+def _archive_major(parts: list[str]) -> int:
+    """The CUDA major a split archive's path claims, or -1 for an unsuffixed one."""
+    for p in parts:
+        if p.startswith("cu") and p[2:].isdigit():
+            return int(p[2:])
+    return -1
+
+
 def _dsl_runtime_archive() -> str | None:
-    """The DSL dialect runtime archive the CuTeDSL kernel objects need, matched to
+    """The DSL dialect runtime archive the CuTeDSL kernel objects need, preferring
     this build's CUDA major.
 
-    In Python because it is a lookup, not a policy: CMake globbed for the file,
-    matched the major with a regex on the path, and had a FATAL_ERROR arm -- for
-    something importlib answers directly.
-
-    The major MUST match. 4.5.x shipped one archive at <root>/lib/; 4.6.x splits it
-    per CUDA major (<root>/cu12/lib/, <root>/cu13/lib/) and -- the trap -- only
-    cu12 is a hard dependency of nvidia-cutlass-dsl, with cu13 behind an extra. So
-    a plain install on a CUDA 13 build leaves ONLY the cu12 archive present, and
-    taking whatever is there would quietly link a cu12-built runtime into a CUDA 13
-    libtorch_cuda. Refusing names the fix instead. The unsuffixed path is accepted
-    only when the wheel has no split at all (pre-4.6)."""
+    4.5.x shipped one archive at <root>/lib/; 4.6.x splits it per major (cu12/lib/,
+    cu13/lib/) and only cu12 is a hard dependency, so a CUDA 13 environment often
+    holds cu12 alone. A mismatch warns rather than failing: in 4.6.2 the archives
+    are the same objects (`ar p | md5sum` equal, differing only in ar timestamps)
+    and a CUDA 13.2 build linked against cu12 passed the AOT suite. Still preferred
+    and reported, since the per-major split says they may diverge."""
     import importlib.util
 
     spec = importlib.util.find_spec("nvidia_cutlass_dsl")
     if spec is None or not spec.submodule_search_locations:
         return None
-    # The cache first (it is what the build was configured with), then torch out of
-    # process. Unknown must not become an empty match: the first version of this
-    # raised "ships no dialect runtime for CUDA " and told the user to install
-    # `nvidia-cutlass-dsl[cu]`, for a tree whose cache simply had no CUDA entry.
-    major = (
-        _cmake_cache_value("CUDAToolkit_VERSION_MAJOR")
-        or (_cmake_cache_value("CUDA_VERSION").split(".")[0])
-    )
-    if not major:
-        reported = _torch_value("torch.version.cuda or ''") or ""
-        major = reported.split(".")[0]
+    archive = "libcuda_dialect_runtime_static.a"
     found, split = [], False
     for root in spec.submodule_search_locations:
         for dirpath, _dirs, files in os.walk(root):
-            if "libcuda_dialect_runtime_static.a" in files:
-                path = os.path.join(dirpath, "libcuda_dialect_runtime_static.a")
-                found.append(path)
-                if os.sep + "cu" in path and any(
-                    part.startswith("cu") and part[2:].isdigit()
-                    for part in path.split(os.sep)
-                ):
-                    split = True
+            if archive not in files:
+                continue
+            # Components RELATIVE to the package root. The absolute path also holds
+            # the venv or conda directory, so an environment named cu12/cu13 was read
+            # as the wheel's own per-major layout: it matched both archives and the
+            # walk order picked one, or it made an unsplit pre-4.6 wheel look split
+            # and be refused.
+            parts = os.path.relpath(dirpath, root).split(os.sep)
+            found.append((os.path.join(dirpath, archive), parts))
+            split = split or _archive_major(parts) >= 0
     if not found:
         return None
-    if split and not major:
-        raise RuntimeError(
-            f"native-AOT stage 2: the CuTeDSL wheel ships per-CUDA-major dialect "
-            f"runtimes ({', '.join(sorted(found))}) but this build's CUDA major "
-            f"could not be determined -- neither {BUILD_DIR}/CMakeCache.txt nor the "
-            f"installed torch reports one. Linking an arbitrary one is not safe; "
-            f"configure the build first, or set TORCH_NATIVE_AOT=0."
-        )
-    if split:
-        want = f"{os.sep}cu{major}{os.sep}"
-        for path in found:
-            if want in path:
-                return path
-        raise RuntimeError(
-            f"native-AOT stage 2: the CuTeDSL wheel ships no dialect runtime for "
-            f"CUDA {major} (found: {', '.join(sorted(found))}). Only cu12 is a hard "
-            f"dependency of nvidia-cutlass-dsl; install the matching extra, e.g. "
-            f"`pip install 'nvidia-cutlass-dsl[cu{major}]==<pinned version>'` (see "
-            f"install_cutlass_dsl in .ci/pytorch/common_utils.sh), or set "
-            f"TORCH_NATIVE_AOT=0 to build without embedded kernels. Linking the "
-            f"cu12 runtime into a CUDA {major} library instead is not safe."
-        )
-    return found[0]
+    if not split:
+        return found[0][0]
+    major = _cuda_major()
+    for path, parts in found:
+        if f"cu{major}" in parts:
+            return path
+    # Highest major present, sorted first so the pick is deterministic.
+    fallback = max(sorted(found), key=lambda f: _archive_major(f[1]))
+    _report(
+        f"the CuTeDSL wheel ships no dialect runtime for CUDA {major}; linking "
+        f"{fallback[0]} instead (found: {', '.join(sorted(p for p, _ in found))}). "
+        f"Only cu12 is a hard dependency of nvidia-cutlass-dsl, so install the "
+        f"matching extra to be sure -- `pip install "
+        f"'nvidia-cutlass-dsl[cu{major}]==<pinned version>'`, see install_cutlass_dsl "
+        f"in .ci/pytorch/common_utils.sh."
+    )
+    return fallback[0]
 
 
 def _artifact_size(art: str) -> str:
     """Summarize what is about to be linked in, as "N object(s), M.M MiB".
 
-    Reported because nothing else states it: these bytes land in
-    libtorch_cuda, and they scale with declarations x precompile points x
-    arches -- so a wheel can grow tens of MiB from an arch added to
-    TORCH_CUDA_ARCH_LIST, with no line in the build log that says so.
-
-    Read from the generator's manifest, NOT by walking the tree: the tree also
-    holds artifacts that lost the arch tie-break or belong to an earlier build's
-    arch list, and those are not linked. Walking it reported 8.2 MiB where
-    4.7 MiB shipped."""
+    Reported because nothing else states it, and these bytes scale with
+    declarations x precompile points x arches: a wheel can grow tens of MiB from
+    one added arch. Read from the generated CMake, NOT by walking the tree, which
+    also holds artifacts that lost the arch tie-break (8.2 MiB where 4.7 shipped)."""
     from tools.native_aot.gen_aot_lib import CMAKE_INCLUDE
 
     listed = os.path.join(art, CMAKE_INCLUDE)
     if not os.path.exists(listed):
-        return "nothing (no manifest written)"
-    # The emitted target_sources() block ONLY: the objects are also listed in the
-    # set_source_files_properties() call above it, so scanning every quoted line in
-    # the file counted them twice ("4 object(s)" for two).
+        return "nothing (no native_aot.cmake written)"
+    # The target_sources() block ONLY: the objects also appear in the
+    # set_source_files_properties() call above it, so scanning the whole file
+    # counted them twice.
     with open(listed) as f:
         text = f.read()
     block = text.partition("target_sources(torch_cuda PRIVATE")[2].partition(")")[0]
@@ -317,11 +307,9 @@ def _artifact_size(art: str) -> str:
         for char in (";", "$", '"', "\\"):
             path = path.replace("\\" + char, char)
         (objects if path.endswith(".o") else sources).append(path)
-    # SOURCES as well as objects: a kind that embeds its artifact in the generated
-    # source (Toolchain.link_exts empty -- Triton's cubin bytes) contributes no
-    # OBJECT= line at all, so counting objects alone reported "0 object(s),
-    # 0.0 MiB" for a build embedding megabytes, which is exactly what this line
-    # exists to make visible.
+    # Sources as well as objects: a kind that embeds its artifact in the generated
+    # source (Triton's cubin bytes) contributes no object, so counting objects
+    # alone reported 0.0 MiB for a build embedding megabytes.
     total = sum(os.path.getsize(p) for p in objects + sources if os.path.exists(p))
     return (
         f"{len(objects)} object(s) + {len(sources)} generated source(s), "
@@ -333,21 +321,15 @@ def should_run() -> bool:
     """Whether stage 2 will export for this build. Answers from build
     properties ONLY, and never raises.
 
-    Separate from require_runtimes() because of who asks and when: the CI
-    shells ask this to decide whether to INSTALL the DSL wheels
-    (--print-verdict), so a verdict that itself demanded those wheels could
-    only ever say "no" on a fresh image -- and did, by raising, leaving the
-    shells to skip the install and the real invocation to fail on the very
-    runtimes the verdict was meant to request."""
+    Separate from require_runtimes() because the CI shells ask this to decide
+    whether to INSTALL the DSL wheels (--print-verdict): a verdict that demanded
+    them could only ever say "no" on a fresh image."""
     if _opted_out():
         _report("disabled (TORCH_NATIVE_AOT=0)")
         return False
-    # Linux only, and stated here rather than assumed. Everything downstream is
-    # ELF: the relink targets build/lib/libtorch_cuda.so (Windows produces
-    # torch_cuda.dll in build/bin), and the version script plus --exclude-libs are
-    # GNU-ld options. Without this arm a Windows or macOS CUDA build with a GPU and
-    # a declaration reached require_runtimes() and demanded wheels that do not
-    # exist for it.
+    # Everything downstream is ELF: the relink targets libtorch_cuda.so, and the
+    # version script plus --exclude-libs are GNU-ld options. Without this arm a
+    # Windows or macOS CUDA build demanded wheels that do not exist for it.
     if sys.platform != "linux":
         _report(f"skipped (native-AOT kernels are Linux-only; this is {sys.platform})")
         return False
@@ -358,10 +340,8 @@ def should_run() -> bool:
         _report("skipped (torch built without CUDA)")
         return False
 
-    # Platform BEFORE runtimes: which toolchains are even candidates is a
-    # property of the build, so a backend with no AOT toolchain is "not
-    # applicable", not "missing a wheel". torch.version.hip is the
-    # discriminator -- backends.cuda.is_built() is True on ROCm too.
+    # Backend before runtimes: a backend with no AOT toolchain is "not
+    # applicable", not "missing a wheel".
     from tools.native_aot import toolchains
 
     backend = _backend()
@@ -370,37 +350,38 @@ def should_run() -> bool:
         _report(f"skipped (no AOT toolchain targets {backend})")
         return False
 
-    # Same "not applicable" category: the DSL wheels are cp-tagged and simply do
-    # not exist for every interpreter the release matrix builds. Verified against
-    # PyPI for the pinned 4.6.2 (2026-08-18): the -libs-* packages publish
-    # cp310-cp314 plus cp314-cp314t, manylinux only, with no sdist -- while the
-    # matrix also builds 3.13t, 3.15 and 3.15t. pip cannot resolve them there
-    # however it tries, so asking would fail the wheel build on something no one
-    # can fix; not-applicable is the honest answer, and those wheels keep the JIT
-    # path.
+    # Ahead of every runtime demand, reusing the backend probe above: a 12.x build
+    # is "not applicable" like a non-Linux one. An undeterminable major counts as
+    # too old, since _dsl_runtime_archive() cannot pick a runtime without it.
+    if backend == "cuda":
+        major = _cuda_major()
+        if major is None or major < _MIN_CUDA_MAJOR:
+            _report(
+                f"skipped (CUDA {major if major is not None else 'version undetermined'};"
+                f" embedded kernels need CUDA {_MIN_CUDA_MAJOR} or newer, since 12.x"
+                f" tops out at sm_90 and every 13.x build already ships it)"
+            )
+            return False
+
+    # Also "not applicable": the DSL wheels are cp-tagged and do not exist for
+    # every interpreter the release matrix builds. For the pinned 4.6.2 the
+    # -libs-* packages publish cp310-cp314 plus cp314t, manylinux only, no sdist,
+    # while the matrix also builds 3.13t/3.15/3.15t. Those wheels keep the JIT
+    # path; demanding an unresolvable tag would fail the build on nothing anyone
+    # can fix.
     #
-    # cp314t EXISTS, so free-threaded alone is not the question -- gating on it
-    # skipped 3.14t and shipped a kernel-free 3.14t CUDA wheel, which is the
-    # silent underperformance this module exists to prevent. What has no wheel is
-    # free-threaded BELOW 3.14 (no cp313t anywhere in the chain, base included)
-    # and anything past 3.14, threaded or not.
+    # cp314t EXISTS, so the gate is NOT "free-threaded": that spelling skipped
+    # 3.14t and shipped a kernel-free 3.14t CUDA wheel. What has no wheel is
+    # free-threaded below 3.14, and anything past 3.14 either way.
     #
-    # Only when they are ABSENT: if they import, they are installable here
-    # whatever PyPI publishes today, so a newer interpreter needs no edit here.
+    # Py_GIL_DISABLED, not sys._is_gil_enabled(): the question is which wheel TAG
+    # pip must find, an ABI property, and a free-threaded build still needs cp3XXt
+    # with the GIL re-enabled -- where _is_gil_enabled() reports True and would
+    # vote RUN. It is also what pip's own tag matching reads, and exists on 3.10.
     #
-    # Py_GIL_DISABLED, not sys._is_gil_enabled(). The question is which wheel TAG
-    # pip must find, which is an ABI property: a free-threaded build still needs
-    # a cp3XXt wheel even when the GIL has been re-enabled (PYTHON_GIL=1, or any
-    # extension without Py_mod_gil), and _is_gil_enabled() reports True there --
-    # so on 3.14t it would say "not free-threaded", vote RUN, and hand pip a tag
-    # that does not exist. This config var is what pip's own tag matching reads
-    # (packaging/tags.py), it is public, and it exists on 3.10 -- the matrix
-    # floor -- while _is_gil_enabled() is 3.13+.
-    # ANY, not all: a kind that needs no runtimes at all (Triton compiles with
-    # the wheel torch already depends on) always reports none missing, so `all`
-    # became permanently False the moment a second toolchain was registered and
-    # this gate stopped firing entirely. The question is "does this build have to
-    # install something?", and one missing runtime is enough.
+    # ANY, not all, and only when ABSENT: a kind needing no runtimes always
+    # reports none missing, so `all` went permanently False once a second
+    # toolchain registered.
     if any(tc.missing_runtimes() for tc in usable.values()):
         free_threaded = bool(sysconfig.get_config_var("Py_GIL_DISABLED"))
         ver = sys.version_info[:2]
@@ -412,17 +393,16 @@ def should_run() -> bool:
             )
             return False
 
-    # Nothing DECLARES kernels: also "not applicable", and it must be decided
-    # before the runtimes are demanded. Otherwise a tree with no aot.py -- an
-    # earlier commit of this stack, or a bisect -- fails a build for want of
-    # ~190MB of wheels it would then use to export exactly nothing.
     # A STATIC torch_cuda cannot take the version script that keeps the DSL's
     # entry points out of the public ABI (CMake silently discards
-    # target_link_options for an archive), so caffe2/CMakeLists.txt refuses to
-    # embed there. Skipping HERE as well makes it the same "not applicable" answer
-    # as the Linux check, instead of a full export followed by a configure error
-    # that every later build of that tree repeats.
-    if _cmake_cache_value("BUILD_SHARED_LIBS") in ("OFF", "0", "FALSE", "NO"):
+    # target_link_options for an archive), so they would join it with no warning.
+    # Answered here rather than after a full export.
+    # The same CMake-truthiness predicate as the opt-out, not a hand-rolled uppercase
+    # tuple: CMakeLists.txt declares this with option(), EnvVarForwarding passes
+    # BUILD_* through verbatim, and `BUILD_SHARED_LIBS=off` therefore produced a
+    # static torch_cuda that this arm waved through.
+    shared = _cmake_cache_value("BUILD_SHARED_LIBS")
+    if shared is not None and _cmake_false(shared):
         _report(
             "skipped (BUILD_SHARED_LIBS=OFF; kernels cannot be embedded in a static torch_cuda)"
         )
@@ -436,8 +416,6 @@ def should_run() -> bool:
 
     arch_list = _arch_list()
     if arch_list:
-        from tools.native_aot import export as export_mod
-
         archs = export_mod.archs_from_cuda_arch_list(arch_list)
         if not archs:
             _report(
@@ -447,27 +425,19 @@ def should_run() -> bool:
             )
             return False
         if len(archs) > 1:
-            # Supported: export nests one tree per arch, gen_aot_lib walks both
-            # depths and emits a per-capability selector, and the embedded-link
-            # globs cover both. Reported because it multiplies embedded kernel
-            # bytes -- one full set per arch.
+            # Supported (export nests one tree per arch and the generated stub
+            # selects per capability); reported because it multiplies embedded
+            # bytes, one full set per arch.
             _report(f"multi-arch: {' '.join(archs)}")
     elif not _torch_probe("torch.cuda.is_available()"):
         _report("skipped (no TORCH_CUDA_ARCH_LIST and no local GPU to detect from)")
         return False
     else:
-        # On-device export compiles for whatever GPU is present, so check it is
-        # one we can export for BEFORE committing. Without this, a dev box
-        # outside EXPORTABLE_ARCHES (sm_86, sm_120) exports for its own arch and
-        # then fails in generation -- after a successful build, and leaving a
-        # tree that cannot even configure until build/native_aot is removed.
-        #
-        # Asked through a subprocess, not export._detected_arch(): that imports
-        # torch and initializes CUDA in THIS process, which is what _torch_probe
-        # exists to avoid -- and a teardown segfault there (seen on the b200
-        # builder) would fail a stage 2 that had otherwise succeeded.
-        from tools.native_aot import export as export_mod
-
+        # On-device export compiles for whatever GPU is present, so check it
+        # BEFORE committing: a dev box outside EXPORTABLE_ARCHES exported for its
+        # own arch and then failed in generation, after a successful build.
+        # Through a subprocess, not export._detected_arch(), which would
+        # initialize CUDA here -- what _torch_probe exists to avoid.
         local = _torch_value("'sm_%d%d' % torch.cuda.get_device_capability()")
         if local not in export_mod.EXPORTABLE_ARCHES:
             _report(
@@ -482,13 +452,11 @@ def should_run() -> bool:
 def require_runtimes() -> None:
     """Fail unless every toolchain that targets this build has its runtime.
 
-    Called ONLY once stage 2 is actually running, never from the verdict:
-    every skip in should_run() means stage 2 exports nothing, so demanding
-    the DSL wheels there fails builds that never wanted them. But a build
-    that WILL export and cannot is the silent-partial failure the sidecar and
-    orphan checks exist to prevent -- it ships a wheel missing some declared
-    kernels, which surfaces as a performance regression rather than an error.
-    TORCH_NATIVE_AOT=0 is the supported way to build without the DSL wheels."""
+    Called only once stage 2 is actually running, never from the verdict: every
+    should_run() skip exports nothing, so demanding the wheels there fails builds
+    that never wanted them. A build that WILL export and cannot would instead
+    ship a wheel missing declared kernels, which surfaces as a performance
+    regression rather than an error. TORCH_NATIVE_AOT=0 opts out."""
     from tools.native_aot import toolchains
 
     backend = _backend()
@@ -497,11 +465,9 @@ def require_runtimes() -> None:
         k: tc.missing_runtimes() for k, tc in usable.items() if tc.missing_runtimes()
     }
     if gaps:
-        # DISTRIBUTION names, not the importable module names in
-        # REQUIRED_RUNTIMES: this is the only error text a developer sees for the
-        # stack's one hard failure, and it told them to `pip install cutlass
-        # tvm_ffi`, which installs unrelated packages. The two genuinely differ --
-        # module `cutlass` ships in nvidia-cutlass-dsl.
+        # DISTRIBUTION names, not REQUIRED_RUNTIMES' module names: they differ
+        # (module `cutlass` ships in nvidia-cutlass-dsl), and this text used to
+        # say `pip install cutlass tvm_ffi`, which installs unrelated packages.
         dists = sorted(
             {d for k in gaps for d in toolchains.get_toolchain(k).RUNTIME_DISTS}
         )
@@ -525,19 +491,13 @@ def _backend() -> str:
 
 
 def _installed_lib_dir() -> str:
-    """The lib/ directory of the INSTALLED torch package. Anchored on
-    the compiled _C extension rather than torch.__file__: editable
-    redirect installs serve Python from the source tree while compiled
-    artifacts live in site-packages (same trick as _load_dll_libraries
-    in torch/__init__.py). Wheel installs resolve both to the same dir.
+    """The lib/ directory of the INSTALLED torch package.
 
-    Resolved in a subprocess like every other torch touch in this
-    driver: find_spec("torch._C") imports the parent torch package,
-    and a CUDA torch can segfault in interpreter-shutdown teardown on
-    GPU-less build machines -- which would fail the build AFTER stage
-    2 finished (observed on the B200 build job). The probe prints the
-    path BEFORE its interpreter exits, so trust non-empty output even
-    if the probe process then dies in teardown."""
+    Anchored on the compiled _C extension, not torch.__file__: an editable
+    redirect install serves Python from the source tree while the compiled
+    artifacts live in site-packages (as _load_dll_libraries does). In a
+    subprocess like every torch touch here, and trusted on non-empty output even
+    if that process then dies in teardown -- the path is printed first."""
     code = (
         "import importlib.util, os\n"
         "spec = importlib.util.find_spec('torch._C')\n"
@@ -547,10 +507,8 @@ def _installed_lib_dir() -> str:
     probe = subprocess.run(
         [sys.executable, "-c", code], capture_output=True, text=True, cwd=HERE
     )
-    # Marked like the other probes rather than taking stdout whole: this value is
-    # joined into a filesystem path, so any other line the child writes (a
-    # deprecation warning, a site hook) would become part of it, and the failure
-    # then surfaces as the misleading "not the torch this tree built".
+    # Marked rather than taking stdout whole: this is joined into a path, so any
+    # other line the child writes (a warning, a site hook) becomes part of it.
     for line in probe.stdout.splitlines():
         if line.startswith("NAOT_VALUE:"):
             return os.path.join(line[len("NAOT_VALUE:") :], "lib")
@@ -580,12 +538,10 @@ def patch_wheel(wheel_path: str, lib_path: str) -> None:
     """Replace torch/lib/libtorch_cuda.so inside an already-built wheel and fix
     its RECORD entry.
 
-    Rewritten member-by-member with zipfile rather than shelling out: the zip
-    CLI is absent from the manywheel images (they install unzip only), and
-    .ci/manywheel/repair_wheel.py already had to move off `wheel pack` because
-    it emitted invalid ZIP64 above 4GB (pytorch#189748) -- a CUDA wheel with
-    embedded kernels is squarely in that range. Copying members preserves each
-    entry's existing compression instead of recompressing the archive.
+    Member-by-member with zipfile rather than shelling out: the zip CLI is absent
+    from the manywheel images, and repair_wheel.py already had to move off
+    `wheel pack` for emitting invalid ZIP64 above 4GB (pytorch#189748), which a
+    CUDA wheel with embedded kernels exceeds.
     """
 
     lib_rel = "torch/lib/libtorch_cuda.so"
@@ -618,22 +574,17 @@ def patch_wheel(wheel_path: str, lib_path: str) -> None:
             for info in src.infolist():
                 if info.filename in replaced:
                     continue
-                # Streamed, not read()+writestr(): a CUDA wheel has several
-                # members in the hundreds of MiB (libtorch_cpu.so, bundled
-                # cuBLAS/cuDNN), and the read form holds each one whole in
-                # memory, twice, on a build machine already running a link.
+                # Streamed, not read()+writestr(): several members run to
+                # hundreds of MiB, and the read form holds each whole in
+                # memory twice, on a machine already running a link.
                 with src.open(info) as s, dst.open(info, "w") as d:
                     shutil.copyfileobj(s, d)
-            # Keep the member's ORIGINAL compression. Storing it uncompressed
-            # grows the wheel by the whole ratio of a ~1GB .so -- and in CI that
-            # wheel is the artifact every test shard downloads.
+            # Both rewritten members keep their ORIGINAL compression, and the
+            # RECORD needs its own ZipInfo to do so: writestr() with a plain name
+            # takes the ZipFile default, and dst has none, so the two members this
+            # function touches were the only ones stored uncompressed (~630 KiB
+            # added to the artifact every test shard downloads).
             dst.write(lib_path, lib_rel, src.getinfo(lib_rel).compress_type)
-            # The RECORD too, via its own ZipInfo: writestr() with a plain NAME
-            # takes the ZipFile's default compression, and dst was opened without
-            # one -- so the one member this function rewrites was the one member
-            # stored uncompressed. Measured on a real torch RECORD: 1,087,255 B
-            # stored where it deflates to 439,747 B, i.e. ~630 KiB added to the
-            # artifact every test shard downloads.
             record_info = src.getinfo(record_rel)
             dst.writestr(record_info, record_text)
         shutil.move(tmp_whl, wheel_path)
@@ -656,19 +607,16 @@ def main(argv: list[str] | None = None) -> int:
         "--print-verdict",
         action="store_true",
         help="print RUN or SKIP and exit; the shell callers install the DSL "
-        "runtimes only when this says RUN, so the decision lives in one place "
-        "(their own `python -c` probe disagreed with _torch_probe on GPU-less "
-        "CUDA builders, where a CUDA torch can segfault in teardown)",
+        "runtimes only when this says RUN, so one place owns the decision (their "
+        "own probe disagreed with this one on GPU-less CUDA builders)",
     )
     args = parser.parse_args(argv)
     if args.print_verdict:
         print("RUN" if should_run() else "SKIP", flush=True)
         return 0
-    # --wheel means a CI caller that installed torch on the line before this one,
-    # so "not importable" there is a broken build, not "not applicable". Degrading
-    # it to a skip shipped a green, kernel-free release wheel -- and in the
-    # manywheel container, where the wheel is installed unrepaired and
-    # --no-deps, that is a plausible state rather than a hypothetical one.
+    # --wheel means the caller installed torch on the line above, so "not
+    # importable" is a broken build rather than "not applicable". Degrading it to
+    # a skip shipped a green, kernel-free release wheel.
     if args.wheel and not _torch_probe("True"):
         raise RuntimeError(
             "native-AOT stage 2: --wheel was given, so torch was just installed, "
@@ -687,79 +635,102 @@ def main(argv: list[str] | None = None) -> int:
     art = NATIVE_AOT_ARTIFACTS_DIR
     _report("exporting kernels")
     export = [py, os.path.join(HERE, "export.py"), "--out-dir", art]
-    # TORCH_CUDA_ARCH_LIST in the child's environment even when this build only
-    # ever had it as a CMake cache entry: export.py translates it into the arches
-    # it compiles for, and letting it read a bare environment made the export
-    # target a different arch list than the one recorded in the manifest.
+    # Read ONCE and used by both children below, so they cannot be told different
+    # arch lists. Into the export child's ENVIRONMENT even when this build only had
+    # it as a cache entry, or export compiles for a list generation never hears of.
+    arch_list = _arch_list()
     env = dict(os.environ)
-    if arch_list := _arch_list():
+    if arch_list:
         env["TORCH_CUDA_ARCH_LIST"] = arch_list
     subprocess.check_call(export, cwd=REPO, env=env)
     _report("generating stub sources")
     gen = [py, os.path.join(HERE, "gen_aot_lib.py"), "--artifacts-dir", art]
-    # The archive the generator names in the CMake it emits. Found HERE rather
-    # than in CMake, which used to glob for it and match the CUDA major by regex.
+    # The archive the generator names in the CMake it emits.
     if archive := _dsl_runtime_archive():
         gen += ["--dsl-runtime", archive]
-    # Name the arches THIS build targets, so a tree from a build with a
-    # different TORCH_CUDA_ARCH_LIST is ignored instead of shipped. Omitted for
-    # an on-device export, where the local GPU is the whole arch list and
-    # export resolves it the same way generation would.
-    arch_list = _arch_list()
+    # Name the arches THIS build targets, so a tree left by a build with a
+    # different TORCH_CUDA_ARCH_LIST is ignored rather than shipped. Omitted for an
+    # on-device export, where export and generation resolve the arch identically.
     if arch_list:
         from tools.native_aot import export as export_mod
 
-        # Both: --archs is what generation filters trees by, --arch-list is the
-        # raw value it records in the manifest for CMake to compare against. Only
-        # this caller knows they describe the same request.
+        # Both: --archs filters the trees, --arch-list is the raw value recorded
+        # in the emitted CMake. Only this caller knows they are one request.
         gen += ["--archs", *export_mod.archs_from_cuda_arch_list(arch_list)]
         gen += ["--arch-list", arch_list]
     subprocess.check_call(gen, cwd=REPO)
-    # Nothing generated means nothing to embed, and that is legitimate: no
-    # declaration ships kernels for the arch this build targets (or none
-    # declares any yet). Stop here rather than relinking an unchanged library
-    # and then asserting kernels are in it -- that assertion would fail a build
-    # that did exactly what was asked.
+    # Nothing generated is legitimate: no declaration ships kernels for the arch
+    # this build targets. Stop rather than relink an unchanged library and then
+    # assert kernels are in it, which would fail a build that did what was asked.
     if not glob.glob(os.path.join(art, "*", "aot_*.cpp")):
         _report("no declaration ships kernels for this build; nothing embedded")
         return 0
     _report(f"embedding {_artifact_size(art)}")
-    # Relink JUST torch_cuda: the manifest (CONFIGURE_DEPENDS) makes the
-    # reconfigure ahead of this relink pick up the new artifacts. A full
-    # `--target install` would also work but walks the whole install manifest
-    # (~15 min); the targeted relink is seconds. The hand copy into the installed
-    # torch/lib is then byte-identical to what install writes -- but only BECAUSE
-    # caffe2/CMakeLists.txt sets BUILD_WITH_INSTALL_RPATH on torch_cuda in the
-    # embedding branch. Without it install rewrites RPATH and the copy ships the
-    # builder's own build/lib instead of $ORIGIN, so that property and this copy
-    # are one mechanism; do not move either alone.
-    # RECONFIGURE first, explicitly. caffe2/CMakeLists.txt include()s the file the
-    # generator just wrote, and the generated file registers itself in
-    # CMAKE_CONFIGURE_DEPENDS -- but only from the reconfigure that first READS it.
-    # The build.ninja on disk was generated before the file existed (or before this
-    # generation rewrote it), so `cmake --build --target torch_cuda` alone would
-    # relink WITHOUT the kernels: measured, a 417 MiB library where 423 MiB ships,
-    # and the post-relink check below then fails the build. Owning the sequencing
-    # here is the point of moving the logic out of CMake.
-    _report("reconfiguring to pick up the generated CMake")
-    subprocess.check_call(
-        ["cmake", "-S", REPO, "-B", BUILD_DIR], stdout=subprocess.DEVNULL
-    )
-    _report("relinking torch_cuda with embedded kernels")
-    if not os.path.isdir(BUILD_DIR):
-        # BUILD_DIR mirrors pyproject.toml's build-dir; an override there (or
-        # a build run from another directory) lands here as a bare
-        # FileNotFoundError out of subprocess.
+    # RECONFIGURE before relinking, explicitly: the generated file registers
+    # itself in CMAKE_CONFIGURE_DEPENDS, but only from the reconfigure that first
+    # READS it, and the build.ninja on disk predates this generation. Without it
+    # the relink silently omits the kernels (417 MiB where 423 ships).
+    # BEFORE the reconfigure, and keyed on the CACHE, not the directory: `cmake -B`
+    # on a directory that does not exist exits 0 and configures FROM SCRATCH -- with
+    # none of scikit-build-core's -D flags and none of the cache the shipped libtorch
+    # was built from -- and the relink and copy below would then put that library
+    # over the installed torch. Checked here rather than after the reconfigure, where
+    # the directory always exists by construction and the guard could never fire.
+    if not os.path.exists(os.path.join(BUILD_DIR, "CMakeCache.txt")):
         raise RuntimeError(
-            f"native-AOT stage 2: build directory {BUILD_DIR} does not exist. "
-            f"It must match pyproject.toml's build-dir; re-run the build from "
-            f"the repo root, or set TORCH_NATIVE_AOT=0 to skip stage 2."
+            f"native-AOT stage 2: {BUILD_DIR} holds no CMakeCache.txt, so it is not "
+            f"the build this torch came from. It must match pyproject.toml's "
+            f"build-dir; re-run the build from the repo root, or set "
+            f"TORCH_NATIVE_AOT=0 to skip stage 2."
         )
-    # Honour the build's parallelism knob. pyproject.toml aliases MAX_JOBS to
-    # CMAKE_BUILD_PARALLEL_LEVEL only inside scikit-build-core's own subprocess,
-    # so this relink otherwise ran at ninja's default (ncpu+2) -- and each
-    # generated .cpp pulls the whole ATen/CUDA header set, which is why PyTorch
-    # already carries knobs like FLASH_ATTENTION_MAX_JOBS for OOM.
+    _report("reconfiguring to pick up the generated CMake")
+    # Output CAPTURED, for two reasons. CMake prints most of its failure context on
+    # stdout, so DEVNULL left a failing configure with nothing to read; and the STATUS
+    # line the generated file emits is the only pre-relink evidence that the build
+    # agrees it should embed. Requiring it here keeps every state where the two sides
+    # disagree from reaching the relink -- and therefore from reaching the copy over
+    # the installed torch, which used to happen BEFORE the check that catches it.
+    # --log-level, because the marker below is a message(STATUS): EnvVarForwarding
+    # forwards every CMAKE_* environment variable into the cache with FORCE, so
+    # CMAKE_MESSAGE_LOG_LEVEL=WARNING (quietening configure output) hides it -- and
+    # then persists in the cache after the variable is gone. Stage 2 would fail the
+    # build advising -DTORCH_NATIVE_AOT=1, which is not the problem. The flag wins
+    # over the cached value, and this output is captured, so nothing a user reads
+    # gets noisier.
+    configure = subprocess.run(
+        ["cmake", "--log-level=STATUS", "-S", REPO, "-B", BUILD_DIR],
+        capture_output=True,
+        text=True,
+    )
+    if configure.returncode != 0:
+        print(configure.stdout.rstrip(), file=sys.stderr, flush=True)
+        print(configure.stderr.rstrip(), file=sys.stderr, flush=True)
+        raise RuntimeError(
+            f"native-AOT stage 2: reconfiguring {BUILD_DIR} failed (exit "
+            f"{configure.returncode}, output above)."
+        )
+    from tools.native_aot.gen_aot_lib import EMBED_STATUS
+
+    if EMBED_STATUS not in configure.stdout:
+        raise RuntimeError(
+            f"native-AOT stage 2: generation wrote "
+            f"{os.path.join(art, 'native_aot.cmake')}, but the reconfigure did not "
+            f"report embedding it. The build has declined the kernels this run just "
+            f"exported -- most often TORCH_NATIVE_AOT is falsy in "
+            f"{BUILD_DIR}/CMakeCache.txt (a -D from an earlier configure) while stage "
+            f"2 was told to run. Reconfigure with -DTORCH_NATIVE_AOT=1, or set "
+            f"TORCH_NATIVE_AOT=0 to skip stage 2 entirely."
+        )
+    # Relink JUST torch_cuda: `--target install` walks the whole install manifest
+    # (~15 min) where this is seconds. The hand copy below is then byte-identical
+    # to what install writes, but ONLY because the generated CMake sets
+    # BUILD_WITH_INSTALL_RPATH -- otherwise install rewrites RPATH and the copy
+    # ships the builder's build/lib instead of $ORIGIN. One mechanism; do not move
+    # either half alone.
+    _report("relinking torch_cuda with embedded kernels")
+    # pyproject.toml aliases MAX_JOBS only inside scikit-build-core's own
+    # subprocess, so this relink otherwise ran at ninja's default (ncpu+2) while
+    # each generated .cpp pulls the whole ATen/CUDA header set.
     relink = ["cmake", "--build", ".", "--target", "torch_cuda"]
     jobs = os.getenv("MAX_JOBS") or os.getenv("CMAKE_BUILD_PARALLEL_LEVEL")
     if jobs and jobs.isdigit():
@@ -783,18 +754,45 @@ def main(argv: list[str] | None = None) -> int:
     # may be mapping, and a failure part-way (ENOSPC, EPERM on a root-owned
     # site-packages) would leave a torch that cannot import at all.
     staged = installed + ".naot.tmp"
+    backup = installed + ".naot.bak"
     try:
         shutil.copy2(built, staged)
+        # The displaced library is kept until the verification below passes, because
+        # this overwrites an INSTALLED torch and a relink that embedded nothing would
+        # otherwise stay there after the build failed.
+        #
+        # A HARDLINK, not a rename: `installed` must never stop existing. Renaming it
+        # away first made the swap two steps, and a kill between them (Ctrl-C during
+        # the `spin develop` that chains this, an OOM after writing ~400 MiB, ENOSPC
+        # on the rename) left the environment with NO library and the `finally` below
+        # deleting the only other copy -- strictly worse than the un-verified library
+        # the backup exists to prevent. The link shares the inode, so it also costs
+        # nothing, where the rename left ~400 MiB behind on every successful build.
+        if os.path.exists(backup):
+            os.remove(backup)  # a stale one, from a run that died before its cleanup
+        try:
+            os.link(installed, backup)
+        except OSError:
+            # No hardlinks here (an exotic site-packages filesystem). Proceed without
+            # a restore rather than fail the build: the swap below is still atomic, so
+            # the worst case is the un-verified library staying put, which is what
+            # this whole block improves on rather than depends on.
+            _report(f"cannot hardlink {installed}; proceeding without a restore copy")
+            backup = None
         os.replace(staged, installed)
     finally:
         if os.path.exists(staged):
             os.remove(staged)
     _report(f"{os.path.getsize(built) >> 20} MiB relinked into {installed}")
-    # Size is not evidence. This script's artifacts dir must agree with the one
-    # caffe2/CMakeLists.txt derives from CMAKE_BINARY_DIR, and CONFIGURE_DEPENDS
-    # is Ninja/Makefile only -- both let the relink succeed while embedding
-    # nothing, which would ship a kernel-free wheel with a green build.
+    # Size is not evidence: this script's artifacts dir must agree with the one
+    # caffe2/CMakeLists.txt include()s, and a mismatch lets the relink succeed
+    # while embedding nothing -- a kernel-free wheel with a green build.
     if not _torch_probe("torch._native._native_aot_embedded()"):
+        # Put the previous library back before failing: leaving site-packages holding
+        # a library this run has just declared unusable makes every later `import
+        # torch` in that environment the build's problem too.
+        if backup:
+            os.replace(backup, installed)
         raise RuntimeError(
             "native-AOT stage 2: relinked libtorch_cuda reports no embedded "
             "kernels (torch._native._native_aot_embedded() is False). The "
@@ -803,6 +801,12 @@ def main(argv: list[str] | None = None) -> int:
             f"build-dir), and that {art}/native_aot.cmake exists and is the file "
             f"caffe2/CMakeLists.txt includes."
         )
+    if backup:
+        # Verified, so drop the restore copy. It is a hardlink, so this frees the
+        # displaced library's blocks rather than a second copy of them -- but leaving
+        # it would still keep the OLD inode alive in site-packages after every build,
+        # invisible to `pip uninstall` because it is in no RECORD.
+        os.remove(backup)
     if args.wheel:
         _report(f"embedding into {args.wheel}")
         patch_wheel(args.wheel, built)
