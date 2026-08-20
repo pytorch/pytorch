@@ -14,9 +14,12 @@ that computes the wrong thing.
 
 With ``tracer="dynamo"``, precompile executes every tuple in ``example_inputs`` and
 captures the guarded specializations and recompilations Dynamo produces. Graph breaks
-are not supported yet. The artifact evaluates the captured guards at runtime and raises
-on a miss; it never compiles after loading. Compiled graphs and kernels remain Python
-source, while guard trees and transformed bytecode are stored as opaque inline data.
+are not supported yet. The serialized guard records are minimized while preserving how
+every example dispatches among the captured variants. Conditions removed this way are
+unchecked caller assumptions after loading, so changing one can silently miscompute.
+The artifact never compiles after loading; a call that fails every retained guard set
+raises. Compiled graphs and kernels remain Python source, while guard trees and
+transformed bytecode are stored as opaque inline data.
 
 ``precompile`` returns a self-contained, executable ``python_code`` string plus a
 companion integrity-tagged ``cache``. With ``backend="inductor"`` (the default) the
@@ -205,8 +208,9 @@ it.
 # whole runnable artifact).
 #
 # tracer: the capture front-end, orthogonal to backend. "make_fx" (default) is a
-# non-strict trace. "dynamo" analyzes Python bytecode, captures one guarded variant per
-# specialization/recompilation exercised by example_inputs, and dispatches among them at
+# non-strict trace. "dynamo" analyzes Python bytecode, captures one variant per
+# specialization/recompilation exercised by example_inputs, minimizes guard records
+# while preserving dispatch for those calls, and dispatches among the variants at
 # runtime. It currently requires one full graph (no graph breaks).
 
 from __future__ import annotations
@@ -1390,6 +1394,163 @@ def _dynamo_backend_compiler(backend: str) -> Callable[..., _DynamoPythonBackend
     return compile_graph
 
 
+def _filter_dynamo_guards(
+    target: Callable[..., object],
+    guarded_codes: Sequence[Any],
+    example_inputs: Sequence[tuple[object, ...]],
+) -> list[bytes]:
+    """Minimize guard records while preserving every example's match vector."""
+    import dataclasses
+    import functools
+    import inspect
+
+    from torch._dynamo.guards import CheckFunctionManager, GuardBuilder
+    from torch._dynamo.output_graph import OutputGraphCommon
+    from torch._dynamo.package import load_guard_manager, load_guards_state
+    from torch._guards import GuardsSet
+    from torch.utils._ordered_set import OrderedSet
+
+    signature = inspect.signature(target)
+    example_scopes: list[dict[str, object]] = []
+    for example in example_inputs:
+        bound = signature.bind(*example)
+        bound.apply_defaults()
+        example_scopes.append(dict(bound.arguments))
+
+    def fresh_guard(guard: Any, *, final: bool = False) -> Any:
+        create_fn = guard.create_fn
+        if (
+            final
+            and isinstance(create_fn, functools.partial)
+            and create_fn.func is GuardBuilder.TENSOR_MATCH
+        ):
+            create_fn = GuardBuilder.TENSOR_MATCH
+        return dataclasses.replace(
+            guard,
+            create_fn=create_fn,
+            guard_types=None,
+            code_list=None,
+            obj_weakref=None,
+            guarded_class_weakref=None,
+            _hash=None,
+        )
+
+    def manager_for(state: Any, output_graph: Any | None = None) -> Any:
+        if output_graph is not None:
+            state = dataclasses.replace(state, output_graph=output_graph)
+        return load_guard_manager(state, target.__code__, target.__globals__)
+
+    def outcomes(
+        state: Any,
+        *,
+        guards: Sequence[Any],
+        aot_guards: Sequence[Any],
+        key_order: Sequence[Any],
+    ) -> list[bool]:
+        output_graph = dataclasses.replace(
+            state.output_graph,
+            _guards=GuardsSet(OrderedSet(fresh_guard(guard) for guard in guards)),
+            _aotautograd_guards=list(aot_guards),
+            guard_on_key_order=set(key_order),
+        )
+        manager = manager_for(state, output_graph)
+        return [manager.check(scope) for scope in example_scopes]
+
+    filtered_states: list[bytes] = []
+    for guarded in guarded_codes:
+        state = load_guards_state(guarded.guards_state)
+        kept_guards = list(state.output_graph.guards)
+        kept_aot_guards = list(state.output_graph.aotautograd_guards)
+        kept_key_order = sorted(
+            state.output_graph.guard_on_key_order, key=lambda source: source.name
+        )
+        baseline = outcomes(
+            state,
+            guards=kept_guards,
+            aot_guards=kept_aot_guards,
+            key_order=kept_key_order,
+        )
+        matching_scopes = [
+            scope
+            for scope, matches in zip(example_scopes, baseline, strict=True)
+            if matches
+        ]
+        if not matching_scopes:
+            raise PrecompileError(
+                "precompile tracer='dynamo' captured a variant that does not match "
+                "any example input."
+            )
+
+        def try_drop(records: list[Any], index: int) -> bool:
+            candidate = records[:index] + records[index + 1 :]
+            trial_guards = candidate if records is kept_guards else kept_guards
+            trial_aot = candidate if records is kept_aot_guards else kept_aot_guards
+            trial_key_order = candidate if records is kept_key_order else kept_key_order
+            try:
+                return (
+                    outcomes(
+                        state,
+                        guards=trial_guards,
+                        aot_guards=trial_aot,
+                        key_order=trial_key_order,
+                    )
+                    == baseline
+                )
+            except Exception:
+                # Some records construct relational checks jointly. If removing one
+                # leaves an invalid manager, it is a required dependency.
+                return False
+
+        changed = True
+        while changed:
+            changed = False
+            for records in (kept_guards, kept_aot_guards, kept_key_order):
+                index = 0
+                while index < len(records):
+                    if try_drop(records, index):
+                        del records[index]
+                        changed = True
+                    else:
+                        index += 1
+
+        output_graph = dataclasses.replace(
+            state.output_graph,
+            local_scope={**state.output_graph.local_scope, **matching_scopes[0]},
+            _guards=GuardsSet(
+                OrderedSet(fresh_guard(guard, final=True) for guard in kept_guards)
+            ),
+            _aotautograd_guards=kept_aot_guards,
+            guard_on_key_order=set(kept_key_order),
+        )
+        shape_code_parts = (
+            state.shape_code_parts
+            if any(guard.create_fn_name() == "SHAPE_ENV" for guard in kept_guards)
+            else None
+        )
+        check_fn = CheckFunctionManager(
+            target.__code__,
+            OutputGraphCommon(output_graph),
+            shape_code_parts=shape_code_parts,
+            runtime_global_scope=target.__globals__,
+            save_guards=True,
+            strict_error=True,
+            guard_build_local_state=state.local_state,
+        )
+        if check_fn.guards_state is None:
+            raise AssertionError("guards_state must not be None")
+        filtered_state = load_guards_state(check_fn.guards_state)
+        filtered_manager = manager_for(filtered_state)
+        filtered_outcomes = [filtered_manager.check(scope) for scope in example_scopes]
+        if filtered_outcomes != baseline:
+            raise PrecompileError(
+                "precompile tracer='dynamo' guard filtering changed captured "
+                "example dispatch."
+            )
+        filtered_states.append(check_fn.guards_state)
+
+    return filtered_states
+
+
 def _build_dynamo_python_source(
     *,
     backend: str,
@@ -1418,7 +1579,7 @@ def _build_dynamo_python_source(
         "#",
         "# The compiled graphs and kernels below remain Python source. Dynamo's guard",
         "# trees and transformed code objects have no source form, so section 2 stores",
-        "# only that dispatch state as base64-encoded pickle data.",
+        "# only minimized dispatch guard state plus bytecode as base64-encoded pickle data.",
         "",
         "# " + "=" * 70,
         "# 1. Capture metadata and compiled Python graph sources",
@@ -1543,6 +1704,9 @@ def _precompile_dynamo(
             raise PrecompileError(
                 "precompile tracer='dynamo' did not capture a runnable entry frame."
             )
+        filtered_guard_states = _filter_dynamo_guards(
+            target, code.guarded_codes, example_inputs
+        )
 
         compiled_backends = []
         for backend_id in code.backend_ids:
@@ -1563,10 +1727,12 @@ def _precompile_dynamo(
             "closure": None,
             "variants": [
                 {
-                    "guards_state": guarded.guards_state,
+                    "guards_state": guards_state,
                     "dynamo_code": guarded.dynamo_code,
                 }
-                for guarded in code.guarded_codes
+                for guarded, guards_state in zip(
+                    code.guarded_codes, filtered_guard_states
+                )
             ],
         }
         backend_ids = [str(backend_id) for backend_id in code.backend_ids]
@@ -1946,7 +2112,8 @@ class _PrecompileApi:
         The outer sequence supports capture front-ends that can specialize one artifact
         from multiple calls. The ``make_fx`` tracer accepts exactly one tuple because it
         records only one execution; ``dynamo`` executes every tuple and records the
-        guarded recompilations they trigger.
+        guarded recompilations they trigger. The Dynamo artifact minimizes serialized
+        guard records while preserving how every example dispatches among those variants.
 
         THREADING: the inductor lowering step drives process-global compiler state
         and is serialized by an internal lock, so concurrent ``backend="inductor"``
@@ -1978,10 +2145,15 @@ class _PrecompileApi:
           to the example (the source of the programming-model contract).
         - ``"dynamo"``: analyze a Python function's bytecode and capture every guarded
           specialization/recompilation exercised by ``example_inputs``. The emitted
-          artifact rebuilds the guards and dispatches among those variants; an uncovered
-          call raises instead of compiling at runtime. This initial path requires one
-          full graph (graph breaks are rejected), a function without closure cells, and
-          tensor/scalar arguments (``nn.Module`` arguments are not supported yet).
+          artifact drops a serialized guard record only when doing so preserves every
+          example's variant-match results. Filtering is at guard-record granularity, so
+          a retained composite record can still rebuild invariant leaf checks. Removed
+          conditions are unchecked caller assumptions: changing one from all capture
+          examples is outside this experimental contract and can silently miscompute.
+          A call that fails every retained guard set raises instead of compiling at
+          runtime. This initial path requires one full graph (graph breaks are rejected),
+          a function without closure cells, and tensor/scalar arguments (``nn.Module``
+          arguments are not supported yet).
 
         ``decompositions`` is an optional decomposition table (a dict mapping each
         ``OpOverload`` to a decomposition function) forwarded to ``make_fx`` as its
@@ -1992,7 +2164,8 @@ class _PrecompileApi:
         With ``tracer="dynamo"``, shape variation across ``example_inputs`` uses
         Dynamo's ordinary automatic dynamic-shape policy: for example, a static first
         graph can recompile into a symbolic graph when a later tuple changes a dimension.
-        Those guards and symbolic graphs are retained in the artifact.
+        The symbolic graphs and the minimized dispatch guard records are retained in the
+        artifact.
 
         With ``tracer="make_fx"``, dynamic shapes are opt-in via
         ``torch._dynamo.decorators.mark_unbacked``

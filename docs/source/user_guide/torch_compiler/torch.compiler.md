@@ -42,9 +42,11 @@ a self-contained, runnable Python source string plus an acceleration cache. Relo
 artifact with `torch.compiler.precompile.load`; since no weights are baked in, you pass
 the model again at runtime. The optional `tracer="dynamo"` path accepts several example
 tuples and retains the guarded recompilations they trigger, including automatically
-dynamic graphs. Its initial support is for Python functions with tensor/scalar arguments;
-graph breaks, closures, and `nn.Module` arguments are not supported yet. See the
-{ref}`API reference <torch.compiler_api>` for details.
+dynamic graphs. Its serialized guard records are minimized while preserving how every
+example dispatches. Conditions removed this way are unchecked after loading, so changing
+one from all capture examples can silently miscompute. Initial support is for Python
+functions with tensor/scalar arguments; graph breaks, closures, and `nn.Module` arguments
+are not supported yet. See the {ref}`API reference <torch.compiler_api>` for details.
 
 :::{warning}
 `torch.compile` may not support recently released major versions of Python.

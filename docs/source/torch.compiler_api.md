@@ -77,12 +77,18 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
       With ``tracer="dynamo"``, every tuple in ``example_inputs`` is executed during
       capture. Recompilations become guarded variants in the artifact, including
       automatically dynamic graphs produced when dimensions vary across examples. The
-      loaded artifact evaluates those guards and raises on a miss instead of compiling.
-      Graph breaks are not supported yet. Compiled graphs and kernels remain Python
-      source; guard trees and transformed Dynamo bytecode are stored as opaque inline
-      data because they have no Python-source representation. This initial path accepts
-      a Python function with tensor/scalar arguments; closures and ``nn.Module``
-      arguments are not supported yet because their identity guards are not serializable.
+      artifact drops a serialized guard record only when doing so preserves how every
+      example matches the captured variants. This filtering is at guard-record
+      granularity, so a retained composite record can still contain invariant leaf
+      checks. Conditions removed from the dispatch guards become unchecked caller
+      assumptions; changing one from all capture examples can silently miscompute. The
+      loaded artifact raises only when a call fails every retained guard set, and never
+      compiles a new variant. Graph breaks are not supported yet. Compiled graphs and
+      kernels remain Python source; guard trees and transformed Dynamo bytecode are
+      stored as opaque inline data because they have no Python-source representation.
+      This initial path accepts a Python function with tensor/scalar arguments; closures
+      and ``nn.Module`` arguments are not supported yet because their identity guards
+      are not serializable.
 
    With ``tracer="make_fx"``, if ``fn`` runs a backward, the artifact re-runs the whole
    forward and backward and scatters the resulting parameter gradients onto the runtime

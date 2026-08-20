@@ -375,10 +375,10 @@ def _inductor_forward(*args):
 def _build_dynamo_forward():
     """Rebuild Dynamo's guards and transformed bytecode into a standalone dispatcher.
 
-    The compiled graph sources stay ordinary Python in the artifact. Only Dynamo's guard
-    state and transformed code objects are opaque, because neither has a source form.
-    There is no compiler behind this dispatcher: a guard miss raises instead of compiling
-    another specialization.
+    The compiled graph sources stay ordinary Python in the artifact. Only the minimized
+    Dynamo dispatch guards and transformed code objects are opaque, because neither has
+    a source form. There is no compiler behind this dispatcher: a miss against every
+    retained guard set raises instead of compiling another specialization.
     """
     import base64
     import importlib

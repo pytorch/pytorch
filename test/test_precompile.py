@@ -37,6 +37,21 @@ def _precompile_dynamo_dynamic(x):
     return x.sin() + x.shape[0]
 
 
+def _precompile_dynamo_scalar(x, scale):
+    return x + scale
+
+
+def _precompile_dynamo_aliasing(a, b):
+    a.add_(1)
+    return a * b
+
+
+def _precompile_dynamo_dict_order(x, values):
+    for value in values.values():
+        x = x * value + 1
+    return x
+
+
 def _precompile_dynamo_graph_break(x):
     y = x + 1
     torch._dynamo.graph_break()
@@ -70,6 +85,42 @@ def _strip_artifact(cache: bytes) -> bytes:
     buf = io.BytesIO()
     torch.save(blob, buf)
     return buf.getvalue()
+
+
+def _dynamo_serialized_guard_summary(
+    code: str,
+) -> list[tuple[list[str], list[str], list[str], bool]]:
+    import ast
+    import base64
+
+    from torch._dynamo.package import load_guards_state
+
+    encoded_state = ast.literal_eval(
+        next(
+            line.removeprefix("_DYNAMO_STATE = ")
+            for line in code.splitlines()
+            if line.startswith("_DYNAMO_STATE = ")
+        )
+    )
+    state = pickle.loads(base64.b64decode(encoded_state))
+    summary = []
+    for variant in state["variants"]:
+        guards_state = load_guards_state(variant["guards_state"])
+        summary.append(
+            (
+                [guard.create_fn_name() for guard in guards_state.output_graph.guards],
+                [
+                    type(guard).__name__
+                    for guard in guards_state.output_graph.aotautograd_guards
+                ],
+                sorted(
+                    source.name
+                    for source in guards_state.output_graph.guard_on_key_order
+                ),
+                guards_state.shape_code_parts is not None,
+            )
+        )
+    return summary
 
 
 def _default_and_inlined_loaders(code: str, cache: bytes, backend: str):
@@ -976,13 +1027,18 @@ class TestPrecompile(TestCase):
         self.assertIn("DYNAMIC_GRAPH_COUNT = 1", code)
         self.assertIn("Inductor output code", code)
         self.assertIn("Guard trees and transformed Dynamo bytecode", code)
+        self.assertEqual(
+            _dynamo_serialized_guard_summary(code),
+            [(["TENSOR_MATCH"], [], [], False), ([], [], [], False)],
+        )
 
         for _, loaded in _default_and_inlined_loaders(code, cache, "inductor"):
-            for size in (2, 7):
+            # The automatic-dynamic variant has a size >= 2 guard, but every example
+            # satisfies it. Removing that record does not change captured dispatch, so
+            # size 1 falls through to the dynamic variant too.
+            for size in (1, 2, 7):
                 x = torch.randn(size, 4)
                 self.assertEqual(loaded(x), _precompile_dynamo_dynamic(x))
-            with self.assertRaisesRegex(PrecompileError, "no captured Dynamo variant"):
-                loaded(torch.randn(1, 4))
 
     def test_tracer_dynamo_rejects_graph_break(self):
         with self.assertRaisesRegex(
@@ -994,6 +1050,72 @@ class TestPrecompile(TestCase):
                 tracer="dynamo",
                 backend="eager",
             )
+
+    def test_tracer_dynamo_filters_invariant_scalar_guards(self):
+        examples = [(torch.randn(4), scale) for scale in (2, 3)]
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_scalar,
+            example_inputs=examples,
+            tracer="dynamo",
+            backend="eager",
+        )
+
+        loaded = torch.compiler.precompile.load(code, cache)
+        self.assertEqual(
+            _dynamo_serialized_guard_summary(code),
+            [(["CONSTANT_MATCH"], [], [], False), ([], [], [], False)],
+        )
+        x = torch.randn(4)
+        self.assertEqual(loaded(x, 2), _precompile_dynamo_scalar(x, 2))
+        self.assertEqual(loaded(x, 4), _precompile_dynamo_scalar(x, 4))
+
+    def test_tracer_dynamo_preserves_relational_guards(self):
+        shared = torch.ones(4)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_aliasing,
+            example_inputs=[
+                (torch.ones(4), torch.full((4,), 2.0)),
+                (shared, shared),
+            ],
+            tracer="dynamo",
+        )
+
+        summaries = _dynamo_serialized_guard_summary(code)
+        has_relational_inputs = any(
+            types.count("TENSOR_MATCH") >= 2 for types, _, _, _ in summaries
+        )
+        self.assertTrue(has_relational_inputs)
+        for _, loaded in _default_and_inlined_loaders(code, cache, "inductor"):
+            expected_a = torch.ones(4)
+            expected = _precompile_dynamo_aliasing(expected_a, torch.full((4,), 2.0))
+            actual_a = torch.ones(4)
+            actual = loaded(actual_a, torch.full((4,), 2.0))
+            self.assertEqual(actual, expected)
+            self.assertEqual(actual_a, expected_a)
+
+            expected_shared = torch.ones(4)
+            expected = _precompile_dynamo_aliasing(expected_shared, expected_shared)
+            actual_shared = torch.ones(4)
+            actual = loaded(actual_shared, actual_shared)
+            self.assertEqual(actual, expected)
+            self.assertEqual(actual_shared, expected_shared)
+
+    def test_tracer_dynamo_preserves_key_order_guard_dependencies(self):
+        forward = {"a": 2.0, "b": 3.0}
+        reverse = {"b": 3.0, "a": 2.0}
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_dict_order,
+            example_inputs=[(torch.ones(4), forward), (torch.ones(4), reverse)],
+            tracer="dynamo",
+            backend="eager",
+        )
+
+        summaries = _dynamo_serialized_guard_summary(code)
+        self.assertTrue(any(key_order for _, _, key_order, _ in summaries))
+        loaded = torch.compiler.precompile.load(code, cache)
+        x = torch.ones(4)
+        self.assertEqual(loaded(x, forward), _precompile_dynamo_dict_order(x, forward))
+        self.assertEqual(loaded(x, reverse), _precompile_dynamo_dict_order(x, reverse))
 
     def test_tracer_invalid_raises(self):
         a, b = torch.randn(4, 4), torch.randn(4, 4)
