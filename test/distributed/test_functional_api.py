@@ -12,8 +12,11 @@ import torch.distributed.tensor as dt
 from functorch import make_fx
 from torch.distributed._local_tensor import LocalTensorMode
 from torch.testing import FileCheck
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.inductor_utils import HAS_GPU
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
+)
 
 
 if not dist.is_available():
@@ -23,7 +26,6 @@ if not dist.is_available():
 from torch.testing._internal.common_distributed import (
     DistributedTestBase,
     MultiThreadedTestCase,
-    requires_accelerator_dist_backend,
     TEST_SKIPS,
 )
 from torch.testing._internal.common_utils import (
@@ -616,8 +618,11 @@ class TestCollectivesWithDistributedBackend(DistributedTestBase):
         expected = torch.cat(expected)
         self.assertEqual(y, expected)
 
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_capabilities(
+        Capability.compile.inductor,
+        Capability.distributed.backend,
+        Capability.lib.triton,
+    )
     @with_comms()
     def test_tracing(self, device):
         def allreduce(t, pg):
@@ -626,7 +631,10 @@ class TestCollectivesWithDistributedBackend(DistributedTestBase):
         compiled_allreduce = torch.compile(allreduce, fullgraph=True)
         compiled_allreduce(torch.randn(8, device=device), self.pg)
 
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @requires_capabilities(
+        Capability.compile.inductor,
+        Capability.lib.triton,
+    )
     def test_tracing_with_fakepg(self, device=DEVICE):
         exit_if_lt_x_accelerators(self.world_size)
 
@@ -642,8 +650,11 @@ class TestCollectivesWithDistributedBackend(DistributedTestBase):
         allreduce(torch.randn(8, device=device), pg=dist.group.WORLD)
         dist.destroy_process_group()
 
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_capabilities(
+        Capability.compile.inductor,
+        Capability.distributed.backend,
+        Capability.lib.triton,
+    )
     @with_comms()
     def test_tracing_with_dce_code(self, device):
         if self.world_size > 2:
@@ -814,9 +825,12 @@ class TestFunctionalAutogradWithDistributedBackend(DistributedTestBase):
         self.assertEqual(t.grad, torch.full_like(t, 2.0))
 
 
-# Update the supported devices in DEVICE
+# Include all supported accelerator device types for this test class.
 instantiate_device_type_tests(
-    TestCollectivesWithDistributedBackend, globals(), only_for=DEVICE, allow_xpu=True
+    TestCollectivesWithDistributedBackend,
+    globals(),
+    except_for=("cpu",),
+    allow_xpu=True,
 )
 instantiate_device_type_tests(
     TestDistributedBackendCollectivesWithWorldSize4,
