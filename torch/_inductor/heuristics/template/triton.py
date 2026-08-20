@@ -1091,7 +1091,12 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         if is_exceeding_shared_memory is None:
             return configs
 
-        return [c for c in configs if not is_exceeding_shared_memory(c, dtype_size)]
+        pruned = [c for c in configs if not is_exceeding_shared_memory(c, dtype_size)]
+        # The estimate is an upper bound and does not model every template, so it
+        # can reject a config that would really have fit. Pruning the whole set
+        # would leave the template with no choices at all, so keep the original
+        # configs and let the compiler decide which of them are usable.
+        return pruned or configs
 
     def _prune_reg_spill_configs(
         self,
