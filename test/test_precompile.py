@@ -1229,6 +1229,30 @@ class TestPrecompile(TestCase):
     @torch._dynamo.config.patch(
         automatic_dynamic_shapes=True, assume_static_by_default=True
     )
+    def test_tracer_dynamo_dynamic_graph_keeps_tensor_contract(self):
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_dynamic,
+            example_inputs=[(torch.randn(2, 4),), (torch.randn(3, 4),)],
+            tracer="dynamo",
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        with self.assertRaisesRegex(PrecompileError, "dtype"):
+            loaded(torch.randn(7, 4, dtype=torch.float64))
+
+    def test_tracer_dynamo_executes_each_example_once(self):
+        examples = [(torch.zeros(4),), (torch.zeros(8),)]
+        torch.compiler.precompile(
+            lambda x: x.add_(1),
+            example_inputs=examples,
+            tracer="dynamo",
+            backend="eager",
+        )
+        for (example,) in examples:
+            self.assertEqual(example, torch.ones_like(example))
+
+    @torch._dynamo.config.patch(
+        automatic_dynamic_shapes=True, assume_static_by_default=True
+    )
     def test_tracer_dynamo_training_recompiles_to_dynamic_graph(self):
         examples = [(torch.randn(size, 4, requires_grad=True),) for size in (2, 3, 5)]
         code, cache = torch.compiler.precompile(

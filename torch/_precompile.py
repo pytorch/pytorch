@@ -1412,7 +1412,7 @@ def _filter_dynamo_guards(
     guarded_codes: Sequence[Any],
     example_scopes: Sequence[dict[str, object]],
 ) -> list[bytes]:
-    """Minimize guard records while preserving every example's match vector."""
+    """Minimize frozen guard records while preserving variant dispatch."""
     import dataclasses
     import functools
 
@@ -1461,9 +1461,9 @@ def _filter_dynamo_guards(
         manager = manager_for(state, output_graph)
         return [manager.check(scope) for scope in example_scopes]
 
+    states = [load_guards_state(guarded.guards_state) for guarded in guarded_codes]
     filtered_states: list[bytes] = []
-    for guarded in guarded_codes:
-        state = load_guards_state(guarded.guards_state)
+    for state in states:
         kept_guards = list(state.output_graph.guards)
         kept_aot_guards = list(state.output_graph.aotautograd_guards)
         kept_key_order = sorted(
@@ -1520,7 +1520,6 @@ def _filter_dynamo_guards(
 
         output_graph = dataclasses.replace(
             state.output_graph,
-            local_scope={**state.output_graph.local_scope, **matching_scopes[0]},
             _guards=GuardsSet(
                 OrderedSet(fresh_guard(guard, final=True) for guard in kept_guards)
             ),
@@ -1649,6 +1648,59 @@ def _dynamo_cache_bytes(
         buf,
     )
     return buf.getvalue()
+
+
+def _dynamo_input_contract(
+    example_inputs: Sequence[tuple[object, ...]],
+) -> dict[str, object] | None:
+    flattened = [pytree.tree_flatten(example) for example in example_inputs]
+    specs = [spec for _, spec in flattened]
+    if not specs or any(spec != specs[0] for spec in specs[1:]):
+        return None
+    try:
+        serialized_spec = pytree.treespec_dumps(specs[0])
+    except Exception:
+        return None
+
+    leaves_by_example = [leaves for leaves, _ in flattened]
+    leaf_contracts: list[dict[str, object] | None] = []
+    for leaves in zip(*leaves_by_example):
+        if not all(isinstance(leaf, torch.Tensor) for leaf in leaves):
+            leaf_contracts.append(None)
+            continue
+        tensors = cast("tuple[torch.Tensor, ...]", leaves)
+
+        def common(values: Sequence[object]) -> object | None:
+            first = values[0]
+            return first if all(value == first for value in values[1:]) else None
+
+        ranks = [tensor.dim() for tensor in tensors]
+        rank = cast("int | None", common(ranks))
+        shapes = [tuple(tensor.shape) for tensor in tensors]
+        strides = [tuple(tensor.stride()) for tensor in tensors]
+        shape = (
+            tuple(common([dims[dim] for dims in shapes]) for dim in range(rank))
+            if rank is not None
+            else None
+        )
+        stride = (
+            tuple(common([dims[dim] for dims in strides]) for dim in range(rank))
+            if rank is not None
+            else None
+        )
+        leaf_contracts.append(
+            {
+                "type": common(
+                    [(type(t).__module__, type(t).__qualname__) for t in tensors]
+                ),
+                "dtype": common([str(t.dtype) for t in tensors]),
+                "device": common([str(t.device) for t in tensors]),
+                "requires_grad": common([t.requires_grad for t in tensors]),
+                "shape": shape,
+                "stride": stride,
+            }
+        )
+    return {"spec": serialized_spec, "leaves": tuple(leaf_contracts)}
 
 
 def _precompile_dynamo(
@@ -1840,8 +1892,6 @@ def _precompile_dynamo(
     _DYNAMO_COMPILE_LOCK.acquire()
     try:
         torch._dynamo.reset()
-        package = CompilePackage(fn)
-
         unsupported_capture_guards: set[tuple[str, str]] = set()
 
         def keep_portable_capture_guards(guards: Sequence[Any]) -> list[bool]:
@@ -1855,81 +1905,27 @@ def _precompile_dynamo(
                     result.append(True)
                     continue
                 portable_global = guard.is_global
-                result.append(not portable_global)
                 if not portable_global:
                     unsupported_capture_guards.add((guard.name, guard.guard_type))
+                result.append(False)
             return result
 
+        package = CompilePackage(
+            fn, serialization_guard_filter_fn=keep_portable_capture_guards
+        )
         compiled = torch._dynamo.optimize(
             backend=_dynamo_backend_compiler(backend, training),
             nopython=False,
-            guard_filter_fn=keep_portable_capture_guards,
             package=package,
             dynamic=None,
         )(fn)
-        captured_scopes: list[tuple[Any, dict[str, object]]] = []
-        previous_profile = sys.getprofile()
-
-        def record_scope(frame: types.FrameType, event: str) -> None:
-            if (
-                event == "call"
-                and frame.f_code.co_filename == target.__code__.co_filename
-            ):
-                captured_scopes.append(
-                    (
-                        SerializedCode.from_code_object(frame.f_code),
-                        dict(frame.f_locals),
-                    )
-                )
-
-        use_profile = previous_profile is None or callable(previous_profile)
-        previous_trace = None
-        if use_profile:
-
-            def profile(frame: types.FrameType, event: str, arg: object) -> None:
-                if previous_profile is not None:
-                    previous_profile(frame, event, arg)
-                record_scope(frame, event)
-
-            sys.setprofile(profile)
-        else:
-            previous_trace = cast(
-                "Callable[[types.FrameType, str, Any], Any] | None", sys.gettrace()
-            )
-            trace_locals: dict[
-                types.FrameType, Callable[[types.FrameType, str, Any], Any]
-            ] = {}
-
-            def trace(frame: types.FrameType, event: str, arg: Any) -> Any:
-                previous = (
-                    previous_trace if event == "call" else trace_locals.get(frame)
-                )
-                if previous is not None:
-                    next_trace = previous(frame, event, arg)
-                    if next_trace is not None and event != "return":
-                        trace_locals[frame] = next_trace
-                    else:
-                        trace_locals.pop(frame, None)
-                record_scope(frame, event)
-                if event == "return":
-                    trace_locals.pop(frame, None)
-                    return None
-                return trace if frame in trace_locals else None
-
-            sys.settrace(trace)
-        try:
-            if training:
-                with torch.enable_grad():
-                    for example in example_inputs:
-                        compiled(*example)
-            else:
+        if training:
+            with torch.enable_grad():
                 for example in example_inputs:
                     compiled(*example)
-        finally:
-            if use_profile:
-                sys.setprofile(previous_profile)
-            else:
-                sys.settrace(previous_trace)
+        else:
+            for example in example_inputs:
+                compiled(*example)
 
         if unsupported_capture_guards:
             details = ", ".join(
@@ -1975,19 +1971,9 @@ def _precompile_dynamo(
 
         code_states = []
         disabled_functions: dict[str, dict[str, object]] = {}
-        for index, code in enumerate(code_entries):
+        observed_scopes = package.observed_scopes()
+        for index, (code, scopes) in enumerate(zip(code_entries, observed_scopes)):
             original_code = SerializedCode.to_code_object(code.python_code)
-            dynamo_codes = [guarded.dynamo_code for guarded in code.guarded_codes]
-            scopes = [
-                scope
-                for captured_code, scope in captured_scopes
-                if captured_code in dynamo_codes
-            ]
-            if code.guarded_codes and not scopes:
-                raise PrecompileError(
-                    "precompile tracer='dynamo' did not observe runtime locals for "
-                    f"captured frame {original_code.co_name!r}."
-                )
             runtime_globals = sys.modules[code.python_module].__dict__
             runtime_codes = [
                 SerializedCode.to_code_object(guarded.dynamo_code)
@@ -2066,6 +2052,7 @@ def _precompile_dynamo(
         state: dict[str, Any] = {
             "codes": code_states,
             "disabled_functions": disabled_functions,
+            "input_contract": _dynamo_input_contract(example_inputs),
         }
         python_code = _build_dynamo_python_source(
             backend=backend,
