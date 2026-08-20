@@ -13,9 +13,7 @@ from torch.distributed.fsdp import fully_shard
 from torch.distributed.fsdp._fully_shard._fsdp_param_group import (
     RegisterPostBackwardFunction,
 )
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     check_sharded_parity,
@@ -56,7 +54,7 @@ class TestFullyShardFrozen(FSDPTest):
         return min(4, torch.get_device_module(device_type).device_count())
 
     @skip_if_lt_x_gpu(2)
-    def test_train_mixed_requires_grad_per_group(self):
+    def test_train_mixed_requires_grad_per_group(self, device):
         """
         Tests training parity with DDP when mixing frozen and non-frozen
         parameters in the same FSDP communication group. This checks that
@@ -156,7 +154,7 @@ class TestFullyShardFrozen(FSDPTest):
                 self.assertTrue(backward_count >= num_mlps - 1)
 
     @skip_if_lt_x_gpu(2)
-    def test_train_mixed_requires_grad_across_groups(self):
+    def test_train_mixed_requires_grad_across_groups(self, device):
         """
         Tests training parity with DDP when mixing frozen and non-frozen
         parameters across different FSDP communication groups, including
@@ -234,7 +232,7 @@ class TestFullyShardFrozen(FSDPTest):
             self.assertTrue(backward_count >= num_linears - 1)
 
     @skip_if_lt_x_gpu(2)
-    def test_multi_forward_mixed_requires_grad(self):
+    def test_multi_forward_mixed_requires_grad(self, device):
         """
         Tests training parity with DDP when having trainable and frozen modules
         that participate multiple times in forward.
