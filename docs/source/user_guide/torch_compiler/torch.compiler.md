@@ -45,8 +45,10 @@ tuples and retains the guarded recompilations they trigger, including automatica
 dynamic graphs. Its serialized guard records are minimized while preserving how every
 example dispatches. Conditions removed this way are unchecked after loading, so changing
 one from all capture examples can silently miscompute. Initial support is for Python
-functions with tensor/scalar arguments; graph breaks, closures, and `nn.Module` arguments
-are not supported yet. See the {ref}`API reference <torch.compiler_api>` for details.
+functions with tensor, scalar, and Python-container arguments. Graph breaks and
+closure-free `torch._dynamo.disable` functions are preserved; top-level closures,
+nested functions that capture locals, and `nn.Module` arguments are not supported yet.
+See the {ref}`API reference <torch.compiler_api>` for details.
 
 :::{warning}
 `torch.compile` may not support recently released major versions of Python.

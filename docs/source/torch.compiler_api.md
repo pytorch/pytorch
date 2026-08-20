@@ -83,12 +83,19 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
       checks. Conditions removed from the dispatch guards become unchecked caller
       assumptions; changing one from all capture examples can silently miscompute. The
       loaded artifact raises only when a call fails every retained guard set, and never
-      compiles a new variant. Graph breaks are not supported yet. Compiled graphs and
-      kernels remain Python source; guard trees and transformed Dynamo bytecode are
-      stored as opaque inline data because they have no Python-source representation.
-      This initial path accepts a Python function with tensor/scalar arguments; closures
-      and ``nn.Module`` arguments are not supported yet because their identity guards
-      are not serializable.
+      compiles a new variant. Graph breaks are captured as Dynamo resume frames.
+      Closure-free Python functions wrapped with ``torch._dynamo.disable`` are embedded
+      and execute eagerly between compiled graph segments. Global names left in
+      transformed bytecode must resolve to recursive literal values or independently
+      importable objects. Disabled functions cannot assign globals or use
+      ``globals()``, ``eval()``, or ``exec()``; their importable module globals are
+      rebound at load, while recursive literal globals and defaults are captured by
+      value. Compiled graphs and kernels remain Python source; guard
+      trees, transformed Dynamo entry/resume bytecode, and embedded disabled-function
+      bytecode are stored as opaque inline data because they have no Python-source
+      representation. The top-level function cannot have closure cells or nested
+      functions that capture its locals, and ``nn.Module`` arguments are not supported
+      yet because their identity guards are not serializable.
 
    With ``tracer="make_fx"``, if ``fn`` runs a backward, the artifact re-runs the whole
    forward and backward and scatters the resulting parameter gradients onto the runtime
@@ -110,8 +117,9 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
        are still specialized to the example).
    :param tracer: capture front-end. ``"make_fx"`` (default) is a non-strict make_fx
        trace. ``"dynamo"`` captures guarded specializations and recompilations from a
-       Python function; it currently requires one full graph, rejects graph breaks, and
-       does not yet support closures or ``nn.Module`` arguments.
+       Python function, including graph-break resume frames; it does not yet support
+       top-level closures, nested functions that capture locals, or ``nn.Module``
+       arguments.
    :param decompositions: Optional decomposition table (``dict`` of ``OpOverload`` to a
        decomposition function) forwarded to ``make_fx``; defaults to ``None`` and is not
        yet supported with ``tracer="dynamo"``.
