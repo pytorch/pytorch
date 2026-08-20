@@ -75,7 +75,7 @@ class NVGemmReductionCapabilities:
         if self.secondary_kinds is None:
             return False
         if contract.secondary_consumer_fn is not None:
-            return True
+            return contract.feeds_main
         descriptor = _reduction_descriptor(contract.secondary_feed_type)
         if descriptor is None:
             return False
@@ -118,4 +118,5 @@ BLOCK_SCALED_GEMM_REDUCTION_CAPABILITIES = NVGemmReductionCapabilities(
     feed_main_only_kinds=DENSE_GEMM_REDUCTION_CAPABILITIES.feed_main_only_kinds,
     source_types=DENSE_GEMM_REDUCTION_CAPABILITIES.source_types,
     secondary_kinds=None,
+    max_n_axis_consumer_group=GEMM_REDUCTION_FRAGMENT_WIDTH,
 )
