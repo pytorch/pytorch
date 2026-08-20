@@ -8200,7 +8200,10 @@ class Scheduler:
             return None
 
         snodes = [subnode for node in nodes for subnode in node.get_nodes()]
-        if not snodes or not all(isinstance(node, SchedulerNode) for node in snodes):
+        if not snodes or not all(
+            isinstance(node, SchedulerNode) and node._body is not None
+            for node in snodes
+        ):
             return None
 
         if any(node.is_cpu() for node in snodes):
@@ -8316,7 +8319,10 @@ class Scheduler:
         red_rnumel = typing.cast(sympy.Expr, groups[1])
         target_numel = red_numel * red_rnumel
 
-        if not all(isinstance(sn, SchedulerNode) for sn in pw_node.get_nodes()):
+        if not all(
+            isinstance(sn, SchedulerNode) and sn._body is not None
+            for sn in pw_node.get_nodes()
+        ):
             return False
         snodes = typing.cast(list[SchedulerNode], pw_node.get_nodes())
 
