@@ -15,7 +15,7 @@ import unittest.mock as mock
 # `PYTHONPATH=$(pwd) pytest tools/test`). These modules keep their module
 # scope torch-free precisely so this works: the Test tools job runs in the
 # linter image, which has no built torch.
-from tools.native_aot import export, toolchains
+from tools.native_aot import export, gen_aot_lib, toolchains
 
 
 _TOOLS_FILE = os.path.abspath(toolchains.__file__)
@@ -557,58 +557,97 @@ class TestArch(unittest.TestCase):
         self.assertEqual(os.path.basename(os.path.dirname(sj[3])), "sm_100a")
         self.assertEqual(sj[4], "sm_100a")
 
-    def test_cross_product(self):
-        pts = export.expand_specs(
-            [{"dtype": ["float32", "bfloat16"], "N": [1024, 2048], "K": 8}]
-        )
-        self.assertEqual(len(pts), 4)
-        self.assertIn({"dtype": "float32", "N": 2048, "K": 8}, pts)
-        self.assertIn({"dtype": "bfloat16", "N": 1024, "K": 8}, pts)
-
-    def test_multiple_blocks_concatenate(self):
-        pts = export.expand_specs([{"N": [1, 2]}, {"N": 3, "extra": True}])
-        self.assertEqual(pts, [{"N": 1}, {"N": 2}, {"N": 3, "extra": True}])
-
-    def test_scalar_only_spec(self):
+    def test_by_arch_groups_and_orders_by_capability(self):
+        scs = [
+            {"prefix": "k__sm100a", "arch": "sm_100a"},
+            {"prefix": "k__sm90a", "arch": "sm_90a"},
+            {"prefix": "k2__sm90a", "arch": "sm_90a"},
+        ]
+        groups = gen_aot_lib._by_arch(scs)
+        self.assertEqual(list(groups), [(9, 0), (10, 0)])
         self.assertEqual(
-            export.expand_specs([{"N": 4096, "K": 64}]), [{"N": 4096, "K": 64}]
+            [s["prefix"] for s in groups[(9, 0)]], ["k__sm90a", "k2__sm90a"]
         )
 
+    def test_by_arch_prefers_the_arch_conditional_build(self):
+        # Both are valid on 10.0 hardware; the conditional build is the one the
+        # kernels were written against, and shipping both would otherwise let
+        # directory order decide.
+        for order in (
+            [("sm_100", "p"), ("sm_100a", "c")],
+            [("sm_100a", "c"), ("sm_100", "p")],
+        ):
+            scs = [{"prefix": n, "arch": a} for a, n in order]
+            groups = gen_aot_lib._by_arch(scs)
+            self.assertEqual(list(groups), [(10, 0)])
+            self.assertEqual([s["prefix"] for s in groups[(10, 0)]], ["c"])
 
-class TestLauncherCodegen(unittest.TestCase):
-    """CuteDslToolchain.gen_launcher is what puts C++ into the build; these
-    pin the properties that were argued over in review."""
+    def test_by_arch_rejects_an_arch_less_sidecar(self):
+        # Export names the arch of everything it writes, so this is a tree from
+        # before it did. Rejected rather than grouped: a capability nothing
+        # matches would emit a branch that declines every call in silence.
+        with self.assertRaisesRegex(RuntimeError, "records no arch"):
+            gen_aot_lib._by_arch([{"prefix": "old", "arch": None}])
 
-    def _launcher(self, **over):
-        sc = dict(SIDECAR, **over)
-        return toolchains.CuteDslToolchain().gen_launcher(sc)
+    def test_dropped_tie_break_candidate_gets_no_launcher(self):
+        # Both spellings of a capability are exportable ("10.0;10.0a"), so the
+        # plain build loses the tie-break -- and a launcher emitted for it would
+        # be defined and never called, i.e. -Wunused-function in an anonymous
+        # namespace, fatal under CI's WERROR.
+        class _Decl:
+            ATEN_OP = "fakeop"
+            DISPATCH_KEY = "CUDA"
+            ARCHS = ("sm_100", "sm_100a")
 
-    def test_read_only_arg_uses_const_data_ptr(self):
-        # A mutable data_ptr() would materialize a copy-on-write input.
-        targs = [dict(SIDECAR["tensor_args"][0], read_only=True)]
-        src = self._launcher(tensor_args=targs)
-        self.assertIn("const_cast<void*>(mX.const_data_ptr())", src)
-        self.assertNotIn("mX.mutable_data_ptr()", src)
+            @staticmethod
+            def cpp_dispatch(spec):
+                return "true"
 
-    def test_written_arg_uses_mutable_data_ptr(self):
-        src = self._launcher()
-        self.assertIn("mOut_s.data = mOut.mutable_data_ptr();", src)
+            @staticmethod
+            def cpp_launch(spec, launch_fn):
+                return f"{launch_fn}(self, out, at::cuda::getCurrentCUDAStream());"
 
-    def test_arg_order_is_tensors_then_scalars_then_stream(self):
-        # Must match the exported wrapper's signature exactly.
-        src = self._launcher(scalar_args=[{"name": "k", "ctype": "int64_t"}])
-        self.assertIn("const at::Tensor& mX, const at::Tensor& mOut, int64_t k", src)
-        self.assertIn("&mX_s, &mOut_s, k", src)
-        self.assertIn("c10::cuda::CUDAStream(stream).stream()", src)
+        def sc(arch):
+            return dict(
+                SIDECAR, prefix=f"fakeop_p__{arch.replace('_', '', 1)}", arch=arch
+            )
 
-    def test_shape_slots_narrow_and_strides_stay_64bit(self):
-        src = self._launcher()
-        self.assertIn("mX_s.dynamic_shapes[0] = static_cast<int32_t>(mX.size(0));", src)
-        self.assertIn("mX_s.dynamic_strides[0] = mX.stride(0);", src)
+        src = gen_aot_lib.gen_op(
+            "fakeop",
+            "CUDA",
+            _Decl,
+            [sc("sm_100"), sc("sm_100a")],
+            "const at::Tensor & self, const at::Tensor & out",
+        )
+        self.assertIn("launch_fakeop_p__sm100a(", src)
+        self.assertNotIn("launch_fakeop_p__sm100(", src)
 
-    def test_module_load_is_once_per_process(self):
-        src = self._launcher()
-        self.assertIn("c10::call_once", src)
+    def test_cc_of_and_device_match(self):
+        self.assertEqual(gen_aot_lib._cc_of("sm_90"), (9, 0))
+        self.assertEqual(gen_aot_lib._cc_of("sm_103a"), (10, 3))
+        m = gen_aot_lib._device_match(10, 3)
+        self.assertIn("major == 10", m)
+        self.assertIn("minor == 3", m)
+
+    def test_cc_of_refuses_what_it_cannot_read(self):
+        # Each would otherwise compute a plausible capability and emit a gate no
+        # device satisfies ("sm_9" -> (0, 9), "sm_1000" -> (100, 0)), so the op
+        # ships, links and declines every call unreported.
+        #
+        # assertRaisesRegex, not assertRaises: _cc_of raises two different
+        # RuntimeErrors, so a bare check passed with the digit-length guard
+        # removed -- "sm_9" then tripped the RANGE error instead.
+        for bad in ("sm_9", "sm_1000", "sm_100f", "sm_", "", "100a", "sm_10a0"):
+            with self.subTest(arch=bad):
+                with self.assertRaisesRegex(
+                    RuntimeError, "cannot read a compute capability"
+                ):
+                    gen_aot_lib._cc_of(bad)
+
+    def test_cc_of_refuses_a_capability_outside_the_known_range(self):
+        # Parses fine, but no such hardware: a gate for it is dead code.
+        with self.assertRaisesRegex(RuntimeError, "outside the known range"):
+            gen_aot_lib._cc_of("sm_130")
 
 
 class TestSidecarIntegrity(unittest.TestCase):
@@ -691,6 +730,347 @@ class TestSidecarIntegrity(unittest.TestCase):
         self.assertEqual(
             export.expand_specs([{"N": 4096, "K": 64}]), [{"N": 4096, "K": 64}]
         )
+
+
+class TestLauncherGeneration(unittest.TestCase):
+    def test_marshalling_from_sidecar(self):
+        src = gen_aot_lib.gen_launcher(SIDECAR)
+        # Struct fill: one dynamic size per listed dim, in slot order.
+        self.assertIn("mX_s.dynamic_shapes[0] = static_cast<int32_t>(mX.size(0));", src)
+        self.assertIn("mX_s.dynamic_strides[0] = mX.stride(0);", src)
+        self.assertIn(
+            "mOut_s.dynamic_shapes[1] = static_cast<int32_t>(mOut.size(1));", src
+        )
+        # Lazy module load + wrapper call with all tensor structs.
+        self.assertIn("c10::call_once(fakeop_f32_n1024_k8_loaded", src)
+        self.assertIn(
+            "cute_dsl_fakeop_f32_n1024_k8_wrapper(&fakeop_f32_n1024_k8_module, &mX_s, &mOut_s,",
+            src,
+        )
+
+
+class TestScalarArgs(unittest.TestCase):
+    def test_launcher_forwards_scalars_by_value(self):
+        sidecar = dict(
+            SIDECAR,
+            tensor_args=[{"name": "mX", "dynamic_sizes": [0]}],
+            scalar_args=[{"name": "alpha", "ctype": "float"}],
+        )
+        src = gen_aot_lib.gen_launcher(sidecar)
+        # Scalars appear after tensors in both the params and the call,
+        # matching the exported wrapper's argument order.
+        self.assertIn("const at::Tensor& mX, float alpha, c10::Stream stream", src)
+        self.assertIn("(&fakeop_f32_n1024_k8_module, &mX_s, alpha,", src)
+        # The shared contract carries a device-agnostic c10::Stream; the
+        # body narrows it to the raw handle the C ABI takes.
+        self.assertIn("c10::cuda::CUDAStream(stream).stream()", src)
+
+    def test_no_scalar_args_unchanged(self):
+        src = gen_aot_lib.gen_launcher(SIDECAR)
+        self.assertIn(
+            "const at::Tensor& mX, const at::Tensor& mOut, c10::Stream stream", src
+        )
+
+
+class _FakeDecl:
+    """Minimal declaration object for gen_op tests (the real contract
+    lives in decl.py; gen_op only touches these attributes)."""
+
+    ATEN_OP = "fakeop"
+    DISPATCH_KEY = "CUDA"
+    # Set explicitly: fixtures bypass the validating loader, which is
+    # what normalizes ARCHS on real declarations. Annotated so
+    # subclasses can narrow it without a bad-override.
+    ARCHS: tuple[str, ...] = ("sm_90", "sm_90a", "sm_100", "sm_100a")
+
+    @staticmethod
+    def cpp_dispatch_prelude():
+        return (
+            "if (self.scalar_type() != at::kFloat) return false;\n"
+            "const int64_t N = self.size(-1);"
+        )
+
+    @staticmethod
+    def cpp_dispatch(spec):
+        return f"N == {spec['N']} && k == {spec['K']}"
+
+    @staticmethod
+    def cpp_launch(spec, launch_fn):
+        return f"{launch_fn}(self, out, at::cuda::getCurrentCUDAStream());"
+
+
+class TestInt32SizeGate(unittest.TestCase):
+    # The DSL's exported ABI carries int32_t shape slots while aten sizes
+    # are int64_t, so the generated gate must DECLINE oversized dims
+    # rather than let the launcher's static_cast truncate them.
+    def test_gate_covers_plain_and_optional_tensors(self):
+        gate = gen_aot_lib._int32_size_gate(
+            "const at::Tensor & self, int64_t k, "
+            "const std::optional<at::Tensor>& values"
+        )
+        # Plain tensor: unconditional scan.
+        self.assertIn("self.sizes().begin()", gate)
+        # Optional tensor: has_value() guarded, arrow deref.
+        self.assertIn("values.has_value()", gate)
+        self.assertIn("values->sizes().begin()", gate)
+        # Declines, never truncates -- and does so as ONE guarded statement,
+        # so an oversized dim in any tensor leaves via the same early return.
+        self.assertEqual(gate.count("return false;"), 1)
+        self.assertIn("if (C10_UNLIKELY(", gate)
+        self.assertTrue(gate.rstrip().endswith(")) return false;"), gate)
+        # Non-tensor params contribute nothing: a wrongly-included scalar
+        # would emit its name in a sizes() probe.
+        self.assertNotIn("k.sizes()", gate)
+
+    def test_gate_empty_without_tensors(self):
+        self.assertEqual(gen_aot_lib._int32_size_gate("int64_t k, bool largest"), "")
+
+    def test_gate_emitted_into_the_stub(self):
+        sidecar = dict(SIDECAR, spec={"N": 1024, "K": 8})
+        src = gen_aot_lib.gen_op(
+            "fakeop",
+            "CUDA",
+            _FakeDecl,
+            [sidecar],
+            "const at::Tensor & self, int64_t k",
+        )
+        self.assertIn("inline bool _naot_dim_too_big", src)
+        # _FakeDecl declares no cpp_covers, so there is exactly one gate site.
+        self.assertEqual(src.count("// Size gate:"), 1)
+        self.assertIn("self.sizes().begin()", src)
+
+    def test_covers_gets_the_same_gates_as_the_stub(self):
+        # The stated invariant: coverage must be no wider than the stub's
+        # acceptance. The stub declines on an unsupported device and on an
+        # oversized dim, so covers must decline there too -- otherwise the
+        # router hands those calls to a stub that refuses them and they lose
+        # their JIT route. Nothing asserted this: the previous test used a
+        # declaration with no cpp_covers and admitted as much in a comment.
+        class _WithCovers(_FakeDecl):
+            @staticmethod
+            def cpp_covers():
+                return "return true;"
+
+        sidecar = dict(SIDECAR, spec={"N": 1024, "K": 8})
+        src = gen_aot_lib.gen_op(
+            "fakeop",
+            "CUDA",
+            _WithCovers,
+            [sidecar],
+            "const at::Tensor & self, int64_t k",
+            covers=(
+                "const at::Tensor & self, int64_t k",
+                "covers_fakeop(...)-> bool",
+                "return true;",
+            ),
+        )
+        # Two of each: once in the kernel, once in the covers predicate.
+        self.assertEqual(src.count("// Size gate:"), 2)
+        self.assertEqual(src.count("// Device gate:"), 2)
+        # ...and the covers copy reads the TENSOR's device, not the current one:
+        # the router calls it before any device guard, so on a mixed-capability
+        # host the current device need not be the one the op will run on.
+        self.assertIn(
+            "const auto* _naot_props = at::cuda::getDeviceProperties(self.device().index());",
+            src,
+        )
+        self.assertIn(
+            "const auto* _naot_props = at::cuda::getCurrentDeviceProperties();", src
+        )
+
+
+class TestAotSourceGeneration(unittest.TestCase):
+    def test_full_source(self):
+        sidecar = dict(SIDECAR, spec={"N": 1024, "K": 8})
+        src = gen_aot_lib.gen_op(
+            "fakeop",
+            "CUDA",
+            _FakeDecl,
+            [sidecar],
+            "const at::Tensor & self, int64_t k, const at::Tensor & out",
+        )
+        # Prelude verbatim (indented) ahead of the chain.
+        self.assertIn("if (self.scalar_type() != at::kFloat) return false;", src)
+        # Dispatch branch wraps the launch with the point's launcher name.
+        self.assertIn("if (N == 1024 && k == 8) {", src)
+        self.assertIn(
+            "launch_fakeop_f32_n1024_k8(self, out, at::cuda::getCurrentCUDAStream());",
+            src,
+        )
+        # Falls through to false: the LAST statement of the kernel body, which
+        # is what routes an unmatched call to op.impl. Asserted positionally --
+        # the device gate and the size gate each emit a "return false;" too, so
+        # a substring check here passes even with no fallback at all.
+        body = src.split("bool fakeop_cuda_aot_kernel(", 1)[1]
+        body = body[: body.index("\n}\n")]
+        self.assertTrue(body.rstrip().endswith("return false;"), body[-200:])
+        # Registers on the generated DispatchStub.
+        self.assertIn(
+            "REGISTER_CUDA_DISPATCH(fakeop_aot_stub, &::fakeop_cuda_aot_kernel)", src
+        )
+        self.assertIn('#include "fakeop_f32_n1024_k8.h"', src)
+
+    def test_branches_in_sidecar_order(self):
+        s1 = dict(SIDECAR, spec={"N": 1024, "K": 8})
+        s2 = dict(SIDECAR, prefix="fakeop_f32_n2048_k8", spec={"N": 2048, "K": 8})
+        src = gen_aot_lib.gen_op(
+            "fakeop", "CUDA", _FakeDecl, [s1, s2], "const at::Tensor & self, int64_t k"
+        )
+        self.assertLess(src.index("N == 1024"), src.index("N == 2048"))
+
+    def test_prelude_optional(self):
+        class NoPrelude(_FakeDecl):
+            # The contract's "absent prelude" case; the deliberate
+            # callable -> None override trips bad-override.
+            cpp_dispatch_prelude = None  # pyrefly: ignore [bad-override]
+
+        sidecar = dict(SIDECAR, spec={"N": 1024, "K": 8})
+        src = gen_aot_lib.gen_op(
+            "fakeop", "CUDA", NoPrelude, [sidecar], "const at::Tensor & self, int64_t k"
+        )
+        self.assertNotIn("scalar_type() != at::kFloat", src)
+        self.assertIn("if (N == 1024 && k == 8) {", src)
+
+    def test_cpp_covers_emission(self):
+        # cpp_covers -> a bool fn over the schema params + a
+        # TORCH_LIBRARY_FRAGMENT registration in the _native_aot ns.
+        sidecar = dict(SIDECAR, spec={"N": 1024, "K": 8})
+        covers = (
+            "const at::Tensor & self, int64_t k",
+            "covers_fakeop(Tensor self, int k) -> bool",
+            "return self.scalar_type() == at::kFloat && k == 8;",
+        )
+        src = gen_aot_lib.gen_op(
+            "fakeop",
+            "CUDA",
+            _FakeDecl,
+            [sidecar],
+            "const at::Tensor & self, int64_t k",
+            covers,
+        )
+        self.assertIn(
+            "bool fakeop_cuda_covers(const at::Tensor & self, int64_t k) {", src
+        )
+        self.assertIn("TORCH_LIBRARY_FRAGMENT(_native_aot, m) {", src)
+        self.assertIn(
+            'm.def("covers_fakeop(Tensor self, int k) -> bool", &::fakeop_cuda_covers);',
+            src,
+        )
+
+    def test_cpp_covers_absent_no_registration(self):
+        sidecar = dict(SIDECAR, spec={"N": 1024, "K": 8})
+        src = gen_aot_lib.gen_op(
+            "fakeop", "CUDA", _FakeDecl, [sidecar], "const at::Tensor & self, int64_t k"
+        )
+        self.assertNotIn("TORCH_LIBRARY_FRAGMENT", src)
+        self.assertNotIn("fakeop_cuda_covers", src)
+
+    def test_covers_signature_from_schema(self):
+        # Functional schema args + out-variant outputs as trailing
+        # optionals; SymInt degrades to int.
+        params, schema = gen_aot_lib.covers_signature("topk")
+        self.assertIn("int64_t k", params)
+        self.assertIn("const std::optional<at::Tensor>& values", params)
+        self.assertIn("const std::optional<at::Tensor>& indices", params)
+        self.assertEqual(
+            schema,
+            "covers_topk(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True, Tensor? values=None, Tensor? indices=None) -> bool",
+        )
+
+    def test_covers_signature_kwarg_only_and_defaults(self):
+        # Pin the tricky schema shapes the per-argument rendering must
+        # handle: a kwarg-only section (the '*' marker), a list default
+        # ('int[1] dim=[]'), and Scalar defaults -- surgery on the whole
+        # schema string mangles these.
+        _, schema = gen_aot_lib.covers_signature("sum.dim_IntList")
+        self.assertEqual(
+            schema,
+            "covers_sum_dim_IntList(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor? out=None) -> bool",
+        )
+        _, schema = gen_aot_lib.covers_signature("amax")
+        self.assertEqual(
+            schema,
+            "covers_amax(Tensor self, int[1] dim=[], bool keepdim=False, Tensor? out=None) -> bool",
+        )
+        _, schema = gen_aot_lib.covers_signature("add.Tensor")
+        self.assertEqual(
+            schema,
+            "covers_add_Tensor(Tensor self, Tensor other, *, Scalar alpha=1, Tensor? out=None) -> bool",
+        )
+
+
+class TestStructuredIntrospection(unittest.TestCase):
+    """Read off native_functions.yaml, so they are tested against REAL ops the
+    way covers_signature already is. Every generation test patches these two out,
+    which left `precomputed_args` returning [] and impl_signature_params
+    returning nonsense both invisible to the suite."""
+
+    def test_precomputed_args_reports_what_meta_replaces(self):
+        # The commit's headline reason for the generated header note: index_add's
+        # dim arrives already wrapped, sum.dim_IntList's arrives RAW, and a prelude
+        # comparing a raw negative dim against self.dim()-1 silently declines every
+        # dim=-1 call.
+        self.assertEqual(gen_aot_lib.precomputed_args("index_add"), ["dim"])
+        self.assertEqual(gen_aot_lib.precomputed_args("sum.dim_IntList"), [])
+
+    def test_impl_signature_is_the_structured_impl_signature(self):
+        params = gen_aot_lib.impl_signature_params("topk")
+        # Outputs last, because meta() allocated them before the stub runs.
+        self.assertTrue(params.startswith("const at::Tensor & self, int64_t k"))
+        self.assertIn("const at::Tensor & values", params)
+        self.assertIn("const at::Tensor & indices", params)
+
+    def test_precompute_note_states_which_case_applies(self):
+        # The note goes into every generated file, where an author debugging a
+        # silently-declining dim reads it.
+        sidecar = dict(SIDECAR, spec={"N": 1024, "K": 8})
+        wrapped = gen_aot_lib.gen_op(
+            "fakeop",
+            "CUDA",
+            _FakeDecl,
+            [sidecar],
+            "const at::Tensor & self, int64_t k",
+            None,
+            ["dim"],
+        )
+        self.assertIn("precomputes (impl receives them wrapped/replaced): dim", wrapped)
+        raw = gen_aot_lib.gen_op(
+            "fakeop",
+            "CUDA",
+            _FakeDecl,
+            [sidecar],
+            "const at::Tensor & self, int64_t k",
+            None,
+            [],
+        )
+        self.assertIn("precomputes NOTHING", raw)
+        self.assertIn("arrive RAW", raw)
+
+
+class TestShippedVsDeclaredArchs(unittest.TestCase):
+    def test_shipping_an_arch_the_declaration_disowns_is_fatal(self):
+        # Called out as a guarantee ("shipped arches outside ARCHS fail
+        # generation") and reached by no test, because the shared fixture
+        # declares every arch. A packaging bug here would otherwise emit a gate
+        # for hardware the op never claimed to support.
+        class _Narrow(_FakeDecl):
+            ARCHS = ("sm_100a",)
+
+        s90 = dict(SIDECAR, prefix="fakeop_p__sm90a", arch="sm_90a")
+        with self.assertRaisesRegex(RuntimeError, "declaration supports only"):
+            gen_aot_lib.gen_op(
+                "fakeop", "CUDA", _Narrow, [s90], "const at::Tensor & self, int64_t k"
+            )
+
+    def test_declaring_more_than_was_shipped_is_fine(self):
+        # The other direction is normal: a build targeting one arch ships one
+        # tree for an op whose kernels support several.
+        s100 = dict(SIDECAR, prefix="fakeop_p__sm100a", arch="sm_100a")
+        src = gen_aot_lib.gen_op(
+            "fakeop", "CUDA", _FakeDecl, [s100], "const at::Tensor & self, int64_t k"
+        )
+        self.assertIn("major == 10", src)
+        self.assertNotIn("major == 9", src)
 
 
 # mX with one size and one stride slot, and with none at all: the two claims the
@@ -1128,10 +1508,73 @@ class TestAbiValidation(unittest.TestCase):
         toolchains.CuteDslToolchain().validate_abi(dict(SIDECAR, _dir="/nonexistent"))
 
 
+class TestMultiCapabilitySelector(unittest.TestCase):
+    """One generated .cpp serves every arch an op shipped for, so its selector
+    is what keeps each artifact on its own hardware. _by_arch's grouping and
+    the absence of dead launchers are covered above; this pins the SHAPE of
+    what gen_op emits from those groups, which an inverted or misplaced gate
+    passes through unchanged."""
+
+    def _body(self):
+        # Deliberately passed newest-first: the emitted order must come from
+        # the capability, not from directory or argument order.
+        s100 = dict(
+            SIDECAR, prefix="fakeop_p__sm100a", arch="sm_100a", spec={"N": 1024, "K": 8}
+        )
+        s90 = dict(
+            SIDECAR, prefix="fakeop_p__sm90a", arch="sm_90a", spec={"N": 1024, "K": 8}
+        )
+        src = gen_aot_lib.gen_op(
+            "fakeop",
+            "CUDA",
+            _FakeDecl,
+            [s100, s90],
+            "const at::Tensor & self, int64_t k, const at::Tensor & out",
+        )
+        body = src.split("bool fakeop_cuda_aot_kernel(", 1)[1]
+        return body[: body.index("\n}\n")]
+
+    def test_properties_read_once_before_any_gate(self):
+        body = self._body()
+        self.assertEqual(body.count("= at::cuda::getCurrentDeviceProperties();"), 1)
+        self.assertLess(body.index("_naot_props ="), body.index("_naot_props->"))
+
+    def test_early_out_accepts_exactly_the_shipped_capabilities(self):
+        body = self._body()
+        accept = next(l for l in body.splitlines() if l.startswith("  if (!(("))
+        self.assertEqual(accept.count("major =="), 2)
+        self.assertIn("major == 9 && _naot_props->minor == 0", accept)
+        self.assertIn("major == 10 && _naot_props->minor == 0", accept)
+
+    def test_each_capability_launches_only_its_own_kernels(self):
+        # The cross pairing is the failure this whole grouping exists to
+        # prevent: loading a module built for other hardware fails inside the
+        # launcher instead of declining to aten.
+        body = self._body()
+        i9 = body.index("_naot_props->major == 9 && _naot_props->minor == 0) {")
+        i10 = body.index("_naot_props->major == 10 && _naot_props->minor == 0) {")
+        self.assertLess(i9, i10)
+        sm90_branch, sm100_branch = body[i9:i10], body[i10:]
+        self.assertIn("launch_fakeop_p__sm90a(", sm90_branch)
+        self.assertNotIn("launch_fakeop_p__sm100a(", sm90_branch)
+        self.assertIn("launch_fakeop_p__sm100a(", sm100_branch)
+        self.assertNotIn("launch_fakeop_p__sm90a(", sm100_branch)
+
+
 class TestReadOnlyInputs(unittest.TestCase):
     # read_only tensor args must go through const_data_ptr in every
     # toolchain's launcher: a mutable data_ptr() materializes
     # copy-on-write inputs on each call.
+
+    def test_cutedsl_launcher(self):
+        sc: dict = dict(SIDECAR)
+        sc["tensor_args"] = [
+            {"name": "mX", "dynamic_sizes": [0], "read_only": True},
+            {"name": "mOut", "dynamic_sizes": [0]},
+        ]
+        src = gen_aot_lib.gen_launcher(sc)
+        self.assertIn("mX_s.data = const_cast<void*>(mX.const_data_ptr());", src)
+        self.assertIn("mOut_s.data = mOut.mutable_data_ptr();", src)
 
     def test_closure_covers_shared_declaration_machinery(self):
         # The grid expander and the validating loader decide which spec
@@ -1341,6 +1784,66 @@ class TestStaleGridPointArtifacts(unittest.TestCase):
             export._check_no_orphan_artifacts(tmpdir, [{"N": 1024}])
 
 
+class TestInt32GateTypeClassifier(unittest.TestCase):
+    def test_plain_and_optional_tensors_are_gated(self):
+        gate = gen_aot_lib._int32_size_gate(
+            "const at::Tensor & self, const ::std::optional<at::Tensor> & weight"
+        )
+        self.assertIn("self.sizes()", gate)
+        self.assertIn("weight.has_value()", gate)
+
+    def test_the_gate_bounds_dims_only_and_not_numel(self):
+        # The contract is "every dim the CALLER passes must fit". Bounding numel() here
+        # instead declined any tensor over 2**31 elements even when the extent a
+        # prelude derives is tiny -- (2**28, 8) collapses to 8, is served correctly and
+        # is bitwise equal to aten, so declining it is pure lost coverage on exactly
+        # the large shapes this path exists for. A prelude that DERIVES an extent bounds
+        # it itself; see test_tma_preludes_bound_their_derived_extents.
+        gate = gen_aot_lib._int32_size_gate(
+            "const at::Tensor & self, const ::std::optional<at::Tensor> & weight"
+        )
+        self.assertIn("self.sizes()", gate)
+        self.assertNotIn("numel()", gate)
+
+    def test_tma_preludes_bound_their_derived_extents(self):
+        # The generator cannot see a value a prelude computes, so the declarations that
+        # reshape to 2-D own bounding it: they hand `static_cast<int32_t>(N)` and a
+        # collapsed `size(1)` to int32_t ABI shape slots, and (2, 2, 2**30) -- every dim
+        # far under the limit -- collapses to N = 2**31 and silently left 256 elements
+        # un-accumulated. Checked here because this is the only torch-free suite that
+        # reads the declarations, and the two sides are otherwise unlinked.
+        for op in ("scatter_add", "index_add"):
+            with self.subTest(op=op):
+                path = os.path.join(export.OPS_DIR, op, "aot.py")
+                if not os.path.exists(path):  # earlier commit of the stack
+                    continue
+                with open(path) as f:
+                    src = f.read()
+                self.assertIn("const int64_t N = ", src, f"{op}: no derived extent")
+                self.assertIn(
+                    "_naot_dim_too_big(N)",
+                    src,
+                    f"{op} derives a collapsed extent and must bound it",
+                )
+
+    def test_unhandled_tensor_like_types_are_refused(self):
+        # torchgen renders Tensor? as at::OptionalTensorRef and Tensor[] as
+        # at::ITensorListRef in structured impl signatures; neither fits the
+        # accessors the gate emits, and guessing would either leave a dim
+        # ungated or emit C++ that does not compile.
+        for params in (
+            "const at::Tensor & self, at::OptionalTensorRef bias",
+            "const at::ITensorListRef & tensors",
+            "const c10::List<::std::optional<at::Tensor>> & indices",
+        ):
+            with self.subTest(params=params):
+                with self.assertRaisesRegex(RuntimeError, "unhandled tensor-like"):
+                    gen_aot_lib._int32_size_gate(params)
+
+    def test_scalar_only_signature_emits_nothing(self):
+        self.assertEqual(gen_aot_lib._int32_size_gate("int64_t k, bool largest"), "")
+
+
 class TestRegistryConsistency(unittest.TestCase):
     def test_link_exts_must_be_a_subset_of_artifact_exts(self):
         # Generation iterates artifact_exts and links `if ext in link_exts`, so a
@@ -1360,6 +1863,62 @@ class TestRegistryConsistency(unittest.TestCase):
         # The import-time call, re-run explicitly so this is a test rather than a
         # side effect of collection.
         toolchains._assert_link_exts_are_exportable(toolchains.TOOLCHAINS)
+
+
+class TestSpecRoundTrip(unittest.TestCase):
+    def test_tuple_grid_values_reach_the_declaration_as_tuples(self):
+        # The grid distinguishes a list (an axis) from a tuple (one compound
+        # value), but JSON has only arrays. Unrestored, `spec["dtypes"] ==
+        # ("f32", "bf16")` was silently False in a declaration's cpp_dispatch --
+        # emitting a cond that never fires, so the kernel shipped, linked, and
+        # declined every call -- and `_CTYPE[spec["dtypes"]]` raised "unhashable
+        # type: 'list'" inside generation.
+        restored = gen_aot_lib._spec_from_json(
+            {"dtypes": ["f32", "bf16"], "N": 1024, "pairs": [[1, 2], [3, 4]]}
+        )
+        self.assertEqual(restored["dtypes"], ("f32", "bf16"))
+        self.assertEqual(restored["pairs"], ((1, 2), (3, 4)))
+        self.assertEqual(restored["N"], 1024)
+
+    def test_a_tuple_spec_survives_the_sidecar_round_trip(self):
+        # The restore is exact rather than a guess: expand_specs consumed every
+        # list as an axis, so a sequence still in a recorded point was a tuple.
+        (point,) = export.expand_specs([{"dtypes": ("f32", "bf16"), "N": 1024}])
+        self.assertEqual(point["dtypes"], ("f32", "bf16"))
+        recorded = json.loads(json.dumps(export._json_normal(point)))
+        self.assertEqual(recorded["dtypes"], ["f32", "bf16"])
+        self.assertEqual(gen_aot_lib._spec_from_json(recorded), point)
+
+    def test_the_generator_hands_cpp_dispatch_the_restored_spec(self):
+        # The CALL SITE, not just _spec_from_json: dropping the restore in gen_op
+        # left the direct test above green, the same shape as validate_abi's
+        # missing call-site test. A declaration comparing a tuple-valued field
+        # then sees a list and emits a cond that never fires.
+        seen = {}
+
+        class _TupleDecl(_FakeDecl):
+            @staticmethod
+            def cpp_dispatch(spec):
+                seen.update(spec)
+                return "true"
+
+            @staticmethod
+            def cpp_launch(spec, launch_fn):
+                return launch_fn + "();"
+
+        sc = dict(
+            SIDECAR,
+            spec=json.loads(json.dumps({"dtypes": ["f32", "bf16"], "N": 1, "K": 8})),
+            _dir="/art",
+        )
+        gen_aot_lib.gen_op(
+            op="fakeop",
+            key="CUDA",
+            d=_TupleDecl,
+            sidecars=[sc],
+            impl_params="const at::Tensor & self, int64_t k",
+        )
+        self.assertEqual(seen["dtypes"], ("f32", "bf16"))
 
 
 class TestClaimedSpellingPreference(unittest.TestCase):
@@ -1471,6 +2030,103 @@ class TestSourceClosureCoversVendoredKernels(unittest.TestCase):
             self.assertEqual(closure[rel], export._file_hash(path))
 
 
+class TestGeneratedCoversGuards(unittest.TestCase):
+    """The covers predicate is registered as a catch-all custom op, so the router
+    calls it for ANY dispatch of that op -- CPU tensors included, on hosts with no
+    GPU at all."""
+
+    def _gen(self, params="const at::Tensor & self, int64_t k", covers_schema=None):
+        # N and K: _FakeDecl.cpp_dispatch reads both.
+        sc = dict(
+            SIDECAR,
+            spec={"N": 1024, "K": 8},
+            _dir="/art",
+            tensor_args=[{"name": "mX", "dynamic_sizes": [0], "dynamic_strides": [0]}],
+        )
+        schema = covers_schema or "covers_fakeop(Tensor self, int k) -> bool"
+        return gen_aot_lib.gen_op(
+            op="fakeop",
+            key="CUDA",
+            d=_FakeDecl,
+            sidecars=[sc],
+            impl_params=params,
+            covers=(params, schema, "return self.is_cuda();"),
+        )
+
+    def test_the_covers_body_checks_is_cuda_before_reading_properties(self):
+        # Untested before: the string "is_cuda" appeared nowhere in this file, and
+        # deleting the guard left the suite green. getDeviceProperties(-1) falls
+        # back to the CURRENT device, so a CPU tensor initializes a CUDA context
+        # from inside a predicate the router runs on every call -- and on a
+        # GPU-less host it ABORTS (num_gpus=0) where the answer is simply false.
+        src = self._gen()
+        body = src.split("_covers(", 1)[1]
+        guard = body.index("is_cuda()")
+        props = body.index("getDeviceProperties")
+        self.assertLess(guard, props, "is_cuda must be checked BEFORE the props read")
+        self.assertIn("if (!self.is_cuda()) return false;", src)
+
+    def test_covers_reads_the_tensors_device_not_the_current_one(self):
+        # The router calls covers before any device guard, so on a mixed-capability
+        # host the current device need not be the one the op will run on.
+        src = self._gen()
+        self.assertIn("getDeviceProperties(self.device().index())", src)
+
+    def test_a_covers_signature_without_a_tensor_is_refused(self):
+        # Nothing to ask is_cuda() of, and falling back to current-device
+        # properties reintroduces the abort above. Refused at generation, where an
+        # author sees it, rather than shipped.
+        with self.assertRaisesRegex(RuntimeError, "plain at::Tensor"):
+            self._gen(params="const at::ITensorListRef & tensors, int64_t dim")
+
+    def test_a_double_quoted_schema_default_is_escaped(self):
+        # 15 in-tree schemas carry one (str mode="constant" on pad, str
+        # padding="valid" on conv1d.padding, str UPLO="L" on _linalg_eigh).
+        # Unescaped it closed the C++ string literal early: a compile error inside
+        # a @generated file, far from the declaration that caused it.
+        src = self._gen(
+            covers_schema='covers_fakeop(Tensor self, str mode="constant") -> bool'
+        )
+        self.assertIn(r"str mode=\"constant\"", src)
+        # ...and the literal is still one argument: nothing between the escaped
+        # quotes ends it.
+        line = next(l for l in src.splitlines() if "m.def(" in l)
+        self.assertEqual(line.count('", &::'), 1)
+
+
+class TestSizeGateIsPerKindNotPerFile(unittest.TestCase):
+    def test_one_narrowing_kind_among_several_emits_the_gate(self):
+        # `narrows = any(...)` read as `all(...)` passed identically, because every
+        # existing case builds a single-kind sidecar list. The mixed list is the
+        # only shape that tells them apart -- and `all` would drop the gate for a
+        # file that DOES carry a narrowing kernel, so a dim past INT32_MAX would
+        # be truncated instead of declined.
+        class _Wide(toolchains.Toolchain):
+            kind = "wide"
+            NARROWS_SHAPES_TO_INT32 = False
+            artifact_exts = (".o",)
+            link_exts = (".o",)
+
+            def gen_launcher(self, sidecar):
+                return f"void launch_{sidecar['prefix']}() {{}}"
+
+            def kernel_includes(self, sidecar):
+                return []
+
+        spec = {"N": 1024, "K": 8}
+        narrowing = dict(SIDECAR, prefix="k_narrow", spec=spec, _dir="/art")
+        wide = dict(SIDECAR, prefix="k_wide", kind="wide", spec=spec, _dir="/art")
+        with mock.patch.dict(toolchains.TOOLCHAINS, {"wide": _Wide()}, clear=False):
+            src = gen_aot_lib.gen_op(
+                op="fakeop",
+                key="CUDA",
+                d=_FakeDecl,
+                sidecars=[wide, narrowing],
+                impl_params="const at::Tensor & self, int64_t k",
+            )
+        self.assertIn("_naot_dim_too_big", src)
+
+
 class TestExportMain(unittest.TestCase):
     """export.main() had no coverage at all, including the TORCH_CUDA_ARCH_LIST
     translation that another comment in the same file depends on: _CLOSURE_EXCLUDED
@@ -1548,6 +2204,25 @@ class TestCollectJobsRefusals(unittest.TestCase):
                     ):
                         with self.assertRaisesRegex(RuntimeError, "compute capability"):
                             export._collect_jobs(None, out, [bad])
+
+    def test_a_malformed_archs_entry_is_refused_at_load(self):
+        # _SM_RE accepts "sm_9" and "sm_1000", which name no capability. Refused by
+        # the LOADER, which is the only place that knows which file to name -- and
+        # because export compares ARCHS by string, a typo there silently matched
+        # nothing, so the op was absent from the build with no diagnostic.
+        for bad in ("sm_9", "sm_1000"):
+            with self.subTest(archs=bad):
+                with tempfile.TemporaryDirectory() as ops:
+                    _write_fake_decl(ops, f"ARCHS = ({bad!r},)\n")
+                    path = os.path.join(ops, "fakeop", "aot.py")
+                    with self.assertRaisesRegex(RuntimeError, "compute capability"):
+                        gen_aot_lib.decl.load_declarations(path)
+                    # ...and the message names the file, which a refusal from
+                    # inside export could not.
+                    try:
+                        gen_aot_lib.decl.load_declarations(path)
+                    except RuntimeError as e:
+                        self.assertIn("aot.py", str(e))
 
     def test_a_declaration_that_ships_nothing_says_so(self):
         # ARCHS spelling is load-bearing on the explicit path: a declaration
@@ -1664,6 +2339,150 @@ class TestOrphanCheckIsCalled(unittest.TestCase):
             ):
                 with self.assertRaisesRegex(RuntimeError, "no sidecar"):
                     export._collect_jobs(None, out, [None])
+
+
+class TestParamListSplitting(unittest.TestCase):
+    """Both the size gate and the covers device read pick parameters out of a
+    rendered C++ signature, so the split has to survive a template argument
+    list that contains a comma."""
+
+    def test_top_level_split_keeps_template_args_intact(self):
+        params = (
+            "const at::Tensor & self, std::array<bool, 3> mask, "
+            "const std::optional<at::Tensor>& out"
+        )
+        self.assertEqual(
+            gen_aot_lib._split_params(params),
+            [
+                "const at::Tensor & self",
+                "std::array<bool, 3> mask",
+                "const std::optional<at::Tensor>& out",
+            ],
+        )
+
+    def test_gate_sees_a_comma_bearing_type_whole(self):
+        # The refusal below exists to stop a guess at an unknown tensor-shaped
+        # type. It can only be honest if it is handed the WHOLE type: split on
+        # every comma, the classifier judges the fragment "at::Tensor>" and
+        # names that in the error, sending the next author after a type that
+        # does not appear in their signature.
+        with self.assertRaisesRegex(RuntimeError, r"std::pair<at::Tensor, at::Tensor>"):
+            gen_aot_lib._int32_size_gate(
+                "const at::Tensor & self, std::pair<at::Tensor, at::Tensor> pr"
+            )
+
+    def test_non_tensor_comma_bearing_type_is_not_gated(self):
+        gate = gen_aot_lib._int32_size_gate(
+            "const at::Tensor & self, std::array<bool, 3> mask, "
+            "const std::optional<at::Tensor>& out"
+        )
+        self.assertIn("self.sizes().begin()", gate)
+        self.assertIn("out.has_value()", gate)
+        self.assertNotIn("mask", gate)
+
+
+class TestSizeGateIsPerToolchain(unittest.TestCase):
+    """The i32 size gate belongs to kinds whose exported ABI takes i32
+    extents (CuTeDSL), not to every AOT op."""
+
+    class _Decl:
+        ATEN_OP = "fakeop"
+        DISPATCH_KEY = "CUDA"
+        ARCHS = ("sm_100a",)
+
+        def cpp_dispatch(self, spec):
+            return "true"
+
+        def cpp_launch(self, spec, fn):
+            return f"{fn}(self, k, at::cuda::getCurrentCUDAStream());"
+
+    _SC = {
+        "prefix": "p",
+        "spec": {"N": 1},
+        "tensor_args": [{"name": "self", "dynamic_sizes": [0], "dynamic_strides": [0]}],
+        "arch": "sm_100a",
+    }
+
+    def _gen(self, kind):
+        return gen_aot_lib.gen_op(
+            "fakeop",
+            "CUDA",
+            self._Decl(),
+            [dict(self._SC, kind=kind)],
+            "const at::Tensor & self, int64_t k",
+        )
+
+    def test_narrowing_kind_gets_gate_and_helper(self):
+        src = self._gen("cutedsl")
+        self.assertIn("// Size gate:", src)
+        self.assertIn("inline bool _naot_dim_too_big", src)
+
+    def test_non_narrowing_kind_gets_neither(self):
+        # An unused inline helper would otherwise sit in every generated
+        # file, and the gate would decline dims the kernel could serve.
+        class _Wide(toolchains.CuteDslToolchain):
+            kind = "wide"
+            NARROWS_SHAPES_TO_INT32 = False
+
+        with mock.patch.dict(toolchains.TOOLCHAINS, {"wide": _Wide()}, clear=False):
+            src = self._gen("wide")
+        self.assertNotIn("// Size gate:", src)
+        self.assertNotIn("_naot_dim_too_big", src)
+
+
+class TestSelectiveIncludes(unittest.TestCase):
+    """torch/library.h pulls the dispatcher in (~110 transitive headers), and
+    only the cpp_covers registration needs it."""
+
+    _SC = {
+        "prefix": "p",
+        "spec": {"N": 1024, "K": 8},  # _FakeDecl.cpp_dispatch reads both
+        "kind": "cutedsl",
+        "arch": "sm_100a",
+        "tensor_args": [{"name": "self", "dynamic_sizes": [0], "dynamic_strides": [0]}],
+    }
+    _COVERS = (
+        "const at::Tensor & self",
+        "fakeop(Tensor self) -> bool",
+        "return true;",
+    )
+
+    def _gen(self, covers):
+        return gen_aot_lib.gen_op(
+            "fakeop",
+            "CUDA",
+            _FakeDecl,
+            [self._SC],
+            "const at::Tensor & self",
+            covers,
+        )
+
+    def test_library_header_omitted_without_covers(self):
+        src = self._gen(None)
+        self.assertNotIn("#include <torch/library.h>", src)
+        self.assertFalse(
+            any(l.startswith("TORCH_LIBRARY_FRAGMENT") for l in src.splitlines())
+        )
+
+    def test_library_header_present_with_covers(self):
+        src = self._gen(self._COVERS)
+        self.assertIn("#include <torch/library.h>", src)
+        self.assertTrue(
+            any(l.startswith("TORCH_LIBRARY_FRAGMENT") for l in src.splitlines())
+        )
+
+    def test_always_needed_headers_are_unconditional(self):
+        # These are used by every generated file (stub registration, launcher
+        # stream narrowing, the arch gate's device query).
+        src = self._gen(None)
+        for h in (
+            "<ATen/core/Tensor.h>",
+            "<ATen/NativeAotStubs.h>",
+            "<ATen/cuda/CUDAContext.h>",
+            "<c10/cuda/CUDAStream.h>",
+        ):
+            with self.subTest(header=h):
+                self.assertIn(f"#include {h}", src)
 
 
 class TestMissingArtifacts(unittest.TestCase):
