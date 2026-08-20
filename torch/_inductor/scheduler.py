@@ -8481,7 +8481,8 @@ class Scheduler:
                 shared_data_score = new_shared_data_score
 
         if (
-            config.loop_index_inversion_in_fusion
+            reduction_epilogue is None
+            and config.loop_index_inversion_in_fusion
             and shared_data_score < config.score_fusion_memory_threshold
         ):
             new_shared_data_score = self.shared_data_after_inverting_indexing(
@@ -8511,7 +8512,10 @@ class Scheduler:
                     prevalidated_dep_names=prevalidated_dep_names,
                 )
                 and V.choices.can_fuse_vertical(self, node1, node2, shared_data_score)
-                and self.get_backend(device).can_fuse_vertical(node1, node2)
+                and (
+                    reduction_epilogue is not None
+                    or self.get_backend(device).can_fuse_vertical(node1, node2)
+                )
             ):
                 return True
 
@@ -8520,7 +8524,8 @@ class Scheduler:
             # writes buf[x]).  Try reindexing the pointwise to the
             # reduction's domain and retry.
             if (
-                config.loop_reindexing_after_fusion
+                reduction_epilogue is None
+                and config.loop_reindexing_after_fusion
                 and self._try_reindex_pointwise_for_reduction(node1, node2)
             ):
                 return (

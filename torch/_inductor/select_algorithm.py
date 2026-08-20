@@ -834,7 +834,7 @@ class TritonTemplateKernel(TritonKernel):
         node: Any,
         template_tile_buffers: OrderedSet[str],
         node_index: int,
-    ) -> bool:
+    ) -> None:
         block = self.template_local_reduction_block
         tile = self.template_local_reduction_tile
         if block is None or tile is None:
@@ -847,7 +847,7 @@ class TritonTemplateKernel(TritonKernel):
         if not numels:
             node.codegen(self.split_and_set_ranges(node.get_ranges()))
             template_tile_buffers.update(node.get_buffer_names())
-            return False
+            return
 
         range_trees, input_shape, output_shape = self._template_local_range_trees(
             node, numels, tile, block, node_index
@@ -889,7 +889,6 @@ class TritonTemplateKernel(TritonKernel):
                 node.restore_loop_state(loop_state)
             self.codegen_body()
         template_tile_buffers.difference_update(node.get_buffer_names())
-        return True
 
     @property
     def index_dtype(self) -> str:
@@ -2198,14 +2197,13 @@ class TritonTemplateKernel(TritonKernel):
                 subgraph_name = self._get_store_output_subgraph_name(i)
                 with self.set_subgraph_body(subgraph_name):
                     template_tile_buffers = OrderedSet([self.output_node.get_name()])
-                    local_node_index = 0
-                    for node in self._epilogue_nodes_by_subgraph[i]:
+                    for node_index, node in enumerate(
+                        self._epilogue_nodes_by_subgraph[i]
+                    ):
                         if self.template_local_reduction_block is not None:
-                            uses_local_ranges = self._codegen_template_epilogue_node(
-                                node, template_tile_buffers, local_node_index
+                            self._codegen_template_epilogue_node(
+                                node, template_tile_buffers, node_index
                             )
-                            if uses_local_ranges:
-                                local_node_index += 1
                         else:
                             node.codegen(self.split_and_set_ranges(node.get_ranges()))
                     self.cse.invalidate(OrderedSet())

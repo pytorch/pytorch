@@ -1023,7 +1023,7 @@ class TestFP8Lowering(TestCase):
         ).check(f"SCALE_RECIPE_B : tl.constexpr = {ScalingType.TensorWise.value}").run(
             code[0]
         )
-        FileCheck().check_not("block_local_xindex").run(code[0])
+        FileCheck().check_not("block_local_").run(code[0])
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @onlyOn(["cuda", "xpu", "cpu"])

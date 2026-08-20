@@ -8423,13 +8423,6 @@ class TritonScheduling(SIMDScheduling):
                 return None
         return block
 
-    def can_fuse_vertical(
-        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
-    ) -> bool:
-        if node1.is_template() and node2.is_reduction():
-            return self.analyze_reduction_epilogue(node1, node2) is not None
-        return super().can_fuse_vertical(node1, node2)
-
     def analyze_reduction_epilogue(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> ReductionEpilogueFusion | None:
