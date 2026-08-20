@@ -106,16 +106,12 @@ def device_to_aten(device_type: str) -> str:
     try:
         overrides = get_device_op_overrides(device_type)
     except KeyError as exc:
-        raise RuntimeError(
-            f"No ATen device type mapping for {device_type}"
-        ) from exc
+        raise RuntimeError(f"No ATen device type mapping for {device_type}") from exc
 
     try:
         aten_device_type = overrides.aten_device_type()
     except NotImplementedError as exc:
-        raise RuntimeError(
-            f"No ATen device type mapping for {device_type}"
-        ) from exc
+        raise RuntimeError(f"No ATen device type mapping for {device_type}") from exc
 
     if (
         not isinstance(aten_device_type, str)
