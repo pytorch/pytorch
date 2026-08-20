@@ -51,7 +51,7 @@ class TestFullyShardAutograd(FSDPTest):
                 param.grad.div_(group.size())
 
     @skip_if_lt_x_gpu(2)
-    def test_unused_forward_output(self):
+    def test_unused_forward_output(self, device):
         """
         Tests that gradients propagate when running a backward where some
         forward output is not used to compute the loss, motivated by:
@@ -97,7 +97,7 @@ class TestFullyShardAutograd(FSDPTest):
             check_sharded_parity(self, ref_model, model)
 
     @skip_if_lt_x_gpu(2)
-    def test_unused_forward_module(self):
+    def test_unused_forward_module(self, device):
         """
         Tests that gradients propagate when running a backward where some
         forward module is not used to compute the loss, motivated by:
@@ -139,7 +139,7 @@ class TestFullyShardAutograd(FSDPTest):
                 _optim.zero_grad(set_to_none=(iter_idx % 2))
 
     @skip_if_lt_x_gpu(2)
-    def test_nontensor_activations(self):
+    def test_nontensor_activations(self, device):
         """
         Tests that gradients propagate when running forward with nontensor
         data structures wrapping the activations. This is mainly to test the
@@ -286,7 +286,7 @@ class TestFullyShardPostAccGradHookMultiProcess(FSDPTest):
         return min(torch.get_device_module(device_type).device_count(), 2)
 
     @skip_if_lt_x_gpu(2)
-    def test_post_acc_grad_hook_optim_parity(self):
+    def test_post_acc_grad_hook_optim_parity(self, device):
         """
         Tests parity of running the optimizer via the post-accumulate-grad
         hook vs. normally.
