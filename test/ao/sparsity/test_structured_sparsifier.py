@@ -69,6 +69,8 @@ class BottomHalfLSTMPruner(BaseStructuredSparsifier):
 
 
 class TestSaliencyPruner(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @dtypes(torch.float)
     def test_saliency_pruner_update_mask(self, device, dtype):
         """Test that we prune out the row with the lowest saliency (first row)"""
@@ -1000,6 +1002,8 @@ class TestFPGMPruner(TestCase):
     Test case for the implementation of paper:
     `Filter Pruning via Geometric Median for Deep Convolutional Neural Networks Acceleration <https://arxiv.org/abs/1811.00250>`_.
     """
+
+    hw_classification = HardwareClassification.ACCELERATOR
 
     class SimpleConvFPGM(nn.Module):
         def __init__(self) -> None:

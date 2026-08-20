@@ -17,10 +17,16 @@ from torch.testing._internal.common_pruning import (
     MockSparseLinear,
     SimpleLinear,
 )
-from torch.testing._internal.common_utils import raise_on_run_directly, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    raise_on_run_directly,
+    TestCase,
+)
 
 
 class TestBaseSparsifier(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_constructor(self):
         # Cannot instantiate the abstract base
         self.assertRaises(TypeError, BaseSparsifier)
@@ -338,6 +344,8 @@ class TestBaseSparsifier(TestCase):
 
 
 class TestWeightNormSparsifier(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_constructor(self):
         model = SimpleLinear()
         sparsifier = WeightNormSparsifier()
@@ -502,6 +510,8 @@ class TestWeightNormSparsifier(TestCase):
 
 
 class TestNearlyDiagonalSparsifier(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_constructor(self):
         model = SimpleLinear()
         sparsifier = NearlyDiagonalSparsifier(nearliness=1)
