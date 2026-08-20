@@ -2921,7 +2921,7 @@ class TestFakeTensor(TestCase):
                             self.assertEqual(fake_out, real_out)
                             continue
 
-                        self.assertTrue(isinstance(fake_out, FakeTensor))
+                        self.assertTrue(is_fake_tensor(fake_out))
                         # if you see a shape exception here, you may need to add
                         # a `dynamic_output_shape` tag to an operator
 
