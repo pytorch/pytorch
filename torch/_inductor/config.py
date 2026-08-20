@@ -3065,11 +3065,17 @@ _cache_config_ignore_prefix: list[str] = [
     "autotune_remote_cache",
 ]
 
-# Config keys whose values are callable factories. save_config_portable will
-# instantiate the factory and use .uuid() for serialization.
-_cache_config_factory_keys: list[str] = [
-    "inductor_choices_class",
-]
+
+def _serialize_inductor_choices(config: dict[str, Any]) -> None:
+    from .choices import inductor_choices_cache_key
+
+    if "inductor_choices_class" in config:
+        config["inductor_choices_class"] = inductor_choices_cache_key(
+            config["inductor_choices_class"]
+        )
+
+
+_cache_config_serializer = _serialize_inductor_choices
 
 # External callable for matmul tuning candidates
 external_matmul: list[Callable[[torch.Tensor, torch.Tensor, torch.Tensor], None]] = []
