@@ -1,13 +1,12 @@
 # Owner(s): ["module: dsl-native-ops"]
 
-import os
 import unittest
-from unittest.mock import patch
 
 import torch
 import torch.backends.python_native as pn
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -65,53 +64,14 @@ def _unsupported_environment_reason() -> str | None:
     if not fu._version_is_ok():
         return f"FlyDSL {fu.runtime_version()} is outside the supported release"
 
-    from torch._native.ops.norm.flydsl_rmsnorm_impl import _is_supported_arch
+    from torch._native.ops.norm.flydsl_rmsnorm_impl import _SUPPORTED_ARCHES
 
-    if not _is_supported_arch(torch.cuda.current_device()):
+    if not fu._is_supported_arch(torch.cuda.current_device(), _SUPPORTED_ARCHES):
         return "FlyDSL RMSNorm override requires gfx950"
     return None
 
 
 _UNSUPPORTED_REASON = _unsupported_environment_reason()
-
-
-class TestFlyDSLRMSNormArch(TestCase):
-    @parametrize(
-        "arch,expected",
-        (
-            ("gfx950", True),
-            # _resolve_rocm_arch returns HSA_OVERRIDE_GFX_VERSION verbatim, so
-            # the gate has to tolerate feature flags rather than compare the
-            # whole string.
-            ("gfx950:sramecc+", True),
-            ("gfx950:sramecc+:xnack-", True),
-            ("gfx942", False),
-            ("gfx942:sramecc+", False),
-            (None, False),
-        ),
-    )
-    def test_arch_gate_allows_only_gfx950(self, arch, expected):
-        import torch._native.ops.norm.flydsl_rmsnorm_impl as flydsl_rmsnorm_impl
-
-        arch_is_supported = flydsl_rmsnorm_impl._is_supported_arch
-        arch_is_supported.cache_clear()
-        self.addCleanup(arch_is_supported.cache_clear)
-        with patch.object(
-            flydsl_rmsnorm_impl.fu, "_resolve_rocm_arch", return_value=arch
-        ):
-            self.assertEqual(arch_is_supported(0), expected)
-
-    def test_arch_gate_is_resolved_once_per_process(self):
-        import torch._native.ops.norm.flydsl_rmsnorm_impl as flydsl_rmsnorm_impl
-
-        arch_is_supported = flydsl_rmsnorm_impl._is_supported_arch
-        arch_is_supported.cache_clear()
-        self.addCleanup(arch_is_supported.cache_clear)
-
-        with patch.dict(os.environ, {"FLYDSL_GPU_ARCH": "gfx950"}):
-            self.assertTrue(arch_is_supported(0))
-        with patch.dict(os.environ, {"FLYDSL_GPU_ARCH": "gfx942"}):
-            self.assertTrue(arch_is_supported(0))
 
 
 class TestFlyDSLRMSNormHelpers(TestCase):
@@ -140,22 +100,6 @@ class TestFlyDSLRMSNormHelpers(TestCase):
         from torch._native.ops.norm.flydsl_rmsnorm_utils import normalized_shape_1d
 
         self.assertEqual(normalized_shape_1d(normalized_shape), expected)
-
-    @parametrize(
-        "rows_m,n,itemsize,expected",
-        (
-            (2048, 114688, 4, True),
-            (16383, 65536, 4, True),
-            (16384, 65536, 4, False),
-            (16385, 65536, 4, False),
-            (1 << 31, 1, 1, False),
-            (1, 1 << 31, 1, False),
-        ),
-    )
-    def test_flydsl_buffer_span(self, rows_m, n, itemsize, expected):
-        from torch._native.ops.norm.flydsl_rmsnorm_impl import _fits_int32_buffer_span
-
-        self.assertEqual(_fits_int32_buffer_span(rows_m, n, itemsize), expected)
 
     def test_impl_without_weight_raises(self):
         # The predicate declines weight=None, so reaching the impl means a
@@ -454,6 +398,31 @@ class TestFlyDSLRMSNorm(TestCase):
         self.assertEqual(got, ref)
         self.assertEqual(got_rstd, ref_rstd)
 
+    @largeTensorTest("9GB", device="cuda")  # 3.5 GiB in and out
+    def test_large_span_matches_aten(self):
+        # Nothing else here clears 0.5 GiB, so if FlyDSL ever indexed in signed
+        # 32-bit bytes, rows past the crossover would read out of bounds unseen.
+        from torch._native.ops.norm.flydsl_rmsnorm_fwd import rmsnorm_cache_info
+
+        m, n = 8192, 114688
+        x, weight = self._make_inputs(m, n, torch.float32)
+        got, got_rstd = torch.ops.aten._fused_rms_norm(x, [n], weight, EPS)
+        self.assertEqual(rmsnorm_cache_info()["fwd"].misses, 1)
+
+        # rms_norm is row-independent, so only rows around the crossover need a
+        # reference; comparing the whole tensor would hide a broken tail.
+        crossover = ((1 << 31) - 1) // (n * x.element_size())
+        self.assertLess(crossover, m)
+        rows = torch.tensor(
+            [0, crossover - 1, crossover, crossover + 1, m - 1], device=x.device
+        )
+        probe = x[rows].contiguous()
+        with pn.flydsl.disabled():
+            ref, ref_rstd = torch.ops.aten._fused_rms_norm(probe, [n], weight, EPS)
+
+        self.assertEqual(got[rows], ref)
+        self.assertEqual(got_rstd[rows], ref_rstd)
+
     def test_nd_input_dispatches_and_matches_aten(self):
         # rmsnorm_fwd flattens to (M, N) and rebuilds a different stat_shape for
         # ndim != 2, and (batch, seq, hidden) is what a model actually passes --
@@ -584,7 +553,6 @@ class TestFlyDSLRMSNorm(TestCase):
         self.assertEqual(rmsnorm_cache_info()["fwd"].misses, 1)
 
 
-instantiate_parametrized_tests(TestFlyDSLRMSNormArch)
 instantiate_parametrized_tests(TestFlyDSLRMSNormHelpers)
 instantiate_parametrized_tests(TestFlyDSLRMSNorm)
 
