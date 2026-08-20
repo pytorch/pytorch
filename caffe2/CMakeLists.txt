@@ -1039,6 +1039,16 @@ elseif(USE_CUDA)
   torch_compile_options(torch_cuda)  # see cmake/public/utils.cmake
   target_compile_definitions(torch_cuda PRIVATE USE_CUDA)
 
+  # native-AOT: embed the AOT-exported DSL kernels into torch_cuda.
+  #
+  # ONE include, and no logic here on purpose. tools/native_aot/gen_aot_lib.py
+  # decides everything -- sources, objects, the version script, the DSL runtime
+  # archive, the TORCH_NATIVE_AOT opt-out -- and EMITS this file as the resulting
+  # CMake calls. OPTIONAL, so a tree that embeds nothing does nothing. Stage 2
+  # reconfigures explicitly after writing it, so its appearance needs no
+  # CONFIGURE_DEPENDS bootstrap.
+  include("${CMAKE_BINARY_DIR}/native_aot/native_aot.cmake" OPTIONAL)
+
   if(USE_CUFILE)
     target_link_libraries(torch_cuda PRIVATE torch::cufile)
     target_compile_definitions(torch_cuda PRIVATE USE_CUFILE)

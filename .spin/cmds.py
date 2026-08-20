@@ -569,6 +569,17 @@ def _pip_install_cmd(editable):
     return cmd + [".", "-v", "--no-build-isolation"]
 
 
+def _native_aot_stage2():
+    # Post-install: the kernel builders import the installed torch, and
+    # scikit-build-core has no post-build hook inside the PEP 517 backend.
+    #
+    # Skips cleanly, printing why, when AOT kernels do not apply (build_stage2.py
+    # lists the conditions) -- but NOT for a missing DSL runtime, which is a hard
+    # error once it decides to export. So on a machine with an exportable GPU this
+    # needs the DSL wheels installed, or TORCH_NATIVE_AOT=0.
+    spin.util.run([sys.executable, "tools/native_aot/build_stage2.py"])
+
+
 @click.command()
 def develop():
     """Build PyTorch (editable install).
@@ -579,6 +590,7 @@ def develop():
     CMakeLists.txt and the supported env vars in cmake/EnvVarForwarding.cmake.
     """
     spin.util.run(_pip_install_cmd(editable=True))
+    _native_aot_stage2()
 
 
 # Alias so `spin editable` also works.
@@ -596,6 +608,7 @@ def install():
     CMakeLists.txt and the supported env vars in cmake/EnvVarForwarding.cmake.
     """
     spin.util.run(_pip_install_cmd(editable=False))
+    _native_aot_stage2()
 
 
 PYREFLY_LINTER_SCRIPT = CWD / "tools" / "linter" / "adapters" / "pyrefly_linter.py"

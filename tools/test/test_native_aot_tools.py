@@ -13,6 +13,8 @@ import tempfile
 import types
 import unittest
 import unittest.mock as mock
+import zipfile
+from typing import Any
 
 # Ordinary package imports, like every other tools test (CI runs
 # `PYTHONPATH=$(pwd) pytest tools/test`). These modules keep their module
@@ -1959,6 +1961,194 @@ class TestEndToEndGeneration(unittest.TestCase):
                 sys.argv = argv
 
 
+class TestWheelPatch(unittest.TestCase):
+    LIB = "torch/lib/libtorch_cuda.so"
+
+    @staticmethod
+    def _rec(name, data):
+        """A RECORD line, implemented here rather than imported from the code
+        under test -- that is what lets the digest assertion actually fail."""
+        import base64
+        import hashlib
+
+        h = base64.urlsafe_b64encode(hashlib.sha256(data).digest())
+        return f"{name},sha256={h.rstrip(b'=').decode()},{len(data)}"
+
+    def _make_wheel(self, d: str, record_entry: bool = True) -> str:
+        import zipfile
+
+        rec = self._rec
+        whl = os.path.join(d, "torch-0.0-cp310-linux_x86_64.whl")
+        record = "torch-0.0.dist-info/RECORD"
+        lines = [rec("torch/__init__.py", b"x"), f"{record},,"]
+        if record_entry:
+            lines.insert(0, rec(self.LIB, b"OLD"))
+        with zipfile.ZipFile(whl, "w") as zf:
+            zf.writestr(self.LIB, b"OLD")
+            zf.writestr("torch/__init__.py", b"x")
+            zf.writestr(record, "\n".join(lines) + "\n")
+        return whl
+
+    def test_replaces_lib_and_record(self):
+        import zipfile
+
+        with tempfile.TemporaryDirectory() as d:
+            whl = self._make_wheel(d)
+            lib = os.path.join(d, "libtorch_cuda.so")
+            with open(lib, "wb") as f:
+                f.write(b"NEW" * 64)
+            build_stage2.patch_wheel(whl, lib)
+            with zipfile.ZipFile(whl) as zf:
+                self.assertEqual(zf.read(self.LIB), b"NEW" * 64)
+                lines = zf.read("torch-0.0.dist-info/RECORD").decode().splitlines()
+                # Independent expectation: computing it with the function under
+                # test made this pass with _wheel_hash_and_size switched to md5,
+                # i.e. a wheel whose RECORD pip rejects would ship green. rec()
+                # is this file's own implementation of the RECORD format.
+                self.assertIn(self._rec(self.LIB, b"NEW" * 64), lines)
+                # untouched members keep their RECORD entries; no dup names
+                self.assertTrue(any(x.startswith("torch/__init__.py,") for x in lines))
+                self.assertEqual(len(zf.namelist()), len(set(zf.namelist())))
+
+    def test_compression_is_preserved(self):
+        # The replaced member is the biggest thing in the wheel, and in CI that
+        # wheel is what every test shard downloads. Storing it uncompressed
+        # (ZIP_STORED, which this did) grows the artifact by the whole ratio of
+        # a ~1GB shared object, silently -- no test saw it because none looked
+        # at compress_type. Untouched members must keep theirs too, which is
+        # what the "copying members preserves compression" docstring claims.
+        import zipfile
+
+        with tempfile.TemporaryDirectory() as d:
+            whl = os.path.join(d, "torch-0.0-cp310-linux_x86_64.whl")
+            record = "torch-0.0.dist-info/RECORD"
+            # Deliberately mixed: DEFLATED for the lib and one member, STORED
+            # for another, so "preserved" cannot be satisfied by a constant.
+            with zipfile.ZipFile(whl, "w") as zf:
+                zf.writestr(self.LIB, b"OLD" * 999, zipfile.ZIP_DEFLATED)
+                zf.writestr("torch/big.py", b"y" * 4096, zipfile.ZIP_DEFLATED)
+                zf.writestr("torch/raw.bin", b"z" * 4096, zipfile.ZIP_STORED)
+                zf.writestr(record, f"{self.LIB},,\n{record},,\n")
+            lib = os.path.join(d, "libtorch_cuda.so")
+            with open(lib, "wb") as f:
+                f.write(b"NEW" * 999)
+            build_stage2.patch_wheel(whl, lib)
+            with zipfile.ZipFile(whl) as zf:
+                self.assertEqual(
+                    zf.getinfo(self.LIB).compress_type, zipfile.ZIP_DEFLATED
+                )
+                self.assertEqual(
+                    zf.getinfo("torch/big.py").compress_type, zipfile.ZIP_DEFLATED
+                )
+                self.assertEqual(
+                    zf.getinfo("torch/raw.bin").compress_type, zipfile.ZIP_STORED
+                )
+                self.assertEqual(zf.read(self.LIB), b"NEW" * 999)
+                self.assertEqual(zf.read("torch/raw.bin"), b"z" * 4096)
+
+    def test_members_are_streamed_not_read_whole(self):
+        # A CUDA wheel holds members in the hundreds of MiB; read()+writestr holds
+        # each one twice in memory on a machine already running a link. Asserted by
+        # watching for the read that must NOT happen, since the output is
+        # byte-identical either way.
+        import zipfile
+
+        with tempfile.TemporaryDirectory() as d:
+            whl = self._make_wheel(d)
+            lib = os.path.join(d, "libtorch_cuda.so")
+            with open(lib, "wb") as f:
+                f.write(b"NEW")
+            real_read = zipfile.ZipFile.read
+            reads = []
+
+            def spy(self, name, *a, **kw):
+                reads.append(name if isinstance(name, str) else name.filename)
+                return real_read(self, name, *a, **kw)
+
+            with mock.patch.object(zipfile.ZipFile, "read", spy):
+                build_stage2.patch_wheel(whl, lib)
+            # RECORD is read deliberately (it has to be rewritten); the payload
+            # members must not be.
+            self.assertNotIn("torch/__init__.py", reads)
+
+    def test_a_failed_rewrite_leaves_the_original_wheel_untouched(self):
+        # tmp + rename: an interrupted rewrite must not leave a half-written wheel
+        # where a valid one was, nor a .naot.tmp beside it.
+        import zipfile
+
+        with tempfile.TemporaryDirectory() as d:
+            whl = self._make_wheel(d)
+            with open(whl, "rb") as f:
+                before = f.read()
+            lib = os.path.join(d, "libtorch_cuda.so")
+            with open(lib, "wb") as f:
+                f.write(b"NEW")
+            with mock.patch.object(
+                build_stage2.shutil, "move", side_effect=OSError("simulated failure")
+            ):
+                with self.assertRaises(OSError):
+                    build_stage2.patch_wheel(whl, lib)
+            with open(whl, "rb") as f:
+                self.assertEqual(f.read(), before, "original wheel was modified")
+            self.assertEqual(
+                [f for f in os.listdir(d) if f.endswith(".naot.tmp")],
+                [],
+                "left a temp wheel behind",
+            )
+            # ...and it is still a readable zip.
+            with zipfile.ZipFile(whl) as zf:
+                self.assertIsNone(zf.testzip())
+
+    def test_zip64_stays_enabled(self):
+        # repair_wheel.py had to move off `wheel pack` because it emitted invalid
+        # ZIP64 above 4GB (pytorch#189748), and a CUDA wheel with embedded kernels
+        # is squarely in that range. Cannot be caught by a small fixture, so assert
+        # the flag reaches ZipFile.
+        seen = {}
+        real_init = zipfile.ZipFile.__init__
+
+        # mode as Any: ZipFile's overloads take a Literal, and a str parameter
+        # matches none of them.
+        def spy(self, file, mode: Any = "r", *a, **kw):
+            if mode == "w":
+                seen["allowZip64"] = kw.get("allowZip64")
+            return real_init(self, file, mode, *a, **kw)
+
+        with tempfile.TemporaryDirectory() as d:
+            whl = self._make_wheel(d)
+            lib = os.path.join(d, "libtorch_cuda.so")
+            with open(lib, "wb") as f:
+                f.write(b"NEW")
+            with mock.patch.object(zipfile.ZipFile, "__init__", spy):
+                build_stage2.patch_wheel(whl, lib)
+        self.assertIs(seen.get("allowZip64"), True)
+
+    def test_non_torch_wheel_is_refused(self):
+        # Nothing in the wheel to replace: a wrong --wheel argument (or a
+        # renamed member) must say so rather than silently produce a wheel with
+        # no kernels in it.
+        import zipfile
+
+        with tempfile.TemporaryDirectory() as d:
+            whl = os.path.join(d, "nottorch-0.0-py3-none-any.whl")
+            with zipfile.ZipFile(whl, "w") as zf:
+                zf.writestr("nottorch/__init__.py", b"x")
+                zf.writestr("notorch-0.0.dist-info/RECORD", "")
+            lib = os.path.join(d, "libtorch_cuda.so")
+            open(lib, "wb").close()
+            with self.assertRaisesRegex(RuntimeError, "not a torch wheel"):
+                build_stage2.patch_wheel(whl, lib)
+
+    def test_record_without_the_lib_entry_is_refused(self):
+        with tempfile.TemporaryDirectory() as d:
+            whl = self._make_wheel(d, record_entry=False)
+            lib = os.path.join(d, "libtorch_cuda.so")
+            with open(lib, "wb") as f:
+                f.write(b"NEW")
+            with self.assertRaisesRegex(RuntimeError, "RECORD has no entry"):
+                build_stage2.patch_wheel(whl, lib)
+
+
 class TestDeclarationStaleness(unittest.TestCase):
     def test_source_closure_includes_the_declaration(self):
         # Declarations load by file path and never enter sys.modules, so
@@ -2289,6 +2479,76 @@ class TestShouldRun(unittest.TestCase):
         # request -- on every CUDA build job.
         self.assertTrue(self._run(self.CUDA, self.ARCH, missing=("cutlass",)))
 
+    def _verdict(self, env):
+        """(stdout, stderr) of `--print-verdict`, captured separately."""
+        import io
+
+        out, err = io.StringIO(), io.StringIO()
+        # Every probe true EXCEPT the hip one: all-true means ROCm, which has no
+        # AOT toolchain and skips before reaching the arch logic under test.
+        probe = lambda e: e != "torch.version.hip is not None"  # noqa: E731
+        with contextlib.ExitStack() as stack:
+            # This goes through main() rather than _run, so it needs the same
+            # REPO redirect: without it the verdict depends on whether the
+            # checked-out commit has any declaration yet, and this test failed at
+            # the first three commits of the stack while passing at the tip.
+            repo = stack.enter_context(tempfile.TemporaryDirectory())
+            ops = os.path.join(repo, "torch", "_native", "ops")
+            os.makedirs(os.path.join(ops, "fakeop"))
+            open(os.path.join(ops, "fakeop", "aot.py"), "w").close()
+            stack.enter_context(mock.patch.object(build_stage2, "REPO", repo))
+            stack.enter_context(mock.patch.object(export, "OPS_DIR", ops))
+            # ...and the same platform patch, since should_run checks sys.platform
+            # first: without it this test failed on a non-Linux box.
+            stack.enter_context(mock.patch.object(sys, "platform", "linux"))
+            # ...and the same BUILD_DIR redirect, so the CMakeCache fallback for
+            # both variables cannot read the developer's own build tree -- carrying
+            # the CUDA major like _run's, because the >=13 gate reads it and an
+            # EMPTY cache falls through to the INSTALLED torch. That made these two
+            # pass here (a CUDA 13 box) and fail in lint.yml's torch-less "Test
+            # tools" image, where the verdict flips to SKIP.
+            build = stack.enter_context(tempfile.TemporaryDirectory())
+            with open(os.path.join(build, "CMakeCache.txt"), "w") as f:
+                f.write("CUDAToolkit_VERSION_MAJOR:STRING=13\n")
+            stack.enter_context(mock.patch.object(build_stage2, "BUILD_DIR", build))
+            # ...and the same env neutralization as _run: an exported
+            # TORCH_NATIVE_AOT=0 made the verdict SKIP and failed the purity
+            # assertion below. Applied before the caller's env, which overrides it.
+            stack.enter_context(
+                mock.patch.dict(
+                    os.environ,
+                    {"TORCH_NATIVE_AOT": "", "TORCH_CUDA_ARCH_LIST": ""},
+                    clear=False,
+                )
+            )
+            stack.enter_context(mock.patch.object(build_stage2, "_torch_probe", probe))
+            stack.enter_context(
+                mock.patch.object(
+                    toolchains.Toolchain,
+                    "missing_runtimes",
+                    classmethod(lambda cls: []),
+                )
+            )
+            stack.enter_context(mock.patch.dict(os.environ, env, clear=False))
+            stack.enter_context(contextlib.redirect_stdout(out))
+            stack.enter_context(contextlib.redirect_stderr(err))
+            build_stage2.main(["--print-verdict"])
+        return out.getvalue(), err.getvalue()
+
+    def test_verdict_stdout_carries_only_the_verdict(self):
+        # The shells compare with ==, so ANY other line on stdout breaks them.
+        # The multi-arch case is the one that reports and still proceeds, and it
+        # answered "-- native-AOT stage 2: multi-arch: ...\nRUN" until _report
+        # moved to stderr: no install, then a failed build.
+        out, err = self._verdict({"TORCH_CUDA_ARCH_LIST": "9.0;10.0"})
+        self.assertEqual(out, "RUN\n")
+        self.assertIn("multi-arch", err)
+
+    def test_verdict_stdout_is_clean_when_skipping(self):
+        out, err = self._verdict({"TORCH_NATIVE_AOT": "0"})
+        self.assertEqual(out, "SKIP\n")
+        self.assertIn("TORCH_NATIVE_AOT=0", err)
+
     def test_skips_when_no_declarations_exist(self):
         # No aot.py in the tree means stage 2 would export nothing, so demanding
         # ~190MB of DSL wheels for it is wrong -- and this is the state of the
@@ -2343,6 +2603,31 @@ class TestShouldRun(unittest.TestCase):
         )
         with mock.patch.object(build_stage2.subprocess, "run", return_value=lied):
             self.assertFalse(build_stage2._torch_probe("True"))
+
+    def test_probe_runs_outside_the_repo_root(self):
+        # cwd=HERE, not the repo root: `python -c` puts the cwd on sys.path, and
+        # from the root that imports the SOURCE torch/ tree instead of the
+        # installed wheel, so every probe would answer about the wrong torch.
+        # EVERY probe: a dict keyed on "cwd" kept only the last call.
+        seen = []
+
+        def fake_run(cmd, **kw):
+            seen.append(kw.get("cwd"))
+            return subprocess.CompletedProcess(
+                args=cmd,
+                returncode=0,
+                stdout="PROBE_OK\nNAOT_VALUE:/x/torch\n",
+                stderr="",
+            )
+
+        with mock.patch.object(build_stage2.subprocess, "run", fake_run):
+            build_stage2._torch_probe("True")
+            build_stage2._torch_value("1")
+            build_stage2._installed_lib_dir()
+        self.assertEqual(len(seen), 3, "all three probes should have run")
+        for cwd in seen:
+            self.assertEqual(cwd, build_stage2.HERE)
+            self.assertNotEqual(cwd, build_stage2.REPO)
 
     def test_probe_diagnostics_stay_off_stdout(self):
         # Exercises the REAL subprocess probe, which every other test in this
@@ -2568,6 +2853,98 @@ class TestGeneratedVersionScript(unittest.TestCase):
         self.assertTrue(patterns)
         for p in patterns:
             self.assertIn("topk_f32_n1024_k8", p, f"unanchored pattern: {p}")
+
+
+class TestEmbeddedSizeReport(unittest.TestCase):
+    """Embedded kernel bytes scale with declarations x precompile points x
+    arches, so an arch added to TORCH_CUDA_ARCH_LIST can grow the wheel by
+    tens of MiB. Nothing else in the build log states it."""
+
+    def test_counts_what_is_linked_not_what_is_on_disk(self):
+        # Read from the generated CMake, not by walking the tree: the tree
+        # also holds artifacts that lost the arch tie-break or came from an
+        # earlier build's arch list, and those are not linked. Walking it
+        # reported 8.2 MiB where 4.7 MiB shipped.
+        mib = 1 << 20
+        with tempfile.TemporaryDirectory() as tmpdir:
+            d = os.path.join(tmpdir, "sm_100a", "fakeop")
+            os.makedirs(d)
+            listed = []
+            for name, size in (("k0.o", mib), ("k1.o", mib)):
+                p = os.path.join(d, name)
+                with open(p, "wb") as f:
+                    f.truncate(size)  # sparse: only the reported size matters
+                listed.append(p)
+            # On disk but NOT listed: an unreferenced object and an ABI header.
+            # Both deliberately large, so counting either moves the figure. The
+            # generated source IS counted (a kind can embed its artifact there), but
+            # this fixture's is empty, so the total stays at the two objects.
+            for name in ("dead.o", "k0.h"):
+                with open(os.path.join(d, name), "wb") as f:
+                    f.truncate(8 * mib)
+            src = os.path.join(tmpdir, "aot_fakeop_cuda.cpp")
+            with open(src, "w") as f:
+                f.write("// generated\n")
+            gen_aot_lib.write_cmake_include(
+                tmpdir, [src], listed, os.path.join(tmpdir, "v.ver"), None, None
+            )
+            self.assertEqual(
+                build_stage2._artifact_size(tmpdir),
+                "2 object(s) + 1 generated source(s), 2.0 MiB",
+            )
+
+    def test_no_object_list_reports_nothing(self):
+        # Generation writes the list, so its absence means nothing was wired up.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self.assertIn("nothing", build_stage2._artifact_size(tmpdir))
+
+    def test_artifact_exts_are_shared_by_both_sweeps(self):
+        # One notion of "kernel artifact", exercised through BOTH sweeps with a
+        # toolchain neither knew about. Asserting that all_artifact_exts()
+        # contains each toolchain's exts proves nothing -- it is defined as
+        # their union, and would still pass if a sweep kept a private set.
+        class _Novel(toolchains.Toolchain):
+            kind = "novel"
+            artifact_exts = (".novelobj",)
+
+        with mock.patch.dict(toolchains.TOOLCHAINS, {"novel": _Novel()}, clear=False):
+            self.assertIn(".novelobj", toolchains.all_artifact_exts())
+            # Sweep 1: export's per-directory orphan check.
+            with tempfile.TemporaryDirectory() as d:
+                open(os.path.join(d, "k.novelobj"), "w").close()
+                with self.assertRaisesRegex(RuntimeError, "no sidecar"):
+                    export._check_no_orphan_artifacts(d, [])
+
+            # Sweep 2: generation's no-declaration check, which refuses to leave
+            # undeclared artifacts for the link glob to pick up.
+            # "fakeop" has artifacts but no declaration; "other" is declared, so
+            # by_id is non-empty (an empty one means "this commit declares
+            # nothing", which is deliberately NOT treated as orphaned).
+            class _OtherDecl(_FakeDecl):
+                ATEN_OP = "other"
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+                art = os.path.join(tmpdir, "sm_100a", "fakeop")
+                os.makedirs(art)
+                open(os.path.join(art, "k.novelobj"), "w").close()
+                ops = os.path.join(tmpdir, "_ops")
+                os.makedirs(os.path.join(ops, "other"))
+                open(os.path.join(ops, "other", "aot.py"), "w").close()
+                with (
+                    mock.patch.object(gen_aot_lib, "OPS_DIR", ops),
+                    mock.patch.object(
+                        gen_aot_lib.decl,
+                        "load_declarations",
+                        return_value=[_OtherDecl],
+                    ),
+                ):
+                    out = io.StringIO()
+                    with contextlib.redirect_stdout(out):
+                        gen_aot_lib.main(["--artifacts-dir", tmpdir])
+                    # Reported, per arch directory, and NOT fatal: see
+                    # TestOrphanArtifactSafety for why.
+                    self.assertIn("no declaration", out.getvalue())
+                    self.assertIn(".novelobj", out.getvalue())
 
 
 class TestBuildInputsFromTheCMakeCache(unittest.TestCase):
@@ -2833,6 +3210,35 @@ class TestProbeDiagnostics(unittest.TestCase):
         # --print-verdict writes a machine-read word to stdout and the CI shells
         # compare it with ==.
         self.assertEqual(out.getvalue(), "")
+
+
+class TestInstalledLibDir(unittest.TestCase):
+    def test_the_path_comes_from_a_marked_line(self):
+        # Unmarked, any other line the child writes (a warning, a site hook)
+        # became part of a filesystem path, and the failure then surfaced as the
+        # misleading "the torch on sys.path is not the one this tree built".
+        done = subprocess.CompletedProcess(
+            [], 0, stdout="a warning\nNAOT_VALUE:/x/site-packages/torch\n", stderr=""
+        )
+        with mock.patch.object(subprocess, "run", return_value=done):
+            self.assertEqual(
+                build_stage2._installed_lib_dir(),
+                os.path.join("/x/site-packages/torch", "lib"),
+            )
+
+    def test_a_failure_reports_the_childs_stderr(self):
+        # The traceback was captured and thrown away -- after a full export,
+        # generation and relink.
+        done = subprocess.CompletedProcess(
+            [], 1, stdout="", stderr="ImportError: libcudart.so.13"
+        )
+        with (
+            mock.patch.object(subprocess, "run", return_value=done),
+            contextlib.redirect_stderr(io.StringIO()) as err,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "cannot locate the installed"):
+                build_stage2._installed_lib_dir()
+        self.assertIn("libcudart.so.13", err.getvalue())
 
 
 class TestRegistryConsistency(unittest.TestCase):
@@ -3242,6 +3648,75 @@ class TestSizeGateIsPerKindNotPerFile(unittest.TestCase):
         self.assertIn("_naot_dim_too_big", src)
 
 
+class TestWheelRefusal(unittest.TestCase):
+    def test_wheel_requires_an_importable_torch(self):
+        # --wheel means a CI caller installed torch on the line above, so "not
+        # importable" there is a broken build, not "not applicable": degrading it
+        # to a skip shipped a green, kernel-free release wheel. Untested before --
+        # replacing the condition with `if False:` left the suite green.
+        with (
+            mock.patch.object(build_stage2, "_torch_probe", lambda e: False),
+            mock.patch.object(build_stage2, "should_run", lambda: False),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "does not import"):
+                build_stage2.main(["--wheel", "/tmp/nonexistent.whl"])
+
+    def test_the_refusal_is_ahead_of_every_applicability_gate(self):
+        # Deliberate, and the reason .ci/pytorch/build.sh guards the whole block
+        # with *cuda*: this refusal cannot consult should_run (which needs to
+        # import torch to know whether the build is CUDA at all), so a caller that
+        # passes --wheel for a build where torch legitimately does not import --
+        # the ASan and TSan images -- must not reach it. should_run is never even
+        # called here.
+        called = []
+        with (
+            mock.patch.object(build_stage2, "_torch_probe", lambda e: False),
+            mock.patch.object(
+                build_stage2, "should_run", lambda: called.append(1) or False
+            ),
+        ):
+            with self.assertRaises(RuntimeError):
+                build_stage2.main(["--wheel", "/tmp/nonexistent.whl"])
+        self.assertEqual(called, [])
+
+    def test_without_wheel_an_unimportable_torch_is_a_clean_skip(self):
+        # The other half of the same contract: an ordinary build must degrade.
+        with mock.patch.object(build_stage2, "_torch_probe", lambda e: False):
+            self.assertEqual(build_stage2.main([]), 0)
+
+
+class TestRecordCompression(unittest.TestCase):
+    def test_the_rewritten_record_keeps_its_compression(self):
+        # writestr() with a plain NAME takes the ZipFile default, and the
+        # destination has none, so the RECORD was the one member stored
+        # uncompressed: 1,087,255 B against 439,747 B deflated on a real torch,
+        # added to the artifact every test shard downloads. The existing test
+        # asserted compress_type for the lib and two payloads, never the RECORD.
+        with tempfile.TemporaryDirectory() as d:
+            whl = os.path.join(d, "torch-0.0.0-cp310-cp310-linux_x86_64.whl")
+            lib = "torch/lib/libtorch_cuda.so"
+            rec = "torch-0.0.0.dist-info/RECORD"
+            body = "\n".join(f"torch/f{i}.py,sha256=x,{i}" for i in range(4000))
+            with zipfile.ZipFile(whl, "w", zipfile.ZIP_DEFLATED) as z:
+                z.writestr(lib, b"old")
+                z.writestr(rec, f"{lib},sha256=old,3\n{body}\n")
+            new_lib = os.path.join(d, "new.so")
+            with open(new_lib, "wb") as f:
+                f.write(b"new kernels")
+            build_stage2.patch_wheel(whl, new_lib)
+            with zipfile.ZipFile(whl) as z:
+                info = z.getinfo(rec)
+                self.assertEqual(info.compress_type, zipfile.ZIP_DEFLATED)
+                self.assertLess(info.compress_size, info.file_size)
+                # ...and the rewrite is still correct: sizes recomputed, entry
+                # updated, every other line kept, archive readable.
+                text = z.read(rec).decode()
+                self.assertNotIn("sha256=old", text)
+                self.assertEqual(text.count("\n"), 4001)
+                self.assertEqual(z.read(lib), b"new kernels")
+                self.assertIsNone(z.testzip())
+
+
 class TestExportMain(unittest.TestCase):
     """export.main() had no coverage at all, including the TORCH_CUDA_ARCH_LIST
     translation that another comment in the same file depends on: _CLOSURE_EXCLUDED
@@ -3474,6 +3949,452 @@ class TestCollectJobsRefusals(unittest.TestCase):
         self.assertEqual(job[4], "sm_100a")
 
 
+class TestCiAndCMakeWiring(unittest.TestCase):
+    """Text assertions over files this suite cannot execute. Each pins a defect
+    that reached review, so a revert has to fail here rather than in a build."""
+
+    def _read(self, rel):
+        with open(os.path.join(REPO, rel)) as f:
+            return f.read()
+
+    def test_the_wheel_is_patched_before_it_is_repaired(self):
+        # repair_wheel.py produces the PUBLISHED artifact, so stage 2 has to patch the
+        # raw wheel first. Reversed, every release wheel ships kernel-free and green:
+        # the AOT tests skip themselves unless kernels are embedded, and the builder's
+        # own site-packages was relinked a step earlier. One ordering property of this
+        # file (nullglob before the glob) was already pinned here; this one was not.
+        sh = self._read(".ci/manywheel/build.sh")
+        self.assertLess(
+            sh.index("build_stage2.py --wheel"),
+            sh.index("repair_wheel.py"),
+            "stage 2 must patch the raw wheel before repair_wheel.py copies it out",
+        )
+
+    def test_stage_two_is_cuda_guarded_in_both_ci_shells(self):
+        # Unguarded, .ci/pytorch/build.sh ran `build_stage2.py --wheel` for every
+        # non-libtorch build, and the --wheel refusal above then failed the ASan
+        # and TSan builds -- where plain `import torch` cannot work, since test.sh
+        # LD_PRELOADs the sanitizer runtime / switches interpreter and build.sh
+        # does neither.
+        # STRUCTURE, not the literal: it occurs five times in build.sh for
+        # unrelated reasons, so reverting stage 2's guard left the assertion green.
+        # The --wheel call must sit between the guard and its matching fi.
+        text = self._read(".ci/pytorch/build.sh")
+        # The closing marker must EXIST: partitioning on a missing separator
+        # returns the whole string, so without this the assertions below matched
+        # one of the four unrelated *cuda* guards and reverting stage 2's guard
+        # left the test green.
+        marker = "fi  # BUILD_ENVIRONMENT == *cuda*"
+        self.assertIn(marker, text)
+        block = text.partition(marker)[0]
+        guard_at = block.rindex('if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then')
+        self.assertIn("build_stage2.py --wheel", block[guard_at:])
+        self.assertIn("--print-verdict", block[guard_at:])
+        self.assertIn(
+            'if [[ "${GPU_ARCH_TYPE}" == cuda* ]]; then',
+            self._read(".ci/manywheel/build.sh"),
+        )
+
+    def test_both_shells_count_wheels_with_nullglob(self):
+        # Without it a non-matching glob yields the literal pattern, and the
+        # message said "found 1" for an EMPTY directory.
+        for rel in (".ci/pytorch/build.sh", ".ci/manywheel/build.sh"):
+            with self.subTest(rel=rel):
+                text = self._read(rel)
+                # ORDER, not presence.
+                enable = text.index("shopt -s nullglob")
+                self.assertLess(
+                    enable,
+                    text.index("naot_wheels=(", enable),
+                    "nullglob must be set BEFORE the glob expands",
+                )
+                self.assertIn("shopt -u nullglob", text)
+
+    def test_the_documented_skip_reasons_match_should_run(self):
+        # The module docstring, CONTRIBUTING.md and should_run() are three
+        # statements of one list; the doc named three of nine.
+        doc = build_stage2.__doc__
+        contributing = self._read("CONTRIBUTING.md")
+        for phrase in ("not Linux", "does not import", "nothing declares kernels"):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, doc)
+        for phrase in (
+            "not Linux",
+            "does not import",
+            "nothing declares kernels",
+            "no published DSL wheel",
+        ):
+            with self.subTest(contributing=phrase):
+                self.assertIn(phrase, contributing)
+
+
+class TestStageTwoArgvContract(unittest.TestCase):
+    """What main() passes to its two children, and the invariant that ties them:
+    a tree export creates must be one generation was told about."""
+
+    @contextlib.contextmanager
+    def _run_main(self, arch_list, cache=None, archive=None):
+        """main() with both children captured; returns the recorded calls."""
+        calls = []
+
+        def fake_check_call(cmd, **kw):
+            calls.append((cmd, kw.get("env") or {}))
+
+        with contextlib.ExitStack() as stack:
+            build = stack.enter_context(tempfile.TemporaryDirectory())
+            art = os.path.join(build, "native_aot")
+            os.makedirs(art)
+            if cache is not None:
+                with open(os.path.join(build, "CMakeCache.txt"), "w") as f:
+                    f.write(cache)
+            env = {"TORCH_CUDA_ARCH_LIST": arch_list or "", "TORCH_NATIVE_AOT": ""}
+            stack.enter_context(mock.patch.dict(os.environ, env, clear=False))
+            stack.enter_context(mock.patch.object(build_stage2, "BUILD_DIR", build))
+            stack.enter_context(
+                mock.patch.object(build_stage2, "NATIVE_AOT_ARTIFACTS_DIR", art)
+            )
+            stack.enter_context(
+                mock.patch.object(build_stage2, "should_run", lambda: True)
+            )
+            stack.enter_context(
+                mock.patch.object(build_stage2, "require_runtimes", lambda: None)
+            )
+            # Discovery is a separate subject: unpatched, these tests reach the real
+            # DSL wheel and a real torch probe, so they failed in the job that runs
+            # this file (lint.yml's "Test tools", which has no built torch) while
+            # passing here. What they are about is main()'s argv and env.
+            stack.enter_context(
+                mock.patch.object(build_stage2, "_dsl_runtime_archive", lambda: archive)
+            )
+            stack.enter_context(
+                mock.patch.object(subprocess, "check_call", fake_check_call)
+            )
+            # No generated source, so main() stops before the relink -- the argv is
+            # the whole subject here.
+            self.assertEqual(build_stage2.main([]), 0)
+            yield calls
+
+    def _args_of(self, calls, script):
+        ((cmd, env),) = [(c, e) for c, e in calls if any(script in str(a) for a in c)]
+        return cmd, env
+
+    def test_the_arch_list_reaches_the_export_child(self):
+        # export.py reads TORCH_CUDA_ARCH_LIST itself, and _CLOSURE_EXCLUDED
+        # justifies keeping build_stage2.py out of the source closure on the
+        # grounds that the driver passes it nothing kernel-affecting -- so the
+        # value has to be in the child's ENVIRONMENT, including for a -D build
+        # where this process never had it.
+        with self._run_main(
+            None, cache="TORCH_CUDA_ARCH_LIST:STRING=9.0;10.0a\n"
+        ) as calls:
+            _, env = self._args_of(calls, "export.py")
+            self.assertEqual(env.get("TORCH_CUDA_ARCH_LIST"), "9.0;10.0a")
+
+    def test_generation_is_told_both_the_filter_and_the_recorded_list(self):
+        with self._run_main("9.0;10.0a") as calls:
+            cmd, _ = self._args_of(calls, "gen_aot_lib.py")
+            self.assertIn("--archs", cmd)
+            self.assertIn("--arch-list", cmd)
+            # --arch-list is recorded verbatim for CMake to compare against.
+            self.assertEqual(cmd[cmd.index("--arch-list") + 1], "9.0;10.0a")
+
+    def test_the_discovered_archive_is_passed_to_generation(self):
+        # The first of the two hops between _dsl_runtime_archive() (tested eight ways)
+        # and the emitted target_link_libraries (tested with the path passed in by
+        # hand): every fixture here patched the discovery to None, so nothing required
+        # main() to forward what it found.
+        archive = "/x/libcuda_dialect_runtime_static.a"
+        with self._run_main(None, archive=archive) as calls:
+            cmd, _ = self._args_of(calls, "gen_aot_lib.py")
+        self.assertIn("--dsl-runtime", cmd)
+        self.assertEqual(cmd[cmd.index("--dsl-runtime") + 1], archive)
+
+    def test_an_on_device_run_passes_no_arch_filter(self):
+        # Nothing to filter by: the local GPU is the whole arch list, and passing
+        # a filter here would be comparing a resolved spelling against itself.
+        with self._run_main(None) as calls:
+            cmd, _ = self._args_of(calls, "gen_aot_lib.py")
+            self.assertNotIn("--archs", cmd)
+            self.assertNotIn("--arch-list", cmd)
+
+    def test_every_tree_export_creates_is_one_generation_was_told_about(self):
+        # THE invariant. The arch name appears in four places -- the artifact
+        # directory, the sidecar, generation's --archs filter, and the recorded
+        # ARCH_LIST -- and they must all follow from one resolution. They did not:
+        # export resolved a plain spelling to the arch-conditional one while
+        # generation was still filtering on the plain name, so every tree was
+        # ignored, nothing was listed to compile, and stage 2 exited 0
+        # reporting "no declaration ships kernels for this build". Release arch
+        # lists are plain spellings throughout, so every release wheel would have
+        # shipped kernel-free, green.
+        # The real lists: .ci/manywheel/build_env_setup.py and the b200 job.
+        for arch_list in (
+            "7.5;8.0;9.0;10.0;12.0",
+            "7.5;8.0;8.6;9.0",
+            "10.0a",
+            "9.0",
+            "9.0a;10.0",
+        ):
+            with self.subTest(arch_list=arch_list):
+                with self._run_main(arch_list) as calls:
+                    cmd, _ = self._args_of(calls, "gen_aot_lib.py")
+                told = cmd[cmd.index("--archs") + 1 : cmd.index("--arch-list")]
+                with (
+                    tempfile.TemporaryDirectory() as ops,
+                    tempfile.TemporaryDirectory() as out,
+                ):
+                    _write_fake_decl(ops)
+                    with (
+                        mock.patch.object(export, "OPS_DIR", ops),
+                        _no_ambient_arch(device=None),
+                    ):
+                        jobs = export._collect_jobs(
+                            None, out, export.archs_from_cuda_arch_list(arch_list)
+                        )
+                    trees = sorted(
+                        {os.path.basename(os.path.dirname(j[3])) for j in jobs}
+                    )
+                self.assertTrue(trees, "the fixture should export something")
+                for tree in trees:
+                    self.assertIn(
+                        tree,
+                        told,
+                        f"export created {tree}/ but generation was told to filter "
+                        f"on {told}, so that tree would be ignored and nothing "
+                        f"embedded",
+                    )
+
+
+class TestRelinkNeverStrandsTheInstalledTorch(unittest.TestCase):
+    """main()'s relink half, which copies over the INSTALLED torch.
+
+    A separate fixture from TestStageTwoArgvContract._run_main, which deliberately
+    supplies no generated source so it stops BEFORE the relink -- the whole subject
+    here is what happens past that point. Nothing covered this half, which is how
+    two blockers lived in it: the build-directory guard sat after the reconfigure
+    that creates the directory (so it could never fire), and the copy over
+    site-packages happened before the check that decides whether the relink was
+    any good."""
+
+    OLD, NEW = b"PREVIOUSLY-INSTALLED", b"RELINKED"
+    reconfigure_argv: list[str] = []
+
+    @contextlib.contextmanager
+    def _main(
+        self,
+        cache=True,
+        configure_embeds=True,
+        embedded_after=True,
+        kill_swap=False,
+        wheel=False,
+    ):
+        """main() with every child faked, so the ORDER is the production one.
+
+        Yields (outcome, installed_bytes, children, listing): `outcome` is the
+        exception message or the return code, `children` the commands main() got as
+        far as launching, and `listing` everything left in the installed lib dir --
+        which is what catches a temporary this block forgets to clean up.
+        ``kill_swap`` raises at the os.replace that swaps the new library in, standing
+        in for a Ctrl-C or an OOM kill at the worst moment. ``wheel`` runs main() the
+        way both CI shells do, with --wheel, and records the patch_wheel call."""
+        children = []
+        patched = []
+
+        def fake_check_call(cmd, **kw):
+            children.append(os.path.basename(str(cmd[1])) if len(cmd) > 1 else cmd[0])
+
+        def fake_run(cmd, **kw):
+            children.append("reconfigure")
+            # Separately from `children`, whose ORDER is asserted ("reconfigure" must
+            # be the last thing a declining build does).
+            self.reconfigure_argv = list(cmd)
+            out = (
+                "-- native-AOT: embedding 1 object(s)\n" if configure_embeds else "--\n"
+            )
+            return subprocess.CompletedProcess(cmd, 0, out, "")
+
+        with contextlib.ExitStack() as stack:
+            d = stack.enter_context(tempfile.TemporaryDirectory())
+            build = os.path.join(d, "build")
+            art = os.path.join(build, "native_aot")
+            libdir = os.path.join(d, "site-packages", "torch", "lib")
+            os.makedirs(os.path.join(art, "fakeop"))
+            os.makedirs(os.path.join(build, "lib"))
+            os.makedirs(libdir)
+            # A generated source, so main() gets past the "nothing to embed" return.
+            open(os.path.join(art, "fakeop", "aot_fakeop_cuda.cpp"), "w").close()
+            with open(os.path.join(build, "lib", "libtorch_cuda.so"), "wb") as f:
+                f.write(self.NEW)
+            installed = os.path.join(libdir, "libtorch_cuda.so")
+            with open(installed, "wb") as f:
+                f.write(self.OLD)
+            if cache:
+                with open(os.path.join(build, "CMakeCache.txt"), "w") as f:
+                    f.write("CUDAToolkit_VERSION_MAJOR:STRING=13\n")
+            for target, name, value in (
+                (build_stage2, "BUILD_DIR", build),
+                (build_stage2, "NATIVE_AOT_ARTIFACTS_DIR", art),
+                (build_stage2, "should_run", lambda: True),
+                (build_stage2, "require_runtimes", lambda: None),
+                (build_stage2, "_artifact_size", lambda a: "1 object(s)"),
+                (build_stage2, "_installed_lib_dir", lambda: libdir),
+                (build_stage2, "_arch_list", lambda: ""),
+                (build_stage2, "_dsl_runtime_archive", lambda: None),
+                (build_stage2, "_torch_probe", lambda e: embedded_after),
+                (build_stage2, "patch_wheel", lambda w, lib: patched.append((w, lib))),
+                (subprocess, "check_call", fake_check_call),
+                (subprocess, "run", fake_run),
+            ):
+                stack.enter_context(mock.patch.object(target, name, value))
+            if kill_swap:
+                real_replace = os.replace
+
+                def failing_replace(a, b):
+                    if str(a).endswith(".naot.tmp"):
+                        raise KeyboardInterrupt("killed at the swap")
+                    return real_replace(a, b)
+
+                stack.enter_context(mock.patch.object(os, "replace", failing_replace))
+            stack.enter_context(contextlib.redirect_stderr(io.StringIO()))
+            argv = []
+            if wheel:
+                whl = os.path.join(d, "torch-0.0.0-cp312-cp312-linux_x86_64.whl")
+                open(whl, "w").close()
+                argv = ["--wheel", whl]
+            try:
+                outcome = f"returned {build_stage2.main(argv)}"
+            except (RuntimeError, KeyboardInterrupt) as e:
+                outcome = str(e)
+            content = None
+            if os.path.exists(installed):
+                with open(installed, "rb") as f:
+                    content = f.read()
+            children += [f"wheel:{w}|{lib}" for w, lib in patched]
+            yield outcome, content, children, sorted(os.listdir(libdir))
+
+    def test_a_build_dir_without_a_cache_is_refused_before_any_cmake(self):
+        # `cmake -B <dir>` on a directory that does not exist exits 0 and configures
+        # FROM SCRATCH, so a guard placed after the reconfigure can never fire -- and
+        # the relink and copy would then put a library built from that empty
+        # configure over the installed torch. Keyed on the CACHE, not the directory.
+        with self._main(cache=False) as (outcome, installed, children, listing):
+            self.assertIn("holds no CMakeCache.txt", outcome)
+            self.assertEqual(installed, self.OLD)
+            self.assertNotIn("reconfigure", children)
+
+    def test_a_reconfigure_that_does_not_embed_is_refused_before_the_relink(self):
+        # The STATUS line the generated CMake prints is the only pre-relink evidence
+        # that the build agrees it should embed. Without this, every state where the
+        # two sides disagree reached the copy first and failed afterwards.
+        with self._main(configure_embeds=False) as (
+            outcome,
+            installed,
+            children,
+            listing,
+        ):
+            self.assertIn("did not report embedding", outcome)
+            self.assertEqual(installed, self.OLD)
+            self.assertEqual(children[-1], "reconfigure")
+
+    def test_a_failed_verification_restores_the_installed_library(self):
+        # The copy replaces a library the running environment imports, so a relink
+        # this run then declares unusable must not be what site-packages keeps.
+        with self._main(embedded_after=False) as (outcome, installed, _, listing):
+            self.assertIn("reports no embedded kernels", outcome)
+            self.assertEqual(installed, self.OLD)
+
+    def test_the_happy_path_replaces_the_installed_library(self):
+        # ...and the guards above do not block the case they exist to protect.
+        with self._main() as (outcome, installed, children, listing):
+            self.assertEqual(outcome, "returned 0")
+            self.assertEqual(installed, self.NEW)
+            self.assertIn("reconfigure", children)
+            # NOTHING else left behind. Asserting only the content missed a restore
+            # copy that every successful build was leaving in site-packages -- a name
+            # in no RECORD, so `pip uninstall` could not clear it either.
+            self.assertEqual(listing, ["libtorch_cuda.so"])
+
+    def test_an_interrupt_at_the_swap_leaves_the_previous_library_in_place(self):
+        # The restore copy is a HARDLINK and the swap is ONE os.replace, so the
+        # installed library never stops existing. Taking the backup by RENAMING the
+        # library away first made this two steps, and a kill in between left the
+        # environment with no library at all -- worse than the un-verified library the
+        # backup exists to prevent, and unrecoverable without knowing about the
+        # backup. A stale link may remain; the next run clears it.
+        with self._main(kill_swap=True) as (outcome, installed, _, listing):
+            self.assertIn("killed at the swap", outcome)
+            self.assertEqual(installed, self.OLD)
+            self.assertIn("libtorch_cuda.so", listing)
+
+    def test_the_reconfigure_forces_status_messages(self):
+        # The agreement check greps for a message(STATUS), and EnvVarForwarding
+        # forwards every CMAKE_* environment variable into the cache with FORCE: a
+        # developer quietening configure output with CMAKE_MESSAGE_LOG_LEVEL=WARNING
+        # hides the marker, the value then persists in the cache after the variable is
+        # gone, and stage 2 fails the build advising -DTORCH_NATIVE_AOT=1 -- which is
+        # not the problem. Verified against cmake: the flag wins over the cached value.
+        with self._main() as (outcome, _, _, _):
+            self.assertEqual(outcome, "returned 0")
+        self.assertIn("--log-level=STATUS", self.reconfigure_argv)
+
+    def test_an_explicit_opt_out_beats_even_the_wheel_refusal(self):
+        # The kill switch has to work where no pull-request CI runs: the binary
+        # builds install an UNREPAIRED wheel and then --wheel makes `import torch` a
+        # hard precondition, so without this the nightly matrix could only be fixed
+        # by a revert. The opt-out is read from env and the CMake cache, so it needs
+        # no torch -- every other gate stays behind the refusal.
+        with tempfile.TemporaryDirectory() as d:
+            whl = os.path.join(d, "torch-0.0.0-cp312-cp312-linux_x86_64.whl")
+            open(whl, "w").close()
+            with (
+                mock.patch.dict(os.environ, {"TORCH_NATIVE_AOT": "0"}, clear=False),
+                mock.patch.object(
+                    build_stage2, "_torch_probe", side_effect=AssertionError("imported")
+                ),
+                contextlib.redirect_stderr(io.StringIO()),
+            ):
+                self.assertEqual(build_stage2.main(["--wheel", whl]), 0)
+
+    def test_the_wheel_is_patched_with_the_relinked_library(self):
+        # --wheel is how both CI shells call this (the wheel is built BEFORE the
+        # relink, so its libtorch_cuda has no kernels), and patch_wheel was tested
+        # only as a function. Nothing downstream re-checks the wheel: the AOT tests
+        # skip themselves unless kernels are embedded, and the builder's own
+        # site-packages was relinked one step earlier -- so a wheel that never gets
+        # patched ships kernel-free with every test green.
+        with self._main(wheel=True) as (outcome, _, children, _):
+            self.assertEqual(outcome, "returned 0")
+            patched = [c for c in children if c.startswith("wheel:")]
+        self.assertEqual(len(patched), 1, f"main() did not patch the wheel: {children}")
+        whl, lib = patched[0][len("wheel:") :].split("|")
+        self.assertTrue(whl.endswith(".whl"), whl)
+        # The RELINKED library, not the installed copy: same basename, so a test
+        # asserting only the name would pass on either.
+        self.assertEqual(lib.split(os.sep)[-3:], ["build", "lib", "libtorch_cuda.so"])
+
+
+class TestSizeReportCountsEmbeddedSources(unittest.TestCase):
+    def test_a_source_embedded_artifact_is_counted(self):
+        # A kind that embeds its artifact in the generated source contributes NO
+        # OBJECT= line (Toolchain.link_exts empty -- Triton's cubin bytes), so
+        # counting objects alone reported "0 object(s), 0.0 MiB" for a build
+        # embedding megabytes, defeating the one line whose whole purpose is to
+        # make that growth visible.
+        mib = 1 << 20
+        with tempfile.TemporaryDirectory() as tmpdir:
+            src_dir = os.path.join(tmpdir, "bmm")
+            os.makedirs(src_dir)
+            src = os.path.join(src_dir, "aot_bmm_cuda.cpp")
+            with open(src, "wb") as f:
+                f.truncate(15 * mib)  # sparse: only the reported size matters
+            gen_aot_lib.write_cmake_include(
+                tmpdir, [src], [], os.path.join(tmpdir, "v.ver"), None, None
+            )
+            got = build_stage2._artifact_size(tmpdir)
+        self.assertIn("15.0 MiB", got)
+        self.assertIn("1 generated source(s)", got)
+
+
 class TestStaticBuildSkips(unittest.TestCase):
     def test_build_shared_libs_off_skips_cleanly(self):
         # caffe2/CMakeLists.txt refuses to embed into a static torch_cuda (CMake
@@ -3653,6 +4574,23 @@ class TestOrphanCheckIsCalled(unittest.TestCase):
                     export._collect_jobs(None, out, [None])
 
 
+class TestModulePathOrder(unittest.TestCase):
+    def test_the_repo_root_is_appended_never_prepended(self):
+        # The repo root holds a torch/ SOURCE tree with no compiled extension.
+        # Ahead of site-packages it shadows the installed wheel, so every
+        # `import torch` dies with "loaded the torch/_C folder of the PyTorch
+        # repository" -- invisible in an editable checkout, where that tree IS the
+        # installed torch, which is how it reached CI. Untested until now:
+        # switching any of the three to insert(0, ...) left the suite green.
+        for mod in ("build_stage2.py", "export.py", "gen_aot_lib.py"):
+            with self.subTest(module=mod):
+                with open(os.path.join(REPO, "tools", "native_aot", mod)) as f:
+                    src = f.read()
+                self.assertIn("sys.path.append(REPO)", src)
+                self.assertNotIn("sys.path.insert(0, REPO)", src)
+                self.assertNotIn("sys.path.insert(0, REPO)", src.replace(" ", ""))
+
+
 class TestEmittedCMake(unittest.TestCase):
     """caffe2/CMakeLists.txt is one include(); everything it used to derive is
     emitted here. These assert the emitted CALLS, which is what CMake consumes."""
@@ -3677,6 +4615,38 @@ class TestEmittedCMake(unittest.TestCase):
         )
         with open(path) as f:
             return f.read()
+
+    def test_caffe2_cmakelists_holds_no_logic(self):
+        # The point of the restructure: one include, and nothing to get wrong. If a
+        # future change starts deriving things in CMake again, this fails.
+        with open(os.path.join(REPO, "caffe2", "CMakeLists.txt")) as f:
+            cmake = f.read()
+        naot = [
+            l
+            for l in cmake.splitlines()
+            if "native_aot" in l and not l.strip().startswith("#")
+        ]
+        self.assertEqual(
+            naot,
+            ['  include("${CMAKE_BINARY_DIR}/native_aot/native_aot.cmake" OPTIONAL)'],
+            "caffe2/CMakeLists.txt should contain exactly one native-AOT line",
+        )
+        for gone in ("file(STRINGS", "ARCH_LIST_ABSENT", "_native_aot_normalize"):
+            with self.subTest(construct=gone):
+                self.assertNotIn(gone, cmake)
+
+    def test_the_include_line_agrees_with_the_python_constants(self):
+        # The assertion above is a LITERAL, and every other test reads the constants --
+        # so renaming CMAKE_INCLUDE or moving NATIVE_AOT_ARTIFACTS_DIR kept the suite
+        # green while the OPTIONAL include silently found nothing: the build embeds no
+        # kernels and stage 2 then fails blaming TORCH_NATIVE_AOT in the CMake cache.
+        # Derived from both constants, so either side moving alone fails here.
+        rel = os.path.relpath(
+            build_stage2.NATIVE_AOT_ARTIFACTS_DIR, build_stage2.BUILD_DIR
+        )
+        want = f'"${{CMAKE_BINARY_DIR}}/{rel}/{gen_aot_lib.CMAKE_INCLUDE}"'
+        with open(os.path.join(REPO, "caffe2", "CMakeLists.txt")) as f:
+            self.assertIn(want, f.read())
 
     def test_the_linker_options_are_emitted_de_duplication_safe(self):
         # Three hazards, all measured by linking: -Wl, (what LINKER: expands to) is
