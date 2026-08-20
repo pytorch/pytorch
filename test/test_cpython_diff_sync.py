@@ -229,16 +229,20 @@ class CPythonDiffSyncTests(TestCase):
                         rc = regen.regenerate(
                             "test_fake.py", force=force, pristine_path=pristine_path
                         )
-            return rc, old_before, old_diff, diff_path.read_bytes(), py_path.read_bytes()
+            return (
+                rc,
+                old_before,
+                old_diff,
+                diff_path.read_bytes(),
+                py_path.read_bytes(),
+            )
 
     def test_regenerate_refuses_outside_hunk_edit_without_pristine(self):
         _pristine, _adapted, edited, diff_text = _fake_pair_bytes()
         for force in (False, True):
             with self.subTest(force=force):
-                rc, old_before, old_diff, new_diff, _py = (
-                    self._run_regen_on_fake_tree(
-                        edited, diff_text, force=force, pristine_path=None
-                    )
+                rc, old_before, old_diff, new_diff, _py = self._run_regen_on_fake_tree(
+                    edited, diff_text, force=force, pristine_path=None
                 )
                 self.assertEqual(rc, 1)
                 self.assertEqual(new_diff, old_diff)
