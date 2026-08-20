@@ -2563,6 +2563,13 @@ def amin(
     *,
     out: Tensor | None = None,
 ) -> TensorLikeType:
+    if out is not None:
+        torch._check(
+            a.dtype == out.dtype,
+            lambda: f"Expected the dtype for input and out to match, but got "
+            f"{a.dtype} for input's dtype and {out.dtype} for out's dtype.",
+        )
+
     # reduces over all dimensions if dim=() is passed
     if dim == () or dim == []:
         dim = None
@@ -2587,6 +2594,13 @@ def amax(
     *,
     out: Tensor | None = None,
 ) -> TensorLikeType:
+    if out is not None:
+        torch._check(
+            a.dtype == out.dtype,
+            lambda: f"Expected the dtype for input and out to match, but got "
+            f"{a.dtype} for input's dtype and {out.dtype} for out's dtype.",
+        )
+
     # reduces over all dimensions if dim=() is passed
     if dim == () or dim == []:
         dim = None
