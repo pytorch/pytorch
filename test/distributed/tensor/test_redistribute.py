@@ -39,6 +39,7 @@ from torch.distributed.tensor._redistribute import (
     _redistribute_cost_sort_key,
     _TransformInfo,
     disable_redistribute_transform_optimization,
+    NestedRedistribute,
     redistribute_local_tensor,
     use_min_cost_redistribution_plan,
 )
@@ -3239,8 +3240,7 @@ class _CollectiveDtypeTracer(torch.utils._python_dispatch.TorchDispatchMode):
 
 
 class RedistributeBackwardDtypeTest(TestCase):
-    """Verify ``DTensor.redistribute(..., backward_dtype=...)`` actually runs the
-    backward collective at the requested dtype.
+    """Verify the backward dtype semantics of ``DTensor.redistribute``.
 
     A fake process group lets us run this single-process; a TorchDispatchMode
     tracer captures the dtype of each ``_c10d_functional`` collective.
@@ -3299,6 +3299,99 @@ class RedistributeBackwardDtypeTest(TestCase):
         self.assertEqual(tracer.dtypes_for("all_gather_into_tensor"), [torch.bfloat16])
         self.assertEqual(tracer.dtypes_for("reduce_scatter_tensor"), [torch.float32])
         self.assertEqual(local.grad.dtype, torch.float32)
+
+    @parametrize("backward_dtype", [torch.bfloat16, torch.float32])
+    def test_grad_dtype_propagates_independently_of_backward_dtype(
+        self, backward_dtype
+    ):
+        mesh = init_device_mesh("cpu", (4,), mesh_dim_names=("dp",))
+        dt = DTensor.from_local(
+            torch.randn(16, 8, dtype=torch.bfloat16), mesh, [Shard(0)]
+        ).requires_grad_()
+        dt.grad_dtype = torch.float32
+
+        tracer = _CollectiveDtypeTracer()
+        with tracer:
+            out = dt.redistribute(
+                mesh,
+                [Replicate()],
+                forward_dtype=torch.bfloat16,
+                backward_dtype=backward_dtype,
+            )
+            self.assertEqual(out.grad_dtype, torch.float32)
+            grad_d = DTensor.from_local(
+                torch.ones(64, 8, dtype=torch.float32), mesh, [Partial()]
+            )
+            out.backward(grad_d)
+
+        self.assertEqual(tracer.dtypes_for("reduce_scatter_tensor"), [backward_dtype])
+        self.assertEqual(dt.grad.dtype, torch.float32)
+
+    def test_backward_output_uses_input_grad_dtype(self):
+        mesh = init_device_mesh("cpu", (4,), mesh_dim_names=("dp",))
+        dt = DTensor.from_local(
+            torch.randn(16, 8, dtype=torch.bfloat16), mesh, [Replicate()]
+        ).requires_grad_()
+        dt.grad_dtype = torch.float32
+
+        out = dt.redistribute(
+            mesh,
+            [Replicate()],
+            forward_dtype=torch.bfloat16,
+            backward_dtype=torch.float32,
+        )
+        local_grad = torch.full((16, 8), 1.0001, dtype=torch.float32)
+        out.backward(DTensor.from_local(local_grad, mesh, [Replicate()]))
+
+        self.assertEqual(dt.grad.to_local(), local_grad)
+
+    def test_none_grad_dtype_does_not_force_backward_output_dtype(self):
+        mesh = init_device_mesh("cpu", (4,), mesh_dim_names=("dp",))
+        dt = DTensor.from_local(
+            torch.randn(16, 8, dtype=torch.bfloat16), mesh, [Shard(0)]
+        ).requires_grad_()
+        dt.grad_dtype = None
+
+        out = dt.redistribute(
+            mesh,
+            [Replicate()],
+            forward_dtype=torch.bfloat16,
+            backward_dtype=torch.float32,
+        )
+        self.assertIsNone(out.grad_dtype)
+        grad_d = DTensor.from_local(
+            torch.ones(64, 8, dtype=torch.float64), mesh, [Partial()]
+        )
+        out.backward(grad_d)
+
+        self.assertEqual(dt.grad.dtype, torch.float32)
+
+    def test_nested_redistribute_propagates_its_input_grad_dtype(self):
+        mesh = init_device_mesh("cpu", (4,), mesh_dim_names=("dp",))
+        grad_output = DTensor.from_local(
+            torch.randn(16, 8, dtype=torch.float32), mesh, [Replicate()]
+        ).requires_grad_()
+        grad_output.grad_dtype = torch.float64
+
+        output = NestedRedistribute.apply(
+            grad_output,
+            grad_output._spec,
+            False,
+            torch.float32,
+            torch.float32,
+        )
+        self.assertEqual(output.dtype, torch.float32)
+        self.assertEqual(output.grad_dtype, torch.float64)
+
+        grad2_output = DTensor.from_local(
+            torch.ones(16, 8, dtype=torch.float64), mesh, [Replicate()]
+        )
+        output.backward(grad2_output)
+
+        self.assertEqual(grad_output.grad.dtype, torch.float64)
+
+
+instantiate_parametrized_tests(RedistributeBackwardDtypeTest)
 
 
 if __name__ == "__main__":
