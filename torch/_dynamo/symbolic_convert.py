@@ -512,6 +512,10 @@ class BlockStackEntry:
         return None
 
 
+# Called once per frame per fx node created, so keep it out of the hot path.
+_NN_MODULES_FILENAME_RE = re.compile(r".*torch/nn/modules.*")
+
+
 class SpeculationLogDivergence(AssertionError):
     pass
 
@@ -5202,8 +5206,7 @@ class InstructionTranslatorBase(
 
     def is_co_filename_from_nn_modules(self) -> bool:
         filename = getattr(self.f_code, "co_filename", "<unknown>")
-        nn_modules_pattern = re.compile(r".*torch/nn/modules.*")
-        return nn_modules_pattern.match(filename) is not None
+        return _NN_MODULES_FILENAME_RE.match(filename) is not None
 
     def store_global_weakref_by_id(self, prefix: str, value: object) -> str:
         global_name = self.output.install_global_by_id(prefix, weakref.ref(value))
