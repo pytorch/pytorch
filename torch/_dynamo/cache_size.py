@@ -165,7 +165,7 @@ def compute_cache_size(
 def is_recompilation(cache_size: CacheSizeRelevantForFrame) -> bool:
     """
     If the frame (earlier parsed by compute_cache_size) has more than 1 cache
-    entry with same ID_MATCH'd objects, then its a recompilation.
+    entry with same ID_MATCH'd objects, then it's a recompilation.
     """
     # Note that you can have multiple entries in the cache but still not a
     # recompile, e.g., you can have 64 nn module instances, each one having an

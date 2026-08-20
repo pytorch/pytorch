@@ -34,7 +34,7 @@ struct PythonHooks final : public at::PrivateUse1HooksInterface {
         bool, at::PrivateUse1HooksInterface, "is_available", isBuilt, );
   }
 
-  // TODO(qihqi): these is not supported from python yet
+  // TODO(qihqi): these are not supported from python yet
   const at::Generator& getDefaultGenerator(
       c10::DeviceIndex device_index) const override {
     return at::PrivateUse1HooksInterface::getDefaultGenerator(device_index);

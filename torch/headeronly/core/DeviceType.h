@@ -14,7 +14,7 @@
 
 namespace c10 {
 
-// These contains all device types that also have a BackendComponent
+// These contain all device types that also have a BackendComponent
 // and therefore participate in per-backend functionality dispatch keys.
 // This is most backends except PrivateUse2 and PrivateUse3
 #define C10_FORALL_BACKEND_DEVICE_TYPES(_, extra) \

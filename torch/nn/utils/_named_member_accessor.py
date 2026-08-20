@@ -125,7 +125,7 @@ class NamedMemberAccessor:
         For example, to get the submodule mod.layer1.conv1,
         use accessor.get_submodule("layer1.conv1")
 
-        Compare to mod.get_submodule("layer1.conv1"), this method will cache the
+        Compared to mod.get_submodule("layer1.conv1"), this method will cache the
         intermediate submodule access to speed up future lookups.
         """
         if not name:
@@ -169,7 +169,7 @@ class NamedMemberAccessor:
         For example, to get the attribute mod.layer1.conv1.weight,
         use accessor.get_tensor('layer1.conv1.weight')
 
-        Compare to mod.get_parameter("layer1.conv1.weight"), this method will
+        Compared to mod.get_parameter("layer1.conv1.weight"), this method will
         cache the intermediate submodule access to speed up future lookups.
         """
         prefix, _, attr = name.rpartition(".")

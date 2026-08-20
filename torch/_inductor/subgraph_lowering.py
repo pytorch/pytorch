@@ -113,7 +113,7 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
             if target is operator.getitem and isinstance(args[0], (list, tuple, dict)):
                 return super().call_function(target, args, kwargs)
 
-            # These takes precedence over the main lowerings
+            # These take precedence over the main lowerings
             if self.additional_lowerings is not None:
                 if target in self.additional_lowerings:
                     if not isinstance(target, OpOverload):

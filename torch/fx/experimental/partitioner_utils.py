@@ -99,7 +99,7 @@ class PartitionerConfig(NamedTuple):
 
 def get_extra_size_of(node: Node, nodes: set[Node]) -> int:
     """Given a node and a set of nodes,
-    this function return the extra size that needed
+    this function returns the extra size that is needed
     if this node is included in this set.
     """
     # Find all its input nodes
