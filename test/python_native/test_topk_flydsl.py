@@ -105,11 +105,14 @@ class TestFlyDSLTopK(TestCase):
         self._assert_topk_matches_aten(x, k)
 
     def test_register_correctness_with_odd_rows(self):
+        # Register kernel packs rows_per_cta=2 per CTA; odd M leaves a tail
+        # block where in_bounds is false for one row slot (row_safe falls back
+        # to row 0 for loads only; writes stay gated on in_bounds).
         k = 8
-        rows = _test_m()
-        if rows % 2 == 0:
-            rows += 1
-        x = make_tensor((rows, _test_n(k)), device="cuda", dtype=torch.float32)
+        n = _test_n(k)
+        self.assertEqual(_expected_kernel(k, n), "register")
+        rows = _test_m() | 1
+        x = make_tensor((rows, n), device="cuda", dtype=torch.float32)
         self._assert_topk_matches_aten(x, k)
 
     def test_correctness_with_extreme_values(self):

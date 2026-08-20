@@ -33,7 +33,7 @@ spanning phases needs a struct member, not a union member.
 """
 
 import math
-from typing import Any, cast, Protocol
+from typing import cast
 
 import flydsl.compiler as flyc
 import flydsl.expr as fx
@@ -42,30 +42,23 @@ from flydsl.expr import arith, Array, Float32, gpu, Int32, Int64, range_constexp
 from flydsl.runtime.device import is_rdna_arch
 
 import torch
-from torch._native.flydsl.cache import CacheInfo
+from torch._native.flydsl.cache import CachedCompile, CacheInfo
+from torch._native.flydsl.compile_args import make_compile_arg, read_only_tensor
 from torch._native.flydsl_utils import _resolve_rocm_arch
 from torch._native.instrumentation import instrumented_flydsl_cache
-
-from ._common import any_cow
-
-
-class _CachedCompile(Protocol):
-    def __call__(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def cache_clear(self) -> None: ...
-
-    def cache_info(self) -> CacheInfo: ...
 
 
 _RADIX_BITS = 8
 _RADIX_MASK = (1 << _RADIX_BITS) - 1
 _RADIX_SIGN_BIT = 1 << (_RADIX_BITS - 1)
-_NUM_RADIX_PASSES = 32 // _RADIX_BITS
+_FP32_BIT_WIDTH = torch.float32.itemsize * 8
+_NUM_RADIX_PASSES = _FP32_BIT_WIDTH // _RADIX_BITS
 _N_HIST_BINS = 1 << _RADIX_BITS
 _VEC = 4
+_NAN_SENTINEL_ORD = 0x7FFFFFFF
 
 
-def _i32_const(x: int) -> int:
+def _u32_to_i32(x: int) -> int:
     return x - (1 << 32) if x >= (1 << 31) else x
 
 
@@ -73,7 +66,7 @@ def _f32_to_ord(val):
     bits = val.bitcast(Int32)
     ords = bits ^ ((bits >> fx.Int32(31)) & fx.Int32(0x7FFFFFFF))
     is_nan = (bits & fx.Int32(0x7FFFFFFF)) > fx.Int32(0x7F800000)
-    return is_nan.select(fx.Int32(0x7FFFFFFF), ords)
+    return is_nan.select(fx.Int32(_NAN_SENTINEL_ORD), ords)
 
 
 def _make_key(val, idx):
@@ -89,6 +82,13 @@ def _decode_key(key):
     val = val_bits.bitcast(Float32)
     idx = ~inv_idx
     return val, idx, ord32
+
+
+def _decode_topk_key(key, row):
+    val, idx, ord32 = _decode_key(key)
+    if ord32 == fx.Int32(_NAN_SENTINEL_ORD):
+        val = row[idx]
+    return val, idx
 
 
 def _make_topk_storage(sort_len: int, block_threads: int):
@@ -168,12 +168,6 @@ def _build_radix_select_topk_module(n: int, k: int, deterministic: bool, arch: s
             fx.copy_atom_call(copy_atom_v, fx.slice(input_div, (None, idx)), r)
             return fx.memref_load_vec(r)
 
-        def decode_key(key):
-            val, idx, ord32 = _decode_key(key)
-            if ord32 == fx.Int32(0x7FFFFFFF):
-                val = row_in[idx]
-            return val, idx
-
         def atomic_add_i32_fetch(memref, val, offset):
             ptr = fx.to_llvm_ptr(fx.get_iter(memref) + offset)
             old = llvm.AtomicRMWOp(
@@ -219,6 +213,15 @@ def _build_radix_select_topk_module(n: int, k: int, deterministic: bool, arch: s
             gpu.barrier()
             return packed_pfx, packed_total
 
+        def accumulate_radix_byte_hist(
+            ords, byte_pos, prefix, decided_mask, shift, sign_bit_xor_val
+        ):
+            if byte_pos == 0 or (ords & decided_mask) == prefix:
+                byte_val = (
+                    (ords >> fx.Int32(shift)) & fx.Int32(_RADIX_MASK)
+                ) ^ fx.Int32(sign_bit_xor_val)
+                atomic_add_i32_fetch(s_hist, 1, byte_val)
+
         if tid == 0:
             s_prefix[0] = 0
             s_mask[0] = 0
@@ -228,7 +231,7 @@ def _build_radix_select_topk_module(n: int, k: int, deterministic: bool, arch: s
         # Phase 1: radix byte passes, MSB to LSB.
         for byte_pos in range_constexpr(_NUM_RADIX_PASSES):
             shift = (_NUM_RADIX_PASSES - 1 - byte_pos) * _RADIX_BITS
-            xor_val = _RADIX_SIGN_BIT if byte_pos == 0 else 0
+            sign_bit_xor_val = _RADIX_SIGN_BIT if byte_pos == 0 else 0
 
             # Zero the 256-bin histogram.
             if tid < fx.Int32(_N_HIST_BINS):
@@ -241,21 +244,25 @@ def _build_radix_select_topk_module(n: int, k: int, deterministic: bool, arch: s
             for step in range_constexpr(vec_iters):
                 rvals = load_vec_f32(step * block_threads + tid)
                 for vi in range_constexpr(_VEC):
-                    ords = _f32_to_ord(rvals[vi])
-                    if byte_pos == 0 or (ords & decided_mask) == prefix:
-                        byte_val = (
-                            (ords >> fx.Int32(shift)) & fx.Int32(_RADIX_MASK)
-                        ) ^ fx.Int32(xor_val)
-                        atomic_add_i32_fetch(s_hist, 1, byte_val)
+                    accumulate_radix_byte_hist(
+                        _f32_to_ord(rvals[vi]),
+                        byte_pos,
+                        prefix,
+                        decided_mask,
+                        shift,
+                        sign_bit_xor_val,
+                    )
             for step in range_constexpr(scalar_tail_iters):
                 col = vec_tail_start + step * block_threads + tid
                 if col < n:
-                    ords = _f32_to_ord(row_in[col])
-                    if byte_pos == 0 or (ords & decided_mask) == prefix:
-                        byte_val = (
-                            (ords >> fx.Int32(shift)) & fx.Int32(_RADIX_MASK)
-                        ) ^ fx.Int32(xor_val)
-                        atomic_add_i32_fetch(s_hist, 1, byte_val)
+                    accumulate_radix_byte_hist(
+                        _f32_to_ord(row_in[col]),
+                        byte_pos,
+                        prefix,
+                        decided_mask,
+                        shift,
+                        sign_bit_xor_val,
+                    )
             gpu.barrier()
 
             # Select the radix threshold.
@@ -276,9 +283,9 @@ def _build_radix_select_topk_module(n: int, k: int, deterministic: bool, arch: s
                             found = 1
                     acc = acc + count
 
-                actual_byte = sel_bin ^ fx.Int32(xor_val)
+                actual_byte = sel_bin ^ fx.Int32(sign_bit_xor_val)
                 s_prefix[0] = prefix | (actual_byte << fx.Int32(shift))
-                s_mask[0] = decided_mask | fx.Int32(_i32_const(_RADIX_MASK << shift))
+                s_mask[0] = decided_mask | fx.Int32(_u32_to_i32(_RADIX_MASK << shift))
                 s_rem_k[0] = remaining_k - elems_above
             gpu.barrier()
 
@@ -447,7 +454,7 @@ def _build_radix_select_topk_module(n: int, k: int, deterministic: bool, arch: s
 
         # Phase 4: results to gmem.
         if tid < fx.Int32(k):
-            val, idx = decode_key(s_keys[tid])
+            val, idx = _decode_topk_key(s_keys[tid], row_in)
             row_values[tid] = val
             row_indices[tid] = fx.Int64(idx)
 
@@ -517,18 +524,13 @@ def _build_register_topk_module(n: int, k: int, arch: str, rows_per_cta: int = 2
             fx.copy_atom_call(copy_atom_v, fx.slice(input_div, (None, idx)), r)
             return fx.memref_load_vec(r)
 
-        def decode_key(key):
-            val, idx, ord32 = _decode_key(key)
-            if ord32 == fx.Int32(0x7FFFFFFF):
-                val = row_input[idx]
-            return val, idx
-
-        def compare_and_swap(arr, i: int, j: int, descending: bool):
+        def compare_and_swap(arr, i: int, j: int, descending):
             a = arr[i]
             b = arr[j]
-            swap = a < b if descending else a > b
-            arr[i] = swap.select(b, a)
-            arr[j] = swap.select(a, b)
+            hi = arith.maxsi(a, b)
+            lo = arith.minsi(a, b)
+            arr[i] = hi if descending else lo
+            arr[j] = lo if descending else hi
 
         def bitonic_sort_desc(arr, length: int, stages: int):
             if length > 1:
@@ -592,7 +594,7 @@ def _build_register_topk_module(n: int, k: int, arch: str, rows_per_cta: int = 2
 
         if lane == 0 and in_bounds:
             for i in range_constexpr(k):
-                val, idx = decode_key(topk[i])
+                val, idx = _decode_topk_key(topk[i], row_input)
                 row_values[i] = val
                 row_indices[i] = fx.Int64(idx)
 
@@ -613,28 +615,6 @@ def _build_register_topk_module(n: int, k: int, arch: str, rows_per_cta: int = 2
         )
 
     return launch_register_topk
-
-
-def _read_only(tensor: torch.Tensor) -> Any:
-    if not any_cow(tensor):
-        return tensor
-    from torch._native.const_tensor_wrapper import ConstTensorWrapper
-
-    return ConstTensorWrapper(tensor)
-
-
-def _make_compile_arg(tensor: torch.Tensor, *, read_only: bool = False) -> Any:
-    tensor_arg = _read_only(tensor) if read_only else tensor
-    return flyc.from_torch_tensor(tensor_arg).mark_shape_dynamic(0)
-
-
-def _arch_for(device_index: int) -> str:
-    # _resolve_rocm_arch forwards HSA_OVERRIDE_GFX_VERSION and the device's
-    # gcnArchName through unchanged, so either may still carry feature flags
-    # ("gfx950:sramecc+"); strip them the way the dispatcher predicate does.
-    # That predicate already declined when the arch could not be resolved.
-    resolved = _resolve_rocm_arch(device_index)
-    return resolved.split(":", 1)[0]  # pyrefly: ignore[missing-attribute]
 
 
 @instrumented_flydsl_cache(
@@ -664,9 +644,9 @@ def _compile_register_topk(
     launch = _build_register_topk_module(n, k, arch, rows_per_cta=rows_per_cta)
     return flyc.compile(
         launch,
-        _make_compile_arg(input_2d, read_only=True),
-        _make_compile_arg(values_2d),
-        _make_compile_arg(indices_2d),
+        make_compile_arg(input_2d, read_only=True),
+        make_compile_arg(values_2d),
+        make_compile_arg(indices_2d),
         rows_m,
         stream,
     )
@@ -683,6 +663,7 @@ def topk_register_out(
     rows_m = input_2d.shape[0]
     n = input_2d.shape[1]
     device_index = input_2d.device.index
+    arch: str = _resolve_rocm_arch(device_index)  # pyrefly: ignore[bad-assignment]
 
     with torch.cuda.device(input_2d.device):
         stream = torch.cuda.current_stream(input_2d.device)
@@ -690,12 +671,12 @@ def topk_register_out(
             n,
             k,
             rows_per_cta,
-            _arch_for(device_index),
+            arch,
             flyc.compile_backend_name(),
             device_index,
             compile_args=(input_2d, values_2d, indices_2d, rows_m, stream),
         )
-        compiled(_read_only(input_2d), values_2d, indices_2d, rows_m, stream)
+        compiled(read_only_tensor(input_2d), values_2d, indices_2d, rows_m, stream)
 
 
 def topk_register(
@@ -730,9 +711,9 @@ def _compile_radix_select_topk(
     launch = _build_radix_select_topk_module(n, k, deterministic, arch)
     return flyc.compile(
         launch,
-        _make_compile_arg(input_2d, read_only=True),
-        _make_compile_arg(values_2d),
-        _make_compile_arg(indices_2d),
+        make_compile_arg(input_2d, read_only=True),
+        make_compile_arg(values_2d),
+        make_compile_arg(indices_2d),
         rows_m,
         stream,
     )
@@ -749,6 +730,7 @@ def topk_radix_out(
     rows_m = input_2d.shape[0]
     n = input_2d.shape[1]
     device_index = input_2d.device.index
+    arch: str = _resolve_rocm_arch(device_index)  # pyrefly: ignore[bad-assignment]
 
     with torch.cuda.device(input_2d.device):
         stream = torch.cuda.current_stream(input_2d.device)
@@ -756,12 +738,12 @@ def topk_radix_out(
             n,
             k,
             deterministic,
-            _arch_for(device_index),
+            arch,
             flyc.compile_backend_name(),
             device_index,
             compile_args=(input_2d, values_2d, indices_2d, rows_m, stream),
         )
-        compiled(_read_only(input_2d), values_2d, indices_2d, rows_m, stream)
+        compiled(read_only_tensor(input_2d), values_2d, indices_2d, rows_m, stream)
 
 
 def topk_radix(
@@ -779,7 +761,7 @@ _COMPILERS = {"register": _compile_register_topk, "radix": _compile_radix_select
 
 def clear_topk_cache() -> None:
     for compiler in _COMPILERS.values():
-        cast(_CachedCompile, compiler).cache_clear()
+        cast(CachedCompile, compiler).cache_clear()
 
 
 def topk_cache_info(kernel: str | None = None) -> CacheInfo:
@@ -790,8 +772,8 @@ def topk_cache_info(kernel: str | None = None) -> CacheInfo:
     alone still passes when the gate picks the wrong kernel.
     """
     if kernel is not None:
-        return cast(_CachedCompile, _COMPILERS[kernel]).cache_info()
-    infos = [cast(_CachedCompile, c).cache_info() for c in _COMPILERS.values()]
+        return cast(CachedCompile, _COMPILERS[kernel]).cache_info()
+    infos = [cast(CachedCompile, c).cache_info() for c in _COMPILERS.values()]
     return CacheInfo(
         sum(i.hits for i in infos),
         sum(i.misses for i in infos),
