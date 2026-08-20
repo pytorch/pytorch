@@ -348,6 +348,7 @@ class TestMaxAutotuneBlackwell(TestCase):
     @parametrize("dynamic", (False, True))
     @parametrize("tma_store", (False, True))
     @parametrize("epilogue_subtile", (1, 2, 4))
+    @parametrize("host_side_tma", (False, True))
     def test_blackwell_max_autotune_addmm_persistent_tma(
         self,
         a_transposed: bool,
@@ -355,6 +356,7 @@ class TestMaxAutotuneBlackwell(TestCase):
         dynamic: bool,
         tma_store: bool,
         epilogue_subtile: int,
+        host_side_tma: bool,
     ):
         def addmm(x, a, b):
             # TMA requires 16-byte alignment: here we repeat the dims
@@ -390,6 +392,7 @@ class TestMaxAutotuneBlackwell(TestCase):
                 "max_autotune": True,
                 "triton.enable_persistent_tma_matmul": True,
                 "triton.enable_template_tma_store": tma_store,
+                "triton.enable_host_side_tma": host_side_tma,
                 "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_tma",
                 "test_configs.autotune_choice_desc_regex": epilogue_subtile_regex,
                 # If we dynamically disable pipelining,
@@ -423,9 +426,18 @@ class TestMaxAutotuneBlackwell(TestCase):
             write_api = "tl.store"
 
         # Verify that we are using a TMA implementation
-        FileCheck().check("triton_tem_fused_addmm").check(make_desc_api).check(
-            read_api
-        ).check(write_api).run(code[0])
+        fc = FileCheck().check("triton_tem_fused_addmm")
+        if host_side_tma:
+            fc.check("host_tma_descriptor_args")
+            if not tma_store:
+                fc.check_not(make_desc_api)
+        else:
+            fc.check(make_desc_api)
+        fc.check(read_api).check(write_api).run(code[0])
+        if host_side_tma and tma_store:
+            # Loads are host-side, so the TMA store is the only descriptor
+            # still built in-kernel.
+            FileCheck().check_count(make_desc_api, 1, exactly=True).run(code[0])
 
         torch.testing.assert_close(c_actual, c_expected, atol=1e-2, rtol=1e-2)
 
