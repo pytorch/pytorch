@@ -34,8 +34,6 @@ class TestCompilerBisector(TestCase):
     def tearDown(self):
         if hasattr(torch.ops, self.bisector_ns):
             delattr(torch.ops, self.bisector_ns)
-        if hasattr(self, "lib"):
-            self.lib._destroy()
 
     def get_op(self, name):
         return getattr(getattr(torch.ops, self.bisector_ns), name).default
@@ -151,8 +149,10 @@ class TestCompilerBisectorDevice(TestCase):
                 not utils.is_complex_dtype(self.dtype)
                 and not utils.is_integer_dtype(self.dtype)
                 and not utils.is_boolean_dtype(self.dtype),
-                lambda: f"Exponential distribution is a continuous probability distribution. \
-                dtype must be a floating point but you specified {self.dtype}",
+                lambda: (
+                    f"Exponential distribution is a continuous probability distribution. \
+                dtype must be a floating point but you specified {self.dtype}"
+                ),
             )
             torch._check(
                 rate > 0.0,
@@ -429,7 +429,9 @@ class TestCompilerBisectorDevice(TestCase):
         self.assertIn(expected_result, output.stdout)
 
 
-instantiate_device_type_tests(TestCompilerBisectorDevice, globals(), except_for="cpu")
+instantiate_device_type_tests(
+    TestCompilerBisectorDevice, globals(), except_for="cpu", allow_xpu=True
+)
 
 
 if __name__ == "__main__":
