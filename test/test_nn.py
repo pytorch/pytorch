@@ -4702,6 +4702,67 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
                         libc.munmap(addr, total_size)
 
+    @set_default_dtype(torch.double)
+    def test_interpolate(self):
+        def _test_interpolate_non_integer_size_warning(in_t, out_size, dim, **kwargs):
+            test_sizes = [float(out_size),
+                          torch.tensor(out_size, dtype=torch.float)]
+            for size in test_sizes:
+                self.assertRaisesRegex(TypeError,
+                                       "(expected size to be one of int or).*",
+                                       F.interpolate, in_t, size=(size,) * dim, **kwargs)
+
+        def _test_interpolate_helper(in_t, scale_factor, layer):
+            out_size = int(math.floor(in_t.shape[-1] * scale_factor))
+            dim = len(in_t.shape) - 2
+            out_shape = [1, 1] + [out_size] * dim
+            with warnings.catch_warnings(record=True) as w:
+                out_t = layer(in_t)
+            self.assertEqual(torch.ones(out_shape), out_t)
+
+            self.assertEqual(
+                F.interpolate(in_t, (out_size,) * dim, **kwargs),
+                F.interpolate(in_t, scale_factor=scale_factor, **kwargs))
+            gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [in_t], nondet_tol=GRADCHECK_NONDET_TOL)
+            gradgradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [in_t], nondet_tol=GRADCHECK_NONDET_TOL)
+            _test_interpolate_non_integer_size_warning(in_t, out_size, dim, **kwargs)
+
+        def _make_input(dim, device):
+            size = [1, 1]
+            size += [2] * dim
+            return torch.ones(size, requires_grad=True, device=device)
+
+        device_list = ['cpu']
+        if TEST_CUDA:
+            device_list.append('cuda')
+
+        for device in device_list:
+            for scale_factor in [0.5, 1.5, 2]:
+                for mode in ['nearest', 'area']:
+                    kwargs = dict(mode=mode)
+                    m = nn.Upsample(scale_factor=scale_factor, **kwargs).to(device)
+                    for input in [_make_input(1, device), _make_input(2, device), _make_input(3, device)]:
+                        _test_interpolate_helper(input, scale_factor, m)
+
+                for align_corners in [True, False]:
+                    kwargs = dict(mode='linear', align_corners=align_corners)
+                    m = nn.Upsample(scale_factor=scale_factor, **kwargs).to(device)
+                    _test_interpolate_helper(_make_input(1, device), scale_factor, m)
+
+                    kwargs = dict(mode='bilinear', align_corners=align_corners)
+                    m = nn.Upsample(scale_factor=scale_factor, **kwargs).to(device)
+                    _test_interpolate_helper(_make_input(2, device), scale_factor, m)
+
+                    kwargs = dict(mode='bicubic', align_corners=align_corners)
+
+                    def m(t):
+                        return F.interpolate(t, scale_factor=scale_factor, **kwargs).to(device)
+                    _test_interpolate_helper(_make_input(2, device), scale_factor, m)
+
+                    kwargs = dict(mode='trilinear', align_corners=align_corners)
+                    m = nn.Upsample(scale_factor=scale_factor, **kwargs).to(device)
+                    _test_interpolate_helper(_make_input(3, device), scale_factor, m)
+
     def test_linear_broadcasting(self):
         m = nn.Linear(5, 8)
         inp = torch.randn(2, 3, 5)
@@ -5071,44 +5132,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         )
         self.assertEqual(expected, actual)
 
-    def test_linear_cross_entropy_options_auto_memory_cap(self):
-        """``auto`` + ``compact`` caps the chunk at a per-target ``B_ref`` so
-        the chunked peak never exceeds the unchunked reference in the budget
-        regime (``in_features >= num_classes``, where aspect_ratio degenerates
-        to a single chunk): ``floor_pow2(N*V/4D)`` for index targets,
-        ``floor_pow2(N/2)`` for prob (whose fatter reference clears the
-        single-chunk excess with two chunks). The cap is inert in the vocab
-        regime, and skipped for non-``compact`` policies (e.g. CPU's
-        ``accurate``) and explicit (non-auto) ``chunking_method``. Pure
-        resolution arithmetic -- no GPU.
-        """
-        opts = nn.LinearCrossEntropyOptions()
-        cuda = torch.device("cuda")
-
-        def b(N, D, V, prob_target=False, device=cuda):
-            return opts._adjust(
-                N, D, V, torch.bfloat16, device, prob_target=prob_target
-            ).batch_chunk_size
-
-        # Vocab regime (V >> D): cap inert; equals the factor-1 aspect_ratio chunk.
-        self.assertEqual(b(4096, 4096, 32000), 512)
-        # Budget regime (D >= V): cap binds at floor_pow2(N*V/4D).
-        self.assertEqual(b(4096, 16384, 4096), 256)
-        self.assertEqual(b(4096, 8192, 8192), 1024)  # crossing D == V
-        # Prob target: capped at N/2 (its fatter reference clears the
-        # single-chunk excess with two chunks); vocab regime stays inert.
-        self.assertEqual(b(4096, 16384, 4096, prob_target=True), 2048)
-        self.assertEqual(b(4096, 8192, 8192, prob_target=True), 2048)  # crossing: N/2
-        self.assertEqual(b(4096, 4096, 32000, prob_target=True), 512)  # vocab inert
-        # CPU auto resolves to "accurate" (non-compact): uncapped.
-        self.assertEqual(b(4096, 16384, 4096, device=torch.device("cpu")), 4096)
-        # Explicit (non-auto) chunking_method is never capped.
-        explicit = nn.LinearCrossEntropyOptions(chunking_method="aspect_ratio")
-        self.assertEqual(
-            explicit._adjust(4096, 16384, 4096, torch.bfloat16, cuda).batch_chunk_size,
-            4096,
-        )
-
     def test_flatten(self):
         tensor_input = torch.randn(2, 1, 2, 3)
 
@@ -5136,120 +5159,12 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 r"unflattened_size must be tuple of ints, but found element of type float at pos 2"):
             nn.Unflatten(dim=1, unflattened_size=(2, 5, 5.0))
 
-    def test_layer_norm_grads_with_create_graph_flag(self):
-        atol = 1e-5
-        rtol = 1e-3
-
-        x = torch.randn((4, 4, 16), requires_grad=True)
-        layer_norm = nn.LayerNorm((16,), 1e-5, True)
-        with torch.no_grad():
-            layer_norm.weight = torch.nn.Parameter(0.1 * torch.ones_like(layer_norm.weight))
-
-        grads1 = torch.autograd.grad(layer_norm(x).sum(), x, create_graph=False)[0]
-        grads2 = torch.autograd.grad(layer_norm(x).sum(), x, create_graph=True)[0]
-
-        self.assertEqual(grads1, grads2, rtol=rtol, atol=atol)
-
-        if TEST_CUDA:
-            x = x.to('cuda')
-            layer_norm = layer_norm.to('cuda')
-
-            grads1 = torch.autograd.grad(layer_norm(x).sum(), x, create_graph=False)[0]
-            grads2 = torch.autograd.grad(layer_norm(x).sum(), x, create_graph=True)[0]
-
-            self.assertEqual(grads1, grads2, rtol=rtol, atol=atol)
-
     def test_layer_norm_eps(self):
         # test for https://github.com/pytorch/pytorch/issues/108072
         x = torch.Tensor([[[2.0, 2.0], [14.0, 14.0]], [[2.0, 2.0], [14.0, 14.0]]])
         ln = torch.nn.LayerNorm(2, eps=1e-6, elementwise_affine=False)
         self.assertEqual(ln.forward(x), torch.zeros_like(x))
 
-
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-    def test_layer_norm_backwards_eps(self):
-        dtype = torch.float
-        m_x_n_list = [(3, 3), (5, 5), (11, 11), (55, 55),
-                      (32, 32), (1024, 32), (1024, 1024),
-                      (33, 33), (1025, 33), (1025, 1025),
-                      (128 * 1024, 32), (32, 128 * 1024)]
-        boolean = [True, False]
-        combinations = itertools.product(boolean, repeat=2)
-        for elementwise_affine, bias in combinations:
-            for m, n in m_x_n_list:
-                x = torch.randn((m, n), dtype=dtype, requires_grad=True)
-                grad_output = torch.rand_like(x)
-                x_cuda = x.clone().detach().to("cuda").requires_grad_()
-                grad_output_cuda = grad_output.clone().detach().to("cuda")
-                ln = nn.LayerNorm(n, dtype=dtype, elementwise_affine=elementwise_affine, bias=bias)
-                ln_cuda = nn.LayerNorm(n, device="cuda", dtype=dtype, elementwise_affine=elementwise_affine, bias=bias)
-                ln_out = ln(x)
-                ln_out_cuda = ln_cuda(x_cuda)
-                ln_out.backward(grad_output)
-                ln_out_cuda.backward(grad_output_cuda)
-                atol = 1e-4
-                rtol = 1e-5
-                if m > 64 * 1024:
-                    atol = 1e-3
-                    rtol = 1e-3
-                if elementwise_affine:
-                    self.assertEqual(ln.weight.grad, ln_cuda.weight.grad, lambda msg: f"{msg}\nweight grad failed: {m=} {n=}", rtol=rtol, atol=atol)
-                if bias and elementwise_affine:
-                    self.assertEqual(ln.bias.grad, ln_cuda.bias.grad, lambda msg: f"{msg}\nbias grad failed: {m=} {n=}", rtol=rtol, atol=atol)
-
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-    @largeTensorTest("40GB", device="cuda")
-    def test_layer_norm_large_tensor(self):
-        # test for https://github.com/pytorch/pytorch/issues/136291
-        device = torch.device("cuda")
-        b, n, dp = 16, 3000, 16
-        pairwise_repr = torch.randn(b, n, n, dp)
-
-        attn_bias_norm = nn.LayerNorm(dp).to(device=device)
-        pairwise_repr = pairwise_repr.to(dtype=torch.float32, device=device)
-        # we want a smaller copy to compare the results
-        pairwise_small = pairwise_repr[-1, -1, -1].detach().clone()
-        norm = attn_bias_norm(pairwise_repr)
-        norm_small = attn_bias_norm(pairwise_small)
-
-        self.assertEqual(norm.shape, torch.Size([16, 3000, 3000, 16]))
-        # Check output to make sure it is correct.
-        torch.testing.assert_close(norm_small, norm[-1, -1, -1])
-
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-    @largeTensorTest("20GB", device="cuda")
-    def test_layer_norm_32bit_overflow(self):
-        # test for https://github.com/pytorch/pytorch/issues/181555
-        N = 4096
-        M = (2**32 // N) + 2  # M*N just over 2^32
-        x = torch.randn(M, N, dtype=torch.bfloat16, device="cuda")
-        gamma = torch.ones(N, dtype=torch.bfloat16, device="cuda")
-        beta = torch.zeros(N, dtype=torch.bfloat16, device="cuda")
-
-        y = torch.layer_norm(x, [N], gamma, beta)
-
-        # Rows past the 2^32 element boundary must not be zero
-        boundary_row = 2**32 // N
-        for row in [boundary_row, boundary_row + 1]:
-            ref = torch.layer_norm(x[row:row + 1], [N], gamma, beta)
-            self.assertEqual(y[row], ref[0])
-
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-    @largeTensorTest("1GB", device="cuda")
-    def test_layer_norm_large_m_non_vectorized(self):
-        # test for https://github.com/pytorch/pytorch/issues/184826
-        # N is intentionally not divisible by 4 so the vectorized kernel is skipped.
-        N = 3
-        gamma = torch.ones(N, dtype=torch.float32, device="cuda")
-
-        for M in (2**23, 2**23 + 1):
-            x = torch.randn(M, N, dtype=torch.float32, device="cuda")
-            y = torch.layer_norm(x, [N], gamma, None)
-
-            for start in (0, M - 8192):
-                x_chunk = x[start:start + 8192].contiguous()
-                ref = torch.layer_norm(x_chunk, [N], gamma, None)
-                self.assertEqual(y[start:start + 8192], ref, atol=1e-5, rtol=1e-5)
 
     def test_padding_list(self):
         # Padding can be a list, or tuple (regression test for gh-54452)
@@ -5271,19 +5186,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         with self.assertRaisesRegex(ValueError,
                                     "fractional_max_pool2d requires output_ratio to either be a single Int or tuple of Ints."):
             res = arg_class(*arg_3)
-
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-    @largeTensorTest("20GB", device="cuda")
-    def test_large_max_pool2d_ch_last(self):
-        # https://github.com/pytorch/pytorch/issues/165297
-        N, C, H, W = 70, 64, 512, 960  # dims to extend > int32
-        device = torch.device("cuda")
-        x_cuda = torch.randn(N, C, H, W, device=device, dtype=torch.float16)
-        x_cuda = x_cuda.to(memory_format=torch.channels_last)
-        pool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
-        y_cuda_ch_last = pool(x_cuda)
-        y_cuda_contig = pool(x_cuda.contiguous())
-        self.assertEqual(y_cuda_ch_last, y_cuda_contig)
 
     def test_max_pool1d_invalid_output_size(self):
         arg_1 = 3
@@ -7442,6 +7344,113 @@ class TestNNDeviceType(NNTestCase):
         out_cpu.backward(grad_out.cpu())
 
         self.assertEqual(bias.grad.cpu(), bias_cpu.grad, f"M={M} N={N}", atol=1e-4, rtol=1e-4)
+
+    def test_layer_norm_grads_with_create_graph_flag(self, device):
+        atol = 1e-5
+        rtol = 1e-3
+
+        x = torch.randn((4, 4, 16), requires_grad=True)
+        layer_norm = nn.LayerNorm((16,), 1e-5, True)
+        with torch.no_grad():
+            layer_norm.weight = torch.nn.Parameter(0.1 * torch.ones_like(layer_norm.weight))
+
+        grads1 = torch.autograd.grad(layer_norm(x).sum(), x, create_graph=False)[0]
+        grads2 = torch.autograd.grad(layer_norm(x).sum(), x, create_graph=True)[0]
+
+        self.assertEqual(grads1, grads2, rtol=rtol, atol=atol)
+
+        if torch.device(device).type != 'cpu':
+            x = x.to(device)
+            layer_norm = layer_norm.to(device)
+
+            grads1 = torch.autograd.grad(layer_norm(x).sum(), x, create_graph=False)[0]
+            grads2 = torch.autograd.grad(layer_norm(x).sum(), x, create_graph=True)[0]
+
+            self.assertEqual(grads1, grads2, rtol=rtol, atol=atol)
+
+    @onlyAccelerator
+    def test_layer_norm_backwards_eps(self, device):
+        dtype = torch.float
+        m_x_n_list = [(3, 3), (5, 5), (11, 11), (55, 55),
+                      (32, 32), (1024, 32), (1024, 1024),
+                      (33, 33), (1025, 33), (1025, 1025),
+                      (128 * 1024, 32), (32, 128 * 1024)]
+        boolean = [True, False]
+        combinations = itertools.product(boolean, repeat=2)
+        for elementwise_affine, bias in combinations:
+            for m, n in m_x_n_list:
+                x = torch.randn((m, n), dtype=dtype, requires_grad=True)
+                grad_output = torch.rand_like(x)
+                x_device = x.clone().detach().to(device).requires_grad_()
+                grad_output_device = grad_output.clone().detach().to(device)
+                ln = nn.LayerNorm(n, dtype=dtype, elementwise_affine=elementwise_affine, bias=bias)
+                ln_device = nn.LayerNorm(n, device=device, dtype=dtype, elementwise_affine=elementwise_affine, bias=bias)
+                ln_out = ln(x)
+                ln_out_device = ln_device(x_device)
+                ln_out.backward(grad_output)
+                ln_out_device.backward(grad_output_device)
+                atol = 1e-4
+                rtol = 1e-5
+                if m > 64 * 1024:
+                    atol = 1e-3
+                    rtol = 1e-3
+                if elementwise_affine:
+                    self.assertEqual(ln.weight.grad, ln_device.weight.grad, lambda msg: f"{msg}\nweight grad failed: {m=} {n=}", rtol=rtol, atol=atol)
+                if bias and elementwise_affine:
+                    self.assertEqual(ln.bias.grad, ln_device.bias.grad, lambda msg: f"{msg}\nbias grad failed: {m=} {n=}", rtol=rtol, atol=atol)
+
+    @onlyAccelerator
+    @largeTensorTest("40GB")
+    def test_layer_norm_large_tensor(self, device):
+        # test for https://github.com/pytorch/pytorch/issues/136291
+        b, n, dp = 16, 3000, 16
+        pairwise_repr = torch.randn(b, n, n, dp)
+
+        attn_bias_norm = nn.LayerNorm(dp).to(device=device)
+        pairwise_repr = pairwise_repr.to(dtype=torch.float32, device=device)
+        # we want a smaller copy to compare the results
+        pairwise_small = pairwise_repr[-1, -1, -1].detach().clone()
+        norm = attn_bias_norm(pairwise_repr)
+        norm_small = attn_bias_norm(pairwise_small)
+
+        self.assertEqual(norm.shape, torch.Size([16, 3000, 3000, 16]))
+        # Check output to make sure it is correct.
+        torch.testing.assert_close(norm_small, norm[-1, -1, -1])
+
+    @onlyAccelerator
+    @largeTensorTest("20GB")
+    def test_layer_norm_32bit_overflow(self, device):
+        # test for https://github.com/pytorch/pytorch/issues/181555
+        N = 4096
+        M = (2**32 // N) + 2  # M*N just over 2^32
+        x = torch.randn(M, N, dtype=torch.bfloat16, device=device)
+        gamma = torch.ones(N, dtype=torch.bfloat16, device=device)
+        beta = torch.zeros(N, dtype=torch.bfloat16, device=device)
+
+        y = torch.layer_norm(x, [N], gamma, beta)
+
+        # Rows past the 2^32 element boundary must not be zero
+        boundary_row = 2**32 // N
+        for row in [boundary_row, boundary_row + 1]:
+            ref = torch.layer_norm(x[row:row + 1], [N], gamma, beta)
+            self.assertEqual(y[row], ref[0])
+
+    @onlyAccelerator
+    @largeTensorTest("1GB")
+    def test_layer_norm_large_m_non_vectorized(self, device):
+        # test for https://github.com/pytorch/pytorch/issues/184826
+        # N is intentionally not divisible by 4 so the vectorized kernel is skipped.
+        N = 3
+        gamma = torch.ones(N, dtype=torch.float32, device=device)
+
+        for M in (2**23, 2**23 + 1):
+            x = torch.randn(M, N, dtype=torch.float32, device=device)
+            y = torch.layer_norm(x, [N], gamma, None)
+
+            for start in (0, M - 8192):
+                x_chunk = x[start:start + 8192].contiguous()
+                ref = torch.layer_norm(x_chunk, [N], gamma, None)
+                self.assertEqual(y[start:start + 8192], ref, atol=1e-5, rtol=1e-5)
 
     @onlyCPU
     def test_glu_bfloat16(self, device):
@@ -15575,63 +15584,6 @@ if __name__ == '__main__':
         self.assertEqual(out_ref, out)
         self.assertEqual(input_ref.grad, input.grad)
 
-    @skipMPS  # MPS does not support double dtype, which this test relies on via set_default_dtype
-    @set_default_dtype(torch.double)
-    def test_interpolate(self, device):
-        def _test_interpolate_non_integer_size_warning(in_t, out_size, dim, **kwargs):
-            test_sizes = [float(out_size),
-                          torch.tensor(out_size, dtype=torch.float)]
-            for size in test_sizes:
-                self.assertRaisesRegex(TypeError,
-                                       "(expected size to be one of int or).*",
-                                       F.interpolate, in_t, size=(size,) * dim, **kwargs)
-
-        def _test_interpolate_helper(in_t, scale_factor, layer):
-            out_size = int(math.floor(in_t.shape[-1] * scale_factor))
-            dim = len(in_t.shape) - 2
-            out_shape = [1, 1] + [out_size] * dim
-            with warnings.catch_warnings(record=True) as w:
-                out_t = layer(in_t)
-            self.assertEqual(torch.ones(out_shape), out_t)
-
-            self.assertEqual(
-                F.interpolate(in_t, (out_size,) * dim, **kwargs),
-                F.interpolate(in_t, scale_factor=scale_factor, **kwargs))
-            gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [in_t], nondet_tol=GRADCHECK_NONDET_TOL)
-            gradgradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [in_t], nondet_tol=GRADCHECK_NONDET_TOL)
-            _test_interpolate_non_integer_size_warning(in_t, out_size, dim, **kwargs)
-
-        def _make_input(dim, device):
-            size = [1, 1]
-            size += [2] * dim
-            return torch.ones(size, requires_grad=True, device=device)
-
-        for scale_factor in [0.5, 1.5, 2]:
-            for mode in ['nearest', 'area']:
-                kwargs = dict(mode=mode)
-                m = nn.Upsample(scale_factor=scale_factor, **kwargs).to(device)
-                for input in [_make_input(1, device), _make_input(2, device), _make_input(3, device)]:
-                    _test_interpolate_helper(input, scale_factor, m)
-
-            for align_corners in [True, False]:
-                kwargs = dict(mode='linear', align_corners=align_corners)
-                m = nn.Upsample(scale_factor=scale_factor, **kwargs).to(device)
-                _test_interpolate_helper(_make_input(1, device), scale_factor, m)
-
-                kwargs = dict(mode='bilinear', align_corners=align_corners)
-                m = nn.Upsample(scale_factor=scale_factor, **kwargs).to(device)
-                _test_interpolate_helper(_make_input(2, device), scale_factor, m)
-
-                kwargs = dict(mode='bicubic', align_corners=align_corners)
-
-                def m(t):
-                    return F.interpolate(t, scale_factor=scale_factor, **kwargs).to(device)
-                _test_interpolate_helper(_make_input(2, device), scale_factor, m)
-
-                kwargs = dict(mode='trilinear', align_corners=align_corners)
-                m = nn.Upsample(scale_factor=scale_factor, **kwargs).to(device)
-                _test_interpolate_helper(_make_input(3, device), scale_factor, m)
-
     @skipMPS
     @tf32_on_and_off(0.005)
     @parametrize_test('bias', [
@@ -15679,8 +15631,6 @@ if __name__ == '__main__':
         for g, ge in zip(grads, grads_expected):
             self.assertEqual(g, ge)
 
-
-class TestNNCUDA(NNTestCase):
     def test_linear_cross_entropy_options_auto_defaults(self, device):
         """``LinearCrossEntropyOptions()`` keeps the auto sentinels at
         construction time; ``_adjust`` resolves them per (device, dtype).
@@ -15784,6 +15734,46 @@ class TestNNCUDA(NNTestCase):
                 torch.float32 if major >= 7 else torch.float16,
             )
 
+    def test_linear_cross_entropy_options_auto_memory_cap(self, device):
+        """``auto`` + ``compact`` caps the chunk at a per-target ``B_ref`` so
+        the chunked peak never exceeds the unchunked reference in the budget
+        regime (``in_features >= num_classes``, where aspect_ratio degenerates
+        to a single chunk): ``floor_pow2(N*V/4D)`` for index targets,
+        ``floor_pow2(N/2)`` for prob (whose fatter reference clears the
+        single-chunk excess with two chunks). The cap is inert in the vocab
+        regime, and skipped for non-``compact`` policies (e.g. CPU's
+        ``accurate``) and explicit (non-auto) ``chunking_method``. Pure
+        resolution arithmetic -- no GPU.
+        """
+        opts = nn.LinearCrossEntropyOptions()
+        cuda = torch.device("cuda")
+
+        def b(N, D, V, prob_target=False, device=cuda):
+            return opts._adjust(
+                N, D, V, torch.bfloat16, device, prob_target=prob_target
+            ).batch_chunk_size
+
+        # Vocab regime (V >> D): cap inert; equals the factor-1 aspect_ratio chunk.
+        self.assertEqual(b(4096, 4096, 32000), 512)
+        # Budget regime (D >= V): cap binds at floor_pow2(N*V/4D).
+        self.assertEqual(b(4096, 16384, 4096), 256)
+        self.assertEqual(b(4096, 8192, 8192), 1024)  # crossing D == V
+        # Prob target: capped at N/2 (its fatter reference clears the
+        # single-chunk excess with two chunks); vocab regime stays inert.
+        self.assertEqual(b(4096, 16384, 4096, prob_target=True), 2048)
+        self.assertEqual(b(4096, 8192, 8192, prob_target=True), 2048)  # crossing: N/2
+        self.assertEqual(b(4096, 4096, 32000, prob_target=True), 512)  # vocab inert
+        # CPU auto resolves to "accurate" (non-compact): uncapped.
+        self.assertEqual(b(4096, 16384, 4096, device=torch.device("cpu")), 4096)
+        # Explicit (non-auto) chunking_method is never capped.
+        explicit = nn.LinearCrossEntropyOptions(chunking_method="aspect_ratio")
+        self.assertEqual(
+            explicit._adjust(4096, 16384, 4096, torch.bfloat16, cuda).batch_chunk_size,
+            4096,
+        )
+
+
+class TestNNCUDA(NNTestCase):
     @skipCUDAIfNoCudnn
     @deviceCountAtLeast(2)
     def test_cudnn_rnn_dropout_states_device(self, devices):
