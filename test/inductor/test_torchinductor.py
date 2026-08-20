@@ -95,7 +95,10 @@ from torch.testing._internal.common_cuda import (
 from torch.testing._internal.common_device_type import (
     e4m3_type,
     expectedFailureXPU,
+    instantiate_device_type_tests,
     largeTensorTest,
+    skipCUDAIf as skipCUDAIfDeviceType,
+    skipXPUIf,
 )
 from torch.testing._internal.common_dtype import (
     all_types,
@@ -6129,7 +6132,7 @@ for dtype in (torch.int32, torch.int64):
             (torch.randn([10]),),
         )
 
-    @skip_if_no_accelerator
+    @skip_if_no_accelerator_triton
     def test_to_copy_fp64_to_no_fp64_device(self):
         # See https://github.com/pytorch/pytorch/issues/180664
         # When the target device does not support fp64, _to_copy should
@@ -10750,7 +10753,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     # The following 2 tests are meant to check the logic that drops
     # xmask from triton load/store if xnumel = 1
-    @skip_if_no_accelerator
+    @skip_if_no_accelerator_triton
     def test_single_elem(self):
         def fn(a):
             b = a + 1
@@ -10758,7 +10761,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (torch.randn(1),))
 
-    @skip_if_no_accelerator
+    @skip_if_no_accelerator_triton
     def test_single_elem_indirect(self):
         def fn(a, b):
             c = a[b] + 1
@@ -10772,7 +10775,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     # This test is meant to check for issues from the logic
     # that drops xmask from trito load/store if XBLOCK divides xnumel
 
-    @skip_if_no_accelerator
+    @skip_if_no_accelerator_triton
     def test_xblock_divides_xnumel(self):
         def fn(a):
             b = a + 1
@@ -22217,143 +22220,160 @@ if RUN_GPU:
             for a, e in zip(actual, expected):
                 torch.testing.assert_close(a, e)
 
-    class RNNTest(TestCase):
-        hw_classification = HardwareClassification.ACCELERATOR
-        device_type = GPU_TYPE
-        device = GPU_TYPE
 
-        class Model(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.gru = torch.nn.GRU(16, 16, batch_first=True)
+class RNNTest(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
-            def forward(self, x):
-                return self.gru(x)
+    class Model(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.gru = torch.nn.GRU(16, 16, batch_first=True)
 
-        def test_rnn_compile_safe(self):
-            device = torch.device(self.device)
-            model = RNNTest.Model().to(device)
-            model = torch.compile(model, backend="inductor")
-            x = torch.rand(1024, 20, 16).to(device)
-            model(x)
+        def forward(self, x):
+            return self.gru(x)
 
-    class NanCheckerTest(TestCase):
-        hw_classification = HardwareClassification.ACCELERATOR
-        device = GPU_TYPE
-
-        @config.patch("nan_asserts", True)
-        def test_nan_checker_pass(self):
-            def f(x):
-                return torch.softmax(x, dim=-1)
-
-            x = torch.randn(2, 1024, device=self.device)
-            ref = f(x)
-            actual, code = run_and_get_code(torch.compile(f), x)
-            self.assertTrue(torch.allclose(ref, actual))
-
-            code = code[0]
-            if config.cpp_wrapper:
-                self.assertIn("aoti_torch_check_inf_and_nan", code)
-            else:
-                self.assertIn("# make sure graph inputs are not nan/inf", code)
-                self.assertRegex(code, r"return_vars = (.*)")
-                self.assertIn("for var in return_vars:", code)
-                self.assertIn("if isinstance(var, torch.Tensor):", code)
-                self.assertRegex(code, r"assert not .*\.isnan\(\)\.any\(\).item\(\)")
-                self.assertRegex(code, r"assert not .*\.isinf\(\)\.any\(\).item\(\)")
-
-        @config.patch("nan_asserts", True)
-        def test_nan_checker_fail(self):
-            def f(x):
-                return torch.softmax(x, dim=-1)
-
-            x = torch.randn(2, 1024, device=self.device)
-            x[0, 0] = float("nan")
-            with self.assertRaises(
-                AssertionError if not config.cpp_wrapper else RuntimeError
-            ):
-                torch.compile(f)(x)
+    @skipCUDAIfDeviceType(not has_triton(), "requires Triton")
+    @skipXPUIf(not has_triton(), "requires Triton")
+    def test_rnn_compile_safe(self, device):
+        model = self.Model().to(device)
+        model = torch.compile(model, backend="inductor")
+        x = torch.rand(1024, 20, 16).to(device)
+        model(x)
 
 
-if RUN_CPU:
+instantiate_device_type_tests(RNNTest, globals(), except_for="cpu", allow_xpu=True)
 
-    class CheckModelStrideSemanticsTest(TestCase):
-        hw_classification = HardwareClassification.CPU
 
-        def test_check_model_exact_stride_ignores_insignificant_strides(self):
-            def fn(x, y):
-                return torch.einsum("aij,ajk->aik", x, y)
+class NanCheckerTest(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
-            x = torch.arange(6, dtype=torch.int64).reshape(1, 2, 3)
-            y = torch.arange(12, dtype=torch.int64).reshape(1, 3, 4)
+    @skipCUDAIfDeviceType(not has_triton(), "requires Triton")
+    @skipXPUIf(not has_triton(), "requires Triton")
+    @config.patch("nan_asserts", True)
+    def test_nan_checker_pass(self, device):
+        def f(x):
+            return torch.softmax(x, dim=-1)
 
-            check_model(
-                self,
-                fn,
-                (x, y),
-                exact_stride=True,
-                reference_in_float=False,
-            )
+        x = torch.randn(2, 1024, device=device)
+        ref = f(x)
+        actual, code = run_and_get_code(torch.compile(f), x)
+        self.assertTrue(torch.allclose(ref, actual))
 
-        def test_significant_stride_check_rejects_meaningful_stride_mismatch(self):
+        code = code[0]
+        if config.cpp_wrapper:
+            self.assertIn("aoti_torch_check_inf_and_nan", code)
+        else:
+            self.assertIn("# make sure graph inputs are not nan/inf", code)
+            self.assertRegex(code, r"return_vars = (.*)")
+            self.assertIn("for var in return_vars:", code)
+            self.assertIn("if isinstance(var, torch.Tensor):", code)
+            self.assertRegex(code, r"assert not .*\.isnan\(\)\.any\(\).item\(\)")
+            self.assertRegex(code, r"assert not .*\.isinf\(\)\.any\(\).item\(\)")
+
+    @skipCUDAIfDeviceType(not has_triton(), "requires Triton")
+    @skipXPUIf(not has_triton(), "requires Triton")
+    @config.patch("nan_asserts", True)
+    def test_nan_checker_fail(self, device):
+        def f(x):
+            return torch.softmax(x, dim=-1)
+
+        x = torch.randn(2, 1024, device=device)
+        x[0, 0] = float("nan")
+        with self.assertRaises(
+            AssertionError if not config.cpp_wrapper else RuntimeError
+        ):
+            torch.compile(f)(x)
+
+
+instantiate_device_type_tests(
+    NanCheckerTest, globals(), except_for="cpu", allow_xpu=True
+)
+
+
+@unittest.skipIf(not HAS_CPU, "requires C++ compiler")
+class CheckModelStrideSemanticsTest(TestCase):
+    hw_classification = HardwareClassification.CPU
+
+    def test_check_model_exact_stride_ignores_insignificant_strides(self, device):
+        def fn(x, y):
+            return torch.einsum("aij,ajk->aik", x, y)
+
+        x = torch.arange(6, dtype=torch.int64).reshape(1, 2, 3)
+        y = torch.arange(12, dtype=torch.int64).reshape(1, 3, 4)
+
+        check_model(
+            self,
+            fn,
+            (x, y),
+            exact_stride=True,
+            reference_in_float=False,
+        )
+
+    def test_significant_stride_check_rejects_meaningful_stride_mismatch(self, device):
+        _assert_same_significant_strides(
+            self,
+            torch.empty_strided((1, 2, 4), (4, 4, 1)),
+            torch.empty_strided((1, 2, 4), (8, 4, 1)),
+        )
+
+        with self.assertRaisesRegex(AssertionError, "Significant strides mismatch"):
             _assert_same_significant_strides(
                 self,
-                torch.empty_strided((1, 2, 4), (4, 4, 1)),
-                torch.empty_strided((1, 2, 4), (8, 4, 1)),
+                torch.empty_strided((2, 2, 4), (4, 4, 1)),
+                torch.empty_strided((2, 2, 4), (8, 4, 1)),
             )
 
-            with self.assertRaisesRegex(AssertionError, "Significant strides mismatch"):
-                _assert_same_significant_strides(
-                    self,
-                    torch.empty_strided((2, 2, 4), (4, 4, 1)),
-                    torch.empty_strided((2, 2, 4), (8, 4, 1)),
-                )
 
-    class TestFull(TestCase):
-        hw_classification = HardwareClassification.CPU
+instantiate_device_type_tests(CheckModelStrideSemanticsTest, globals(), only_for="cpu")
 
-        def test_full_dtype(self):
-            pytypes = (
-                bool,
-                int,
-                float,
-                # TODO: Triton's JITFunction._type_of has no support for complex
-                # complex,
-            )
 
-            dtypes = (
-                torch.bool,
-                torch.int32,
-                torch.int64,
-                torch.float32,
-                torch.float64,
-                None,
-                # torch.complex64,
-                # torch.complex128,
-            )
+@unittest.skipIf(not HAS_CPU, "requires C++ compiler")
+class TestFull(TestCase):
+    hw_classification = HardwareClassification.CPU
 
-            def fn(pytype, dtype):
-                if pytype is bool:
-                    fill_value = True
-                elif pytype is int:
-                    fill_value = 42
-                elif pytype is float:
-                    fill_value = 42.0
-                else:
-                    raise AssertionError(f"Unexpected Python type: {pytype}")
+    def test_full_dtype(self, device):
+        pytypes = (
+            bool,
+            int,
+            float,
+            # TODO: Triton's JITFunction._type_of has no support for complex
+            # complex,
+        )
 
-                return torch.full(
-                    (4, 6), fill_value, dtype=dtype, device=torch.device("cpu")
-                )
+        dtypes = (
+            torch.bool,
+            torch.int32,
+            torch.int64,
+            torch.float32,
+            torch.float64,
+            None,
+            # torch.complex64,
+            # torch.complex128,
+        )
 
-            fn_opt = torch.compile(fn, backend="inductor")
+        def fn(pytype, dtype):
+            if pytype is bool:
+                fill_value = True
+            elif pytype is int:
+                fill_value = 42
+            elif pytype is float:
+                fill_value = 42.0
+            else:
+                raise AssertionError(f"Unexpected Python type: {pytype}")
 
-            for pytype, dtype in itertools.product(pytypes, dtypes):
-                with enable_python_dispatcher():
-                    with torch.no_grad():
-                        ret_opt = fn_opt(pytype, dtype)
+            return torch.full((4, 6), fill_value, dtype=dtype, device=device)
 
-                self.assertEqual(ret_opt, fn(pytype, dtype))
+        fn_opt = torch.compile(fn, backend="inductor")
+
+        for pytype, dtype in itertools.product(pytypes, dtypes):
+            with enable_python_dispatcher():
+                with torch.no_grad():
+                    ret_opt = fn_opt(pytype, dtype)
+
+            self.assertEqual(ret_opt, fn(pytype, dtype))
+
+
+instantiate_device_type_tests(TestFull, globals(), only_for="cpu")
 
 
 def _strip_tmp_path(code: str) -> str:
