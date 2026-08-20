@@ -85,7 +85,7 @@ def vt_identity_compare(
     from .dicts import ConstDictVariable
     from .lists import ListVariable
     from .misc import ExceptionVariable, TracebackVariable
-    from .sets import SetVariable
+    from .sets import FrozensetVariable, SetVariable
 
     if isinstance(
         left,
@@ -93,6 +93,7 @@ def vt_identity_compare(
             ConstDictVariable,
             ListVariable,
             SetVariable,
+            FrozensetVariable,
             TracebackVariable,
             ExceptionVariable,
         ),
@@ -400,9 +401,7 @@ def generic_is_true(
             raise_observed_exception(type(e), tx, args=[str(e)])
 
     if obj.tp_as_number.nb_bool:
-        result = obj.nb_bool_impl(tx)
-        if result is not None:
-            return result
+        return obj.nb_bool_impl(tx)
 
     try:
         length = generic_size(tx, obj)

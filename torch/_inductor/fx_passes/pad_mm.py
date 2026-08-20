@@ -478,10 +478,27 @@ def should_pad(
     op: torch._ops.OpOverloadPacket,
     input: Tensor | None = None,
 ) -> bool:
-    _can_pad = can_pad(mat1, mat2, op, input)
+    if not can_pad(mat1, mat2, op, input):
+        return False
+
+    # Force padding when explicitly requested - performance override
+    if torch._inductor.config.force_shape_pad:
+        return True
+
+    # Small-K/N mm is lowered to a fused pointwise kernel in tuned_mm.
+    # Leave those shapes unpadded and let the pointwise lowering handle them.
+    if op is torch.ops.aten.mm:
+        from ..kernel.mm_common import _use_small_mm_pointwise
+
+        m, k, n = mat1.shape[0], mat1.shape[1], mat2.shape[1]
+        if _use_small_mm_pointwise(
+            m, k, n, mat1.device.type, statically_known_true=statically_known_true
+        ):
+            return False
+
     # Note that if you're tempted to insert a dynamo_timed call here, this function can
     # be called enough that the dynamo_timed overhead is not negligible.
-    return _can_pad and _should_pad(match, mat1, mat2, op, input)
+    return _should_pad(match, mat1, mat2, op, input)
 
 
 def get_do_bench() -> Callable[[Callable[[], Any]], float]:
@@ -525,10 +542,6 @@ def _should_pad(
             n_padded_length = get_padded_length(n, get_alignment_size(mat2))
         else:
             return False
-
-        # Force padding when explicitly requested - performance override
-        if torch._inductor.config.force_shape_pad:
-            return True
 
         # Resolve symbolic dims to concrete hints for heuristic checks below.
         # These are performance decisions, not correctness — optimization_hint is safe.

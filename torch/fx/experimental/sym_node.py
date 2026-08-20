@@ -1410,6 +1410,18 @@ def method_to_operator(method: str) -> Callable[..., object]:
     return METHOD_TO_OPERATOR[method]
 
 
+def _coerce_hint(pytype: type | None, out_hint: object) -> object:
+    """Narrow a hint computed from the operands to the result's python type."""
+    if (
+        pytype is not None
+        and out_hint is not _NO_HINT
+        and out_hint is not None
+        and not isinstance(out_hint, SymTypes)
+    ):
+        return pytype(out_hint)  # type: ignore[arg-type]
+    return out_hint
+
+
 def _make_node_magic(method: str, func: Callable[..., sympy.Basic]) -> None:
     func = lru_cache(256)(func)
 
@@ -1502,9 +1514,15 @@ def _make_node_magic(method: str, func: Callable[..., sympy.Basic]) -> None:
             raise AssertionError(f"Expected SymNode, got {type(other)}")
 
         # See Note [symbolic op memo] in symbolic_shapes.py. The cache holds the
-        # resulting expression, never the SymNode: proxy slots are keyed on node
-        # identity, so returning one node to two call sites would give the second
-        # the first's provenance in the graph being traced.
+        # result expression, never the SymNode. Given
+        #   s1: a = x.size()[0] + 1
+        #   s2: b = x.size()[0] + 1
+        # a and b must wrap different SymNodes, so that the two sites refer to
+        # different graph nodes as their producers. While tracing, the tracer
+        # keeps a table mapping each SymNode object to the graph node that
+        # produced it, and two SymNodes with the same expression are told apart
+        # only by object identity, so handing the same one to both sites makes
+        # s2 refer to the node created at s1 as its producer.
         shape_env = self.shape_env
         cache = None
         cache_key = None
@@ -1519,13 +1537,7 @@ def _make_node_magic(method: str, func: Callable[..., sympy.Basic]) -> None:
             cached = cache.get(cache_key)
             if cached is not None:
                 out, pytype, optimized_summation = cached
-                if (
-                    pytype is not None
-                    and out_hint is not _NO_HINT
-                    and out_hint is not None
-                    and not isinstance(out_hint, SymTypes)
-                ):
-                    out_hint = pytype(out_hint)  # type: ignore[arg-type]
+                out_hint = _coerce_hint(pytype, out_hint)
                 fx_node, _ = shape_env._create_fx_call_function(
                     op, (self.fx_node, other.fx_node)
                 )
@@ -1621,13 +1633,7 @@ def _make_node_magic(method: str, func: Callable[..., sympy.Basic]) -> None:
         else:
             pytype = self.pytype
 
-        if (
-            pytype is not None
-            and out_hint is not _NO_HINT
-            and out_hint is not None
-            and not isinstance(out_hint, SymTypes)
-        ):
-            out_hint = pytype(out_hint)  # type: ignore[arg-type]
+        out_hint = _coerce_hint(pytype, out_hint)
 
         # Create a FX node that corresponds to the operation being applied to
         # this node.
