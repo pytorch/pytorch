@@ -11,6 +11,10 @@ import sympy
 import torch
 import torch._inductor.virtualized as virtualized
 from torch._inductor.ir import ComputedBuffer, Pointwise
+from torch._inductor.kernel.gemm_epilogue import (
+    GEMM_ACCUMULATOR_ARG_NAME,
+    GemmEpiloguePlan,
+)
 from torch._inductor.ops_handler import DefaultHandler, WrapperHandler
 from torch._inductor.scheduler import BaseSchedulerNode
 from torch._inductor.utils import DelayReplaceLine, IndentedBuffer, OrderedSet
@@ -18,8 +22,6 @@ from torch._inductor.virtualized import OpsValue
 
 from ...virtualized import V
 
-
-_ACCUMULATOR_ARG_NAME = "accum"
 
 # 1/sqrt(2) (M_SQRT1_2), the constant Inductor's gelu decomposition multiplies
 # the input by before applying erf.
@@ -290,7 +292,7 @@ def scaled_mm_evt(
     evt_read_names = [scale_A_name, scale_B_name]
     var_name_to_buffer_name = {n: n for n in [scale_A_name, scale_B_name]}
     var_name_to_buffer_name["D"] = output_name
-    var_name_to_buffer_name[_ACCUMULATOR_ARG_NAME] = output_name
+    var_name_to_buffer_name[GEMM_ACCUMULATOR_ARG_NAME] = output_name
     expr = f"accum * {scale_A_name} * {scale_B_name}{linesep}"
     if bias_name:
         expr = f"({expr}) + {bias_name}"
@@ -446,7 +448,7 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
         self.reads: OrderedSet[str] = OrderedSet([])
         # Used for creating example tensors
         self.var_name_to_buffer_name: dict[str, str] = {
-            _ACCUMULATOR_ARG_NAME: accumulator_node_name
+            GEMM_ACCUMULATOR_ARG_NAME: accumulator_node_name
         }
         self.removed_buffers: OrderedSet[str] = removed_buffers
         self.cur_node: ComputedBuffer | None = None
@@ -462,7 +464,7 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
         if accumulator_node_name not in removed_buffers:
             # cannot return accumulator directly, so alias it
             var = self._tmp_var()
-            self.body.writeline(f"{var} = {_ACCUMULATOR_ARG_NAME}")
+            self.body.writeline(f"{var} = {GEMM_ACCUMULATOR_ARG_NAME}")
             self.store(accumulator_node_name, value=OpsValue(var))
 
     @staticmethod
@@ -472,7 +474,7 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
         removed_buffers: OrderedSet[str],
         fn_name: str = "fn",
         as_standalone_function: bool = False,
-    ) -> tuple[list[str], list[str], dict[str, Any], str]:
+    ) -> GemmEpiloguePlan:
         codegen = CutlassEVTCodegen(cutlass_template_node_name, removed_buffers)
         handler = _AssignmentFormatter(codegen)
 
@@ -489,11 +491,11 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
 
         codegen.finalize()
 
-        return (
-            codegen.get_reads(),
-            codegen.get_writes(),
-            codegen.get_renames(),
-            codegen.get_value(
+        return GemmEpiloguePlan(
+            reads=tuple(codegen.get_reads()),
+            writes=tuple(codegen.get_writes()),
+            renames=codegen.get_renames(),
+            source=codegen.get_value(
                 fn_name=fn_name,
                 as_standalone_function=as_standalone_function,
             ),
@@ -551,7 +553,7 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
         if name in self.store_name_to_value:
             return self.store_name_to_value[name].value
         elif name == self.accumulator_node_name:
-            return _ACCUMULATOR_ARG_NAME
+            return GEMM_ACCUMULATOR_ARG_NAME
         else:
             self.reads.add(name)
             self.var_name_to_buffer_name[name] = name
@@ -563,7 +565,7 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
         if name not in self.removed_buffers:
             if index:
                 self._check_indexing(name, index)
-            if value.value == _ACCUMULATOR_ARG_NAME:
+            if value.value == GEMM_ACCUMULATOR_ARG_NAME:
                 raise AssertionError("Cannot store accumulator arg name")
             self.var_name_to_buffer_name[value.value] = name
             self.store_name_to_value[name] = value
@@ -590,7 +592,7 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
         # We only support indexing that matches the layout today because
         # CUTLASS doesn't support arbitrary indexing
         buffer_name = (
-            self.accumulator_node_name if name == _ACCUMULATOR_ARG_NAME else name
+            self.accumulator_node_name if name == GEMM_ACCUMULATOR_ARG_NAME else name
         )
         buffer = self.name_to_buffer[buffer_name]
         index_strides = V.graph.sizevars.stride_vars(
@@ -646,7 +648,7 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
 
     def _render_input_signature(self, fn_name: str = "fn") -> str:
         arguments = ", ".join(
-            [_ACCUMULATOR_ARG_NAME]
+            [GEMM_ACCUMULATOR_ARG_NAME]
             + [name for name in self.reads if name != self.accumulator_node_name]
         )
         return f"def {fn_name}({arguments}):"
