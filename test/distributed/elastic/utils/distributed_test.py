@@ -20,6 +20,7 @@ from torch.distributed.elastic.utils.distributed import (
     get_socket_with_port,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_MACOS,
     IS_WINDOWS,
     MI200_ARCH,
@@ -51,6 +52,8 @@ if IS_WINDOWS or IS_MACOS:
 
 
 class DistributedUtilTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_create_store_single_server(self):
         store = create_c10d_store(is_server=True, server_addr=socket.gethostname())
         self.assertIsNotNone(store)
