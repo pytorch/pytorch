@@ -5985,10 +5985,10 @@ class TestMaxAutotuneAsyncPipelined(TestMaxAutotune, TestEpilogueFusionStaticAna
     def setUp(self):
         super().setUp()
         AutotuneProcessPool._shutdown_for_inactivity = False
-        test_name = self._testMethodName
-        for skip_test_name in self.SKIP_TESTS:
-            if skip_test_name in test_name or TEST_XPU or config.cpp_wrapper:
-                self.skipTest(self.SKIP_TESTS[skip_test_name])
+        if TEST_XPU or config.cpp_wrapper:
+            self.skipTest(
+                "Async pipelined autotuning not supported on XPU or with cpp_wrapper"
+            )
 
     def tearDown(self):
         super().tearDown()
@@ -6171,11 +6171,14 @@ class TestMaxAutotuneAsyncPipelined(TestMaxAutotune, TestEpilogueFusionStaticAna
             test_aten_chosen()
 
 
-# Copy parent test methods into child __dict__ (must be before instantiate calls)
+# Copy parent test methods into child __dict__ (must be before instantiate calls).
+# Methods listed in SKIP_TESTS are excluded; they are incompatible with async pipelining.
+_async_pipelined_skip = frozenset(TestMaxAutotuneAsyncPipelined.SKIP_TESTS)
 for _base in (TestMaxAutotune, TestEpilogueFusionStaticAnalysis):
     for _name, _fn in _base.__dict__.items():
         if (
             _name.startswith("test")
+            and _name not in _async_pipelined_skip
             and _name not in TestMaxAutotuneAsyncPipelined.__dict__
         ):
             setattr(TestMaxAutotuneAsyncPipelined, _name, _fn)
