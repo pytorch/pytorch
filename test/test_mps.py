@@ -16745,7 +16745,13 @@ class TestConsistency(TestCaseMPS):
         x[-1, -1, :] = 1000.0
         x = x.requires_grad_(True)
         weight = torch.ones(C, device=device, dtype=dtype, requires_grad=True)
-        torch.group_norm(x, num_groups=C, weight=weight).sum().backward()
+        # .sum() over >2**32 elements raises on MPS; reuse out as its own ones
+        # gradient to keep peak memory at the old sum().backward() level
+        # (out is not saved for backward, so the in-place fill is safe)
+        out = torch.group_norm(x, num_groups=C, weight=weight)
+        with torch.no_grad():
+            out.fill_(1)
+        out.backward(out)
 
         x_last_cpu = x[-1:, -1:].detach().cpu().requires_grad_(True)
         weight_last_cpu = torch.ones(1, dtype=dtype, requires_grad=True)
