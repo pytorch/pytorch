@@ -230,7 +230,7 @@ class TestNbMultiply(torch._dynamo.test_case.TestCase):
     @make_dynamo_test
     def test_tuple_imul(self):
         # tuple lacks sq_inplace_repeat; *= falls back to non-inplace via
-        # generic_inplace_multiply -> sq_repeat.
+        # pynumber_inplace_multiply -> sq_repeat.
         t = (1, 2)
         t *= 3
         self.assertEqual(t, (1, 2, 1, 2, 1, 2))
@@ -318,12 +318,12 @@ class TestNbMultiply(torch._dynamo.test_case.TestCase):
 
     @make_dynamo_test
     def test_operator_mul_int_str(self):
-        # int * str via sq_repeat fallback in generic_multiply.
+        # int * str via sq_repeat fallback in pynumber_multiply.
         self.assertEqual(operator.mul(3, "ab"), "ababab")
 
     @make_dynamo_test
     def test_operator_imul_int(self):
-        # int has no nb_inplace_multiply — generic_inplace_multiply falls
+        # int has no nb_inplace_multiply — pynumber_inplace_multiply falls
         # back to nb_multiply via binary_iop1.
         self.assertEqual(operator.imul(5, 3), 15)
 
@@ -364,7 +364,7 @@ class TestNbMultiply(torch._dynamo.test_case.TestCase):
         # list.__mul__ wraps sq_repeat — TypeError on non-int.  CPython's
         # slot wrapper raises "'str' object cannot be interpreted as an
         # integer"; Dynamo's slot_wrapper_mul currently delegates to
-        # sequence_repeat and raises "can't multiply sequence by non-int of
+        # pysequence_repeat and raises "can't multiply sequence by non-int of
         # type 'str'". Both are TypeErrors, so use a permissive regex.
         self.assertEqual([1, 2].__mul__(3), [1, 2, 1, 2, 1, 2])
         with self.assertRaisesRegex(

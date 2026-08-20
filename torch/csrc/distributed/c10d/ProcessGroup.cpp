@@ -6,11 +6,40 @@
 #include <fmt/ranges.h>
 
 #include <algorithm>
+#include <typeinfo>
 #include <unordered_set>
 
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 
 namespace c10d {
+
+namespace {
+
+// Options handed to a child backend must never alias the parent's (or the
+// caller's) object: Backend::getBackendOptions() returns the backend's live
+// options_, and split()/merge() implementations write into what they are given
+// (ProcessGroupGloo::split overwrites global_ranks_in_group,
+// ProcessGroupNCCL::split also sets split_from/split_color). Sharing one object
+// leaves the parent describing its child's ranks, which the parent's next split
+// then indexes out of bounds.
+c10::intrusive_ptr<Backend::Options> cloneOptions(
+    const c10::intrusive_ptr<Backend::Options>& opts) {
+  auto copy = opts->clone();
+  // An out-of-tree Options subclass that does not override clone() would be
+  // sliced. Keep the legacy aliasing behavior for it rather than handing its
+  // backend an object of the wrong type.
+  if (copy == nullptr) {
+    return opts;
+  }
+  const Backend::Options& copyRef = *copy;
+  const Backend::Options& optsRef = *opts;
+  if (typeid(copyRef) != typeid(optsRef)) {
+    return opts;
+  }
+  return copy;
+}
+
+} // namespace
 
 std::string opTypeToString(OpType opType) {
   switch (opType) {
@@ -56,6 +85,8 @@ std::string opTypeToString(OpType opType) {
       return "_ALLREDUCE_SPARSE";
     case OpType::REDUCE_SCATTER_TENSOR_COALESCED:
       return "REDUCE_SCATTER_TENSOR_COALESCED";
+    case OpType::ALLGATHER_INTO_TENSOR_COALESCED:
+      return "ALLGATHER_INTO_TENSOR_COALESCED";
     default:
       TORCH_INTERNAL_ASSERT(false, "Unknown op type!");
   }
@@ -71,7 +102,7 @@ bool isP2POp(OpType opType, bool batchP2P /*= false*/) {
 c10::intrusive_ptr<Backend> ProcessGroup::getBackend(
     c10::DeviceType deviceType) {
   // If there is a backend associated with this device type then return it
-  if (deviceTypeToBackend_.find(deviceType) != deviceTypeToBackend_.end()) {
+  if (deviceTypeToBackend_.contains(deviceType)) {
     return deviceTypeToBackend_.at(deviceType);
   }
 
@@ -85,7 +116,7 @@ c10::intrusive_ptr<Backend> ProcessGroup::getBackend(
   }
 
   // Check if the backend has already been initialized
-  if (backendTypeToBackend_.find(backendType) != backendTypeToBackend_.end()) {
+  if (backendTypeToBackend_.contains(backendType)) {
     auto backend = backendTypeToBackend_.at(backendType);
     deviceTypeToBackend_[deviceType] = backend;
     return backend;
@@ -202,6 +233,7 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroup::splitGroup(
   std::string groupDesc = desc.has_value()
       ? desc.value()
       : c10::str(getGroupDesc(), ":split:", incrementSplitCount());
+  std::unordered_map<BackendType, c10::intrusive_ptr<Backend>> splitBackends;
   for (const auto& pair : deviceTypeToBackendType_) {
     c10::DeviceType deviceType = pair.first;
     BackendType backendType = pair.second;
@@ -210,9 +242,27 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroup::splitGroup(
       continue;
     }
 
+    // One backend instance can serve several device types -- a gloo world maps
+    // both cpu and cuda to the same ProcessGroupGloo, and setBackend() reuses
+    // whatever is already registered for a backend type. Split it once: the
+    // second child would be thrown away by setBackend() below, but only after
+    // rendezvousing on the same store prefix as the real child, which races
+    // with it and hangs.
+    auto splitIt = splitBackends.find(backendType);
+    if (splitIt != splitBackends.end()) {
+      newGroup->setBackend(deviceType, backendType, splitIt->second);
+      continue;
+    }
+
     auto parentBackend = getBackend(deviceType);
-    auto backendOpts =
-        opts.has_value() ? opts.value() : parentBackend->getBackendOptions();
+    // `opts` describes the group's default backend, mirroring what
+    // `pg_options` means for init_process_group; a backend of another type
+    // would reject it (or worse, silently fall back to defaults and drop the
+    // caller's timeout), so those inherit the parent's own options instead.
+    auto backendOpts = cloneOptions(
+        opts.has_value() && backendType == backendType_
+            ? opts.value()
+            : parentBackend->getBackendOptions());
     backendOpts->group_name = groupName;
     backendOpts->timeout =
         timeout.has_value() ? timeout.value() : backendOpts->timeout;
@@ -228,6 +278,7 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroup::splitGroup(
       newGroup->setDefaultBackend(backendType_);
     }
     newGroup->setBackend(deviceType, backendType, splitBackend);
+    splitBackends.emplace(backendType, splitBackend);
   }
 
   if (!newGroup) {
@@ -252,11 +303,18 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroup::mergeRemoteGroup(
   std::string groupDesc = opts.group_desc.has_value()
       ? opts.group_desc.value()
       : c10::str(getGroupDesc(), ":merge");
+  std::unordered_map<BackendType, c10::intrusive_ptr<Backend>> mergedBackends;
   for (const auto& pair : deviceTypeToBackendType_) {
     c10::DeviceType deviceType = pair.first;
     BackendType backendType = pair.second;
+    // Merge each backend instance once; see the same guard in splitGroup().
+    auto mergedIt = mergedBackends.find(backendType);
+    if (mergedIt != mergedBackends.end()) {
+      newGroup->setBackend(deviceType, backendType, mergedIt->second);
+      continue;
+    }
     auto parentBackend = getBackend(deviceType);
-    auto backendOpts = parentBackend->getBackendOptions();
+    auto backendOpts = cloneOptions(parentBackend->getBackendOptions());
     backendOpts->group_name = groupName;
     backendOpts->timeout = opts.timeout;
     auto mergedBackend = parentBackend->merge(store, backendOpts, rank, size);
@@ -270,6 +328,7 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroup::mergeRemoteGroup(
       newGroup->setDefaultBackend(backendType_);
     }
     newGroup->setBackend(deviceType, backendType, mergedBackend);
+    mergedBackends.emplace(backendType, mergedBackend);
   }
 
   if (!newGroup) {

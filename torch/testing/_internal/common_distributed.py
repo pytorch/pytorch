@@ -644,6 +644,23 @@ def skip_if_rocm_ver_lessthan_multiprocess(version=None):
     return decorator
 
 
+def skip_if_rocm_ver_atleast_multiprocess(version=None):
+    """Skips a test for ROCm if the version is at least the given tuple - multiprocess UTs"""
+
+    def decorator(func):
+        reason = None
+        if TEST_WITH_ROCM:
+            rocm_version = str(torch.version.hip)
+            rocm_version = rocm_version.split("-", maxsplit=1)[0]  # ignore git sha
+            rocm_version_tuple = tuple(int(x) for x in rocm_version.split("."))
+            if version is not None and rocm_version_tuple >= tuple(version):
+                reason = f"skip_if_rocm_ver_atleast_multiprocess: known failure on ROCm {rocm_version_tuple} (>= {version})"
+
+        return unittest.skipIf(reason is not None, reason)(func)
+
+    return decorator
+
+
 def skip_if_win32():
     return skip_but_pass_in_sandcastle_if(
         sys.platform == "win32",
@@ -1946,6 +1963,9 @@ class MultiProcContinuousTest(TestCase):
                 cls._run_test_given_id(test_id)
                 completion_queue.put(test_id)
             except BaseException as ex:
+                if isinstance(ex, unittest.SkipTest):
+                    completion_queue.put(ex)
+                    continue
                 if isinstance(ex, SystemExit):
                     # Get exit code from the process
                     exit_code = getattr(ex, "code", None)
@@ -2052,7 +2072,10 @@ class MultiProcContinuousTest(TestCase):
         This supports instantiate_device_type_tests which calls setUpClass during
         class creation (before any tests run), when spawning would be premature.
         """
-        if cls._processes_spawned:
+        # Check the class's own dict: a subclass must not inherit the flag from
+        # a base test class that already ran and tore down its workers, else it
+        # would dispatch tests to the base class's dead worker processes.
+        if cls.__dict__.get("_processes_spawned", False):
             return
 
         # Handle method, property, and string attribute for device_type
@@ -2100,8 +2123,10 @@ class MultiProcContinuousTest(TestCase):
         Class-scope test fixture. Run once for entire test class, after all tests finish.
         Tear down the process group if spawned.
         """
-        # If processes were never spawned (e.g., all tests were skipped), nothing to tear down
-        if not cls._processes_spawned:
+        # If processes were never spawned (e.g., all tests were skipped), nothing to tear down.
+        # Check the class's own dict to avoid tearing down an already-finished
+        # base class's workers (see _ensure_processes_spawned).
+        if not cls.__dict__.get("_processes_spawned", False):
             super().tearDownClass()
             return
 
