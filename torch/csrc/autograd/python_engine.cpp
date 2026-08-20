@@ -1,5 +1,7 @@
 #include <torch/csrc/autograd/python_engine.h>
 
+#include <torch/csrc/Exceptions.h>
+
 #include <ATen/LegacyBatchedTensorImpl.h>
 #include <ATen/LegacyVmapMode.h>
 #include <c10/util/irange.h>
@@ -395,23 +397,10 @@ static PyObject* THPEngine_queue_callback(PyObject* self, PyObject* _callback) {
     pybind11::gil_scoped_acquire gil;
     THPObjectPtr result{PyObject_CallFunctionObjArgs(callback.get(), nullptr)};
     if (!result) {
-      // Note [ Persisting PyErr state across autograd engine threads ]
-      //
-      // Since the autograd engine is multi-threaded, and Python error state is
-      // local to each thread, it must preserve the python error from the worker
-      // thread and rethrow it as-is in the calling thread. This is done via
-      // persisting the error in the two places that can encounter Python
-      // errors: (1) evaluate function and (2) queued callbacks.
-      //
-      // TODO: the engine is not actually responsible for persisting the error
-      // in the custom autograd Function case today! See the note above
-      // `raise_python_error()` function in python_function.cpp and
-      // python_hooks.cpp for more details. Persisting an extra time in the
-      // engine is fine because doing so is a no-op when the python_error has
-      // already been persisted.
-      python_error err;
-      err.persist();
-      throw std::move(err);
+      // See Note [ Persisting PyErr state across autograd engine threads ],
+      // above throw_python_error() in torch/csrc/Exceptions.h. Persisting an
+      // extra time here is a no-op if the error has already been persisted.
+      torch::throw_python_error();
     }
   });
   Py_RETURN_NONE;

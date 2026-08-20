@@ -1308,8 +1308,10 @@ def _unpack_fast_types() -> tuple[type, ...]:
             variables.DequeVariable,
             variables.ListVariable,
             variables.ListIteratorVariable,
+            variables.DequeIteratorVariable,
             variables.RangeVariable,
             variables.SetVariable,
+            variables.FrozensetVariable,
             variables.TensorVariable,
             variables.TupleVariable,
         )
