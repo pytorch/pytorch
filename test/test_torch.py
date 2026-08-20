@@ -6792,7 +6792,7 @@ class TestTorchDeviceType(TestCase):
             self.assertFalse(torch.equal(t, t))
 
     # inductor unsupported complex types
-    @skipIfTorchInductor
+    @skipIfTorchInductor("inductor unsupported complex types")
     def test_equal_conj(self, device):
         conj_0 = torch.tensor([1.0 + 2.0j, 2.0 + 1.0j], device=device)
         conj_1 = conj_0.conj()
@@ -6860,12 +6860,13 @@ class TestTorchDeviceType(TestCase):
                     helper(dim, dtype, size, size)
 
                 # Check bound on CPU.
-                result = torch.zeros(1, 512, 256, dtype=dtype)
-                source = torch.ones(1, 512, 256, dtype=dtype)
-                index = torch.ones(257).to(dtype=torch.long)
-                self.assertRaises(RuntimeError, lambda: result.index_add_(dim, index, source))
-                index = (torch.ones(256) * 257).to(dtype=torch.long)
-                self.assertRaises(RuntimeError, lambda: result.index_add_(dim, index, source))
+                if device == "cpu":
+                    result = torch.zeros(1, 512, 256, dtype=dtype)
+                    source = torch.ones(1, 512, 256, dtype=dtype)
+                    index = torch.ones(257).to(dtype=torch.long)
+                    self.assertRaises(RuntimeError, lambda: result.index_add_(dim, index, source))
+                    index = (torch.ones(256) * 257).to(dtype=torch.long)
+                    self.assertRaises(RuntimeError, lambda: result.index_add_(dim, index, source))
 
     # FIXME: resolve comment below and move this to indexing test suite
     # add coverage for issue with atomic add that appeared only for
