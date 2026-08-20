@@ -11,7 +11,11 @@ from torch._inductor.compiler_bisector import CompilerBisector
 from torch._inductor.custom_graph_pass import CustomGraphPass
 from torch._inductor.test_case import TestCase
 from torch.library import _scoped_library
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
+)
 from torch.testing._internal.common_utils import HardwareClassification
 
 
@@ -136,6 +140,7 @@ class TestCompilerBisectorDevice(TestCase):
         if hasattr(torch.ops, self.bisector_ns):
             delattr(torch.ops, self.bisector_ns)
 
+    @requires_capabilities(Capability.lib.triton)
     def test_bad_decomp(self, device):
         import_module("torch._inductor.compile_fx")
 
@@ -192,6 +197,7 @@ class TestCompilerBisectorDevice(TestCase):
         self.assertEqual(out.bisect_number, 1)
         self.assertTrue("aten.exponential" in out.debug_info)
 
+    @requires_capabilities(Capability.lib.triton)
     def test_joint_graph(self, device):
         from torch._inductor import config
 
@@ -229,6 +235,7 @@ class TestCompilerBisectorDevice(TestCase):
         self.assertEqual(out.bisect_number, 4)
         self.assertTrue("joint_custom_post_pass" in out.debug_info)
 
+    @requires_capabilities(Capability.lib.triton)
     def test_rng(self, device):
         def foo():
             return torch.rand([10], device=device) + 1
@@ -248,6 +255,7 @@ class TestCompilerBisectorDevice(TestCase):
         self.assertEqual(out.subsystem, "inductor_fallback_random")
         self.assertTrue("inductor_fallback_random" in out.debug_info)
 
+    @requires_capabilities(Capability.lib.triton)
     def test_emulate_precision_casts(self, device):
         def test_fn():
             torch._dynamo.reset()
@@ -270,6 +278,7 @@ class TestCompilerBisectorDevice(TestCase):
         self.assertEqual(out.backend, "inductor")
         self.assertEqual(out.subsystem, "inductor_emulate_precision_casts")
 
+    @requires_capabilities(Capability.lib.triton)
     def test_bad_lowering(self, device):
         def test_fn():
             torch._dynamo.reset()
@@ -288,6 +297,7 @@ class TestCompilerBisectorDevice(TestCase):
         self.assertEqual(out.bisect_number, 2)
         self.assertTrue("relu" in out.debug_info)
 
+    @requires_capabilities(Capability.lib.triton)
     @config.patch(
         {
             "test_configs.bisect_pre_grad_graph": True,
@@ -341,6 +351,7 @@ class TestCompilerBisectorDevice(TestCase):
         self.assertEqual(out.subsystem, "pre_grad_graph")
         self.assertEqual(out.bisect_number, 1)
 
+    @requires_capabilities(Capability.lib.triton)
     def test_cudagraph_bisect_max(self, device):
         """Test that cudagraph bisector can limit number of cudagraphed graphs."""
         import os
@@ -380,6 +391,7 @@ class TestCompilerBisectorDevice(TestCase):
                 CompilerBisector.bisection_enabled = False
                 get_env_val.cache_clear()
 
+    @requires_capabilities(Capability.lib.triton)
     def test_bisect_run_debuginfo(self, device):
         import os
         import subprocess
