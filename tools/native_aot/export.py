@@ -232,12 +232,13 @@ def _effective_arch(
         if k.ARCH_ENV_VAR and os.getenv(k.ARCH_ENV_VAR)
     }
     if named:
+        example = sorted(named.items())[0][1]
         raise RuntimeError(
             "arch variable(s) "
             + ", ".join(f"{k}={v}" for k, v in sorted(named.items()))
             + " are set but --arch is not. They are per-toolchain, so they cannot "
             "name the arch for every kind in one export; pass --arch "
-            f"(e.g. --arch {next(iter(sorted(named.values())))}) to state it once."
+            f"(e.g. --arch {example}) to state it once."
         )
     return _detected_arch()
 

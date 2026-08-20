@@ -221,16 +221,24 @@ def _cuda_major() -> int | None:
     return None
 
 
+def _archive_major(parts: list[str]) -> int:
+    """The CUDA major a split archive's path claims, or -1 for an unsuffixed one."""
+    for p in parts:
+        if p.startswith("cu") and p[2:].isdigit():
+            return int(p[2:])
+    return -1
+
+
 def _dsl_runtime_archive() -> str | None:
-    """The DSL dialect runtime archive the CuTeDSL kernel objects need, matched to
+    """The DSL dialect runtime archive the CuTeDSL kernel objects need, preferring
     this build's CUDA major.
 
-    The major MUST match. 4.5.x shipped one archive at <root>/lib/; 4.6.x splits
-    it per CUDA major (cu12/lib/, cu13/lib/), and the two really do differ (same
-    size, different contents), so taking whatever is present would link a runtime
-    built for another toolkit. The unsuffixed path is accepted only for a wheel
-    with no split at all. No arm for an undeterminable major: should_run() has
-    already refused one below _MIN_CUDA_MAJOR."""
+    4.5.x shipped one archive at <root>/lib/; 4.6.x splits it per major (cu12/lib/,
+    cu13/lib/) and only cu12 is a hard dependency, so a CUDA 13 environment often
+    holds cu12 alone. A mismatch warns rather than failing: in 4.6.2 the archives
+    are the same objects (`ar p | md5sum` equal, differing only in ar timestamps)
+    and a CUDA 13.2 build linked against cu12 passed the AOT suite. Still preferred
+    and reported, since the per-major split says they may diverge."""
     import importlib.util
 
     spec = importlib.util.find_spec("nvidia_cutlass_dsl")
@@ -249,8 +257,7 @@ def _dsl_runtime_archive() -> str | None:
             # and be refused.
             parts = os.path.relpath(dirpath, root).split(os.sep)
             found.append((os.path.join(dirpath, archive), parts))
-            if any(p.startswith("cu") and p[2:].isdigit() for p in parts):
-                split = True
+            split = split or _archive_major(parts) >= 0
     if not found:
         return None
     if not split:
@@ -259,16 +266,17 @@ def _dsl_runtime_archive() -> str | None:
     for path, parts in found:
         if f"cu{major}" in parts:
             return path
-    found = [p for p, _ in found]
-    raise RuntimeError(
-        f"native-AOT stage 2: the CuTeDSL wheel ships no dialect runtime for CUDA "
-        f"{major} (found: {', '.join(sorted(found))}). Only cu12 is a hard "
-        f"dependency of nvidia-cutlass-dsl; install the matching extra, e.g. "
-        f"`pip install 'nvidia-cutlass-dsl[cu{major}]==<pinned version>'` (see "
-        f"install_cutlass_dsl in .ci/pytorch/common_utils.sh), or set "
-        f"TORCH_NATIVE_AOT=0 to build without embedded kernels. Linking a runtime "
-        f"built for another toolkit instead is not safe."
+    # Highest major present, sorted first so the pick is deterministic.
+    fallback = max(sorted(found), key=lambda f: _archive_major(f[1]))
+    _report(
+        f"the CuTeDSL wheel ships no dialect runtime for CUDA {major}; linking "
+        f"{fallback[0]} instead (found: {', '.join(sorted(p for p, _ in found))}). "
+        f"Only cu12 is a hard dependency of nvidia-cutlass-dsl, so install the "
+        f"matching extra to be sure -- `pip install "
+        f"'nvidia-cutlass-dsl[cu{major}]==<pinned version>'`, see install_cutlass_dsl "
+        f"in .ci/pytorch/common_utils.sh."
     )
+    return fallback[0]
 
 
 def _artifact_size(art: str) -> str:

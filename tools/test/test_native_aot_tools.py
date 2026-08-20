@@ -14,6 +14,7 @@ import types
 import unittest
 import unittest.mock as mock
 import zipfile
+from typing import Any
 
 # Ordinary package imports, like every other tools test (CI runs
 # `PYTHONPATH=$(pwd) pytest tools/test`). These modules keep their module
@@ -84,7 +85,10 @@ def _manifest(artifacts_dir):
     with open(path) as f:
         text = f.read()
     if "TORCH_CUDA_ARCH_LIST=" in text:
-        out["arch_list"] = re.search(r"TORCH_CUDA_ARCH_LIST='([^']*)'", text).group(1)
+        m = re.search(r"TORCH_CUDA_ARCH_LIST='([^']*)'", text)
+        if m is None:
+            raise AssertionError(f"{path}: arch list present but unquoted:\n{text}")
+        out["arch_list"] = m.group(1)
     elif "without an arch list" in text:
         # The generator makes no claim -- a hand run or an on-device export. A
         # DISTINCT value from None, which means "the file said nothing at all".
@@ -2100,12 +2104,12 @@ class TestWheelPatch(unittest.TestCase):
         # ZIP64 above 4GB (pytorch#189748), and a CUDA wheel with embedded kernels
         # is squarely in that range. Cannot be caught by a small fixture, so assert
         # the flag reaches ZipFile.
-        import zipfile
-
         seen = {}
         real_init = zipfile.ZipFile.__init__
 
-        def spy(self, file, mode="r", *a, **kw):
+        # mode as Any: ZipFile's overloads take a Literal, and a str parameter
+        # matches none of them.
+        def spy(self, file, mode: Any = "r", *a, **kw):
             if mode == "w":
                 seen["allowZip64"] = kw.get("allowZip64")
             return real_init(self, file, mode, *a, **kw)
@@ -3052,13 +3056,30 @@ class TestDslRuntimeArchive(unittest.TestCase):
             got = build_stage2._dsl_runtime_archive()
         self.assertEqual(got, os.path.join(root, "cu13", "lib", self.ARCHIVE))
 
-    def test_refuses_a_wheel_with_no_archive_for_this_major(self):
-        # The trap this exists for: cu12 is a hard dependency of
-        # nvidia-cutlass-dsl and cu13 is behind an extra, so a plain install on a
-        # CUDA 13 build leaves ONLY cu12 -- and linking it is silently wrong.
-        with self._wheel(("cu12",), cuda_major="13"):
-            with self.assertRaisesRegex(RuntimeError, "no dialect runtime for CUDA 13"):
+    def test_a_wheel_with_no_archive_for_this_major_warns_and_links_one(self):
+        # cu12 is a hard dependency and cu13 is behind an extra, so a plain install
+        # on a CUDA 13 build leaves ONLY cu12. Refusing failed the build; the two
+        # 4.6.2 archives are the same objects and a CUDA 13.2 build linked against
+        # cu12 passed the AOT suite, so warn and link it.
+        with self._wheel(("cu12",), cuda_major="13") as root:
+            with contextlib.redirect_stderr(io.StringIO()) as err:
+                got = build_stage2._dsl_runtime_archive()
+        self.assertEqual(got, os.path.join(root, "cu12", "lib", self.ARCHIVE))
+        self.assertIn("no dialect runtime for CUDA 13", err.getvalue())
+        self.assertIn("cu13", err.getvalue(), "the warning should name the extra")
+
+    def test_the_mismatch_fallback_takes_the_highest_major(self):
+        # Deterministic, so two builds of one environment link the same file.
+        with self._wheel(("cu12", "cu13"), cuda_major="14") as root:
+            with contextlib.redirect_stderr(io.StringIO()):
+                got = build_stage2._dsl_runtime_archive()
+        self.assertEqual(got, os.path.join(root, "cu13", "lib", self.ARCHIVE))
+
+    def test_a_matching_major_warns_about_nothing(self):
+        with self._wheel(("cu12", "cu13"), cuda_major="13"):
+            with contextlib.redirect_stderr(io.StringIO()) as err:
                 build_stage2._dsl_runtime_archive()
+        self.assertEqual(err.getvalue(), "")
 
     def test_an_unsplit_wheel_is_taken_as_is(self):
         # Pre-4.6 shipped one archive at <root>/lib/ with no major in the path.

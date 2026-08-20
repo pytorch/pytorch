@@ -376,10 +376,8 @@ function install_cutlass_dsl() {
   #
   # [cu13]: as of 4.6.x the dialect runtime archive that native-AOT kernels link
   # against ships per CUDA major, and only cu12 is a hard dependency -- cu13 is
-  # behind this extra. Without it a CUDA 13 build has no matching runtime.
-  # cu12 rides along as that hard dependency and is never linked: stage 2 embeds
-  # kernels only on CUDA 13+ (_MIN_CUDA_MAJOR), and _dsl_runtime_archive() refuses
-  # any archive whose major does not match rather than linking whatever is there.
+  # behind this extra. Without it _dsl_runtime_archive() warns and links cu12,
+  # which works today (same objects) but is not the supported pairing.
   pip_install "nvidia-cutlass-dsl[cu13]==4.6.2" apache-tvm-ffi==0.1.11
   echo "NVIDIA CUTLASS DSL installation complete."
 }
