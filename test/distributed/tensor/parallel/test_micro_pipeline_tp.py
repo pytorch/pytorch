@@ -737,6 +737,7 @@ class MicroPipelineTP4GPUTest(TestCase):
         self.assertIn("fused_matmul_reduce_scatter", str(gm.graph))
         self.assertNotIn("reduce_scatter_tensor", str(gm.graph))
 
+
 instantiate_device_type_tests(
     MicroPipelineTPTest,
     globals(),
