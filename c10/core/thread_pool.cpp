@@ -55,7 +55,7 @@ ThreadPool::ThreadPool(
 ThreadPool::~ThreadPool() {
   // Set running flag to false then notify all threads.
   {
-    std::unique_lock<std::mutex> lock(mutex_);
+    std::lock_guard<std::mutex> lock(mutex_);
     running_ = false;
     condition_.notify_all();
   }
@@ -74,7 +74,7 @@ size_t ThreadPool::size() const {
 }
 
 size_t ThreadPool::numAvailable() const {
-  std::unique_lock<std::mutex> lock(mutex_);
+  std::lock_guard<std::mutex> lock(mutex_);
   return available_;
 }
 
@@ -89,7 +89,7 @@ bool ThreadPool::inThreadPool() const {
 
 void ThreadPool::run(std::function<void()> func) {
   TORCH_CHECK(!threads_.empty(), "No threads to run a task");
-  std::unique_lock<std::mutex> lock(mutex_);
+  std::lock_guard<std::mutex> lock(mutex_);
 
   // Set task and signal condition variable so that a worker thread will
   // wake up and use the task.
