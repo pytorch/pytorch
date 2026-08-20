@@ -221,10 +221,12 @@ class TestExportJobs(unittest.TestCase):
         self.assertEqual(export.export_point.__qualname__, "export_point")
 
     def test_pool_never_forks_after_cuda_init(self):
-        # Plain "fork" gives workers a dead CUDA context (is_initialized() False,
-        # allocation fails, no exception), the parent having initialized CUDA
-        # first. Pinned to forkserver rather than "not fork" because main() calls
-        # set_forkserver_preload unconditionally, which spawn silently ignores.
+        # Plain "fork" gives workers a dead CUDA context (measured:
+        # is_initialized() False, allocation fails, no exception) because
+        # the parent initializes CUDA before the pool starts.
+        # Pinned to forkserver, not just "not fork": main() calls
+        # set_forkserver_preload unconditionally, which a spawn context
+        # would silently ignore.
         self.assertEqual(export.POOL_START_METHOD, "forkserver")
 
     def test_cutedsl_export_passes_gpu_arch(self):
