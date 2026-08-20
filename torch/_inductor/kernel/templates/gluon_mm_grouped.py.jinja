@@ -41,6 +41,7 @@ def _proton_exit_scope(name: gl.constexpr):
         pl.exit_scope(name)
 
 
+
 @aggregate
 class PartitionArgs:
     a_desc: tma.tensor_descriptor
@@ -208,7 +209,7 @@ class TileIterator:
     @gluon.jit
     def next(self):
         tile_idx = self.tile_idx + (self.NUM_BLOCKS if self.has_started else 0)
-        # Walk GROUP_SIZE_N columns of tiles at a time so concurrent CTAs
+        # Walk GROUP_SIZE_N tile columns at a time so concurrent CTAs
         # touch a 2D block rather than one column, improving L2 reuse.
         # GROUP_SIZE_N == 1 is plain m-fastest order.
         tiles_per_group = self.num_m_tiles * self.GROUP_SIZE_N
@@ -273,7 +274,6 @@ def load_partition(pargs: PartitionArgs):
     load_buf_full_bars = pargs.load_buf_full_bars
     state = Counter.create(1, load_buf_empty_bars.shape[0])
 
-    _proton_enter_scope("load_group_iter")
     group_iter = GroupIterator.create(
         G, M, N, K,
 {%- if M_IS_VARYING or N_IS_VARYING or K_IS_VARYING %}
@@ -281,15 +281,12 @@ def load_partition(pargs: PartitionArgs):
 {%- endif %}
         BLOCK_M, BLOCK_N, NUM_BLOCKS
     )
-    _proton_exit_scope("load_group_iter")
     while group_iter.should_process():
-        _proton_enter_scope("load_tile_iter")
         tile_iter = TileIterator.create(
             group_iter.tile_idx - group_iter.tiles_processed,
             group_iter.m_start_offset, group_iter.m_size, group_iter.n_start_offset, group_iter.n_size,
             BLOCK_M, BLOCK_N, NUM_BLOCKS, GROUP_SIZE_N
         )
-        _proton_exit_scope("load_tile_iter")
         while tile_iter.should_process():
             for k in range(0, group_iter.k_size, BLOCK_K):
                 k_offset = group_iter.k_start_offset + k
@@ -299,18 +296,16 @@ def load_partition(pargs: PartitionArgs):
                 a_smem = pargs.a_smem_bufs.index(state.index)
                 b_smem = pargs.b_smem_bufs.index(state.index)
 
-                _proton_enter_scope("load_barrier_wait_empty")
+                _proton_enter_scope("load_wait")
                 mbarrier.wait(load_buf_empty_bar, state.phase)
-                _proton_exit_scope("load_barrier_wait_empty")
+                _proton_exit_scope("load_wait")
 
-                _proton_enter_scope("load_barrier_expect")
+                _proton_enter_scope("load_work")
                 mbarrier.expect(
                     load_buf_full_bar,
                     pargs.a_desc.block_type.nbytes + pargs.b_desc.block_type.nbytes,
                 )
-                _proton_exit_scope("load_barrier_expect")
 
-                _proton_enter_scope("load_tma_async")
                 tma.async_copy_global_to_shared(
                     pargs.a_desc,
 {%- if A_IS_2D %}
@@ -348,17 +343,13 @@ def load_partition(pargs: PartitionArgs):
                     load_buf_full_bar,
                     b_smem
                 )
-                _proton_exit_scope("load_tma_async")
+                _proton_exit_scope("load_work")
 
                 state = state.next()
 
-            _proton_enter_scope("load_tile_iter")
             tile_iter = tile_iter.next()
-            _proton_exit_scope("load_tile_iter")
 
-        _proton_enter_scope("load_group_iter")
         group_iter = group_iter.next()
-        _proton_exit_scope("load_group_iter")
 
     _proton_exit_scope("load_partition")
 
@@ -398,7 +389,6 @@ def compute_partition(pargs: PartitionArgs):
     )
 {%- endif %}
 
-    _proton_enter_scope("compute_group_iter")
     group_iter = GroupIterator.create(
         G, M, N, K,
 {%- if M_IS_VARYING or N_IS_VARYING or K_IS_VARYING %}
@@ -406,21 +396,18 @@ def compute_partition(pargs: PartitionArgs):
 {%- endif %}
         BLOCK_M, BLOCK_N, NUM_BLOCKS
     )
-    _proton_exit_scope("compute_group_iter")
     while group_iter.should_process():
-        _proton_enter_scope("compute_tile_iter")
         tile_iter = TileIterator.create(
             group_iter.tile_idx - group_iter.tiles_processed,
             group_iter.m_start_offset, group_iter.m_size, group_iter.n_start_offset, group_iter.n_size,
             BLOCK_M, BLOCK_N, NUM_BLOCKS, GROUP_SIZE_N
         )
-        _proton_exit_scope("compute_tile_iter")
         while tile_iter.should_process():
             acc_buf_empty_bar = acc_buf_empty_bars.index(acc_state.index)
 
-            _proton_enter_scope("compute_barrier_wait_acc_empty")
+            _proton_enter_scope("compute_wait_acc")
             mbarrier.wait(acc_buf_empty_bar, acc_state.phase)
-            _proton_exit_scope("compute_barrier_wait_acc_empty")
+            _proton_exit_scope("compute_wait_acc")
 
             acc = pargs.acc_tmem_bufs.index(acc_state.index)
             use_acc = False
@@ -429,11 +416,11 @@ def compute_partition(pargs: PartitionArgs):
                 load_buf_empty_bar = load_buf_empty_bars.index(load_state.index)
                 load_buf_full_bar = load_buf_full_bars.index(load_state.index)
 
-                _proton_enter_scope("compute_barrier_wait_load_full")
+                _proton_enter_scope("compute_wait")
                 mbarrier.wait(load_buf_full_bar, load_state.phase)
-                _proton_exit_scope("compute_barrier_wait_load_full")
+                _proton_exit_scope("compute_wait")
 
-                _proton_enter_scope("compute_data_prep")
+                _proton_enter_scope("compute_work")
                 a_smem = pargs.a_smem_bufs.index(load_state.index)
                 b_smem = pargs.b_smem_bufs.index(load_state.index)
 {%- if not A_IS_K_MAJOR %}
@@ -445,7 +432,6 @@ def compute_partition(pargs: PartitionArgs):
 
 {%- if K_IS_VARYING %}
                 if k + BLOCK_K > group_iter.k_size:
-                    _proton_enter_scope("mask_k_tail")
                     mask = k + gl.arange(0, BLOCK_K, layout=range_layout) < group_iter.k_size
                     a = a_smem.load(gl.AutoLayout())
                     # Only mask A, as zeroing A's columns makes
@@ -453,37 +439,24 @@ def compute_partition(pargs: PartitionArgs):
                     a = gl.where(mask[None, :], a, 0)
                     a_smem.store(a)
                     fence_async_shared()
-                    _proton_exit_scope("mask_k_tail")
 {%- endif %}
 
-                _proton_exit_scope("compute_data_prep")
-
-                _proton_enter_scope("compute_mma")
                 tcgen05_mma(a_smem, b_smem, acc, use_acc=use_acc)
-                _proton_exit_scope("compute_mma")
-
-                _proton_enter_scope("compute_commit_empty")
                 tcgen05_commit(load_buf_empty_bar)
-                _proton_exit_scope("compute_commit_empty")
+                _proton_exit_scope("compute_work")
 
                 use_acc = True
                 load_state = load_state.next()
 
             acc_buf_full_bar = acc_buf_full_bars.index(acc_state.index)
 
-            _proton_enter_scope("compute_commit_acc_full")
             tcgen05_commit(acc_buf_full_bar)
-            _proton_exit_scope("compute_commit_acc_full")
 
             acc_state = acc_state.next()
 
-            _proton_enter_scope("compute_tile_iter")
             tile_iter = tile_iter.next()
-            _proton_exit_scope("compute_tile_iter")
 
-        _proton_enter_scope("compute_group_iter")
         group_iter = group_iter.next()
-        _proton_exit_scope("compute_group_iter")
 
     _proton_exit_scope("compute_partition")
 
@@ -511,7 +484,6 @@ def store_partition(pargs: PartitionArgs):
     )
 {%- endif %}
 
-    _proton_enter_scope("store_group_iter")
     group_iter = GroupIterator.create(
         G, M, N, K,
 {%- if M_IS_VARYING or N_IS_VARYING or K_IS_VARYING %}
@@ -519,46 +491,37 @@ def store_partition(pargs: PartitionArgs):
 {%- endif %}
         BLOCK_M, BLOCK_N, NUM_BLOCKS
     )
-    _proton_exit_scope("store_group_iter")
     while group_iter.should_process():
-        _proton_enter_scope("store_tile_iter")
         tile_iter = TileIterator.create(
             group_iter.tile_idx - group_iter.tiles_processed,
             group_iter.m_start_offset, group_iter.m_size, group_iter.n_start_offset, group_iter.n_size,
             BLOCK_M, BLOCK_N, NUM_BLOCKS, GROUP_SIZE_N
         )
-        _proton_exit_scope("store_tile_iter")
         while tile_iter.should_process():
             # FIXME: add epilogue here!
 
             acc_buf_full_bar = acc_buf_full_bars.index(acc_state.index)
 
-            _proton_enter_scope("store_barrier_wait_acc_full")
+            _proton_enter_scope("store_wait")
             mbarrier.wait(acc_buf_full_bar, acc_state.phase)
-            _proton_exit_scope("store_barrier_wait_acc_full")
+            _proton_exit_scope("store_wait")
 
-            _proton_enter_scope("store_tmem_load")
+            _proton_enter_scope("store_work")
             acc_tmem = pargs.acc_tmem_bufs.index(acc_state.index)
             acc = acc_tmem.load()
-            _proton_exit_scope("store_tmem_load")
 
             acc_buf_empty_bar = acc_buf_empty_bars.index(acc_state.index)
             acc_state = acc_state.next()
 
-            _proton_enter_scope("store_convert")
 {%- if USE_TMA_STORE %}
             c = acc.to(pargs.c_desc.dtype)
 {%- else %}
             c = acc.to(pargs.output_dtype)
 {%- endif %}
-            _proton_exit_scope("store_convert")
 
-            _proton_enter_scope("store_barrier_arrive")
             mbarrier.arrive(acc_buf_empty_bar, count=1)
-            _proton_exit_scope("store_barrier_arrive")
 
 {%- if C_IS_2D %}
-            _proton_enter_scope("store_masked")
             offs_m = gl.arange(0, BLOCK_M)
             offs_n = gl.arange(0, BLOCK_N)
 
@@ -580,34 +543,22 @@ def store_partition(pargs: PartitionArgs):
             )
             c_coalesced = gl.convert_layout(c, store_layout)
             gl.store(c_ptrs, c_coalesced, mask=mask)
-            _proton_exit_scope("store_masked")
 {%- else %}
-            _proton_enter_scope("store_tma_wait")
             tma.store_wait(pendings=0)
-            _proton_exit_scope("store_tma_wait")
 
-            _proton_enter_scope("store_smem_write")
             c_smem.store(c)
-            _proton_exit_scope("store_smem_write")
 
-            _proton_enter_scope("store_fence_and_tma")
             fence_async_shared()
             tma.async_copy_shared_to_global(pargs.c_desc, [group_iter.g, tile_iter.m_offset, tile_iter.n_offset], c_smem)
-            _proton_exit_scope("store_fence_and_tma")
 {%- endif %}
+            _proton_exit_scope("store_work")
 
-            _proton_enter_scope("store_tile_iter")
             tile_iter = tile_iter.next()
-            _proton_exit_scope("store_tile_iter")
 
-        _proton_enter_scope("store_group_iter")
         group_iter = group_iter.next()
-        _proton_exit_scope("store_group_iter")
 
 {%- if USE_TMA_STORE %}
-    _proton_enter_scope("store_final_tma_wait")
     tma.store_wait(pendings=0)
-    _proton_exit_scope("store_final_tma_wait")
 {%- endif %}
 
     _proton_exit_scope("store_partition")

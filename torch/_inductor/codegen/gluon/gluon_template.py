@@ -90,12 +90,7 @@ from triton.experimental.gluon import language as gl
                 output_torch_dtype = self.output_node.get_dtype()  # type: ignore[attr-defined]
 
                 def torch_dtype_to_gluon_str(dtype):
-                    if dtype == torch.float8_e5m2:
-                        return "gl.float8e5"
-                    elif dtype == torch.float8_e4m3fn:
-                        return "gl.float8e4nv"
-                    else:
-                        return f"gl.{str(dtype).split('.')[1]}"
+                    return f"gl.{str(dtype).split('.')[1]}"
 
                 kwargs["INPUT_DTYPE"] = torch_dtype_to_gluon_str(input_torch_dtype)
                 kwargs["OUTPUT_DTYPE"] = torch_dtype_to_gluon_str(output_torch_dtype)

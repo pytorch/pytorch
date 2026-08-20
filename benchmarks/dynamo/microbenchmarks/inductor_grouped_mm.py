@@ -1,13 +1,17 @@
 # FIXME: move this to tritonbench project.
 
 import argparse
+import dataclasses
 import gc
+import re
 import time
 import warnings
 
 from triton import runtime
 
 import torch
+
+from torch._inductor.utils import run_and_get_code
 
 
 def is_blackwell():
@@ -255,6 +259,64 @@ def _maybe_wrap_cuda_graph(fn, label, use_cuda_graphs):
 BACKEND_CHOICES = ["aten", "triton", "cutedsl", "gluon"]
 
 
+def _autotune_winning_config(A, B, offs):
+    """Autotune the Gluon backend and return the config that won.
+
+    Timed without instrumentation, so the winner is the one that is
+    actually fastest.
+    """
+    from torch._inductor.template_heuristics import gluon as gluon_heuristics
+
+    seen = []
+    orig_get_configs = gluon_heuristics.get_grouped_mm_configs
+
+    def recording_get_configs(**kwargs):
+        configs = orig_get_configs(**kwargs)
+        seen.extend(configs)
+        return configs
+
+    gluon_heuristics.get_grouped_mm_configs = recording_get_configs
+    try:
+        torch._dynamo.reset()
+        compiled = torch.compile(
+            torch._grouped_mm,
+            options={
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "GLUON",
+                "fx_graph_cache": False,
+            },
+            dynamic=False,
+        )
+        _, code = run_and_get_code(compiled, A, B.transpose(-2, -1), offs)
+    finally:
+        gluon_heuristics.get_grouped_mm_configs = orig_get_configs
+
+    src = "\n".join(code)
+    matches = [c for c in seen if _config_matches_source(c, src)]
+    if len(matches) != 1:
+        found = re.search(r"'config_args': \{[^}]*\}", src)
+        raise RuntimeError(
+            f"could not identify the winning Gluon config: {len(matches)} of "
+            f"{len(seen)} candidates match the generated code; it says "
+            f"{found.group(0) if found else 'nothing about config_args'}"
+        )
+    return matches[0]
+
+
+def _config_matches_source(gluon_config, src):
+    # Inductor emits config values either as an annotated constexpr,
+    # "BLOCK_M : gl.constexpr = 128", or as a repr'd dict entry,
+    # "'BLOCK_M': 128".
+    for field in dataclasses.fields(gluon_config):
+        value = getattr(gluon_config, field.name)
+        pattern = (
+            rf"\b{field.name}\b['\"]?\s*(?::\s*[\w.]+\s*)?[:=]\s*{value}\b"
+        )
+        if not re.search(pattern, src):
+            return False
+    return True
+
+
 def _proton_profile_gluon(
     A,
     B,
@@ -264,45 +326,97 @@ def _proton_profile_gluon(
     buffer_size,
     sample_warps,
     output_format,
+    optimizations,
 ):
     """Profile one call of the Gluon kernel with Proton scopes.
 
-    Instrumentation costs enough that autotuning under it would pick a
-    different config, so this recompiles after autotuning has already
-    settled on a winner, and profiles that.
+    Proton instruments at compile time, so the compile has to happen
+    inside the session. Autotuning there would put every candidate's
+    trial launches into the profile, so the winner is picked first
+    without instrumentation and then pinned as the only choice.
     """
     import triton.profiler as proton
 
-    torch._dynamo.reset()
-    compiled = torch.compile(
-        torch._grouped_mm,
-        options={
-            "max_autotune": True,
-            "max_autotune_gemm_backends": "GLUON",
-            "gluon_enable_proton_profiling": True,
-        },
-        dynamic=False,
-    )
+    winner = _autotune_winning_config(A, B, offs)
+    pinned = winner
+    if buffer_type == "shared" and winner.NUM_LOAD_BUFFERS > 1:
+        # Proton's shared buffer is whatever shared memory the kernel
+        # leaves unused, and at the winning config that is nothing.
+        # Give up one load buffer to make room: a shallower pipeline,
+        # but the same pipeline.
+        pinned = dataclasses.replace(
+            winner, NUM_LOAD_BUFFERS=winner.NUM_LOAD_BUFFERS - 1
+        )
+    num_warps = pinned.NUM_STORE_WARPS + 4
+    segments = len(sample_warps.split(",")) if sample_warps else num_warps
+    if buffer_size == 0 and buffer_type == "global":
+        # Proton splits buffer_size across the profiled warps and wants
+        # each share to be a power of 2, and caps the total, which it
+        # multiplies by the CTA count, at 4GB. Take the largest share
+        # that fits: a dropped event is the oldest one, so the partition
+        # scopes are the first thing lost.
+        num_ctas = torch.cuda.get_device_properties(0).multi_processor_count
+        share_limit = 4 * 1024**3 // (segments * num_ctas)
+        buffer_size = segments * (1 << min(23, share_limit.bit_length() - 1))
+    print(f"  Proton: pinning {pinned}")
+    if buffer_size:
+        print(f"  Proton: {buffer_size // segments // 8} events/warp")
 
     mode_kwargs = {
         "name": "default",
         "granularity": "warp",
         "buffer_type": buffer_type,
         "buffer_size": buffer_size,
+        "optimizations": optimizations,
     }
     if sample_warps:
         mode_kwargs["sampling_strategy"] = "selective"
         mode_kwargs["sampling_options"] = sample_warps
 
-    session = proton.start(
-        proton_out,
-        backend="instrumentation",
-        mode=proton.mode.InstrumentationMode(**mode_kwargs),
-    )
-    compiled(A, B.transpose(-2, -1), offs)
-    torch.cuda.synchronize()
-    proton.finalize(session, output_format=output_format)
-    print(f"  Proton profile written for {proton_out}")
+    from torch._inductor.template_heuristics import gluon as gluon_heuristics
+
+    orig_get_configs = gluon_heuristics.get_grouped_mm_configs
+    gluon_heuristics.get_grouped_mm_configs = lambda **kwargs: [pinned]
+    try:
+        torch._dynamo.reset()
+        compiled = torch.compile(
+            torch._grouped_mm,
+            options={
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "GLUON",
+                "gluon_enable_proton_profiling": True,
+                "fx_graph_cache": False,
+                # Proton instruments during the Triton compile and
+                # installs itself in this process only, so a kernel
+                # built by an async_compile worker is uninstrumented.
+                "compile_threads": 1,
+            },
+            dynamic=False,
+        )
+        # time_shift, the only knob that removes Proton's own per-record
+        # cost, is applied by the trace dump and not by the tree dump.
+        session = proton.start(
+            proton_out,
+            data="trace" if output_format == "chrome_trace" else "tree",
+            backend="instrumentation",
+            mode=proton.mode.InstrumentationMode(**mode_kwargs),
+        )
+        compiled(A, B.transpose(-2, -1), offs)
+        torch.cuda.synchronize()
+        proton.finalize(session, output_format=output_format)
+    finally:
+        gluon_heuristics.get_grouped_mm_configs = orig_get_configs
+
+    path = f"{proton_out}.{output_format}"
+    with open(path) as f:
+        if "compute_work" not in f.read():
+            raise RuntimeError(
+                f"{path} has no scopes: the kernel ran without "
+                "instrumentation. Proton instruments in-process, so check "
+                "that nothing moved the Triton compile off the main process "
+                "or served it from a cache."
+            )
+    print(f"  Proton profile written to {path}")
 
 
 def benchmark_grouped_mm(
@@ -325,6 +439,7 @@ def benchmark_grouped_mm(
     proton_buffer_type="global",
     proton_sample_warps="",
     proton_format="hatchet",
+    proton_optimizations="clock32,sched_stores",
 ):
     torch.manual_seed(seed)
     if backends is None:
@@ -579,6 +694,7 @@ def benchmark_grouped_mm(
                             proton_buffer_size,
                             proton_sample_warps,
                             proton_format,
+                            proton_optimizations,
                         )
                 except Exception as e:
                     print(f"  Gluon: Failed ({e})")
@@ -708,19 +824,20 @@ if __name__ == "__main__":
         type=int,
         default=0,
         help=(
-            "Proton per-warp event buffer size in bytes (0 = auto). Total "
-            "allocation is this times sampled warps times CTAs, capped at 4GB."
+            "Proton per-CTA event buffer size in bytes (0 = 1 MB per warp). "
+            "Proton splits it across warps and wants each share to be a "
+            "power of 2. Total allocation is this times CTAs, capped at 4GB."
         ),
     )
     parser.add_argument(
         "--proton-buffer-type",
         dest="proton_buffer_type",
         choices=["global", "shared"],
-        default="global",
+        default="shared",
         help=(
-            "Where Proton stages its event buffer. 'shared' is much cheaper "
-            "per event but far smaller, so it needs a smaller problem to avoid "
-            "dropped events."
+            "Where Proton stages its event buffer. 'shared' is far cheaper "
+            "per event, but it only gets the shared memory the kernel leaves "
+            "free, so one load buffer is given up to make room."
         ),
     )
     parser.add_argument(
@@ -737,10 +854,21 @@ if __name__ == "__main__":
         "--proton-format",
         dest="proton_format",
         choices=["hatchet", "chrome_trace"],
-        default="hatchet",
+        default="chrome_trace",
         help=(
-            "Proton output format: 'hatchet' for proton-viewer, 'chrome_trace' "
-            "for a Perfetto/chrome://tracing timeline."
+            "Proton output format: 'chrome_trace' for a Perfetto timeline, "
+            "the only one that gets the time_shift correction; 'hatchet' for "
+            "proton-viewer aggregates, which are raw uncorrected cycles."
+        ),
+    )
+    parser.add_argument(
+        "--proton-optimizations",
+        dest="proton_optimizations",
+        default="clock32,time_shift",
+        help=(
+            "Comma-separated Proton Optimize flags. 'clock32' halves the "
+            "record size and 'time_shift' subtracts Proton's own per-record "
+            "cost, which only the trace dump applies. Pass '' to disable."
         ),
     )
     args = parser.parse_args()
@@ -768,4 +896,5 @@ if __name__ == "__main__":
         proton_buffer_type=args.proton_buffer_type,
         proton_sample_warps=args.proton_sample_warps,
         proton_format=args.proton_format,
+        proton_optimizations=args.proton_optimizations,
     )

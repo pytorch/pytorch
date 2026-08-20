@@ -163,3 +163,43 @@ jobs:
       python-version: "3.10"
       compiler: gcc11
     secrets: inherit
+
+  # B200 CUDA 13.2 sm100 smoke coverage, staged here to gauge B200 runner
+  # reliability/availability on every main commit before it graduates to trunk.
+  linux-jammy-cuda13_2-py3_12-gcc11-sm100-build:
+    if: github.repository_owner == 'pytorch'
+    name: linux-jammy-cuda13.2-py3.12-gcc11-sm100
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runner: linux.r7i.4xlarge
+      build-environment: linux-jammy-cuda13.2-py3.12-gcc11-sm100
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.2-cudnn9-py3.12-gcc11
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
+      cuda-arch-list: '10.0'
+      test-matrix: |
+        { include: [
+          { config: "smoke_b200", shard: 1, num_shards: 1, runner: "linux.dgx.b200" },
+        ]}
+      # config: "smoke_b200" maps to test_python_smoke_b200() in .ci/pytorch/test.sh
+      python-version: "3.12"
+      compiler: gcc11
+      cuda-version: "13.2"
+    secrets: inherit
+
+  linux-jammy-cuda13_2-py3_12-gcc11-sm100-test:
+    if: github.repository_owner == 'pytorch'
+    name: linux-jammy-cuda13.2-py3.12-gcc11-sm100
+    uses: ./.github/workflows/_linux-test.yml
+    needs:
+      - linux-jammy-cuda13_2-py3_12-gcc11-sm100-build
+      - target-determination
+    with:
+      build-environment: ${{ needs.linux-jammy-cuda13_2-py3_12-gcc11-sm100-build.outputs.build-environment }}
+      docker-image: ${{ needs.linux-jammy-cuda13_2-py3_12-gcc11-sm100-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-cuda13_2-py3_12-gcc11-sm100-build.outputs.test-matrix }}
+      python-version: "3.12"
+      compiler: gcc11
+      cuda-version: "13.2"
+    secrets: inherit

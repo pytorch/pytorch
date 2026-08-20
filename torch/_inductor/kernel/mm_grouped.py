@@ -360,6 +360,11 @@ def can_use_gluon_kernel(
     if bias is not None or scale_result is not None:
         return False
 
+    # FIXME: Reconsider rejecting dynamic shapes here, as CuTeDSL does.
+    # We accept them to match Triton, but they cost performance: with
+    # symbolic shapes autotuning cannot compare shape-dependent
+    # configs, so it settles on a more conservative one.
+
     if len(mat_a.get_size()) == 2 or len(mat_b.get_size()) == 2:
         return offs is not None
     else:
