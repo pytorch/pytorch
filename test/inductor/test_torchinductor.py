@@ -13516,6 +13516,37 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(code.count("triton_helpers.rand_eager_kernel"), 1)
         self.assertEqual(code.count("tl.rand("), 0)
 
+    @xfail_if_mps  # Only works for Triton on CUDA
+    @config.patch(align_random_eager=True)
+    def test_align_random_eager_randn(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("Only valid for CUDA!")
+
+        @torch.compile
+        def fn():
+            return torch.randn([4096], device=self.device)
+
+        torch.manual_seed(1234)
+        result, (code,) = run_and_get_code(fn)
+        self.assertEqual(result.shape, (4096,))
+        self.assertEqual(code.count("triton_helpers.rand_eager_kernel"), 0)
+
+        x = torch.empty(4096, device=self.device)
+
+        @torch.compile
+        def fn_like(t):
+            return torch.randn_like(t)
+
+        torch.manual_seed(5678)
+        result_like = fn_like(x)
+        self.assertEqual(result_like.shape, x.shape)
+
+        for t in (result, result_like):
+            self.assertGreater((t < 0).sum().item(), 0)
+            self.assertGreater((t > 1).sum().item(), 0)
+            self.assertTrue(-0.2 < t.mean().item() < 0.2)
+            self.assertTrue(0.7 < t.std().item() < 1.3)
+
     @xfail_if_mps  # Only works for triton
     def test_randint_kernel_count(self):
         if self.device != GPU_TYPE:
