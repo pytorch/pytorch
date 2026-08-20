@@ -25,7 +25,6 @@ from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.fully_sharded_data_parallel import StateDictType
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import (
-    MultiProcContinuousTest,
     requires_accelerator_dist_backend,
 )
 from torch.testing._internal.common_utils import (
@@ -34,8 +33,13 @@ from torch.testing._internal.common_utils import (
     skip_but_pass_in_sandcastle_if,
     TestCase,
 )
+from torch.testing._internal.distributed._shard.sharded_tensor import (
+    ShardedTensorTestBase,
+    with_comms,
+)
 
-
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+BACKEND = torch.distributed.get_default_backend_for_device(device_type)
 
 
 def with_temp_dir(
@@ -83,17 +87,14 @@ class MyTestModule(torch.nn.Module):
         return self.net4(self.net3(self.net2(self.net1(x))))
 
 
-class TestFSSpec(MultiProcContinuousTest):
+class TestFSSpec(ShardedTensorTestBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @classmethod
-    def backend_str(cls) -> str:
-        return dist.get_default_backend_for_device(cls.device_type)
-
     @property
-    def device(self) -> torch.device:
-        return self._dev
+    def world_size(self) -> int:
+        return 2
 
+    @with_comms(backend=BACKEND, init_rpc=False)
     @requires_accelerator_dist_backend()
     @skip_but_pass_in_sandcastle_if(
         torch.accelerator.device_count() < 2,
@@ -101,12 +102,11 @@ class TestFSSpec(MultiProcContinuousTest):
     )
     @with_temp_dir
     def test_fsspec(self, device):
-        self._dev = torch.device(device)
         CHECKPOINT_DIR = self.temp_dir
 
         model = FSDP(MyTestModule().to(device))
         optim = torch.optim.Adam(model.parameters(), lr=0.1)
-        model(torch.rand(8, 8, device=self.device)).sum().backward()
+        model(torch.rand(8, 8, device=dist.get_rank())).sum().backward()
         optim.step()
 
         with FSDP.state_dict_type(model, StateDictType.SHARDED_STATE_DICT):
@@ -171,6 +171,7 @@ class TestFSSpec(MultiProcContinuousTest):
             opt_at(optim, 0)["exp_avg_sq"], opt_at(optim_2, 0)["exp_avg_sq"]
         )
 
+    @with_comms(backend=BACKEND, init_rpc=False)
     @requires_accelerator_dist_backend()
     @skip_but_pass_in_sandcastle_if(
         torch.accelerator.device_count() < 2,
@@ -178,7 +179,6 @@ class TestFSSpec(MultiProcContinuousTest):
     )
     @with_temp_dir
     def test_overwrite(self, device):
-        self._dev = torch.device(device)
         t1, t2 = torch.randn(10), torch.randn(10)
 
         dcp.save(
