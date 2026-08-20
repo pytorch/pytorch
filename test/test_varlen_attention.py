@@ -708,7 +708,7 @@ class TestVarlenAttention(NNTestCase):
                 rng_state,
                 None,
                 None,
-                False,
+                SDPBackend.FLASH_ATTENTION.value,
             ),
             test_utils=["test_schema", "test_faketensor"],
         )
@@ -865,37 +865,17 @@ class TestVarlenAttention(NNTestCase):
             _should_use_cudnn=_should_use_cudnn,
         )
 
-    @skipIfRocm
-    @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
-    )
-    @parametrize("scale", [0.0, -0.125])
-    @parametrize("backend", [SDPBackend.FLASH_ATTENTION, SDPBackend.CUDNN_ATTENTION])
-    def test_varlen_nonpositive_scale(self, device, scale, backend):
-        if backend == SDPBackend.CUDNN_ATTENTION:
-            _check_cudnn_varlen_supported(device)
-        q, k, v, cu_seq = _make_causal_varlen_inputs(device, requires_grad=True)
+    @parametrize("scale", [0.0, -0.125, float("nan")])
+    def test_varlen_invalid_scale(self, device, scale):
+        q, k, v, cu_seq = _make_causal_varlen_inputs(device)
         seq_len = q.size(0)
-        grad_out = torch.randn_like(q)
 
-        with sdpa_kernel(SDPBackend.MATH):
-            expected = (
-                F.scaled_dot_product_attention(
-                    q.transpose(0, 1).unsqueeze(0),
-                    k.transpose(0, 1).unsqueeze(0),
-                    v.transpose(0, 1).unsqueeze(0),
-                    is_causal=True,
-                    scale=scale,
-                )
-                .squeeze(0)
-                .transpose(0, 1)
-            )
-        expected_grads = torch.autograd.grad(
-            expected, (q, k, v), grad_out, retain_graph=True
-        )
+        with self.assertRaisesRegex(ValueError, "scale must be greater than 0"):
+            varlen_attn(q, k, v, cu_seq, cu_seq, seq_len, seq_len, scale=scale)
 
-        with sdpa_kernel(backend):
-            actual = varlen_attn(
+        with self.assertRaisesRegex(ValueError, "scale must be greater than 0"):
+            varlen_attn_out(
+                torch.empty_like(q),
                 q,
                 k,
                 v,
@@ -904,56 +884,7 @@ class TestVarlenAttention(NNTestCase):
                 seq_len,
                 seq_len,
                 scale=scale,
-                window_size=(-1, 0),
             )
-        actual_grads = torch.autograd.grad(actual, (q, k, v), grad_out)
-
-        self.assertEqual(actual, expected, atol=1e-2, rtol=1e-2)
-        for actual_grad, expected_grad in zip(actual_grads, expected_grads):
-            self.assertEqual(actual_grad, expected_grad, atol=1e-2, rtol=1e-2)
-
-        if backend == SDPBackend.FLASH_ATTENTION:
-            out = torch.empty_like(actual)
-            with sdpa_kernel(backend):
-                varlen_attn_out(
-                    out,
-                    q.detach(),
-                    k.detach(),
-                    v.detach(),
-                    cu_seq,
-                    cu_seq,
-                    seq_len,
-                    seq_len,
-                    scale=scale,
-                    window_size=(-1, 0),
-                )
-            self.assertEqual(out, expected, atol=1e-2, rtol=1e-2)
-
-    @skipIfRocm
-    @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
-    )
-    @parametrize("backend", [SDPBackend.FLASH_ATTENTION, SDPBackend.CUDNN_ATTENTION])
-    def test_varlen_nan_scale(self, device, backend):
-        if backend == SDPBackend.CUDNN_ATTENTION:
-            _check_cudnn_varlen_supported(device)
-        q, k, v, cu_seq = _make_causal_varlen_inputs(device)
-        seq_len = q.size(0)
-
-        with sdpa_kernel(backend):
-            actual = varlen_attn(
-                q,
-                k,
-                v,
-                cu_seq,
-                cu_seq,
-                seq_len,
-                seq_len,
-                scale=float("nan"),
-                window_size=(-1, 0),
-            )
-
-        self.assertTrue(actual.isnan().all())
 
     @skipIfRocm
     @unittest.skipIf(
