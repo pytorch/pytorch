@@ -360,6 +360,7 @@ class _FusionCompareBase(TestCase):
 class TestGroupBatchFusionAccelerator(_FusionCompareBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @requires_capabilities(Capability.lib.triton)
     @unittest.skipIf(not has_fbgemm, "requires fbgemm")
     @torch._inductor.config.patch(
         pre_grad_fusion_options={},
@@ -367,7 +368,6 @@ class TestGroupBatchFusionAccelerator(_FusionCompareBase):
             "group_linear": {"require_fbgemm": True},
         },
     )
-    @requires_capabilities(Capability.lib.triton)
     def test_group_linear_fusion(self, device):
         z = 10
         for has_bias in [True, False]:
@@ -392,6 +392,7 @@ class TestGroupBatchFusionAccelerator(_FusionCompareBase):
             )
             counters.clear()
 
+    @requires_capabilities(Capability.lib.triton)
     @unittest.skipIf(not has_fbgemm, "requires fbgemm")
     @torch._inductor.config.patch(
         pre_grad_fusion_options={},
@@ -399,7 +400,6 @@ class TestGroupBatchFusionAccelerator(_FusionCompareBase):
             "group_linear": {"require_fbgemm": True},
         },
     )
-    @requires_capabilities(Capability.lib.triton)
     def test_group_linear_fusion_different_shapes(self, device):
         counters.clear()
         module = MyModule2().eval().to(device)
@@ -426,12 +426,12 @@ class TestGroupBatchFusionAccelerator(_FusionCompareBase):
         )
         counters.clear()
 
+    @requires_capabilities(Capability.lib.triton)
     @skipMPS
     @torch._inductor.config.patch(
         pre_grad_fusion_options={"batch_layernorm": {}},
         post_grad_fusion_options={},
     )
-    @requires_capabilities(Capability.lib.triton)
     def test_batch_layer_norm_fusion(self, device):
         for has_weight in [True, False]:
             for has_bias in [True, False]:
@@ -449,11 +449,11 @@ class TestGroupBatchFusionAccelerator(_FusionCompareBase):
                 self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
                 counters.clear()
 
+    @requires_capabilities(Capability.lib.triton)
     @torch._inductor.config.patch(
         pre_grad_fusion_options={"batch_linear_lhs": {}},
         post_grad_fusion_options={},
     )
-    @requires_capabilities(Capability.lib.triton)
     def test_batch_linear_lhs_fusion(self, device):
         z = 10
         for has_bias in [True, False]:
@@ -576,11 +576,11 @@ class TestGroupBatchFusionAccelerator(_FusionCompareBase):
         for ref_t, res_t in zip(ref, res):
             self.assertEqual(ref_t, res_t, rtol=1e-3, atol=1e-3)
 
+    @requires_capabilities(Capability.lib.triton)
     @torch._inductor.config.patch(
         pre_grad_fusion_options={"batch_linear_lhs": {}},
         post_grad_fusion_options={},
     )
-    @requires_capabilities(Capability.lib.triton)
     def test_batch_linear_lhs_fusion_nn_linear_inlined(self, device):
         # Same shape pattern as test_batch_linear_lhs_fusion, but the linears
         # are produced through nn.Linear modules. Dynamo inlines those to
@@ -613,11 +613,11 @@ class TestGroupBatchFusionAccelerator(_FusionCompareBase):
             self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
             counters.clear()
 
+    @requires_capabilities(Capability.lib.triton)
     @torch._inductor.config.patch(
         pre_grad_fusion_options={"batch_linear": {}},
         post_grad_fusion_options={},
     )
-    @requires_capabilities(Capability.lib.triton)
     def test_batch_linear_pre_grad_fusion(self, device):
         for has_bias in [True, False]:
             counters.clear()
@@ -634,6 +634,7 @@ class TestGroupBatchFusionAccelerator(_FusionCompareBase):
             self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
             counters.clear()
 
+    @requires_capabilities(Capability.lib.triton)
     @torch._inductor.config.patch(
         pre_grad_fusion_options={
             "batch_relu": {},
@@ -646,7 +647,6 @@ class TestGroupBatchFusionAccelerator(_FusionCompareBase):
             "batch_aten_div": {},
         },
     )
-    @requires_capabilities(Capability.lib.triton)
     def test_pointwise_op_fusion(self, device):
         counters.clear()
         module = _TestPointwiseOps(device)
@@ -667,6 +667,7 @@ class TestGroupBatchFusionAccelerator(_FusionCompareBase):
         self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
         counters.clear()
 
+    @requires_capabilities(Capability.lib.triton)
     @torch._inductor.config.patch(
         pre_grad_fusion_options={},
         post_grad_fusion_options={
@@ -676,7 +677,6 @@ class TestGroupBatchFusionAccelerator(_FusionCompareBase):
             "unbind_stack_aten_pass": {},
         },
     )
-    @requires_capabilities(Capability.lib.triton)
     def test_pointwise_op_fusion_post_grad(self, device):
         counters.clear()
         module = _TestPointwiseOpsPostGrad(device)
@@ -695,6 +695,7 @@ class TestGroupBatchFusionAccelerator(_FusionCompareBase):
         self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
         counters.clear()
 
+    @requires_capabilities(Capability.lib.triton)
     @torch._dynamo.config.patch(canonicalize_output_graph_node_order=False)
     @torch._inductor.config.patch(
         pre_grad_fusion_options={},
@@ -710,7 +711,6 @@ class TestGroupBatchFusionAccelerator(_FusionCompareBase):
             "unbind_stack_aten_pass": {},
         },
     )
-    @requires_capabilities(Capability.lib.triton)
     def test_gate_fusion_post_grad(self, device):
         counters.clear()
         size = 20
@@ -737,6 +737,7 @@ class TestGroupBatchFusionAccelerator(_FusionCompareBase):
         self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
         counters.clear()
 
+    @requires_capabilities(Capability.lib.triton)
     @torch._inductor.config.patch(
         pre_grad_fusion_options={
             "normalization_pass": {},
@@ -748,7 +749,6 @@ class TestGroupBatchFusionAccelerator(_FusionCompareBase):
         },
         post_grad_fusion_options={},
     )
-    @requires_capabilities(Capability.lib.triton)
     def test_math_op_fusion(self, device):
         counters.clear()
         module = _TestMathOps(device)
@@ -770,13 +770,13 @@ class TestGroupBatchFusionAccelerator(_FusionCompareBase):
         self.assertTrue(torch.allclose(ref, res))
         counters.clear()
 
+    @requires_capabilities(Capability.lib.triton)
     @torch._inductor.config.patch(
         pre_grad_fusion_options={
             "normalization_pass": {},
             "batch_dropout": {},
         }
     )
-    @requires_capabilities(Capability.lib.triton)
     def test_batch_dropout_pre_grad_fusion(self, device):
         counters.clear()
         module = _TestDropout(device)
@@ -978,13 +978,13 @@ class _TestBMMFusionModule(torch.nn.Module):
         return output
 
 
-@torch._inductor.config.patch(
-    post_grad_fusion_options={"batch_linear_post_grad": {"require_fbgemm": False}}
-)
 class TestPostGradBatchLinearFusion(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @requires_capabilities(Capability.lib.triton)
+    @torch._inductor.config.patch(
+        post_grad_fusion_options={"batch_linear_post_grad": {"require_fbgemm": False}}
+    )
     def test_batch_linear_post_grad_fusion(self, device):
         pt1_module = _TestBMMFusionModule().to(device)
         inputs = []
@@ -1856,14 +1856,14 @@ class TestCatLinearFusionGeneric(TestCase):
             counters.clear()
 
 
-@torch._inductor.config.patch(
-    pre_grad_fusion_options={"cat_linear": {}},
-    post_grad_fusion_options={},
-)
 class TestCatLinearFusionAccelerator(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @requires_capabilities(Capability.lib.triton)
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={"cat_linear": {}},
+        post_grad_fusion_options={},
+    )
     def test_cat_linear_numerics(self, device):
         from unittest import mock
 
@@ -1887,6 +1887,10 @@ class TestCatLinearFusionAccelerator(TestCase):
             counters.clear()
 
     @requires_capabilities(Capability.lib.triton)
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={"cat_linear": {}},
+        post_grad_fusion_options={},
+    )
     def test_cat_linear_numerics_backward(self, device):
         # forward is not enough: the rewrite has to keep the backward correct too.
         # grads reach the shared weight through the differentiable slices (one
@@ -1939,7 +1943,9 @@ instantiate_device_type_tests(
     allow_mps=True,
     allow_xpu=True,
 )
-instantiate_device_type_tests(TestGroupBatchFusionXpu, globals(), only_for="xpu")
+instantiate_device_type_tests(
+    TestGroupBatchFusionXpu, globals(), only_for="xpu", allow_xpu=True
+)
 instantiate_device_type_tests(TestGroupBatchFusionCpu, globals(), only_for="cpu")
 instantiate_device_type_tests(
     TestPostGradBatchLinearFusion,
