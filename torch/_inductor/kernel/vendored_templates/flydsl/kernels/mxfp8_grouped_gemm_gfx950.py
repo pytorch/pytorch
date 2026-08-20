@@ -78,6 +78,7 @@
 
 import dataclasses
 import functools
+import logging
 import os
 
 import torch
@@ -93,7 +94,7 @@ from torch._inductor.runtime.flydsl_cache import run_cached_flydsl
 SCALE_BLOCK = 32
 
 BLOCK_R = 256  # DEFAULT output rows (tokens) per tile; see pick_block_r
-BLOCK_C_DEFAULT = 256  # output cols (N) per tile; 128 also supported, see pick_block_c
+BLOCK_C_DEFAULT = 256  # output cols (N) per tile; 128 also supported, see pick_tile
 BLOCK_M = 128  # contraction elements per pipeline step (= BLOCK_K)
 
 
@@ -140,14 +141,16 @@ def pick_block_r(m_total: int, e: int) -> int:
 def pick_tile(m_total: int, e: int, n: int) -> tuple:
     """(BLOCK_R, BLOCK_C) for this shape, shrinking both when the grid starves.
 
-    `pick_block_r` and `pick_block_c` each answer a local question and neither
-    looks at how many blocks the pair produces. That is fine everywhere except
+    `pick_block_r` answers a local question and does not look at how many
+    blocks the resulting tile produces. That is fine everywhere except
     small N, where BLOCK_C=256 leaves ONE column tile and the row dim is the
     only parallelism left: K4096 x N256 tiles to 16 blocks on a 256-CU part.
 
     Halving a tile dimension doubles the block count, and at a starved grid that
     trade is strongly positive even though the narrower tile is worse per block.
-    THE THRESHOLD IS ONE FULL WAVE.
+    THE THRESHOLD IS ONE FULL WAVE, and the shrink stops at (128, 128): going on
+    to BLOCK_R=64 measured 2.2% at K4096 x N256 on MI355X, inside the harness
+    run-to-run band, which does not pay for another branch here.
 
     Note for anyone re-deriving this: the original block_c sweep that concluded
     "128 loses on 11 of 12 shapes" predates the surplus-slot guard, when the
@@ -156,7 +159,12 @@ def pick_tile(m_total: int, e: int, n: int) -> tuple:
     Do not resurrect those numbers.
     """
     br = pick_block_r(m_total, e)
-    bc = pick_block_c(n)
+    # BLOCK_C is always 256 to start: a tile that overhangs N is not free, but
+    # the narrow tile is still ~15% slower where it removes the whole overhang,
+    # because per K-step a wave issues 4*NA*NB MFMAs against 4*(NA+NB) LDS reads
+    # -- ratio 2.0 at 4x4 against 1.33 at 4x2. 128 is taken below only when the
+    # grid is starved, where occupancy outweighs that ratio.
+    bc = BLOCK_C_DEFAULT
     if e <= 0 or n <= 0:
         return br, bc
     # Row tiles are per-group, so the average group is what the grid sees.
@@ -179,21 +187,10 @@ def pick_tile(m_total: int, e: int, n: int) -> tuple:
         br = 128
         if tiles_at(br, bc) >= _STARVED_TILES:
             return br, bc
-    # Third step, for the shapes STILL starved after both. K4096 x N256 is the
-    # case: bandwidth-bound with too few concurrent blocks to saturate HBM, so
-    # throughput tracks block count. Split-K is NOT the fix -- the K-walk is
-    # only ~6us of a 25us kernel there, so splitting scales time linearly with
-    # launches; this shape wants more blocks per launch, not more launches.
-    #
-    # HALF the threshold, because the step reverses once bandwidth saturates: a
-    # finer tile re-reads operands more times, so it only pays while there are
-    # too few blocks to use the bus. K4096 x N512 is the far side, where
-    # (64,128) buys more bytes for less work and loses. The gate is therefore
-    # "still under half a wave after both steps".
-    if br == 128 and tiles_at(br, bc) < _STARVED_TILES // 2:
-        br = 64
     return br, bc
 
+
+log = logging.getLogger(__name__)
 
 _STARVED_TILES = 256  # one full wave on MI350X's 256 CUs; see pick_tile
 
@@ -215,10 +212,8 @@ def _warn_guard_fallback(K, N, E, BLOCK_C, BLOCK_R, err) -> None:
     if key in _guard_fallback_warned:
         return
     _guard_fallback_warned.add(key)
-    import logging
-
-    logging.getLogger(__name__).warning(
-        "[amd_titan] fwdgemm: surplus-slot guard failed to compile at "
+    log.warning(
+        "FlyDSL MXFP8 grouped GEMM: surplus-slot guard failed to compile at "
         "K=%d N=%d E=%d BLOCK_C=%d BLOCK_R=%d (%s: %s); falling back to the "
         "unguarded kernel, which is correct but pays for its surplus slots.",
         K,
@@ -231,20 +226,6 @@ def _warn_guard_fallback(K, N, E, BLOCK_C, BLOCK_R, err) -> None:
     )
 
 
-def pick_block_c(N: int) -> int:
-    """Column tile width. Always 256 -- the narrow tile was measured and lost.
-
-    A tile that overhangs N is not free: the MFMAs run on the overhang and the
-    results are discarded at the store. Even so, at the shapes where 128 removes
-    the whole overhang it is still ~15% slower, because per K-step a wave issues
-    4*NA*NB MFMAs against 4*(NA+NB) LDS reads -- ratio 2.0 at 4x4 against 1.33
-    at 4x2. Hardware efficiency drops further than the saved work is worth.
-
-    No better tile is available: the accumulators already fill all 256 AGPRs at
-    NA*NB = 16 per quadrant. Pass ``block_c=128`` explicitly to re-run the
-    comparison; `pick_tile` still takes 128 when the grid is starved.
-    """
-    return BLOCK_C_DEFAULT
 
 
 import flydsl.compiler as flyc
@@ -266,11 +247,9 @@ from .mxfp8_gemm_utils import (
 )
 
 
-# Interleave each quadrant's 16 MFMAs with the g2s/s2r loads of the NEXT
-# fragment so they co-issue in the MFMA execute shadow. Worth +6.6% in wgrad
-# once its scale loads stopped saturating the L1 address path. Set
-# FWDGEMM_INTERLEAVE=0 for the plain cluster.
-_INTERLEAVE = os.environ.get("FLYDSL_MXFP8_GROUPED_INTERLEAVE", "1") != "0"
+# Each quadrant's 16 MFMAs are interleaved with the g2s/s2r loads of the NEXT
+# fragment so they co-issue in the MFMA execute shadow -- worth +6.6% in wgrad
+# once its scale loads stopped saturating the L1 address path.
 
 
 def _mfma_scale_agpr(a, b, sa, sb, acc):
@@ -737,14 +716,7 @@ def _compile(
                     out.append(swz)
                 return out
 
-            def _cluster_plain(lds_dst, g2s, k_off, s2r, lds_src, a, b, c, sa, sb):
-                g2s.load(lds_dst, k_off)
-                vm.issue(g2s.n_load_steps)
-                rt = s2r.load(lds_src)
-                c = mma(a, b, c, sa, sb)
-                return c, rt
-
-            def _cluster_il(lds_dst, g2s, k_off, s2r, lds_src, a, b, c, sa, sb):
+            def _cluster(lds_dst, g2s, k_off, s2r, lds_src, a, b, c, sa, sb):
                 # Interleave this quadrant's MFMAs with the g2s and s2r loads of
                 # the NEXT fragment, so the loads co-issue in the MFMA execute
                 # shadow. Mirrors fp8_gemm_4wave's _interleaved_cluster; the MFMA
@@ -774,8 +746,6 @@ def _compile(
 
                 vm.issue(g2s.n_load_steps)
                 return c, rt
-
-            _cluster = _cluster_il if _INTERLEAVE else _cluster_plain
 
             # ── Prologue: pre-fill the 8-buffer LDS pipeline (2 K-steps) ──
             # Chunk 0 goes first so it is the oldest thing in flight and the
@@ -1285,8 +1255,7 @@ def _row_windows(M, K, N, offs, block_r=BLOCK_R):
         yield r0, rows, (offs - r0).clamp_(0, rows)
 
 
-# Names the Inductor lazy-export table in `kernels/__init__.py` binds to.
-# Aliases rather than renames, so the body above stays diffable against the
+# Name the Inductor lazy-export table in `kernels/__init__.py` binds to. An
+# alias rather than a rename, so the body above stays diffable against the
 # upstream AMD-TorchTitan-Ops file.
-MXFP8_SCALE_BLOCK = SCALE_BLOCK
 pick_mxfp8_grouped_gemm_tile = pick_tile

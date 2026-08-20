@@ -154,6 +154,32 @@ flydsl_grouped_mm_template = FlyDSLTemplate(
 )
 
 
+def _flydsl_grouped_static_shape(
+    mat_a: TensorBox, mat_b: TensorBox, offs: TensorBox
+) -> tuple[int, int, int, int] | None:
+    """(M, N, K, G) as ints for a 2D-ragged x 3D grouped GEMM, or None.
+
+    None means one of them is dynamic, or `offs` does not name exactly the
+    groups B stacks. Total M only prunes configs -- the exact per-group sizes
+    stay runtime values that the kernel reads from `offs` on device -- but the
+    other three are compile keys, so a dynamic one has to decline the template.
+    Shared by the BF16 and MXFP8 grouped gates so the two cannot drift.
+    """
+    g = mat_b.get_size()[0]
+    k = mat_a.get_size()[-1]
+    n = mat_b.get_size()[-1]
+    statically_known = PythonWrapperCodegen.statically_known_int_or_none
+    m_static = statically_known(mat_a.get_size()[0])
+    n_static = statically_known(n)
+    k_static = statically_known(k)
+    g_static = statically_known(g)
+    if m_static is None or n_static is None or k_static is None or g_static is None:
+        return None
+    if not V.graph.sizevars.statically_known_equals(offs.get_size()[0], g):
+        return None
+    return m_static, n_static, k_static, g_static
+
+
 def get_flydsl_grouped_mm_template_kwargs(
     mat_a: TensorBox,
     mat_b: TensorBox,
@@ -225,16 +251,10 @@ def get_flydsl_grouped_mm_template_kwargs(
     ):
         return []
 
-    # Total M only prunes configs here; exact per-group sizes remain runtime
-    # values read from offs by the persistent kernel's on-device tile scan.
-    m_static = PythonWrapperCodegen.statically_known_int_or_none(mat_a.get_size()[0])
-    n_static = PythonWrapperCodegen.statically_known_int_or_none(n)
-    k_static = PythonWrapperCodegen.statically_known_int_or_none(k)
-    g_static = PythonWrapperCodegen.statically_known_int_or_none(g)
-    if m_static is None or n_static is None or k_static is None or g_static is None:
+    static_shape = _flydsl_grouped_static_shape(mat_a, mat_b, offs)
+    if static_shape is None:
         return []
-    if not V.graph.sizevars.statically_known_equals(offs.get_size()[0], g):
-        return []
+    m_static, n_static, k_static, g_static = static_shape
     if n_static % 32 != 0 or k_static % 32 != 0:
         return []
     tensor_spans = (
@@ -779,12 +799,10 @@ def get_flydsl_mxfp8_grouped_mm_template_kwargs(
     g = mat_b.get_size()[0]
     k = mat_a.get_size()[-1]
     n = mat_b.get_size()[-1]
-    m_static = PythonWrapperCodegen.statically_known_int_or_none(mat_a.get_size()[0])
-    n_static = PythonWrapperCodegen.statically_known_int_or_none(n)
-    k_static = PythonWrapperCodegen.statically_known_int_or_none(k)
-    g_static = PythonWrapperCodegen.statically_known_int_or_none(g)
-    if m_static is None or n_static is None or k_static is None or g_static is None:
+    static_shape = _flydsl_grouped_static_shape(mat_a, mat_b, offs)
+    if static_shape is None:
         return []
+    m_static, n_static, k_static, g_static = static_shape
 
     if k_static % MXFP8_SCALE_BLOCK != 0:
         return []

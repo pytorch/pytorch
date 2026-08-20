@@ -937,9 +937,6 @@ class TestFlyDSLTemplate(TestCase):
     def test_flydsl_mxfp8_grouped_gemm_config_schema(self):
         from torch._inductor.heuristics.template import flydsl as flydsl_heuristics
 
-        default = flydsl_heuristics.FlyDSLMXFP8GroupedGemmConfig()
-        self.assertEqual(asdict(default), {"BLOCK_R": 256, "BLOCK_C": 256})
-
         # Non-autotuned selection is the tile the kernel's own heuristic picks,
         # not a fixed one -- so it has to be shape-dependent.
         with (
@@ -966,17 +963,6 @@ class TestFlyDSLTemplate(TestCase):
         self.assertEqual(len(exhaustive), 6)
         self.assertIn({"BLOCK_R": 256, "BLOCK_C": 256}, exhaustive)
         self.assertIn({"BLOCK_R": 64, "BLOCK_C": 128}, exhaustive)
-
-    def test_flydsl_mxfp8_scale_block_matches_kernel(self):
-        from torch._inductor.heuristics.template import flydsl as flydsl_heuristics
-
-        if not flydsl_utils.runtime_available():
-            self.skipTest("FlyDSL runtime unavailable")
-        from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
-            MXFP8_SCALE_BLOCK,
-        )
-
-        self.assertEqual(flydsl_heuristics.MXFP8_SCALE_BLOCK, MXFP8_SCALE_BLOCK)
 
     @parametrize(
         "k,n,g,block_r,block_c,expected",

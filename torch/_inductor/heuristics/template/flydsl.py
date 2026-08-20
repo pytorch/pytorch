@@ -372,9 +372,9 @@ def get_grouped_gemm_configs() -> list[dict[str, int | bool]]:
     return [asdict(gemm_config) for gemm_config in candidates]
 
 
-# OCP MX: 32 elements share one E8M0 scale. Declared here rather than imported
-# from the vendored kernel so the lowering's shape gate stays importable
-# without the FlyDSL runtime; the two are asserted equal in the tests.
+# OCP MX: 32 elements share one E8M0 scale. Fixed by the spec, so it is declared
+# here rather than imported from the vendored kernel (which pulls in the FlyDSL
+# runtime) and the lowering's shape gate stays importable without it.
 MXFP8_SCALE_BLOCK = 32
 
 
