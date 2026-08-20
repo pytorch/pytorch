@@ -9,8 +9,11 @@ import torch._inductor.fx_passes.fuse_attention as fuse_attention
 from torch.testing._internal.common_utils import (
     recover_orig_fp32_precision,
     run_tests,
+    skipIfXpu,
+    TEST_XPU,
     TestCase,
 )
+from torch.testing._internal.inductor_utils import GPU_TYPE
 from torch.testing._internal.logging_utils import logs_to_string
 
 
@@ -26,7 +29,8 @@ def _has_cuda_sm80() -> bool:
 
 
 class InductorWarningTests(TestCase):
-    @unittest.skipIf(not _has_cuda_sm80(), "requires CUDA SM80")
+    @skipIfXpu(msg="torch-xpu-ops/issues/5048")
+    @unittest.skipIf(not TEST_XPU and not _has_cuda_sm80(), "requires CUDA SM80 or XPU")
     @recover_orig_fp32_precision
     def test_trivial_matmul_compile_no_user_warning(self):
         # recover_orig_fp32_precision restores the per-backend flags; the
@@ -37,7 +41,7 @@ class InductorWarningTests(TestCase):
             inductor_compile_fx._warn_tf32_disabled.cache_clear()
             torch._dynamo.reset()
 
-            x = torch.eye(2, device="cuda")
+            x = torch.eye(2, device=GPU_TYPE)
             log_stream, ctx = logs_to_string("torch._inductor.compile_fx", "perf_hints")
             with ctx(), warnings.catch_warnings(record=True) as caught:
                 warnings.simplefilter("ignore")
@@ -45,7 +49,7 @@ class InductorWarningTests(TestCase):
                 actual = torch.compile(
                     lambda y: y @ y, backend="inductor", fullgraph=True
                 )(x)
-                torch.cuda.synchronize()
+                torch.accelerator.synchronize()
 
             self.assertEqual(actual, x)
             self.assertEqual([str(w.message) for w in caught], [])
@@ -54,7 +58,8 @@ class InductorWarningTests(TestCase):
             torch.set_float32_matmul_precision(orig_matmul_precision)
             torch._dynamo.reset()
 
-    @unittest.skipIf(not _has_cuda_sm80(), "requires CUDA SM80")
+    @skipIfXpu(msg="torch-xpu-ops/issues/5048")
+    @unittest.skipIf(not TEST_XPU and not _has_cuda_sm80(), "requires CUDA SM80 or XPU")
     @recover_orig_fp32_precision
     def test_fuse_attention_tf32_advisory_no_user_warning(self):
         orig_matmul_precision = torch.get_float32_matmul_precision()
