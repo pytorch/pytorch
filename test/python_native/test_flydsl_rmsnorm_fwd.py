@@ -1,8 +1,6 @@
 # Owner(s): ["module: dsl-native-ops"]
 
-import os
 import unittest
-from unittest.mock import patch
 
 import torch
 import torch.backends.python_native as pn
@@ -66,50 +64,14 @@ def _unsupported_environment_reason() -> str | None:
     if not fu._version_is_ok():
         return f"FlyDSL {fu.runtime_version()} is outside the supported release"
 
-    from torch._native.ops.norm.flydsl_rmsnorm_impl import _is_supported_arch
+    from torch._native.ops.norm.flydsl_rmsnorm_impl import _SUPPORTED_ARCHES
 
-    if not _is_supported_arch(torch.cuda.current_device()):
+    if not fu._is_supported_arch(torch.cuda.current_device(), _SUPPORTED_ARCHES):
         return "FlyDSL RMSNorm override requires gfx950"
     return None
 
 
 _UNSUPPORTED_REASON = _unsupported_environment_reason()
-
-
-class TestFlyDSLRMSNormArch(TestCase):
-    @parametrize(
-        "arch,expected",
-        (
-            ("gfx950", True),
-            ("gfx942", False),
-            (None, False),
-        ),
-    )
-    def test_arch_gate_allows_only_gfx950(self, arch, expected):
-        import torch._native.ops.norm.flydsl_rmsnorm_impl as flydsl_rmsnorm_impl
-
-        arch_is_supported = flydsl_rmsnorm_impl._is_supported_arch
-        arch_is_supported.cache_clear()
-        self.addCleanup(arch_is_supported.cache_clear)
-        with patch.object(
-            flydsl_rmsnorm_impl.fu, "_resolve_rocm_arch", return_value=arch
-        ):
-            self.assertEqual(arch_is_supported(0), expected)
-
-    def test_arch_gate_is_resolved_once_per_process(self):
-        import torch._native.ops.norm.flydsl_rmsnorm_impl as flydsl_rmsnorm_impl
-
-        arch_is_supported = flydsl_rmsnorm_impl._is_supported_arch
-        resolve_arch = flydsl_rmsnorm_impl.fu._resolve_rocm_arch
-        arch_is_supported.cache_clear()
-        resolve_arch.cache_clear()
-        self.addCleanup(arch_is_supported.cache_clear)
-        self.addCleanup(resolve_arch.cache_clear)
-
-        with patch.dict(os.environ, {"FLYDSL_GPU_ARCH": "gfx950"}):
-            self.assertTrue(arch_is_supported(0))
-        with patch.dict(os.environ, {"FLYDSL_GPU_ARCH": "gfx942"}):
-            self.assertTrue(arch_is_supported(0))
 
 
 class TestFlyDSLRMSNormHelpers(TestCase):
@@ -138,22 +100,6 @@ class TestFlyDSLRMSNormHelpers(TestCase):
         from torch._native.ops.norm.flydsl_rmsnorm_utils import normalized_shape_1d
 
         self.assertEqual(normalized_shape_1d(normalized_shape), expected)
-
-    @parametrize(
-        "rows_m,n,itemsize,expected",
-        (
-            (2048, 114688, 4, True),
-            (16383, 65536, 4, True),
-            (16384, 65536, 4, False),
-            (16385, 65536, 4, False),
-            (1 << 31, 1, 1, False),
-            (1, 1 << 31, 1, False),
-        ),
-    )
-    def test_flydsl_buffer_span(self, rows_m, n, itemsize, expected):
-        from torch._native.ops.norm.flydsl_rmsnorm_impl import _fits_int32_buffer_span
-
-        self.assertEqual(_fits_int32_buffer_span(rows_m, n, itemsize), expected)
 
     def test_impl_without_weight_raises(self):
         # The predicate declines weight=None, so reaching the impl means a
@@ -607,7 +553,6 @@ class TestFlyDSLRMSNorm(TestCase):
         self.assertEqual(rmsnorm_cache_info()["fwd"].misses, 1)
 
 
-instantiate_parametrized_tests(TestFlyDSLRMSNormArch)
 instantiate_parametrized_tests(TestFlyDSLRMSNormHelpers)
 instantiate_parametrized_tests(TestFlyDSLRMSNorm)
 

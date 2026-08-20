@@ -23046,8 +23046,11 @@ if "cutedsl" in dsl_ops_by_dsl:
     ])
 
 if "flydsl" in dsl_ops_by_dsl:
+    from torch._native.flydsl_utils import (
+        _is_supported_arch as _is_flydsl_supported_arch,
+    )
     from torch._native.ops.norm.flydsl_rmsnorm_impl import (
-        _is_supported_arch as _is_flydsl_rmsnorm_supported_arch,
+        _SUPPORTED_ARCHES as _FLYDSL_RMSNORM_ARCHES,
     )
 
     dsl_ops_by_dsl["flydsl"].append(
@@ -23068,8 +23071,8 @@ if "flydsl" in dsl_ops_by_dsl:
                 skipCUDAIf(
                     not (
                         TEST_CUDA
-                        and _is_flydsl_rmsnorm_supported_arch(
-                            torch.cuda.current_device()
+                        and _is_flydsl_supported_arch(
+                            torch.cuda.current_device(), _FLYDSL_RMSNORM_ARCHES
                         )
                     ),
                     "flydsl rms_norm override requires gfx950",

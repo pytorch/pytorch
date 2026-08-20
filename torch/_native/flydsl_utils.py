@@ -135,6 +135,28 @@ def _resolve_rocm_arch(device_index: int) -> str | None:
     return _get_flydsl_device_arch(device_index)
 
 
+@functools.cache
+def _is_supported_arch(device_index: int, supported_arches: tuple[str, ...]) -> bool:
+    """Whether a device architecture is supported by a FlyDSL operator."""
+    arch = _resolve_rocm_arch(device_index)
+    return arch in supported_arches
+
+
+def _fits_int32_buffer_span(rows_m: int, n: int, itemsize: int) -> bool:
+    """Whether a contiguous (rows_m, n) tensor fits FlyDSL buffer indexing.
+
+    The byte span gets the wider bound because it lands in the descriptor's
+    num_records, which is unsigned; kernels index elements with signed int32.
+    """
+    int32_max = (1 << 31) - 1
+    uint32_max = (1 << 32) - 1
+    return (
+        0 < rows_m <= int32_max
+        and 0 < n <= int32_max
+        and rows_m * n * itemsize <= uint32_max
+    )
+
+
 def deregister_op_overrides() -> None:
     """Temporarily deregister all FlyDSL overrides."""
 
