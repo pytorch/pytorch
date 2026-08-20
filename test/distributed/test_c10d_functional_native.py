@@ -806,6 +806,14 @@ class CrossThreadWaitTest(TestCase):
         finally:
             dist.destroy_process_group()
 
+    def test_wait_tensors_empty_raises(self) -> None:
+        msg = "wait_tensors requires at least one tensor"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.ops._c10d_functional.wait_tensors([])
+        fake_mode = torch._subclasses.FakeTensorMode()
+        with fake_mode, self.assertRaisesRegex(RuntimeError, msg):
+            torch.ops._c10d_functional.wait_tensors([])
+
 
 class PyWorkTest(TestCase):
     """

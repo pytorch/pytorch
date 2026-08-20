@@ -1519,6 +1519,7 @@ def _wait_tensor_meta(self, *args):
 
 
 def _wait_tensors_meta(tensors):
+    torch._check(len(tensors) > 0, lambda: "wait_tensors requires at least one tensor")
     return list(tensors)
 
 

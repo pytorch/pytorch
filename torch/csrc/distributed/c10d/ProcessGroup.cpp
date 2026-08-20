@@ -522,6 +522,7 @@ at::Tensor wait_tensor(const at::Tensor& tensor) {
 }
 
 std::vector<at::Tensor> wait_tensors(at::TensorList tensors) {
+  TORCH_CHECK(!tensors.empty(), "wait_tensors requires at least one tensor");
   std::vector<c10::intrusive_ptr<c10d::Work>> works;
   std::unordered_set<c10d::Work*> seen;
   for (const auto& tensor : tensors) {
