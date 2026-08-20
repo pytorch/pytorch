@@ -1954,6 +1954,8 @@ class MultiProcContinuousTest(TestCase):
 
     @classmethod
     def _worker_loop(cls, rank, world_size, rdvz_file, task_queue, completion_queue):
+        print("Woker loop called")
+
         raised_exception = False
         # Sub tests are going to access these values, check first
         if not (0 <= rank < world_size):
@@ -1973,6 +1975,7 @@ class MultiProcContinuousTest(TestCase):
         init_skip_reason = None
         try:
             cls._init_pg(rank, world_size, rdvz_file)
+            print("pg initialized", cls.pg)
         except SystemExit as ex:
             exit_code = getattr(ex, "code", None)
             skip_entry = next(
@@ -2040,7 +2043,9 @@ class MultiProcContinuousTest(TestCase):
         # it waits for enqueued collectives to finish.
         # Only call this on a clean exit path
         if not raised_exception:
+            print("pg about to be destroyed", cls.pg if hasattr(cls, "pg") else None)
             c10d.destroy_process_group()
+            print("pg destroyed")
 
     @classmethod
     def _spawn_processes(cls, world_size) -> None:
@@ -2060,6 +2065,7 @@ class MultiProcContinuousTest(TestCase):
             pass
 
         for rank in range(int(world_size)):
+            print("spawning processes rank:", rank)
             task_queue = torch.multiprocessing.Queue()
             completion_queue = torch.multiprocessing.Queue()
             process = torch.multiprocessing.Process(
