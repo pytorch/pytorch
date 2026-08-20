@@ -2135,6 +2135,13 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
     def get(self, cache_key: str) -> CSEVariableType:
         return self._cache[self.augment_key(cache_key)]
 
+    def contains_value(self, value: CSEVariableType) -> bool:
+        return (
+            value in self._cache.values()
+            or value in self.store_cache.values()
+            or value in self.reduction_cache.values()
+        )
+
     def generate(
         self,
         buffer: IndentedBuffer,

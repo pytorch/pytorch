@@ -182,6 +182,7 @@ from .variables.iter import MAX_ITERATOR_LIMIT
 from .variables.lazy import LazyVariableTracker
 from .variables.lists import (
     BaseListVariable,
+    DequeIteratorVariable,
     ListIteratorVariable,
     ListVariable,
     SliceVariable,
@@ -5199,7 +5200,7 @@ class InstructionTranslatorBase(
         filename = getattr(self.f_code, "co_filename", "<unknown>")
         return _NN_MODULES_FILENAME_RE.match(filename) is not None
 
-    def store_global_weakref_by_id(self, prefix: str, value: Any) -> str:
+    def store_global_weakref_by_id(self, prefix: str, value: object) -> str:
         global_name = self.output.install_global_by_id(prefix, weakref.ref(value))
         install_guard(
             GlobalWeakRefSource(global_name).make_guard(GuardBuilder.WEAKREF_ALIVE)
@@ -6551,7 +6552,8 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
 
     def GET_YIELD_FROM_ITER(self, inst: Instruction) -> None:
         tos = self.stack[-1]
-        if not isinstance(tos, ListIteratorVariable):
+        # tuple iterators subclass ListIteratorVariable; deque is a sibling
+        if not isinstance(tos, (ListIteratorVariable, DequeIteratorVariable)):
             self.pop()
             res = VariableTracker.build(self, iter).call_function(self, [tos], {})  # type: ignore[arg-type]
             self.push(res)
