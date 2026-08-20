@@ -84,7 +84,7 @@ class TestHSDPCheckpoint(DTensorTestBase):
     @with_comms
     @with_temp_dir
     @parametrize("is_even_sharded_model", [True, False])
-    def test_hsdp_checkpoint(self, is_even_sharded_model) -> None:
+    def test_hsdp_checkpoint(self, device, is_even_sharded_model) -> None:
         CHECKPOINT_DIR = self.temp_dir
         simple_model = SimpleModel if is_even_sharded_model else SimpleModelUneven
 
@@ -142,7 +142,9 @@ class TestHSDPCheckpoint(DTensorTestBase):
     @with_comms
     @with_temp_dir
     @parametrize("is_even_sharded_model", [True, False])
-    def test_hsdp_fsdp_checkpoint_conversion(self, is_even_sharded_model) -> None:
+    def test_hsdp_fsdp_checkpoint_conversion(
+        self, device, is_even_sharded_model
+    ) -> None:
         CHECKPOINT_DIR = self.temp_dir
         simple_model = SimpleModel if is_even_sharded_model else SimpleModelUneven
 
