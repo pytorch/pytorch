@@ -63,11 +63,7 @@ def tearDownModule():
 
 
 def _is_cuda_device(device) -> bool:
-    if isinstance(device, torch.device):
-        return device.type == "cuda"
-    if isinstance(device, str):
-        return "cuda" in device
-    return False
+    return torch.device(device).type == "cuda"
 
 
 def _fix_fp8_dtype_for_rocm(
@@ -257,7 +253,7 @@ class TestFP8TypesAccelerator(TestCase):
         compiled_fp8_cast = torch.compile(fp8_cast, backend="inductor", dynamic=True)
         x_shape = (16, 16, 16)
 
-        if "cuda" in device or "xpu" in device:
+        if torch.device(device).type in ("cuda", "xpu"):
             with self.assertRaisesRegex(
                 torch._dynamo.exc.BackendCompilerFailed,
                 "Conversions between float8_e5m2 and float8_e4m3fn is not supported!",
@@ -711,7 +707,7 @@ class TestFP8LoweringAccelerator(TestCase):
         """Test that scaled_mm preserves stride ordering through a custom pass."""
 
         use_fast_accum = True
-        if "xpu" in device:
+        if torch.device(device).type == "xpu":
             use_fast_accum = False
 
         def f(a, b, scale_a, scale_b):
@@ -888,7 +884,7 @@ class TestFP8LoweringAccelerator(TestCase):
         dtype: torch.dtype = torch.bfloat16
         use_fast_accum = True
         # xpu does not support fast_accum now
-        if "xpu" in device:
+        if torch.device(device).type == "xpu":
             use_fast_accum = False
         dtype_float8 = torch.float8_e4m3fn
         dtype_float8 = _fix_fp8_dtype_for_rocm(dtype_float8, device)
@@ -960,7 +956,7 @@ class TestFP8LoweringAccelerator(TestCase):
         dtype: torch.dtype = torch.bfloat16
         use_fast_accum = True
         # xpu does not support fast_accum now
-        if "xpu" in device:
+        if torch.device(device).type == "xpu":
             use_fast_accum = False
         dtype_float8 = torch.float8_e4m3fn
         dtype_float8 = _fix_fp8_dtype_for_rocm(dtype_float8, device)
@@ -1320,10 +1316,10 @@ class TestFP8LoweringAccelerator(TestCase):
         B_scale = torch.full(
             (N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu
         )
-        if "cuda" in device:
+        if torch.device(device).type == "cuda":
             A_scale = to_blocked(A_scale)
             B_scale = to_blocked(B_scale)
-        elif "xpu" in device:
+        elif torch.device(device).type == "xpu":
             B_scale = B_scale.t()
 
         def linear(A, B, A_scale, B_scale):
@@ -1355,7 +1351,7 @@ class TestFP8LoweringAccelerator(TestCase):
 
         # xpu does not support fast_accum now
         use_fast_accum = True
-        if "xpu" in device:
+        if torch.device(device).type == "xpu":
             use_fast_accum = False
         M, K, N = 64, 15, 2048  # K needs to be a multiple of 16
         x = torch.randn(M, K, dtype=dtype, device=device)
@@ -1404,7 +1400,7 @@ class TestFP8LoweringAccelerator(TestCase):
         w_t_fp8 = w_fp8.t()
         # xpu does not support fast_accum now
         use_fast_accum = True
-        if "xpu" in device:
+        if torch.device(device).type == "xpu":
             use_fast_accum = False
 
         def linear(x, w_t_fp8, w_inverse_scale, bias):
@@ -1730,7 +1726,7 @@ class TestFP8LoweringCuda(TestCase):
         }
         if (shape, use_fast_accum, scaling_block_sizes) in _disabled_combos:
             self.skipTest("disabled due to CI failures; see #190236")
-        if "xpu" in device and use_fast_accum:
+        if torch.device(device).type == "xpu" and use_fast_accum:
             self.skipTest("XPU does not support use_fast_accum=True for now")
         # Only bf16 output type is supported for non-tensorwise scaling, not fp32
         dtype: torch.dtype = torch.bfloat16
@@ -1951,6 +1947,8 @@ class TestFP8LoweringCuda(TestCase):
 
 
 class TestE8M0ToFloat(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @parametrize(
         "dtype",
         (torch.float64, torch.float32, torch.float16, torch.bfloat16),
