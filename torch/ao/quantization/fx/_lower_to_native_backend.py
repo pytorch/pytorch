@@ -489,6 +489,7 @@ def fold_weight(
     # remove folded nodes and replace the prepacking node with getattr
     folded_graph = Graph()
     env: dict[Any, Any] = {}
+    producer_node_copies: list[Node] = []
 
     def load_arg(a):
         return map_arg(a, lambda node: env[node.name])
@@ -522,12 +523,17 @@ def fold_weight(
                 ]
                 del original_weights_lookup[str(lookup_counter)]
                 lookup_counter += 1
-        elif prepack_node is not None:
-            # remove the fold node
-            continue
         else:
             # copy other nodes
             env[node.name] = folded_graph.node_copy(node, load_arg)
+            if prepack_node is not None:
+                producer_node_copies.append(env[node.name])
+
+    # Preserve folded producers with external users, and remove only the
+    # producer chain made dead by replacing its prepack node.
+    for node in reversed(producer_node_copies):
+        if len(node.users) == 0:
+            folded_graph.erase_node(node)
 
     quantized_model = GraphModule(quantized_model, folded_graph)
     quantized_model._register_state_dict_hook(_save_packed_weight)
