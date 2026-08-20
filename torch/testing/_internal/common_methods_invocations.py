@@ -1406,17 +1406,11 @@ def sample_inputs_addcmul_addcdiv(op_info, device, dtype, requires_grad, **kwarg
                   ]
 
     for input_args, broadcasts_input in test_cases:
-        # addcdiv should accept inputs with zero value
-        # Currently, it throws ZeroDivisionError when the denominator is zero
-        # TODO: exclude_zeros can be removed after https://github.com/pytorch/pytorch/issues/73638 is fixed
-        args = tuple(make_arg(arg, exclude_zero=True) if isinstance(arg, tuple) else arg
+        args = tuple(make_arg(arg) if isinstance(arg, tuple) else arg
                      for arg in input_args)
         yield SampleInput(*args).with_metadata(broadcasts_input=broadcasts_input)
 
-        # addcdiv should accept inputs with zero value
-        # Currently, it throws ZeroDivisionError when the denominator is zero
-        # TODO: exclude_zeros can be removed after https://github.com/pytorch/pytorch/issues/73638 is fixed
-        args = tuple(make_arg(arg, exclude_zero=True) if isinstance(arg, tuple) else arg
+        args = tuple(make_arg(arg) if isinstance(arg, tuple) else arg
                      for arg in input_args)
         yield SampleInput(
             *args, value=3.14 if dtype.is_floating_point or dtype.is_complex else 3
@@ -19864,7 +19858,7 @@ op_db: list[OpInfo] = [
     OpInfo('rand_like',
            dtypes=floating_types_and(torch.half, torch.bfloat16, torch.complex32, torch.complex64, torch.complex128),
            op=lambda inp, *args, **kwargs:
-               wrapper_set_seed(torch.randn_like, inp, *args, **kwargs),
+               wrapper_set_seed(torch.rand_like, inp, *args, **kwargs),
            supports_out=False,
            sample_inputs_func=sample_inputs_like_fns,
            supports_autograd=False,
@@ -19872,7 +19866,7 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
                # AssertionError: JIT Test does not execute any logic
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-               DecorateInfo(unittest.skip("Expected: randn_like is not comparable between dtypes"),
+               DecorateInfo(unittest.skip("Expected: rand_like is not comparable between dtypes"),
                             'TestCommon', 'test_complex_half_reference_testing'),
                DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
            )),
