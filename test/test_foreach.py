@@ -1615,14 +1615,14 @@ class TestForeach(TestCase):
             ):
                 with torch.no_grad():
                     ref_input = [t.detach().clone() for t in sample.input]
-                foreach_copy_(sample.input, sample.args[0], non_blocking)
+                foreach_copy_(sample.input, sample.args[0], non_blocking=non_blocking)
                 for t, s in zip(ref_input, sample.args[0]):
                     copy_(t, s, non_blocking)
                 self.assertEqual(sample.input, ref_input)
                 if torch.accelerator.device_count() > 1:
                     device = torch.device(self.device_type, 1)
                     rhs_tensors = [t.to(device) for t in sample.args[0]]
-                    foreach_copy_(sample.input, rhs_tensors, non_blocking)
+                    foreach_copy_(sample.input, rhs_tensors, non_blocking=non_blocking)
                     for t, s in zip(ref_input, rhs_tensors):
                         copy_(t, s, non_blocking)
                     self.assertEqual(ref_input, sample.input)
