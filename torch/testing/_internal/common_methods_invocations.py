@@ -5557,8 +5557,7 @@ def sample_inputs_flydsl_topk(op_info, device, dtype, requires_grad, **kwargs):
     # M=256 covers the gfx950 occupancy gate.
     for K in (64, 256, 257, 383, 384, 831, 832, 1024):
         n_range = _radix_n_range(K)
-        if n_range is None:
-            raise AssertionError(f"missing radix gate for K={K}")
+        assert n_range is not None, f"missing radix gate for K={K}"
         N = n_range[0]
         yield SampleInput(make_arg((256, N)).contiguous(), args=(K,))
         yield SampleInput(make_arg((256, N)).contiguous(), args=(K, -1))
