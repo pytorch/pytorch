@@ -209,15 +209,32 @@ if sys.platform == "win32":
             sysconfig.get_config_var("userbase"), "Library", "bin"
         )
         py_root_bin_path = os.path.join(sys.exec_prefix, "bin")
-        nvidia_dll_paths = []
         if cuda_version:
-            nvidia_dll_paths = [
-                p
-                for path in sys.path
-                for p in glob.glob(os.path.join(path, "nvidia", "*", "bin"))
-                + glob.glob(os.path.join(path, "nvidia", "*", "bin", "*"))
-                if os.path.isdir(p)
-            ]
+            try:
+                # CUDA Pathfinder locates and loads the CUDA runtime DLLs installed
+                # by NVIDIA's PyPI packages on Windows.
+                from cuda.pathfinder import load_nvidia_dynamic_lib
+            except ImportError:
+                warnings.warn(
+                    "cuda-pathfinder is not installed; falling back to CUDA DLLs from the torch package.",
+                    stacklevel=2,
+                )
+            else:
+                for lib in (
+                    "cudart",
+                    "nvJitLink",
+                    "nvrtc",
+                    "cublas",
+                    "cublasLt",
+                    "cufft",
+                    "curand",
+                    "cusolver",
+                    "cusparse",
+                    "cusparseLt",
+                    "cupti",
+                    "cudnn",
+                ):
+                    load_nvidia_dynamic_lib(lib)
 
         # When users create a virtualenv that inherits the base environment,
         # we will need to add the corresponding library directory into
@@ -232,7 +249,6 @@ if sys.platform == "win32":
             p
             for p in (
                 th_dll_path,
-                *nvidia_dll_paths,
                 py_dll_path,
                 base_py_dll_path,
                 usebase_path,
