@@ -96,7 +96,7 @@ void RegisterOperators::checkNoDuplicateKernels_(const Options& options) {
   for (const auto& kernel : options.kernels) {
     if (kernel.dispatch_key.has_value()) {
       TORCH_CHECK(
-          0 == dispatch_keys.count(*kernel.dispatch_key),
+          !dispatch_keys.contains(*kernel.dispatch_key),
           "In operator registration: Tried to register multiple kernels with same dispatch key ",
           *kernel.dispatch_key,
           " for operator schema ",

@@ -6210,7 +6210,7 @@ Done""",
         # real and imag are only implemented for complex tensors.
         y = torch.randn(10, 10, dtype=torch.cfloat)
         imag_key = "imag"
-        self.assertRaises(RuntimeError, lambda: hasattr(x, imag_key))
+        self.assertRaises(TypeError, lambda: hasattr(x, imag_key))
         self.assertTrue(hasattr(y, imag_key))
         keys.remove(imag_key)
 
@@ -18287,7 +18287,10 @@ from autograd.test_logging import TestAutogradLogging  # noqa: F401
 instantiate_device_type_tests(TestAutogradDeviceType, globals(), except_for=None)
 
 instantiate_device_type_tests(
-    TestAutogradMultipleDispatch, globals(), only_for=("cpu", "cuda")
+    TestAutogradMultipleDispatch,
+    globals(),
+    only_for=("cpu", "xpu", "cuda"),
+    allow_xpu=True,
 )
 instantiate_device_type_tests(
     TestAutogradStreamSynchronization, globals(), except_for=None

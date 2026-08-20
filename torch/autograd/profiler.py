@@ -267,6 +267,13 @@ class profile:
                 FutureWarning,
                 stacklevel=2,
             )
+        if experimental_config.adjust_profiler_step:
+            warn(
+                "adjust_profiler_step is deprecated and ignored. It will be "
+                "removed in a future release.",
+                FutureWarning,
+                stacklevel=2,
+            )
         if with_modules:
             warn(
                 "with_modules is deprecated and will be removed in a future release. "
