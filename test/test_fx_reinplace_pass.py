@@ -2,8 +2,8 @@
 import torch
 from torch.testing._internal.common_utils import (
     HardwareClassification,
-    TestCase,
     run_tests,
+    TestCase,
 )
 from torch.fx.passes.reinplace import reinplace
 from torch.fx.experimental.proxy_tensor import make_fx
