@@ -16,6 +16,8 @@ TORCH_PYTHON_API py::handle getTorchApiFunction(const c10::OperatorHandle& op);
 TORCH_PYTHON_API c10::impl::PyInterpreter* getPyInterpreter();
 TORCH_PYTHON_API void initializeGlobalPyInterpreter();
 
-// get the python CppFakeTensorMode object, returns None when mode is unset or
-// python object no longer exists
-TORCH_PYTHON_API py::object getFakeModePyObj(const c10::FakeTensorMode* mode);
+// get the python CppFakeTensorMode object for mode, minting a fresh wrapper
+// around the same C++ mode if the previous one has been collected. Returns None
+// only when mode is null.
+TORCH_PYTHON_API py::object getFakeModePyObj(
+    const std::shared_ptr<c10::FakeTensorMode>& mode);
