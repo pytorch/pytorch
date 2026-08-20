@@ -11,7 +11,7 @@ import warnings
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import HardwareClassification, TestCase, run_tests, do_test_dtypes, \
     load_tests, TEST_NUMPY, TEST_SCIPY, IS_WINDOWS, gradcheck, coalescedonoff, \
-    DeterministicGuard, first_sample, TEST_WITH_CROSSREF, TEST_WITH_ROCM, skipIfTorchDynamo, \
+    DeterministicGuard, first_sample, TEST_WITH_CROSSREF, TEST_WITH_ROCM, skipIfTorchDynamo, skipIfMPS, \
     parametrize, subtest, is_coalesced_indices, suppress_warnings, instantiate_parametrized_tests, \
     skipIfCrossRef, set_warn_always_context
 from torch.testing._internal.common_cuda import TEST_CUDA
@@ -791,6 +791,7 @@ class TestSparse(TestSparseBase):
     @largeTensorTest("30GB", "cuda")
     @skipCUDAIf(not SM80OrLater and not TEST_WITH_ROCM, "CUDA capability < SM80 and not ROCM")
     @dtypes(torch.float)
+    @skipIfMPS
     def test_coalesce_accepts_large_tensor(self, device, dtype):
         N = 22500000
         NNZ = 272500000
