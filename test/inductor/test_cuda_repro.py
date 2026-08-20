@@ -48,13 +48,18 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     skipIfRocmArch,
     skipIfXpu,
+    subtest,
     TEST_CUDA,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TEST_XPU,
     xfailIfROCm,
 )
-from torch.testing._internal.inductor_utils import HAS_GPU, IS_BIG_GPU
+from torch.testing._internal.inductor_utils import (
+    HAS_GPU,
+    IS_BIG_GPU,
+    requires_block_ptr,
+)
 
 
 if TEST_WITH_ROCM:
@@ -2346,7 +2351,10 @@ class CudaReproTests(TestCase):
         self.assertIn("reduction_hint=ReductionHint.INNER", persistent_code)
         self.assertNotIn("for roffset", persistent_code)
 
-    @parametrize("use_block_ptr", [False, True])
+    @parametrize(
+        "use_block_ptr",
+        [subtest(False), subtest(True, decorators=[requires_block_ptr])],
+    )
     @parametrize("dynamic_batch", [False, True])
     @config.patch(
         {
