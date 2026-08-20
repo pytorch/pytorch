@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import inspect
 import warnings
 from typing import Any
@@ -49,7 +48,7 @@ def apply_sharding(
     datapipe: DataPipe,
     num_of_instances: int,
     instance_id: int,
-    sharding_group=SHARDING_PRIORITIES.DEFAULT,
+    sharding_group: SHARDING_PRIORITIES = SHARDING_PRIORITIES.DEFAULT,
 ) -> DataPipe:
     r"""
     Apply dynamic sharding over the ``sharding_filter`` DataPipe that has a method ``apply_sharding``.
@@ -58,7 +57,7 @@ def apply_sharding(
     """
     graph = traverse_dps(datapipe)
 
-    def _helper(graph, prev_applied=None) -> None:
+    def _helper(graph: DataPipeGraph, prev_applied: DataPipe | None = None) -> None:
         for dp, sub_graph in graph.values():
             applied = None
             if _is_sharding_datapipe(dp):
@@ -118,9 +117,7 @@ def apply_shuffle_settings(datapipe: DataPipe, shuffle: bool | None = None) -> D
             stacklevel=2,
         )
         datapipe = datapipe.shuffle()
-        shufflers = [
-            datapipe,
-        ]
+        shufflers = [datapipe]
 
     for shuffler in shufflers:
         shuffler.set_shuffle(shuffle)
@@ -155,8 +152,8 @@ def apply_random_seed(datapipe: DataPipe, rng: torch.Generator) -> DataPipe:
     all_pipes = get_all_graph_pipes(graph)
     # Using a set to track id of DataPipe to prevent setting randomness per DataPipe more than once.
     # And, `id` is used in case of unhashable DataPipe
-    cache = set()
-    random_datapipes = []
+    cache: set[int] = set()
+    random_datapipes: list[DataPipe] = []
     for pipe in all_pipes:
         if id(pipe) in cache:
             continue
