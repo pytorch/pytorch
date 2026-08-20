@@ -5,10 +5,7 @@ import copy
 import torch.nn as nn
 from torch.distributed.fsdp import FSDPModule, fully_shard
 from torch.testing._internal.common_fsdp import FSDPTestMultiThread, MLP
-from torch.testing._internal.common_utils import (
-    HardwareClassification,
-    run_tests,
-)
+from torch.testing._internal.common_utils import HardwareClassification, run_tests
 
 
 class TestFullyShardState(FSDPTestMultiThread):
