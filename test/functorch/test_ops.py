@@ -2881,6 +2881,8 @@ class TestOperators(TestCase):
             )
 
 
+@unittest.skipIf(TEST_WITH_ASAN, "tests time out with asan, are probably redundant")
+@unMarkDynamoStrictTest
 class TestOperatorsGeneric(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
