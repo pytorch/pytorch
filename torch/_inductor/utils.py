@@ -759,13 +759,13 @@ def print_performance(
     return took.item()
 
 
-def precompute_method(obj: Any, method: str) -> None:
+def precompute_method(obj: object, method: str) -> None:
     """Replace obj.method() with a new method that returns a precomputed constant."""
     result = getattr(obj, method)()
     setattr(obj, method, lambda: result)
 
 
-def precompute_methods(obj: Any, methods: list[str]) -> None:
+def precompute_methods(obj: object, methods: list[str]) -> None:
     """Replace methods with new methods that returns a precomputed constants."""
     for method in methods:
         precompute_method(obj, method)
@@ -1308,13 +1308,13 @@ def sympy_subs(expr: sympy.Expr, replacements: dict[sympy.Expr, Any]) -> sympy.E
     return _sympy_subs(expr, replacements)
 
 
-def is_symbolic(a: Any) -> TypeGuard[torch.SymInt | torch.Tensor]:
+def is_symbolic(a: object) -> TypeGuard[torch.SymInt | torch.Tensor]:
     return isinstance(a, torch.SymInt) or (
         isinstance(a, torch.Tensor) and a._has_symbolic_sizes_strides
     )
 
 
-def any_is_symbolic(*args: Any) -> bool:
+def any_is_symbolic(*args: object) -> bool:
     return any(is_symbolic(a) for a in args)
 
 
@@ -3134,11 +3134,11 @@ def is_windows() -> bool:
     return sys.platform == "win32"
 
 
-def has_free_symbols(itr: Iterable[Any]) -> bool:
+def has_free_symbols(itr: Iterable[object]) -> bool:
     return any(isinstance(x, sympy.Expr) and not x.is_number for x in itr)
 
 
-def is_dynamic(*args: Any) -> bool:
+def is_dynamic(*args: object) -> bool:
     from . import ir
 
     for t in args:
