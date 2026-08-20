@@ -1031,25 +1031,31 @@ void LaunchGammaBetaBackwardCUDAKernel(
     Tensor dbeta_blocks;
     T * dgamma_blocks_ptr = nullptr;
     T * dbeta_blocks_ptr = nullptr;
+    // The partial-sum buffers are indexed by the kernel at stride N (the full
+    // prod(normalized_shape)), so they must be N wide. Using dgamma->size(-1)
+    // here only happens to work for a 1-D normalized_shape; for a multi-dim one
+    // it under-allocates and the kernel writes out of bounds.
     if (dgamma->defined()) {
       auto options = dgamma->options();
-      dgamma_blocks = at::empty({blocks.y * threads.y, dgamma->size(-1)}, options);
+      dgamma_blocks = at::empty({blocks.y * threads.y, N}, options);
       dgamma_blocks_ptr = dgamma_blocks.data_ptr<T>();
     }
     if (dbeta->defined() && !rms_norm) {
       auto options = dbeta->options();
-      dbeta_blocks = at::empty({blocks.y * threads.y, dgamma->size(-1)}, options);
+      dbeta_blocks = at::empty({blocks.y * threads.y, N}, options);
       dbeta_blocks_ptr = dbeta_blocks.data_ptr<T>();
     }
     LaunchAndCheckGammaBetaBackwardKernel<T, T_ACC, block_dim_x, block_dim_y, rows_per_block_y, /*skip_block_reduction=*/true, rms_norm>(
       aligned_grid, blocks, threads, 0, cuda_stream, dY_data, X_data, mean_data, rstd_data, M, N, dgamma_blocks_ptr, dbeta_blocks_ptr);
 
+    // sum(0) reduces to a flat [N]; restore normalized_shape so the returned
+    // gradient matches the parameter autograd expects.
     if (dgamma_blocks.defined()) {
-      *dgamma = dgamma_blocks.sum(0);
+      *dgamma = dgamma_blocks.sum(0).view_as(*dgamma);
     }
     if constexpr (!rms_norm){
       if (dbeta_blocks.defined()) {
-        *dbeta = dbeta_blocks.sum(0);
+        *dbeta = dbeta_blocks.sum(0).view_as(*dbeta);
       }
     }
   } else {
