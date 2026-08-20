@@ -433,6 +433,16 @@ def _read_sidecar(path: str) -> dict:
         ) from e
 
 
+def _invalidate_generation(out_dir: str) -> None:
+    """Drop the previous generation, so the tree reads as not-generated-yet."""
+    from tools.native_aot.gen_aot_lib import CMAKE_INCLUDE
+
+    stale = os.path.join(out_dir, CMAKE_INCLUDE)
+    if os.path.exists(stale):
+        os.remove(stale)
+        print(f"invalidated {stale}; regenerate after this export")
+
+
 def _check_no_orphan_artifacts(out_dir: str, specs) -> None:
     """Report or refuse kernel artifacts no current grid point claims.
 
@@ -693,10 +703,30 @@ def main(argv: list[str] | None = None) -> None:
             return
         print(f"arch from TORCH_CUDA_ARCH_LIST: {' '.join(args.arch)}")
     archs = args.arch if args.arch else [None]
-    jobs = _collect_jobs(args.ops, args.out_dir, archs)
+    try:
+        jobs = _collect_jobs(args.ops, args.out_dir, archs)
+    except RuntimeError:
+        # Every refusal in there tells the user to `rm -rf` an arch tree, and the
+        # previous generation names every object in it -- so following the advice made
+        # the NEXT main build fail in CMake on a missing source, inside a @generated
+        # file that says nothing about native-AOT. Invalidate before re-raising, the
+        # same rule as below.
+        _invalidate_generation(args.out_dir)
+        raise
     todo = [j for j in jobs if _job_needed(j, args.force)]
     if len(todo) < len(jobs):
         print(f"{len(jobs) - len(todo)} points already exported, skipped")
+    if todo:
+        # INVALIDATE the previous generation before touching a single artifact, the
+        # same rule gen_aot_lib.main() follows and for the same reason -- except the
+        # window here is wider. The artifacts are DIRECT link inputs in build.ninja
+        # while generation is not a build step, so an export that is interrupted (a
+        # Ctrl-C among a hundred compiles, an OOM-killed worker, one op failing) and
+        # then an ordinary `cmake --build` relinks a library mixing objects from two
+        # source revisions, described by launchers generated for the older ones.
+        # Removing it makes that state read as "not generated yet" instead. Stage 2
+        # and the by-hand flow are unaffected: generation rewrites it.
+        _invalidate_generation(args.out_dir)
 
     total = 0
     if args.jobs <= 1 or len(todo) <= 1:
