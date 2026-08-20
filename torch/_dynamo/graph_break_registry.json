@@ -3732,6 +3732,14 @@
       ]
     }
   ],
+  "GB9118": [
+    {
+      "Gb_type": "Data pointer truth value",
+      "Context": "nb_bool_impl {self}",
+      "Explanation": "Dynamo cannot decide the truth value of a data pointer because the address is only known at runtime.",
+      "Hints": []
+    }
+  ],
   "GB0233": [
     {
       "Gb_type": "Attempted to use strided NestedTensor",
@@ -5931,6 +5939,16 @@
       "Context": "str(self.bwd_graph)",
       "Explanation": "Expected backward function to be a function or method.",
       "Hints": []
+    }
+  ],
+  "GB2582": [
+    {
+      "Gb_type": "Missing nb_bool_impl override",
+      "Context": "nb_bool_impl {self}",
+      "Explanation": "{type(self).__name__} does not implement nb_bool_impl. Add a nb_bool_impl override to {type(self).__name__}.",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
     }
   ],
   "GB0353": [
