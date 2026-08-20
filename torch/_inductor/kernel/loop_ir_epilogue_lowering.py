@@ -185,13 +185,30 @@ class _GemmEpilogueIRHandler(DefaultHandler):
         self.stores[name] = GemmEpilogueIRStore(index, value)
 
 
-def _loaded_names(expr: Any) -> frozenset[str]:
+def _walk(expr: Any, *, follow_stored_values: bool = True):
     if not isinstance(expr, GemmEpilogueIRExpression):
-        return frozenset()
-    if expr.op == "load":
-        name, _, stored = expr.args
-        return frozenset((name,)) | _loaded_names(stored)
-    return frozenset().union(*(_loaded_names(arg) for arg in expr.args))
+        return
+    yield expr
+    args = (
+        expr.args[:2] if expr.op == "load" and not follow_stored_values else expr.args
+    )
+    for arg in args:
+        yield from _walk(arg, follow_stored_values=follow_stored_values)
+
+
+def _loaded_names(expr: Any, *, follow_stored_values: bool = True) -> frozenset[str]:
+    return frozenset(
+        value.args[0]
+        for value in _walk(expr, follow_stored_values=follow_stored_values)
+        if value.op == "load"
+    )
+
+
+def _contains_reduction(expr: Any, *, follow_stored_values: bool = True) -> bool:
+    return any(
+        value.op == "reduction"
+        for value in _walk(expr, follow_stored_values=follow_stored_values)
+    )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -311,6 +328,10 @@ class GemmEpilogueIRAnalysis:
         store = self.store(output_name)
         if store is None:
             return None
+        direct_inputs = _loaded_names(store.value, follow_stored_values=False)
+        has_direct_reduction = _contains_reduction(
+            store.value, follow_stored_values=False
+        )
         if operation_names_ir(store).issubset(
             ("load", "to_dtype", "to_dtype_bitcast", "identity")
         ):
@@ -322,10 +343,7 @@ class GemmEpilogueIRAnalysis:
             kind = "mean"
         elif is_absmax_scale_finalizer_ir(store, source_name):
             kind = "absmax_scale"
-        elif (
-            store.value.loads == frozenset((source_name,))
-            and not store.value.reductions
-        ):
+        elif direct_inputs == frozenset((source_name,)) and not has_direct_reduction:
             kind = "generic"
         else:
             return None
@@ -350,14 +368,6 @@ def _strip_conversions(expr: Any) -> Any:
     ):
         expr = expr.args[0]
     return expr
-
-
-def _walk(expr: Any):
-    if not isinstance(expr, GemmEpilogueIRExpression):
-        return
-    yield expr
-    for arg in expr.args:
-        yield from _walk(arg)
 
 
 def grouped_reduction_axis_ir(
@@ -590,12 +600,6 @@ def is_absmax_scale_finalizer_ir(store: GemmEpilogueIRStore, source_name: str) -
             and (len(clamped.args) < 3 or clamped.args[2] is None)
         )
     return False
-
-
-def _contains_reduction(expr: Any) -> bool:
-    if not isinstance(expr, GemmEpilogueIRExpression):
-        return False
-    return expr.op == "reduction" or any(_contains_reduction(arg) for arg in expr.args)
 
 
 def _affine_scale(
