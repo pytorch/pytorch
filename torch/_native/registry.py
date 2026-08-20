@@ -25,6 +25,37 @@ R = TypeVar("R")
 _OpCondFn = Callable[P, bool]
 _OpImplFn = Callable[P, R]
 
+# Masks unconditional overrides, which the user-facing filters cannot reach.
+# Private: the only supported flip is torch._native._unconditional_masked(),
+# so a test can still compute stock-aten reference values for an op whose
+# override IS the implementation.
+_mask_unconditional = False
+
+
+def _unconditional_is_masked() -> bool:
+    """Current value of the private mask. A getter so callers can read it
+    before mutating anything, which is what lets them restore it even if a
+    later step of their setup raises."""
+    return _mask_unconditional
+
+
+def _set_mask_unconditional(masked: bool) -> bool:
+    """Set the mask and rebuild every router, returning the previous value.
+    Callers must restore it.
+
+    The rebuild is the point: check_enabled runs while a graph is being
+    registered, not per call, so flipping the flag alone would leave the
+    already-installed routers untouched and the mask would appear to do
+    nothing."""
+    global _mask_unconditional
+    previous = _mask_unconditional
+    _mask_unconditional = masked
+    for (op_symbol, dispatch_key), graph in _graphs.items():
+        _cleanup_and_reregister_graph(
+            op_symbol, dispatch_key, graph, filter_state=_filter_state
+        )
+    return previous
+
 
 @dataclass
 class _OverrideNode:
@@ -64,7 +95,17 @@ class _FilterState:
 
         Returns:
             bool: True if the node should be enabled, False if filtered out
+
+        An unconditional override is exempt from every filter: its impl is
+        the op's implementation, not an accelerated route to the same
+        answer, so disabling by DSL name / op / dispatch key must not
+        silently change what the op computes. The private
+        `_mask_unconditional` escape hatch is the sole exception, and exists
+        only so tests can obtain stock aten reference values.
         """
+        if node.unconditional_override and not _mask_unconditional:
+            return True
+
         if node.dsl_name in self._dsl_names:
             return False
 
@@ -617,10 +658,14 @@ def register_op_override(
             be None if `unconditional_override=True`.
         impl: Implementation function for the override
         allow_multiple_override: Allow overriding an existing override
-        unconditional_override: Implementation doesn't have a fallback and
+        unconditional_override: This impl IS the op's implementation, not a
+            faster route to the same answer. It doesn't have a fallback and
             doesn't require torch.DispatchKeySet as the first argument. When
             True, a trivially-True predicate is supplied for the router if
-            `cond` is None.
+            `cond` is None, AND the override becomes exempt from the
+            user-facing filters -- deregister_op_overrides() and
+            python_native.<dsl>.disabled() leave it installed, because
+            masking it would change results rather than just performance.
 
     Raises:
         ValueError: If lib_symbol is not "aten", if dispatch_key is in
@@ -930,7 +975,24 @@ def _register_overrides_from_graph(
     # Inductor reuses the default lowering rather than recursing.
     _NO_MATCH = object()  # sentinel; impl return values of None would be valid outputs
 
+    # Calls covered by AOT kernels embedded in the aten implementation
+    # (see torch/_native/ops/<op>/aot.py) must decline the JIT route:
+    # the router's no-match fallback lands in the aten kernel, whose
+    # native-AOT stub serves them. Checked once per call here rather
+    # than per cond -- every override of the op would get the same
+    # answer for the same arguments, and ops with several paths (e.g.
+    # scatter_add's TMA + vec-scatter) would pay covers() N times.
+    # Applies to unconditional overrides too. None when the op has no
+    # AOT declaration, so uncovered ops pay nothing.
+    from . import aot_manifest
+
+    coverage = aot_manifest.get_coverage(op_symbol, dispatch_key)
+
     def _dispatch(args, kwargs, swallow_cond_exceptions: bool):
+        # covers() degrades covered_axes exceptions to "uncovered", so
+        # this is safe under FakeTensor in the compile router too.
+        if coverage is not None and coverage.covers(args, kwargs):
+            return _NO_MATCH
         for cond, impl_name in cond_impl:
             try:
                 matched = cond(*args, **kwargs)
