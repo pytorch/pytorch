@@ -54,9 +54,10 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-_NVGEMM_BIAS_ADD_EPILOGUE_SOURCE = (
-    "def _epilogue_fn(accum, bias):\n    D = accum + bias\n    return D"
-)
+
+def _nvgemm_bias_add_epilogue(accum, bias):
+    D = accum + bias
+    return D
 
 
 def _local_reduce_source_constant(field: str) -> str:
@@ -410,12 +411,12 @@ def _worker_nvgemm_autotuning_precompile(
     epilogue_source = ""
     aux_tensors: tuple = ()
     if has_bias_epilogue:
+        from cutlass.operators.arguments import EpilogueArguments
+
         *gemm_list, bias = input_tensors
         input_tensors = tuple(gemm_list)
-        epilogue_args = CuTeDSLEpilogueArguments(
-            _NVGEMM_BIAS_ADD_EPILOGUE_SOURCE, bias=bias, D=out
-        )
-        epilogue_source = "nvgemm_addmm_bias_v2"
+        epilogue_args = EpilogueArguments(_nvgemm_bias_add_epilogue, bias=bias, D=out)
+        epilogue_source = "nvgemm_addmm_bias_v1"
         aux_tensors = (bias,)
 
     cache_key = _create_gemm_cache_key(
@@ -1256,7 +1257,6 @@ class NVUniversalGemmKernel(Kernel):
                     self.epilogue_writes,
                     self.epilogue_var_renames,
                 ) = _build_bias_epilogue(bias_node.get_name(), output_node.get_name())
-                self.epilogue_is_cutedsl = True
             else:
                 (
                     self.epilogue_fn_code,
