@@ -115,7 +115,7 @@ struct TORCH_API RRefForkData {
 //
 // G1. The owner will be notified when any UserRRef is deleted.
 //
-// As messages might come delayed or out-of-order, we need more one guarantee to
+// As messages might come delayed or out-of-order, we need one more guarantee to
 // make sure the delete message is not sent out too soon. Let us first introduce
 // a new concept. If A sends an RPC to B that involves an RRef, we call the RRef
 // on A the parent RRef and the RRef on B the child RRef.

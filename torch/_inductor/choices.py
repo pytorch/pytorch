@@ -292,7 +292,7 @@ class InductorChoices:
     ) -> bool:
         """Return True if any active backend requires fixed (non-flexible) tensor layouts."""
         # TODO: debug and fix
-        # NOTE: on mps, we see issues with flexible layouts on baddmm. This check just makes sure
+        # NOTE: on mps, we see issues with flexible layouts on baddbmm. This check just makes sure
         # that for mps, everything stays as it was before this optimization
         if len(adjusted_choices) > 0:
             if adjusted_choices[0].inputs.device_type == "mps" and op_name not in [

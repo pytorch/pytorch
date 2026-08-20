@@ -628,10 +628,10 @@ def unimplemented_with_warning(
 ) -> NoReturn:
     # This function calls unimplemented internally and eventually graph breaks
     # or falls to eager. unimplemented itself does not print any user warnings,
-    # i.e., its very silent. This helper function is intended when an error is
+    # i.e., it's very silent. This helper function is intended when an error is
     # encountered in the torch.compile stack which is worth showing as warning
     # to the user. For example, if AOT Autograd backend fails with a fake tensor
-    # exception, its ok to fallback to eager but not silently. Here, we can use
+    # exception, it's ok to fallback to eager but not silently. Here, we can use
     # this function to log the message and the stack trace.
     graph_break_msg = format_error_msg_verbose(e, code)
     torch._logging.trace_structured(

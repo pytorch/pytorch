@@ -885,7 +885,7 @@ def register_bytecode_hook(hook: BytecodeHook) -> RemovableHandle:
 
 
 # TODO - We want to run preserve_node_meta context manager here, but the CI
-# fails (its unclear if the failures were flaky)
+# fails (it's unclear if the failures were flaky)
 # @torch.fx.traceback.preserve_node_meta()
 @preserve_global_state
 def trace_frame(
