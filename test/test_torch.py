@@ -53,7 +53,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCUDA, onlyCPU, onlyAccelerator,
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast,
-    skipMeta, PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyNativeDeviceTypes, skipCUDAIfNotRocm,
+    skipMeta, PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyNativeDeviceTypes, skipCUDAIf, skipCUDAIfNotRocm,
     skipXLA)
 import torch.backends.quantized
 import torch.testing._internal.data
@@ -6819,6 +6819,7 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(generator.get_offset(), reserialized.get_offset())
         torch.testing.assert_close(generator.get_state(), reserialized.get_state())
 
+    @skipCUDAIf(TEST_WITH_TORCHDYNAMO, "Dynamo fails on CUDA for uint8 index_add because alpha=2.0 cannot be safely cast to an integer type.")
     @unittest.mock.patch.object(torch._dynamo.config, "suppress_errors", False)
     @set_default_dtype(torch.double)
     def test_index_add_correctness(self, device):
