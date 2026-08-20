@@ -23,6 +23,9 @@ from torch.testing._internal.common_utils import (
 )
 
 
+_CPU_BOUND_EXPORTDB_CASES = frozenset({"optional_input", "static_if"})
+
+
 def _to_device(obj, device):
     return pytree.tree_map_only(torch.Tensor, lambda x: x.to(device), obj)
 
@@ -39,7 +42,7 @@ class ExampleTests(TestCase):
         name_fn=lambda name, case: f"case_{name}",
     )
     def test_exportdb_supported(self, device, name: str, case: ExportCase) -> None:
-        if name in ("optional_input", "static_if") and torch.device(device).type != "cpu":
+        if name in _CPU_BOUND_EXPORTDB_CASES and torch.device(device).type != "cpu":
             self.skipTest(f"{name} constructs CPU tensors in the example")
         model = copy.deepcopy(case.model)
         if isinstance(model, torch.nn.Module):
