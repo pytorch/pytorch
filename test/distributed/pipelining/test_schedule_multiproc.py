@@ -331,7 +331,7 @@ class ScheduleTest(MultiProcContinuousTest):
 
     @property
     def device(self) -> torch.device:
-        return torch.device(self._device_type, self.rank)
+        return torch.device(self.device_type, self.rank)
 
     @property
     def config(self) -> PipelineTestConfig:
@@ -346,7 +346,7 @@ class ScheduleTest(MultiProcContinuousTest):
     )
     @skip_if_lt_x_gpu(4)
     def test_forward_only(self, device):
-        self._device_type = torch.device(device).type
+        self.device_type = torch.device(device).type
         for ScheduleClass in [_ScheduleForwardOnly]:
             with self.subTest(ScheduleClass=ScheduleClass):
                 mod, mod_ref, x, _, _ = setup_models_and_data(self.config)
@@ -383,7 +383,7 @@ class ScheduleTest(MultiProcContinuousTest):
     )
     @skip_if_lt_x_gpu(4)
     def test_eval_inference_mode(self, device):
-        self._device_type = torch.device(device).type
+        self.device_type = torch.device(device).type
         for ScheduleClass in [
             ScheduleGPipe,
             Schedule1F1B,
@@ -460,7 +460,7 @@ class ScheduleTest(MultiProcContinuousTest):
     )
     @skip_if_lt_x_gpu(4)
     def test_return_output(self, device):
-        self._device_type = torch.device(device).type
+        self.device_type = torch.device(device).type
         for ScheduleClass in [
             ScheduleGPipe,
             Schedule1F1B,
@@ -524,7 +524,7 @@ class ScheduleTest(MultiProcContinuousTest):
     )
     @skip_if_lt_x_gpu(4)
     def test_multi_iter(self, device):
-        self._device_type = torch.device(device).type
+        self.device_type = torch.device(device).type
         for ScheduleClass in [ScheduleGPipe, Schedule1F1B]:
             with self.subTest(ScheduleClass=ScheduleClass):
                 mod, _, x, target, loss_fn = setup_models_and_data(self.config)
@@ -550,7 +550,7 @@ class ScheduleTest(MultiProcContinuousTest):
     )
     @skip_if_lt_x_gpu(4)
     def test_kwargs_with_tracer(self, device):
-        self._device_type = torch.device(device).type
+        self.device_type = torch.device(device).type
         for ScheduleClass in [ScheduleGPipe, Schedule1F1B]:
             for pre_split in [False, True]:
                 with self.subTest(ScheduleClass=ScheduleClass, pre_split=pre_split):
@@ -622,7 +622,7 @@ class ScheduleTest(MultiProcContinuousTest):
     )
     @skip_if_lt_x_gpu(4)
     def test_grad_with_tracer(self, device):
-        self._device_type = torch.device(device).type
+        self.device_type = torch.device(device).type
         for ScheduleClass in [ScheduleGPipe, Schedule1F1B]:
             for pre_split in [False, True]:
                 with self.subTest(ScheduleClass=ScheduleClass, pre_split=pre_split):
@@ -682,7 +682,7 @@ class ScheduleTest(MultiProcContinuousTest):
     )
     @skip_if_lt_x_gpu(4)
     def test_grad_with_manual(self, device):
-        self._device_type = torch.device(device).type
+        self.device_type = torch.device(device).type
         for ScheduleClass in [ScheduleGPipe, Schedule1F1B]:
             for shape_inference in [True, False]:
                 with self.subTest(ScheduleClass=ScheduleClass, shape_inference=shape_inference):
@@ -746,7 +746,7 @@ class ScheduleTest(MultiProcContinuousTest):
     )
     @skip_if_lt_x_gpu(4)
     def test_grad_with_manual_interleaved(self, device):
-        self._device_type = torch.device(device).type
+        self.device_type = torch.device(device).type
         for ScheduleClass in [
             ScheduleInterleaved1F1B,
             ScheduleLoopedBFS,
@@ -833,7 +833,7 @@ class ScheduleTest(MultiProcContinuousTest):
     )
     @skip_if_lt_x_gpu(4)
     def test_schedule_with_weight_update_mlp_e2e(self, device):
-        self._device_type = torch.device(device).type
+        self.device_type = torch.device(device).type
         for ScheduleClass in [ScheduleInterleavedZeroBubble]:
             with self.subTest(ScheduleClass=ScheduleClass):
                 stages_per_rank = 2
@@ -919,7 +919,7 @@ class ScheduleTest(MultiProcContinuousTest):
     )
     @skip_if_lt_x_gpu(4)
     def test_v_shape_schedules(self, device):
-        self._device_type = torch.device(device).type
+        self.device_type = torch.device(device).type
         for schedule_class in [ScheduleZBVZeroBubble, ScheduleDualPipeV]:
             with self.subTest(schedule_class=schedule_class):
                 n_stages = 8
@@ -967,8 +967,8 @@ class ScheduleTest(MultiProcContinuousTest):
     )
     @skip_if_lt_x_gpu(4)
     def test_custom_function_callback(self, device):
-        self._device_type = torch.device(device).type
         """Test the custom function callback functionality with _PipelineScheduleRuntime."""
+        self.device_type = torch.device(device).type
         n_stages = 8
         rank_stages = {0: [0, 7], 1: [1, 6], 2: [2, 5], 3: [3, 4]}
         mod, ref_mod, x, target, loss_fn = setup_models_and_data(
@@ -1170,7 +1170,7 @@ class ScheduleTest(MultiProcContinuousTest):
     )
     @skip_if_lt_x_gpu(4)
     def test_zero_bubble_with_model_kwargs(self, device):
-        self._device_type = torch.device(device).type
+        self.device_type = torch.device(device).type
         for ScheduleClass in [ScheduleInterleavedZeroBubble, ScheduleInterleaved1F1B]:
             with self.subTest(ScheduleClass=ScheduleClass):
                 stages_per_rank = 2
@@ -1285,7 +1285,7 @@ class ScheduleTest(MultiProcContinuousTest):
     )
     @skip_if_lt_x_gpu(4)
     def test_NoneGrad_conditional_input_grad(self, device):
-        self._device_type = torch.device(device).type
+        self.device_type = torch.device(device).type
         for ScheduleClass in [ScheduleGPipe, ScheduleInterleaved1F1B, ScheduleZBVZeroBubble]:
             for pattern in ["first_false_then_true", "first_true_then_false"]:
                 with self.subTest(ScheduleClass=ScheduleClass, pattern=pattern):
@@ -1302,7 +1302,7 @@ class ScheduleTestCUDA(MultiProcContinuousTest):
 
     @property
     def device(self) -> torch.device:
-        return torch.device(self._device_type, self.rank)
+        return torch.device(self.device_type, self.rank)
 
     @property
     def config(self) -> PipelineTestConfig:
@@ -1316,7 +1316,7 @@ class ScheduleTestCUDA(MultiProcContinuousTest):
     )
     @skip_if_lt_x_gpu(4)
     def test_interleaved_1f1b_pre_split_flex_attention(self, device):
-        self._device_type = torch.device(device).type
+        self.device_type = torch.device(device).type
         stages_per_rank = 2
         n_stages = stages_per_rank * self.world_size
         num_microbatches = 8
@@ -1459,7 +1459,7 @@ class CustomSchedulesTest(MultiProcContinuousTest):
 
     @property
     def device(self) -> torch.device:
-        return torch.device(self._device_type, self.rank)
+        return torch.device(self.device_type, self.rank)
 
     @property
     def config(self) -> PipelineTestConfig:
@@ -1474,7 +1474,7 @@ class CustomSchedulesTest(MultiProcContinuousTest):
     )
     @skip_if_lt_x_gpu(4)
     def test_non_symmetric_stage_ids(self, device):
-        self._device_type = torch.device(device).type
+        self.device_type = torch.device(device).type
         for schedule_class in [ScheduleVShaped, ScheduleUnbalanced]:
             with self.subTest(schedule_class=schedule_class):
                 n_stages = schedule_class.n_stages
@@ -1526,7 +1526,7 @@ class CustomSchedulesTest(MultiProcContinuousTest):
     )
     @skip_if_lt_x_gpu(4)
     def test_pipeline_schedule_runtime_custom_sched(self, device):
-        self._device_type = torch.device(device).type
+        self.device_type = torch.device(device).type
         for ScheduleClass in [ScheduleWithReorderedB]:
             with self.subTest(ScheduleClass=ScheduleClass):
                 n_stages = 2
@@ -1592,7 +1592,7 @@ class CustomSchedulesTest(MultiProcContinuousTest):
     )
     @skip_if_lt_x_gpu(4)
     def test_schedule_with_native_zero_bubble(self, device):
-        self._device_type = torch.device(device).type
+        self.device_type = torch.device(device).type
         for ScheduleClass in [ScheduleWithW]:
             with self.subTest(ScheduleClass=ScheduleClass):
                 n_stages = ScheduleClass.n_stages
@@ -1692,7 +1692,7 @@ class PerDirectionScheduleTest(MultiProcContinuousTest):
 
     @property
     def device(self) -> torch.device:
-        return torch.device(self._device_type, self.rank)
+        return torch.device(self.device_type, self.rank)
 
     @property
     def config(self) -> PipelineTestConfig:
@@ -1708,7 +1708,7 @@ class PerDirectionScheduleTest(MultiProcContinuousTest):
     def test_creates_distinct_direction_groups(self, device):
         """PipelineStage builds two distinct, non-WORLD direction groups when the
         config flag is set (no constructor arg)."""
-        self._device_type = torch.device(device).type
+        self.device_type = torch.device(device).type
         with dist_config.patch(pipeline_per_direction_p2p=True):
             mod, _, x, _, _ = setup_models_and_data(self.config)
             chunks = 2 * self.world_size
@@ -1728,7 +1728,7 @@ class PerDirectionScheduleTest(MultiProcContinuousTest):
     def test_grad_with_manual_per_direction(self, device):
         """Per-direction P2P only changes which communicator carries the bytes,
         not the math: gradients/outputs must still match the reference model."""
-        self._device_type = torch.device(device).type
+        self.device_type = torch.device(device).type
         for ScheduleClass in [ScheduleGPipe, Schedule1F1B]:
             with self.subTest(ScheduleClass=ScheduleClass):
                 with dist_config.patch(pipeline_per_direction_p2p=True):
