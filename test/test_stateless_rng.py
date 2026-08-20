@@ -19,6 +19,9 @@ from torch.testing._internal.inductor_utils import HAS_TRITON
 
 
 all_floating_dtypes = floating_types_and(torch.half, torch.bfloat16)
+# Dtype limits are resolved here rather than inside the tests: holding a live
+# torch.iinfo local in a test body crashes dynamo_wrapped on 3.14, where the
+# bytecode debugger tries to hash it.
 all_int_dtypes = [
     torch.uint8,
     torch.uint16,
@@ -29,6 +32,8 @@ all_int_dtypes = [
     torch.int32,
     torch.int64,
 ]
+int_limits = {dt: (torch.iinfo(dt).min, torch.iinfo(dt).max) for dt in all_int_dtypes}
+int_bits = {dt: torch.iinfo(dt).bits for dt in all_int_dtypes}
 
 
 class TestStatelessRNGKey(TestCase):
@@ -953,11 +958,11 @@ class TestStatelessRNGInteger(TestCase):
     def test_no_bounds_is_full_range(self, device, dtype):
         # Omitting both bounds spans the dtype, so samples reach near its limits.
         key = random.key(42, device=device)
-        info = torch.iinfo(dtype)
+        dmin, dmax = int_limits[dtype]
         result = random.randint(key, (1000,), low=None, dtype=dtype).double()
-        self.assertGreater(result.max().item(), info.max * 0.9)
-        if info.min < 0:
-            self.assertLess(result.min().item(), info.min * 0.9)
+        self.assertGreater(result.max().item(), dmax * 0.9)
+        if dmin < 0:
+            self.assertLess(result.min().item(), dmin * 0.9)
 
     @parametrize("dtype", [torch.int8, torch.int16, torch.int32, torch.int64])
     def test_full_range_covers_negatives(self, device, dtype):
@@ -970,17 +975,15 @@ class TestStatelessRNGInteger(TestCase):
     def test_explicit_dtype_bounds_match_none(self, device, dtype):
         # Passing a bound equal to the dtype's limit is the same as omitting it.
         key = random.key(42, device=device)
-        info = torch.iinfo(dtype)
+        dmin, dmax = int_limits[dtype]
         expected = random.randint(key, (1000,), low=None, dtype=dtype)
+        self.assertEqual(random.randint(key, (1000,), low=dmin, dtype=dtype), expected)
         self.assertEqual(
-            random.randint(key, (1000,), low=info.min, dtype=dtype), expected
-        )
-        self.assertEqual(
-            random.randint(key, (1000,), low=None, high=info.max + 1, dtype=dtype),
+            random.randint(key, (1000,), low=None, high=dmax + 1, dtype=dtype),
             expected,
         )
         self.assertEqual(
-            random.randint(key, (1000,), low=info.min, high=info.max + 1, dtype=dtype),
+            random.randint(key, (1000,), low=dmin, high=dmax + 1, dtype=dtype),
             expected,
         )
 
@@ -988,14 +991,12 @@ class TestStatelessRNGInteger(TestCase):
     def test_only_one_bound_specified(self, device, dtype):
         # Either bound may be given on its own; the other defaults to the dtype's.
         key = random.key(42, device=device)
-        info = torch.iinfo(dtype)
+        dmin, dmax = int_limits[dtype]
         # Compare as Python ints: float64 cannot represent int64 magnitudes.
-        low_only = random.randint(key, (1000,), low=info.max - 10, dtype=dtype)
-        self.assertTrue(all(v >= info.max - 10 for v in low_only.tolist()))
-        high_only = random.randint(
-            key, (1000,), low=None, high=info.min + 10, dtype=dtype
-        )
-        self.assertTrue(all(v < info.min + 10 for v in high_only.tolist()))
+        low_only = random.randint(key, (1000,), low=dmax - 10, dtype=dtype)
+        self.assertTrue(all(v >= dmax - 10 for v in low_only.tolist()))
+        high_only = random.randint(key, (1000,), low=None, high=dmin + 10, dtype=dtype)
+        self.assertTrue(all(v < dmin + 10 for v in high_only.tolist()))
 
     def test_error_bounds_out_of_dtype_range(self, device):
         key = random.key(42, device=device)
@@ -1133,7 +1134,7 @@ class TestStatelessRNGInteger(TestCase):
     def test_full_range_statistically_uniform(self, device, dtype):
         key = random.key(42, device=device)
         result = random.randint(key, (100000,), dtype=dtype)
-        width = torch.iinfo(dtype).bits
+        width = int_bits[dtype]
         normalized = result.double() / float(2**width)
         self.assertTrue(abs(normalized.mean().item() - 0.5) < 0.01)
 
