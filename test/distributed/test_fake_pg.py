@@ -625,7 +625,7 @@ class TestFakePG(TestCase):
         else:
             out_tensor = torch.empty(2, 4).t()
 
-        with self.assertRaisesRegex(RuntimeError, "Tensors must be contiguous"):
+        with self.assertRaisesRegex(RuntimeError, "tensor must be contiguous"):
             dist.all_to_all_single(out_tensor, in_tensor)
 
     def test_alltoall_base_channels_last(self):

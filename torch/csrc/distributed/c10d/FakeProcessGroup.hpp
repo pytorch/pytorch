@@ -332,24 +332,26 @@ class FakeProcessGroup : public Backend {
     c10d::checkSplitSizes(inputSplitSizes, inputBuffer, size_);
     c10d::checkSplitSizes(outputSplitSizes, outputBuffer, size_);
     TORCH_CHECK(
-        inputBuffer.is_contiguous(inputBuffer.suggest_memory_format()) &&
-            outputBuffer.is_contiguous(outputBuffer.suggest_memory_format()),
-        "Tensors must be contiguous");
+        inputBuffer.is_contiguous(inputBuffer.suggest_memory_format()),
+        "Input tensor must be contiguous");
+    TORCH_CHECK(
+        outputBuffer.is_contiguous(outputBuffer.suggest_memory_format()),
+        "Output tensor must be contiguous");
     // See note in _allgather_base above.
     at::AutoDispatchBelowAutograd guard;
     // Approximation: inputs from other ranks are unavailable here, so copy as
     // much of the local input as fits and zero the remainder.
     auto flat_input = inputBuffer.as_strided(
         {inputBuffer.numel()}, {1}, inputBuffer.storage_offset());
-    auto flat_output = outputBuffer.as_strided(
-        {outputBuffer.numel()}, {1}, outputBuffer.storage_offset());
+    auto flat_output =
+        outputBuffer
+            .as_strided(
+                {outputBuffer.numel()}, {1}, outputBuffer.storage_offset())
+            .zero_();
     auto copy_size = std::min(flat_input.numel(), flat_output.numel());
     if (copy_size > 0) {
       flat_output.narrow(0, 0, copy_size)
           .copy_(flat_input.narrow(0, 0, copy_size));
-    }
-    if (copy_size < flat_output.numel()) {
-      flat_output.narrow(0, copy_size, flat_output.numel() - copy_size).zero_();
     }
     return c10::make_intrusive<FakeWork>();
   }
