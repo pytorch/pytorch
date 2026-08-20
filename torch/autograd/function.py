@@ -3,6 +3,7 @@ import functools
 import inspect
 import itertools
 import warnings
+import weakref
 from collections import OrderedDict
 from collections.abc import Callable
 from typing import Any, Concatenate, TypeVar
@@ -351,6 +352,37 @@ class BackwardCFunction(_C._FunctionBase, FunctionCtx, _HookMixin):
             )
         return vjp_fn if vjp_fn is not Function.vjp else backward_fn
 
+    @staticmethod
+    def _snapshot_input_versions(args):
+        versions = []
+
+        def visit(arg):
+            if isinstance(arg, torch.Tensor):
+                try:
+                    version = arg._version
+                except RuntimeError:
+                    return
+                versions.append((weakref.ref(arg), version))
+            elif isinstance(arg, (list, tuple)):
+                for item in arg:
+                    visit(item)
+
+        for arg in args:
+            visit(arg)
+        return versions
+
+    def _call_user_fn(self, user_fn, args):
+        input_versions = self._snapshot_input_versions(args)
+        result = user_fn(self, *args)
+        for input_ref, expected_version in input_versions:
+            input = input_ref()
+            if input is not None and input._version != expected_version:
+                raise RuntimeError(
+                    f"custom autograd Function {self.name()} modified a gradient "
+                    "input in-place during backward"
+                )
+        return result
+
     def apply(self, *args):
         r"""
         Apply method used when executing this Node during the backward.
@@ -363,7 +395,7 @@ class BackwardCFunction(_C._FunctionBase, FunctionCtx, _HookMixin):
         fwd_cls = self._forward_cls  # type: ignore[attr-defined]  # pyrefly: ignore[missing-attribute]
         if getattr(fwd_cls, "boxed_grads_call", False):
             args = (list(args),)
-        return user_fn(self, *args)
+        return self._call_user_fn(user_fn, args)
 
     def apply_boxed(self, *args):
         r"""
@@ -371,7 +403,7 @@ class BackwardCFunction(_C._FunctionBase, FunctionCtx, _HookMixin):
         is True. Grads arrive as a single mutable list argument, allowing
         backward to free individual grads mid-execution.
         """
-        return self._get_user_fn()(self, *args)
+        return self._call_user_fn(self._get_user_fn(), args)
 
     def apply_jvp(self, *args):
         r"""
