@@ -1132,7 +1132,7 @@ def launch_for(K: int, N: int, E: int, BLOCK_C: int, BLOCK_R: int):
     )
 
 
-def launch_guarded(launch, key, compile_args, dispatch_args, param):
+def launch_guarded(launch, key, compile_args_factory, dispatch_args, param):
     """Run `launch`, and on a tracer error retry once unguarded, forever.
 
     Compilation goes through Inductor's FlyDSL cache so the compiled dispatcher
@@ -1142,10 +1142,10 @@ def launch_guarded(launch, key, compile_args, dispatch_args, param):
     try:
         return run_cached_flydsl(
             launch,
-            *compile_args,
             constexpr_param=param,
             compiler=flyc.compile,
             dispatch_args=dispatch_args,
+            compile_args_factory=compile_args_factory,
         )
     except Exception as e:
         # The guard fallback exists for ONE failure mode: the surplus-slot `if`
@@ -1158,10 +1158,10 @@ def launch_guarded(launch, key, compile_args, dispatch_args, param):
         _warn_guard_fallback(*key, e)
         return run_cached_flydsl(
             cached_launch(*key, GUARD=False),
-            *compile_args,
             constexpr_param=param.unguarded(),
             compiler=flyc.compile,
             dispatch_args=dispatch_args,
+            compile_args_factory=compile_args_factory,
         )
 
 
@@ -1352,14 +1352,24 @@ def launch_mxfp8_grouped_gemm_gfx950(
             param.n,
             stream,
         )
-        compile_args = tuple(
-            tensor_arg(arg) if idx < 6 else arg for idx, arg in enumerate(dispatch_args)
-        )
+
+        # Deferred: the descriptors are only needed if a compile happens, and
+        # after the first call for a given param it never does. Building them
+        # eagerly cost ~8us of the launcher's ~26us per call, which is dead
+        # weight on shapes whose kernel time is of that order.
+        def compile_args_factory(dispatch_args=dispatch_args):
+            return tuple(
+                tensor_arg(arg) if idx < 6 else arg
+                for idx, arg in enumerate(dispatch_args)
+            )
+
         if compile_only:
-            flyc.compile(launch_for(*key), *compile_args)
+            flyc.compile(launch_for(*key), *compile_args_factory())
             return out
         # A window that fell back re-resolves, so later windows skip the retry.
-        launch_guarded(launch_for(*key), key, compile_args, dispatch_args, param)
+        launch_guarded(
+            launch_for(*key), key, compile_args_factory, dispatch_args, param
+        )
     return out
 
 
