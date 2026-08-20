@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import unittest
 from contextlib import contextmanager
 from importlib import import_module
 
@@ -11,12 +12,9 @@ from torch._inductor.compiler_bisector import CompilerBisector
 from torch._inductor.custom_graph_pass import CustomGraphPass
 from torch._inductor.test_case import TestCase
 from torch.library import _scoped_library
-from torch.testing._internal.common_device_type import (
-    Capability,
-    instantiate_device_type_tests,
-    requires_capabilities,
-)
-from torch.testing._internal.common_utils import HardwareClassification
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import HardwareClassification, skipIfXpu
+from torch.utils._triton import has_triton
 
 
 aten = torch.ops.aten
@@ -34,8 +32,6 @@ class TestCompilerBisector(TestCase):
     def tearDown(self):
         if hasattr(torch.ops, self.bisector_ns):
             delattr(torch.ops, self.bisector_ns)
-        if hasattr(self, "lib"):
-            self.lib._destroy()
 
     def get_op(self, name):
         return getattr(getattr(torch.ops, self.bisector_ns), name).default
@@ -140,7 +136,7 @@ class TestCompilerBisectorDevice(TestCase):
         if hasattr(torch.ops, self.bisector_ns):
             delattr(torch.ops, self.bisector_ns)
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not has_triton(), "requires Triton")
     def test_bad_decomp(self, device):
         import_module("torch._inductor.compile_fx")
 
@@ -151,8 +147,10 @@ class TestCompilerBisectorDevice(TestCase):
                 not utils.is_complex_dtype(self.dtype)
                 and not utils.is_integer_dtype(self.dtype)
                 and not utils.is_boolean_dtype(self.dtype),
-                lambda: f"Exponential distribution is a continuous probability distribution. \
-                dtype must be a floating point but you specified {self.dtype}",
+                lambda: (
+                    f"Exponential distribution is a continuous probability distribution. \
+                dtype must be a floating point but you specified {self.dtype}"
+                ),
             )
             torch._check(
                 rate > 0.0,
@@ -197,7 +195,7 @@ class TestCompilerBisectorDevice(TestCase):
         self.assertEqual(out.bisect_number, 1)
         self.assertTrue("aten.exponential" in out.debug_info)
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not has_triton(), "requires Triton")
     def test_joint_graph(self, device):
         from torch._inductor import config
 
@@ -235,7 +233,7 @@ class TestCompilerBisectorDevice(TestCase):
         self.assertEqual(out.bisect_number, 4)
         self.assertTrue("joint_custom_post_pass" in out.debug_info)
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not has_triton(), "requires Triton")
     def test_rng(self, device):
         def foo():
             return torch.rand([10], device=device) + 1
@@ -255,7 +253,7 @@ class TestCompilerBisectorDevice(TestCase):
         self.assertEqual(out.subsystem, "inductor_fallback_random")
         self.assertTrue("inductor_fallback_random" in out.debug_info)
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not has_triton(), "requires Triton")
     def test_emulate_precision_casts(self, device):
         def test_fn():
             torch._dynamo.reset()
@@ -278,7 +276,7 @@ class TestCompilerBisectorDevice(TestCase):
         self.assertEqual(out.backend, "inductor")
         self.assertEqual(out.subsystem, "inductor_emulate_precision_casts")
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not has_triton(), "requires Triton")
     def test_bad_lowering(self, device):
         def test_fn():
             torch._dynamo.reset()
@@ -297,7 +295,7 @@ class TestCompilerBisectorDevice(TestCase):
         self.assertEqual(out.bisect_number, 2)
         self.assertTrue("relu" in out.debug_info)
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not has_triton(), "requires Triton")
     @config.patch(
         {
             "test_configs.bisect_pre_grad_graph": True,
@@ -351,7 +349,8 @@ class TestCompilerBisectorDevice(TestCase):
         self.assertEqual(out.subsystem, "pre_grad_graph")
         self.assertEqual(out.bisect_number, 1)
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not has_triton(), "requires Triton")
+    @skipIfXpu(msg="XPU doesn't support cudagraphs")
     def test_cudagraph_bisect_max(self, device):
         """Test that cudagraph bisector can limit number of cudagraphed graphs."""
         import os
@@ -391,7 +390,7 @@ class TestCompilerBisectorDevice(TestCase):
                 CompilerBisector.bisection_enabled = False
                 get_env_val.cache_clear()
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not has_triton(), "requires Triton")
     def test_bisect_run_debuginfo(self, device):
         import os
         import subprocess
@@ -429,7 +428,9 @@ class TestCompilerBisectorDevice(TestCase):
         self.assertIn(expected_result, output.stdout)
 
 
-instantiate_device_type_tests(TestCompilerBisectorDevice, globals(), except_for="cpu")
+instantiate_device_type_tests(
+    TestCompilerBisectorDevice, globals(), except_for="cpu", allow_xpu=True
+)
 
 
 if __name__ == "__main__":

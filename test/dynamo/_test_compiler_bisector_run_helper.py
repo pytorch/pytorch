@@ -3,15 +3,14 @@ from contextlib import contextmanager
 
 import torch
 import torch._prims_common as utils
-from torch._inductor.utils import get_gpu_type
 
 
 aten = torch.ops.aten
 
 # Device is passed via environment variable from the parent test process
 # (consistent with bisector CLI pattern: TORCH_COMPILE_BACKEND, TORCH_BISECT_BACKEND).
-# Falls back to get_gpu_type() for backwards compatibility when run standalone.
-_DEVICE = os.environ.get("TORCH_TEST_DEVICE", get_gpu_type())
+# Falls back to "cuda" for backwards compatibility when run standalone.
+_DEVICE = os.environ.get("TORCH_TEST_DEVICE", "cuda")
 
 
 def bad_exp_decomp(self, rate=1.0, generator=None):
