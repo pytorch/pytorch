@@ -2136,6 +2136,46 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(opt(x), fn(x))
         self.assertEqual(cnt.frame_count, 1)
 
+    def test_symint_explicit_dunder_index(self):
+        # Explicit s.__index__() on a SymInt binds int.__index__ (a C slot
+        # wrapper) as a method-wrapper whose call must dispatch to the
+        # nb_index slot model (specializing the symbol with a guard), not
+        # to SymNodeVariable.call_method's generic proxy path.
+        def fn(x):
+            s = x.size(0)
+            return x.sum() + s.__index__()
+
+        cnt = CompileCounter()
+        opt = torch.compile(fn, backend=cnt, fullgraph=True, dynamic=True)
+        x = torch.randn(5)
+        self.assertEqual(opt(x), fn(x))
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_explicit_method_wrapper_call_constant_folds(self):
+        # Explicit dunder calls binding C slot wrappers on constant types
+        # must keep constant-folding through call_method when the VT has no
+        # dedicated slot impl (str subscript/concat, int.__bool__).
+        def fn(x):
+            a = "abc".__getitem__(1)
+            b = "ab".__add__("cd")
+            c = (7).__bool__()
+            d = (7).__index__()
+            return x + 1, a, b, c, d
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(3)
+        self.assertEqual(opt(x), fn(x))
+
+    def test_explicit_range_dunder_bool(self):
+        # bool(range(...)) constant-folds before reaching the nb_bool slot, so
+        # the explicit wrapper call is the only path into RangeVariable's slot.
+        def fn(x):
+            return x + 1, range(0).__bool__(), range(5).__bool__()
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(3)
+        self.assertEqual(opt(x), fn(x))
+
     def test_int_base_out_of_range_value_error(self):
         class MyIndexable:
             def __index__(self):
@@ -5559,6 +5599,86 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
                 return a - b / c
 
         torch._dynamo.testing.standard_test(self, fn=fn1, nargs=3)
+
+    def test_dunder_class_across_vt_types(self):
+        # obj.__class__ under compile must return the type for VTs across
+        # families (list/dict/set subclasses, tensor, exception).
+        class MyList(list):
+            pass
+
+        class MyExc(ValueError):
+            pass
+
+        def fn(x):
+            return (
+                x + 1,
+                MyList([1, 2]).__class__,
+                {1: 2}.__class__,
+                {1, 2}.__class__,
+                x.__class__,
+                MyExc("boom").__class__,
+            )
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_instance_dunder_dict(self):
+        # An instance's writable __dict__ under compile.
+        class Foo:
+            def __init__(self):
+                self.a = 1
+                self.b = 2
+
+        def fn(x):
+            obj = Foo()
+            return x + 1, dict(obj.__dict__)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_class_object_dunder_dict(self):
+        # A class object's __dict__ is a read-only mappingproxy, not an instance
+        # dict; both membership (which installs a dict guard) and item read must
+        # not route through the instance-dict machinery.
+        class Foo:
+            x = 5
+
+        def fn(t):
+            has_x = "x" in Foo.__dict__
+            return t + 1, has_x, Foo.__dict__["x"]
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        t = torch.randn(4)
+        self.assertEqual(fn(t), opt_fn(t))
+
+    def test_hasattr_dunder_dict_no_dict_type(self):
+        # Types without an instance __dict__ (builtins, __slots__-only classes)
+        # must report hasattr(obj, "__dict__") == False under compile, while
+        # types that do have one report True.
+        class Slots:
+            __slots__ = ("a",)
+
+            def __init__(self):
+                self.a = 1
+
+        class Plain:
+            def __init__(self):
+                self.a = 1
+
+        def fn(x):
+            return (
+                x + 1,
+                hasattr(Slots(), "__dict__"),
+                hasattr([1, 2], "__dict__"),
+                hasattr(5, "__dict__"),
+                hasattr(Plain(), "__dict__"),
+            )
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
 
     def test_class_reassignment_graph_break(self):
         class BaseClass:
