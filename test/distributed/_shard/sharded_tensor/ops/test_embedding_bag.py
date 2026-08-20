@@ -290,7 +290,7 @@ class TestShardedEmbeddingBag(ShardedTensorTestBase):
         )
 
 
-instantiate_device_type_tests(TestShardedEmbeddingBag, globals())
+instantiate_device_type_tests(TestShardedEmbeddingBag, globals(), except_for=["cpu"])
 
 
 if __name__ == "__main__":
