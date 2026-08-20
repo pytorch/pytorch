@@ -19,6 +19,8 @@
 #   MAX_JOBS                 compile parallelism; aliased to
 #                            CMAKE_BUILD_PARALLEL_LEVEL by [tool.scikit-build.env]
 #                            in pyproject.toml
+#   FLASH_ATTENTION_MAX_JOBS max concurrent FlashAttention CUDA compilations;
+#                            unset by default, set by CUDA CI based on runner memory
 #   CC / CXX / CFLAGS        compiler and flags; read by CMake / scikit-build-core
 #                            directly (CFLAGS also applies to C++ unless CXXFLAGS
 #                            is set)
@@ -103,6 +105,8 @@
 #                            debug flags (may OOM nvcc). This was always a CMake
 #                            option; the setup.py comment that listed it as an env
 #                            var was inaccurate -- it was never forwarded.
+#   CUDA_DEVICE_DEBUG        build CUDA device code with -g -G (read in
+#                            cmake/public/cuda.cmake; no effect on MSVC)
 #
 # Removed with setup.py (no longer available):
 #   CMAKE_FRESH              force a fresh configure. Delete the build/ directory
@@ -130,6 +134,7 @@ set(_ENV_PASSTHROUGH
   CUDNN_INCLUDE_DIR
   CUDNN_ROOT
   EXPERIMENTAL_SINGLE_THREAD_POOL
+  FLASH_ATTENTION_MAX_JOBS
   INSTALL_TEST
   INTEL_MKL_DIR
   INTEL_OMP_DIR

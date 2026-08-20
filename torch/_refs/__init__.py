@@ -798,8 +798,9 @@ def frac(x: TensorLikeType) -> TensorLikeType:
 def imag(a: TensorLikeType) -> TensorLikeType:
     if not isinstance(a, TensorLike):
         raise AssertionError(f"a must be TensorLike, got {type(a)}")
-    torch._check(
-        utils.is_complex_dtype(a.dtype), lambda: "imag only supports complex tensors."
+    torch._check_type(
+        utils.is_complex_dtype(a.dtype),
+        lambda: "imag only supports complex tensors.",
     )
     return prims.imag(a)
 
@@ -829,7 +830,7 @@ def isinf(a: TensorLikeType) -> TensorLikeType:
     exact_dtype=True,
 )
 def isposinf(a: TensorLikeType) -> TensorLikeType:
-    torch._check(
+    torch._check_type(
         not utils.is_complex_dtype(a.dtype),
         lambda: f"Complex dtype is not supported for isposinf, got dtype {a.dtype}",
     )
@@ -843,7 +844,7 @@ def isposinf(a: TensorLikeType) -> TensorLikeType:
     exact_dtype=True,
 )
 def isneginf(a: TensorLikeType) -> TensorLikeType:
-    torch._check(
+    torch._check_type(
         not utils.is_complex_dtype(a.dtype),
         lambda: f"Complex dtype is not supported for isneginf, got dtype {a.dtype}",
     )
@@ -970,7 +971,7 @@ def nan_to_num(
 
 
 def _neg_meta(a: TensorLikeType):
-    torch._check(
+    torch._check_not_implemented(
         a.dtype is not torch.bool,
         lambda: (
             "Negation, the `-` operator, on a bool tensor is not supported. "
@@ -994,7 +995,7 @@ def positive(a: TensorLikeType) -> TensorLikeType:
         raise AssertionError(f"a must be TensorLike, got {type(a)}")
     if a.dtype is torch.bool:
         msg = "positive does not support bool tensors."
-        raise RuntimeError(msg)
+        raise NotImplementedError(msg)
     return a
 
 
@@ -1881,7 +1882,7 @@ def sub(
     a, b = _maybe_broadcast(a, b)
 
     if isinstance(a, TensorLike) and isinstance(b, TensorLike):
-        torch._check(
+        torch._check_not_implemented(
             not utils.is_boolean_dtype(a.dtype) and not utils.is_boolean_dtype(b.dtype),
             lambda: (
                 "Subtraction, the `-` operator, with two bool tensors is not supported. "
@@ -2414,7 +2415,7 @@ def _make_copy_from_view(fn, return_none_on_out_variant=False):
 
 
 @register_decomposition(aten.all)
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 def all(
     a: TensorLikeType,
     dim: DimsType | None = None,
@@ -2429,7 +2430,7 @@ def all(
 
 
 @register_decomposition(aten.any)
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 def any(
     a: TensorLikeType,
     dim: DimsType | None = None,
@@ -3431,11 +3432,16 @@ def native_group_norm(
         lambda: f"Expected at least 2 dimensions for input tensor but received {input.ndim}",
     )
 
-    # Match contiguous behavior of eager implementation.  Only necessary for ref tests.
+    supports_memory_format = input.device.type in (
+        "cpu",
+        "cuda",
+        "meta",
+        torch._C._get_privateuse1_backend_name(),
+    )
     mem_fmt = (
-        torch.contiguous_format
-        if input.device.type not in ("cpu", torch._C._get_privateuse1_backend_name())
-        else utils.suggest_memory_format(input)
+        utils.suggest_memory_format(input)
+        if supports_memory_format
+        else torch.contiguous_format
     )
     input = input.contiguous(memory_format=mem_fmt)
     weight = weight.contiguous() if weight is not None else None
@@ -3483,6 +3489,7 @@ def native_group_norm(
             out = out + unsqueeze_bias
 
     out = _maybe_convert_to_dtype(out, input.dtype)  # type: ignore[assignment]
+    out = out.contiguous(memory_format=mem_fmt)
     mean = _maybe_convert_to_dtype(mean, input.dtype)  # type: ignore[assignment]
     rstd = _maybe_convert_to_dtype(rstd, input.dtype)  # type: ignore[assignment]
 
@@ -3733,7 +3740,7 @@ def stft(
     else:
         return_complex_ = return_complex
 
-    torch._check(
+    torch._check_not_implemented(
         utils.is_float_dtype(input.dtype) or utils.is_complex_dtype(input.dtype),
         lambda: "stft expected a tensor of floating point or complex values",
     )
@@ -3831,11 +3838,11 @@ def istft(
     hop_length_ = hop_length if hop_length is not None else n_fft // 4
     win_length_ = win_length if win_length is not None else n_fft
 
-    torch._check(
+    torch._check_type(
         utils.is_complex_dtype(input.dtype),
         lambda: (
-            "istft input and window must be on the same device but got self on "
-            + f"{input.device} and window on {window.device}"  # type: ignore[union-attr]
+            "istft requires a complex-valued input tensor matching the "
+            "output from stft with return_complex=True."
         ),
     )
     n_frames = input.size(-1)
