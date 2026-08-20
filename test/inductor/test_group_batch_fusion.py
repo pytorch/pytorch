@@ -796,20 +796,17 @@ class TestGroupBatchFusion(TestCase):
         self.assertEqual(counters["inductor"]["batch_dropout"], 1)
         counters.clear()
 
-    @unittest.skipUnless(
-        torch.xpu.is_available(),
-        "batch_linear_lhs auto-enable is XPU-only for now",
+    @unittest.skipUnless(torch.xpu.is_available(), "batch_linear_lhs is XPU-only")
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={
+            "batch_linear_lhs": {"devices": ("xpu",), "min_fuse_set_size": 2},
+        },
     )
-    def test_xpu_auto_enable_batch_linear_lhs(self):
-        # Verify that batch_linear_lhs fusion is auto-enabled when example inputs
-        # contain XPU tensors, driven by the "devices" key in the default
-        # config.pre_grad_fusion_options.
-        default_options = config.pre_grad_fusion_options
-        self.assertIn("batch_linear_lhs", default_options)
-        self.assertEqual(default_options["batch_linear_lhs"]["devices"], ("xpu",))
+    def test_xpu_batch_linear_lhs(self):
+        # batch_linear_lhs is disabled by default; enabling it for XPU via mock
+        # config must make the fusion fire on XPU tensors.
         z = 10
         for has_bias in [True, False]:
-            orig_fusion_options = dict(config.pre_grad_fusion_options)
             counters.clear()
             module = MyModule4(z, "xpu", has_bias)
             input = [torch.randn(20, z, device="xpu")]
@@ -823,11 +820,6 @@ class TestGroupBatchFusion(TestCase):
             res.sum().backward()
             self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
             self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
-            self.assertEqual(
-                orig_fusion_options,
-                dict(config.pre_grad_fusion_options),
-                "config.pre_grad_fusion_options should not be mutated by auto-enable",
-            )
             counters.clear()
 
     @requires_gpu()
