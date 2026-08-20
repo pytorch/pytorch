@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import contextlib
 import importlib
 import json
 import os
+import sys
 import tempfile
+import types
 import unittest
+import unittest.mock as mock
 
 # Ordinary package imports, like every other tools test (CI runs
 # `PYTHONPATH=$(pwd) pytest tools/test`). These modules keep their module
@@ -15,6 +19,11 @@ from tools.native_aot import export, toolchains
 
 _TOOLS_FILE = os.path.abspath(toolchains.__file__)
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(_TOOLS_FILE)))
+
+
+# The DSL versions this environment would compile with; sidecars must carry
+# them or the skip check treats them as built by a different compiler.
+_RUNTIMES = export.runtime_versions("cutedsl")
 
 SIDECAR = {
     "prefix": "fakeop_f32_n1024_k8",
@@ -31,12 +40,94 @@ SIDECAR = {
 }
 
 
-def _touch_artifacts(out_dir, prefix, exts=(".o", ".h")):
-    """Create the files a sidecar claims. _job_needed verifies they exist,
-    so a fixture that writes only the .json would always re-export."""
+def _no_ambient_arch(device=None):
+    """Take the ambient environment out of arch resolution.
+
+    ``device`` is what _detected_arch should report -- None for "no GPU", or an
+    sm string to test the device fallback, which only answers once no arch env
+    var does.
+
+    _effective_arch resolves an unspecified arch from the builder's GPU or from
+    a toolchain's ARCH_ENV_VAR, so a sidecar written without one is legitimately
+    stale when either answers. Tests about spec/source matching say nothing
+    about arch and must not depend on the runner's hardware -- nor on the
+    ambient environment: with CUTE_DSL_ARCH exported (the invocation export.py's
+    own docstring documents) patching only the device left six of them failing."""
+    env = {
+        tc.ARCH_ENV_VAR: "" for tc in toolchains.TOOLCHAINS.values() if tc.ARCH_ENV_VAR
+    }
+    stack = contextlib.ExitStack()
+    stack.enter_context(
+        mock.patch.object(export, "_detected_arch", return_value=device)
+    )
+    # patch.dict cannot unset, and os.getenv("") is falsy, which is what
+    # _effective_arch tests -- so an empty value is equivalent to absent here.
+    stack.enter_context(mock.patch.dict(os.environ, env, clear=False))
+    return stack
+
+
+_DECL_REL = os.path.relpath(
+    os.path.join(os.path.dirname(__file__), "..", "native_aot", "decl.py"), export.REPO
+)
+
+
+def _current_sources():
+    """A source closure that matches this tree, for sidecars meant to look
+    current."""
+    return {_DECL_REL: export._file_hash(os.path.join(export.REPO, _DECL_REL))}
+
+
+def _write_sidecar(d, point, prefix="x", exts=(".o", ".h"), **over):
+    """Write into ``d`` the artifacts and the sidecar a current export would have
+    left for ``point``, so _job_needed sees a skippable job. ``over`` replaces or
+    adds fields (arch, sources, ...) for the cases that are about one of them."""
+    _touch_artifacts(d, prefix, exts=exts)
+    sc = {
+        "version": export.SIDECAR_VERSION,
+        "prefix": prefix,
+        "kind": "cutedsl",
+        "spec": point,
+        "sources": _current_sources(),
+        "runtimes": _RUNTIMES,
+    }
+    sc.update(over)
+    with open(os.path.join(d, prefix + ".json"), "w") as f:
+        json.dump(sc, f)
+
+
+def _touch_artifacts(out_dir, prefix, exts=(".o", ".h"), tensor_args=None):
+    """Create the files a sidecar claims. _job_needed verifies they exist, so a
+    fixture that writes only the .json would always re-export.
+
+    The .h is DERIVED from the sidecar's own tensor_args -- one struct per tensor,
+    named <prefix>_Tensor_<name>_t, with each array bound equal to the number of
+    dims that tensor claims. validate_abi requires that equality (an over-claim
+    stores past the end of the struct; an under-claim leaves the kernel reading an
+    uninitialized slot), so a header with hand-picked bounds described an ABI no
+    export could produce, and every generation fixture built on it was exercising
+    the guard against an impossible input."""
+    args = SIDECAR["tensor_args"] if tensor_args is None else tensor_args
     for e in exts:
+        body = ""
+        if e == ".h":
+            body = "#pragma once\n#include <stdint.h>\n"
+            for a in args:
+                fields = ["  void* data;"]
+                if a.get("dynamic_sizes"):
+                    fields.append(
+                        f"  int32_t dynamic_shapes[{len(a['dynamic_sizes'])}];"
+                    )
+                if a.get("dynamic_strides"):
+                    fields.append(
+                        f"  int64_t dynamic_strides[{len(a['dynamic_strides'])}];"
+                    )
+                body += (
+                    "typedef struct {\n"
+                    + "\n".join(fields)
+                    + f"\n}} {prefix}_Tensor_{a['name']}_t;\n"
+                )
         with open(os.path.join(out_dir, prefix + e), "w") as f:
-            f.write("")
+            f.write(body)
 
 
 class TestExportJobs(unittest.TestCase):
@@ -44,61 +135,28 @@ class TestExportJobs(unittest.TestCase):
         # Skip detection matches the sidecar's recorded spec AND a
         # current source closure; a spec match alone (no/mismatched
         # sources) re-exports.
-        import json as _json
-        import tempfile
-
-        rel = os.path.relpath(
-            os.path.join(os.path.dirname(__file__), "..", "native_aot", "decl.py"),
-            export.REPO,
-        )
-        current = {rel: export._file_hash(os.path.join(export.REPO, rel))}
         with tempfile.TemporaryDirectory() as d:
             point = {"dtype": "float32", "N": 4096}
             job = ("fakeop", "aot_kernel.py", point, d, None)
             self.assertTrue(export._job_needed(job, force=False))
-            _touch_artifacts(d, "x")
-            with open(os.path.join(d, "x.json"), "w") as f:
-                _json.dump(
-                    {
-                        "version": export.SIDECAR_VERSION,
-                        "prefix": "x",
-                        "spec": point,
-                        "sources": current,
-                    },
-                    f,
-                )
-            self.assertFalse(export._job_needed(job, force=False))
-            self.assertTrue(export._job_needed(job, force=True))
-            other = ("fakeop", "aot_kernel.py", {"dtype": "bfloat16"}, d, None)
-            self.assertTrue(export._job_needed(other, force=False))
+            _write_sidecar(d, point)
+            with _no_ambient_arch():
+                self.assertFalse(export._job_needed(job, force=False))
+                self.assertTrue(export._job_needed(job, force=True))
+                other = ("fakeop", "aot_kernel.py", {"dtype": "bfloat16"}, d, None)
+                self.assertTrue(export._job_needed(other, force=False))
 
     def test_job_skip_survives_json_round_trip(self):
         # Tuple-valued grid fields read back from the sidecar as lists;
         # skip detection must normalize both sides or such points
         # re-export on every run (the pointwise family's in_dtypes hit
         # this).
-        import json as _json
-        import tempfile
-
-        rel = os.path.relpath(
-            os.path.join(os.path.dirname(__file__), "..", "native_aot", "decl.py"),
-            export.REPO,
-        )
-        current = {rel: export._file_hash(os.path.join(export.REPO, rel))}
         with tempfile.TemporaryDirectory() as d:
             point = {"aten": "add.Tensor", "in_dtypes": ("float32", "bfloat16")}
             job = ("fakeop", "aot_kernel.py", point, d, None)
-            sidecar = {
-                "version": export.SIDECAR_VERSION,
-                "prefix": "x",
-                "spec": export._json_normal(point),
-                "sources": current,
-            }
-            _touch_artifacts(d, "x")
-            _touch_artifacts(d, "x")
-            with open(os.path.join(d, "x.json"), "w") as f:
-                _json.dump(sidecar, f)
-            self.assertFalse(export._job_needed(job, force=False))
+            _write_sidecar(d, point, spec=export._json_normal(point))
+            with _no_ambient_arch():
+                self.assertFalse(export._job_needed(job, force=False))
 
     def test_run_job_is_module_level(self):
         # The pool pickles the job function by qualified name; a closure
@@ -109,12 +167,10 @@ class TestExportJobs(unittest.TestCase):
         self.assertEqual(export.export_point.__qualname__, "export_point")
 
     def test_pool_never_forks_after_cuda_init(self):
-        # Plain "fork" gives workers a dead CUDA context (measured:
-        # is_initialized() False, allocation fails, no exception) because
-        # the parent initializes CUDA before the pool starts.
-        # Pinned to forkserver, not just "not fork": main() calls
-        # set_forkserver_preload unconditionally, which a spawn context
-        # would silently ignore.
+        # Plain "fork" gives workers a dead CUDA context (is_initialized() False,
+        # allocation fails, no exception), the parent having initialized CUDA
+        # first. Pinned to forkserver rather than "not fork" because main() calls
+        # set_forkserver_preload unconditionally, which spawn silently ignores.
         self.assertEqual(export.POOL_START_METHOD, "forkserver")
 
     def test_cutedsl_export_passes_gpu_arch(self):
@@ -125,7 +181,6 @@ class TestExportJobs(unittest.TestCase):
         # suite runs in the linter image, which has no DSL installed.
         import sys
         import types
-        import unittest.mock as mock
         from typing import Any, cast
 
         seen = {}
@@ -177,22 +232,34 @@ class TestExportJobs(unittest.TestCase):
         )
 
     def test_missing_runtime_is_fatal_not_skipped(self):
-        # A declaration whose toolchain targets this build's backend was
-        # ASKED for, so a missing runtime must fail rather than quietly
-        # ship a wheel with fewer kernels than declared. TORCH_NATIVE_AOT=0
-        # is the supported way to build without the DSL wheels.
-        import unittest.mock as mock
-
-        with mock.patch.object(
-            toolchains.CuteDslToolchain, "missing_runtimes", classmethod(lambda cls: [])
+        # A declaration whose toolchain targets this backend was ASKED for, so a
+        # missing runtime must fail rather than ship a wheel with fewer kernels
+        # than declared (TORCH_NATIVE_AOT=0 is the way to build without them).
+        #
+        # export is STUBBED on the runtime-present half: the real one imports
+        # cutlass into the test process, leaks CUTE_DSL_LIBS into os.environ, and
+        # with CUTE_DSL_ARCH set made the asserted exception come from arch
+        # resolution rather than the gate.
+        reached = []
+        with (
+            mock.patch.object(
+                toolchains.CuteDslToolchain,
+                "missing_runtimes",
+                classmethod(lambda cls: []),
+            ),
+            mock.patch.object(
+                toolchains.CuteDslToolchain,
+                "export",
+                lambda self, b, out_dir, arch=None: reached.append(arch) or {},
+            ),
+            _no_ambient_arch(device="sm_100a"),
         ):
             b = {"prefix": "p", "fn": None, "fake_args": (), "tensor_args": []}
             with mock.patch.object(export, "load_builder", lambda *a: lambda p: b):
-                # Runtime present: gets past the gate (fails later, on the
-                # real compile, which this harness cannot do).
-                with self.assertRaises(Exception) as cm:
-                    export.export_point("fakeop", "aot_kernel.py", {}, "/tmp")
-                self.assertNotIn("TORCH_NATIVE_AOT=0", str(cm.exception))
+                with tempfile.TemporaryDirectory() as d:
+                    export.export_point("fakeop", "aot_kernel.py", {}, d)
+        # Runtime present: it got PAST the gate and into the toolchain's export.
+        self.assertEqual(len(reached), 1)
 
         with mock.patch.object(
             toolchains.CuteDslToolchain,
@@ -229,89 +296,156 @@ class TestExportJobs(unittest.TestCase):
 
 
 class TestArch(unittest.TestCase):
-    def test_effective_arch_is_per_toolchain(self):
-        # Only kinds that declare an ARCH_ENV_VAR read one, so a kind that
-        # takes its target another way (Triton: an explicit GPUTarget) is
-        # not perturbed by CUTE_DSL_ARCH.
-        import unittest.mock as mock
-
+    def test_effective_arch_answers_identically_for_every_kind(self):
+        # The invariant the refusal above buys: with no --arch, resolution is
+        # device detection, which does not vary by kind -- so a tree can never
+        # disagree with its own sidecars. This is what a per-kind env var broke.
         cutedsl = toolchains.get_toolchain("cutedsl")
         no_env = toolchains.Toolchain()
         self.assertIsNone(no_env.ARCH_ENV_VAR)
+        with _no_ambient_arch(device="sm_100"):
+            self.assertEqual(export._effective_arch(None, cutedsl), "sm_100")
+            self.assertEqual(export._effective_arch(None, no_env), "sm_100")
+            self.assertEqual(export._effective_arch(None), "sm_100")
+        # An explicit arch wins for every kind alike.
         with mock.patch.dict(os.environ, {"CUTE_DSL_ARCH": "sm_90a"}):
-            self.assertEqual(export._effective_arch(None, cutedsl), "sm_90a")
-            self.assertIsNone(export._effective_arch(None, no_env))
-            # An explicit arch always wins over the env var.
             self.assertEqual(export._effective_arch("sm_100a", cutedsl), "sm_100a")
+            self.assertEqual(export._effective_arch("sm_100a", no_env), "sm_100a")
 
-    def test_job_skip_sees_the_arch_env_var(self):
-        # Two runs into ONE --out-dir differing only in CUTE_DSL_ARCH. Both
-        # pass arch=None, so comparing the raw value would match on spec
-        # alone and skip the second run -- leaving the first arch's objects
-        # behind a sidecar the caller reads as the second arch.
-        import unittest.mock as mock
+    def test_arch_tag_is_short(self):
+        # The tag lands in every exported C symbol, so its shape is part of
+        # the artifact ABI: one underscore dropped, nothing else.
+        self.assertEqual(export._arch_tag("sm_100a"), "sm100a")
+        self.assertEqual(export._arch_tag("sm_90"), "sm90")
 
-        rel = os.path.relpath(
-            os.path.join(os.path.dirname(__file__), "..", "native_aot", "decl.py"),
-            export.REPO,
-        )
-        current = {rel: export._file_hash(os.path.join(export.REPO, rel))}
+    def test_an_arch_env_var_without_explicit_arch_is_refused(self):
+        # An arch variable is PER KIND, so it answers only for kinds that declare
+        # one: with CUTE_DSL_ARCH=sm_90a set, a tree named sm_90a held a sidecar
+        # recording the DETECTED sm_100 for a kind with no variable -- and
+        # generation filters by directory while the gate comes from the sidecar.
+        # Refusing leaves one arch=None path that every kind answers identically.
+        class _Other(toolchains.Toolchain):
+            kind = "other"
+            ARCH_ENV_VAR = "OTHER_DSL_ARCH"
+
+        registry = dict(toolchains.TOOLCHAINS, other=_Other())
+        with (
+            mock.patch.dict(toolchains.TOOLCHAINS, registry, clear=True),
+            mock.patch.dict(
+                os.environ, {"CUTE_DSL_ARCH": "sm_90a", "OTHER_DSL_ARCH": "sm_100a"}
+            ),
+            mock.patch.object(export, "_detected_arch", return_value=None),
+        ):
+            # Named in the message so the user knows WHICH variable to unset, and
+            # both are named when both are set.
+            with self.assertRaisesRegex(RuntimeError, "CUTE_DSL_ARCH=sm_90a"):
+                export._effective_arch(None)
+            with self.assertRaisesRegex(RuntimeError, "OTHER_DSL_ARCH=sm_100a"):
+                export._effective_arch(None)
+            # Agreeing values are refused too: the point is not a conflict
+            # between them, it is that neither can speak for the other kinds.
+            with mock.patch.dict(os.environ, {"OTHER_DSL_ARCH": "sm_90a"}):
+                with self.assertRaisesRegex(RuntimeError, "--arch"):
+                    export._effective_arch(None)
+            # An explicit --arch is the way to say it, for every kind at once.
+            self.assertEqual(export._effective_arch("sm_100a"), "sm_100a")
+
+    def test_export_prefix_is_arch_qualified(self):
+        # Two arches must not produce the same prefix: the exported symbols
+        # (cute_dsl_<prefix>_wrapper, <prefix>_Kernel_Module_Load) are derived
+        # from it, so an unqualified prefix is a duplicate definition when both
+        # arches link into one libtorch_cuda.
+        seen = []
+
+        class _FakeTc(toolchains.Toolchain):
+            kind = "cutedsl"
+            artifact_exts = (".o", ".h")
+            # So the sidecar's recorded compiler versions are non-empty below.
+            RUNTIME_DISTS = ("nvidia-cutlass-dsl",)
+
+            def missing_runtimes(self):
+                return []
+
+            def validate_build_result(self, b):
+                pass
+
+            def export(self, b, out_dir, arch=None):
+                seen.append(b["prefix"])
+                _touch_artifacts(out_dir, b["prefix"])
+                return {"tensor_args": []}
+
+        fake = _FakeTc()
+        with tempfile.TemporaryDirectory() as d:
+            with (
+                mock.patch.object(
+                    export,
+                    "load_builder",
+                    return_value=lambda p: {"prefix": "k", "kind": "cutedsl"},
+                ),
+                mock.patch.object(toolchains, "get_toolchain", return_value=fake),
+            ):
+                for arch in ("sm_90a", "sm_100a"):
+                    export.export_point("fakeop", "aot_kernel.py", {"n": 1}, d, arch)
+                self.assertEqual(seen, ["k__sm90a", "k__sm100a"])
+                # The sidecar WRITER, against what the readers require. It had
+                # no test: deleting "version" and "arch" from what export_point
+                # writes left the suite green, since every reader passes against
+                # hand-written fixtures. Asserted inside the patch, so the same
+                # toolchain answers here as when the file was written.
+                with open(os.path.join(d, "k__sm100a.json")) as f:
+                    written = json.load(f)
+                self.assertEqual(written["version"], export.SIDECAR_VERSION)
+                self.assertEqual(written["arch"], "sm_100a")
+                self.assertEqual(written["kind"], "cutedsl")
+                self.assertEqual(written["prefix"], "k__sm100a")
+                self.assertEqual(written["spec"], {"n": 1})
+                self.assertTrue(written["sources"], "no source closure recorded")
+                self.assertEqual(
+                    written["runtimes"], export.runtime_versions("cutedsl")
+                )
+                # ...and what it wrote is what the readers accept.
+                self.assertTrue(export.sources_current(written))
+                self.assertTrue(export.runtimes_current(written))
+
+    def test_job_skip_compares_the_arch(self):
+        # Two exports into ONE --out-dir differing only in arch: comparing spec
+        # alone would skip the second and leave the first arch's objects behind a
+        # sidecar the caller reads as the second arch.
         with tempfile.TemporaryDirectory() as d:
             point = {"dtype": "float32", "N": 4096}
             job = ("fakeop", "aot_kernel.py", point, d, None)
-            _touch_artifacts(d, "x")
-            with open(os.path.join(d, "x.json"), "w") as f:
-                json.dump(
-                    {
-                        "version": export.SIDECAR_VERSION,
-                        "prefix": "x",
-                        "kind": "cutedsl",
-                        "spec": point,
-                        "arch": "sm_90a",
-                        "sources": current,
-                    },
-                    f,
-                )
-            with mock.patch.dict(os.environ, {"CUTE_DSL_ARCH": "sm_90a"}):
-                self.assertFalse(export._job_needed(job, force=False))
-            with mock.patch.dict(os.environ, {"CUTE_DSL_ARCH": "sm_100a"}):
-                self.assertTrue(export._job_needed(job, force=False))
-            # Env var gone: an on-device export is not the sm_90a one either.
-            with mock.patch.dict(os.environ, {}, clear=True):
-                self.assertTrue(export._job_needed(job, force=False))
+            _write_sidecar(d, point, arch="sm_90a")
+            # _collect_jobs resolves the arch once and puts it in the job, so the
+            # comparison is job-vs-sidecar and needs no ambient variable.
+            with _no_ambient_arch():
+                same = ("fakeop", "aot_kernel.py", point, d, "sm_90a")
+                other = ("fakeop", "aot_kernel.py", point, d, "sm_100a")
+                self.assertFalse(export._job_needed(same, force=False))
+                self.assertTrue(export._job_needed(other, force=False))
+                # An on-device job (arch resolved from the device) is not the
+                # sm_90a one either.
+                with mock.patch.object(export, "_detected_arch", return_value="sm_100"):
+                    self.assertTrue(export._job_needed(job, force=False))
 
     def test_job_skip_rejects_arch_less_sidecar_when_env_set(self):
         # The reported case, from the other side: a sidecar that recorded no
         # arch at all (an on-device export) must NOT satisfy a run whose
         # CUTE_DSL_ARCH names a target, or the env-var run silently inherits
         # objects built for whatever the builder's GPU was.
-        import unittest.mock as mock
-
-        rel = os.path.relpath(
-            os.path.join(os.path.dirname(__file__), "..", "native_aot", "decl.py"),
-            export.REPO,
-        )
-        current = {rel: export._file_hash(os.path.join(export.REPO, rel))}
         with tempfile.TemporaryDirectory() as d:
             point = {"dtype": "float32", "N": 4096}
             job = ("fakeop", "aot_kernel.py", point, d, None)
-            _touch_artifacts(d, "x")
-            with open(os.path.join(d, "x.json"), "w") as f:
-                json.dump(
-                    {
-                        "version": export.SIDECAR_VERSION,
-                        "prefix": "x",
-                        "kind": "cutedsl",
-                        "spec": point,
-                        "arch": None,
-                        "sources": current,
-                    },
-                    f,
-                )
-            with mock.patch.dict(os.environ, {"CUTE_DSL_ARCH": "sm_100a"}):
-                self.assertTrue(export._job_needed(job, force=False))
-            # ...while a genuine on-device re-run still skips.
-            with mock.patch.dict(os.environ, {}, clear=True):
+            _write_sidecar(d, point, arch=None)
+            with _no_ambient_arch():
+                named = ("fakeop", "aot_kernel.py", point, d, "sm_100a")
+                self.assertTrue(export._job_needed(named, force=False))
+                # ...and where an arch IS resolvable it does not satisfy an
+                # on-device run either: that run knows its arch, the sidecar names
+                # none. _detected_arch patched rather than trusted, so the claim
+                # does not depend on the runner having a GPU.
+                with mock.patch.object(export, "_detected_arch", return_value="sm_100"):
+                    self.assertTrue(export._job_needed(job, force=False))
+                # Only where no arch can be resolved at all is it a match.
                 self.assertFalse(export._job_needed(job, force=False))
 
     def test_archs_from_cuda_arch_list(self):
@@ -439,91 +573,6 @@ class TestArch(unittest.TestCase):
         self.assertEqual(
             export.expand_specs([{"N": 4096, "K": 64}]), [{"N": 4096, "K": 64}]
         )
-
-
-class TestSourceStaleness(unittest.TestCase):
-    def test_closure_covers_shared_declaration_machinery(self):
-        # The grid expander and the validating loader decide which spec
-        # points exist and what a declaration means, so editing them
-        # changes what an artifact MEANS. They live in torchgen (outside
-        # the tools/*.py glob) and arrive by ordinary import, so only the
-        # sys.modules half of the closure can catch them -- which used to
-        # filter on "torch._native" alone and silently missed them.
-        # Compared by basename: an editable install can resolve torchgen
-        # to a different checkout than REPO, and relpath then yields a
-        # ../.. traversal rather than the tidy repo-relative path.
-        names = {os.path.basename(p) for p in export.source_closure()}
-        for want in (
-            "native_aot_spec_grid.py",
-            "native_aot_decl.py",
-            "toolchains.py",
-        ):
-            self.assertIn(want, names, f"{want} must invalidate artifacts")
-
-    def test_closure_survives_sys_modules_mutation(self):
-        # source_closure hashes files while walking sys.modules, and
-        # hashing imports hashlib lazily -- so on a cold interpreter the
-        # walk mutates the dict it is iterating and raises "dictionary
-        # changed size during iteration". Force that ordering by having
-        # the hash step import a module that is definitely not loaded yet.
-        import sys
-        import unittest.mock as mock
-
-        real_hash = export._file_hash
-
-        def hash_and_import(path):
-            importlib.import_module("wave")  # stdlib, unlikely to be loaded
-            return real_hash(path)
-
-        sys.modules.pop("wave", None)
-        with mock.patch.object(export, "_file_hash", hash_and_import):
-            export.source_closure()
-
-    def test_sources_current_roundtrip(self):
-        # A sidecar whose recorded closure matches the tree is current;
-        # editing any recorded file (or recording none) makes it stale.
-        rel = os.path.relpath(
-            os.path.join(os.path.dirname(__file__), "..", "native_aot", "decl.py"),
-            export.REPO,
-        )
-        h = export._file_hash(os.path.join(export.REPO, rel))
-        good = {"version": export.SIDECAR_VERSION, "sources": {rel: h}}
-        self.assertTrue(export.sources_current(good))
-        # schema-version mismatch is stale even with current sources
-        self.assertFalse(export.sources_current({"version": 0, "sources": {rel: h}}))
-        self.assertFalse(export.sources_current({"sources": {rel: "0" * 16}}))
-        self.assertFalse(export.sources_current({}))
-        self.assertFalse(export.sources_current({"sources": {"no/such/file.py": "aa"}}))
-
-    def test_stale_point_reexports_without_force(self):
-        import json as _json
-
-        with tempfile.TemporaryDirectory() as d:
-            point = {"dtype": "float32"}
-            job = ("fakeop", "aot_kernel.py", point, d, None)
-            rel = os.path.relpath(
-                os.path.join(os.path.dirname(__file__), "..", "native_aot", "decl.py"),
-                export.REPO,
-            )
-            current = {rel: export._file_hash(os.path.join(export.REPO, rel))}
-            _touch_artifacts(d, "x")
-            with open(os.path.join(d, "x.json"), "w") as f:
-                _json.dump(
-                    {
-                        "version": export.SIDECAR_VERSION,
-                        "prefix": "x",
-                        "spec": point,
-                        "sources": current,
-                    },
-                    f,
-                )
-            self.assertFalse(export._job_needed(job, force=False))
-            _touch_artifacts(d, "x")
-            with open(os.path.join(d, "x.json"), "w") as f:
-                _json.dump(
-                    {"prefix": "x", "spec": point, "sources": {rel: "0" * 16}}, f
-                )
-            self.assertTrue(export._job_needed(job, force=False))
 
 
 class TestLauncherCodegen(unittest.TestCase):
@@ -997,6 +1046,131 @@ class TestAbiValidation(unittest.TestCase):
         toolchains.CuteDslToolchain().validate_abi(dict(SIDECAR, _dir="/nonexistent"))
 
 
+class TestReadOnlyInputs(unittest.TestCase):
+    # read_only tensor args must go through const_data_ptr in every
+    # toolchain's launcher: a mutable data_ptr() materializes
+    # copy-on-write inputs on each call.
+
+    def test_closure_covers_shared_declaration_machinery(self):
+        # The grid expander and the validating loader decide which spec
+        # points exist and what a declaration means, so editing them changes what
+        # an artifact MEANS. They live outside the tools/*.py glob and arrive by
+        # ordinary import, so only the sys.modules half of the closure catches
+        # them -- and it used to filter on "torch._native" alone.
+        #
+        # By basename: an editable install can resolve torchgen to a different
+        # checkout than REPO, where relpath yields a ../.. traversal.
+        names = {os.path.basename(p) for p in export.source_closure()}
+        for want in (
+            "native_aot_spec_grid.py",
+            "native_aot_decl.py",
+            "toolchains.py",
+        ):
+            self.assertIn(want, names, f"{want} must invalidate artifacts")
+
+    def test_closure_excludes_the_consumer_tools(self):
+        # Neither can change what an artifact MEANS, and hashing them is
+        # expensive in a way that is easy to miss: every kernel of every arch
+        # re-exports (minutes) for an edit that could not have changed one.
+        # gen_aot_lib.py only reads sidecars; build_stage2.py only decides
+        # whether stage 2 runs and then relinks -- export.py reads the arch
+        # list itself, so the driver passes it nothing kernel-affecting.
+        names = {os.path.basename(p) for p in export.source_closure()}
+        for unwanted in ("gen_aot_lib.py", "build_stage2.py"):
+            self.assertNotIn(unwanted, names)
+
+    def test_closure_survives_sys_modules_mutation(self):
+        # source_closure hashes files while walking sys.modules, and
+        # hashing imports hashlib lazily -- so on a cold interpreter the
+        # walk mutates the dict it is iterating and raises "dictionary
+        # changed size during iteration". Force that ordering by having
+        # the hash step import a module that is definitely not loaded yet.
+        import sys
+
+        real_hash = export._file_hash
+
+        def hash_and_import(path):
+            importlib.import_module("wave")  # stdlib, unlikely to be loaded
+            return real_hash(path)
+
+        sys.modules.pop("wave", None)
+        with mock.patch.object(export, "_file_hash", hash_and_import):
+            export.source_closure()
+
+    def test_runtimes_current_detects_a_compiler_upgrade(self):
+        # The DSL's version is in no file the closure hashes, so an upgraded
+        # wheel changes nothing on disk and without this re-exports nothing,
+        # leaving the tree mixing compilers.
+        #
+        # runtime_versions is PATCHED, not read from this machine: CI's image has
+        # no DSL wheels, where the live call is all-"absent" and runtimes_current
+        # takes its ignorance arm -- which left the comparison uncovered in CI.
+        current = {"nvidia-cutlass-dsl": "4.6.2", "apache-tvm-ffi": "0.1.11"}
+        with mock.patch.object(export, "runtime_versions", lambda kind: current):
+            self.assertTrue(
+                export.runtimes_current({"kind": "cutedsl", "runtimes": current})
+            )
+            older = dict.fromkeys(current, "0.0.1")
+            self.assertFalse(
+                export.runtimes_current({"kind": "cutedsl", "runtimes": older})
+            )
+            # A sidecar predating the record is stale, like one with no closure.
+            self.assertFalse(export.runtimes_current({"kind": "cutedsl"}))
+
+    def test_runtimes_current_does_not_call_ignorance_staleness(self):
+        # Generation may run where the DSL wheels are absent. Declaring every
+        # artifact stale there would fail a build that cannot re-export anyway.
+        with mock.patch.object(
+            export, "runtime_versions", lambda kind: {"nvidia-cutlass-dsl": "absent"}
+        ):
+            self.assertTrue(export.runtimes_current({"kind": "cutedsl"}))
+
+    def test_runtime_versions_reads_metadata_not_the_module(self):
+        # Distribution names, so the skip path never imports the DSL (importing
+        # cutlass pulls MLIR bindings in). The mapping is not derivable: module
+        # `cutlass` ships in the nvidia-cutlass-dsl distribution.
+        self.assertIn(
+            "nvidia-cutlass-dsl", toolchains.get_toolchain("cutedsl").RUNTIME_DISTS
+        )
+        versions = export.runtime_versions("cutedsl")
+        # Sorted keys, so two runs on one machine record byte-identical sidecars
+        # (a dict whose order drifts would compare unequal and re-export).
+        self.assertEqual(list(versions), sorted(versions))
+        self.assertEqual(
+            sorted(versions), sorted(toolchains.get_toolchain("cutedsl").RUNTIME_DISTS)
+        )
+        for dist, v in versions.items():
+            self.assertTrue(v, f"{dist} recorded an empty version")
+
+    def test_sources_current_roundtrip(self):
+        # A sidecar whose recorded closure matches the tree is current;
+        # editing any recorded file (or recording none) makes it stale.
+        rel = _DECL_REL
+        h = export._file_hash(os.path.join(export.REPO, rel))
+        good = {"version": export.SIDECAR_VERSION, "sources": {rel: h}}
+        self.assertTrue(export.sources_current(good))
+        # schema-version mismatch is stale even with current sources
+        self.assertFalse(export.sources_current({"version": 0, "sources": {rel: h}}))
+        self.assertFalse(export.sources_current({"sources": {rel: "0" * 16}}))
+        self.assertFalse(export.sources_current({}))
+        self.assertFalse(export.sources_current({"sources": {"no/such/file.py": "aa"}}))
+
+    def test_stale_point_reexports_without_force(self):
+        with tempfile.TemporaryDirectory() as d:
+            point = {"dtype": "float32"}
+            job = ("fakeop", "aot_kernel.py", point, d, None)
+            _write_sidecar(d, point)
+            with _no_ambient_arch():
+                self.assertFalse(export._job_needed(job, force=False))
+            _write_sidecar(d, point, sources={_DECL_REL: "0" * 16})
+            # Inside the guard like the call above: unguarded, the recorded arch
+            # (None) mismatched the DETECTED one and _job_needed answered True on
+            # that, never reaching staleness -- and with CUTE_DSL_ARCH set it
+            # raised instead.
+            with _no_ambient_arch():
+                self.assertTrue(export._job_needed(job, force=False))
+
+
 class TestToolchainRegistry(unittest.TestCase):
     def test_cutedsl_registered(self):
         self.assertIn("cutedsl", toolchains.TOOLCHAINS)
@@ -1025,8 +1199,21 @@ class TestDeclarationStaleness(unittest.TestCase):
             self.assertIn(rel, closure)
             self.assertEqual(closure[rel], export._file_hash(decl_path))
 
-    def test_source_closure_without_declaration_is_unchanged(self):
-        self.assertNotIn("aot.py", " ".join(export.source_closure()))
+    def test_source_closure_omits_a_declaration_not_passed(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            decl_path = os.path.join(tmpdir, "aot.py")
+            with open(decl_path, "w") as f:
+                f.write("ATEN_OP = 'fake'\n")
+            # The closure records the declaration it is GIVEN, so one it was not
+            # given must be absent -- otherwise editing any aot.py anywhere would
+            # invalidate every other op's artifacts.
+            self.assertNotIn(
+                os.path.relpath(decl_path, export.REPO), export.source_closure()
+            )
+            self.assertIn(
+                os.path.relpath(decl_path, export.REPO),
+                export.source_closure(decl_path),
+            )
 
 
 class TestStaleGridPointArtifacts(unittest.TestCase):
@@ -1073,55 +1260,139 @@ class TestRegistryConsistency(unittest.TestCase):
         toolchains._assert_link_exts_are_exportable(toolchains.TOOLCHAINS)
 
 
+class TestClaimedSpellingPreference(unittest.TestCase):
+    def test_the_conditional_spelling_wins_when_both_are_claimed(self):
+        # Alphabetical order would pick sm_100 over sm_100a. The conditional one
+        # is what the generator's tie-break keeps for a capability, so exporting
+        # the plain build would pay a compile and then lose that tie-break.
+        both = ("sm_100", "sm_100a", "sm_90", "sm_90a")
+        self.assertEqual(export._claimed_spelling("sm_100", both), "sm_100a")
+        self.assertEqual(export._claimed_spelling("sm_100a", both), "sm_100a")
+        self.assertEqual(export._claimed_spelling("sm_90", both), "sm_90a")
+
+    def test_a_capability_that_is_not_claimed_has_no_spelling(self):
+        self.assertIsNone(export._claimed_spelling("sm_103", ("sm_100a",)))
+
+    def test_the_plain_spelling_is_used_when_it_is_the_only_claim(self):
+        # A declaration pinning the plain build must not be handed a conditional
+        # target its kernels were not written for.
+        self.assertEqual(export._claimed_spelling("sm_100a", ("sm_100",)), "sm_100")
+
+
+class TestSidecarSchemaIsReadFirst(unittest.TestCase):
+    """gen_aot_lib refuses a mismatched sidecar SCHEMA before reading any field,
+    because a different version need not mean the same thing by a name. The skip
+    check has to do the same: it read sc["kind"] first and raised a bare KeyError,
+    naming no file and no remedy, where the version field exists precisely so the
+    point re-exports."""
+
+    def _job(self, d, sidecar):
+        _touch_artifacts(d, "x")
+        with open(os.path.join(d, "x.json"), "w") as f:
+            json.dump(sidecar, f)
+        return (
+            "fakeop",
+            "aot_kernel.py",
+            {"dtype": "float32", "N": 4096},
+            d,
+            "sm_100a",
+        )
+
+    def _sidecar(self, **over):
+        sc = {
+            "version": export.SIDECAR_VERSION,
+            "prefix": "x",
+            "kind": "cutedsl",
+            "spec": {"dtype": "float32", "N": 4096},
+            "arch": "sm_100a",
+            "sources": _current_sources(),
+            "runtimes": _RUNTIMES,
+        }
+        sc.update(over)
+        return sc
+
+    def test_a_matching_sidecar_still_skips(self):
+        # The control: without it, "re-exports" below could be for any reason.
+        with tempfile.TemporaryDirectory() as d:
+            job = self._job(d, self._sidecar())
+            with _no_ambient_arch():
+                self.assertFalse(export._job_needed(job, force=False))
+
+    def test_a_sidecar_from_another_schema_re_exports(self):
+        with tempfile.TemporaryDirectory() as d:
+            job = self._job(d, self._sidecar(version=export.SIDECAR_VERSION + 1))
+            with _no_ambient_arch():
+                self.assertTrue(export._job_needed(job, force=False))
+
+    def test_a_sidecar_without_a_kind_re_exports_instead_of_raising(self):
+        sc = self._sidecar()
+        del sc["kind"]
+        with tempfile.TemporaryDirectory() as d:
+            job = self._job(d, sc)
+            with _no_ambient_arch():
+                self.assertTrue(export._job_needed(job, force=False))
+
+
+class TestSourceClosureCoversVendoredKernels(unittest.TestCase):
+    def test_a_loaded_vendored_module_is_hashed(self):
+        # torch/_vendor/quack/ holds real CuTeDSL kernel bodies, and a
+        # declaration's build() is meant to share code with its JIT wrapper. With
+        # the prefix missing, editing a vendored body left every artifact's
+        # closure unchanged, sources_current() True, and a relink shipping kernels
+        # compiled from the old source -- silently.
+        #
+        # REPO and _HERE both redirected into a temp tree: the first version of
+        # this test put its probe file under tools/native_aot/, which the closure
+        # hashes by GLOB whatever the prefixes say, so it passed with
+        # torch._vendor removed. The file has to sit where only the prefix reaches.
+        with tempfile.TemporaryDirectory() as root:
+            here = os.path.join(root, "tools", "native_aot")
+            vendored = os.path.join(root, "torch", "_vendor", "quack")
+            os.makedirs(here)
+            os.makedirs(vendored)
+            path = os.path.join(vendored, "rmsnorm.py")
+            with open(path, "w") as f:
+                f.write("# a stand-in for a vendored kernel body\n")
+            mod = types.ModuleType("torch._vendor.quack.rmsnorm")
+            mod.__file__ = path
+            with (
+                mock.patch.object(export, "REPO", root),
+                mock.patch.object(export, "_HERE", here),
+                mock.patch.dict(
+                    sys.modules, {"torch._vendor.quack.rmsnorm": mod}, clear=False
+                ),
+            ):
+                closure = export.source_closure()
+            rel = os.path.join("torch", "_vendor", "quack", "rmsnorm.py")
+            self.assertIn(rel, closure)
+            # ...and the recorded hash is the file's, so an edit invalidates it.
+            self.assertEqual(closure[rel], export._file_hash(path))
+
+
 class TestMissingArtifacts(unittest.TestCase):
     def test_missing_artifacts_reexport_despite_current_sidecar(self):
         # Sidecar matches spec/arch/sources, but its .o is gone: skipping
         # here surfaces as a missing include when torch_cuda compiles.
-        rel = os.path.relpath(
-            os.path.join(os.path.dirname(__file__), "..", "native_aot", "decl.py"),
-            export.REPO,
-        )
-        current = {rel: export._file_hash(os.path.join(export.REPO, rel))}
         point = {"dtype": "float32", "N": 4096}
-        sidecar = {
-            "version": export.SIDECAR_VERSION,
-            "prefix": "x",
-            "spec": point,
-            "sources": current,
-            "kind": "cutedsl",
-        }
         with tempfile.TemporaryDirectory() as d:
             job = ("fakeop", "aot_kernel.py", point, d, None)
-            with open(os.path.join(d, "x.json"), "w") as f:
-                json.dump(sidecar, f)
-            _touch_artifacts(d, "x")
-            self.assertFalse(export._job_needed(job, force=False))
+            _write_sidecar(d, point)
+            with _no_ambient_arch():
+                self.assertFalse(export._job_needed(job, force=False))
 
-            os.remove(os.path.join(d, "x.o"))
-            self.assertTrue(export._job_needed(job, force=False))
+                os.remove(os.path.join(d, "x.o"))
+                self.assertTrue(export._job_needed(job, force=False))
 
     def test_missing_header_also_reexports(self):
-        rel = os.path.relpath(
-            os.path.join(os.path.dirname(__file__), "..", "native_aot", "decl.py"),
-            export.REPO,
-        )
-        current = {rel: export._file_hash(os.path.join(export.REPO, rel))}
         point = {"dtype": "float32", "N": 4096}
         with tempfile.TemporaryDirectory() as d:
             job = ("fakeop", "aot_kernel.py", point, d, None)
-            with open(os.path.join(d, "x.json"), "w") as f:
-                json.dump(
-                    {
-                        "version": export.SIDECAR_VERSION,
-                        "prefix": "x",
-                        "spec": point,
-                        "sources": current,
-                        "kind": "cutedsl",
-                    },
-                    f,
-                )
-            _touch_artifacts(d, "x", exts=(".o",))  # .h missing
-            self.assertTrue(export._job_needed(job, force=False))
+            _write_sidecar(d, point, exts=(".o",))  # .h missing
+            # _no_ambient_arch: the job resolves arch=None, so an exported
+            # CUTE_DSL_ARCH (this commit's Test Plan sets one) would refuse rather
+            # than answer, failing this test for a reason it is not about.
+            with _no_ambient_arch():
+                self.assertTrue(export._job_needed(job, force=False))
 
 
 if __name__ == "__main__":
