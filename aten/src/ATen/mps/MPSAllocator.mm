@@ -485,7 +485,7 @@ BufferBlock* MPSHeapAllocatorImpl::alloc_buffer_block(size_t size, uint32_t usag
   buffer_block->in_use = true;
   buffer_block->use_count++;
   m_current_allocated_memory.increase(buffer_block->size);
-
+  m_active_bytes.increase(buffer_block->size);
   return buffer_block;
 }
 
@@ -519,6 +519,7 @@ void MPSHeapAllocatorImpl::free_buffer(BufferBlock* buffer_block) {
   buffer_block->shape.clear(); // reset shape
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(m_current_allocated_memory.current >= static_cast<int64_t>(buffer_block->size));
   m_current_allocated_memory.decrease(buffer_block->size);
+  m_active_bytes.decrease(buffer_block->size);
   if (buffer_block->event) {
     // returns the MPSEvent back to MPSEventPool
     buffer_block->event.reset(nullptr);
@@ -855,6 +856,7 @@ c10::CachingDeviceAllocator::DeviceStats MPSHeapAllocatorImpl::getDeviceStats() 
   constexpr auto kAggregate = static_cast<size_t>(c10::CachingAllocator::StatType::AGGREGATE);
   stats.allocated_bytes[kAggregate] = m_current_allocated_memory;
   stats.reserved_bytes[kAggregate] = m_total_allocated_memory;
+  stats.active_bytes[kAggregate] = m_active_bytes;
   return stats;
 }
 
@@ -862,12 +864,14 @@ void MPSHeapAllocatorImpl::resetAccumulatedStats() {
   std::lock_guard<std::recursive_mutex> lock(m_mutex);
   m_current_allocated_memory.reset_accumulated();
   m_total_allocated_memory.reset_accumulated();
+  m_active_bytes.reset_accumulated();
 }
 
 void MPSHeapAllocatorImpl::resetPeakStats() {
   std::lock_guard<std::recursive_mutex> lock(m_mutex);
   m_current_allocated_memory.reset_peak();
   m_total_allocated_memory.reset_peak();
+  m_active_bytes.reset_peak();
 }
 
 inline std::string MPSHeapAllocatorImpl::format_size(uint64_t size) const {

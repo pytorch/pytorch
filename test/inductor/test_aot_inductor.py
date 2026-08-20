@@ -30,6 +30,7 @@ from torch._inductor.codecache import WritableTempFile
 from torch._inductor.cpp_builder import normalize_path_separator
 from torch._inductor.package import package_aoti
 from torch._inductor.runtime.runtime_utils import cache_dir
+from torch._inductor.select_algorithm import TritonTemplate
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import (
     is_big_gpu,
@@ -243,6 +244,55 @@ def get_triton_grid_info(kernel, total_elements, src_code):
         return int(grid_match.group(1)), expected_grids
     else:
         return None, expected_grids
+
+
+# copy_tests() only copies test_* methods onto the concrete device classes, so
+# helpers shared by the bmm_shared_a tests have to live at module level.
+def _skip_unless_bmm_shared_a_runnable(test):
+    # Any Triton-capable accelerator can run the template; it is only ever
+    # offered under max-autotune.
+    if test.device != GPU_TYPE:
+        raise unittest.SkipTest("requires an accelerator")
+    if not is_big_gpu():
+        raise unittest.SkipTest("requires modern GPU to run max-autotune")
+
+
+def _bmm_shared_a_model():
+    class Model(torch.nn.Module):
+        def forward(self, a, b):
+            # Broadcasting a over the batch is what gives mat1 the zero batch
+            # stride the template keys on.
+            return torch.bmm(a.expand(b.shape[0], -1, -1), b)
+
+    return Model()
+
+
+def _record_bmm_shared_a_choices(example_inputs, model=None, **config_overrides):
+    """Compile through AOTI and return the configs offered to the autotuner.
+
+    Which candidate ultimately wins is a timing outcome and not stable enough to
+    assert on; whether the template was offered at all is the behaviour the
+    eligibility rules actually control.
+    """
+    offered = []
+    maybe_append_choice = TritonTemplate.maybe_append_choice
+
+    def record(template, choices, **kwargs):
+        if template.name == "bmm_shared_a":
+            offered.append(kwargs)
+        return maybe_append_choice(template, choices, **kwargs)
+
+    patches = {"max_autotune": True, "bmm_shared_a": True, **config_overrides}
+    with (
+        patch.object(TritonTemplate, "maybe_append_choice", record),
+        config.patch(patches),
+        torch.no_grad(),
+    ):
+        torch._dynamo.reset()
+        torch._export.aot_compile(
+            model if model is not None else _bmm_shared_a_model(), example_inputs
+        )
+    return offered
 
 
 class AOTInductorTestsTemplate:
@@ -5162,6 +5212,34 @@ class AOTInductorTestsTemplate:
         m = M()
         self.check_model(m, example_args)
 
+    def test_proxy_executor_symint_scalar_arg(self):
+        # A SymInt (a symbolic scalar from a dynamic shape) bound to a Number/Scalar-typed
+        # arg -- arange.default's `end`. Under lite-mode fallback, arange goes through the
+        # AOT ProxyExecutor and its symbolic `end` exercises fill_args' NumberType branch
+        # (routed via cexpr like the SymIntType branch) plus the host proxy executor's
+        # as_sym_int handling. This previously raised: expected arg to be int, float, or
+        # bool, got <class 'torch.SymInt'>.
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return torch.arange(x.shape[0], device=x.device, dtype=x.dtype) + x
+
+        # Compile at n=64 and re-run the same artifact at n=257. A second shape is what
+        # actually pins the runtime half of the fix: the symbolic `end` has to travel the
+        # int64 runtime array (correctly counted by num_ints, read back at the matching
+        # index by the host), so a run at a size the artifact was not compiled for must
+        # produce arange(257) rather than a stale or misindexed 64.
+        dynamic_shapes = ({0: torch.export.Dim("n", min=2, max=4096)},)
+        list_example_inputs = [
+            (torch.randn(64, device=self.device),),
+            (torch.randn(257, device=self.device),),
+        ]
+        self.check_model_with_multiple_inputs(
+            M(),
+            list_example_inputs,
+            options={"fallback_by_default": True},
+            dynamic_shapes=dynamic_shapes,
+        )
+
     def test_proxy_executor_error_message_preserved(self):
         @torch.library.custom_op("aoti_test::validate_input", mutates_args=())
         def validate_input(x: torch.Tensor) -> torch.Tensor:
@@ -9343,6 +9421,70 @@ torch._inductor.aoti_load_package("{model_path}")
         }
         with config.patch({"combo_kernels": True}):
             self.check_model(Model(), example_inputs, dynamic_shapes=dynamic_shapes)
+
+    def test_bmm_shared_a_numerics(self):
+        _skip_unless_bmm_shared_a_runnable(self)
+        # Autotuning only times candidates, it does not check them, so a template
+        # config that miscompiles can win and silently return garbage. Comparing
+        # against eager after a real AOTI compile is what catches that.
+        example_inputs = (
+            torch.randn(1, 64, 64, device=self.device, dtype=torch.float16),
+            torch.randn(128, 64, 32, device=self.device, dtype=torch.float16),
+        )
+        with config.patch({"max_autotune": True, "bmm_shared_a": True}):
+            self.check_model(_bmm_shared_a_model(), example_inputs)
+
+    def test_bmm_shared_a_offered_when_eligible(self):
+        _skip_unless_bmm_shared_a_runnable(self)
+        example_inputs = (
+            torch.randn(1, 64, 64, device=self.device, dtype=torch.float16),
+            torch.randn(128, 64, 32, device=self.device, dtype=torch.float16),
+        )
+        offered = _record_bmm_shared_a_choices(example_inputs)
+        self.assertTrue(offered, "bmm_shared_a was not offered to the autotuner")
+        # BLOCK_Q batches share one A tile, so the accumulator is
+        # BLOCK_M x BLOCK_N x BLOCK_Q floats; the config space is bounded to keep
+        # that in registers.
+        for cfg in offered:
+            self.assertLessEqual(64, cfg["BLOCK_N"] * cfg["BLOCK_Q"])
+            self.assertLessEqual(cfg["BLOCK_N"] * cfg["BLOCK_Q"], 256)
+            self.assertLessEqual(
+                cfg["BLOCK_M"] * cfg["BLOCK_N"] * cfg["BLOCK_Q"], 64 * 256
+            )
+
+    def test_bmm_shared_a_not_offered_when_disabled(self):
+        _skip_unless_bmm_shared_a_runnable(self)
+        example_inputs = (
+            torch.randn(1, 64, 64, device=self.device, dtype=torch.float16),
+            torch.randn(128, 64, 32, device=self.device, dtype=torch.float16),
+        )
+        offered = _record_bmm_shared_a_choices(example_inputs, bmm_shared_a=False)
+        self.assertEqual(offered, [])
+
+    def test_bmm_shared_a_not_offered_for_small_batch(self):
+        _skip_unless_bmm_shared_a_runnable(self)
+        # Below the profitability gate: with few batches the grouping only costs
+        # parallelism, so the template must decline.
+        example_inputs = (
+            torch.randn(1, 64, 64, device=self.device, dtype=torch.float16),
+            torch.randn(8, 64, 32, device=self.device, dtype=torch.float16),
+        )
+        offered = _record_bmm_shared_a_choices(example_inputs)
+        self.assertEqual(offered, [])
+
+    def test_bmm_shared_a_not_offered_without_broadcast(self):
+        _skip_unless_bmm_shared_a_runnable(self)
+
+        class Model(torch.nn.Module):
+            def forward(self, a, b):
+                return torch.bmm(a, b)
+
+        example_inputs = (
+            torch.randn(128, 64, 64, device=self.device, dtype=torch.float16),
+            torch.randn(128, 64, 32, device=self.device, dtype=torch.float16),
+        )
+        offered = _record_bmm_shared_a_choices(example_inputs, model=Model())
+        self.assertEqual(offered, [])
 
 
 class AOTInductorLoggingTest(LoggingTestCase):
