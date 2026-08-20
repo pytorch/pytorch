@@ -5037,6 +5037,8 @@ class AssociativeScanModels:
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 @skipIfNoDynamoSupport
 class AssociativeScanTests(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         torch._dynamo.reset()
         super().setUp()
