@@ -870,7 +870,6 @@ class TestOperators(TestCase):
                 {torch.float32: tol(atol=5e-05, rtol=9e-05)},
                 device_type="cuda",
             ),
-            tol1("prod", {torch.float32: tol(atol=2e-05, rtol=1e-04)}),
             tol1("masked.cumprod", {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
             tol1("cumprod", {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
             tol1("linalg.vander", {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
@@ -1029,7 +1028,6 @@ class TestOperators(TestCase):
             tol1("linalg.multi_dot", {torch.float32: tol(atol=2e-03, rtol=2e-04)}),
             tol1("svd", {torch.float32: tol(atol=1e-03, rtol=5e-04)}),
             tol1("matrix_exp", {torch.float32: tol(atol=1e-03, rtol=5e-04)}),
-            tol1("masked.prod", {torch.float32: tol(atol=2e-03, rtol=2e-04)}),
         ),
     )
     @skipOps(
@@ -1739,7 +1737,6 @@ class TestOperators(TestCase):
         "TestOperators",
         "test_jvpvjp",
         (
-            tol1("masked.prod", {torch.float32: tol(atol=1e-04, rtol=1.3e-05)}),
             tol1("masked.cumprod", {torch.float32: tol(atol=1e-04, rtol=5e-04)}),
             tol1(
                 "cumprod",

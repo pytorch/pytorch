@@ -1070,23 +1070,19 @@ Tensor prod_backward(
   if (input.dim() == 0) {
     return grad;
   }
-  if (input.is_meta() || isTensorSubclassLike(input)) {
-    // For Composite Compliance, always take the safer (and slower) path
+  if (input.is_meta() || isTensorSubclassLike(input) ||
+      at::GradMode::is_enabled()) {
+    // Always take the safer path for Composite Compliance and higher-order
+    // derivatives. In low-precision dtypes, the result/input intermediate can
+    // overflow or underflow, and its magnitude is unrelated to the final
+    // Hessian.
     return prod_safe_zeros_backward(grad, input.contiguous().view(-1), 0)
         .view_as(input);
   }
   Tensor zero_idx = (input == 0).nonzero();
   if (zero_idx.sym_numel() == 0) {
-    if (at::GradMode::is_enabled()) {
-      // The fast path materializes result / input, which is numerically
-      // unstable in higher-order derivatives even when the final Hessian entry
-      // is perfectly in range. Use the safe no-division formula instead when
-      // building a backward graph.
-      return prod_safe_zeros_backward(grad, input.contiguous().view(-1), 0)
-          .view_as(input);
-    }
     return grad * (result / input).conj();
-  } else if (!at::GradMode::is_enabled() && zero_idx.sym_size(0) > 1) {
+  } else if (zero_idx.sym_size(0) > 1) {
     return at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   } else {
     return prod_safe_zeros_backward(grad, input.contiguous().view(-1), 0)
@@ -1110,8 +1106,9 @@ Tensor prod_backward(
     grad = grad.unsqueeze(dim);
     result = result.unsqueeze(dim);
   }
-  if (input.is_meta() || isTensorSubclassLike(input)) {
-    // For Composite Compliance, always take the safer (and slower) path
+  if (input.is_meta() || isTensorSubclassLike(input) ||
+      at::GradMode::is_enabled()) {
+    // See comment in the flat prod_backward overload above.
     return prod_safe_zeros_backward(grad, input, dim);
   }
 
@@ -1119,10 +1116,6 @@ Tensor prod_backward(
   Tensor slice_zero_count = zero_mask.sum(dim, true);
   int64_t total_zeros = slice_zero_count.sum().item<int64_t>();
   if (total_zeros == 0) {
-    if (at::GradMode::is_enabled()) {
-      // See comment in the flat prod_backward overload above.
-      return prod_safe_zeros_backward(grad, input, dim);
-    }
     return grad * (result / input).conj();
   } else {
     return prod_safe_zeros_backward(grad, input, dim);
