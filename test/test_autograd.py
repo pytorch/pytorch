@@ -9080,7 +9080,9 @@ for shape in [(1,), ()]:
         self.assertEqual(ret["outer"], 1)
         self.assertEqual(ret["inner"], 1)
 
-    @skipIfTorchDynamo("callbacks don't fire when backward runs under compiled autograd")
+    @skipIfTorchDynamo(
+        "callbacks don't fire when backward runs under compiled autograd"
+    )
     def test_graph_queue_callback(self):
         # The public API matches Variable._execution_engine.queue_callback.
         counter = [0]
