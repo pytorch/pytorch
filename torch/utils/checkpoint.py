@@ -1708,12 +1708,26 @@ def create_selective_checkpoint_contexts(policy_fn_or_list, allow_cache_entry_mu
 
     .. note::
 
-        If you would like to specify selective activation checkpointing
-        policies over regions of source code rather than individual ATen
-        operators, we recommend trying
-        `torch_remat <https://github.com/meta-pytorch/remat>`_. This can make
-        it easier to distinguish between different uses of the same operator
-        or to apply policies to custom kernels.
+        This API expresses selective activation checkpointing policies at the
+        level of individual ATen operators. If you would rather define
+        save/recompute decisions over regions of source code, we recommend
+        trying the separate
+        `torch_remat <https://github.com/meta-pytorch/remat>`_ package. Its
+        region-based API lets you:
+
+        * assign different policies to different uses of the same operator;
+        * apply policies to arbitrary multi-operation code, including custom
+          :class:`torch.autograd.Function` implementations, without wrapping
+          the region in a custom operator;
+        * in eager mode, retain only tensors needed for backward or subsequent
+          recomputation instead of caching every output of a selected
+          operator; and
+        * avoid the eager-mode ``TorchDispatchMode`` overhead of per-operator
+          policies.
+
+        ``torch_remat`` also provides eager-mode tracing and memory diagnostics
+        for named regions, while its core save/recompute policy works with
+        :func:`torch.compile`.
 
     Args:
         policy_fn_or_list (Callable or List):
