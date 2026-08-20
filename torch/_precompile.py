@@ -1374,8 +1374,15 @@ def _dynamo_backend_compiler(backend: str) -> Callable[..., _DynamoPythonBackend
             exec(compile(python_code, "<dynamo-eager-graph>", "exec"), namespace)
             call = cast("Callable[[list[object]], object]", namespace["call"])
         else:
+            # Dynamo's runtime examples may have concrete tensor sizes while the graph
+            # metadata carries the symbolic sizes and sources selected for this variant.
+            graph_inputs = [
+                node.meta["example_value"]
+                for node in gm.graph.nodes
+                if node.op == "placeholder"
+            ]
             python_code, cache = aot_autograd.compile_to_python(
-                gm, example_inputs, options={"size_asserts": True}
+                gm, graph_inputs, options={"size_asserts": True}
             )
             call = aot_autograd.load_from_python(python_code, cache)
         return _DynamoPythonBackend(python_code, cache, is_dynamic, call)

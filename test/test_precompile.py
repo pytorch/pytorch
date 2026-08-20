@@ -15,7 +15,10 @@ from torch._dynamo.decorators import mark_dynamic, mark_unbacked
 from torch._precompile import PrecompileError
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyCUDA,
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -2234,6 +2237,30 @@ class TestPrecompile(TestCase):
 class TestPrecompileNumerics(TestCase):
     # Numeric-correctness tests run device-generically so the same coverage
     # exercises the CUDA lowering, not just CPU.
+
+    @onlyCUDA
+    @torch._dynamo.config.patch(
+        automatic_dynamic_shapes=True, assume_static_by_default=True
+    )
+    def test_tracer_dynamo_recompiles_to_dynamic_cuda_graph(self, device):
+        from torch._inductor.utils import fresh_cache
+
+        examples = [
+            (make_tensor((size, 4), device=device, dtype=torch.float32),)
+            for size in (2, 3, 5)
+        ]
+        with fresh_cache():
+            code, cache = torch.compiler.precompile(
+                _precompile_dynamo_dynamic,
+                example_inputs=examples,
+                tracer="dynamo",
+            )
+
+        self.assertIn("DYNAMIC_GRAPH_COUNT = 1", code)
+        self.assertIn("@triton.jit", code)
+        loaded = torch.compiler.precompile.load(code, cache)
+        x = make_tensor((7, 4), device=device, dtype=torch.float32)
+        self.assertEqual(loaded(x), _precompile_dynamo_dynamic(x))
 
     def test_plain_function(self, device):
         def f(x, y):
