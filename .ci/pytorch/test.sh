@@ -1673,7 +1673,7 @@ test_distributed() {
   fi
   echo "Testing distributed python tests (${multigpu_filter:-all})"
   # shellcheck disable=SC2086
-  time python test/run_test.py --distributed-tests "${filter_arg[@]}" --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" $INCLUDE_CLAUSE --verbose
+  time python test/run_test.py --distributed-tests "${filter_arg[@]}" --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" $INCLUDE_CLAUSE --verbose -- -s
   assert_git_not_dirty
 
   # The C++ / mpiexec distributed tests below require multiple GPUs.
