@@ -3,6 +3,7 @@ import copy
 from dataclasses import dataclass
 
 import torch
+import torch.distributed as dist
 from torch.distributed._shard import _shard_tensor, sharded_tensor
 from torch.distributed._shard.sharded_tensor import (
     ShardedTensor,
@@ -27,15 +28,14 @@ from torch.distributed._shard.sharding_spec._internals import (
 from torch.testing._internal.common_device_type import (
     Capability,
     instantiate_device_type_tests,
-    onlyAccelerator,
     requires_capabilities,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
     HardwareClassification,
-    TEST_MULTIACCELERATOR,
     run_tests,
     skip_but_pass_in_sandcastle_if,
+    TEST_MULTIACCELERATOR,
     TestCase,
 )
 from torch.testing._internal.distributed._shard.sharded_tensor import (
@@ -353,7 +353,6 @@ class TestShardingSpec(TestCase):
 class TestShardingSpecDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @onlyAccelerator
     @skip_but_pass_in_sandcastle_if(
         not TEST_MULTIACCELERATOR, "2 accelerators are needed"
     )
@@ -378,7 +377,6 @@ class TestShardingSpecDevice(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Invalid device string"):
             DevicePlacementSpec("rank:0/cpu2")
 
-    @onlyAccelerator
     @skip_but_pass_in_sandcastle_if(
         not TEST_MULTIACCELERATOR, "2 accelerators are needed"
     )
@@ -395,16 +393,12 @@ class TestShardingSpecDevice(TestCase):
             ],
         )
         ChunkShardingSpec(-1, [f"{device_type}:0", f"{device_type}:1"])
-        ChunkShardingSpec(
-            0, [f"rank:0/{device_type}:0", f"rank:0/{device_type}:1"]
-        )
+        ChunkShardingSpec(0, [f"rank:0/{device_type}:0", f"rank:0/{device_type}:1"])
         ChunkShardingSpec(0, ["rank:0", "rank:1"])
         ChunkShardingSpec(0, ["rank:0/cpu", "rank:1/cpu"])
 
         # Test unimplemented error
-        with self.assertRaisesRegex(
-            NotImplementedError, "not support named dimension"
-        ):
+        with self.assertRaisesRegex(NotImplementedError, "not support named dimension"):
             # Named dimension.
             ChunkShardingSpec("N", ["cuda:0", "cuda:1"])
 
@@ -426,7 +420,6 @@ class TestShardingSpecDevice(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Invalid device string"):
             ChunkShardingSpec(0, ["rank:0/cuda:foo", "cuda:1"])
 
-    @onlyAccelerator
     @skip_but_pass_in_sandcastle_if(
         not TEST_MULTIACCELERATOR, "2 accelerators are needed"
     )
@@ -515,21 +508,15 @@ class TestShardingSpecDevice(TestCase):
             ShardMetadata(shard_offsets=[0, 0], shard_sizes=[1], placement="cuda:0")
 
         with self.assertRaisesRegex(ValueError, "shard_offsets should be >=0"):
-            ShardMetadata(
-                shard_offsets=[-1, 0], shard_sizes=[1, 1], placement="cuda:0"
-            )
+            ShardMetadata(shard_offsets=[-1, 0], shard_sizes=[1, 1], placement="cuda:0")
 
         with self.assertRaisesRegex(ValueError, "shard_sizes should be >= 0"):
-            ShardMetadata(
-                shard_offsets=[0, 0], shard_sizes=[-1, 1], placement="cuda:0"
-            )
+            ShardMetadata(shard_offsets=[0, 0], shard_sizes=[-1, 1], placement="cuda:0")
 
         with self.assertRaisesRegex(ValueError, "Empty shard list provided"):
             EnumerableShardingSpec([])
 
-        with self.assertRaisesRegex(
-            ValueError, "Found inconsistent ranks for shards"
-        ):
+        with self.assertRaisesRegex(ValueError, "Found inconsistent ranks for shards"):
             EnumerableShardingSpec(
                 [
                     ShardMetadata(
@@ -570,9 +557,7 @@ class TestShardingSpecDevice(TestCase):
             ]
         )
 
-        with self.assertRaisesRegex(
-            ValueError, "Rank of tensor is.*but shards rank"
-        ):
+        with self.assertRaisesRegex(ValueError, "Rank of tensor is.*but shards rank"):
             check_tensor(spec.shards, torch.Size([10, 10, 10]))
 
         spec = EnumerableShardingSpec(
@@ -612,7 +597,7 @@ class TestShardingSpecDevice(TestCase):
             check_tensor(spec.shards, torch.Size([10, 10]))
 
 
-instantiate_device_type_tests(TestShardingSpecDevice, globals())
+instantiate_device_type_tests(TestShardingSpecDevice, globals(), except_for="cpu")
 
 
 # Custom ShardingSpec, an simple example to do grid sharding
@@ -676,7 +661,6 @@ class GridShardingSpec(ShardingSpec):
 class TestCustomShardingSpec(ShardedTensorTestBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @onlyAccelerator
     def test_custom_sharding_spec(self, device):
         device_type = torch.device(device).type
         ranks = [f"rank:{i}/{device_type}:{i}" for i in range(4)]
@@ -694,11 +678,16 @@ class TestCustomShardingSpec(ShardedTensorTestBase):
         meta = grid_spec.build_metadata(torch.Size((8, 8)), tensor_properties)
         check_tensor(meta.shards_metadata, torch.Size((8, 8)))
 
-    @onlyAccelerator
     @skip_but_pass_in_sandcastle_if(
         not TEST_MULTIACCELERATOR, "Multi-accelerator required"
     )
-    @with_comms
+    @with_comms(
+        backend=dist.get_default_backend_for_device(
+            torch.accelerator.current_accelerator().type
+        )
+        if torch.accelerator.is_available()
+        else "gloo"
+    )
     @skip_if_lt_x_gpu(4)
     @requires_capabilities(Capability.distributed.backend)
     def test_custom_sharding_spec_tensor_ctor(self, device):
@@ -722,17 +711,20 @@ class TestCustomShardingSpec(ShardedTensorTestBase):
         local_shards = st.local_shards()
         self.assertEqual(1, len(local_shards))
         local_shard = local_shards[0].tensor
-        self.assertEqual(
-            torch.device(f"{device_type}:{self.rank}"), local_shard.device
-        )
+        self.assertEqual(torch.device(f"{device_type}:{self.rank}"), local_shard.device)
         self.assertEqual((2, 2), local_shard.size())
         self.assertEqual(local_shard, torch.ones(2, 2))
 
-    @onlyAccelerator
     @skip_but_pass_in_sandcastle_if(
         not TEST_MULTIACCELERATOR, "Multi-accelerator required"
     )
-    @with_comms
+    @with_comms(
+        backend=dist.get_default_backend_for_device(
+            torch.accelerator.current_accelerator().type
+        )
+        if torch.accelerator.is_available()
+        else "gloo"
+    )
     @skip_if_lt_x_gpu(4)
     @requires_capabilities(Capability.distributed.backend)
     def test_custom_sharding_spec_shard_tensor(self, device):
@@ -748,7 +740,7 @@ class TestCustomShardingSpec(ShardedTensorTestBase):
             _shard_tensor(torch.randn(8, 8), grid_spec)
 
 
-instantiate_device_type_tests(TestCustomShardingSpec, globals())
+instantiate_device_type_tests(TestCustomShardingSpec, globals(), except_for="cpu")
 
 
 if __name__ == "__main__":
