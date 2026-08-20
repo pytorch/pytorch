@@ -364,7 +364,6 @@ batch_fusion = True
 # merge_splits_pass
 # mutate_cat_pass
 # split_cat_pass
-
 pre_grad_fusion_options: dict[str, dict[str, Any]] = {}
 
 # Post grad fusion and options, set to empty dict to disable fusion.

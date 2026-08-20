@@ -805,6 +805,9 @@ class TestGroupBatchFusion(TestCase):
     def test_xpu_batch_linear_lhs(self):
         # batch_linear_lhs is disabled by default; enabling it for XPU via mock
         # config must make the fusion fire on XPU tensors.
+        default_options = config.pre_grad_fusion_options
+        self.assertIn("batch_linear_lhs", default_options)
+        self.assertEqual(default_options["batch_linear_lhs"]["devices"], ("xpu",))
         z = 10
         for has_bias in [True, False]:
             orig_fusion_options = dict(config.pre_grad_fusion_options)
