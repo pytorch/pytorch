@@ -7,6 +7,7 @@ import io
 import json
 import os
 import re
+import subprocess
 import sys
 import tempfile
 import types
@@ -17,7 +18,7 @@ import unittest.mock as mock
 # `PYTHONPATH=$(pwd) pytest tools/test`). These modules keep their module
 # scope torch-free precisely so this works: the Test tools job runs in the
 # linter image, which has no built torch.
-from tools.native_aot import export, gen_aot_lib, toolchains
+from tools.native_aot import build_stage2, export, gen_aot_lib, toolchains
 
 
 _TOOLS_FILE = os.path.abspath(toolchains.__file__)
@@ -2034,6 +2035,455 @@ class TestStaleGridPointArtifacts(unittest.TestCase):
             export._check_no_orphan_artifacts(tmpdir, [{"N": 1024}])
 
 
+def _version(major, minor):
+    """A stand-in for sys.version_info: supports .major/.minor and [:2]."""
+    import collections
+
+    vi = collections.namedtuple("vi", "major minor micro releaselevel serial")
+    return vi(major, minor, 0, "final", 0)
+
+
+class TestShouldRun(unittest.TestCase):
+    """build_stage2.should_run decides whether the wheel ships kernels, so
+    every skip arm needs to be deliberate rather than incidental."""
+
+    # The inputs that otherwise RUN: a CUDA (not ROCm) torch -- all-probes-true
+    # means ROCm, which skips for its own reason -- and one exportable arch.
+    CUDA = {"torch.version.hip is not None": False}
+    ARCH = {"TORCH_CUDA_ARCH_LIST": "10.0a"}
+
+    def _run(
+        self,
+        probes,
+        env=None,
+        missing=(),
+        declarations=True,
+        platform="linux",
+        cuda_major="13",
+    ):
+        # probes: expr -> bool, in place of a real torch subprocess.
+        #
+        # missing_runtimes is patched so these cases do not depend on the runner
+        # having the DSL wheels (the Test tools job does not).
+        #
+        # REPO points at a temp tree holding one declaration (none for
+        # `declarations=False`), because should_run skips when nothing declares
+        # kernels: reading the real tree made every RUN case depend on which
+        # commit is checked out.
+        with contextlib.ExitStack() as stack:
+            repo = stack.enter_context(tempfile.TemporaryDirectory())
+            ops = os.path.join(repo, "torch", "_native", "ops")
+            os.makedirs(ops)
+            if declarations:
+                os.makedirs(os.path.join(ops, "fakeop"))
+                open(os.path.join(ops, "fakeop", "aot.py"), "w").close()
+            stack.enter_context(mock.patch.object(build_stage2, "REPO", repo))
+            # The gate reads export.OPS_DIR (one spelling of the path, shared with
+            # the generator), so that is what has to be redirected.
+            stack.enter_context(mock.patch.object(export, "OPS_DIR", ops))
+            # BUILD_DIR at a temp dir, because both variables below fall back to
+            # the CMakeCache.txt when the environment does not carry them: at the
+            # real tree, five of these read the developer's own cached
+            # TORCH_CUDA_ARCH_LIST and rerouted every on-device case.
+            #
+            # The cache carries ONLY the CUDA major, which the >=13 gate reads --
+            # via the cache and not _torch_value, which the two on-device tests
+            # patch to answer every expression with an arch string, so a major
+            # from there reads "sm_100" and skips for an unrelated reason.
+            build = stack.enter_context(tempfile.TemporaryDirectory())
+            if cuda_major is not None:
+                with open(os.path.join(build, "CMakeCache.txt"), "w") as f:
+                    f.write(f"CUDAToolkit_VERSION_MAJOR:STRING={cuda_major}\n")
+            stack.enter_context(mock.patch.object(build_stage2, "BUILD_DIR", build))
+            # Neutralize the two variables should_run READS, before applying the
+            # caller's env: exported TORCH_NATIVE_AOT=0 failed eleven of these
+            # (every arm returns False first), and an exported
+            # TORCH_CUDA_ARCH_LIST silently rerouted the on-device cases -- one of
+            # which then passed with its gate deleted. Both are exported by this
+            # commit's own Test Plan. "" reads as absent for both.
+            stack.enter_context(
+                mock.patch.dict(
+                    os.environ,
+                    {"TORCH_NATIVE_AOT": "", "TORCH_CUDA_ARCH_LIST": ""},
+                    clear=False,
+                )
+            )
+            # sys.platform too: it is the arm should_run checks FIRST, so on a
+            # non-Linux box 11 of these tests failed for a reason none of them is
+            # about -- while the arm itself had no test at all. The default keeps
+            # every other case on the Linux path; test_a_non_linux_platform_skips
+            # overrides it.
+            stack.enter_context(mock.patch.object(sys, "platform", platform))
+            stack.enter_context(
+                mock.patch.object(
+                    build_stage2,
+                    "_torch_probe",
+                    side_effect=lambda e: probes.get(e, True),
+                )
+            )
+            stack.enter_context(
+                mock.patch.object(
+                    toolchains.Toolchain,
+                    "missing_runtimes",
+                    classmethod(lambda cls: list(missing)),
+                )
+            )
+            stack.enter_context(mock.patch.dict(os.environ, env or {}, clear=False))
+            return build_stage2.should_run()
+
+    def _run_on(self, version, free_threaded, missing):
+        """should_run() as if running on another interpreter.
+
+        Patches Py_GIL_DISABLED because that is what the gate reads, and what
+        pip's tag matching reads: a free-threaded build needs a cp3XXt wheel
+        even with the GIL re-enabled, where sys._is_gil_enabled() would say
+        otherwise."""
+        with (
+            mock.patch.object(build_stage2.sys, "version_info", _version(*version)),
+            mock.patch.object(
+                build_stage2.sysconfig,
+                "get_config_var",
+                lambda name: 1 if (name == "Py_GIL_DISABLED" and free_threaded) else 0,
+            ),
+        ):
+            return self._run(self.CUDA, self.ARCH, missing=missing)
+
+    def test_a_non_linux_platform_skips(self):
+        # Untested before: deleting the arm left the suite green, while its own
+        # comment records the failure it prevents -- a Windows or macOS CUDA build
+        # with a GPU and a declaration reached require_runtimes() and demanded
+        # wheels that do not exist for it. Everything downstream is ELF: the
+        # relink targets libtorch_cuda.so, and the version script is a GNU-ld
+        # option.
+        # hip False and an exportable arch list, i.e. inputs that otherwise RUN --
+        # all-probes-true means ROCm, which skips for its own reason.
+        for platform in ("darwin", "win32"):
+            with self.subTest(platform=platform):
+                self.assertFalse(self._run(self.CUDA, self.ARCH, platform=platform))
+        # ...and the same inputs on Linux RUN, so the assertion above is about the
+        # platform and not about some other arm firing first.
+        self.assertTrue(self._run(self.CUDA, self.ARCH))
+
+    def test_the_non_linux_skip_reason_names_the_platform(self):
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            self._run(self.CUDA, self.ARCH, platform="darwin")
+        self.assertIn("Linux-only", err.getvalue())
+        self.assertIn("darwin", err.getvalue())
+
+    def test_interpreter_without_a_dsl_wheel_skips(self):
+        # The release matrix builds 3.13t/3.15/3.15t, and the pinned
+        # nvidia-cutlass-dsl's cp-tagged -libs-* packages publish cp310-cp314
+        # plus cp314t, with no sdist. RUN there makes the CI shell run
+        # install_cutlass_dsl, which cannot resolve, and `set -ex` kills the
+        # wheel build -- for a reason nobody can fix. Not-applicable is honest.
+        for version, ft in (((3, 15), False), ((3, 15), True), ((3, 13), True)):
+            with self.subTest(version=version, free_threaded=ft):
+                self.assertFalse(self._run_on(version, ft, missing=("cutlass",)))
+
+    def test_supported_interpreters_still_run(self):
+        # 3.14t among them: cp314t wheels DO exist (verified against PyPI for the
+        # pin), and gating on free-threaded alone skipped it -- shipping a
+        # kernel-free 3.14t CUDA wheel, the silent underperformance this module
+        # exists to prevent. Free-threaded is not the question; a published tag is.
+        for version, ft in (
+            ((3, 10), False),
+            ((3, 13), False),
+            ((3, 14), False),
+            ((3, 14), True),
+        ):
+            with self.subTest(version=version, free_threaded=ft):
+                self.assertTrue(self._run_on(version, ft, missing=("cutlass",)))
+
+    def test_interpreter_gate_survives_a_runtime_less_toolchain(self):
+        # The gate asks "must this build install something?", so ONE toolchain
+        # missing its runtimes is enough. Written because patching
+        # Toolchain.missing_runtimes on the BASE class (as the other cases here
+        # do) makes every kind answer identically, which cannot tell `all` from
+        # `any` -- and with `all` the gate was dead from the moment Triton was
+        # registered, since a kind that needs no runtimes always reports none
+        # missing. Two kinds with DIFFERENT answers is the only shape that sees it.
+        class _NeedsNothing(toolchains.Toolchain):
+            kind = "needsnothing"
+
+        class _NeedsWheels(toolchains.Toolchain):
+            kind = "needswheels"
+            REQUIRED_RUNTIMES = ("definitely_not_installed",)
+
+        registry = {"needsnothing": _NeedsNothing(), "needswheels": _NeedsWheels()}
+        with (
+            mock.patch.dict(toolchains.TOOLCHAINS, registry, clear=True),
+            # Environment and platform too, like _run: with only REPO patched, an
+            # exported or cached TORCH_NATIVE_AOT=0 returned False at the first arm
+            # and this passed without reaching its own predicate.
+            mock.patch.dict(
+                os.environ, {"TORCH_NATIVE_AOT": "", "TORCH_CUDA_ARCH_LIST": ""}
+            ),
+            mock.patch.object(sys, "platform", "linux"),
+            mock.patch.object(build_stage2.sys, "version_info", _version(3, 15)),
+            mock.patch.object(build_stage2.sysconfig, "get_config_var", lambda name: 0),
+        ):
+            # No base-class patch here: each kind answers for itself.
+            with contextlib.ExitStack() as stack:
+                repo = stack.enter_context(tempfile.TemporaryDirectory())
+                d = os.path.join(repo, "torch", "_native", "ops", "fakeop")
+                os.makedirs(d)
+                open(os.path.join(d, "aot.py"), "w").close()
+                stack.enter_context(mock.patch.object(build_stage2, "REPO", repo))
+                # OPS_DIR, which is what should_run actually reads (REPO alone left
+                # the declarations arm looking at the developer's real tree), and a
+                # BUILD_DIR whose cache pins the CUDA major -- the >=13 gate runs
+                # first, and undetermined there satisfied this assertFalse from the
+                # wrong arm wherever torch is absent.
+                stack.enter_context(
+                    mock.patch.object(export, "OPS_DIR", os.path.dirname(d))
+                )
+                build = stack.enter_context(tempfile.TemporaryDirectory())
+                with open(os.path.join(build, "CMakeCache.txt"), "w") as f:
+                    f.write("CUDAToolkit_VERSION_MAJOR:STRING=13\n")
+                stack.enter_context(mock.patch.object(build_stage2, "BUILD_DIR", build))
+                stack.enter_context(
+                    mock.patch.object(
+                        build_stage2,
+                        "_torch_probe",
+                        lambda e: e != "torch.version.hip is not None",
+                    )
+                )
+                stack.enter_context(
+                    mock.patch.dict(
+                        os.environ, {"TORCH_CUDA_ARCH_LIST": "10.0a"}, clear=False
+                    )
+                )
+                self.assertFalse(build_stage2.should_run())
+
+    def test_installed_wheels_beat_the_published_tags(self):
+        # The bound is consulted ONLY when the runtimes are absent. If they
+        # import, they are installable on this interpreter whatever PyPI
+        # publishes today -- so a newly-supported python needs no edit here, and
+        # a stale bound cannot silently drop kernels from a build that has the
+        # wheels in hand.
+        self.assertTrue(self._run_on((3, 15), True, missing=()))
+
+    def test_missing_runtime_is_fatal(self):
+        # A declared kernel that cannot be built must fail the build, not ship
+        # a slower wheel. Enforced by require_runtimes, called only once stage 2
+        # is really running -- NOT by should_run, whose answer the CI shells use
+        # to decide whether to install those very runtimes.
+        #
+        # The message must name INSTALLABLE distributions: this is the only error
+        # text a developer sees for the stack's one hard failure, and it used to
+        # say `pip install cutlass tvm_ffi` -- two unrelated projects on PyPI. A
+        # regex on "runtimes are not installed" alone let that come back.
+        with (
+            mock.patch.object(build_stage2, "_torch_probe", lambda e: False),
+            mock.patch.object(
+                toolchains.Toolchain,
+                "missing_runtimes",
+                classmethod(lambda cls: ["cutlass"]),
+            ),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "runtimes are not installed"):
+                build_stage2.require_runtimes()
+
+    def test_verdict_never_demands_the_runtimes_it_asks_for(self):
+        # The verdict tells the CI shells whether to INSTALL the DSL wheels, so it
+        # cannot require them: raising left stdout empty, the shell skipped the
+        # install, and the real run failed on the runtimes it was meant to
+        # request -- on every CUDA build job.
+        self.assertTrue(self._run(self.CUDA, self.ARCH, missing=("cutlass",)))
+
+    def test_skips_when_no_declarations_exist(self):
+        # No aot.py in the tree means stage 2 would export nothing, so demanding
+        # ~190MB of DSL wheels for it is wrong -- and this is the state of the
+        # first commits of this stack, so a bisect landed on a build that failed
+        # for want of wheels it would then have used for nothing.
+        self.assertFalse(self._run(self.CUDA, self.ARCH, declarations=False))
+        # ...and one declaration is enough to proceed.
+        self.assertTrue(self._run(self.CUDA, self.ARCH, declarations=True))
+
+    def test_torch_value_returns_the_marked_value(self):
+        # Every other test patches _torch_value out, leaving two mutations
+        # invisible: returning the line WITH its marker, and dropping the marker
+        # protocol. Either makes should_run compare "NAOT_VALUE:sm_100" against
+        # EXPORTABLE_ARCHES, so every on-device build silently skips stage 2.
+        #
+        # Stubbed, not run for real: the marker protocol is the subject and needs
+        # no torch, which lint.yml's "Test tools" image does not install.
+        for stdout, want in (
+            ("NAOT_VALUE:2\n", "2"),
+            ("NAOT_VALUE:sm_100\n", "sm_100"),
+            # A line before the marker (a warning, a site hook) must not become
+            # the value, and an empty value is still a value.
+            ("some warning\nNAOT_VALUE:sm_90a\n", "sm_90a"),
+            ("NAOT_VALUE:\n", ""),
+        ):
+            with self.subTest(stdout=stdout):
+                done = subprocess.CompletedProcess([], 0, stdout=stdout, stderr="")
+                with mock.patch.object(subprocess, "run", return_value=done):
+                    self.assertEqual(build_stage2._torch_value("expr"), want)
+
+    def test_torch_value_is_none_without_a_marker(self):
+        # No marker means the expression never evaluated. Stubbed for the reason
+        # above: `1 / 0` had to import a real torch before it could raise.
+        done = subprocess.CompletedProcess([], 1, stdout="", stderr="ZeroDivisionError")
+        with mock.patch.object(subprocess, "run", return_value=done):
+            self.assertIsNone(build_stage2._torch_value("1 / 0"))
+
+    def test_probe_verdict_comes_from_stdout_not_the_exit_code(self):
+        # The documented reason for the marker protocol: a CUDA torch can segfault
+        # in interpreter teardown AFTER the expression evaluated, so a verdict
+        # taken from the exit code is corrupted by a crash that came too late to
+        # matter. Reading returncode instead survived the whole suite.
+        import subprocess as sp
+
+        crashed = sp.CompletedProcess(
+            args=[], returncode=-11, stdout="PROBE_OK\n", stderr=""
+        )
+        with mock.patch.object(build_stage2.subprocess, "run", return_value=crashed):
+            self.assertTrue(build_stage2._torch_probe("True"))
+        lied = sp.CompletedProcess(
+            args=[], returncode=0, stdout="PROBE_NO\n", stderr=""
+        )
+        with mock.patch.object(build_stage2.subprocess, "run", return_value=lied):
+            self.assertFalse(build_stage2._torch_probe("True"))
+
+    def test_probe_diagnostics_stay_off_stdout(self):
+        # Exercises the REAL subprocess probe, which every other test in this
+        # class mocks -- which is how a print() to stdout survived inside it
+        # while the purity test above kept passing. A raising expression leaves
+        # no verdict and a non-empty stderr, the one path that reports it.
+        import contextlib
+        import io
+
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            self.assertFalse(build_stage2._torch_probe("1 / 0"))
+        self.assertEqual(out.getvalue(), "", "diagnostics must not reach stdout")
+        self.assertIn("produced no verdict", err.getvalue())
+
+    def test_on_device_export_checks_the_local_arch(self):
+        # Untested until now: deleting this gate left the suite green. Its
+        # comment records a real failure -- a dev box outside EXPORTABLE_ARCHES
+        # (sm_86, sm_120) exported for its own arch and failed in GENERATION,
+        # after a successful build, leaving a tree that would not configure.
+        # No TORCH_CUDA_ARCH_LIST, so resolution goes through the device.
+        for local, expected in (("sm_86", False), ("sm_120", False), ("sm_100", True)):
+            with self.subTest(local=local):
+                with mock.patch.object(
+                    build_stage2, "_torch_value", lambda expr, a=local: a
+                ):
+                    self.assertEqual(self._run(self.CUDA), expected)
+
+    def test_on_device_arch_is_read_out_of_process(self):
+        # Via _torch_value, not export._detected_arch(): that imports torch and
+        # initializes CUDA in the driver process, which is what _torch_probe
+        # exists to avoid -- and a teardown segfault there fails a stage 2 that
+        # had already succeeded.
+        with (
+            mock.patch.object(export, "_detected_arch", side_effect=AssertionError),
+            mock.patch.object(build_stage2, "_torch_value", lambda expr: "sm_100"),
+        ):
+            self.assertTrue(self._run(self.CUDA))
+
+    def test_disabled_by_env(self):
+        self.assertFalse(self._run({}, {"TORCH_NATIVE_AOT": "0"}))
+
+    def test_skips_when_torch_not_importable(self):
+        self.assertFalse(self._run({"True": False}))
+
+    def test_skips_when_torch_built_without_cuda(self):
+        self.assertFalse(self._run({"torch.backends.cuda.is_built()": False}))
+
+    def test_skips_on_rocm_with_no_rocm_toolchain(self):
+        # ROCm has no AOT toolchain, so absent DSL wheels are expected there
+        # rather than a missing dependency.
+        self.assertFalse(self._run({"torch.version.hip is not None": True}, self.ARCH))
+
+    def test_cuda_12_skips(self):
+        # CUDA 12 tops out at sm_90 (.ci/manywheel/build_env_setup.py's arch
+        # table) and every 13.x config builds sm_90 too, so a 12.x export is a
+        # strict subset of what the 13.x wheels already ship. The saving is the
+        # export AND the DSL wheel install: .ci/pytorch/build.sh calls
+        # install_cutlass_dsl only when --print-verdict says RUN.
+        for major in ("11", "12"):
+            with self.subTest(major=major):
+                self.assertFalse(self._run(self.CUDA, self.ARCH, cuda_major=major))
+        # ...and the same inputs on 13 and on a future 14 RUN, so this is about the
+        # major and not some other arm firing first.
+        for major in ("13", "14"):
+            with self.subTest(major=major):
+                self.assertTrue(self._run(self.CUDA, self.ARCH, cuda_major=major))
+
+    def test_an_undeterminable_cuda_major_skips(self):
+        # Counts as too old rather than "assume new enough":
+        # _dsl_runtime_archive() cannot pick a per-major runtime without it, and
+        # guessing links one built for another toolkit. _torch_value patched to ""
+        # because with no cache entry the major falls through to it.
+        with mock.patch.object(build_stage2, "_torch_value", lambda expr: ""):
+            self.assertFalse(self._run(self.CUDA, self.ARCH, cuda_major=None))
+
+    def test_the_cuda_major_skip_reason_names_the_version(self):
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            self._run(self.CUDA, self.ARCH, cuda_major="12")
+        self.assertIn("CUDA 12", err.getvalue())
+        self.assertIn(f"CUDA {build_stage2._MIN_CUDA_MAJOR} or newer", err.getvalue())
+
+    def test_rocm_is_not_gated_on_a_cuda_major(self):
+        # ROCm reports no CUDA version at all, so a major gate applied to it would
+        # skip a ROCm build for a reason that cannot apply to one.
+        #
+        # A fake ROCm toolchain is REGISTERED for this, because without one
+        # should_run returns at "no AOT toolchain targets rocm" before the gate is
+        # ever reached -- so the test that first stood here passed with the
+        # backend guard deleted. That is the shape a future ROCm DSL takes
+        # (BACKENDS = ("rocm",), per test_every_toolchain_declares_backends).
+        class _RocmToolchain(toolchains.Toolchain):
+            kind = "fakerocm"
+            BACKENDS = ("rocm",)
+
+        # _torch_value too: with no cache entry the major falls through to the
+        # INSTALLED torch, which on a CUDA box reports 13 and lets the gate pass on
+        # a ROCm build -- so this test passed with the backend guard deleted until
+        # the fallback was pinned as well.
+        with (
+            mock.patch.dict(
+                toolchains.TOOLCHAINS, {"fakerocm": _RocmToolchain()}, clear=False
+            ),
+            mock.patch.object(build_stage2, "_torch_value", lambda expr: ""),
+        ):
+            self.assertTrue(
+                self._run(
+                    {"torch.version.hip is not None": True}, self.ARCH, cuda_major=None
+                )
+            )
+
+    def test_skips_when_arch_list_has_no_exportable_arch(self):
+        # 8.0 and 7.5 are below the kernels' floor (TMA, clusters), so nothing
+        # to export. 9.0a IS exportable now, hence not in this list.
+        self.assertFalse(self._run(self.CUDA, {"TORCH_CUDA_ARCH_LIST": "7.5;8.0"}))
+
+    def test_multi_exportable_arch_runs(self):
+        # Was fatal while nested per-arch artifacts were walked by neither the
+        # generator nor the CMake globs (a kernel-less wheel, silently). Now
+        # supported end to end: one tree per arch, a per-capability selector,
+        # and link globs at both depths.
+        self.assertTrue(self._run(self.CUDA, {"TORCH_CUDA_ARCH_LIST": "10.0;10.0a"}))
+
+    def test_runs_for_a_single_exportable_arch(self):
+        self.assertTrue(self._run(self.CUDA, self.ARCH))
+
+    def test_skips_without_arch_list_and_without_a_gpu(self):
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("TORCH_CUDA_ARCH_LIST", None)
+            self.assertFalse(
+                self._run(
+                    {
+                        "torch.version.hip is not None": False,
+                        "torch.cuda.is_available()": False,
+                    }
+                )
+            )
+
+
 class TestInt32GateTypeClassifier(unittest.TestCase):
     def test_plain_and_optional_tensors_are_gated(self):
         gate = gen_aot_lib._int32_size_gate(
@@ -2120,6 +2570,271 @@ class TestGeneratedVersionScript(unittest.TestCase):
         self.assertTrue(patterns)
         for p in patterns:
             self.assertIn("topk_f32_n1024_k8", p, f"unanchored pattern: {p}")
+
+
+class TestBuildInputsFromTheCMakeCache(unittest.TestCase):
+    """CMake resolves TORCH_CUDA_ARCH_LIST and TORCH_NATIVE_AOT from its own
+    variables first and the environment only as their default, so a build
+    configured with -D... has neither in the environment. Reading only the
+    environment made stage 2 record ARCH_LIST_ABSENT for those builds -- which
+    caffe2/CMakeLists.txt treats as "no claim, embed what is there" -- so the
+    staleness guard was dead exactly where -D is used."""
+
+    @contextlib.contextmanager
+    def _build_dir(self, cache_text):
+        with tempfile.TemporaryDirectory() as d:
+            if cache_text is not None:
+                with open(os.path.join(d, "CMakeCache.txt"), "w") as f:
+                    f.write(cache_text)
+            with (
+                mock.patch.object(build_stage2, "BUILD_DIR", d),
+                mock.patch.dict(
+                    os.environ,
+                    {"TORCH_CUDA_ARCH_LIST": "", "TORCH_NATIVE_AOT": ""},
+                    clear=False,
+                ),
+            ):
+                yield d
+
+    def test_arch_list_comes_from_the_cache_when_the_env_is_unset(self):
+        cache = (
+            "//From env\n"
+            "TORCH_CUDA_ARCH_LIST:STRING=9.0a;10.0a\n"
+            "CMAKE_BUILD_TYPE:STRING=Release\n"
+        )
+        with self._build_dir(cache):
+            self.assertEqual(build_stage2._arch_list(), "9.0a;10.0a")
+
+    def test_the_environment_still_wins(self):
+        with self._build_dir("TORCH_CUDA_ARCH_LIST:STRING=8.0\n"):
+            with mock.patch.dict(os.environ, {"TORCH_CUDA_ARCH_LIST": "10.0a"}):
+                self.assertEqual(build_stage2._arch_list(), "10.0a")
+
+    def test_no_cache_and_no_env_is_empty(self):
+        # The on-device path: no arch list at all, rather than a crash or a value
+        # inherited from some other build tree.
+        with self._build_dir(None):
+            self.assertEqual(build_stage2._arch_list(), "")
+
+    def test_a_similarly_named_entry_is_not_mistaken_for_it(self):
+        # Prefix matching would read TORCH_CUDA_ARCH_LIST_EXTRA here.
+        with self._build_dir("TORCH_CUDA_ARCH_LIST_EXTRA:STRING=7.5\n"):
+            self.assertEqual(build_stage2._arch_list(), "")
+
+    def test_the_opt_out_is_honored_from_the_cache(self):
+        # caffe2/CMakeLists.txt caches TORCH_NATIVE_AOT so the opt-out survives a
+        # reconfigure with no environment. If stage 2 read only the environment, a
+        # manual run in such a tree would export, relink a library CMake had
+        # declined to embed anything into, and then fail its own post-relink
+        # "reports no embedded kernels" check.
+        with self._build_dir("TORCH_NATIVE_AOT:STRING=0\n"):
+            self.assertTrue(build_stage2._opted_out())
+        with self._build_dir("TORCH_NATIVE_AOT:STRING=1\n"):
+            self.assertFalse(build_stage2._opted_out())
+
+    def test_the_environment_can_re_enable_it(self):
+        with self._build_dir("TORCH_NATIVE_AOT:STRING=0\n"):
+            with mock.patch.dict(os.environ, {"TORCH_NATIVE_AOT": "1"}):
+                self.assertFalse(build_stage2._opted_out())
+
+
+class TestDslRuntimeArchive(unittest.TestCase):
+    """Which dialect runtime the CuTeDSL kernel objects link against.
+
+    4.6.x splits the archive per CUDA major (cu12/lib/, cu13/lib/) and the two
+    really do differ -- identical sizes, different contents -- so taking whichever
+    one is present links a runtime built for another toolkit into libtorch_cuda.
+    Untested until now, while being the one lookup in stage 2 that can fail a
+    build."""
+
+    ARCHIVE = "libcuda_dialect_runtime_static.a"
+
+    @contextlib.contextmanager
+    def _wheel(self, subdirs, cuda_major="13", env_dir="venv"):
+        """A fake nvidia_cutlass_dsl tree with an archive under each of subdirs
+        ("" for the pre-4.6 unsplit layout).
+
+        ``env_dir`` names the directory the package sits in, which a caller can spell
+        cu12/cu13 to stand in for a venv or conda environment named after a CUDA
+        version -- the archive match must not see it."""
+        with tempfile.TemporaryDirectory() as d:
+            root = os.path.join(d, env_dir, "site-packages", "nvidia_cutlass_dsl")
+            bld = os.path.join(d, "build")
+            os.makedirs(root)
+            os.makedirs(bld)
+            for sub in subdirs:
+                lib = os.path.join(root, sub, "lib")
+                os.makedirs(lib)
+                open(os.path.join(lib, self.ARCHIVE), "w").close()
+            if cuda_major is not None:
+                with open(os.path.join(bld, "CMakeCache.txt"), "w") as f:
+                    f.write(f"CUDAToolkit_VERSION_MAJOR:STRING={cuda_major}\n")
+            spec = mock.Mock(submodule_search_locations=[root])
+            with (
+                mock.patch.object(build_stage2, "BUILD_DIR", bld),
+                mock.patch("importlib.util.find_spec", return_value=spec),
+            ):
+                yield root
+
+    def test_picks_the_archive_for_this_major(self):
+        with self._wheel(("cu12", "cu13"), cuda_major="13") as root:
+            got = build_stage2._dsl_runtime_archive()
+        self.assertEqual(got, os.path.join(root, "cu13", "lib", self.ARCHIVE))
+
+    def test_a_wheel_with_no_archive_for_this_major_warns_and_links_one(self):
+        # cu12 is a hard dependency and cu13 is behind an extra, so a plain install
+        # on a CUDA 13 build leaves ONLY cu12. Refusing failed the build; the two
+        # 4.6.2 archives are the same objects and a CUDA 13.2 build linked against
+        # cu12 passed the AOT suite, so warn and link it.
+        with self._wheel(("cu12",), cuda_major="13") as root:
+            with contextlib.redirect_stderr(io.StringIO()) as err:
+                got = build_stage2._dsl_runtime_archive()
+        self.assertEqual(got, os.path.join(root, "cu12", "lib", self.ARCHIVE))
+        self.assertIn("no dialect runtime for CUDA 13", err.getvalue())
+        self.assertIn("cu13", err.getvalue(), "the warning should name the extra")
+
+    def test_the_mismatch_fallback_takes_the_highest_major(self):
+        # Deterministic, so two builds of one environment link the same file.
+        with self._wheel(("cu12", "cu13"), cuda_major="14") as root:
+            with contextlib.redirect_stderr(io.StringIO()):
+                got = build_stage2._dsl_runtime_archive()
+        self.assertEqual(got, os.path.join(root, "cu13", "lib", self.ARCHIVE))
+
+    def test_a_matching_major_warns_about_nothing(self):
+        # Absence of THIS warning, not an empty stream: asserting emptiness failed in
+        # the torch-less lint image, where _cuda_major's torch probe reported itself
+        # (fixed -- the probes are lazy now -- but the assertion should not have been
+        # coupled to unrelated output either way).
+        with self._wheel(("cu12", "cu13"), cuda_major="13"):
+            with contextlib.redirect_stderr(io.StringIO()) as err:
+                build_stage2._dsl_runtime_archive()
+        self.assertNotIn("no dialect runtime", err.getvalue())
+
+    def test_the_cache_answering_skips_the_torch_probe(self):
+        # The torch subprocess is the expensive probe and the only one that can fail
+        # noisily; a configured build never needs it.
+        with self._wheel(("cu13",), cuda_major="13"):
+            with mock.patch.object(
+                build_stage2, "_torch_value", side_effect=AssertionError("probed torch")
+            ):
+                self.assertEqual(build_stage2._cuda_major(), 13)
+
+    def test_an_unsplit_wheel_is_taken_as_is(self):
+        # Pre-4.6 shipped one archive at <root>/lib/ with no major in the path.
+        with self._wheel(("",), cuda_major="13") as root:
+            got = build_stage2._dsl_runtime_archive()
+        self.assertEqual(got, os.path.join(root, "lib", self.ARCHIVE))
+
+    def test_no_archive_at_all_is_none_not_an_error(self):
+        # A wheel without the archive means this build embeds no CuTeDSL objects;
+        # the generator then emits CMake with no runtime to link, which is correct
+        # for a Triton-only export.
+        with self._wheel(()):
+            self.assertIsNone(build_stage2._dsl_runtime_archive())
+
+    def test_no_wheel_is_none(self):
+        with mock.patch("importlib.util.find_spec", return_value=None):
+            self.assertIsNone(build_stage2._dsl_runtime_archive())
+
+    def test_the_environments_own_directory_name_does_not_select_the_major(self):
+        # The match reads components RELATIVE to the package root. Split on the
+        # ABSOLUTE path it also saw the venv or conda directory, so an environment
+        # named cu12/cu13 matched BOTH archives and the walk order picked one --
+        # silently linking a runtime built for the other toolkit.
+        for env_dir in ("cu12", "cu13"):
+            with self.subTest(env_dir=env_dir):
+                with self._wheel(("cu12", "cu13"), env_dir=env_dir) as root:
+                    got = build_stage2._dsl_runtime_archive()
+                self.assertEqual(got, os.path.join(root, "cu13", "lib", self.ARCHIVE))
+
+    def test_an_unsplit_wheel_under_a_cu_named_environment_is_still_unsplit(self):
+        # The same absolute-path bug's other face: it made a pre-4.6 wheel, whose one
+        # archive has no major in its path, look split -- and then hard-refused with
+        # advice about installing an extra that layout does not have.
+        with self._wheel(("",), env_dir="cu12") as root:
+            got = build_stage2._dsl_runtime_archive()
+        self.assertEqual(got, os.path.join(root, "lib", self.ARCHIVE))
+
+
+class TestCudaMajor(unittest.TestCase):
+    """The >=13 gate and the archive lookup share one answer for "which CUDA is
+    this build", so it is read in one place."""
+
+    @contextlib.contextmanager
+    def _cache(self, text, torch_reports=""):
+        reported = torch_reports
+        with tempfile.TemporaryDirectory() as d:
+            if text is not None:
+                with open(os.path.join(d, "CMakeCache.txt"), "w") as f:
+                    f.write(text)
+            with (
+                mock.patch.object(build_stage2, "BUILD_DIR", d),
+                mock.patch.object(build_stage2, "_torch_value", lambda e: reported),
+            ):
+                yield
+
+    def test_reads_the_toolkit_major_from_the_cache(self):
+        with self._cache("CUDAToolkit_VERSION_MAJOR:STRING=13\n"):
+            self.assertEqual(build_stage2._cuda_major(), 13)
+
+    def test_falls_back_to_the_full_cached_version(self):
+        with self._cache("CUDA_VERSION:STRING=13.2\n"):
+            self.assertEqual(build_stage2._cuda_major(), 13)
+
+    def test_falls_back_to_the_installed_torch(self):
+        # An unconfigured tree, or a manual stage-2 run against an installed wheel.
+        with self._cache(None, torch_reports="12.6"):
+            self.assertEqual(build_stage2._cuda_major(), 12)
+
+    def test_no_source_is_none(self):
+        with self._cache(None):
+            self.assertIsNone(build_stage2._cuda_major())
+
+    def test_a_non_numeric_value_does_not_become_a_major(self):
+        # _torch_value answers with an arch string in two of the should_run tests,
+        # and int("sm_100") would raise rather than fall through.
+        with self._cache("CUDAToolkit_VERSION_MAJOR:STRING=\n", torch_reports="sm_100"):
+            self.assertIsNone(build_stage2._cuda_major())
+
+
+class TestProbeDiagnostics(unittest.TestCase):
+    """A probe that produces no verdict must say why: the caller degrades to a
+    skip, and a silent one reads as a confident answer about the build."""
+
+    def _probe(self, returncode, stderr):
+        done = subprocess.CompletedProcess([], returncode, stdout="", stderr=stderr)
+        with (
+            mock.patch.object(subprocess, "run", return_value=done),
+            contextlib.redirect_stderr(io.StringIO()) as err,
+        ):
+            build_stage2._torch_probe("torch.backends.cuda.is_built()")
+        return err.getvalue()
+
+    def test_a_signal_killed_probe_is_reported(self):
+        # An OOM kill or an import-time segfault writes NEITHER stream, so the
+        # `if stderr.strip()` guard reported nothing at all and the caller logged
+        # "skipped (torch built without CUDA)" -- a confident wrong reason, with a
+        # release CUDA wheel then shipping no kernels, green and silent.
+        out = self._probe(-9, "")
+        self.assertIn("no verdict", out)
+        self.assertIn("signal 9", out)
+
+    def test_the_childs_stderr_is_still_forwarded(self):
+        out = self._probe(1, "ImportError: libcudart.so.13: cannot open")
+        self.assertIn("libcudart.so.13", out)
+        self.assertIn("exit 1", out)
+
+    def test_diagnostics_stay_off_stdout(self):
+        done = subprocess.CompletedProcess([], -11, stdout="", stderr="")
+        with (
+            mock.patch.object(subprocess, "run", return_value=done),
+            contextlib.redirect_stdout(io.StringIO()) as out,
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
+            build_stage2._torch_probe("True")
+        # --print-verdict writes a machine-read word to stdout and the CI shells
+        # compare it with ==.
+        self.assertEqual(out.getvalue(), "")
 
 
 class TestRegistryConsistency(unittest.TestCase):
@@ -2759,6 +3474,141 @@ class TestCollectJobsRefusals(unittest.TestCase):
                 (job,) = export._collect_jobs(None, out, [None])
         self.assertEqual(os.path.basename(os.path.dirname(job[3])), "sm_100a")
         self.assertEqual(job[4], "sm_100a")
+
+
+class TestStaticBuildSkips(unittest.TestCase):
+    def test_build_shared_libs_off_skips_cleanly(self):
+        # caffe2/CMakeLists.txt refuses to embed into a static torch_cuda (CMake
+        # silently discards target_link_options for an archive, so the version
+        # script would evaporate). Skipping HERE makes it the same "not
+        # applicable" answer as the Linux check, instead of a full export followed
+        # by a configure error that every later build of that tree repeats.
+        with contextlib.ExitStack() as stack:
+            build = stack.enter_context(tempfile.TemporaryDirectory())
+            with open(os.path.join(build, "CMakeCache.txt"), "w") as f:
+                # The CUDA major too: the >=13 gate runs BEFORE this arm, and with
+                # the major absent it falls through to the INSTALLED torch -- so the
+                # skip came from the wrong arm wherever torch is missing, which is
+                # the image CI runs this file in.
+                f.write(
+                    "CUDAToolkit_VERSION_MAJOR:STRING=13\nBUILD_SHARED_LIBS:BOOL=OFF\n"
+                )
+            stack.enter_context(mock.patch.object(build_stage2, "BUILD_DIR", build))
+            stack.enter_context(
+                mock.patch.dict(
+                    os.environ,
+                    {"TORCH_NATIVE_AOT": "", "TORCH_CUDA_ARCH_LIST": "10.0a"},
+                )
+            )
+            stack.enter_context(mock.patch.object(sys, "platform", "linux"))
+            stack.enter_context(
+                mock.patch.object(
+                    build_stage2,
+                    "_torch_probe",
+                    lambda e: e != "torch.version.hip is not None",
+                )
+            )
+            err = stack.enter_context(contextlib.redirect_stderr(io.StringIO()))
+            self.assertFalse(build_stage2.should_run())
+        self.assertIn("BUILD_SHARED_LIBS=OFF", err.getvalue())
+
+
+class TestCacheReadCannotRaise(unittest.TestCase):
+    """should_run() promises never to raise, and the cache read is the first thing
+    it does: a traceback from --print-verdict makes the CI shell read "" != RUN,
+    skip installing the runtimes, and the real invocation then fail demanding
+    them."""
+
+    def test_an_unreadable_cache_is_treated_as_unset(self):
+        with contextlib.ExitStack() as stack:
+            build = stack.enter_context(tempfile.TemporaryDirectory())
+            cache = os.path.join(build, "CMakeCache.txt")
+            with open(cache, "w") as f:
+                f.write("TORCH_CUDA_ARCH_LIST:STRING=9.0\n")
+            os.chmod(cache, 0)
+            stack.enter_context(mock.patch.object(build_stage2, "BUILD_DIR", build))
+            stack.enter_context(
+                mock.patch.dict(os.environ, {"TORCH_CUDA_ARCH_LIST": ""})
+            )
+            stack.enter_context(contextlib.redirect_stderr(io.StringIO()))
+            try:
+                self.assertEqual(build_stage2._arch_list(), "")
+            finally:
+                os.chmod(cache, 0o644)
+
+    def test_a_directory_named_cmakecache_is_treated_as_unset(self):
+        with contextlib.ExitStack() as stack:
+            build = stack.enter_context(tempfile.TemporaryDirectory())
+            os.makedirs(os.path.join(build, "CMakeCache.txt"))
+            stack.enter_context(mock.patch.object(build_stage2, "BUILD_DIR", build))
+            stack.enter_context(mock.patch.dict(os.environ, {"TORCH_NATIVE_AOT": ""}))
+            stack.enter_context(contextlib.redirect_stderr(io.StringIO()))
+            self.assertFalse(build_stage2._opted_out())
+
+
+class TestOptOutSpellings(unittest.TestCase):
+    """The two sides must agree: a spelling one honours and the other ignores means
+    the build embeds kernels while stage 2 thinks it opted out, or the reverse."""
+
+    def _opted(self, value, cached=False):
+        with contextlib.ExitStack() as stack:
+            build = stack.enter_context(tempfile.TemporaryDirectory())
+            if cached:
+                with open(os.path.join(build, "CMakeCache.txt"), "w") as f:
+                    f.write(f"TORCH_NATIVE_AOT:STRING={value}\n")
+            stack.enter_context(mock.patch.object(build_stage2, "BUILD_DIR", build))
+            stack.enter_context(
+                mock.patch.dict(
+                    os.environ, {"TORCH_NATIVE_AOT": "" if cached else value}
+                )
+            )
+            stack.enter_context(contextlib.redirect_stderr(io.StringIO()))
+            return build_stage2._opted_out()
+
+    def test_cmake_falsy_spellings_opt_out(self):
+        # Declared as a cache STRING, so ccmake offers it as editable text and a
+        # user typing the idiomatic OFF got kernels embedded AND the hard runtime
+        # requirement, with no diagnostic.
+        for value in ("0", "OFF", "off", "false", "FALSE", "no", "N", "NOTFOUND"):
+            for cached in (False, True):
+                with self.subTest(value=value, cached=cached):
+                    self.assertTrue(self._opted(value, cached))
+
+    def test_truthy_spellings_do_not(self):
+        for value in ("1", "ON", "true", "yes", "2"):
+            for cached in (False, True):
+                with self.subTest(value=value, cached=cached):
+                    self.assertFalse(self._opted(value, cached))
+
+    def test_a_cache_entry_that_is_defined_but_empty_opts_out(self):
+        # `-DTORCH_NATIVE_AOT=` (an unset variable expanded into a -D) writes
+        # `TORCH_NATIVE_AOT:UNINITIALIZED=`, which CMake calls DEFINED-and-false, so
+        # the generated file embeds nothing. Reading "" as ABSENT had stage 2 export
+        # and relink for a build that wanted neither, and then fail its own
+        # post-relink check complaining about CMAKE_BINARY_DIR. Blank in the
+        # ENVIRONMENT still means absent (the test below) -- only the cache differs,
+        # because only there can a key be present with no value.
+        with contextlib.ExitStack() as stack:
+            build = stack.enter_context(tempfile.TemporaryDirectory())
+            with open(os.path.join(build, "CMakeCache.txt"), "w") as f:
+                f.write("TORCH_NATIVE_AOT:UNINITIALIZED=\n")
+            stack.enter_context(mock.patch.object(build_stage2, "BUILD_DIR", build))
+            stack.enter_context(mock.patch.dict(os.environ, {"TORCH_NATIVE_AOT": ""}))
+            stack.enter_context(contextlib.redirect_stderr(io.StringIO()))
+            self.assertTrue(build_stage2._opted_out())
+
+    def test_blank_means_absent_and_falls_through_to_the_cache(self):
+        # How a shell blanks a variable it will not unset. CMake treats blank as
+        # absent too (it no longer FORCEs the cache from 0 to empty), so a blank
+        # environment must fall through to the cache rather than read as "run".
+        with contextlib.ExitStack() as stack:
+            build = stack.enter_context(tempfile.TemporaryDirectory())
+            with open(os.path.join(build, "CMakeCache.txt"), "w") as f:
+                f.write("TORCH_NATIVE_AOT:STRING=0\n")
+            stack.enter_context(mock.patch.object(build_stage2, "BUILD_DIR", build))
+            stack.enter_context(mock.patch.dict(os.environ, {"TORCH_NATIVE_AOT": ""}))
+            stack.enter_context(contextlib.redirect_stderr(io.StringIO()))
+            self.assertTrue(build_stage2._opted_out())
 
 
 class TestOrphanCheckIsCalled(unittest.TestCase):
