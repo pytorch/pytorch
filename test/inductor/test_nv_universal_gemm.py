@@ -399,6 +399,52 @@ class TestNVUniversalGemm(TestCase):
         self.assertTrue(names)
         self.assertEqual(len(names), len(set(names)))
 
+    @unittest.skipIf(IS_FBCODE, "CUTLASS Operator API is not available in fbcode")
+    def test_vendored_dense_grouped_n_feed_main_filters_cta_shapes(self):
+        from cutlass import Float32
+
+        from torch._inductor.codegen.nv_universal_gemm.kernel_cache import (
+            _args_query_candidates,
+        )
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
+            _create_gemm_arguments,
+        )
+        from torch._inductor.kernel.gemm_epilogue import GemmReductionArguments
+
+        m, n, k = 128, 128, 64
+        a = torch.empty((m, k), device="cuda", dtype=torch.bfloat16)
+        b = torch.empty((k, n), device="cuda", dtype=torch.bfloat16)
+        out = torch.empty((m, n), device="cuda", dtype=torch.bfloat16)
+        feed = torch.empty((m, n), device="cuda")
+        args = _create_gemm_arguments(
+            "GEMM",
+            (a, b),
+            out,
+            Float32,
+            local_reduce=GemmReductionArguments(
+                group=16,
+                axis=1,
+                reduction_type="sum",
+                feeds_main=True,
+                feed_output=feed,
+                consumer_fn=(
+                    "def consumer(accumulator, reduction, _secondary):\n"
+                    "    return accumulator + reduction"
+                ),
+            ),
+        )
+        kernels = [
+            kernel
+            for kernel in _args_query_candidates(args, 100, efc_only=True)
+            if "VendoredDenseGemmEFCOperator" in kernel.metadata.operator_name
+        ]
+
+        self.assertTrue(kernels)
+        for kernel in kernels:
+            design = kernel.metadata.design
+            self.assertFalse(design.use_2cta_mma)
+            self.assertEqual(design.tile_shape[0], 128)
+
     def test_efc_epilogue_lookup_no_deadlock(self):
         """get_efc_kernel_with_epilogue holds _cache_lock and, when the base EFC
         kernel is not pre-resolved and misses the args cache, calls
@@ -1041,7 +1087,7 @@ class TestNVUniversalGemmHeuristics(TestCase):
             consumer_fn="generated_consumer",
         )
         self.assertFalse(GemmVariant.GEMM.supports_reduction(wide_consumer))
-        self.assertTrue(GemmVariant.SCALED_GEMM.supports_reduction(wide_consumer))
+        self.assertFalse(GemmVariant.SCALED_GEMM.supports_reduction(wide_consumer))
         unsupported = dataclasses.replace(plan, reduction_type="unsupported")
         self.assertFalse(GemmVariant.GEMM.supports_reduction(unsupported))
         self.assertTrue(GemmVariant.SCALED_GEMM.supports_reduction(plan))
@@ -1068,7 +1114,12 @@ class TestNVUniversalGemmHeuristics(TestCase):
         custom_secondary = dataclasses.replace(
             secondary, secondary_consumer_fn="generated_consumer"
         )
-        self.assertTrue(GemmVariant.GEMM.supports_reduction(custom_secondary))
+        self.assertFalse(GemmVariant.GEMM.supports_reduction(custom_secondary))
+        self.assertTrue(
+            GemmVariant.GEMM.supports_reduction(
+                dataclasses.replace(custom_secondary, feeds_main=True)
+            )
+        )
         self.assertFalse(GemmVariant.SCALED_GEMM.supports_reduction(custom_secondary))
         normalized_secondary = dataclasses.replace(
             secondary,
@@ -2618,6 +2669,33 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         self.assertIn("feeds_main=False", code)
         self.assertIn("output=out_ptr1", code)
         self.assertEqual(result, fn(a, b), atol=2e-2, rtol=2e-2)
+
+    def test_flex_gemm_grouped_n_outputs_share_physical_reduction(self):
+        m, n, k, group = 128, 128, 64, 16
+        a = torch.rand(m, k, device="cuda", dtype=torch.bfloat16) * 0.1
+        b = torch.rand(k, n, device="cuda", dtype=torch.bfloat16) * 0.1
+
+        def epilogue(acc):
+            grouped = acc.float().view(m, -1, group)
+            reduced = grouped.sum(-1, keepdim=True)
+            return (
+                (grouped + reduced).sqrt().reshape(m, n),
+                (grouped * reduced).reshape(m, n),
+            )
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue,
+                kernel_options={"backend": "NVGEMM"},
+            )
+
+        result, code, _ = self._compile_and_check(fn, a, b)
+        self.assertEqual(result, epilogue(a @ b), atol=2e-2, rtol=2e-2)
+        self.assertIn("VendoredDenseGemmEFCOperator", code)
+        self.assertIn("axis=1", code)
+        self.assertIn("_LOCAL_REDUCE_SECONDARY_CONSUMER_FN_SRC", code)
 
     def test_bf16_grouped_m_regrouped_reduction_reuse(self):
         m, n, k, group = 128, 64, 64, 8

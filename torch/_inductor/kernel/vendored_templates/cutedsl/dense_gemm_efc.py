@@ -2113,6 +2113,8 @@ class PersistentDenseGemmEFCKernel:
                                 elif cutlass.const_expr(group <= fragment_n):
                                     if cutlass.const_expr(
                                         self.local_reduce_consumer is not None
+                                        or self.local_reduce_secondary_consumer
+                                        is not None
                                     ):
                                         reduced_flt[i] = reduced
                                     reduced = self.local_reduce_finalize(reduced, group)
@@ -2263,6 +2265,33 @@ class PersistentDenseGemmEFCKernel:
                                                 value = float("nan")
                                         value = self.local_reduce_finalize(value, group)
                                         g_reduce[row_idx, group_idx] = value
+                        if cutlass.const_expr(
+                            local_reduce_secondary_feed_tensor is not None
+                            and self.local_reduce_secondary_consumer is not None
+                        ):
+                            output_m = cute.size(mA_mkl, mode=[0])
+                            output_n = cute.size(mB_nkl, mode=[0])
+                            for i in cutlass.range(
+                                cute.size(acc_flt), unroll_full=True
+                            ):
+                                global_m = (
+                                    mma_tile_coord_mnl[0] * self.cta_tile_shape_mnk[0]
+                                    + acc_coord_flt[i][0]
+                                )
+                                global_n = (
+                                    mma_tile_coord_mnl[1] * self.cta_tile_shape_mnk[1]
+                                    + acc_coord_flt[i][1]
+                                )
+                                if global_m < output_m and global_n < output_n:
+                                    local_reduce_secondary_feed_tensor[
+                                        global_m,
+                                        global_n,
+                                        mma_tile_coord_mnl[2],
+                                    ] = self.local_reduce_secondary_consumer(
+                                        acc_flt[i], reduced_flt[i], 0.0
+                                    ).to(
+                                        local_reduce_secondary_feed_tensor.element_type
+                                    )
                         if cutlass.const_expr(self.local_reduce_feeds_main):
                             primary_acc_vec = epilogue_context.acc_vec
                             for i in cutlass.range(
