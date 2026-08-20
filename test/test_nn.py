@@ -7681,6 +7681,21 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(y_cuda_ch_last, y_cuda_contig)
 
     @onlyCUDA
+    @dtypes(torch.float32, torch.float64, torch.float16, torch.bfloat16)
+    @parametrize_test("approximate", ["none", "tanh"])
+    def test_gelu_infinite_inputs(self, device, dtype, approximate):
+        # https://github.com/pytorch/pytorch/issues/185770
+        x = torch.tensor([float("inf"), -float("inf"), float("nan")],
+                         device=device, dtype=dtype)
+        out = F.gelu(x, approximate=approximate)
+        self.assertTrue(torch.isinf(out[0]) and out[0] > 0)
+        self.assertEqual(out[1].item(), 0.0)
+        self.assertTrue(torch.isnan(out[2]))
+
+        big = torch.full((1024,), -float("inf"), device=device, dtype=dtype)
+        self.assertEqual(F.gelu(big, approximate=approximate).abs().sum().item(), 0.0)
+
+    @onlyCUDA
     def test_large_reflect_pad(self, device):
         # https://github.com/pytorch/pytorch/issues/165861
         for shape in ((2**16, 2), (2**16, 1, 2)):
