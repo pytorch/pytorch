@@ -328,9 +328,9 @@ struct C10_API MemoryReportingInfoBase : public c10::DebugInfoBase {
   virtual bool memoryProfilingEnabled() const = 0;
 };
 
-// Sets the memory reporter used when no thread-local reporter is installed.
-// Passing nullptr prevents new reports and waits for in-flight reports to
-// finish before returning.
+// Atomically sets the memory reporter used when no thread-local reporter
+// exists. The caller is responsible for draining in-flight reports before
+// teardown.
 C10_API void setGlobalMemoryReportingInfo(
     std::shared_ptr<MemoryReportingInfoBase> reporter);
 
