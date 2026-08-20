@@ -545,12 +545,12 @@ class _TemplateLocalReductionOpsHandler(V.WrapperHandler):  # type: ignore[name-
 
     def load(self, name: str, index: sympy.Expr) -> CSEVariable:
         if name != self.stage.source_name:
-            raise CantSplit(name, self.stage.source_name)
+            return self._inner.load(name, index)
         if self.value is None:
             value = self._inner.load(name, index)
             if value.dtype is None:
                 raise AssertionError("reduction source must have a known dtype")
-            if name == self.kernel.output_node.get_name():
+            if self.stage.source_is_template_tile:
                 tile_m, tile_n = self.tile
                 block_m, block_n = self.block
                 groups_m = tile_m // block_m
@@ -2134,7 +2134,7 @@ class TritonTemplateKernel(TritonKernel):
             for stage in local_reduction_plan.stages:
                 if stage.output_name not in V.graph.removed_buffers:
                     self.args.output(stage.output_name)
-            routed_epilogues: list[Any] = []
+            routed_epilogues: list[Any] = list(local_reduction_plan.pointwise_nodes)
         else:
             routed_epilogues = epilogue_nodes
         self._epilogue_nodes_by_subgraph: defaultdict[int, list[Any]] = defaultdict(

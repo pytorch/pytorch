@@ -164,6 +164,7 @@ async_compile = AsyncCompile()
 class TemplateLocalReductionStage:
     reduction_node: SchedulerNode
     source_name: str
+    source_is_template_tile: bool
     output_name: str
     pointwise_ranges: tuple[sympy.Expr, ...]
     reduction_ranges: tuple[sympy.Expr, ...]
@@ -171,6 +172,7 @@ class TemplateLocalReductionStage:
 
 @dataclasses.dataclass(frozen=True)
 class TemplateLocalReductionPlan:
+    pointwise_nodes: tuple[SchedulerNode, ...]
     stages: tuple[TemplateLocalReductionStage, ...]
     block: tuple[int, int]
 
@@ -8262,23 +8264,46 @@ class TritonScheduling(SIMDScheduling):
         if len(template.get_size()) != 2:
             return None
 
-        chains: list[list[SchedulerNode]] = []
-        chain_by_last_buffer: dict[str, int] = {}
+        pointwise_nodes: list[SchedulerNode] = []
+        pointwise_outputs: dict[str, ir.ComputedBuffer] = {}
+        reduction_nodes: list[SchedulerNode] = []
+        saw_reduction = False
         for node in nodes:
+            if not isinstance(node, SchedulerNode):
+                return None
+            if node.is_reduction():
+                saw_reduction = True
+                reduction_nodes.append(node)
+            else:
+                if saw_reduction or not isinstance(node.node, ir.ComputedBuffer):
+                    return None
+                pointwise_nodes.append(node)
+                pointwise_outputs[node.node.get_name()] = node.node
+
+        chains: list[list[SchedulerNode]] = []
+        chain_sources: list[str] = []
+        chain_by_last_buffer: dict[str, int] = {}
+        for node in reduction_nodes:
             if not (
-                isinstance(node, SchedulerNode)
-                and node.is_reduction()
-                and isinstance(node.node, ir.ComputedBuffer)
+                isinstance(node.node, ir.ComputedBuffer)
                 and isinstance(node.node.data, ir.Reduction)
             ):
                 return None
             reads = OrderedSet(dep.name for dep in node.read_writes.reads)
-            if len(reads) != 1:
+            local_reads = [
+                read
+                for read in reads
+                if read == template.get_name()
+                or read in pointwise_outputs
+                or read in chain_by_last_buffer
+            ]
+            if len(local_reads) != 1:
                 return None
-            read = next(iter(reads))
-            if read == template.get_name():
+            read = local_reads[0]
+            if read == template.get_name() or read in pointwise_outputs:
                 chain = len(chains)
                 chains.append([])
+                chain_sources.append(read)
             elif read in chain_by_last_buffer:
                 chain = chain_by_last_buffer.pop(read)
             else:
@@ -8291,7 +8316,7 @@ class TritonScheduling(SIMDScheduling):
         m, n = template.get_size()
         stages: list[TemplateLocalReductionStage] = []
         block: tuple[int, int] | None = None
-        for reductions in chains:
+        for chain_index, reductions in enumerate(chains):
             buffers = [
                 cast(ir.ComputedBuffer, reduction.node) for reduction in reductions
             ]
@@ -8305,17 +8330,10 @@ class TritonScheduling(SIMDScheduling):
                 or len(first._original_reduction_ranges) != 2
             ):
                 return None
-            reduction_type = first.get_reduction_type()
-            if reduction_type not in {
-                "max",
-                "min",
-                "sum",
-            }:
-                return None
             if any(reduction._split_size is None for reduction in buffers[:-1]):
                 return None
             if any(
-                reduction.get_reduction_type() != reduction_type
+                reduction.get_reduction_type() not in {"max", "min", "sum"}
                 for reduction in buffers
             ):
                 return None
@@ -8345,6 +8363,17 @@ class TritonScheduling(SIMDScheduling):
                 first._original_ranges, expected_output
             ):
                 return None
+            source_name = chain_sources[chain_index]
+            source = (
+                template
+                if source_name == template.get_name()
+                else pointwise_outputs[source_name]
+            )
+            source_size = source.get_size()
+            if not V.graph.sizevars.statically_known_equals(
+                sympy_product(source_size), m * n
+            ):
+                return None
             with first.with_original_inner_fn():
                 read_writes = first.get_read_writes()
                 used_ops = first.data.inner_fn_opcount().used_ops
@@ -8359,12 +8388,11 @@ class TritonScheduling(SIMDScheduling):
                 source_reads = [
                     dep
                     for dep in read_writes.reads
-                    if isinstance(dep, MemoryDep) and dep.name == template.get_name()
+                    if isinstance(dep, MemoryDep) and dep.name == source_name
                 ]
                 range_vars = read_writes.range_vars
                 if (
                     len(source_reads) != 1
-                    or len(read_writes.reads) != 1
                     or read_writes.index_exprs
                     or range_vars is None
                     or len(range_vars) != 4
@@ -8380,9 +8408,9 @@ class TritonScheduling(SIMDScheduling):
                 if sympy.simplify(source_reads[0].index - expected_source_index) != 0:
                     return None
 
-            source_name = template.get_name()
-            source_size = template.get_size()
-            for reduction_node, reduction in zip(reductions, buffers):
+            for stage_index, (reduction_node, reduction) in enumerate(
+                zip(reductions, buffers)
+            ):
                 reduction_data = cast(ir.Reduction, reduction.data)
                 pointwise_ranges = tuple(
                     cast(sympy.Expr, sympy.sympify(value))
@@ -8409,6 +8437,7 @@ class TritonScheduling(SIMDScheduling):
                     TemplateLocalReductionStage(
                         reduction_node=reduction_node,
                         source_name=source_name,
+                        source_is_template_tile=stage_index == 0,
                         output_name=reduction.get_name(),
                         pointwise_ranges=pointwise_ranges,
                         reduction_ranges=reduction_ranges,
@@ -8434,7 +8463,7 @@ class TritonScheduling(SIMDScheduling):
                     return None
         if block is None:
             raise AssertionError("expected a template-local reduction block")
-        return TemplateLocalReductionPlan(tuple(stages), block)
+        return TemplateLocalReductionPlan(tuple(pointwise_nodes), tuple(stages), block)
 
     @classmethod
     def _template_supports_local_reduction_block(

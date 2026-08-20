@@ -181,14 +181,28 @@ class TestMaxAutotune(TestCase):
         has_datacenter_blackwell_tma_device(),
         "Hopper persistent TMA template is shadowed on Blackwell",
     )
-    def test_persistent_tma_block_local_reduction_epilogue(self):
-        def f(a, b):
+    @parametrize(
+        "case", ("template", "pointwise", "reshaped_pointwise", "broadcast_input")
+    )
+    def test_persistent_tma_block_local_reduction_epilogue(self, case):
+        def f(a, b, bias):
             mm = a @ b
-            blocked = mm.view(2, 128, 2, 128)
-            return mm, blocked.amax((1, 3))
+            if case in ("template", "broadcast_input"):
+                source = mm
+                blocked = source.view(2, 128, 2, 128)
+            elif case == "pointwise":
+                source = mm.relu()
+                blocked = source.view(2, 128, 2, 128)
+            else:
+                source = mm.view(2, 128, 2, 128).relu()
+                blocked = source
+            if case == "broadcast_input":
+                blocked = blocked + bias
+            return source, blocked.amax((1, 3))
 
         a = torch.randn(256, 64, device=GPU_TYPE, dtype=torch.bfloat16)
         b = torch.randn(64, 256, device=GPU_TYPE, dtype=torch.bfloat16)
+        bias = torch.randn(128, device=GPU_TYPE, dtype=torch.bfloat16)
         with config.patch(
             {
                 "max_autotune": True,
@@ -197,12 +211,13 @@ class TestMaxAutotune(TestCase):
                 "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
             }
         ):
-            actual, code = run_and_get_code(torch.compile(f), a, b)
+            actual, code = run_and_get_code(torch.compile(f), a, b, bias)
 
-        self.assertEqual(actual, f(a, b))
+        self.assertEqual(actual, f(a, b, bias))
         FileCheck().check_count("async_compile.triton", 1, exactly=True).check(
             "block_local_xindex"
         ).check_count("triton_helpers.max2(", 2, exactly=True).run(code[0])
+        FileCheck().check_count("tl.store(", 2, exactly=True).run(code[0])
 
     @unittest.skipIf(
         not has_triton_tma_device(), "Need device-side TMA support in Triton"
