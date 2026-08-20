@@ -226,6 +226,40 @@ class TestMaxAutotune(TestCase):
         has_datacenter_blackwell_tma_device(),
         "Hopper persistent TMA template is shadowed on Blackwell",
     )
+    def test_persistent_tma_block_local_reduction_alternating_epilogues(self):
+        def f(a, b, scale):
+            mm = a @ b
+            reduced = mm.view(2, 128, 2, 128).amax((1, 3))
+            pointwise = reduced.relu()
+            second_reduction = (pointwise.unsqueeze(-1) * scale).sum(-1)
+            return mm, reduced, pointwise, second_reduction
+
+        a = torch.randn(256, 64, device=GPU_TYPE, dtype=torch.bfloat16)
+        b = torch.randn(64, 256, device=GPU_TYPE, dtype=torch.bfloat16)
+        scale = torch.randn(2, device=GPU_TYPE, dtype=torch.bfloat16)
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+                "triton.enable_persistent_tma_matmul": "1",
+                "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
+            }
+        ):
+            actual, code = run_and_get_code(torch.compile(f), a, b, scale)
+
+        self.assertEqual(actual, f(a, b, scale))
+        FileCheck().check_count("async_compile.triton", 1, exactly=True).check(
+            "block_local_xindex"
+        ).check("tl.maximum").check("block_local_3_xindex").run(code[0])
+        FileCheck().check_count("tl.store(", 4, exactly=True).run(code[0])
+
+    @unittest.skipIf(
+        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+    )
+    @unittest.skipIf(
+        has_datacenter_blackwell_tma_device(),
+        "Hopper persistent TMA template is shadowed on Blackwell",
+    )
     @parametrize(
         "case",
         (
@@ -235,6 +269,7 @@ class TestMaxAutotune(TestCase):
             "signed_zero",
             "multiple",
             "permute",
+            "multiple_index",
             "relu",
             "chain",
             "larger_tile_m",
@@ -270,6 +305,8 @@ class TestMaxAutotune(TestCase):
                 )
             if case == "permute":
                 return blocked.permute(2, 1, 0, 3).amax((1, 3))
+            if case == "multiple_index":
+                return (blocked + blocked.flip(-1)).amax((1, 3))
             if case in ("relu", "larger_tile_relu"):
                 return blocked.relu().amax((1, 3))
             if case == "chain":

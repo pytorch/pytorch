@@ -1241,10 +1241,13 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             self.simplify_indexing.cache_clear()
 
     @contextlib.contextmanager
-    def use_persistent_reduction_ranges(
-        self, range_trees: Sequence[IterationRangesRoot]
+    def use_iteration_ranges(
+        self,
+        range_trees: Sequence[IterationRangesRoot],
+        *,
+        is_reduction: bool,
     ) -> Iterator[None]:
-        """Codegen a persistent reduction in an alternate iteration space."""
+        """Codegen in an alternate pointwise or persistent-reduction space."""
         saved_nodes = self.range_tree_nodes
         saved_numels = self.numels
         saved_inside_reduction = self.inside_reduction
@@ -1252,8 +1255,8 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         saved_cooperative_reduction = self.cooperative_reduction
         self.range_tree_nodes = {}
         self.numels = {tree.prefix: tree.numel for tree in range_trees}
-        self.inside_reduction = True
-        self.persistent_reduction = True
+        self.inside_reduction = is_reduction
+        self.persistent_reduction = is_reduction
         self.cooperative_reduction = False
         try:
             with self.use_range_trees(range_trees):
