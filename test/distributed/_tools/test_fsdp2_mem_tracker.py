@@ -17,9 +17,7 @@ from torch.distributed.fsdp import (
     MixedPrecisionPolicy,
     OffloadPolicy,
 )
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, MLP
 from torch.testing._internal.common_utils import (
@@ -58,7 +56,7 @@ class TestTrackerFullyShard1DTrainingCore(FSDPTest):
 
     @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/129390")
     @skip_if_lt_x_gpu(2)
-    def test_tracker_multi_group_eager(self):
+    def test_tracker_multi_group_eager(self, device):
         """
         Tests tracker accuracy when using multiple parameter groups for
         communication (for communication and computation overlap plus memory
@@ -140,7 +138,7 @@ class TestTrackerFullyShard1DTrainingCore(FSDPTest):
         del optim
 
     @skip_if_lt_x_gpu(2)
-    def test_tracker_non_root_forward_backward(self):
+    def test_tracker_non_root_forward_backward(self, device):
         """
         Tests tracker accuracy when running forward/backward through a non-root.
         """
@@ -239,7 +237,7 @@ class TestTrackerFullyShard1DTrainingCompose(FSDPTest):
         return min(torch.accelerator.device_count(), 4)
 
     @skip_if_lt_x_gpu(2)
-    def test_tracker_with_activation_checkpointing(self):
+    def test_tracker_with_activation_checkpointing(self, device):
         """
         Tests tracker accuracy when composing with activation checkpointing.
         """
