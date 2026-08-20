@@ -3519,6 +3519,7 @@ class TestSDPAAccelerator(NNTestCase):
             self.assertEqual(grad.numel(), 0)
 
     @skipXPUIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU, "XPU Flash Attention is not supported")
+    @skipIfXpu(msg="torch-xpu-ops/issues/4813")
     @parametrize(
         "fused_kernel",
         [SDPBackend.FLASH_ATTENTION, ] if TEST_XPU else [SDPBackend.FLASH_ATTENTION, SDPBackend.CUDNN_ATTENTION],
