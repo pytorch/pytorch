@@ -8362,7 +8362,7 @@ class TritonScheduling(SIMDScheduling):
         block: tuple[int, int],
         node: SchedulerNode,
         local_buffers: OrderedSet[str],
-    ) -> tuple[OrderedSet[str], OrderedSet[str]] | None:
+    ) -> tuple[OrderedSet[str], OrderedSet[str], OrderedSet[str]] | None:
         root = TritonScheduling._template_local_reduction_root_block(
             template, node, local_buffers
         )
@@ -8370,7 +8370,7 @@ class TritonScheduling(SIMDScheduling):
             root_block, prevalidated = root
             if root_block != block:
                 return None
-            return prevalidated, OrderedSet()
+            return prevalidated, OrderedSet(), OrderedSet()
 
         _, (numel, rnumel) = node.group
         local_deps = [
@@ -8378,8 +8378,9 @@ class TritonScheduling(SIMDScheduling):
         ]
         if any(not isinstance(dep, MemoryDep) for dep in local_deps):
             return None
+        local_dep_counts = collections.Counter(dep.name for dep in local_deps)
         index_equivalent = OrderedSet[str]()
-        for name, count in collections.Counter(dep.name for dep in local_deps).items():
+        for name, count in local_dep_counts.items():
             if count != 1:
                 return None
             source = V.graph.get_buffer(name)
@@ -8396,7 +8397,7 @@ class TritonScheduling(SIMDScheduling):
                 return None
             if not V.graph.sizevars.statically_known_equals(source_numel, numel):
                 return None
-        return OrderedSet(), index_equivalent
+        return OrderedSet(), index_equivalent, OrderedSet(local_dep_counts)
 
     @classmethod
     def _template_local_reduction_block(
@@ -8457,16 +8458,12 @@ class TritonScheduling(SIMDScheduling):
         for node in node2.get_nodes():
             if not isinstance(node, SchedulerNode):
                 return None
-            local_read_names = OrderedSet(
-                dep.name for dep in node.read_writes.reads if dep.name in local_buffers
-            )
             dependencies = self._template_local_node_dependencies(
                 template, block, node, local_buffers
             )
             if dependencies is None:
                 return None
-            node_prevalidated, node_index_equivalent = dependencies
-            ordinary_node_reads = local_read_names - node_prevalidated
+            node_prevalidated, node_index_equivalent, ordinary_node_reads = dependencies
             if (node_prevalidated & ordinary_local_reads) or (
                 ordinary_node_reads & prevalidated
             ):
