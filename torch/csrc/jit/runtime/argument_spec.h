@@ -2,6 +2,7 @@
 
 #include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>
+#include <c10/util/bit_cast.h>
 #include <c10/util/hash.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/Export.h>
@@ -115,9 +116,8 @@ struct ArgumentSpec {
   }
 
   void combineHash(const ArgumentInfo& arg) {
-    ArgumentInfo::plain_data_type arg_data = 0;
-    std::memcpy(&arg_data, &arg, sizeof(ArgumentInfo));
-    hash_code = c10::hash_combine(hash_code, arg_data);
+    hash_code = c10::hash_combine(
+        hash_code, c10::bit_cast<ArgumentInfo::plain_data_type>(arg));
   }
 
   // equality is fast: check ninputs, and then check the raw array data,
