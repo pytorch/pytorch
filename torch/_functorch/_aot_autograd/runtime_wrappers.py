@@ -28,7 +28,12 @@ from torch._custom_class_base import CustomClassBase
 from torch._dynamo import config as dynamo_config
 from torch._dynamo.callback import callback_handler, CallbackTrigger
 from torch._dynamo.graph_bytecode_inputs import index_to_external_object_weakref
-from torch._dynamo.utils import CompileEventLogger, dynamo_timed, get_metrics_context
+from torch._dynamo.utils import (
+    CompileEventLogger,
+    deferred_full_gc,
+    dynamo_timed,
+    get_metrics_context,
+)
 from torch._guards import (
     compile_context,
     CompileContext,
@@ -2879,6 +2884,10 @@ class _AutogradBackwardCompiler:
         context = torch._C._DisableAutocast if self.disable_amp else nullcontext
         metrics_context = get_metrics_context()
         with (
+            # Lazily compiling the backward builds as much graph as the forward
+            # did, and it runs outside Dynamo's compile, so it needs its own
+            # deferral of full collections.
+            deferred_full_gc(),
             tracing(saved_context),
             compile_context(saved_compile_context),
             context(),
