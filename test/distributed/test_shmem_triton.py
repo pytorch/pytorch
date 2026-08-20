@@ -283,7 +283,7 @@ def my_reduce_kernel(
 
 @instantiate_parametrized_tests
 class SHMEMTritonTest(MultiProcContinuousTest):
-    hw_classification = HardwareClassification.MULTI_ACCELERATOR_CUDA
+    hw_classification = HardwareClassification.CUDA
 
     def _init_device(self) -> None:
         # TODO: relieve this (seems to hang if without)
