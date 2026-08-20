@@ -6591,6 +6591,7 @@ class TestTorchDeviceType(TestCase):
                 torch.clamp(x, min=info.max + 1)
             with self.assertRaisesRegex(RuntimeError, "outside the representable range"):
                 torch.clamp_min(x, info.max + 1)
+
     # FIXME: move to indexing test suite
     def test_index_add(self, device):
         for dest_contig, src_contig, index_contig in product([True, False], repeat=3):
