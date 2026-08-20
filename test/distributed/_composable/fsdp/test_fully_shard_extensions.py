@@ -23,10 +23,7 @@ from torch.testing._internal.common_fsdp import (
     get_devtype,
     MLP,
 )
-from torch.testing._internal.common_utils import (
-    HardwareClassification,
-    run_tests,
-)
+from torch.testing._internal.common_utils import HardwareClassification, run_tests
 from torch.testing._internal.two_tensor import TwoTensor
 
 
@@ -229,7 +226,7 @@ class TestFullyShardAllGatherExtensionsMultiProcess(
     hw_classification = HardwareClassification.ACCELERATOR
 
     @skip_if_lt_x_gpu(2)
-    def test_all_gather_extensions_train_parity(self):
+    def test_all_gather_extensions_train_parity(self, device):
         with self._patch_two_tensor_fsdp_all_gather(pre_all_gather_version=1):
             self.run_subtests(
                 {"reshard_after_forward": [True, False]},
@@ -288,7 +285,7 @@ class TestFullyShardAllGatherExtensionsMultiThread(
         return torch.device(device_type)
 
     @skip_if_lt_x_gpu(1)
-    def test_all_gather_extensions_end_to_end(self):
+    def test_all_gather_extensions_end_to_end(self, device):
         with self._patch_two_tensor_fsdp_all_gather(pre_all_gather_version=1):
             self.run_subtests(
                 {"reshard_after_forward": [True, False]},
@@ -328,7 +325,7 @@ class TestFullyShardAllGatherExtensionsMultiThread(
             optim.zero_grad()
 
     @skip_if_lt_x_gpu(1)
-    def test_all_gather_extensions_monkey_patch(self):
+    def test_all_gather_extensions_monkey_patch(self, device):
         tls = threading.local()
         tls.ran_pre_all_gather = False
 
@@ -405,7 +402,7 @@ class TestFullyShardAllGatherExtensionsMultiThread(
             raise AssertionError("Expected tls.ran_pre_all_gather to be True")
 
     @skip_if_lt_x_gpu(1)
-    def test_all_gather_extension_outer_size_stride(self):
+    def test_all_gather_extension_outer_size_stride(self, device):
         """
         NOTE: We cannot easily test the incorrect case where the user-defined
         ``fsdp_pre_all_gather`` does not correctly pad the local tensor because
@@ -434,7 +431,7 @@ class TestFullyShardAllGatherExtensionsMultiThread(
         optim.zero_grad()
 
     @skip_if_lt_x_gpu(1)
-    def test_all_gather_extension_hsdp_mesh(self):
+    def test_all_gather_extension_hsdp_mesh(self, device):
         tls = threading.local()
         replicate_size = 2
         shard_size = self.world_size // replicate_size
