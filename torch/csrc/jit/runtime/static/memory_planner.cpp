@@ -29,7 +29,7 @@ c10::FastMap<const Value*, at::Tensor*> tensorValueToTensor(
     for (const auto output_idx : c10::irange(node->outputs().size())) {
       auto* output = node->output(output_idx);
 
-      if (managed_tensor_values.find(output) == managed_tensor_values.end()) {
+      if (!managed_tensor_values.contains(output)) {
         continue;
       }
 
@@ -94,7 +94,7 @@ std::vector<StorageGroup> assignStorageToManagedTensors(
   };
 
   auto isManagedTensor = [&](const Value* value) {
-    return tensor_value_to_tensor.find(value) != tensor_value_to_tensor.end();
+    return tensor_value_to_tensor.contains(value);
   };
 
   for (auto* node : nodes) {
@@ -171,7 +171,7 @@ void ManagedStorages::append(at::StorageImpl& storageImpl) {
 namespace {
 
 bool setIncludes(const c10::FastSet<const Value*>& set, const Value* v) {
-  return set.find(v) != set.end();
+  return set.contains(v);
 }
 
 std::vector<std::pair<size_t, at::Tensor*>> assignStorageToOutputTensors(
