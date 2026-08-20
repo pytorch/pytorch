@@ -27,6 +27,7 @@ import sys
 import threading
 import types
 import uuid
+import weakref
 from collections.abc import Callable, Generator, Iterable, Iterator, Sequence
 from contextlib import nullcontext
 from typing import Any, NewType, Optional, TYPE_CHECKING, Union
@@ -54,6 +55,21 @@ if TYPE_CHECKING:
 
 
 _CODE_CACHE = WeakIdKeyDictionary()
+_INSTALLER_REGISTRY_LOCK = threading.Lock()
+_GLOBAL_BINDINGS: WeakIdKeyDictionary = WeakIdKeyDictionary()
+_ABSENT_GLOBAL = object()
+
+
+@dataclasses.dataclass(frozen=True)
+class _InstalledGlobal:
+    name: str
+    value: object
+
+
+@dataclasses.dataclass
+class _GlobalBinding:
+    value: object
+    owners: weakref.WeakSet["CompilePackage"]
 
 
 def _code_cache(fn: Callable[..., Any]) -> Callable[..., Any]:
@@ -670,7 +686,7 @@ class CompilePackage:
         self._observed_scopes: dict[types.CodeType, list[dict[str, object]]] = {}
 
         self._current_entry: _DynamoCodeCacheEntry | None = None
-        self._installed_globals: dict[types.ModuleType, list[str]] = {}
+        self._installed_globals: dict[types.ModuleType, list[_InstalledGlobal]] = {}
         self._installed_precompile_codes: list[types.CodeType] = []
         self._installed_precompile_region_id = -1
         self._installed_precompile_probe: types.CodeType | None = None
@@ -907,7 +923,14 @@ class CompilePackage:
         # so that hook must not delete it once its code object is collected.
         CleanupHook.disown(module.__dict__, name)
         module.__dict__[name] = value
-        self._installed_globals.setdefault(module, []).append(name)
+        installed = _InstalledGlobal(name, value)
+        self._installed_globals.setdefault(module, []).append(installed)
+        with _INSTALLER_REGISTRY_LOCK:
+            by_name = _GLOBAL_BINDINGS.setdefault(module, {})
+            stack = by_name.setdefault(name, [])
+            if not stack or stack[-1].value is not value:
+                stack.append(_GlobalBinding(value, weakref.WeakSet()))
+            stack[-1].owners.add(self)
 
     def uninstall(self) -> None:
         from torch._C._dynamo.eval_frame import _reset_precompile_entries_for_owner
@@ -915,9 +938,28 @@ class CompilePackage:
         with _PACKAGE_INSTALL_LOCK:
             if self._innermost_fn is None:
                 raise AssertionError("_innermost_fn is not set in uninstall")
-            for module, names in self._installed_globals.items():
-                for name in names:
-                    module.__dict__.pop(name, None)
+            for module, installed_globals in self._installed_globals.items():
+                for installed in installed_globals:
+                    with _INSTALLER_REGISTRY_LOCK:
+                        by_name = _GLOBAL_BINDINGS.get(module) or {}
+                        stack = by_name.get(installed.name) or []
+                        for binding in stack:
+                            if (
+                                binding.value is installed.value
+                                and self in binding.owners
+                            ):
+                                binding.owners.discard(self)
+                                break
+                        stack[:] = [binding for binding in stack if binding.owners]
+                        survivor = stack[-1].value if stack else _ABSENT_GLOBAL
+                        if not stack:
+                            by_name.pop(installed.name, None)
+                    current = module.__dict__.get(installed.name, _ABSENT_GLOBAL)
+                    if survivor is _ABSENT_GLOBAL:
+                        if current is installed.value:
+                            del module.__dict__[installed.name]
+                    elif current is installed.value or current is _ABSENT_GLOBAL:
+                        module.__dict__[installed.name] = survivor
 
             self._installed_globals = {}
 
