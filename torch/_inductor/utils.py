@@ -4760,16 +4760,17 @@ def should_fallback_by_default(node: torch.fx.Node) -> bool:
     if target in skip_fallback_due_to_dynamic_shape:
         return False
 
-    # Most hops have registered lowering. We should follow the lowering and not fallback.
-    # However, in rare cases, hops may not register lowering, such as
-    # torch.ops.higher_order.triton_kernel_wrapper_functional. We should fallback for
-    # these hops.
-    fallback_hops = OrderedSet(
-        [torch.ops.higher_order.triton_kernel_wrapper_functional]
-    )
-
+    # HigherOrderOperators cannot be serialized by the AOT ProxyExecutor, which only
+    # supports OpOverload targets -- e.g. triton_kernel_wrapper_functional (a user-defined
+    # Triton kernel already present in the model) fails ExternKernelNode serialization with
+    # "expected OpOverload or registered extension type". Do not force HOPs to fall back;
+    # let them use their normal inductor codegen so any Triton already in the model is
+    # compiled into the AOT artifact rather than routed through the (unsupported) proxy
+    # executor. (triton_kernel_wrapper_functional has no lowering of its own; it is
+    # decomposed to its mutation form -- see the lite-mode decomposition in
+    # compile_fx._recursive_post_grad_passes -- which lowers to a UserDefinedTritonKernel.)
     if isinstance(target, torch._ops.HigherOrderOperator):
-        return target in fallback_hops
+        return False
 
     return not _needs_inductor_compile(node)
 
