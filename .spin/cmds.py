@@ -135,6 +135,20 @@ def regenerate_type_stubs():
 
 
 @click.command()
+@click.option("--write", is_flag=True, help="Apply the fix to .ci/pytorch/test.sh.")
+@click.option("--changed", is_flag=True, help="Check this branch's changed test files.")
+@click.argument("files", nargs=-1)
+def gpu_coverage(write, changed, files):
+    """Check H100/B200 smoke lists cover tests that need those GPUs."""
+    cmd = [sys.executable, "tools/testing/gpu_coverage.py"]
+    if write:
+        cmd.append("--write")
+    if changed:
+        cmd.append("--changed")
+    spin.util.run(cmd + list(files))
+
+
+@click.command()
 def regenerate_clangtidy_files():
     """Regenerate clang-tidy files."""
     cmd = [
