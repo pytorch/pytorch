@@ -41,7 +41,6 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_WINDOWS,
     run_tests,
-    skip_but_pass_in_sandcastle_if,
     skip_if_pytest,
     skipIfRocm,
     TEST_WITH_ASAN,
