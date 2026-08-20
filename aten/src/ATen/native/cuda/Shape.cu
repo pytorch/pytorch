@@ -333,7 +333,13 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
   // 16 Byte boundary.
 
   constexpr bool isContig = stride_size == 1;
-  bool isAligned = true;
+#ifdef USE_ROCM
+  // CatArrayBatchedCopy_contig is faster on ROCm, see #118685.
+  constexpr bool useAlignedKernels = false;
+#else
+  constexpr bool useAlignedKernels = true;
+#endif
+  bool isAligned = useAlignedKernels;
   constexpr int alignment = 16;
 
   // Next, let's initialize the size, stride arrays for the output Tensor.
@@ -373,7 +379,8 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
   // we need output stride in cat dimension to be multiple of alignment,
   // if we ever use it to compute offsets
   // for catting in 0th dimension it doesn't matter
-  bool isInOutAligned = isContig && at::native::memory::get_alignment(data) >= alignment &&
+  bool isInOutAligned = useAlignedKernels && isContig &&
+                        at::native::memory::get_alignment(data) >= alignment &&
                         memory_format == c10::MemoryFormat::Contiguous && (dimension == 0 ||
                         outputParam.tensorStride[dimension - 1] * sizeof(scalar_t) % alignment == 0);
   unsigned int max_elements_per_tensor = 0;
@@ -408,16 +415,12 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
       catMetaData.dimSize[batchCounter] = dimSize;
       catMetaData.nElements[batchCounter] = inputs[i+batchCounter].get().numel();
 
-#ifdef USE_ROCM
-      // On ROCm, CatArrayBatchedCopy_contig is faster
-      isAligned = false;
-      isInOutAligned = false;
-#else
       // If at least one of the inputs is not aligned, we can't call the
       // CatArrayBatchedCopy_alignedK_contig
-      isAligned &= is_aligned_vec4(catMetaData.input[batchCounter]);
-      isInOutAligned &= at::native::memory::get_alignment(catMetaData.input[batchCounter]) >= alignment;
-#endif
+      if constexpr (useAlignedKernels) {
+        isAligned &= is_aligned_vec4(catMetaData.input[batchCounter]);
+        isInOutAligned &= at::native::memory::get_alignment(catMetaData.input[batchCounter]) >= alignment;
+      }
 
       if (stride_size > 1) {
         auto strides = inputs[i+batchCounter].get().strides();
@@ -503,20 +506,26 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
     }
     // Template Declarations for dim = 1, 2, 3, 4
 #define HANDLE_CASE(DIMS) \
-    if (isInOutAligned) {\
-      constexpr auto elems_per_vec = alignment / sizeof(scalar_t); \
-      CatArrayBatchedCopy_vectorized<scalar_t, unsigned int, DIMS, batch_size, stride_size, alignment, elems_per_vec><<<\
-      catGrid, applyBlock, 0, stream.stream()>>>(\
-        (char*)data, catMetaData, kernelOutputParam, cat_dim, trailingSize);\
-    } else if (isContig && isAligned && sizeof(scalar_t) > 2 && sizeof(scalar_t) <= 8) {\
-      CatArrayBatchedCopy_alignedK_contig<scalar_t, unsigned int, DIMS, batch_size, stride_size, ALIGNED_VEC_LOAD_BYTES_16><<<\
-          catGrid, applyBlock, 0, stream.stream()>>>(\
-              data, catMetaData, outputParam, cat_dim, outputParam.tensorStride[cat_dim]);\
-    } else if (isContig && isAligned && sizeof(scalar_t) == 2) { \
-      CatArrayBatchedCopy_alignedK_contig<scalar_t, unsigned int, DIMS, batch_size, stride_size, ALIGNED_VEC_LOAD_BYTES_8><<<\
-          catGrid, applyBlock, 0, stream.stream()>>>(\
-              data, catMetaData, outputParam, cat_dim, outputParam.tensorStride[cat_dim]);\
-    } else if (isContig) {\
+    if (useAlignedKernels && isInOutAligned) {\
+      if constexpr (useAlignedKernels) {\
+        constexpr auto elems_per_vec = alignment / sizeof(scalar_t); \
+        CatArrayBatchedCopy_vectorized<scalar_t, unsigned int, DIMS, batch_size, stride_size, alignment, elems_per_vec><<<\
+        catGrid, applyBlock, 0, stream.stream()>>>(\
+          reinterpret_cast<char*>(data), catMetaData, kernelOutputParam, cat_dim, trailingSize);\
+      }\
+    } else if (useAlignedKernels && isContig && isAligned && sizeof(scalar_t) > 2 && sizeof(scalar_t) <= 8) {\
+      if constexpr (useAlignedKernels) {\
+        CatArrayBatchedCopy_alignedK_contig<scalar_t, unsigned int, DIMS, batch_size, stride_size, ALIGNED_VEC_LOAD_BYTES_16><<<\
+            catGrid, applyBlock, 0, stream.stream()>>>(\
+                data, catMetaData, outputParam, cat_dim, outputParam.tensorStride[cat_dim]);\
+      }\
+    } else if (useAlignedKernels && isContig && isAligned && sizeof(scalar_t) == 2) { \
+      if constexpr (useAlignedKernels) {\
+        CatArrayBatchedCopy_alignedK_contig<scalar_t, unsigned int, DIMS, batch_size, stride_size, ALIGNED_VEC_LOAD_BYTES_8><<<\
+            catGrid, applyBlock, 0, stream.stream()>>>(\
+                data, catMetaData, outputParam, cat_dim, outputParam.tensorStride[cat_dim]);\
+      }\
+    } else if constexpr (isContig) {\
       CatArrayBatchedCopy_contig<scalar_t, unsigned int, DIMS, batch_size, stride_size><<<\
           catGrid, applyBlock, 0, stream.stream()>>>(\
               data, catMetaData, outputParam, cat_dim, outputParam.tensorStride[cat_dim]);\
