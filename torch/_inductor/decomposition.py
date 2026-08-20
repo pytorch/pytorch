@@ -1144,7 +1144,7 @@ def _foreach_lerp_scalarlist(
     )
 
 
-@register_decomposition(aten.divmod.Tensor)
+@register_decomposition(aten.divmod)
 def divmod_tensor(
     self: torch.Tensor,
     other: torch.Tensor,

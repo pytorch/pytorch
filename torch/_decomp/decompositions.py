@@ -5980,7 +5980,7 @@ def isin(elements, test_elements, *, assume_unique=False, invert=False):
         )
 
 
-@register_decomposition(aten.divmod.Tensor)
+@register_decomposition(aten.divmod)
 def divmod_tensor(
     self: torch.Tensor,
     other: torch.Tensor,
