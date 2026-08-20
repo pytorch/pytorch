@@ -3,7 +3,11 @@
 import torch
 from torch.fx import symbolic_trace
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing._internal.common_utils import run_tests, TestCase, HardwareClassification
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 class TestFxGraphPrint(TestCase):
