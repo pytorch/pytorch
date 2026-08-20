@@ -9,6 +9,8 @@ except ImportError:
 
     import testing  # @manual=fbcode//caffe2/test:test_export-library
 
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+
 
 test_classes = {}
 
@@ -60,6 +62,15 @@ for test in tests:
     make_dynamic_cls(test, True)
     make_dynamic_cls(test, False)
 del test
+
+for cls, instantiate_kwargs in test_export.DEVICE_EXPORT_TEST_CLASSES:
+    instantiate_device_type_tests(
+        make_dynamic_cls(cls, True), globals(), **instantiate_kwargs
+    )
+    instantiate_device_type_tests(
+        make_dynamic_cls(cls, False), globals(), **instantiate_kwargs
+    )
+del cls, instantiate_kwargs
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
