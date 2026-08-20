@@ -177,7 +177,7 @@ def use_native_matmul(mat1, mat2):
     # If the shape has unbacked symbols, don't do native matmul.
     # This is related to the behavior of statically_known_multiple_of on unbacked symints.
     # Since statically_known_multiple_of just returns False for unbacked symbols
-    # due to the expensive cost, codegen fails when there is a unbacked symbol.
+    # due to the expensive cost, codegen fails when there is an unbacked symbol.
     # In particular, it fails at _split_iteration_ranges in codegen/simd.py.
     # See this : https://github.com/pytorch/pytorch/pull/131649
     if any(map(has_free_unbacked_symbols, [m, k, n])):
