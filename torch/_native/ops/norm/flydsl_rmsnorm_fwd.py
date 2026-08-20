@@ -313,12 +313,7 @@ def rmsnorm_fwd(
         raise ValueError("FlyDSL RMSNorm currently requires one normalized dimension")
 
     device_index = input.device.index
-    # The dispatcher declines when the arch cannot be resolved, so it is not
-    # None here. _resolve_rocm_arch forwards HSA_OVERRIDE_GFX_VERSION verbatim,
-    # so it may carry feature flags ("gfx950:sramecc+"); strip them the way the
-    # predicate does.
-    resolved = _resolve_rocm_arch(device_index)
-    arch = resolved.split(":", 1)[0]  # pyrefly: ignore[missing-attribute]
+    arch: str = _resolve_rocm_arch(device_index)  # pyrefly: ignore[bad-assignment]
 
     rows_m = input.numel() // n
     input_shape = input.shape

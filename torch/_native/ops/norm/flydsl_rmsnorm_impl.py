@@ -4,8 +4,6 @@
 
 from __future__ import annotations
 
-import functools
-
 import torch
 
 from ... import flydsl_utils as fu
@@ -13,33 +11,6 @@ from .flydsl_rmsnorm_utils import normalized_shape_1d, SUPPORTED_DTYPES
 
 
 _SUPPORTED_ARCHES = ("gfx950",)
-_HIP_AVAILABLE = torch.version.hip is not None
-
-
-@functools.cache
-def _is_supported_arch(device_index: int) -> bool:
-    """Whether this device's arch is one the kernel was tuned for.
-
-    Cached per device, which means FLYDSL_GPU_ARCH and HSA_OVERRIDE_GFX_VERSION
-    are read once per process: changing either afterwards needs a restart to
-    take effect.
-    """
-    # HSA_OVERRIDE_GFX_VERSION may carry feature flags ("gfx950:sramecc+") and
-    # _resolve_rocm_arch passes those through, so compare the base arch only --
-    # the band tuning below does not depend on sramecc/xnack.
-    arch = fu._resolve_rocm_arch(device_index)
-    return arch is not None and arch.split(":", 1)[0] in _SUPPORTED_ARCHES
-
-
-def _fits_int32_buffer_span(rows_m: int, n: int, itemsize: int) -> bool:
-    """Whether a contiguous (rows_m, n) tensor fits FlyDSL buffer indexing."""
-    int32_max = (1 << 31) - 1
-    uint32_max = (1 << 32) - 1
-    return (
-        0 < rows_m <= int32_max
-        and 0 < n <= int32_max
-        and rows_m * n * itemsize <= uint32_max
-    )
 
 
 def _common_supported(
@@ -48,10 +19,10 @@ def _common_supported(
     weight: torch.Tensor | None,
 ) -> bool:
     """Cheap dispatcher predicate for supported forward inputs."""
-    if not _HIP_AVAILABLE or input.device.type != "cuda":
+    if input.device.type != "cuda":
         return False
     device_index = input.device.index
-    if not _is_supported_arch(device_index):
+    if not fu._is_supported_arch(device_index, _SUPPORTED_ARCHES):
         return False
     if input.dtype not in SUPPORTED_DTYPES:
         return False
@@ -93,7 +64,7 @@ def _fused_rms_norm_cond(
     if not _common_supported(input, n, weight):
         return False
     rows_m = input.numel() // n  # n has been validated to be non-Zero
-    if not _fits_int32_buffer_span(rows_m, n, input.element_size()):
+    if not fu._fits_int32_buffer_span(rows_m, n, input.element_size()):
         return False
     return _fused_rms_norm_fwd_perf_wins(rows_m, n)
 

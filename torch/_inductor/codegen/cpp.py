@@ -6388,7 +6388,12 @@ class LoopNest:
         for loop in self.loops:
             if loop.is_reduction != is_reduction:
                 break
-            num_steps = num_steps * FloorDiv(loop.size, loop.steps)
+            # Trip count of `for (var = 0; var < size; var += steps)`. The bound
+            # is `size` and the increment is `steps`, so a loop with size < steps
+            # (a vectorized loop narrower than the vector width) still runs one
+            # iteration. Use CeilDiv, not FloorDiv, which would count 0 and zero
+            # out the whole product.
+            num_steps = num_steps * CeilDiv(loop.size, loop.steps)
             max_depth += 1
 
         def get_simd_vec_depth(loops):

@@ -1572,7 +1572,9 @@ def run_tests(argv=None):
         if failed:
             raise AssertionError("Some test shards have failed")
     elif USE_PYTEST:
-        pytest_args = argv + ["--use-main-module"]
+        # xdist workers import the test file as a module, so they cannot collect
+        # tests from the coordinator's __main__ module.
+        pytest_args = argv if "-n" in argv else argv + ["--use-main-module"]
         if HW_CLASSIFICATION is not None:
             pytest_args += ['--hw-classification'] + [req.name for req in HW_CLASSIFICATION]
         test_report_path = ""

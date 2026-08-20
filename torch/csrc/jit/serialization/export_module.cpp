@@ -553,7 +553,7 @@ void ScriptModuleSerializer::writeArchive(
       continue;
     }
     WriteableTensorData writable_td = getWriteableTensorData(td);
-    if (use_storage_context && serialized_tensors.count(tensor_name)) {
+    if (use_storage_context && serialized_tensors.contains(tensor_name)) {
       // storage has been serialized already, skip
       continue;
     }
@@ -586,7 +586,7 @@ void ScriptModuleSerializer::writeExtraFiles(
     for (const auto& kv : hook_files) {
       // Checks if the hooked file is already written in extra files,
       //   if so, skips it and warns
-      if (extra_files.find(kv.first) != extra_files.end()) {
+      if (extra_files.contains(kv.first)) {
         TORCH_WARN_ONCE(
             "An extra files hook attempted to write ",
             kv.first,
@@ -604,7 +604,7 @@ void ScriptModuleSerializer::writeExtraFiles(
 void ScriptModuleSerializer::updateSourceRangeTags(
     const SourceRangeRecords& ranges) {
   for (const auto& range : ranges) {
-    if (source_range_tags_.find(range.range) == source_range_tags_.end()) {
+    if (!source_range_tags_.contains(range.range)) {
       source_range_tags_[range.range] = current_source_range_tag_;
       current_source_range_tag_++;
     }
@@ -771,7 +771,7 @@ std::optional<std::string> type_printer(
 
 void ScriptModuleSerializer::convertNamedType(
     const c10::NamedTypePtr& class_type) {
-  if (converted_types_.count(class_type)) {
+  if (converted_types_.contains(class_type)) {
     return;
   }
   converted_types_.insert(class_type);
