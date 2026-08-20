@@ -17,6 +17,7 @@ import torch.nn.functional as F
 from torch import inf, nan
 from torch.autograd import gradcheck, gradgradcheck
 from torch.testing import make_tensor
+from torch.testing._internal.common_cuda import has_device_side_assert
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
@@ -31,6 +32,7 @@ from torch.testing._internal.common_device_type import (
     onlyCUDA,
     onlyMPS,
     onlyNativeDeviceTypes,
+    skipXPUIf,
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.common_dtype import floating_types_and
@@ -866,14 +868,8 @@ torch.cuda.synchronize()
             error_msg = error_msgs[module_name]
 
             if should_error:
-                # CUDA shows assertion message
-                # ROCm shows launch failure or HSA_STATUS_ERROR_EXCEPTION
-                has_cuda_assert = error_msg in output
-                has_hip_error = (
-                    "launch failure" in output or "HSA_STATUS_ERROR_EXCEPTION" in output
-                )
                 self.assertTrue(
-                    has_cuda_assert or has_hip_error,
+                    error_msg in output or has_device_side_assert(output),
                     lambda msg: f"{msg}\nExpected device assert error, got: {output[-500:]}",
                 )
             else:
@@ -1447,6 +1443,7 @@ torch.cuda.synchronize()
         )
 
     @expectedFailureMPS  # TODO: Fixme
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/4731")
     @dtypes(torch.half, torch.bfloat16, torch.float, torch.double)
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @gcIfJetson
@@ -2300,7 +2297,9 @@ torch.cuda.synchronize()
 
 
 instantiate_device_type_tests(TestAvgPoolDeviceType, globals())
-instantiate_device_type_tests(TestPoolingNNDeviceType, globals(), allow_mps=True)
+instantiate_device_type_tests(
+    TestPoolingNNDeviceType, globals(), allow_mps=True, allow_xpu=True
+)
 instantiate_parametrized_tests(TestPoolingNN)
 
 if __name__ == "__main__":

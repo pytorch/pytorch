@@ -363,5 +363,13 @@ class TokenSwitchNCCLTest(MultiProcContinuousTest):
         self.assertEqual(combined, expected)
 
 
+class TokenSwitchNCCL2Test(TokenSwitchNCCLTest):
+    _cached_token_switch: TokenSwitchNCCL | None = None
+
+    @classmethod
+    def backend_str(cls):
+        return "nccl2"
+
+
 if __name__ == "__main__":
     run_tests()
