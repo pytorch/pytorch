@@ -49,7 +49,6 @@ def T(*size, device, dtype=torch.float32, grad=False) -> torch.Tensor:
 
 
 class TestCase(InductorTestCase):
-    hw_classification = HardwareClassification.ACCELERATOR
     """
     Helper methods to compare runtime estimate against 0. Since this estimate is hardware dependent,
     stronger comparisons may fail depending on the host's specs.
@@ -82,6 +81,8 @@ class TestCase(InductorTestCase):
 
 
 class UnsupportedTests(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_no_op(self, device):
         def f(a):
             return a
@@ -102,6 +103,8 @@ class UnsupportedTestsGeneric(TestCase):
 
 
 class ComputeBoundedTests(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_conv1d(self, device):
         def f(x, y):
             return torch.nn.functional.conv1d(x, y)
@@ -163,6 +166,8 @@ class ComputeBoundedTests(TestCase):
 
 
 class MemoryBoundedTests(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_relu(self, device):
         def f(a):
             return torch.nn.functional.relu(a)
@@ -196,6 +201,8 @@ class MemoryBoundedTests(TestCase):
 
 
 class InputDistanceTests(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _get_snodes(self, f, *args):
         metrics.reset()
         torch._logging.set_logs(inductor_metrics=True)
@@ -291,6 +298,8 @@ class InputDistanceTests(TestCase):
 
 @skipIf(not dist.is_available(), "requires distributed")
 class TestCommAnalysis(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     WORLD_SIZE: int = 8
     RANKS = list(range(8))
 
