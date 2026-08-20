@@ -254,7 +254,22 @@ class NCCLSymmetricMemoryCftDeviceTest : public ::testing::Test {
       LOG(INFO) << "Need at least 2 ranks, skipping test";
       return true;
     }
-    return false;
+    // cftPutKernel compiles to a no-op unless CFT_DEVICE_SUPPORTED held, and
+    // the host-side queries can still succeed then (they only need the driver
+    // and NCCL), so the readback would fail confusingly instead of skipping.
+    // ptxVersion is the virtual arch the loaded kernel variant was compiled
+    // for, i.e. its __CUDA_ARCH__/10; CUDART_VERSION is shared with the
+    // device pass of this TU.
+#if CUDART_VERSION >= 13030
+    cudaFuncAttributes attr{};
+    AT_CUDA_CHECK(cudaFuncGetAttributes(&attr, cftPutKernel));
+    if (attr.ptxVersion >= 100) {
+      return false;
+    }
+#endif
+    LOG(INFO) << "cftPutKernel compiled without CFT device support "
+              << "(needs sm_100+ code and CUDA >= 13.3), skipping test";
+    return true;
   }
 
   int size_{1};
@@ -263,6 +278,23 @@ class NCCLSymmetricMemoryCftDeviceTest : public ::testing::Test {
 TEST_F(NCCLSymmetricMemoryCftDeviceTest, testDevicePutCft) {
   if (skipTest()) {
     return;
+  }
+  // cftPutKernel compiles to a no-op unless CFT_DEVICE_SUPPORTED held, and
+  // the host-side queries can still succeed then (they only need the driver
+  // and NCCL), so the readback would fail confusingly instead of skipping.
+  // ptxVersion is the virtual arch the loaded kernel variant was compiled
+  // for, i.e. its __CUDA_ARCH__/10; CUDART_VERSION is shared with the device
+  // pass of this TU.
+#if CUDART_VERSION >= 13030
+  cudaFuncAttributes attr{};
+  AT_CUDA_CHECK(cudaFuncGetAttributes(&attr, cftPutKernel));
+  const bool cftCompiled = attr.ptxVersion >= 100;
+#else
+  const bool cftCompiled = false;
+#endif
+  if (!cftCompiled) {
+    GTEST_SKIP() << "cftPutKernel compiled without CFT device support "
+                 << "(needs sm_100+ code and CUDA >= 13.3)";
   }
   c10d::test::TemporaryFile file;
   ThreadBarrier barrier(size_);
