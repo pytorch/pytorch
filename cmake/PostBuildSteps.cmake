@@ -109,17 +109,18 @@ if(WIN32 AND BUILD_PYTHON)
       endif()
     endforeach()
 
-    # NvToolsExt (legacy, may not exist on all systems).
-    set(_nvtoolsext "C:/Program Files/NVIDIA Corporation/NvToolsExt/bin/x64/nvToolsExt64_1.dll")
-    if(EXISTS "${_nvtoolsext}")
-      install(FILES "${_nvtoolsext}" DESTINATION "${TORCH_INSTALL_LIB_DIR}")
-    endif()
-
     # zlibwapi (needed by some CUDA libraries).
     if(EXISTS "C:/Windows/System32/zlibwapi.dll")
       install(FILES "C:/Windows/System32/zlibwapi.dll"
               DESTINATION "${TORCH_INSTALL_LIB_DIR}")
     endif()
+  endif()
+
+  # Retain the legacy NvToolsExt DLL for existing Windows binaries until its
+  # separate deprecation; cuda-toolkit no longer provides it.
+  set(_nvtoolsext "C:/Program Files/NVIDIA Corporation/NvToolsExt/bin/x64/nvToolsExt64_1.dll")
+  if(USE_CUDA AND EXISTS "${_nvtoolsext}")
+    install(FILES "${_nvtoolsext}" DESTINATION "${TORCH_INSTALL_LIB_DIR}")
   endif()
 endif()
 
