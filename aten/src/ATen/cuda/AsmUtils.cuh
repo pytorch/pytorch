@@ -1,4 +1,5 @@
 #pragma once
+#include <c10/util/bitfield.h>
 #include <cstdint>
 
 // Collection of direct PTX functions
@@ -13,11 +14,7 @@ struct Bitfield<unsigned int> {
   static __device__ __host__ __forceinline__
   unsigned int getBitfield(unsigned int val, int pos, int len) {
 #if !defined(__CUDA_ARCH__)
-    pos &= 0xff;
-    len &= 0xff;
-
-    unsigned int m = (1u << len) - 1u;
-    return (val >> pos) & m;
+    return c10::Bitfield<unsigned int>::getBitfield(val, pos, len);
 #else
     unsigned int ret;
     asm("bfe.u32 %0, %1, %2, %3;" : "=r"(ret) : "r"(val), "r"(pos), "r"(len));
@@ -28,15 +25,8 @@ struct Bitfield<unsigned int> {
   static __device__ __host__ __forceinline__
   unsigned int setBitfield(unsigned int val, unsigned int toInsert, int pos, int len) {
 #if !defined(__CUDA_ARCH__)
-    pos &= 0xff;
-    len &= 0xff;
-
-    unsigned int m = (1u << len) - 1u;
-    toInsert &= m;
-    toInsert <<= pos;
-    m <<= pos;
-
-    return (val & ~m) | toInsert;
+    return c10::Bitfield<unsigned int>::setBitfield(
+        val, toInsert, pos, len);
 #else
     unsigned int ret;
     asm("bfi.b32 %0, %1, %2, %3, %4;" :
@@ -51,11 +41,7 @@ struct Bitfield<uint64_t> {
   static __device__ __host__ __forceinline__
   uint64_t getBitfield(uint64_t val, int pos, int len) {
 #if !defined(__CUDA_ARCH__)
-    pos &= 0xff;
-    len &= 0xff;
-
-    uint64_t m = (static_cast<uint64_t>(1) << len) - 1;
-    return (val >> pos) & m;
+    return c10::Bitfield<uint64_t>::getBitfield(val, pos, len);
 #else
     uint64_t ret;
     asm("bfe.u64 %0, %1, %2, %3;" : "=l"(ret) : "l"(val), "r"(pos), "r"(len));
@@ -66,15 +52,8 @@ struct Bitfield<uint64_t> {
   static __device__ __host__ __forceinline__
   uint64_t setBitfield(uint64_t val, uint64_t toInsert, int pos, int len) {
 #if !defined(__CUDA_ARCH__)
-    pos &= 0xff;
-    len &= 0xff;
-
-    uint64_t m = (static_cast<uint64_t>(1) << len) - 1;
-    toInsert &= m;
-    toInsert <<= pos;
-    m <<= pos;
-
-    return (val & ~m) | toInsert;
+    return c10::Bitfield<uint64_t>::setBitfield(
+        val, toInsert, pos, len);
 #else
     uint64_t ret;
     asm("bfi.b64 %0, %1, %2, %3, %4;" :
