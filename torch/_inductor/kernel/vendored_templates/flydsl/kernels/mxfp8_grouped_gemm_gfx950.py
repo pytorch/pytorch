@@ -28,8 +28,8 @@
 #     templates hand over their `GemmGfx950Param`.
 #   * `pick_block_r` scores MFMA density against actual overhang instead of
 #     comparing m_avg to a constant. This is the ONE divergence from upstream
-#     in a decision the kernel body relies on; it is measured over 43 shapes in
-#     the comment on that function and should be ported back.
+#     in a decision the kernel body relies on; the 43-shape sweep behind it is
+#     in the PR description, and it should be ported back.
 #
 # Exactly four things differ from the even-groups parent. Everything else --
 # the 8-buffer LDS ping-pong, the AGPR-pinned scaled MFMA, the cooperative
@@ -54,39 +54,25 @@
 # zero-initialised because a masked store no longer covers every row.
 # ---------------------------------------------------------------------------
 #
-# Ported from flydsl-wgrad's `_wgrad_kernel_v3.py` v3.3 (1305 TFLOP/s, 28.3% of
-# MI350X peak). The port is small because the two problems have the SAME operand
-# layout: both are `C = A @ B^T` with A and B row-major and the contraction
-# running along the contiguous axis. What differs is only what the axes mean:
+# Ported from flydsl-wgrad's `_wgrad_kernel_v3.py` v3.3. The port is small
+# because the two problems have the SAME operand layout -- both are
+# `C = A @ B^T` with A and B row-major and the contraction along the contiguous
+# axis. What differs is what the axes mean: wgrad's groups partition the
+# CONTRACTION, these partition the OUTPUT ROWS, so the group index moves from
+# the K-walk into the tile's base addresses.
 #
-#                    wgrad v3.3                      forward (here)
-#   A                go_t   (R=N, M_TOTAL)           X      (M_tok, K)
-#   B                ia_t   (C=K, M_TOTAL)           W[g]   (N, K)
-#   contraction      tokens, length m_g              K, length K (fixed)
-#   groups partition the CONTRACTION                 the OUTPUT ROWS
-#   per-group offset a column offset (m_start)       a row offset on A, a plane on B
-#   output           (E, R, C) f32                   (M_tok, N) bf16
-#
-# So the group index moves from the K-walk into the tile's base addresses, the
-# contraction becomes short and uniform (K/128 = 16 or 11 steps, versus wgrad's
-# 192), and the epilogue writes bf16 into one 2-D matrix instead of f32 into a
-# per-expert stack.
-#
-# Two structural consequences of the short contraction:
-#   * The K-loop is fully unrolled at compile time. wgrad needed `scf.for`
-#     because a 192-step constexpr loop hung the JIT; at 11-16 steps the rolled
-#     form only costs scheduling freedom, and the loop-carried a0/b0 fragments
-#     and scale chunk disappear.
+# Two structural consequences of the short contraction (K/128 = 11-16 steps,
+# against wgrad's 192):
+#   * The K-loop is fully unrolled at compile time; the loop-carried a0/b0
+#     fragments and scale chunk disappear.
 #   * Pipeline fill and drain are a much larger fraction of the kernel (2 of 16
-#     steps are prologue, 2 are tails), so prologue cost matters here in a way it
-#     never did for wgrad.
+#     steps are prologue, 2 are tails), so prologue cost matters here in a way
+#     it never did for wgrad.
 #
-# The vmcnt accounting is derived, not transcribed. wgrad hand-computed four
-# constants (W1A/W2A/W1B/W2B) for its steady state; with the loop unrolled the
-# issue pattern is not perfectly periodic (the last steps stop prefetching
-# scales), so `_VmCounter` tracks issued vector-memory ops and each barrier waits
-# for exactly "everything up to the op I depend on". It reproduces wgrad's
-# constants in the steady state -- see the test in test_correctness.py.
+# The vmcnt accounting is derived, not transcribed: with the loop unrolled the
+# issue pattern is not perfectly periodic, so `_VmCounter` tracks issued
+# vector-memory ops and each barrier waits for exactly "everything up to the op
+# I depend on".
 
 # NOTE: no `from __future__ import annotations` -- fx.struct needs real types.
 
@@ -112,87 +98,33 @@ BLOCK_M = 128  # contraction elements per pipeline step (= BLOCK_K)
 
 
 def pick_block_r(m_total: int, e: int) -> int:
-    """Row tile height, from the AVERAGE group size. 256 unless groups are small.
+    """Row tile height, from the AVERAGE group size.
 
-    A row tile is charged for every row it covers, so a group of 64 tokens under
-    a 256-row tile runs the MFMAs on 256 rows and discards three quarters of the
-    result at the masked store. The waste is (BLOCK_R / m_g) and it is the single
-    largest term at the small-M shapes: measured 4.6% of MXFP8 peak at
-    m_g=64 (g32x64x2048x2048) against 20-25% where m_g >= 512.
-
-    A narrower tile costs per-block efficiency, because the MFMA-per-ds_read
-    ratio is NA*NB/(NA+NB) -- 2.0 at 4x4 (BLOCK_R=256), 1.33 at 2x4 (128), 0.8 at
-    1x4 (64). So this is only worth taking when the overhang it removes is bigger
-    than the ratio it gives up, i.e. when a group does not fill the wider tile.
+    A row tile is charged for every row it covers: a group of m_avg rows under a
+    BLOCK_R tile is charged ceildiv(m_avg, BLOCK_R) * BLOCK_R rows and discards
+    the rest at the masked store. A narrower tile removes that overhang but
+    costs per-block efficiency -- the MFMA-per-ds_read ratio is NA*NB/(NA+NB),
+    2.0 at 4x4 (BLOCK_R=256), 1.33 at 2x4 (128), 0.8 at 1x4 (64) -- so the two
+    are scored against each other below.
 
     AVERAGE, not per-group, and that is forced: the group sizes live on the
-    device and this kernel's whole design is not to sync on them (see
-    `grouped_mm`). m_total and E are host-side shape metadata, so m_total // E
-    costs nothing. Under real MoE routing the groups are within ~2x of the mean,
-    so the average picks the right tile for most of them; a badly skewed batch
-    gets a tile sized for its mean, which is still no worse than the fixed 256.
+    device and this kernel's whole design is not to sync on them. m_total and E
+    are host-side shape metadata, so m_total // E costs nothing. Under real MoE
+    routing the groups are within ~2x of the mean; a skewed batch gets a tile
+    sized for its mean, which is no worse than the fixed 256.
 
-    THE CUTOFF IS MEASURED, NOT DERIVED, and it sits at 320 because that is
-    where the evidence stops being one-sided. Pure overhang arithmetic says 128
-    only pays below m_g=128, but it keeps winning up to a skewed ragged mean of
-    269 (+44%), because the smaller tile also doubles the tile count and fills
-    the machine. At m_avg=512 it is no longer a win in any consistent direction
-    -- the same m_avg goes +5.2%, -2.6% and -14.0% depending only on K, N and E
-    -- so 512 stays on the wide tile. Measured (median of 3, bitwise-identical
-    output, TFLOP/s):
-
-        m_avg  shape                     br=256   br=128   pick
-           62  ragged [1,3,7,15,...]      254.8    366.2    128 (64 would give 430.3)
-           64  g32x64x2048x2048           219.9    298.7    128 (64 would give 375.1)
-          128  g8x128x4096x4096           461.6    595.7    128
-          128  g16x128x4096x4096          408.0    536.9    128
-          256  g16x256x2048x2048          628.5    614.0    128  (-2.3%, the one loss)
-          256  g8x256x8192x8192           806.1    867.3    128
-          269  ragged [100,333,777,...]   571.7    820.6    128
-          512  g8x512x4096x4096           992.0   1044.1    256  (+5.2% forgone)
-          512  g16x512x4096x4096         1036.6   1009.9    256
-          512  g8x512x8192x2048           994.1    854.5    256  (128 costs 14%)
-          696  ragged [813,1200,47,...]  1199.2   1073.7    256
-         1024  g4x1024x2048x2048          771.1    682.4    256
-
-    64 IS RETURNED AGAIN at m_avg <= 96, where it is the fastest tile (1.71x at
-    g32x64, 1.69x at the [1,3,7,...] ragged). It used to compute wrong answers;
-    the cause was `wait_barrier` waiting on vmcnt but never lgkmcnt, so an s2r
-    fragment issued in one cluster and consumed in the next crossed the barrier
-    outstanding while another wave overwrote its LDS buffer. Only the MFMAs in
-    between covered the gap -- N_ACCUMS of them -- so the tiles with N_ACCUMS=4
-    (this one, and BLOCK_C=128 with BLOCK_R=128) were the ones that broke. Fixed
-    in `_fp8_gemm_utils.wait_barrier`; verified clean on all 10 shapes of
-    scratchpad/dbg_br64.py on the development branch, including the K=8192
-    N=8192 case that used to corrupt
-    1510 elements.
+    BLOCK_R=64 computed wrong answers until the `wait_barrier` lgkmcnt fix in
+    `mxfp8_gemm_utils`; verified clean since.
     """
     if e <= 0:
         return 256
     m_avg = max(m_total // e, 1)
 
-    # OVERHANG, NOT A THRESHOLD ON m_avg. The docstring above says the waste is
-    # (BLOCK_R / m_g), but that only holds while m_g < BLOCK_R; in general a
-    # group of m_avg rows under a BLOCK_R tile is charged
-    # ceildiv(m_avg, BLOCK_R) * BLOCK_R rows. At m_avg = 256 that factor is 1.0
-    # for every legal tile -- a 256-row group fills a 256-row tile exactly -- so
-    # the ladder's "m_avg <= 320 -> 128" narrowed the tile to remove an overhang
-    # that was not there, paying the MFMA-per-ds_read ratio (2.0 at 4x4 against
-    # 1.33 at 2x4) for nothing.
-    #
-    # Scoring density against actual overhang instead. Measured on MI350X over
-    # 43 shapes (the 19 benchmark shapes plus an m_avg ladder of 64..512 at
-    # K=N=4096 and K=N=8192, all six tiles timed interleaved in one process,
-    # median of 3 runs of 21), against the best tile for each shape:
-    #
-    #   rule       geomean loss vs best tile   >2% off
-    #   ladder     1.0271x                     12/43
-    #   this       1.0055x                      4/43
-    #
-    # Biggest single gain 1.158x at m_avg=96, K=N=8192, where the ladder picked
-    # 64 and the right answer is 128. Shapes with m_avg >= 384 -- including the
-    # DSV3 shape this kernel was tuned on, m_g=24576 -- score 256 exactly as the
-    # ladder did, so the original calibration is unchanged.
+    # Density against actual overhang, not a threshold on m_avg: at m_avg=256
+    # every legal tile has overhang 1.0, so narrowing there gives up the ratio
+    # for nothing. Measured over 43 shapes, geomean loss against the best tile
+    # is 1.0055x here against 1.0271x for a threshold ladder; shapes with
+    # m_avg >= 384 pick 256 either way. Sweep in the PR description.
     best_block_r, best_score = 256, -1.0
     for block_r in (64, 128, 256):
         n_tiles_a = block_r // 64
@@ -210,28 +142,18 @@ def pick_tile(m_total: int, e: int, n: int) -> tuple:
 
     `pick_block_r` and `pick_block_c` each answer a local question and neither
     looks at how many blocks the pair produces. That is fine everywhere except
-    small N, where BLOCK_C=256 leaves ONE column tile and the row dim is the only
-    parallelism left: K4096 x N256 tiles to 16 blocks on a 256-CU part, 6% of the
-    machine, and it is the one PR shape still under 1x of the bf16 kernel.
+    small N, where BLOCK_C=256 leaves ONE column tile and the row dim is the
+    only parallelism left: K4096 x N256 tiles to 16 blocks on a 256-CU part.
 
     Halving a tile dimension doubles the block count, and at a starved grid that
-    trade is strongly positive even though the narrower tile is worse per block
-    (the MFMA-per-ds_read ratio argument in `pick_block_c`). Measured at
-    K4096 x N256, M=4096 over 8 groups, bitwise-identical output:
+    trade is strongly positive even though the narrower tile is worse per block.
+    THE THRESHOLD IS ONE FULL WAVE.
 
-        br    bc   tiles   TF/s
-        256   256     16   145.4   (1.00x, the shipped pick)
-        256   128     32   215.9   (1.48x)
-        128   256     32   212.6   (1.46x)
-        128   128     64   296.3   (2.04x)
-
-    THE THRESHOLD IS ONE FULL WAVE, and the evidence for it had to be re-taken.
-    The original block_c sweep -- "128 loses on 11 of 12 shapes", including 0.86x
-    at g4x1024x2048x2048 -- was measured BEFORE the surplus-slot guard, when the
+    Note for anyone re-deriving this: the original block_c sweep that concluded
+    "128 loses on 11 of 12 shapes" predates the surplus-slot guard, when the
     launched grid was (ceildiv(M,BLOCK_R) + E) * n_c instead of the tile count,
     so both arms were partial-wave and the comparison never isolated occupancy.
-    Post-guard the grid IS the tile count, the same shape goes +14%, and every
-    partial-wave shape measured gains 11-14%. Do not resurrect the old numbers.
+    Do not resurrect those numbers.
     """
     br = pick_block_r(m_total, e)
     bc = pick_block_c(n)
@@ -242,26 +164,10 @@ def pick_tile(m_total: int, e: int, n: int) -> tuple:
     if tiles >= _STARVED_TILES:
         return br, bc
     # Only a tile that is 256 in BOTH dims can be halved: halving one that is
-    # already 128 lands on (128, 128), which is banned below. Measured on the
-    # partial-wave shapes (TFLOP/s, all bitwise-correct, post-surplus-guard):
-    #
-    #   shape                 pick  (256,256)  (256,128)  (128,256)   taken
-    #   g4x1024x2048x2048  256,256      823.4      938.1      929.9   +14%
-    #   g4x512x4096x4096   256,256     1018.2     1164.8     1156.5   +14%
-    #   g8x512x8192x2048   256,256     1110.8     1231.6     1267.7   +11%
-    #   g8x128x4096x4096   128,256      522.8      618.8      730.1   -> (128,128)
-    #   ragged [1,3,7,...] 128,256      269.4      335.5      386.2   -> narrower
-    #
-    # SHRINK ONE STEP AT A TIME, re-checking. (128,128) and BLOCK_R=64 were
-    # banned until 2026-08-13 for computing wrong answers; the cause was
-    # `wait_barrier` waiting on vmcnt and never lgkmcnt, so an s2r fragment
-    # issued in one cluster and consumed in the next crossed the barrier still
-    # outstanding while another wave overwrote its LDS buffer. The only thing
-    # covering that gap was the MFMAs in between -- N_ACCUMS of them -- so
-    # exactly the tiles with N_ACCUMS=4 broke. Fixed in `_fp8_gemm_utils`, and
-    # both tiles verified clean on the repros that used to fail every time.
-    # At K4096 x N256 the two-step shrink is worth 296.3 TF/s against 215.9 for
-    # stopping at (256,128).
+    # already 128 lands on (128, 128). SHRINK ONE STEP AT A TIME, re-checking;
+    # the partial-wave shapes gain 11-14% from the first step. (128,128) and
+    # BLOCK_R=64 were banned until the `wait_barrier` lgkmcnt fix, which is what
+    # made the N_ACCUMS=4 tiles compute wrong answers.
     tiles_at = lambda r, c: (
         max(1, e * ceildiv(max(m_total // e, 1), r)) * ceildiv(n, c)
     )
@@ -273,36 +179,17 @@ def pick_tile(m_total: int, e: int, n: int) -> tuple:
         br = 128
         if tiles_at(br, bc) >= _STARVED_TILES:
             return br, bc
-    # Third step, for the shapes that are STILL starved after both. K4096 x N256
-    # is the case: it is bandwidth-bound with too few concurrent blocks to
-    # saturate HBM, and throughput tracks achieved bandwidth, which tracks block
-    # count. Measured there (bitwise-identical output):
+    # Third step, for the shapes STILL starved after both. K4096 x N256 is the
+    # case: bandwidth-bound with too few concurrent blocks to saturate HBM, so
+    # throughput tracks block count. Split-K is NOT the fix -- the K-walk is
+    # only ~6us of a 25us kernel there, so splitting scales time linearly with
+    # launches; this shape wants more blocks per launch, not more launches.
     #
-    #   tile      tiles  waves    TF/s   achieved TB/s
-    #   (256,256)    16   0.06   147.4   0.63
-    #   (256,128)    32   0.12   222.4   1.40
-    #   (128,128)    64   0.25   302.8   2.51
-    #   (64,128)    128   0.50   361.1   4.45
-    #
-    # TAKE THE LAST ROW AS +9%, NOT +19%. That 361.1 came from one back-to-back
-    # sweep; an interleaved A/B repeated across three fresh processes puts
-    # (64,128) at 1.073 / 1.095 / 1.110 of (128,128), i.e. ~336 TF/s against
-    # ~305. One shape at +9% is ~+0.4% of the 24-shape geomean, which is inside
-    # that harness's run-to-run band -- so this step is justified by the A/B and
-    # will NOT be visible end to end. Do not go looking for it there.
-    #
-    # Split-K would be the textbook fix and is NOT it: the K-walk is only ~6us
-    # of a 25us kernel there, so splitting K scaled the time LINEARLY with the
-    # number of launches (S=2 -> 0.50x, S=4 -> 0.25x). More blocks per launch is
-    # what this shape wants, not more launches.
-    #
-    # HALF the threshold, because this step reverses once bandwidth saturates.
-    # A finer tile re-reads operands more times, so it only pays while there are
-    # too few blocks to use the bus. K4096 x N512 shows the far side: it reaches
-    # 4.58 TB/s at (128,128) already, and (64,128) buys 4.91 TB/s of MORE bytes
-    # for LESS work -- 551.2 -> 398.6 TF/s. N256 is the near side, 2.51 -> 4.45
-    # TB/s and 302.8 -> 361.1 TF/s. The two differ by whether 128 tiles is
-    # already enough, so the gate is "still under half a wave after both steps".
+    # HALF the threshold, because the step reverses once bandwidth saturates: a
+    # finer tile re-reads operands more times, so it only pays while there are
+    # too few blocks to use the bus. K4096 x N512 is the far side, where
+    # (64,128) buys more bytes for less work and loses. The gate is therefore
+    # "still under half a wave after both steps".
     if br == 128 and tiles_at(br, bc) < _STARVED_TILES // 2:
         br = 64
     return br, bc
@@ -347,31 +234,15 @@ def _warn_guard_fallback(K, N, E, BLOCK_C, BLOCK_R, err) -> None:
 def pick_block_c(N: int) -> int:
     """Column tile width. Always 256 -- the narrow tile was measured and lost.
 
-    The motivation for a narrow tile is real: a tile that overhangs N is not
-    free, because the MFMAs run on the overhang and the results are discarded at
-    the store. At K=2048, M=196608, N=1408 (6x256 = 1536 columns) and N=1536 take
-    the SAME 0.83 ms, so the 9.1% overhang is paid in full, and the kernel's
-    29.8% of peak on useful FLOPs is really 32.3% of the hardware.
+    A tile that overhangs N is not free: the MFMAs run on the overhang and the
+    results are discarded at the store. Even so, at the shapes where 128 removes
+    the whole overhang it is still ~15% slower, because per K-step a wave issues
+    4*NA*NB MFMAs against 4*(NA+NB) LDS reads -- ratio 2.0 at 4x4 against 1.33
+    at 4x2. Hardware efficiency drops further than the saved work is worth.
 
-    1408 = 2^7 x 11 and a legal BLOCK_C is 64 x N_TILES_B, so 128 is the only
-    sane width that divides it. Measured (median of 3, interleaved):
-
-        K=2048 N=1408   256: 0.831 ms 1365 TF/s   128: 0.979 ms 1158   0.849x
-        K=1408 N=2048   256: 0.833 ms 1361 TF/s   128: 1.034 ms 1097   0.806x
-        K=2048 N=2048   256: 1.105 ms 1493 TF/s   128: 1.326 ms 1244   0.833x
-
-    So the narrow tile removes the whole overhang at N=1408 and is still 15%
-    slower. Why: per K-step a wave issues 4*NA*NB MFMAs against 4*(NA+NB) LDS
-    reads, so the MFMA-per-ds_read ratio is NA*NB/(NA+NB) -- 2.0 at 4x4, 1.33 at
-    4x2. Hardware efficiency drops 32.3% -> 25.1%, a 22% loss to save 9% of work.
-
-    There is no better tile available: the accumulators already fill all 256
-    AGPRs at NA*NB = 16 per quadrant, so no shape with a higher ratio fits. The
-    NA=8, NB=2 corner (ratio 1.6, and exactly 160 KB of LDS) interpolates to
-    ~28% hardware, still below the 29.8% useful the wide tile delivers.
-
-    Conclusion: the overhang at N=1408 is not recoverable by retiling. Pass
-    ``block_c=128`` explicitly to re-run the comparison.
+    No better tile is available: the accumulators already fill all 256 AGPRs at
+    NA*NB = 16 per quadrant. Pass ``block_c=128`` explicitly to re-run the
+    comparison; `pick_tile` still takes 128 when the grid is starved.
     """
     return BLOCK_C_DEFAULT
 
