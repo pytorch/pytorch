@@ -653,6 +653,14 @@ max_autotune_gemm_backends = os.environ.get(
     "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS", "ATEN,TRITON,CPP"
 ).upper()
 
+# Opt-in for the shared-A bmm template (see kernel/bmm.py), off by default. The
+# template is only ever an extra autotune choice, so leaving it off keeps the
+# stock bmm choices and changes nothing else.
+bmm_shared_a: bool = Config(
+    default=False,
+    env_name_force="TORCHINDUCTOR_BMM_SHARED_A_TEMPLATE_ENABLED",
+)
+
 
 # Configures the maximum number of NVIDIA Universal GEMM (NVGEMM) configs to profile
 # in max_autotune. Default 10: a sweep over GDN2/attn/MoE + FLUX shapes (bf16 and
@@ -1923,63 +1931,15 @@ class cpp:
     use_two_step_variance_threshold = 1024
 
 
-def tlx_mode_default() -> Literal["allow", "force"] | None:
-    """Resolve torchTLX engagement, highest precedence first.
-
-    1. ``TORCHINDUCTOR_TLX_MODE``: "off", "allow" or "force". Unset is a
-       no-op. Any other value raises, so a typo fails loudly rather than
-       silently leaving TLX in whatever state the fleet is in.
-    2. ``pytorch/inductor:tlx_mode``, the fleet-wide rollout and killswitch:
-       1 off, 2 allow, 3 force. 0 is a no-op, and is also what
-       justknobs_getval_int reports for a knob that does not exist, an
-       unreachable JK, and PYTORCH_DISABLE_JUSTKNOBS -- hence a no-op rather
-       than a fleet-wide decision taken on absent information.
-    3. ``DEFAULT_MODE`` from the active Triton, which is where the TLX
-       templates live. Installing a Triton that ships the integration is
-       itself the opt-in; one that does not -- upstream OAI Triton -- has no
-       say and TLX stays off.
-
-    No fbcode gate is needed: outside fbcode the JustKnob stub reports 0,
-    which is already a no-op.
-
-    Off is spelled None rather than "off": get_hash() hashes every
-    non-compile-ignored config at its resolved value, so giving the off state
-    a new spelling would change the key for every Inductor process, TLX or
-    not, and invalidate the FX graph cache fleet-wide.
-    """
-    off_allow_force: tuple[Literal["allow", "force"] | None, ...] = (
-        None,
-        "allow",
-        "force",
-    )
-    env_modes = dict(zip(("off", "allow", "force"), off_allow_force))
-    # "default" was the documented spelling of off before this knob grew a
-    # JustKnob and a build default; keep honoring it so a job that still sets
-    # it does not die inside `import torch._inductor.config`.
-    env_modes["default"] = None
-
+def tlx_mode_from_env() -> Literal["allow", "force"] | None:
+    # Only the explicit values "allow"/"force" enable torchTLX. Any other
+    # value -- unset, empty, a typo, or a legacy "default" -- maps to None so
+    # TLX stays off. See the "Knob" section of the torchTLX README under
+    # third-party/triton/.../tlx/language/tlx/inductor/README.md.
     mode = os.environ.get("TORCHINDUCTOR_TLX_MODE")
-    if mode is not None:
-        if mode not in env_modes:
-            raise ValueError(
-                f"TORCHINDUCTOR_TLX_MODE={mode!r} is not one of {tuple(env_modes)}"
-            )
-        return env_modes[mode]
-
-    # JustKnob values 1/2/3 index off/allow/force; 0 falls through.
-    jk = torch._utils_internal.justknobs_getval_int("pytorch/inductor:tlx_mode")
-    if 1 <= jk <= len(off_allow_force):
-        return off_allow_force[jk - 1]
-
-    # A Triton that does not ship torchTLX has no default, so TLX stays off.
-    # Deliberately a module directly under `triton` rather than anything in
-    # triton.language.extra.tlx: that package eagerly imports the whole TLX
-    # DSL, and this runs in every Inductor process, GPU or not.
-    try:
-        from triton._torchtlx_default import DEFAULT_MODE
-    except ImportError:
-        return None
-    return DEFAULT_MODE
+    if mode in ("allow", "force"):
+        return cast("Literal['allow', 'force']", mode)
+    return None
 
 
 class triton:
@@ -1987,12 +1947,12 @@ class triton:
     Config specific to codegen/triton.py
     """
 
-    # torchTLX enablement. None (off) means TLX is never considered (standard
-    # Inductor behavior); "allow" lets TLX compete via autotuning; "force"
-    # uses only TLX templates plus forced epilogue fusion. Also a no-op
-    # unless the active Triton ships the integration (the import in
-    # heuristics/template/tlx.py fails cleanly otherwise).
-    tlx_mode: Literal["allow", "force"] | None = tlx_mode_default()
+    # torchTLX enablement. None (the default) means TLX is never considered
+    # (standard Inductor behavior); "allow" lets TLX compete via autotuning;
+    # "force" uses only TLX templates plus forced epilogue fusion. Also a
+    # no-op unless the active Triton is the fbtriton fork (the integration
+    # import in template_heuristics/tlx.py fails cleanly otherwise).
+    tlx_mode: Literal["allow", "force"] | None = tlx_mode_from_env()
 
     # Use cudagraphs on output code
     cudagraphs = os.environ.get("TORCHINDUCTOR_CUDAGRAPHS") == "1"
@@ -3105,11 +3065,17 @@ _cache_config_ignore_prefix: list[str] = [
     "autotune_remote_cache",
 ]
 
-# Config keys whose values are callable factories. save_config_portable will
-# instantiate the factory and use .uuid() for serialization.
-_cache_config_factory_keys: list[str] = [
-    "inductor_choices_class",
-]
+
+def _serialize_inductor_choices(config: dict[str, Any]) -> None:
+    from .choices import inductor_choices_cache_key
+
+    if "inductor_choices_class" in config:
+        config["inductor_choices_class"] = inductor_choices_cache_key(
+            config["inductor_choices_class"]
+        )
+
+
+_cache_config_serializer = _serialize_inductor_choices
 
 # External callable for matmul tuning candidates
 external_matmul: list[Callable[[torch.Tensor, torch.Tensor, torch.Tensor], None]] = []

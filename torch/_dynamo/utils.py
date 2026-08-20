@@ -1538,6 +1538,12 @@ def make_cell(val: Any = None) -> types.CellType:
     return f.__closure__[0]
 
 
+def clear_cell(cell: types.CellType) -> None:
+    """Empty `cell` regardless of its current state (replays DELETE_DEREF)."""
+    cell.cell_contents = None
+    del cell.cell_contents
+
+
 def proxy_args_kwargs(args: Any, kwargs: Any) -> tuple[tuple[Any, ...], dict[str, Any]]:
     try:
         proxy_args = tuple(arg.as_proxy() for arg in args)
