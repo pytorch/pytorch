@@ -342,7 +342,7 @@ class ScheduleTest(MultiProcContinuousTest):
 
     @requires_capabilities(Capability.distributed.backend)
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "Distributed backend test requires 2+ accelerators"
     )
     @skip_if_lt_x_gpu(4)
     def test_forward_only(self, device):
@@ -379,7 +379,7 @@ class ScheduleTest(MultiProcContinuousTest):
 
     @requires_capabilities(Capability.distributed.backend)
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "Distributed backend test requires 2+ accelerators"
     )
     @skip_if_lt_x_gpu(4)
     def test_eval_inference_mode(self, device):
@@ -456,7 +456,7 @@ class ScheduleTest(MultiProcContinuousTest):
 
     @requires_capabilities(Capability.distributed.backend)
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "Distributed backend test requires 2+ accelerators"
     )
     @skip_if_lt_x_gpu(4)
     def test_return_output(self, device):
@@ -520,7 +520,7 @@ class ScheduleTest(MultiProcContinuousTest):
 
     @requires_capabilities(Capability.distributed.backend)
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "Distributed backend test requires 2+ accelerators"
     )
     @skip_if_lt_x_gpu(4)
     def test_multi_iter(self, device):
@@ -546,7 +546,7 @@ class ScheduleTest(MultiProcContinuousTest):
 
     @requires_capabilities(Capability.distributed.backend)
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "Distributed backend test requires 2+ accelerators"
     )
     @skip_if_lt_x_gpu(4)
     def test_kwargs_with_tracer(self, device):
@@ -618,7 +618,7 @@ class ScheduleTest(MultiProcContinuousTest):
 
     @requires_capabilities(Capability.distributed.backend)
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "Distributed backend test requires 2+ accelerators"
     )
     @skip_if_lt_x_gpu(4)
     def test_grad_with_tracer(self, device):
@@ -678,7 +678,7 @@ class ScheduleTest(MultiProcContinuousTest):
 
     @requires_capabilities(Capability.distributed.backend)
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "Distributed backend test requires 2+ accelerators"
     )
     @skip_if_lt_x_gpu(4)
     def test_grad_with_manual(self, device):
@@ -742,7 +742,7 @@ class ScheduleTest(MultiProcContinuousTest):
 
     @requires_capabilities(Capability.distributed.backend)
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "Distributed backend test requires 2+ accelerators"
     )
     @skip_if_lt_x_gpu(4)
     def test_grad_with_manual_interleaved(self, device):
@@ -829,7 +829,7 @@ class ScheduleTest(MultiProcContinuousTest):
 
     @requires_capabilities(Capability.distributed.backend)
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "Distributed backend test requires 2+ accelerators"
     )
     @skip_if_lt_x_gpu(4)
     def test_schedule_with_weight_update_mlp_e2e(self, device):
@@ -915,7 +915,7 @@ class ScheduleTest(MultiProcContinuousTest):
 
     @requires_capabilities(Capability.distributed.backend)
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "Distributed backend test requires 2+ accelerators"
     )
     @skip_if_lt_x_gpu(4)
     def test_v_shape_schedules(self, device):
@@ -963,7 +963,7 @@ class ScheduleTest(MultiProcContinuousTest):
 
     @requires_capabilities(Capability.distributed.backend)
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "Distributed backend test requires 2+ accelerators"
     )
     @skip_if_lt_x_gpu(4)
     def test_custom_function_callback(self, device):
@@ -1166,7 +1166,7 @@ class ScheduleTest(MultiProcContinuousTest):
 
     @requires_capabilities(Capability.distributed.backend)
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "Distributed backend test requires 2+ accelerators"
     )
     @skip_if_lt_x_gpu(4)
     def test_zero_bubble_with_model_kwargs(self, device):
@@ -1281,7 +1281,7 @@ class ScheduleTest(MultiProcContinuousTest):
 
     @requires_capabilities(Capability.distributed.backend)
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "Distributed backend test requires 2+ accelerators"
     )
     @skip_if_lt_x_gpu(4)
     def test_NoneGrad_conditional_input_grad(self, device):
@@ -1470,7 +1470,7 @@ class CustomSchedulesTest(MultiProcContinuousTest):
 
     @requires_capabilities(Capability.distributed.backend)
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "Distributed backend test requires 2+ accelerators"
     )
     @skip_if_lt_x_gpu(4)
     def test_non_symmetric_stage_ids(self, device):
@@ -1522,7 +1522,7 @@ class CustomSchedulesTest(MultiProcContinuousTest):
 
     @requires_capabilities(Capability.distributed.backend)
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "Distributed backend test requires 2+ accelerators"
     )
     @skip_if_lt_x_gpu(4)
     def test_pipeline_schedule_runtime_custom_sched(self, device):
@@ -1588,7 +1588,7 @@ class CustomSchedulesTest(MultiProcContinuousTest):
 
     @requires_capabilities(Capability.distributed.backend)
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "Distributed backend test requires 2+ accelerators"
     )
     @skip_if_lt_x_gpu(4)
     def test_schedule_with_native_zero_bubble(self, device):
@@ -1702,7 +1702,7 @@ class PerDirectionScheduleTest(MultiProcContinuousTest):
 
     @requires_capabilities(Capability.distributed.backend)
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "Distributed backend test requires 2+ accelerators"
     )
     @skip_if_lt_x_gpu(4)
     def test_creates_distinct_direction_groups(self, device):
@@ -1722,7 +1722,7 @@ class PerDirectionScheduleTest(MultiProcContinuousTest):
 
     @requires_capabilities(Capability.distributed.backend)
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "Distributed backend test requires 2+ accelerators"
     )
     @skip_if_lt_x_gpu(4)
     def test_grad_with_manual_per_direction(self, device):
