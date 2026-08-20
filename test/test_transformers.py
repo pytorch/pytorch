@@ -1775,6 +1775,7 @@ class TestSDPAFailureModes(NNTestCase):
                                    lambda: torch.nn.functional.scaled_dot_product_attention(q, k, v))
 
     @onlyAccelerator
+    @skipIfXpu(msg="torch-xpu-ops/issues/4915")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Does not support fused scaled dot product attention")
     @parametrize(
         "kernel",
