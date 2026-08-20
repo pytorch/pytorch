@@ -282,6 +282,13 @@ class TestUtils(TestCase):
         self.assertEqual(lookup_device_info("AMD Instinct MI300X"), upper)
         self.assertEqual(lookup_device_info("amd instinct mi300x"), upper)
 
+    def test_lookup_device_info_h100_sxm_reported_name(self):
+        # torch.cuda.get_device_name() reports the SXM part as
+        # "NVIDIA H100 80GB HBM3", which the "NVIDIA H100" entry describes.
+        h100 = lookup_device_info("NVIDIA H100")
+        self.assertIsNotNone(h100)
+        self.assertEqual(lookup_device_info("NVIDIA H100 80GB HBM3"), h100)
+
 
 def has_supported_gpu():
     """Check if any GPU platform with Triton support is available."""
