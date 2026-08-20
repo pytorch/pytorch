@@ -761,14 +761,25 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
                         for node in pointwise_nodes
                         if isinstance(node.node, ComputedBuffer)
                     ]
-                    try:
-                        lowered_epilogue = LoopIRCuteDSLCodegen.from_buffers(
-                            original_buffer_name,
-                            evt_buffers,
-                            removed_buffers_with_gemm,
-                            EPILOGUE_FN_NAME,
-                        )
-                    except NotImplementedError:
+                    from .nv_universal_gemm import GemmVariant
+
+                    if ctb.variant == GemmVariant.SCALED_GEMM:
+                        try:
+                            lowered_epilogue = LoopIRCuteDSLCodegen.from_buffers(
+                                original_buffer_name,
+                                evt_buffers,
+                                removed_buffers_with_gemm,
+                                EPILOGUE_FN_NAME,
+                            )
+                        except NotImplementedError:
+                            lowered_epilogue = CutlassEVTCodegen.ir_to_evt_python_code(
+                                original_buffer_name,
+                                list(pointwise_nodes),
+                                removed_buffers_with_gemm,
+                                fn_name=EPILOGUE_FN_NAME,
+                                as_standalone_function=True,
+                            )
+                    else:
                         lowered_epilogue = CutlassEVTCodegen.ir_to_evt_python_code(
                             original_buffer_name,
                             list(pointwise_nodes),
