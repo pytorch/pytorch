@@ -20,6 +20,10 @@ from torch._inductor.select_algorithm import (
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_cache, get_num_sms, TMA_DESCRIPTOR_SIZE
 from torch._inductor.virtualized import V
+from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_GREEN_CONTEXT,
+    SM90OrLater,
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -1113,6 +1117,13 @@ class TestLookupTableE2E(BaseE2ELookupTableTest):
         # Ensure hash checking is enabled
         with patch.object(inductor_config.lookup_table, "check_src_hash", True):
             self.run_model("mm", tensors)
+
+
+class TestForcedPredicateProbe(TestCase):
+    @unittest.skipIf(not SM90OrLater, "needs sm90")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_GREEN_CONTEXT, "needs green context")
+    def test_sm90_behind_a_forced_predicate(self):
+        self.assertTrue(True)
 
 
 if __name__ == "__main__":
