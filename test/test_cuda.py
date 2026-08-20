@@ -8207,6 +8207,39 @@ class TestMemPool(TestCase):
         g.reset()
         self.assertEqual(pool.use_count(), 1)
 
+    @serialTest()
+    @unittest.skipUnless(TEST_CUDAMALLOCASYNC, "requires cudaMallocAsync")
+    def test_mempool_cudamallocasync_custom_allocator(self):
+        allocator, dummy_allocator = self.get_dummy_allocator(check_vars=True)
+        alloc_lib = ctypes.CDLL(dummy_allocator)
+        called_dummy_alloc = ctypes.c_int.in_dll(alloc_lib, "called_dummy_alloc")
+        called_dummy_free = ctypes.c_int.in_dll(alloc_lib, "called_dummy_free")
+        called_dummy_alloc.value = 0
+        called_dummy_free.value = 0
+        pool = None
+        x = None
+        try:
+            pool = torch.cuda.MemPool(
+                allocator.allocator(), use_on_oom=False, no_split=True
+            )
+            self.assertEqual(pool.use_count(), 1)
+            with torch.cuda.use_mem_pool(pool):
+                self.assertEqual(pool.use_count(), 2)
+                x = torch.ones(4, device="cuda")
+            self.assertEqual(pool.use_count(), 1)
+            self.assertEqual(x.numel(), 4)
+            self.assertEqual(called_dummy_alloc.value, 0)
+        finally:
+            x = None
+            pool = None
+            torch.cuda.synchronize()
+            final_dummy_alloc = called_dummy_alloc.value
+            final_dummy_free = called_dummy_free.value
+            called_dummy_alloc.value = 0
+            called_dummy_free.value = 0
+        self.assertEqual(final_dummy_alloc, 0)
+        self.assertEqual(final_dummy_free, 0)
+
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "already running under cudaMallocAsync")
     @unittest.skipIf(TEST_WITH_ROCM, "hipMallocAsync path not validated")
     def test_mempool_cudamallocasync_subprocess(self):
@@ -8218,13 +8251,16 @@ class TestMemPool(TestCase):
             dict.fromkeys(filter(None, [torch_parent, *sys.path]))
         )
         module = os.path.splitext(os.path.basename(__file__))[0]
-        test = f"{module}.TestMemPool.test_mempool_cudamallocasync"
+        tests = [
+            f"{module}.TestMemPool.test_mempool_cudamallocasync",
+            f"{module}.TestMemPool.test_mempool_cudamallocasync_custom_allocator",
+        ]
         child_code = (
             "import sys, unittest; "
             "sys.modules['torchvision'] = None; "
             "import torch; "
             "assert torch.cuda.get_allocator_backend() == 'cudaMallocAsync'; "
-            f"suite = unittest.defaultTestLoader.loadTestsFromName({test!r}); "
+            f"suite = unittest.defaultTestLoader.loadTestsFromNames({tests!r}); "
             "result = unittest.TextTestRunner(verbosity=2).run(suite); "
             "raise SystemExit(0 if result.wasSuccessful() else 1)"
         )
