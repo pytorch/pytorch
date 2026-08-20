@@ -2050,6 +2050,51 @@ partial_fn = functools.partial(fn, scale=2)
         x = torch.randn(4)
         self.assertEqual(fn(x), opt_fn(x))
 
+    def test_function_dunder_class(self):
+        # A function object's __class__ (types.FunctionType) under compile.
+        def g(x):
+            return x + 1
+
+        def fn(x):
+            return g(x), g.__class__
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_instance_dunder_class(self):
+        # A user-defined instance's __class__ under compile.
+        class A:
+            def __init__(self) -> None:
+                self.a = 6
+
+        def fn(x):
+            return x + 1, A().__class__
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_function_missing_attr_raises(self):
+        # A missing attribute on a function must raise a catchable
+        # AttributeError, not defer to a GetAttrVariable / graph break.
+        def make():
+            def g(x):
+                return x
+
+            return g
+
+        def fn(x):
+            g = make()
+            try:
+                return x + g.does_not_exist
+            except AttributeError:
+                return x + 100
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
     def test_default_dict_constr(self):
         param = torch.nn.Parameter(torch.ones([2, 2]))
 
