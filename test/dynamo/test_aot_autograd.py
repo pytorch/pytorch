@@ -942,7 +942,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 5|aten.view.default|linear|
 6|aten.t.default|linear|
 7|aten.addmm.default|linear|
-8|aten.view.default|linear|
+8|aten._unsafe_view.default|linear|
 9|aten.sub.Tensor|l1_loss|
 10|aten.abs.default|l1_loss|
 11|aten.mean.default|l1_loss|
