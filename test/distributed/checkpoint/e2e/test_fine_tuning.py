@@ -16,8 +16,17 @@ from torch.distributed.checkpoint.state_dict import (
 )
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
+)
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TEST_WITH_DEV_DBG_ASAN,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
@@ -80,6 +89,8 @@ class FineTuningModel(nn.Module):
 
 
 class TestFineTuning(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return min(4, torch.accelerator.device_count())
@@ -89,16 +100,17 @@ class TestFineTuning(DTensorTestBase):
         curr_backend = dist.get_default_backend_for_device(self.device_type)
         return f"cpu:gloo,{self.device_type}:{curr_backend}"
 
-    def pretrain(self, pretrain_dir: str) -> None:
-        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
+    def pretrain(self, device, pretrain_dir: str) -> None:
+        device_type = torch.device(device).type
+        device_mesh = init_device_mesh(device_type, (self.world_size,))
 
-        model = PreTrainedModel().to(self.device_type)
+        model = PreTrainedModel().to(device_type)
         model = FSDP(model, device_mesh=device_mesh)
         optim = torch.optim.Adam(model.parameters(), lr=1e-3)
 
         # Training
         for _ in range(3):
-            batch = torch.rand(32, DIM, device=self.device_type)
+            batch = torch.rand(32, DIM, device=device_type)
             loss = model(batch).sum()
             loss.backward()
             optim.step()
@@ -112,10 +124,11 @@ class TestFineTuning(DTensorTestBase):
             storage_writer=dist_cp.FileSystemWriter(pretrain_dir),
         )
 
-    def finetune(self, pretrain_dir: str, finetune_dir: str) -> None:
-        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
+    def finetune(self, device, pretrain_dir: str, finetune_dir: str) -> None:
+        device_type = torch.device(device).type
+        device_mesh = init_device_mesh(device_type, (self.world_size,))
 
-        model = FineTuningModel().to(self.device_type)
+        model = FineTuningModel().to(device_type)
         # TODO: make the parallelism more complicated, e.g., using 2D + DDP.
         model = FSDP(model, use_orig_params=True, device_mesh=device_mesh)
         optim = torch.optim.Adam(model.parameters(), lr=1e-3)
@@ -163,7 +176,7 @@ class TestFineTuning(DTensorTestBase):
 
             # Training
             for _ in range(3):
-                batch = torch.rand(32, DIM, device=self.device_type)
+                batch = torch.rand(32, DIM, device=device_type)
                 loss = model(batch).sum()
                 loss.backward()
                 optim.step()
@@ -182,9 +195,14 @@ class TestFineTuning(DTensorTestBase):
             )
 
     @skip_if_lt_x_gpu(4)
+    @requires_capabilities(
+        Capability.distributed.backend,
+        Capability.distributed.dtensor,
+        Capability.distributed.fsdp,
+    )
     @with_comms
     @with_temp_dir
-    def test_fine_tuning(self) -> None:
+    def test_fine_tuning(self, device) -> None:
         self.assertTrue(os.path.exists(self.temp_dir))
         pretrain_dir = os.path.join(self.temp_dir, "pretrain")
         finetune_dir = os.path.join(self.temp_dir, "finetune")
@@ -197,8 +215,13 @@ class TestFineTuning(DTensorTestBase):
         self.assertTrue(os.path.exists(pretrain_dir))
         self.assertTrue(os.path.exists(finetune_dir))
 
-        self.pretrain(pretrain_dir)
-        self.finetune(pretrain_dir, finetune_dir)
+        self.pretrain(device, pretrain_dir)
+        self.finetune(device, pretrain_dir, finetune_dir)
+
+
+instantiate_device_type_tests(
+    TestFineTuning, globals(), except_for=("cpu",), allow_xpu=True
+)
 
 
 if __name__ == "__main__":
