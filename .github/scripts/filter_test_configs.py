@@ -244,7 +244,10 @@ def mark_unstable_jobs(
 
 
 def remove_disabled_jobs(
-    workflow: str, job_name: str, test_matrix: dict[str, list[Any]]
+    workflow: str,
+    job_name: str,
+    test_matrix: dict[str, list[Any]],
+    reenabled_issues: set[str] | None = None,
 ) -> dict[str, list[Any]]:
     """
     Check the list of disabled jobs, remove the current job and all its dependents
@@ -256,6 +259,7 @@ def remove_disabled_jobs(
         test_matrix=test_matrix,
         issue_type=IssueType.DISABLED,
         url=DISABLED_JOBS_URL,
+        reenabled_issues=reenabled_issues,
     )
 
 
@@ -304,6 +308,7 @@ def process_jobs(
     test_matrix: dict[str, list[Any]],
     issue_type: IssueType,
     url: str,
+    reenabled_issues: set[str] | None = None,
 ) -> dict[str, list[Any]]:
     """
     Both disabled and unstable jobs are in the following format:
@@ -327,6 +332,9 @@ def process_jobs(
         ],
     }
     """
+    if reenabled_issues is None:
+        reenabled_issues = set()
+
     try:
         # The job name from github is in the PLATFORM / JOB (CONFIG) format, so breaking
         # it into its two components first
@@ -338,12 +346,20 @@ def process_jobs(
     for record in download_json(url=url, headers={}).values():
         (
             author,
-            _,
+            issue_number,
             target_url,
             target_workflow,
             target_platform,
             target_job_cfg,
         ) = record
+
+        if issue_type == IssueType.DISABLED and issue_number in reenabled_issues:
+            msg = (
+                f"Issue {target_url} is re-enabled on this PR, "
+                "ignoring disabled job filter"
+            )
+            info(msg)
+            continue
 
         if target_workflow != workflow:
             # The current workflow doesn't match this record
@@ -530,6 +546,7 @@ def perform_misc_tasks(
     pr_body: str,
     branch: str | None = None,
     tag: str | None = None,
+    reenabled_issues: list[str] | None = None,
 ) -> None:
     """
     In addition to apply the filter logic, the script also does the following
@@ -577,7 +594,9 @@ def perform_misc_tasks(
         is_unstable,
     )
 
-    set_output("reenabled-issues", ",".join(get_reenabled_issues(pr_body=pr_body)))
+    if reenabled_issues is None:
+        reenabled_issues = get_reenabled_issues(pr_body=pr_body)
+    set_output("reenabled-issues", ",".join(reenabled_issues))
 
 
 def main() -> None:
@@ -641,18 +660,27 @@ def main() -> None:
         # not on every periodically scheduled job.
         filtered_test_matrix = set_periodic_modes(filtered_test_matrix, args.job_name)
 
+    pr_body = ""
+    reenabled_issues_list: list[str] = []
+    reenabled_issues_set: set[str] = set()
+    if pr_number:
+        pr_body = get_pr_info(int(pr_number)).get("body", "") or ""
+        reenabled_issues_list = get_reenabled_issues(pr_body=pr_body)
+        reenabled_issues_set = set(reenabled_issues_list)
+
     if args.workflow and args.job_name and args.branch not in EXCLUDED_BRANCHES:
         # If both workflow and job name are available, we will check if the current job
         # is disabled and remove it and all its dependants from the test matrix
         filtered_test_matrix = remove_disabled_jobs(
-            args.workflow, args.job_name, filtered_test_matrix
+            args.workflow,
+            args.job_name,
+            filtered_test_matrix,
+            reenabled_issues_set,
         )
 
         filtered_test_matrix = mark_unstable_jobs(
             args.workflow, args.job_name, filtered_test_matrix
         )
-
-    pr_body = get_pr_info(int(pr_number)).get("body", "") if pr_number else ""
 
     # Fail the workflow for PRs sitting on top of a long ghstack: those PRs
     # will need to be retested once everything underneath lands, so running
@@ -677,9 +705,10 @@ def main() -> None:
         labels=labels,
         test_matrix=filtered_test_matrix,
         job_name=args.job_name,
-        pr_body=pr_body if pr_body else "",
+        pr_body=pr_body,
         branch=args.branch,
         tag=tag,
+        reenabled_issues=reenabled_issues_list,
     )
 
     # Set the filtered test matrix as the output
