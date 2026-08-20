@@ -309,13 +309,23 @@ def unwrap_tensor_subclasses(
     def _maybe_fakeify_opaque(v: Any) -> Any:
         # Registered opaque types need to be wrapped as FakeScriptObject for
         # compile-time FX tracing (proxy slot tracking, hashability, etc.).
+        # Exception: non-hoisted constant-type opaques are inlined as literals
+        # (matching VariableBuilder and PythonKeyTracer behavior), so
+        # fakeifying them would inject a FakeScriptObject that downstream
+        # layers do not expect and cannot unwrap without extra codegen.
         if isinstance(v, CustomClassBase):
             from torch._guards import detect_fake_mode
             from torch._library.fake_class_registry import maybe_to_fake_obj
-            from torch._library.opaque_object import is_custom_class
+            from torch._library.opaque_object import (
+                is_custom_class,
+                is_opaque_constant_type,
+                should_hoist,
+            )
 
             fake_mode = detect_fake_mode()
             if fake_mode is not None and is_custom_class(type(v)):
+                if is_opaque_constant_type(type(v)) and not should_hoist(type(v)):
+                    return v
                 return maybe_to_fake_obj(fake_mode, v)
         return v
 
