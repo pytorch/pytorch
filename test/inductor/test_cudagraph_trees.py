@@ -368,11 +368,7 @@ if HAS_CUDA_AND_TRITON:
             out = f(x, w)
             node = self.get_manager().current_node
             cached = node.cached_tensor_outputs
-            held = [
-                i
-                for i, tn in enumerate(cached)
-                if tn is not None and tn is out
-            ]
+            held = [i for i, tn in enumerate(cached) if tn is not None and tn is out]
             self.assertTrue(held)
             for i in held:
                 # cache + getrefcount arg + the user's `out` variable
@@ -436,9 +432,7 @@ if HAS_CUDA_AND_TRITON:
             for _ in range(8):
                 out = f2(f1(x, w), w2)
                 del out
-            self.assertEqual(
-                self.get_manager().new_graph_id().id, graphs_before + 1
-            )
+            self.assertEqual(self.get_manager().new_graph_id().id, graphs_before + 1)
 
         def test_severed_backward_rerecord_repro(self):
             # Production repro: another root fn runs the liveness sweep while
@@ -491,14 +485,10 @@ if HAS_CUDA_AND_TRITON:
             # the pending backward's SavedVariable preserves liveness, so the
             # forward path is never abandoned mid-generation: no severing, no
             # cudagraph skip
-            self.assertEqual(
-                counters["inductor"]["cudagraph_skips"], skips_before
-            )
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], skips_before)
             # the eager fallback must be numerically correct
             x_ref = x.detach().clone().requires_grad_(True)
-            (g_ref,) = torch.autograd.grad(
-                torch.tanh(x_ref * w).sum(), x_ref
-            )
+            (g_ref,) = torch.autograd.grad(torch.tanh(x_ref * w).sum(), x_ref)
             self.assertEqual(g, g_ref)
             # and no backward may have recorded as a fresh root
             from torch._inductor.cudagraph_trees import CompilationMode

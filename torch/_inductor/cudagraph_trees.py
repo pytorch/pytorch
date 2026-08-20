@@ -1684,15 +1684,16 @@ class CUDAGraphNode:
                 self_loc = self_ref()
                 if self_loc is None:
                     return False
-                if self_loc.cached_tensor_outputs[i] is None:
-                    # checks are installed only on cached entries and are
-                    # uninstalled before entries are cleared
-                    raise AssertionError(f"cached output {i} cleared while its liveness check was still installed")
                 # NB: the refcount must be measured before binding any local
                 # reference to the tensor, or the local itself inflates it
                 refcount = self_loc.get_output_refcount(i)
-                # pyrefly: ignore
                 cached = self_loc.cached_tensor_outputs[i]
+                if cached is None:
+                    # checks are installed only on cached entries and are
+                    # uninstalled before entries are cleared
+                    raise AssertionError(
+                        f"cached output {i} cleared while its liveness check was still installed"
+                    )
                 # TODO: under free-threaded Python sys.getrefcount is biased /
                 # imprecise; use PyUnstable_Object_IsUniquelyReferenced (or
                 # query the real refcount) for this check instead
