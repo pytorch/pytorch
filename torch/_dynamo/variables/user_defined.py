@@ -127,7 +127,7 @@ from .object_protocol import (
     type_disallows_instantiation,
     type_implements_nb_slot,
 )
-from .sets import SetVariable
+from .sets import FrozensetVariable, SetVariable
 
 
 try:
@@ -1896,7 +1896,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def nb_bool_impl(
         self,
         tx: "InstructionTranslatorBase",
-    ) -> "VariableTracker | None":
+    ) -> "VariableTracker":
         # Mirrors slot_nb_bool:
         # https://github.com/python/cpython/blob/c09ccd9c429/Objects/typeobject.c#L9408-L9458
         res = self._maybe_call_special(tx, "__bool__", [])
@@ -2852,6 +2852,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        method = self._maybe_get_baseclass_method("__init__")
+        if method is object.__init__:
+            return variables.ConstantVariable.create(None)
         res = self._vectorcall_method(tx, "__init__", args, kwargs)
         if not res.is_constant_none():
             raise_type_error(
@@ -5010,7 +5013,10 @@ class UserDefinedSetVariable(UserDefinedObjectVariable):
     """
 
     def __init__(
-        self, value: object, set_vt: SetVariable | None = None, **kwargs: Any
+        self,
+        value: object,
+        set_vt: SetVariable | FrozensetVariable | None = None,
+        **kwargs: Any,
     ) -> None:
         from .builder import SourcelessBuilder
 
