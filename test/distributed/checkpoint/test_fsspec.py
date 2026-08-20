@@ -101,7 +101,8 @@ class TestFSSpec(ShardedTensorTestBase):
         "test requires 2+ accelerators",
     )
     @with_temp_dir
-    def test_fsspec(self):
+    def test_fsspec(self, device):
+        device_type = torch.device(device).type
         CHECKPOINT_DIR = self.temp_dir
 
         model = FSDP(MyTestModule().to(device_type))
@@ -178,7 +179,7 @@ class TestFSSpec(ShardedTensorTestBase):
         "test requires 2+ accelerators",
     )
     @with_temp_dir
-    def test_overwrite(self):
+    def test_overwrite(self, device):
         t1, t2 = torch.randn(10), torch.randn(10)
 
         dcp.save(
