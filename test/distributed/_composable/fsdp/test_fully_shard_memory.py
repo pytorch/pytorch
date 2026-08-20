@@ -17,9 +17,7 @@ from torch.distributed.fsdp import (
     OffloadPolicy,
 )
 from torch.distributed.tensor import init_device_mesh
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, get_devtype
 from torch.testing._internal.common_utils import (
@@ -47,7 +45,7 @@ class TestFullyShardMemory(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     @unittest.skipIf(TEST_HPU, " 'empty_cache' is not supported on hpu")
-    def test_fully_shard_training_memory(self):
+    def test_fully_shard_training_memory(self, device):
         self.run_subtests(
             {
                 "reshard_after_forward": [True, False],
@@ -243,7 +241,7 @@ class TestFullyShardMemory(FSDPTest):
         self.assertLessEqual(mem_mb - base_mem_mb, expected_mem_mb)
 
     @skip_if_lt_x_gpu(2)
-    def test_fully_shard_training_memory_no_gc(self):
+    def test_fully_shard_training_memory_no_gc(self, device):
         """Memory should not grow across training steps when GC is disabled.
 
         Regression test: reference cycles in FSDP's autograd integration can
@@ -302,7 +300,7 @@ class TestFullyShardMemory(FSDPTest):
             gc.enable()
 
     @skip_if_lt_x_gpu(2)
-    def test_fully_shard_del_memory(self):
+    def test_fully_shard_del_memory(self, device):
         base_mem_mb = self._get_peak_active_memory_mb()
         vocab_size = 32
         model_args = ModelArgs(
@@ -378,7 +376,7 @@ class TestFullyShardHSDPSyncCorrectness(FSDPTest):
 
     # This test is CUDA-specific because it relies on torch.cuda._sleep.
     @skip_if_lt_x_gpu(4)
-    def test_ar_buffer_lifetime_mixed_dtype(self):
+    def test_ar_buffer_lifetime_mixed_dtype(self, device):
         """Regression guard for PR #140044 (`[FSDP2] Fix CUDA sync for bf16
         HSDP AR, fp32 params`).
 
