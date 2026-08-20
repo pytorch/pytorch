@@ -23,8 +23,8 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
     IS_FBCODE, IS_JETSON, IS_MACOS, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, slowTest,
     parametrize, reparametrize, subtest, instantiate_parametrized_tests, dtype_name,
-    TEST_WITH_PERIODIC, TEST_WITH_ROCM, check_if_enable, decorateIf, periodic, skipIfTorchDynamo, skipIfXpu,
-    suppress_warnings,
+    TEST_SKIP_NON_PERIODIC, TEST_WITH_PERIODIC, TEST_WITH_ROCM, check_if_enable, decorateIf, periodic,
+    skipIfTorchDynamo, skipIfXpu, suppress_warnings,
 )
 from torch.testing._internal.common_cuda import has_device_side_assert
 from torch.testing._internal.common_device_type import \
@@ -614,6 +614,7 @@ class TestPeriodicDecorator(TestCase):
         test run's environment."""
         defaults = dict(
             TEST_WITH_PERIODIC=False,
+            TEST_SKIP_NON_PERIODIC=False,
             TEST_WITH_SLOW=False,
             TEST_SKIP_FAST=False,
             IS_SANDCASTLE=False,
@@ -708,7 +709,10 @@ class TestPeriodicDecorator(TestCase):
         self.assertTrue(test_fn.__dict__.get("periodic_test"))
         self.assertEqual(getattr(test_fn, "__unittest_skip__", False), not periodic_enabled)
 
-    def test_check_if_enable_dynamic_slow_respects_periodic(self):
+    def test_periodic_strict_env_runs_dynamically_slow_periodic_tests(self):
+        # periodic-strict sets PYTORCH_TEST_WITH_SLOW, so a @periodic test that
+        # lands in slow-tests.json (auto-marked slow from its own runtime) still
+        # runs in the only workflow that runs it.
         with self._patch_test_env(TEST_WITH_PERIODIC=True):
             class TestP(TestCase):
                 @periodic
@@ -719,9 +723,10 @@ class TestPeriodicDecorator(TestCase):
                     pass
 
         slow_tests = {"test_p (__main__.TestP)": None, "test_plain (__main__.TestP)": None}
-        with self._patch_test_env(TEST_WITH_PERIODIC=True, slow_tests_dict=slow_tests):
-            check_if_enable(TestP("test_p"))  # periodic overrides the dynamic slow mark
-            with self.assertRaisesRegex(unittest.SkipTest, "test is slow"):
+        env = dict(TEST_WITH_PERIODIC=True, TEST_WITH_SLOW=True, TEST_SKIP_NON_PERIODIC=True)
+        with self._patch_test_env(**env, slow_tests_dict=slow_tests):
+            check_if_enable(TestP("test_p"))
+            with self.assertRaisesRegex(unittest.SkipTest, "test is not periodic"):
                 check_if_enable(TestP("test_plain"))
 
     def test_slowtest_gates_on_slow_mode(self):
@@ -749,7 +754,9 @@ class TestPeriodicDecorator(TestCase):
         ],
     )
     def test_periodic_composes_with_slowtest(self, decorate):
-        with self._patch_test_env(TEST_WITH_PERIODIC=True):
+        # periodic-strict sets PYTORCH_TEST_WITH_SLOW, so the slow gate does not
+        # block a test marked both @periodic and @slowTest there.
+        with self._patch_test_env(TEST_WITH_PERIODIC=True, TEST_WITH_SLOW=True):
             class TestP(TestCase):
                 @decorate
                 def test_b(self):
@@ -758,7 +765,7 @@ class TestPeriodicDecorator(TestCase):
             self.assertTrue(TestP.test_b.__dict__.get("periodic_test"))
             self.assertTrue(TestP.test_b.__dict__.get("slow_test"))
             self.assertFalse(getattr(TestP.test_b, "__unittest_skip__", False))
-            TestP("test_b").test_b()  # the slow gate defers to periodic mode
+            TestP("test_b").test_b()
 
         # Outside periodic mode the periodic gate applies even when slow mode
         # is on: a test marked both runs only in periodic CI.
@@ -771,23 +778,32 @@ class TestPeriodicDecorator(TestCase):
         self.assertTrue(getattr(TestS.test_b, "__unittest_skip__", False))
         self.assertIn("PYTORCH_TEST_WITH_PERIODIC", TestS.test_b.__unittest_skip_why__)
 
-    def test_periodic_mode_enabled_in_periodic_workflows(self):
-        # Static validation of the periodic workflow files lives in
-        # .github/scripts/test_periodic_workflows.py; this checks end to end
-        # that periodic CI actually plumbed the flag through to the test env.
-        workflow = os.getenv("GITHUB_WORKFLOW", "")
-        # unstable-periodic parks flaky jobs from any workflow, so periodic
-        # tests are not necessarily enabled there.
-        if "periodic" not in workflow or workflow == "unstable-periodic":
-            self.skipTest("only meaningful inside a periodic CI workflow")
-        self.assertTrue(TEST_WITH_PERIODIC)
+    def test_check_if_enable_skips_non_periodic_in_periodic_only_mode(self):
+        with self._patch_test_env(TEST_WITH_PERIODIC=True):
+            class TestP(TestCase):
+                @periodic
+                def test_p(self):
+                    pass
+
+                def test_plain(self):
+                    pass
+
+        with self._patch_test_env(TEST_WITH_PERIODIC=True, TEST_SKIP_NON_PERIODIC=True):
+            check_if_enable(TestP("test_p"))
+            with self.assertRaisesRegex(unittest.SkipTest, "test is not periodic"):
+                check_if_enable(TestP("test_plain"))
 
     # Not a tautology: if the @periodic gate ever breaks, this test runs in
     # every non-periodic CI job, where TEST_WITH_PERIODIC is False, and fails.
-    # Inverse canary to test_periodic_mode_enabled_in_periodic_workflows.
     @periodic
     def test_periodic_smoke(self):
         self.assertTrue(TEST_WITH_PERIODIC)
+
+    # Inverse canary to test_periodic_smoke: in the periodic-strict workflow
+    # (where PYTORCH_TEST_SKIP_NON_PERIODIC is set) this unmarked test must be
+    # skipped by check_if_enable; executing there means the mode is broken.
+    def test_non_periodic_smoke(self):
+        self.assertFalse(TEST_SKIP_NON_PERIODIC)
 
 
 instantiate_parametrized_tests(TestPeriodicDecorator)
