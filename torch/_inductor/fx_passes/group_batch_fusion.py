@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import collections
+import functools
 import logging
 import operator
 from collections import OrderedDict
@@ -501,6 +502,13 @@ class BatchLinearLHSFusion(BatchFusion):
         if CallFunctionVarArgs([torch.nn.functional.linear, torch._C._nn.linear]).match(
             node
         ) and is_linear_node_can_be_fused(node):
+            # Splitting a wide GEMM returns non-contiguous views. Avoid changing
+            # observable layout or passing those views to opaque custom operators.
+            # The guard walks through view-producing users (including split /
+            # chunk / indexing via getitem) to find any consumer that can
+            # observe the layout or requires contiguity.
+            if _has_layout_sensitive_user(node):
+                return None
             input = get_arg_value(node, 0, "input")
             weight = get_arg_value(node, 1, "weight")
             bias = get_arg_value(node, 2, "bias")
@@ -598,6 +606,112 @@ class BatchLinearLHSFusion(BatchFusion):
             new_node.meta.update(node.meta)
             graph.erase_node(node)  # type: ignore[operator]
         counters["inductor"]["batch_linear_lhs"] += 1
+
+
+def _op_namespace(tgt) -> str | None:
+    # OpOverload and HigherOrderOperator expose .namespace; OpOverloadPacket
+    # does not (accessing it raises), so derive its namespace from the
+    # qualified op name ("ns::op").
+    if isinstance(tgt, (torch._ops.OpOverload, torch._ops.HigherOrderOperator)):
+        return tgt.namespace
+    if isinstance(tgt, torch._ops.OpOverloadPacket):
+        return tgt._qualified_op_name.split("::")[0]
+    return None
+
+
+# Whether an aten op is a view (its output aliases its input, per the schema's
+# alias annotations surfaced as OpOverload.is_view). Pre-grad graphs spell the
+# same view op as call_method "view", as torch.split, or as
+# torch.ops.aten.numpy_T, so we match on the op name and ask aten's schema.
+# This tracks the aten table instead of a hand-maintained list (e.g. it covers
+# view_as / narrow / unfold / diagonal / .T without an edit). The match is by
+# name only, so a non-aten python callable whose __name__ collides with an aten
+# view op is judged against aten's table; the caller rejects non-aten
+# namespaces first, which keeps that from firing on real third-party ops.
+@functools.lru_cache(None)
+def _is_aten_view_name(name: str) -> bool:
+    packet = getattr(torch.ops.aten, name, None)
+    if packet is None:
+        return False
+    # Iterate op_overloads(): select/slice/transpose/unbind have no .default.
+    return any(o.is_view for o in packet.op_overloads())
+
+
+# view / as_strided / view_as require a compatible layout and can crash on the
+# non-contiguous fused output; other views (permute, reshape, ...) work on any
+# layout and just propagate it. This is op semantics, not alias info, so it is
+# the one hand-maintained list.
+_CRASH_VIEW_OPS = OrderedSet(["view", "as_strided", "view_as"])
+
+# contiguous is alias-annotated (so is_view is True) but its output layout is
+# determined by the call, not by the incoming strides: the result is contiguous
+# for any memory_format. The fused layout does not propagate through it, so the
+# walk stops there (otherwise custom_op(lin(x).contiguous()), the canonical
+# user-side fix, loses the fusion for no correctness benefit).
+_LAYOUT_BREAKING_OPS = OrderedSet(["contiguous"])
+
+
+def _view_op_kind(user: torch.fx.Node) -> str | None:
+    # "crash" for view/as_strided/view_as (can fail on non-contiguous),
+    # "propagate" for the other view-producing ops (layout flows through),
+    # None otherwise. The caller (_has_layout_sensitive_user) checks the target
+    # namespace before this, so only aten ops reach the name lookup below.
+    if user.op == "call_function":
+        # operator.getitem unwraps the tuple returned by split/chunk/unbind and
+        # is itself an unguarded view producer (lin(x)[0]); walk through it.
+        if user.target is operator.getitem:
+            return "propagate"
+        # Normalize OpOverload / OpOverloadPacket to the op name ("view").
+        tgt = user.target
+        if isinstance(tgt, torch._ops.OpOverload):
+            tgt = tgt.overloadpacket
+        name = getattr(tgt, "__name__", None)
+    elif user.op == "call_method":
+        name = user.target
+    else:
+        return None
+    # A call_function target without __name__ has no op name to look up; treat
+    # it as opaque and stop the walk rather than letting getattr on a non-string
+    # name raise inside _is_aten_view_name.
+    if not isinstance(name, str):
+        return None
+    if name in _CRASH_VIEW_OPS:
+        return "crash"
+    if name in _LAYOUT_BREAKING_OPS:
+        return None
+    return "propagate" if _is_aten_view_name(name) else None
+
+
+def _has_layout_sensitive_user(node: torch.fx.Node) -> bool:
+    # A user that can observe the (possibly fused) output layout: the graph
+    # output, stride/contiguity/storage-offset queries, an opaque custom op
+    # (both OpOverload and OpOverloadPacket call forms), or a view/as_strided
+    # that can fail on the non-contiguous fused output. View-producing ops
+    # (call_function aten.* / call_method x.view(...) / getitem) are walked
+    # through since the layout propagates to their consumers. Iterative
+    # worklist with a seen set, so each node is visited at most once (view
+    # chains can form diamonds that a naive recursion would re-traverse).
+    queue = [node]
+    seen = OrderedSet([node])
+    while queue:
+        for user in queue.pop().users:
+            if user.op == "output":
+                return True
+            if user.op == "call_method" and user.target in (
+                "is_contiguous",
+                "storage_offset",
+                "stride",
+            ):
+                return True
+            if _op_namespace(user.target) not in (None, "aten"):
+                return True
+            kind = _view_op_kind(user)
+            if kind == "crash":
+                return True
+            if kind == "propagate" and user not in seen:
+                seen.add(user)
+                queue.append(user)
+    return False
 
 
 # Poor person's check for if a node in the graph mutates its input.
