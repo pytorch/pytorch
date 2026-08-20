@@ -2868,9 +2868,9 @@ class _InternalsBase:
             )
         else:
             # Non-SM100 devices (XPU, older CUDA, ROCm, CPU) use the software
-            # fallback, which fuses the e8m0 conversion via bit manipulation;
-            # verify it still compiles into a single kernel.
-            extra_checks = None
+            # fallback: assert the PTX instruction is absent and the mantissa
+            # mask (0x7FFFFF = 8388607) is emitted.
+            extra_checks = FileCheck().check_not("cvt.rp.satfinite").check("8388607")
         self.assert_single_kernel_form(
             _capture_rmsnorm_mxfp8_scale_swizzle_sources,
             128,
