@@ -288,3 +288,23 @@ class CreateBackendTest(TestCase):
             r"details.$",
         ):
             create_backend(self._params_filestore)
+
+    @mock.patch(
+        "torch.distributed.elastic.rendezvous.c10d_rendezvous_backend.os.close"
+    )
+    @mock.patch("tempfile.mkstemp")
+    def test_create_backend_closes_fd_from_mkstemp(
+        self, mock_mkstemp, mock_os_close
+    ) -> None:
+        mock_mkstemp.return_value = (42, "/tmp/fake_rendezvous_path")
+
+        self._params_filestore.endpoint = ""
+
+        # FileStore will fail on the fake path, but we only care that
+        # os.close(fd) was called before that happens.
+        try:
+            create_backend(self._params_filestore)
+        except (RendezvousConnectionError, RendezvousError):
+            pass
+
+        mock_os_close.assert_called_once_with(42)
