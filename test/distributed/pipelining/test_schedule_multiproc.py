@@ -327,7 +327,10 @@ class ScheduleTest(MultiProcContinuousTest):
 
     @classmethod
     def backend_str(cls) -> str:
-        return dist.get_default_backend_for_device(cls.device_type)
+        dt = cls.device_type
+        if callable(dt):
+            dt = dt()
+        return dist.get_default_backend_for_device(dt)
 
     @property
     def device(self) -> torch.device:
@@ -1298,7 +1301,10 @@ class ScheduleTestCUDA(MultiProcContinuousTest):
 
     @classmethod
     def backend_str(cls) -> str:
-        return dist.get_default_backend_for_device(cls.device_type)
+        dt = cls.device_type
+        if callable(dt):
+            dt = dt()
+        return dist.get_default_backend_for_device(dt)
 
     @property
     def device(self) -> torch.device:
@@ -1455,7 +1461,10 @@ class CustomSchedulesTest(MultiProcContinuousTest):
 
     @classmethod
     def backend_str(cls) -> str:
-        return dist.get_default_backend_for_device(cls.device_type)
+        dt = cls.device_type
+        if callable(dt):
+            dt = dt()
+        return dist.get_default_backend_for_device(dt)
 
     @property
     def device(self) -> torch.device:
@@ -1660,7 +1669,10 @@ class PerDirectionScheduleTest(MultiProcContinuousTest):
 
     @classmethod
     def backend_str(cls) -> str:
-        return dist.get_default_backend_for_device(cls.device_type)
+        dt = cls.device_type
+        if callable(dt):
+            dt = dt()
+        return dist.get_default_backend_for_device(dt)
 
     @classmethod
     def _init_pg(cls, rank, world_size, rdvz_file):
@@ -1678,7 +1690,10 @@ class PerDirectionScheduleTest(MultiProcContinuousTest):
         # would make init_process_group raise instead of skip.
         device_id = None
         if torch.accelerator.device_count() >= world_size:
-            device_id = torch.device(cls.device_type, rank)
+            dt = cls.device_type
+            if callable(dt):
+                dt = dt()
+            device_id = torch.device(dt, rank)
         dist.init_process_group(
             backend=cls.backend_str(),
             world_size=world_size,
