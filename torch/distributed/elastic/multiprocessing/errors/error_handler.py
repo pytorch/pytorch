@@ -41,13 +41,16 @@ class ErrorHandler:
         """
         return os.environ.get("TORCHELASTIC_ERROR_FILE", None)
 
-    def initialize(self) -> None:
+    def initialize(self, fn_name: str | None = None) -> None:
         """
         Call prior to running code that we wish to capture errors/exceptions.
 
         Typically registers signal/fault handlers. Users can override this
         function to add custom initialization/registrations that aid in
         propagation/information of errors/signals/exceptions/faults.
+
+        ``fn_name`` is the qualified name of the decorated entrypoint function
+        (from ``@record``), available for custom initialization logic.
         """
         try:
             faulthandler.enable(all_threads=True)
@@ -66,13 +69,19 @@ class ErrorHandler:
                 f"Unable to write error to file. {type(e).__name__}: {e}", stacklevel=2
             )
 
-    def record_exception(self, e: BaseException) -> None:
+    def record_exception(self, e: BaseException, fn_name: str | None = None) -> None:
         """
         Write structured information about the exception into an error file in JSON format.
 
         If the error file cannot be determined, then logs the content
         that would have been written to the error file.
+
+        ``fn_name`` is the qualified name of the decorated entrypoint function
+        (from ``@record``). It is not written to the error file; subclasses may
+        override this method to record it in their own format.
         """
+        if fn_name:
+            logger.debug("recording exception from entrypoint fn: %s", fn_name)
         file = self._get_error_file_path()
         if file:
             data = {

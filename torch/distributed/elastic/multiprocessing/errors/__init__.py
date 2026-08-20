@@ -340,7 +340,7 @@ def record(
     ::
 
      error_handler = get_error_handler()
-     error_handler.initialize()
+     error_handler.initialize(fn_name=foobar.__qualname__)
      try:
          foobar()
      except ChildFailedError as e:
@@ -348,7 +348,7 @@ def record(
          error_handler.dump_error_file(failure.error_file, failure.exitcode)
          raise
      except Exception as e:
-         error_handler.record_exception(e)
+         error_handler.record_exception(e, fn_name=foobar.__qualname__)
          raise
 
     .. important:: use this decorator once per process at the top level method,
@@ -375,7 +375,7 @@ def record(
         def wrapper(*args: _P.args, **kwargs: _P.kwargs):
             if error_handler is None:
                 raise AssertionError  # assertion for mypy type checker
-            error_handler.initialize()
+            error_handler.initialize(fn_name=f.__qualname__)
             try:
                 return f(*args, **kwargs)
             except SystemExit as se:
@@ -400,7 +400,7 @@ def record(
                     )
                 raise
             except Exception as e:
-                error_handler.record_exception(e)
+                error_handler.record_exception(e, fn_name=f.__qualname__)
                 raise
 
         return wrapper
