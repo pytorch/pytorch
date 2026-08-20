@@ -770,7 +770,10 @@ class profile:
                     device_corr_map[corr_id] = []
                 device_corr_map[corr_id].append(fe)
             elif corr_id == 0:
-                frontend_function_events.append(fe)
+                # Skip OVERHEAD events (profiler-internal host cost):
+                # they do no device work and would otherwise inflate reported device time.
+                if fe.activity_type != "overhead":
+                    frontend_function_events.append(fe)
             else:
                 raise RuntimeError(
                     f"Got negative correlation id {corr_id} in profiler post processing"
