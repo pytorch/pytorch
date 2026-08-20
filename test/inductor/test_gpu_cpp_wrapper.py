@@ -22,6 +22,7 @@ from torch._inductor.codegen.cpp_wrapper_mps import CppWrapperMps
 from torch._inductor.codegen.cuda.device_op_overrides import CUDADeviceOpOverrides
 from torch._inductor.codegen.mps_device_op_overrides import MPSDeviceOpOverrides
 from torch._inductor.codegen.mtia.device_op_overrides import MTIADeviceOpOverrides
+from torch._inductor.codegen.xpu.device_op_overrides import XPUDeviceOpOverrides
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import DualIndentedBuffer, IndentedBuffer
 from torch._inductor.virtualized import V
@@ -219,11 +220,16 @@ class TestGpuWrapper(InductorTestCase):
             "stream0",
             prologue(CppWrapperGpu, "mtia", MTIADeviceOpOverrides(), aot_mode=True),
         )
+        self.assertNotIn(
+            "stream0",
+            prologue(CppWrapperGpu, "xpu", XPUDeviceOpOverrides(), aot_mode=True),
+        )
 
+    @skipIfXpu(msg="torch-xpu-ops/issues/5031")
     def test_debug_sync_graph(self):
         if not RUN_GPU:
             self.skipTest("GPU not available")
-        if GPU_TYPE != "cuda":
+        if GPU_TYPE not in ("cuda", "xpu"):
             self.skipTest("CUDA/ROCm-only cpp_wrapper debug sync")
 
         def test_fn(x):
@@ -963,7 +969,7 @@ class TestCppWrapperStaticInitDeadlock(InductorTestCase):
 
 # Helper script for test_lazy_tma_global_scratch_scales_with_launch_grid
 # Run this repro in a subprocess because the regression can poison the CUDA context.
-_LAZY_TMA_GLOBAL_SCRATCH_SCRIPT = """\
+_LAZY_TMA_GLOBAL_SCRATCH_SCRIPT = f"""\
 import torch
 import triton
 import triton.language as tl
@@ -978,7 +984,7 @@ BLOCK_N = 16
 
 
 def _alloc_scratch(size, alignment, stream):
-    return torch.empty(size, device="cuda", dtype=torch.uint8)
+    return torch.empty(size, device="{GPU_TYPE}", dtype=torch.uint8)
 
 
 triton.set_allocator(_alloc_scratch)
@@ -1012,7 +1018,7 @@ def _tma_copy_kernel(
     tl.store(out_ptr + offs_m[:, None] * N + offs_n[None, :], tile)
 
 
-@torch.library.triton_op("test_inductor::lazy_tma_scratch_copy", mutates_args={})
+@torch.library.triton_op("test_inductor::lazy_tma_scratch_copy", mutates_args={{}})
 def _tma_copy(x: torch.Tensor) -> torch.Tensor:
     y = torch.empty_like(x)
     grid = (triton.cdiv(M, BLOCK_M) * triton.cdiv(N, BLOCK_N),)
@@ -1030,7 +1036,7 @@ def _tma_copy(x: torch.Tensor) -> torch.Tensor:
 
 
 def run():
-    x = (torch.arange(M * N, device="cuda", dtype=torch.float32) % 100).to(
+    x = (torch.arange(M * N, device="{GPU_TYPE}", dtype=torch.float32) % 100).to(
         torch.float16
     )
     x = x.reshape(M, N)
@@ -1039,23 +1045,23 @@ def run():
         return _tma_copy(x)
 
     eager = fn(x)
-    torch.cuda.synchronize()
+    torch.{GPU_TYPE}.synchronize()
     torch.testing.assert_close(eager, x)
 
     compiled = torch.compile(
         fn,
         fullgraph=True,
-        options={
+        options={{
             "cpp_wrapper": True,
             "triton.autotune_at_compile_time": False,
-        },
+        }},
     )
     warmup = compiled(x)
-    torch.cuda.synchronize()
+    torch.{GPU_TYPE}.synchronize()
     torch.testing.assert_close(warmup, x)
     # The warmup lazy-compiles through Python; the second call uses the cached C++ launch.
     out = compiled(x)
-    torch.cuda.synchronize()
+    torch.{GPU_TYPE}.synchronize()
     torch.testing.assert_close(out, x)
 
 
@@ -1069,9 +1075,9 @@ class TestLazyTmaGlobalScratch(InductorTestCase):
     def test_lazy_tma_global_scratch_scales_with_launch_grid(self):
         if not RUN_GPU:
             self.skipTest("GPU not available")
-        if GPU_TYPE != "cuda" or torch.version.hip:
-            self.skipTest("requires CUDA")
-        if torch.cuda.get_device_capability()[0] < 9:
+        if GPU_TYPE not in ("cuda", "xpu") or torch.version.hip:
+            self.skipTest("requires CUDA or XPU")
+        if GPU_TYPE == "cuda" and torch.cuda.get_device_capability()[0] < 9:
             self.skipTest("requires Hopper or newer for TMA")
         if not has_triton_tensor_descriptor_host_tma():
             self.skipTest("requires Triton TensorDescriptor TMA support")
