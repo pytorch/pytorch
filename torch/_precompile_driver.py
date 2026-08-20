@@ -496,10 +496,22 @@ def _build_multigraph_forward():
     # The artifact's own names win over anything seeded above.
     for _backend_id, _artifact in backends.items():
         ns[_backend_id] = torch._dynamo.disable(_artifact.after_deserialization())
+    # Subgraphs emitted as readable source above already ran as part of this
+    # module, so their compiled ``call`` is in _SUBGRAPHS. Inductor's entry point
+    # is boxed (it takes one list), while the transformed bytecode calls the
+    # subgraph with individual arguments, so adapt between the two.
+    for _backend_id, _boxed in globals().get("_SUBGRAPHS", {}).items():
+
+        def _adapt(_inner):
+            def _compiled_subgraph(*args):
+                return _inner(list(args))
+
+            return _compiled_subgraph
+
+        ns[_backend_id] = torch._dynamo.disable(_adapt(_boxed))
     for _frame in frames:
         for _alias, _module_name in _frame["import_sources"].items():
             ns[_alias] = importlib.import_module(_module_name)
-        ns.update(_frame["used_globals"])
 
     entry_binding = (
         pickle.loads(base64.b64decode(_ENTRY_BINDING)) if _ENTRY_BINDING else {}

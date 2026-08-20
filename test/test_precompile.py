@@ -242,6 +242,10 @@ def _maybe_scoped(loaded):
     return loaded if hasattr(loaded, "__enter__") else contextlib.nullcontext()
 
 
+def _precompile_scale_sum(x):
+    return torch.relu(x * 2.0).sum()
+
+
 def _brk_call(model, x):
     return model(x)
 
@@ -2191,8 +2195,19 @@ class TestPrecompile(TestCase):
         self.assertIn('TRACER = "dynamo"', code)
         self.assertIn("FRAMES = [", code)
         self.assertIn("2. Guard trees and transformed bytecode -- OPAQUE", code)
-        self.assertIn("3. Compiled subgraphs -- OPAQUE", code)
         self.assertIn("DROPPED_GUARDS", code)
+        # Guard trees and bytecode have no source form and stay opaque, but a
+        # compiled subgraph is Inductor output, which does: on inductor the
+        # kernels are emitted as readable source, and only eager (whose
+        # "backend" is an fx graph with nothing to render) stays pickled.
+        if backend == "inductor":
+            self.assertIn("READABLE below", code)
+            # async_compile rather than @triton.jit: this test runs on CPU,
+            # where the rendered kernels are C++ rather than Triton.
+            self.assertIn("async_compile", code)
+            self.assertIn("_SUBGRAPHS[", code)
+        else:
+            self.assertIn("3. Compiled subgraphs -- OPAQUE", code)
 
         # It reports one entry frame plus one continuation, two variants each.
         frames = _parse_artifact_metadata(code)["FRAMES"]
@@ -2583,6 +2598,67 @@ class TestPrecompile(TestCase):
                 tracer="dynamo",
                 example_inputs=[(torch.randn(4),)],
             )
+
+    @parametrize("training", [False, True])
+    def test_dynamo_tracer_renders_kernels_as_source(self, training):
+        # A compiled subgraph is Inductor output, which has a source form -- so
+        # the dynamo tracer emits it rather than pickling it, leaving only the
+        # guard trees and bytecode opaque. A TRAINING capture is the exception:
+        # compile_to_python pins the inference path, so rendering there would
+        # drop the backward, and the bundle is kept instead.
+        model = _PrecompileBreakingModule().eval()
+        xs = [torch.randn(3, 8), torch.randn(5, 8)]
+        ctx = torch.enable_grad() if training else torch.no_grad()
+        with ctx:
+            code, cache = torch.compiler.precompile(
+                model,
+                backend="inductor",
+                dynamic=False,
+                tracer="dynamo",
+                training=training,
+                example_inputs=[(x,) for x in xs],
+            )
+        if training:
+            self.assertIn("3. Compiled subgraphs -- OPAQUE", code)
+            self.assertNotIn("_SUBGRAPHS[", code)
+        else:
+            self.assertIn("READABLE below", code)
+            self.assertIn("async_compile", code)
+            self.assertIn("_SUBGRAPHS[", code)
+
+        torch._dynamo.reset()
+        loaded = torch.compiler.precompile.load(code, cache)
+        # Serve in the mode it was captured in: grad mode is a GLOBAL_STATE
+        # guard, and it is checked.
+        with (
+            _maybe_scoped(loaded),
+            torch.enable_grad() if training else torch.no_grad(),
+        ):
+            for x in xs:
+                # entry frame is forward, so the receiver is passed explicitly
+                self.assertEqual(loaded(model, x), model(x))
+
+    def test_rendered_subgraphs_do_not_share_top_level_names(self):
+        # Two variants of one frame are the same computation at different
+        # shapes, so they render the SAME names. They are spliced into one
+        # namespace, and a block resolves its siblings as late-bound globals --
+        # so without per-subgraph renaming the first variant would silently run
+        # the second's code. Each variant must still serve its own shape.
+        x2, x4 = torch.randn(2, 8), torch.randn(4, 8)
+        with torch.no_grad():
+            code, cache = torch.compiler.precompile(
+                _precompile_scale_sum,
+                backend="inductor",
+                dynamic=False,
+                tracer="dynamo",
+                example_inputs=[(x2,), (x4,)],
+            )
+        self.assertIn("_SUBGRAPHS[", code)
+        torch._dynamo.reset()
+        loaded = torch.compiler.precompile.load(code, cache)
+        with _maybe_scoped(loaded), torch.no_grad():
+            for x in (x2, x4):
+                self.assertEqual(loaded(x), _precompile_scale_sum(x))
 
     def test_multi_graph_bare_module_capture_is_refused(self):
         # Handing precompile a bare nn.Module compiles Dynamo's OWN wrapper
