@@ -41,3 +41,23 @@ else:
     # Now every call runs on the GPU
     pred = model(x)
 ```
+
+## Floating-point dtypes
+
+The `mps` device supports `torch.float32`, `torch.float16`, `torch.bfloat16`
+and `torch.complex64`. It has no double precision: Metal Shading Language has
+no `double` type, so `torch.float64` and `torch.complex128` are rejected:
+
+```python
+>>> torch.ones(3, dtype=torch.float64, device="mps")
+TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework
+doesn't support float64. Please use float32 instead.
+```
+
+This is a dtype restriction, not a missing operator, so
+`PYTORCH_ENABLE_MPS_FALLBACK=1` does not apply to it: the error is raised when
+the tensor is allocated or copied to the device, before any operator is
+dispatched. `Tensor.to("mps")` on a float64 tensor raises for the same reason,
+rather than downcasting implicitly.
+
+A computation that genuinely requires double precision has to run on the CPU.
