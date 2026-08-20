@@ -1,10 +1,12 @@
 """AOT-export DSL kernels for native-AOT declarations.
 
-Stage 2 of the two-stage build: runs with the BUILT torch importable, so kernel
-builders are ordinary package imports (``torch._native.ops.<op>.<module>``) and
-share code with their JIT wrappers -- making the same-kernel property structural
-rather than a parallel restatement. Only the aot.py DECLARATION modules stay
-torch-free at module scope, since torchgen loads those during stage 1.
+Stage 2 of the two-stage build (build torch -> build the AOT lib): runs
+with the BUILT torch importable, so kernel builder modules are ordinary
+package imports (``torch._native.ops.<op>.<module>``) and may freely
+share code with their JIT wrappers -- the same-kernel property is then
+by construction, not by parallel restatement. Only the aot.py
+DECLARATION modules stay torch-free at module scope (torchgen loads
+those during stage 1, before torch exists).
 
 For each ``torch/_native/ops/<op>/aot.py``, expands the spec grid (list
 fields cross-multiply) and for every grid point runs the toolchain's
@@ -26,18 +28,24 @@ naming the missing keys.
 
 Idempotent: existing artifacts are skipped unless --force.
 
-Spec points compile on a forkserver process pool; each is independent, so
-results do not depend on --jobs (which follows MAX_JOBS, then
-CMAKE_BUILD_PARALLEL_LEVEL, then half the CPU count; 1 forces serial). Plain
-fork is unusable -- the parent has initialized CUDA and forked workers inherit a
-dead context silently. Only torch is preloaded; cutlass or triton would build
-state in the fork parent.
+Spec points compile on a forkserver process pool. Each point is
+independent, so results do not depend on --jobs. --jobs follows the
+torch build's parallelism (MAX_JOBS, then CMAKE_BUILD_PARALLEL_LEVEL,
+then half the CPU count); --jobs 1 forces serial. Plain fork is
+unusable: the parent has initialized CUDA and forked workers inherit a
+dead context, silently -- they report is_initialized() False and cannot
+allocate. forkserver forks from a pre-CUDA server process instead, and
+pays the torch import once there rather than per worker. Only torch is
+preloaded; cutlass or triton would build state in that fork parent.
 
-With --arch (one or more sm strings) export never touches the CUDA driver, so
-kernels build on GPU-less machines. The arch is per-COMPILE state (CuTeDSL's
---gpu-arch outranks CUTE_DSL_ARCH, and Triton gets a fixed-target driver), so
-one pool serves every (point, arch) job and each arch's tree stays independently
-linkable. CuTeDSL needs one warmup compile per process for this; see
+With --arch (one or more sm strings) export never touches the CUDA
+driver, so kernels build on GPU-less machines. The arch is per-COMPILE
+state: CuTeDSL takes a --gpu-arch option, which outranks CUTE_DSL_ARCH
+(base_dsl/dsl.py prefers compile_options.gpu_arch over envar.arch), and
+Triton gets a fixed-target driver per export. So a single pool serves
+every (point, arch) job. Every arch nests under <out-dir>/<arch>/ to
+keep each tree independently linkable.
+CuTeDSL needs one warmup compile per process for this to work; see
 tools/native_aot/cutedsl_warmup.py.
 
 Usage (from the repo root, venv with torch built and the DSL wheel
@@ -57,12 +65,16 @@ import sys
 REPO = os.path.normpath(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
 )
-# As a script sys.path[0] is this directory, so the repo root has to go on the
-# path for `tools.native_aot` to import from any cwd.
+# Run as a script (`python tools/native_aot/export.py`), sys.path[0] is this
+# directory, so `tools.native_aot` is importable only when the cwd happens to
+# be the repo root. Put the root on the path explicitly instead of loading
+# siblings by file path, which also keeps the imports legible to type checkers.
 #
-# APPEND, never insert(0): stage 2 runs against the INSTALLED wheel, and the repo
-# root holds a torch/ source tree with no compiled extension that would shadow it.
-# An editable checkout hides this, because there that tree IS the installed torch.
+# APPEND, never insert(0): stage 2 runs against the INSTALLED wheel, and the
+# repo root contains a torch/ source tree with no compiled extension. Ahead of
+# site-packages it shadows the real torch, so every worker's `import torch`
+# dies with "loaded the torch/_C folder of the PyTorch repository". Invisible
+# in a `pip install -e .` checkout, where that tree IS the installed torch.
 sys.path.append(REPO)
 
 # torchgen is pure Python and imports with no built torch, which this
@@ -81,16 +93,18 @@ OPS_DIR = os.path.join(REPO, "torch", "_native", "ops")
 # mismatched sidecars (re-export rather than debugging a garbled .cpp).
 SIDECAR_VERSION = 1
 
-# Never "fork": the parent has initialized CUDA and forked workers inherit a
-# dead context that fails silently. forkserver forks from a pre-CUDA server
-# process, so it is as safe as spawn but pays the torch import once.
-# TODO(native-aot): forkserver does not exist on Windows; fall back to "spawn"
-# when Windows CUDA builds start exporting.
+# Pool start method: forkserver, never "fork" (the parent has initialized
+# CUDA, and forked workers inherit a dead context that fails silently).
+# forkserver forks from a pre-CUDA server process, so it is as safe as
+# spawn while paying the torch import once instead of per worker.
+# TODO(native-aot): forkserver does not exist on Windows. Nothing calls
+# this from the build there yet (stage 2 targets libtorch_cuda.so only),
+# so fall back to "spawn" when Windows CUDA builds start exporting.
 POOL_START_METHOD = "forkserver"
 
-# Preloaded in the forkserver's server process, so every worker inherits it
-# imported. Only what is safe in a fork PARENT: torch neither initializes CUDA
-# nor builds DSL state.
+# Preloaded in the forkserver's server process, so every worker inherits
+# it already imported. Only modules that are safe in a fork PARENT belong
+# here: importing torch neither initializes CUDA nor builds any DSL state.
 POOL_PRELOAD = ("torch",)
 
 
@@ -134,18 +148,20 @@ def source_closure(decl_path: str | None = None) -> dict[str, str]:
     sources (a launcher-template edit in toolchains.py counts), and the
     op's own aot.py.
 
-    Recorded per sidecar; gen_aot_lib re-hashes from disk and refuses to pair
-    edited sources with stale artifacts. Deliberately over-approximates --
-    staleness must err toward re-export.
+    Recorded per sidecar; gen_aot_lib re-hashes from disk and refuses to
+    pair edited sources with stale artifacts. Deliberately
+    over-approximates -- staleness must err toward re-export.
 
-    Only IMPORTED modules appear in sys.modules, hence globbing the tools/
-    sources and passing decl_path explicitly: declarations are loaded by file
-    path, so grid edits would otherwise reuse artifacts built from the old one."""
+    Only IMPORTED modules appear in sys.modules, which is why the tools/
+    sources are globbed from disk instead -- and why decl_path is passed
+    explicitly: declarations are loaded by file path and never enter
+    sys.modules, so KERNEL_MODULE or kernel_precompile_grid() edits would
+    otherwise reuse artifacts built from the old grid."""
     import glob
 
     out = {}
     # Snapshot: hashing can trigger imports, and mutating sys.modules
-    # mid-iteration raises.
+    # mid-iteration raises "dictionary changed size during iteration".
     for name, mod in list(sys.modules.items()):
         if not name.startswith(_CLOSURE_PREFIXES):
             continue
@@ -257,17 +273,20 @@ def _claimed_spelling(arch: str, claimed: tuple[str, ...]) -> str | None:
 def export_point(
     op_pkg: str, kernel_module: str, point: dict, out_dir: str, arch: str | None = None
 ) -> str:
-    """Compile + export ONE spec point and write its sidecar.
+    """Compile + export ONE spec point and write its sidecar. Self-
+    contained (module-level function, picklable args) so it runs
+    identically inline and as a pool job. ``arch`` is an explicit sm
+    string, passed through to the toolchain (CuTeDSL takes it as
+    --gpu-arch, Triton as a fixed GPUTarget); no process-global state, so
+    one process may serve any mix of arches.
 
-    Self-contained (module-level, picklable args) so it runs identically inline
-    and as a pool job. ``arch`` is passed through to the toolchain as per-compile
-    state, so one process may serve any mix of arches.
-
-    A missing DSL runtime is FATAL here, not a skip: a declaration reaching this
-    point targets this build's backend, so its kernels were asked for, and
-    exporting only some would ship a wheel that silently underperforms
-    (TORCH_NATIVE_AOT=0 builds without them). The ImportError arm exists because
-    a builder cannot be asked its kind without importing its runtime."""
+    A missing DSL runtime is FATAL here, not a skip: a declaration that
+    reaches this point targets this build's backend (build_stage2 filtered
+    on Toolchain.BACKENDS), so its kernels were asked for, and exporting
+    only some of them would ship a wheel that silently underperforms.
+    Build without the DSL wheels via TORCH_NATIVE_AOT=0 instead. The
+    ImportError arm exists because a builder cannot be asked its kind
+    without importing its runtime -- build() constructs the kernel."""
     try:
         build = load_builder(op_pkg, kernel_module)
         b = build(point)
@@ -302,8 +321,8 @@ def export_point(
         "kind": tc.kind,
         "spec": point,
         "arch": effective_arch,
-        # The declaration's path is fixed by construction, so it needs no
-        # threading through the job tuple.
+        # The declaration lives at a path fixed by construction, so it needs
+        # no threading through the job tuple.
         "sources": source_closure(os.path.join(OPS_DIR, op_pkg, "aot.py")),
         # The compiler, which no source file names (see runtimes_current).
         "runtimes": runtime_versions(tc.kind),
@@ -406,9 +425,10 @@ def _collect_jobs(ops_filter, out_root: str, archs):
     return jobs
 
 
-# Every "this tree is inconsistent" error ends the same way. `spin clean` does
-# clear the default --out-dir, but takes the whole build tree with it, so the
-# surgical command comes first.
+# Every "this tree is inconsistent" error ends the same way. `spin clean`
+# does clear the default --out-dir (build/ sits above .gitignore's
+# NOT-CLEAN-FILES marker), but it takes the whole build tree with it, so
+# name the surgical command first.
 _CLEAN_HINT = (
     "run `rm -rf {d}` and re-export (`spin clean` also clears it, "
     "along with the rest of the build tree)"
@@ -597,9 +617,11 @@ def _job_needed(job, force: bool) -> bool:
             return True
         tc = toolchains.get_toolchain(sc["kind"])
         if sc.get("spec") == spec and sc.get("arch") == _effective_arch(arch, tc):
-            # The sidecar marks the skip but does not prove its artifacts are
-            # still there: a partial clean that took a .o/.h without its .json
-            # would be skipped here and fail later as a missing include.
+            # The sidecar is the skip marker, but it is not proof the
+            # artifacts it describes are still on disk: anything that
+            # removes a .o/.h without its .json (a partial clean, an
+            # over-eager prune) would otherwise be skipped here and fail
+            # much later as a missing include at compile time.
             prefix = sc.get("prefix", "")
             if any(
                 not os.path.exists(os.path.join(out_dir, prefix + e))
@@ -649,10 +671,16 @@ def archs_from_cuda_arch_list(arch_list: str) -> list[str]:
 
 
 # Which TORCH_CUDA_ARCH_LIST entries are ELIGIBLE for AOT kernels on the
-# automatic path. A filter, never a build list: it permits an export, never
-# causes one, and an explicit --arch bypasses it -- so a list with no eligible
-# entry exports nothing and stage 2 skips, printing why. Distinct from a
-# declaration's ARCHS, which is what the KERNELS support.
+# automatic export path. A filter, never a build list: it cannot cause an
+# export, only permit one, and an explicit --arch bypasses it. So a list
+# with no eligible entry exports nothing and stage 2 skips, printing why.
+#
+# Distinct from a declaration's ARCHS (what the KERNELS support, sm_90+);
+# this says what the standard build SHIPS. Both spellings of a CC are
+# listed because they are distinct nvcc targets used by different builds
+# for the same hardware -- "10.0a" (arch-conditional, needed by
+# tcgen05/wgmma) in b200-native-aot.yml, plain "10.0" elsewhere and in the
+# manywheel lists. Omitting either silently exports nothing there.
 #
 # Both spellings of a capability are listed because they are distinct nvcc
 # targets used by different builds for the same hardware ("10.0a" in
@@ -685,14 +713,15 @@ def main(argv: list[str] | None = None) -> None:
         default=None,
         metavar="SM",
         help="target architecture(s), e.g. --arch sm_90a sm_100a. With an "
-        "explicit arch export never touches the CUDA driver, so it runs on "
-        "GPU-less machines. Default: detect from the local device.",
+        "explicit arch, export never touches the CUDA driver and runs on "
+        "GPU-less machines (CuTeDSL via --gpu-arch; Triton via an "
+        "explicit GPUTarget). Default: detect from the local device.",
     )
     args = parser.parse_args(argv)
     if args.jobs is None:
         env_jobs = os.getenv("MAX_JOBS") or os.getenv("CMAKE_BUILD_PARALLEL_LEVEL")
-        # Half the CPU count: os.cpu_count() reports SMT siblings, and one
-        # compile per virtual thread oversubscribes.
+        # Half the CPU count, not all of it: os.cpu_count() reports SMT
+        # siblings, and one compile per virtual thread oversubscribes.
         args.jobs = int(env_jobs) if env_jobs else max(1, (os.cpu_count() or 2) // 2)
     if args.arch is None and os.getenv("TORCH_CUDA_ARCH_LIST"):
         # Standard-build integration: export for the exportable subset of what
@@ -738,8 +767,9 @@ def main(argv: list[str] | None = None) -> None:
             print(f"  {prefix}: exported")
             total += 1
     else:
-        # ONE pool over every (point, arch) job: the arch is per-compile state,
-        # so no process is pinned to one and mixed jobs pack freely.
+        # ONE pool over every (point, arch) job: each toolchain takes its
+        # arch per compile (CuTeDSL --gpu-arch, Triton a fixed GPUTarget),
+        # so no process is pinned to an arch and mixed jobs pack freely.
         import multiprocessing
         from concurrent.futures import as_completed, ProcessPoolExecutor
 
