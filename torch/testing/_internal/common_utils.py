@@ -1871,10 +1871,17 @@ TEST_WITH_MTIA: bool = TestEnvironment.def_flag(
 # TODO: Remove PYTORCH_MIOPEN_SUGGEST_NHWC once ROCm officially supports NHWC in MIOpen
 # See #64427
 TEST_WITH_MIOPEN_SUGGEST_NHWC = os.getenv('PYTORCH_MIOPEN_SUGGEST_NHWC', '0') == '1'
-# Enables tests that run only in periodic CI (disabled by default)
+# Enables tests that run only in the periodic-strict CI workflow (disabled by default)
 TEST_WITH_PERIODIC: bool = TestEnvironment.def_flag(
     "TEST_WITH_PERIODIC",
     env_var="PYTORCH_TEST_WITH_PERIODIC",
+)
+# Disables tests not marked @periodic; used in conjunction with
+# TEST_WITH_PERIODIC to run *only* periodic tests (the periodic-strict CI
+# workflow). The periodic analog of TEST_SKIP_FAST.
+TEST_SKIP_NON_PERIODIC: bool = TestEnvironment.def_flag(
+    "TEST_SKIP_NON_PERIODIC",
+    env_var="PYTORCH_TEST_SKIP_NON_PERIODIC",
 )
 # Enables tests that are slow to run (disabled by default)
 TEST_WITH_SLOW: bool = TestEnvironment.def_flag(
@@ -2895,12 +2902,15 @@ def skipIfCachingAllocatorDisabled(fn):
 def periodic(fn):
     """Marks a test to run only when periodic test mode is enabled.
 
-    Gating only, not scheduling: the test runs only in periodic workflows
-    that already execute its test file; if none does, the test never runs.
+    Periodic tests run in the periodic-strict CI workflow, which sweeps the
+    default test files with PYTORCH_TEST_WITH_PERIODIC set and skips every
+    test not marked @periodic (via PYTORCH_TEST_SKIP_NON_PERIODIC). Tests in
+    files outside that sweep (e.g. distributed or quantization) never run.
 
-    Composes with @slowTest: periodic CI does not set PYTORCH_TEST_WITH_SLOW,
-    so slow gating (static or dynamic) defers to periodic mode and a test
-    marked both still runs in periodic CI.
+    Composes with @slowTest: periodic-strict sets PYTORCH_TEST_WITH_SLOW, so
+    slow gating (static or dynamic) does not block @periodic tests there,
+    while the periodic gate keeps a test marked both out of the slow shards;
+    it runs only in periodic-strict.
     """
     if isinstance(fn, type):
         raise TypeError(f"@periodic cannot be applied to a class ({fn.__name__}); decorate its test methods instead")
@@ -2919,21 +2929,10 @@ def periodic(fn):
     return wrapper
 
 
-def _periodic_enabled(test):
-    # Slow gating defers to periodic mode because periodic CI does not set
-    # PYTORCH_TEST_WITH_SLOW; a @periodic test marked slow must still run there.
-    # The running test method is inspected (rather than the slowTest wrapper's
-    # own mark) so detection works regardless of decorator stacking order.
-    if not TEST_WITH_PERIODIC or not isinstance(test, unittest.TestCase):
-        return False
-    test_fn = getattr(test, test._testMethodName, None)
-    return test_fn is not None and test_fn.__dict__.get('periodic_test', False)
-
-
 def slowTest(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
-        if not TEST_WITH_SLOW and not (args and _periodic_enabled(args[0])):
+        if not TEST_WITH_SLOW:
             raise unittest.SkipTest("test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test")
         else:
             fn(*args, **kwargs)
@@ -3371,7 +3370,7 @@ def check_if_enable(test: unittest.TestCase):
 
     if any(matches_test(x) for x in slow_tests_dict):
         getattr(test, test._testMethodName).__dict__['slow_test'] = True
-        if not TEST_WITH_SLOW and not _periodic_enabled(test):
+        if not TEST_WITH_SLOW:
             raise unittest.SkipTest("test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test")
 
     if not IS_SANDCASTLE:
@@ -3429,6 +3428,10 @@ def check_if_enable(test: unittest.TestCase):
     if TEST_SKIP_FAST:
         if hasattr(test, test._testMethodName) and not getattr(test, test._testMethodName).__dict__.get('slow_test', False):
             raise unittest.SkipTest("test is fast; we disabled it with PYTORCH_TEST_SKIP_FAST")
+
+    if TEST_SKIP_NON_PERIODIC:
+        if hasattr(test, test._testMethodName) and not getattr(test, test._testMethodName).__dict__.get('periodic_test', False):
+            raise unittest.SkipTest("test is not periodic; we disabled it with PYTORCH_TEST_SKIP_NON_PERIODIC")
 
 
 # `TestCase.assertEqual` is very permissive and coerced the inputs into a format that could be compared. This is very

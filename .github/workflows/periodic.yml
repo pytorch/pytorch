@@ -93,7 +93,6 @@ jobs:
       build-environment: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-build.outputs.test-matrix }}
-      enable-periodic-tests: true
       python-version: "3.10"
       compiler: gcc11
       cuda-version: "13.0"
@@ -129,7 +128,6 @@ jobs:
       build-environment: ${{ needs.linux-jammy-cuda13_4-py3_10-gcc11-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-cuda13_4-py3_10-gcc11-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-cuda13_4-py3_10-gcc11-build.outputs.test-matrix }}
-      enable-periodic-tests: true
       python-version: "3.10"
       compiler: gcc11
       cuda-version: "13.4"
@@ -171,7 +169,6 @@ jobs:
       build-environment: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-debug-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-debug-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-debug-build.outputs.test-matrix }}
-      enable-periodic-tests: true
       python-version: "3.10"
       compiler: gcc11
       cuda-version: "13.0"
@@ -253,7 +250,6 @@ jobs:
       build-environment: ${{ needs.linux-jammy-cuda13_0-py3-gcc11-slow-gradcheck-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-cuda13_0-py3-gcc11-slow-gradcheck-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-cuda13_0-py3-gcc11-slow-gradcheck-build.outputs.test-matrix }}
-      enable-periodic-tests: true
       timeout-minutes: 300
       python-version: "3.10"
       compiler: gcc11
@@ -305,7 +301,6 @@ jobs:
       build-environment: ${{ needs.linux-jammy-cuda13_2-py3_10-gcc11-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-cuda13_2-py3_10-gcc11-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-cuda13_2-py3_10-gcc11-build.outputs.test-matrix }}
-      enable-periodic-tests: true
       python-version: "3.10"
       compiler: gcc11
       cuda-version: "13.2"
@@ -347,7 +342,6 @@ jobs:
       build-environment: ${{ needs.linux-jammy-cuda13_2-py3_10-gcc11-debug-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-cuda13_2-py3_10-gcc11-debug-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-cuda13_2-py3_10-gcc11-debug-build.outputs.test-matrix }}
-      enable-periodic-tests: true
       python-version: "3.10"
       compiler: gcc11
       cuda-version: "13.2"
@@ -390,7 +384,6 @@ jobs:
       build-environment: ${{ needs.linux-jammy-cuda13_2-py3-gcc11-slow-gradcheck-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-cuda13_2-py3-gcc11-slow-gradcheck-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-cuda13_2-py3-gcc11-slow-gradcheck-build.outputs.test-matrix }}
-      enable-periodic-tests: true
       timeout-minutes: 300
       python-version: "3.10"
       compiler: gcc11
