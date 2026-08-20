@@ -19,8 +19,8 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_utils import unMarkDynamoStrictTest
 from torch.testing._internal.common_utils import (
     HardwareClassification,
-    TestCase,
     instantiate_parametrized_tests,
+    TestCase,
     skipIfCrossRef,
     skipIfTorchDynamo,
     suppress_warnings,
