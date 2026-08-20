@@ -713,7 +713,11 @@ def cond_func(ctx, pred, true_fn, false_fn, inputs):
         can_auto_functionalize,
         do_auto_functionalize_v2,
     )
-    from torch._higher_order_ops.utils import _check_alias_and_mutation, HopInstance
+    from torch._higher_order_ops.utils import (
+        _check_mutation,
+        clone_outputs_aliasing_inputs,
+        HopInstance,
+    )
 
     hop_instance = HopInstance.create(cond_op, pred, true_fn, false_fn, inputs)
     # For now, we only support auto-functionalization for cond when using python
@@ -732,13 +736,24 @@ def cond_func(ctx, pred, true_fn, false_fn, inputs):
         functional_true = ctx.functionalize(_maybe_run_with_interpreter(true_fn))
         functional_false = ctx.functionalize(_maybe_run_with_interpreter(false_fn))
         pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
+        # A branch may return an operand directly; clone outputs that alias an
+        # input so the cond HOP stays functional (outputs must not alias inputs).
+        # Input mutation is still rejected.
         for branch, branch_name in [(true_fn, "cond_true"), (false_fn, "cond_false")]:
-            _check_alias_and_mutation(
-                branch, unwrapped_inputs, branch_name, pre_dispatch
-            )
+            _check_mutation(branch, unwrapped_inputs, branch_name, pre_dispatch)
+
+        def _materialize_aliased_outputs(fn):
+            def wrapped(*operands):
+                maybe_clone = clone_outputs_aliasing_inputs(operands)
+                return pytree.tree_map(maybe_clone, fn(*operands))
+
+            return wrapped
 
         cond_return = cond_op(
-            unwrapped_pred, functional_true, functional_false, unwrapped_inputs
+            unwrapped_pred,
+            _materialize_aliased_outputs(functional_true),
+            _materialize_aliased_outputs(functional_false),
+            unwrapped_inputs,
         )
         return ctx.wrap_tensors(cond_return)
 
