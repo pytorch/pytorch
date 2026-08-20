@@ -1,6 +1,6 @@
 import sys
 
-from torch.utils._config_module import Config, install_config_module
+from torch.utils._config_module import alias_fields_from, Config, install_config_module
 
 
 e_bool = True
@@ -44,6 +44,19 @@ e_deprecated_alias: bool = Config(
 
 class nested:
     e_bool = True
+
+
+# Alias whose target is a sub-config field (exercises sub-config alias
+# resolution in _get_alias_module_and_name).
+e_nested_alias_bool: bool = Config(
+    alias="torch.testing._internal.fake_config_module.nested.e_bool"
+)
+
+
+# Every field of `nested` not overridden here is aliased to it.
+@alias_fields_from(nested)
+class nested_alias:
+    pass
 
 
 _cache_config_ignore_prefix = ["magic_cache_config"]
