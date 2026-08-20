@@ -681,9 +681,9 @@ class AsyncCompile:
 
     def _load_kernel_wrapper(self, kernel_name, main_suffix, wrapper_cls, key, path):
         """Reload a kernel module from PyCodeCache and wrap the entry point."""
-        mod = torch._inductor.codecache.PyCodeCache.load_by_key_path(key, path)
-        kernel_name = _sanitize_kernel_name(kernel_name)
-        main_func_name = f"{kernel_name}_{main_suffix}"
+        mod = torch._inductor.codecache.PyCodeCache.load_by_key_path(key, path)     
+        sanitized_name = _sanitize_kernel_name(kernel_name)
+        main_func_name = f"{sanitized_name}_{main_suffix}"
         # f"{kernel_name}_{main_suffix}"
         return wrapper_cls(getattr(mod, main_func_name), kernel_path=path)
 
@@ -741,11 +741,8 @@ class AsyncCompile:
         else:
             key, path = torch._inductor.codecache.PyCodeCache.write(source_code)
             mod = torch._inductor.codecache.PyCodeCache.load_by_key_path(key, path)
-
-            
-            kernel_name = _sanitize_kernel_name(kernel_name)
-            main_func_name = f"{kernel_name}_{MAIN_SUFFIX}"
-
+            sanitized_name = _sanitize_kernel_name(kernel_name)
+            main_func_name = f"{sanitized_name}_{MAIN_SUFFIX}"
 
             if not hasattr(mod, main_func_name):
                 available = [name for name in dir(mod) if callable(getattr(mod, name))]
@@ -842,8 +839,9 @@ class AsyncCompile:
             mod = torch._inductor.codecache.PyCodeCache.load_by_key_path(key, path)
 
             # Find our special entry point named function
-            kernel_name = _sanitize_kernel_name(kernel_name)
-            main_func_name = f"{kernel_name}_{MAIN_SUFFIX}"
+            sanitized_name = _sanitize_kernel_name(kernel_name)
+            main_func_name = f"{sanitized_name}_{MAIN_SUFFIX}"
+            
 
             if not hasattr(mod, main_func_name):
                 available = [name for name in dir(mod) if callable(getattr(mod, name))]
@@ -882,6 +880,8 @@ class AsyncCompile:
             MAIN_SUFFIX,
         )
 
+        kernel_name = _sanitize_kernel_name(kernel_name)  # <--- SANITIZE HERE ONCE
+
         kernel_code_log.info("NVIDIA Universal GEMM Kernel:\n%s", source_code)
         _compile_start()
 
@@ -917,9 +917,7 @@ class AsyncCompile:
         else:
             key, path = torch._inductor.codecache.PyCodeCache.write(source_code)
             mod = torch._inductor.codecache.PyCodeCache.load_by_key_path(key, path)
-
-            kernel_name = _sanitize_kernel_name(kernel_name)
-            main_func_name = f"{kernel_name}_{main_suffix}"
+            main_func_name = f"{kernel_name}_{MAIN_SUFFIX}"
 
             if not hasattr(mod, main_func_name):
                 available = [name for name in dir(mod) if callable(getattr(mod, name))]
