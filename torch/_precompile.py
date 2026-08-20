@@ -1801,6 +1801,15 @@ def _build_multigraph_python_source(
         f"RISKY_DROPPED_GUARDS = {[list(g) for g in summary.risky_dropped_guards]!r}"
     )
     parts.append("")
+    parts.append("# Guards that COULD be serialized and were not, because they held")
+    parts.append("# identically in every captured variant so they discriminated")
+    parts.append("# nothing. Not checked at serve time either: a call outside the")
+    parts.append("# captured domain along one of these is served, not refused.")
+    parts.append(
+        f"POLICY_DROPPED_GUARDS = "
+        f"{[list(g) for g in getattr(summary, 'policy_dropped_guards', ())]!r}"
+    )
+    parts.append("")
     parts.append("# Values pinned to exactly what capture saw; any other value misses.")
     parts.append(f"WONT_GENERALIZE = {tuple(summary.wont_generalize)!r}")
     parts.append("")
