@@ -3724,9 +3724,10 @@ def _enforce_reduction_config_block_minimums(
         return configs
 
     for cfg in configs:
-        if frozenset(("YBLOCK", "ZBLOCK", "R1_BLOCK")) & cfg.kwargs.keys():
+        unsupported_blocks = frozenset(("ZBLOCK", "R1_BLOCK")) & cfg.kwargs.keys()
+        if unsupported_blocks or ("YBLOCK" in cfg.kwargs and min_rblock is not None):
             raise AssertionError(
-                f"min_xblock/min_rblock only support 2D X/R0 configs: {cfg}"
+                f"min_xblock/min_rblock do not support this config: {cfg}"
             )
         has_xblock = "XBLOCK" in cfg.kwargs
         has_rblock = "R0_BLOCK" in cfg.kwargs
