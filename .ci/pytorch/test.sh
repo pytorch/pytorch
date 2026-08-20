@@ -1149,8 +1149,8 @@ test_better_benchmark() {
   benchmark_dir="$(mktemp -d "${RUNNER_TEMP:-/tmp}/better-benchmark.XXXXXX")"
   mkdir -p "${test_reports_dir}" "${debug_dir}"
 
-  git clone --depth 1 --branch better-benchmark-dashboard \
-    https://github.com/karthickai/better-benchmark.git "${benchmark_dir}"
+  git clone --depth 1 --branch main \
+    https://github.com/eellison/better-benchmark.git "${benchmark_dir}"
   pushd "${benchmark_dir}"
 
   local gpu_indices
