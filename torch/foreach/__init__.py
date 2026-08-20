@@ -270,21 +270,8 @@ Returns:
 """
 
 
-def _supported_signatures(name: str, signatures: tuple[str, ...]) -> str:
-    lines = []
-    for signature in signatures:
-        if ", *" in signature:
-            signature = signature.replace(", *", ", /, *")
-        else:
-            signature = f"{signature}, /"
-        lines.append(f"    {name}({signature})")
-    return "\n".join(lines)
-
-
 def _binary_doc(
-    name: str,
     reference: str,
-    signatures: tuple[str, ...],
     *,
     inplace: bool,
     alpha: str | None = None,
@@ -293,7 +280,6 @@ def _binary_doc(
     operand_note: str | None = None,
 ) -> str:
     alpha_doc = "" if alpha is None else f"\n    alpha (Number, optional): {alpha}"
-    supported_signatures = _supported_signatures(name, signatures)
     shared_tensor_note = (
         "\nA shared ``Tensor`` operand must be a 0-D scalar tensor.\n"
         if shared_tensor
@@ -307,13 +293,6 @@ def _binary_doc(
 Applies :func:`{reference}` to every tensor in ``inputs``.
 
 {_common_doc(reference, inplace=inplace, has_aligned_lists=True)}
-
-Supported signatures::
-
-{supported_signatures}
-
-``TensorList`` and ``ScalarList`` denote a list or tuple of tensors and
-scalars, respectively.
 {shared_tensor_note}{operand_note_text}
 
 Args:
@@ -326,26 +305,12 @@ Returns:
 """
 
 
-def _pointwise_doc(name: str, reference: str, *, inplace: bool) -> str:
-    supported_signatures = _supported_signatures(
-        name,
-        (
-            "inputs, tensor1, tensor2, *, value: ScalarList",
-            "inputs, tensor1, tensor2, *, value: Tensor",
-            "inputs, tensor1, tensor2, *, value: Scalar=1",
-        ),
-    )
+def _pointwise_doc(reference: str, *, inplace: bool) -> str:
     return rf"""
 Applies :func:`{reference}` to corresponding tensors from the three input
 lists.
 
 {_common_doc(reference, inplace=inplace, has_aligned_lists=True)}
-
-Supported signatures::
-
-{supported_signatures}
-
-``ScalarList`` denotes a list or tuple of scalars.
 
 ``value`` may be one shared scalar, a scalar list or tuple, or a packed 1-D
 CPU tensor containing one scalar per list position.
@@ -743,14 +708,7 @@ def add(
 
 @_make_foreach_api(
     _binary_doc(
-        "add",
         "torch.add",
-        (
-            "inputs, other: Scalar",
-            "inputs, other: ScalarList",
-            "inputs, other: Tensor, *, alpha",
-            "inputs, other: TensorList, *, alpha=1",
-        ),
         inplace=False,
         alpha=(
             "supported only when ``other`` is a tensor list or a shared 0-D "
@@ -806,14 +764,7 @@ def add_(
 
 @_make_foreach_api(
     _binary_doc(
-        "add_",
         "torch.add",
-        (
-            "inputs, other: Scalar",
-            "inputs, other: ScalarList",
-            "inputs, other: Tensor, *, alpha",
-            "inputs, other: TensorList, *, alpha=1",
-        ),
         inplace=True,
         alpha=(
             "supported only when ``other`` is a tensor list or a shared 0-D "
@@ -861,13 +812,7 @@ def sub(
 
 @_make_foreach_api(
     _binary_doc(
-        "sub",
         "torch.sub",
-        (
-            "inputs, other: Scalar",
-            "inputs, other: ScalarList",
-            "inputs, other: TensorList, *, alpha=1",
-        ),
         inplace=False,
         alpha="supported only when ``other`` is a tensor list. Default: ``1``.",
     )
@@ -904,13 +849,7 @@ def sub_(
 
 @_make_foreach_api(
     _binary_doc(
-        "sub_",
         "torch.sub",
-        (
-            "inputs, other: Scalar",
-            "inputs, other: ScalarList",
-            "inputs, other: TensorList, *, alpha=1",
-        ),
         inplace=True,
         alpha="supported only when ``other`` is a tensor list. Default: ``1``.",
     )
@@ -947,14 +886,7 @@ def mul(inputs: _TensorList, other: _Scalar, /) -> _TensorTuple: ...
 
 @_make_foreach_api(
     _binary_doc(
-        "mul",
         "torch.mul",
-        (
-            "inputs, other: ScalarList",
-            "inputs, other: Tensor",
-            "inputs, other: TensorList",
-            "inputs, other: Scalar",
-        ),
         inplace=False,
         shared_tensor=True,
     )
@@ -981,14 +913,7 @@ def mul_(inputs: _TensorList, other: _Scalar, /) -> _TensorList: ...
 
 @_make_foreach_api(
     _binary_doc(
-        "mul_",
         "torch.mul",
-        (
-            "inputs, other: ScalarList",
-            "inputs, other: Tensor",
-            "inputs, other: TensorList",
-            "inputs, other: Scalar",
-        ),
         inplace=True,
         shared_tensor=True,
     )
@@ -1016,14 +941,7 @@ def div(inputs: _TensorList, other: _Scalar, /) -> _TensorTuple: ...
 
 @_make_foreach_api(
     _binary_doc(
-        "div",
         "torch.div",
-        (
-            "inputs, other: ScalarList",
-            "inputs, other: Tensor",
-            "inputs, other: TensorList",
-            "inputs, other: Scalar",
-        ),
         inplace=False,
         shared_tensor=True,
         operand_note="The ``rounding_mode`` argument is not supported.",
@@ -1051,14 +969,7 @@ def div_(inputs: _TensorList, other: _Scalar, /) -> _TensorList: ...
 
 @_make_foreach_api(
     _binary_doc(
-        "div_",
         "torch.div",
-        (
-            "inputs, other: ScalarList",
-            "inputs, other: Tensor",
-            "inputs, other: TensorList",
-            "inputs, other: Scalar",
-        ),
         inplace=True,
         shared_tensor=True,
         operand_note="The ``rounding_mode`` argument is not supported.",
@@ -1083,13 +994,7 @@ def clamp_min(inputs: _TensorList, min: _TensorList, /) -> _TensorTuple: ...
 
 @_make_foreach_api(
     _binary_doc(
-        "clamp_min",
         "torch.clamp",
-        (
-            "inputs, min: Scalar",
-            "inputs, min: ScalarList",
-            "inputs, min: TensorList",
-        ),
         inplace=False,
         operand="min",
         operand_note="Only the ``min`` bound is specified.",
@@ -1113,13 +1018,7 @@ def clamp_min_(inputs: _TensorList, min: _TensorList, /) -> _TensorList: ...
 
 @_make_foreach_api(
     _binary_doc(
-        "clamp_min_",
         "torch.clamp",
-        (
-            "inputs, min: Scalar",
-            "inputs, min: ScalarList",
-            "inputs, min: TensorList",
-        ),
         inplace=True,
         operand="min",
         operand_note="Only the ``min`` bound is specified.",
@@ -1144,13 +1043,7 @@ def clamp_max(inputs: _TensorList, max: _TensorList, /) -> _TensorTuple: ...
 
 @_make_foreach_api(
     _binary_doc(
-        "clamp_max",
         "torch.clamp",
-        (
-            "inputs, max: Scalar",
-            "inputs, max: ScalarList",
-            "inputs, max: TensorList",
-        ),
         inplace=False,
         operand="max",
         operand_note="Only the ``max`` bound is specified.",
@@ -1174,13 +1067,7 @@ def clamp_max_(inputs: _TensorList, max: _TensorList, /) -> _TensorList: ...
 
 @_make_foreach_api(
     _binary_doc(
-        "clamp_max_",
         "torch.clamp",
-        (
-            "inputs, max: Scalar",
-            "inputs, max: ScalarList",
-            "inputs, max: TensorList",
-        ),
         inplace=True,
         operand="max",
         operand_note="Only the ``max`` bound is specified.",
@@ -1205,13 +1092,7 @@ def minimum(inputs: _TensorList, other: _TensorList, /) -> _TensorTuple: ...
 
 @_make_foreach_api(
     _binary_doc(
-        "minimum",
         "torch.minimum",
-        (
-            "inputs, other: Scalar",
-            "inputs, other: ScalarList",
-            "inputs, other: TensorList",
-        ),
         inplace=False,
         operand_note=(
             "Scalar and ``ScalarList`` forms are semantically equivalent to "
@@ -1237,13 +1118,7 @@ def minimum_(inputs: _TensorList, other: _TensorList, /) -> _TensorList: ...
 
 @_make_foreach_api(
     _binary_doc(
-        "minimum_",
         "torch.minimum",
-        (
-            "inputs, other: Scalar",
-            "inputs, other: ScalarList",
-            "inputs, other: TensorList",
-        ),
         inplace=True,
         operand_note=(
             "Scalar and ``ScalarList`` forms are semantically equivalent to "
@@ -1270,13 +1145,7 @@ def maximum(inputs: _TensorList, other: _TensorList, /) -> _TensorTuple: ...
 
 @_make_foreach_api(
     _binary_doc(
-        "maximum",
         "torch.maximum",
-        (
-            "inputs, other: Scalar",
-            "inputs, other: ScalarList",
-            "inputs, other: TensorList",
-        ),
         inplace=False,
         operand_note=(
             "Scalar and ``ScalarList`` forms are semantically equivalent to "
@@ -1302,13 +1171,7 @@ def maximum_(inputs: _TensorList, other: _TensorList, /) -> _TensorList: ...
 
 @_make_foreach_api(
     _binary_doc(
-        "maximum_",
         "torch.maximum",
-        (
-            "inputs, other: Scalar",
-            "inputs, other: ScalarList",
-            "inputs, other: TensorList",
-        ),
         inplace=True,
         operand_note=(
             "Scalar and ``ScalarList`` forms are semantically equivalent to "
@@ -1357,7 +1220,7 @@ def addcmul(
 ) -> _TensorTuple: ...
 
 
-@_make_foreach_api(_pointwise_doc("addcmul", "torch.addcmul", inplace=False))
+@_make_foreach_api(_pointwise_doc("torch.addcmul", inplace=False))
 def addcmul(
     inputs: _TensorList,
     tensor1: _TensorList,
@@ -1402,7 +1265,7 @@ def addcmul_(
 ) -> _TensorList: ...
 
 
-@_make_foreach_api(_pointwise_doc("addcmul_", "torch.addcmul", inplace=True))
+@_make_foreach_api(_pointwise_doc("torch.addcmul", inplace=True))
 def addcmul_(
     inputs: _TensorList,
     tensor1: _TensorList,
@@ -1448,7 +1311,7 @@ def addcdiv(
 ) -> _TensorTuple: ...
 
 
-@_make_foreach_api(_pointwise_doc("addcdiv", "torch.addcdiv", inplace=False))
+@_make_foreach_api(_pointwise_doc("torch.addcdiv", inplace=False))
 def addcdiv(
     inputs: _TensorList,
     tensor1: _TensorList,
@@ -1493,7 +1356,7 @@ def addcdiv_(
 ) -> _TensorList: ...
 
 
-@_make_foreach_api(_pointwise_doc("addcdiv_", "torch.addcdiv", inplace=True))
+@_make_foreach_api(_pointwise_doc("torch.addcdiv", inplace=True))
 def addcdiv_(
     inputs: _TensorList,
     tensor1: _TensorList,
@@ -1534,22 +1397,6 @@ Applies :func:`torch.lerp` to corresponding tensors in ``inputs`` and
 ``end``.
 
 {_common_doc("torch.lerp", inplace=False, has_aligned_lists=True)}
-
-Supported signatures::
-
-{
-        _supported_signatures(
-            "lerp",
-            (
-                "inputs, end, weight: Scalar",
-                "inputs, end, weight: ScalarList",
-                "inputs, end, weight: TensorList",
-            ),
-        )
-    }
-
-``TensorList`` and ``ScalarList`` denote a list or tuple of tensors and
-scalars, respectively.
 
 ``weight`` may be one shared scalar, a scalar list or tuple, or a tensor list.
 
@@ -1595,22 +1442,6 @@ In-place version of :func:`torch.foreach.lerp`.
 
 {_common_doc("torch.lerp", inplace=True, has_aligned_lists=True)}
 
-Supported signatures::
-
-{
-        _supported_signatures(
-            "lerp_",
-            (
-                "inputs, end, weight: Scalar",
-                "inputs, end, weight: ScalarList",
-                "inputs, end, weight: TensorList",
-            ),
-        )
-    }
-
-``TensorList`` and ``ScalarList`` denote a list or tuple of tensors and
-scalars, respectively.
-
 ``weight`` may be one shared scalar, a scalar list or tuple, or a tensor list.
 
 Args:
@@ -1650,23 +1481,6 @@ Applies :func:`torch.pow` at each list position.
 
 {_common_doc("torch.pow", inplace=False, has_aligned_lists=True)}
 
-Supported signatures::
-
-{
-        _supported_signatures(
-            "pow",
-            (
-                "input: Scalar, exponent: TensorList",
-                "input: TensorList, exponent: Scalar",
-                "input: TensorList, exponent: ScalarList",
-                "input: TensorList, exponent: TensorList",
-            ),
-        )
-    }
-
-``TensorList`` and ``ScalarList`` denote a list or tuple of tensors and
-scalars, respectively.
-
 Args:
     input (Number, list of Tensor, or tuple of Tensor): bases.
     exponent (Number, list or tuple of Number, or list or tuple of Tensor):
@@ -1698,21 +1512,7 @@ In-place version of :func:`torch.foreach.pow`.
 
 {_common_doc("torch.pow", inplace=True, has_aligned_lists=True)}
 
-Supported signatures::
-
-{
-        _supported_signatures(
-            "pow_",
-            (
-                "inputs: TensorList, exponent: Scalar",
-                "inputs: TensorList, exponent: ScalarList",
-                "inputs: TensorList, exponent: TensorList",
-            ),
-        )
-    }
-
-``TensorList`` and ``ScalarList`` denote a list or tuple of tensors and
-scalars, respectively. The scalar-left form has no in-place variant.
+The scalar-left form has no in-place variant.
 
 Args:
     inputs (list or tuple of Tensor): bases to mutate.

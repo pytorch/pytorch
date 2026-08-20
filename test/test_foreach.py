@@ -1957,6 +1957,7 @@ instantiate_device_type_tests(TestForeach, globals(), allow_xpu=True)
 
 class TestForeachPublicAPI(TestCase):
     @parametrize("op", foreach_op_db, name_fn=lambda op: op.name)
+    @skipIfTorchDynamo("torch.compile does not work with foreach torch function")
     def test_private_compatibility(self, op):
         seen = []
 
