@@ -30,6 +30,7 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
     skipCUDAIf,
+    skipXPU,
 )
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
@@ -811,11 +812,8 @@ class TestSchedulerAccelerator(TestCase):
             counters["inductor"]["flop_count"] = 0
         torch._logging.set_logs()
 
-
-class TestSchedulerCuda(TestCase):
-    hw_classification = HardwareClassification.CUDA
-
     @xfailIfNoAcceleratorTriton
+    @skipXPU
     def test_index_add_fusion_prevented(self, device):
         """
         Test that index_add_ (scatter with atomic_add mode) is not fused with
@@ -857,6 +855,7 @@ class TestSchedulerCuda(TestCase):
         )
 
     @xfailIfNoAcceleratorTriton
+    @skipXPU
     def test_atomic_add_no_fusion_correctness(self, device):
         """
         Test that atomic_add operations produce correct results.
@@ -888,6 +887,7 @@ class TestSchedulerCuda(TestCase):
         )
 
     @xfailIfNoAcceleratorTriton
+    @skipXPU
     def test_expand_reuse_does_not_realize_before_reduction(self, device):
         def fn(icrd1, icrd2, wcrd, ocrd, meta, input1, input2, weight, output):
             input1_selected = torch.index_select(input1, 2, icrd1)
@@ -957,6 +957,7 @@ class TestSchedulerCuda(TestCase):
         self.assertEqual(metrics.generated_kernel_count, 1)
 
     @xfailIfNoAcceleratorTriton
+    @skipXPU
     def test_expand_reuse_realizes_in_deterministic_mode(self, device):
         def fn(a, b, c, d, e):
             x = a * b * c * d * e
@@ -993,6 +994,7 @@ class TestSchedulerCuda(TestCase):
             check_realizes()
 
     @xfailIfNoAcceleratorTriton
+    @skipXPU
     @parametrize("op", ["select_scatter", "index_put"])
     # Both settings are pinned so the test can only pass via graph_fanout:
     # deterministic mode makes expand realize src on its own, and the read
@@ -1175,8 +1177,6 @@ instantiate_parametrized_tests(TestSchedulerGeneric)
 instantiate_device_type_tests(
     TestSchedulerAccelerator, globals(), except_for="cpu", allow_xpu=True
 )
-
-instantiate_device_type_tests(TestSchedulerCuda, globals(), only_for="cuda")
 
 instantiate_device_type_tests(
     TestScoreFusionMemory, globals(), except_for="cpu", allow_xpu=True
