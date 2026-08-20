@@ -23,6 +23,11 @@ call that fails every retained guard set raises. Compiled graphs and kernels rem
 Python source, while guard trees, transformed entry/resume bytecode, and disabled-
 function bytecode are stored as opaque inline data.
 
+With ``tracer="dynamo", training=True`` (inductor backend only), every compiled segment
+contains AOTAutograd's forward and backward as readable Inductor source. The served
+output retains its ``grad_fn`` and a later ``backward()`` executes those captured
+backward kernels, including across captured recompilations and graph breaks.
+
 ``precompile`` returns a self-contained, executable ``python_code`` string plus a
 companion integrity-tagged ``cache``. With ``backend="inductor"`` (the default) the
 captured graph is lowered through the AOT backend contract
@@ -1118,7 +1123,7 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
         "USER_INPUT_DEVICES",
         "USER_INPUT_BOUNDS",
     }
-    wanted = {"BACKEND", "TRACER", *make_fx_metadata}
+    wanted = {"BACKEND", "TRACER", "TRAINING", *make_fx_metadata}
     found: dict[str, object] = {}
     try:
         tree = ast.parse(python_code)
@@ -1363,7 +1368,9 @@ def _build_dynamo_eager_graph_source(gm: torch.fx.GraphModule) -> str:
     return "\n".join(parts)
 
 
-def _dynamo_backend_compiler(backend: str) -> Callable[..., _DynamoPythonBackend]:
+def _dynamo_backend_compiler(
+    backend: str, training: bool
+) -> Callable[..., _DynamoPythonBackend]:
     def compile_graph(
         gm: torch.fx.GraphModule, example_inputs: list[object]
     ) -> _DynamoPythonBackend:
@@ -1388,7 +1395,10 @@ def _dynamo_backend_compiler(backend: str) -> Callable[..., _DynamoPythonBackend
                 if node.op == "placeholder"
             ]
             python_code, cache = aot_autograd.compile_to_python(
-                gm, graph_inputs, options={"size_asserts": True}
+                gm,
+                graph_inputs,
+                options={"size_asserts": True},
+                grad_enabled=training,
             )
             call = aot_autograd.load_from_python(python_code, cache)
         return _DynamoPythonBackend(python_code, cache, is_dynamic, call)
@@ -1554,6 +1564,7 @@ def _dynamo_backend_source_literal(source: str) -> str:
 def _build_dynamo_python_source(
     *,
     backend: str,
+    training: bool,
     state: dict[str, Any],
     backend_ids: list[str],
     compiled_backends: list[_DynamoPythonBackend],
@@ -1587,6 +1598,7 @@ def _build_dynamo_python_source(
         "# " + "=" * 70,
         f"BACKEND = {backend!r}",
         'TRACER = "dynamo"',
+        f"TRAINING = {training!r}",
         f"FRAME_COUNT = {len(state['codes'])}",
         f"VARIANT_COUNT = {variant_count}",
         f"GRAPH_COUNT = {len(compiled_backends)}",
@@ -1645,6 +1657,7 @@ def _precompile_dynamo(
     *,
     backend: str,
     decompositions: dict | None,
+    training: bool,
 ) -> tuple[str, bytes]:
     import dis
     import importlib
@@ -1848,7 +1861,7 @@ def _precompile_dynamo(
             return result
 
         compiled = torch._dynamo.optimize(
-            backend=_dynamo_backend_compiler(backend),
+            backend=_dynamo_backend_compiler(backend, training),
             nopython=False,
             guard_filter_fn=keep_portable_capture_guards,
             package=package,
@@ -1905,8 +1918,13 @@ def _precompile_dynamo(
 
             sys.settrace(trace)
         try:
-            for example in example_inputs:
-                compiled(*example)
+            if training:
+                with torch.enable_grad():
+                    for example in example_inputs:
+                        compiled(*example)
+            else:
+                for example in example_inputs:
+                    compiled(*example)
         finally:
             if use_profile:
                 sys.setprofile(previous_profile)
@@ -2051,6 +2069,7 @@ def _precompile_dynamo(
         }
         python_code = _build_dynamo_python_source(
             backend=backend,
+            training=training,
             state=state,
             backend_ids=[str(backend_id) for backend_id in backend_ids],
             compiled_backends=compiled_backends,
@@ -2407,6 +2426,7 @@ class _PrecompileApi:
         backend: str = "inductor",
         tracer: str = "make_fx",
         decompositions: dict | None = None,
+        training: bool = False,
     ) -> tuple[str, bytes]:
         """Ahead-of-time precompile ``fn`` against ``example_inputs``.
 
@@ -2479,6 +2499,13 @@ class _PrecompileApi:
         ``decomposition_table`` during capture, so you can control how ATen ops are
         broken down in the captured graph. Defaults to ``None`` (make_fx's default) and
         is not yet supported with ``tracer="dynamo"``.
+
+        ``training=True`` is supported with ``tracer="dynamo"`` and
+        ``backend="inductor"``. Capture runs with grad enabled, and each compiled graph
+        carries a readable AOTAutograd forward and backward bridged by an emitted
+        ``torch.autograd.Function``. A served output therefore retains its ``grad_fn``;
+        calling ``backward()`` executes the precompiled backward kernels. The input
+        tensors that require gradients must do so in every example and at runtime.
 
         With ``tracer="dynamo"``, shape variation across ``example_inputs`` uses
         Dynamo's ordinary automatic dynamic-shape policy: for example, a static first
@@ -2562,12 +2589,18 @@ class _PrecompileApi:
             raise ValueError(
                 f"precompile tracer must be 'make_fx' or 'dynamo', got {tracer!r}."
             )
+        if training and (tracer != "dynamo" or backend != "inductor"):
+            raise NotImplementedError(
+                "precompile training=True currently requires tracer='dynamo' and "
+                "backend='inductor'."
+            )
         if tracer == "dynamo":
             return _precompile_dynamo(
                 fn,
                 example_inputs,
                 backend=backend,
                 decompositions=decompositions,
+                training=training,
             )
         compiled = PrecompiledModule(
             fn, backend=backend, tracer=tracer, decompositions=decompositions

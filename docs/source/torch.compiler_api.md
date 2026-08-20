@@ -50,7 +50,7 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 % intentionally omitted from the autosummary block above.
 
 ```{eval-rst}
-.. py:function:: precompile(fn, *, example_inputs, backend="inductor", tracer="make_fx", decompositions=None)
+.. py:function:: precompile(fn, *, example_inputs, backend="inductor", tracer="make_fx", decompositions=None, training=False)
 
    Ahead-of-time precompile ``fn`` against example inputs, returning a self-contained,
    runnable Python source string plus an acceleration cache as ``(python_code, cache)``.
@@ -97,6 +97,14 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
       functions that capture its locals, and ``nn.Module`` arguments are not supported
       yet because their identity guards are not serializable.
 
+      Pass ``training=True`` with ``tracer="dynamo"`` and ``backend="inductor"`` to
+      capture differentiable graphs. Each compiled segment contains readable Inductor
+      source for both its AOTAutograd forward and backward, bridged by an emitted
+      ``torch.autograd.Function``. Outputs retain their ``grad_fn``, so a later
+      ``backward()`` executes the captured backward kernels. Training works across the
+      captured recompilations and graph breaks. Only first-order backward is supported;
+      tensor-subclass and ``BackwardState`` training graphs are rejected.
+
    With ``tracer="make_fx"``, if ``fn`` runs a backward, the artifact re-runs the whole
    forward and backward and scatters the resulting parameter gradients onto the runtime
    model's ``parameters()`` ``.grad`` fields, accumulating (``p.grad += g``) exactly like
@@ -123,6 +131,9 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
    :param decompositions: Optional decomposition table (``dict`` of ``OpOverload`` to a
        decomposition function) forwarded to ``make_fx``; defaults to ``None`` and is not
        yet supported with ``tracer="dynamo"``.
+   :param training: If ``True``, capture a differentiable Dynamo/Inductor artifact whose
+       outputs can be passed to ``backward()``. Defaults to ``False`` and currently
+       requires ``tracer="dynamo"`` and ``backend="inductor"``.
    :returns: ``(python_code, cache)`` -- a self-contained Python source string (the
        single source of truth for the calling convention) and a binary acceleration
        cache (no weights, no calling-convention metadata; it carries a small
@@ -146,6 +157,16 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
        )
        f = torch.compiler.precompile.load(python_code, cache)
        out = f(torch.randn(7, 4))  # served by the captured dynamic variant
+
+   Dynamo training::
+
+       examples = [(torch.randn(n, 4, requires_grad=True),) for n in (2, 3)]
+       python_code, cache = torch.compiler.precompile(
+           fn, example_inputs=examples, tracer="dynamo", training=True
+       )
+       f = torch.compiler.precompile.load(python_code, cache)
+       x = torch.randn(7, 4, requires_grad=True)
+       f(x).sum().backward()  # executes the captured backward kernels
 ```
 
 ```{eval-rst}
