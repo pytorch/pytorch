@@ -3005,6 +3005,13 @@ class _TorchCompileWrapper:
         if hasattr(self.compiler_fn, "reset"):
             self.compiler_fn.reset()
 
+    # Forwarded so the backend's _dynamo_backend_init can be read off the
+    # wrapper (what get_compiler_fn receives); read at fire time so the hook
+    # can be set on the backend even after torch.compile() wraps it.
+    @property
+    def _dynamo_backend_init(self) -> _Any | None:
+        return getattr(self.compiler_fn, "_dynamo_backend_init", None)
+
 
 _InputT = _ParamSpec("_InputT")
 _RetT = _TypeVar("_RetT")
@@ -3424,8 +3431,9 @@ def get_device_module(device: "torch.device | str | None" = None) -> _ModuleType
     elif isinstance(device, str):
         device_module_name = torch.device(device).type
     elif device is None:
-        # Using default accelerator type. If no accelerator is available, it automatically returns CPU device.
-        device_module_name = torch._C._get_accelerator().type
+        # Use the current accelerator's type, falling back to CPU when none is available.
+        acc = torch._C._accelerator_getAccelerator()
+        device_module_name = acc.type if acc is not None else "cpu"
     else:
         raise RuntimeError(
             f"Invalid value of device '{device}', expect torch.device, str, or None"

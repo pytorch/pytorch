@@ -55,8 +55,10 @@ KeepDims: typing.TypeAlias = bool
 OutArray: typing.TypeAlias = "ndarray"
 
 # NotImplementedType marks unsupported parameters; the normalizer raises unless
-# the argument equals the (always None) default, so the value is never used.
-NotImplementedType: typing.TypeAlias = None
+# the argument equals the parameter's default (which mirrors NumPy's default, so
+# passing the default is a no-op). Typed as object because these defaults are not
+# always None (e.g. where=True, order="K").
+NotImplementedType: typing.TypeAlias = object
 
 
 def normalize_array_like(
@@ -202,6 +204,7 @@ normalizers: dict[str, Callable[..., object]] = {
     "DTypeLike | None": normalize_dtype,
     "AxisLike": normalize_axis_like,
     "NotImplementedType": normalize_not_implemented,
+    "CastingModes": normalize_casting,
     "Optional[CastingModes]": normalize_casting,
     "CastingModes | None": normalize_casting,
 }
@@ -272,7 +275,9 @@ _R = typing.TypeVar("_R")
 
 
 @typing.overload
-def normalizer(_func: Callable[_P, _R]) -> Callable[_P, _R]: ...
+def normalizer(
+    _func: Callable[_P, _R], *, promote_scalar_result: bool = False
+) -> Callable[_P, _R]: ...
 
 
 @typing.overload

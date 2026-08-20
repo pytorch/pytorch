@@ -1211,7 +1211,7 @@ class TestReductions(TestCase):
     @dtypes(*complex_types())
     @dtypesIfMPS(torch.complex64)
     def test_invalid_0dim_aminmax(self, device, dtype):
-        with self.assertRaisesRegex(RuntimeError, 'not implemented'):
+        with self.assertRaisesRegex(TypeError, 'not implemented'):
             torch.aminmax(torch.tensor(1., dtype=dtype, device=device), dim=0)
 
     # TODO: bincount isn't a classic reduction -- maybe this test suite is
