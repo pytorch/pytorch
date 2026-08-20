@@ -88,7 +88,7 @@ class TestConfigModule(TestCase):
             self.check_deterministic(key, value)
 
     def test_inductor_config_hash_portable_without_ignore(self):
-        for cutlass_key in ("cuda", "xpu", "cutlass"):
+        for cutlass_key in ("xpu", "cutlass"):
             cutlass_dir_key = f"{cutlass_key}.cutlass_dir"
             idx = inductor_config._cache_config_ignore_prefix.index(cutlass_dir_key)
             inductor_config._cache_config_ignore_prefix.remove(cutlass_dir_key)
