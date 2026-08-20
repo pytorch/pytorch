@@ -1,6 +1,11 @@
 #pragma once
 #include <metal_stdlib>
 
+// Bit-exact Metal ports of the fp8 <-> fp32 conversions from
+// torch/headeronly/util/Float8_*.h, which Metal sources cannot include.
+// Keep in sync with those files; see them for the bit-level derivations
+// of the constants below.
+
 namespace c10 {
 namespace metal {
 namespace detail {
@@ -42,7 +47,16 @@ inline uchar fp8e4m3fn_from_fp32(float value) {
 }
 
 inline float fp8e5m2_to_fp32(uchar input) {
-  return float(as_type<half>(ushort(ushort(input) << 8)));
+  const ushort h_bits = ushort(input) << 8;
+  // The hardware half->float conversion canonicalizes NaNs; expand NaN
+  // manually to match the CPU conversion bit-for-bit (sign and mantissa
+  // payload preserved, quiet bit set).
+  if ((h_bits & 0x7fff) > 0x7c00) {
+    const uint sign = (uint(h_bits) & 0x8000) << 16;
+    const uint payload = (uint(h_bits) & 0x03ff) << 13;
+    return as_type<float>(sign | 0x7fc00000 | payload);
+  }
+  return float(as_type<half>(h_bits));
 }
 
 inline uchar fp8e5m2_from_fp32(float value) {

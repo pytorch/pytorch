@@ -248,7 +248,7 @@ ROUND_TRIP_TEST_CASES = (
 class TestFloat8Dtype(TestCase):
     @dtypes(*FLOAT8_DTYPES)
     @dtypesIfCUDA(*CUDA_FLOAT8_DTYPES)
-    @dtypesIfMPS()
+    @dtypesIfMPS(*MPS_FLOAT8_DTYPES)
     def test_creation_with_zeros(self, dtype, device):
         """Sanity test, round-trip casting of zeros."""
         x8 = torch.zeros(8, dtype=dtype, device=device)
@@ -345,9 +345,7 @@ class TestFloat8Dtype(TestCase):
             tensor_int = torch.tensor([bits_int], dtype=torch.uint8, device=device)
             tensor_fp8 = tensor_int.view(dtype)
             if number_name == "nan":
-                is_mps = self.device_type == "mps"
-                tensor_isnan = tensor_fp8.float() if is_mps else tensor_fp8
-                if not tensor_isnan.isnan():
+                if not tensor_fp8.isnan():
                     raise AssertionError(
                         f"Expected NaN for {number_name}, got {tensor_fp8}"
                     )
@@ -363,7 +361,7 @@ class TestFloat8Dtype(TestCase):
 
     @dtypes(*FLOAT8_DTYPES)
     @dtypesIfCUDA(*CUDA_FLOAT8_DTYPES)
-    @dtypesIfMPS()
+    @dtypesIfMPS(*MPS_FLOAT8_DTYPES)
     def test_type_promotion_fails(self, dtype, device):
         """Test that float8 is not promoted to higher precision Float Type."""
         for other_dtype in [
@@ -372,6 +370,8 @@ class TestFloat8Dtype(TestCase):
             torch.float32,
             torch.float64,
         ]:
+            if other_dtype == torch.float64 and self.device_type == "mps":
+                continue  # MPS does not support float64
             x = torch.randn(8, device=device).to(dtype)
             y = torch.randn(8, device=device).to(other_dtype)
             with self.assertRaisesRegex(
@@ -381,7 +381,7 @@ class TestFloat8Dtype(TestCase):
 
     @dtypes(*FLOAT8_DTYPES)
     @dtypesIfCUDA(*CUDA_FLOAT8_DTYPES)
-    @dtypesIfMPS()
+    @dtypesIfMPS(*MPS_FLOAT8_DTYPES)
     def test_empty(self, dtype, device):
         with DeterministicGuard(torch.are_deterministic_algorithms_enabled()):
             for use_deterministic in (True, False):
@@ -390,13 +390,13 @@ class TestFloat8Dtype(TestCase):
 
     @dtypes(*FLOAT8_DTYPES)
     @dtypesIfCUDA(*CUDA_FLOAT8_DTYPES)
-    @dtypesIfMPS()
+    @dtypesIfMPS(*MPS_FLOAT8_DTYPES)
     def test_to_string(self, dtype, device):
         x = torch.empty(4, 4, device=device, dtype=dtype)
         str(x)
 
     @dtypes(*FLOAT8_DTYPES)
-    @dtypesIfMPS()
+    @dtypesIfMPS(*MPS_FLOAT8_DTYPES)
     def test_finfo(self, dtype, device):
         torch.finfo(dtype)
 

@@ -54,6 +54,7 @@ struct MPSScalar {
     c10::complex<float> cf;
     c10::complex<at::Half> ch;
     at::BFloat16 bf16;
+    uint8_t f8; // bit pattern shared by all three fp8 dtypes
   } value{};
 };
 
