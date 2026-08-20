@@ -570,6 +570,32 @@ test_h100_cutlass_backend() {
   TORCHINDUCTOR_CUTLASS_DIR=$(realpath "./third_party/cutlass") python test/run_test.py --include inductor/test_cutlass_evt $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
 }
 
+test_native_aot() {
+  # These suites exercise the Python JIT route as well as the embedded
+  # kernels, so they need the DSL runtime. Installed here rather than baked
+  # into the image via requirements-ci.txt: that file is shared by every
+  # image, so pinning it there put ~190 MB of CUDA-only tooling into the
+  # CPU, ROCm and XPU images too.
+  install_cutlass_dsl
+
+  # native-AOT: DSL kernels embedded into libtorch_cuda by stage 2 of the
+  # build (tools/native_aot/build_stage2.py). First assert the wheel under
+  # test actually carries them -- a silently artifact-free wheel would make
+  # every routing test vacuously pass on the JIT/aten fallbacks.
+  # (cd test: from the repo root the source torch/ dir would shadow the
+  # installed wheel, same as the ASAN smoke checks above)
+  (cd test && python -c "
+from torch._native import _native_aot_embedded
+assert _native_aot_embedded(), 'AOT kernels not embedded: stage 2 did not run in the build'
+print('native-AOT: embedded kernels detected')
+")
+  local native_aot_tests=()
+  for f in test/python_native/test_*.py; do
+    native_aot_tests+=("${f#test/}")
+  done
+  time python test/run_test.py --include "${native_aot_tests[@]%.py}" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+}
+
 test_xpu_sycl_tla_backend() {
   # Inductor sycl-tla backend tests for XPU
   # shellcheck disable=SC1091
@@ -2588,6 +2614,8 @@ elif [[ "${TEST_CONFIG}" == "b200-symm-mem" ]]; then
   test_b200_symm_mem
 elif [[ "${TEST_CONFIG}" == h100_cutlass_backend ]]; then
   test_h100_cutlass_backend
+elif [[ "${TEST_CONFIG}" == native_aot ]]; then
+  test_native_aot
 elif [[ "${TEST_CONFIG}" == openreg ]]; then
   test_openreg
 elif [[ "${TEST_CONFIG}" == "tsan" ]]; then
