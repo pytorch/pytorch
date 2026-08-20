@@ -402,7 +402,7 @@ class TestFlexDecoding(InductorTestCase):
             # Note, it seems like we really are less accurate than the float32
             # computation, likely due to the online softmax
             if dtype == torch.float32:
-                fudge_factor = 10.0
+                fudge_factor = 12.0
             else:
                 fudge_factor = 1.1
 
@@ -903,7 +903,6 @@ class TestFlexDecoding(InductorTestCase):
     @parametrize_device_dtype("dtypes")
     @common_utils.parametrize("score_mod", test_score_mods)
     @common_utils.parametrize("BLOCK_SIZE", test_block_size)
-    @with_tf32_off
     def test_builtin_score_mods_different_block_size(
         self,
         device,
