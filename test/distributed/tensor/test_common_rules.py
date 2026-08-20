@@ -6,22 +6,33 @@ from torch.distributed.tensor import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import OpSchema
 from torch.distributed.tensor._ops._common_rules import einop_rule, pointwise_rule
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import HardwareClassification, run_tests
-from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorContinuousTestBase,
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
 )
+from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
 aten = torch.ops.aten
 
 
-class CommonRulesTest(DTensorContinuousTestBase):
+class CommonRulesTest(TestCase):
     # hard code world size to 4 as we need to test
     # at least with 2d mesh
-    hw_classification = HardwareClassification.ACCELERATOR
+    hw_classification = HardwareClassification.GENERIC
 
     world_size = 4
+
+    def setUp(self):
+        super().setUp()
+        torch.distributed.init_process_group(
+            backend="fake", rank=0, world_size=self.world_size, store=FakeStore()
+        )
+
+    def tearDown(self):
+        super().tearDown()
+        torch.distributed.destroy_process_group()
 
     def _gen_tensor_meta(self, shape):
         empty_tensor = torch.empty(shape)
@@ -33,7 +44,7 @@ class CommonRulesTest(DTensorContinuousTestBase):
 
     def test_einop_basic_propagation(self):
         # plain einsum, mm
-        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        mesh = DeviceMesh("cpu", torch.arange(self.world_size))
 
         mm_call = aten.mm.default
         # propagate col-wise sharding
@@ -85,7 +96,7 @@ class CommonRulesTest(DTensorContinuousTestBase):
         self.assertTrue(output_spec.placements[0].is_partial())
 
     def test_einop_pointwise_propagation(self):
-        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        mesh = DeviceMesh("cpu", torch.arange(self.world_size))
 
         add_call = aten.add.Tensor
         # addition
@@ -140,7 +151,7 @@ class CommonRulesTest(DTensorContinuousTestBase):
         mesh_shape = torch.arange(self.world_size).reshape(
             self.world_size // 2, self.world_size // 2
         )
-        mesh = DeviceMesh(self.device_type, mesh_shape)
+        mesh = DeviceMesh("cpu", mesh_shape)
 
         mm_call = aten.mm.default
 
@@ -164,7 +175,7 @@ class CommonRulesTest(DTensorContinuousTestBase):
         mesh_shape = torch.arange(self.world_size).reshape(
             self.world_size // 2, self.world_size // 2
         )
-        mesh = DeviceMesh(self.device_type, mesh_shape)
+        mesh = DeviceMesh("cpu", mesh_shape)
 
         mm_call = aten.mm.default
 
@@ -230,7 +241,7 @@ class CommonRulesTest(DTensorContinuousTestBase):
     def test_einop_multi_sharding_on_mesh_dim(self):
         # einop prop with multi sharding on same mesh dim
         mesh_shape = torch.arange(self.world_size)
-        mesh = DeviceMesh(self.device_type, mesh_shape)
+        mesh = DeviceMesh("cpu", mesh_shape)
 
         mm_call = aten.mm.default
         mat1, mat2 = [0, -1], [0, -1]
@@ -259,7 +270,7 @@ class CommonRulesTest(DTensorContinuousTestBase):
         mesh_shape = torch.arange(self.world_size).reshape(
             self.world_size // 2, self.world_size // 2
         )
-        mesh = DeviceMesh(self.device_type, mesh_shape)
+        mesh = DeviceMesh("cpu", mesh_shape)
 
         add_call = aten.add.Tensor
         mat1, mat2 = [0, -1], [1, -1]
@@ -276,7 +287,7 @@ class CommonRulesTest(DTensorContinuousTestBase):
             einop_rule("ij,ij->ij", OpSchema(add_call, (mat1_spec, mat2_spec), {}))
 
     def test_pointwise_rules_broadcasting(self):
-        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        mesh = DeviceMesh("cpu", torch.arange(self.world_size))
 
         where_call = aten.where.self
         inp1, inp2, inp3 = [0], [], [-1, -1]
@@ -301,7 +312,7 @@ class CommonRulesTest(DTensorContinuousTestBase):
         self.assertEqual(output_spec.dim_map, [-1, 0])
 
     def test_pointwise_rules_suggestion(self):
-        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        mesh = DeviceMesh("cpu", torch.arange(self.world_size))
 
         lerp_call = aten.lerp.Scalar
         # propagate point-wise sharding
@@ -332,7 +343,7 @@ class CommonRulesTest(DTensorContinuousTestBase):
         mesh_shape = torch.arange(self.world_size).reshape(
             self.world_size // 2, self.world_size // 2
         )
-        mesh = DeviceMesh(self.device_type, mesh_shape)
+        mesh = DeviceMesh("cpu", mesh_shape)
 
         add_call = aten.add.Tensor
 
@@ -377,7 +388,7 @@ class CommonRulesTest(DTensorContinuousTestBase):
         mesh_shape = torch.arange(self.world_size).reshape(
             self.world_size // 2, self.world_size // 2
         )
-        mesh = DeviceMesh(self.device_type, mesh_shape)
+        mesh = DeviceMesh("cpu", mesh_shape)
 
         add_call = aten.add_.Tensor
 
@@ -401,14 +412,6 @@ class CommonRulesTest(DTensorContinuousTestBase):
         schema_suggestion = output_sharding.redistribute_schema
         self.assertEqual(schema_suggestion.args_schema[0].dim_map, mat1)
         self.assertEqual(schema_suggestion.args_schema[1].dim_map, mat1)
-
-
-instantiate_device_type_tests(
-    CommonRulesTest,
-    globals(),
-    except_for=["cpu"],
-    allow_xpu=True,
-)
 
 
 if __name__ == "__main__":

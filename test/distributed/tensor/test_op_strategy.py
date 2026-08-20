@@ -34,7 +34,6 @@ from torch.distributed.tensor._ops._math_ops import common_reduction_strategy
 from torch.distributed.tensor._ops.utils import replicate_op_strategy
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.placement_types import _StridedShard
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -1924,26 +1923,6 @@ class TestUnsupportedDTensorOp(TestCase):
             r"Operator.*testlib\.unsupported_cat.*does not have a sharding strategy registered",
         ):
             _ = torch.ops.testlib.unsupported_cat([x_dt, y_dt], dim=0)
-
-
-instantiate_device_type_tests(
-    DistTensorReplicateStrategyRegistrationTest,
-    globals(),
-    except_for=["cpu"],
-    allow_xpu=True,
-)
-instantiate_device_type_tests(
-    TestStrategyHashing,
-    globals(),
-    except_for=["cpu"],
-    allow_xpu=True,
-)
-instantiate_device_type_tests(
-    TestStrategyOperation,
-    globals(),
-    except_for=["cpu"],
-    allow_xpu=True,
-)
 
 
 if __name__ == "__main__":
