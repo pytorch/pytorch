@@ -27,6 +27,49 @@ case "${GPU_ARCH_TYPE:-BLANK}" in
 
         cd "${PYTORCH_ROOT}"
         python3 "${SCRIPTPATH}/build_wheel.py"  "${RAW_WHEEL_DIR}"
+
+        # native-AOT stage 2, BEFORE the repair so the relinked libtorch_cuda
+        # goes through patchelf like any other library in the wheel. Kernel
+        # builders import torch, so the raw wheel has to be installed first --
+        # same ordering as .ci/pytorch/build.sh, which builds the wheel used by
+        # test jobs. Stage 2 prints why and skips when it has nothing to do
+        # (no toolchain for the backend, no exportable arch in
+        # TORCH_CUDA_ARCH_LIST); once it decides it WILL export, a missing DSL
+        # runtime fails the build. There is no GPU in this container, so export
+        # relies on the explicit arch from TORCH_CUDA_ARCH_LIST and never
+        # touches the driver.
+        #
+        # CUDA arch types only: this arm also serves cpu/xpu/rocm, where stage 2
+        # can only skip -- and where the guard also keeps those containers from
+        # installing an unrepaired wheel to be told so.
+        if [[ "${GPU_ARCH_TYPE}" == cuda* ]]; then
+            # nullglob so an empty directory counts as zero: without it the
+            # glob yields the literal pattern and the message said "found 1",
+            # pointing at a naming problem rather than a missing wheel.
+            naot_wheels=()
+            shopt -s nullglob
+            naot_wheels=("${RAW_WHEEL_DIR}"/*.whl)
+            shopt -u nullglob
+            if [[ ${#naot_wheels[@]} -ne 1 ]]; then
+              echo "native-AOT: expected one raw wheel in ${RAW_WHEEL_DIR}, found ${#naot_wheels[@]}" >&2
+              exit 1
+            fi
+            RAW_WHEEL="${naot_wheels[0]}"
+            # --no-deps --no-index: the kernel builders need only the built torch,
+            # and resolving Requires-Dist would pull GBs of CUDA runtime wheels
+            # into every binary-build container.
+            python3 -m pip install --progress-bar off --no-deps --no-index "${RAW_WHEEL}"
+            # Sourced for install_cutlass_dsl so the DSL version pin lives in one
+            # place; the file is function-only by construction.
+            source "${PYTORCH_ROOT}/.ci/pytorch/common_utils.sh"
+            # Stage 2 owns the verdict (see .ci/pytorch/build.sh for why a separate
+            # probe here was wrong).
+            if [[ "$(python3 tools/native_aot/build_stage2.py --print-verdict)" == "RUN" ]]; then
+              install_cutlass_dsl
+            fi
+            python3 tools/native_aot/build_stage2.py --wheel "${RAW_WHEEL}"
+        fi  # GPU_ARCH_TYPE == cuda*
+
         python3 "${SCRIPTPATH}/repair_wheel.py" "${RAW_WHEEL_DIR}" "${PYTORCH_FINAL_PACKAGE_DIR}"
         ;;
     cpu-s390x)

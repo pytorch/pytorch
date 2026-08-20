@@ -283,6 +283,46 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
   fi
   pip_install_whl "$(echo dist/*.whl)"
 
+  # native-AOT stage 2: export DSL kernels, relink torch_cuda with them
+  # embedded, and patch the relinked library back into the wheel handed to test
+  # jobs. Post-install because the kernel builders import the INSTALLED torch.
+  # It prints why it skips, and past its own gates any failure fails the build;
+  # see tools/native_aot/build_stage2.py.
+  #
+  # CUDA-only, the same guard .ci/manywheel/build.sh applies, and for more than
+  # two subprocesses: --wheel tells stage 2 torch was installed on the line
+  # above, so it refuses a torch that does not import rather than patch a
+  # kernel-free wheel. In the ASan and TSan images plain `import torch`
+  # legitimately does not work, and that refusal is deliberately ahead of every
+  # applicability gate -- so TORCH_NATIVE_AOT=0 could not exempt them.
+  if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+    # Installed HERE, not in .ci/docker/requirements-ci.txt, which every image
+    # shares: pinning them there put ~190 MB of CUDA-only tooling into the CPU,
+    # ROCm and XPU images and made capability probes lie (a ROCm image reports
+    # CUTLASS available, then fails cuInit).
+    #
+    # ONE owner of the decision: stage 2 prints its verdict and we install only
+    # on RUN. An independent `python -c` probe here decided by exit code, which
+    # disagrees on GPU-less CUDA builders where a CUDA torch can segfault in
+    # teardown -- so the install was skipped and stage 2 then demanded it.
+    if [[ "$(python tools/native_aot/build_stage2.py --print-verdict)" == "RUN" ]]; then
+      install_cutlass_dsl
+    fi
+    # One wheel expected; a stale second would otherwise be glued into a single
+    # argument containing a space. nullglob so an empty dist/ counts as zero:
+    # without it the glob yields the literal pattern and the message read
+    # "found 1", sending the reader looking for a second wheel.
+    naot_wheels=()
+    shopt -s nullglob
+    naot_wheels=(dist/*.whl)
+    shopt -u nullglob
+    if [[ ${#naot_wheels[@]} -ne 1 ]]; then
+      echo "native-AOT: expected exactly one wheel in dist/, found ${#naot_wheels[@]}" >&2
+      exit 1
+    fi
+    python tools/native_aot/build_stage2.py --wheel "${naot_wheels[0]}"
+  fi  # BUILD_ENVIRONMENT == *cuda*
+
   # Smoke-test tools/build_with_debinfo.py against the real build tree: it must
   # still emit a debug-rebuild plan with a -g compile and the libtorch_python
   # relink. This guards against build-system changes (e.g. a new
