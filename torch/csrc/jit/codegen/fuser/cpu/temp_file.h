@@ -70,7 +70,7 @@ struct TempFile {
     auto wname = std::wstring(tt.begin(), tt.end() - 1);
     name_ = c10::u16u8(wname);
 #else
-    // mkstemps edits its first argument in places
+    // mkstemps edits its first argument in place
     // so we make a copy of the string here, including null terminator
     std::vector<char> tt(t.c_str(), t.c_str() + t.size() + 1);
     int fd = mkstemps(tt.data(), suffix);

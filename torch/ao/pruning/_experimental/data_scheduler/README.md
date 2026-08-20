@@ -14,7 +14,7 @@ the data sparsifier class and varies it across the training process (or across t
 `step`: Applies the `get_schedule_param` logic every epoch/step depending on when it is called. This should always be called after the `sparsifier.step()` has been called.
 
 ## Write your own data scheduler
-The custom data scheduler must be inherit from the `BaseDataScheduler` class and should have the `get_schedule_param()` function implemented. For example, that gradually multiplies the sparsity level by `gamma` every epoch.
+The custom data scheduler must inherit from the `BaseDataScheduler` class and should have the `get_schedule_param()` function implemented. For example, that gradually multiplies the sparsity level by `gamma` every epoch.
 It also takes an argument `threshold_sl` which when reached does not increase further.
 
 ```

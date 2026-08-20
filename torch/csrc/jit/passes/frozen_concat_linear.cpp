@@ -114,7 +114,7 @@ class ConcatLinearLayers {
 
     for (Node* orig_node : compatible_layers) {
       // for each node in the compatible_layers list,
-      // slide the output of the combined linear layer
+      // slice the output of the combined linear layer
       // and use it instead of the output of the original node
 
       Tensor weight_tensor =

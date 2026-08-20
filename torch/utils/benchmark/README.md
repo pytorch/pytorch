@@ -43,7 +43,7 @@ performance differences. Grouping and layout is based on metadata passed to
 table will be generated per unique label.
 
 * `sub_label`: This is the label for a given configuration. Multiple statements
-may be logically equivalent differ in implementation. Assigning separate
+may be logically equivalent but differ in implementation. Assigning separate
 sub_labels will result in a row per sub_label. If a sublabel is not provided,
 `stmt` is used instead. Statistics (such as computing the fastest
 implementation) use all sub_labels.

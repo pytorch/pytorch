@@ -4,7 +4,7 @@
 
 namespace torch::jit {
 
-// If given a top-level graph, DCE will construct do alias analysis that allows
+// If given a top-level graph, DCE will do alias analysis that allows
 // for "smarter" dead code elimination (we will eliminate mutable ops if we can
 // prove the mutated values are not used). Otherwise, we will not allow DCE to
 // eliminate mutable ops.

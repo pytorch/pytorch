@@ -66,7 +66,7 @@ def mask_fn(tensor, threshold):  # threshold is the sparse config here
 
 `step`: For each registered layer, applies the `reduce_fn` on aggregated activations and then applies `mask_fn` after reduce operation.
 
-`squash_mask`: Unregisters aggregate hook that was applied earlier and registers sparsification hooks if `attach_sparsify_hook=True`. Sparsification hooks applies the computed mask to the activations before it flows into the registered layer.
+`squash_mask`: Unregisters aggregate hook that was applied earlier and registers sparsification hooks if `attach_sparsify_hook=True`. Sparsification hooks apply the computed mask to the activations before it flows into the registered layer.
 
 ## Example
 
