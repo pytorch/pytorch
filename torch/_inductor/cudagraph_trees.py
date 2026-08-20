@@ -826,6 +826,12 @@ class CUDAWarmupNode:
         return collect_path_user_visible_storage_groups(tuple(self._path_from_root))
 
     def run(self, new_inputs: Any) -> OutputType:
+        """Eagerly run the wrapped function during cudagraph warmup.
+
+        Executes the model once outside graph capture, under the device's
+        memory-pool manager, and records weakrefs to the output storages
+        allocated inside the cudagraph pool so later steps can free them.
+        """
         if self.has_run:
             raise AssertionError("Wrapped function should never be run twice")
 
