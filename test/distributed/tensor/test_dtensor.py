@@ -38,7 +38,6 @@ from torch.distributed.tensor.parallel import (
 )
 from torch.distributed.tensor.placement_types import _StridedShard
 from torch.testing import make_tensor
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     IS_FBCODE,
@@ -1937,38 +1936,6 @@ class TestMixedPartialTypes(TestCase):
         )
         # no error
         redistribute_local_tensor(tensor, current_spec, target_spec)
-
-
-instantiate_device_type_tests(
-    DTensorTest,
-    globals(),
-    except_for=["cpu"],
-    allow_xpu=True,
-)
-instantiate_device_type_tests(
-    DTensorSubclassTest,
-    globals(),
-    except_for=["cpu"],
-    allow_xpu=True,
-)
-instantiate_device_type_tests(
-    DTensorMeshTest,
-    globals(),
-    except_for=["cpu"],
-    allow_xpu=True,
-)
-instantiate_device_type_tests(
-    TestDTensorPlacementTypes,
-    globals(),
-    except_for=["cpu"],
-    allow_xpu=True,
-)
-instantiate_device_type_tests(
-    TestDTensorSpec,
-    globals(),
-    except_for=["cpu"],
-    allow_xpu=True,
-)
 
 
 if __name__ == "__main__":
