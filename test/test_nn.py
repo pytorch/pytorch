@@ -5413,6 +5413,15 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertRaises(RuntimeError, lambda: F.interpolate(x, scale_factor=-1e20, mode="bilinear"))
         self.assertRaises(RuntimeError, lambda: F.interpolate(x, scale_factor=1e20, mode="bilinear"))
 
+    @largeTensorTest("5GB", device="cuda")
+    def test_interpolate_spatial_dim_exceeds_int32(self):
+        # A spatial extent above INT_MAX was narrowed to int on the host, which
+        # made the computed scale negative and the kernel read before the input.
+        # https://github.com/pytorch/pytorch/issues/193689
+        x = torch.empty((1, 1, 2**31, 1), dtype=torch.float16, device="cuda")
+        with self.assertRaisesRegex(RuntimeError, "spatial dimensions must each be at most"):
+            F.interpolate(x, size=(2, 1), mode="bilinear", align_corners=True)
+
     def test_interpolate_buffer_overflow(self):
         # Test buffer overflow issue due to inaccurate floating point
         # representation for integer values. See issue below for details.
