@@ -374,7 +374,7 @@ graphsafe_rng_functionalization = True
 # used by AOT compile and other settings
 # TODO: once AOT compile calls aot autograd directly instead of
 # through compile_fx, we can remove this
-force_non_lazy_backward_lowering = False
+force_non_lazy_backward_lowering: bool = False
 
 # only for testing, used to turn functionalization off in AOTDispatcher
 _test_disable_functionalization = True
