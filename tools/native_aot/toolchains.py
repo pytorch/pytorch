@@ -81,9 +81,11 @@ class Toolchain:
 
     # Importable modules this kind needs to COMPILE a kernel. Absence is
     # FATAL once a declaration targeting this build's backend reaches
-    # export: its kernels were asked for, and exporting only some ships a wheel
-    # that silently underperforms (TORCH_NATIVE_AOT=0 builds without them).
-    # Nothing at RUNTIME needs these; the exported artifacts are self-contained.
+    # export: its kernels were asked for, and exporting only some of them
+    # ships a wheel that silently underperforms. Build without the DSL
+    # wheels via TORCH_NATIVE_AOT=0 instead (see build_stage2.should_run
+    # and test_missing_runtime_is_fatal_not_skipped). Nothing at RUNTIME
+    # needs these -- the exported artifacts are self-contained.
     REQUIRED_RUNTIMES: tuple[str, ...] = ()
 
     # Distribution names whose versions define this kind's COMPILER, recorded per
@@ -100,9 +102,10 @@ class Toolchain:
     # from the kernel's own signature.
     NARROWS_SHAPES_TO_INT32: bool = False
 
-    # Env var this kind falls back to with no explicit arch. The sidecar records
-    # what it resolves to, so a run changing only this variable is not mistaken
-    # for one that already exported (export._effective_arch).
+    # Env var this kind falls back to when no explicit arch is given. The
+    # sidecar records the arch it resolves to, so a run that changes only
+    # this variable is not mistaken for one that already exported (see
+    # export._effective_arch).
     ARCH_ENV_VAR: str | None = None
 
     REQUIRED_BUILD_KEYS: tuple[str, ...] = ()
@@ -128,10 +131,12 @@ class Toolchain:
     def export(self, b: dict, out_dir: str, arch: str | None = None) -> dict:
         """Compile one spec point; return sidecar marshalling metadata.
 
-        ``arch`` is an sm string or None for detect-from-device. With an explicit
-        one no toolchain touches the CUDA driver, so export runs on GPU-less
-        machines, and it is per-COMPILE state rather than per-process -- so one
-        process may export for several arches."""
+        ``arch`` is an sm string ("sm_90a") or None for detect-from-
+        device. With an explicit arch no toolchain touches the CUDA
+        driver, so export runs on GPU-less machines, and the arch is
+        per-compile state rather than per-process: CuTeDSL passes
+        --gpu-arch, Triton kinds install a fixed GPUTarget driver. One
+        process may therefore export for several arches."""
         raise NotImplementedError
 
     def gen_launcher(self, sidecar: dict) -> str:
