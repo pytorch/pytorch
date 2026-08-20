@@ -13,7 +13,6 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
     HardwareClassification,
-    instantiate_parametrized_tests,
     parametrize,
     run_tests,
 )
@@ -61,7 +60,7 @@ class FsdpOptimStateCheckpoint(DTensorTestBase):
 
     @skip_if_lt_x_gpu(2)
     @with_comms
-    def test_get_set_state_dict_forwards_fsdp_process_group(self):
+    def test_get_set_state_dict_forwards_fsdp_process_group(self, device):
         custom_pg = dist.new_group(ranks=list(range(self.world_size)))
 
         model = self._create_model()
@@ -114,7 +113,7 @@ class FsdpOptimStateCheckpoint(DTensorTestBase):
     @with_comms
     @with_temp_dir
     @parametrize("pass_planner", [True, False])
-    def test_load_sharded_optimizer_state_dict(self, pass_planner) -> None:
+    def test_load_sharded_optimizer_state_dict(self, device, pass_planner) -> None:
         CHECKPOINT_DIR = self.temp_dir
         planner = dcp.DefaultLoadPlanner() if pass_planner else None
 
