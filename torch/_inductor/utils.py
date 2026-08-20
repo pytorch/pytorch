@@ -103,11 +103,15 @@ if TYPE_CHECKING:
     from .output_code import CompiledFxGraph
     from .scheduler import BaseSchedulerNode, SchedulerBuffer
 
+
 # GPU_TYPES is derived from the device interface registry so that a backend
 # advertising BackendFeature.GPU is included automatically. Late-binding
 # (module __getattr__) so backends registered after import are picked up.
 def _gpu_types() -> list[str]:
-    from torch._dynamo.device_interface import BackendFeature, get_registered_device_interfaces
+    from torch._dynamo.device_interface import (
+        BackendFeature,
+        get_registered_device_interfaces,
+    )
 
     return [
         name
