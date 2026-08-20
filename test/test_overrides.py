@@ -12,6 +12,7 @@ import unittest
 import os
 
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     TestCase,
     run_tests,
     TEST_WITH_CROSSREF,
@@ -398,6 +399,8 @@ class TensorLike:
         return HANDLED_FUNCTIONS_TENSOR_LIKE[func](*args, **kwargs)
 
 class TestTorchFunctionOverride(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_dtype_override(self):
         class MyDtype:
             def __torch_function__(self, *args, **kwargs):
@@ -1167,6 +1170,8 @@ def wrap(v):
     return Wrapper(v) if isinstance(v, torch.Tensor) else v
 
 class TestEinsumOverride(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     "Regression test for gh-38479"
     def test_wrapper(self):
         x = Wrapper(torch.randn(5))
@@ -1182,6 +1187,8 @@ class TestEinsumOverride(TestCase):
                          torch.nn.functional.bilinear(a, c, b)._data)
 
 class TestGradCheckOverride(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     "Test that wrappers work with gradcheck."
     def test_gradcheck(self):
         from torch.testing._internal.common_utils import gradcheck, gradgradcheck
@@ -1238,6 +1245,8 @@ class TestGradCheckOverride(TestCase):
         run_test(fast_mode=False)
 
 class TestNamedTuple(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     """ Regression test for gh-47090 """
     def test_max(self):
         x = torch.tensor([1, 2])
@@ -1248,6 +1257,8 @@ class TestNamedTuple(TestCase):
         self.assertEqual(r, rs)
 
 class TestGradNewOnesOverride(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     """ Regression test for gh-47069 """
     def test_newones(self):
         t = torch.tensor([1, 2]).as_subclass(SubTensor2)
@@ -1255,6 +1266,8 @@ class TestGradNewOnesOverride(TestCase):
         self.assertEqual(type(n), SubTensor2)
 
 class TestPickle(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     "Regression test for gh-47051"
     def test_pickle(self):
         t = torch.tensor([1]).as_subclass(SubTensor2)
@@ -1264,6 +1277,8 @@ class TestPickle(TestCase):
         self.assertEqual(t2.abcd, "e")
 
 class TestBroadcastAllOverride(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     """ test for gh-37141 """
     def test_broadcast_all(self):
         from torch.distributions.utils import broadcast_all
@@ -1286,6 +1301,8 @@ class TestBroadcastAllOverride(TestCase):
         self.assertEqual(o_2[1]._data, c)
 
 class TestWrapTorchFunction(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_wrap_torch_function(self):
         class A:
             @classmethod
@@ -1302,6 +1319,8 @@ class TestWrapTorchFunction(TestCase):
         self.assertEqual(f(A()), -1)
 
 class TestIndexing(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     """ Regression tests for gh-46277 """
     def test_getitem(self):
         class A:
@@ -1370,6 +1389,8 @@ class TestIndexing(TestCase):
 
 
 class TestIterator(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     # Regression test for gh-54457
     def test_iterator(self):
         t = torch.tensor([5, 6, 7]).as_subclass(SubTensor2)
@@ -1380,6 +1401,8 @@ class TestIterator(TestCase):
 
 
 class TestRNN(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     # Regression test for gh-55868
     def test_rnn(self):
         model = torch.nn.RNN(10, 20, 2)
@@ -1388,6 +1411,8 @@ class TestRNN(TestCase):
 
 
 class TestDisabledTorchFunction(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     # Regression test for gh-64687
     def test_parameter_does_not_prevent_dispatch(self):
         class MyTensor:
@@ -1404,6 +1429,8 @@ class TestDisabledTorchFunction(TestCase):
         self.assertEqual(torch.nn.functional.linear(inp, t2, t1), "called")
 
 class TestResolveName(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_resolve_name(self):
         for cs in get_overridable_functions().values():
             for c in cs:
@@ -1414,6 +1441,8 @@ class TestResolveName(TestCase):
                 )
 
 class TestTorchFunctionWarning(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_torch_function_standalone_class(self):
         class StandaloneTorchFunctionClass:
             @classmethod
@@ -1441,6 +1470,8 @@ class TestTorchFunctionWarning(TestCase):
         self.assertEqual(result2, torch.tensor(99.0))
 
 class TestDisabledUserWarnings(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_no_implicit_user_warning_for_deprecated_functions(self):
         self.assertNotWarn(get_ignored_functions)
         self.assertNotWarn(get_testing_overrides)
@@ -1450,6 +1481,8 @@ class TestDisabledUserWarnings(TestCase):
 
 @unittest.skipIf(TEST_WITH_CROSSREF, "not run with crossref")
 class TestTorchFunctionMode(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_basic(self):
         class A(TorchFunctionMode):
             def __torch_function__(self, *args, **kwargs):
@@ -1933,6 +1966,8 @@ class TestTorchFunctionMode(TestCase):
 
 
 class TestTorchFunctionRedispatch(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.assertFalse(
@@ -2023,6 +2058,8 @@ TensorBase.add: (<class 'torch.testing._internal.common_subclass.RedispatchTenso
 
 
 class TestTorchFunctionRedispatchOps(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @ops(op_db)
     def test_redispatch(self, device, dtype, op):
         if op.name == "nn.functional.conv_transpose3d" and dtype in (
@@ -2032,6 +2069,22 @@ class TestTorchFunctionRedispatchOps(TestCase):
         ):
             # Disabled due to CI failures; see #190241
             self.skipTest("disabled due to CI failures; see #190241")
+        if (
+            op.name in ("__rmatmul__", "tensordot")
+            and dtype in (torch.int8, torch.uint8)
+            and self.device_type == "xpu"
+        ):
+            # dot_xpu_mkl does not support integer types;
+            # see https://github.com/intel/torch-xpu-ops/issues/5049
+            self.skipTest("dot_xpu_mkl not implemented for int8/uint8")
+        if (
+            op.name.startswith("nn.functional.linear_cross_entropy")
+            and dtype == torch.float16
+            and self.device_type == "xpu"
+        ):
+            # Flaky numerical precision failure on XPU with float16;
+            # see https://github.com/intel/torch-xpu-ops/issues/5050
+            self.skipTest("flaky precision issue on xpu float16")
         if op.has_nondeterministic_output:
             self.skipTest("output is nondeterministic; not comparable across calls")
 
@@ -2071,7 +2124,7 @@ class TestTorchFunctionRedispatchOps(TestCase):
                 self.assertEqual(expect, actual)
 
 
-instantiate_device_type_tests(TestTorchFunctionRedispatchOps, globals())
+instantiate_device_type_tests(TestTorchFunctionRedispatchOps, globals(), allow_xpu=True)
 
 
 if __name__ == '__main__':
