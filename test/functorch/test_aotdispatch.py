@@ -246,14 +246,41 @@ class AOTTestCase(TestCase):
                     self.assertTensorMetadataEqual(actual_inner, expected_inner)
 
 
+_pack_body_calls: list[int] = []
+
+
 @torch.fx.wrap
-def _il_log_tensor_stats_for_regression(t, name):
+def _alloc_unbacked_symint(t):
     # Directly exercise the unbacked-symbol allocation path: `.item()` on a
     # fake tensor allocates a fresh unbacked SymInt. Bare (no if/bool, no
     # try/except) so an unrelated swallowed exception can't turn the
     # regression into a no-op.
+    #
+    # Also records each execution of the enclosing pack body. torch.fx.wrap
+    # means symbolic_trace turns this into a node without calling it, so the
+    # count only reflects real executions of the pack GraphModule.
+    _pack_body_calls.append(1)
     torch.all(torch.isfinite(t)).item()
     return t
+
+
+# `type(c) is`, not isinstance: immutable_list / immutable_dict subclass
+# list / dict, so isinstance cannot tell them apart. These are torch.fx.wrap'd
+# so the check survives symbolic_trace as a call_function node and runs against
+# the real container when the unpack GraphModule is traced, rather than being
+# constant-folded away against a Proxy.
+@torch.fx.wrap
+def _unwrap_exact_list(c):
+    if type(c) is not list:
+        raise AssertionError(f"expected a plain list, got {type(c).__name__}")
+    return c[0]
+
+
+@torch.fx.wrap
+def _unwrap_exact_dict(c):
+    if type(c) is not dict:
+        raise AssertionError(f"expected a plain dict, got {type(c).__name__}")
+    return c["t"]
 
 
 class TestPythonKey(AOTTestCase):
@@ -4932,61 +4959,74 @@ def forward(self, tangents_1):
                 raise e.inner_exception from e
 
     @torch._functorch.config.patch(saved_tensors_hooks_filtering_mode="no_static")
-    def test_saved_tensors_hooks_gm_data_dependent_probe(self):
+    @parametrize("pack_out", ["tensor", "list", "dict"])
+    def test_saved_tensors_hooks_gm_data_dependent_probe(self, pack_out):
         # Regression: pack GraphModule bodies that allocate a fresh unbacked
         # SymInt (e.g. via `.item()` / `bool(<fake_tensor>)` / nonzero) used
         # to leak into `pending_fresh_unbacked_symbols` because
         # `maybe_inline_graph_saved_tensors_hooks` ran the hook without a
         # ProxyTorchDispatchMode, leaving no tracker to bind the symbol.
         #
-        # The list / dict variants additionally cover container-typed pack
-        # outputs: `pack_out_val` is extracted from the traced graph's output
-        # node args (immutable_list / immutable_dict) and must be normalized
-        # back to plain list / dict so the unpack hook traces against the same
-        # runtime container type it would see in eager.
+        # The list / dict variants additionally pin the immutable_list /
+        # immutable_dict -> list / dict normalization of the pack output. Their
+        # unpack hooks check `type(c) is list` / `type(c) is dict`, which is the
+        # only way the container type is observable: the immutable types are
+        # list / dict subclasses, so an isinstance-based unpack hook (or one that
+        # only does getitem) cannot distinguish them and passes either way.
 
         def fn(x, w):
             return torch.matmul(x, w).sin()
 
-        def _run(pack, unpack):
-            pack_gm, unpack_gm = saved_tensors_hooks_to_gm(
-                pack, unpack, "pack_hash", "unpack_hash"
-            )
-            x = torch.randn(8, 16, requires_grad=True)
-            w = torch.randn(16, 16, requires_grad=True)
-            compiled = torch.compile(fn, backend="aot_eager", fullgraph=True)
-            with torch.autograd.graph.saved_tensors_hooks(pack_gm, unpack_gm):
-                out = compiled(x, w)
-                out.sum().backward()
+        # `allocs_per_body` is how many times each variant's pack body calls
+        # _alloc_unbacked_symint, so the assertion below is in units of pack
+        # body executions regardless of variant.
+        if pack_out == "tensor":
+            allocs_per_body = 2
 
-        # single-tensor pack output
-        def pack_tensor(x):
-            x = _il_log_tensor_stats_for_regression(x, "in")
-            return _il_log_tensor_stats_for_regression(x, "out")
+            def pack(x):
+                x = _alloc_unbacked_symint(x)
+                return _alloc_unbacked_symint(x)
 
-        def unpack_tensor(x):
-            return x
+            def unpack(packed):
+                return packed
 
-        _run(pack_tensor, unpack_tensor)
+        elif pack_out == "list":
+            allocs_per_body = 1
 
-        # list-typed pack output — exercises immutable_list normalization
-        def pack_list(x):
-            return [_il_log_tensor_stats_for_regression(x, "in")]
+            def pack(x):
+                return [_alloc_unbacked_symint(x)]
 
-        def unpack_list(packed):
-            (x,) = packed
-            return x
+            def unpack(packed):
+                return _unwrap_exact_list(packed)
 
-        _run(pack_list, unpack_list)
+        else:
+            allocs_per_body = 1
 
-        # dict-typed pack output — exercises immutable_dict normalization
-        def pack_dict(x):
-            return {"t": _il_log_tensor_stats_for_regression(x, "in")}
+            def pack(x):
+                return {"t": _alloc_unbacked_symint(x)}
 
-        def unpack_dict(packed):
-            return packed["t"]
+            def unpack(packed):
+                return _unwrap_exact_dict(packed)
 
-        _run(pack_dict, unpack_dict)
+        pack_gm, unpack_gm = saved_tensors_hooks_to_gm(
+            pack, unpack, "pack_hash", "unpack_hash"
+        )
+        x = torch.randn(8, 16, requires_grad=True)
+        w = torch.randn(16, 16, requires_grad=True)
+        compiled = torch.compile(fn, backend="aot_eager", fullgraph=True)
+
+        _pack_body_calls.clear()
+        with torch.autograd.graph.saved_tensors_hooks(pack_gm, unpack_gm):
+            out = compiled(x, w)
+            out.sum().backward()
+
+        # `fn` saves 3 tensors, and the pack hook is now only traced -- not
+        # additionally executed to obtain an example value. Re-adding that
+        # second execution doubles this count, which is the regression this
+        # pins.
+        pack_body_runs, remainder = divmod(len(_pack_body_calls), allocs_per_body)
+        self.assertEqual(remainder, 0)
+        self.assertEqual(pack_body_runs, 3)
 
     def test_mark_activations_dynamic_with_nested(self):
         # The flattened tensors of the nested tensor aren't

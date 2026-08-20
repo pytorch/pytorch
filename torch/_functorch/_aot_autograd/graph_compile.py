@@ -1372,6 +1372,27 @@ def prepare_hook_gm(
     return gm
 
 
+def _materialize_fx_output_containers(x: Any) -> Any:
+    # FX stores an output node's container args as immutable_list /
+    # immutable_dict. The pack hook's return value is handed to the unpack hook
+    # trace (`prepare_hook_gm(unpack_hook_gm, (pack_out_val,))`), and
+    # `create_wrap_fn` tree_maps it, which preserves those immutable types.
+    # Unpack hooks that check `type(c) is list` / `type(c) is dict` rather than
+    # isinstance would therefore see a different container than in eager, so
+    # normalize back to the plain runtime types.
+    #
+    # Note this only recovers `list` / `dict`, not other subclasses: FX's
+    # create_arg already collapses e.g. an OrderedDict pack output to
+    # immutable_dict, so that distinction is gone before we get here.
+    if type(x) in (immutable_list, list):
+        return [_materialize_fx_output_containers(v) for v in x]
+    if type(x) in (immutable_dict, dict):
+        return {k: _materialize_fx_output_containers(v) for k, v in x.items()}
+    if type(x) is tuple:
+        return tuple(_materialize_fx_output_containers(v) for v in x)
+    return x
+
+
 # Inline Autograd saved_tensors_hooks into epilogue of forward graph
 # and prologue of backward graph.
 # This changes forward graph outputs and inputs.
@@ -1522,28 +1543,8 @@ def maybe_inline_graph_saved_tensors_hooks(
             # Extract pack_out_val from the traced graph's output-node meta.
             # `pack_g` is what gets inlined into the joint graph below via
             # `node_copy`, so its output meta uses the same symbols the
-            # inlined nodes carry — no identity mismatch, no need to re-run
+            # inlined nodes carry -- no identity mismatch, no need to re-run
             # the hook to get an "example value".
-            #
-            # FX stores the output node's container args as immutable_list /
-            # immutable_dict. Executing the hook (the old code path) instead
-            # returned plain list / dict. `pack_out_val` feeds the unpack hook
-            # trace below (`prepare_hook_gm(unpack_hook_gm, (pack_out_val,))`),
-            # so normalize the containers back to their runtime types to keep
-            # the unpack trace in parity with eager and avoid tracing a
-            # different backward for container-type-sensitive unpack hooks.
-            def _materialize_fx_output_containers(x: Any) -> Any:
-                if type(x) in (immutable_list, list):
-                    return [_materialize_fx_output_containers(v) for v in x]
-                if type(x) in (immutable_dict, dict):
-                    return {
-                        k: _materialize_fx_output_containers(v) for k, v in x.items()
-                    }
-                if isinstance(x, tuple):
-                    values = tuple(_materialize_fx_output_containers(v) for v in x)
-                    return type(x)(*values) if hasattr(x, "_fields") else values
-                return x
-
             pack_out_args = _materialize_fx_output_containers(
                 pack_g.output_node().args[0]
             )
