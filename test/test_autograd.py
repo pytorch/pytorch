@@ -49,7 +49,6 @@ from torch.autograd.profiler_util import (
     FunctionEventAvg,
 )
 from torch.testing import make_tensor
-from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
     dtypes,
@@ -58,8 +57,6 @@ from torch.testing._internal.common_device_type import (
     expectedFailureMPS,
     instantiate_device_type_tests,
     onlyAccelerator,
-    onlyCPU,
-    onlyCUDA,
     skipMeta,
 )
 from torch.testing._internal.common_dtype import floating_types_and
@@ -12367,6 +12364,8 @@ def bernoulli_scalar():
 
 
 class TestAutogradForwardModeBatchedGrad(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_out_of_place_basic(self):
         a = torch.rand(4, 4, dtype=torch.double, requires_grad=True)
         b = torch.rand(4, 4, dtype=torch.double, requires_grad=True)
@@ -12476,6 +12475,8 @@ class TestAutogradForwardModeBatchedGrad(TestCase):
 
 
 class TestAutogradForwardMode(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def tearDown(self):
         # Ensure that a failing test won't make others fail
         while fwAD._current_level >= 0:
@@ -14847,6 +14848,8 @@ class TestAutogradDeviceType(TestCase):
 
 
 class TestAllowMutationOnSaved(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def assertClonedLenEqual(self, ctx, n):
         self.assertEqual(len(list(ctx.cloned.items())), n)
 
@@ -15044,6 +15047,8 @@ class TestAllowMutationOnSaved(TestCase):
 
 
 class TestAutogradInferenceMode(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _is_inference_tensor(self, tensor):
         try:
             err_msg = "Inference tensors do not track version counter"
@@ -15464,9 +15469,7 @@ def _get_device_name(idx):
     return f"{torch.accelerator.current_accelerator().type}:{idx}"
 
 
-# Although this is written to be generic over all accelerators, non-cuda accelerators
-# are not fully tested since sleep is only supported on cuda.
-class TestAutogradStreamSynchronization(TestCase):
+class _TestAutogradStreamSynchronizationBase(TestCase):
     def get_default_streams(self, num_devices=1):
         out = []
         for i in range(num_devices):
@@ -15492,13 +15495,17 @@ class TestAutogradStreamSynchronization(TestCase):
                     torch.get_device_module(acc).current_stream(), default_streams[i]
                 )
 
+
+# Although this is written to be generic over all accelerators, non-cuda accelerators
+# are not fully tested since sleep is only supported on cuda.
+class TestAutogradStreamSynchronization(_TestAutogradStreamSynchronizationBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     # AttributeError: module 'torch.mps' has no attribute 'default_stream'
+    @onlyAccelerator
     @expectedFailureMPS
     @skipCUDANonDefaultStreamIf(True)
     def test_consumer_to_single_producer_case_2_correctness(self, device):
-        if device == "cpu":
-            self.skipTest("requires accelerator")
-
         #                          Device    Stream
         # Consumer (MulBackward):  cuda:0    s0
         # Producer              :  cuda:0    s1
@@ -15574,7 +15581,7 @@ class TestAutogradStreamSynchronization(TestCase):
             # when FuncBackward produces a gradient on a default stream
             # a sync is necessary.
             with torch.Stream(0) as s0:
-                a = torch.ones(256, 256, requires_grad=True, device="cuda")
+                a = torch.ones(256, 256, requires_grad=True, device=_get_device_name(0))
                 b = a * 2
 
             default_stream_0.wait_stream(s0)
@@ -15601,6 +15608,7 @@ class TestAutogradStreamSynchronization(TestCase):
             test()
 
     # AttributeError: module 'torch.mps' has no attribute 'default_stream'
+    @onlyAccelerator
     @expectedFailureMPS
     @skipCUDANonDefaultStreamIf(True)
     @unittest.skipIf(
@@ -15609,35 +15617,30 @@ class TestAutogradStreamSynchronization(TestCase):
     def test_consumer_to_single_producer_case_3_correctness_non_default_ambient_stream(
         self, device
     ):
-        if device == "cpu":
-            self.skipTest("requires accelerator")
         self._test_consumer_to_single_producer_case_3_correctness(
             non_default_ambient_stream=True
         )
 
     # AttributeError: module 'torch.mps' has no attribute 'default_stream'
+    @onlyAccelerator
     @expectedFailureMPS
     @skipCUDANonDefaultStreamIf(True)
     @unittest.skipIf(
         torch.accelerator.device_count() < 2, "accelerator count is less than 2"
     )
     def test_consumer_to_single_producer_case_3_correctness(self, device):
-        if device == "cpu":
-            self.skipTest("requires accelerator")
         self._test_consumer_to_single_producer_case_3_correctness(
             non_default_ambient_stream=False
         )
 
     # AttributeError: module 'torch.mps' has no attribute 'default_stream'
+    @onlyAccelerator
     @expectedFailureMPS
     @skipCUDANonDefaultStreamIf(True)
     @unittest.skipIf(
         torch.accelerator.device_count() < 2, "accelerator count is less than 2"
     )
     def test_consumer_to_single_producer_case_4_correctness(self, device):
-        if device == "cpu":
-            self.skipTest("requires accelerator")
-
         #           Device    Stream
         # Consumer: cuda:0    cuda:0 default
         # Producer: cuda:1    s1
@@ -15694,15 +15697,13 @@ class TestAutogradStreamSynchronization(TestCase):
             test()
 
     # AttributeError: module 'torch.mps' has no attribute 'default_stream'
+    @onlyAccelerator
     @expectedFailureMPS
     @skipCUDANonDefaultStreamIf(True)
     @unittest.skipIf(
         torch.accelerator.device_count() < 2, "accelerator count is less than 2"
     )
     def test_consumer_to_multi_producer_case_4_correctness(self, device):
-        if device == "cpu":
-            self.skipTest("requires accelerator")
-
         #             Device    Stream
         # Consumer  : cuda:0    cuda:0 default
         #
@@ -15784,9 +15785,59 @@ class TestAutogradStreamSynchronization(TestCase):
         for _ in range(2):
             test()
 
+    @onlyAccelerator
+    @expectedFailureMPS
+    def test_warn_on_accumulate_grad_stream_mismatch_flag(self, device):
+        def do_test(suppress_warn, keep_grad_acc):
+            def _test():
+                with set_warn_always_context(True):
+                    with warnings.catch_warnings(record=True) as warns:
+                        warnings.simplefilter("always")
+
+                        with torch.Stream(0) as s0:
+                            a = torch.ones(8, 8, device=device, requires_grad=True)
+                            if keep_grad_acc:
+                                # create grad_acc under s1 and keep alive with b
+                                b = a.clone()
+
+                        with torch.Stream(0) as s1:
+                            s1.wait_stream(s0)
+                            c = a.sum()
+
+                        c.backward()
+
+                    filter_str = "set_warn_on_accumulate_grad_stream_mismatch"
+                    return sum([filter_str in str(w.message) for w in warns]) > 0
+
+            if suppress_warn:
+                try:
+                    torch.autograd.graph.set_warn_on_accumulate_grad_stream_mismatch(
+                        False
+                    )
+                    actual_warn = _test()
+                finally:
+                    torch.autograd.graph.set_warn_on_accumulate_grad_stream_mismatch(
+                        True
+                    )
+            else:
+                actual_warn = _test()
+
+            expect_warn = not suppress_warn and keep_grad_acc
+            self.assertEqual(actual_warn, expect_warn)
+
+        # Warn by default
+        self.assertTrue(torch._C._warn_on_accumulate_grad_stream_mismatch())
+
+        for suppress_warn in (True, False):
+            for keep_grad_acc in (True, False):
+                do_test(suppress_warn=suppress_warn, keep_grad_acc=keep_grad_acc)
+
+
+class TestAutogradStreamSynchronizationCudaOnly(_TestAutogradStreamSynchronizationBase):
+    hw_classification = HardwareClassification.CUDA
+
     # This test may spuriously fail on non-cuda accelerators (since we won't
     # be calling sleep)
-    @onlyCUDA
     @skipCUDANonDefaultStreamIf(True)
     def test_side_stream_backward_overlap(self, device):
         # In case 2/3, we would designate the consumer as the accumulation
@@ -15889,57 +15940,10 @@ class TestAutogradStreamSynchronization(TestCase):
         populate_events()
         check_ordering()
 
-    @expectedFailureMPS
-    def test_warn_on_accumulate_grad_stream_mismatch_flag(self, device):
-        if device == "cpu":
-            self.skipTest("requires accelerator")
-
-        def do_test(suppress_warn, keep_grad_acc):
-            def _test():
-                with set_warn_always_context(True):
-                    with warnings.catch_warnings(record=True) as warns:
-                        warnings.simplefilter("always")
-
-                        with torch.Stream(0) as s0:
-                            a = torch.ones(8, 8, device=device, requires_grad=True)
-                            if keep_grad_acc:
-                                # create grad_acc under s1 and keep alive with b
-                                b = a.clone()
-
-                        with torch.Stream(0) as s1:
-                            s1.wait_stream(s0)
-                            c = a.sum()
-
-                        c.backward()
-
-                    filter_str = "set_warn_on_accumulate_grad_stream_mismatch"
-                    return sum([filter_str in str(w.message) for w in warns]) > 0
-
-            if suppress_warn:
-                try:
-                    torch.autograd.graph.set_warn_on_accumulate_grad_stream_mismatch(
-                        False
-                    )
-                    actual_warn = _test()
-                finally:
-                    torch.autograd.graph.set_warn_on_accumulate_grad_stream_mismatch(
-                        True
-                    )
-            else:
-                actual_warn = _test()
-
-            expect_warn = not suppress_warn and keep_grad_acc
-            self.assertEqual(actual_warn, expect_warn)
-
-        # Warn by default
-        self.assertTrue(torch._C._warn_on_accumulate_grad_stream_mismatch())
-
-        for suppress_warn in (True, False):
-            for keep_grad_acc in (True, False):
-                do_test(suppress_warn=suppress_warn, keep_grad_acc=keep_grad_acc)
-
 
 class TestMultithreadAutograd(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _run_py_multithread_fn(
         self, fn, args=(), num_threads=10, kwargs=None, pass_idx=False
     ):
@@ -16347,24 +16351,6 @@ class TestMultithreadAutograd(TestCase):
         torch.autograd.set_multithreading_enabled(True)
         self.assertTrue(torch.autograd.is_multithreading_enabled())
 
-    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
-    def test_custom_function_propagates_errors_from_device_thread(self):
-        class MyFunc(Function):
-            @staticmethod
-            def forward(ctx, x):
-                return x
-
-            @staticmethod
-            def backward(ctx, gO):
-                raise RuntimeError("blah")
-                return gO
-
-        t = torch.tensor([1.0, 2.0], requires_grad=True, device=torch.device("cuda"))
-        out = MyFunc.apply(t).sum()
-
-        with self.assertRaisesRegex(RuntimeError, "blah"):
-            out.backward()
-
     def test_remove_obj_from_tls(self):
         # Regression test for deadlock introduced by
         # https://github.com/pytorch/pytorch/pull/173568.
@@ -16378,7 +16364,30 @@ class TestMultithreadAutograd(TestCase):
         self.assertFalse(torch._C._is_key_in_tls("test_obj"))
 
 
+class TestMultithreadAutogradCudaOnly(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    def test_custom_function_propagates_errors_from_device_thread(self, device):
+        class MyFunc(Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x
+
+            @staticmethod
+            def backward(ctx, gO):
+                raise RuntimeError("blah")
+                return gO
+
+        t = torch.tensor([1.0, 2.0], requires_grad=True, device=device)
+        out = MyFunc.apply(t).sum()
+
+        with self.assertRaisesRegex(RuntimeError, "blah"):
+            out.backward()
+
+
 class TestNestedCheckpoint(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @staticmethod
     def grad(fn):
         def wrapper(x):
@@ -16896,101 +16905,7 @@ class _AutoNamingMode(TorchDispatchMode):
 
 
 class TestSelectiveActivationCheckpoint(TestCase):
-    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
-    def test_flops_and_mem(self):
-        # From https://github.com/pytorch/pytorch/pull/126320
-        def get_act_mem(f):
-            out = f()
-            out.backward()
-            # Why do one forward and backward?
-            start_mem = torch.cuda.memory_stats()["requested_bytes.all.current"]
-            out = f()
-            cur_mem = torch.cuda.memory_stats()["requested_bytes.all.current"]
-            act_mem = (cur_mem - start_mem) / (1024 * 1024)
-            out.backward()
-            return act_mem
-
-        def get_bw_flops(f):
-            # Normalized so that a 512 square matmul returns 1
-            f().backward()
-            out = f()
-            # NB: FlopCounterMode is pushed onto the mode stack before CachedMode, so
-            # it will be able to observe whether an op is cached or not.
-            with FlopCounterMode(display=False) as mode:
-                out.backward()
-            return mode.get_total_flops() / (512**3 * 2)
-
-        x = torch.randn(512, 512, requires_grad=True, device="cuda")
-        y = torch.randn(512, 512, requires_grad=True, device="cuda")
-
-        def fn(x, y):
-            return torch.mm(x.cos(), y).sin().sum()
-
-        def fn_ac(x, y):
-            return checkpoint(fn, x, y, use_reentrant=False)
-
-        def fn_sac(x, y):
-            context_fn = functools.partial(
-                create_selective_checkpoint_contexts,
-                [torch.ops.aten.mm.default],
-            )
-            out = checkpoint(fn, x, y, use_reentrant=False, context_fn=context_fn)
-            return out
-
-        def policy_fn(ctx, op, *args, **kwargs):
-            if op == torch.ops.aten.mm.default:
-                return CheckpointPolicy.MUST_SAVE
-            else:
-                return CheckpointPolicy.PREFER_RECOMPUTE
-
-        def fn_sac2(x, y):
-            context_fn = functools.partial(
-                create_selective_checkpoint_contexts,
-                policy_fn,
-            )
-            out = checkpoint(fn, x, y, use_reentrant=False, context_fn=context_fn)
-            return out
-
-        def policy_fn_bool(ctx, op, *args, **kwargs):
-            return op == torch.ops.aten.mm.default
-
-        def fn_sac3(x, y):
-            context_fn = functools.partial(
-                create_selective_checkpoint_contexts,
-                policy_fn_bool,
-            )
-            out = checkpoint(fn, x, y, use_reentrant=False, context_fn=context_fn)
-            return out
-
-        act_mem_noac = get_act_mem(lambda: fn(x, y))
-        bw_flops_noac = get_bw_flops(lambda: fn(x, y))
-
-        self.assertEqual(act_mem_noac, 2.0)
-        self.assertEqual(bw_flops_noac, 2.0)
-
-        act_mem_ac = get_act_mem(lambda: fn_ac(x, y))
-        bw_flops_ac = get_bw_flops(lambda: fn_ac(x, y))
-
-        self.assertEqual(act_mem_ac, 0.0)
-        self.assertEqual(bw_flops_ac, 3.0)
-
-        act_mem_sac = get_act_mem(lambda: fn_sac(x, y))
-        bw_flops_sac = get_bw_flops(lambda: fn_sac(x, y))
-
-        self.assertEqual(act_mem_sac, 1.0)
-        self.assertEqual(bw_flops_sac, 2.0)
-
-        act_mem_sac2 = get_act_mem(lambda: fn_sac2(x, y))
-        bw_flops_sac2 = get_bw_flops(lambda: fn_sac2(x, y))
-
-        self.assertEqual(act_mem_sac2, 1.0)
-        self.assertEqual(bw_flops_sac2, 2.0)
-
-        act_mem_sac3 = get_act_mem(lambda: fn_sac3(x, y))
-        bw_flops_sac3 = get_bw_flops(lambda: fn_sac3(x, y))
-
-        self.assertEqual(act_mem_sac3, 1.0)
-        self.assertEqual(bw_flops_sac3, 2.0)
+    hw_classification = HardwareClassification.GENERIC
 
     @skipIfTorchDynamo("compile tested in test/dynamo/test_activation_checkpointing.py")
     def test_output_already_has_autograd_meta(self):
@@ -17518,15 +17433,106 @@ class TestSelectiveActivationCheckpoint(TestCase):
             self.assertEqual(my_count[0], 9)
 
 
-@skipIfTorchDynamo("SAC hook interaction under compile tested elsewhere")
-class TestSACAmbientSavedTensorsHooks(TestCase):
-    # Characterizes how a user saved_tensors_hooks context wrapped OUTER around
-    # a selective activation checkpoint (SAC) region interacts with the tensors
-    # SAC decides to save. Historically SAC held those tensors outside the
-    # autograd graph, so an ambient hook (e.g. save_on_cpu) never saw them.
-    # The respect_saved_tensors_hooks arg of checkpoint() opts into routing them
-    # through the hook; the default (legacy) leaves them untouched and warns.
-    # These tests pin both behaviors so the eventual default flip is explicit.
+class TestSelectiveActivationCheckpointCudaOnly(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    def test_flops_and_mem(self):
+        # From https://github.com/pytorch/pytorch/pull/126320
+        def get_act_mem(f):
+            out = f()
+            out.backward()
+            # Why do one forward and backward?
+            start_mem = torch.cuda.memory_stats()["requested_bytes.all.current"]
+            out = f()
+            cur_mem = torch.cuda.memory_stats()["requested_bytes.all.current"]
+            act_mem = (cur_mem - start_mem) / (1024 * 1024)
+            out.backward()
+            return act_mem
+
+        def get_bw_flops(f):
+            # Normalized so that a 512 square matmul returns 1
+            f().backward()
+            out = f()
+            # NB: FlopCounterMode is pushed onto the mode stack before CachedMode, so
+            # it will be able to observe whether an op is cached or not.
+            with FlopCounterMode(display=False) as mode:
+                out.backward()
+            return mode.get_total_flops() / (512**3 * 2)
+
+        x = torch.randn(512, 512, requires_grad=True, device="cuda")
+        y = torch.randn(512, 512, requires_grad=True, device="cuda")
+
+        def fn(x, y):
+            return torch.mm(x.cos(), y).sin().sum()
+
+        def fn_ac(x, y):
+            return checkpoint(fn, x, y, use_reentrant=False)
+
+        def fn_sac(x, y):
+            context_fn = functools.partial(
+                create_selective_checkpoint_contexts,
+                [torch.ops.aten.mm.default],
+            )
+            out = checkpoint(fn, x, y, use_reentrant=False, context_fn=context_fn)
+            return out
+
+        def policy_fn(ctx, op, *args, **kwargs):
+            if op == torch.ops.aten.mm.default:
+                return CheckpointPolicy.MUST_SAVE
+            else:
+                return CheckpointPolicy.PREFER_RECOMPUTE
+
+        def fn_sac2(x, y):
+            context_fn = functools.partial(
+                create_selective_checkpoint_contexts,
+                policy_fn,
+            )
+            out = checkpoint(fn, x, y, use_reentrant=False, context_fn=context_fn)
+            return out
+
+        def policy_fn_bool(ctx, op, *args, **kwargs):
+            return op == torch.ops.aten.mm.default
+
+        def fn_sac3(x, y):
+            context_fn = functools.partial(
+                create_selective_checkpoint_contexts,
+                policy_fn_bool,
+            )
+            out = checkpoint(fn, x, y, use_reentrant=False, context_fn=context_fn)
+            return out
+
+        act_mem_noac = get_act_mem(lambda: fn(x, y))
+        bw_flops_noac = get_bw_flops(lambda: fn(x, y))
+
+        self.assertEqual(act_mem_noac, 2.0)
+        self.assertEqual(bw_flops_noac, 2.0)
+
+        act_mem_ac = get_act_mem(lambda: fn_ac(x, y))
+        bw_flops_ac = get_bw_flops(lambda: fn_ac(x, y))
+
+        self.assertEqual(act_mem_ac, 0.0)
+        self.assertEqual(bw_flops_ac, 3.0)
+
+        act_mem_sac = get_act_mem(lambda: fn_sac(x, y))
+        bw_flops_sac = get_bw_flops(lambda: fn_sac(x, y))
+
+        self.assertEqual(act_mem_sac, 1.0)
+        self.assertEqual(bw_flops_sac, 2.0)
+
+        act_mem_sac2 = get_act_mem(lambda: fn_sac2(x, y))
+        bw_flops_sac2 = get_bw_flops(lambda: fn_sac2(x, y))
+
+        self.assertEqual(act_mem_sac2, 1.0)
+        self.assertEqual(bw_flops_sac2, 2.0)
+
+        act_mem_sac3 = get_act_mem(lambda: fn_sac3(x, y))
+        bw_flops_sac3 = get_bw_flops(lambda: fn_sac3(x, y))
+
+        self.assertEqual(act_mem_sac3, 1.0)
+        self.assertEqual(bw_flops_sac3, 2.0)
+
+
+class _TestSACAmbientSavedTensorsHooksBase(TestCase):
     class RecordingHooks:
         # Records the shapes pack sees without transforming the tensor, so it is
         # numerically transparent (models a CPU-offload hook on CPU).
@@ -17601,6 +17607,18 @@ class TestSACAmbientSavedTensorsHooks(TestCase):
             return hooks.packed, fw
         return hooks.packed
 
+
+@skipIfTorchDynamo("SAC hook interaction under compile tested elsewhere")
+class TestSACAmbientSavedTensorsHooks(_TestSACAmbientSavedTensorsHooksBase):
+    # Characterizes how a user saved_tensors_hooks context wrapped OUTER around
+    # a selective activation checkpoint (SAC) region interacts with the tensors
+    # SAC decides to save. Historically SAC held those tensors outside the
+    # autograd graph, so an ambient hook (e.g. save_on_cpu) never saw them.
+    # The respect_saved_tensors_hooks arg of checkpoint() opts into routing them
+    # through the hook; the default (legacy) leaves them untouched and warns.
+    # These tests pin both behaviors so the eventual default flip is explicit.
+    hw_classification = HardwareClassification.GENERIC
+
     def test_hook_outer_sac_inner_default_bypasses(self):
         # Legacy default: the ambient hook is blind to the MUST_SAVE mm output.
         # A FutureWarning fires because a user hook is in scope.
@@ -17639,37 +17657,6 @@ class TestSACAmbientSavedTensorsHooks(TestCase):
         x_ref = x.detach().clone().requires_grad_()
         fn(x_ref).backward()
         torch.testing.assert_close(x.grad, x_ref.grad)
-
-    @unittest.skipIf(not torch.cuda.is_available(), "needs CUDA to observe offload")
-    def test_save_on_cpu_device_movement(self):
-        # save_on_cpu moves saved tensors to CPU. Under the default the SAC-kept
-        # mm output never reaches the hook, so it stays on GPU; under the opt-in
-        # the hook sees it and offloads it to CPU.
-        def offloaded_device(respects):
-            device_by_shape = {}
-
-            def pack(t):
-                device_by_shape[tuple(t.shape)] = t.device.type
-                return t.cpu()
-
-            def unpack(t):
-                return t.cuda()
-
-            x = torch.randn(*self.INPUT_SHAPE, device="cuda", requires_grad=True)
-            context_fn = self._mm_save_context_fn()
-            with torch.autograd.graph.saved_tensors_hooks(pack, unpack):
-                out = checkpoint(
-                    self._fn,
-                    x,
-                    use_reentrant=False,
-                    context_fn=context_fn,
-                    respect_saved_tensors_hooks=respects,
-                )
-            out.backward()
-            return device_by_shape
-
-        self.assertNotIn(self.MM_SHAPE, offloaded_device(False))
-        self.assertEqual(offloaded_device(True).get(self.MM_SHAPE), "cuda")
 
     def test_nested_checkpoint_ignores_internal_hooks(self):
         # An inner selective checkpoint nested inside an outer recompute-all
@@ -17760,7 +17747,47 @@ class TestSACAmbientSavedTensorsHooks(TestCase):
             )
 
 
+@skipIfTorchDynamo("SAC hook interaction under compile tested elsewhere")
+class TestSACAmbientSavedTensorsHooksDeviceType(_TestSACAmbientSavedTensorsHooksBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @onlyAccelerator
+    def test_save_on_cpu_device_movement(self, device):
+        # save_on_cpu moves saved tensors to CPU. Under the default the SAC-kept
+        # mm output never reaches the hook, so it stays on GPU; under the opt-in
+        # the hook sees it and offloads it to CPU.
+        def offloaded_device(respects):
+            device_by_shape = {}
+
+            def pack(t):
+                device_by_shape[tuple(t.shape)] = t.device.type
+                return t.cpu()
+
+            def unpack(t):
+                return t.to(device)
+
+            x = torch.randn(*self.INPUT_SHAPE, device=device, requires_grad=True)
+            context_fn = self._mm_save_context_fn()
+            with torch.autograd.graph.saved_tensors_hooks(pack, unpack):
+                out = checkpoint(
+                    self._fn,
+                    x,
+                    use_reentrant=False,
+                    context_fn=context_fn,
+                    respect_saved_tensors_hooks=respects,
+                )
+            out.backward()
+            return device_by_shape
+
+        self.assertNotIn(self.MM_SHAPE, offloaded_device(False))
+        self.assertEqual(
+            offloaded_device(True).get(self.MM_SHAPE), torch.device(device).type
+        )
+
+
 class TestAutogradMultipleDispatch(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_autograd_multiple_dispatch_registrations(self, device):
         t = torch.randn(3, 3, device=device, requires_grad=True)
         # using _test_autograd_multiple_dispatch.fullcoverage which has
@@ -17876,36 +17903,11 @@ class TestAutogradMultipleDispatch(TestCase):
             # Default gradient registered is grad.reshape_as(self)
             self.assertEqual(t.grad, grad.reshape_as(t))
 
-    @onlyCPU
-    def test_per_dispatch_key_input_saving(self, device):
-        # Tests that sum.dim_IntList's input is not saved for regular tensors but is saved for nested tensors
-        def foo(x):
-            # Don't modify the input inplace
-            x = x.clone()
-            res = x.sum(-1, keepdim=True)
-            x.add_(x)
-            return res
-
-        inp = torch.rand(2, device=device, requires_grad=True)
-        # sum's input is not saved for regular Tensors
-        foo(inp).backward()
-
-        # sum's input is saved for Nested Tensors
-        nt = torch.nested.nested_tensor(
-            [torch.rand(2), torch.rand(2)], device=device, requires_grad=True
-        )
-        with self.assertRaisesRegex(RuntimeError, "modified by an inplace operation"):
-            foo(nt).backward(
-                torch.nested.nested_tensor(
-                    [torch.rand(1), torch.rand(1)], device=device
-                )
-            )
-
+    @onlyAccelerator
     @unittest.skipIf(
         IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/181272"
     )
-    @onlyCUDA
-    def test_backward_single_threaded(self):
+    def test_backward_single_threaded(self, device):
         threads_eq = None
 
         class TestFn(Function):
@@ -17921,7 +17923,7 @@ class TestAutogradMultipleDispatch(TestCase):
                 threads_eq = ctx.tid == threading.get_ident()
                 return gO, None
 
-        inp = torch.rand(10, device="cuda", requires_grad=True)
+        inp = torch.rand(10, device=device, requires_grad=True)
 
         with torch.autograd.set_multithreading_enabled(False):
             TestFn.apply(inp, None).sum().backward()
@@ -17930,8 +17932,8 @@ class TestAutogradMultipleDispatch(TestCase):
         TestFn.apply(inp, None).sum().backward()
         self.assertFalse(threads_eq)
 
-    @onlyCUDA
-    def test_backward_tls_stash(self):
+    @onlyAccelerator
+    def test_backward_tls_stash(self, device):
         local = threading.local()
         local.my_obj = {}
         local.my_obj[10] = 10
@@ -17950,10 +17952,14 @@ class TestAutogradMultipleDispatch(TestCase):
                 torch._C._get_obj_in_tls("my_obj")[10] = 5
                 return gO, None
 
-        inp = torch.rand(10, device="cuda", requires_grad=True)
+        inp = torch.rand(10, device=device, requires_grad=True)
 
         TestFn.apply(inp, None).sum().backward()
         self.assertEqual(local.my_obj[10], 5)
+
+
+class TestAutogradMultipleDispatchGeneric(TestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     @unittest.skipIf(
         IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/181323"
@@ -18116,12 +18122,34 @@ class TestAutogradMultipleDispatch(TestCase):
                     expected[i, i] = 1.0
                 self.assertEqual(x.grad, expected)
 
+    def test_per_dispatch_key_input_saving(self):
+        # Tests that sum.dim_IntList's input is not saved for regular tensors but is saved for nested tensors
+        def foo(x):
+            # Don't modify the input inplace
+            x = x.clone()
+            res = x.sum(-1, keepdim=True)
+            x.add_(x)
+            return res
+
+        inp = torch.rand(2, requires_grad=True)
+        # sum's input is not saved for regular Tensors
+        foo(inp).backward()
+
+        # sum's input is saved for Nested Tensors
+        nt = torch.nested.nested_tensor(
+            [torch.rand(2), torch.rand(2)], requires_grad=True
+        )
+        with self.assertRaisesRegex(RuntimeError, "modified by an inplace operation"):
+            foo(nt).backward(torch.nested.nested_tensor([torch.rand(1), torch.rand(1)]))
+
 
 @skipIfTorchDynamo("tests eager C++ error paths that Dynamo does not reproduce")
 class TestFunctionAssertMessages(TestCase):
     # THPFunction_assert forwards to a printf-style formatter. Regression tests
     # that the dynamic content (offending type name / index) is not silently
     # dropped from the error message.
+    hw_classification = HardwareClassification.GENERIC
+
     def _apply(self, forward_fn):
         class F(Function):
             @staticmethod
@@ -18269,13 +18297,18 @@ instantiate_device_type_tests(TestAutogradDeviceType, globals())
 instantiate_device_type_tests(TestAutogradCudaOnly, globals(), only_for="cuda")
 
 instantiate_device_type_tests(
-    TestAutogradMultipleDispatch,
-    globals(),
-    only_for=("cpu", "xpu", "cuda"),
-    allow_xpu=True,
+    TestMultithreadAutogradCudaOnly, globals(), only_for="cuda"
+)
+
+instantiate_device_type_tests(TestSACAmbientSavedTensorsHooksDeviceType, globals())
+
+instantiate_device_type_tests(TestAutogradMultipleDispatch, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestAutogradStreamSynchronization, globals())
+instantiate_device_type_tests(
+    TestAutogradStreamSynchronizationCudaOnly, globals(), only_for="cuda"
 )
 instantiate_device_type_tests(
-    TestAutogradStreamSynchronization, globals(), except_for=None
+    TestSelectiveActivationCheckpointCudaOnly, globals(), only_for="cuda"
 )
 
 instantiate_parametrized_tests(TestAutograd)
