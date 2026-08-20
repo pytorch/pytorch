@@ -12,7 +12,6 @@ from torch.distributed.tensor import (
     Shard,
     zeros,
 )
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import HardwareClassification, run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
@@ -418,20 +417,6 @@ DTensorConstructorTestWithLocalTensor = create_local_tensor_test_class(
         # Non-contigous sub-meshes are not supported
         "test_zeros_submesh",
     ],
-)
-
-
-instantiate_device_type_tests(
-    DTensorInitOpsTest,
-    globals(),
-    except_for=["cpu"],
-    allow_xpu=True,
-)
-instantiate_device_type_tests(
-    DTensorConstructorTest,
-    globals(),
-    except_for=["cpu"],
-    allow_xpu=True,
 )
 
 

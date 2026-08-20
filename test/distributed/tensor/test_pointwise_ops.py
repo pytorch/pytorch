@@ -21,7 +21,6 @@ from torch.distributed.tensor import (
 from torch.distributed.tensor._ops._math_ops import _NormPartial
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.placement_types import _StridedShard
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -1435,17 +1434,9 @@ class TestPointwiseRuleValidation(TestCase):
                 self._with_even_sizes(run)
 
 
+instantiate_parametrized_tests(DistElementwiseOpsTest)
 DistElementwiseOpsTestWithLocalTensor = create_local_tensor_test_class(
     DistElementwiseOpsTest, base_class=LocalDTensorOpTestBase
-)
-instantiate_parametrized_tests(DistElementwiseOpsTestWithLocalTensor)
-
-
-instantiate_device_type_tests(
-    DistElementwiseOpsTest,
-    globals(),
-    except_for=["cpu"],
-    allow_xpu=True,
 )
 
 

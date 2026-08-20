@@ -39,7 +39,6 @@ from torch.distributed.tensor.placement_types import (
     Replicate,
     Shard,
 )
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -1108,7 +1107,7 @@ class TestStridedSharding(DTensorTestBase):
 
 
 class Test_StridedShard_Propagation(LocalDTensorTestBase):
-    hw_classification = HardwareClassification.ACCELERATOR
+    hw_classification = HardwareClassification.GENERIC
 
     @property
     def world_size(self) -> int:
@@ -1460,7 +1459,7 @@ class Test_StridedShard_Optimizer(DTensorTestBase):
 
 
 class Test_StridedShard_with_shard_order(LocalDTensorTestBase):
-    hw_classification = HardwareClassification.ACCELERATOR
+    hw_classification = HardwareClassification.GENERIC
 
     @property
     def world_size(self) -> int:
@@ -2052,50 +2051,6 @@ UtilTestWithLocalTensor = create_local_tensor_test_class(UtilTest)
 TestStridedShardingWithLocalTensor = create_local_tensor_test_class(TestStridedSharding)
 Test2DStridedLocalShardWithLocalTensor = create_local_tensor_test_class(
     Test2DStridedLocalShard
-)
-
-
-instantiate_device_type_tests(
-    UtilTest,
-    globals(),
-    except_for=["cpu"],
-    allow_xpu=True,
-)
-instantiate_device_type_tests(
-    TestStridedSharding,
-    globals(),
-    except_for=["cpu"],
-    allow_xpu=True,
-)
-instantiate_device_type_tests(
-    Test_StridedShard_Propagation,
-    globals(),
-    except_for=["cpu"],
-    allow_xpu=True,
-)
-instantiate_device_type_tests(
-    Test_StridedShard_Optimizer,
-    globals(),
-    except_for=["cpu"],
-    allow_xpu=True,
-)
-instantiate_device_type_tests(
-    Test_StridedShard_with_shard_order,
-    globals(),
-    except_for=["cpu"],
-    allow_xpu=True,
-)
-instantiate_device_type_tests(
-    Test2DStridedLocalShard,
-    globals(),
-    except_for=["cpu"],
-    allow_xpu=True,
-)
-instantiate_device_type_tests(
-    TestStridedShardReplicate,
-    globals(),
-    except_for=["cpu"],
-    allow_xpu=True,
 )
 
 

@@ -6,7 +6,6 @@ from unittest.mock import patch
 import torch
 from torch.distributed.tensor import distribute_tensor, DTensor
 from torch.distributed.tensor.placement_types import Replicate
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -66,6 +65,7 @@ class TestDynamic(DTensorTestBase):
             _out = compiled_forward(arg0)
 
 
+instantiate_parametrized_tests(TestDynamic)
 TestDynamicWithLocalTensor = create_local_tensor_test_class(
     TestDynamic,
     # LocalTensorMode is a non-infra dispatch mode that causes Dynamo to skip
@@ -74,15 +74,6 @@ TestDynamicWithLocalTensor = create_local_tensor_test_class(
         "test_embedding_fake_tensor_cache_enabled_False",
         "test_embedding_fake_tensor_cache_enabled_True",
     ],
-)
-instantiate_parametrized_tests(TestDynamicWithLocalTensor)
-
-
-instantiate_device_type_tests(
-    TestDynamic,
-    globals(),
-    except_for=["cpu"],
-    allow_xpu=True,
 )
 
 

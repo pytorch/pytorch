@@ -26,7 +26,6 @@ from torch.distributed.tensor.parallel import (
     RowwiseParallel,
     SequenceParallel,
 )
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -2040,14 +2039,6 @@ class DistMathOpsTest(DTensorTestBase):
 
 DistMathOpsTestWithLocalTensor = create_local_tensor_test_class(
     DistMathOpsTest,
-)
-
-
-instantiate_device_type_tests(
-    DistMathOpsTest,
-    globals(),
-    except_for=["cpu"],
-    allow_xpu=True,
 )
 
 
