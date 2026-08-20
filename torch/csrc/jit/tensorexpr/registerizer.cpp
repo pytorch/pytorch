@@ -104,7 +104,7 @@ bool AccessInfo::dependsOnVar(const VarPtr& v) {
     i->accept(&vf);
   }
 
-  return vf.vars().count(v);
+  return vf.vars().contains(v);
 }
 
 std::shared_ptr<AccessInfo> AccessInfo::cloneWithHiddenInfo(
@@ -174,7 +174,7 @@ void Scope::filterClosed() {
 void RegisterizerAnalysis::closeAccessIntoScope(
     const std::shared_ptr<AccessInfo>& info,
     const std::shared_ptr<Scope>& scope) {
-  if (exprConditionals_.count(info->conditionId()) != 0) {
+  if (exprConditionals_.contains(info->conditionId())) {
     return;
   }
 
@@ -659,7 +659,7 @@ ExprPtr RegisterizerReplacer::mutate(const LoadPtr& v) {
 }
 
 StmtPtr RegisterizerReplacer::mutate(const StorePtr& v) {
-  if (eliminatedIntializers_.count(v) != 0) {
+  if (eliminatedIntializers_.contains(v)) {
     // This store is the initializer for a scalar var that is already inserted.
     return nullptr;
   }

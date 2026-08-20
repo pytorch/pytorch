@@ -203,6 +203,19 @@ def my_view(t, size) -> Tensor:
     return torch.ops.libtorch_agn_2_10.my_view.default(t, size)
 
 
+def my_view_dtype(t, dtype) -> Tensor:
+    """
+    Returns a view of the input tensor with the same data reinterpreted as dtype.
+
+    Args:
+        t: Tensor - tensor to view
+        dtype: ScalarType - dtype to reinterpret the data as
+
+    Returns: Tensor - view with the specified dtype
+    """
+    return torch.ops.libtorch_agn_2_10.my_view_dtype.default(t, dtype)
+
+
 def my_shape(t) -> tuple[int]:
     """
     Returns a shape of the input tensor.
@@ -721,6 +734,58 @@ def my_bitwise_right_shift(self, other) -> Tensor:
     Returns: Tensor - result of the right bitwise shift
     """
     return torch.ops.libtorch_agn_2_10.my_bitwise_right_shift.default(self, other)
+
+
+def my_permute(self, dims) -> Tensor:
+    """
+    Returns a view of the input tensor with its dimensions rearranged.
+
+    Args:
+        self: Tensor - input tensor
+        dims: list[int] - desired ordering of dimensions
+
+    Returns: Tensor - permuted view of the input
+    """
+    return torch.ops.libtorch_agn_2_10.my_permute.default(self, dims)
+
+
+def my_index_select(self, dim, index) -> Tensor:
+    """
+    Indexes the input tensor along dimension dim using entries in index.
+
+    Args:
+        self: Tensor - input tensor
+        dim: int - dimension to index along
+        index: Tensor - 1-D tensor of indices to select
+
+    Returns: Tensor - values selected along dim
+    """
+    return torch.ops.libtorch_agn_2_10.my_index_select.default(self, dim, index)
+
+
+def my_floor_divide(self, other) -> Tensor:
+    """
+    Computes the element-wise floor division of self by other.
+
+    Args:
+        self: Tensor - dividend tensor
+        other: Tensor - divisor tensor
+
+    Returns: Tensor - result of floor division
+    """
+    return torch.ops.libtorch_agn_2_10.my_floor_divide.default(self, other)
+
+
+def my_is_pinned(self) -> bool:
+    """
+    Returns whether the tensor's storage is allocated in pinned memory.
+
+    Args:
+        self: Tensor - input tensor
+
+    Returns: bool - True if the tensor is pinned, False otherwise
+    """
+    return torch.ops.libtorch_agn_2_10.my_is_pinned.default(self)
 
 
 # =============================================================================

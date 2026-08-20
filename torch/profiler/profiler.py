@@ -176,8 +176,12 @@ class _KinetoProfile:
             corresponding to the callstack of the op. e.g. If module A's forward call's
             module B's forward which contains an aten::add op,
             then aten::add's module hierarchy is A.B
-            Note that this support exists, at the moment, only for TorchScript models
-            and not eager mode models.
+
+            .. deprecated::
+                ``with_modules`` is deprecated and will be removed in a future version.
+                It only collects data for TorchScript models, which are themselves
+                deprecated, and does nothing in eager mode. Use ``with_stack=True``,
+                which records ``nn.Module`` events for eager models.
         experimental_config (_ExperimentalConfig) : A set of experimental options
             used by profiler libraries like Kineto. Note, backward compatibility is not guaranteed.
         execution_trace_observer (ExecutionTraceObserver) : A PyTorch Execution Trace Observer object.
@@ -901,8 +905,12 @@ class profile(_KinetoProfile):
             corresponding to the callstack of the op. e.g. If module A's forward call's
             module B's forward which contains an aten::add op,
             then aten::add's module hierarchy is A.B
-            Note that this support exists, at the moment, only for TorchScript models
-            and not eager mode models.
+
+            .. deprecated::
+                ``with_modules`` is deprecated and will be removed in a future version.
+                It only collects data for TorchScript models, which are themselves
+                deprecated, and does nothing in eager mode. Use ``with_stack=True``,
+                which records ``nn.Module`` events for eager models.
         experimental_config (_ExperimentalConfig) : A set of experimental options
             used for Kineto library features. Note, backward compatibility is not guaranteed.
         execution_trace_observer (ExecutionTraceObserver) : A PyTorch Execution Trace Observer object.
@@ -917,9 +925,6 @@ class profile(_KinetoProfile):
         custom_trace_id_callback (Callable[[], str], optional): User-supplied trace ID generator,
             invoked once per profiling cycle. Defaults to a random UUID; retrieve via
             :meth:`get_trace_id`.
-        use_cuda (bool):
-            .. deprecated:: 1.8.1
-                use ``activities`` instead.
 
     .. note::
         Use :func:`~torch.profiler.schedule` to generate the callable schedule.
@@ -1031,31 +1036,13 @@ class profile(_KinetoProfile):
         experimental_config: _ExperimentalConfig | None = None,
         execution_trace_observer: _ITraceObserver | None = None,
         acc_events: bool = False,
-        # deprecated:
-        use_cuda: bool | None = None,
         custom_trace_id_callback: Callable[[], str] | None = None,
         post_processing_timeout_s: float | None = None,
     ) -> None:
-        # Extract activities for the use_cuda deprecation check.
         if activities is not None:
-            activities_set: set[ProfilerActivity] = set()
-            for item in activities:
-                if isinstance(item, ProfilerActivity):
-                    activities_set.add(item)
-                elif isinstance(item, dict):
-                    activities_set.update(item.keys())
+            activities_set, _ = _parse_activities(activities)
         else:
             activities_set = supported_activities()
-        if use_cuda is not None:
-            warn(
-                "`use_cuda` is deprecated, use `activities` argument instead",
-                FutureWarning,
-                stacklevel=2,
-            )
-            if use_cuda:
-                activities_set.add(ProfilerActivity.CUDA)
-            elif ProfilerActivity.CUDA in activities_set:
-                activities_set.remove(ProfilerActivity.CUDA)
         if len(activities_set) == 0:
             raise AssertionError("No valid profiler activities found")
 

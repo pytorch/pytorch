@@ -4150,6 +4150,22 @@ class ShapeEnv:
         # SymNode.expr
         self._replacements_version_counter = 0
 
+        # Note [symbolic op memo]
+        # Symbolic binary arithmetic is overwhelmingly repetitive: deriving
+        # numel and contiguity for every fake tensor recomputes the same
+        # products and comparisons over and over: on one model over 99% of a
+        # few hundred thousand ops were repeats of about two thousand distinct
+        # computations. Memoize on
+        # (op, lhs expr, rhs expr, replacement version); the version keeps a hit
+        # valid only while replacements have not moved.
+        #
+        # What is cached is the result sympy expression. Every call site still
+        # builds its own SymNode around it, and must: see the comment in
+        # SymNode's binary_magic_impl for why two sites cannot share one. Under
+        # proxy tracing binary_magic_impl returns before it reaches this cache,
+        # so nothing being traced is served from here.
+        self._symop_cache: dict[Any, Any] = {}
+
         # Each time divisible is changed this should be set to True, this is set in _update_version_counter.
         self._resimplify_floor_div_axioms = True
 
@@ -4347,6 +4363,7 @@ class ShapeEnv:
             "var_to_range_sloc",
             "replacements_slocs",
             "_replacements_version_counter",
+            "_symop_cache",
             "_resimplify_floor_div_axioms",
             "_expr_sym_node_id",
             "specialization_stacks",
@@ -6696,7 +6713,7 @@ class ShapeEnv:
                 if any(
                     is_dim(source)
                     for s in expr.free_symbols
-                    for source in symbol_to_source[s]
+                    for source in symbol_to_source.get(s, ())
                 ):
                     if self.dim_constraints is None:
                         raise AssertionError("dim_constraints must not be None")
@@ -6713,7 +6730,14 @@ class ShapeEnv:
                 # a constraint
                 if not is_trivial and len(expr.free_symbols) == 1:
                     symbol = next(iter(expr.free_symbols))
-                    source = symbol_to_source[symbol][0]
+                    # Subclasses opting out of outer size/stride tracking leave their
+                    # outer dims out of symbol_to_source; fall back as _print_Symbol does.
+                    sources = symbol_to_source.get(symbol) or self.var_to_sources.get(
+                        symbol
+                    )
+                    if not sources:
+                        return
+                    source = sources[0]
                     constraints = symbol_to_constraints[symbol]
                     for c in constraints:
                         if isinstance(c, StrictMinMaxConstraint):
@@ -7811,7 +7835,10 @@ class ShapeEnv:
             desc = "Could not guard on data-dependent expression"
             size_oblivious_result_msg = (
                 "consider using data-dependent friendly APIs such as "
-                "guard_or_false, guard_or_true and statically_known_true."
+                "guard_or_false, guard_or_true and statically_known_true. "
+                "If this was caused by Python `not` on a symbolic boolean, "
+                "use torch.sym_not() or an equivalent comparison instead; "
+                "Python `not` cannot be overloaded outside Dynamo bytecode tracing."
             )
 
         # If the ShapesSpec/ParamsSpec dynamic-shapes API is in use, this DDE is

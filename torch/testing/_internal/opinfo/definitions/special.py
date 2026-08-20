@@ -13,7 +13,11 @@ from torch.testing._internal.common_device_type import (
     tol,
     toleranceOverride,
 )
-from torch.testing._internal.common_dtype import all_types_and, floating_types
+from torch.testing._internal.common_dtype import (
+    all_types_and,
+    floating_types,
+    floating_types_and,
+)
 from torch.testing._internal.common_utils import TEST_SCIPY, torch_to_numpy_dtype_dict
 from torch.testing._internal.opinfo.core import (
     BinaryUfuncInfo,
@@ -150,7 +154,7 @@ op_db: list[OpInfo] = [
             torch.bool, torch.half, torch.bfloat16, *_unsigned_int_types
         ),
         dtypesIfMPS=all_types_and(torch.bool, torch.half, torch.bfloat16),
-        backward_dtypes=floating_types(),
+        backward_dtypes=floating_types_and(torch.half, torch.bfloat16),
         sample_inputs_func=sample_inputs_i0_i1,
         decorators=(
             DecorateInfo(
@@ -160,6 +164,13 @@ op_db: list[OpInfo] = [
                         torch.bool: tol(atol=1e-4, rtol=0),
                     }
                 )
+            ),
+            DecorateInfo(
+                toleranceOverride({torch.float16: tol(atol=1e-5, rtol=5e-3)}),
+                "TestConsistency",
+                "test_output_grad_match",
+                device_type="mps",
+                dtypes=(torch.float16,),
             ),
         ),
         skips=(
@@ -181,8 +192,17 @@ op_db: list[OpInfo] = [
             torch.bool, torch.half, torch.bfloat16, *_unsigned_int_types
         ),
         dtypesIfMPS=all_types_and(torch.bool, torch.half, torch.bfloat16),
-        backward_dtypes=floating_types(),
+        backward_dtypes=floating_types_and(torch.half, torch.bfloat16),
         sample_inputs_func=sample_inputs_i0_i1,
+        decorators=(
+            DecorateInfo(
+                toleranceOverride({torch.float16: tol(atol=1e-5, rtol=3e-2)}),
+                "TestConsistency",
+                "test_output_grad_match",
+                device_type="mps",
+                dtypes=(torch.float16,),
+            ),
+        ),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
     ),
@@ -419,7 +439,10 @@ op_db: list[OpInfo] = [
         dtypes=all_types_and(torch.bool, *_unsigned_int_types),
         dtypesIfMPS=all_types_and(torch.bool, torch.float16, torch.bfloat16),
         ref=scipy.special.j0 if TEST_SCIPY else None,
-        supports_autograd=False,
+        backward_dtypes=floating_types(),
+        backward_dtypesIfMPS=floating_types_and(torch.float16, torch.bfloat16),
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
     ),
     UnaryUfuncInfo(
         "special.bessel_j1",
@@ -452,7 +475,10 @@ op_db: list[OpInfo] = [
         dtypes=all_types_and(torch.bool, *_unsigned_int_types),
         dtypesIfMPS=all_types_and(torch.bool, torch.float16, torch.bfloat16),
         ref=scipy.special.j1 if TEST_SCIPY else None,
-        supports_autograd=False,
+        backward_dtypes=floating_types(),
+        backward_dtypesIfMPS=floating_types_and(torch.float16, torch.bfloat16),
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
     ),
     UnaryUfuncInfo(
         "special.bessel_y0",
@@ -479,7 +505,11 @@ op_db: list[OpInfo] = [
         dtypesIfMPS=all_types_and(torch.bool, torch.float16, torch.bfloat16),
         dtypes=all_types_and(torch.bool, *_unsigned_int_types),
         ref=scipy.special.y0 if TEST_SCIPY else None,
-        supports_autograd=False,
+        backward_dtypes=floating_types(),
+        backward_dtypesIfMPS=floating_types_and(torch.float16, torch.bfloat16),
+        domain=(0, None),
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
     ),
     UnaryUfuncInfo(
         "special.bessel_y1",
@@ -506,7 +536,11 @@ op_db: list[OpInfo] = [
         dtypes=all_types_and(torch.bool, *_unsigned_int_types),
         dtypesIfMPS=all_types_and(torch.bool, torch.float16, torch.bfloat16),
         ref=scipy.special.y1 if TEST_SCIPY else None,
-        supports_autograd=False,
+        backward_dtypes=floating_types(),
+        backward_dtypesIfMPS=floating_types_and(torch.float16, torch.bfloat16),
+        domain=(0, None),
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
     ),
     BinaryUfuncInfo(
         "special.chebyshev_polynomial_t",
@@ -705,7 +739,10 @@ op_db: list[OpInfo] = [
         dtypes=all_types_and(torch.bool, *_unsigned_int_types),
         dtypesIfMPS=all_types_and(torch.bool, torch.float16, torch.bfloat16),
         ref=scipy.special.i0 if TEST_SCIPY else None,
-        supports_autograd=False,
+        backward_dtypes=floating_types(),
+        backward_dtypesIfMPS=floating_types_and(torch.float16, torch.bfloat16),
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
     ),
     UnaryUfuncInfo(
         "special.modified_bessel_i1",
@@ -720,7 +757,10 @@ op_db: list[OpInfo] = [
         dtypes=all_types_and(torch.bool, *_unsigned_int_types),
         dtypesIfMPS=all_types_and(torch.bool, torch.float16, torch.bfloat16),
         ref=scipy.special.i1 if TEST_SCIPY else None,
-        supports_autograd=False,
+        backward_dtypes=floating_types(),
+        backward_dtypesIfMPS=floating_types_and(torch.float16, torch.bfloat16),
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
     ),
     UnaryUfuncInfo(
         "special.modified_bessel_k0",
@@ -735,7 +775,11 @@ op_db: list[OpInfo] = [
         dtypes=all_types_and(torch.bool, *_unsigned_int_types),
         dtypesIfMPS=all_types_and(torch.bool, torch.float16, torch.bfloat16),
         ref=scipy.special.k0 if TEST_SCIPY else None,
-        supports_autograd=False,
+        backward_dtypes=floating_types(),
+        backward_dtypesIfMPS=floating_types_and(torch.float16, torch.bfloat16),
+        domain=(0, None),
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
     ),
     UnaryUfuncInfo(
         "special.modified_bessel_k1",
@@ -750,7 +794,11 @@ op_db: list[OpInfo] = [
         dtypes=all_types_and(torch.bool, *_unsigned_int_types),
         dtypesIfMPS=all_types_and(torch.bool, torch.float16, torch.bfloat16),
         ref=scipy.special.k1 if TEST_SCIPY else None,
-        supports_autograd=False,
+        backward_dtypes=floating_types(),
+        backward_dtypesIfMPS=floating_types_and(torch.float16, torch.bfloat16),
+        domain=(0, None),
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
     ),
     UnaryUfuncInfo(
         "special.scaled_modified_bessel_k0",
