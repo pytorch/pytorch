@@ -574,8 +574,9 @@ class TestKernelBenchmark(TestCase):
         x = torch.randn(1024, device=device)
         _, (src,) = run_and_get_code(f, x)
 
+        device_type = torch.device(device).type
         FileCheck().check(
-            f"print_performance(fn, times=times, repeat=repeat, device='{device}')"
+            f"print_performance(fn, times=times, repeat=repeat, device='{device_type}')"
         ).run(src)
 
 
