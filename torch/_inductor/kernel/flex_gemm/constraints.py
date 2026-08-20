@@ -9,7 +9,10 @@ from torch._inductor.kernel.flex_gemm.output_layout import (
     FlexGemmOutputStorageLayout,
     output_layout_supports_config,
 )
-from torch._inductor.kernel.gemm_epilogue import GemmReductionGeometry
+from torch._inductor.kernel.gemm_epilogue import (
+    GEMM_REDUCTION_FRAGMENT_WIDTH,
+    GemmReductionGeometry,
+)
 from torch._inductor.kernel.gemm_epilogue_utils import (
     statically_known,
     statically_known_shape_equal,
@@ -27,7 +30,7 @@ LOCAL_REDUCE_FINALIZE_KEY_SUFFIX: Final = ":local_reduce_finalize"
 # group; cross-warp M stitching needs the two-phase/replay path used by
 # compressed aux reductions. Axis-1 feeds whose groups fit in one TensorSSA
 # fragment lower as plain generated TensorSSA without a feed plan.
-LOCAL_REDUCE_FRAGMENT_WIDTH = 32
+LOCAL_REDUCE_FRAGMENT_WIDTH = GEMM_REDUCTION_FRAGMENT_WIDTH
 LOCAL_REDUCE_FEED_MAIN_AXIS_ERROR = (
     "FlexGEMM local-reduce feed-main currently supports only axis 0"
 )
@@ -253,11 +256,6 @@ def validate_local_reduce_tensorssa_group_size(axis: int, group: int) -> None:
         raise NotImplementedError(LOCAL_REDUCE_TENSORSSA_FRAGMENT_DIVISIBLE_ERROR)
 
 
-def local_reduce_needs_physical_callbacks(axis: int, group: int) -> bool:
-    """Return whether QuACK must merge TensorSSA partials outside the fragment path."""
-    return axis == 0 or group > LOCAL_REDUCE_FRAGMENT_WIDTH
-
-
 def validate_local_reduce_runtime_dense_mm(ndim: int) -> None:
     """Keep runtime wrappers on the only layout QuACK currently supports.
 
@@ -352,8 +350,9 @@ def validate_flex_gemm_local_reduce_config(
         return False
     swapped = config.swap_ab
     if swapped:
-        if not allow_swap_ab or not local_reduce_needs_physical_callbacks(
-            1 - axis, group
+        if (
+            not allow_swap_ab
+            or not GemmReductionGeometry(group, 1 - axis).needs_physical_callbacks
         ):
             return False
         axis = 1 - axis

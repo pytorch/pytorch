@@ -326,7 +326,11 @@ class NVUniversalGemmScheduling(BaseScheduling):
             return None
         if not range_vars:
             return GemmReductionConfig(
-                output_name, group, axis, reduction_type, source_type
+                output_name=output_name,
+                group=group,
+                axis=axis,
+                reduction_type=reduction_type,
+                source_type=source_type,
             )
         if isinstance(node.data, Reduction):
             if len(reads) != 1:
@@ -348,7 +352,11 @@ class NVUniversalGemmScheduling(BaseScheduling):
             if OrderedSet(offsets) != expected_offsets:
                 return None
         return GemmReductionConfig(
-            output_name, group, axis, reduction_type, source_type
+            output_name=output_name,
+            group=group,
+            axis=axis,
+            reduction_type=reduction_type,
+            source_type=source_type,
         )
 
     @classmethod
@@ -389,7 +397,13 @@ class NVUniversalGemmScheduling(BaseScheduling):
             for i, read in enumerate(reads[1:])
         ):
             return None
-        return GemmReductionConfig(node.get_name(), group, 0, "mean", "identity")
+        return GemmReductionConfig(
+            output_name=node.get_name(),
+            group=group,
+            axis=0,
+            reduction_type="mean",
+            source_type="identity",
+        )
 
     @classmethod
     def _epilogue_plan(
