@@ -2239,8 +2239,7 @@ class TestProxyTensorOpInfo(TestCase):
         _test_make_fx_helper(self, device, dtype, op, "symbolic", out=True)
 
 
-only_for = ("cpu")
-instantiate_device_type_tests(TestProxyTensorOpInfo, globals(), only_for=only_for)
+instantiate_device_type_tests(TestProxyTensorOpInfo, globals(), only_for="cpu")
 
 
 class TestGenericProxyTensorCUDA(TestCase):
@@ -2282,7 +2281,7 @@ class TestGenericProxyTensorCUDA(TestCase):
         )
 
 
-instantiate_device_type_tests(TestGenericProxyTensorCUDA, globals(), only_for='cuda')
+instantiate_device_type_tests(TestGenericProxyTensorCUDA, globals(), only_for="cuda")
 
 
 class TestSymbolicTracingCUDA(TestCase):
@@ -2298,11 +2297,14 @@ class TestSymbolicTracingCUDA(TestCase):
                 torch.tensor(1.0), torch.randn(2, 2, device=device)
             ).code
         ).strip()
-        self.assertExpectedInline(r, """\
+        self.assertExpectedInline(
+            r,
+            """\
 def forward(self, a_1, b_1):
     mul = torch.ops.aten.mul.Tensor(a_1, b_1);  a_1 = None
     mm = torch.ops.aten.mm.default(mul, b_1);  mul = b_1 = None
-    return mm""")
+    return mm""",
+        )
 
     def test_view_divisibility_unbacked_relatively_prime(self, device):
         # See https://github.com/pytorch/pytorch/issues/123651
@@ -2313,6 +2315,7 @@ def forward(self, a_1, b_1):
             torch._check(i0 > 0)
             torch._check(i0 <= 448)
             return torch.zeros(256 * i0).view(-1, 447)
+
         make_fx(f, tracing_mode="symbolic")(torch.tensor(256 * 447, device=device))
 
     @unittest.expectedFailure
@@ -2330,7 +2333,7 @@ def forward(self, a_1, b_1):
         gm = make_fx(f, tracing_mode="symbolic")(
             torch.tensor(10, device=device),
             torch.tensor(10, device=device),
-            torch.randn(10, device=device)
+            torch.randn(10, device=device),
         )
         insert_deferred_runtime_asserts(gm, gm.shape_env, "test")
         gm.recompile()
@@ -2347,27 +2350,35 @@ def forward(self, a_1, b_1):
             z3 = x3.item()
             torch._check(z1 == z2 + z3)
             return y * 2
+
         # NB: inputs are done as CUDA to ensure they aren't queried to be
         # backed
 
         gm = make_fx(f, tracing_mode="symbolic")(
-            torch.tensor(10, device=device), torch.tensor(5, device=device),
-            torch.tensor(5, device=device), torch.randn(1, device=device)
+            torch.tensor(10, device=device),
+            torch.tensor(5, device=device),
+            torch.tensor(5, device=device),
+            torch.randn(1, device=device),
         )
         insert_deferred_runtime_asserts(gm, gm.shape_env, "test")
         gm.recompile()
         self.assertEqual(gm(
-            torch.tensor(12, device=device), torch.tensor(6, device=device),
-            torch.tensor(6, device=device), torch.tensor([1.0], device=device)),
-            torch.tensor([2.0], device=device)
+            torch.tensor(12, device=device),
+            torch.tensor(6, device=device),
+            torch.tensor(6, device=device),
+            torch.tensor([1.0], device=device),
+        ),
+        torch.tensor([2.0], device=device),
         )
         with self.assertRaises(RuntimeError):
             gm(
-                torch.tensor(20, device=device), torch.tensor(10, device=device),
-                torch.tensor(10, device=device), torch.tensor([1.0], device=device)
+                torch.tensor(20, device=device),
+                torch.tensor(10, device=device),
+                torch.tensor(10, device=device),
+                torch.tensor([1.0], device=device),
             )
 
-instantiate_device_type_tests(TestSymbolicTracingCUDA, globals(), only_for='cuda')
+instantiate_device_type_tests(TestSymbolicTracingCUDA, globals(), only_for="cuda")
 
 if __name__ == '__main__':
     run_tests()
