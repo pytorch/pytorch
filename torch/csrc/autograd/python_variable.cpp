@@ -118,10 +118,6 @@ class OperatorArgsKwargsView {
       return parent_ == rhs.parent_ && current_ == rhs.current_;
     }
 
-    bool operator!=(const kwargs_iterator& rhs) {
-      return !(*this == rhs);
-    }
-
    private:
     const OperatorArgsKwargsView* parent_ = nullptr;
     size_t current_ = 0;
@@ -1490,7 +1486,7 @@ static bool sets_intersect(
     return sets_intersect(bigger, smaller);
   }
   for (const auto& item : smaller) {
-    if (bigger.find(item) != bigger.end()) {
+    if (bigger.contains(item)) {
       return true;
     }
   }
