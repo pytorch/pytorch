@@ -103,10 +103,30 @@ torch._dynamo.config.fake_tensor_cache_crosscheck_enabled = True
 
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
+# Follow the library switch so the test harness (N/A skips, cpp mode
+# construction, cpp-specific assertions) always matches how FakeTensorMode is
+# actually built, rather than reading the env var with a different default.
 CPP_FAKETENSOR = torch._dynamo.config.use_cpp_fake_tensor
 
 if CPP_FAKETENSOR:
-    raise NotImplementedError("c++ faketensor not implemented yet")
+    from torch._subclasses.fake_tensor import CppFakeTensorMode
+
+    def FakeTensorMode(
+        *,
+        shape_env=None,
+        allow_fallback_kernels=True,
+        allow_non_fake_inputs=False,
+        **kwargs,
+    ):
+        mode = CppFakeTensorMode.create_cpp_fake_tensor_mode(
+            FakeTensorConverter(
+                copy_data=torch._functorch.config.fake_tensor_propagate_real_tensors
+            ),
+            shape_env,
+        )
+        mode.set_allow_fallback_kernels(allow_fallback_kernels)
+        mode.allow_non_fake_inputs = allow_non_fake_inputs
+        return mode
 
 
 def expectedFailurePropagateRealTensors(fn):
@@ -1664,8 +1684,16 @@ class FakeTensorTest(TestCase):
     def test_tolist(self):
         shape_env = ShapeEnv()
         with FakeTensorMode(allow_fallback_kernels=False, shape_env=shape_env):
-            x = torch.rand([10])
-            x.tolist()
+            # 1-D: flat list of (symbolic) scalars.
+            flat = torch.rand([10]).tolist()
+            self.assertEqual(len(flat), 10)
+            self.assertNotIsInstance(flat[0], list)
+            # Multi-dim exercises the recursive fake tolist path.
+            nested = torch.rand([2, 3]).tolist()
+            self.assertEqual(len(nested), 2)
+            self.assertTrue(all(len(row) == 3 for row in nested))
+            # 0-D returns a scalar, not a list.
+            self.assertNotIsInstance(torch.rand(()).tolist(), list)
 
     # Propagate real tensors doesn't work with fake-on-fake
     @expectedFailurePropagateRealTensors
@@ -3352,6 +3380,10 @@ class FakeTensorPropTest(TestCase):
                 #  2. run FakeTensorProp
                 # The following code should fail.
                 failed = False
+                # Python FakeTensor fails the refake with AssertionError (device
+                # must be meta). A C++ fake is a plain torch.Tensor already bound
+                # to a Tensor PyObject, so the mismatched mode instead trips
+                # _make_subclass with a RuntimeError; both signal the same reject.
                 refake_errors = (
                     (AssertionError, RuntimeError) if CPP_FAKETENSOR else AssertionError
                 )

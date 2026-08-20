@@ -2762,10 +2762,20 @@ PyObject* initModule() {
         "_fake_dispatch_register_prim_meta",
         add_for(FakeDispatchCategory::PrimMeta));
     py_module.def(
+        "_fake_dispatch_register_custom_op_impl",
+        add_for(FakeDispatchCategory::CustomOpImpl));
+    py_module.def(
         "_fake_dispatch_deregister_op_impl",
         [](const std::string& name, const std::string& overload) {
           at::impl::fakeDispatchTableRemove(
               FakeDispatchCategory::OpImpl, c10::OperatorName(name, overload));
+        });
+    py_module.def(
+        "_fake_dispatch_deregister_custom_op_impl",
+        [](const std::string& name, const std::string& overload) {
+          at::impl::fakeDispatchTableRemove(
+              FakeDispatchCategory::CustomOpImpl,
+              c10::OperatorName(name, overload));
         });
   }
   py_module.def("_log_api_usage_metadata", &LogAPIUsageMetadataFromPython);
