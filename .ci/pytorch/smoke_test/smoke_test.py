@@ -313,7 +313,7 @@ def get_expected_cudnn_version_linux(cuda_version: str) -> str | None:
     # Match the full cudnn package version like nvidia-cudnn-cu12==9.10.2.21
     # and extract major.minor.patch (dropping the build number)
     pattern = (
-        rf'"{re.escape(cuda_version)}":\s*\(\s*'
+        rf'"{re.escape(cuda_version)}":\s*\{{\s*"linux":\s*\(\s*'
         r"[\s\S]*?nvidia-cudnn-cu\d+==(\d+\.\d+\.\d+)\.\d+"
     )
     match = re.search(pattern, content)
