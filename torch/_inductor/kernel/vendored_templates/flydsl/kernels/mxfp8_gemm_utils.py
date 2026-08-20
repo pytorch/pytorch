@@ -6,27 +6,21 @@
 #
 # FP8-GEMM data-path helpers for the flydsl_8wave candidate. Self-contained:
 # the only dependency is the `flydsl` pip wheel (flydsl.*).
+#
+# TRIMMED TO WHAT `mxfp8_grouped_gemm_gfx950` IMPORTS. Upstream also carries
+# `preshuffle_b`, `ceildiv`, `divmod`, `StoreC` and `Mfma16x16x128`; this
+# kernel imports none of them (it issues its own scaled MFMA through
+# `_mfma_scale_agpr` and stores via `buffer_ops.buffer_store`), so they are
+# dropped rather than vendored unused. `Mfma16x16x128` in particular built an
+# `MFMA_Scale` atom and left its scale operands at the atom default, which is
+# only correct while FlyDSL treats that default as an identity scale -- an
+# assumption no live code here depends on.
 
 import flydsl.expr as fx
 from flydsl._mlir.dialects import fly as fly_dialect, llvm as _llvm
 from flydsl._mlir.dialects.fly_rocdl import TargetAddressSpace
 from flydsl.expr import arith, const_expr, range_constexpr
 from flydsl.expr.typing import Vector as Vec
-
-
-def preshuffle_b(b_t):
-    """Permute row-major ``B_T`` ``(N, K)`` for ``b_preshuffled=True``."""
-    n, k = b_t.shape[-2:]
-    assert n % 16 == 0 and k % 64 == 0, f"need N%16==0 and K%64==0, got N={n} K={k}"
-    return b_t.reshape(n // 16, 16, k // 64, 4, 16).permute(0, 2, 3, 1, 4).contiguous()
-
-
-def ceildiv(a: int, b: int) -> int:
-    return (a + b - 1) // b
-
-
-def divmod(a: int, b: int) -> tuple[int, int]:
-    return (a // b, a % b)
 
 
 def make_fp8_buffer_tensor(arg_i8, fp8_ir_t):
@@ -143,88 +137,6 @@ class S2RLoader:
         return v.bitcast(fx.Int32)
 
 
-class StoreC:
-    def __init__(
-        self, A_scale, B_scale, C, c_rows, c_cols, c_idx_fn, n_tiles_a, n_tiles_b
-    ):
-        self.c_rows = c_rows
-        self.c_cols = c_cols
-        self.lane_id = fx.thread_idx.x % 64
-        self.c_idx_fn = c_idx_fn
-        self.n_tiles_a = n_tiles_a
-        self.n_tiles_b = n_tiles_b
-        # Exact byte counts from compile-time shape (BF16 C output, FP32 scales).
-        # ``num_records_bytes`` is required when ``max_size=False`` -- see
-        # ``make_buffer_tensor`` docstring for the silent-OOB rationale.
-        c_nbytes = c_rows * c_cols * 2  # BFloat16 = 2 bytes
-        sa_nbytes = c_rows * 4  # Float32 row-wise scale
-        sb_nbytes = c_cols * 4  # Float32 col-wise scale
-        gC = fx.rocdl.make_buffer_tensor(C, max_size=False, num_records_bytes=c_nbytes)
-        gSA = fx.rocdl.make_buffer_tensor(
-            A_scale, max_size=False, num_records_bytes=sa_nbytes
-        )
-        gSB = fx.rocdl.make_buffer_tensor(
-            B_scale, max_size=False, num_records_bytes=sb_nbytes
-        )
-        self.c_div = fx.logical_divide(gC, fx.make_layout(1, 1))
-        self.sa_div = fx.logical_divide(gSA, fx.make_layout(1, 1))
-        self.sb_div = fx.logical_divide(gSB, fx.make_layout(1, 1))
-
-        self.scale_atom_4 = fx.make_copy_atom(fx.rocdl.BufferCopy128b(), fx.Float32)
-        self.scale_atom_1 = fx.make_copy_atom(fx.rocdl.BufferCopy32b(), fx.Float32)
-        self.out_atom_1 = fx.make_copy_atom(fx.rocdl.BufferCopy16b(), fx.BFloat16)
-        self.reg_f32_4 = fx.make_rmem_tensor(fx.make_layout(4, 1), fx.Float32)
-        self.reg_f32_1 = fx.make_rmem_tensor(fx.make_layout(1, 1), fx.Float32)
-        self.reg_bf16_1 = fx.make_rmem_tensor(fx.make_layout(1, 1), fx.BFloat16)
-
-    def _load_scale_vec4(self, row):
-        fx.copy(
-            self.scale_atom_4,
-            fx.slice(self.sa_div, (None, fx.Int32(row))),
-            self.reg_f32_4,
-        )
-        return Vec(fx.memref_load_vec(self.reg_f32_4))
-
-    def _load_scale_scalar(self, col):
-        fx.copy(
-            self.scale_atom_1,
-            fx.slice(self.sb_div, (None, fx.Int32(col))),
-            self.reg_f32_1,
-        )
-        return Vec(fx.memref_load_vec(self.reg_f32_1))[0]
-
-    def _store_bf16(self, value_bf16, c_index):
-        fx.memref_store_vec(Vec.filled(1, value_bf16, fx.BFloat16), self.reg_bf16_1)
-        fx.copy(
-            self.out_atom_1,
-            self.reg_bf16_1,
-            fx.slice(self.c_div, (None, fx.Int32(c_index))),
-        )
-
-    def store(self, c_frag, base_row, base_col):
-        a_scales = [
-            self._load_scale_vec4(base_row + i * 16 + (self.lane_id // 16) * 4)
-            for i in range_constexpr(self.n_tiles_a)
-        ]
-        b_scales = [
-            self._load_scale_scalar(base_col + i * 16 + self.lane_id % 16)
-            for i in range_constexpr(self.n_tiles_b)
-        ]
-        for ti in range_constexpr(self.n_tiles_a):
-            row = base_row + ti * 16 + (self.lane_id // 16) * 4
-            for tj in range_constexpr(self.n_tiles_b):
-                col = base_col + tj * 16 + self.lane_id % 16
-                col_valid = col < self.c_cols
-                oob = fx.Int32(self.c_rows * self.c_cols)
-                vec_f32 = Vec(c_frag[self.c_idx_fn(ti, tj)])
-                for i in range_constexpr(4):
-                    scaled = (vec_f32[i] * (a_scales[ti][i] * b_scales[tj])).to(
-                        fx.BFloat16
-                    )
-                    c_index = (row + i) * self.c_cols + col
-                    self._store_bf16(scaled, arith.select(col_valid, c_index, oob))
-
-
 def wait_barrier(count):
     """`s_waitcnt vmcnt(count) lgkmcnt(0)` then `s_barrier`.
 
@@ -253,35 +165,3 @@ def wait_barrier(count):
         constraints="",
         has_side_effects=True,
     )
-
-
-class Mfma16x16x128:
-    def __init__(self, n_tiles_a, n_tiles_b):
-        self.atom = fx.make_mma_atom(
-            fx.rocdl.cdna4.MFMA_Scale(16, 16, 128, fx.Float8E4M3FN)
-        )
-        self.accum_type = Vec.make_type(4, fx.Float32)
-        self.zero_value = Vec.filled(4, 0.0, fx.Float32)
-        self.n_tiles_a = n_tiles_a
-        self.n_tiles_b = n_tiles_b
-
-    def idx(self, i, j):
-        return i * self.n_tiles_b + j
-
-    def _do_mma(self, a, b, c):
-        return fly_dialect.mma_atom_call_ssa([self.accum_type], self.atom, a, b, c)
-
-    def call(self, a, b, c):
-        assert len(a) == self.n_tiles_a
-        assert len(b) == self.n_tiles_b
-        assert len(c) == self.n_tiles_a * self.n_tiles_b
-
-        for i in range_constexpr(self.n_tiles_a):
-            for j in range_constexpr(self.n_tiles_b):
-                c[self.idx(i, j)] = self._do_mma(a[i], b[j], c[self.idx(i, j)])
-        return c
-
-    def call_one(self, a, b, c, i, j):
-        assert i < self.n_tiles_a and j < self.n_tiles_b
-
-        return self._do_mma(a[i], b[j], c[self.idx(i, j)])

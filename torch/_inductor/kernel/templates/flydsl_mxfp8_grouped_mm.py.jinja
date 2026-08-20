@@ -35,7 +35,9 @@ def _temporary_env(updates):
                 os.environ[key] = old_value
 
 
-def _flydsl_mxfp8_grouped_mm(output, mat1, mat2, scale_a, scale_b, offs, stream):
+def _flydsl_mxfp8_grouped_mm(
+    output, mat1, mat2, scale_a, scale_b, offs, stream, compile_only=False
+):
     global _mxfp8_grouped_param
     if output.shape[0] == 0:
         return output
@@ -70,9 +72,11 @@ def _flydsl_mxfp8_grouped_mm(output, mat1, mat2, scale_a, scale_b, offs, stream)
         param,
         stream,
         tensor_arg=_inductor_tensor_arg,
-        # Precompilation runs on fake tensors, so it may warm the cache but
-        # must not dispatch.
-        compile_only=bool(os.environ.get("FLYDSL_COMPILE_ONLY")),
+        # Passed down rather than read from the environment: cache warming and
+        # a real dispatch can share a process (autotune_in_subproc=False), and
+        # a process-global flag would let a real call skip the GEMM and return
+        # the uninitialised output buffer.
+        compile_only=compile_only,
     )
     return output
 
@@ -95,7 +99,9 @@ def {{kernel_name}}_precompile(
     """Warm FlyDSL's disk cache using metadata-only fake tensors."""
     names = ("mat1", "mat2", "scale_a", "scale_b", "offs", "output")
 
-    env_updates = {"FLYDSL_COMPILE_ONLY": "1"}
+    # FLYDSL_GPU_ARCH is read by FlyDSL itself, so it has to go through the
+    # environment; compile-only is ours and is passed as an argument instead.
+    env_updates = {}
     if flydsl_gpu_arch is not None:
         env_updates["FLYDSL_GPU_ARCH"] = flydsl_gpu_arch
 
@@ -112,12 +118,13 @@ def {{kernel_name}}_precompile(
                 )
                 for name in names
             }
-            {{kernel_name}}_main(
+            _flydsl_mxfp8_grouped_mm(
+                fakes["output"],
                 fakes["mat1"],
                 fakes["mat2"],
                 fakes["scale_a"],
                 fakes["scale_b"],
                 fakes["offs"],
-                fakes["output"],
                 stream=0,
+                compile_only=True,
             )

@@ -1144,8 +1144,11 @@ class TestFlyDSLTemplate(TestCase):
 
         code = self._assert_compiled_mxfp8_grouped_mm(group_sizes, k, n)
         self.assertIn(".mark_layout_dynamic()", code)
-        self.assertIn("FLYDSL_COMPILE_ONLY", code)
         self.assertIn("_precompile", code)
+        # Compile-only is an argument, not a process-global env flag: warming
+        # and a real dispatch can share a process.
+        self.assertIn("compile_only=True", code)
+        self.assertNotIn("FLYDSL_COMPILE_ONLY", code)
 
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
     @unittest.skipIf(torch.version.hip is None, "requires ROCm")
@@ -1161,6 +1164,76 @@ class TestFlyDSLTemplate(TestCase):
             self.skipTest("FlyDSL runtime unavailable")
 
         self._assert_compiled_mxfp8_grouped_mm([512, 300, 700, 1000], 2048, 2048)
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
+    @unittest.skipIf(torch.version.hip is None, "requires ROCm")
+    def test_flydsl_mxfp8_grouped_mm_tile_parity_e2e(self):
+        """Every tile must agree bitwise, on the shapes that once did not.
+
+        The N_ACCUMS=4 tiles (BLOCK_R=64, and 128x128) computed a small
+        fraction of elements wrong until `wait_barrier` was made to wait on
+        lgkmcnt as well as vmcnt: an s2r fragment issued in one cluster and
+        consumed in the next could cross the barrier still outstanding. Only
+        the MFMAs in between covered that gap, so exactly the tiles with four
+        accumulators broke. `pick_block_r` can return those tiles, so this
+        pins the property rather than trusting it.
+        """
+        import importlib
+
+        if not flydsl_utils.runtime_available():
+            self.skipTest("FlyDSL runtime unavailable")
+        module = importlib.import_module(
+            "torch._inductor.kernel.vendored_templates.flydsl.kernels."
+            "mxfp8_grouped_gemm_gfx950"
+        )
+        import flydsl.compiler as flyc
+
+        group_sizes = [1, 3, 7, 15, 31, 63, 127, 255]
+        k, n, g = 2048, 1408, len(group_sizes)
+        a, b, a_scale, b_scale, offs, reference = self._make_mxfp8_grouped_inputs(
+            group_sizes, k, n
+        )
+        # The kernel wants B as a stack of [N, K] planes, the layout the
+        # lowering hands it after the template's permute.
+        weight = b.permute(0, 2, 1)
+        rows = int(offs[-1])
+        outputs = {}
+        for block_r in (64, 128, 256):
+            for block_c in (128, 256):
+                param = module.make_mxfp8_grouped_gemm_param_and_validate(
+                    k, n, g, block_r, block_c
+                )
+                if param is None:
+                    continue
+                out = torch.zeros(a.shape[0], n, dtype=torch.bfloat16, device=a.device)
+                module.launch_mxfp8_grouped_gemm_gfx950(
+                    out,
+                    a,
+                    weight,
+                    a_scale,
+                    b_scale.reshape(g, n, -1),
+                    offs,
+                    param,
+                    torch.cuda.current_stream(),
+                    tensor_arg=lambda t: flyc.from_torch_tensor(
+                        t
+                    ).mark_layout_dynamic(),
+                )
+                outputs[(block_r, block_c)] = out
+        self.assertGreaterEqual(len(outputs), 4)
+
+        tiles = list(outputs)
+        base = outputs[tiles[0]]
+        for tile in tiles[1:]:
+            differing = int((outputs[tile][:rows] != base[:rows]).sum())
+            self.assertEqual(
+                differing,
+                0,
+                f"tile {tile} disagrees with {tiles[0]} on {differing} elements",
+            )
+        self.assertEqual(
+            base[:rows].float(), reference[:rows].float(), atol=6e-2, rtol=6e-2
+        )
 
     def test_flydsl_mxfp8_grouped_mm_row_windows(self):
         """A token dim past the int32 operand limit is split, not truncated."""

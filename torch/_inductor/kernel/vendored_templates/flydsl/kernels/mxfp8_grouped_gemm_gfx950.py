@@ -463,16 +463,20 @@ def _compile(
     The even-groups parent keyed on (K, N, M_G, M_TOTAL, BLOCK_C) and so
     recompiled per token count; only balanced routing hid it.
     """
-    assert K % BLOCK_M == 0, f"K ({K}) must be a multiple of {BLOCK_M}"
-    assert BLOCK_C in (128, 256), f"BLOCK_C {BLOCK_C} not supported"
+    if K % BLOCK_M != 0:
+        raise ValueError(f"K ({K}) must be a multiple of {BLOCK_M}")
+    if BLOCK_C not in (128, 256):
+        raise ValueError(f"BLOCK_C {BLOCK_C} not supported")
     # 64/128/256 give N_TILES_A of 1/2/4. Below 64 a half is under one MFMA
     # tile (16 rows x 2 wave-rows) and the row structure stops holding.
-    assert BLOCK_R in (64, 128, 256), f"BLOCK_R {BLOCK_R} not supported"
+    if BLOCK_R not in (64, 128, 256):
+        raise ValueError(f"BLOCK_R {BLOCK_R} not supported")
 
     K_ITERS = K // BLOCK_M
-    assert K_ITERS >= 4, (
-        f"K {K} gives {K_ITERS} steps; need >= 4 (2 prologue + 2 tails)"
-    )
+    if K_ITERS < 4:
+        raise ValueError(
+            f"K {K} gives {K_ITERS} steps; need >= 4 (2 prologue + 2 tails)"
+        )
 
     SCALE_I32_ROW = K // 128  # i32 of e8m0 per operand row
 
@@ -746,7 +750,6 @@ def _compile(
             # ONE instruction, and the rows it touches are the next 32 of the same
             # weight plane -- already-warm cache lines, or an in-bounds read the
             # bpermute never selects.
-            assert N_TILES_A <= 4 and N_TILES_B <= 4, "a half must fit in 64 lanes"
 
             sa0_base = row0 + wave_i * fx.Int32(N_TILES_A * 16)
             sa1_base = row0 + fx.Int32(LDS_BLOCK_R) + wave_i * fx.Int32(N_TILES_A * 16)
@@ -1145,7 +1148,11 @@ def launch_guarded(launch, key, compile_args, dispatch_args, param):
             dispatch_args=dispatch_args,
         )
     except Exception as e:
-        if key in _guard_broken:
+        # The guard fallback exists for ONE failure mode: the surplus-slot `if`
+        # not tracing on some shapes. An out-of-memory is not that, and treating
+        # it as such both misreports the cause and permanently pins this shape
+        # to the unguarded kernel (up to 1.74x slower). Re-raise it instead.
+        if isinstance(e, torch.OutOfMemoryError) or key in _guard_broken:
             raise
         _guard_broken.add(key)
         _warn_guard_fallback(*key, e)
