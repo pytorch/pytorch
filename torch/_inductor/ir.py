@@ -3975,7 +3975,9 @@ class View(GenericView):
             return handle_unbacked_or_dynamic_reshape(x)
 
         # Try to compute valid output strides.
-        storage, old_layout = as_storage_and_layout(x, freeze=False)
+        # ReinterpretView stores an index map derived from this layout, so the
+        # backing storage must not remain flexible after the view is created.
+        storage, old_layout = as_storage_and_layout(x)
 
         old_stride = old_layout.stride
 
@@ -8684,7 +8686,7 @@ class UserDefinedTritonKernel(ExternKernel):
         if not config.epilogue_fusion_user_defined_triton_kernel:
             return False
 
-        if not self.arg_can_fuse_epilogue:
+        if not self.arg_accesses.can_fuse_epilogue:
             return False
 
         # We achieve fusion by parsing the original src into a python AST,
@@ -8748,11 +8750,11 @@ class UserDefinedTritonKernel(ExternKernel):
         kernel_kwargs = self.kwargs
         epilogue_out_override: dict[str, Any] = {}
         if epilogue_fusion:
-            if len(self.mutated_arg_names) != 1:
+            if len(self.arg_accesses.read_writes.writes) != 1:
                 raise AssertionError(
-                    f"expected one write, got {len(self.mutated_arg_names)}"
+                    f"expected one write, got {len(self.arg_accesses.read_writes.writes)}"
                 )
-            mutable_arg_name = self.mutated_arg_names[0]
+            mutable_arg_name = next(iter(self.arg_accesses.read_writes.writes)).name
             epilogue_computed_buffer, _ = epilogue_fusion
             kernel_kwargs = {**self.kwargs, mutable_arg_name: epilogue_computed_buffer}
             epilogue_out_override = {mutable_arg_name: epilogue_computed_buffer}
@@ -8858,8 +8860,6 @@ class UserDefinedTritonKernel(ExternKernel):
         tma_descriptor_metadata: dict[str, Any],
         kernel_args: dict[str, Any],
         launch_kwargs: tuple[str, ...],
-        mutated_arg_names: tuple[str, ...] | None = None,
-        can_fuse_epilogue: bool | None = None,
     ) -> None:
         inputs: list[IRNode] = []
         kwargs: dict[str, IRNode] = {}
@@ -8916,26 +8916,19 @@ class UserDefinedTritonKernel(ExternKernel):
         self.kernel_ast = ast.parse(self.kernel_src)
         self.kernel_stores = identify_triton_stores(self.kernel_src)
         self.kernel_args = kernel_args
-        # Names of formal arguments in the kernel's prototype. Normally recorded
-        # on the node when it was created; derived here only for a graph that
-        # carries neither - see Note [TTIR mutation analysis].
-        if mutated_arg_names is None or can_fuse_epilogue is None:
-            accesses = identify_accessed_tensors(
-                kernel,
-                {**kernel_args, **autotuned_kwargs},
-                tma_descriptor_metadata,
-            )
-            mutated_arg_names = tuple(dep.name for dep in accesses.read_writes.writes)
-            can_fuse_epilogue = accesses.can_fuse_epilogue
-        self.mutated_arg_names = mutated_arg_names
-        self.arg_can_fuse_epilogue = can_fuse_epilogue
+        # names in `arg_accesses.read_writes` are names of formal arguments in the kernel's prototype
+        self.arg_accesses = identify_accessed_tensors(
+            kernel,
+            {**kernel_args, **autotuned_kwargs},
+            tma_descriptor_metadata,
+        )
 
         # Filter to only tensor args: with Triton 3.7+, ordered_arg_names
         # includes scalars, so writes may reference non-tensor args like SymInts.
         self.mutable_args = [
-            kernel_args[name]
-            for name in self.mutated_arg_names
-            if isinstance(kernel_args.get(name), TensorBox)
+            kernel_args[key.name]
+            for key in self.arg_accesses.read_writes.writes
+            if isinstance(kernel_args.get(key.name), TensorBox)
         ]
 
         self.mutation_outputs = [
@@ -10099,16 +10092,156 @@ class FallbackKernel(ExternKernelAlloc):
                         qualname,
                     )
 
+    @staticmethod
+    def _uses_aot_proxy_executor(kernel: torch._ops.OpOverload) -> bool:
+        # Mirror FallbackKernel.codegen's c-shim availability check: an op with no c-shim
+        # is dispatched through the AOT ProxyExecutor, whose only runtime channels are an
+        # int64[] and an AtenTensorHandle[]. That is the path where a Python scalar bound
+        # to a Tensor-typed schema arg cannot be serialized (fill_args has no channel for
+        # it). C-shim ops handle scalar-in-Tensor-slot already (codegen_scalar_to_tensor),
+        # so restricting to the proxy path keeps this change to cases that otherwise fail.
+        if not V.graph.cpp_wrapper:
+            return False
+        if kernel.namespace == "aten":
+            from torchgen.aoti.fallback_ops import inductor_fallback_ops
+
+            return str(kernel) not in inductor_fallback_ops
+        if kernel.namespace == "_quantized":
+            return False
+        return kernel not in config.aot_inductor.custom_ops_to_c_shims
+
+    @classmethod
+    def _materialize_scalar_tensor_args(
+        cls, kernel: _OpOverloads, args: Any, kwargs: Any
+    ) -> tuple[Any, Any, bool]:
+        # A scalar bound to a Tensor-typed schema arg ("scalar in place of a tensor", a
+        # wrapped number) cannot be serialized by the AOT ProxyExecutor fill_args path.
+        # Materialize it into a real constant tensor buffer up front so it flows through
+        # the tensor path uniformly (arg classification, serialization, and the host proxy
+        # executor all agree that it is a TensorArgument). The constant dtype follows
+        # eager's weak-scalar promotion (torch.result_type) so numerics match normal
+        # lowering, which inlines the scalar via promote_constants.
+        #
+        # Returns the rewritten (args, kwargs) plus whether anything was materialized;
+        # the caller needs to know because process_kernel feeds graph constants back in
+        # as *real* tensors (see the V.graph.constants branch there).
+        if not isinstance(kernel, torch._ops.OpOverload):
+            return args, kwargs, False
+        if not cls._uses_aot_proxy_executor(kernel):
+            return args, kwargs, False
+
+        tensor_dtypes: list[torch.dtype] = []
+        device: torch.device | None = None
+        for v in itertools.chain(args, kwargs.values()):
+            if not isinstance(v, IRNode):
+                continue
+            # Not every IRNode exposes a dtype/device (e.g. non-tensor outputs); skip
+            # those for scalar-promotion inference rather than failing the compile.
+            try:
+                dt = v.get_dtype()
+            except (AttributeError, NotImplementedError):
+                dt = None
+            if dt is not None:
+                tensor_dtypes.append(dt)
+            if device is None:
+                try:
+                    device = v.get_device()
+                except (AttributeError, NotImplementedError):
+                    device = None
+        if device is None:
+            device = torch.device("cpu")
+
+        def scalar_dtype(value: int | float | complex) -> torch.dtype:
+            if tensor_dtypes:
+                acc = tensor_dtypes[0]
+                for dt in tensor_dtypes[1:]:
+                    acc = torch.promote_types(acc, dt)
+                ref = torch.empty((), dtype=acc, device="cpu")
+                promoted = torch.result_type(ref, value)
+                # Keep the promotion CATEGORY but not a sub-single-precision width:
+                # eager keeps a wrapped float scalar at double precision and casts it
+                # inside the kernel, so storing e.g. an fp16 epsilon in an fp16 tensor
+                # would flush it to zero. A 0-d tensor only contributes its category to
+                # type promotion, so widening here leaves the op's output dtype alone.
+                if promoted.is_floating_point and promoted.itemsize < 4:
+                    return torch.float32
+                return promoted
+            if isinstance(value, bool):
+                return torch.bool
+            if isinstance(value, int):
+                return torch.int64
+            if isinstance(value, complex):
+                return torch.complex64
+            return torch.get_default_dtype()
+
+        def is_tensor_slot(arg_info: torch._C.Argument) -> bool:
+            t = arg_info.real_type
+            if isinstance(t, torch.OptionalType):
+                t = t.getElementType()
+            return isinstance(t, torch.TensorType)
+
+        def maybe_wrap(value: Any, arg_info: torch._C.Argument) -> Any:
+            # bool is a subclass of int; SymInt/SymFloat/SymBool are not int/float/complex.
+            if not isinstance(value, (int, float, complex)):
+                return value
+            if not is_tensor_slot(arg_info):
+                return value
+            alias = arg_info.alias_info
+            if alias is not None and alias.is_write:
+                return value
+            with torch.utils._python_dispatch._disable_current_modes():
+                const = torch.tensor(value, dtype=scalar_dtype(value), device=device)
+            materialized.append(True)
+            return V.graph.add_tensor_constant(const)
+
+        materialized: list[bool] = []
+        new_args = list(args)
+        new_kwargs = dict(kwargs)
+        for i, arg_info in enumerate(kernel._schema.arguments):
+            if arg_info.name in new_kwargs:
+                new_kwargs[arg_info.name] = maybe_wrap(
+                    new_kwargs[arg_info.name], arg_info
+                )
+            elif not arg_info.kwarg_only and i < len(new_args):
+                new_args[i] = maybe_wrap(new_args[i], arg_info)
+        return tuple(new_args), new_kwargs, bool(materialized)
+
+    @staticmethod
+    @contextlib.contextmanager
+    def _allow_non_fake_constant_args(enabled: bool) -> Iterator[None]:
+        # process_kernel deliberately re-runs fake propagation with the *real* tensor
+        # for anything registered in V.graph.constants, so that ops which inspect their
+        # operand values do not hit a DataDependentError. A constant we just created in
+        # _materialize_scalar_tensor_args therefore reaches the op as a real tensor
+        # alongside fake ones, which FakeTensorMode rejects with "Please convert all
+        # Tensors to FakeTensors first". Let the mode absorb it for this one
+        # propagation; it is a compile-time constant we synthesised ourselves, and the
+        # scope is a single kernel. Mirrors force_allow_non_fake_inputs in
+        # compile_fx.fake_tensor_prop.
+        fake_mode = V.graph.fake_mode
+        if not enabled or fake_mode is None:
+            yield
+            return
+        prev = fake_mode.allow_non_fake_inputs
+        fake_mode.allow_non_fake_inputs = True
+        try:
+            yield
+        finally:
+            fake_mode.allow_non_fake_inputs = prev
+
     @classmethod
     def create(cls, kernel: _OpOverloads, *args: Any, **kwargs: Any) -> FallbackKernel:
         """Create an instance of FallbackKernel from an _OpOverloads"""
+        args, kwargs, materialized = cls._materialize_scalar_tensor_args(
+            kernel, args, kwargs
+        )
         fake_incorrect_kernels = (aten._fused_moving_avg_obs_fq_helper_functional,)
         if kernel not in fake_incorrect_kernels:
             context = cast(AbstractContextManager[None], V.graph.fake_mode)
         else:
             context = nullcontext()
 
-        with context:
+        with context, cls._allow_non_fake_constant_args(materialized):
             result = cls.process_kernel(kernel, *args, **kwargs)
         example_output = result.example_output
         tensor_args = result.tensor_args
