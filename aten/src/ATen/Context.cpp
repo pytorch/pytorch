@@ -972,6 +972,25 @@ bool Context::allowFP16ReductionCPU() const {
   return allow_fp16_reduction_cpu;
 }
 
+// Plain bools, like the ~67 other user-facing toggles on Context
+// (enabled_cudnn, _deterministic_algorithms, allow_tf32_cudnn, ...): set
+// rarely from Python, read per op call, publishing no data of their own.
+bool Context::allowNativeAot() const {
+  return allow_native_aot;
+}
+
+void Context::setAllowNativeAot(bool b) {
+  allow_native_aot = b;
+}
+
+bool Context::maskUnconditionalNativeAot() const {
+  return mask_unconditional_native_aot;
+}
+
+void Context::setMaskUnconditionalNativeAot(bool b) {
+  mask_unconditional_native_aot = b;
+}
+
 void Context::setAllowFP16ReductionCPU(bool b) {
   if ( b && !allow_fp16_reduction_cpu) {
     // Check that CPU supports fp16 reductions
