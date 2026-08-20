@@ -60,9 +60,7 @@ from torch.testing._internal.common_device_type import (
     onlyAccelerator,
     onlyCPU,
     onlyCUDA,
-    skipCUDAIf,
     skipMeta,
-    skipXPUIf,
 )
 from torch.testing._internal.common_dtype import floating_types_and
 from torch.testing._internal.common_methods_invocations import mask_not_all_zeros
@@ -4098,13 +4096,11 @@ class TestAutograd(TestCase):
         leaf.grad_dtype = None  # Allow any dtype
         self.assertIsNone(leaf.grad_dtype)
 
-        # get/set grad_dtype is only allowed on leaf tensors
+        # Non-leaf tensors read grad_dtype from their producing Function's
+        # output metadata, but setting grad_dtype is still limited to leaves.
         non_leaf = leaf * 2
         self.assertFalse(non_leaf.is_leaf)
-        with self.assertRaisesRegex(
-            RuntimeError, "grad_dtype can only be accessed on leaf tensors"
-        ):
-            _ = non_leaf.grad_dtype
+        self.assertEqual(non_leaf.grad_dtype, torch.float32)
         with self.assertRaisesRegex(
             RuntimeError, "grad_dtype can only be set on leaf tensors"
         ):
@@ -4233,6 +4229,7 @@ class TestAutograd(TestCase):
         class Downstream(torch.autograd.Function):
             @staticmethod
             def forward(ctx, x):
+                Downstream.input_grad_dtype = x.grad_dtype
                 return x.clone()
 
             @staticmethod
@@ -4255,7 +4252,20 @@ class TestAutograd(TestCase):
         x = torch.tensor([1.0, 2.0], requires_grad=True)
         out = DeclareOutput.apply(x, declared)
         self.assertEqual(out.dtype, torch.bfloat16)
-        Downstream.apply(out).sum().backward()
+        self.assertFalse(out.is_leaf)
+        expected_grad_dtype = out.dtype if declared == "unset" else declared
+        self.assertEqual(out.grad_dtype, expected_grad_dtype)
+        if expected_grad_dtype is not None and expected_grad_dtype != out.dtype:
+            with self.assertRaisesRegex(RuntimeError, "must match.*grad_dtype"):
+                out.grad = torch.ones_like(out)
+        assigned_dtype = expected_grad_dtype
+        if assigned_dtype is None:
+            assigned_dtype = torch.float64
+        out.grad = torch.ones_like(out, dtype=assigned_dtype)
+        out.grad = None
+        downstream_out = Downstream.apply(out)
+        self.assertEqual(Downstream.input_grad_dtype, expected_grad_dtype)
+        downstream_out.sum().backward()
         self.assertEqual(DeclareOutput.seen, expected)
 
     @skipIfTorchDynamo("grad_dtype not supported in compile")
@@ -4279,6 +4289,8 @@ class TestAutograd(TestCase):
         x = torch.tensor([1.0, 2.0], requires_grad=True)
         t1, t2, s = MultiOutput.apply(x)
         self.assertEqual(s, "not a tensor")
+        self.assertEqual(t1.grad_dtype, torch.float64)
+        self.assertEqual(t2.grad_dtype, torch.float32)
         (t1.sum() + t2.sum()).backward()
         self.assertEqual(MultiOutput.seen[0], torch.float64)
         self.assertEqual(MultiOutput.seen[1], torch.float32)
@@ -14694,20 +14706,20 @@ class TestAutogradDeviceType(TestCase):
 
         x = torch.randn(100, 256, requires_grad=True, device=device)
 
-        torch.accelerator.reset_peak_memory_stats()
+        torch.accelerator.reset_peak_memory_stats(device)
         loss = model_no_checkpoint(x.clone()).sum()
         loss.backward()
-        mem_no_checkpoint = torch.accelerator.max_memory_allocated()
+        mem_no_checkpoint = torch.accelerator.max_memory_allocated(device)
 
-        torch.accelerator.reset_peak_memory_stats()
+        torch.accelerator.reset_peak_memory_stats(device)
         loss = model_reentrant_checkpoint(x.clone()).sum()
         loss.backward()
-        mem_reentrant_checkpoint = torch.accelerator.max_memory_allocated()
+        mem_reentrant_checkpoint = torch.accelerator.max_memory_allocated(device)
 
-        torch.accelerator.reset_peak_memory_stats()
+        torch.accelerator.reset_peak_memory_stats(device)
         loss = model_no_reentrant_checkpoint(x.clone()).sum()
         loss.backward()
-        mem_no_reentrant_checkpoint = torch.accelerator.max_memory_allocated()
+        mem_no_reentrant_checkpoint = torch.accelerator.max_memory_allocated(device)
 
         self.assertTrue(mem_reentrant_checkpoint < mem_no_checkpoint)
         self.assertTrue(mem_no_reentrant_checkpoint < mem_no_checkpoint)
@@ -14727,7 +14739,7 @@ class TestAutogradDeviceType(TestCase):
             )
 
         block_mask = create_block_mask(
-            lambda b, h, q, kv: q >= kv, B=1, H=1, Q_LEN=128, KV_LEN=128
+            lambda b, h, q, kv: q >= kv, B=1, H=1, Q_LEN=128, KV_LEN=128, device=device
         )
         x = torch.randn(4, 128, device=device)
 
@@ -14831,7 +14843,7 @@ class TestAutogradDeviceType(TestCase):
         # with grad
         a = torch.ones(1, requires_grad=True, device=device)
         y = f(a)
-        memory_with_grad = torch.accelerator.memory_allocated()
+        memory_with_grad = torch.accelerator.memory_allocated(device)
 
         del a
         del y
@@ -14840,7 +14852,7 @@ class TestAutogradDeviceType(TestCase):
         a = torch.ones(1, requires_grad=True, device=device)
         with torch.no_grad():
             y = f(a)
-        memory_without_grad = torch.accelerator.memory_allocated()
+        memory_without_grad = torch.accelerator.memory_allocated(device)
 
         self.assertGreater(memory_with_grad, memory_without_grad)
 
@@ -14851,7 +14863,7 @@ class TestAutogradDeviceType(TestCase):
         with torch.autograd.graph.save_on_cpu():
             a = torch.ones(1, requires_grad=True, device=device)
             y = f(a)
-            memory_with_hooks = torch.accelerator.memory_allocated()
+            memory_with_hooks = torch.accelerator.memory_allocated(device)
             self.assertEqual(memory_with_hooks, memory_without_grad)
 
     @onlyAccelerator
@@ -14873,9 +14885,12 @@ class TestAutogradDeviceType(TestCase):
 
             self.assertTrue(gradcheck(func, x, fast_mode=True))
 
-    @skipCUDAIf(not torch.cuda.is_bf16_supported(), "Test requires bf16 support")
-    @skipXPUIf(not torch.xpu.is_bf16_supported(), "Test requires bf16 support")
     def test_checkpointing_non_reentrant_autocast(self, device):
+        device_type = torch.device(device).type
+        if (device_type == "cuda" and not torch.cuda.is_bf16_supported()) or (
+            device_type == "xpu" and not torch.xpu.is_bf16_supported()
+        ):
+            raise unittest.SkipTest("Test requires bf16 support")
         for enabled in [True, False]:
 
             def foo(x, y, z):
@@ -14893,7 +14908,7 @@ class TestAutogradDeviceType(TestCase):
             z = torch.randn(3, 3, requires_grad=True, device=device)
 
             with torch.autocast(
-                enabled=enabled, device_type=device, dtype=torch.bfloat16
+                enabled=enabled, device_type=device_type, dtype=torch.bfloat16
             ):
                 loss = checkpoint(foo, x, y, z, use_reentrant=False)
                 loss = loss.sum()
