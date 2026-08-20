@@ -573,15 +573,10 @@ def _native_aot_stage2():
     # Post-install: the kernel builders import the installed torch, and
     # scikit-build-core has no post-build hook inside the PEP 517 backend.
     #
-    # Skips cleanly (printing why) when AOT kernels do not apply to this build --
-    # no CUDA, no exportable arch, nothing declaring kernels; see
-    # tools/native_aot/build_stage2.py for the full list. It does NOT skip for a
-    # missing DSL runtime: once it decides it will export, an absent runtime is a
-    # hard error (a wheel missing declared kernels underperforms silently), and
-    # spin.util.run exits non-zero on it. On a machine with an exportable GPU
-    # that means `spin develop` needs the DSL wheels installed -- CI does that
-    # with install_cutlass_dsl in .ci/pytorch/common_utils.sh -- or
-    # TORCH_NATIVE_AOT=0 to build without embedded kernels.
+    # Skips cleanly, printing why, when AOT kernels do not apply (build_stage2.py
+    # lists the conditions) -- but NOT for a missing DSL runtime, which is a hard
+    # error once it decides to export. So on a machine with an exportable GPU this
+    # needs the DSL wheels installed, or TORCH_NATIVE_AOT=0.
     spin.util.run([sys.executable, "tools/native_aot/build_stage2.py"])
 
 
