@@ -161,6 +161,7 @@ class TestLayoutOptim(TestCase):
 
         self.verify_accuracy_for_infer(Model, device)
 
+    @torch.no_grad()
     def _run_keep_output_layout_infer(self, device):
         class Model(nn.Module):
             def __init__(self) -> None:
@@ -191,7 +192,6 @@ class TestLayoutOptim(TestCase):
         opt_out.view(5, -1)
 
     @requires_capabilities(Capability.lib.triton)
-    @torch.no_grad()
     def test_keep_output_layout_infer(self, device):
         self._run_keep_output_layout_infer(device)
 
