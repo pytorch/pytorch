@@ -73,7 +73,9 @@ def get_mem_and_flops(f, device, memory_budget=None):
         return round(get_act_mem(f, device), 1), get_bw_flops(f)
 
 
-@skipIfRocm(msg="the original test file does not run on ROCm")
+@skipIfRocm(
+    msg="activation memory budget assertions assume non-ROCm allocator behavior"
+)
 class MemoryBudgetTest(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
@@ -278,7 +280,9 @@ class MemoryBudgetTest(TestCase):
         self.assertEqual(flops, eager_flops)
 
 
-@skipIfRocm(msg="the original test file does not run on ROCm")
+@skipIfRocm(
+    msg="activation memory budget assertions assume non-ROCm allocator behavior"
+)
 class MemoryBudgetBackendSpecificTest(TestCase):
     hw_classification = HardwareClassification.CUDA
 
@@ -407,9 +411,9 @@ class MemoryBudgetBackendSpecificTest(TestCase):
                 x = torch.ops.testac.triton_relu(torch.mm(x, w))
             return x.sum()
 
-        x = torch.randn(512, 512, requires_grad=True, device="cuda")
+        x = torch.randn(512, 512, requires_grad=True, device=device)
         ws = [
-            torch.randn(512, 512, requires_grad=True, device="cuda") for _ in range(5)
+            torch.randn(512, 512, requires_grad=True, device=device) for _ in range(5)
         ]
 
         def call():
