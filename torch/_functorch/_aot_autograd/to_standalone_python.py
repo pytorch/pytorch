@@ -1135,6 +1135,24 @@ def call(flat_inputs):  # noqa: F811
     return "\n".join(parts)
 
 
+def _graph_differentiates(gm: GraphModule) -> bool:
+    """Whether a single dense graph carries a backward inside it.
+
+    A graph traced through a ``.backward()`` / ``torch.autograd.grad`` call has
+    the backward ops inlined rather than split into a joint, so it reaches this
+    layer looking like a forward. It is not one, and lowering it as inference
+    picks layouts the training path would not.
+
+    Matching on the op NAME is sufficient rather than sloppy: the only thing
+    ``is_inference`` changes here is inductor's layout decision, and
+    ``GraphLowering.decide_layout_opt`` returns early unless the graph contains
+    convolutions -- whose backward is a named ``convolution_backward``. A
+    Linear's backward decomposes to ``mm``/``t`` and would not match, but such a
+    graph has no conv for layout optimization to act on either.
+    """
+    return any("backward" in str(node.target) for node in gm.graph.nodes)
+
+
 def _restride_backward_placeholders(
     bw_gm: GraphModule,
     fwd_output_strides: Sequence[tuple[int, ...] | None],
@@ -1342,16 +1360,25 @@ def compile_to_python(
         # to _aot_stage2b_bw_compile; a capture pass that never lowers cannot
         # observe it, and two independently-lowered graphs then disagree about
         # layout -- loudly on a conv net, silently if size asserts are off.
-        training = "bw" in dense
+        # Two different questions, and conflating them is a real bug. Whether
+        # there is a JOINT decides what to compose; whether the computation
+        # DIFFERENTIATES decides what to tell inductor. A make_fx-style graph
+        # that differentiates inline has no joint but is not inference, and
+        # inductor's decide_layout_opt takes a different branch for inference:
+        # it converts a conv to channels-last, so cuDNN serves a TF32 NHWC
+        # kernel where the same computation under torch.compile gets fp32 NCHW
+        # -- a silent ~2e-4 relative difference in the gradients.
+        has_joint = "bw" in dense
+        differentiates = has_joint or _graph_differentiates(dense["gm"])
         fwd_output_strides: list[tuple[int, ...] | None] = []
         inner_python, cache = _inductor_compile_to_python(
             dense["gm"],
             example_inputs,
             options=options,
-            is_inference=not training,
+            is_inference=not differentiates,
             output_strides=fwd_output_strides,
         )
-        if not training:
+        if not has_joint:
             source = _compose_standalone_module(
                 inner_python, captured, dense["placeholder"]
             )
