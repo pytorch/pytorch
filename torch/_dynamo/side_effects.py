@@ -2015,21 +2015,20 @@ def _codegen_attribute_mutation(ctx: SideEffectReplayContext) -> None:
         ctx.log(var)
 
 
-_LIST_OR_TUPLE_ITERATOR = (
-    variables.ListIteratorVariable,
-    variables.TupleIteratorVariable,
-)
-
-
 @register_side_effect_replay_handler(
     name="list_iterator_mutation",
-    matcher=lambda ctx: isinstance(ctx.var, _LIST_OR_TUPLE_ITERATOR),
+    # Lazy: builder imports side_effects while variables/ is still initializing.
+    matcher=lambda ctx: isinstance(
+        ctx.var, (variables.ListIteratorVariable, variables.TupleIteratorVariable)
+    ),
     priority=30,
 )
 def _codegen_list_iterator_mutation(ctx: SideEffectReplayContext) -> None:
     cg = ctx.codegen
     var = ctx.var
-    if not isinstance(var, _LIST_OR_TUPLE_ITERATOR):
+    if not isinstance(
+        var, (variables.ListIteratorVariable, variables.TupleIteratorVariable)
+    ):
         raise AssertionError(type(var))
     for _ in range(var.index):
         cg.add_push_null(lambda: cg.load_import_from(utils.__name__, "iter_next"))
