@@ -3071,14 +3071,22 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 expr = arg.node.expr if isinstance(arg, torch.SymInt) else arg
                 new_int_args.append(cexpr(expr))
             elif isinstance(arg_type, torch.NumberType):
-                # Scalar of type int
-                if not isinstance(arg, (int, float, bool)):
-                    raise AssertionError(
-                        f"expected arg to be int, float, or bool, got {type(arg)}"
-                    )
-                # Only treat int Scalar as dynamic
-                if isinstance(arg, int):
-                    new_int_args.append(str(arg))
+                # A symbolic scalar (SymInt) bound to a Scalar slot is a dynamic int64
+                # runtime arg, mirroring the SymIntType branch above. The host proxy
+                # executor's NumberType case accepts the resulting as_sym_int tag.
+                if isinstance(arg, torch.SymInt):
+                    new_int_args.append(cexpr(arg.node.expr))
+                else:
+                    # Scalar of type int
+                    if not isinstance(arg, (int, float, bool)):
+                        raise AssertionError(
+                            f"expected arg to be int, float, or bool, got {type(arg)}"
+                        )
+                    # Only treat int Scalar as dynamic. `bool` is an int subclass
+                    # but is serialized as_bool and prefilled statically, so it
+                    # must not be counted here.
+                    if type(arg) is int:
+                        new_int_args.append(str(arg))
             elif isinstance(arg, ir.TorchBindObject):
                 # torchbind objects are loaded in proxy executor
                 pass
