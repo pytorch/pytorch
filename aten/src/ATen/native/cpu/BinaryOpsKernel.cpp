@@ -1195,7 +1195,22 @@ void lcm_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_INTEGRAL_TYPES(iter.common_dtype(), "lcm_cpu", [&]() {
     cpu_kernel(iter, [](scalar_t a, scalar_t b) -> scalar_t {
       scalar_t g = calc_gcd(a, b);
-      return (g == 0) ? 0 : std::abs(a / g * b);
+      if (g == 0) {
+        return 0;
+      }
+      // Compute the lcm magnitude purely from unsigned magnitudes. The signed
+      // form abs(a / g * b) traps on the type-min / -1 division (calc_gcd can
+      // return a negative gcd for a type-min input because abs of the type
+      // minimum overflows) and can overflow the product; doing it in unsigned
+      // never traps and the wraparound matches NumPy.
+      // See https://github.com/pytorch/pytorch/issues/121343.
+      using unsigned_t = std::make_unsigned_t<scalar_t>;
+      auto umag = [](scalar_t v) -> unsigned_t {
+        unsigned_t uv = static_cast<unsigned_t>(v);
+        return v < 0 ? static_cast<unsigned_t>(0) - uv : uv;
+      };
+      unsigned_t result = (umag(a) / umag(g)) * umag(b);
+      return static_cast<scalar_t>(result);
     });
   });
 }
