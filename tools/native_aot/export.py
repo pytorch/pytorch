@@ -161,9 +161,10 @@ def source_closure(decl_path: str | None = None) -> dict[str, str]:
 
 
 def _json_normal(value):
-    """The spec as a sidecar reads it back: tuples become lists, JSON having no
-    tuple type. Skip detection compares a live grid point against a recorded
-    spec, so without this a tuple-valued field re-exports on every run."""
+    """The spec as a sidecar reads it back: tuples become lists, since
+    JSON has no tuple type. Skip detection compares a live grid point
+    against a recorded spec, so a tuple-valued field must be converted
+    or it never matches its own sidecar and re-exports on every run."""
     if isinstance(value, (tuple, list)):
         return [_json_normal(v) for v in value]
     if isinstance(value, dict):
@@ -361,12 +362,14 @@ _CLEAN_HINT = (
 
 
 def _read_sidecar(path: str) -> dict:
-    """A sidecar's JSON. Unreadable ones are fatal.
+    """A sidecar's JSON. Unreadable sidecars are fatal.
 
-    The sidecar is written LAST, so its presence marks a completed export. One
-    that will not parse means the artifacts beside it are of unknown provenance,
-    and re-exporting would only make the directory look consistent. Reached even
-    under --force, via _collect_jobs' orphan scan.
+    The sidecar is written LAST, so its presence marks a completed
+    export. One that exists but will not parse means the tree is
+    corrupted and the .o/.h beside it are of unknown provenance.
+    Re-exporting would just make the directory look consistent again.
+    Reached even under --force, via the orphan scan in _collect_jobs, so
+    gen_aot_lib never links artifacts nothing validated.
     """
     try:
         with open(path) as f:
