@@ -17,7 +17,7 @@ import torch
 from torch._jit_internal import _get_model_id
 from torch._utils_internal import log_torchscript_usage
 from torch.jit._recursive import wrap_cpp_module
-from torch.serialization import validate_cuda_device
+from torch.serialization import _validate_device
 
 
 def save(m, f, _extra_files=None) -> None:
@@ -222,8 +222,17 @@ def validate_map_location(map_location=None):
             "but got type: " + str(type(map_location))
         )
 
-    if str(map_location).startswith("cuda"):
-        validate_cuda_device(map_location)
+    # Validate against whichever backend registered torch.<device_type>, rather
+    # than only CUDA: _validate_device is already parameterized by backend name
+    # and reports an unavailable device or an out-of-range index the same way for
+    # all of them. Two types are skipped rather than validated -- one with no
+    # device module at all (meta) has nothing to check against and is left to the
+    # loader, and cpu is skipped by name because torch.cpu exists but is never
+    # the absent-runtime case this guards.
+    if map_location is not None:
+        device_type = map_location.type
+        if device_type != "cpu" and hasattr(torch, device_type):
+            _validate_device(map_location, device_type)
 
     return map_location
 

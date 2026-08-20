@@ -622,14 +622,9 @@ def _validate_device(location, backend_name):
             "to map your storages to the CPU."
         )
     device_module = getattr(torch, backend_name)
-    if hasattr(device_module, "_utils") and hasattr(
-        device_module._utils, "_get_device_index"
-    ):
-        device_index = device_module._utils._get_device_index(location, True)
-        device = torch.device(backend_name, device_index)
-    else:
-        device = torch.device(location)
-        device_index = device.index if device.index else 0
+    # Availability first: resolving the index can itself query the runtime, and a
+    # backend that is not present fails there with its own message instead of the
+    # actionable one below.
     if hasattr(device_module, "is_available") and not device_module.is_available():
         raise RuntimeError(
             f"Attempting to deserialize object on a {backend_name.upper()} "
@@ -638,6 +633,14 @@ def _validate_device(location, backend_name):
             "please use torch.load with map_location=torch.device('cpu') "
             "to map your storages to the CPU."
         )
+    if hasattr(device_module, "_utils") and hasattr(
+        device_module._utils, "_get_device_index"
+    ):
+        device_index = device_module._utils._get_device_index(location, True)
+        device = torch.device(backend_name, device_index)
+    else:
+        device = torch.device(location)
+        device_index = device.index if device.index else 0
     if hasattr(device_module, "device_count"):
         device_count = device_module.device_count()
         if device_index >= device_count:

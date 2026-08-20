@@ -25,6 +25,48 @@ from torch.testing._internal.jit_utils import clear_class_registry, JitTestCase
 
 
 class TestSaveLoad(JitTestCase):
+    def test_validate_map_location_checks_every_backend(self):
+        """
+        validate_map_location used to validate only when the target was CUDA, so
+        an unavailable non-CUDA accelerator passed straight through to the
+        loader. Every accelerator with a registered device module is checked.
+        """
+        from torch.jit._serialization import validate_map_location
+
+        checked = []
+        for device_type in ("cuda", "xpu", "mps", "mtia"):
+            device_module = getattr(torch, device_type, None)
+            if device_module is None or not hasattr(device_module, "is_available"):
+                continue
+            if device_module.is_available():
+                continue
+            checked.append(device_type)
+            with self.assertRaisesRegex(
+                RuntimeError, rf"torch\.{device_type}\.is_available\(\) is False"
+            ):
+                validate_map_location(device_type)
+
+        if not checked:
+            self.skipTest(
+                "every accelerator with a device module is available on this machine"
+            )
+
+    def test_validate_map_location_passes_through_deviceless_targets(self):
+        """
+        A device type with no device module has nothing to validate against and
+        must still round-trip, as must CPU and None.
+        """
+        from torch.jit._serialization import validate_map_location
+
+        self.assertIsNone(validate_map_location(None))
+        self.assertEqual(validate_map_location("cpu"), torch.device("cpu"))
+        self.assertEqual(validate_map_location("meta"), torch.device("meta"))
+        self.assertEqual(
+            validate_map_location(torch.device("cpu")), torch.device("cpu")
+        )
+        with self.assertRaisesRegex(ValueError, "map_location should be either"):
+            validate_map_location(0)
+
     def test_different_modules(self):
         """
         Exercise the situation where we have the same qualified name
