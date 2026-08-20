@@ -6,7 +6,7 @@ SCRIPTPATH="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 PYTORCH_ROOT="${PYTORCH_ROOT:-$(cd "${SCRIPTPATH}/../.." && pwd)}"
 
 case "${GPU_ARCH_TYPE:-BLANK}" in
-    cuda|cuda-aarch64|cpu|cpu-aarch64|cpu-cxx11-abi|xpu|rocm)
+    cuda|cuda-aarch64|cpu|cpu-aarch64|cpu-riscv64|cpu-cxx11-abi|xpu|rocm)
         # New pipeline: pyproject-driven build via `python -m build`
         # then patchelf-based wheel repair.
         source "${SCRIPTPATH}/set_desired_python.sh"

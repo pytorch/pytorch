@@ -211,9 +211,21 @@ class SymNode:
 
     @property
     def expr(self) -> sympy.Basic:
+        # Fast path for a constant, where replace() cannot do anything and is
+        # expensive: a SymBool that has settled on one asks for its expr 25k
+        # times in one inductor compile. These are class attributes, so no
+        # sympy import is needed - importing it here would pull sympy into
+        # `import torch` and cost ~0.3s of startup, which is also why this is
+        # is_Boolean and is_Atom (exactly sympy.true / sympy.false) rather than
+        # an identity check, and is_Number rather than is_number, which walks
+        # the tree uncached.
         if (
             isinstance(self._expr, int)
-            or self._expr.is_number  # pyrefly: ignore[missing-attribute]
+            or self._expr.is_Number  # pyrefly: ignore[missing-attribute]
+            or (
+                self._expr.is_Boolean  # pyrefly: ignore[missing-attribute]
+                and self._expr.is_Atom  # pyrefly: ignore[missing-attribute]
+            )
         ):
             return self._expr
         if self.shape_env is None:
@@ -809,7 +821,7 @@ unary_nonmagic_methods = {
 unary_methods = unary_magic_methods | unary_nonmagic_methods
 
 # Most methods are only registered on SymInt and SymFloat
-# Some methods are only be registered on SymBool
+# Some methods are only registered on SymBool
 only_bool_magic_methods = {"and", "or", "xor", "sym_not", "sym_ite"}
 # Methods that implicitly convert SymBool into SymInt
 bool_becomes_int_magic_methods = {"add", "sub", "mul"}

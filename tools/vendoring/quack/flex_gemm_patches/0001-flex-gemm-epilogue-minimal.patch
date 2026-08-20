@@ -11,16 +11,25 @@ diff --git a/cute_dsl_utils.py b/cute_dsl_utils.py
 index 2090fb978d1..f54fdf41733 100644
 --- a/cute_dsl_utils.py
 +++ b/cute_dsl_utils.py
-@@ -16,7 +16,7 @@ except ImportError:
+@@ -16,7 +16,16 @@ except ImportError:
  
  import cutlass
  import cutlass.cute as cute
 -from cutlass import Int32, Int64, Float16, BFloat16, Float32
-+from cutlass import Uint8, Int32, Int64, Float16, BFloat16, Float32
++from cutlass import (
++    BFloat16,
++    Float16,
++    Float32,
++    Float8E4M3FN,
++    Float8E8M0FNU,
++    Int32,
++    Int64,
++    Uint8,
++)
  from cutlass.base_dsl.tvm_ffi_builder import spec
  from cutlass.cutlass_dsl import NumericMeta
  
-@@ -54,6 +54,8 @@ _converter_module._convert_single_arg = _patched_convert_single_arg
+@@ -54,9 +63,13 @@ _converter_module._convert_single_arg = _patched_convert_single_arg
  
  
  torch2cute_dtype_map = {
@@ -29,16 +38,21 @@ index 2090fb978d1..f54fdf41733 100644
      torch.float16: Float16,
      torch.bfloat16: BFloat16,
      torch.float32: Float32,
++    torch.float8_e4m3fn: Float8E4M3FN,
++    torch.float8_e8m0fnu: Float8E8M0FNU,
+     torch.int32: Int32,
+     torch.int64: Int64,
+ }
 diff --git a/epi_ops.py b/epi_ops.py
 index a02a4e7..9633276 100644
 --- a/epi_ops.py
 +++ b/epi_ops.py
 @@ -292,6 +292,7 @@ class VecLoad(EpiOp):
      """
- 
+
      dim = None  # 0 for col (M), 1 for row (N)
 +    convert_to_acc_dtype = True
- 
+
      def param_fields(self):
          return [(self.name, object, None)]
 @@ -371,7 +372,12 @@ class VecLoad(EpiOp):
@@ -53,7 +67,7 @@ index a02a4e7..9633276 100644
 +        )
 +        tDrV_cvt = cute.make_rmem_tensor(tDsV_sub.layout, register_dtype)
          return [tDsV, tDrV_cvt]
- 
+
      @cute.jit
 @@ -388,7 +394,10 @@ class VecLoad(EpiOp):
              tDsV_cur = cute.group_modes(tDsV, 3, cute.rank(tDsV))[None, None, None, epi_coord]
@@ -65,8 +79,8 @@ index a02a4e7..9633276 100644
 +            else:
 +                tDrV_cvt.store(tDrV.load())
          return tDrV_cvt
- 
- 
+
+
 @@ -452,7 +461,12 @@ class ColVecLoad(VecLoad):
              tDsV = ctx.tiled_copy_r2s.retile(tDsV)
          # Pre-allocate register tensor reused across begin_loop calls
@@ -79,8 +93,8 @@ index a02a4e7..9633276 100644
 +        )
 +        tDrV_cvt = cute.make_rmem_tensor(tDsV_sub.layout, register_dtype)
          return [tDsV, tDrV_cvt]
- 
- 
+
+
 @@ -456,6 +456,93 @@ class ColVecLoad(VecLoad):
          return [tDsV, tDrV_cvt]
 
