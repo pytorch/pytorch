@@ -1307,6 +1307,14 @@ if(NOT MSVC)
     # Suppress "The ABI for passing parameters with 64-byte alignment has
     # changed in GCC 4.6"
     string(APPEND CMAKE_CXX_FLAGS " -Wno-psabi")
+    # GCC 12+ warns on every use of std::hardware_destructive_interference_size
+    # because its value tracks -mtune. c10/core/alignment.h re-exports it and
+    # ATen/c10 align on it in several headers, so with -Werror this breaks any
+    # target that does not go through torch_compile_options() (which carries the
+    # same suppression, added in #166297).
+    if(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 12)
+      string(APPEND CMAKE_CXX_FLAGS " -Wno-interference-size")
+    endif()
   endif()
 
   # Use ld.gold if available, fall back to ld.bfd (the default ld) if not
