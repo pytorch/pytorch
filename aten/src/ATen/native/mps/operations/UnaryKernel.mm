@@ -126,12 +126,15 @@ static void frexp_kernel_mps(TensorIteratorBase& iter) {
       [computeEncoder setComputePipelineState:pipelineState];
       mps::bind_iter_tensors(computeEncoder, iter);
       if (!is_dense) {
-        mps::mtl_setArgs<3>(computeEncoder,
-                            iter.shape(),
-                            iter.strides(0),
-                            iter.strides(1),
-                            iter.strides(2),
-                            static_cast<uint32_t>(iter.ndim()));
+        FrexpParams params{};
+        params.ndim = static_cast<int32_t>(iter.ndim());
+        for (const auto i : c10::irange(iter.ndim())) {
+          params.sizes[i] = static_cast<int32_t>(iter.shape()[i]);
+          params.mantissa_strides[i] = static_cast<int32_t>(iter.strides(0)[i]);
+          params.exponent_strides[i] = static_cast<int32_t>(iter.strides(1)[i]);
+          params.input_strides[i] = static_cast<int32_t>(iter.strides(2)[i]);
+        }
+        mps::mtl_setArgs<3>(computeEncoder, params);
       }
       mps::mtl_dispatch1DJob(computeEncoder, pipelineState, iter.numel());
 
