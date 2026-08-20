@@ -30,12 +30,13 @@ from torch.testing._internal.common_dtype import (
 from torch.testing._internal.common_device_type import (
     onlyCPU, onlyCUDA, onlyNativeDeviceTypes, disablecuDNN,
     skipCUDAIfNoCusolver, skipCPUIfNoLapack, skipCPUIfNoFFT, skipCUDAIf, precisionOverride,
-    skipCPUIfNoMklSparse, toleranceOverride, tol, skipXPU, e4m3_type, E4M3_MAX_POS, E5M2_MAX_POS,
+    skipCPUIfNoMklSparse, toleranceOverride, tol, skipXPU, e4m3_type, e5m2_type, E4M3_MAX_POS, E5M2_MAX_POS,
     skipCUDAIfNoMagmaAndNoLinalgsolver,
 )
 from torch.testing._internal.common_cuda import (
-    PLATFORM_SUPPORTS_FLASH_ATTENTION, PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
-    SM53OrLater, SM80OrLater, SM89OrLater, SM90OrLater, with_tf32_off, TEST_CUDNN,
+    PLATFORM_SUPPORTS_FLASH_ATTENTION, PLATFORM_SUPPORTS_FP8,
+    PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+    SM53OrLater, SM80OrLater, SM90OrLater, with_tf32_off, TEST_CUDNN,
     _get_torch_cuda_version,
 )
 from torch.testing._internal.common_quantized import (
@@ -1387,7 +1388,11 @@ def sample_inputs_addbmm(op_info, device, dtype, requires_grad, **kwargs):
             beta_complex, alpha_complex = beta * (1 + 2j), alpha * (2 + 3j)
             yield SampleInput(make_arg(input_shape), args=(make_arg(batch1_shape), make_arg(batch2_shape)),
                               kwargs=dict(beta=beta_complex, alpha=alpha_complex), broadcasts_input=is_broadcasting)
-        yield SampleInput(make_arg(input_shape), args=(make_arg(batch1_shape), make_arg(batch2_shape)),
+        if beta == 0 and (dtype.is_floating_point or dtype.is_complex):
+            input = torch.full(input_shape, math.inf, device=device, dtype=dtype, requires_grad=requires_grad)
+        else:
+            input = make_arg(input_shape)
+        yield SampleInput(input, args=(make_arg(batch1_shape), make_arg(batch2_shape)),
                           kwargs=dict(beta=beta, alpha=alpha), broadcasts_input=is_broadcasting)
 
 def sample_inputs_addcmul_addcdiv(op_info, device, dtype, requires_grad, **kwargs):
@@ -1401,17 +1406,11 @@ def sample_inputs_addcmul_addcdiv(op_info, device, dtype, requires_grad, **kwarg
                   ]
 
     for input_args, broadcasts_input in test_cases:
-        # addcdiv should accept inputs with zero value
-        # Currently, it throws ZeroDivisionError when the denominator is zero
-        # TODO: exclude_zeros can be removed after https://github.com/pytorch/pytorch/issues/73638 is fixed
-        args = tuple(make_arg(arg, exclude_zero=True) if isinstance(arg, tuple) else arg
+        args = tuple(make_arg(arg) if isinstance(arg, tuple) else arg
                      for arg in input_args)
         yield SampleInput(*args).with_metadata(broadcasts_input=broadcasts_input)
 
-        # addcdiv should accept inputs with zero value
-        # Currently, it throws ZeroDivisionError when the denominator is zero
-        # TODO: exclude_zeros can be removed after https://github.com/pytorch/pytorch/issues/73638 is fixed
-        args = tuple(make_arg(arg, exclude_zero=True) if isinstance(arg, tuple) else arg
+        args = tuple(make_arg(arg) if isinstance(arg, tuple) else arg
                      for arg in input_args)
         yield SampleInput(
             *args, value=3.14 if dtype.is_floating_point or dtype.is_complex else 3
@@ -1468,11 +1467,16 @@ def sample_inputs_baddbmm(op_info, device, dtype, requires_grad, **kwargs):
                   ((), (S, S, S), (S, S, M), 1, 1, True),
                   ((), (S, S, S), (S, S, M), 0.6, 0.2, True),
                   ((), (0, S, S), (0, S, M), 1, 1, True),  # empty batch, see #188765
+                  ((S, S, M), (S, S, 0), (S, 0, M), 1, 0, False),
                   ]
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad, low=None, high=None)
     for (input_shape, batch1_shape, batch2_shape, alpha, beta, broadcasts_input) in test_cases:
+        if beta == 0 and (dtype.is_floating_point or dtype.is_complex):
+            input = torch.full(input_shape, math.inf, device=device, dtype=dtype, requires_grad=requires_grad)
+        else:
+            input = make_arg(input_shape)
         yield SampleInput(
-            make_arg(input_shape),
+            input,
             make_arg(batch1_shape),
             make_arg(batch2_shape),
             beta=beta,
@@ -9355,28 +9359,28 @@ def sample_inputs_scaled_mm(op_info, device, dtype, requires_grad, **kwargs):
     # Case 1: Both matrices e4m3
     scale1 = random.random()
     scale2 = random.random()
-    mat1 = make_mat((M, K), scale1, torch.float8_e4m3fn)
-    mat2 = make_mat((K, N), scale2, torch.float8_e4m3fn).t().contiguous().t()
-    scale_tensor1 = make_scale(scale1, torch.float8_e4m3fn)
-    scale_tensor2 = make_scale(scale2, torch.float8_e4m3fn)
+    mat1 = make_mat((M, K), scale1, e4m3_type)
+    mat2 = make_mat((K, N), scale2, e4m3_type).t().contiguous().t()
+    scale_tensor1 = make_scale(scale1, e4m3_type)
+    scale_tensor2 = make_scale(scale2, e4m3_type)
     samples.append(SampleInput(mat1, mat2, scale_tensor1, scale_tensor2))
 
     # Case 2: mat1 e4m3, mat2 e5m2
     scale1 = random.random()
     scale2 = random.random()
-    mat1 = make_mat((M, K), scale1, torch.float8_e4m3fn)
-    mat2 = make_mat((K, N), scale2, torch.float8_e5m2).t().contiguous().t()
-    scale_tensor1 = make_scale(scale1, torch.float8_e4m3fn)
-    scale_tensor2 = make_scale(scale2, torch.float8_e5m2)
+    mat1 = make_mat((M, K), scale1, e4m3_type)
+    mat2 = make_mat((K, N), scale2, e5m2_type).t().contiguous().t()
+    scale_tensor1 = make_scale(scale1, e4m3_type)
+    scale_tensor2 = make_scale(scale2, e5m2_type)
     samples.append(SampleInput(mat1, mat2, scale_tensor1, scale_tensor2))
 
     # Case 3: mat1 e5m2, mat2 e4m3
     scale1 = random.random()
     scale2 = random.random()
-    mat1 = make_mat((M, K), scale1, torch.float8_e5m2)
-    mat2 = make_mat((K, N), scale2, torch.float8_e4m3fn).t().contiguous().t()
-    scale_tensor1 = make_scale(scale1, torch.float8_e5m2)
-    scale_tensor2 = make_scale(scale2, torch.float8_e4m3fn)
+    mat1 = make_mat((M, K), scale1, e5m2_type)
+    mat2 = make_mat((K, N), scale2, e4m3_type).t().contiguous().t()
+    scale_tensor1 = make_scale(scale1, e5m2_type)
+    scale_tensor2 = make_scale(scale2, e4m3_type)
     samples.append(SampleInput(mat1, mat2, scale_tensor1, scale_tensor2))
 
     # Case 4: MXFP4 (float4_e2m1fn_x2) with E8M0 blockwise scaling
@@ -9409,7 +9413,7 @@ def sample_inputs_scaled_mm(op_info, device, dtype, requires_grad, **kwargs):
 
 def sample_inputs_scaled_mm_v2(op_info, device, dtype, requires_grad, **kwargs):
     from torch.nn.functional import ScalingType, SwizzleType
-    make_mat_e4m3 = partial(make_tensor, device=device, dtype=torch.float8_e4m3fn, requires_grad=requires_grad)
+    make_mat_e4m3 = partial(make_tensor, device=device, dtype=e4m3_type, requires_grad=requires_grad)
 
     make_scale = partial(make_tensor, device=device, dtype=torch.float, requires_grad=False)
 
@@ -12361,7 +12365,8 @@ op_db: list[OpInfo] = [
            ],
            sample_inputs_func=sample_inputs_addmv),
     OpInfo('addbmm',
-           ref=lambda M, batch1, batch2, beta=1, alpha=1: np.add(np.multiply(np.asarray(beta, dtype=M.dtype), M),
+           ref=lambda M, batch1, batch2, beta=1, alpha=1: np.add(np.zeros_like(M) if beta == 0 else
+                                                                 np.multiply(np.asarray(beta, dtype=M.dtype), M),
                                                                  np.multiply(np.asarray(alpha, dtype=batch1.dtype),
                                                                              np.sum(np.matmul(batch1, batch2), axis=0))),
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16),
@@ -17102,11 +17107,15 @@ op_db: list[OpInfo] = [
         'torch._scaled_mm_v2',
         sample_inputs_func=sample_inputs_scaled_mm_v2,
         dtypes=float8_types(),
+        # Deliberately e4m3fn even on gfx942 (native fnuz): this dtype only
+        # names the generated test id, which must stay stable across archs for
+        # the disable-test bot and flaky-test aggregator. Sample inputs ignore
+        # it and use e4m3_type / e5m2_type instead.
         dtypesIfCUDA=empty_types() + (torch.float8_e4m3fn,),
         supports_out=True,
         supports_forward_ad=False,
         supports_autograd=False,
-        decorators=[onlyCUDA, skipCUDAIf(not SM89OrLater or TEST_WITH_ROCM, 'Requires CUDA SM >= 8.9')],
+        decorators=[onlyCUDA, skipCUDAIf(not PLATFORM_SUPPORTS_FP8, 'Requires FP8 support')],
         skips=(
             # Sample inputs isn't really parametrized on dtype
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes'),
@@ -17132,11 +17141,12 @@ op_db: list[OpInfo] = [
         'torch._scaled_mm',
         sample_inputs_func=sample_inputs_scaled_mm,
         dtypes=float8_types(),
+        # Deliberately e4m3fn even on gfx942 (native fnuz); see _scaled_mm_v2.
         dtypesIfCUDA=empty_types() + (torch.float8_e4m3fn,),
         supports_out=True,
         supports_forward_ad=False,
         supports_autograd=False,
-        decorators=[skipXPU, skipCUDAIf(not SM89OrLater or TEST_WITH_ROCM, 'Requires CUDA SM >= 8.9')],
+        decorators=[skipXPU, skipCUDAIf(not PLATFORM_SUPPORTS_FP8, 'Requires FP8 support')],
         skips=(
             # Sample inputs isn't really parametrized on dtype
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes'),
@@ -17783,7 +17793,7 @@ op_db: list[OpInfo] = [
     UnaryUfuncInfo('nn.functional.hardtanh',
                    aten_name="hardtanh",
                    aten_backward_name='hardtanh_backward',
-                   dtypes=floating_types_and(torch.int8, torch.int16, torch.int32, torch.int64, torch.half, torch.bfloat16),
+                   dtypes=all_types_and(torch.half, torch.bfloat16),
                    backward_dtypes=all_types_and(torch.half, torch.bfloat16),
                    backward_dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
                    assert_autodiffed=True,
@@ -19848,7 +19858,7 @@ op_db: list[OpInfo] = [
     OpInfo('rand_like',
            dtypes=floating_types_and(torch.half, torch.bfloat16, torch.complex32, torch.complex64, torch.complex128),
            op=lambda inp, *args, **kwargs:
-               wrapper_set_seed(torch.randn_like, inp, *args, **kwargs),
+               wrapper_set_seed(torch.rand_like, inp, *args, **kwargs),
            supports_out=False,
            sample_inputs_func=sample_inputs_like_fns,
            supports_autograd=False,
@@ -19856,7 +19866,7 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
                # AssertionError: JIT Test does not execute any logic
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-               DecorateInfo(unittest.skip("Expected: randn_like is not comparable between dtypes"),
+               DecorateInfo(unittest.skip("Expected: rand_like is not comparable between dtypes"),
                             'TestCommon', 'test_complex_half_reference_testing'),
                DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
            )),
