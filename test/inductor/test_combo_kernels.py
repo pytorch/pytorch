@@ -356,26 +356,37 @@ class ComboKernelTests(TestCase):
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @requires_cuda_and_triton
-    def test_source_independent_masks_stay_local(self):
-        def make_mask(size, dtype, value):
-            index = torch.arange(size, device=GPU_TYPE)
-            causal = index[:, None] >= index[None, :]
-            return torch.where(causal, value, float("-inf")).to(dtype)
-
-        def fn(q, k, v):
+    @parametrize("bias_kind", ("causal", "alibi"))
+    def test_source_independent_masks_stay_local(self, bias_kind):
+        def make_bias(q):
             size = q.shape[-2]
+            index = torch.arange(size, device=GPU_TYPE)
+            if bias_kind == "alibi":
+                num_heads = q.shape[-3]
+                head = torch.arange(num_heads, device=GPU_TYPE)
+                slopes = torch.exp2(-((head + 1) * 8.0 / num_heads))
+                relative_position = index[None, :] - index[:, None]
+                return (slopes[:, None, None] * relative_position[None, :, :]).to(
+                    q.dtype
+                )
+            causal = index[:, None] >= index[None, :]
+            return torch.where(causal, 0.0, float("-inf")).to(q.dtype)
+
+        def fn(q1, k1, v1, q2, k2, v2):
             first = torch.nn.functional.scaled_dot_product_attention(
-                q, k, v, attn_mask=make_mask(size, q.dtype, 0.0)
+                q1, k1, v1, attn_mask=make_bias(q1)
             )
             second = torch.nn.functional.scaled_dot_product_attention(
-                q, k, v, attn_mask=make_mask(size, q.dtype, 1.0)
+                q2, k2, v2, attn_mask=make_bias(q2)
             )
-            return first + second
+            return first, second
 
-        inps = [
-            torch.rand(1, 4, 128, 32, device=GPU_TYPE, dtype=torch.float16)
-            for _ in range(3)
-        ]
+        inps = []
+        for num_heads, size in ((4, 96), (8, 128)):
+            inps.extend(
+                torch.rand(1, num_heads, size, 32, device=GPU_TYPE, dtype=torch.float16)
+                for _ in range(3)
+            )
         with fresh_cache():
             _, code = run_and_get_code(torch.compile(fn), *inps)
 
@@ -392,7 +403,7 @@ class ComboKernelTests(TestCase):
                 events.append("kernel")
         self.assertEqual(events[:4], ["kernel", "attention", "kernel", "attention"])
         self.assertNotIn("'num_kernels': 2", source)
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 3)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
     @requires_gpu_and_triton
     @torch._functorch.config.patch("cse", False)

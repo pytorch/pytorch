@@ -3609,22 +3609,15 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
             node
             for node in filtered_nodes
             if _real_dep_names(node.read_writes.reads)
-            or not (
-                any(
-                    origin.op == "call_function"
-                    and origin.target is torch.ops.aten.where.self
-                    for snode in node.get_nodes()
-                    if snode.node is not None
-                    for origin in snode.node.get_origins()
-                )
-                and any(
-                    not use.is_weak
-                    and isinstance(use.node, ExternKernelSchedulerNode)
-                    and isinstance(use.node.node, ir.ExternKernel)
-                    and use.node.node.op_overload in masked_sdpa_ops
-                    for output in node.get_outputs()
-                    for use in output.users
-                )
+            or not any(
+                not use.is_weak
+                and isinstance(use.node, ExternKernelSchedulerNode)
+                and isinstance(use.node.node, ir.ExternKernel)
+                and use.node.node.op_overload in masked_sdpa_ops
+                and len(use.node.node.inputs) > 3
+                and use.node.node.input_name(3) == output.get_name()
+                for output in node.get_outputs()
+                for use in output.users
             )
         ]
 
