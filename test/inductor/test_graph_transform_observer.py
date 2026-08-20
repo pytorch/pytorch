@@ -18,10 +18,9 @@ from torch.testing._internal.common_utils import HardwareClassification, IS_LINU
 
 
 class TestGraphTransformObserver(TestCase):
-    hw_classification = HardwareClassification.CUDA
+    hw_classification = HardwareClassification.ACCELERATOR
 
-    @requires_capabilities(Capability.lib.triton)
-    @requires_capabilities(Capability.attention.fused_attention)
+    @requires_capabilities(Capability.lib.triton, Capability.attention.fused_attention)
     def test_sdpa_rewriter(self, device):
         if shutil.which("dot") is None:
             self.skipTest("Requires dot")
@@ -65,7 +64,7 @@ class TestGraphTransformObserver(TestCase):
         self.assertTrue(found_output_svg)
 
 
-instantiate_device_type_tests(TestGraphTransformObserver, globals(), only_for="cuda")
+instantiate_device_type_tests(TestGraphTransformObserver, globals(), except_for="cpu")
 
 
 if __name__ == "__main__":
