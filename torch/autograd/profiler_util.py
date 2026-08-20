@@ -146,7 +146,7 @@ class EventList(list):
         s1 and e1 would be start and end of the child event's interval. And
         s2 and e2 start and end of the parent event's interval
 
-        Example: In event list [[0, 10], [1, 3], [3, 4]] would have make [0, 10]
+        Example: In event list [[0, 10], [1, 3], [3, 4]] would make [0, 10]
         be a parent of two other intervals.
 
         If for any reason two intervals intersect only partially, this function
@@ -304,15 +304,16 @@ class EventList(list):
             for evt in self:
                 if evt.trace_name is None:
                     continue
+                name_json = json.dumps(evt.trace_name)
                 f.write(
-                    '{{"name": "{}", '
+                    '{{"name": {}, '
                     '"ph": "X", '
                     '"ts": {}, '
                     '"dur": {}, '
                     '"tid": {}, '
                     '"pid": "CPU functions", '
                     '"args": {{}}}}, '.format(
-                        evt.trace_name,
+                        name_json,
                         evt.time_range.start,
                         evt.time_range.elapsed_us(),
                         evt.thread
@@ -324,7 +325,7 @@ class EventList(list):
                     # 's' and 'f' draw Flow arrows from
                     # the CPU launch to the GPU kernel
                     f.write(
-                        f'{{"name": "{evt.trace_name}", '
+                        f'{{"name": {name_json}, '
                         '"ph": "s", '
                         f'"ts": {evt.time_range.start}, '
                         f'"tid": {evt.thread}, '
@@ -708,6 +709,10 @@ class FunctionEvent(FormattedTimesMixin):
         is_legacy (bool): Whether this is from the legacy profiler.
         flops (int): Estimated floating point operations.
         is_user_annotation (bool): Whether this is a user-annotated region.
+        metadata (Dict[str, Any]): Additional metadata keyed by the field names
+            used in exported traces. Use
+            ``_ExperimentalConfig(expose_kineto_event_metadata=True)`` to expose
+            Kineto activity metadata. Available fields vary by activity and backend.
         metadata_json (str): Deprecated. Use event_metadata instead.
         event_metadata (EventMetadata): Additional metadata in structured format.
         structured_input_shapes (List[List[int] | List[List[int]]]): Like ``input_shapes``
@@ -778,6 +783,7 @@ class FunctionEvent(FormattedTimesMixin):
         python_id=-1,
         python_parent_id=-1,
         python_module_id=-1,
+        typed_metadata=None,
     ):
         self.id: int = id
         self.node_id: int = node_id
@@ -827,6 +833,7 @@ class FunctionEvent(FormattedTimesMixin):
         self.flow_start: bool | None = flow_start
         self.external_id: int = external_id
         self.linked_correlation_id: int = linked_correlation_id
+        self.metadata: dict[str, Any] | None = typed_metadata
         self.event_metadata: EventMetadata | None = (
             _build_metadata(extra_meta) if extra_meta else None
         )
