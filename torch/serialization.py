@@ -565,6 +565,14 @@ def _cpu_deserialize(obj, location):
 
 def _mps_deserialize(obj, location):
     if location.startswith("mps"):
+        # MPS predates the shared _backend_tag/_deserialize pair and still moves
+        # storages with obj.mps(): the shared path goes through
+        # torch._utils._to, which needs a torch.<backend>.device context manager
+        # that torch.mps does not provide. Validate through the same helper as
+        # every other backend regardless, so an unavailable device or an
+        # out-of-range index is reported here the way it is reported everywhere
+        # else instead of failing inside the allocator.
+        _validate_device(location, "mps")
         return obj.mps()
 
 
