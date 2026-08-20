@@ -2484,20 +2484,6 @@ class SchedulerNode(BaseSchedulerNode):
         with self.node.with_original_inner_fn():
             self._compute_attrs()
 
-    @contextlib.contextmanager
-    def use_original_reduction(self) -> Iterator[None]:
-        """Temporarily restore the reduction represented by a split node."""
-        if not MixOrderReduction.is_split_reduction(self):
-            yield
-            return
-
-        state = self.snapshot_loop_state()
-        try:
-            self.cancel_reduction_split()
-            yield
-        finally:
-            self.restore_loop_state(state)
-
     def expand_dimension_for_pointwise_node(
         self, dimension: int, new_range: int
     ) -> None:
@@ -5717,10 +5703,6 @@ class Scheduler:
         if atomic_add_template_epilogue and not config.epilogue_fusion_with_atomic_add:
             return FusionResult.fuse(False)
 
-        backend = self.get_backend(node1.get_device())
-        if backend.can_fuse_reduction_chain(node1, node2):
-            return FusionResult.fuse(True)
-
         if not config.benchmark_fusion and not is_multi_template:
             return FusionResult.fuse(True)
 
@@ -8230,10 +8212,6 @@ class Scheduler:
             node1, node2
         ):
             return True
-        if any(node.is_reduction() for node in node1.get_nodes()) and self.get_backend(
-            node1.get_device()
-        ).can_fuse_reduction_chain(node1, node2):
-            return True
         if isinstance(node1, GroupedSchedulerNode) or isinstance(
             node2, GroupedSchedulerNode
         ):
@@ -10695,11 +10673,6 @@ class BaseScheduling:  # noqa: docstring_linter
         node1: BaseSchedulerNode,
         node2: BaseSchedulerNode,
         choice: Any,
-    ) -> bool:
-        return False
-
-    def can_fuse_reduction_chain(
-        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:
         return False
 

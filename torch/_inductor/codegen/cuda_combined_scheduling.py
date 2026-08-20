@@ -164,16 +164,6 @@ class CUDACombinedScheduling(BaseScheduling):
             node1, node2, choice
         )
 
-    def can_fuse_reduction_chain(
-        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
-    ) -> bool:
-        return self._triton_scheduling.can_fuse_reduction_chain(node1, node2)
-
-    def get_fusion_pair_priority(
-        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
-    ) -> int:
-        return self._triton_scheduling.get_fusion_pair_priority(node1, node2)
-
     def group_fn(
         self, sizes: Sequence[Sequence[_IntLike]]
     ) -> tuple[tuple[_IntLike, ...], ...]:

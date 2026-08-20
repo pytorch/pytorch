@@ -202,7 +202,7 @@ class TestMaxAutotune(TestCase):
         self.assertEqual(actual, f(a, b))
         FileCheck().check_count("async_compile.triton", 1, exactly=True).check(
             "block_local_xindex"
-        ).run(code[0])
+        ).check_count("triton_helpers.max2(", 2, exactly=True).run(code[0])
 
     @unittest.skipIf(
         not has_triton_tma_device(), "Need device-side TMA support in Triton"

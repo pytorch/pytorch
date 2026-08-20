@@ -3008,16 +3008,10 @@ class CSEProxy(DefaultHandler):
         self.kernel.record_op_trace("load", (name, index), {}, out)
         return out
 
-    def _update_store_cache(
-        self,
-        name: str,
-        value: CSEVariable,
-        *,
-        node_output_name: str | None = None,
-    ) -> None:
+    def _update_store_cache(self, name: str, value: CSEVariable) -> None:
         self.kernel.cse.store_cache[name] = value
         if self.kernel.current_node and name in V.graph.name_to_buffer:
-            buf = self.kernel.current_node.get_output(node_output_name or name)
+            buf = self.kernel.current_node.get_output(name)
             for other_name in buf.get_mutations():
                 self.kernel.cse.store_cache[other_name] = value
 
@@ -3041,16 +3035,9 @@ class CSEProxy(DefaultHandler):
     def partial_accumulate(self, *args: Any) -> None:
         self.kernel.partial_accumulate(*args)
 
-    def store_reduction(
-        self,
-        name: str,
-        index: sympy.Expr,
-        value: CSEVariable,
-        *,
-        node_output_name: str | None = None,
-    ) -> None:
+    def store_reduction(self, name: str, index: sympy.Expr, value: CSEVariable) -> None:
         self.kernel.store_buffer_names.add(name)
-        self._update_store_cache(name, value, node_output_name=node_output_name)
+        self._update_store_cache(name, value)
 
         if name not in V.graph.removed_buffers:
             self.kernel.num_store += 1
