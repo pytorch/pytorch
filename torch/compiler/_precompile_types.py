@@ -65,6 +65,12 @@ class PrecompileSummary:
     dropped_guards: tuple[tuple[str, str], ...] = ()
     kept_guards: tuple[tuple[str, str], ...] = ()
     risky_dropped_guards: tuple[tuple[str, str], ...] = ()
+    # Guards that COULD have been serialized and were not, because they held
+    # identically across every captured variant. Reported apart from
+    # dropped_guards, which is "could not be serialized", because the reason and
+    # the remedy differ -- but reported, because a capture that silently
+    # discards a precondition should not look like one that had none.
+    policy_dropped_guards: tuple[tuple[str, str], ...] = ()
     capture_errors: tuple[str, ...] = ()
 
     @property
