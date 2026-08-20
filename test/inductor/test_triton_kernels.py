@@ -46,6 +46,7 @@ from torch.testing._internal.inductor_utils import (
     HAS_CPU,
     HAS_CUDA_AND_TRITON,
     HAS_GPU,
+    HAS_GPU_AND_TRITON,
     HAS_XPU_AND_TRITON,
     requires_block_ptr,
     TRITON_HAS_CPU,
@@ -316,10 +317,10 @@ class KernelTests(torch._inductor.test_case.TestCase):
         self.assertIsNotNone(_re.search(r"\b_dunder_add_kernel_0\b", code))
 
     @inductor_config.patch(strict_signed_zero=True)
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_dim_max_min_reuse_argreduce_value(self):
         dtypes = [torch.float32, torch.float16]
-        if torch.cuda.is_bf16_supported(including_emulation=False):
+        if GPU_TYPE == "xpu" or torch.cuda.is_bf16_supported(including_emulation=False):
             dtypes.append(torch.bfloat16)
 
         for op, indexed_helper, value_helper, selected_value in (
@@ -881,7 +882,7 @@ def forward(self, x_1, output_1):
             self.assertEqual(output_code.count('float("nan")'), 0)
             self.assertEqual(output_code.count("float('nan')"), 0)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_fp_self_sub_rewrite_preserves_nonfinite_semantics(self):
         def fn(x):
             a = x * x
@@ -902,7 +903,7 @@ def forward(self, x_1, output_1):
         actual = torch.compile(fn, fullgraph=True)(special)
         torch.testing.assert_close(actual, expected, equal_nan=True)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @common_utils.parametrize("per_subkernel", [False, True])
     def test_combo_fp_self_sub_rewrite(self, per_subkernel):
         def fn(a, b):
@@ -929,7 +930,7 @@ def forward(self, x_1, output_1):
         self.assertIn("tl.where", code)
         self.assertNotIn("'enable_fp_fusion': False", code)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_duplicate_mse_loss_operands_are_zero(self):
         torch.manual_seed(0)
         x = torch.randn(10000, device=GPU_TYPE)
@@ -2467,7 +2468,7 @@ def forward(self, x_1, output_1):
         x = torch.randn(4, device=GPU_TYPE)
         y = torch.randn(4, device=GPU_TYPE)
         args_list = [(x, y, torch.float32, tl.float32)]
-        if torch.cuda.is_bf16_supported(including_emulation=False):
+        if GPU_TYPE == "xpu" or torch.cuda.is_bf16_supported(including_emulation=False):
             args_list.append((x, y, torch.bfloat16, tl.bfloat16))
 
         for args in args_list:
@@ -7219,7 +7220,7 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
                 "del", num_deallocs, exactly=True
             ).run(code_str)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_fusion_relu_epilogue(self):
         @triton.jit
         def add_kernel(in_ptr0, in_ptr1, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
@@ -7236,16 +7237,18 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
             add_kernel[grid](a, b, out, a.numel(), BLOCK_SIZE=1024)
             return out.relu()
 
-        a = torch.tensor([-0.3] * 8, dtype=torch.float32, device="cuda")
+        a = torch.tensor([-0.3] * 8, dtype=torch.float32, device=GPU_TYPE)
         b = torch.tensor(
-            [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7], dtype=torch.float32, device="cuda"
+            [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
+            dtype=torch.float32,
+            device=GPU_TYPE,
         )
 
         out, code = run_and_get_code(torch.compile(fn), a, b)
         self.assertEqual(out, fn(a, b), atol=0.05, rtol=0.05)
         self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_fusion_sigmoid_epilogue(self):
         @triton.jit
         def add_kernel(in_ptr0, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
@@ -7262,14 +7265,16 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
             return out.sigmoid()
 
         a = torch.tensor(
-            [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7], dtype=torch.float32, device="cuda"
+            [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
+            dtype=torch.float32,
+            device=GPU_TYPE,
         )
 
         out, code = run_and_get_code(torch.compile(fn), a)
         self.assertEqual(out, fn(a), atol=0.05, rtol=0.05)
         self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=1)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_fusion_with_unused_buffer(self):
         @triton.jit
         def kernel_unused_tensor(
@@ -7286,17 +7291,17 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
 
         def fn(a):
             out = torch.empty_like(a)
-            unused = torch.empty(a.numel(), device="cuda")
+            unused = torch.empty(a.numel(), device=GPU_TYPE)
             kernel_unused_tensor[(1,)](a, out, unused, a.numel(), BLOCK_SIZE=16)
             return out.relu()
 
-        a = torch.randn(10, device="cuda")
+        a = torch.randn(10, device=GPU_TYPE)
 
         out, code = run_and_get_code(torch.compile(fn), a)
         self.assertEqual(out, fn(a))
         self.check_code(code[0], num_kernels=1, num_allocs=2, num_deallocs=2)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_fusion_with_ordering_constraints(self):
         @triton.jit
         def add_kernel(in_ptr0, in_ptr1, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
@@ -7317,14 +7322,14 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
             c = add(c, b)
             return c.relu()
 
-        a = torch.randn(10, device="cuda")
-        b = torch.randn(10, device="cuda")
+        a = torch.randn(10, device=GPU_TYPE)
+        b = torch.randn(10, device=GPU_TYPE)
 
         out, code = run_and_get_code(torch.compile(fn), a, b)
         self.assertEqual(out, fn(a, b))
         self.check_code(code[0], num_kernels=2, num_allocs=2, num_deallocs=3)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_fusion_cache(self):
         @triton.jit
         def add_kernel(in_ptr0, in_ptr1, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
@@ -7345,14 +7350,14 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
             c = add(c, b).relu()
             return c
 
-        a = torch.randn(10, device="cuda")
-        b = torch.randn(10, device="cuda")
+        a = torch.randn(10, device=GPU_TYPE)
+        b = torch.randn(10, device=GPU_TYPE)
 
         out, code = run_and_get_code(torch.compile(fn), a, b)
         self.assertEqual(out, fn(a, b))
         self.check_code(code[0], num_kernels=2, num_allocs=2, num_deallocs=3)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_fusion_custom_kernel_with_linebreaks(self):
         # we do AST manipulation / string manipulation of the kernel source code
         # so we wanna make sure to correctly handle edge cases with tricky line breaks
@@ -7382,14 +7387,16 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
             return out.sigmoid()
 
         a = torch.tensor(
-            [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7], dtype=torch.float32, device="cuda"
+            [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
+            dtype=torch.float32,
+            device=GPU_TYPE,
         )
 
         out, code = run_and_get_code(torch.compile(fn), a)
         self.assertEqual(out, fn(a), atol=0.05, rtol=0.05)
         self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=1)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_no_fusion_for_read_write_tensors(self):
         # cannot epilogue-fuse this one because the kernel reads from `out_ptr` before writing to it
         @triton.jit
@@ -7408,16 +7415,18 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
             add_kernel[grid](a, b, out, a.numel(), BLOCK_SIZE=1024)
             return out.relu()
 
-        a = torch.tensor([-0.3] * 8, dtype=torch.float32, device="cuda")
+        a = torch.tensor([-0.3] * 8, dtype=torch.float32, device=GPU_TYPE)
         b = torch.tensor(
-            [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7], dtype=torch.float32, device="cuda"
+            [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
+            dtype=torch.float32,
+            device=GPU_TYPE,
         )
 
         _, code = run_and_get_code(torch.compile(fn), a, b)
         # no fusion, so 2 kernels: add_kernel, relu
         self.check_code(code[0], num_kernels=2, num_allocs=2, num_deallocs=3)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_no_fusion_for_multiple_stores(self):
         # cannot epilogue-fuse this one because the kernel stores twice (once directly and once indirectly via another triton func)
         """
@@ -7444,16 +7453,18 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
             add_kernel_with_custom_store[grid](a, b, out, a.numel(), BLOCK_SIZE=1024)
             return out.relu()
 
-        a = torch.tensor([-0.3] * 8, dtype=torch.float32, device="cuda")
+        a = torch.tensor([-0.3] * 8, dtype=torch.float32, device=GPU_TYPE)
         b = torch.tensor(
-            [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7], dtype=torch.float32, device="cuda"
+            [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
+            dtype=torch.float32,
+            device=GPU_TYPE,
         )
 
         _, code = run_and_get_code(torch.compile(fn), a, b)
         # no fusion, so 2 kernels: add_kernel, relu
         self.check_code(code[0], num_kernels=2, num_allocs=2, num_deallocs=3)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_no_fusion_for_non_empty_outputs(self):
         # cannot epilogue-fuse this one because the kernel writes to buffer initialized with non-UB values
         @triton.jit
@@ -7471,9 +7482,11 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
             add_kernel[grid](a, b, out, a.numel(), BLOCK_SIZE=1024)
             return out.relu()
 
-        a = torch.tensor([-0.3] * 8, dtype=torch.float32, device="cuda")
+        a = torch.tensor([-0.3] * 8, dtype=torch.float32, device=GPU_TYPE)
         b = torch.tensor(
-            [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7], dtype=torch.float32, device="cuda"
+            [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
+            dtype=torch.float32,
+            device=GPU_TYPE,
         )
 
         out, code = run_and_get_code(torch.compile(fn), a, b)
@@ -7481,7 +7494,7 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
         # no fusion, so 3 kernels: ones, add_kernel, relu
         self.check_code(code[0], num_kernels=3, num_allocs=2, num_deallocs=3)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_no_fusion_for_concat_outputs(self):
         @triton.jit
         def add_kernel(in_ptr0, in_ptr1, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
@@ -7493,16 +7506,22 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
             tl.store(out_ptr + offs, x + y, mask=mask)
 
         def fn(a, b):
-            out_first_half = torch.empty(int(len(a) / 2), dtype=a.dtype, device="cuda")
-            out_second_half = torch.empty(int(len(a) / 2), dtype=a.dtype, device="cuda")
+            out_first_half = torch.empty(
+                int(len(a) / 2), dtype=a.dtype, device=GPU_TYPE
+            )
+            out_second_half = torch.empty(
+                int(len(a) / 2), dtype=a.dtype, device=GPU_TYPE
+            )
             out = torch.concat((out_first_half, out_second_half))
             grid = (triton.cdiv(a.numel(), 1024),)
             add_kernel[grid](a, b, out, a.numel(), BLOCK_SIZE=1024)
             return out.relu()
 
-        a = torch.tensor([-0.3] * 8, dtype=torch.float32, device="cuda")
+        a = torch.tensor([-0.3] * 8, dtype=torch.float32, device=GPU_TYPE)
         b = torch.tensor(
-            [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7], dtype=torch.float32, device="cuda"
+            [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
+            dtype=torch.float32,
+            device=GPU_TYPE,
         )
 
         out, code = run_and_get_code(torch.compile(fn), a, b)
@@ -7510,7 +7529,7 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
         # no fusion, so 3 kernels: concat, add_kernel, relu
         self.check_code(code[0], num_kernels=3, num_allocs=2, num_deallocs=3)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_no_fusion_for_multiple_reads_on_mutated_tensor(self):
         @triton.jit
         def add_kernel(in_ptr0, in_ptr1, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
@@ -7527,9 +7546,11 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
             add_kernel[grid](a, b, out, a.numel(), BLOCK_SIZE=1024)
             return out.relu(), out.sigmoid()
 
-        a = torch.tensor([-0.3] * 8, dtype=torch.float32, device="cuda")
+        a = torch.tensor([-0.3] * 8, dtype=torch.float32, device=GPU_TYPE)
         b = torch.tensor(
-            [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7], dtype=torch.float32, device="cuda"
+            [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
+            dtype=torch.float32,
+            device=GPU_TYPE,
         )
 
         out, code = run_and_get_code(torch.compile(fn), a, b)
@@ -7537,10 +7558,10 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
         # two kernels: user defined `add_kernel`, and the generated one for both sigmoid and relu
         self.check_code(code[0], num_kernels=2, num_allocs=3, num_deallocs=3)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_no_fusion_for_atomic_store(self):
         # on ROCm we skip this because `tl.atomic_xchg` fails to compile in ROCm
-        if torch.version.cuda is None:
+        if GPU_TYPE != "xpu" and torch.version.cuda is None:
             return
 
         @triton.jit
@@ -7558,16 +7579,18 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
             add_kernel[grid](a, b, out, a.numel(), BLOCK_SIZE=1024)
             return out.relu()
 
-        a = torch.tensor([-0.3] * 8, dtype=torch.float32, device="cuda")
+        a = torch.tensor([-0.3] * 8, dtype=torch.float32, device=GPU_TYPE)
         b = torch.tensor(
-            [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7], dtype=torch.float32, device="cuda"
+            [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
+            dtype=torch.float32,
+            device=GPU_TYPE,
         )
 
         out, code = run_and_get_code(torch.compile(fn), a, b)
         self.assertEqual(out, fn(a, b), atol=0.05, rtol=0.05)
         self.check_code(code[0], num_kernels=2, num_allocs=2, num_deallocs=3)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_no_fusion_indexing_var_usage(self):
         @triton.jit
         def add_kernel(in_ptr0, in_ptr1, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
@@ -7583,18 +7606,20 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
             grid = (triton.cdiv(a.numel(), 1024),)
             add_kernel[grid](a, b, out, a.numel(), BLOCK_SIZE=1024)
             # this arange causes the final kernel to require indexing expressions not available in the user kernel
-            return out.relu() + torch.arange(out.shape[0], device="cuda")
+            return out.relu() + torch.arange(out.shape[0], device=GPU_TYPE)
 
-        a = torch.tensor([-0.3] * 8, dtype=torch.float32, device="cuda")
+        a = torch.tensor([-0.3] * 8, dtype=torch.float32, device=GPU_TYPE)
         b = torch.tensor(
-            [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7], dtype=torch.float32, device="cuda"
+            [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
+            dtype=torch.float32,
+            device=GPU_TYPE,
         )
 
         out, code = run_and_get_code(torch.compile(fn), a, b)
         self.assertEqual(out, fn(a, b), atol=0.05, rtol=0.05)
         self.check_code(code[0], num_kernels=2, num_allocs=2, num_deallocs=3)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_no_fusion_non_unary_epilogue(self):
         @triton.jit
         def add_kernel(a_ptr, b_ptr, out_ptr, numel, BLOCK_SIZE: tl.constexpr):
@@ -7612,15 +7637,15 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
             add_kernel[GRID](a, b, out, a.numel(), 1)
             return out + c
 
-        a = torch.randn(10, dtype=torch.float32, device="cuda")
-        b = torch.randn(10, dtype=torch.float32, device="cuda")
-        c = torch.randn(10, dtype=torch.float32, device="cuda")
+        a = torch.randn(10, dtype=torch.float32, device=GPU_TYPE)
+        b = torch.randn(10, dtype=torch.float32, device=GPU_TYPE)
+        c = torch.randn(10, dtype=torch.float32, device=GPU_TYPE)
 
         out, code = run_and_get_code(torch.compile(fn), a, b, c)
         self.assertEqual(out, fn(a, b, c))
         self.check_code(code[0], num_kernels=2, num_allocs=2, num_deallocs=4)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_fusion_cast_epilogue(self):
         @triton.jit
         def add_kernel(in_ptr0, in_ptr1, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
@@ -7637,14 +7662,14 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
             add_kernel[grid](a, b, out, a.numel(), BLOCK_SIZE=1024)
             return out.to(torch.float16)
 
-        a = torch.randn(8, 16, dtype=torch.float32, device="cuda")
-        b = torch.randn(8, 16, dtype=torch.float32, device="cuda")
+        a = torch.randn(8, 16, dtype=torch.float32, device=GPU_TYPE)
+        b = torch.randn(8, 16, dtype=torch.float32, device=GPU_TYPE)
 
         out, code = run_and_get_code(torch.compile(fn), a, b)
         self.assertEqual(out, fn(a, b))
         self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_no_fusion_for_out_of_place_epilogue(self):
         @triton.jit
         def add_kernel(in_ptr0, in_ptr1, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
@@ -7661,14 +7686,14 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
             add_kernel[grid](a, b, out, a.numel(), BLOCK_SIZE=1024)
             return out.T.contiguous().relu()
 
-        a = torch.randn(32, 32, device="cuda")
-        b = torch.randn(32, 32, device="cuda")
+        a = torch.randn(32, 32, device=GPU_TYPE)
+        b = torch.randn(32, 32, device=GPU_TYPE)
         out, code = run_and_get_code(torch.compile(fn), a, b)
         self.assertEqual(out, fn(a, b))
         self.check_code(code[0], num_kernels=2, num_allocs=2, num_deallocs=3)
 
 
-if HAS_CUDA_AND_TRITON:
+if HAS_GPU_AND_TRITON:
 
     @triton.jit
     def custom_store(ptr, val, mask):
