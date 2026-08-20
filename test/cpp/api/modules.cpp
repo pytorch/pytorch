@@ -1113,6 +1113,43 @@ TEST_F(ModulesTest, LayerNorm) {
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
+TEST_F(ModulesTest, RMSNorm) {
+  RMSNorm model(RMSNormOptions({2, 2}).eps(2e-5));
+  auto x = torch::randn({2, 2}, torch::requires_grad());
+  auto y = model(x);
+  auto y_exp = torch::rms_norm(x, {2, 2}, model->weight, 2e-5);
+  torch::Tensor s = y.sum();
+
+  s.backward();
+  ASSERT_EQ(y.ndimension(), 2);
+  ASSERT_EQ(s.ndimension(), 0);
+  for (const auto i : c10::irange(2)) {
+    ASSERT_EQ(y.size(i), 2);
+  }
+
+  ASSERT_EQ(model->weight.grad().numel(), 2 * 2);
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}
+
+TEST_F(ModulesTest, RMSNormDefaultEps) {
+  // eps is unset by default, which defers to the machine epsilon of the
+  // input dtype inside at::rms_norm.
+  RMSNorm model(RMSNormOptions({2, 2}));
+  auto x = torch::randn({2, 2});
+  auto y = model(x);
+  auto y_exp = torch::rms_norm(x, {2, 2}, model->weight, std::nullopt);
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}
+
+TEST_F(ModulesTest, RMSNormNoAffine) {
+  RMSNorm model(RMSNormOptions({2, 2}).elementwise_affine(false).eps(2e-5));
+  ASSERT_FALSE(model->weight.defined());
+  auto x = torch::randn({2, 2});
+  auto y = model(x);
+  auto y_exp = torch::rms_norm(x, {2, 2}, std::nullopt, 2e-5);
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}
+
 TEST_F(ModulesTest, GroupNorm) {
   GroupNorm model(GroupNormOptions(2, 2).eps(2e-5));
   auto x = torch::randn({2, 2}, torch::requires_grad());
@@ -4974,6 +5011,16 @@ TEST_F(ModulesTest, PrettyPrintInstanceNorm3d) {
                                   .affine(false)
                                   .track_running_stats(true))),
       "torch::nn::InstanceNorm3d(4, eps=0.5, momentum=0.1, affine=false, track_running_stats=true)");
+}
+
+TEST_F(ModulesTest, PrettyPrintRMSNorm) {
+  ASSERT_EQ(
+      c10::str(RMSNorm(RMSNormOptions({2, 2}))),
+      "torch::nn::RMSNorm([2, 2], eps=None, elementwise_affine=true)");
+  ASSERT_EQ(
+      c10::str(
+          RMSNorm(RMSNormOptions({2, 2}).elementwise_affine(false).eps(2e-5))),
+      "torch::nn::RMSNorm([2, 2], eps=2e-05, elementwise_affine=false)");
 }
 
 TEST_F(ModulesTest, PrettyPrintLayerNorm) {
