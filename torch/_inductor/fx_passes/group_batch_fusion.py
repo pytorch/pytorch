@@ -1310,7 +1310,7 @@ class BatchPointwiseOpsPostGradFusion(BatchPointwiseOpsFusionFactory):
 
 class BatchMathOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
     """
-    Batch simple match related ops such as nan_to_num in pre grad pass.
+    Batch simple math related ops such as nan_to_num in pre grad pass.
     """
 
     def __init__(self, op, **kwargs):
@@ -1326,6 +1326,7 @@ class BatchMathOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
             child = next(iter(node.users.keys()))
             group_key = (
                 str(input.meta["example_value"].shape)
+                + str(node.args[1:])
                 + str(node.kwargs)
                 + str(child.target)
             )
@@ -1340,6 +1341,7 @@ class BatchMathOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
         batch_nodes = []
         batch_inputs = []
         batch_inputs_metadata = []
+        args = subset[0].args[1:]
         kwargs = subset[0].kwargs
 
         for node in subset:
@@ -1355,11 +1357,11 @@ class BatchMathOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
             update_stack_example_value(stack_inputs, batch_inputs_metadata)
             batch_op = graph.call_function(  # type: ignore[operator]
                 self.op,
-                args=(stack_inputs,),
+                args=(stack_inputs, *args),
                 kwargs=kwargs,
             )
             batch_op.meta["example_value"] = self.op(
-                stack_inputs.meta["example_value"], **kwargs
+                stack_inputs.meta["example_value"], *args, **kwargs
             )
             unbind_op = graph.call_function(  # type: ignore[operator]
                 torch.unbind, args=(batch_op,), kwargs={"dim": 0}

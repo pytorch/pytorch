@@ -20,6 +20,7 @@ from torch.fx.experimental.symbolic_shapes import (
     guard_or_false,
     guard_or_true,
     statically_known_true,
+    sym_eq,
 )
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._ordered_set import OrderedSet
@@ -104,7 +105,14 @@ def remove_no_ops(
             if any(not isinstance(t, torch.Tensor) for t in (t1, t2)):
                 return False
             for field in fields:
-                if getattr(t1, field) != getattr(t2, field):
+                v1 = getattr(t1, field)
+                v2 = getattr(t2, field)
+                if field == "shape":
+                    # Shapes may contain unbacked SymInts; tuple `!=` would
+                    # force a guard. Conservatively treat unknown as "not equal".
+                    if not guard_or_false(sym_eq(v1, v2)):
+                        return False
+                elif v1 != v2:
                     return False
             return True
 
@@ -291,6 +299,11 @@ def remove_redundant_views(gm: torch.fx.GraphModule):
                 break
             for unused in unused_views:
                 views.pop(unused)
+                if unused.op == "placeholder":
+                    # Placeholders are graph inputs; erasing one would silently
+                    # shrink the compiled function's arity while callers keep
+                    # passing the original argument count.
+                    continue
                 graph.erase_node(unused)
 
 

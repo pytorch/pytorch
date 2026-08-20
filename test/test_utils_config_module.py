@@ -39,6 +39,26 @@ class _alias_parent_with_nested_class:
         pass
 
 
+# Module-level fixture for the alias_fields_from foreign-class-valued-field
+# test. `foreign_class` mimics a factory-style field (see
+# torch._inductor.config's _cache_config_factory_keys) whose value is a class
+# defined elsewhere -- not a nested subconfig of this parent.
+class _alias_parent_with_foreign_class_field:
+    e_bool = True
+    foreign_class = TestCase
+
+
+# Module-level fixture for the alias_fields_from chained-alias rejection
+# test. `e_aliased` is itself an alias (mirrors fake_config_module.e_aliased_bool),
+# so re-aliasing it through this parent must be rejected rather than risk
+# silently resolving to value_type=object.
+class _alias_parent_with_aliased_field:
+    e_bool = True
+    e_aliased: bool = Config(
+        alias="torch.testing._internal.fake_config_module2.e_aliasing_bool"
+    )
+
+
 class TestConfigModule(TestCase):
     def tearDown(self):
         # Config changes get persisted between test cases
@@ -61,6 +81,16 @@ class TestConfigModule(TestCase):
         alias_config._hash_cache_var.set(None)
         alias_config._get_dict_dirty_keys_var.set(None)
         alias_config._get_dict_cache_var.set(None)
+
+        # config2 is e_aliased_bool's target module; reset it too now that a
+        # test (test_alias_delattr_marks_cross_module_target_dirty) reads its
+        # get_hash()/save_config() cache.
+        for k in config2._config:
+            config2._config[k].user_override.set(_UNSET_SENTINEL)
+            config2._config[k].hide = False
+        config2._hash_cache_var.set(None)
+        config2._get_dict_dirty_keys_var.set(None)
+        config2._get_dict_cache_var.set(None)
 
     def test_base_value_loading(self):
         self.assertTrue(config.e_bool)
@@ -114,6 +144,20 @@ class TestConfigModule(TestCase):
             AttributeError, msg="fake_config_module.does_not_exist does not exist"
         ):
             config.does_not_exist = 0
+
+    def test_hide_not_added_to_instance_dict_on_write(self):
+        # A normal config write must not materialize 'hide' in the _ConfigEntry instance
+        # __dict__; it should stay on the class default. An unconditional hide=False write
+        # on every setattr would add it (pure overhead), so __setattr__ clears hide only
+        # when it is actually set.
+        entry = config._config["e_bool"]
+        entry.__dict__.pop("hide", None)  # reset to the class default
+        config.e_bool = False
+        self.assertNotIn("hide", entry.__dict__)
+        # When hide *is* set (the __delattr__ / mock.patch path), a write still clears it.
+        entry.hide = True
+        config.e_bool = True
+        self.assertFalse(entry.hide)
 
     def test_none_override_semantics(self):
         config.e_bool = None
@@ -524,6 +568,13 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
         revert()
         self.assertTrue(config.e_bool)
 
+    def test_make_closure_patcher_rejects_aliased_config(self):
+        # _make_closure_patcher writes straight to a key's own user_override
+        # and can't redirect to the alias target's module, so it must reject
+        # aliased keys upfront rather than silently patching the wrong entry.
+        with self.assertRaisesRegex(AssertionError, "e_aliased_bool"):
+            config._make_closure_patcher(e_aliased_bool=False)
+
     def test_unittest_patch(self):
         with patch("torch.testing._internal.fake_config_module.e_bool", False):
             with patch("torch.testing._internal.fake_config_module.e_bool", False):
@@ -598,6 +649,33 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
             self.assertNotEqual(config.get_hash(), hash_before)
             self.assertNotEqual(config.save_config(), saved_before)
 
+    def test_alias_delattr_marks_cross_module_target_dirty(self):
+        # Same as above, but the alias target lives in a different installed
+        # ConfigModule (fake_config_module2), exercising the actual
+        # `target_module is not self` branch in __delattr__ -- the shape of
+        # every real in-tree alias, e.g.
+        # torch._inductor.config.force_disable_caches aliasing
+        # torch.compiler.config.force_disable_caches.
+        with config2.patch(e_aliasing_bool=True):
+            hash_before = config2.get_hash()
+            saved_before = config2.save_config()
+            delattr(config, "e_aliased_bool")
+            # Target is reset back to its default value, not left at True.
+            self.assertFalse(config2.e_aliasing_bool)
+            self.assertNotEqual(config2.get_hash(), hash_before)
+            self.assertNotEqual(config2.save_config(), saved_before)
+
+    def test_alias_delattr_rejects_chained_alias(self):
+        # _get_alias_target_entry is single-hop by design: alias_fields_from
+        # guards against building a chain itself, but nothing stops a
+        # hand-written Config(alias=...) from pointing at an already-aliased
+        # field (alias_config.e_chained_alias -> fake_config_module.e_aliased_bool
+        # -> fake_config_module2.e_aliasing_bool). delattr on the outer link
+        # must fail loudly rather than silently resetting the middle link's
+        # own user_override, which is never read.
+        with self.assertRaisesRegex(NotImplementedError, "chained"):
+            delattr(alias_config, "e_chained_alias")
+
     def test_alias_fields_from_skips_methods(self):
         # alias_fields_from must only alias actual config fields. Functions of
         # the parent must not become config entries.
@@ -615,15 +693,43 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
             class _unused_child:
                 pass
 
+    def test_alias_fields_from_skips_foreign_class_valued_field(self):
+        # A field whose value is a class defined in a *different* module
+        # (e.g. a factory class, the pattern torch._inductor.config's
+        # _cache_config_factory_keys documents for class/callable-valued
+        # config fields) is not a nested subconfig of this parent, so it
+        # must be silently skipped like a method rather than rejected as an
+        # unaliasable subtree.
+        @alias_fields_from(_alias_parent_with_foreign_class_field)
+        class _child:
+            pass
+
+        self.assertTrue(hasattr(_child, "e_bool"))
+        self.assertFalse(hasattr(_child, "foreign_class"))
+
+    def test_alias_fields_from_rejects_chained_alias(self):
+        # A parent field that is itself an alias can't be re-aliased: with no
+        # explicit value_type or class annotation, the fallback below would
+        # resolve to type(_UNSET_SENTINEL) -- i.e. object -- silently
+        # defeating isinstance-based type checks on the child's alias.
+        with self.assertRaisesRegex(AssertionError, "e_aliased"):
+
+            @alias_fields_from(_alias_parent_with_aliased_field)
+            class _unused_child:
+                pass
+
     def test_alias_fields_from_value_type_resolution(self):
-        # A parent field declared via Config(default=...) with no annotation
-        # must resolve to the default's type, not the _Config class. An
-        # annotated plain field resolves to its annotation. An annotated
-        # Config(default=...) field must resolve to the annotation, not
-        # type(default) (which would be NoneType for a str | None field).
-        # Checked through the installed module's get_type(), since that (not
-        # the decorator's raw output) is what real callers rely on.
+        # An annotated Config(default=...) field resolves to the class
+        # annotation, not the _Config class or type(default) (which would be
+        # NoneType for a str | None field). An annotated plain field resolves
+        # to its annotation. A Config(default=...) field with *no* class
+        # annotation falls back to the default's type. Checked through the
+        # installed module's get_type(), since that (not the decorator's raw
+        # output) is what real callers rely on.
         self.assertEqual(alias_config.get_type("alias_child.e_config_int"), int)
+        self.assertEqual(
+            alias_config.get_type("alias_child.e_config_no_annotation"), int
+        )
         self.assertEqual(alias_config.get_type("alias_child.e_annotated"), str)
         self.assertEqual(
             alias_config.get_type("alias_child.e_annotated_config"), str | None
@@ -713,7 +819,7 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
             class Inner:
                 e_bool = True
 
-        with self.assertRaisesRegex(AssertionError, "top-level config class"):
+        with self.assertRaisesRegex(AssertionError, "module scope"):
             alias_fields_from(Outer.Inner)
 
     def test_alias_excluded_from_save_and_hash(self):
@@ -728,11 +834,20 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
 
         hash_before = config.get_hash()
         with config.patch({"nested.e_bool": False}):
-            self.assertNotEqual(config.get_hash(), hash_before)
+            hash_via_target = config.get_hash()
+            self.assertNotEqual(hash_via_target, hash_before)
             code = config.codegen_config()
             self.assertNotIn("nested_alias.e_bool", code)
             self.assertNotIn("e_nested_alias_bool", code)
             self.assertIn("nested.e_bool = False", code)
+
+        # Writing through the alias must move the hash identically to writing
+        # the target directly: _get_dict drops the alias key, so the value
+        # only reaches the hash via nested.e_bool. This would still pass if
+        # alias writes were silently dropped -- unless compared against
+        # hash_via_target (rather than just hash_before) as done here.
+        with config.patch({"nested_alias.e_bool": False}):
+            self.assertEqual(config.get_hash(), hash_via_target)
 
     def test_reference_is_default(self):
         t = config.e_dict

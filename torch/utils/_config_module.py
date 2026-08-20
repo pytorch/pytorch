@@ -1,9 +1,12 @@
 import contextlib
 import copy
+import functools
 import hashlib
 import importlib
 import inspect
 import io
+import keyword
+import math
 import os
 import pickle
 import tokenize
@@ -318,7 +321,7 @@ class _ConfigEntry:
     # environment variables are read at install time
     env_value_force: Any = _UNSET_SENTINEL
     env_value_default: Any = _UNSET_SENTINEL
-    # Used to work arounds bad assumptions in unittest.mock.patch
+    # Used to work around bad assumptions in unittest.mock.patch
     # The code to blame is
     # https://github.com/python/cpython/blob/94a7a4e22fb8f567090514785c69e65298acca42/Lib/unittest/mock.py#L1637
     # Essentially, mock.patch requires, that if __dict__ isn't accessible
@@ -438,8 +441,11 @@ class ConfigModule(ModuleType):
                 config.user_override.set(value)
                 self._hash_dirty_var.set(True)
                 self._mark_get_dict_dirty(name)
-            # delattr sets hide=True; mock.patch's teardown setattr must clear it.
-            config.hide = False
+            # delattr sets hide=True; mock.patch's teardown setattr must clear
+            # it (for both alias and non-alias entries). Avoid a redundant
+            # instance-__dict__ write when hide is already False.
+            if config.hide:
+                config.hide = False
 
     def __getattr__(self, name: str) -> Any:
         try:
@@ -481,8 +487,6 @@ class ConfigModule(ModuleType):
             raise AttributeError(f"{self.__name__}.{name} does not exist") from e
 
     def __delattr__(self, name: str) -> None:
-        self._hash_dirty_var.set(True)
-        self._mark_get_dict_dirty(name)
         # must support delete because unittest.mock.patch deletes
         # then recreate things
         config = self._config[name]
@@ -491,6 +495,8 @@ class ConfigModule(ModuleType):
             # own user_override is never read. Route the reset through the
             # target module so its hash/get_dict dirty state is updated too;
             # otherwise get_hash()/save_config() keep returning the stale value.
+            # `name` itself is never dirtied here: `_get_dict` always skips
+            # alias keys, so it can't be stale on `self`.
             target = self._get_alias_target_entry(config)
             if target is not None:
                 target_module, target_key = target
@@ -498,6 +504,8 @@ class ConfigModule(ModuleType):
                 target_module._mark_get_dict_dirty(target_key)
                 target_module._config[target_key].user_override.set(_UNSET_SENTINEL)
         else:
+            self._hash_dirty_var.set(True)
+            self._mark_get_dict_dirty(name)
             config.user_override.set(_UNSET_SENTINEL)
         config.hide = True
 
@@ -545,7 +553,14 @@ class ConfigModule(ModuleType):
         is itself a config entry (rather than a plain module constant).
 
         Returns ``(owning_config_module, key)`` so callers can both read the
-        target ``_ConfigEntry`` and mark that module's dirty state.
+        target ``_ConfigEntry`` and mark that module's dirty state. Returns
+        ``None`` if the target isn't a config entry at all (e.g. a plain
+        module constant): there's no override state to reset, so the only
+        caller (``__delattr__``) is a no-op beyond hiding the alias entry.
+
+        Single-hop only: raises if the resolved target is itself aliased,
+        rather than silently returning that entry unresolved, since no
+        in-tree alias chains exist for this to chase.
         """
         data = self._get_alias_module_and_name(entry)
         if data is None:
@@ -561,6 +576,13 @@ class ConfigModule(ModuleType):
             return None
         if key not in owner._config:  # type: ignore[attr-defined]
             return None
+        target_entry = owner._config[key]  # type: ignore[attr-defined]
+        if target_entry.alias is not None:
+            raise NotImplementedError(
+                f"chained config aliases are not supported: {entry.alias!r} "
+                f"resolves to {key!r}, which is itself aliased to "
+                f"{target_entry.alias!r}"
+            )
         return owner, key  # type: ignore[return-value]
 
     def _get_alias_val(self, entry: _ConfigEntry) -> Any:
@@ -622,7 +644,7 @@ class ConfigModule(ModuleType):
     ) -> dict[str, Any]:
         """Export a dictionary of current configuration keys and values.
 
-        This function is design to provide a single point which handles
+        This function is designed to provide a single point which handles
         accessing config options and exporting them into a dictionary.
         This is used by a number of different user facing export methods
         which all have slightly different semantics re: how and what to
@@ -774,6 +796,76 @@ class ConfigModule(ModuleType):
             # functools.partial has no attributes below but is a callable
             return callable(v) and hasattr(v, "__module__") and hasattr(v, "__name__")
 
+        def importable_ref(func: Any) -> tuple[str, str] | None:
+            try:
+                module_name = getattr(func, "__module__", None)
+                qualname = getattr(func, "__qualname__", None)
+                if (
+                    not callable(func)
+                    or not isinstance(module_name, str)
+                    or not isinstance(qualname, str)
+                    or not module_name
+                    or not qualname
+                    or module_name == "__main__"
+                    or "<" in qualname
+                ):
+                    return None
+                names = module_name.split(".") + qualname.split(".")
+                if any(
+                    not name.isidentifier() or keyword.iskeyword(name) for name in names
+                ):
+                    return None
+                resolved = importlib.import_module(module_name)
+                for name in qualname.split("."):
+                    resolved = getattr(resolved, name)
+                if resolved is not func:
+                    return None
+                import_name = "" if module_name == "builtins" else module_name
+                prefix = f"{import_name}." if import_name else ""
+                return f"{prefix}{qualname}", import_name
+            except Exception:
+                return None
+
+        def serialize_partial_arg(val: Any) -> str:
+            if type(val) in (type(None), bool, int, str, bytes) or (
+                type(val) is float and math.isfinite(val)
+            ):
+                return repr(val)
+            if type(val) not in (list, tuple, dict):
+                raise ValueError(
+                    f"unsupported functools.partial argument type {type(val).__name__}"
+                )
+
+            if type(val) in (list, tuple):
+                for item in val:
+                    serialize_partial_arg(item)
+            else:
+                for key, item in val.items():
+                    serialize_partial_arg(key)
+                    serialize_partial_arg(item)
+            return repr(val)
+
+        def get_partial_line(mod, k, v) -> str:  # type: ignore[no-untyped-def]
+            if type(v) is not functools.partial:
+                return f"# {mod}.{k} omitted: unsupported partial subclass"
+            func_info = importable_ref(v.func)
+            if func_info is None:
+                return f"# {mod}.{k} omitted: partial callable cannot be re-imported"
+            func_ref, import_name = func_info
+            try:
+                parts = [func_ref]
+                parts.extend(serialize_partial_arg(arg) for arg in v.args)
+                if v.keywords:
+                    parts.append(f"**{serialize_partial_arg(v.keywords)}")
+                expression = f"functools.partial({', '.join(parts)})"
+                compile(expression, "<config>", "eval")
+            except Exception:
+                return f"# {mod}.{k} omitted: partial arguments cannot be serialized"
+            if import_name:
+                imports.add(import_name)
+            imports.add("functools")
+            return f"{mod}.{k} = {expression}"
+
         def get_config_line(mod, k, v) -> str:  # type: ignore[no-untyped-def]
             """
             Return a string version of the config line.
@@ -785,7 +877,9 @@ class ConfigModule(ModuleType):
                 import _warnings
                 torch._dynamo.config.reorderable_logging_functions = { _warnings.warn, logging.warn, print }
             """
-            if importable_callable(v):
+            if isinstance(v, functools.partial):
+                return get_partial_line(mod, k, v)
+            elif importable_callable(v):
                 add_import(v)
                 return f"{mod}.{k} = {get_module_name(v, True)}{v.__name__}"
             elif isinstance(v, (list, set)) and all(
@@ -976,6 +1070,10 @@ class ConfigModule(ModuleType):
             finally:
                 revert()
 
+        Raises immediately, here at the factory call rather than from
+        `change()`/`revert()`, if any key is aliased -- this closure-based
+        fast path writes straight to `user_override` and can't redirect to
+        another module. Use patch() instead for aliased keys.
         """
         config = self._config
         for k in changes:
@@ -1098,13 +1196,16 @@ def alias_fields_from(parent_cls: type) -> Callable[[type], type]:
     other. For mutable defaults (lists, dicts) the child and parent share the
     same object, so in-place mutation is visible through either name.
     """
-    # Subconfig classes are required to be defined in the config module, so
-    # ``__qualname__`` is a bare name and the derived alias resolves. Guard the
-    # assumption here so a nested/relocated parent fails at decoration time
-    # rather than at first field access.
+    # install_config_module's visit() already requires every subconfig class
+    # to be defined at module scope (it raises "subconfig class ... must be
+    # defined in module ..." otherwise), which is what keeps a subconfig
+    # class's __qualname__ a bare name. Check the same thing here so a
+    # nested/relocated parent fails at decoration time instead of at first
+    # field access.
     if "." in parent_cls.__qualname__:
         raise AssertionError(
-            f"alias_fields_from expects a top-level config class, got {parent_cls.__qualname__}"
+            f"alias_fields_from parent must be defined at module scope, "
+            f"like any subconfig class -- got {parent_cls.__qualname__}"
         )
     prefix = f"{parent_cls.__module__}.{parent_cls.__qualname__}"
     annotations = inspect.get_annotations(parent_cls)
@@ -1113,14 +1214,12 @@ def alias_fields_from(parent_cls: type) -> Callable[[type], type]:
         for k, v in parent_cls.__dict__.items():
             if k.startswith("_") or k in child_cls.__dict__:
                 continue
-            if isinstance(v, type) and not issubclass(v, _Config):
-                # A nested subconfig class of the parent. inherit_fields_from
-                # could copy it wholesale and let install_config_module's
-                # visit() recurse into it; alias_fields_from has no way to
-                # alias a whole subtree, so silently dropping it here would
-                # make the child lose it with no error at decoration time or
-                # install time -- just a missing key at first read. Refuse
-                # instead of guessing.
+            if (
+                isinstance(v, type)
+                and not issubclass(v, _Config)
+                and v.__module__ == parent_cls.__module__
+            ):
+                # A nested subconfig class of the parent; alias_fields_from can't alias a whole subtree.
                 raise AssertionError(
                     f"alias_fields_from cannot alias nested subconfig class "
                     f"{parent_cls.__name__}.{k}"
@@ -1130,13 +1229,28 @@ def alias_fields_from(parent_cls: type) -> Callable[[type], type]:
             if not isinstance(v, (*CONFIG_TYPES, _Config)):
                 continue
             if isinstance(v, _Config):
+                if v.alias is not None:
+                    # Chaining aliases is unsupported: _Config.__post_init__
+                    # forbids a default alongside alias, so an intermediate
+                    # alias with no explicit value_type or class annotation
+                    # would silently resolve to `object` here, defeating
+                    # isinstance-based type checks downstream (e.g.
+                    # torch.compile's apply_options()).
+                    raise AssertionError(
+                        f"alias_fields_from cannot alias {parent_cls.__name__}.{k}, "
+                        f"which is itself an alias (chained aliases are not supported)"
+                    )
                 # ``type(v)`` would be ``_Config`` itself; recover the real
                 # value type from the field's declared type or its default.
                 # Annotations are only back-filled into _Config by
                 # install_config_module, which runs after this decorator, so
                 # check the class annotation as a fallback before defaulting
                 # to type(default). Explicit value_type= still wins.
-                value_type = v.value_type or annotations.get(k) or type(v.default)
+                value_type = (
+                    v.value_type
+                    if v.value_type is not None
+                    else annotations.get(k, type(v.default))
+                )
             else:
                 value_type = annotations.get(k, type(v))
             setattr(child_cls, k, Config(alias=f"{prefix}.{k}", value_type=value_type))
