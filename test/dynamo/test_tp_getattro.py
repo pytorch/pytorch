@@ -1,10 +1,16 @@
 # Owner(s): ["module: dynamo"]
 """Tests for tp_getattro_impl: unified attribute access protocol in Dynamo."""
 
+import inspect
+import types
+import unittest
+
 import torch
+
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch.testing._internal.common_utils import HardwareClassification
+from torch.utils._triton import has_triton_package
 
 
 class TpGetattroTests(torch._dynamo.test_case.TestCase):
@@ -567,6 +573,27 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
 
         result = torch.compile(fn, backend="eager", fullgraph=True)()
         self.assertEqual(sorted(result), ["a", "b"])
+
+    @unittest.skipUnless(has_triton_package(), "requires Triton package")
+    def test_nonstandard_c_method_descriptor_graph_break_binding(self):
+        from triton._C.libtriton import ir
+
+        context = ir.context()
+        ir.load_dialects(context)
+        builder = ir.builder(context)
+        descriptor = inspect.getattr_static(type(builder), "get_loc")
+        if not inspect.ismethoddescriptor(descriptor) or isinstance(
+            descriptor, types.MethodDescriptorType
+        ):
+            self.skipTest("requires a nonstandard C method descriptor")
+
+        def fn(x):
+            builder.get_loc()
+            return x + 1
+
+        x = torch.ones(1)
+        result = torch.compile(fn, backend="eager")(x)
+        self.assertEqual(result, x + 1)
 
     def test_classmethod_descriptor_dict_fromkeys(self):
         """dict.fromkeys is a classmethod_descriptor."""
