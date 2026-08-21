@@ -458,9 +458,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
             if param.grad is not None:
                 param.grad.div_(group.size())
 
-    @skipIfRocmVersionLessThan((7, 0))
     @skip_if_lt_x_gpu(2)
-    @requires_nccl_version((2, 10), "Need NCCL 2.10+ for bf16 collectives")
     def test_grad_dtype_preserved(self):
         meshes = [init_device_mesh(device_type.type, (self.world_size,))]
         if self.world_size == 4:  # test HSDP too if enough GPUs
@@ -535,9 +533,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
             self.assertIsNotNone(param.grad)
             self.assertEqual(param.grad.dtype, grad_dtype)
 
-    @skipIfRocmVersionLessThan((7, 0))
     @skip_if_lt_x_gpu(2)
-    @requires_nccl_version((2, 10), "Need NCCL 2.10+ for bf16 collectives")
     def test_grad_dtype_preserved_grad_acc(self):
         meshes = [init_device_mesh(device_type.type, (self.world_size,))]
         if self.world_size == 4:  # test HSDP too if enough GPUs
