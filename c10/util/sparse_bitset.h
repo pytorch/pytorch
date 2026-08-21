@@ -13,6 +13,7 @@
 
 #pragma once
 #include <c10/macros/Macros.h>
+#include <c10/util/Exception.h>
 #include <c10/util/llvmMathExtras.h>
 #include <array>
 #include <cassert>
@@ -121,7 +122,7 @@ struct SparseBitVectorElement {
     for (unsigned i = 0; i < BITWORDS_PER_ELEMENT; ++i)
       if (Bits[i] != 0)
         return i * BITWORD_SIZE + llvm::countTrailingZeros(Bits[i]);
-    throw std::runtime_error("Illegal empty element");
+    TORCH_CHECK(false, "Illegal empty element");
   }
 
   /// find_last - Returns the index of the last set bit.
@@ -132,7 +133,7 @@ struct SparseBitVectorElement {
         return Idx * BITWORD_SIZE + BITWORD_SIZE -
             llvm::countLeadingZeros(Bits[Idx]);
     }
-    throw std::runtime_error("Illegal empty element");
+    TORCH_CHECK(false, "Illegal empty element");
   }
 
   /// find_next - Returns the index of the next set bit starting from the
