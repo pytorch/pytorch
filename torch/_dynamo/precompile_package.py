@@ -226,6 +226,33 @@ def _clear_package_region(
         _clear_cache_entries_for_region(code, isolate_recompiles_id)
 
 
+def _compose_with_default(
+    user: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]],
+) -> Callable[[Sequence[GuardFilterEntry]], Sequence[bool]]:
+    """AND a caller's filter with the default rather than replacing it.
+
+    ``default_guard_filter_fn`` is not a default in the "sensible starting point"
+    sense -- it is what drops the identity guards that CANNOT be serialized at
+    all. Replacing it means a caller who wanted to drop three of their own guards
+    silently re-admits every unserializable one, and the failure surfaces as
+    "ID_MATCH guard cannot be serialized" in frames that have nothing to do with
+    their filter. A custom filter can only ever want to drop MORE, so composing
+    is the only reading that makes sense.
+    """
+
+    def composed(entries: Sequence[GuardFilterEntry]) -> Sequence[bool]:
+        base = default_guard_filter_fn(entries)
+        chosen = user(entries)
+        if len(chosen) != len(entries):
+            raise ValueError(
+                f"guard_filter_fn returned {len(chosen)} decisions for "
+                f"{len(entries)} guards; it must return one per entry."
+            )
+        return [bool(a) and bool(b) for a, b in zip(base, chosen)]
+
+    return composed
+
+
 def default_guard_filter_fn(
     guard_entries: Sequence[GuardFilterEntry],
 ) -> Sequence[bool]:
@@ -1197,7 +1224,9 @@ class PrecompileSession:
         self._guard_sets: dict[tuple[str, str, int], list[frozenset[_GuardFact]]] = {}
         self._undetermined: dict[tuple[str, str, int], set[_GuardFact]] = {}
         self._guard_filter_fn = self._recording_filter(
-            default_guard_filter_fn if guard_filter_fn is None else guard_filter_fn
+            default_guard_filter_fn
+            if guard_filter_fn is None
+            else _compose_with_default(guard_filter_fn)
         )
         self._recompile_limit = recompile_limit
         self._dynamic = dynamic

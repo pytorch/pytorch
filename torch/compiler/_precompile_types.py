@@ -73,6 +73,12 @@ class PrecompileSummary:
 
         False if any frame produced NO guarded code at all, if any frame hit the
         recompile limit, if any was bypassed, or if a capture call raised.
+
+        ``backend_graphs`` is checked too, because ``guarded_codes`` alone cannot
+        tell a real capture from an empty one: ``allow_empty_graphs`` lets a frame
+        that compiled nothing still count as one guarded code, so a model whose
+        every graph sits behind a recursive ``torch._dynamo.disable`` reported
+        complete while carrying no compiled compute at all.
         """
         return (
             not self.bypassed
@@ -80,6 +86,7 @@ class PrecompileSummary:
             and not self.uncovered_frames
             and not self.capture_errors
             and self.guarded_codes > 0
+            and self.backend_graphs > 0
         )
 
     def dropped_guard_types(self) -> dict[str, int]:
