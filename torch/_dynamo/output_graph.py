@@ -70,7 +70,11 @@ from torch._guards import (
 )
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_custom_class
-from torch._subclasses.fake_tensor import FakeTensor
+from torch._subclasses.fake_tensor import (
+    maybe_get_fake_device,
+    maybe_get_item_memo,
+    maybe_set_fake_device,
+)
 from torch._utils_internal import signpost_event
 from torch.export.dynamic_shapes import _ConstraintTarget
 from torch.fx._lazy_graph_module import _make_graph_module  # type: ignore[attr-defined]
@@ -2986,7 +2990,10 @@ class OutputGraph(OutputGraphCommon):
                 for node, snapshot in self._shallow_copy_placeholder_snapshots.items():
                     node.meta["example_value"] = snapshot
                     idx = placeholder_to_idx[node]
-                    example_inputs[idx].fake_device = snapshot.fake_device  # type: ignore[union-attr]
+                    snapshot_device = maybe_get_fake_device(snapshot)
+                    if snapshot_device is None:
+                        raise AssertionError("expected a fake tensor device")
+                    maybe_set_fake_device(example_inputs[idx], snapshot_device)
 
             gm.graph.lint()
             with self.restore_global_state():
@@ -3020,7 +3027,7 @@ class OutputGraph(OutputGraphCommon):
                 # registered backends covered by convert_frame weakref cleanup.
                 # Backends have already consumed the graph, so non-CPU Dynamo
                 # tracing constants no longer need to keep real tensors alive.
-                old_fake_mode.fake_tensor_converter.clear_non_cpu_constants()
+                old_fake_mode.clear_non_cpu_constants()
 
             if self.package is not None:
                 self.package.add_backend_id(name, compiled_fn)
@@ -3474,18 +3481,18 @@ class OutputGraph(OutputGraphCommon):
 
         for node in self.graph.nodes:
             example_value = node.meta.get("example_value")
+            item_memo = maybe_get_item_memo(example_value)
             if (
-                isinstance(example_value, FakeTensor)  # noqa: ISINSTANCE_FAKE_TENSOR
-                and example_value.item_memo is not None
-                and hasattr(example_value.item_memo.node._expr, "name")
+                isinstance(item_memo, (torch.SymFloat, torch.SymInt))
+                and hasattr(item_memo.node._expr, "name")
                 and all(u.target == "item" for u in node.users)
                 and TensorifyState.should_specialize(
                     # We use _expr instead of expr b/c we want the symbol not the replacement
-                    example_value.item_memo.node._expr.name
+                    item_memo.node._expr.name
                 )
             ):
                 for u in list(node.users):
-                    u.replace_all_uses_with(guard_scalar(example_value.item_memo))
+                    u.replace_all_uses_with(guard_scalar(item_memo))
                     self.remove_node(u)
                 self.remove_node(node)
 
@@ -4252,11 +4259,14 @@ class SubgraphTracer(fx.Tracer):
     ) -> fx.Proxy:
         if isinstance(example_value, torch.Tensor):
             self._input_versions_at_beginning.append(example_value._version)
+            ev_str = f"{example_value.__class__.__name__}(..., size={tuple(example_value.shape)})"
+        else:
+            ev_str = example_value
         log.debug(
             "create_graph_input %s %s %s at debug_level %s before=%s",
             name,
             source.name if source is not None else "(none)",
-            example_value,
+            ev_str,
             self.debug_level,
             before,
         )

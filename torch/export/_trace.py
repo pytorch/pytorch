@@ -13,7 +13,6 @@ from collections.abc import Callable
 from contextlib import contextmanager, ExitStack, nullcontext
 from itertools import chain
 from typing import Any, cast, TYPE_CHECKING, TypeAlias
-from unittest import mock
 
 
 if TYPE_CHECKING:
@@ -75,7 +74,10 @@ from torch._guards import detect_fake_mode, tracing, TracingContext
 from torch._library.fake_class_registry import FakeScriptObject, maybe_to_fake_obj
 from torch._library.opaque_object import is_custom_class
 from torch._logging import dtrace_structured
-from torch._subclasses.fake_tensor import FakeTensorMode
+from torch._subclasses.fake_tensor import (
+    allow_non_fake_inputs_temporarily,
+    FakeTensorMode,
+)
 from torch._utils_internal import compile_time_strobelight_meta, log_export_usage
 from torch.export._leakage_detection_utils import find_legit_leaks_from_referrers
 from torch.export._unlift import _check_input_constraints_pre_hook
@@ -1866,7 +1868,7 @@ def _strict_export(
     with (
         dynamo_fake_mode,
         tracing(tx),
-        mock.patch.object(dynamo_fake_mode, "allow_non_fake_inputs", True),
+        allow_non_fake_inputs_temporarily(dynamo_fake_mode),
     ):
         aten_export_artifact = _to_aten_func(
             gm_torch_level,
@@ -2494,8 +2496,8 @@ def _export_for_training(
     # see fake tensor constants.
     if not strict and not has_ambient_mode:
         for const, val in export_artifact.aten.constants.items():
-            if isinstance(
-                val, torch._subclasses.fake_tensor.FakeTensor
+            if torch._subclasses.fake_tensor.is_fake_tensor(
+                val
             ) and _is_bogus_const_name(const):
                 error_msg = (
                     f"We found a fake tensor in the exported program constant's list. "

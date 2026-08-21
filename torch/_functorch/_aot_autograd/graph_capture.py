@@ -14,6 +14,7 @@ import torch.utils.dlpack
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import detect_fake_mode, lazy_format_graph_code
 from torch._logging import getArtifactLogger, trace_structured
+from torch._subclasses.fake_tensor import maybe_get_item_memo, maybe_set_item_memo
 from torch._subclasses.functional_tensor import FunctionalTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torchgen.utils import dataclass_repr
@@ -187,9 +188,8 @@ def _create_graph(
 # TODO: Refactor the following code so detach() persists item_memo
 def _detach_and_copy_item_memo(t: torch.Tensor) -> torch.Tensor:
     detached_t = t.detach()
-    if hasattr(t, "item_memo"):
-        # pyrefly: ignore[missing-attribute]
-        detached_t.item_memo = t.item_memo
+    if (item_memo := maybe_get_item_memo(t)) is not None:
+        maybe_set_item_memo(detached_t, item_memo)
     return detached_t
 
 
