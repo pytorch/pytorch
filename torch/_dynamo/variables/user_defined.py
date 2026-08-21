@@ -4286,24 +4286,15 @@ class SourcelessGraphModuleVariable(UserDefinedObjectVariable):
         )
 
 
-def _base_exception_member(name: str) -> Member:
-    """BaseException attribute of a user-defined exception, delegated to the
-    wrapped base-exception VT that owns the state."""
-
-    def getter(
-        self: "UserDefinedExceptionObjectVariable", tx: "InstructionTranslatorBase"
-    ) -> VariableTracker:
-        return self._base_vt.tp_getattro_impl(tx, name)  # type: ignore[missing-attribute]
-
-    def setter(
-        self: "UserDefinedExceptionObjectVariable",
-        tx: "InstructionTranslatorBase",
-        value: VariableTracker | None,
-    ) -> VariableTracker:
-        name_vt = variables.ConstantVariable.create(name)
-        return self._base_vt.tp_setattro_impl(tx, name_vt, value)  # type: ignore[missing-attribute]
-
-    return Member(getter, setter)
+# The writable BaseException attributes, whose state lives on the wrapped
+# ExceptionVariable rather than in the instance __dict__.
+_BASE_EXCEPTION_ATTRS = (
+    "args",
+    "__cause__",
+    "__context__",
+    "__suppress_context__",
+    "__traceback__",
+)
 
 
 class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
@@ -4347,9 +4338,7 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
         if (
             name == "__setattr__"
             and len(args) == 2
-            and args[0].is_constant_match(
-                "__cause__", "__context__", "__suppress_context__", "__traceback__"
-            )
+            and args[0].is_constant_match(*_BASE_EXCEPTION_ATTRS)
         ):
             return self._base_vt.call_method(tx, "__setattr__", args, kwargs)  # type: ignore[missing-attribute]
         return super().call_method(tx, name, args, kwargs)
@@ -4372,18 +4361,32 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
         "with_traceback": Method(_with_traceback),
     }
 
+    tp_getset = {
+        "args": GetSet(
+            lambda s, tx: s._base_vt.tp_getattro_impl(tx, "args"),
+            lambda s, tx, value: s._base_vt._set_args(tx, value),
+        ),
+        "__cause__": GetSet(
+            lambda s, tx: s._base_vt.tp_getattro_impl(tx, "__cause__"),
+            lambda s, tx, value: s._base_vt._set_cause(tx, value),
+        ),
+        "__context__": GetSet(
+            lambda s, tx: s._base_vt.tp_getattro_impl(tx, "__context__"),
+            lambda s, tx, value: s._base_vt._set_context(tx, value),
+        ),
+        "__traceback__": GetSet(
+            lambda s, tx: s._base_vt.tp_getattro_impl(tx, "__traceback__"),
+            lambda s, tx, value: s._base_vt._set_traceback(tx, value),
+        ),
+    }
+
     # BaseException args/__cause__/__context__/__suppress_context__/__traceback__
-    # are members/getsets; delegate each to the wrapped base exception VT. All
-    # five are writable in CPython.
+    # are members/getsets; delegate each to the wrapped base exception VT.
     tp_members = {
-        name: _base_exception_member(name)
-        for name in (
-            "args",
-            "__cause__",
-            "__context__",
-            "__suppress_context__",
-            "__traceback__",
-        )
+        "__suppress_context__": Member(
+            lambda s, tx: s._base_vt.tp_getattro_impl(tx, "__suppress_context__"),
+            lambda s, tx, value: s._base_vt._set_suppress_context(tx, value),
+        ),
     }
 
     @property

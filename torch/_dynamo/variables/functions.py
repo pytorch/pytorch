@@ -39,7 +39,7 @@ import types
 import typing
 from collections.abc import Callable, Sequence
 from types import CellType, FunctionType
-from typing import Any, cast, Literal, Optional, TYPE_CHECKING, TypeVar
+from typing import Any, cast, Literal, Optional, TYPE_CHECKING, TypeAlias, TypeVar
 from typing_extensions import Never
 from weakref import WeakKeyDictionary
 
@@ -57,6 +57,7 @@ from ..exc import (
     ObservedException,
     ObservedGeneratorExit,
     ObservedUserStopIteration,
+    raise_attribute_error,
     raise_observed_exception,
     raise_type_error,
     raise_value_error,
@@ -4225,13 +4226,17 @@ class TritonSetAllocatorVariable(VariableTracker):
 # the descriptor binding step faithfully.
 # ---------------------------------------------------------------------------
 
+DescriptorTypes: TypeAlias = (
+    types.MethodDescriptorType
+    | types.WrapperDescriptorType
+    | types.MemberDescriptorType
+    | types.GetSetDescriptorType
+)
+
 
 def _check_descriptor_obj_type(
     tx: "InstructionTranslatorBase",
-    descriptor: types.MethodDescriptorType
-    | types.WrapperDescriptorType
-    | types.MemberDescriptorType
-    | types.GetSetDescriptorType,
+    descriptor: DescriptorTypes,
     obj: "VariableTracker",
 ) -> None:
     """Check that obj's type is compatible with descriptor.__objclass__.
@@ -4242,17 +4247,27 @@ def _check_descriptor_obj_type(
 
     https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L79-L96
     """
-    if obj is None:
-        return
-    try:
-        obj_type = obj.python_type()
-    except NotImplementedError:
-        return
+    obj_type = obj.python_type()
     if not issubclass(obj_type, descriptor.__objclass__):
         raise_type_error(
             tx,
             f"descriptor '{descriptor.__name__}' for "
             f"'{descriptor.__objclass__.__name__}' objects "
+            f"doesn't apply to a '{obj_type.__name__}' object",
+        )
+
+
+def descr_setcheck(
+    tx: "InstructionTranslatorBase",
+    descr: DescriptorTypes,
+    obj: VariableTracker,
+) -> None:
+    obj_type = obj.python_type()
+    if not issubclass(obj_type, descr.__objclass__):
+        raise_type_error(
+            tx,
+            f"descriptor '{descr.__name__}' for "
+            f"'{descr.__objclass__.__name__}' objects "
             f"doesn't apply to a '{obj_type.__name__}' object",
         )
 
@@ -4909,6 +4924,36 @@ class GetSetDescriptorVariable(DescriptorVariable):
 
         return python_constant_richcompare_impl(self, tx, other, op)
 
+    def tp_descr_set_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        obj: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        descr_setcheck(tx, self.descriptor, obj)
+        name = self.descriptor.__name__
+        entry = obj.lookup_tp_getset_member(name)
+        if entry is None:
+            # No model for this getset. Dynamo cannot see whether the C setter
+            # exists, so defer to the ordinary attribute write rather than
+            # claiming the attribute is read-only. Routed through the setattr
+            # builtin, which is what STORE_ATTR/DELETE_ATTR use.
+            name_vt = ConstantVariable.create(name)
+            if value is None:
+                fn, args = delattr, [obj, name_vt]
+            else:
+                fn, args = setattr, [obj, name_vt, value]
+            return VariableTracker.build(tx, fn).call_function(tx, args, {})
+        if entry.setter is None:
+            raise_attribute_error(
+                tx,
+                f"attribute '{name}' of "
+                f"'{self.descriptor.__objclass__.__name__}' objects "
+                "is not writable",
+            )
+        entry.setter(obj, tx, value)
+        return ConstantVariable.create(None)
+
     def tp_descr_get_impl(
         self,
         tx: "InstructionTranslatorBase",
@@ -5006,6 +5051,36 @@ class PropertyVariable(DescriptorVariable):
 
     def as_python_constant(self) -> property:
         return self.descriptor
+
+    def tp_descr_set_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        obj: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        fn = self.descriptor.fset if value is not None else self.descriptor.fdel
+
+        if fn is None:
+            raise_attribute_error(
+                tx,
+                f"property '{self.descriptor.__name__}' of "  # type: ignore[missing-attribute]
+                f"'{obj.python_type_name()}' object "
+                f"has no {'setter' if value is not None else 'deleter'}",
+            )
+
+        if value is None:
+            fdel_source = self.source and AttrSource(self.source, "fdel")
+            fdel_vt = VariableTracker.build(
+                tx, self.descriptor.fdel, source=fdel_source
+            )
+            fdel_vt.call_function(tx, [obj], {})
+        else:
+            fset_source = self.source and AttrSource(self.source, "fset")
+            fset_vt = VariableTracker.build(
+                tx, self.descriptor.fset, source=fset_source
+            )
+            fset_vt.call_function(tx, [obj, value], {})
+        return ConstantVariable.create(None)
 
     def tp_descr_get_impl(
         self,

@@ -1998,17 +1998,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """
         return None
 
-    def tp_setattro_impl(
-        self,
-        tx: InstructionTranslatorBase,
-        name: VariableTracker,
-        value: VariableTracker | None,
-    ) -> VariableTracker:
-        """Default attribute assignment via object_generic_setattr"""
-        from .object_protocol import object_generic_setattr
-
-        return object_generic_setattr(tx, self, name, value)
-
     def tp_descr_set_impl(
         self,
         tx: InstructionTranslatorBase,
