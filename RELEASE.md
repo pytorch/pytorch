@@ -462,23 +462,18 @@ For accelerator software like CUDA, ROCm and XPU we will typically use the follo
 
 ### Release gating requirements for accelerator versions
 
-These requirements apply to every accelerator we publish binaries for -- CUDA, ROCm, XPU and any backend added later. They generalize the CUDA policy in
-[RFC-0039](https://github.com/pytorch/rfcs/blob/master/RFC-0039-cuda-support.md#release-gating-principles), which also documents the CUDA-specific process.
+These apply to every accelerator we publish binaries for -- CUDA, ROCm, XPU and any backend added later. They generalize the CUDA policy in
+[RFC-0039](https://github.com/pytorch/rfcs/blob/master/RFC-0039-cuda-support.md#release-gating-principles).
 
-1. **We do not release anything that is not tested in CI.** An accelerator version qualifies for a release -- including as an Experimental version -- only once it has
-   build *and* test jobs running in CI, with all failures identified, tracked in issues, and either fixed or explicitly accepted before branch cut. Presence in the
-   nightly build matrix (CD) alone does not qualify a version: CD shows that it builds, CI shows that it works. A version that is only built and never tested is not
-   eligible for the release matrix.
-2. **We do not cut an RC for anything we are not planning to promote.** The release matrix is fixed before the release branch is cut, and only the versions in that
-   matrix are built in the RC. An RC binary is a promise to ship; if we would not promote it to the final release, we do not build it in the RC.
-3. **Promotion from Experimental to Stable requires more than CI passing.** The full CI and CD matrix has to be running on the version and green over a sustained
-   period, benchmarks must show no unresolved regressions against the current Stable version, and the domain libraries and other downstream consumers must have built
-   and tested against it and confirmed they can switch. Promotion is what makes a version the one we publish to PyPI.
-4. **We stop shipping before we stop testing.** When support for a version is removed, CD support is dropped first and CI support second, so a published version is
-   never left without test coverage.
+1. **We do not release anything that is not tested in CI.** A version qualifies for a release, including as Experimental, only once it has build *and* test jobs in CI,
+   with failures tracked and either fixed or explicitly accepted before branch cut. CD shows that a version builds; CI shows that it works. A version present only in
+   the nightly build matrix is not eligible for the release matrix.
+2. **We do not cut an RC for anything we are not planning to promote.** The release matrix is fixed before branch cut, and only those versions are built in the RC.
+3. **Promotion from Experimental to Stable needs more than green CI.** The full CI and CD matrix must be running and stable, benchmarks must show no unresolved
+   regressions against the current Stable version, and downstream consumers must have tested the version and be ready to switch.
+4. **We stop shipping before we stop testing.** On deprecation, CD support is dropped first and CI second.
 
-Enablement of a new version runs CD first and then CI, per platform rather than globally -- for example CD Linux followed by CI Linux, CD Windows followed by CI
-Windows -- with platforms progressing in parallel. A platform whose CD is still broken does not hold back CI enablement on a platform whose CD is already green.
+Enablement runs CD then CI per platform rather than globally, with platforms progressing in parallel.
 
 ### Special support cases
 
