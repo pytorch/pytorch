@@ -1881,6 +1881,19 @@ def _build_multigraph_python_source(
 
     parts.append('SERVING_MODE = "standalone"')
     parts.append("")
+    parts.append("# Every function Dynamo INLINED into a captured graph, so the driver")
+    parts.append("# can tell that the source it is about to trust still says what it")
+    parts.append("# said at capture. The installed mode gets this from CompilePackage;")
+    parts.append(
+        "# a standalone artifact builds no package, so it carries the records."
+    )
+    parts.append("# __main__ is skipped: it names the LOADER's script on another")
+    parts.append("# machine, which is exactly what a portable artifact is for.")
+    parts.append(
+        f"INLINED_SOURCES = "
+        f"{sorted((s.module, s.firstlineno, s.lastlineno, s.checksum) for s in entry.source_info.inlined_sources if s.module != '__main__')!r}"
+    )
+    parts.append("")
     parts.append("# The entry's defaults and closure values: a code object carries")
     parts.append("# neither, and the driver rebuilds the entry from one.")
     parts.append(f"_ENTRY_BINDING = {_b64(entry_binding or {})!r}")
