@@ -315,7 +315,7 @@ int main(int argc, char** argv) {
       FLAGS_iter,
       ".");
   const auto bench_start = high_resolution_clock::now();
-  std::vector<float> times;
+  std::vector<float> times(FLAGS_iter, 0);
   for (int i = 0; i < FLAGS_iter; ++i) {
     auto start = high_resolution_clock::now();
     runner->run(module, inputs);
