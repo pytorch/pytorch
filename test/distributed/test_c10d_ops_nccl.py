@@ -441,13 +441,13 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
                         factor_ref = factor
                     float_tensors = [
                         torch.tensor(
-                            [self.rank + 1.0], device=f"cuda:{local_device_id}"
+                            [self.rank + 1.0], device=local_device_id
                         )
                     ]
                     float_tensors_ref = [
                         torch.tensor(
                             [(self.rank + 1.0) * factor_ref],
-                            device=f"cuda:{local_device_id}",
+                            device=local_device_id,
                         )
                     ]
 
@@ -1152,13 +1152,13 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
             expected = scalar_factor * torch.tensor(
                 [self.world_size * (self.world_size + 1) / 2],
                 dtype=dtype,
-                device=f"cuda:{local_device_id}",
+                device=local_device_id,
             )
             self.assertEqual(expected, tensors[0])
 
         for dtype in (torch.half, torch.float, torch.double):
             tensor_factor = torch.tensor(
-                [5.0], device=f"cuda:{local_device_id}", dtype=dtype
+                [5.0], device=local_device_id, dtype=dtype
             )
             tensors = [
                 torch.tensor([self.rank + 1]).cuda(local_device_id).to(dtype=dtype)
@@ -1169,7 +1169,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
             expected = tensor_factor * torch.tensor(
                 [self.world_size * (self.world_size + 1) / 2],
                 dtype=dtype,
-                device=f"cuda:{local_device_id}",
+                device=local_device_id,
             )
             self.assertEqual(expected, tensors[0])
 
@@ -1188,13 +1188,13 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
                     expected = scalar_factor * torch.tensor(
                         [self.world_size * (self.world_size + 1) / 2],
                         dtype=dtype,
-                        device=f"cuda:{local_device_id}",
+                        device=local_device_id,
                     )
                     self.assertEqual(expected, tensors[0])
 
                 # Test with tensor factor
                 tensor_factor = torch.tensor(
-                    [4.0], device=f"cuda:{local_device_id}", dtype=dtype
+                    [4.0], device=local_device_id, dtype=dtype
                 )
                 tensors = [
                     torch.tensor([self.rank + 1]).cuda(local_device_id).to(dtype=dtype)
@@ -1206,7 +1206,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
                     expected = tensor_factor * torch.tensor(
                         [self.world_size * (self.world_size + 1) / 2],
                         dtype=dtype,
-                        device=f"cuda:{local_device_id}",
+                        device=local_device_id,
                     )
                     self.assertEqual(expected, tensors[0])
 
@@ -1214,10 +1214,10 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
         for dtype in (torch.half, torch.float, torch.double):
             # Test with scalar factor
             scalar_factor = 3.0
-            output = [torch.zeros(1, dtype=dtype, device=f"cuda:{local_device_id}")]
+            output = [torch.zeros(1, dtype=dtype, device=local_device_id)]
             input_lists = [
                 [
-                    torch.tensor([i + 1], dtype=dtype, device=f"cuda:{local_device_id}")
+                    torch.tensor([i + 1], dtype=dtype, device=local_device_id)
                     for i in range(self.world_size)
                 ]
             ]
@@ -1228,18 +1228,18 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
             expected = scalar_factor * torch.tensor(
                 [self.world_size * (self.rank + 1)],
                 dtype=dtype,
-                device=f"cuda:{local_device_id}",
+                device=local_device_id,
             )
             self.assertEqual(expected, output[0])
 
             # Test with tensor factor
             tensor_factor = torch.tensor(
-                [5.0], device=f"cuda:{local_device_id}", dtype=dtype
+                [5.0], device=local_device_id, dtype=dtype
             )
-            output = [torch.zeros(1, dtype=dtype, device=f"cuda:{local_device_id}")]
+            output = [torch.zeros(1, dtype=dtype, device=local_device_id)]
             input_lists = [
                 [
-                    torch.tensor([i + 1], dtype=dtype, device=f"cuda:{local_device_id}")
+                    torch.tensor([i + 1], dtype=dtype, device=local_device_id)
                     for i in range(self.world_size)
                 ]
             ]
@@ -1249,7 +1249,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
             expected = tensor_factor * torch.tensor(
                 [self.world_size * (self.rank + 1)],
                 dtype=dtype,
-                device=f"cuda:{local_device_id}",
+                device=local_device_id,
             )
             self.assertEqual(expected, output[0])
 
