@@ -34,7 +34,7 @@ class TORCH_API NCCLDevCommManager {
   // @param device The CUDA device this manager is associated with
   explicit NCCLDevCommManager(const c10::Device device) : device_(device) {}
 
-  // Per-device singleton: Defined out-of-line in nccl_dev_comm_bridge.cpp
+  // Per-device singleton: Defined out-of-line in nccl_devcomm_manager.cpp
   // (libtorch_cuda) so the function-local registry is process-wide. An inline
   // definition is hidden by
   // `-fvisibility-inlines-hidden`, so a separately linked DSO (e.g.
