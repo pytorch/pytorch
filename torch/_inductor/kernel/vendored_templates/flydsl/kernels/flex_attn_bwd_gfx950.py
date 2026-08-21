@@ -159,6 +159,14 @@ def _build_flex_attn_bwd_module(
         raise ValueError(
             "FlyDSL backward requires (DQK, DV) to be (128, 128) or (192, 128)"
         )
+    if int(block_m) != 128 or int(block_n) != 128:
+        raise ValueError("FlyDSL backward requires sparse Q/KV block size 128")
+    if S <= 0 or S % 128:
+        raise ValueError(
+            "FlyDSL backward requires a positive sequence length divisible by 128"
+        )
+    if S > 16384:
+        raise ValueError("FlyDSL backward currently supports sequence length <= 16384")
     if block_mask_batch not in (1, B):
         raise ValueError("BlockMask batch dimension must be 1 or B")
     if block_mask_heads not in (1, H):
@@ -168,7 +176,7 @@ def _build_flex_attn_bwd_module(
     if len(mask_buffer_shapes) > 4:
         raise ValueError("FlyDSL backward supports at most four mask buffers")
 
-    SB = int(block_m)  # sparse block size (== block_n == 128)
+    SB = int(block_m)
     BM = 64  # q rows per tile
     BN = 64  # kv rows per tile
     DQ_BN = int(dq_reduction_rows)  # kv rows streamed by the dQ kernel
@@ -182,7 +190,7 @@ def _build_flex_attn_bwd_module(
     MC = S // BM  # q chunks
     NC = S // BN  # kv chunks
     CPB = SB // BM  # chunks per sparse block
-    PNT = max(64, MC)  # prologue threads: one per chunk, rounded to wave64
+    PNT = max(64, MC)  # one prologue thread per chunk, with at least one wave
     MAX_PARTIAL = NB if max_partial_blocks is None else int(max_partial_blocks)
     MAX_FULL = NB if max_full_blocks is None else int(max_full_blocks)
 
@@ -239,9 +247,9 @@ def _build_flex_attn_bwd_module(
 
     @flyc.kernel
     def delta_kernel(OUT: fx.Tensor, DO: fx.Tensor, DELTA: fx.Tensor):
-        tid = fx.Int32(fx.thread_idx.x)
-        bid = fx.Int32(fx.block_idx.x)
-        bh = fx.Int32(fx.block_idx.y)
+        tid = fx.thread_idx.x
+        bid = fx.block_idx.x
+        bh = fx.block_idx.y
         batch = bh // fx.Int32(H)
         head = bh % fx.Int32(H)
         out_off = batch * fx.Int32(OUT_STRIDE[0]) + head * fx.Int32(OUT_STRIDE[1])
@@ -298,8 +306,8 @@ def _build_flex_attn_bwd_module(
         CF_K: fx.Tensor,
         IF_K: fx.Tensor,
     ):
-        tid = fx.Int32(fx.thread_idx.x)
-        bh = fx.Int32(fx.block_idx.x)
+        tid = fx.thread_idx.x
+        bh = fx.block_idx.x
         batch = bh // fx.Int32(H)
         head = bh % fx.Int32(H)
         mask_b = fx.Int32(0) if BMB == 1 else batch
@@ -334,7 +342,7 @@ def _build_flex_attn_bwd_module(
         i32atom = fx.make_copy_atom(fx.rocdl.BufferCopy32b(), fx.Int32)
 
         def gload_i32(view, idx):
-            return fx.Int32(load_scalar(i32atom, view, idx, fx.Int32))
+            return load_scalar(i32atom, view, idx, fx.Int32)
 
         def gstore_i32(view, idx, val):
             store_scalar(i32atom, view, idx, val, fx.Int32)
@@ -384,8 +392,8 @@ def _build_flex_attn_bwd_module(
         rowq = mc * fx.Int32(NC)
         rowk = mc * fx.Int32(MC)
         for nb in fx.range_constexpr(NB):
-            fq = fx.Int32(fx.ptr_load(fp + (mb * fx.Int32(NB) + fx.Int32(nb))))
-            fk = fx.Int32(fx.ptr_load(fp + (fx.Int32(nb * NB) + mb)))
+            fq = fx.ptr_load(fp + (mb * fx.Int32(NB) + fx.Int32(nb)))
+            fk = fx.ptr_load(fp + (fx.Int32(nb * NB) + mb))
             for s in fx.range_constexpr(CPB):
                 ch = fx.Int32(nb * CPB + s)
                 gstore_i32(gIPQ, rowq + c1, ch)
@@ -443,9 +451,9 @@ def _build_flex_attn_bwd_module(
         MaskBuffer2: fx.Tensor,
         MaskBuffer3: fx.Tensor,
     ):
-        tid = fx.Int32(fx.thread_idx.x)
-        nc = fx.Int32(fx.block_idx.x)
-        bh = fx.Int32(fx.block_idx.y)
+        tid = fx.thread_idx.x
+        nc = fx.block_idx.x
+        bh = fx.block_idx.y
         batch = bh // fx.Int32(H)
         head = bh % fx.Int32(H)
         lane = tid % fx.Int32(64)
@@ -529,10 +537,10 @@ def _build_flex_attn_bwd_module(
         o16 = fx.make_copy_atom(fx.rocdl.BufferCopy16b(), fx.BFloat16)
 
         def gload_i32(view, idx):
-            return fx.Int32(load_scalar(i32atom, view, idx, fx.Int32))
+            return load_scalar(i32atom, view, idx, fx.Int32)
 
         def gload_f32(view, idx):
-            return fx.Float32(load_scalar(f32atom, view, idx, fx.Float32))
+            return load_scalar(f32atom, view, idx, fx.Float32)
 
         def load_qk_tile(gsrc, rbase, pn):
             for l in fx.range_constexpr(QK_LOAD_IT):
@@ -687,8 +695,8 @@ def _build_flex_attn_bwd_module(
             dsl = []
             for e in fx.range_constexpr(16):
                 rr = g4 + fx.Int32(CE[e])
-                l2e = fx.Float32(fx.ptr_load(pld + rr))
-                de = fx.Float32(fx.ptr_load(pld + (fx.Int32(BM) + rr)))
+                l2e = fx.ptr_load(pld + rr)
+                de = fx.ptr_load(pld + (fx.Int32(BM) + rr))
                 x = _f32(vs[e]) * _f32(SC2) - l2e
                 p = _exp2(x)
                 if masked:
@@ -764,9 +772,9 @@ def _build_flex_attn_bwd_module(
         MaskBuffer2: fx.Tensor,
         MaskBuffer3: fx.Tensor,
     ):
-        tid = fx.Int32(fx.thread_idx.x)
-        mc = fx.Int32(fx.block_idx.x)
-        bh = fx.Int32(fx.block_idx.y)
+        tid = fx.thread_idx.x
+        mc = fx.block_idx.x
+        bh = fx.block_idx.y
         batch = bh // fx.Int32(H)
         head = bh % fx.Int32(H)
         lane = tid % fx.Int32(64)
@@ -849,10 +857,10 @@ def _build_flex_attn_bwd_module(
         o16 = fx.make_copy_atom(fx.rocdl.BufferCopy16b(), fx.BFloat16)
 
         def gload_i32(view, idx):
-            return fx.Int32(load_scalar(i32atom, view, idx, fx.Int32))
+            return load_scalar(i32atom, view, idx, fx.Int32)
 
         def gload_f32(view, idx):
-            return fx.Float32(load_scalar(f32atom, view, idx, fx.Float32))
+            return load_scalar(f32atom, view, idx, fx.Float32)
 
         sQ = sview(pa, (BM, DQK), (DQKp, 1))
         sD = sview(pb, (BM, DV), (DVp, 1))
