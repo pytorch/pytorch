@@ -1025,6 +1025,33 @@ class TestVarlenAttention(NNTestCase):
                 self.assertEqual(cudnn_forward.call_count, expected_calls)
                 self.assertEqual(cudnn_backward.call_count, expected_calls)
 
+    @parametrize("compile", [False, True])
+    def test_sdpa_kernel_backend_priority(self, device, compile):
+        q, k, v, cu_seq = _make_causal_varlen_inputs(device)
+        args = (q, k, v, cu_seq, cu_seq, q.size(0), [-1, 0])
+
+        with patch.object(varlen_attention, "_should_use_cudnn", return_value=True):
+            for backend_order in (
+                [SDPBackend.FLASH_ATTENTION, SDPBackend.CUDNN_ATTENTION],
+                [SDPBackend.CUDNN_ATTENTION, SDPBackend.FLASH_ATTENTION],
+            ):
+                with sdpa_kernel(backend_order, set_priority=True):
+                    if compile:
+                        torch._dynamo.reset()
+                        get_priority = torch.compile(
+                            lambda x: x + varlen_attention._get_sdp_priority_order()[0],
+                            backend="eager",
+                            fullgraph=True,
+                        )
+                        priority = get_priority(torch.zeros((), device=device)).item()
+                        self.assertEqual(priority, backend_order[0].value)
+                    backend = varlen_attention._select_backend(*args)
+                self.assertEqual(backend, backend_order[0].value)
+            self.assertEqual(
+                varlen_attention._select_backend(*args),
+                SDPBackend.CUDNN_ATTENTION.value,
+            )
+
     @skipIfRocm
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"

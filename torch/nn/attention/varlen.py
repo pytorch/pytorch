@@ -12,6 +12,7 @@ from typing import Any, NamedTuple
 import torch
 from torch._C import _SDPBackend as SDPBackend
 
+from . import _is_sdp_priority_order_active
 from ._utils import _empty_with_matching_layout
 
 
@@ -38,6 +39,14 @@ def _validate_scale(scale: float | None) -> None:
     # This form also rejects NaN, unlike scale <= 0.
     if scale is not None and not scale > 0:
         raise ValueError(f"scale must be greater than 0, got {scale}")
+
+
+@torch.compiler.assume_constant_result
+def _get_sdp_priority_order() -> list[int]:
+    """Capture varlen backend priority at trace time."""
+    if _is_sdp_priority_order_active():
+        return torch._C._get_sdp_priority_order()
+    return [_CUDNN_ATTENTION_BACKEND, _FLASH_ATTENTION_BACKEND]
 
 
 @lru_cache(maxsize=8)
@@ -111,7 +120,7 @@ def _select_backend(
     block_table: torch.Tensor | None = None,
     num_splits: int | None = None,
 ) -> int:
-    """Prefer eligible cuDNN, otherwise use enabled Flash attention."""
+    """Select the first eligible varlen backend in the SDPA priority order."""
     cudnn_enabled = torch._C._get_cudnn_sdp_enabled()
     flash_enabled = torch._C._get_flash_sdp_enabled()
     cudnn_reasons = (
@@ -131,10 +140,12 @@ def _select_backend(
         if cudnn_enabled
         else []
     )
-    if cudnn_enabled and not cudnn_reasons:
-        return _CUDNN_ATTENTION_BACKEND
-    if flash_enabled:
-        return _FLASH_ATTENTION_BACKEND
+    cudnn_eligible = cudnn_enabled and not cudnn_reasons
+    for backend in _get_sdp_priority_order():
+        if backend == _CUDNN_ATTENTION_BACKEND and cudnn_eligible:
+            return backend
+        if backend == _FLASH_ATTENTION_BACKEND and flash_enabled:
+            return backend
     if cudnn_enabled:
         constraints = "\n  - ".join(cudnn_reasons)
         raise RuntimeError(
@@ -294,8 +305,8 @@ def varlen_attn(
 
     This function is similar to scaled_dot_product_attention but optimized for
     variable-length sequences using cumulative sequence position tensors.
-    Backend enablement follows :func:`torch.nn.attention.sdpa_kernel`; when both
-    cuDNN and Flash are enabled, eligible cuDNN is preferred.
+    Backend enablement follows :func:`torch.nn.attention.sdpa_kernel`. By default,
+    eligible cuDNN is preferred over Flash; ``set_priority=True`` overrides this order.
 
     Args:
         query (Tensor): Query tensor; shape :math:`(T_q, H_q, D)`
