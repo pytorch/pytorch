@@ -5744,8 +5744,10 @@
   dispatch:
     CPU: _sspaddmm_out_only_sparse
     CUDA: _sspaddmm_out_only_sparse_cuda
+    XPU: _sspaddmm_out_only_sparse_xpu
     SparseCPU: _sspaddmm_out_cpu
     SparseCUDA: _sspaddmm_out_cuda
+    SparseXPU: _sspaddmm_out_xpu
 
 - func: _chunk_cat(Tensor[] tensors, int dim, int num_chunks) -> Tensor
   dispatch:
