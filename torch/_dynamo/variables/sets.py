@@ -68,7 +68,11 @@ def set_copy(obj: VariableTracker) -> VariableTracker:
     for exact frozenset (`frozenset_copy`).  Use this for binary-op scratch
     storage so mutations don't bleed into the input.
     """
-    base = obj._base_vt if isinstance(obj, variables.UserDefinedSetVariable) else obj
+    # For a set/frozenset subclass, clone the plain _base_vt view rather than the
+    # UserDefined* object itself, whose __dict__ carries fields (e.g.
+    # _looked_up_attrs) that VariableTracker.__init__ would reject.  Covers both
+    # UserDefinedSetVariable and its sibling UserDefinedFrozensetVariable.
+    base = obj._base_vt if isinstance(obj, variables.UserDefinedObjectVariable) else obj
     if base is None:
         raise AssertionError("_base_vt must not be None")
     return base.clone(
