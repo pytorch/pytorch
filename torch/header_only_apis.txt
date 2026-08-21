@@ -81,17 +81,11 @@ tuple_take
 all
 concat_t
 contains
-count_if
 drop_if_nonempty_t
 drop_t
-filter_t
-find_if
 from_tuple_t
 head_t
 head_with_default_t
-map_t
-map_types_to_values
-reverse_t
 size
 take_t
 to_tuple_t
