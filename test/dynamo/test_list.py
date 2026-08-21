@@ -3,6 +3,7 @@
 # TODO: move set tests from test_functions.py/test_misc.py to this file
 
 
+import collections
 import sys
 
 import torch
@@ -54,10 +55,10 @@ class TupleTests(torch._dynamo.test_case.TestCase):
         return super().tearDown()
 
     def assertEqual(self, a, b):
-        return self.assertTrue(a == b, f"{a} != {b}")
+        return self.assertTrue(a == b, lambda msg: f"{msg}\n{a} != {b}")
 
     def assertNotEqual(self, x, y, msg=None, *, atol=None, rtol=None, **kwargs):
-        return self.assertTrue(x != y, f"{x} == {y}")
+        return self.assertTrue(x != y, lambda msg: f"{msg}\n{x} == {y}")
 
     @make_dynamo_test
     def test_count(self):
@@ -533,6 +534,72 @@ class ListTests(TupleTests):
         # Valid iterable assignments are unaffected.
         p[1:3] = ["x", "y"]
         self.assertEqual(p, ["a", "x", "y", "d", "e", "f"])
+
+
+class IndexNotFoundTests(torch._dynamo.test_case.TestCase):
+    # list/tuple/deque share BaseListVariable.list_index, but CPython's
+    # ValueError text does not: on <=3.13 list and deque repr the missing
+    # value while tuple ignores it; 3.14 dropped the repr everywhere
+    # (gh-121288). Each sequence is built twice: from constants (the inline
+    # fast path) and from opaque objects (the polyfills.index path).
+    def _check(self, fn):
+        x = torch.ones(2)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x), fn(x))
+
+    def test_list(self):
+        def fn(x):
+            try:
+                [1, 2, 3].index("z")
+            except ValueError as e:
+                return str(e)
+
+        self._check(fn)
+
+    def test_tuple(self):
+        def fn(x):
+            try:
+                (1, 2, 3).index("z")
+            except ValueError as e:
+                return str(e)
+
+        self._check(fn)
+
+    def test_deque(self):
+        def fn(x):
+            try:
+                collections.deque([1, 2, 3]).index("z")
+            except ValueError as e:
+                return str(e)
+
+        self._check(fn)
+
+    def test_list_nonconst(self):
+        def fn(x):
+            try:
+                [NeverEqualForListRemove()].index("z")
+            except ValueError as e:
+                return str(e)
+
+        self._check(fn)
+
+    def test_tuple_nonconst(self):
+        def fn(x):
+            try:
+                (NeverEqualForListRemove(),).index("z")
+            except ValueError as e:
+                return str(e)
+
+        self._check(fn)
+
+    def test_deque_nonconst(self):
+        def fn(x):
+            try:
+                collections.deque([NeverEqualForListRemove()]).index("z")
+            except ValueError as e:
+                return str(e)
+
+        self._check(fn)
 
 
 if __name__ == "__main__":

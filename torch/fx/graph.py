@@ -566,9 +566,11 @@ class CodeGen:
 
             typename = _type_repr(o)
             if isinstance(o, types.UnionType) and "|" in typename:
-                # str | int
+                # TorchScript's PEP604 parser does not resolve generated globals
+                # for nested aliases such as typing_Dict.
+                origin_typename = add_global(_type_repr(typing.Union), typing.Union)
                 args = [type_repr(arg) for arg in typing.get_args(o)]
-                return "|".join(args)
+                return f"{origin_typename}[{','.join(args)}]"
 
             if origin_type := getattr(o, "__origin__", None):
                 # list[...], typing.List[...], TensorType[...]

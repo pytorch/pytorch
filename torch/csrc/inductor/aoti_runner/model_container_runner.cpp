@@ -191,6 +191,15 @@ AOTIModelContainerRunner::~AOTIModelContainerRunner() {
 std::vector<at::Tensor> AOTIModelContainerRunner::run_impl(
     std::vector<AtenTensorHandle>& input_handles,
     void* stream_handle) {
+  // The model steals each input handle and nulls its slot (see
+  // steal_from_raw_handles_to_raii_handles). If run_func_ throws before the
+  // steal (e.g. a failed input runtime check), the un-stolen handles would
+  // leak, keeping their input storage alive. Free whatever the model did not
+  // steal on every exit; on success all slots are null so this is a no-op.
+  auto free_unstolen_input_handles = c10::make_scope_exit([&input_handles]() {
+    torch::aot_inductor::free_unstolen_handles(input_handles);
+  });
+
   // For outputs, we only allocate a vector to hold returned tensor handles,
   // not allocating the actual output tensor storage here
   size_t num_outputs = 0;

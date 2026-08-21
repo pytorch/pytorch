@@ -1,9 +1,11 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/Dispatch.h>
 #include <ATen/TensorIterator.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/Pow.h>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/native/mps/kernels/UnaryKernel.h>
 #include <fmt/format.h>
 
 namespace at::native {
@@ -66,6 +68,36 @@ static void polygamma_kernel(TensorIteratorBase& iter, int64_t order) {
   }
 }
 
+// Replacement values are computed per-dtype like the CUDA kernel (posinf and
+// neginf default to the input dtype's max/lowest) and ride at float, which
+// represents half/bfloat extrema exactly. Integral inputs never reach the
+// stub (nan_to_num_out copies them through).
+static void nan_to_num_kernel_mps(TensorIteratorBase& iter,
+                                  std::optional<double> nan,
+                                  std::optional<double> pos_inf,
+                                  std::optional<double> neg_inf) {
+  if (isComplexType(iter.common_dtype())) {
+    AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, iter.common_dtype(), "nan_to_num_mps", [&]() {
+      using value_t = c10::scalar_value_type<scalar_t>::type;
+      NanToNumParams<float> params{static_cast<float>(static_cast<value_t>(nan.value_or(0.))),
+                                   static_cast<float>(pos_inf.has_value() ? static_cast<value_t>(*pos_inf)
+                                                                          : std::numeric_limits<value_t>::max()),
+                                   static_cast<float>(neg_inf.has_value() ? static_cast<value_t>(*neg_inf)
+                                                                          : std::numeric_limits<value_t>::lowest())};
+      lib.exec_unary_kernel_with_params(iter, "nan_to_num", params, "NanToNumParams_float", /*ilp_threshold=*/1u << 18);
+    });
+    return;
+  }
+  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, iter.common_dtype(), "nan_to_num_mps", [&]() {
+    NanToNumParams<float> params{static_cast<float>(static_cast<scalar_t>(nan.value_or(0.))),
+                                 static_cast<float>(pos_inf.has_value() ? static_cast<scalar_t>(*pos_inf)
+                                                                        : std::numeric_limits<scalar_t>::max()),
+                                 static_cast<float>(neg_inf.has_value() ? static_cast<scalar_t>(*neg_inf)
+                                                                        : std::numeric_limits<scalar_t>::lowest())};
+    lib.exec_unary_kernel_with_params(iter, "nan_to_num", params, "NanToNumParams_float", /*ilp_threshold=*/1u << 18);
+  });
+}
+
 REGISTER_UNARY_TI_DISPATCH(exp);
 REGISTER_UNARY_TI_DISPATCH(expm1);
 REGISTER_UNARY_TI_DISPATCH(erf);
@@ -102,4 +134,5 @@ REGISTER_DISPATCH(special_erfcx_stub, erfcx_kernel);
 REGISTER_DISPATCH(round_decimals_stub, round_decimals_kernel);
 REGISTER_DISPATCH(pow_tensor_scalar_stub, pow_tensor_scalar_kernel);
 REGISTER_DISPATCH(polygamma_stub, polygamma_kernel);
+REGISTER_DISPATCH(nan_to_num_stub, nan_to_num_kernel_mps);
 } // namespace at::native

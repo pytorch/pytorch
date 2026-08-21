@@ -6088,11 +6088,11 @@ class GraphModule(torch.nn.Module):
             return grad_res
 
         compile_options = dict(backend="eager", fullgraph=True, dynamic=False)
-        compiled_fn = torch.compile(fn, **compile_options)
+        compiled_fn = torch.compile(fn, **compile_options)  # noqa: UNSPECIFIED_BACKEND
         vmapped_fn = torch.vmap(compiled_fn)
         for attr in _DYNAMO_WRAPPER_ATTRS:
             self.assertFalse(hasattr(vmapped_fn, attr), attr)
-        compiled_vmapped_fn = torch.compile(vmapped_fn, **compile_options)
+        compiled_vmapped_fn = torch.compile(vmapped_fn, **compile_options)  # noqa: UNSPECIFIED_BACKEND
 
         x = torch.randn(8, dtype=torch.float64)
         expected = vmapped_fn(x)
@@ -6124,12 +6124,12 @@ class GraphModule(torch.nn.Module):
         )
         for transform, fn, x in cases:
             with self.subTest(transform=transform.__name__):
-                compiled_fn = torch.compile(fn, **compile_options)
+                compiled_fn = torch.compile(fn, **compile_options)  # noqa: UNSPECIFIED_BACKEND
                 transformed_fn = transform(compiled_fn)
                 for attr in _DYNAMO_WRAPPER_ATTRS:
                     self.assertFalse(hasattr(transformed_fn, attr), attr)
 
-                compiled_transformed_fn = torch.compile(
+                compiled_transformed_fn = torch.compile(  # noqa: UNSPECIFIED_BACKEND
                     transformed_fn, **compile_options
                 )
 

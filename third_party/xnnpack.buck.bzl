@@ -748,6 +748,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "-mavxvnni",
             "-mf16c",
             "-mfma",
+            "-mgfni",
         ] + select({
             "DEFAULT": [],
             "ovr_config//cpu:x86_32": [
@@ -755,12 +756,14 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 "-mavxvnni",
                 "-mf16c",
                 "-mfma",
+                "-mgfni",
             ],
             "ovr_config//cpu:x86_64": [
                 "-mavx2",
                 "-mavxvnni",
                 "-mf16c",
                 "-mfma",
+                "-mgfni",
             ],
         }),
         labels = labels,

@@ -612,7 +612,7 @@ class TestDynamoDecompositionsNumerics(TestCase):
         value = torch.tensor(0.5, device=device)
 
         expected = fn(x.clone(), tensor1, tensor2, value)
-        actual = torch.compile(fn, fullgraph=True)(x.clone(), tensor1, tensor2, value)
+        actual = torch.compile(fn, fullgraph=True)(x.clone(), tensor1, tensor2, value)  # noqa: UNSPECIFIED_BACKEND
         self.assertEqual(expected, actual)
 
     @skipIfCrossRef
@@ -690,7 +690,7 @@ class TestDynamoDecompositionsNumerics(TestCase):
         value = torch.tensor(0.5, device=device)
 
         expected = fn(x.clone(), tensor1, tensor2, value)
-        actual = torch.compile(fn, fullgraph=True)(x.clone(), tensor1, tensor2, value)
+        actual = torch.compile(fn, fullgraph=True)(x.clone(), tensor1, tensor2, value)  # noqa: UNSPECIFIED_BACKEND
         self.assertEqual(expected, actual)
 
     @skipIfCrossRef
@@ -767,7 +767,7 @@ class TestDynamoDecompositionsNumerics(TestCase):
         alpha = torch.tensor(2.0, device=device)
 
         expected = fn(x.clone(), other, alpha)
-        actual = torch.compile(fn, fullgraph=True)(x.clone(), other, alpha)
+        actual = torch.compile(fn, fullgraph=True)(x.clone(), other, alpha)  # noqa: UNSPECIFIED_BACKEND
         self.assertEqual(expected, actual, atol=0, rtol=0)
 
     @skipIfCrossRef
@@ -784,7 +784,7 @@ class TestDynamoDecompositionsNumerics(TestCase):
             return x.add_(other, alpha=alpha)
 
         expected = fn(x.clone(), other, alpha)
-        actual = torch.compile(fn, fullgraph=True)(x.clone(), other, alpha)
+        actual = torch.compile(fn, fullgraph=True)(x.clone(), other, alpha)  # noqa: UNSPECIFIED_BACKEND
         self.assertEqual(expected, actual, atol=0, rtol=0)
 
     @skipIfCrossRef
@@ -805,7 +805,7 @@ class TestDynamoDecompositionsNumerics(TestCase):
             return x.addcmul_(t1, t1, value=1)
 
         expected = fn(x.clone(), t1)
-        actual = torch.compile(fn, fullgraph=True)(x.clone(), t1)
+        actual = torch.compile(fn, fullgraph=True)(x.clone(), t1)  # noqa: UNSPECIFIED_BACKEND
         self.assertEqual(expected, actual)
 
     @skipIfCrossRef
@@ -821,7 +821,7 @@ class TestDynamoDecompositionsNumerics(TestCase):
             return x.addcmul_(t1, t2, value=0.5)
 
         expected = fn(x.clone(), t1, t2)
-        actual = torch.compile(fn, fullgraph=True)(x.clone(), t1, t2)
+        actual = torch.compile(fn, fullgraph=True)(x.clone(), t1, t2)  # noqa: UNSPECIFIED_BACKEND
         self.assertEqual(expected, actual)
 
     @skipIfCrossRef
@@ -838,7 +838,7 @@ class TestDynamoDecompositionsNumerics(TestCase):
             return x.addcmul_(t1, t2, value=value)
 
         expected = fn(x.clone(), t1, t2, value)
-        actual = torch.compile(fn, fullgraph=True)(x.clone(), t1, t2, value)
+        actual = torch.compile(fn, fullgraph=True)(x.clone(), t1, t2, value)  # noqa: UNSPECIFIED_BACKEND
         self.assertEqual(expected, actual)
 
     @skipIfCrossRef
@@ -859,7 +859,7 @@ class TestDynamoDecompositionsNumerics(TestCase):
             return x.addcdiv_(t1, t2, value=-0.01)
 
         expected = fn(x.clone(), t1, t2)
-        actual = torch.compile(fn, fullgraph=True)(x.clone(), t1, t2)
+        actual = torch.compile(fn, fullgraph=True)(x.clone(), t1, t2)  # noqa: UNSPECIFIED_BACKEND
         self.assertEqual(expected, actual)
 
     @skipIfCrossRef
@@ -881,7 +881,7 @@ class TestDynamoDecompositionsNumerics(TestCase):
             return x.addcdiv_(t1, t2, value=value)
 
         expected = fn(x.clone(), t1, t2, value)
-        actual = torch.compile(fn, fullgraph=True)(x.clone(), t1, t2, value)
+        actual = torch.compile(fn, fullgraph=True)(x.clone(), t1, t2, value)  # noqa: UNSPECIFIED_BACKEND
         self.assertEqual(expected, actual)
 
     @skipIfCrossRef
@@ -896,7 +896,7 @@ class TestDynamoDecompositionsNumerics(TestCase):
             return x.add_(other, alpha=2.3)
 
         expected = fn(x.clone(), other)
-        actual = torch.compile(fn, fullgraph=True)(x.clone(), other)
+        actual = torch.compile(fn, fullgraph=True)(x.clone(), other)  # noqa: UNSPECIFIED_BACKEND
         self.assertEqual(expected, actual)
 
 
