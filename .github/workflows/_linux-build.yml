@@ -40,6 +40,13 @@ on:
         default: ""
         type: string
         description: Prefix for runner label
+      skip-arc-mapping:
+        required: false
+        default: ""
+        type: string
+        description: |
+          If "true", pass the test matrix through unmapped (keep EC2 labels
+          like linux.4xlarge) instead of rewriting them to ARC equivalents.
       runner:
         required: false
         type: string
@@ -131,6 +138,13 @@ on:
         type: string
         default: ""
         description: CUDA version to use for the OSDC build.
+      bpf-td-extract-build-graph:
+        description: |
+          If set to "1", extract the ninja source -> artifact graph into
+          dist/build_graph_map.json so it travels inside the build artifact.
+        required: false
+        type: string
+        default: ""
 
     secrets:
       HUGGING_FACE_HUB_TOKEN:
@@ -163,7 +177,7 @@ jobs:
     timeout-minutes: 480
     outputs:
       docker-image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/${{ inputs.docker-image-name }}${{ inputs.ci-docker-hash && format('-{0}', inputs.ci-docker-hash) || '' }}
-      test-matrix: ${{ steps.map-runners.outputs.test-matrix }}
+      test-matrix: ${{ inputs.skip-arc-mapping == 'true' && steps.filter.outputs.test-matrix || steps.map-runners.outputs.test-matrix }}
       build-environment: ${{ inputs.build-environment }}
     steps:
       - name: Setup Linux
@@ -199,6 +213,7 @@ jobs:
 
       - name: Map EC2 runners to ARC runners
         id: map-runners
+        if: inputs.skip-arc-mapping != 'true'
         env:
           FILTERED_TEST_MATRIX: ${{ steps.filter.outputs.test-matrix }}
           RUNNER_PREFIX: ${{ inputs.runner_prefix }}
@@ -268,6 +283,16 @@ jobs:
             mkdir -p "dist/$(dirname "$src")"
             mv "$src" "dist/$(dirname "$src")/"
           fi
+
+      - name: Extract BPF-TD build graph
+        if: inputs.bpf-td-extract-build-graph == '1' && steps.build.outcome != 'skipped'
+        shell: bash
+        run: |
+          mkdir -p dist
+          python3 tools/testing/bpf_td/extract_build_graph.py \
+            --build-dir build \
+            --repo-root "$(pwd)" \
+            --out dist/build_graph_map.json
 
       - name: Archive artifacts into zip
         if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped' && steps.use-old-whl.outputs.reuse != 'true'

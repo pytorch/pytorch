@@ -105,6 +105,20 @@ on:
         required: false
         type: string
         default: ""
+      docker-container-options:
+        description: |
+          Extra options passed to the job container. Defaults to the standard
+          "--gpus all"; the BPF-TD trace workflow overrides this to add BPF caps.
+        required: false
+        type: string
+        default: "--gpus all"
+      bpf-td:
+        description: |
+          If set to "1", run the test command under bpf_td/run_traced.sh to
+          collect syscall traces for target-determination mapping.
+        required: false
+        type: string
+        default: ""
     secrets:
       HUGGING_FACE_HUB_TOKEN:
         required: false
@@ -133,7 +147,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     container:
       image: ${{ inputs.docker-image }}
-      options: "--gpus all"
+      options: ${{ inputs.docker-container-options }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       id-token: write
@@ -215,7 +229,7 @@ jobs:
           for dll in win-torch-wheel/cudart64_*.dll; do
             if [ -f "$dll" ]; then
               mv "$dll" win-torch-wheel-extracted/bin/x64/
-              echo "Moved $(basename $dll) to win-torch-wheel-extracted/bin/x64/"
+              echo "Moved $(basename "$dll") to win-torch-wheel-extracted/bin/x64/"
             fi
           done
 
@@ -306,6 +320,7 @@ jobs:
           ARTIFACTS_FILE_SUFFIX: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.setup-linux.outputs.job-id }}
           TORCH_TPU_TEXT_FILE: /var/lib/jenkins/workspace/.github/ci_commit_pins/torch_tpu.txt
           USE_ARC: "1"
+          PYTORCH_BPF_TD: ${{ inputs.bpf-td }}
         shell: bash
         run: |
           set -x
@@ -343,7 +358,12 @@ jobs:
 
           # shellcheck disable=SC2046
           python3 -m pip install $(echo dist/*.whl)[opt-einsum]
-          ${TEST_COMMAND}
+          if [[ "${PYTORCH_BPF_TD}" == "1" ]]; then
+            # shellcheck disable=SC2086
+            tools/testing/bpf_td/run_traced.sh ${TEST_COMMAND}
+          else
+            ${TEST_COMMAND}
+          fi
 
       - name: Configure AWS credentials
         id: aws-creds-benchmark
