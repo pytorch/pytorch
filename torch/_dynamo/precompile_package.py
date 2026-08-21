@@ -1577,17 +1577,22 @@ class PrecompileSession:
         )
 
     def _record_unrebuildable(
-        self, failures: list[tuple[Guard, Exception]]
+        self, code_entry: Any, failures: list[tuple[Guard, Exception]]
     ) -> set[tuple[str, str]]:
         dropped = set()
         for guard, exc in failures:
             slot = (guard.create_fn_name(), guard.name)
             dropped.add(slot)
+            # Naming the frame matters: several frames can guard the same source
+            # string, so "dropped" and "still failing" are otherwise
+            # indistinguishable between one frame swept and another missed.
             log.warning(
-                "precompile: dropping guard %s on %s -- it cannot be rebuilt from "
-                "the artifact (%s: %s). Nothing checks it at load time.",
+                "precompile: dropping guard %s on %s in %s -- it cannot be "
+                "rebuilt from the artifact (%s: %s). Nothing checks it at load "
+                "time.",
                 slot[0],
                 slot[1],
+                code_entry.python_code.co_name,
                 type(exc).__name__,
                 exc,
             )
@@ -1606,7 +1611,7 @@ class PrecompileSession:
         from torch._dynamo.guards import CheckFunctionManager
         from torch._dynamo.output_graph import OutputGraphCommon
 
-        dropped = self._record_unrebuildable(failures)
+        dropped = self._record_unrebuildable(code_entry, failures)
 
         def without(entries: Sequence[GuardFilterEntry]) -> Sequence[bool]:
             return [(e.guard_type, e.name) not in dropped for e in entries]
@@ -1707,7 +1712,7 @@ class PrecompileSession:
                 except Exception as e:
                     raise _unrebuildable_guards(code_entry, e) from e
                 if failures:
-                    self._record_unrebuildable(failures)
+                    self._record_unrebuildable(code_entry, failures)
                 self._report_guard_drift(code_entry, rebuilt)
                 guarded.guards_state = pruned
 
