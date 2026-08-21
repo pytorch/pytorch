@@ -490,6 +490,7 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
             "handle_current_stream",  # Safely implemented
             "handle_synchronize",  # Device type from function identity or arg
             "handle_functorch_autograd_grad",  # Only inspects placeholder metadata
+            "handle_set_tensor_requires_grad",  # Only re-reads the proxy's own metadata
         )
         for fn in handlers:
             if isinstance(fn, staticmethod) or inspect.ismethod(fn):
