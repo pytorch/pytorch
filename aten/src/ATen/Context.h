@@ -504,7 +504,12 @@ class TORCH_API Context {
       ? at::Float32MatmulPrecision::HIGH
       : at::Float32MatmulPrecision::HIGHEST;
   int benchmark_limit_cudnn = 10;
+#ifdef USE_ROCM
+  // On ROCm TF32 (MIOpen conv / cuDNN-compatible RNN) is strictly opt-in.
+  bool allow_tf32_cudnn = false;
+#else
   bool allow_tf32_cudnn = true;
+#endif
   CuBLASReductionOption allow_fp16_reduction_cublas =
       CuBLASReductionOption::AllowReducedPrecisionWithSplitK;
   CuBLASReductionOption allow_bf16_reduction_cublas =
@@ -554,8 +559,15 @@ class TORCH_API Context {
       {{Float32Backend::MKLDNN, Float32Op::RNN}, Float32Precision::NONE},
       {{Float32Backend::MKLDNN, Float32Op::MATMUL}, Float32Precision::NONE},
       {{Float32Backend::CUDA, Float32Op::ALL}, Float32Precision::NONE},
+#ifdef USE_ROCM
+      // TF32 is opt-in on ROCm, so with no explicit override conv/rnn resolve
+      // to full fp32 rather than the legacy TF32 default used on NVIDIA.
+      {{Float32Backend::CUDA, Float32Op::CONV}, Float32Precision::NONE},
+      {{Float32Backend::CUDA, Float32Op::RNN}, Float32Precision::NONE},
+#else
       {{Float32Backend::CUDA, Float32Op::CONV}, Float32Precision::DEFAULT},
       {{Float32Backend::CUDA, Float32Op::RNN}, Float32Precision::DEFAULT},
+#endif
       {{Float32Backend::CUDA, Float32Op::MATMUL},
        float32_matmul_precision == at::Float32MatmulPrecision::HIGHEST
            ? Float32Precision::NONE
