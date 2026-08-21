@@ -1607,6 +1607,25 @@ class TestTorchDeviceType(TestCase):
             torch.device(device).type == 'cuda')
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
+    def test_deterministic_interpolate_bicubic(self, device):
+        input = torch.randn(1, 2, 4, 4, device=device, requires_grad=True)
+        output_grad = torch.randn(1, 2, 9, 12, device=device)
+        grad = None
+        with DeterministicGuard(True):
+            for _ in range(5):
+                res = torch.nn.functional.interpolate(
+                    input,
+                    size=(9, 12),
+                    mode='bicubic',
+                    align_corners=False)
+                res.backward(output_grad)
+                if grad is None:
+                    grad = input.grad
+                else:
+                    self.assertEqual(grad, input.grad, atol=0, rtol=0)
+                input.grad = None
+
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_interpolate_trilinear(self, device):
         input = torch.randn(1, 2, 4, 4, 4, device=device, requires_grad=True)
         res = torch.nn.functional.interpolate(
@@ -4232,6 +4251,15 @@ class TestTorchDeviceType(TestCase):
             out = torch.addcmul(a, b, c, value=-2)
             self.assertTrue(not (out.isnan() or out.isinf()))
 
+    @onlyNativeDeviceTypes
+    @dtypes(torch.float)
+    def test_addcdiv_zero_divisor(self, device, dtype):
+        input = torch.ones(17, dtype=dtype, device=device)
+        tensor1 = torch.ones(17, dtype=dtype, device=device)
+        tensor2 = torch.zeros(17, dtype=dtype, device=device)
+        expected = torch.full((17,), float("inf"), dtype=dtype, device=device)
+        self.assertEqual(torch.addcdiv(input, tensor1, tensor2), expected)
+
     def test_nullary_op_mem_overlap(self, device):
         ops = (
             ("random_", ()),
@@ -6550,6 +6578,19 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(
                 torch.nn.functional.hardtanh(x, min_bound, max_bound), x
             )
+
+        # An upper bound below the dtype range (or a lower bound above it) would
+        # force every element to an unrepresentable value and must raise.
+        if dtype is not torch.int64:
+            with self.assertRaisesRegex(RuntimeError, "outside the representable range"):
+                torch.clamp(x, max=info.min - 1)
+            with self.assertRaisesRegex(RuntimeError, "outside the representable range"):
+                torch.clamp_max(x, info.min - 1)
+        if dtype is not torch.uint64:
+            with self.assertRaisesRegex(RuntimeError, "outside the representable range"):
+                torch.clamp(x, min=info.max + 1)
+            with self.assertRaisesRegex(RuntimeError, "outside the representable range"):
+                torch.clamp_min(x, info.max + 1)
 
 
 # Tests that compare a device's computation with the (gold-standard) CPU's.

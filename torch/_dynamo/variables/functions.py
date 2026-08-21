@@ -30,6 +30,7 @@ import importlib.util
 import inspect
 import itertools
 import logging
+import operator
 import os
 import re
 import sys
@@ -56,7 +57,6 @@ from ..exc import (
     ObservedException,
     ObservedGeneratorExit,
     ObservedUserStopIteration,
-    raise_attribute_error,
     raise_observed_exception,
     raise_type_error,
     raise_value_error,
@@ -2911,6 +2911,119 @@ def _traceable_collectives_source(
     return AttrSource(path_source, inner_name)
 
 
+def _fuse_batch_p2p_waits(gm: torch.fx.GraphModule) -> None:
+    from torch.distributed._functional_collectives import wait_tensor
+
+    batch_targets = {
+        torch.ops._c10d_functional.batch_p2p_ops,
+        torch.ops._c10d_functional.batch_p2p_ops.default,
+    }
+    wait_targets = {
+        wait_tensor,
+        torch.ops._c10d_functional.wait_tensor,
+        torch.ops._c10d_functional.wait_tensor.default,
+    }
+    graph = gm.graph
+    changed = False
+
+    for batch in list(graph.nodes):
+        if batch.target not in batch_targets:
+            continue
+
+        outputs: dict[int, torch.fx.Node] = {}
+        for user in batch.users:
+            if (
+                user.target is not operator.getitem
+                or len(user.args) != 2
+                or not isinstance(user.args[1], int)
+            ):
+                outputs.clear()
+                break
+            outputs[user.args[1]] = user
+        if (
+            not outputs
+            or len(outputs) != len(batch.users)
+            or sorted(outputs) != list(range(len(outputs)))
+        ):
+            continue
+
+        waits: list[torch.fx.Node] = []
+        for output in (outputs[i] for i in range(len(outputs))):
+            output_waits = [
+                user for user in output.users if user.target in wait_targets
+            ]
+            if len(output.users) != 1 or len(output_waits) != 1:
+                waits.clear()
+                break
+            wait = output_waits[0]
+            if wait.users:
+                waits.clear()
+                break
+            waits.append(wait)
+        if not waits:
+            continue
+
+        nodes = list(graph.nodes)
+        positions = {node: i for i, node in enumerate(nodes)}
+        first = min(waits, key=positions.__getitem__)
+        last = max(waits, key=positions.__getitem__)
+        between = nodes[positions[first] : positions[last] + 1]
+        if any(node not in waits for node in between):
+            continue
+
+        op_list = batch.args[0]
+        tensors = batch.args[3]
+        has_static_inputs = (
+            isinstance(op_list, (list, tuple))
+            and isinstance(tensors, (list, tuple))
+            and len(op_list) == len(tensors) == len(outputs)
+        )
+        insert_before = first
+        if has_static_inputs:
+            for op, tensor in zip(op_list, tensors):
+                if op != "irecv" or not isinstance(tensor, torch.fx.Node):
+                    continue
+                for user in tensor.users:
+                    if (
+                        user is not batch
+                        and positions[batch]
+                        < positions.get(user, -1)
+                        < positions[insert_before]
+                    ):
+                        insert_before = user
+
+        with graph.inserting_before(insert_before):
+            wait_tensors = graph.call_function(
+                torch.ops._c10d_functional.wait_tensors.default,
+                args=([outputs[i] for i in range(len(outputs))],),
+            )
+
+        if has_static_inputs:
+            for i, (op, tensor) in enumerate(zip(op_list, tensors)):
+                if op != "irecv" or not isinstance(tensor, torch.fx.Node):
+                    continue
+                users = [
+                    user
+                    for user in tensor.users
+                    if user is not batch and positions.get(user, -1) > positions[batch]
+                ]
+                if not users:
+                    continue
+                with graph.inserting_after(wait_tensors):
+                    waited = graph.call_function(
+                        operator.getitem, args=(wait_tensors, i)
+                    )
+                for user in users:
+                    user.replace_input_with(tensor, waited)
+        for wait in waits:
+            graph.erase_node(wait)
+        changed = True
+
+    if changed:
+        graph.lint()
+        gm.recompile()
+
+
 class CollectiveFunctionRewriteVariable(UserFunctionVariable):
     """
     Some of the torch.distributed.* collective APIs are possible to rewrite to 'traceable' collectives.
@@ -3055,7 +3168,10 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
                 "tensors": variables.ListVariable(tensors),
                 "group_name": group_var,
             }
-            return self.replacement_var.call_function(tx, new_args, new_kwargs)
+            result = self.replacement_var.call_function(tx, new_args, new_kwargs)
+            if _fuse_batch_p2p_waits not in tx.output.register_finalizer_fns:
+                tx.output.add_graph_finalizer(_fuse_batch_p2p_waits)
+            return result
 
         if self.fn in (dist.isend, dist.irecv):
             if not config.enable_p2p_compilation:
@@ -3074,7 +3190,6 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
             dist.all_reduce,
             dist.reduce_scatter,
             dist.reduce_scatter_single,
-            # pyrefly: ignore [deprecated]
             dist.reduce_scatter_tensor,
             # pyrefly: ignore [deprecated]
             dist._reduce_scatter_base,
@@ -3781,14 +3896,12 @@ class TMADescriptorStableVariable(VariableTracker):
         )
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        codegen.add_push_null(
-            lambda: codegen.load_import_from(
-                "triton.tools.tensor_descriptor",
-                "TensorDescriptor",
-            )
+        codegen.load_import_from(
+            "triton.tools.tensor_descriptor",
+            "TensorDescriptor",
         )
         codegen.load_method("from_tensor")
-        self.tensor.reconstruct(codegen)
+        codegen(self.tensor)
         codegen(self.block_shape)
         codegen.call_method(2)
 
@@ -4245,7 +4358,7 @@ class WrapperDescriptorVariable(DescriptorVariable):
         return MethodWrapperVariable(self.descriptor, obj, source=self.source)
 
 
-class MethodWrapperVariable(DescriptorVariable):
+class MethodWrapperVariable(VariableTracker):
     """Bound method-wrapper (wrapper_descriptor bound to an instance).
 
     Produced by WrapperDescriptorVariable.tp_descr_get_impl, mirroring
@@ -4331,7 +4444,10 @@ class MethodWrapperVariable(DescriptorVariable):
                 descriptor = cast(Any, method_wrapper.__self__)
                 return args[0].tp_getattro_impl(tx, descriptor.__name__)
 
-        return self.obj.call_method(tx, self.descriptor.__name__, list(args), kwargs)
+        sd = self.obj.lookup_slotdefs(self.descriptor.__name__)
+        if sd is None:
+            return self.obj.call_method(tx, self.descriptor.__name__, args, kwargs)
+        return sd(self.obj, tx, args, kwargs)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.obj)
@@ -4433,7 +4549,7 @@ class MethodDescriptorVariable(DescriptorVariable):
         return BoundBuiltinMethodVariable(self.descriptor, obj, source=self.source)
 
 
-class BoundBuiltinMethodVariable(DescriptorVariable):
+class BoundBuiltinMethodVariable(VariableTracker):
     """Bound builtin_function_or_method (PyCFunction_Type).
 
     Produced by MethodDescriptorVariable.tp_descr_get_impl (binding a
@@ -4841,21 +4957,6 @@ class GetSetDescriptorVariable(DescriptorVariable):
                 result_source = TypeMROSource(obj.source)
         return VariableTracker.build(tx, resolved, result_source)
 
-    def tp_descr_set_impl(
-        self,
-        tx: "InstructionTranslatorBase",
-        obj: VariableTracker,
-        value: VariableTracker | None,
-    ) -> VariableTracker:
-        name = self.descriptor.__name__
-        getset = obj.lookup_tp_getset_member(name)
-        if getset and getset.setter is not None:
-            return getset.setter(obj, tx, value)
-        raise_attribute_error(
-            tx,
-            f"attribute '{name}' of '{obj.python_type_name()}' objects is not writable",
-        )
-
 
 class PropertyVariable(DescriptorVariable):
     """Python property descriptor.
@@ -4921,34 +5022,6 @@ class PropertyVariable(DescriptorVariable):
             tx, self.descriptor.fget, source=fget_source, realize=True
         )
         return fget_vt.call_function(tx, [obj], {})
-
-    def tp_descr_set_impl(
-        self,
-        tx: "InstructionTranslatorBase",
-        obj: VariableTracker,
-        value: VariableTracker | None,
-    ) -> VariableTracker:
-        # Mirrors property_descr_set: fdel for __delete__ (value is None),
-        # fset otherwise.  The result of the call is discarded.
-        # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L1695-L1737
-        attr = "fdel" if value is None else "fset"
-        func = getattr(self.descriptor, attr)
-        if func is None:
-            action = "deleter" if value is None else "setter"
-            # prop_name is unset for a property built without an fget and never
-            # bound to a class, which is when CPython falls back to the terse
-            # message.
-            name = getattr(self.descriptor, "__name__", None)
-            if name is None:
-                msg = f"can't {'delete' if value is None else 'set'} attribute"
-            else:
-                msg = f"property {name!r} of {obj.python_type().__qualname__!r} object has no {action}"
-            raise_attribute_error(tx, msg)
-        func_source = self.source and AttrSource(self.source, attr)
-        func_vt = VariableTracker.build(tx, func, source=func_source, realize=True)
-        args = [obj] if value is None else [obj, value]
-        func_vt.call_function(tx, args, {})
-        return variables.ConstantVariable.create(None)
 
 
 class TupleGetterVariable(VariableTracker):
