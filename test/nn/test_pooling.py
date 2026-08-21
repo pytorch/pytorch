@@ -411,7 +411,6 @@ class TestPoolingNN(NNTestCase):
 
 
 class TestPoolingNNDeviceType(NNTestCase):
-    @expectedFailureMPS  # MPS adaptive avg pool requires divisible input/output sizes
     def test_adaptive_pooling_avg_nhwc(self, device):
         input = torch.randint(1, 10, (4, 8, 8, 8), dtype=torch.float32).to(device)
         input = input.contiguous(memory_format=torch.channels_last).requires_grad_()
@@ -432,7 +431,6 @@ class TestPoolingNNDeviceType(NNTestCase):
         self.assertEqual(out, ref_out)
         self.assertEqual(input.grad, ref_input.grad)
 
-    @expectedFailureMPS  # MPS adaptive avg pool requires divisible input/output sizes
     def test_adaptive_pooling_avg_nhwc_non_contiguous(self, device):
         input = torch.randint(1, 10, (4, 8, 8, 8), dtype=torch.float32).to(device)
         input = input.contiguous(memory_format=torch.channels_last)
@@ -456,7 +454,6 @@ class TestPoolingNNDeviceType(NNTestCase):
         self.assertEqual(input.grad, ref_input.grad)
 
     @onlyAccelerator
-    @expectedFailureMPS  # MPS adaptive avg pool requires divisible input/output sizes
     @largeTensorTest("12GB")
     def test_adaptive_pooling_avg_nhwc_launch_config_backward(self, device):
         input = torch.randint(
@@ -482,7 +479,6 @@ class TestPoolingNNDeviceType(NNTestCase):
         self.assertEqual(input.grad, ref_input.grad)
 
     @onlyAccelerator
-    @expectedFailureMPS  # MPS adaptive avg pool requires divisible input/output sizes
     @largeTensorTest("12GB")
     def test_adaptive_pooling_avg_nhwc_launch_config_forward(self, device):
         input = torch.randint(
