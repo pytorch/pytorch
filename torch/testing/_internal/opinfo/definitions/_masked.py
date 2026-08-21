@@ -469,9 +469,13 @@ op_db: list[OpInfo] = [
                 "test_normalize_operator_exhaustive",
             ),
             # FIXME: sum reduces all dimensions when dim=[]
-            DecorateInfo(unittest.expectedFailure, "TestReductionsDevice", "test_dim_empty"),
             DecorateInfo(
-                unittest.expectedFailure, "TestReductionsDevice", "test_dim_empty_keepdim"
+                unittest.expectedFailure, "TestReductionsDevice", "test_dim_empty"
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestReductionsDevice",
+                "test_dim_empty_keepdim",
             ),
             # RuntimeError: undefined value tensor
             DecorateInfo(
@@ -708,9 +712,13 @@ op_db: list[OpInfo] = [
                 "test_normalize_operator_exhaustive",
             ),
             # FIXME: amax reduces all dimensions when dim=[]
-            DecorateInfo(unittest.expectedFailure, "TestReductionsDevice", "test_dim_empty"),
             DecorateInfo(
-                unittest.expectedFailure, "TestReductionsDevice", "test_dim_empty_keepdim"
+                unittest.expectedFailure, "TestReductionsDevice", "test_dim_empty"
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestReductionsDevice",
+                "test_dim_empty_keepdim",
             ),
             # RuntimeError: Unknown builtin op: aten::iinfo
             DecorateInfo(
@@ -762,9 +770,13 @@ op_db: list[OpInfo] = [
                 "test_normalize_operator_exhaustive",
             ),
             # FIXME: amax reduces all dimensions when dim=[]
-            DecorateInfo(unittest.expectedFailure, "TestReductionsDevice", "test_dim_empty"),
             DecorateInfo(
-                unittest.expectedFailure, "TestReductionsDevice", "test_dim_empty_keepdim"
+                unittest.expectedFailure, "TestReductionsDevice", "test_dim_empty"
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestReductionsDevice",
+                "test_dim_empty_keepdim",
             ),
             # RuntimeError: Unknown builtin op: aten::iinfo
             DecorateInfo(
@@ -814,7 +826,9 @@ op_db: list[OpInfo] = [
             ),
             # initial is not a keyword for argmax
             DecorateInfo(
-                unittest.expectedFailure, "TestReductionsDevice", "test_reference_masked"
+                unittest.expectedFailure,
+                "TestReductionsDevice",
+                "test_reference_masked",
             ),
             # NotSupportedError: Compiled functions can't ... use keyword-only arguments with defaults
             DecorateInfo(
@@ -849,7 +863,9 @@ op_db: list[OpInfo] = [
             ),
             # initial is not a keyword for argmin
             DecorateInfo(
-                unittest.expectedFailure, "TestReductionsDevice", "test_reference_masked"
+                unittest.expectedFailure,
+                "TestReductionsDevice",
+                "test_reference_masked",
             ),
             # NotSupportedError: Compiled functions can't ... use keyword-only arguments with defaults
             DecorateInfo(
@@ -889,9 +905,13 @@ op_db: list[OpInfo] = [
                 "test_normalize_operator_exhaustive",
             ),
             # FIXME: sum reduces all dimensions when dim=[]
-            DecorateInfo(unittest.expectedFailure, "TestReductionsDevice", "test_dim_empty"),
             DecorateInfo(
-                unittest.expectedFailure, "TestReductionsDevice", "test_dim_empty_keepdim"
+                unittest.expectedFailure, "TestReductionsDevice", "test_dim_empty"
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestReductionsDevice",
+                "test_dim_empty_keepdim",
             ),
             # RuntimeError: undefined value tensor
             DecorateInfo(
@@ -995,9 +1015,13 @@ op_db: list[OpInfo] = [
                 "test_normalize_operator_exhaustive",
             ),
             # FIXME: sum reduces all dimensions when dim=[]
-            DecorateInfo(unittest.expectedFailure, "TestReductionsDevice", "test_dim_empty"),
             DecorateInfo(
-                unittest.expectedFailure, "TestReductionsDevice", "test_dim_empty_keepdim"
+                unittest.expectedFailure, "TestReductionsDevice", "test_dim_empty"
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestReductionsDevice",
+                "test_dim_empty_keepdim",
             ),
             # torch.jit.frontend.NotSupportedError: Compiled functions
             # can't take variable number of arguments or use
@@ -1039,9 +1063,13 @@ op_db: list[OpInfo] = [
                 "test_normalize_operator_exhaustive",
             ),
             # FIXME: sum reduces all dimensions when dim=[]
-            DecorateInfo(unittest.expectedFailure, "TestReductionsDevice", "test_dim_empty"),
             DecorateInfo(
-                unittest.expectedFailure, "TestReductionsDevice", "test_dim_empty_keepdim"
+                unittest.expectedFailure, "TestReductionsDevice", "test_dim_empty"
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestReductionsDevice",
+                "test_dim_empty_keepdim",
             ),
             # RuntimeError: undefined value tensor
             DecorateInfo(
@@ -1139,9 +1167,13 @@ op_db: list[OpInfo] = [
                 "test_normalize_operator_exhaustive",
             ),
             # FIXME: sum reduces all dimensions when dim=[]
-            DecorateInfo(unittest.expectedFailure, "TestReductionsDevice", "test_dim_empty"),
             DecorateInfo(
-                unittest.expectedFailure, "TestReductionsDevice", "test_dim_empty_keepdim"
+                unittest.expectedFailure, "TestReductionsDevice", "test_dim_empty"
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestReductionsDevice",
+                "test_dim_empty_keepdim",
             ),
             # RuntimeError: undefined value tensor
             DecorateInfo(
@@ -1357,9 +1389,13 @@ op_db: list[OpInfo] = [
                 "test_normalize_operator_exhaustive",
             ),
             # FIXME: reduces all dimensions when dim=[]
-            DecorateInfo(unittest.skip("Skipped!"), "TestReductionsDevice", "test_dim_empty"),
             DecorateInfo(
-                unittest.skip("Skipped!"), "TestReductionsDevice", "test_dim_empty_keepdim"
+                unittest.skip("Skipped!"), "TestReductionsDevice", "test_dim_empty"
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestReductionsDevice",
+                "test_dim_empty_keepdim",
             ),
             # Identity can't be -torch.inf without overflow
             DecorateInfo(
