@@ -19,6 +19,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_WINDOWS,
     load_tests,
@@ -57,6 +58,8 @@ broadcast_dtypes = (
 
 
 class TestNCCL(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
     def test_unique_id(self, device):
         uid = nccl.unique_id()
@@ -240,6 +243,8 @@ class TestNCCL(TestCase):
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
 class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
+    hw_classification = HardwareClassification.CUDA
+
     @property
     def device(self) -> torch.device:
         return torch.device("cuda", self.rank)
@@ -1169,6 +1174,8 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
 
 @requires_cuda_p2p_access()
 class NCCLSymmetricMemoryNccl2Test(MultiProcContinuousTest):
+    hw_classification = HardwareClassification.CUDA
+
     """NCCL symmetric memory over an nccl2-backed process group.
 
     Same flow as NCCLSymmetricMemoryTest, but the process group uses the in-tree
@@ -1231,6 +1238,7 @@ class NCCLSymmetricMemoryNccl2Test(MultiProcContinuousTest):
 
 
 class NCCLSymmetricMemoryNcclLazyTest(NCCLSymmetricMemoryNccl2Test):
+    hw_classification = HardwareClassification.CUDA
     backend_name = "nccl-lazy"
 
 
