@@ -4,6 +4,7 @@
 #include <ATen/native/cuda/JitLoops.cuh>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/Math.cuh>
+#include <ATen/native/Math.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/cuda/jit_utils.h>
@@ -45,8 +46,7 @@ void lcm_kernel_cuda(TensorIteratorBase& iter) {
   #else
     AT_DISPATCH_INTEGRAL_TYPES(iter.common_dtype(), "lcm_cuda", [&]() {
       gpu_kernel(iter, [] GPU_LAMBDA (scalar_t a, scalar_t b) -> scalar_t {
-        scalar_t g = calc_gcd(a, b);
-        return (g == 0) ? 0 : ::abs(a / g * b);
+        return calc_lcm(a, b);
       });
     });
   #endif // AT_USE_JITERATOR()
