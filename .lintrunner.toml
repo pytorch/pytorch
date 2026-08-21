@@ -597,7 +597,6 @@ exclude_patterns = [
     'test/cpp_extensions/**',
     'tools/autograd/**',
     'torch/csrc/*.cpp',
-    'torch/csrc/*.h',
     'torch/csrc/autograd/**',
     'torch/csrc/distributed/**',
     'torch/csrc/dynamo/**',
