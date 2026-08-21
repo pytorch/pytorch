@@ -16,12 +16,20 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_cache, run_and_get_code, run_and_get_kernels
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import xfailIfSM89
-from torch.testing._internal.common_utils import recover_orig_fp32_precision
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, IS_BIG_GPU
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
+)
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    recover_orig_fp32_precision,
+)
+from torch.testing._internal.inductor_utils import IS_BIG_GPU
 
 
 class TestKernelBenchmark(TestCase):
-    device_type = GPU_TYPE
+    hw_classification = HardwareClassification.ACCELERATOR
 
     # to make sure the subprocess runs on the exact same path as the parent process
     # we augment the PYTHONPATH env var
@@ -150,28 +158,31 @@ class TestKernelBenchmark(TestCase):
             exactly=1,
         ).run(bench_out)
 
-    def test_plus1_kernel_benchmark(self):
+    @requires_capabilities(Capability.lib.triton)
+    def test_plus1_kernel_benchmark(self, device):
         @torch.compile
         def f(x):
             return x + 1
 
-        x = torch.randn(1024, device=GPU_TYPE)
+        x = torch.randn(1024, device=device)
         _, (kernel_code,) = run_and_get_kernels(f, x, remove_quote=True)
         _, path = PyCodeCache.write(kernel_code)
         bench_output = self.run_kernel_benchmark(path)
         self.assertTrue("GB/s" in bench_output)
 
-    def test_pw_kernel_benchmark(self):
+    @requires_capabilities(Capability.lib.triton)
+    def test_pw_kernel_benchmark(self, device):
         @torch.compile
         def f(x):
             return torch.sin(x) + torch.cos(x)
 
-        inp = torch.rand(2, 3).to(device=GPU_TYPE)
+        inp = torch.rand(2, 3).to(device=device)
         out = f(inp)
         self.verify_compiled_kernels()
 
     # TODO: Currently the Triton mm template +  relu fusion causes slowdown on XPU,
     # Need to refine the template and config for XPU.
+    @requires_capabilities(Capability.lib.triton)
     @config.patch(
         max_autotune=True, max_autotune_gemm_backends="TRITON", force_shape_pad=True
     )
@@ -179,12 +190,12 @@ class TestKernelBenchmark(TestCase):
         not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
     )
     @fresh_cache()
-    def test_matmul_triton_kernel_benchmark(self):
+    def test_matmul_triton_kernel_benchmark(self, device):
         M = 12544
         N = 256
         K = 64
-        a = torch.rand(M, K, dtype=torch.float16, device=GPU_TYPE)
-        b = torch.rand(N, K, dtype=torch.float16, device=GPU_TYPE).t()
+        a = torch.rand(M, K, dtype=torch.float16, device=device)
+        b = torch.rand(N, K, dtype=torch.float16, device=device).t()
 
         @torch.compile
         def f(a, b):
@@ -193,6 +204,7 @@ class TestKernelBenchmark(TestCase):
         f(a, b)
         self.verify_compiled_kernels()
 
+    @requires_capabilities(Capability.lib.triton)
     @config.patch(
         max_autotune=True, max_autotune_gemm_backends="TRITON", shape_padding=False
     )
@@ -200,13 +212,13 @@ class TestKernelBenchmark(TestCase):
         not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
     )
     @fresh_cache()
-    def test_mm_triton_kernel_benchmark(self):
+    def test_mm_triton_kernel_benchmark(self, device):
         M = 2048
         N = 2432
         K = 1949
         K_2 = 3581
-        a = rand_strided((M, K_2), (K_2, 1), device=GPU_TYPE, dtype=torch.float16)
-        b = rand_strided((K, N), (1, K), device=GPU_TYPE, dtype=torch.float16)
+        a = rand_strided((M, K_2), (K_2, 1), device=device, dtype=torch.float16)
+        b = rand_strided((K, N), (1, K), device=device, dtype=torch.float16)
 
         @torch.compile
         def f(a, b):
@@ -218,8 +230,9 @@ class TestKernelBenchmark(TestCase):
 
         self.verify_compiled_kernels(GB_count=1)
 
+    @requires_capabilities(Capability.lib.triton)
     @recover_orig_fp32_precision
-    def test_matmul_bandwidth_computation(self):
+    def test_matmul_bandwidth_computation(self, device):
         """
         The test does a matmul and then mul. Without max-autotune, we use
         the matmul in aten. So there is a single triton kernel for mul.
@@ -242,24 +255,25 @@ class TestKernelBenchmark(TestCase):
             return w
 
         M, N, K = 1000, 1000, 10
-        x = torch.rand(M, K).to(device=GPU_TYPE)
-        y = torch.rand(K, N).to(device=GPU_TYPE)
+        x = torch.rand(M, K).to(device=device)
+        y = torch.rand(K, N).to(device=device)
         out = f(x, y)
 
         compiled_module = self.get_compiled_module()
 
         self.check_bandwidth(compiled_module, 0.008)
 
-    def test_unused_input_bandwidth_computation(self):
+    @requires_capabilities(Capability.lib.triton)
+    def test_unused_input_bandwidth_computation(self, device):
         M, N = 5, 1000000
 
         @torch.compile
         def f(a, b, c):
             return a + c
 
-        a = torch.rand(M, N, dtype=torch.float16, device=GPU_TYPE)
-        b = torch.rand(M, N, dtype=torch.float16, device=GPU_TYPE)
-        c = torch.rand(M, N, dtype=torch.float16, device=GPU_TYPE)
+        a = torch.rand(M, N, dtype=torch.float16, device=device)
+        b = torch.rand(M, N, dtype=torch.float16, device=device)
+        c = torch.rand(M, N, dtype=torch.float16, device=device)
         torch._dynamo.mark_dynamic(a, 0)
         torch._dynamo.mark_dynamic(b, 0)
         torch._dynamo.mark_dynamic(c, 0)
@@ -272,12 +286,13 @@ class TestKernelBenchmark(TestCase):
         #        = 0.030
         self.check_bandwidth(compiled_module, "0.030")
 
-    def test_reduction_bandwidth_computation(self):
+    @requires_capabilities(Capability.lib.triton)
+    def test_reduction_bandwidth_computation(self, device):
         @torch.compile
         def f(a):
             return torch.sum(a, dim=1)
 
-        a = torch.rand(1000, 20, 1000, dtype=torch.float16, device=GPU_TYPE)
+        a = torch.rand(1000, 20, 1000, dtype=torch.float16, device=device)
         inputs = (a,)
         out = f(*inputs)
 
@@ -287,8 +302,9 @@ class TestKernelBenchmark(TestCase):
         #        = 0.042
         self.check_bandwidth(compiled_module, "0.042")
 
+    @requires_capabilities(Capability.lib.triton)
     @config.patch(max_autotune=True)
-    def test_fused_layernorm_bandwidth_computation(self):
+    def test_fused_layernorm_bandwidth_computation(self, device):
         M, N = 10, 1000000
 
         @torch.compile
@@ -300,10 +316,10 @@ class TestKernelBenchmark(TestCase):
             x2 = torch.sigmoid(x1)
             return x0 * x2
 
-        a = torch.rand(M, N, dtype=torch.float16, device=GPU_TYPE)
-        b = torch.rand(N, dtype=torch.float16, device=GPU_TYPE)
-        c = torch.rand(N, dtype=torch.float16, device=GPU_TYPE)
-        d = torch.rand(N, dtype=torch.float16, device=GPU_TYPE)
+        a = torch.rand(M, N, dtype=torch.float16, device=device)
+        b = torch.rand(N, dtype=torch.float16, device=device)
+        c = torch.rand(N, dtype=torch.float16, device=device)
+        d = torch.rand(N, dtype=torch.float16, device=device)
         inputs = (a, b, c, d)
         out = f(*inputs)
 
@@ -313,7 +329,8 @@ class TestKernelBenchmark(TestCase):
         #        = 0.046
         self.check_bandwidth(compiled_module, "0.046")
 
-    def test_slice_add_cat_bandwidth_computation(self):
+    @requires_capabilities(Capability.lib.triton)
+    def test_slice_add_cat_bandwidth_computation(self, device):
         M, N = 5, 1000000
 
         @torch.compile
@@ -323,9 +340,9 @@ class TestKernelBenchmark(TestCase):
             x1 = x0 + c
             return torch.cat([a, x1], dim=1)
 
-        a = torch.rand(M, N, dtype=torch.float16, device=GPU_TYPE)
-        b = torch.rand(M, N * 5, dtype=torch.float16, device=GPU_TYPE)
-        c = torch.rand(N, dtype=torch.float16, device=GPU_TYPE)
+        a = torch.rand(M, N, dtype=torch.float16, device=device)
+        b = torch.rand(M, N * 5, dtype=torch.float16, device=device)
+        c = torch.rand(N, dtype=torch.float16, device=device)
         torch._dynamo.mark_dynamic(a, 0)
         torch._dynamo.mark_dynamic(b, 0)
         inputs = (a, b, c)
@@ -338,7 +355,8 @@ class TestKernelBenchmark(TestCase):
         #        = 0.052
         self.check_bandwidth(compiled_module, "0.052")
 
-    def test_slice_add_bandwidth_computation(self):
+    @requires_capabilities(Capability.lib.triton)
+    def test_slice_add_bandwidth_computation(self, device):
         M, N = 5, 1000000
 
         @torch.compile
@@ -346,9 +364,9 @@ class TestKernelBenchmark(TestCase):
             x0 = torch.narrow(b, 1, N, N)
             return a + x0 + c
 
-        a = torch.rand(M, N, dtype=torch.float16, device=GPU_TYPE)
-        b = torch.rand(M, N * 5, dtype=torch.float16, device=GPU_TYPE)
-        c = torch.rand(N, dtype=torch.float16, device=GPU_TYPE)
+        a = torch.rand(M, N, dtype=torch.float16, device=device)
+        b = torch.rand(M, N * 5, dtype=torch.float16, device=device)
+        c = torch.rand(N, dtype=torch.float16, device=device)
         torch._dynamo.mark_dynamic(a, 0)
         torch._dynamo.mark_dynamic(b, 0)
         inputs = (a, b, c)
@@ -360,7 +378,8 @@ class TestKernelBenchmark(TestCase):
         #        = 0.032
         self.check_bandwidth(compiled_module, "0.032")
 
-    def test_mm_slice_add_bandwidth_computation(self):
+    @requires_capabilities(Capability.lib.triton)
+    def test_mm_slice_add_bandwidth_computation(self, device):
         M, N, K = 1000, 1000, 30
 
         @torch.compile
@@ -370,9 +389,9 @@ class TestKernelBenchmark(TestCase):
             x2 = torch.narrow(c, 1, 21 * N, N)
             return x0 + x1 + x2
 
-        a = torch.rand(M, K, dtype=torch.float16, device=GPU_TYPE)
-        b = torch.rand(K, N, dtype=torch.float16, device=GPU_TYPE)
-        c = torch.rand(N, N * 100, dtype=torch.float16, device=GPU_TYPE)
+        a = torch.rand(M, K, dtype=torch.float16, device=device)
+        b = torch.rand(K, N, dtype=torch.float16, device=device)
+        c = torch.rand(N, N * 100, dtype=torch.float16, device=device)
         inputs = (a, b, c)
         out = f(*inputs)
 
@@ -385,7 +404,8 @@ class TestKernelBenchmark(TestCase):
         num_gb = "0.006"
         self.check_bandwidth(compiled_module, num_gb)
 
-    def test_mm_slice_add_bandwidth_computation_2(self):
+    @requires_capabilities(Capability.lib.triton)
+    def test_mm_slice_add_bandwidth_computation_2(self, device):
         M, N, K = 1000, 1000, 30
 
         @torch.compile
@@ -395,9 +415,9 @@ class TestKernelBenchmark(TestCase):
             x2 = torch.narrow(c, 1, 20 * N, N)
             return x0 + x1 + x2
 
-        a = torch.rand(M, K, dtype=torch.float16, device=GPU_TYPE)
-        b = torch.rand(K, N, dtype=torch.float16, device=GPU_TYPE)
-        c = torch.rand(N, N * 100, dtype=torch.float16, device=GPU_TYPE)
+        a = torch.rand(M, K, dtype=torch.float16, device=device)
+        b = torch.rand(K, N, dtype=torch.float16, device=device)
+        c = torch.rand(N, N * 100, dtype=torch.float16, device=device)
         inputs = (a, b, c)
         out = f(*inputs)
 
@@ -411,12 +431,14 @@ class TestKernelBenchmark(TestCase):
         # have the same index.
         self.check_bandwidth(compiled_module, "0.006")
 
+    @requires_capabilities(Capability.lib.triton)
     @xfailIfSM89
     @config.patch(
         max_autotune=True, max_autotune_gemm_backends="TRITON", force_shape_pad=True
     )
-    def test_slice_mm_bandwidth_computation(self):
-        if GPU_TYPE == "xpu" and not torch._inductor.utils.is_big_gpu():
+    def test_slice_mm_bandwidth_computation(self, device):
+        device_type = torch.device(device).type
+        if device_type == "xpu" and not torch._inductor.utils.is_big_gpu():
             raise unittest.SkipTest("unsupported device")
 
         M, N, K = 1000, 2000, 3000
@@ -426,8 +448,8 @@ class TestKernelBenchmark(TestCase):
             x = torch.narrow(a, 1, K, K)
             return torch.mm(x, b)
 
-        a = torch.rand(M, 3 * K, dtype=torch.float16, device=GPU_TYPE)
-        b = torch.rand(K, N, dtype=torch.float16, device=GPU_TYPE)
+        a = torch.rand(M, 3 * K, dtype=torch.float16, device=device)
+        b = torch.rand(K, N, dtype=torch.float16, device=device)
         torch._dynamo.mark_dynamic(a, 0)
         inputs = (a, b)
         out = f(*inputs)
@@ -439,7 +461,8 @@ class TestKernelBenchmark(TestCase):
         #        = 0.022
         self.check_bandwidth(compiled_module, "0.022")
 
-    def test_star_dep(self):
+    @requires_capabilities(Capability.lib.triton)
+    def test_star_dep(self, device):
         """
         Test the bandwidth estimation for StarDep
         """
@@ -448,9 +471,9 @@ class TestKernelBenchmark(TestCase):
         def f(a, b):
             a[b] = 3.0
 
-        a = torch.rand(10000, 5000, device=GPU_TYPE)
+        a = torch.rand(10000, 5000, device=device)
         b = torch.randint(
-            0, 10000, [20000], device=GPU_TYPE, dtype=torch.int32
+            0, 10000, [20000], device=device, dtype=torch.int32
         ).unsqueeze(1)
         f(a, b)
         compiled_module = self.get_compiled_module()
@@ -458,35 +481,38 @@ class TestKernelBenchmark(TestCase):
         # 20000 * 5000 * 4 = 200MB for a
         self.check_bandwidth(compiled_module, "0.200")
 
-    def test_split_scan(self):
+    @requires_capabilities(Capability.lib.triton)
+    def test_split_scan(self, device):
         @torch.compile
         def f(a):
             return a.cumsum(-1)
 
-        a = torch.rand(10000, 5000, device=GPU_TYPE)
+        a = torch.rand(10000, 5000, device=device)
         f(a.reshape(-1))
         compiled_module = self.get_compiled_module()
         # 10000 * 5000 * 4 = 200 MB for a
         # Double that for output as well
         self.check_bandwidth(compiled_module, "0.400")
 
+    @requires_capabilities(Capability.lib.triton)
     @config.patch("triton.unique_kernel_names", True)
     @config.patch(benchmark_kernel=False)
     @config.patch(compile_threads=1)
-    def test_remove_inductor_deps(self):
+    def test_remove_inductor_deps(self, device):
         @torch.compile
         def f(a):
             return a.cos().sin()
 
-        a = torch.randn(5, device=GPU_TYPE)
+        a = torch.randn(5, device=device)
         f(a)
         compiled_module = self.get_compiled_module()
         cleaned_triton = self.verify_remove_inductor_deps(compiled_module)
 
+    @requires_capabilities(Capability.lib.triton)
     @config.patch("triton.unique_kernel_names", True)
     @config.patch(benchmark_kernel=False)
     @config.patch(compile_threads=1)
-    def test_remove_inductor_deps_multiple_kernels(self):
+    def test_remove_inductor_deps_multiple_kernels(self, device):
         @torch.compile
         def f(a):
             a = torch.mm(a, a)
@@ -495,11 +521,12 @@ class TestKernelBenchmark(TestCase):
             a = torch.softmax(a, dim=-1)
             return a
 
-        a = torch.randn(5, 5, device=GPU_TYPE)
+        a = torch.randn(5, 5, device=device)
         f(a)
         compiled_module = self.get_compiled_module()
         self.verify_remove_inductor_deps(compiled_module)
 
+    @requires_capabilities(Capability.lib.triton)
     @unittest.skipIf(
         not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
     )
@@ -507,7 +534,7 @@ class TestKernelBenchmark(TestCase):
     @config.patch(benchmark_kernel=False)
     @config.patch(compile_threads=1)
     @config.patch(max_autotune=True, max_autotune_gemm_backends="TRITON")
-    def test_remove_inductor_deps_templates(self):
+    def test_remove_inductor_deps_templates(self, device):
         @torch.compile
         def f(a):
             a = torch.mm(a, a)
@@ -516,40 +543,47 @@ class TestKernelBenchmark(TestCase):
             a = a.sin()
             return a
 
-        a = torch.randn(128, 128, device=GPU_TYPE)
+        a = torch.randn(128, 128, device=device)
         f(a)
         compiled_module = self.get_compiled_module()
         self.verify_remove_inductor_deps(compiled_module)
 
+    @requires_capabilities(Capability.lib.triton)
     @config.patch("triton.unique_kernel_names", True)
     @config.patch(benchmark_kernel=False)
     @config.patch(compile_threads=1)
-    def test_remove_inductor_deps_scalar(self):
+    def test_remove_inductor_deps_scalar(self, device):
         @torch.compile
         def f(a, b):
             return a + b
 
-        a = torch.tensor(1.0, device=GPU_TYPE)
-        b = torch.tensor(2.0, device=GPU_TYPE)
+        a = torch.tensor(1.0, device=device)
+        b = torch.tensor(2.0, device=device)
         f(a, b)
         compiled_module = self.get_compiled_module()
         self.verify_remove_inductor_deps(compiled_module)
 
-    def test_benchmark_compiled_module_device_arg(self):
+    @requires_capabilities(Capability.lib.triton)
+    def test_benchmark_compiled_module_device_arg(self, device):
         """Regression test for https://github.com/pytorch/pytorch/issues/181954."""
 
         @torch.compile
         def f(x):
             return x + 1
 
-        x = torch.randn(1024, device=GPU_TYPE)
+        x = torch.randn(1024, device=device)
         _, (src,) = run_and_get_code(f, x)
 
+        device_type = torch.device(device).type
         FileCheck().check(
-            f"print_performance(fn, times=times, repeat=repeat, device='{GPU_TYPE}')"
+            f"print_performance(fn, times=times, repeat=repeat, device='{device_type}')"
         ).run(src)
 
 
+instantiate_device_type_tests(
+    TestKernelBenchmark, globals(), except_for="cpu", allow_xpu=True
+)
+
+
 if __name__ == "__main__":
-    if HAS_GPU:
-        run_tests()
+    run_tests()
