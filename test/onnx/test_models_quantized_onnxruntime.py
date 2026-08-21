@@ -52,6 +52,8 @@ class _TopPredictor(nn.Module):
     class_name_func=onnx_test_common.parameterize_class_name,
 )
 class TestQuantizedModelsONNXRuntime(onnx_test_common._TestONNXRuntime):
+    hw_classification = common_utils.HardwareClassification.GENERIC
+
     def run_test(self, model, inputs, *args, **kwargs):
         model = _TopPredictor(model)
         return super().run_test(model, inputs, *args, **kwargs)
