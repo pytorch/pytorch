@@ -758,6 +758,14 @@ namespace c10::detail {
           ::c10::MessageLogger(                                       \
               ::c10::SourceLocation::current(), ::google::GLOG_FATAL) \
               .stream()
+#elif defined(C10_USE_ABSL_LOG)
+#define FATAL_IF(condition)                                  \
+  condition ? (void)0                                        \
+            : ::c10::LoggerVoidify() &                       \
+          ::c10::MessageLogger(                              \
+              ::c10::SourceLocation::current(),              \
+              static_cast<int>(::absl::LogSeverity::kFatal)) \
+              .stream()
 #else
 #define FATAL_IF(condition)                                        \
   condition ? (void)0                                              \
@@ -775,6 +783,15 @@ namespace c10::detail {
             : ::c10::LoggerVoidify() &                                       \
           ::c10::MessageLogger(                                              \
               ::c10::SourceLocation::current(), ::google::GLOG_FATAL, false) \
+              .stream()
+#elif defined(C10_USE_ABSL_LOG)
+#define NON_FATAL_IF(condition)                              \
+  condition ? (void)0                                        \
+            : ::c10::LoggerVoidify() &                       \
+          ::c10::MessageLogger(                              \
+              ::c10::SourceLocation::current(),              \
+              static_cast<int>(::absl::LogSeverity::kFatal), \
+              false)                                         \
               .stream()
 #else
 #define NON_FATAL_IF(condition)                                           \
