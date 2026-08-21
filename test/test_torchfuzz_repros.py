@@ -13,6 +13,7 @@ import pytest
 
 import torch
 from torch.testing._internal.common_utils import run_tests, skipIfRocm, TestCase
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 
 
 class TestFuzzerCompileIssues(TestCase):
@@ -26,42 +27,42 @@ class TestFuzzerCompileIssues(TestCase):
         torch._inductor.config.emulate_precision_casts = True
 
     @pytest.mark.xfail(reason="Issue #164484")
-    def test_fuzzer_issue_164484(self):
+    def test_fuzzer_issue_164484(self, device):
         torch.manual_seed(9157)
 
         def foo(arg0, arg1, arg2, arg3):
-            var_node_2 = torch.full((14, 16), 1.158473253250122, dtype=torch.float32)
+            var_node_2 = torch.full((14, 16), 1.158473253250122, dtype=torch.float32, device=device)
             var_node_1 = torch.nn.functional.relu(var_node_2)
-            var_node_6 = torch.full((14, 1), -0.94140625, dtype=torch.bfloat16)
+            var_node_6 = torch.full((14, 1), -0.94140625, dtype=torch.bfloat16, device=device)
             var_node_7 = arg0  # size=(1, 16), stride=(16, 1), dtype=bfloat16
             var_node_5 = torch.matmul(
                 var_node_6.to(torch.bfloat16), var_node_7.to(torch.bfloat16)
             )
-            var_node_9 = torch.full((16,), 0.76953125, dtype=torch.bfloat16)
+            var_node_9 = torch.full((16,), 0.76953125, dtype=torch.bfloat16, device=device)
             var_node_8 = torch.reshape(var_node_9, [16])
-            var_node_11 = torch.full((16,), 2.4375, dtype=torch.bfloat16)
+            var_node_11 = torch.full((16,), 2.4375, dtype=torch.bfloat16, device=device)
             var_node_10 = torch.reshape(var_node_11, [16])
             var_node_4 = torch.cat([var_node_5, var_node_8, var_node_10], dim=1)
             var_node_12 = arg1  # size=(14, 48), stride=(48, 1), dtype=bfloat16
             var_node_3 = torch.sub(var_node_4, var_node_12)
             var_node_0 = torch.add(var_node_1, var_node_3)
-            var_node_14 = torch.full((14, 48), 1.4375, dtype=torch.bfloat16)
+            var_node_14 = torch.full((14, 48), 1.4375, dtype=torch.bfloat16, device=device)
             var_node_13 = torch.nn.functional.layer_norm(var_node_14, [48])
             result = torch.add(var_node_0, var_node_13)
             output = result + arg2 + arg3
             return output
 
         arg0 = torch.rand(
-            [1, 16], dtype=torch.bfloat16, device="cuda", requires_grad=True
+            [1, 16], dtype=torch.bfloat16, device=device, requires_grad=True
         )
         arg1 = torch.rand(
-            [14, 48], dtype=torch.bfloat16, device="cuda", requires_grad=True
+            [14, 48], dtype=torch.bfloat16, device=device, requires_grad=True
         )
         arg2 = torch.tensor(
-            0.0, dtype=torch.bfloat16, device="cuda", requires_grad=True
+            0.0, dtype=torch.bfloat16, device=device, requires_grad=True
         )
         arg3 = torch.tensor(
-            0.0, dtype=torch.bfloat16, device="cuda", requires_grad=True
+            0.0, dtype=torch.bfloat16, device=device, requires_grad=True
         )
 
         out_eager = foo(arg0, arg1, arg2, arg3)
@@ -74,7 +75,7 @@ class TestFuzzerCompileIssues(TestCase):
 
     @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/170259")
     @pytest.mark.xfail(reason="Issue #164185")
-    def test_fuzzer_issue_164185(self):
+    def skip_test_fuzzer_issue_164185(self, device):
         torch.manual_seed(0)
 
         def foo(arg0, arg1, arg2):
@@ -93,11 +94,11 @@ class TestFuzzerCompileIssues(TestCase):
             return output
 
         arg0 = torch.rand(
-            [349200, 5], dtype=torch.bfloat16, device="cuda", requires_grad=True
+            [349200, 5], dtype=torch.bfloat16, device=device, requires_grad=True
         )
-        arg1 = torch.randint(0, 50000, [], dtype=torch.int64, device="cuda")
+        arg1 = torch.randint(0, 50000, [], dtype=torch.int64, device=device)
         arg2 = torch.rand(
-            [50000, 349200], dtype=torch.bfloat16, device="cuda", requires_grad=True
+            [50000, 349200], dtype=torch.bfloat16, device=device, requires_grad=True
         )
 
         out_eager = foo(arg0, arg1, arg2)
@@ -109,7 +110,7 @@ class TestFuzzerCompileIssues(TestCase):
         print("Compile Success! ✅")
 
     @pytest.mark.xfail(reason="Issue #164157")
-    def test_fuzzer_issue_164157(self):
+    def test_fuzzer_issue_164157(self, device):
         torch.manual_seed(0)
 
         def foo(arg0, arg1, arg2, arg3, arg4, arg5):
@@ -137,17 +138,17 @@ class TestFuzzerCompileIssues(TestCase):
             output = t11
             return output
 
-        arg0 = torch.randint(0, 100, [47], dtype=torch.int64, device="cuda")
-        arg1 = torch.randint(0, 10, [], dtype=torch.int64, device="cuda")
-        arg2 = torch.randint(0, 10, [], dtype=torch.int64, device="cuda")
+        arg0 = torch.randint(0, 100, [47], dtype=torch.int64, device=device)
+        arg1 = torch.randint(0, 10, [], dtype=torch.int64, device=device)
+        arg2 = torch.randint(0, 10, [], dtype=torch.int64, device=device)
         arg3 = torch.rand(
-            [256, 88, 1], dtype=torch.float16, device="cuda", requires_grad=True
+            [256, 88, 1], dtype=torch.float16, device=device, requires_grad=True
         )
         arg4 = torch.rand(
-            [256, 88, 1], dtype=torch.float16, device="cuda", requires_grad=True
+            [256, 88, 1], dtype=torch.float16, device=device, requires_grad=True
         )
         arg5 = torch.rand(
-            [256, 88, 1], dtype=torch.float16, device="cuda", requires_grad=True
+            [256, 88, 1], dtype=torch.float16, device=device, requires_grad=True
         )
 
         out_eager = foo(arg0, arg1, arg2, arg3, arg4, arg5)
@@ -159,17 +160,17 @@ class TestFuzzerCompileIssues(TestCase):
         print("Compile Success! ✅")
 
     @pytest.mark.xfail(reason="Issue #164428")
-    def test_fuzzer_issue_164428_already_exists(self):
+    def test_fuzzer_issue_164428_already_exists(self, device):
         torch.manual_seed(6804)
 
         def foo(arg0, arg1, arg2):
             var_node_4 = (
                 arg0  # size=(7, 1, 32), stride=(1, 1, 0), dtype=float64, device=cuda
             )
-            var_node_5 = torch.full((7, 1, 32), -1.195053522845565, dtype=torch.float64)
+            var_node_5 = torch.full((7, 1, 32), -1.195053522845565, dtype=torch.float64, device=device)
             var_node_3 = torch.div(var_node_4, var_node_5)
             var_node_2 = torch.flatten(var_node_3)
-            var_node_8 = torch.full((2,), -0.8316502130341195, dtype=torch.float64)
+            var_node_8 = torch.full((2,), -0.8316502130341195, dtype=torch.float64, device=device)
             var_node_9 = arg1  # size=(2, 224), stride=(224, 1), dtype=float64
             var_node_7 = torch.matmul(
                 var_node_8.to(torch.float64), var_node_9.to(torch.float64)
@@ -181,12 +182,12 @@ class TestFuzzerCompileIssues(TestCase):
             return output
 
         arg0 = torch.rand(
-            [7, 1, 32], dtype=torch.float64, device="cuda", requires_grad=True
+            [7, 1, 32], dtype=torch.float64, device=device, requires_grad=True
         )
         arg1 = torch.rand(
-            [2, 224], dtype=torch.float64, device="cuda", requires_grad=True
+            [2, 224], dtype=torch.float64, device=device, requires_grad=True
         )
-        arg2 = torch.rand([224], dtype=torch.float64, device="cuda", requires_grad=True)
+        arg2 = torch.rand([224], dtype=torch.float64, device=device, requires_grad=True)
 
         out_eager = foo(arg0, arg1, arg2)
         out_eager.sum().backward()
@@ -197,39 +198,39 @@ class TestFuzzerCompileIssues(TestCase):
         print("Compile Success! ✅")
 
     @pytest.mark.xfail(reason="Issue #163894")
-    def test_fuzzer_issue_163894(self):
+    def test_fuzzer_issue_163894(self, device):
         torch.manual_seed(9)
 
         def foo(arg0):
             var_node_1 = arg0  # size=(1, 2), stride=(2, 1), dtype=int64, device=cuda  # noqa: F841
             var_node_5 = torch.full(
-                (1, 2), -66, dtype=torch.int32
+                (1, 2), -66, dtype=torch.int32, device=device
             )  # size=(1, 2), stride=(2, 1), dtype=int32, device=cuda
             var_node_6 = torch.full(
-                (1, 2), 77, dtype=torch.int64
+                (1, 2), 77, dtype=torch.int64, device=device
             )  # size=(1, 2), stride=(2, 1), dtype=int64, device=cuda
             var_node_4 = torch.ops.aten.add(
                 var_node_5, var_node_6
             )  # size=(1, 2), stride=(2, 1), dtype=int32, device=cuda
             var_node_7 = torch.full(
-                (1, 2), -64, dtype=torch.int32
+                (1, 2), -64, dtype=torch.int32, device=device
             )  # size=(1, 2), stride=(2, 1), dtype=int32, device=cuda
             var_node_3 = torch.ops.aten.mul(
                 var_node_4, var_node_7
             )  # size=(1, 2), stride=(2, 1), dtype=int32, device=cuda
             var_node_9 = torch.full(
-                (3, 4), False, dtype=torch.bool
+                (3, 4), False, dtype=torch.bool, device=device
             )  # size=(3, 4), stride=(4, 1), dtype=bool, device=cuda
             var_node_8 = torch.nonzero(
                 var_node_9
             )  # size=(0, 2), stride=(2, 1), dtype=int64, device=cuda
             if var_node_8.numel() == 0:
-                var_node_8 = torch.zeros((1, 2), dtype=torch.int64, device="cuda")
+                var_node_8 = torch.zeros((1, 2), dtype=torch.int64, device=device)
             var_node_2 = torch.ops.aten.add(var_node_3, var_node_8)
             output = var_node_2.float()
             return output
 
-        arg0 = torch.randint(0, 10, [1, 2], dtype=torch.int64, device="cuda")
+        arg0 = torch.randint(0, 10, [1, 2], dtype=torch.int64, device=device)
 
         out_eager = foo(arg0)
         out_eager.sum().backward()
@@ -240,19 +241,19 @@ class TestFuzzerCompileIssues(TestCase):
         print("Compile Success! ✅")
 
     @pytest.mark.xfail(reason="Issue #164486")
-    def test_fuzzer_issue_164486(self):
+    def test_fuzzer_issue_164486(self, device):
         torch.manual_seed(238)
 
         def foo(arg0):
             var_node_2 = torch.full(
-                (), 1, dtype=torch.int16
+                (), 1, dtype=torch.int16, device=device
             )  # size=(), stride=(), dtype=int16, device=cuda
             var_node_3 = arg0  # size=(), stride=(), dtype=int16, device=cuda
             var_node_1 = torch.add(
                 var_node_2, var_node_3
             )  # size=(), stride=(), dtype=int16, device=cuda
             var_node_5 = torch.full(
-                (1,), 3, dtype=torch.int16
+                (1,), 3, dtype=torch.int16, device=device
             )  # size=(1,), stride=(1,), dtype=int16, device=cuda
             var_node_4 = torch.squeeze(
                 var_node_5
@@ -263,7 +264,7 @@ class TestFuzzerCompileIssues(TestCase):
             result = var_node_0.float()
             return result
 
-        arg0 = torch.randint(0, 10, [], dtype=torch.int16, device="cuda")
+        arg0 = torch.randint(0, 10, [], dtype=torch.int16, device=device)
 
         out_eager = foo(arg0)
         out_eager.sum().backward()
@@ -272,6 +273,9 @@ class TestFuzzerCompileIssues(TestCase):
         out_compiled = compiled_foo(arg0)
         out_compiled.sum().backward()
         print("Compile Success! ✅")
+
+
+instantiate_device_type_tests(TestFuzzerCompileIssues, globals())
 
 
 if __name__ == "__main__":
