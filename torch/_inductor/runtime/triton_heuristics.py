@@ -2832,7 +2832,7 @@ class CompileResult(Generic[_T]):
         cuTensorMapEncodeTiled on the hot path. The expanded params are spliced
         into the runner call. Returns (pre_runner_lines, runner_args, scope).
         """
-        from .static_triton_launcher import expand_host_tma_descriptor
+        from .static_triton_launcher import make_host_tma_expander
 
         host_tma_args = self.inductor_meta.get("host_tma_descriptor_args")
         pre_runner_lines: list[str] = []
@@ -2884,7 +2884,7 @@ class CompileResult(Generic[_T]):
             pos += 1
         if pre_runner_lines:
             scope_additions = {
-                "expand_host_tma_descriptor": expand_host_tma_descriptor,
+                "expand_host_tma_descriptor": make_host_tma_expander(),
                 "_host_tma_aligned": _host_tma_aligned,
                 "_tma_cache": {},
                 "_tma_meta": list(meta)
