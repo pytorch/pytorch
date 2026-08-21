@@ -3570,6 +3570,16 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         sorted_nodes = scheduler._topological_sort_nodes()
         grouped_nodes = []
         max_num_nodes = config.combo_kernel_max_num_nodes
+        # Uniform dispatch benefits from LARGE groups of *structurally-identical*
+        # sub-kernels (one shared body vs an N-way branch chain). Raising the node
+        # cap globally, however, also enlarges NON-uniform combo groups into
+        # oversized sequential-combo kernels that regress. So only raise the cap
+        # for runs of structurally-identical nodes (_chunk_uniform_aware);
+        # everything else stays at combo_kernel_max_num_nodes.
+        uniform_dispatch = config.combo_kernel_uniform_dispatch
+        uniform_cap = getattr(
+            config, "combo_kernel_uniform_dispatch_max_num_nodes", max_num_nodes
+        )
 
         excluded_buffer_names: OrderedSet[str] = OrderedSet(
             [
@@ -3610,13 +3620,81 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
                         )
                     ].append(node)
                 for context_nodes in context_groups.values():
-                    grouped_nodes.extend(
-                        [
-                            context_nodes[i : i + max_num_nodes]
-                            for i in range(0, len(context_nodes), max_num_nodes)
-                        ]
-                    )
+                    if uniform_dispatch and uniform_cap > max_num_nodes:
+                        grouped_nodes.extend(
+                            ForeachKernelSchedulerNode._chunk_uniform_aware(
+                                context_nodes, max_num_nodes, uniform_cap
+                            )
+                        )
+                    else:
+                        grouped_nodes.extend(
+                            [
+                                context_nodes[i : i + max_num_nodes]
+                                for i in range(0, len(context_nodes), max_num_nodes)
+                            ]
+                        )
         return grouped_nodes
+
+    @staticmethod
+    def _uniform_structural_key(
+        node: BaseSchedulerNode,
+    ) -> tuple[Any, ...] | None:
+        """Cheap scheduler-level proxy for "this node will produce a
+        structurally-identical sub-kernel" -- a NECESSARY condition for uniform
+        dispatch. Two nodes share a key iff every constituent SchedulerNode has
+        the same device+iteration sizes (node.group) and the same op multiset
+        (LoopBody.op_counts). Returns None for anything not expressible this way
+        (template/extern/foreach nodes), excluding it from large grouping.
+        """
+        parts: list[Any] = []
+        for sn in node.get_nodes():
+            if not isinstance(sn, SchedulerNode):
+                return None
+            body = getattr(sn, "_body", None)
+            group = getattr(sn, "group", None)
+            if body is None or group is None:
+                return None
+            try:
+                op_sig = tuple(sorted(body.op_counts.items()))
+            except Exception:
+                return None
+            parts.append((group, op_sig))
+        return tuple(parts) if parts else None
+
+    @staticmethod
+    def _chunk_uniform_aware(
+        nodes: list[BaseSchedulerNode], small_cap: int, large_cap: int
+    ) -> list[list[BaseSchedulerNode]]:
+        """Group nodes for combo kernels when uniform dispatch is enabled.
+
+        Runs of >=2 structurally-identical nodes (same _uniform_structural_key)
+        are chunked at `large_cap` so their identical sub-kernels fuse into a few
+        large uniform kernels (the win). Every other node (unique key or not
+        keyable) is chunked at `small_cap`, exactly like the default path, so
+        NON-uniform combo groups never grow past combo_kernel_max_num_nodes and
+        cannot regress into oversized sequential-combo kernels.
+        """
+        counts: "collections.Counter[tuple[Any, ...]]" = collections.Counter()
+        keys: list[tuple[Any, ...] | None] = []
+        for n in nodes:
+            k = ForeachKernelSchedulerNode._uniform_structural_key(n)
+            keys.append(k)
+            if k is not None:
+                counts[k] += 1
+        large_by_key: dict[tuple[Any, ...], list[BaseSchedulerNode]] = {}
+        small: list[BaseSchedulerNode] = []
+        for n, k in zip(nodes, keys):
+            if k is not None and counts[k] >= 2:
+                large_by_key.setdefault(k, []).append(n)
+            else:
+                small.append(n)
+        out: list[list[BaseSchedulerNode]] = []
+        for bucket in large_by_key.values():
+            for i in range(0, len(bucket), large_cap):
+                out.append(bucket[i : i + large_cap])
+        for i in range(0, len(small), small_cap):
+            out.append(small[i : i + small_cap])
+        return out
 
     group_algorithm_for_combo_kernels: Callable[
         [Scheduler], list[list[BaseSchedulerNode]]
