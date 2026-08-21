@@ -4239,9 +4239,161 @@ class GuardsStatePickler(pickle.Pickler):
         qualname: str,
         argdefs: tuple[object, ...] | None,
         closure: tuple[types.CellType, ...] | None,
+        kwdefaults: dict[str, object] | None = None,
+        name: str | None = None,
+        attributes: dict[str, object] | None = None,
+        guarded_globals: dict[str, object] | None = None,
+        snapshot_globals: bool = False,
     ) -> types.FunctionType:
-        f_globals = importlib.import_module(module).__dict__
-        return types.FunctionType(code, f_globals, qualname, argdefs, closure)
+        if snapshot_globals:
+            # Deliberately no import_module here: the snapshot IS the scope, and
+            # importing a module only to discard it is a load-time failure mode
+            # this branch does not otherwise have.
+            f_globals: dict[str, Any] = dict(guarded_globals or {})
+        else:
+            # NB obj.__module__ is not reliably the module the function LIVES in
+            # -- functools.wraps copies it from the wrapped function -- so this
+            # scope can belong to a different file. It is only reached when no
+            # guard walks __globals__, since one that does registers the dict
+            # and forces the snapshot above.
+            f_globals = importlib.import_module(module).__dict__
+        fn = types.FunctionType(
+            code,
+            f_globals,
+            name if name is not None else code.co_name,
+            argdefs,
+            closure,
+        )
+        fn.__qualname__ = qualname
+        fn.__kwdefaults__ = kwdefaults
+        if attributes:
+            fn.__dict__.update(attributes)
+        return fn
+
+    def _keep(self, value: object) -> bool:
+        """Whether a value a reconstructed function holds has to be carried.
+
+        Only values some guard tree node references: everything else becomes a
+        _Missing sentinel, so widening the set of reconstructed functions does
+        not drag unrelated -- and possibly unpicklable -- neighbours into the
+        pickle with them. Matching is by identity, which for an interned value
+        (True, None, a small int, a short str) can coincide with an unrelated
+        guarded one and keep it. That is harmless: such values are trivially
+        picklable, and a kept value is always the real one.
+        """
+        return id(value) in self.guard_tree_values
+
+    def _reduce_cell(self, cell: types.CellType) -> types.CellType:
+        """Carry a closure cell, or replace it with a sentinel one.
+
+        A carried cell is passed through UNCHANGED so that two functions
+        closing over the same variable still share it after reload, and so that
+        pickle can memoize it. Only a dropped cell is rebuilt.
+
+        An EMPTY cell -- a free variable a decorator only assigns on a path that
+        did not run -- has no contents to read at all, so presence is checked
+        before identity. Reading it unconditionally raised ValueError here,
+        which reaches the caller as a package bypass.
+        """
+        try:
+            contents = cell.cell_contents
+        except ValueError:
+            return type(self)._unpickle_cell(_Missing("empty function closure"))
+        if self._keep(cell) or self._keep(contents):
+            return cell
+        return type(self)._unpickle_cell(_Missing("unguarded function closure"))
+
+    @staticmethod
+    def _apply_function_globals(
+        fn: types.FunctionType, guarded_globals: dict[str, object]
+    ) -> None:
+        fn.__globals__.update(guarded_globals)
+
+    def _reduce_nested_function(self, obj: types.FunctionType) -> tuple[Any, ...]:
+        snapshot_globals = id(obj.__globals__) in self.guard_tree_values
+        guarded_globals = (
+            {
+                name: (
+                    value
+                    if self._keep(value)
+                    else _Missing("unguarded function global")
+                )
+                for name, value in obj.__globals__.items()
+            }
+            if snapshot_globals
+            else None
+        )
+
+        defaults = obj.__defaults__
+        if defaults is not None:
+            keep_defaults = self._keep(defaults) or any(
+                self._keep(value) for value in defaults
+            )
+            defaults = (
+                tuple(
+                    value
+                    if self._keep(value)
+                    else _Missing("unguarded function default")
+                    for value in defaults
+                )
+                if keep_defaults
+                else None
+            )
+
+        kwdefaults = obj.__kwdefaults__
+        if kwdefaults is not None:
+            keep_kwdefaults = self._keep(kwdefaults)
+            kwdefaults = {
+                name: (
+                    value
+                    if self._keep(value)
+                    else _Missing("unguarded function keyword default")
+                )
+                for name, value in kwdefaults.items()
+                if keep_kwdefaults or self._keep(value)
+            }
+            if not kwdefaults and not keep_kwdefaults:
+                kwdefaults = None
+
+        closure = obj.__closure__
+        if closure is not None:
+            closure = tuple(self._reduce_cell(cell) for cell in closure)
+        attributes = (
+            dict(obj.__dict__)
+            if self._keep(obj.__dict__)
+            else {
+                name: value for name, value in obj.__dict__.items() if self._keep(value)
+            }
+        )
+        args = (
+            obj.__code__,
+            obj.__module__,
+            obj.__qualname__,
+            defaults,
+            closure,
+            kwdefaults,
+            obj.__name__,
+            attributes,
+            None,
+            snapshot_globals,
+        )
+        if not snapshot_globals:
+            return type(self)._unpickle_nested_function, args
+        # The snapshot goes in STATE, not in the args. pickle memoizes an object
+        # only after saving its reduce args, so a snapshot passed as an arg that
+        # reaches back to obj -- the ordinary `wrapped = deco(base)` at module
+        # scope, or two functools.wraps helpers referencing each other through
+        # the module dict -- recurses until RecursionError. State is applied
+        # AFTER memoization, so those references resolve to the function pickle
+        # already built.
+        return (
+            type(self)._unpickle_nested_function,
+            args,
+            guarded_globals,
+            None,
+            None,
+            type(self)._apply_function_globals,
+        )
 
     # pyrefly: ignore [bad-override]
     def reducer_override(
@@ -4395,19 +4547,15 @@ class GuardsStatePickler(pickle.Pickler):
 
         elif inspect.isfunction(obj):
             if "<locals>" in obj.__qualname__:
-                return type(self)._unpickle_nested_function, (
-                    obj.__code__,
-                    obj.__module__,
-                    obj.__qualname__,
-                    obj.__defaults__,
-                    obj.__closure__,
-                )
+                return self._reduce_nested_function(obj)
             if obj.__module__ in sys.modules:
                 f = sys.modules[obj.__module__]
                 for name in obj.__qualname__.split("."):
                     f = getattr(f, name, None)  # type: ignore[assignment]
                 if f is not obj:
-                    return _Missing, ("fqn mismatch",)
+                    if id(obj) not in self.guard_tree_values:
+                        return _Missing, ("fqn mismatch",)
+                    return self._reduce_nested_function(obj)
         elif inspect.ismethod(obj):
             func = obj.__func__
             method_self = obj.__self__
@@ -4418,7 +4566,16 @@ class GuardsStatePickler(pickle.Pickler):
                 return type(self)._unpickle_bound_method, (func, method_self)
 
         elif isinstance(obj, type((lambda x: lambda: x)(0).__closure__[0])):  # type: ignore[index] # noqa: PLC3002
-            return type(self)._unpickle_cell, (obj.cell_contents,)
+            # An EMPTY cell -- a free variable only assigned on a path that
+            # did not run -- has nothing to read, and reading it raised
+            # ValueError out of here, which reaches the caller as a package
+            # bypass. _reduce_cell handles the cells it builds; this is the
+            # path a cell reached directly takes.
+            try:
+                contents = obj.cell_contents
+            except ValueError:
+                contents = _Missing("empty function closure")
+            return type(self)._unpickle_cell, (contents,)
 
         if hasattr(torch.distributed, "distributed_c10d") and isinstance(
             obj, torch.distributed.distributed_c10d.Work
@@ -4527,8 +4684,20 @@ def pickle_guards_state(
 
     try:
         pickler.dump(state)
-    except AttributeError as e:
-        raise torch._dynamo.exc.PackageError(str(e)) from e
+    except torch._dynamo.exc.PackageError:
+        raise
+    except Exception as e:
+        # Deliberately broad, including AssertionError. It is tempting to let
+        # that one through as "our bug", but it is not ours to claim:
+        # GradScaler.__getstate__ asserts when pickled mid-iteration, tensor
+        # subclasses assert in __tensor_flatten__, and any user assert in a
+        # __reduce__ or a property lands here. Propagating those turns a
+        # serialization limitation into a hard torch.compile failure for a
+        # program that has nothing wrong with it.
+        # The caller turns PackageError into a package bypass, or re-raises it
+        # under strict_precompile. Name the original type so the reason stays
+        # diagnosable in the bypass message.
+        raise torch._dynamo.exc.PackageError(f"{type(e).__name__}: {e}") from e
     return buf.getvalue()
 
 
