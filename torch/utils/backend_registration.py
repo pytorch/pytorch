@@ -573,6 +573,6 @@ def _setup_privateuseone_for_python_backend(
         hook = _DummyPrivateUse1Hook()
     if device_guard is None:
         device_guard = _DummyDeviceGuard()
-    torch._register_device_module(rename, backend_module)
+    torch._register_device_module(rename, backend_module)  # type: ignore[bad-argument-type]
     torch._C._acc.register_python_privateuseone_hook(hook)
     torch._C._acc.register_python_privateuseone_device_guard(device_guard)

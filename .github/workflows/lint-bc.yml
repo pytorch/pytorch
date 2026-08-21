@@ -17,7 +17,7 @@ on:
 jobs:
   bc_linter:
     if: github.repository_owner == 'pytorch'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Run BC Lint Action
         uses: pytorch/test-infra/.github/actions/bc-lint@main

@@ -189,7 +189,7 @@ ASGD.__doc__ = rf"""Implements Averaged Stochastic Gradient Descent.
         {_capturable_doc}
 
     .. _Acceleration of stochastic approximation by averaging:
-        https://meyn.ece.ufl.edu/wp-content/uploads/sites/77/archive/spm_files/Courses/ECE555-2011/555media/poljud92.pdf
+        https://doi.org/10.1137/0330046
 
     """
 
@@ -203,7 +203,7 @@ def _single_tensor_asgd(
     state_steps: list[Tensor],
     *,
     lambd: float,
-    lr: float,
+    lr: float | Tensor,
     t0: float,
     alpha: float,
     weight_decay: float,
@@ -255,7 +255,7 @@ def _single_tensor_asgd(
         else:
             eta_value = _get_value(eta)
             param.mul_(1 - lambd * eta_value)  # decay term
-            param.add_(grad, alpha=-eta_value)  # update parameter
+            param.add_(grad, alpha=-eta_value)  # type: ignore[arg-type]  # update parameter
 
         # averaging
         if capturable or mu.item() != 1:
@@ -283,7 +283,7 @@ def _multi_tensor_asgd(
     state_steps: list[Tensor],
     *,
     lambd: float,
-    lr: float,
+    lr: float | Tensor,
     t0: float,
     alpha: float,
     weight_decay: float,
@@ -437,7 +437,7 @@ def asgd(
     has_complex: bool = False,
     *,
     lambd: float,
-    lr: float,
+    lr: float | Tensor,
     t0: float,
     alpha: float,
     weight_decay: float,

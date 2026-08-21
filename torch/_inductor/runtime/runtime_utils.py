@@ -88,8 +88,31 @@ def validate_triton_config(cfg: Config) -> None:
     # right now, if a pre-hook is attached to the config, it will not be saved;
     # and then it won't be used when the config is loaded from cache.
     # So we assert - if we do get a pre_hook, it might get ignored after caching.
-    assert getattr(cfg, "pre_hook", None) is None, (
-        "triton configs with pre_hooks not supported"
+    if getattr(cfg, "pre_hook", None) is not None:
+        raise AssertionError("triton configs with pre_hooks not supported")
+
+
+def assert_tensor_metadata(
+    tensor: torch.Tensor | None,
+    expected_size: tuple[Any, ...],
+    expected_stride: tuple[Any, ...],
+    expected_dtype: torch.dtype,
+    op_name: str | None = None,
+) -> None:
+    if tensor is None:
+        return
+    if tensor.dtype != expected_dtype:
+        op_msg = f"\nError in op: {op_name}" if op_name else ""
+        raise RuntimeError(
+            f"expected dtype {expected_dtype} but got {tensor.dtype}"
+            + op_msg
+            + "\nThis error most often comes from an incorrect fake (aka meta) "
+            "kernel for a custom op."
+            "\nUse torch.library.opcheck to test your custom op."
+            "\nSee https://pytorch.org/docs/stable/library.html#torch.library.opcheck"
+        )
+    torch._C._dynamo.guards.assert_size_stride(
+        tensor, expected_size, expected_stride, op_name
     )
 
 

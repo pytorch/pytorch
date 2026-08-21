@@ -104,7 +104,7 @@ inline void throw_error_for_complex_autograd(
     const at::Tensor& tensor,
     const char* name) {
   if (tensor.requires_grad()) {
-    TORCH_CHECK(
+    TORCH_CHECK_NOT_IMPLEMENTED(
         !tensor.is_complex(),
         name,
         " does not support automatic differentiation for outputs with complex dtype.");
@@ -133,28 +133,34 @@ inline void throw_error_for_complex_autograd(
 
 // TODO: Blegh, bare references
 
-inline void rebase_history(
+// Both overloads return the node that was actually attached as the new
+// history (the CopySlices node when rebasing through a view), so the caller
+// can fire node creation hooks on the composed node once it is fully set up.
+inline c10::intrusive_ptr<Node> rebase_history(
     const Variable& var,
     c10::intrusive_ptr<Node> grad_fn) {
   if (grad_fn && var.defined()) {
     grad_fn->add_input_metadata(var);
-    impl::rebase_history(var, {std::move(grad_fn), 0});
+    return impl::rebase_history(var, {std::move(grad_fn), 0});
   }
+  return grad_fn;
 }
 
-inline void rebase_history(
+inline c10::intrusive_ptr<Node> rebase_history(
     const std::vector<Variable>& vars,
     const c10::intrusive_ptr<Node>& grad_fn) {
+  auto attached_fn = grad_fn;
   if (grad_fn) {
     for (auto& var : vars) {
       if (var.defined()) {
         auto output_nr = grad_fn->add_input_metadata(var);
-        impl::rebase_history(var, {grad_fn, output_nr});
+        attached_fn = impl::rebase_history(var, {grad_fn, output_nr});
       } else {
         grad_fn->add_input_metadata(Node::undefined_input());
       }
     }
   }
+  return attached_fn;
 }
 
 inline void increment_version(const at::Tensor& t) {

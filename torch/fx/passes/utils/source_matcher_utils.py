@@ -148,9 +148,9 @@ def get_source_partitions(
         return SourcePartition(
             nodes,
             module_type,
-            list(input_nodes),
-            list(output_nodes),
-            list(params),  # type: ignore[arg-type]
+            sorted(input_nodes),
+            sorted(output_nodes),
+            sorted(params),  # type: ignore[arg-type]
         )
 
     ret: dict[type[Any], list[SourcePartition]] = {}
