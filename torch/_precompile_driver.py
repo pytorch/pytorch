@@ -469,6 +469,20 @@ def _build_multigraph_forward():
             f"artifact was produced on Python {produced_on[0]}.{produced_on[1]}"
         )
 
+    # The graphs below were captured with these functions inlined into them, so
+    # their current source has to be the source that was traced. The installed
+    # mode gets this check from CompilePackage; here it is the artifact's own.
+    from torch._dynamo.package import _hash_sourcelines
+
+    for _module, _first, _last, _checksum in globals().get("INLINED_SOURCES", ()):
+        if _hash_sourcelines(importlib.import_module(_module), _first, _last) != (
+            _checksum
+        ):
+            raise ValueError(
+                f"source code changes detected for {_module} "
+                f"(line {_first} - line {_last}); recapture the artifact"
+            )
+
     frames = pickle.loads(base64.b64decode(_FRAMES))
     backends = pickle.loads(base64.b64decode(_BACKENDS)) if _BACKENDS else {}
 
