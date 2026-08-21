@@ -178,8 +178,8 @@ class CodegenInductorTest(InductorTestCase):
         a = torch.randn((512, 4096), device=device)
         b = torch.randn((512, 4096), device=device)
         with unittest.mock.patch(
-            "torch._inductor.codegen.triton.TritonKernel.allow_block_ptr",
-            False,
+            "torch._inductor.codegen.triton_utils.has_triton_block_ptr",
+            lambda: False,
         ):
             _, code = self.run_and_compare(
                 func,
