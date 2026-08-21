@@ -249,7 +249,7 @@ def _graph_dependency_flow_events(
     events: list[dict[str, object]] = []
     fid = _GRAPH_DEP_FLOW_ID_BASE
     for node_map in by_corr.values():
-        for gnid, (dev, tid, start_ns, end_ns) in node_map.items():
+        for gnid, (dev, tid, start_ns, _end_ns) in node_map.items():
             for pred in graph_deps.get(gnid, ()):
                 p = node_map.get(pred)
                 if p is None:

@@ -1668,7 +1668,7 @@ class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
                 continue
             yield Hasher(ConstantVariable.create(k))
 
-        for k, v in self.item_dict.items():
+        for k in self.item_dict:
             if k not in d:
                 yield Hasher(ConstantVariable.create(k))
 
