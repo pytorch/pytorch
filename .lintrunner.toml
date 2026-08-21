@@ -596,7 +596,6 @@ exclude_patterns = [
     'torch/csrc/distributed/**',
     'torch/csrc/inductor/**',
     'torch/csrc/jit/**',
-    'torch/csrc/utils/**',
 ]
 command = [
     'python3',
