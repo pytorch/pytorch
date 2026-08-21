@@ -22,9 +22,10 @@ class CKTileTemplate(ROCmTemplate):
         torch.float8_e5m2: "BF8",  # gfx95
     }
 
+    # Keys are _TORCH_DTYPE_TO_CK values and must match the C++ aliases in globals().
     ck_dtype_to_size = {
-        "FP16": 2,
-        "BF16": 2,
+        _TORCH_DTYPE_TO_CK[torch.float16]: 2,
+        _TORCH_DTYPE_TO_CK[torch.bfloat16]: 2,
     }
 
     def header(self) -> IndentedBuffer:
