@@ -12,9 +12,14 @@ import torch._dynamo.testing
 import torch.nn.functional as F
 from torch._dynamo.comptime import comptime
 from torch._dynamo.testing import CompileCounter, CompileCounterWithBackend, same
-from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_MEM_EFF_ATTENTION
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import skipIfWindows
+from torch._dynamo.utils import strip_color_from_string
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    Capability,
+    requires_capabilities,
+    onlyAccelerator,
+)
+from torch.testing._internal.common_utils import skipIfWindows, HardwareClassification
 from torch.testing._internal.logging_utils import logs_to_string
 
 
@@ -27,6 +32,8 @@ from torch.testing._internal.logging_utils import logs_to_string
 
 @torch._dynamo.config.patch(assume_static_by_default=False)
 class UnspecTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_numpy_correctness(self):
         def fn(x, y, z):
             xy = [x + y, y, False]
@@ -971,6 +978,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
 
         out = "\n".join(log_stream.getvalue().strip().split("\n")[3:]).strip()
         self.assertEqual(out.count("torch.ops.aten._assert_scalar.default"), 2)
+        out = strip_color_from_string(out)
         self.assertRegex(out, r"l_(y|args_1)_ \+ 5")
         self.assertRegex(out, r"l_(x|args_0)_\.size\(0\)")
 
@@ -1091,15 +1099,12 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
 
 
 class UnspecTestsDevice(torch._dynamo.test_case.TestCase):
-    @torch._dynamo.config.patch(assume_static_by_default=False)
-    @unittest.skipIf(
-        not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
-        "Platform does not support efficient attention",
-    )
-    def test_no_recompilations_with_efficient_attention(self, device):
-        if self.device_type == "cpu":
-            raise unittest.SkipTest("EFFICIENT_ATTENTION requires a non-CPU device")
+    hw_classification = HardwareClassification.ACCELERATOR
 
+    @onlyAccelerator
+    @torch._dynamo.config.patch(assume_static_by_default=False)
+    @requires_capabilities(Capability.attention.mem_efficient_attention)
+    def test_no_recompilations_with_efficient_attention(self, device):
         def fn(q, k, v, attn_mask):
             from torch.nn.attention import sdpa_kernel, SDPBackend
             from torch.nn.functional import scaled_dot_product_attention
