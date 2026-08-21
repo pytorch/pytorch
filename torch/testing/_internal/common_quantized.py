@@ -7,6 +7,7 @@ import numpy as np
 import torch
 from torch import Tensor
 from contextlib import contextmanager
+from torch.testing._internal.common_cuda import _get_torch_rocm_version
 from torch.testing._internal.common_utils import TEST_WITH_TSAN, IS_PPC, IS_MACOS, IS_WINDOWS, IS_ARM64
 
 supported_qengines = list(torch.backends.quantized.supported_engines)
@@ -514,18 +515,38 @@ def from_blocked_format(x_mxfp8, scales_unswizzled, blocksize=32):
 
 def to_blocked(input_matrix) -> torch.Tensor:
     """
-    Rearrange a large matrix by breaking it into blocks and applying the rearrangement pattern.
+    Rearrange MX block scale factors for GEMM consumption (device-specific layout).
 
-    See:
-        https://docs.nvidia.com/cuda/cublas/index.html#d-block-scaling-factors-layout
+    On CUDA, uses the cuBLAS MX block scaling layout (128 by 4 tiles); see
+    https://docs.nvidia.com/cuda/cublas/index.html#d-block-scaling-factors-layout
+
+    On ROCm 7.13.0 or newer (``torch.version.rocm``), uses the hipBLASLt GFX950 pre-swizzled E8M0 layout for
+    ``Block_32_UE8M0_32_8_EXT`` (MX FP4 from 7.13, MX FP8 from 7.14): pad to ``ceil(H,32)`` by ``ceil(W,8)``, view as
+    ``(H//32, 2, 16, W//8, 2, 4)``, then ``permute(0, 3, 5, 2, 4, 1)``. On older ROCm, returns the input unchanged (contiguous 1D).
 
     Args:
-        input_matrix: Input tensor of shape (H, W)
+        input_matrix: 2D tensor of shape (H, W)
 
     Returns:
-        Rearranged tensor of shape (32*ceil_div(H,128), 16*ceil_div(W,4))
+        1D tensor of length ``ceil(H, tile_h) * ceil(W, tile_w)`` with device-specific tiling.
     """
     rows, cols = input_matrix.shape
+
+    if torch.version.hip:
+        if _get_torch_rocm_version() >= (7, 13):
+            padded_rows = ceil_div(rows, 32) * 32
+            padded_cols = ceil_div(cols, 8) * 8
+
+            padded = input_matrix
+            if (rows, cols) != (padded_rows, padded_cols):
+                padded = torch.zeros((padded_rows, padded_cols), device=input_matrix.device, dtype=input_matrix.dtype)
+                padded[:rows, :cols] = input_matrix
+
+            x = padded.view(padded_rows // 32, 2, 16, padded_cols // 8, 2, 4)
+            x = x.permute(0, 3, 5, 2, 4, 1).contiguous()
+            return x.flatten()
+        return input_matrix.contiguous().flatten()
+
     n_row_blocks = ceil_div(rows, 128)
     n_col_blocks = ceil_div(cols, 4)
 

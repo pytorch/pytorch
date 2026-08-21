@@ -4897,7 +4897,33 @@ def _infer_scale_swizzle_impl(
             ):
                 return ScalingType.BlockWise1x32, SwizzleType.SWIZZLE_32_4_4
         else:
-            # AMD/XPU: no swizzle
+            # AMD: MXFP8 uses plain BlockWise1x32 below 7.14. MXFP4 EXT at runtime ROCm >= 7.13.0;
+            # MXFP8 EXT at runtime ROCm >= 7.14.0. XPU uses plain BlockWise1x32 with no swizzle.
+            from torch.testing._internal.common_cuda import _get_torch_rocm_version
+
+            rocm_version = _get_torch_rocm_version()
+            if mat_dtype == torch.float4_e2m1fn_x2 and rocm_version >= (7, 13):
+                k_blocks_a = ceildiv(K_multiplier * mat_size[1], 32)
+                ext_numel_a = _round_up(mat_size[0], 32) * _round_up(k_blocks_a, 8)
+                k_blocks_b = ceildiv(K_multiplier * mat_size[0], 32)
+                ext_numel_b = _round_up(mat_size[1], 32) * _round_up(k_blocks_b, 8)
+                if eq_fn(scale_numel, ext_numel_a) or eq_fn(scale_numel, ext_numel_b):
+                    return (
+                        ScalingType.BlockWiseBlk32Ue8m0_32_8_EXT,
+                        SwizzleType.SWIZZLE_32_4_4,
+                    )
+
+            if mat_dtype == torch.float8_e4m3fn and rocm_version >= (7, 14):
+                k_blocks_a = ceildiv(K_multiplier * mat_size[1], 32)
+                ext_numel_a = _round_up(mat_size[0], 32) * _round_up(k_blocks_a, 8)
+                k_blocks_b = ceildiv(K_multiplier * mat_size[0], 32)
+                ext_numel_b = _round_up(mat_size[1], 32) * _round_up(k_blocks_b, 8)
+                if eq_fn(scale_numel, ext_numel_a) or eq_fn(scale_numel, ext_numel_b):
+                    return (
+                        ScalingType.BlockWiseBlk32Ue8m0_32_8_EXT,
+                        SwizzleType.SWIZZLE_32_4_4,
+                    )
+
             expected_numel_a = ceildiv(mat_size[0], 32) * K_multiplier * mat_size[1]
             expected_numel_b = ceildiv(K_multiplier * mat_size[1], 32) * mat_size[0]
             if eq_fn(scale_numel, expected_numel_a) or eq_fn(
