@@ -133,6 +133,16 @@ class StaticallyLaunchedTritonKernel:
 
         self.tensordesc_meta = getattr(metadata, "tensordesc_meta", None)
         self._has_tensordesc = False
+
+        # Auto-TMA: the compiler may synthesize recipes that tell the launcher
+        # to build CUtensorMap descriptors at launch time from existing kernel
+        # args.  Recipes are plain dicts and already pickleable.
+        self.auto_tma_recipes: list[dict[str, Any]] = []
+        if hasattr(kernel, "metadata"):
+            recipes = getattr(kernel.metadata, "auto_tma_recipes", None)
+            if recipes:
+                self.auto_tma_recipes = list(recipes)
+
         # pyrefly: ignore [missing-attribute]
         self.arg_tys = self.arg_ty_from_signature(kernel.src)
         self.function: int | None = None  # Loaded by load_kernel(on the parent process)
@@ -412,6 +422,26 @@ class StaticallyLaunchedTritonKernel:
             args = self._expand_tma_args(args)
 
         arg_tys = self.arg_tys
+
+        if self.auto_tma_recipes and not is_rocm():
+            # Auto-TMA: pass user args only; C++ builds the full param layout
+            # [user_args, tma_descs, scratch] and constructs CUtensorMap at launch.
+            n_scratch = int(self.has_global_scratch) + int(self.has_profile_scratch)
+            # pyrefly: ignore [bad-argument-type]
+            self.C_impl._launch_kernel_tma(
+                self.function,
+                grid_x,
+                grid_y,
+                grid_z,
+                self.num_warps,
+                self.shared,
+                arg_tys,
+                args,
+                stream,
+                self.auto_tma_recipes,
+                n_scratch,
+            )
+            return
 
         if is_rocm():
             # HIP always includes both scratch slots in the kernel ABI.
