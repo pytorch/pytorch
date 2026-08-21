@@ -166,6 +166,71 @@ class TestAOTIPackageDeviceValidation(TestCase):
             ):
                 torch._C._aoti.AOTIModelPackageLoader(str(tmp), "model", False, 1, -1)
 
+    def test_is_cpu_isa_compatible(self):
+        from torch._inductor.cpu_vec_isa import is_cpu_isa_compatible
+
+        # Normal superset cases
+        self.assertTrue(is_cpu_isa_compatible("AVX512 AVX512_VNNI", "AVX2"))
+        self.assertTrue(is_cpu_isa_compatible("AVX512", "AVX2"))
+        self.assertTrue(is_cpu_isa_compatible("AVX2", "AVX2"))
+        self.assertTrue(is_cpu_isa_compatible("ASIMD", "NEON"))
+
+        # INVALID_VEC_ISA sentinel: scalar artifact runs anywhere
+        self.assertTrue(is_cpu_isa_compatible("AVX512", "INVALID_VEC_ISA"))
+        # INVALID_VEC_ISA sentinel: unknown host (e.g. no compiler at load time)
+        self.assertTrue(is_cpu_isa_compatible("INVALID_VEC_ISA", "AVX2"))
+        # Both INVALID_VEC_ISA
+        self.assertTrue(is_cpu_isa_compatible("INVALID_VEC_ISA", "INVALID_VEC_ISA"))
+
+        # Incompatible cases
+        self.assertFalse(is_cpu_isa_compatible("AVX2", "AVX512"))
+
+    def test_aoti_load_cpu_isa_compatibility_warning(self):
+        class FakeAOTIModelPackageLoader:
+            @staticmethod
+            def load_metadata_from_package(file, model_name):
+                return {"AOTI_DEVICE_KEY": "cpu", "AOTI_CPU_ISA": "AVX2"}
+
+            def __init__(self, *args, **kwargs):
+                pass
+
+        with (
+            mock.patch.object(
+                torch._C._aoti, "AOTIModelPackageLoader", FakeAOTIModelPackageLoader
+            ),
+            mock.patch(
+                "torch._inductor.codecache.get_device_information",
+                return_value={"AOTI_CPU_ISA": "AVX512 AVX512_VNNI"},
+            ),
+            mock.patch("torch.export.pt2_archive._package.logger.warning") as mock_warn,
+        ):
+            _load_aoti("model.pt2", "model", False, 1, -1)
+            mock_warn.assert_not_called()
+
+        class FakeAOTIModelPackageLoaderAvx512:
+            @staticmethod
+            def load_metadata_from_package(file, model_name):
+                return {"AOTI_DEVICE_KEY": "cpu", "AOTI_CPU_ISA": "AVX512"}
+
+            def __init__(self, *args, **kwargs):
+                pass
+
+        with (
+            mock.patch.object(
+                torch._C._aoti, "AOTIModelPackageLoader", FakeAOTIModelPackageLoaderAvx512
+            ),
+            mock.patch(
+                "torch._inductor.codecache.get_device_information",
+                return_value={"AOTI_CPU_ISA": "AVX2"},
+            ),
+            mock.patch(
+                "torch.export.pt2_archive._package.logger.warning"
+            ) as mock_warn,
+        ):
+            _load_aoti("model.pt2", "model", False, 1, -1)
+            mock_warn.assert_called_once()
+            self.assertIn("Device information mismatch", mock_warn.call_args[0][0])
+
 
 if __name__ == "__main__":
     run_tests()
