@@ -4569,6 +4569,13 @@ class GuardsStatePickler(pickle.Pickler):
         if id(obj) in self.missing_values:
             return _Missing, ("missing values",)
 
+        if type(obj) is _Missing:
+            # A sentinel that came back from a previous serialization. Reduce it
+            # the same compact way it was written, or the default protocol
+            # spends NEWOBJ+EMPTY_TUPLE+EMPTY_DICT+SETITEM+BUILD on it and a
+            # re-serialized artifact grows for nothing.
+            return _Missing, (obj._reason,)
+
         if isinstance(obj, torch.Tensor) and obj.device.type != "meta":
             from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
@@ -5387,6 +5394,19 @@ class CheckFunctionManager:
         for source in output_graph.guard_on_key_order:
             prune_variable(source)
 
+        # A guard's user_stack is pure provenance, and most guards from one
+        # frame share the same one -- but as EQUAL objects rather than the same
+        # object, so the pickle memo cannot fold them. Canonicalize by rendered
+        # text so it can: a quarter of a large artifact is these.
+        interned: dict[str, traceback.StackSummary] = {}
+
+        def intern_user_stack(
+            stack: traceback.StackSummary | None,
+        ) -> traceback.StackSummary | None:
+            if stack is None:
+                return None
+            return interned.setdefault("".join(stack.format()), stack)
+
         def normalize_create_fn(x: Callable[..., None]) -> Callable[..., None]:
             if isinstance(x, functools.partial):
 
@@ -5437,6 +5457,7 @@ class CheckFunctionManager:
                         # artifact otherwise ships each code part several times over.
                         guard_types=None,
                         code_list=None,
+                        user_stack=intern_user_stack(guard.user_stack),
                     )
                     for guard in sorted_guards
                 )
