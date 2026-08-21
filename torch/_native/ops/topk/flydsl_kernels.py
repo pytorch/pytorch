@@ -86,8 +86,7 @@ def _decode_key(key):
 
 def _decode_topk_key(key, row):
     val, idx, ord32 = _decode_key(key)
-    if ord32 == fx.Int32(_NAN_SENTINEL_ORD):
-        val = row[idx]
+    val = (ord32 == fx.Int32(_NAN_SENTINEL_ORD)).select(row[idx], val)
     return val, idx
 
 
@@ -515,8 +514,9 @@ def _build_register_topk_module(n: int, k: int, arch: str, rows_per_cta: int = 2
         def compare_and_swap(arr, i: int, j: int, descending: bool):
             a = arr[i]
             b = arr[j]
-            hi = arith.maxsi(a, b)
-            lo = arith.minsi(a, b)
+            a_is_greater = a > b
+            hi = a_is_greater.select(a, b)
+            lo = a_is_greater.select(b, a)
             arr[i] = hi if descending else lo
             arr[j] = lo if descending else hi
 
