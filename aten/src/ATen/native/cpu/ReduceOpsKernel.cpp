@@ -189,12 +189,12 @@ template <typename scalar_t, typename out_t=typename scalar_value_type<scalar_t>
 void norm_kernel_cpu_impl(TensorIterator& iter, const double& val) {
   // This reduction accumulates results as the type `acc_t`.
   using acc_t = at::opmath_type<typename scalar_value_type<scalar_t>::type>;
-  if (val == 0.0) {
-    binary_kernel_reduce(iter, NormZeroOps<scalar_t, acc_t, out_t>(), acc_t(0));
+  if (val == 2.0) {
+    binary_kernel_reduce(iter, NormTwoOps<scalar_t, acc_t, out_t, false>(), NormTwoAccumulator<acc_t>{});
   } else if (val == 1.0) {
     binary_kernel_reduce(iter, NormOneOps<scalar_t, acc_t, out_t>(), acc_t(0));
   } else if (val == 2.0) {
-    binary_kernel_reduce(iter, NormTwoOps<scalar_t, acc_t, out_t>(), acc_t(0));
+    binary_kernel_reduce(iter, NormTwoOps<scalar_t, acc_t, out_t>(), NormTwoAccumulator<acc_t>{});
   } else if (val == INFINITY) {
     binary_kernel_reduce(iter, AbsMaxOps<scalar_t, acc_t, out_t>(), acc_t(0));
   } else if (val == -INFINITY) {
