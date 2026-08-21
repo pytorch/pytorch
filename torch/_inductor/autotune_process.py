@@ -593,7 +593,8 @@ class BenchmarkRequest:
                 start_ts = time.time()
 
             if self.benchmark_with_cudagraphs:
-                res = benchmarker.benchmark_gpu_with_cuda_graph(fn)
+                device = benchmarker.infer_device(*input_tensors, out)
+                res = benchmarker.benchmark_gpu_with_graph(fn, device=device)
             else:
                 res = self.do_bench(fn, *input_tensors, out)
 
@@ -983,8 +984,9 @@ class ExternKernelBenchmarkRequest(BenchmarkRequest):
                 )
                 out.copy_(out_new)  # for correctness checking
             if self.benchmark_with_cudagraphs:
-                return benchmarker.benchmark_gpu_with_cuda_graph(
-                    lambda: algo(*input_tensors)
+                device = benchmarker.infer_device(*input_tensors, out_new)
+                return benchmarker.benchmark_gpu_with_graph(
+                    lambda: algo(*input_tensors), device=device
                 )
             if config.profile_bandwidth_with_do_bench_using_profiling:
                 return do_bench_using_profiling(lambda: algo(*input_tensors))

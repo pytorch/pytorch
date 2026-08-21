@@ -127,7 +127,8 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
         fn = self.make_run_fn(*input_tensors, out=out)
         try:
             if self.benchmark_with_cudagraphs:
-                res = benchmarker.benchmark_gpu_with_cuda_graph(fn)
+                device = benchmarker.infer_device(*input_tensors, out)
+                res = benchmarker.benchmark_gpu_with_graph(fn, device=device)
             else:
                 res = self.do_bench(fn, *input_tensors, out=out)
         finally:

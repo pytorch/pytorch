@@ -227,7 +227,201 @@ class TestBenchmarker(TestCase):
             _bench._BENCHMARK_DISPATCH.clear()
             _bench._BENCHMARK_DISPATCH.update(orig)
 
-    def test_default_profiler_benchmarker_selection_supports_xpu_only(self):
+    def test_graph_benchmarker_dispatch_and_restore(self):
+        from torch._inductor.runtime import benchmarking as _bench
+
+        original = dict(_bench._GRAPH_BENCHMARK_DISPATCH)
+        calls = []
+
+        def custom_graph(self, fn, *, device_type, grad_to_none=None, **kwargs):
+            calls.append((device_type, grad_to_none, kwargs))
+            return 4.0
+
+        try:
+            _bench.register_graph_benchmarker("cpu", custom_graph, override=True)
+            result = Benchmarker().benchmark_gpu_with_graph(
+                lambda: None,
+                device="cpu",
+                sample=True,
+            )
+        finally:
+            _bench._GRAPH_BENCHMARK_DISPATCH.clear()
+            _bench._GRAPH_BENCHMARK_DISPATCH.update(original)
+
+        self.assertEqual(result, 4.0)
+        self.assertEqual(calls, [("cpu", None, {"sample": True})])
+
+    def test_graph_benchmarker_rejects_unregistered_device(self):
+        from torch._inductor.runtime import benchmarking as _bench
+
+        original = dict(_bench._GRAPH_BENCHMARK_DISPATCH)
+        try:
+            _bench._GRAPH_BENCHMARK_DISPATCH.clear()
+            with self.assertRaisesRegex(
+                RuntimeError, "No graph benchmarker registered for device_type 'xpu'"
+            ):
+                Benchmarker().benchmark_gpu_with_graph(
+                    lambda: None,
+                    device="xpu",
+                )
+        finally:
+            _bench._GRAPH_BENCHMARK_DISPATCH.clear()
+            _bench._GRAPH_BENCHMARK_DISPATCH.update(original)
+
+    def test_cuda_graph_compatibility_handler_preserves_old_call(self):
+        calls = []
+
+        class FakeBenchmarker(Benchmarker):
+            def benchmark_gpu_with_cuda_graph(self, fn, **kwargs):
+                calls.append(kwargs)
+                return 5.0
+
+        result = FakeBenchmarker().benchmark_gpu_with_graph(
+            lambda: None,
+            device="cuda",
+            estimation_iters=2,
+        )
+
+        self.assertEqual(result, 5.0)
+        self.assertEqual(calls, [{"grad_to_none": None, "estimation_iters": 2}])
+
+    def test_benchmark_request_propagates_inferred_graph_device(self):
+        from torch._inductor import autotune_process
+
+        class Request(autotune_process.BenchmarkRequest):
+            def make_run_fn(self, *args, out):
+                return lambda: None
+
+            def cleanup_run_fn(self):
+                pass
+
+            def do_bench(self, fn, *args, out=None):
+                raise AssertionError("graph benchmark path should be used")
+
+        request = Request("test", [], [], ())
+        request.benchmark_with_cudagraphs = True
+        input_tensor = torch.randn(2)
+        output_tensor = torch.randn(2)
+        with (
+            patch.object(
+                autotune_process.benchmarker, "infer_device", return_value="xpu"
+            ) as infer,
+            patch.object(
+                autotune_process.benchmarker,
+                "benchmark_gpu_with_graph",
+                return_value=1.0,
+            ) as benchmark,
+        ):
+            self.assertEqual(request.benchmark(input_tensor, out=output_tensor), 1.0)
+        infer.assert_called_once_with(input_tensor, output_tensor)
+        self.assertEqual(benchmark.call_args.kwargs["device"], "xpu")
+
+    def test_extern_kernel_request_propagates_inferred_graph_device(self):
+        from torch._inductor import autotune_process
+
+        request = object.__new__(autotune_process.ExternKernelBenchmarkRequest)
+        request.has_out_variant = False
+        request.benchmark_with_cudagraphs = True
+        request.to_callable = lambda: (lambda tensor: tensor)
+        input_tensor = torch.randn(2)
+        output_tensor = torch.empty(2)
+        with (
+            patch.object(
+                autotune_process.benchmarker, "infer_device", return_value="xpu"
+            ) as infer,
+            patch.object(
+                autotune_process.benchmarker,
+                "benchmark_gpu_with_graph",
+                return_value=2.0,
+            ) as benchmark,
+        ):
+            self.assertEqual(request.benchmark(input_tensor, out=output_tensor), 2.0)
+        self.assertEqual(infer.call_count, 1)
+        self.assertIs(infer.call_args.args[0], input_tensor)
+        self.assertIs(infer.call_args.args[1], input_tensor)
+        self.assertEqual(benchmark.call_args.kwargs["device"], "xpu")
+
+    def test_nvgemm_request_propagates_inferred_graph_device(self):
+        from torch._inductor.codegen.nv_universal_gemm import nv_universal_gemm
+        from torch._inductor.runtime import benchmarking as _bench
+
+        input_tensor = torch.randn(2)
+        output_tensor = torch.empty(2)
+
+        class Meta:
+            def __init__(self, tensor):
+                self.tensor = tensor
+
+            def to_tensor(self):
+                return self.tensor
+
+        request = object.__new__(nv_universal_gemm.NVUniversalGemmBenchmarkRequest)
+        request.input_tensor_meta = [Meta(input_tensor)]
+        request.output_tensor_meta = Meta(output_tensor)
+        request.benchmark_with_cudagraphs = True
+        request.make_run_fn = lambda *args, out: lambda: None
+        request.cleanup_run_fn = lambda: None
+        with (
+            patch.object(
+                _bench.benchmarker, "infer_device", return_value="xpu"
+            ) as infer,
+            patch.object(
+                _bench.benchmarker,
+                "benchmark_gpu_with_graph",
+                return_value=3.0,
+            ) as benchmark,
+        ):
+            self.assertEqual(request.benchmark(out=output_tensor), 3.0)
+        infer.assert_called_once_with(input_tensor, output_tensor)
+        self.assertEqual(benchmark.call_args.kwargs["device"], "xpu")
+
+    def test_subgraph_choice_caller_propagates_inferred_graph_device(self):
+        from torch._inductor.codegen import subgraph
+
+        request = object.__new__(subgraph.SubgraphChoiceCaller)
+        request._benchmark_with_cudagraphs = True
+        sym_input = torch.randn(2)
+        arg = torch.randn(2)
+        request.sym_input_values = [sym_input]
+        request._compiled_module = type(
+            "Compiled", (), {"call": lambda self, args: None}
+        )()
+        request._ensure_compiled = lambda: None
+        output_tensor = torch.empty(2)
+        with (
+            patch.object(
+                subgraph.benchmarker, "infer_device", return_value="xpu"
+            ) as infer,
+            patch.object(
+                subgraph.benchmarker,
+                "benchmark_gpu_with_graph",
+                return_value=4.0,
+            ) as benchmark,
+        ):
+            self.assertEqual(request.benchmark(arg, out=output_tensor), 4.0)
+        infer.assert_called_once_with(sym_input, arg, output_tensor)
+        self.assertEqual(benchmark.call_args.kwargs["device"], "xpu")
+
+    def test_choice_caller_propagates_inferred_graph_device(self):
+        from torch._inductor import ir
+
+        request = object.__new__(ir.ChoiceCaller)
+        request._benchmark_with_cudagraphs = True
+        request.to_callable = lambda: (lambda tensor: tensor)
+        input_tensor = torch.randn(2)
+        output_tensor = torch.empty(2)
+        with (
+            patch.object(ir.benchmarker, "infer_device", return_value="xpu") as infer,
+            patch.object(
+                ir.benchmarker,
+                "benchmark_gpu_with_graph",
+                return_value=5.0,
+            ) as benchmark,
+        ):
+            self.assertEqual(request.benchmark(input_tensor, out=output_tensor), 5.0)
+        infer.assert_called_once_with(input_tensor, output_tensor)
+        self.assertEqual(benchmark.call_args.kwargs["device"], "xpu")
+
         from torch._inductor.runtime import benchmarking as _bench
 
         with (
