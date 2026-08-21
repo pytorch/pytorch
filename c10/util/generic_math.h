@@ -80,6 +80,20 @@ inline C10_HOST_DEVICE scalar_t div_floor_integer(scalar_t a, scalar_t b) {
   return a / b;
 }
 
+template <typename scalar_t>
+inline C10_HOST_DEVICE scalar_t trunc_floor_integer(scalar_t a, scalar_t b) {
+  if (C10_UNLIKELY(b == 0)) {
+    return scalar_t(0);
+  }
+
+  if (C10_UNLIKELY(
+          std::is_signed<scalar_t>::value &&
+          a == std::numeric_limits<scalar_t>::min() && b == scalar_t(-1))) {
+    return a;
+  }
+  return a / b;
+}
+
 template <
     typename scalar_t,
     std::enable_if_t<std::is_floating_point_v<scalar_t>, int> = 0>

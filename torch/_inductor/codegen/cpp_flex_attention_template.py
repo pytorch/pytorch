@@ -224,7 +224,7 @@ extern "C"
 {{kernel.def_kernel(inputs=kernel_args, outputs={"output": output}, extra_sizevars=template.extra_sizevars)}}
 {
   {{ kernel.maybe_codegen_profile() }}
-
+  std::atomic<int> inductor_cpu_integer_div_error{0};
   // dtypes
   using scalar_t = {{kernel.dtype(query)}};
   constexpr bool is_reduced_type = c10::is_reduced_floating_point_v<scalar_t>;
@@ -683,6 +683,7 @@ FLEX_ATTENTION_TEMPLATE = r"""
     at::native::cpublas::brgemm_release(need_pack);
 
   });
+  inductor_cpu_throw_if_integer_div_error(inductor_cpu_integer_div_error);
 }
 """
 
@@ -1055,6 +1056,7 @@ FLEX_DECODING_TEMPLATE = r"""
     }
 
   });
+  inductor_cpu_throw_if_integer_div_error(inductor_cpu_integer_div_error);
 }
 """
 
