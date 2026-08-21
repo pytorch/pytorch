@@ -589,6 +589,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
         # provide a pytree decomposition for it, and its instances are safe to
         # treat as a constant by `torch.compile`.
         torch._library.opaque_object.register_custom_class(State, typ="constant")
+        self.addCleanup(torch._library.opaque_object.unregister_custom_class, State)
 
         @torch._dynamo.nonstrict_trace
         def trace_me(x, s):
@@ -885,6 +886,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
         # provide a pytree decomposition for it, and its instances are safe to
         # treat as a constant by `torch.compile`.
         torch._library.opaque_object.register_custom_class(State, typ="symbolic")
+        self.addCleanup(torch._library.opaque_object.unregister_custom_class, State)
 
         @torch._dynamo.nonstrict_trace
         def trace_me(x, s):
@@ -1279,6 +1281,9 @@ class DecoratorTests(PytreeRegisteringTestCase):
             if newline:
                 cipher.append("\n")
             return "".join(cipher).encode()
+
+        unregister = torch._dynamo.decorators._unregister_substitute_in_graph
+        self.addCleanup(unregister, operator.indexOf)
 
         cnts = torch._dynamo.testing.CompileCounter()
         fn = polyfill
