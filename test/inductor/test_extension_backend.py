@@ -34,7 +34,10 @@ from torch._inductor.codegen.common import (
     register_device_op_overrides,
 )
 from torch._inductor.codegen.cpp_utils import device_to_aten
-from torch._inductor.codegen.cpu_device_op_overrides import CpuDeviceOpOverrides
+from torch._inductor.codegen.cpu_device_op_overrides import (
+    CpuDeviceOpOverrides,
+    NoOpDeviceOpOverrides,
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
@@ -49,7 +52,7 @@ class ExtensionDeviceOpOverrides(CpuDeviceOpOverrides):
         return "at::kPrivateUse1"
 
 
-class MissingAtenDeviceTypeOverrides(CpuDeviceOpOverrides):
+class MissingAtenDeviceTypeOverrides(NoOpDeviceOpOverrides):
     pass
 
 
@@ -74,6 +77,20 @@ TestCase = test_torchinductor.TestCase
 
 
 class DeviceToAtenTests(TestCase):
+    def test_builtin_device_types(self):
+        for device, expected in (
+            ("cpu", "at::kCPU"),
+            ("cuda", "at::kCUDA"),
+            ("xpu", "at::kXPU"),
+            ("mps", "at::kMPS"),
+            ("meta", "at::kMeta"),
+        ):
+            self.assertEqual(device_to_aten(device), expected)
+
+    def test_unregistered_device_type(self):
+        with self.assertRaisesRegex(RuntimeError, "No ATen device type mapping"):
+            device_to_aten("unregistered_aten_device_type")
+
     def test_missing_aten_device_type(self):
         device = "missing_aten_device_type"
         register_device_op_overrides(device, MissingAtenDeviceTypeOverrides())
@@ -85,6 +102,11 @@ class DeviceToAtenTests(TestCase):
         register_device_op_overrides(device, InvalidAtenDeviceTypeOverrides())
         with self.assertRaisesRegex(RuntimeError, "must return.*at::k"):
             device_to_aten(device)
+
+    def test_unsupported_device_types(self):
+        for device in ("tpu", "mtia"):
+            with self.assertRaisesRegex(RuntimeError, "No ATen device type mapping"):
+                device_to_aten(device)
 
 
 @xfailIfS390X
