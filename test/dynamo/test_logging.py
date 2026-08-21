@@ -1494,7 +1494,7 @@ fn(torch.randn(5))
         def baz(x):
             return x + 1
 
-        baz(torch.ones(3))
+        baz(torch.ones(3, device=device_type))
 
         # `_log_traced_frames` is registered as an atexit callback, so we invoke
         # it explicitly for testing.

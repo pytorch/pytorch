@@ -15,6 +15,11 @@ from torch._dynamo.testing import normalize_gm
 from torch.fx.experimental.proxy_tensor import make_fx
 
 
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+)
+
+
 def _multiply(x):
     return x * x
 
@@ -40,8 +45,8 @@ class BackwardHigherOrderOpTests(torch._dynamo.test_case.TestCase):
     def test_invoke_in_pt2(self):
         for backend in ["eager", "aot_eager", "inductor"]:
             torch._dynamo.reset()
-            x = torch.tensor([0.5, 0.5], requires_grad=True)
-            y = torch.tensor([0.5, 0.5], requires_grad=True)
+            x = torch.tensor([0.5, 0.5], device=device_type, requires_grad=True)
+            y = torch.tensor([0.5, 0.5], device=device_type, requires_grad=True)
 
             def fn(x, y):
                 x.register_hook(_multiply_invoke)
@@ -49,7 +54,7 @@ class BackwardHigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
             fn = torch.compile(fn, backend=backend)
             out = fn(x, y)
-            grad_out = torch.tensor([2.0, 2.0])
+            grad_out = torch.tensor([2.0, 2.0], device=device_type)
             out.backward(grad_out)
             self.assertEqual(x.grad, grad_out * y)
 
@@ -217,8 +222,8 @@ class GraphModule(torch.nn.Module):
 
         for backend in ["inductor"]:
             torch._dynamo.reset()
-            x = torch.tensor([0.5, 0.5], requires_grad=True)
-            y = torch.tensor([0.5, 0.5], requires_grad=True)
+            x = torch.tensor([0.5, 0.5], device=device_type, requires_grad=True)
+            y = torch.tensor([0.5, 0.5], device=device_type, requires_grad=True)
 
             class MyObj:
                 def __init__(self) -> None:
@@ -234,7 +239,7 @@ class GraphModule(torch.nn.Module):
 
             fn = torch.compile(fn, backend=backend, fullgraph=True)
             out = fn(x, y)
-            grad_out = torch.tensor([2.0, 2.0])
+            grad_out = torch.tensor([2.0, 2.0], device=device_type)
             with compiled_autograd._enable(compiler_fn):
                 out.backward(grad_out)
             actual = normalize_gm(graph.print_readable(False))
@@ -297,8 +302,8 @@ class GraphModule(torch.nn.Module):
 
         for backend in ["eager", "aot_eager", "inductor"]:
             torch._dynamo.reset()
-            x = torch.tensor([0.5, 0.5], requires_grad=True)
-            y = torch.tensor([0.5, 0.5], requires_grad=True)
+            x = torch.tensor([0.5, 0.5], device=device_type, requires_grad=True)
+            y = torch.tensor([0.5, 0.5], device=device_type, requires_grad=True)
 
             def fn(x, y):
                 x.register_hook(_graph_break_invoke)
@@ -306,7 +311,7 @@ class GraphModule(torch.nn.Module):
 
             fn = torch.compile(fn, backend=backend, fullgraph=True)
             out = fn(x, y)
-            grad_out = torch.tensor([2.0, 2.0])
+            grad_out = torch.tensor([2.0, 2.0], device=device_type)
             with self.assertRaisesRegex(
                 torch._dynamo.exc.Unsupported,
                 "print",
