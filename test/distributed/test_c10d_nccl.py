@@ -14,10 +14,13 @@ import threading
 import time
 import unittest
 import warnings
+from collections.abc import Callable
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from enum import auto, Enum
+from functools import wraps
 from itertools import chain, product
+from typing import ParamSpec, TypeVar
 from unittest import mock, SkipTest
 
 import torch
@@ -48,6 +51,11 @@ import torch.nn.functional as F
 import torch.testing._internal.common_utils as common
 from torch import nn
 from torch._C._distributed_c10d import ErrorType, OpType, WorkResult
+from torch.cuda._utils import (
+    _check_cuda_bindings,
+    _cuda_bindings_driver as _drv,
+    _HAS_CUDA_BINDINGS,
+)
 from torch.nn.parallel import DistributedDataParallel
 from torch.testing._internal.common_cuda import _get_torch_rocm_version, TEST_MULTIGPU
 from torch.testing._internal.common_distributed import (
@@ -7645,6 +7653,62 @@ class ProcessGroupNCCLLargerScaleTest(MultiProcessTestCase):
         dist.destroy_process_group()
 
 
+def _host_cft_unsupported_reason() -> str | None:
+    """Python mirror of NCCL's runtime gate for CFT logical endpoints
+    (ncclGpuCftSupport in cft_dev_runtime.cc): a Blackwell-class GPU whose
+    driver reports CUDA >= 13.3 and sets both logical-endpoint device
+    attributes. One NCCL requirement stays invisible here: libnccl itself
+    must be built with CUDA >= 13.3.
+    """
+    if torch.cuda.get_device_capability() < (10, 0):
+        return "host-side CFT requires Blackwell (sm_100+)"
+    if os.environ.get("NCCL_CFT_ENABLE", "1") == "0":
+        return "host-side CFT disabled via NCCL_CFT_ENABLE=0"
+    if not _HAS_CUDA_BINDINGS:
+        return "cuda-bindings is required to probe CFT support"
+    try:
+        _check_cuda_bindings(_drv.cuInit(0))
+        if _check_cuda_bindings(_drv.cuDriverGetVersion()) < 13030:
+            return "host-side CFT requires a driver reporting CUDA >= 13.3"
+        for name, raw in (
+            ("CU_DEVICE_ATTRIBUTE_LOGICAL_ENDPOINT_UNICAST_SUPPORTED", 153),
+            ("CU_DEVICE_ATTRIBUTE_LOGICAL_ENDPOINT_MULTICAST_SUPPORTED", 154),
+        ):
+            # The enum member only exists in cuda-bindings >= 13.3; the raw
+            # value is part of the stable driver ABI.
+            attr = getattr(_drv.CUdevice_attribute, name, raw)
+            if not _check_cuda_bindings(_drv.cuDeviceGetAttribute(attr, 0)):
+                return f"device does not report {name}"
+    except Exception as e:
+        return f"failed to probe CFT support: {e}"
+    return None
+
+
+_P = ParamSpec("_P")
+_T = TypeVar("_T")
+
+
+def requires_cft_support() -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
+    """Skip unless the GPU/driver stack can create CFT logical endpoints.
+
+    Like requires_nvls in test_nvshmem.py, but evaluated lazily inside the
+    wrapper so the CUDA probing runs in the child process; this file must
+    not initialize a CUDA context in the main process.
+    """
+
+    def decorator(func: Callable[_P, _T]) -> Callable[_P, _T]:
+        @wraps(func)
+        def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _T:
+            reason = _host_cft_unsupported_reason()
+            if reason is not None:
+                raise SkipTest(reason)
+            return func(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
+
+
 @unittest.skipIf(TEST_WITH_ROCM, "NCCL symmetric memory is not supported on ROCm")
 class SymmMemCftHandleTest(MultiProcessTestCase):
     """Host-side NCCL CFT logical-endpoint handles exposed on _SymmetricMemory.
@@ -7711,6 +7775,7 @@ class SymmMemCftHandleTest(MultiProcessTestCase):
     @requires_nccl()
     @requires_nccl_version((2, 31, 2), "Need NCCL 2.31.2+ for host-side CFT")
     @skip_if_lt_x_gpu(2)
+    @requires_cft_support()
     def test_get_cft_handle(self) -> None:
         hdl = self._init_process()
         self.assertEqual(symm_mem.get_backend(self.device), "NCCL")
