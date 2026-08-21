@@ -601,7 +601,7 @@ class FxGraphRunnableTritonCudaTest(FxGraphRunnableTestBase, TestCase):
         torch.compile(f)(x, y)  # noqa: UNSPECIFIED_BACKEND
         self._exec_and_verify_payload()
 
-instantiate_device_type_tests(FxGraphRunnableTritonCudaTest, globals(), allow_xpu=True)
+instantiate_device_type_tests(FxGraphRunnableTritonCudaTest, globals())
 
 
 @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
