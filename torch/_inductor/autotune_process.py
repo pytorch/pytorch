@@ -1131,6 +1131,14 @@ class CUTLASSBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
 
         self.ensure_dll_loaded()
         self.update_workspace_size()
+        # Deduplicate aliased inputs: def_kernel collapses inputs that share
+        # a buffer name into one kernel parameter (dict-keyed), so the C++
+        # function has fewer pointer args than len(input_tensors).
+        if isinstance(self.input_tensor_meta, list):
+            seen: dict[str | None, torch.Tensor] = {}
+            for tensor, meta in zip(input_tensors, self.input_tensor_meta):
+                seen.setdefault(meta.name, tensor)
+            input_tensors = tuple(seen.values())
         args = [c_void_p(tensor.data_ptr()) for tensor in list(input_tensors) + [out]]
         autotuning_log.debug(
             "make_run_fn: self.kernel_name=%s, self.source_file=%s, self.hash_key=%s, self.DLL=%s, args=%s, self.extra_args=%s",
