@@ -99,7 +99,7 @@ def {{kernel_name}}_precompile(precompile_shapes, precompile_strides=None,
 class TestNVGemmPickling(TestCase):
     @unittest.skipIf(
         not ensure_nv_universal_gemm_available(),
-        "NVIDIA Universal GEMM (cutlass_api) library not available",
+        "NVIDIA Universal GEMM (cutlass.operators) library not available",
     )
     def test_scaled_operand_constraints_pickle_round_trip(self):
         import cutlass
@@ -1420,7 +1420,7 @@ class TestCuteDSLSubprocessCompile(TestCase):
 
     @unittest.skipIf(
         not ensure_nv_universal_gemm_available(),
-        "NVIDIA Universal GEMM (cutlass_api) library not available",
+        "NVIDIA Universal GEMM (cutlass.operators) library not available",
     )
     def test_nv_universal_gemm_subprocess_precompile_skips_bad_fork(self):
         """NV Universal GEMM precompile skips compile in bad-fork workers."""
