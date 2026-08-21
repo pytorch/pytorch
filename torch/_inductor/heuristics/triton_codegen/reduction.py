@@ -385,6 +385,12 @@ class ReductionHeuristic(CodegenConfigHeuristics):
         xnumel = size_hints["x"]
         rnumel = get_total_reduction_numel(size_hints)
 
+        # Under dynamic shapes the emitted R0_BLOCK can exceed the size hint;
+        # budget against the block codegen will actually emit, not the hint.
+        emitted_rblock = inductor_meta.get("persistent_rblock")
+        if emitted_rblock is not None and emitted_rblock > rnumel:
+            rnumel = emitted_rblock
+
         MAX_PERSISTENT_BLOCK_NUMEL = 4096
         warp_size = triton_meta["device"].warp_size_or_default
 
