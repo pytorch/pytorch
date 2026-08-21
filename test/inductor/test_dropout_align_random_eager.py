@@ -11,6 +11,7 @@ from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import HardwareClassification, IS_LINUX
+from torch.testing._internal.inductor_utils import HAS_TRITON
 
 
 # ───────────────────────────────────────────────────────────────
@@ -78,7 +79,7 @@ def _set_seed(device, base: int = BASE_SEED):
 
 
 def _sync(x: torch.Tensor):
-    if x.is_cuda or x.device.type != "cpu":
+    if x.device.type != "cpu":
         torch.get_device_module(x.device).synchronize()
 
 
@@ -95,7 +96,7 @@ def _timed_run(model, x, backward: bool = False):
 def _rng_seed_and_offset(device):
     """Return (seed, offset) extracted from the current device RNG state.
 
-    The CUDA/NPU RNG state is a 16-byte uint8 tensor laid out as
+    The CUDA RNG state is a 16-byte uint8 tensor laid out as
     seed[0:8] + offset[8:16]. The offset is read from bytes [8:16].
     """
     dev_mod = torch.get_device_module(device)
@@ -131,9 +132,12 @@ def dropout_parity(device, shape, p=0.3, dtype=torch.float32, seed=1234):
 # ───────────────────────────────────────────────────────────────
 # Test class (Inductor idioms)
 # ───────────────────────────────────────────────────────────────
-@unittest.skipIf(not IS_LINUX, "Inductor dropout alignment tests require Linux")
+@unittest.skipIf(
+    not (IS_LINUX and HAS_TRITON),
+    "Inductor dropout alignment tests require Linux and Triton",
+)
 class TestDropoutAlignRandomEager(InductorTestCase):
-    hw_classification = HardwareClassification.ACCELERATOR
+    hw_classification = HardwareClassification.CUDA
 
     def setUp(self):
         super().setUp()
@@ -228,7 +232,7 @@ class TestDropoutAlignRandomEager(InductorTestCase):
             self.assertIsNotNone(p_new.grad)
             self.assertSmallMismatchFraction(p_ref.grad, p_new.grad)
 
-    def test_dropout_mask_parity_and_rng_offset_cuda(self, device):
+    def test_dropout_mask_parity_and_rng_offset(self, device):
         H, W = BATCH * SEQ_LEN, FFN_DIM
 
         dev_mod = torch.get_device_module(device)
@@ -384,7 +388,7 @@ class TestDropoutAlignRandomEager(InductorTestCase):
     # ───────────────────────────────────────────────────────────
     # Optional: perf smoke (GPU only)
     # ───────────────────────────────────────────────────────────
-    def test_perf_smoke_cuda(self, device):
+    def test_perf_smoke(self, device):
         x = torch.randn(BATCH, SEQ_LEN, HIDDEN_DIM, device=device)
 
         eager, compiled = build_models(DROPOUT_P)
@@ -495,12 +499,12 @@ class TestDropoutAlignRandomEager(InductorTestCase):
 instantiate_device_type_tests(
     TestDropoutAlignRandomEager,
     globals(),
-    except_for="cpu",
+    only_for="cuda",
 )
 
 
 if __name__ == "__main__":
     from torch.utils._triton import has_triton
 
-    if IS_LINUX and has_triton():
+    if has_triton():
         run_tests(needs="filelock")
