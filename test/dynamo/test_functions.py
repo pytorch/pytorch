@@ -5712,8 +5712,9 @@ class GraphModule(torch.nn.Module):
                 raise AssertionError(type.__name__)
             if not type.__doc__.startswith("type("):
                 raise AssertionError(type.__doc__)
-            if type.__type_params__ != ():
-                raise AssertionError(type.__type_params__)
+            if sys.version_info < (3, 12):
+                if type.__type_params__ != ():
+                    raise AssertionError(type.__type_params__)
             return x + 1
 
         x = torch.tensor(1.0)
@@ -5758,6 +5759,134 @@ class GraphModule(torch.nn.Module):
         x = torch.tensor(1.0)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x), opt_fn(x))
+
+    def test_mappingproxy_iteration(self):
+        # type.__dict__ is a mappingproxy; iterating it must yield its keys.
+        def fn(x):
+            keys = sorted(iter(int.__dict__))
+            if "__add__" not in keys:
+                raise AssertionError(keys)
+            return x + 1
+
+        x = torch.tensor(1.0)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_dict_update_from_mappingproxy(self):
+        # dict.update(mappingproxy) must iterate the proxy's keys/values, both
+        # for a builtin type's __dict__ and a user class's __dict__.
+        class C:
+            attr = 5
+
+        def fn(x):
+            d = {}
+            d.update(int.__dict__)
+            d2 = {}
+            d2.update(C.__dict__)
+            if "__add__" not in d:
+                raise AssertionError(list(d))
+            if d2["attr"] != 5:
+                raise AssertionError(d2)
+            return x + 1
+
+        x = torch.tensor(1.0)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_update_wrapper_from_type(self):
+        # functools.update_wrapper(wrapper, type) runs WRAPPER_UPDATES:
+        # wrapper.__dict__.update(type.__dict__), a mappingproxy full of slot
+        # wrappers and descriptors. The getset data descriptors __name__ /
+        # __annotations__ / __type_params__ must reflect the WRAPPER_ASSIGNMENTS
+        # (or getset defaults), not the copied type.__dict__ descriptor objects.
+        def fn(x):
+            def wrapper(*args):
+                pass
+
+            functools.update_wrapper(wrapper, type)
+            if wrapper.__name__ != "type":
+                raise AssertionError(wrapper.__name__)
+            if wrapper.__annotations__ != {}:
+                raise AssertionError(wrapper.__annotations__)
+            if sys.version_info < (3, 12):
+                if wrapper.__type_params__ != ():
+                    raise AssertionError(wrapper.__type_params__)
+            return x + 1
+
+        x = torch.tensor(1.0)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_function_dict_does_not_shadow_getset(self):
+        # A function's __name__ is a getset data descriptor. Writing to the
+        # instance __dict__ under that key must not change func.__name__.
+        def fn(x):
+            def g():
+                pass
+
+            g.__dict__["__name__"] = "shadow"
+            if g.__name__ != "g":
+                raise AssertionError(g.__name__)
+            if g.__dict__["__name__"] != "shadow":
+                raise AssertionError(g.__dict__["__name__"])
+            return x + 1
+
+        x = torch.tensor(1.0)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_update_wrapper_type_escapes(self):
+        # A wrapper whose getset attrs were set via setattr (update_wrapper) and
+        # whose __dict__ was updated escapes the compiled region; the getset
+        # __name__ must survive reconstruction as the setattr'd value.
+        def cool_name(x):
+            return x.sin()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            y = x.cos()
+
+            @functools.wraps(cool_name)
+            def wrapper():
+                return cool_name(y)
+
+            return wrapper
+
+        result = fn(torch.ones([]))
+        self.assertEqual(result.__name__, "cool_name")
+        self.assertEqual(result(), torch.ones([]).cos().sin())
+
+    def test_update_type_wrapper_escapes(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            def wrapper(*args):
+                return x
+
+            functools.update_wrapper(wrapper, type)
+            return wrapper
+
+        result = fn(torch.ones([]))
+        self.assertEqual(result.__name__, "type")
+        self.assertIs(result.__dict__["__name__"], type.__dict__["__name__"])
+
+    def test_nested_function_getset_attrs_escape(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            def inner():
+                return x
+
+            inner.__name__ = "renamed"
+            inner.__qualname__ = "renamed.qualname"
+            inner.__type_params__ = (int,)
+            inner.__dict__["__name__"] = "shadow"
+            return inner
+
+        result = fn(torch.ones([]))
+        self.assertEqual(result.__name__, "renamed")
+        self.assertEqual(result.__qualname__, "renamed.qualname")
+        self.assertEqual(result.__type_params__, (int,))
+        self.assertEqual(result.__dict__["__name__"], "shadow")
+        self.assertEqual(result(), torch.ones([]))
 
     def test_lru_cache_dunder_name_access(self):
         # Accessing __name__ on an lru_cache-wrapped function during tracing

@@ -50,7 +50,12 @@ from torch._guards import Source
 from torch.utils._pytree import is_namedtuple_class
 
 from .. import config, graph_break_hints, polyfills, variables
-from ..bytecode_transformation import create_call_function, create_rot_n, is_generator
+from ..bytecode_transformation import (
+    create_call_function,
+    create_instruction,
+    create_rot_n,
+    is_generator,
+)
 from ..exc import (
     format_frame_info,
     get_dynamo_observed_exception,
@@ -94,6 +99,7 @@ from ..utils import (
 from .base import (
     AsPythonConstantNotImplementedError,
     AttributeMutationNew,
+    AttrMutationKind,
     GetSet,
     getset_build,
     getset_load_or_build,
@@ -102,7 +108,6 @@ from .base import (
     Method,
     NO_SUCH_SUBOBJ,
     readonly_setter,
-    store_attr_mutation,
     type_qualified_name,
     unmodeled_setter,
     ValueMutationNew,
@@ -404,6 +409,13 @@ fn_known_dunder_attrs = {
 }
 
 
+# Writable getset/member data descriptors on the function type. CPython keeps
+# these in dedicated per-instance storage (func_getsetlist / func_memberlist),
+# separate from the instance __dict__ (tp_dictoffset), and a data descriptor is
+# never shadowed by a __dict__ entry. So `func.__dict__[name] = x` (e.g. via
+# functools.update_wrapper copying type.__dict__) must not change `func.name`,
+# and setattr of these must not leak into __dict__. __annotations__ has its own
+# dedicated field (self.annotations) and is handled separately.
 class BaseUserFunctionVariable(VariableTracker):
     # funcobject.c func_defaults/func_kwdefaults/func_closure/func_annotations:
     # dedicated slots, NOT __dict__ entries. Only a VT that synthesizes a
@@ -414,6 +426,9 @@ class BaseUserFunctionVariable(VariableTracker):
     kwdefaults: VariableTracker | None = None
     closure: VariableTracker | None = None
     annotations: VariableTracker | None = None
+    name: VariableTracker | None = None
+    qualname: VariableTracker | None = None
+    type_params: VariableTracker | None = None
 
     def tp_richcompare_impl(self, tx, other, op):
         from .object_protocol import object_richcompare
@@ -438,15 +453,19 @@ class BaseUserFunctionVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if name == "__setattr__":
-            if args[0].is_constant_match("__annotations__"):
-                self.annotations = args[1]
+            attr_name = args[0].as_python_constant()
+            descriptor = self.lookup_tp_getset_member(attr_name)
+            if descriptor is not None:
+                descriptor.setter(self, tx, args[1])
                 return ConstantVariable.create(None)
             return self.get_dict_vt(tx).call_method(
                 tx, "__setitem__", list(args), kwargs
             )
         elif name == "__delattr__":
-            if args[0].is_constant_match("__annotations__"):
-                self.annotations = None
+            attr_name = args[0].as_python_constant()
+            descriptor = self.lookup_tp_getset_member(attr_name)
+            if descriptor is not None:
+                descriptor.setter(self, tx, None)
                 return ConstantVariable.create(None)
             return self.get_dict_vt(tx).call_method(tx, "__delitem__", list(args), {})
         return super().call_method(tx, name, list(args), kwargs)
@@ -517,27 +536,33 @@ class BaseUserFunctionVariable(VariableTracker):
         tx: "InstructionTranslatorBase",
         value: "VariableTracker | None",
     ) -> None:
-        if value is not None and not issubclass(value.python_type(), tuple):
+        if value is not None and value.is_constant_match(None):
+            value = None
+        if value is None or not issubclass(value.python_type(), tuple):
             raise_type_error(tx, "__type_params__ must be set to a tuple object")
-        store_attr_mutation(tx, self, "__type_params__", value)
+        self.type_params = value
 
     def _set_name(
         self,
         tx: "InstructionTranslatorBase",
         value: "VariableTracker | None",
     ) -> None:
-        if value is not None and not issubclass(value.python_type(), str):
+        if value is not None and value.is_constant_match(None):
+            value = None
+        if value is None or not issubclass(value.python_type(), str):
             raise_type_error(tx, "__name__ must be set to a string object")
-        store_attr_mutation(tx, self, "__name__", value)
+        self.name = value
 
     def _set_qualname(
         self,
         tx: "InstructionTranslatorBase",
         value: "VariableTracker | None",
     ) -> None:
-        if value is not None and not issubclass(value.python_type(), str):
+        if value is not None and value.is_constant_match(None):
+            value = None
+        if value is None or not issubclass(value.python_type(), str):
             raise_type_error(tx, "__qualname__ must be set to a string object")
-        store_attr_mutation(tx, self, "__qualname__", value)
+        self.qualname = value
 
     def _get_annotations(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # func_get_annotations lazily creates and stores an empty dict. The dict
@@ -552,6 +577,8 @@ class BaseUserFunctionVariable(VariableTracker):
         return self.annotations
 
     def _get_type_params(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        if self.type_params is not None:
+            return self.type_params
         params = self.read_func_slot(tx, "__type_params__")
         if params is not None:
             return params
@@ -570,25 +597,32 @@ class BaseUserFunctionVariable(VariableTracker):
         return c if c is not None else ConstantVariable.create(None)
 
     def _get_name(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        return ConstantVariable.create(self.get_name())
+        if self.name is not None:
+            return self.name
+        return VariableTracker.build(
+            tx,
+            self.get_name(),
+            self.source and AttrSource(self.source, "__name__"),
+        )
+
+    def _get_qualname(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        if self.qualname is not None:
+            return self.qualname
+        return VariableTracker.build(
+            tx,
+            self.get_qualname(),
+            self.source and AttrSource(self.source, "__qualname__"),
+        )
 
     tp_getset = {
         "__defaults__": GetSet(_get_defaults, unmodeled_setter),
         "__kwdefaults__": GetSet(_get_kwdefaults, unmodeled_setter),
         "__name__": GetSet(
-            getset_load_or_build(
-                lambda s: s.get_name(),
-                "__name__",
-                source=lambda s: s.source and AttrSource(s.source, "__name__"),
-            ),
+            _get_name,
             _set_name,
         ),
         "__qualname__": GetSet(
-            getset_load_or_build(
-                lambda s: s.get_qualname(),
-                "__qualname__",
-                source=lambda s: s.source and AttrSource(s.source, "__qualname__"),
-            ),
+            _get_qualname,
             _set_qualname,
         ),
         "__code__": GetSet(
@@ -2534,6 +2568,33 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             for name, value in tx.output.side_effects.store_attr_mutations[
                 self
             ].items():
+                mutation_kind = tx.output.side_effects.get_attr_mutation_kind(
+                    self, name
+                )
+                if mutation_kind is AttrMutationKind.INSTANCE_DICT:
+                    codegen.dup_top()
+                    if isinstance(value, variables.DeletedVariable):
+                        codegen.extend_output(codegen.create_load_attrs("__dict__"))
+                        codegen(ConstantVariable.create(name))
+                        codegen.extend_output([create_instruction("DELETE_SUBSCR")])
+                    else:
+                        codegen(value)
+                        codegen.extend_output(create_rot_n(2))
+                        codegen.extend_output(codegen.create_load_attrs("__dict__"))
+                        codegen(ConstantVariable.create(name))
+                        codegen.extend_output([create_instruction("STORE_SUBSCR")])
+                    continue
+                codegen.dup_top()
+                codegen(value)
+                codegen.extend_output(create_rot_n(2))
+                codegen.store_attr(name)
+
+        for name, value in (
+            ("__name__", self.name),
+            ("__qualname__", self.qualname),
+            ("__type_params__", self.type_params),
+        ):
+            if value is not None:
                 codegen.dup_top()
                 codegen(value)
                 codegen.extend_output(create_rot_n(2))
@@ -2565,6 +2626,9 @@ class WrappedNestedUserFunctionVariable(NestedUserFunctionVariable):
             wrapped.wrapped_fn,
         )
         self.annotations = wrapped.annotations
+        self.name = wrapped.name
+        self.qualname = wrapped.qualname
+        self.type_params = wrapped.type_params
         self.wrapped = wrapped
         self.context = context
 
@@ -4827,6 +4891,35 @@ class BoundBuiltinMethodVariable(VariableTracker):
 
     def python_type(self) -> type:
         return types.BuiltinMethodType
+
+    def _get_qualname(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        from .object_protocol import generic_getattr
+
+        if isinstance(self.descriptor, types.BuiltinFunctionType):
+            return VariableTracker.build(tx, self.descriptor.__qualname__)
+        # meth_get__qualname__ uses the bound receiver's class, which may be
+        # a subclass of the descriptor's defining class.
+        owner = self.obj
+        if not issubclass(owner.python_type(), type):
+            owner = variables.BuiltinVariable(type).call_function(tx, [owner], {})
+        qualname = generic_getattr(tx, owner, "__qualname__")
+        return qualname.call_method(
+            tx, "__add__", [ConstantVariable.create(f".{self.descriptor.__name__}")], {}
+        )
+
+    tp_getset = {
+        "__name__": GetSet(
+            getset_build(lambda s: s.descriptor.__name__), readonly_setter
+        ),
+        "__qualname__": GetSet(_get_qualname, readonly_setter),
+    }
+
+    def call_getattr_fallback(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        raise_attribute_error(
+            tx, f"'builtin_function_or_method' object has no attribute '{name}'"
+        )
 
     def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         # meth_hash: https://github.com/python/cpython/blob/e76aa128fe/Objects/methodobject.c#L319
