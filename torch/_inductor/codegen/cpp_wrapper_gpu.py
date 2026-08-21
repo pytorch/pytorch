@@ -414,9 +414,11 @@ class DeferredTritonCallWrapper:
         tma_tensor_args = self.tma_tensor_args
         num_tma_tensor_args = len(tma_tensor_args)
 
-        # Matches internal config params like XBLOCK, RSPLIT_SIZE, and their
-        # per-subkernel variants like XBLOCK_0, YBLOCK_1.
-        internal_config_re = re.compile(r"(?:BLOCK|RSPLIT_SIZE|RSPLIT)(?:_\d+)?$")
+        # Matches internal config params like XBLOCK, RSPLIT_SIZE, NUM_STAGES,
+        # and their per-subkernel variants like XBLOCK_0, YBLOCK_1.
+        internal_config_re = re.compile(
+            r"(?:BLOCK|RSPLIT_SIZE|RSPLIT|NUM_STAGES)(?:_\d+)?$"
+        )
         # Declared constexpr params (tl.constexpr in kernel signature) are excluded
         # from arg_types for user-defined kernels, while value-based constexpr params
         # (e.g. numel=1, arg=None) are still in arg_types.
