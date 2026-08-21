@@ -1415,17 +1415,27 @@ NUM_SIZE0_TENSORS = 1000
 class TestMultiTensorApply(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    def test_multi_tensor_apply_size0_tensors_cpu(self, device):
-        size0_tensors = [torch.empty(0, device="cpu") for _ in range(NUM_SIZE0_TENSORS)]
-        # Check that this does not segfault
-        torch._foreach_mul_(size0_tensors, 0.1)
-
     @unittest.skipIf(
         torch.accelerator.current_accelerator() is None, "no accelerator available"
     )
     def test_multi_tensor_apply_size0_tensors_cuda(self, device):
         size0_tensors = [
             torch.empty(0, device=device_type) for _ in range(NUM_SIZE0_TENSORS)
+        ]
+        # Check that this does not segfault
+        torch._foreach_mul_(size0_tensors, 0.1)
+
+
+class TestMultiTensorApplyOnCPU(TestCase):
+    # This test guards a CPU `_foreach_` segfault and pins its tensors to the
+    # CPU by construction, so it lives in its own CPU class: keeping it in the
+    # ACCELERATOR class above would stop it from being generated (and run) on
+    # CPU-only hosts once `except_for="cpu"` filters that class out.
+    hw_classification = HardwareClassification.CPU
+
+    def test_multi_tensor_apply_size0_tensors_cpu(self, device):
+        size0_tensors = [
+            torch.empty(0, device=device) for _ in range(NUM_SIZE0_TENSORS)
         ]
         # Check that this does not segfault
         torch._foreach_mul_(size0_tensors, 0.1)
@@ -1449,6 +1459,7 @@ instantiate_device_type_tests(TestFSDPUseOrigParamsFQNs, globals(), except_for="
 instantiate_device_type_tests(TestFSDPUseOrigParamsNoSync, globals(), except_for="cpu")
 instantiate_device_type_tests(TestFSDPUseOrigParamsInit, globals(), except_for="cpu")
 instantiate_device_type_tests(TestMultiTensorApply, globals(), except_for="cpu")
+instantiate_device_type_tests(TestMultiTensorApplyOnCPU, globals(), only_for="cpu")
 
 if __name__ == "__main__":
     run_tests()
