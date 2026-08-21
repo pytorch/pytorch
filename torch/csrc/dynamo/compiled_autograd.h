@@ -1338,11 +1338,11 @@ struct IValuePacker<TypeAndSize> {
     return tuple;
   }
   static TypeAndSize unpack(const at::IValue& t) {
-    auto tuple =
+    auto [sym_sizes, options] =
         t.to<std::tuple<std::vector<at::SymInt>, packed_tensoroptions_t>>();
     TypeAndSize result;
-    result.sym_sizes = std::get<0>(tuple);
-    result.options = unpack_TensorOptions(std::get<1>(tuple));
+    result.sym_sizes = std::move(sym_sizes);
+    result.options = unpack_TensorOptions(options);
     return result;
   }
   static at::TypePtr packed_type() {

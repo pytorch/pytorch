@@ -17,6 +17,7 @@ import torch.nn.functional as F
 from torch import inf, nan
 from torch.autograd import gradcheck, gradgradcheck
 from torch.testing import make_tensor
+from torch.testing._internal.common_cuda import has_device_side_assert
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
@@ -28,7 +29,10 @@ from torch.testing._internal.common_device_type import (
     largeTensorTest,
     onlyAccelerator,
     onlyCPU,
+    onlyCUDA,
     onlyMPS,
+    onlyNativeDeviceTypes,
+    skipXPUIf,
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.common_dtype import floating_types_and
@@ -43,7 +47,6 @@ from torch.testing._internal.common_utils import (
     parametrize as parametrize_test,
     run_tests,
     set_default_dtype,
-    skipIfTorchDynamo,
     slowTest,
     subtest,
     TEST_WITH_UBSAN,
@@ -519,6 +522,33 @@ class TestPoolingNNDeviceType(NNTestCase):
         self.assertFalse(torch.isinf(out).any())
         self.assertFalse(torch.isnan(out).any())
 
+    @onlyCUDA
+    @largeTensorTest("10GB", device="cuda")
+    def test_adaptive_avg_pool2d_backward_large_index_offsets(self, device):
+        height = 32769
+        width = 65536
+        channels = 2
+        output_width = 1024
+        input = torch.as_strided(
+            torch.empty((1,), dtype=torch.half, device=device),
+            (1, channels, height, width),
+            (0, 0, 0, 0),
+        )
+        self.assertGreater(input.numel(), torch.iinfo(torch.int32).max)
+        grad_output = torch.ones(
+            (1, channels, height, output_width), dtype=torch.half, device=device
+        )
+
+        grad_input = torch.ops.aten._adaptive_avg_pool2d_backward(grad_output, input)
+        sample = grad_input[
+            0,
+            [0, 0, 1],
+            [0, height - 1, height - 1],
+            [0, 0, width - 1],
+        ]
+        expected = torch.full_like(sample, 1 / (width // output_width))
+        self.assertEqual(sample, expected)
+
     @expectedFailureMPS  # No double, float shape prop does not work
     @dtypes(torch.float, torch.double)
     def test_adaptive_pooling_zero_batch(self, dtype, device):
@@ -838,15 +868,9 @@ torch.cuda.synchronize()
             error_msg = error_msgs[module_name]
 
             if should_error:
-                # CUDA shows assertion message
-                # ROCm shows launch failure or HSA_STATUS_ERROR_EXCEPTION
-                has_cuda_assert = error_msg in output
-                has_hip_error = (
-                    "launch failure" in output or "HSA_STATUS_ERROR_EXCEPTION" in output
-                )
                 self.assertTrue(
-                    has_cuda_assert or has_hip_error,
-                    f"Expected device assert error, got: {output[-500:]}",
+                    error_msg in output or has_device_side_assert(output),
+                    lambda msg: f"{msg}\nExpected device assert error, got: {output[-500:]}",
                 )
             else:
                 self.assertNotIn("Error", output, "Should not have produced an error")
@@ -915,6 +939,24 @@ torch.cuda.synchronize()
 
         with self.assertRaisesRegex(RuntimeError, "value cannot be converted to type"):
             avgpool(inp)
+
+    def test_lp_pool_norm_type_zero(self, device):
+        err = "norm_type must be a non-zero value"
+        x1 = torch.randn(1, 4, 8, device=device)
+        x2 = torch.randn(1, 4, 8, 8, device=device)
+        x3 = torch.randn(1, 4, 8, 8, 8, device=device)
+        with self.assertRaisesRegex(ValueError, err):
+            F.lp_pool1d(x1, norm_type=0, kernel_size=3)
+        with self.assertRaisesRegex(ValueError, err):
+            F.lp_pool2d(x2, norm_type=0, kernel_size=3)
+        with self.assertRaisesRegex(ValueError, err):
+            F.lp_pool3d(x3, norm_type=0, kernel_size=3)
+        with self.assertRaisesRegex(ValueError, err):
+            torch.nn.LPPool1d(norm_type=0, kernel_size=3)
+        with self.assertRaisesRegex(ValueError, err):
+            torch.nn.LPPool2d(norm_type=0, kernel_size=3)
+        with self.assertRaisesRegex(ValueError, err):
+            torch.nn.LPPool3d(norm_type=0, kernel_size=3)
 
     def test_AvgPool2d_empty(self, device):
         avgpool = torch.nn.AvgPool2d(3, stride=2).to(device)
@@ -1079,14 +1121,15 @@ torch.cuda.synchronize()
             grad = torch.randn(
                 n,
                 c,
-                (h - kernel_size) // stride + 1,
-                (w - kernel_size) // stride + 1,
+                (h + 2 * padding - kernel_size) // stride + 1,
+                (w + 2 * padding - kernel_size) // stride + 1,
                 dtype=dtype,
                 device=device,
             )
             pool = torch.nn.AvgPool2d(
                 kernel_size,
                 stride=stride,
+                padding=padding,
                 count_include_pad=count_include_pad,
                 divisor_override=divisor_override,
             ).to(device)
@@ -1096,6 +1139,7 @@ torch.cuda.synchronize()
             ref_pool = torch.nn.AvgPool2d(
                 kernel_size,
                 stride=stride,
+                padding=padding,
                 count_include_pad=count_include_pad,
                 divisor_override=divisor_override,
             ).to(device)
@@ -1112,7 +1156,8 @@ torch.cuda.synchronize()
 
         helper(4, 8, 8, 8, 3)
         helper(4, 8, 8, 8, 3, count_include_pad=False, padding=1)
-        helper(4, 8, 8, 8, 3, count_include_pad=False, padding=2, stride=2)
+        helper(4, 8, 8, 8, 5, count_include_pad=False, padding=2, stride=2)
+        helper(4, 8, 8, 8, 3, padding=1)
         helper(4, 8, 8, 8, 3, divisor_override=42)
         helper(4, 8, 8, 8, 7)
         # ROCm 16GB MI25 hits OOM error. Clear caching allocator prior to running large subtest.
@@ -1120,7 +1165,7 @@ torch.cuda.synchronize()
             torch.cuda.empty_cache()
         helper(200, 512, 28, 28, 2)
         helper(4, 8, 7, 7, 3, stride=1)
-        helper(4, 8, 7, 7, 3, padding=2, stride=1)
+        helper(4, 8, 7, 7, 5, padding=2, stride=1)
         helper(10, 512, 31, 31, 3, stride=2)
         helper(1, 129, 8, 8, 3, stride=2)
 
@@ -1267,7 +1312,6 @@ torch.cuda.synchronize()
 
     @onlyCPU
     @dtypes(torch.float, torch.double)
-    @skipIfTorchDynamo("OOMs https://github.com/pytorch/pytorch/issues/111320")
     def test_max_pool1d(self, device, dtype):
         # FIXME For now compare against max_pool1d with indices
         def check(x, *args, **kwargs):
@@ -1399,6 +1443,7 @@ torch.cuda.synchronize()
         )
 
     @expectedFailureMPS  # TODO: Fixme
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/4731")
     @dtypes(torch.half, torch.bfloat16, torch.float, torch.double)
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @gcIfJetson
@@ -2019,6 +2064,20 @@ torch.cuda.synchronize()
                 grad_output, input, kernel_size, output_size, indices
             )
 
+    @onlyNativeDeviceTypes
+    def test_fractional_max_pool_invalid_kernel_size(self, device):
+        x = torch.randn(1, 2, 7, 7, device=device)
+        samples = x.new(1, 2, 2).uniform_()
+        for kernel_size in [(-1, 2), (0, 2)]:
+            with self.assertRaisesRegex(RuntimeError, "greater than zero"):
+                torch.ops.aten.fractional_max_pool2d(x, kernel_size, (3, 3), samples)
+
+        x = torch.randn(1, 2, 7, 7, 7, device=device)
+        samples = x.new(1, 2, 3).uniform_()
+        for kernel_size in [(-1, 2, 2), (0, 2, 2)]:
+            with self.assertRaisesRegex(RuntimeError, "greater than zero"):
+                torch.ops.aten.fractional_max_pool3d(x, kernel_size, (3, 3, 3), samples)
+
     @expectedFailureMPS  # float64
     @expectedFailureMeta  # RuntimeError: Unrecognized tensor type ID: Meta
     def test_fractional_max_pool3d(self, device):
@@ -2238,7 +2297,9 @@ torch.cuda.synchronize()
 
 
 instantiate_device_type_tests(TestAvgPoolDeviceType, globals())
-instantiate_device_type_tests(TestPoolingNNDeviceType, globals(), allow_mps=True)
+instantiate_device_type_tests(
+    TestPoolingNNDeviceType, globals(), allow_mps=True, allow_xpu=True
+)
 instantiate_parametrized_tests(TestPoolingNN)
 
 if __name__ == "__main__":

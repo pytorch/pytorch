@@ -71,10 +71,11 @@ class C10_API Scalar {
       "int64_t is the same as long long on Windows");
   Scalar(long vv) : Scalar(vv, true) {}
 #endif
-#if defined(__linux__) && !defined(__ANDROID__)
+#if (defined(__linux__) && !defined(__ANDROID__)) || defined(__NetBSD__) || \
+    defined(__FreeBSD__) || defined(__OpenBSD__)
   static_assert(
       sizeof(void*) != 8 || std::is_same_v<long, int64_t>,
-      "int64_t is the same as long on 64 bit Linux");
+      "int64_t is the same as long on 64 bit Linux and BSDs");
 #if LONG_MAX != INT_MAX
   Scalar(long long vv) : Scalar(vv, true) {}
 #endif /* not 32-bit system */
@@ -191,12 +192,6 @@ class C10_API Scalar {
 
   bool isFloatingPoint() const {
     return Tag::HAS_d == tag || Tag::HAS_sd == tag;
-  }
-
-  [[deprecated(
-      "isIntegral is deprecated. Please use the overload with 'includeBool' parameter instead.")]] bool
-  isIntegral() const {
-    return Tag::HAS_i == tag || Tag::HAS_si == tag || Tag::HAS_u == tag;
   }
 
   bool isIntegral(bool includeBool) const {

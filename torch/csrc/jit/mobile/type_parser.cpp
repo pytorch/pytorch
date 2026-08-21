@@ -33,7 +33,7 @@ TypeParser::TypeParser(std::vector<std::string>& pythonStrs)
     : start_(0), pythonStrs_(pythonStrs) {}
 
 // For the Python string list parsing, the order of the Python string matters.
-// In bytecode, the order of the type list correspondings to the order of
+// In bytecode, the order of the type list corresponds to the order of
 // instruction. In nested type, the lowest level type will be at the beginning
 // of the type list. It is possible to parse it without worrying about
 // ordering, but it also introduces 1) extra cost to process nested type to
@@ -133,7 +133,7 @@ TypePtr TypeParser::parse() {
     }
     contained_types_.insert(token);
     return simpleTypeIt->second;
-  } else if (getNonSimpleType().find(token) != getNonSimpleType().end()) {
+  } else if (getNonSimpleType().contains(token)) {
     contained_types_.insert(token);
     return parseNonSimple(token);
   } else if (token == "__torch__") {
