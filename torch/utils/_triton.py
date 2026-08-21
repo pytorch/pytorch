@@ -4,6 +4,9 @@ import os
 from typing import Any
 
 
+# Maximum total threads in a HIP kernel launch.
+HIP_MAX_GRID_THREADS = (1 << 31) - 1
+
 _FAILED_TO_MAP_SEGMENT_FROM_SHARED_OBJECT = "failed to map segment from shared object"
 
 
