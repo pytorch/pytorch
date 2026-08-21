@@ -39,7 +39,9 @@ class FakeBackendNewGroupTest(TestCase):
         self.assertEqual(dist.get_backend(g), "fake")
         # Hashed-name path preserved: sha1 hexdigest (40 chars), not a counter int.
         name = g.group_name
-        self.assertFalse(name.isdigit(), f"expected hashed name, got int {name!r}")
+        self.assertFalse(
+            name.isdigit(), lambda msg: f"{msg}\nexpected hashed name, got int {name!r}"
+        )
         self.assertEqual(
             len(name),
             40,

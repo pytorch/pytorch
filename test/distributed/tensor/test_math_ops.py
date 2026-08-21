@@ -420,7 +420,7 @@ class DistMathOpsTest(DTensorTestBase):
             self.assertLessEqual(
                 comm_mode.get_total_counts(),
                 1,  # TODO: This should be 0!
-                f"comm count={comm_mode.get_total_counts()}, norm_type={norm_type.__name__}, "
+                lambda msg: f"{msg}\ncomm count={comm_mode.get_total_counts()}, norm_type={norm_type.__name__}, "
                 f"shard_dim={shard_dim}, norm_shape={normalized_shape}, elem_affine={elementwise_affine}",
             )
 
@@ -777,7 +777,7 @@ class DistMathOpsTest(DTensorTestBase):
             # Verify gradient exists, has the right placement, and matches
             self.assertIsNotNone(
                 dist_x.grad,
-                msg=f"topk_dim={topk_dim}, shard_dim={shard_dim}",
+                msg=lambda msg: f"{msg}\ntopk_dim={topk_dim}, shard_dim={shard_dim}",
             )
             self.assertEqual(
                 dist_x.grad.full_tensor(),

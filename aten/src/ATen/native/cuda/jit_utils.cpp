@@ -841,7 +841,7 @@ static void replace_all(std::string& s, const std::string& to_replace, const std
   }
 
   oss << s.substr(prev_pos);
-  s = oss.str();
+  s = std::move(oss).str();
 }
 
 // hipify replaces certain device math functions, e.g., std::max -> ::max
