@@ -8,12 +8,10 @@ import torch
 from torch._inductor.test_case import TestCase
 from torch._inductor.virtualized import V
 from torch.testing._internal.common_device_type import (
-    Capability,
     instantiate_device_type_tests,
-    requires_capabilities,
 )
 from torch.testing._internal.common_utils import HardwareClassification
-from torch.testing._internal.inductor_utils import MockGraphHandler
+from torch.testing._internal.inductor_utils import HAS_TRITON, MockGraphHandler
 
 
 try:
@@ -807,7 +805,7 @@ class TestCuteDSLTemplateCuda(TestCase):
 
     hw_classification = HardwareClassification.CUDA
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     def test_cutedsl_add_e2e(self, device):
         """End-to-end test with CuteDSL template including code generation verification."""
         from torch._inductor.ir import TensorBox
@@ -860,7 +858,7 @@ class TestCuteDSLTemplateCuda(TestCase):
             expected = x + y
             self.assertTrue(torch.allclose(result, expected, atol=1e-5))
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     def test_cutedsl_add_e2e_autotune(self, device):
         """E2E test with multiple CuteDSL template variants for autotuning."""
         from torch._inductor.ir import TensorBox
