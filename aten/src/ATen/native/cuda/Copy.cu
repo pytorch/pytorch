@@ -288,7 +288,7 @@ __global__ void transpose_copy_tiled_kernel(
   const int64_t tiles_y = (height + kTransposeTile - 1) / kTransposeTile;
 
   for (int64_t by = blockIdx.y; by < tiles_y; by += gridDim.y) {
-    int64_t x = (int64_t)blockIdx.x * kTransposeTile + threadIdx.x;
+    int64_t x = static_cast<int64_t>(blockIdx.x) * kTransposeTile + threadIdx.x;
     int64_t y = by * kTransposeTile + threadIdx.y;
 
     for (int j = 0; j < kTransposeTile; j += kTransposeRows) {
@@ -299,7 +299,7 @@ __global__ void transpose_copy_tiled_kernel(
     __syncthreads();
 
     x = by * kTransposeTile + threadIdx.x;
-    y = (int64_t)blockIdx.x * kTransposeTile + threadIdx.y;
+    y = static_cast<int64_t>(blockIdx.x) * kTransposeTile + threadIdx.y;
 
     for (int j = 0; j < kTransposeTile; j += kTransposeRows) {
       if (x < height && (y + j) < width) {
@@ -345,13 +345,13 @@ bool maybe_tiled_transpose_copy(TensorIterator& iter) {
 
   switch (es) {
     case 1: transpose_copy_tiled_kernel<uint8_t><<<grid, block, 0, stream>>>(
-              (const uint8_t*)sp, (uint8_t*)dp, w, h); break;
+              reinterpret_cast<const uint8_t*>(sp), reinterpret_cast<uint8_t*>(dp), w, h); break;
     case 2: transpose_copy_tiled_kernel<uint16_t><<<grid, block, 0, stream>>>(
-              (const uint16_t*)sp, (uint16_t*)dp, w, h); break;
+              reinterpret_cast<const uint16_t*>(sp), reinterpret_cast<uint16_t*>(dp), w, h); break;
     case 4: transpose_copy_tiled_kernel<uint32_t><<<grid, block, 0, stream>>>(
-              (const uint32_t*)sp, (uint32_t*)dp, w, h); break;
+              reinterpret_cast<const uint32_t*>(sp), reinterpret_cast<uint32_t*>(dp), w, h); break;
     case 8: transpose_copy_tiled_kernel<uint64_t><<<grid, block, 0, stream>>>(
-              (const uint64_t*)sp, (uint64_t*)dp, w, h); break;
+              reinterpret_cast<const uint64_t*>(sp), reinterpret_cast<uint64_t*>(dp), w, h); break;
     default: return false;
   }
   C10_CUDA_KERNEL_LAUNCH_CHECK();
