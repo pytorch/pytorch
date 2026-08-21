@@ -22607,7 +22607,7 @@ if RUN_CPU:
         only_for="cpu",
     )
 
-_COMMON_ACCELERATOR_TEST_CLASSES = instantiate_device_type_tests_from_templates(
+instantiate_device_type_tests_from_templates(
     GPUTests,
     globals(),
     templates=(CommonTemplate,),
@@ -22643,5 +22643,4 @@ def _run_and_get_stripped_kernels(
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if RUN_CPU or RUN_GPU or HAS_MPS or _COMMON_ACCELERATOR_TEST_CLASSES:
-        run_tests(needs="filelock")
+    run_tests(needs="filelock")
