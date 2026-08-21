@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import warnings
 from contextlib import contextmanager
 from typing import Any, cast, TYPE_CHECKING
@@ -232,6 +233,14 @@ def construct_fake_mode(
         fake_mode = FakeTensorMode(shape_env=shape_env)
     else:
         shape_env = fake_mode.shape_env
+    # AOTAutograd traces the backward here, so a data-dependent op may only
+    # show up in the backward (e.g. nonzero behind a boolean-mask index_put)
+    # where the frontend's graph-break-on-data-dependent decision can't apply.
+    # The backend supports unbacked symints, so always allow them.
+    if shape_env is not None and not shape_env.allow_dynamic_output_shape_ops:
+        shape_env.settings = dataclasses.replace(
+            shape_env.settings, allow_dynamic_output_shape_ops=True
+        )
     return (fake_mode, shape_env)
 
 
