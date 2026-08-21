@@ -2259,7 +2259,7 @@ void grouped_gemm(
     TORCH_CHECK(
         scales->A_scale_ptr != nullptr && scales->B_scale_ptr != nullptr,
         "scaled grouped cublasLtMatmul requires A and B scales");
-    TORCH_CHECK(prop->major == 10 || prop->major == 11, "scaled grouped cublasLtMatmul requires SM 10.x or 11.0");
+    TORCH_CHECK(prop->major >= 9 && prop->major < 12, "scaled grouped cublasLtMatmul requires SM 9.0-11.0");
   } else {
     TORCH_CHECK(prop->major >= 9 && prop->major < 12, "grouped cublasLtMatmul requires SM 9.0-11.0");
   }
@@ -2267,8 +2267,8 @@ void grouped_gemm(
   const auto computeType = CUBLAS_COMPUTE_32F;
   const auto scaleType = CUDA_R_32F;
   const auto pointer_mode = CUBLASLT_POINTER_MODE_DEVICE;
-  const int64_t alphaBatchStride = !scaled && sm90 ? 0 : 1;
-  const int64_t betaBatchStride = !scaled && sm90 ? 0 : 1;
+  const int64_t alphaBatchStride = sm90 ? 0 : 1;
+  const int64_t betaBatchStride = sm90 ? 0 : 1;
 
   cublasOperation_t opa = detail::cublasOpFromChar(transa);
   cublasOperation_t opb = detail::cublasOpFromChar(transb);

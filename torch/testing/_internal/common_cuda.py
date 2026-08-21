@@ -339,7 +339,7 @@ def evaluate_platform_supports_hipsparselt():
 def evaluate_platform_supports_cublaslt_fp8_grouped_gemm():
     return (
         TEST_CUDA
-        and SM100OrLater
+        and SM90OrLater
         and not SM120OrLater
         and _get_torch_cuda_version() >= (13, 4)
     )

@@ -8872,7 +8872,9 @@ def _should_use_scaled_cublaslt_grouped_gemm(
         return False
     cuda_version = tuple(map(int, torch.version.cuda.split(".")[:2]))
     # Device support and the [1, 1024] group-count bound.
-    if cuda_version < (13, 4) or not _grouped_mm_cublaslt_supported(mat_a, mat_b, offs):
+    if cuda_version < (13, 4) or not _grouped_mm_cublaslt_supported(
+        mat_a, mat_b, offs, sm90_allowed=True
+    ):
         return False
 
     mat_a_is_2d = mat_a.dim() == 2
@@ -8892,6 +8894,13 @@ def _should_use_scaled_cublaslt_grouped_gemm(
         return scale.dtype == torch.float8_e8m0fnu
 
     if not scaling_type_supported(scale_a) or not scaling_type_supported(scale_b):
+        return False
+
+    is_sm90 = torch.cuda.get_device_capability()[0] == 9
+    uses_mxfp8 = (
+        scale_a.dtype == torch.float8_e8m0fnu or scale_b.dtype == torch.float8_e8m0fnu
+    )
+    if is_sm90 and uses_mxfp8:
         return False
 
     fp8_dtypes = (torch.float8_e4m3fn, torch.float8_e5m2)

@@ -244,12 +244,6 @@ bool should_use_scaled_cublaslt_grouped_gemm(
   std::optional<ScalingType> scaling_a,
   std::optional<ScalingType> scaling_b,
   int64_t batchCount64) {
-  if (!is_cublaslt_grouped_gemm_device(/*allow_sm90*/ false)) {
-    TORCH_WARN_ONCE(
-        "cuBLASLt scaled grouped GEMM is not used because this device is not supported; falling back to the non-cuBLASLt grouped GEMM path.");
-    return false;
-  }
-
   if (!scaling_a.has_value() || !scaling_b.has_value()) {
     TORCH_WARN_ONCE(
         "cuBLASLt scaled grouped GEMM is not used because scale_a and scale_b must each be tensorwise, groupwise, or blockwise MXFP8 scales; falling back to the non-cuBLASLt grouped GEMM path.");
@@ -260,6 +254,19 @@ bool should_use_scaled_cublaslt_grouped_gemm(
       !is_cublaslt_grouped_scaling_type(*scaling_b)) {
     TORCH_WARN_ONCE(
         "cuBLASLt scaled grouped GEMM is not used because scale_a and scale_b recipes must each be tensorwise, groupwise, or blockwise MXFP8; falling back to the non-cuBLASLt grouped GEMM path.");
+    return false;
+  }
+
+  bool valid_device;
+  if (*scaling_a == ScalingType::BlockWise1x32 ||
+      *scaling_b == ScalingType::BlockWise1x32) {
+    valid_device = is_cublaslt_grouped_gemm_device(/*allow_sm90*/ false);
+  } else {
+    valid_device = is_cublaslt_grouped_gemm_device(/*allow_sm90*/ true);
+  }
+  if (!valid_device) {
+    TORCH_WARN_ONCE(
+        "cuBLASLt scaled grouped GEMM is not used because this device is not supported; falling back to the non-cuBLASLt grouped GEMM path.");
     return false;
   }
 
@@ -733,10 +740,10 @@ static void scaled_grouped_mm_cublaslt(
       args.mArray, args.m,
       args.nArray, args.n,
       args.kArray, args.k,
-      args.alphaPtrArray, nullptr, mat_a.scalar_type(),
+      args.alphaPtrArray, args.alphaScalar, mat_a.scalar_type(),
       args.APtrArray, args.ldaArray,
       args.BPtrArray, args.ldbArray,
-      args.betaPtrArray, nullptr, out.scalar_type(),
+      args.betaPtrArray, args.betaScalar, out.scalar_type(),
       args.DPtrArray, args.lddArray,
       args.DPtrArray, args.lddArray,
       args.batchCount, args.use_int64,

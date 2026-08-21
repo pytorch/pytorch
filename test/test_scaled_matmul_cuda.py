@@ -82,7 +82,7 @@ f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+, XPU and CPU devices
 f8_grouped_msg = "FP8 grouped is only supported on SM90 and MI300/MI350 devices"
 mx_skip_msg = "MX gemm is only supported on CUDA capability 10.0+"
 mxfp8_grouped_mm_skip_msg = "MXFP8 grouped GEMM is only supported when PyTorch is built with USE_MSLK=1 on SM100+"
-cublaslt_grouped_mm_skip_msg = "cuBLASLt scaled grouped GEMM requires SM 10.x or 11.0 with CUDA 13.4+"
+cublaslt_grouped_mm_skip_msg = "cuBLASLt scaled grouped GEMM requires SM 9.0-11.0 with CUDA 13.4+"
 
 # avoid division by zero when calculating scale
 EPS = 1e-12
@@ -2974,7 +2974,10 @@ class TestFP8Matmul(TestCase):
     @onlyCUDA
     @skipIfRocm
     @unittest.skipIf(
-        not PLATFORM_SUPPORTS_CUBLASLT_FP8_GROUPED_GEMM,
+        not (
+            PLATFORM_SUPPORTS_CUBLASLT_FP8_GROUPED_GEMM
+            and PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM
+        ),
         cublaslt_grouped_mm_skip_msg
     )
     @parametrize("op", ["2d/2d", "2d/3d", "3d/2d", "3d/3d"])
@@ -3000,7 +3003,10 @@ class TestFP8Matmul(TestCase):
     @onlyCUDA
     @skipIfRocm
     @unittest.skipIf(
-        not PLATFORM_SUPPORTS_CUBLASLT_FP8_GROUPED_GEMM,
+        not (
+            PLATFORM_SUPPORTS_CUBLASLT_FP8_GROUPED_GEMM
+            and PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM
+        ),
         cublaslt_grouped_mm_skip_msg
     )
     @parametrize("op", ["2d/2d", "2d/3d", "3d/2d", "3d/3d"])
@@ -3078,28 +3084,38 @@ class TestFP8Matmul(TestCase):
         not PLATFORM_SUPPORTS_CUBLASLT_FP8_GROUPED_GEMM,
         cublaslt_grouped_mm_skip_msg
     )
+    def test_scaled_grouped_gemm_cublaslt_groupwise_scale_recipe_error(self, device):
+        A, B_T, scale_a, scale_b, offs = self.scaled_grouped_gemm_cublaslt_helper(
+            "2d/2d", e4m3_type, e4m3_type, "groupwise", device
+        )
+        scale_a = torch.rand(2 * scale_a.numel(), device=device, dtype=torch.float32)[::2]
+        regex = "scale_a groupwise scale must be a contiguous 1D float32 tensor"
+
+        with self.assertRaisesRegex(RuntimeError, regex):
+            torch._scaled_grouped_mm(
+                A, B_T.transpose(-2, -1), scale_a, scale_b, offs=offs, out_dtype=torch.bfloat16
+            )
+
+    @onlyCUDA
+    @skipIfRocm
+    @unittest.skipIf(
+        not (
+            PLATFORM_SUPPORTS_CUBLASLT_FP8_GROUPED_GEMM
+            and PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM
+        ),
+        cublaslt_grouped_mm_skip_msg
+    )
     @parametrize(
         "case",
         [
-            "groupwise_noncontiguous",
             "blockwise_noncontiguous",
             "blockwise_wrong_shape",
             "blockwise_too_few_elements",
         ]
     )
-    def test_scaled_grouped_gemm_cublaslt_scale_recipe_errors(self, case, device):
-        # Scales whose recipe is recognized by should_use_scaled_cublaslt_grouped_gemm
-        # but that violate check_cublaslt_grouped_scale_recipe must raise once the
-        # cuBLASLt path is selected.
+    def test_scaled_grouped_gemm_cublaslt_mxfp8_scale_recipe_errors(self, case, device):
         e8m0 = torch.float8_e8m0fnu
-        if case == "groupwise_noncontiguous":
-            A, B_T, scale_a, scale_b, offs = self.scaled_grouped_gemm_cublaslt_helper(
-                "2d/2d", e4m3_type, e4m3_type, "groupwise", device
-            )
-            # 1D float32 with one value per group, but non-contiguous.
-            scale_a = torch.rand(2 * scale_a.numel(), device=device, dtype=torch.float32)[::2]
-            regex = "scale_a groupwise scale must be a contiguous 1D float32 tensor"
-        elif case == "blockwise_too_few_elements":
+        if case == "blockwise_too_few_elements":
             A, B_T, scale_a, scale_b, offs = self.scaled_grouped_gemm_cublaslt_mxfp8_helper("2d/2d", device)
             scale_a = torch.ones(1, device=device, dtype=e8m0)
             regex = "scale_a blockwise scale for cuBLASLt grouped GEMM must have at least"
