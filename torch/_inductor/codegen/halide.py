@@ -1848,6 +1848,9 @@ class HalideKernel(SIMDKernel):
     ):
         pass  # TODO(jansel): support asserts
 
+    def device_assert_async(self, cond: CSEVariable, msg: str) -> None:
+        pass  # TODO(jansel): support asserts
+
 
 class HalideScheduling(SIMDScheduling):
     kernel_type = HalideKernel  # type: ignore[arg-type,assignment]
