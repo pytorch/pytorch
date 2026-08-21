@@ -19801,9 +19801,20 @@ def _is_preexpanded_test(name, test):
     return False
 
 
+def _unittest_metadata_decorators(test):
+    decorators = []
+    if getattr(test, "__unittest_skip__", False):
+        reason = getattr(test, "__unittest_skip_why__", "")
+        decorators.append(unittest.skip(reason))
+    if getattr(test, "__unittest_expecting_failure__", False):
+        decorators.append(unittest.expectedFailure)
+    return decorators
+
+
 def _template_parametrize_fn(
     source_parametrize_fn,
     test_decorator,
+    test_metadata_decorators,
     test_failure,
     has_xfail_prop,
     suffix_overrides,
@@ -19822,7 +19833,7 @@ def _template_parametrize_fn(
         if suffix_overrides is not None:
             suffix = suffix_overrides.get(suffix, suffix)
 
-        decorators = []
+        decorators = list(test_metadata_decorators)
         if test_decorator is not None:
             decorators.append(test_decorator)
         if has_xfail_prop:
@@ -19859,6 +19870,26 @@ def _rename_test_suffix(generated_cls, device_suffix, suffix):
             raise AssertionError(f"duplicate generated test: {new_name}")
         setattr(generated_cls, new_name, value)
         delattr(generated_cls, name)
+
+
+def _restore_host_test_names(generated, host_test_names):
+    for generated_cls in generated:
+        device_suffix = generated_cls.device_type
+        if device_suffix == "privateuse1":
+            device_suffix = torch._C._get_privateuse1_backend_name()
+        marker = f"_{device_suffix}"
+        for name, value in tuple(generated_cls.__dict__.items()):
+            prefix, matched, tail = name.rpartition(marker)
+            if not matched or not any(
+                prefix == host_name or prefix.startswith(f"{host_name}_")
+                for host_name in host_test_names
+            ):
+                continue
+            new_name = f"{prefix}{tail}"
+            if getattr(generated_cls, new_name, None) is not None:
+                raise AssertionError(f"duplicate generated test: {new_name}")
+            setattr(generated_cls, new_name, value)
+            delattr(generated_cls, name)
 
 
 def _apply_template_name_overrides(
@@ -19933,8 +19964,22 @@ def instantiate_device_type_tests_from_templates(
             continue
         host_test_names.add(name)
         host_test = _wrap_template_test(value)
-        if _is_preexpanded_test(name, value):
-            host_test.__dict__.pop("parametrize_fn", None)
+        source_parametrize_fn = (
+            None
+            if _is_preexpanded_test(name, value)
+            else getattr(host_test, "parametrize_fn", None)
+        )
+        host_test.__dict__.pop("parametrize_fn", None)
+        test_metadata_decorators = _unittest_metadata_decorators(value)
+        if source_parametrize_fn or test_metadata_decorators:
+            host_test.parametrize_fn = _template_parametrize_fn(
+                source_parametrize_fn,
+                None,
+                test_metadata_decorators,
+                None,
+                False,
+                None,
+            )
         setattr(bridge_cls, name, host_test)
 
     # Add each template while preserving parameterization and failure metadata.
@@ -19956,10 +20001,18 @@ def instantiate_device_type_tests_from_templates(
 
             tf = test_failures and test_failures.get(name)
             has_xfail_prop = xfail_prop is not None and hasattr(value, xfail_prop)
-            if source_parametrize_fn or test_decorator or tf or has_xfail_prop:
+            test_metadata_decorators = _unittest_metadata_decorators(value)
+            if (
+                source_parametrize_fn
+                or test_decorator
+                or test_metadata_decorators
+                or tf
+                or has_xfail_prop
+            ):
                 new_test.parametrize_fn = _template_parametrize_fn(
                     source_parametrize_fn,
                     test_decorator,
+                    test_metadata_decorators,
                     tf,
                     has_xfail_prop,
                     suffix_overrides,
@@ -19991,6 +20044,8 @@ def instantiate_device_type_tests_from_templates(
         and value is not bridge_cls
         and bridge_cls in value.__mro__
     )
+
+    _restore_host_test_names(generated, host_test_names)
 
     # Apply copy_tests-compatible public names after standard generation.
     _apply_template_name_overrides(
