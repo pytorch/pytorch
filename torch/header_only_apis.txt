@@ -56,6 +56,10 @@ scalar_value_type
 div_floor_floating
 div_floor_integer
 
+# torch/headeronly/cuda/KernelUtils.h
+fastAtomicAdd
+fastSpecializedAtomicAdd
+
 # torch/headeronly/util/NumericUtils.h
 _isnan
 _isinf

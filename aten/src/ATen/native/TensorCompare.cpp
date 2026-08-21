@@ -305,50 +305,70 @@ TORCH_PRECOMPUTE_META_FUNC2(min, dim)
 
 namespace at::native {
 
+// Is an integral clamp bound below / above the representable range of scalar_t?
+// c10::less_than_lowest / greater_than_max are exact for integer sources (and
+// reject negative -> unsigned rather than wrapping); their digits-based logic
+// is wrong for floating-point sources, so those are compared as doubles.
 template <typename scalar_t>
-static Scalar saturate_integral_bound(const Scalar& bound) {
-  constexpr auto lowest = std::numeric_limits<scalar_t>::lowest();
-  constexpr auto highest = std::numeric_limits<scalar_t>::max();
+static std::pair<bool, bool> clamp_bound_range(const Scalar& bound) {
   if (bound.isFloatingPoint()) {
     const auto value = bound.toDouble();
-    if (value <= static_cast<double>(lowest)) {
-      return Scalar(lowest);
-    }
-    if (value >= static_cast<double>(highest)) {
-      return Scalar(highest);
-    }
-  } else if (bound.type() == ScalarType::UInt64) {
-    const auto value = bound.toUInt64();
-    if (value >= static_cast<uint64_t>(highest)) {
-      return Scalar(highest);
-    }
-  } else {
-    const auto value = bound.toLong();
-    if constexpr (std::is_signed_v<scalar_t>) {
-      if (value <= static_cast<int64_t>(lowest)) {
-        return Scalar(lowest);
-      }
-      if (value >= static_cast<int64_t>(highest)) {
-        return Scalar(highest);
-      }
-    } else {
-      if (value <= 0) {
-        return Scalar(lowest);
-      }
-      if (static_cast<uint64_t>(value) >= static_cast<uint64_t>(highest)) {
-        return Scalar(highest);
-      }
-    }
+    const auto lowest =
+        static_cast<double>(std::numeric_limits<scalar_t>::lowest());
+    const auto highest =
+        static_cast<double>(std::numeric_limits<scalar_t>::max());
+    return {value<lowest, value> highest};
   }
-  return bound;
+  if (bound.type() == ScalarType::UInt64) {
+    const auto value = bound.toUInt64();
+    return {
+        c10::less_than_lowest<scalar_t>(value),
+        c10::greater_than_max<scalar_t>(value)};
+  }
+  const auto value = bound.toLong();
+  return {
+      c10::less_than_lowest<scalar_t>(value),
+      c10::greater_than_max<scalar_t>(value)};
 }
 
-static Scalar saturate_integral_bound(const Scalar& bound, ScalarType dtype) {
-  return AT_DISPATCH_V2(
+// Reconciles a clamp bound with the target dtype, returning the scalar to apply
+// or nullopt to drop the bound. An absent bound is dropped, as is an integral
+// no-op bound: a lower bound below the dtype's range (or an upper bound above
+// it) can never change a representable element. The opposite out-of-range case
+// would force every element to an unrepresentable value, so it raises. We
+// cannot defer that to the kernel's cast, which silently wraps a negative bound
+// for unsigned dtypes instead of raising.
+static std::optional<Scalar> prepare_clamp_bound(
+    OptionalScalarRef bound,
+    ScalarType dtype,
+    bool is_lower_bound) {
+  if (!bound.has_value()) {
+    return std::nullopt;
+  }
+  const auto& scalar = bound.get();
+  if (!isIntegralType(dtype, /*includeBool=*/false)) {
+    return scalar;
+  }
+  const auto [below, above] = AT_DISPATCH_V2(
       dtype,
-      "saturate_integral_bound",
-      AT_WRAP([&] { return saturate_integral_bound<scalar_t>(bound); }),
+      "prepare_clamp_bound",
+      AT_WRAP([&] { return clamp_bound_range<scalar_t>(scalar); }),
       AT_EXPAND(AT_INTEGRAL_TYPES_V2));
+  if (!below && !above) {
+    return scalar;
+  }
+  // Print via toDouble(): a UInt64 bound above INT64_MAX overflows Scalar's
+  // integral operator<<.
+  const bool is_noop = is_lower_bound ? below : above;
+  TORCH_CHECK(
+      is_noop,
+      "Clamp ",
+      is_lower_bound ? "min" : "max",
+      " value ",
+      scalar.toDouble(),
+      " is outside the representable range of ",
+      dtype);
+  return std::nullopt;
 }
 
 DEFINE_DISPATCH(
@@ -872,7 +892,7 @@ std::tuple<Tensor, Tensor> _aminmax(
 }
 
 TORCH_IMPL_FUNC(clamp_out)
-(const Tensor& /*self*/,
+(const Tensor& self,
  const OptionalScalarRef min,
  const OptionalScalarRef max,
  const Tensor& result) {
@@ -887,28 +907,21 @@ TORCH_IMPL_FUNC(clamp_out)
   if (min_is_nan || max_is_nan) {
     at::fill_(
         const_cast<Tensor&>(result), std::numeric_limits<double>::quiet_NaN());
-  } else if (min && max) {
-    if (isIntegralType(result.scalar_type(), /*includeBool=*/false)) {
-      clamp_scalar_stub(
-          device_type(),
-          *this,
-          saturate_integral_bound(min.get(), result.scalar_type()),
-          saturate_integral_bound(max.get(), result.scalar_type()));
-    } else {
-      clamp_scalar_stub(device_type(), *this, min.get(), max.get());
-    }
-  } else if (max) {
-    const auto bound =
-        isIntegralType(result.scalar_type(), /*includeBool=*/false)
-        ? saturate_integral_bound(max.get(), result.scalar_type())
-        : max.get();
-    clamp_max_scalar_stub(device_type(), *this, bound);
-  } else if (min) {
-    const auto bound =
-        isIntegralType(result.scalar_type(), /*includeBool=*/false)
-        ? saturate_integral_bound(min.get(), result.scalar_type())
-        : min.get();
-    clamp_min_scalar_stub(device_type(), *this, bound);
+    return;
+  }
+
+  const auto lo =
+      prepare_clamp_bound(min, result.scalar_type(), /*is_lower_bound=*/true);
+  const auto hi =
+      prepare_clamp_bound(max, result.scalar_type(), /*is_lower_bound=*/false);
+  if (lo && hi) {
+    clamp_scalar_stub(device_type(), *this, *lo, *hi);
+  } else if (lo) {
+    clamp_min_scalar_stub(device_type(), *this, *lo);
+  } else if (hi) {
+    clamp_max_scalar_stub(device_type(), *this, *hi);
+  } else {
+    result.copy_(self);
   }
 }
 
@@ -933,12 +946,12 @@ TORCH_IMPL_FUNC(clamp_max_out)
     // fill_stub because fill is not structured
     // this is a corner case anyway
     at::fill_(const_cast<Tensor&>(result), wrapped_scalar_tensor(max));
+  } else if (
+      const auto bound = prepare_clamp_bound(
+          max, result.scalar_type(), /*is_lower_bound=*/false)) {
+    clamp_max_scalar_stub(device_type(), *this, *bound);
   } else {
-    const auto bound =
-        isIntegralType(result.scalar_type(), /*includeBool=*/false)
-        ? saturate_integral_bound(max, result.scalar_type())
-        : max;
-    clamp_max_scalar_stub(device_type(), *this, bound);
+    result.copy_(self);
   }
 }
 
@@ -951,12 +964,12 @@ TORCH_IMPL_FUNC(clamp_min_out)
 (const Tensor& self, const Scalar& min, const Tensor& result) {
   if (min.toDouble() != min.toDouble()) {
     at::fill_(const_cast<Tensor&>(result), min);
+  } else if (
+      const auto bound = prepare_clamp_bound(
+          min, result.scalar_type(), /*is_lower_bound=*/true)) {
+    clamp_min_scalar_stub(device_type(), *this, *bound);
   } else {
-    const auto bound =
-        isIntegralType(result.scalar_type(), /*includeBool=*/false)
-        ? saturate_integral_bound(min, result.scalar_type())
-        : min;
-    clamp_min_scalar_stub(device_type(), *this, bound);
+    result.copy_(self);
   }
 }
 
