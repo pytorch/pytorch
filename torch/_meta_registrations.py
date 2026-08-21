@@ -8868,10 +8868,11 @@ def _should_use_scaled_cublaslt_grouped_gemm(
     offs: Tensor | None,
     out_dtype: torch.dtype | None,
 ) -> bool:
-    if not torch.backends.cuda.matmul.prefer_cublaslt_grouped_gemm:
+    if not torch.version.cuda:
         return False
+    cuda_version = tuple(map(int, torch.version.cuda.split(".")[:2]))
     # Device support and the [1, 1024] group-count bound.
-    if not _grouped_mm_cublaslt_supported(mat_a, mat_b, offs):
+    if cuda_version < (13, 4) or not _grouped_mm_cublaslt_supported(mat_a, mat_b, offs):
         return False
 
     mat_a_is_2d = mat_a.dim() == 2

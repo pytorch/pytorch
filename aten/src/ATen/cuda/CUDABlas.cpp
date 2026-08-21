@@ -2395,7 +2395,8 @@ void grouped_gemm(
   TORCH_CHECK(
       false,
       scaled ? "scaled grouped cublasLtMatmul" : "grouped cublasLtMatmul",
-      " requires CUDA >= 13.3 and is not supported on ROCm. Current build does not meet these requirements.");
+      " requires CUDA >= ", scaled ? "13.4" : "13.3",
+      " and is not supported on ROCm. Current build does not meet these requirements.");
 #endif // !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13030
 }
 

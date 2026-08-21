@@ -242,10 +242,10 @@ inline int cublasLtMatmulScaleMode(
 #endif
     case at::blas::ScalingType::GroupWise:
       TORCH_CHECK(scale_dtype == kFloat);
-#if !defined(USE_ROCM) && CUDA_VERSION >= 13030
+#if !defined(USE_ROCM) && CUDA_VERSION >= 13040
       return CUBLASLT_MATMUL_MATRIX_SCALE_PER_BATCH_SCALAR_32F;
 #else
-      TORCH_CHECK(false, "per-batch scalar scaling requires CUDA >= 13.3");
+      TORCH_CHECK(false, "per-batch scalar scaling requires CUDA >= 13.4");
 #endif
     default:
       TORCH_CHECK(false);

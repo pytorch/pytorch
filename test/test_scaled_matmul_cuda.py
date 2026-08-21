@@ -33,7 +33,6 @@ from torch.testing._internal.common_cuda import (
     SM89OrLater,
     SM90OrLater,
     with_tf32_off,
-    prefer_cublaslt_grouped_gemm,
 )
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -83,7 +82,7 @@ f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+, XPU and CPU devices
 f8_grouped_msg = "FP8 grouped is only supported on SM90 and MI300/MI350 devices"
 mx_skip_msg = "MX gemm is only supported on CUDA capability 10.0+"
 mxfp8_grouped_mm_skip_msg = "MXFP8 grouped GEMM is only supported when PyTorch is built with USE_MSLK=1 on SM100+"
-cublaslt_grouped_mm_skip_msg = "cuBLASLt grouped GEMM requires SM 10.x or 11.0 with CUDA 13.3+"
+cublaslt_grouped_mm_skip_msg = "cuBLASLt scaled grouped GEMM requires SM 10.x or 11.0 with CUDA 13.4+"
 
 # avoid division by zero when calculating scale
 EPS = 1e-12
@@ -2851,16 +2850,15 @@ class TestFP8Matmul(TestCase):
             op, a_dtype, b_dtype, scale_mode, device
         )
 
-        with prefer_cublaslt_grouped_gemm():
-            C = torch._scaled_grouped_mm(
-                A,
-                B_T.transpose(-2, -1),
-                scale_a,
-                scale_b,
-                offs=offs,
-                use_fast_accum=fast_accum,
-                out_dtype=out_dtype
-            )
+        C = torch._scaled_grouped_mm(
+            A,
+            B_T.transpose(-2, -1),
+            scale_a,
+            scale_b,
+            offs=offs,
+            use_fast_accum=fast_accum,
+            out_dtype=out_dtype
+        )
 
         C_ref = self.cublaslt_grouped_gemm_ref(A, B_T, scale_a, scale_b, offs, out_dtype, fast_accum)
         self.assertEqual(C, C_ref)
@@ -2892,21 +2890,20 @@ class TestFP8Matmul(TestCase):
             op, a_dtype, b_dtype, scale_mode, device
         )
 
-        with prefer_cublaslt_grouped_gemm():
-            f_ref = torch._scaled_grouped_mm
-            f = torch.compile(f_ref, fullgraph=True, mode=mode)
+        f_ref = torch._scaled_grouped_mm
+        f = torch.compile(f_ref, fullgraph=True, mode=mode)
 
-            C_ref = f_ref(
-                A,
-                B_T.transpose(-2, -1),
-                scale_a,
-                scale_b,
-                offs=offs,
-                use_fast_accum=fast_accum,
-                out_dtype=out_dtype
-            )
-            C = f(A, B_T.transpose(-2, -1), scale_a, scale_b, offs=offs, use_fast_accum=fast_accum, out_dtype=out_dtype)
-            self.assertEqual(C, C_ref)
+        C_ref = f_ref(
+            A,
+            B_T.transpose(-2, -1),
+            scale_a,
+            scale_b,
+            offs=offs,
+            use_fast_accum=fast_accum,
+            out_dtype=out_dtype
+        )
+        C = f(A, B_T.transpose(-2, -1), scale_a, scale_b, offs=offs, use_fast_accum=fast_accum, out_dtype=out_dtype)
+        self.assertEqual(C, C_ref)
 
     def scaled_grouped_gemm_cublaslt_mxfp8_helper(self, op, device):
         ngroups = 4
@@ -2986,16 +2983,15 @@ class TestFP8Matmul(TestCase):
     def test_scaled_grouped_gemm_cublaslt_mxfp8(self, op, out_dtype, fast_accum, device):
         A, B_T, scale_a, scale_b, offs = self.scaled_grouped_gemm_cublaslt_mxfp8_helper(op, device)
 
-        with prefer_cublaslt_grouped_gemm():
-            C = torch._scaled_grouped_mm(
-                A,
-                B_T.transpose(-2, -1),
-                scale_a,
-                scale_b,
-                offs=offs,
-                use_fast_accum=fast_accum,
-                out_dtype=out_dtype,
-            )
+        C = torch._scaled_grouped_mm(
+            A,
+            B_T.transpose(-2, -1),
+            scale_a,
+            scale_b,
+            offs=offs,
+            use_fast_accum=fast_accum,
+            out_dtype=out_dtype,
+        )
 
         C_ref = self.cublaslt_grouped_gemm_ref(A, B_T, scale_a, scale_b, offs, out_dtype, fast_accum)
         self.assertEqual(C, C_ref)
@@ -3015,19 +3011,18 @@ class TestFP8Matmul(TestCase):
         A, B_T, scale_a, scale_b, offs = self.scaled_grouped_gemm_cublaslt_mxfp8_helper(op, device)
 
         torch._dynamo.reset()
-        with prefer_cublaslt_grouped_gemm():
-            f_ref = torch._scaled_grouped_mm
-            f = torch.compile(f_ref, fullgraph=True, mode=mode)
+        f_ref = torch._scaled_grouped_mm
+        f = torch.compile(f_ref, fullgraph=True, mode=mode)
 
-            C_ref = f_ref(
-                A, B_T.transpose(-2, -1), scale_a, scale_b,
-                offs=offs, use_fast_accum=fast_accum, out_dtype=out_dtype,
-            )
-            C = f(
-                A, B_T.transpose(-2, -1), scale_a, scale_b,
-                offs=offs, use_fast_accum=fast_accum, out_dtype=out_dtype,
-            )
-            self.assertEqual(C, C_ref)
+        C_ref = f_ref(
+            A, B_T.transpose(-2, -1), scale_a, scale_b,
+            offs=offs, use_fast_accum=fast_accum, out_dtype=out_dtype,
+        )
+        C = f(
+            A, B_T.transpose(-2, -1), scale_a, scale_b,
+            offs=offs, use_fast_accum=fast_accum, out_dtype=out_dtype,
+        )
+        self.assertEqual(C, C_ref)
 
 
     @onlyCUDA
@@ -3064,14 +3059,13 @@ class TestFP8Matmul(TestCase):
             offs = torch.arange(1, 1026, device=device, dtype=torch.int32)
             warn_regex = r"batchCount must be in \[1, 1024\]"
 
-        with prefer_cublaslt_grouped_gemm():
-            with warnings.catch_warnings(record=True) as ws:
-                warnings.simplefilter("always")
-                with set_warn_always_context(True):
-                    with self.assertRaises(RuntimeError):
-                        torch._scaled_grouped_mm(
-                            a, b.t(), scale_a, scale_b, offs=offs, out_dtype=out_dtype
-                        )
+        with warnings.catch_warnings(record=True) as ws:
+            warnings.simplefilter("always")
+            with set_warn_always_context(True):
+                with self.assertRaises(RuntimeError):
+                    torch._scaled_grouped_mm(
+                        a, b.t(), scale_a, scale_b, offs=offs, out_dtype=out_dtype
+                    )
         self.assertTrue(
             any(re.search(warn_regex, str(w.message)) for w in ws),
             f"expected cuBLASLt fallback warning matching {warn_regex!r}, "
@@ -3118,11 +3112,10 @@ class TestFP8Matmul(TestCase):
                 scale_a = torch.ones((A.shape[0], 1), device=device, dtype=e8m0)
                 regex = "scale_a blockwise scale for cuBLASLt grouped GEMM must have shape"
 
-        with prefer_cublaslt_grouped_gemm():
-            with self.assertRaisesRegex(RuntimeError, regex):
-                torch._scaled_grouped_mm(
-                    A, B_T.transpose(-2, -1), scale_a, scale_b, offs=offs, out_dtype=torch.bfloat16
-                )
+        with self.assertRaisesRegex(RuntimeError, regex):
+            torch._scaled_grouped_mm(
+                A, B_T.transpose(-2, -1), scale_a, scale_b, offs=offs, out_dtype=torch.bfloat16
+            )
 
     @onlyAccelerator
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
