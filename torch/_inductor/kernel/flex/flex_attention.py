@@ -852,6 +852,47 @@ def flex_attention_backward(*args, **kwargs):
     else:
         kernel_options.setdefault("IS_DIVISIBLE", False)
 
+    if _use_flydsl_flex_attention_backward(
+        fw_graph,
+        mask_graph,
+        backend=backend,
+        query=query,
+        score_mod_other_buffers=score_mod_other_buffers,
+        key=key,
+        value=value,
+        out=out,
+        grad_out=grad_out,
+        grad_logsumexp=grad_logsumexp,
+        mask_mod_other_buffers=mask_mod_other_buffers,
+        kv_num_blocks=kv_num_blocks,
+        kv_indices=kv_indices,
+        full_kv_num_blocks=full_kv_num_blocks,
+        full_kv_indices=full_kv_indices,
+        scale=scale,
+        sparse_q_block_size=SPARSE_Q_BLOCK_SIZE,
+        sparse_kv_block_size=SPARSE_KV_BLOCK_SIZE,
+    ):
+        return create_flydsl_flex_attention_backward_kernel(
+            query,
+            key,
+            value,
+            out,
+            logsumexp,
+            grad_out,
+            grad_logsumexp,
+            scale,
+            SPARSE_Q_BLOCK_SIZE,
+            SPARSE_KV_BLOCK_SIZE,
+            fw_subgraph=fw_graph,
+            mask_graph=mask_graph,
+            score_mod_other_buffers=list(score_mod_other_buffers),
+            mask_mod_other_buffers=list(mask_mod_other_buffers),
+            kv_num_blocks=kv_num_blocks,
+            kv_indices=kv_indices,
+            full_kv_num_blocks=full_kv_num_blocks,
+            full_kv_indices=full_kv_indices,
+        )
+
     fwd_placeholder_inps = [
         create_placeholder(name, dtype, device)
         for name, dtype in [
@@ -941,44 +982,6 @@ def flex_attention_backward(*args, **kwargs):
             dq_write_order_full=dq_write_order_full if needs_block_mask else None,
             dq_kv_order=dq_kv_order if needs_block_mask else None,
             dq_kv_order_spt=dq_kv_order_spt,
-        )
-
-    if _use_flydsl_flex_attention_backward(
-        fw_graph,
-        mask_graph,
-        backend=backend,
-        query=query,
-        joint_outputs=joint_outputs,
-        score_mod_other_buffers=score_mod_other_buffers,
-    ):
-        needs_block_mask = not is_trivial_mask_graph(mask_graph.graph_module)
-        if grad_logsumexp is not None:
-            (grad_logsumexp,) = maybe_realize([grad_logsumexp])
-
-        score_is_trivial = is_trivial_score_graph(fw_graph.graph_module)
-        return create_flydsl_flex_attention_backward_kernel(
-            query,
-            key,
-            value,
-            out,
-            logsumexp,
-            grad_out,
-            grad_logsumexp,
-            scale,
-            kernel_options,
-            SPARSE_Q_BLOCK_SIZE,
-            SPARSE_KV_BLOCK_SIZE,
-            fw_subgraph_buffer=None if score_is_trivial else fw_subgraph_buffer,
-            joint_subgraph_buffer=None
-            if score_is_trivial
-            else joint_outputs.grad_input,
-            score_mod_other_buffers=list(score_mod_other_buffers),
-            mask_graph_buffer=mask_graph_buffer if needs_block_mask else None,
-            mask_mod_other_buffers=list(mask_mod_other_buffers),
-            q_num_blocks=q_num_blocks if needs_block_mask else None,
-            q_indices=q_indices if needs_block_mask else None,
-            full_q_num_blocks=full_q_num_blocks if needs_block_mask else None,
-            full_q_indices=full_q_indices if needs_block_mask else None,
         )
 
     # Construct layout with stride order matching K

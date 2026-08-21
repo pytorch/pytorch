@@ -1,1 +1,1 @@
-# FlyDSL vendored kernels for the Inductor flex-attention backend (gfx950).
+# FlyDSL vendored template kernels.
