@@ -2718,25 +2718,48 @@ def skip_frame_if_in_functorch_mode(val: torch.Tensor) -> None:
 
 
 @contextmanager
-def preserve_rng_state() -> Generator[None, None, None]:
+def preserve_rng_state(
+    device_type: str | None = None, device_index: int | None = None
+) -> Generator[None, None, None]:
+    """Preserve CPU and accelerator RNG state across the context.
+
+    With no device type, retain the existing CUDA/XPU behavior. When a device
+    type is provided, preserve only that accelerator's RNG state.
+    """
     disable_functorch = torch._C._DisableFuncTorch
     disable_current_modes = torch.utils._python_dispatch._disable_current_modes
+    device_module = None
+    device_rng_state = None
+    device: str | int | None = None
     with disable_current_modes(), disable_functorch():
         rng_state = torch.clone(torch.random.get_rng_state())
         skip_frame_if_in_functorch_mode(rng_state)
-        if torch.cuda.is_available():
-            cuda_rng_state = torch.clone(torch.cuda.get_rng_state())
-        if torch.xpu.is_available():
-            xpu_rng_state = torch.clone(torch.xpu.get_rng_state())
+        if device_type is None:
+            if torch.cuda.is_available():
+                cuda_rng_state = torch.clone(torch.cuda.get_rng_state())
+            if torch.xpu.is_available():
+                xpu_rng_state = torch.clone(torch.xpu.get_rng_state())
+        else:
+            device_module = torch.get_device_module(device_type)
+            if device_module.is_available():
+                device = device_type if device_index is None else device_index
+                device_rng_state = torch.clone(device_module.get_rng_state(device))
     try:
         yield
     finally:
         with torch.utils._python_dispatch._disable_current_modes():
             torch.random.set_rng_state(rng_state)
-            if torch.cuda.is_available():
-                torch.cuda.set_rng_state(cuda_rng_state)  # type: ignore[possibly-undefined]
-            if torch.xpu.is_available():
-                torch.xpu.set_rng_state(xpu_rng_state)  # type: ignore[possibly-undefined]
+            if device_type is None:
+                if torch.cuda.is_available():
+                    torch.cuda.set_rng_state(cuda_rng_state)  # type: ignore[possibly-undefined]
+                if torch.xpu.is_available():
+                    torch.xpu.set_rng_state(xpu_rng_state)  # type: ignore[possibly-undefined]
+            elif (
+                device_module is not None
+                and device_rng_state is not None
+                and device is not None
+            ):
+                device_module.set_rng_state(device_rng_state, device)
 
 
 def is_jit_model(

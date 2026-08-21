@@ -342,6 +342,7 @@ def _get_use_stack_trace(node: torch.fx.Node) -> str | None:
 
 def check_multiple_devices_or_any_cpu_nodes(
     device_node_mapping: dict[torch.device, torch.fx.Node],
+    expected_device_type: str = "cuda",
 ) -> str | None:
     # meta tensors are supported since there is no compute
     device_node_mapping.pop(torch.device("meta"), None)
@@ -360,7 +361,7 @@ def check_multiple_devices_or_any_cpu_nodes(
 
     if (
         len(device_node_mapping) == 1
-        and next(iter(device_node_mapping.keys())).type == "cuda"
+        and next(iter(device_node_mapping.keys())).type == expected_device_type
     ):
         return None
 
@@ -388,13 +389,50 @@ def check_caching_allocator_for_cudagraphs() -> str | None:
     return None
 
 
+def check_current_accelerator_for_cudagraphs(device_type: str) -> str | None:
+    accelerator = torch.accelerator.current_accelerator()
+    if accelerator is None:
+        return format_default_skip_message(
+            f"expected accelerator {device_type!r}, but found none"
+        )
+    if accelerator.type != device_type:
+        return format_default_skip_message(
+            f"current accelerator {accelerator.type!r} does not match "
+            f"graph device {device_type!r}"
+        )
+    return None
+
+
+def check_rng_state_for_cudagraphs(device_type: str) -> str | None:
+    device_module = torch.get_device_module(device_type)
+    missing = [
+        name
+        for name in ("get_rng_state", "set_rng_state")
+        if not callable(getattr(device_module, name, None))
+    ]
+    if missing:
+        return format_default_skip_message(
+            "cudagraph capture requires accelerator RNG state support; "
+            f"missing {', '.join(missing)}"
+        )
+    return None
+
+
 def check_lowering_disable_cudagraph(
     device_node_mapping: dict[torch.device, torch.fx.Node],
+    device_type: str = "cuda",
 ) -> str | None:
-    return (
-        check_caching_allocator_for_cudagraphs()
-        or check_multiple_devices_or_any_cpu_nodes(device_node_mapping)
-    )
+    if reason := (
+        check_caching_allocator_for_cudagraphs() if device_type == "cuda" else None
+    ):
+        return reason
+
+    if reason := check_multiple_devices_or_any_cpu_nodes(
+        device_node_mapping, expected_device_type=device_type
+    ):
+        return reason
+
+    return None
 
 
 def log_cudagraph_skip_and_bump_counter(msg: str) -> None:

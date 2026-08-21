@@ -120,6 +120,20 @@ def cdata(t):
     return t.untyped_storage()._cdata
 
 
+@contextlib.contextmanager
+def fresh_graph_tree_backend():
+    from torch._inductor import graph_tree_backend
+
+    with unittest.mock.patch.multiple(
+        graph_tree_backend,
+        _registered_device_type=None,
+        _graph_interface=None,
+        _allocator_interface=None,
+        _initialized=False,
+    ):
+        yield graph_tree_backend
+
+
 class TestCase(InductorTestCase):
     @classmethod
     def setUpClass(cls):
@@ -160,6 +174,42 @@ class CUDAGraphAPIOnlyTests(TestCase):
         torch.compiler.cudagraph_mark_warmup_incomplete()
         self.assertEqual(tuple(containers), existing_devices)
 
+
+class GraphTreeBackendTests(TestCase):
+    def test_graph_tree_backend_registration(self):
+        with fresh_graph_tree_backend() as backend:
+            graph_interface = backend.CUDAGraphTreeGraphInterface()
+            allocator_interface = backend.CUDAGraphTreeAllocatorInterface()
+
+            with unittest.mock.patch.object(
+                torch.accelerator,
+                "current_accelerator",
+                return_value=torch.device("privateuseone"),
+            ):
+                backend.register_graph_tree_backend(
+                    "privateuseone",
+                    graph_interface,
+                    allocator_interface,
+                )
+
+                with self.assertRaisesRegex(RuntimeError, "already registered"):
+                    backend.register_graph_tree_backend(
+                        "privateuseone",
+                        graph_interface,
+                        allocator_interface,
+                    )
+
+                self.assertTrue(backend.is_graph_tree_backend_available())
+                self.assertIs(backend.get_graph_interface(), graph_interface)
+                self.assertIs(backend.get_allocator_interface(), allocator_interface)
+                self.assertEqual(backend.get_device_type(), "privateuseone")
+
+                with self.assertRaisesRegex(RuntimeError, "already been initialized"):
+                    backend.register_graph_tree_backend(
+                        "privateuseone",
+                        graph_interface,
+                        allocator_interface,
+                    )
 
 if HAS_CUDA_AND_TRITON:
 
@@ -558,6 +608,67 @@ if HAS_CUDA_AND_TRITON:
             for x in xs:
                 torch.tanh(x * w_ref).sum().backward()
             self.assertEqual(w.grad, w_ref.grad)
+
+        def test_registered_cuda_backend_smoke(self):
+            from torch._inductor import graph_tree_backend as backend
+
+            class RecordingGraphInterface(backend.CUDAGraphTreeGraphInterface):
+                def __init__(self):
+                    self.capture_modes = []
+
+                @contextlib.contextmanager
+                def capture(self, graph, *, stream, pool, mode):
+                    self.capture_modes.append(mode)
+                    with super().capture(
+                        graph,
+                        stream=stream,
+                        pool=pool,
+                        mode=mode,
+                    ):
+                        yield
+
+            class RecordingAllocatorInterface(backend.CUDAGraphTreeAllocatorInterface):
+                def __init__(self):
+                    self.checkpoint_count = 0
+
+                def get_checkpoint_state(self, device, pool):
+                    self.checkpoint_count += 1
+                    return super().get_checkpoint_state(device, pool)
+
+            with fresh_graph_tree_backend():
+                graph_interface = RecordingGraphInterface()
+                allocator_interface = RecordingAllocatorInterface()
+                backend.register_graph_tree_backend(
+                    "cuda",
+                    graph_interface,
+                    allocator_interface,
+                )
+
+                run = None
+                try:
+
+                    def fn(inputs):
+                        x = inputs[0]
+                        inputs.clear()
+                        return [torch.sin(x)]
+
+                    x = torch.randn(16, device="cuda")
+                    run = self.cudagraphify_impl(fn, [x], ())
+
+                    for _ in range(3):
+                        self.assertEqual(run([x])[0], torch.sin(x))
+
+                    self.assertEqual(
+                        graph_interface.capture_modes,
+                        [
+                            backend.GraphTreeCaptureMode.POOL_INITIALIZATION,
+                            backend.GraphTreeCaptureMode.MODEL,
+                        ],
+                    )
+                    self.assertGreaterEqual(allocator_interface.checkpoint_count, 1)
+                finally:
+                    del run
+                    torch._dynamo.reset()
 
         def test_multithreaded_cudagraph_trees(self):
             import queue
