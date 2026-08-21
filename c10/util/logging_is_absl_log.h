@@ -58,11 +58,11 @@ T& CheckNotNull(
 
 // Log with source location information override (to be used in generic
 // warning/error handlers implemented as functions, not macros)
-#define LOG_AT_FILE_LINE(n, file, line) \
-  LOG(n).AtLocation(file, line)
+#define LOG_AT_FILE_LINE(n, file, line) LOG(n).AtLocation(file, line)
 
 // ---------------------- Support for std objects --------------------------
-// These are adapted to support logging capability for STL objects with absl log.
+// These are adapted to support logging capability for STL objects with absl
+// log.
 
 namespace std {
 // Forward declare these two, and define them after all the container streams
