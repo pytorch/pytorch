@@ -29,6 +29,7 @@ def _normalize_window_size(window_size: list[int] | None) -> list[int]:
 
 
 @lru_cache(maxsize=8)
+@torch.compiler.assume_constant_result
 def _should_use_cudnn(device_index: int) -> bool:
     """Cache device capability check to avoid repeated CUDA calls."""
     if torch.version.hip is not None:
@@ -46,6 +47,8 @@ def _can_use_cudnn(
     query: torch.Tensor,
     key: torch.Tensor,
     value: torch.Tensor,
+    cu_seq_q: torch.Tensor,
+    cu_seq_k: torch.Tensor | None,
     max_q: int,
     window_size: list[int],
     enable_gqa: bool = False,
@@ -61,7 +64,10 @@ def _can_use_cudnn(
         return False
     if query.shape[-1] % 8 != 0 or value.shape[-1] % 8 != 0:
         return False
-    if window_size != [-1, -1]:
+    if window_size == [-1, 0]:
+        if cu_seq_q is not cu_seq_k or seqused_k is not None or block_table is not None:
+            return False
+    elif window_size != [-1, -1]:
         return False
     if enable_gqa or query.size(-2) != key.size(-2):
         return False
@@ -96,6 +102,7 @@ def _varlen_attn(
     seqused_k: torch.Tensor | None = None,
     block_table: torch.Tensor | None = None,
     num_splits: int | None = None,
+    use_cudnn: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Private custom op for variable-length attention.
@@ -103,17 +110,6 @@ def _varlen_attn(
     This is the internal implementation. Users should use the public varlen_attn function instead.
     """
     window_size = _normalize_window_size(window_size)
-    use_cudnn = _can_use_cudnn(
-        query,
-        key,
-        value,
-        max_q,
-        window_size,
-        enable_gqa,
-        seqused_k,
-        block_table,
-        num_splits,
-    )
 
     if use_cudnn:
         log.info("Using cuDNN backend for varlen_attn")
@@ -179,6 +175,7 @@ def _varlen_attn_fake(
     seqused_k: torch.Tensor | None = None,
     block_table: torch.Tensor | None = None,
     num_splits: int | None = None,
+    use_cudnn: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Fake implementation for meta tensor computation and tracing.
@@ -334,7 +331,21 @@ def varlen_attn(
             f"but got Hq={num_heads_q} and Hkv={num_heads_k}."
         )
 
-    is_causal = window_size == (-1, 0)
+    window_size_list = list(window_size)
+    is_causal = window_size_list == [-1, 0]
+    use_cudnn = _can_use_cudnn(
+        query,
+        key,
+        value,
+        cu_seq_q,
+        cu_seq_k,
+        max_q,
+        window_size_list,
+        enable_gqa,
+        seqused_k,
+        block_table,
+        num_splits,
+    )
     out, lse, _ = torch.ops.torch_attn._varlen_attn(
         query,
         key,
@@ -345,11 +356,12 @@ def varlen_attn(
         max_k,
         is_causal,
         scale,
-        list(window_size),
+        window_size_list,
         enable_gqa,
         seqused_k,
         block_table,
         num_splits,
+        use_cudnn,
     )
     if return_aux is not None and return_aux.lse:
         return out, lse
@@ -511,6 +523,7 @@ def _setup_context(ctx: Any, inputs: tuple[Any, ...], output: Any) -> None:
         seqused_k,
         block_table,
         num_splits,
+        use_cudnn,
     ) = inputs
     out, lse, rng_state = output
 
@@ -519,6 +532,7 @@ def _setup_context(ctx: Any, inputs: tuple[Any, ...], output: Any) -> None:
     if block_table is not None:
         raise RuntimeError("block_table is an inference-only parameter.")
 
+    ctx.use_cudnn = use_cudnn
     ctx.save_for_backward(query, key, value, cu_seq_q, cu_seq_k, out, lse, rng_state)
 
     ctx.max_q = max_q
@@ -544,19 +558,14 @@ def _varlen_attn_backward(
     rng_state: torch.Tensor,
     scale: float | None = None,
     window_size: list[int] | None = None,
+    use_cudnn: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     window_size = _normalize_window_size(window_size)
 
     unused = torch.empty(0, device=query.device)
 
-    use_cudnn = _can_use_cudnn(query, key, value, max_q, window_size)
-
     if use_cudnn:
         log.info("Using cuDNN backend for varlen_attn")
-        if window_size[0] != -1 or window_size[1] != -1:
-            raise RuntimeError(
-                "cuDNN backend does not support window attention. Please use Flash Attention backend."
-            )
         dq, dk, dv = torch.ops.aten._cudnn_attention_backward(
             grad_out=grad_out,
             query=query,
@@ -615,6 +624,7 @@ def _varlen_attn_backward_fake(
     rng_state: torch.Tensor,
     scale: float | None = None,
     window_size: list[int] | None = None,
+    use_cudnn: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Fake implementation for meta tensor computation and tracing.
@@ -654,10 +664,11 @@ def _backward(
         rng_state,
         scale,
         window_size,
+        ctx.use_cudnn,
     )
     # cu_seq_q, cu_seq_k, max_q, max_k, is_causal, scale, window_size, \
-    # enable_gqa, seqused_k, block_table, num_splits
-    num_params = 11
+    # enable_gqa, seqused_k, block_table, num_splits, use_cudnn
+    num_params = 12
     return (dq, dk, dv, *((None,) * num_params))
 
 
