@@ -529,7 +529,7 @@ class FxGraphRunnableTritonCudaTest(FxGraphRunnableTestBase, TestCase):
         torch.compile(add)(x, y)  # noqa: UNSPECIFIED_BACKEND
         self._exec_and_verify_payload()
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipUnless(has_triton(), "Triton not available")
     @onlyAccelerator
     def test_user_defined_nested_triton_kernel(self, device):
         def subtract_nested(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
