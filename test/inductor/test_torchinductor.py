@@ -19003,8 +19003,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         )
 
         self.assertEqual(fn(x), expected)
-        compiled_fn = torch.compile(fn, backend="inductor", fullgraph=True)
-        self.assertEqual(compiled_fn(x), expected)
+        self.common(fn, (x,))
 
     @skip_if_halide
     @requires_gpu_and_triton
