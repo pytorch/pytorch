@@ -1,7 +1,7 @@
 # Owner(s): ["module: inductor"]
 
 from unittest import skipIf
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import sympy
 
@@ -19,6 +19,7 @@ from torch._inductor.scheduler import (
     BaseSchedulerNode,
     ExternKernelSchedulerNode,
     ForeachKernelSchedulerNode,
+    FusedNestedReductions,
     NestedReduction,
     Scheduler,
 )
@@ -167,6 +168,25 @@ class TestScheduler(TestCase):
         self.assertIn(node3, fused_nodes)
         self.assertNotIn(node1, fused_nodes)
         self.assertNotIn(node2, fused_nodes)
+
+    def test_nested_reduction_fuse_with_propagates_mempool(self):
+        scheduler = object.__new__(Scheduler)
+        node1 = self._mock_base_snode("node1")
+        node2 = self._mock_base_snode("node2")
+        other = self._mock_base_snode("other")
+        grouped_node = self._mock_base_snode("grouped_node")
+        stage = Mock()
+        scheduler.node_to_mempool = {node2: (7, 0)}
+
+        nested = object.__new__(FusedNestedReductions)
+        nested.scheduler = scheduler
+        nested.node1 = node1
+        nested.node2 = node2
+        nested._append_approval = (other, grouped_node, stage)
+        with patch.object(FusedNestedReductions, "__init__", return_value=None):
+            FusedNestedReductions.fuse_with(nested, other)
+
+        self.assertEqual(scheduler.node_to_mempool[grouped_node], (7, 0))
 
     @inductor_config.patch(combo_kernel_max_num_nodes=16)
     def test_combo_kernel_grouping_respects_mempool(self):
@@ -366,6 +386,33 @@ class TestScheduler(TestCase):
                         allow_index_equivalence=True,
                     )
                 )
+
+    def test_nested_reduction_sub_parent_domain_preserves_group_axis(self):
+        grouped = Mock()
+        grouped.get_ranges.return_value = ([3, 6], [16])
+        graph = Mock(sizevars=SizeVarAllocator())
+
+        with V.set_graph_handler(graph):
+            context = NestedReduction.PointwiseDomainContext.create(
+                grouped,
+                grouped_numel=18,
+                grouped_rnumel=16,
+                grouped_axis=NestedReduction.GroupedAxis.R,
+                group_size=16,
+                parent_numel=3,
+                parent_rnumel=96,
+            )
+            x_grouped_context = NestedReduction.PointwiseDomainContext.create(
+                grouped,
+                grouped_numel=18,
+                grouped_rnumel=16,
+                grouped_axis=NestedReduction.GroupedAxis.X,
+                group_size=16,
+                parent_numel=3,
+                parent_rnumel=96,
+            )
+        self.assertEqual(context.sub_parent_domain, (3, 6, 8))
+        self.assertIsNone(x_grouped_context.sub_parent_domain)
 
     def test_nested_reduction_grouped_axis_from_ranges(self):
         grouped = Mock()
