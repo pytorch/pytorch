@@ -17670,8 +17670,10 @@ class TestGraphCapture(TestCaseMPS):
 
     def test_inplace_input_update_respected(self):
         # After updating input in-place, replay must produce the new result.
-        # All tensors must be pre-allocated before capture: allocating after
-        # capture may alias intermediate buffers (same constraint as torch.cuda.graph).
+        # x2 is allocated before capture, not between capture and replay: unlike
+        # torch.cuda.CUDAGraph, MetalGraph has no private memory pool, so an
+        # allocation between capture and replay can reuse memory a captured
+        # buffer depends on and silently corrupt the next replay.
         x = torch.ones(8, 8, device="mps")
         x2 = torch.full((8, 8), 2.0, device="mps")
 
