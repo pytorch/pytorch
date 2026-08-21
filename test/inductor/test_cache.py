@@ -18,6 +18,7 @@ import torch._inductor.config as inductor_config
 from torch._inductor import cache as icache
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
 )
@@ -158,6 +159,8 @@ class TestMixin:
 
 @instantiate_parametrized_tests
 class CacheTest(TestMixin, TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @parametrize("cache_type", TestMixin.cache_types())
     @parametrize("key_type", TestMixin.key_types())
     @parametrize("value_type", TestMixin.value_types())
@@ -349,6 +352,8 @@ class CacheTest(TestMixin, TestCase):
 
 @instantiate_parametrized_tests
 class AsyncCacheTest(TestMixin, TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @parametrize("async_cache_type", TestMixin.async_cache_types())
     @parametrize("key_type", TestMixin.key_types())
     @parametrize("value_type", TestMixin.value_types())
@@ -566,6 +571,8 @@ class AsyncCacheTest(TestMixin, TestCase):
 
 @instantiate_parametrized_tests
 class OtherTest(TestMixin, TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @parametrize("key_type", TestMixin.key_types())
     @parametrize("value_type", TestMixin.value_types())
     @parametrize("with_whitespace", [True, False])
@@ -819,6 +826,8 @@ class OtherTest(TestMixin, TestCase):
 
 
 class ConfigSerializationTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_callable_config_not_json_serializable_1(self):
         # Repro: setting callable configs to a non-None value
         # save_config_portable() return a dict that is not JSON-serializable.
