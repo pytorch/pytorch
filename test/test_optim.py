@@ -864,14 +864,19 @@ class TestOptimRenewed(TestCase):
                 )
                 model.to(dtype=dtype, device=device)
 
-                # foreach/fused optimizers should be tested with a
-                # zero_size tensor as its last param.
-                # ref: https://github.com/pytorch/pytorch/issues/100701
-                empty_param = torch.empty(
-                    (), device=device, dtype=dtype, requires_grad=True
-                )
-                empty_param.grad = torch.rand_like(empty_param)
-                params = list(model.parameters()) + [empty_param]
+                if optim_cls.__name__ == "Muon":
+                    # Muon only accepts 2D parameters, so filter out the 1D
+                    # biases and the empty/0-D scalar.
+                    params = [p for p in model.parameters() if p.ndim == 2]
+                else:
+                    # foreach/fused optimizers should be tested with a
+                    # zero_size tensor as its last param.
+                    # ref: https://github.com/pytorch/pytorch/issues/100701
+                    empty_param = torch.empty(
+                        (), device=device, dtype=dtype, requires_grad=True
+                    )
+                    empty_param.grad = torch.rand_like(empty_param)
+                    params = list(model.parameters()) + [empty_param]
 
                 optimizer = optim_cls(params, **kwargs)
                 models.append(model)
@@ -1125,6 +1130,8 @@ class TestOptimRenewed(TestCase):
                 if optim_cls.__name__ == "Adafactor" and kwargs.get("maximize", False):
                     # When maximize is True, Adafactor also tracks device_grad
                     nintermediates = 3
+            elif optim_cls.__name__ == "Muon":
+                nintermediates = 2
 
             # Dynamo ST uses less mem than eager in the case of Adam/Adagrad/Nadam/RAdam
             # which makes the foreach memory check fail
@@ -1687,8 +1694,11 @@ class TestOptimRenewed(TestCase):
 
         def _get_model_and_input_tensor(device, dtype, optim_cls):
             if optim_cls.__name__ == "Muon":
-                # Muon only accepts 2D parameter.
-                model = torch.nn.Linear(10, 4, bias=False)
+                # Muon only accepts 2D parameters.
+                model = torch.nn.Sequential(
+                    torch.nn.Linear(10, 4, bias=False),
+                    torch.nn.Linear(4, 4, bias=False),
+                )
                 input = torch.rand(10, device=device, dtype=dtype)
             else:
                 model = torch.nn.Sequential(
@@ -1702,7 +1712,10 @@ class TestOptimRenewed(TestCase):
         for optim_input in all_optim_inputs:
             torch.manual_seed(1)
             model, input = _get_model_and_input_tensor(device, dtype, optim_cls)
-            optimizer = optim_cls(model.parameters(), **optim_input.kwargs)
+            params = model.parameters()
+            if optim_cls.__name__ == "Muon":
+                params = [{"params": [p]} for p in model.parameters()]
+            optimizer = optim_cls(params, **optim_input.kwargs)
 
             def fwd_bwd(optim, mod, i):
                 optim.zero_grad()
@@ -1726,6 +1739,9 @@ class TestOptimRenewed(TestCase):
                         del group[flag]
 
             optimizer.load_state_dict(old_state_dict)
+            if optim_cls.__name__ == "Muon":
+                for group in optimizer.param_groups:
+                    self.assertEqual(group["foreach"], None)
 
             # Make sure we can still step
             if optim_info.step_requires_closure:
@@ -2432,13 +2448,17 @@ class TestOptimRenewed(TestCase):
         [
             o
             for o in optim_db
-            if ("foreach" in o.supported_impls and o.optim_cls.__name__ != "Adafactor")
+            if (
+                "foreach" in o.supported_impls
+                and o.optim_cls.__name__ not in ("Adafactor", "Muon")
+            )
         ],
         dtypes=[torch.float32],
     )
     def test_defaults_changed_to_foreach(self, device, dtype, optim_info):
         # Test that the default implementations for optimizers are changed to foreach
-        # except Adafactor, which defaults to the single tensor impl for memory efficiency.
+        # except Adafactor, which defaults to the single tensor impl for memory efficiency,
+        # and Muon, whose foreach path is explicit opt-in for BC.
         from torch.optim import Adam, AdamW
 
         optim_cls = optim_info.optim_cls
