@@ -10,7 +10,12 @@ from torch._inductor.lowering import make_fallback, make_pointwise, register_low
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import ops
-from torch.testing._internal.common_utils import skipIfRocm, skipIfXpu
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    skipIfRocm,
+    skipIfXpu,
+)
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
@@ -21,13 +26,15 @@ from torch.testing._internal.inductor_utils import (
 
 # These tests check issues for lowerings that aren't in the main pytorch repo
 class TestCustomLowering(InductorTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
         cls.test_inductor_ops = torch.library.Library(  # noqa: SCOPED_LIBRARY
             "test_inductor_ops", "DEF"
         )
-        cls.device_list = ["Meta", "CUDA", "XPU"]
+        cls.device_list = ["Meta", "CUDA", "XPU", "PRIVATEUSEONE"]
         for device in cls.device_list:
             setattr(
                 cls,
@@ -108,6 +115,7 @@ class TestCustomLowering(InductorTestCase):
         cls.impl_meta.impl("jagged_to_padded_dense", j2pd_meta)
         cls.impl_cuda.impl("jagged_to_padded_dense", j2pd_gpu)
         cls.impl_xpu.impl("jagged_to_padded_dense", j2pd_gpu)
+        cls.impl_privateuseone.impl("jagged_to_padded_dense", j2pd_gpu)
 
     @classmethod
     def _register_asm_op(cls):
@@ -172,14 +180,14 @@ class TestCustomLowering(InductorTestCase):
 
     @requires_gpu()
     @skipIf(GPU_TYPE == "mps", "Not applicable to MPS")
-    def test_jagged_to_padded_dense_sanity_cuda(self):
+    def test_jagged_to_padded_dense_sanity(self, device):
         def fn(inp, offsets, max_seq_len):
             return torch.ops.test_inductor_ops.jagged_to_padded_dense(
                 inp, offsets, max_seq_len, 60.0
             )
 
-        inp = torch.rand((9, 96), device=GPU_TYPE)
-        offsets = torch.tensor([0, 2, 5, 9], dtype=torch.int32, device=GPU_TYPE)
+        inp = torch.rand((9, 96), device=device)
+        offsets = torch.tensor([0, 2, 5, 9], dtype=torch.int32, device=device)
         max_seq_len = 4
 
         res = fn(inp, offsets, max_seq_len)
@@ -198,18 +206,18 @@ class TestCustomLowering(InductorTestCase):
 
     @requires_gpu()
     @skipIf(GPU_TYPE == "mps", "Not applicable to MPS")
-    def test_jagged_to_padded_dense_zero_size(self):
+    def test_jagged_to_padded_dense_zero_size(self, device):
         # Previously, the masking was being completely stripped for the
         # masked load of the input value. That would lead to an IMA
         # because cuda was trying to read index 0 of a zero-size tensor.
         def fn(inp, offsets, max_seq_len):
-            inp = torch.bmm(inp, torch.ones((1, 96, 1), device=GPU_TYPE)).view((0, 1))
+            inp = torch.bmm(inp, torch.ones((1, 96, 1), device=device)).view((0, 1))
             return torch.ops.test_inductor_ops.jagged_to_padded_dense(
                 inp, offsets, max_seq_len, 60.0
             )
 
-        inp = torch.rand((1, 0, 96), device=GPU_TYPE)
-        offsets = torch.zeros(1025, device=GPU_TYPE, dtype=torch.int32)
+        inp = torch.rand((1, 0, 96), device=device)
+        offsets = torch.zeros(1025, device=device, dtype=torch.int32)
         max_seq_len = 20
 
         fn_opt = torch.compile(fn)
@@ -222,11 +230,11 @@ class TestCustomLowering(InductorTestCase):
     @skipIfRocm
     @skipIfXpu(msg="`tl.inline_asm_elementwise` is not yet supported on Intel GPUs")
     @skipIf(GPU_TYPE == "mps", "Not applicable to MPS")
-    def test_tanh_approx(self):
+    def test_tanh_approx(self, device):
         def fn(inp):
             return torch.ops.test_inductor_ops.tanh_approx(inp)
 
-        inp = torch.randn(32, device=GPU_TYPE)
+        inp = torch.randn(32, device=device)
         fn_opt = torch.compile(fn)
 
         a = torch.tanh(inp)
@@ -237,12 +245,12 @@ class TestCustomLowering(InductorTestCase):
     @skipIfRocm
     @skipIfXpu(msg="`tl.inline_asm_elementwise` is not yet supported on Intel GPUs")
     @skipIf(GPU_TYPE == "mps", "Not applicable to MPS")
-    def test_reused_inline_asm_realized(self):
+    def test_reused_inline_asm_realized(self, device):
         def fn(inp):
             y = torch.ops.test_inductor_ops.tanh_approx(inp)
             return y.sum(dim=0), y.sum(dim=1)
 
-        inp = torch.randn(32, 64, device=GPU_TYPE)
+        inp = torch.randn(32, 64, device=device)
         expected = (torch.tanh(inp).sum(dim=0), torch.tanh(inp).sum(dim=1))
         actual, code = run_and_get_code(torch.compile(fn, fullgraph=True), inp)
 
@@ -252,12 +260,12 @@ class TestCustomLowering(InductorTestCase):
     @requires_gpu()
     @skipIfXpu(msg="`tl.inline_asm_elementwise` is not yet supported on Intel GPUs")
     @skipIf(GPU_TYPE == "mps", "Not applicable to MPS")
-    def test_multi_inp_asm(self):
+    def test_multi_inp_asm(self, device):
         def fn(a, b):
             return torch.ops.test_inductor_ops.add_custom(a, b)
 
-        a = torch.randn(32, device=GPU_TYPE)
-        b = torch.randn(32, device=GPU_TYPE)
+        a = torch.randn(32, device=device)
+        b = torch.randn(32, device=device)
         fn_opt = torch.compile(fn)
 
         out1 = a + b
@@ -275,6 +283,10 @@ class TestCustomLowering(InductorTestCase):
             torch.allclose(torch.compile(M())(torch.ones(3)), torch.ones(3) + 1)
         )
 
+
+instantiate_device_type_tests(
+    TestCustomLowering, globals(), allow_xpu=True, allow_mps=True
+)
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
