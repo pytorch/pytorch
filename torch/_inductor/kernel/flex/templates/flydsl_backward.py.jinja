@@ -1,0 +1,44 @@
+{#
+  FlyDSL flex attention BACKWARD -- DRAFT SCAFFOLD.
+
+  This is a scaffold only. The real FlyDSL MFMA codegen (adapting the standalone
+  build_flex_attn_bwd_module kernel: bf16 MMA on gfx950, split-V accumulation)
+  lands in a follow-up. The structure below mirrors the reference backward:
+    1. Delta = rowsum(OUT * D_OUT)   (preprocess)
+    2. dQ phase:      loop KV blocks, accumulate dQ per Q block
+    3. dK/dV phase:   loop Q blocks,  accumulate dK/dV per KV block
+  driven by the block-mask metadata when HAS_BLOCK_MASK.
+
+  It is never rendered unless the FlyDSL runtime is available: FlyDSLTemplate.
+  maybe_append_choice declines the choice (NotImplementedError) when
+  flydsl_utils.runtime_available() is False, so this file stays inert without
+  the optional `flydsl` dependency installed.
+#}
+{{gen_defines()}}
+{% if HAS_BLOCK_MASK %}
+{{def_kernel("Q", "K", "V", "OUT", "D_OUT", "LSE", "DK", "DV", "Q_NUM_BLKS", "Q_IDX", "FULL_Q_NUM_BLKS", "FULL_Q_IDX")}}
+{% else %}
+{{def_kernel("Q", "K", "V", "OUT", "D_OUT", "LSE", "DK", "DV")}}
+{% endif %}
+    # dq is the primary template output; dk/dv are mutated in place.
+    DQ = {{get_output()}}
+
+    # --- Preprocess: Delta = rowsum(OUT * D_OUT), fp32 accumulate ---
+    # TODO(flydsl-bwd): emit the FlyDSL delta reduction over head_dim.
+
+    # --- dQ phase: for each Q block, iterate KV blocks (MFMA, bf16) ---
+    # TODO(flydsl-bwd): scf.for over KV blocks; recompute S = Q@K^T * SM_SCALE,
+    # P = exp(S - LSE), dP = D_OUT@V^T, dS = P * (dP - Delta), dQ += dS @ K.
+{% if HAS_BLOCK_MASK %}
+    # Block-mask driven: walk Q_NUM_BLKS / Q_IDX (+ FULL_Q_* dense blocks) with
+    # SPARSE_Q_BLOCK_SIZE={{SPARSE_Q_BLOCK_SIZE}}, SPARSE_KV_BLOCK_SIZE={{SPARSE_KV_BLOCK_SIZE}}.
+{% endif %}
+
+    # --- dK/dV phase: for each KV block, iterate Q blocks (MFMA, bf16) ---
+    # TODO(flydsl-bwd): scf.for over Q blocks; dV += P^T @ D_OUT,
+    # dK += dS^T @ Q, split-V accumulation into DK / DV.
+
+    raise NotImplementedError(
+        "FlyDSL flex attention backward kernel body is a scaffold; "
+        "the MFMA codegen lands in a follow-up."
+    )
