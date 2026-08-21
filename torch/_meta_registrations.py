@@ -610,11 +610,19 @@ def meta_philox_key_fold_in_tensor(key, data):
     return torch.empty_like(key)
 
 
-def _check_philox_distribution_args(op_name, self, key):
-    torch._check(
-        self.dtype.is_floating_point,
-        lambda: f"{op_name}: self must be a floating point tensor, got {self.dtype}",
-    )
+_PHILOX_RANDINT_DTYPES = (
+    torch.uint8,
+    torch.uint16,
+    torch.uint32,
+    torch.uint64,
+    torch.int8,
+    torch.int16,
+    torch.int32,
+    torch.int64,
+)
+
+
+def _check_philox_gen_args(op_name, self, key):
     torch._check(
         key.dtype == torch.uint64,
         lambda: f"{op_name}: key must have dtype uint64, got {key.dtype}",
@@ -650,6 +658,14 @@ def _check_philox_distribution_args(op_name, self, key):
         )
 
 
+def _check_philox_distribution_args(op_name, self, key):
+    torch._check(
+        self.dtype.is_floating_point,
+        lambda: f"{op_name}: self must be a floating point tensor, got {self.dtype}",
+    )
+    _check_philox_gen_args(op_name, self, key)
+
+
 @register_meta(aten._philox_normal_.default)
 def meta_philox_normal_(self, key, mean=0.0, std=1.0):
     _check_philox_distribution_args("_philox_normal_", self, key)
@@ -659,6 +675,32 @@ def meta_philox_normal_(self, key, mean=0.0, std=1.0):
 @register_meta(aten._philox_uniform_.default)
 def meta_philox_uniform_(self, key, low=0.0, high=1.0):
     _check_philox_distribution_args("_philox_uniform_", self, key)
+    return self
+
+
+@register_meta(aten._philox_randint_.default)
+def meta_philox_randint_(self, key, low=None, high=None):
+    torch._check(
+        self.dtype in _PHILOX_RANDINT_DTYPES,
+        lambda: f"_philox_randint_: self must have an integer dtype, got {self.dtype}",
+    )
+    if self.dtype.itemsize == 4 and (low is not None or high is not None):
+        # Must match the kernels' 32-bit sample range limit; see kMaxRange32.
+        # A range dividing 2**32 evenly is exact at any size, so only guard the
+        # ranges that actually skew.
+        dtype_low = -(2**31) if self.dtype.is_signed else 0
+        lo = dtype_low if low is None else low
+        hi = (dtype_low + 2**32) if high is None else high
+        rng = (hi - lo) % 2**32
+        torch._check(
+            rng == 0 or 2**32 % rng == 0 or rng < 2**28,
+            lambda: f"_philox_randint_: range (high - low = {rng}) does not divide 2^32 "
+            f"evenly and is too large for the output dtype {self.dtype}. Each element draws "
+            "only 32 random bits, so a non-dividing range >= 2^28 gives a significantly biased "
+            "distribution. Use a range that divides 2^32 (a power of two), or a 64-bit dtype "
+            "(torch.int64 or torch.uint64).",
+        )
+    _check_philox_gen_args("_philox_randint_", self, key)
     return self
 
 
