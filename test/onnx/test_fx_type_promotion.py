@@ -39,6 +39,25 @@ class TestFindCompatibleOpOverload(common_utils.TestCase):
 
 
 class TestTypePromotionONNXExport(common_utils.TestCase):
+    def test_scalar_minus_int_tensor_exports(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, mask):
+                return (1.0 - mask) * x
+
+        model = Model().eval()
+        x = torch.randn(2, 3)
+        mask = torch.ones(2, 3, dtype=torch.int64)
+        exported_program = torch.export.export(model, (x, mask))
+
+        onnx_program = torch.onnx.export(
+            exported_program,
+            (x, mask),
+            dynamo=True,
+            verbose=False,
+        )
+
+        self.assertIsNotNone(onnx_program)
+
     def test_where_with_bool_tensor_and_mixed_scalars_exports(self):
         class WhereModel(torch.nn.Module):
             def forward(self, condition):
