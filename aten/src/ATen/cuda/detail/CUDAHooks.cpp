@@ -550,9 +550,7 @@ bool CUDAHooks::isGPUArch(const std::vector<std::string>& archs, DeviceIndex dev
 const std::vector<std::string>& CUDAHooks::getHipblasltPreferredArchs() const {
   static const std::vector<std::string> archs = {
     "gfx90a", "gfx942",
-#if ROCM_VERSION >= 60400
     "gfx1200", "gfx1201",
-#endif
 #if ROCM_VERSION >= 70000
     "gfx950",
 #endif
@@ -569,9 +567,7 @@ const std::vector<std::string>& CUDAHooks::getHipblasltPreferredArchs() const {
 const std::vector<std::string>& CUDAHooks::getHipblasltSupportedArchs() const {
   static const std::vector<std::string> archs = {
     "gfx90a", "gfx942",
-#if ROCM_VERSION >= 60300
     "gfx1100", "gfx1101", "gfx1103", "gfx1200", "gfx1201", "gfx908",
-#endif
 #if ROCM_VERSION >= 70000
     "gfx950", "gfx1150", "gfx1151",
 #endif
