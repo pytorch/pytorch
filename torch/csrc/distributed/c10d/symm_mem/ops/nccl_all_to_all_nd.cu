@@ -4,18 +4,13 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_dev_cap.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/nccl_devcomm_cache.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/nccl_device_shims.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_extension.hpp>
-#include <torch/csrc/distributed/c10d/symm_mem/nccl_devcomm_manager.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.hpp>
 
 #if defined(NCCL_HAS_DEVCOMM) || defined(NCCL_HAS_LSA_PEER_PTR)
 #define NCCL_A2A_ENABLED
-#endif
-
-#ifdef NCCL_HAS_LSA_PEER_PTR
-#include <mutex>
-#include <unordered_map>
-#include <nccl_device.h>
 #endif
 
 // Permute-free all-to-all for Ulysses-style sequence parallelism.
@@ -140,48 +135,6 @@ __global__ void all_to_all_lsa_kernel(
   bar.sync(coop, cuda::memory_order_release);
 }
 
-#ifdef NCCL_HAS_LSA_PEER_PTR
-struct A2ADevCommKey {
-  ncclComm_t comm;
-  std::string group_name;
-
-  bool operator==(const A2ADevCommKey& other) const {
-    return comm == other.comm && group_name == other.group_name;
-  }
-};
-
-struct A2ADevCommKeyHash {
-  size_t operator()(const A2ADevCommKey& key) const {
-    size_t hash = std::hash<ncclComm_t>{}(key.comm);
-    hash ^= std::hash<std::string>{}(key.group_name) + 0x9e3779b9 +
-        (hash << 6) + (hash >> 2);
-    return hash;
-  }
-};
-
-static std::mutex g_a2a_devcomm_mutex;
-static std::unordered_map<A2ADevCommKey, ncclDevComm, A2ADevCommKeyHash>
-    g_a2a_devcomm_cache;
-
-static ncclDevComm& get_or_create_a2a_devcomm(
-    ncclComm_t comm,
-    const std::string& group_name) {
-  std::lock_guard<std::mutex> lock(g_a2a_devcomm_mutex);
-  A2ADevCommKey key{comm, group_name};
-  auto it = g_a2a_devcomm_cache.find(key);
-  if (it == g_a2a_devcomm_cache.end()) {
-    ncclDevCommRequirements reqs = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
-    reqs.lsaBarrierCount = A2A_MAX_CTA_COUNT;
-    ncclDevComm devcomm;
-    C10D_NCCL_CHECK(
-        ncclDevCommCreate(comm, &reqs, &devcomm),
-        "ncclDevCommCreate failed in nccl_all_to_all_nd");
-    it = g_a2a_devcomm_cache.emplace(std::move(key), devcomm).first;
-  }
-  return it->second;
-}
-#endif // NCCL_HAS_LSA_PEER_PTR
-
 #endif // NCCL_A2A_ENABLED
 
 // Host entry point.  Validates arguments, builds the devcomm (cached), and
@@ -218,28 +171,14 @@ void nccl_all_to_all_nd(
   auto stream = at::cuda::getCurrentCUDAStream();
   auto device = input.device();
 
-  auto& manager = c10d::symmetric_memory::NCCLDevCommManager::get(device);
-  ncclComm_t comm = manager.get_comm(group_name);
-
-#ifdef NCCL_HAS_LSA_PEER_PTR
-  // Keep RCCL's ncclDevComm in this hipcc translation unit. Include the host
-  // communicator identity in the key so a recreated process group cannot
-  // reuse a device communicator created for its predecessor.
-  ncclDevComm& devcomm = get_or_create_a2a_devcomm(comm, group_name);
-#else
+  // Device communicators are cached per group; entries die with the owning
+  // process group, so a recreated group can never reuse a device communicator
+  // created for its predecessor.
   static constexpr char const kDevcommKey[] = "nccl_all_to_all_nd";
-  auto devcomm_opt = manager.get_devcomm(group_name, kDevcommKey);
-  if (!devcomm_opt) {
-    ncclDevCommRequirements reqs = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
-    reqs.lsaBarrierCount = A2A_MAX_CTA_COUNT;
-    ncclDevComm devcomm;
-    C10D_NCCL_CHECK(
-        ncclDevCommCreate(comm, &reqs, &devcomm),
-        "ncclDevCommCreate failed in nccl_all_to_all_nd");
-    devcomm_opt = manager.register_devcomm(group_name, devcomm, kDevcommKey);
-  }
-  ncclDevComm& devcomm = devcomm_opt->get();
-#endif
+  ncclDevComm& devcomm = *static_cast<ncclDevComm*>(
+      c10d::symmetric_memory::get_or_create_nccl_devcomm(
+          device, group_name, kDevcommKey, A2A_MAX_CTA_COUNT,
+          /*lsa_multimem=*/false));
 
   const int my_rank = devcomm.rank;
   const int p = devcomm.nRanks;

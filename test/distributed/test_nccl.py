@@ -257,8 +257,12 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
             raise AssertionError("Expected rdvz_file to not be None")
         os.environ["LOCAL_RANK"] = str(rank)
         if TEST_WITH_ROCM:
-            os.environ.setdefault("NCCL_CUMEM_ENABLE", "1")
-            os.environ.setdefault("NCCL_WIN_ENABLE", "1")
+            # RCCL symmetric-memory windows require VMM (cuMem) and window
+            # registration. Force-set rather than setdefault: an inherited
+            # NCCL_CUMEM_ENABLE=0 would make these tests fail confusingly at
+            # window registration instead of exercising the symmetric path.
+            os.environ["NCCL_CUMEM_ENABLE"] = "1"
+            os.environ["NCCL_WIN_ENABLE"] = "1"
         device = torch.device("cuda", rank)
         torch.cuda.set_device(device)
         store = c10d.FileStore(rdvz_file, world_size)
@@ -644,6 +648,38 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
         self.assertEqual(tensor_a, torch.full_like(tensor_a, self.rank + 1))
         self.assertEqual(tensor_b, torch.full_like(tensor_b, self.rank + 2))
         del handle_a, handle_b
+
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_WITH_ROCM, "ROCm-specific free-block reuse behavior"
+    )
+    @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    @requires_nccl_version(
+        (2, 29, 7), "ROCm LSA symmetric-memory support from RCCL 2.29.7"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_nccl_symmem_free_then_reuse_rendezvous(self):
+        # Freeing a symmetric tensor must invalidate its rendezvous handle
+        # while keeping the block's window registration reusable: the freed
+        # block comes back from the allocator's free cache with the same
+        # pointer, and a fresh rendezvous on it works without re-registering.
+        symm_mem.set_backend("NCCL")
+        torch.cuda.set_device(self.rank)
+        c10d.all_reduce(torch.ones(1, device=self.device))
+        group_name = c10d.group.WORLD.group_name
+
+        tensor = symm_mem.empty(4096, dtype=torch.float32, device=self.device)
+        handle = symm_mem.rendezvous(tensor, group=group_name)
+        handle.barrier()
+        ptr = tensor.data_ptr()
+        del tensor, handle
+        torch.cuda.synchronize(self.device)
+
+        reused = symm_mem.empty(4096, dtype=torch.float32, device=self.device)
+        self.assertEqual(reused.data_ptr(), ptr)
+        new_handle = symm_mem.rendezvous(reused, group=group_name)
+        reused.fill_(self.rank)
+        torch.cuda.synchronize(self.device)
+        new_handle.barrier()
 
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
     @requires_nccl_version(

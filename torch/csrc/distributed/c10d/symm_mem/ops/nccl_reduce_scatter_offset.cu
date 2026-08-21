@@ -4,44 +4,10 @@
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/macros.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_dev_cap.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/nccl_devcomm_cache.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/nccl_device_shims.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_extension.hpp>
-#include <torch/csrc/distributed/c10d/symm_mem/nccl_devcomm_manager.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.hpp>
-
-#if defined(NCCL_DEVICE_HAS_REDUCE_COPY) && defined(NCCL_HAS_LSA_PEER_PTR)
-#include <mutex>
-#include <unordered_map>
-
-// RCCL's device reduce/copy header expects CUDA compatibility helpers that
-// hipcc does not provide under PyTorch's compile flags. Keep the shims local to
-// this translation unit and restore the feature macro after including RCCL.
-#pragma push_macro("__CUDACC_EXTENDED_LAMBDA__")
-#ifndef __CUDACC_EXTENDED_LAMBDA__
-#define __CUDACC_EXTENDED_LAMBDA__ 1
-#endif
-static __device__ __forceinline__ unsigned int __vadd4(
-    unsigned int a,
-    unsigned int b) {
-  unsigned int result;
-  auto* out = reinterpret_cast<unsigned char*>(&result);
-  auto* lhs = reinterpret_cast<unsigned char*>(&a);
-  auto* rhs = reinterpret_cast<unsigned char*>(&b);
-#pragma unroll
-  for (int i = 0; i < 4; ++i) {
-    out[i] = static_cast<unsigned char>(lhs[i] + rhs[i]);
-  }
-  return result;
-}
-#if defined(__HIP_NO_HALF_OPERATORS__)
-static __device__ __forceinline__ __half operator+(
-    const __half& a,
-    const __half& b) {
-  return __float2half(__half2float(a) + __half2float(b));
-}
-#endif
-#include <nccl_device.h>
-#pragma pop_macro("__CUDACC_EXTENDED_LAMBDA__")
-#endif
 
 // Simultaneously reduce N blocks of a 2-D input tensor from a symmetric memory
 // buffer, routing each block to a specific destination rank (dst_ranks[i]).
@@ -160,6 +126,9 @@ __global__ void reduce_scatter_offset_kernel(
 // RCCL faults when CTAs concurrently reduce into different destination
 // allocations on gfx942. Launch one destination slot at a time on ROCm while
 // retaining row-tile parallelism within the slot.
+// TODO: drop this kernel and the serial per-slot launches once RCCL fixes the
+// multi-destination LSA-reduce fault and the fix has reached all supported
+// RCCL versions.
 template <typename T, bool UseMultimem>
 __global__ void reduce_scatter_offset_rocm_kernel(
     ncclWindow_t window,
@@ -191,52 +160,6 @@ __global__ void reduce_scatter_offset_rocm_kernel(
     }
   }
   bar.sync(coop, cuda::memory_order_release);
-}
-
-struct RSDevCommKey {
-  ncclComm_t comm;
-  std::string group_name;
-  bool use_multimem;
-
-  bool operator==(const RSDevCommKey& other) const {
-    return comm == other.comm && group_name == other.group_name &&
-        use_multimem == other.use_multimem;
-  }
-};
-
-struct RSDevCommKeyHash {
-  size_t operator()(const RSDevCommKey& key) const {
-    size_t hash = std::hash<ncclComm_t>{}(key.comm);
-    hash ^= std::hash<std::string>{}(key.group_name) + 0x9e3779b9 +
-        (hash << 6) + (hash >> 2);
-    hash ^= std::hash<bool>{}(key.use_multimem) + 0x9e3779b9 +
-        (hash << 6) + (hash >> 2);
-    return hash;
-  }
-};
-
-static std::mutex g_rs_devcomm_mutex;
-static std::unordered_map<RSDevCommKey, ncclDevComm, RSDevCommKeyHash>
-    g_rs_devcomm_cache;
-
-static ncclDevComm& get_or_create_rs_devcomm(
-    ncclComm_t comm,
-    const std::string& group_name,
-    bool use_multimem) {
-  std::lock_guard<std::mutex> lock(g_rs_devcomm_mutex);
-  RSDevCommKey key{comm, group_name, use_multimem};
-  auto it = g_rs_devcomm_cache.find(key);
-  if (it == g_rs_devcomm_cache.end()) {
-    ncclDevCommRequirements reqs = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
-    reqs.lsaBarrierCount = RS_MAX_CTA_COUNT;
-    reqs.lsaMultimem = use_multimem;
-    ncclDevComm devcomm;
-    C10D_NCCL_CHECK(
-        ncclDevCommCreate(comm, &reqs, &devcomm),
-        "ncclDevCommCreate failed in nccl_reduce_scatter_offset");
-    it = g_rs_devcomm_cache.emplace(std::move(key), devcomm).first;
-  }
-  return it->second;
 }
 #endif // NCCL_HAS_LSA_PEER_PTR
 
@@ -286,35 +209,22 @@ void nccl_reduce_scatter_offset(
   auto stream = at::cuda::getCurrentCUDAStream();
   auto device = input.device();
 
-  auto& manager = c10d::symmetric_memory::NCCLDevCommManager::get(device);
-  // Get the host-side communicator.
-  ncclComm_t comm = manager.get_comm(group_name);
-
   const bool use_multimem = nccl_hdl->has_multicast_support();
 
   // lsaBarrierCount must cover the maximum number of concurrent CTAs.
   // lsaMultimem is set when the allocation has multicast support.
-#ifdef NCCL_HAS_LSA_PEER_PTR
-  // Keep RCCL's ncclDevComm in this hipcc translation unit. Include the host
-  // communicator identity and multicast requirement in the key so a recreated
-  // process group cannot reuse an incompatible device communicator.
-  ncclDevComm& devcomm =
-      get_or_create_rs_devcomm(comm, group_name, use_multimem);
-#else
-  static constexpr char const kDevcommKey[] = "nccl_reduce_scatter_offset";
-  auto devcomm_opt = manager.get_devcomm(group_name, kDevcommKey);
-  if (!devcomm_opt) {
-    ncclDevCommRequirements reqs = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
-    reqs.lsaBarrierCount = RS_MAX_CTA_COUNT;
-    reqs.lsaMultimem = use_multimem;
-    ncclDevComm devcomm;
-    C10D_NCCL_CHECK(
-        ncclDevCommCreate(comm, &reqs, &devcomm),
-        "ncclDevCommCreate failed in nccl_reduce_scatter_offset");
-    devcomm_opt = manager.register_devcomm(group_name, devcomm, kDevcommKey);
-  }
-  ncclDevComm& devcomm = devcomm_opt->get();
-#endif
+  // Device communicators are cached per (group, mode); entries die with the
+  // owning process group, so a recreated group can never reuse a device
+  // communicator created for its predecessor. The mode is part of the key
+  // because lsaMultimem is baked into the created device communicator.
+  static constexpr char const kDevcommKeyMultimem[] =
+      "nccl_reduce_scatter_offset_multimem";
+  static constexpr char const kDevcommKeyLsa[] =
+      "nccl_reduce_scatter_offset_lsa";
+  const char* devcomm_key = use_multimem ? kDevcommKeyMultimem : kDevcommKeyLsa;
+  ncclDevComm& devcomm = *static_cast<ncclDevComm*>(
+      c10d::symmetric_memory::get_or_create_nccl_devcomm(
+          device, group_name, devcomm_key, RS_MAX_CTA_COUNT, use_multimem));
 
   const int my_rank = devcomm.rank;
   const int group_size = devcomm.nRanks;
