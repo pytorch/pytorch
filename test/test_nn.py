@@ -39,9 +39,9 @@ from torch.testing._internal.common_utils import dtype_name, freeze_rng_state, r
     download_file, get_function_arglist, load_tests, skipIfMPS, MACOS_VERSION, \
     IS_PPC, IS_ARM64, IS_MACOS, IS_WINDOWS, IS_CPU_CAPABILITY_SVE, IS_CPU_EXT_SVE_SUPPORTED, xfailIf, \
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, \
-    skipIfTorchDynamo, gcIfJetson, set_default_dtype, skipIfNoCuteDSL
+    skipIfTorchDynamo, gcIfJetson, set_default_dtype, skipIfNoCuteDSL, isRocmArchAnyOf, MI200_ARCH
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUDNN, \
-    SM80OrLater, SM90OrLater, _get_torch_rocm_version
+    SM80OrLater, SM90OrLater, _get_torch_rocm_version, has_device_side_assert
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
     module_tests, criterion_tests, loss_reference_fns, _create_basic_net, \
     ctcloss_reference, get_new_module_tests, single_batch_reference_fn, _test_bfloat16_ops, _test_module_empty_input
@@ -1817,6 +1817,18 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         m = nn.Linear(4, 5, dtype=torch.float16)
         m = torch.nn.utils.weight_norm(m)
 
+    @parametrize_test("dtype", [torch.float, torch.bfloat16, torch.float16])
+    def test_weight_norm_empty_input(self, dtype):
+        # Regression test for #181510. The fused CPU kernel reduced over an
+        # empty v, which handed a null data pointer to the vectorized load and
+        # left the saved norm at zero, so the g gradient came back nan.
+        m = torch.nn.utils.weight_norm(nn.Linear(0, 1).to(dtype=dtype))
+        out = m(torch.empty((1, 0), dtype=dtype))
+        self.assertEqual(out.shape, torch.Size([1, 1]))
+
+        out.sum().backward()
+        self.assertEqual(m.weight_g.grad, torch.zeros_like(m.weight_g))
+
     def test_parameterlistdict_setting_attributes(self):
         with warnings.catch_warnings(record=True) as w:
             mod = nn.ParameterList(map(nn.Parameter, [torch.rand(2), torch.rand(2)]))
@@ -3187,6 +3199,41 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                         self.assertNotEqual(output2.data, prev_output)
                 prev_output = output1.data
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    def test_RNN_dropout_gradients(self):
+        # Regression test for ROCm/ROCm#6339: a multi-layer GRU with dropout set
+        # via the module parameter (which routes through the fused cuDNN/MIOpen
+        # dropout path) must produce a fresh mask each training step and must not
+        # zero the input-to-hidden gradients. A prior MIOpen bug reused a single
+        # all-drop mask, which zeroed weight_ih_l* gradients and stalled training.
+        torch.manual_seed(0)
+        rnn = nn.GRU(16, 32, num_layers=2, dropout=0.5).cuda()
+        rnn.train()
+        input = torch.randn(7, 4, 16, device="cuda")
+        target = torch.randn(7, 4, 32, device="cuda")
+
+        # Consecutive training forwards on the same input must differ (dropout is
+        # actually stochastic across steps, not a fixed mask). Compare multiple
+        # consecutive pairs: under the original bug the first forward generated a
+        # real mask and only later steps repeated the fixed all-drop mask, so
+        # out1 != out2 held even on broken code while out2 == out3 exposed it.
+        out1, _ = rnn(input)
+        out2, _ = rnn(input)
+        out3, _ = rnn(input)
+        self.assertNotEqual(out1, out2)
+        self.assertNotEqual(out2, out3)
+        self.assertNotEqual(out1, out3)
+
+        # After a backward, the input-to-hidden gradients of the dropped layer
+        # must not be entirely zero.
+        rnn.zero_grad()
+        out, _ = rnn(input)
+        (out - target).pow(2).mean().backward()
+        for name, param in rnn.named_parameters():
+            if name.startswith("weight_ih"):
+                self.assertIsNotNone(param.grad)
+                self.assertGreater(param.grad.abs().sum().item(), 0.0)
+
     def test_inplace_thnn(self):
         modules = [nn.ReLU, nn.ELU, nn.SELU, nn.CELU, nn.RReLU]
         for mod in modules:
@@ -4045,6 +4092,15 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         with self.assertRaisesRegex(RuntimeError,
                                     re.escape("input tensor must have at least one element, but got input_sizes = [0, 1]")):
             torch.batch_norm_update_stats(input=input, momentum=0.0, running_mean=running_mean, running_var=running_var)
+
+    def test_native_batch_norm_eval_requires_running_stats(self):
+        # The raw aten op in eval mode with no running statistics used to
+        # segfault inside the kernel; it must raise instead (#194014).
+        x = torch.full((9, 2, 8, 8), 1.11e15)
+        w = torch.ones(2)
+        b = torch.zeros(2)
+        with self.assertRaisesRegex(ValueError, "running_mean must be defined in evaluation mode"):
+            torch.ops.aten.native_batch_norm(x, w, b, None, None, False, 0.1, 1e-5)
 
     def test_pairwise_distance(self):
         input1 = torch.randn(4, 4, requires_grad=True, dtype=torch.double)
@@ -7470,7 +7526,7 @@ class TestNNDeviceType(NNTestCase):
 
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
-    @tf32_on_and_off()
+    @tf32_on_and_off(0.005)
     @reduced_f32_on_and_off()
     def test_affine_2d_rotate0(self, device):
         # scipy before 1.0.0 do not support homogeneous coordinate
@@ -12212,13 +12268,7 @@ class TestThatContainsCUDAAssert(TestCase):
 if __name__ == '__main__':
     run_tests()
         """)
-        # CUDA says "device-side assert triggered"
-        # ROCm says "unspecified launch failure", or HSA_STATUS_ERROR_EXCEPTION
-        has_cuda_assert = 'CUDA error: device-side assert triggered' in stderr
-        has_hip_assert = ('launch failure' in stderr
-                          or 'HSA_STATUS_ERROR_EXCEPTION' in stderr
-                          or 'illegal memory access' in stderr)
-        self.assertTrue(has_cuda_assert or has_hip_assert,
+        self.assertTrue(has_device_side_assert(stderr),
                         lambda msg: f"{msg}\nExpected device assert error in stderr, got: {stderr}")
 
 
@@ -12938,17 +12988,6 @@ if __name__ == '__main__':
     @dtypesIfMPS(torch.float32)
     @dtypes(torch.float32, torch.float64)
     def test_module_to_empty(self, device, dtype):
-        if (
-            TEST_WITH_ROCM
-            and getRocmVersion() >= (7, 14)
-            and torch.device(device).type == "cuda"
-            and dtype == torch.float32
-        ):
-            self.skipTest(
-                "order/state-dependent NotImplementedError regex mismatch on "
-                "ROCm 7.14+ (cuda, float32)"
-            )
-
         class MyModule(nn.Module):
             def __init__(self, in_features, out_features, device=None, dtype=None):
                 super().__init__()
@@ -13473,6 +13512,30 @@ if __name__ == '__main__':
             self.assertEqual(out[0, 0, 0], 1 / numel)
 
     @onlyCUDA
+    @largeTensorTest("30GB", "cuda")
+    def test_spatial_softmax_backward_64bit_indexing(self, device):
+        # Softmax over a non-last dim (inner_size != 1) routes the backward to
+        # cunn_SpatialSoftMaxBackward, a separate kernel from the inner_size==1
+        # path exercised by test_softmax_backward_64bit_indexing. Its element
+        # offsets must be 64-bit once the tensor has > INT_MAX elements (the
+        # 32-bit fast path uses signed int indexing). With the softmax dim kept
+        # at size 2, the per-column result is exactly +/-0.1875 in fp16, so the
+        # last column provides a clean check that the wide offset is computed
+        # correctly.
+        inner_size = 2147483649  # > INT_MAX; with dim_size==2, 2*inner_size > 2**32 so uint32_t offsets would wrap
+        out = torch.empty([1, 2, inner_size], device=device, dtype=torch.float16)
+        out[0, 0].fill_(0.25)
+        out[0, 1].fill_(0.75)
+        grad = torch.empty([1, 2, inner_size], device=device, dtype=torch.float16)
+        grad[0, 0].fill_(1.0)
+        grad[0, 1].fill_(0.0)
+        gI = torch._softmax_backward_data(grad, out, 1, out.dtype)
+        self.assertEqual(gI[0, 0, 0], 0.1875)
+        self.assertEqual(gI[0, 1, 0], -0.1875)
+        self.assertEqual(gI[0, 0, -1], 0.1875)
+        self.assertEqual(gI[0, 1, -1], -0.1875)
+
+    @onlyCUDA
     @largeTensorTest("24GB", "cuda")
     def test_avg_pool3d_backward_64bit_indexing(self, device):
         # The overlapping-window avg_pool3d backward path scatters gradients
@@ -13759,6 +13822,18 @@ if __name__ == '__main__':
             else:  # compact, fp16 (cpu / cuda / rocm)
                 expected_input_grad_max_ulp_diff = 192  # cpu 93
                 expected_weight_grad_max_ulp_diff = 64  # cpu 23, cuda/rocm 5
+                if "cpu" not in device and isRocmArchAnyOf(MI200_ARCH):
+                    # bf16-grade backward GEMMs (see wb_grad_err_tol below):
+                    # input-grad err measured at 6.39e-3 = 6.54 * eps
+                    # (bias=False; bias=True 4.83 * eps) against the
+                    # feps = 3 * eps cap. 7.5 * eps covers it with ~15%
+                    # headroom while staying under 1 bf16 ulp (8 * eps).
+                    input_grad_err_mult = 7.5
+                    # Measured 206 / 117 (input / weight) against the shared
+                    # 192 / 64 caps; ~2.2-2.5x headroom like the
+                    # reduction='none' MI200 bump above (116 -> 256).
+                    expected_input_grad_max_ulp_diff = 512
+                    expected_weight_grad_max_ulp_diff = 256
         elif prob_target:
             # Probability-target caps with the near-zero ULP floor (see
             # ``grad_max_ulp``). fp32 takes the all-input-dtype path, so
@@ -13812,6 +13887,10 @@ if __name__ == '__main__':
             else:  # compact, fp16
                 expected_input_grad_max_ulp_diff = 48
                 expected_weight_grad_max_ulp_diff = 128
+                if "cpu" not in device and isRocmArchAnyOf(MI200_ARCH):
+                    # bf16-grade backward GEMMs (see wb_grad_err_tol below);
+                    # measured 116 against the shared cap of 48.
+                    expected_input_grad_max_ulp_diff = 256
         elif _resolved_policy == "accurate":
             # bias=False caps are device-independent here (the device-specific
             # spread lived only in the now-dropped bias=True caps).
@@ -13872,6 +13951,21 @@ if __name__ == '__main__':
         # Weight/bias grad_error use feps, except the prob+bias accelerator legs
         # (same cancellation inflates them too) which also get 16*eps.
         wb_grad_err_tol = eta * 16 if prob_bias_accel else feps
+        if "cpu" not in device and dtype == torch.float16 and isRocmArchAnyOf(MI200_ARCH):
+            # MI200 fp16 backward GEMMs use the bf16-intermediate alt
+            # implementation (fp16_on_mi200 in numerical_accuracy.md). The
+            # weight grad error trips its cap there: measured
+            # 3.283e-3 = 3.36 * eps against the feps = 3 * eps cap. Input
+            # grads and the ULP caps pass unchanged except the prob +
+            # reduction='none' legs, whose MI200 input-grad caps live in the
+            # branch above.
+            wb_grad_err_tol = feps * 2
+            if prob_target and none_reduction and _resolved_policy != "accurate":
+                # dW rides the same bf16-grade GEMMs as the input grad on
+                # these legs: weight err measured 6.20e-3 = 6.35 * eps
+                # (bias=True legs 4.17 * eps max) against the feps * 2 cap
+                # above, so it gets the same 7.5 * eps as the input grad.
+                wb_grad_err_tol = eta * 7.5
 
         def diff_ulp(x, y):
             # ULP difference between two normal numbers, applied to
@@ -16065,7 +16159,7 @@ class TestNNCUDA(NNTestCase):
         self.assertEqual(weight_data, all_vars[4].data)
 
     @skipCUDAIfNoCudnn
-    @tf32_on_and_off()
+    @tf32_on_and_off(0.005)
     @parametrize_test('mode,proj_size', [('LSTM', 0), ('LSTM', 10), ('GRU', 0), ('RNN', 0)])
     def test_cudnn_weight_tying(self, device, mode, proj_size):
         rnn_kwargs = {'proj_size': proj_size} if proj_size else {}
@@ -16099,7 +16193,7 @@ class TestNNCUDA(NNTestCase):
         self.assertEqual(output_device, output_cpu)
 
     @skipCUDAIfNoCudnn
-    @tf32_on_and_off()
+    @tf32_on_and_off(0.005)
     def test_RNN_cudnn_weight_norm(self, device):
         input_size = 10
         hidden_size = 6
