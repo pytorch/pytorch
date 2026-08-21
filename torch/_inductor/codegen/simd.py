@@ -1512,7 +1512,15 @@ class _IterationSpace:
     values: Sequence[sympy.Expr]
 
 
-RemappedRangeValue = CSEVariable | tuple[CSEVariable, ...]
+@dataclasses.dataclass(frozen=True)
+class _ContiguousSubParentRemappedValue:
+    parts: tuple[CSEVariable, ...]
+    parent_extent: sympy.Expr
+
+
+RemappedRangeValue = (
+    CSEVariable | tuple[CSEVariable, ...] | _ContiguousSubParentRemappedValue
+)
 
 
 class _SubParentFusion(enum.Enum):
@@ -1558,11 +1566,23 @@ class _DerivedIterationFamily:
     def resolve_load(self, name: str, index: sympy.Expr) -> CSEVariable | None:
         """The pre-materialized value for ``name``, or None if there is none.
 
-        A tuple entry in ``remapped_values`` is a lane tuple: the parent tile
-        was split into ``len(value)`` lanes, and ``index`` selects one of them
-        as ``index % len(value)``. Non-tuple entries are already the value.
+        Lane tuples select interleaved lanes with ``index % factor``. Contiguous
+        lanes select from the index's constant offset within the parent extent.
+        Non-lane entries are already the value.
         """
         value = self.remapped_values.get(name)
+        if isinstance(value, _ContiguousSubParentRemappedValue):
+            factor = len(value.parts)
+            lane = scheduler.NestedReduction.sub_parent_contiguous_lane(
+                index, factor, value.parent_extent
+            )
+            part = _select_lane(value.parts, lane)
+            if part is None:
+                raise AssertionError(
+                    "sub-parent planner invariant violated: contiguous load "
+                    f"for {name!r} has non-constant lane for index {index}"
+                )
+            return part
         if not isinstance(value, tuple):
             return value
         lane = scheduler.NestedReduction.interleaved_sub_parent_lane(
@@ -2052,26 +2072,43 @@ class _GroupedReductionLayout:
                 return False
             family.remapped_values[name] = value
             return True
-        interleaved = scheduler.NestedReduction.SubParentSourceLayout.INTERLEAVED
-        if source_layout is not interleaved:
+        if source_layout is None:
             return False
+        source_layout_kind = scheduler.NestedReduction.SubParentSourceLayout
         sub_parent_tree = family.sub_parent_tree()
         child_block = sub_parent_tree.block_size_str()
         factor_dim = str(factor)
-        if len(shape) == 2:
-            passthrough_dim = str(shape[1 - self.parent_axis])
-            reshape_shape = (passthrough_dim, child_block, factor_dim)
-            part_shape = (passthrough_dim, child_block)
-        else:
-            reshape_shape = (child_block, factor_dim)
-            part_shape = (child_block,)
+        # parent_dim() only accepts rank-1/2 tiles.
+        prefix = (str(shape[1 - self.parent_axis]),) if len(shape) == 2 else ()
         parts = tuple(
-            kernel.cse.newvar(dtype=value.dtype, shape=part_shape)
+            kernel.cse.newvar(dtype=value.dtype, shape=(*prefix, child_block))
             for _ in range(factor)
         )
-        kernel.emit_split_via_reshape(value, reshape_shape, tuple(map(str, parts)))
-        # Derived loads select the appropriate register value from this tuple.
-        family.remapped_values[name] = parts
+        part_names = tuple(map(str, parts))
+        if source_layout is source_layout_kind.CONTIGUOUS:
+            if not kernel.persistent_reduction:
+                return False
+            # make_sub_parent_family restricts the grouped parent axis to R,
+            # so any prefix is the unchanged X axis.
+            if self.parent_axis != 1:
+                raise AssertionError("contiguous sub-parent projection requires R")
+            reshape_shape = (*prefix, factor_dim, child_block)
+            permute_dims = (0, 2, 1) if prefix else (1, 0)
+            kernel.emit_split_via_reshape(
+                value, reshape_shape, part_names, permute_dims=permute_dims
+            )
+            family.remapped_values[name] = _ContiguousSubParentRemappedValue(
+                parts,
+                self.local_reduction_size,
+            )
+        else:
+            if source_layout is not source_layout_kind.INTERLEAVED:
+                raise AssertionError(f"unexpected sub-parent layout: {source_layout}")
+            kernel.emit_split_via_reshape(
+                value, (*prefix, child_block, factor_dim), part_names
+            )
+            # Derived loads select the appropriate register value from this tuple.
+            family.remapped_values[name] = parts
         return True
 
     def broadcast_group_value_to_lanes(
@@ -2797,7 +2834,54 @@ class SIMDScheduling(BaseScheduling):
             return None
         if not self._sub_parent_tiling_is_2d(nodes, parent_numel, parent_rnumel):
             return None
+        if self._sub_parent_has_internal_contiguous_source(plan):
+            parent_schedule = self._sub_parent_parent_schedule(plan)
+            features = SIMDKernelFeatures(
+                parent_schedule, plan.parent_numel, plan.parent_rnumel
+            )
+            if not V.choices.should_use_persistent_reduction(
+                features, cooperative_reduction=False
+            ):
+                return None
         return plan
+
+    @staticmethod
+    def _sub_parent_has_internal_contiguous_source(
+        plan: scheduler.StagedReductionPlan,
+    ) -> bool:
+        stage = plan.sub_parent_stages[0]
+        contiguous_names = OrderedSet(
+            name
+            for name, layout in stage.source_layouts
+            if layout is scheduler.NestedReduction.SubParentSourceLayout.CONTIGUOUS
+        )
+        internal_names = OrderedSet(
+            name for node in plan.parent_nodes for name in node.get_buffer_names()
+        )
+        return bool(contiguous_names & internal_names)
+
+    def _sub_parent_parent_schedule(
+        self, plan: scheduler.StagedReductionPlan
+    ) -> list[NodeScheduleEntry]:
+        parent_nodes = list(plan.parent_nodes)
+        deferred_start = plan.deferred_parent_start
+        if deferred_start is None:
+            return self.generate_node_schedule(
+                parent_nodes, plan.parent_numel, plan.parent_rnumel
+            )
+        leading_schedule = self.generate_node_schedule(
+            parent_nodes[:deferred_start], plan.parent_numel, plan.parent_rnumel
+        )
+        if leading_schedule[-1] is not EnableReduction:
+            leading_schedule.extend((DisableReduction, EnableReduction))
+        return [
+            *leading_schedule,
+            *self.generate_node_schedule(
+                parent_nodes[deferred_start:],
+                plan.parent_numel,
+                plan.parent_rnumel,
+            ),
+        ]
 
     def _sub_parent_tiling_is_2d(
         self,
@@ -3738,21 +3822,7 @@ class SIMDScheduling(BaseScheduling):
         internal_source_names = OrderedSet(sub_parent_source_layouts) & OrderedSet(
             name for node in parent_nodes for name in node.get_buffer_names()
         )
-        deferred_start = plan.deferred_parent_start
-        if deferred_start is None:
-            parent_schedule = self.generate_node_schedule(parent_nodes, numel, rnumel)
-        else:
-            leading_schedule = self.generate_node_schedule(
-                parent_nodes[:deferred_start], numel, rnumel
-            )
-            if leading_schedule[-1] is not EnableReduction:
-                leading_schedule.extend((DisableReduction, EnableReduction))
-            parent_schedule = [
-                *leading_schedule,
-                *self.generate_node_schedule(
-                    parent_nodes[deferred_start:], numel, rnumel
-                ),
-            ]
+        parent_schedule = self._sub_parent_parent_schedule(plan)
         schedule_log.debug(
             "Schedule:\n %s\nSub-parent epilogue:\n %s",
             parent_schedule,
@@ -3785,10 +3855,17 @@ class SIMDScheduling(BaseScheduling):
             "override_cooperative_reduction": False,
             "disable_multi_kernel": True,
         }
+        requires_persistent = self._sub_parent_has_internal_contiguous_source(plan)
+        if requires_persistent:
+            kernel_kwargs["override_persistent_reduction"] = True
         kernel = cast(
             "TritonKernel",
             self.create_kernel_choices(kernel_features, [tiling], kernel_kwargs)[0],
         )
+        if requires_persistent and not kernel.persistent_reduction:
+            raise AssertionError(
+                "looped sub-parent codegen cannot forward an internal contiguous source"
+            )
         metrics.codegen_nested_reduction += 1
         sub_parent_factor = stage.factor
         parent_rnumel = plan.parent_rnumel
