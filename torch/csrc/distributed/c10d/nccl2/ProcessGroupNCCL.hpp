@@ -338,6 +338,11 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // Returns {window handle, byte offset of ptr within the segment}, or
   // {nullptr, 0} if ptr is not inside a window-registered segment.
   std::pair<ncclWindow_t, size_t> lookupSegmentWindow(const void* ptr);
+#if defined(USE_ROCM)
+  // Returns true when ptr exactly matches an ncclMemAlloc segment base on this
+  // process group's device and len does not exceed the allocation size.
+  bool isNcclAllocatorSegment(const void* ptr, size_t len) const;
+#endif
   // Registers the segment containing ptr as a NCCL_WIN_COLL_SYMMETRIC window
   // if it is not one already. Collective: all ranks must call it together.
   ncclResult_t ensureSegmentWindow(const void* ptr);
@@ -700,9 +705,6 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // ncclCommMemPoolMap). The symm mode is not tracked: a segment carries its
   // own window handle, so teardown does not need to be told which mode to use.
   std::set<c10::cuda::MempoolId_t> registeredMemPools_;
-#if defined(USE_ROCM)
-  bool isNcclAllocatorSegment(const void* ptr, size_t len) const;
-#endif
   // Caller must hold memory_registration_mutex_ and have checked that `addr`
   // is not already registered.
   void registerAddressLocked(void* addr, size_t len);
