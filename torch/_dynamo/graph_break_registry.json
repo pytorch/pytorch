@@ -4770,6 +4770,16 @@
       ]
     }
   ],
+  "GB9368": [
+    {
+      "Gb_type": "tp_descr_set_impl not implemented",
+      "Context": "{type(self).__name__} has tp_descr_set slot but no tp_descr_set_impl override",
+      "Explanation": "The type {self.python_type_name()} has a tp_descr_set C slot but Dynamo has no model for it.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0291": [
     {
       "Gb_type": "logging.Logger method not supported for non-export cases",
