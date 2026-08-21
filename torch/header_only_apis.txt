@@ -6,8 +6,11 @@
 # torch/headeronly/util/shim_utils.h
 TORCH_ERROR_CODE_CHECK
 
-# c10/util/TypeCast.h
+# torch/headeronly/util/TypeCast.h
 convert
+checked_convert
+unsafe_wrapping_convert
+report_overflow
 
 # torch/headeronly/util/bit_cast.h
 bit_cast
@@ -236,3 +239,42 @@ HeaderOnlyGenericPackedTensorAccessor
 # C10_DEFINE_DEPRECATED_USING functionalities are expressed at compile
 # time that have no effect to runtime. Therefore, these macros are not
 # tested under test/.
+
+# torch/headeronly/util/MathConstants.h
+frac_1_sqrt_pi
+frac_1_pi
+frac_sqrt_3
+frac_sqrt_2
+golden_ratio
+log_10_e
+log_2_e
+euler
+ln_10
+ln_2
+sqrt_3
+sqrt_2
+pi
+e
+
+# torch/headeronly/util/copysign.h
+copysign
+
+# torch/headeronly/util/Load.h
+load
+
+# torch/headeronly/util/BFloat16-math.h
+is_reduced_floating_point_v
+is_reduced_floating_point
+
+# torch/headeronly/util/irange.h
+integer_range
+irange
+
+# torch/headeronly/util/overflows.h
+overflows
+
+# torch/headeronly/util/AccumulateType.h
+acc_type_device
+AccumulateTypeDevice
+AccumulateType
+acc_type
