@@ -2754,7 +2754,42 @@ class TestPrecompile(TestCase):
         )
         self.assertTrue(_read_literal(ast.parse(code), "POLICY_DROPPED_GUARDS"))
 
-    def test_installed_artifact_validates_at_load_not_at_first_call(self):
+    def test_installed_artifact_reuses_what_load_prepared(self):
+        # Preparing at load is only worth doing if install CONSUMES the result;
+        # otherwise it is the same work twice and a per-artifact memory cost.
+        import torch._dynamo.package as package_module
+
+        built = []
+        real = package_module.load_guard_manager
+
+        def count(*args, **kwargs):
+            built.append(1)
+            return real(*args, **kwargs)
+
+        model = _PrecompileBreakingModule().eval()
+        x = torch.randn(3, 8)
+        with torch.no_grad():
+            code, cache = torch.compiler.precompile(
+                _precompile_attr_entry,
+                backend="eager",
+                dynamic=False,
+                tracer="dynamo",
+                require_no_risky_drops=False,
+                example_inputs=[(model, x)],
+            )
+        from torch._precompile import _parse_artifact_metadata
+
+        self.assertEqual(_parse_artifact_metadata(code)["SERVING_MODE"], "installed")
+        torch._dynamo.reset()
+        with mock.patch.object(package_module, "load_guard_manager", count):
+            loaded = torch.compiler.precompile.load(code, cache)
+            at_load = len(built)
+            with _maybe_scoped(loaded), torch.no_grad():
+                loaded(model, x)
+        self.assertGreater(at_load, 0)
+        self.assertEqual(len(built), at_load)
+
+    def test_installed_artifact_is_prepared_at_load_not_at_first_call(self):
         # An installed artifact defers its mutation to the first call, which is
         # the right default -- but it used to defer every way the artifact can
         # be wrong for this host along with it, so a guard that would not
@@ -2791,7 +2826,7 @@ class TestPrecompile(TestCase):
 
         self.assertEqual(_parse_artifact_metadata(code)["SERVING_MODE"], "installed")
         torch._dynamo.reset()
-        with self.assertRaisesRegex(PrecompileError, "cannot rebuild its guards"):
+        with self.assertRaisesRegex(PrecompileError, "does not fit this host"):
             torch.compiler.precompile.load(code, cache)
 
     @parametrize("api", ["session", "public"])
