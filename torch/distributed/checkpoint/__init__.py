@@ -20,3 +20,4 @@ from .state_dict_loader import load, load_state_dict
 # pyrefly: ignore [deprecated]
 from .state_dict_saver import async_save, save, save_state_dict
 from .storage import StorageReader, StorageWriter
+from ._fsspec_filesystem import FsspecReader, FsspecWriter
