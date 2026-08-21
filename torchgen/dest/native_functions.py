@@ -32,7 +32,7 @@ _CPU_DLL_CUDA_KERNELS = frozenset(
 )
 
 
-# Dispatch key → TORCH_* for generated forward decls (Windows). Also used from register_dispatch_key.
+# Dispatch key -> TORCH_* for generated forward decls (Windows). Also used from register_dispatch_key.
 def torch_api_key_word_prefix(backend_index: BackendIndex) -> str:
     if backend_index.external:
         return ""
@@ -50,10 +50,10 @@ def torch_api_key_word_prefix(backend_index: BackendIndex) -> str:
 
 def dll_export_macro_for_kernel(
     backend_index: BackendIndex,
-    g: NativeFunction | NativeFunctionsGroup | None,
+    g: NativeFunction | NativeFunctionsGroup,
 ) -> str:
     macro = torch_api_key_word_prefix(backend_index)
-    if macro == "TORCH_CUDA_CPP_API" and g is not None:
+    if macro == "TORCH_CUDA_CPP_API":
         metadata = backend_index.get_kernel(g)
         if metadata and metadata.kernel in _CPU_DLL_CUDA_KERNELS:
             return "TORCH_API"

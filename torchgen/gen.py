@@ -1526,7 +1526,11 @@ def _decl_equivalence_key_for_dll_macros(decl: str) -> str:
     return "\n".join(parts)
 
 
-# Collide variants with the same DLL-macro equivalence key; prefer TORCH_API, then static, else first.
+# Collide variants with the same DLL-macro equivalence key; prefer TORCH_API, else keep the first.
+# Only TORCH_* prefixes are stripped when building the key, so a "static " decl (external backends,
+# which do not reach this path anyway) can never share a key with a TORCH_* variant.
+# A TORCH_CUDA_CPP_API / TORCH_XPU_API collision (a "CUDA, XPU: foo" kernel) matches no preference
+# and keeps backend_indices order, i.e. the CUDA variant.
 def _merge_native_decl_variants(existing: str | None, incoming: str) -> str:
     if existing is None:
         return incoming
@@ -1543,7 +1547,6 @@ def _merge_native_decl_variants(existing: str | None, incoming: str) -> str:
     pair = (existing, incoming)
     return (
         next((v for v in pair if first_sig_line(v).startswith("TORCH_API ")), None)
-        or next((v for v in pair if first_sig_line(v).startswith("static ")), None)
         or pair[0]
     )
 

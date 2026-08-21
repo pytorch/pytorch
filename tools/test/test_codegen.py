@@ -3,6 +3,7 @@ from __future__ import annotations
 import dataclasses
 import typing
 import unittest
+import unittest.mock
 from collections import defaultdict
 
 import yaml
@@ -13,7 +14,11 @@ from torchgen import dest
 from torchgen.api.python import PythonSignatureGroup, signature
 from torchgen.api.types import CppSignatureGroup, DispatcherSignature
 from torchgen.context import native_function_manager
-from torchgen.dest.native_functions import dll_export_macro_for_kernel
+from torchgen.dest import native_functions as native_functions_dest
+from torchgen.dest.native_functions import (
+    dll_export_macro_for_kernel,
+    validate_cpu_dll_cuda_kernels,
+)
 from torchgen.gen import (
     get_native_function_declarations,
     get_native_function_schema_registrations,
@@ -31,6 +36,7 @@ from torchgen.model import (
 )
 from torchgen.native_function_generation import add_generated_native_functions
 from torchgen.selective_build.selector import SelectiveBuilder
+from torchgen.utils import Target
 
 
 class TestGenPyi(unittest.TestCase):
@@ -402,7 +408,7 @@ class TestNativeDeclDllExportMacro(unittest.TestCase):
         self.assertTrue(decl[0].startswith("TORCH_CUDA_CPP_API "))
         self.assertIn("cuda_only_kernel(", decl[0])
 
-    def test_cpu_dll_cuda_kernel_uses_torch_api(self) -> None:
+    def test_allowlisted_cuda_kernel_uses_torch_api(self) -> None:
         native_function, backend_indices = _build_backend_indices_from_yaml(
             [
                 {
@@ -438,7 +444,7 @@ class TestNativeDeclDllExportMacro(unittest.TestCase):
         self.assertIn("shared_op(", joined)
         self.assertNotIn("TORCH_CUDA_CPP_API", joined)
 
-    def test_cpu_dll_quantized_cuda_kernel_overrides_quantized_cuda_only(
+    def test_allowlisted_quantized_cuda_kernel_overrides_only_quantized_cuda(
         self,
     ) -> None:
         native_function, backend_indices = _build_backend_indices_from_yaml(
@@ -489,6 +495,79 @@ class TestNativeDeclDllExportMacro(unittest.TestCase):
         self.assertEqual(len(decl), 1)
         self.assertTrue(decl[0].startswith("TORCH_API "))
         self.assertIn("_index_put_impl_quantized_cuda_(", decl[0])
+
+    def test_xpu_kernel_uses_torch_xpu_api(self) -> None:
+        native_function, backend_indices = _build_backend_indices_from_yaml(
+            [
+                {
+                    "func": "xpu_only_op(Tensor self) -> Tensor",
+                    "dispatch": {"XPU": "xpu_only_kernel"},
+                }
+            ]
+        )
+        decl = dest.compute_native_function_declaration(
+            native_function[0], backend_indices[DispatchKey.XPU]
+        )
+        self.assertEqual(len(decl), 1)
+        self.assertTrue(decl[0].startswith("TORCH_XPU_API "))
+        self.assertIn("xpu_only_kernel(", decl[0])
+
+    def test_cuda_namespaced_declaration_uses_torch_cuda_cpp_api(self) -> None:
+        native_function, backend_indices = _build_backend_indices_from_yaml(
+            [
+                {
+                    "func": "cuda_only_op(Tensor self) -> Tensor",
+                    "dispatch": {"CUDA": "cuda_only_kernel"},
+                }
+            ]
+        )
+        decl = dest.RegisterDispatchKey(
+            backend_index=backend_indices[DispatchKey.CUDA],
+            target=Target.NAMESPACED_DECLARATION,
+            selector=SelectiveBuilder.get_nop_selector(),
+            rocm=False,
+            symint=True,
+            class_method_name=None,
+            skip_dispatcher_op_registration=False,
+        )(native_function[0])
+        joined = "".join(decl)
+        self.assertIn("TORCH_CUDA_CPP_API ", joined)
+        self.assertNotIn("TORCH_API at::Tensor cuda_only_op", joined)
+
+    def test_validate_cpu_dll_cuda_kernels_accepts_reachable_entry(self) -> None:
+        _, backend_indices = _build_backend_indices_from_yaml(
+            [
+                {
+                    "func": "count_nonzero_cuda(Tensor self) -> Tensor",
+                    "dispatch": {"CUDA": "count_nonzero_cuda"},
+                }
+            ]
+        )
+        with unittest.mock.patch.object(
+            native_functions_dest,
+            "_CPU_DLL_CUDA_KERNELS",
+            frozenset({"count_nonzero_cuda"}),
+        ):
+            validate_cpu_dll_cuda_kernels(backend_indices)
+
+    def test_validate_cpu_dll_cuda_kernels_rejects_stale_entry(self) -> None:
+        _, backend_indices = _build_backend_indices_from_yaml(
+            [
+                {
+                    "func": "count_nonzero_cuda(Tensor self) -> Tensor",
+                    "dispatch": {"CUDA": "count_nonzero_cuda"},
+                }
+            ]
+        )
+        with unittest.mock.patch.object(
+            native_functions_dest,
+            "_CPU_DLL_CUDA_KERNELS",
+            frozenset({"kernel_removed_from_native_functions_yaml"}),
+        ):
+            with self.assertRaisesRegex(
+                AssertionError, "kernel_removed_from_native_functions_yaml"
+            ):
+                validate_cpu_dll_cuda_kernels(backend_indices)
 
 
 class TestGenNativeFunctionDeclaration(unittest.TestCase):
