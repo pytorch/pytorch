@@ -934,7 +934,8 @@ inline DispatchKey legacyExtractDispatchKey(DispatchKeySet s) {
                DispatchKey::FuncTorchGradWrapper,
                DispatchKey::FuncTorchVmapMode,
                DispatchKey::FuncTorchBatched,
-               DispatchKey::Python}))
+               DispatchKey::Python,
+               DispatchKey::Fake}))
       .highestPriorityTypeId();
 }
 

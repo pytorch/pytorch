@@ -40,4 +40,15 @@ void FakeTensorModeTLS::reset_state() {
   tls_set_dispatch_key_included(DispatchKey::Fake, false);
 }
 
+static NormalizeFakeDeviceFn normalizeFakeDeviceFn = nullptr;
+
+void setNormalizeFakeDeviceFn(NormalizeFakeDeviceFn fn) {
+  normalizeFakeDeviceFn = fn;
+}
+
+DeviceIndex normalizeFakeDevice(DeviceType type) {
+  return normalizeFakeDeviceFn ? normalizeFakeDeviceFn(type)
+                               : static_cast<DeviceIndex>(0);
+}
+
 } // namespace c10::impl

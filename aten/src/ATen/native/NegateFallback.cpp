@@ -19,6 +19,10 @@ TORCH_LIBRARY_IMPL(_, Negative, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&negationFallback>());
 }
 
+TORCH_LIBRARY_IMPL(prims, Negative, m) {
+  m.impl("as_strided", torch::CppFunction::makeFallthrough());
+}
+
 TORCH_LIBRARY_IMPL(aten, Negative, m) {
   m.impl("set_.source_Storage_storage_offset", torch::CppFunction::makeFallthrough());
   m.impl("set_.source_Tensor", torch::CppFunction::makeFallthrough());
