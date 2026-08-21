@@ -84,7 +84,7 @@ class TORCH_API ProcessGroupGloo : public Backend {
 
     c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
     uint64_t getSequencenumber() const override;
-    std::chrono::milliseconds getTimeout() const;
+    std::chrono::milliseconds getTimeout() const override;
     virtual const std::vector<at::Tensor> getInputTensors() = 0;
     virtual const std::vector<at::Tensor> getOutputTensors() = 0;
     inline std::string getProfilerTitle() const {
@@ -259,6 +259,10 @@ class TORCH_API ProcessGroupGloo : public Backend {
     static c10::intrusive_ptr<Options> create_default(
         std::chrono::milliseconds timeout = kBackendDefaultTimeout);
 
+    c10::intrusive_ptr<Backend::Options> clone() const override {
+      return c10::make_intrusive<Options>(*this);
+    }
+
     std::vector<std::shared_ptr<::gloo::transport::Device>> devices;
     int threads{2};
   };
@@ -317,6 +321,10 @@ class TORCH_API ProcessGroupGloo : public Backend {
 
   c10::intrusive_ptr<Backend::Options> getBackendOptions() override {
     return c10::static_intrusive_pointer_cast<Backend::Options>(options_);
+  }
+
+  ErrorType getError() override {
+    return ErrorType::SUCCESS;
   }
 
   c10::intrusive_ptr<Backend> split(

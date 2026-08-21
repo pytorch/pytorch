@@ -4,6 +4,7 @@ from contextlib import contextmanager
 
 import torch
 import torch.utils._pytree as pytree
+from torch._higher_order_ops.auto_functionalize import auto_functionalized_v2_dense
 from torch.torch_version import TorchVersion
 from torch.utils._python_dispatch import TorchDispatchMode
 
@@ -54,10 +55,6 @@ class CUDAGraphCaptureControlFlowOpDispatchMode(TorchDispatchMode):
             and len(args) > 0
             and _is_control_flow_op(args[0])
         ):
-            from torch._higher_order_ops.auto_functionalize import (
-                auto_functionalized_v2_dense,
-            )
-
             with self:
                 return auto_functionalized_v2_dense(*args, **kwargs)
         return func(*args, **kwargs)
@@ -163,10 +160,6 @@ class ControlFlowOpWarmupDispatchMode(TorchDispatchMode):
             and len(args) > 0
             and _is_control_flow_op(args[0])
         ):
-            from torch._higher_order_ops.auto_functionalize import (
-                auto_functionalized_v2_dense,
-            )
-
             with self:
                 return auto_functionalized_v2_dense(*args, **kwargs)
         else:
@@ -187,9 +180,12 @@ def _check_no_cond_kwargs(kwargs) -> None:
 
 
 def _check_while_loop_kwargs(kwargs) -> None:
-    if kwargs.keys() - {"mutated_arg_indices"}:
+    unsupported_kwargs = kwargs.keys() - {"mutated_arg_indices"}
+    if unsupported_kwargs:
         raise RuntimeError(
-            "CUDA graph conditional torch.while_loop does not support kwargs"
+            "CUDA graph conditional torch.while_loop only supports "
+            "mutated_arg_indices as a kwarg; got unsupported kwargs: "
+            f"{', '.join(sorted(unsupported_kwargs))}"
         )
 
 
@@ -394,6 +390,8 @@ def while_loop_node(
             )
         current_cuda_graph.set_conditional_handle_for_current_node(pred)
 
+    # Additional inputs are passed by reference and mutated in place; only the
+    # cloned carried inputs need their final values copied back.
     for idx, (input_arg, carried) in enumerate(
         zip(flat_carried_inputs, flat_loop_carried)
     ):

@@ -161,6 +161,9 @@ specialize_int = False
 # support codegen on float (this is to be fixed).
 specialize_float = False
 
+# Max ops per ComputedLazyConstantVariable chain before realizing under guards; 0 disables
+computed_lazy_constant_max_nodes = 64
+
 # legacy config, does nothing now!
 dynamic_shapes = True
 
@@ -447,7 +450,7 @@ optimize_ddp_lazy_compile = False
 
 # lambda guarding on object aliasing to improve opportunity for dict tag
 # optimization
-use_lamba_guard_for_object_aliasing = True
+use_lamba_guard_for_object_aliasing = False
 
 # Whether to skip guarding on FSDP-managed modules
 skip_fsdp_guards = True
@@ -522,7 +525,7 @@ allow_rnn = False
 # exported FX graph. This flag should become the default eventually
 # and be removed, but currently provides a way to fall back to old
 # graph breaking behavior.
-capture_sparse_compute = not is_fbcode()
+capture_sparse_compute = True
 
 # If true, error if we try to compile a function that has
 # been seen before.
@@ -565,9 +568,11 @@ enable_trace_unittest = False
 # Enable tracing LOAD_BUILD_CLASS bytecode
 enable_trace_load_build_class = False
 
-# Enable tracing generator functions lazily. If False, Dynamo will exhaust
-# generators upon first execution. And if True, the generator will be accessed lazily
-enable_faithful_generator_behavior = True
+enable_faithful_generator_behavior = Config(  # type: ignore[var-annotated]
+    default=True,
+    deprecated=True,
+    deprecation_message="does not do anything, generators are always traced lazily",
+)
 
 # Inline inbuilt nn modules
 inline_inbuilt_nn_modules = Config(  # type: ignore[var-annotated]
@@ -914,9 +919,8 @@ inline_invoke_subgraph: bool = False
 # Single-use subgraphs add overhead without deduplication benefit.
 inline_single_use_invoke_subgraph: bool = True
 
-# Clear WeakIdRef entries from TracingContext.tensor_to_context and
-# MetaTensorDescriber.lookup_tensor at the end of compile. These weakrefs
-# can block torch.utils.swap_tensors from working after compile.
+# Clear compile-context references, including ShapeEnv tracked fakes, at the
+# end of compile. These can retain tensors or block torch.utils.swap_tensors.
 # - None (default): clear for registered backends (inductor, eager, etc.),
 #   don't clear for custom backends (to support standalone_compile, etc.)
 # - True: always clear regardless of backend

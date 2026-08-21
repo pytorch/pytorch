@@ -25,6 +25,8 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import parametrize, skipIfXpu
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils._ordered_set import OrderedSet
+from torch.utils._sympy.functions import FloorDiv
+from torch.utils._sympy.printers import PythonPrinter
 
 
 class TestUnbackedSymints(InductorTestCase):
@@ -73,6 +75,38 @@ class TestUnbackedSymints(InductorTestCase):
         actual = torch.compile(fn, fullgraph=True)(x)
         expected = fn(x)
         torch.testing.assert_close(actual, expected)
+
+    def test_remove_no_ops_unbacked_shape_dde(self, device):
+        # Regression: fake_tensors_eq in remove_no_ops used `shape1 != shape2`,
+        # which raises GuardOnDataDependentSymNode when the tuples contain
+        # two different unbacked SymInts (u0 vs u1).
+        from torch._inductor.fx_passes.joint_graph import remove_no_ops
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+        with FakeTensorMode(shape_env=shape_env):
+            u0 = shape_env.create_unbacked_symint()
+            u1 = shape_env.create_unbacked_symint()
+            ones_val = torch.empty((u0, 128), device=device)
+            x_val = torch.empty((u1, 128), device=device)
+
+        graph = torch.fx.Graph()
+        ones_node = graph.placeholder("ones")
+        x_node = graph.placeholder("x")
+        ones_node.meta["val"] = ones_val
+        x_node.meta["val"] = x_val
+        mul = graph.call_function(torch.ops.aten.mul.Tensor, (ones_node, x_node))
+        mul.meta["val"] = ones_val
+        graph.output(mul)
+        gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+
+        # Must not raise. Shapes are not provably equal, so mul must stay.
+        remove_no_ops(gm, OrderedSet(), OrderedSet([ones_node]))
+        self.assertEqual(
+            sum(1 for n in gm.graph.nodes if n.target is torch.ops.aten.mul.Tensor),
+            1,
+        )
 
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
@@ -898,6 +932,44 @@ class TestUnbackedSymints(InductorTestCase):
         torch.testing.assert_close(compiled(counts, x), fn(counts, x))
 
     @dynamo_config.patch({"capture_scalar_outputs": True})
+    def test_inplace_multidim_dynamic_slice_tensor_bound(self, device):
+        # Regression test for https://github.com/pytorch/pytorch/issues/183259
+        def fn(tensor_span):
+            batch_size = tensor_span.shape[0]
+            mask = torch.zeros(
+                (batch_size, 20, 20),
+                dtype=torch.float32,
+                device=tensor_span.device,
+            )
+            for i in range(batch_size):
+                span = tensor_span[i, 0]
+                mask[i, :span, :span] = 1.0
+            return mask
+
+        compiled_fn = torch.compile(fn, fullgraph=True, dynamic=True)
+        for span in (8, 25, -1, -25, 0):
+            tensor_span = torch.tensor([[span]], dtype=torch.int64, device=device)
+            actual = compiled_fn(tensor_span)
+            expected = fn(tensor_span)
+            torch.testing.assert_close(actual, expected)
+
+    @dynamo_config.patch({"capture_scalar_outputs": True})
+    def test_slice_scatter_dynamic_end_invalid_src_size(self, device):
+        def fn(x, src, end):
+            return torch.ops.aten.slice_scatter.default(x, src, 0, 0, end.item(), 1)
+
+        compiled_fn = torch.compile(fn, fullgraph=True, dynamic=True)
+        for src_len in (1, 2, 4):
+            x = torch.arange(5, dtype=torch.float32, device=device)
+            src = torch.ones(src_len, dtype=torch.float32, device=device)
+            end = torch.tensor(3, dtype=torch.int64, device=device)
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "expected src to have a size equal to the slice of self|Eq\\(",
+            ):
+                compiled_fn(x, src, end)
+
+    @dynamo_config.patch({"capture_scalar_outputs": True})
     def test_override_optimization_hint_eager(self, device):
         """Test that override_optimization_hint updates var_to_hint_override eagerly."""
         t = torch.tensor([5], device=device)
@@ -1121,7 +1193,12 @@ class TestUnbackedSymints(InductorTestCase):
         shape_env.replacements[s0] = s2
         sizevars = SizeVarAllocator(shape_env)
         graph_inputs = {}
-        graph = mock.Mock(sizevars=sizevars, graph_inputs=graph_inputs)
+        graph = mock.Mock(
+            sizevars=sizevars,
+            graph_inputs=graph_inputs,
+            graph_input_names=list(graph_inputs),
+            symbolic_input_sources={},
+        )
 
         value = ir.TensorBox.create(
             ir.InputBuffer(
@@ -1135,6 +1212,7 @@ class TestUnbackedSymints(InductorTestCase):
             )
         )
         graph_inputs["arg0_1"] = value
+        graph.graph_input_names = list(graph_inputs)
 
         wrapper = PythonWrapperCodegen.__new__(PythonWrapperCodegen)
         wrapper.prefix = IndentedBuffer()
@@ -1197,7 +1275,10 @@ class TestUnbackedSymints(InductorTestCase):
             ),
         }
         graph = mock.Mock(
-            sizevars=SizeVarAllocator(ShapeEnv()), graph_inputs=graph_inputs
+            sizevars=SizeVarAllocator(ShapeEnv()),
+            graph_inputs=graph_inputs,
+            graph_input_names=list(graph_inputs),
+            symbolic_input_sources={},
         )
 
         wrapper = PythonWrapperCodegen.__new__(PythonWrapperCodegen)
@@ -1233,7 +1314,10 @@ class TestUnbackedSymints(InductorTestCase):
             ),
         }
         graph = mock.Mock(
-            sizevars=SizeVarAllocator(ShapeEnv()), graph_inputs=graph_inputs
+            sizevars=SizeVarAllocator(ShapeEnv()),
+            graph_inputs=graph_inputs,
+            graph_input_names=list(graph_inputs),
+            symbolic_input_sources={},
         )
 
         wrapper = PythonWrapperCodegen.__new__(PythonWrapperCodegen)
@@ -1252,6 +1336,52 @@ class TestUnbackedSymints(InductorTestCase):
         cpp_code = cpp_wrapper.prefix.getvalue()
         self.assertIn("int64_t s4 = arg0_1_size[1];", cpp_code)
         self.assertRegex(cpp_code, r"int64_t s5 = .*arg0_1_size_0")
+
+    def test_stride_ordered_handles_reciprocal_in_divisibility_check(self, device):
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+        seq = shape_env.create_unbacked_symint().node.expr
+        shape_env.constrain_symbol_range(seq, 4, 1024)
+        half = FloorDiv(seq, 2)
+        reduced = FloorDiv(half**2, half)
+        left = 16 * reduced - 30
+        right = 16 * (64 * half * reduced - 120 * half - 120 * reduced + 225)
+        sizevars = SizeVarAllocator(shape_env)
+        graph = mock.Mock(sizevars=sizevars)
+
+        layout = ir.FixedLayout(
+            torch.device(device),
+            torch.float32,
+            size=[seq, 2],
+            stride=[left, right],
+        )
+        with V.set_graph_handler(graph):
+            with mock.patch.object(
+                sizevars,
+                "optimization_hint",
+                side_effect=AssertionError("unexpected optimization hint"),
+            ):
+                self.assertTrue(layout.is_stride_ordered([0, 1]))
+
+        fallback_sizevars = mock.Mock()
+        fallback_sizevars.guard_or_false.return_value = False
+        fallback_sizevars.statically_known_multiple_of.return_value = False
+        graph = mock.Mock(sizevars=fallback_sizevars)
+        with V.set_graph_handler(graph):
+            self.assertFalse(ir.Layout._stride_expr_ge_or_false(left, right))
+
+        fallback_sizevars.statically_known_multiple_of.assert_called_once_with(
+            left, right
+        )
+        guard = fallback_sizevars.guard_or_false.call_args.args[0]
+        negative_powers = [
+            power
+            for power in guard.atoms(sympy.Pow)
+            if power.args[1].is_negative is True
+        ]
+        self.assertEqual(negative_powers, [])
+        self.assertIn("%", PythonPrinter().doprint(guard))
 
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
