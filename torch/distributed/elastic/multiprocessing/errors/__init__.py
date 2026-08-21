@@ -240,7 +240,7 @@ class ChildFailedError(Exception):
     def __init__(self, name: str, failures: dict[GlobalRank, ProcessFailure]):
         self.name = name
         self.failures = failures
-        # does not make sense to create a ChildFaileError with no failures
+        # does not make sense to create a ChildFailedError with no failures
         if not self.failures:
             raise AssertionError
         super().__init__(self.format_msg())

@@ -28,7 +28,7 @@ from torch._export.serde.serialize import (
 )
 from torch._inductor.cpp_builder import normalize_path_separator
 from torch._library.opaque_object import is_custom_class_obj
-from torch._subclasses.fake_tensor import FakeTensor
+from torch._subclasses.fake_tensor import FakeTensor, is_fake_tensor
 from torch.export import ExportedProgram
 from torch.export._tree_utils import reorder_kwargs
 from torch.export.pt2_archive._package_weights import (
@@ -329,7 +329,7 @@ def _package_aoti_files(
 
 
 def _is_fake_tensor(t: torch.Tensor) -> TypeIs[FakeTensor]:
-    return isinstance(t, FakeTensor)
+    return is_fake_tensor(t)
 
 
 def _is_tensor_subclass(t: torch.Tensor) -> bool:

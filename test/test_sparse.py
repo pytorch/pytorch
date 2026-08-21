@@ -2031,7 +2031,10 @@ class TestSparse(TestSparseBase):
         def test_shape(sparse_dims, nnz, with_size):
             x, _, _ = self._gen_sparse(sparse_dims, nnz, with_size, dtype, device, coalesced)
             y = x.coalesce()
-            self.assertEqual(x.norm(), y._values().norm())
+            self.assertEqual(
+                torch.linalg.vector_norm(x),
+                torch.linalg.vector_norm(y._values()),
+            )
 
         test_shape(3, 10, 100)
         test_shape(4, 10, [100, 100, 100, 5, 5, 5, 0])
@@ -2043,15 +2046,13 @@ class TestSparse(TestSparseBase):
              RuntimeError, r'norm_sparse currently does not support keepdim=True'),
             ({'dim': 0},
              RuntimeError, r'norm_sparse currently only supports full reductions'),
-            ({'dtype': torch.double, 'p': 'fro'},
-             ValueError, r'dtype argument is not supported in frobenius norm'),
-            ({'dtype': torch.double, 'p': 0},
-             RuntimeError, r"norm_sparse currently does not support 'dtype' argument")
+            ({'dtype': torch.double, 'ord': 0},
+             RuntimeError, r"norm_sparse currently does not support 'dtype' argument"),
         ]
         x = self._gen_sparse(3, 10, 100, dtype, device, coalesced)[0]
         for kwargs, err, msg in kwarg_error_pairs:
             with self.assertRaisesRegex(err, msg):
-                x.norm(**kwargs)
+                torch.linalg.vector_norm(x, **kwargs)
 
     @coalescedonoff
     @dtypes(torch.double)
@@ -4286,7 +4287,7 @@ class TestSparse(TestSparseBase):
             else:
                 ex_layout = layout
             out_dense = out.to_dense()
-            self.assertTrue(out.layout == ex_layout, f"Output layout {out.layout} expected {ex_layout}")
+            self.assertTrue(out.layout == ex_layout, lambda msg: f"{msg}\nOutput layout {out.layout} expected {ex_layout}")
             self.assertEqual(out_dense, ref_out, lambda msg: f"{msg}\nResult:\n{out_dense} does not match reference:\n{ref_out}")
 
         def check_invalid(args, error):

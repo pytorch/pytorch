@@ -83,6 +83,26 @@ class MPSBasicTests(TestCase):
         if torch.isnan(result).any():
             raise AssertionError("tanh should not produce NaN for large values")
 
+    def test_erfc_tail_accuracy(self):
+        # gh-187806: compiled erfc must lower to c10::metal::erfc, not the
+        # 1 - erf fallback that flushes the tail to zero past x ~ 3.9
+        x = torch.arange(-9.0, 9.0, 2**-10, device="mps")
+
+        @torch.compile
+        def fn(x):
+            return torch.erfc(x)
+
+        actual = fn(x).cpu().double()
+        expected = torch.erfc(x.cpu().double())
+        self.assertEqual(actual, expected, rtol=1e-6, atol=0)
+        # specials and the clamped tail (t = min(|x|, 10.5) in the kernel);
+        # erfc rounds to exactly 0/2 in fp32 well before the clamp
+        inf, nan = float("inf"), float("nan")
+        vals = [0.0, inf, -inf, nan, 10.5, -10.5, 1e30, -1e30]
+        sp = torch.tensor(vals, device="mps")
+        expected_sp = torch.tensor([1.0, 0.0, 2.0, nan, 0.0, 2.0, 0.0, 2.0])
+        self.assertEqual(fn(sp).cpu(), expected_sp, rtol=0, atol=0)
+
     def test_floor(self):
         self.common(lambda x: x.floor(), (torch.rand(1024),))
 
