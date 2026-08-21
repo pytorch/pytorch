@@ -53,6 +53,60 @@ def _choices_context(force_persistent: bool | None):
     return V.set_choices_handler(_Choices())
 
 
+def _looped_reduction_block_context(r0_block: int):
+    from torch._inductor.codegen.triton import FixedTritonConfig
+
+    class _Choices(InductorChoices):
+        @staticmethod
+        def should_use_cooperative_reduction(*args, **kwargs):
+            return False
+
+        @staticmethod
+        def should_use_persistent_reduction(*args, **kwargs):
+            return False
+
+        def triton_kernel_kwargs(self, kernel_cls, features, groups, kernel_kwargs):
+            return {
+                **kernel_kwargs,
+                "fixed_config": FixedTritonConfig(
+                    {"XBLOCK": 8, "R0_BLOCK": r0_block, "num_warps": 4, "num_stages": 1}
+                ),
+            }
+
+    return V.set_choices_handler(_Choices())
+
+
+def _swizzle_aligned_scale(scale):
+    """Apply the GEMM scale swizzle without padding an already aligned tensor."""
+    rows, cols = scale.shape
+    tiles = scale.view(rows // 128, 128, cols // 4, 4).permute(0, 2, 1, 3)
+    return tiles.reshape(-1, 4, 32, 4).transpose(1, 2).reshape(rows, cols)
+
+
+def _rmsnorm_nvfp4_with_scale_layout(x, weight, D, G, *, swizzled):
+    import torch.nn.functional as F
+
+    B = x.shape[0]
+    x = F.rms_norm(x, (D,), weight).view(B, D // G, G)
+    amax = x.abs().amax(dim=-1)
+    scale = (amax / 6.0).clamp(min=1e-12, max=448.0).to(torch.float8_e4m3fn)
+    pairs = x.view(B, D // G, G // 2, 2)
+    inv_scale = scale.float().unsqueeze(-1).reciprocal()
+    packed = inline_asm_elementwise(
+        pairs[..., 0].float() * inv_scale,
+        pairs[..., 1].float() * inv_scale,
+        asm_str="{.reg .b8 t; cvt.rn.satfinite.e2m1x2.f32 t, $2, $1; cvt.u32.u8 $0, t;}",
+        constraints="=r,f,f",
+        dtype=torch.int32,
+        is_pure=True,
+        pack=1,
+    )
+    scale = scale.view(B, D // G)
+    return packed.to(torch.uint8).view(B, D // 2), (
+        _swizzle_aligned_scale(scale) if swizzled else scale
+    )
+
+
 class TestBase(TestCase):
     force_persistent_outer_reduction: bool | None = None
 
@@ -962,6 +1016,47 @@ class _NestedReductionBase:
         self.assertEqual(act[0], ref[0])
         self.assertEqual(act[1].float(), ref[1].float(), atol=1e-2, rtol=1e-2)
         self.check_fusion()
+
+    @skipIfRocm
+    @skipIfXpu(msg="NVFP4 inline asm requires CUDA")
+    def test_producer_consumer_rmsnorm_nvfp4_swizzled_scale(self):
+        if torch.cuda.get_device_capability()[0] < 10:
+            self.skipTest("NVFP4 inline asm requires SM100+")
+
+        B, D, G = 128, 4096, 16
+        x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
+        weight = torch.randn(D, device=GPU_TYPE, dtype=torch.bfloat16)
+
+        def compile_variant(swizzled):
+            def f(x, weight):
+                return _rmsnorm_nvfp4_with_scale_layout(
+                    x, weight, D, G, swizzled=swizzled
+                )
+
+            torch._dynamo.reset()
+            metrics.reset()
+            context = (
+                _looped_reduction_block_context(1024)
+                if self.force_persistent_outer_reduction is False
+                else _choices_context(True)
+            )
+            with context:
+                out, source = run_and_get_code(
+                    torch.compile(f, fullgraph=True), x, weight
+                )
+            self.check_fusion()
+            return out, "\n".join(source)
+
+        (row_packed, row_scale), _ = compile_variant(swizzled=False)
+        (swizzled_packed, swizzled_scale), source = compile_variant(swizzled=True)
+
+        self.assertEqual(swizzled_packed, row_packed)
+        self.assertEqual(
+            swizzled_scale.view(torch.uint8),
+            _swizzle_aligned_scale(row_scale).view(torch.uint8),
+        )
+        FileCheck().check_count(".to(tl.float8e4nv)", 1, exactly=True).run(source)
+        self.assertEqual(re.findall(r"tl\.load\((?:out|in_out)_ptr", source), [])
 
     @parametrize("B", [1, 128])
     @skipIfRocm
@@ -2313,6 +2408,24 @@ def _capture_nvfp4_kernel_sources(
     )
 
 
+def _capture_nvfp4_swizzled_scale_sources(
+    batch_size: int, *, force_persistent_outer_reduction: bool | None = None
+) -> tuple[str, str]:
+    B, D, G = batch_size, 4096, 16
+
+    def f(x, weight):
+        return _rmsnorm_nvfp4_with_scale_layout(x, weight, D, G, swizzled=True)
+
+    x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
+    weight = torch.randn(D, device=GPU_TYPE, dtype=torch.bfloat16)
+    return _run_and_capture_sources(
+        f,
+        (x, weight),
+        _nested_kernel_signature(force_persistent_outer_reduction),
+        force_persistent_outer_reduction=force_persistent_outer_reduction,
+    )
+
+
 def _rmsnorm_mxfp4(x, weight, G):
     import torch.nn.functional as F
     from torch._inductor import inductor_prims
@@ -2767,12 +2880,32 @@ class _InternalsBase:
             meta_num_load=self.looped_or_persistent(3, 2),
             min_rblock=16,
             extra_checks=FileCheck()
-            .check("tl.broadcast_to")
+            .check_count(".to(tl.float8e4nv)", 1, exactly=True)
             .check("tl.split(")
-            .check(".to(tl.uint8, bitcast=True)")
-            .check(").to(tl.float8e4nv, bitcast=True)")
+            .check_regex(r"tmp\d+ = tmp\d+\.to\(tl\.float32\)")
+            .check_regex(r"tl\.reshape\(tl\.broadcast_to\(tmp\d+\[:, :, None\]")
+            .check_regex(r"tmp\d+ = \(tmp\d+ / tmp\d+\)")
             .check("tl.inline_asm_elementwise")
             .check("cvt.rn.satfinite.e2m1x2.f32"),
+        )
+
+    @skipIfRocm
+    @skipIfXpu(msg="NVFP4 inline asm requires CUDA")
+    def test_nvfp4_swizzled_scale_kernel_form(self):
+        if torch.cuda.get_device_capability()[0] < 10:
+            self.skipTest("NVFP4 inline asm requires SM100+")
+
+        self.assert_single_kernel_form(
+            _capture_nvfp4_swizzled_scale_sources,
+            128,
+            input_counts=self.looped_or_persistent({0: 2, 1: 1}, {0: 1, 1: 1}),
+            num_outputs=2,
+            meta_num_load=self.looped_or_persistent(3, 2),
+            min_rblock=16,
+            extra_checks=FileCheck()
+            .check_count(".to(tl.float8e4nv)", 1, exactly=True)
+            .check_regex(r"tmp\d+ = \(tmp\d+ / tmp\d+\)")
+            .check_regex(r"tl\.reshape\(tl\.broadcast_to\(tmp\d+\[:, :, None\]"),
         )
 
     @skipIfRocm
