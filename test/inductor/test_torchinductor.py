@@ -19776,6 +19776,136 @@ class _TemplateDeviceHost:
         super().setUp()
 
 
+def _wrap_template_test(test):
+    source_params = inspect.signature(test).parameters
+
+    @functools.wraps(test)
+    def wrapped(self, *args, device=None, devices=None, **kwargs):
+        if devices is not None:
+            self.devices = devices
+            self.device = devices[0]
+            if "devices" in source_params:
+                kwargs["devices"] = devices
+        elif device is not None:
+            self.device = device
+            if "device" in source_params:
+                kwargs["device"] = device
+        return test(self, *args, **kwargs)
+
+    wrapped.__dict__ = copy.deepcopy(test.__dict__)
+    # Let the device framework inspect wrapped's device-aware signature.
+    wrapped.__dict__.pop("__wrapped__", None)
+    return wrapped
+
+
+def _is_preexpanded_test(name, test):
+    # Expanded parameter cases have a generated name or capture param_kwargs.
+    if name != test.__name__:
+        return True
+    while test is not None:
+        params = inspect.signature(test, follow_wrapped=False).parameters
+        if "param_kwargs" in params:
+            return True
+        test = getattr(test, "__wrapped__", None)
+    return False
+
+
+def _template_parametrize_fn(
+    source_parametrize_fn,
+    test_decorator,
+    test_failure,
+    has_xfail_prop,
+    suffix_overrides,
+):
+    def parametrize_fn(test, generic_cls, device_cls):
+        if source_parametrize_fn is None:
+            cases = ((test, "", {}, lambda _: ()),)
+        else:
+            cases = source_parametrize_fn(
+                test, generic_cls=generic_cls, device_cls=device_cls
+            )
+
+        suffix = device_cls.device_type
+        if suffix == "privateuse1":
+            suffix = torch._C._get_privateuse1_backend_name()
+        if suffix_overrides is not None:
+            suffix = suffix_overrides.get(suffix, suffix)
+
+        decorators = []
+        if test_decorator is not None:
+            decorators.append(test_decorator)
+        if has_xfail_prop:
+            decorators.append(unittest.expectedFailure)
+        if test_failure is not None and suffix in test_failure.suffixes:
+            decorators.append(
+                unittest.skip("Skipped!")
+                if test_failure.is_skip
+                else unittest.expectedFailure
+            )
+
+        for test_case, test_suffix, param_kwargs, decorator_fn in cases:
+
+            def combined_decorator_fn(
+                params,
+                _decorator_fn=decorator_fn,
+                _decorators=tuple(decorators),
+            ):
+                return (*_decorator_fn(params), *_decorators)
+
+            yield test_case, test_suffix, param_kwargs, combined_decorator_fn
+
+    return parametrize_fn
+
+
+def _rename_test_suffix(generated_cls, device_suffix, suffix):
+    marker = f"_{device_suffix}"
+    for name, value in tuple(generated_cls.__dict__.items()):
+        if not name.startswith("test") or marker not in name:
+            continue
+        prefix, _, tail = name.rpartition(marker)
+        new_name = f"{prefix}_{suffix}{tail}"
+        if hasattr(generated_cls, new_name):
+            raise AssertionError(f"duplicate generated test: {new_name}")
+        setattr(generated_cls, new_name, value)
+        delattr(generated_cls, name)
+
+
+def _apply_template_name_overrides(
+    generated, scope, suffix_overrides, class_name_overrides
+):
+    for generated_cls in generated:
+        device_type = generated_cls.device_type
+        device_suffix = (
+            torch._C._get_privateuse1_backend_name()
+            if device_type == "privateuse1"
+            else device_type
+        )
+        if suffix_overrides:
+            suffix = suffix_overrides.get(device_suffix, device_suffix)
+            if suffix != device_suffix:
+                _rename_test_suffix(generated_cls, device_suffix, suffix)
+
+        if not class_name_overrides:
+            continue
+        privateuse1_name = torch._C._get_privateuse1_backend_name()
+        normalized_device_type = (
+            "privateuse1" if device_type == privateuse1_name else device_type
+        )
+        class_name = class_name_overrides.get(
+            device_type, class_name_overrides.get(normalized_device_type)
+        )
+        if class_name is None:
+            continue
+        old_name = generated_cls.__name__
+        existing = scope.get(class_name)
+        if existing is not None and existing is not generated_cls:
+            raise AssertionError(f"duplicate generated class: {class_name}")
+        scope.pop(old_name)
+        generated_cls.__name__ = class_name
+        generated_cls.__qualname__ = class_name
+        scope[class_name] = generated_cls
+
+
 def instantiate_device_type_tests_from_templates(
     host_cls: type,
     scope: dict[str, object],
@@ -19802,36 +19932,7 @@ def instantiate_device_type_tests_from_templates(
     bridge_cls = type(host_cls.__name__, (_TemplateDeviceHost, host_cls), {})
     bridge_cls.__module__ = host_cls.__module__
 
-    def make_test(value):
-        source_params = inspect.signature(value).parameters
-
-        @functools.wraps(value)
-        def new_test(self, *args, device=None, devices=None, **kwargs):
-            if devices is not None:
-                self.devices = devices
-                self.device = devices[0]
-                if "devices" in source_params:
-                    kwargs["devices"] = devices
-            elif device is not None:
-                self.device = device
-                if "device" in source_params:
-                    kwargs["device"] = device
-            return value(self, *args, **kwargs)
-
-        new_test.__dict__ = copy.deepcopy(value.__dict__)
-        new_test.__dict__.pop("__wrapped__", None)
-        return new_test
-
-    def was_parametrized(name, value):
-        if name != value.__name__:
-            return True
-        while value is not None:
-            params = inspect.signature(value, follow_wrapped=False).parameters
-            if "param_kwargs" in params:
-                return True
-            value = getattr(value, "__wrapped__", None)
-        return False
-
+    # Normalize inherited host tests before the device framework sees them.
     host_test_names = set()
     for name in dir(host_cls):
         if not name.startswith("test"):
@@ -19840,11 +19941,12 @@ def instantiate_device_type_tests_from_templates(
         if not callable(value):
             continue
         host_test_names.add(name)
-        host_test = make_test(value)
-        if was_parametrized(name, value):
+        host_test = _wrap_template_test(value)
+        if _is_preexpanded_test(name, value):
             host_test.__dict__.pop("parametrize_fn", None)
         setattr(bridge_cls, name, host_test)
 
+    # Add each template while preserving parameterization and failure metadata.
     for template in templates:
         for name, value in template.__dict__.items():
             if not name.startswith("test_"):
@@ -19852,9 +19954,8 @@ def instantiate_device_type_tests_from_templates(
             if name in host_test_names:
                 raise AssertionError(f"duplicate test method: {name}")
 
-            new_test = make_test(value)
-
-            already_parametrized = was_parametrized(name, value)
+            new_test = _wrap_template_test(value)
+            already_parametrized = _is_preexpanded_test(name, value)
             source_parametrize_fn = (
                 None
                 if already_parametrized
@@ -19865,64 +19966,20 @@ def instantiate_device_type_tests_from_templates(
             tf = test_failures and test_failures.get(name)
             has_xfail_prop = xfail_prop is not None and hasattr(value, xfail_prop)
             if source_parametrize_fn or test_decorator or tf or has_xfail_prop:
-
-                def parametrize_fn(
-                    test,
-                    generic_cls,
-                    device_cls,
-                    _source_parametrize_fn=source_parametrize_fn,
-                    _test_decorator=test_decorator,
-                    _tf=tf,
-                    _has_xfail_prop=has_xfail_prop,
-                ):
-                    if _source_parametrize_fn is None:
-                        cases = ((test, "", {}, lambda _: ()),)
-                    else:
-                        cases = _source_parametrize_fn(
-                            test, generic_cls=generic_cls, device_cls=device_cls
-                        )
-
-                    suffix = device_cls.device_type
-                    if suffix == "privateuse1":
-                        suffix = torch._C._get_privateuse1_backend_name()
-                    if suffix_overrides is not None:
-                        suffix = suffix_overrides.get(suffix, suffix)
-
-                    decorators = []
-                    if _test_decorator is not None:
-                        decorators.append(_test_decorator)
-                    if _has_xfail_prop:
-                        decorators.append(unittest.expectedFailure)
-                    if _tf is not None and suffix in _tf.suffixes:
-                        decorators.append(
-                            unittest.skip("Skipped!")
-                            if _tf.is_skip
-                            else unittest.expectedFailure
-                        )
-
-                    for test_case, test_suffix, param_kwargs, decorator_fn in cases:
-
-                        def combined_decorator_fn(
-                            params,
-                            _decorator_fn=decorator_fn,
-                            _decorators=tuple(decorators),
-                        ):
-                            return (*_decorator_fn(params), *_decorators)
-
-                        yield (
-                            test_case,
-                            test_suffix,
-                            param_kwargs,
-                            combined_decorator_fn,
-                        )
-
-                new_test.parametrize_fn = parametrize_fn
+                new_test.parametrize_fn = _template_parametrize_fn(
+                    source_parametrize_fn,
+                    test_decorator,
+                    tf,
+                    has_xfail_prop,
+                    suffix_overrides,
+                )
 
             setattr(bridge_cls, name, new_test)
 
         if hasattr(template, "is_dtype_supported"):
             bridge_cls.is_dtype_supported = template.is_dtype_supported
 
+    # Delegate device selection, class generation, and capability handling.
     scope[host_cls.__name__] = bridge_cls
     instantiate_device_type_tests(
         bridge_cls,
@@ -19932,6 +19989,7 @@ def instantiate_device_type_tests_from_templates(
         allow_xpu=allow_xpu,
         allow_mps=allow_mps,
     )
+    # Mask inherited originals so only device-suffixed host tests are discoverable.
     for name in host_test_names:
         setattr(bridge_cls, name, None)
 
@@ -19943,45 +20001,10 @@ def instantiate_device_type_tests_from_templates(
         and bridge_cls in value.__mro__
     )
 
-    if suffix_overrides:
-        for generated_cls in generated:
-            device_suffix = generated_cls.device_type
-            if device_suffix == "privateuse1":
-                device_suffix = torch._C._get_privateuse1_backend_name()
-            suffix = suffix_overrides.get(device_suffix, device_suffix)
-            if suffix == device_suffix:
-                continue
-            marker = f"_{device_suffix}"
-            for name, value in tuple(generated_cls.__dict__.items()):
-                if not name.startswith("test") or marker not in name:
-                    continue
-                prefix, _, tail = name.rpartition(marker)
-                new_name = f"{prefix}_{suffix}{tail}"
-                if hasattr(generated_cls, new_name):
-                    raise AssertionError(f"duplicate generated test: {new_name}")
-                setattr(generated_cls, new_name, value)
-                delattr(generated_cls, name)
-
-    if class_name_overrides:
-        for generated_cls in generated:
-            device_type = generated_cls.device_type
-            privateuse1_name = torch._C._get_privateuse1_backend_name()
-            normalized_device_type = (
-                "privateuse1" if device_type == privateuse1_name else device_type
-            )
-            class_name = class_name_overrides.get(
-                device_type, class_name_overrides.get(normalized_device_type)
-            )
-            if class_name is None:
-                continue
-            old_name = generated_cls.__name__
-            existing = scope.get(class_name)
-            if existing is not None and existing is not generated_cls:
-                raise AssertionError(f"duplicate generated class: {class_name}")
-            scope.pop(old_name)
-            generated_cls.__name__ = class_name
-            generated_cls.__qualname__ = class_name
-            scope[class_name] = generated_cls
+    # Apply copy_tests-compatible public names after standard generation.
+    _apply_template_name_overrides(
+        generated, scope, suffix_overrides, class_name_overrides
+    )
 
     return generated
 
