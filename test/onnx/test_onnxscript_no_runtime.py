@@ -15,6 +15,8 @@ from torch.testing._internal import common_utils
 
 
 class TestONNXScriptExport(common_utils.TestCase):
+    hw_classification = common_utils.HardwareClassification.GENERIC
+
     # opset version is
     # 1. local function is supported after opset 15
     # 2. onnx-script requires users to determine opset in local function
