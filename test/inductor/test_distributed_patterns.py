@@ -7,8 +7,13 @@ from torch import nn
 from torch._dynamo import compiled_autograd
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import CompileCounter
-from torch.testing._internal.common_utils import IS_MACOS
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, requires_gpu
+import unittest
+
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+)
+from torch.testing._internal.common_utils import HardwareClassification, IS_MACOS
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_MPS, HAS_TRITON
 
 
 # Fake distributed
@@ -120,7 +125,16 @@ def steps(m, inp):
     return out
 
 
-class DistributedPatternTests(TestCase):
+def _assert_same_grad(test_case, a, b):
+    test_case.assertEqual(type(a), type(b))
+    test_case.assertEqual(a, b)
+    test_case.assertEqual(a.grad, b.grad)
+    test_case.assertEqual(a.requires_grad, b.requires_grad)
+
+
+class DistributedPatternTestsGeneric(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_intermediate_hook_with_closure(self):
         @dataclasses.dataclass
         class CustomObj:
@@ -187,51 +201,6 @@ class DistributedPatternTests(TestCase):
 
         self.assertEqual(x0.grad, x2.grad)
         self.assertEqual(x1.grad, x3.grad)
-
-    @torch.no_grad()
-    def _test_storage_resize_zero(self, device):
-        @torch.compile(fullgraph=True)
-        def fn(x):
-            y = torch.sin(x)
-            x.untyped_storage().resize_(0)
-            return torch.cos(y)
-
-        x = torch.randn(10, device=device)
-        expected = torch.cos(torch.sin(x))
-        y = fn(x)
-        self.assertEqual(y, expected)
-        self.assertEqual(x.untyped_storage().size(), 0)
-
-    def test_storage_resize_zero_cpu(self):
-        self._test_storage_resize_zero("cpu")
-
-    @requires_gpu()
-    def test_storage_resize_zero_gpu(self):
-        self._test_storage_resize_zero(GPU_TYPE)
-
-    @torch.no_grad()
-    def _test_storage_resize_nonzero(self, device):
-        @torch.compile(fullgraph=True)
-        def fn(x, out):
-            y = torch.sin(x)
-            assert out.untyped_storage().size() == 0  # noqa: S101
-            out.untyped_storage().resize_(x.untyped_storage().size())
-            out.copy_(y.cos())
-
-        x = torch.randn(10, device=device)
-        out = torch.randn(10, device=device)
-        expected = torch.cos(torch.sin(x))
-        out.untyped_storage().resize_(0)
-        fn(x, out)
-        self.assertEqual(out.untyped_storage().size(), x.untyped_storage().size())
-        self.assertEqual(out, expected)
-
-    def test_storage_resize_nonzero_cpu(self):
-        self._test_storage_resize_nonzero("cpu")
-
-    @requires_gpu()
-    def test_storage_resize_nonzero_gpu(self):
-        self._test_storage_resize_nonzero(GPU_TYPE)
 
     @torch.no_grad()
     def test_unsafe_set_version_counter1(self):
@@ -398,12 +367,6 @@ class DistributedPatternTests(TestCase):
 
     # TODO(jansel): support bw hooks with graph break
 
-    def _assert_same_grad(self, a, b):
-        self.assertEqual(type(a), type(b))
-        self.assertEqual(a, b)
-        self.assertEqual(a.grad, b.grad)
-        self.assertEqual(a.requires_grad, b.requires_grad)
-
     def test_nn_param_return1(self):
         def fn(x):
             p = torch.nn.Parameter(x)
@@ -417,8 +380,8 @@ class DistributedPatternTests(TestCase):
         r1.sum().backward()
         p2, r2 = opt(x2)
         r2.sum().backward()
-        self._assert_same_grad(r1, r2)
-        self._assert_same_grad(p1, p2)
+        _assert_same_grad(self, r1, r2)
+        _assert_same_grad(self, p1, p2)
 
     def test_nn_param_return2(self):
         def fn(x):
@@ -431,8 +394,8 @@ class DistributedPatternTests(TestCase):
 
         p1, r1 = fn(x1)
         p2, r2 = opt(x2)
-        self._assert_same_grad(r1, r2)
-        self._assert_same_grad(p1, p2)
+        _assert_same_grad(self, r1, r2)
+        _assert_same_grad(self, p1, p2)
 
     @torch._dynamo.config.patch("graph_break_on_nn_param_ctor", False)
     def test_nn_param_return3(self):
@@ -448,8 +411,8 @@ class DistributedPatternTests(TestCase):
         r1.sum().backward()
         p2, r2 = opt(x2)
         r2.sum().backward()
-        self._assert_same_grad(r1, r2)
-        self._assert_same_grad(p1, p2)
+        _assert_same_grad(self, r1, r2)
+        _assert_same_grad(self, p1, p2)
 
     @torch._dynamo.config.patch("graph_break_on_nn_param_ctor", False)
     def test_nn_param_return4(self):
@@ -463,8 +426,8 @@ class DistributedPatternTests(TestCase):
 
         p1, r1 = fn(x1)
         p2, r2 = opt(x2)
-        self._assert_same_grad(r1, r2)
-        self._assert_same_grad(p1, p2)
+        _assert_same_grad(self, r1, r2)
+        _assert_same_grad(self, p1, p2)
 
     @torch._functorch.config.patch(recompute_views=True)
     def test_fake_distributed_aot_eager(self):
@@ -477,26 +440,78 @@ class DistributedPatternTests(TestCase):
         with compiled_autograd._enable(torch.compile(backend=bw_cnt, fullgraph=True)):
             out2 = steps(m2, inp2)
 
-        self._assert_same_grad(m1.weight, m2.weight)
-        self._assert_same_grad(inp1, inp2)
-        self._assert_same_grad(out1, out2)
+        _assert_same_grad(self, m1.weight, m2.weight)
+        _assert_same_grad(self, inp1, inp2)
+        _assert_same_grad(self, out1, out2)
         # Recompile on grad==None/grad!=None
         self.assertEqual(bw_cnt.frame_count, 2)
 
-    @requires_gpu()
+
+class DistributedPatternTestsAccelerator(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @torch.no_grad()
+    def test_storage_resize_zero(self, device):
+        @torch.compile(fullgraph=True)
+        def fn(x):
+            y = torch.sin(x)
+            x.untyped_storage().resize_(0)
+            return torch.cos(y)
+
+        x = torch.randn(10, device=device)
+        expected = torch.cos(torch.sin(x))
+        y = fn(x)
+        self.assertEqual(y, expected)
+        self.assertEqual(x.untyped_storage().size(), 0)
+
+    @torch.no_grad()
+    def test_storage_resize_nonzero(self, device):
+        @torch.compile(fullgraph=True)
+        def fn(x, out):
+            y = torch.sin(x)
+            assert out.untyped_storage().size() == 0  # noqa: S101
+            out.untyped_storage().resize_(x.untyped_storage().size())
+            out.copy_(y.cos())
+
+        x = torch.randn(10, device=device)
+        out = torch.randn(10, device=device)
+        expected = torch.cos(torch.sin(x))
+        out.untyped_storage().resize_(0)
+        fn(x, out)
+        self.assertEqual(out.untyped_storage().size(), x.untyped_storage().size())
+        self.assertEqual(out, expected)
+
+
+class DistributedPatternTestsInductor(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @unittest.skipIf(not (HAS_MPS or HAS_TRITON), "requires gpu")
     @torch._functorch.config.patch(recompute_views=True)
-    def test_fake_distributed_inductor(self):
-        m1, inp1 = init_fake_distributed(GPU_TYPE)
+    def test_fake_distributed_inductor(self, device):
+        m1, inp1 = init_fake_distributed(device)
         out1 = steps(m1, inp1)
 
-        m2, inp2 = init_fake_distributed(GPU_TYPE)
+        m2, inp2 = init_fake_distributed(device)
         m2 = torch.compile(m2, fullgraph=True)
         with compiled_autograd._enable(torch.compile(fullgraph=True)):
             out2 = steps(m2, inp2)
 
-        self._assert_same_grad(m1.weight, m2.weight)
-        self._assert_same_grad(inp1, inp2)
-        self._assert_same_grad(out1, out2)
+        _assert_same_grad(self, m1.weight, m2.weight)
+        _assert_same_grad(self, inp1, inp2)
+        _assert_same_grad(self, out1, out2)
+
+
+instantiate_device_type_tests(
+    DistributedPatternTestsAccelerator, globals(), allow_mps=True, allow_xpu=True
+)
+
+instantiate_device_type_tests(
+    DistributedPatternTestsInductor,
+    globals(),
+    except_for="cpu",
+    allow_mps=True,
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":
