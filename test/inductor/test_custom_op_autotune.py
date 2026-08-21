@@ -19,7 +19,11 @@ from torch._inductor.kernel.custom_op import (
 )
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing import FileCheck
+from torch.testing._internal.common_device_type import (
+    skipPRIVATEUSE1,
+)
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_MACOS,
     parametrize,
@@ -56,6 +60,8 @@ def tearDownModule():
 class TestCustomOpAutoTune(TestCase):
     """Test custom operation autotuning functionality."""
 
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def setUp(self) -> None:
         """Set up test environment with appropriate device and dtype."""
         super().setUp()
@@ -63,7 +69,8 @@ class TestCustomOpAutoTune(TestCase):
         self.device = GPU_TYPE if HAS_GPU else "cpu"
         self.dtype = (
             torch.float16
-            if self.device == "cuda" or self.device == "xpu"
+            if self.device == "cuda" or self.device == "xpu" or
+               self.device == "privateuseone"
             else torch.float32
         )
         # Clear any previous lowering registrations to ensure test isolation
@@ -79,7 +86,11 @@ class TestCustomOpAutoTune(TestCase):
             return op_object(*args)
 
         torch._dynamo.reset()
-        autotune_backends = "TRITON" if self.device == "cuda" else "ATEN"
+        autotune_backends = (
+            "TRITON"
+            if self.device == "cuda" or self.device == "privateuseone"
+            else "ATEN"
+        )
 
         with config.patch(
             max_autotune=True,
@@ -539,7 +550,11 @@ class TestCustomOpAutoTune(TestCase):
             },
         )
 
-        autotune_backends = "TRITON" if self.device == "cuda" else "ATEN"
+        autotune_backends = (
+            "TRITON"
+            if self.device == "cuda" or self.device == "privateuseone"
+            else "ATEN"
+        )
         test_x = torch.randn(2, 96, 32, device=self.device, dtype=self.dtype)
         test_weight = torch.randn(32, device=self.device, dtype=self.dtype)
 
@@ -597,6 +612,7 @@ class TestCustomOpAutoTune(TestCase):
             print("[Dynamic] No dispatch logic found (unexpected for dynamic shapes)")
         self.assertTrue(dispatch_dynamic, "Dynamic shapes should have dispatch logic")
 
+    @skipPRIVATEUSE1
     @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179943")
     @skipIfXpu
     def test_benchmark_with_cudagraphs_uses_cuda_graph_benchmarking(self):
@@ -708,7 +724,7 @@ class TestCustomOpAutoTune(TestCase):
     @skipIfXpu
     def test_config_patching_in_generated_code(self):
         """Test that coordinate_descent_tuning config_patches flows through to generated code."""
-        if self.device != "cuda":
+        if self.device != "cuda" and self.device != "privateuseone":
             self.skipTest(
                 "coordinate_descent_tuning test requires CUDA for Triton codegen"
             )
@@ -770,7 +786,7 @@ class TestCustomOpAutoTune(TestCase):
     )
     def test_split_config_patching_in_generated_code(self):
         """Test that coordinate_descent_tuning config_patches flows through to generated code."""
-        if self.device != "cuda":
+        if self.device != "cuda" and self.device != "privateuseone":
             self.skipTest(
                 "coordinate_descent_tuning test requires CUDA for Triton codegen"
             )
@@ -854,7 +870,7 @@ class TestCustomOpAutoTune(TestCase):
     @skipIfXpu
     def test_benchmark_real_trace_symbolic(self):
         """Verify benchmarking uses real values but tracing uses symbolic shapes."""
-        if self.device != "cuda":
+        if self.device != "cuda" and self.device != "privateuseone":
             self.skipTest("Test requires CUDA")
 
         # Track shapes seen by the real op implementation
@@ -1450,6 +1466,7 @@ class TestCustomOpAutoTune(TestCase):
 
         torch.testing.assert_close(result, test_x @ test_weight, rtol=1e-1, atol=1e-1)
 
+    @skipPRIVATEUSE1
     @skipIfXpu
     def test_cudagraph_memory_cleanup(self):
         """Test that CUDA graph destruction automatically cleans up cuBLAS workspaces."""
@@ -1495,6 +1512,7 @@ class TestCustomOpAutoTune(TestCase):
             lambda msg: f"{msg}\nMemory leak detected: baseline={baseline_memory}, after_cleanup={memory_after_cleanup}",
         )
 
+    @skipPRIVATEUSE1
     @skipIfXpu
     def test_cudagraph_memory_cleanup_benchmarker(self):
         """Test that CUDA graph benchmarking cleans up memory without leaking."""
