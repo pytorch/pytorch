@@ -16218,7 +16218,7 @@ class TestConsistency(TestCaseMPS):
                 return (2e-3, 2e-3)
             if op.name in ("nanmean", "nansum"):
                 return (5e-3, 5e-3)
-            if op.name in ("special.bessel_y0", "special.bessel_y1"):
+            if op.name in ("special.bessel_y0", "special.bessel_y1", "special.modified_bessel_k0"):
                 return (5e-4, 2e-3)
         if dtype == torch.complex64:
             if op.name == "mv":
@@ -16518,7 +16518,7 @@ class TestConsistency(TestCaseMPS):
                 atol, rtol = 1e-2, 5e-6
             if op.name in ("polygamma", "special.polygamma") and dtype == torch.float16:
                 atol, rtol = 5e-5, 2.5e-2
-            if op.name in ("special.bessel_y0", "special.bessel_y1") and dtype == torch.float16:
+            if op.name in ("special.bessel_y0", "special.bessel_y1", "special.modified_bessel_i1") and dtype == torch.float16:
                 atol, rtol = 5e-4, 2e-3
             if op.name == "polar" and dtype == torch.float16:
                 # `d(real)/d(abs) = cos(angle)` near pi/2 collapses to ~0 in
@@ -16586,6 +16586,33 @@ class TestConsistency(TestCaseMPS):
         out_cpu = torch.grid_sampler_3d(input, grid_nan, 0, 0, True)
         out_mps = torch.grid_sampler_3d(input.to(device), grid_nan.to(device), 0, 0, True)
         self.assertEqual(out_mps, out_cpu)
+
+    # CPU has no half-precision kernels for these Bessel forwards, so MPS is the
+    # only backend where the reduced-precision backward dispatch runs at all.
+    # The float32/float64 coverage of the same corner cases lives in
+    # test_unary_ufuncs.py's test_bessel_zero_limit_gradient.
+    @dtypes(torch.float16, torch.bfloat16)
+    @parametrize(
+        "name, expected",
+        (
+            ("bessel_j1", 0.5),
+            ("modified_bessel_i1", 0.5),
+            ("bessel_y1", float("inf")),
+        ),
+    )
+    def test_bessel_zero_limit_gradient(self, device, dtype, name, expected):
+        op = getattr(torch.special, name)
+        x = torch.zeros(4, dtype=dtype, device=device, requires_grad=True)
+        (grad,) = torch.autograd.grad(op(x).sum(), x)
+        self.assertEqual(grad, torch.full_like(grad, expected))
+
+    @dtypes(torch.float16, torch.bfloat16)
+    @parametrize("name", ("bessel_j1", "modified_bessel_i1", "i1", "i1e"))
+    def test_bessel_nan_input_gradient(self, device, dtype, name):
+        op = getattr(torch.special, name)
+        x = torch.full((4,), float("nan"), dtype=dtype, device=device).requires_grad_()
+        (grad,) = torch.autograd.grad(op(x).sum(), x)
+        self.assertTrue(torch.isnan(grad).all())
 
     def test_householder_product_race(self, device):
         # Regression testing for https://github.com/pytorch/pytorch/issues/173972
@@ -16718,7 +16745,13 @@ class TestConsistency(TestCaseMPS):
         x[-1, -1, :] = 1000.0
         x = x.requires_grad_(True)
         weight = torch.ones(C, device=device, dtype=dtype, requires_grad=True)
-        torch.group_norm(x, num_groups=C, weight=weight).sum().backward()
+        # .sum() over >2**32 elements raises on MPS; reuse out as its own ones
+        # gradient to keep peak memory at the old sum().backward() level
+        # (out is not saved for backward, so the in-place fill is safe)
+        out = torch.group_norm(x, num_groups=C, weight=weight)
+        with torch.no_grad():
+            out.fill_(1)
+        out.backward(out)
 
         x_last_cpu = x[-1:, -1:].detach().cpu().requires_grad_(True)
         weight_last_cpu = torch.ones(1, dtype=dtype, requires_grad=True)

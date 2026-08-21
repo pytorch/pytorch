@@ -3116,7 +3116,7 @@ def sample_inputs_take_along_dim(op_info, device, dtype, requires_grad, **kwargs
             1)
 
 
-def error_inputs_aminmax_amax_amin(op_info, device, is_ref=False, **kwargs):
+def error_inputs_aminmax_amax_amin(op_info, device, **kwargs):
 
     # Error Inputs for zero-dim tensors, when 'dim' arg is not provided.
     shape = (S, 0, S)
@@ -3149,19 +3149,14 @@ def error_inputs_aminmax_amax_amin(op_info, device, is_ref=False, **kwargs):
     min_values = torch.empty(L, dtype=torch.double, device=device)
     illegal_values = torch.empty(L, dtype=torch.int, device=device)
 
-    # Unlike regular PyTorch, amax and amin refs don't require input and out
-    # dtypes to match exactly:
-    # https://github.com/pytorch/pytorch/pull/87765#pullrequestreview-1162023824
-    if is_ref:
-        err_msg_amax_amin2 = ("Attempting to cast from torch.float32 to out tensor with dtype "
-                              "torch.int32, but this can't be cast because it is not safe!")
-    else:
-        err_msg_amax_amin2 = ("Expected the dtype for input and out to match, but got Float "
-                              "for input's dtype and Int for out's dtype.")
+    err_msg_amax_amin2 = "Expected the dtype for input and out to match"
     err_msg_aminmax2 = "Expected out tensor to have dtype float, but got double instead"
 
     if op_info.name in ['amax', 'amin', '_refs.amax', '_refs.amin']:
         yield ErrorInput(SampleInput(input5, kwargs={'dim': 0, 'out': illegal_values}),
+                         error_regex=err_msg_amax_amin2)
+        # Safe-but-mismatched dtype (float32 -> float64) should still be rejected.
+        yield ErrorInput(SampleInput(input5, kwargs={'dim': 0, 'out': min_values}),
                          error_regex=err_msg_amax_amin2)
     elif op_info.name == 'aminmax':
         yield ErrorInput(SampleInput(input5, kwargs={'dim': 0, 'out': (max_values, min_values)}),
@@ -17793,7 +17788,7 @@ op_db: list[OpInfo] = [
     UnaryUfuncInfo('nn.functional.hardtanh',
                    aten_name="hardtanh",
                    aten_backward_name='hardtanh_backward',
-                   dtypes=floating_types_and(torch.int8, torch.int16, torch.int32, torch.int64, torch.half, torch.bfloat16),
+                   dtypes=all_types_and(torch.half, torch.bfloat16),
                    backward_dtypes=all_types_and(torch.half, torch.bfloat16),
                    backward_dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
                    assert_autodiffed=True,
@@ -19858,7 +19853,7 @@ op_db: list[OpInfo] = [
     OpInfo('rand_like',
            dtypes=floating_types_and(torch.half, torch.bfloat16, torch.complex32, torch.complex64, torch.complex128),
            op=lambda inp, *args, **kwargs:
-               wrapper_set_seed(torch.randn_like, inp, *args, **kwargs),
+               wrapper_set_seed(torch.rand_like, inp, *args, **kwargs),
            supports_out=False,
            sample_inputs_func=sample_inputs_like_fns,
            supports_autograd=False,
@@ -19866,7 +19861,7 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
                # AssertionError: JIT Test does not execute any logic
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-               DecorateInfo(unittest.skip("Expected: randn_like is not comparable between dtypes"),
+               DecorateInfo(unittest.skip("Expected: rand_like is not comparable between dtypes"),
                             'TestCommon', 'test_complex_half_reference_testing'),
                DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
            )),
@@ -26072,7 +26067,7 @@ python_ref_db = [
     ReductionPythonRefInfo(
         "_refs.amax",
         torch_opinfo_name="amax",
-        error_inputs_func=partial(error_inputs_aminmax_amax_amin, is_ref=True),
+        error_inputs_func=error_inputs_aminmax_amax_amin,
         skips=(
             # FIXME: reduces all dimensions when dim=[]
             DecorateInfo(
@@ -26091,7 +26086,7 @@ python_ref_db = [
     ReductionPythonRefInfo(
         "_refs.amin",
         torch_opinfo_name="amin",
-        error_inputs_func=partial(error_inputs_aminmax_amax_amin, is_ref=True),
+        error_inputs_func=error_inputs_aminmax_amax_amin,
         skips=(
             # FIXME: reduces all dimensions when dim=[]
             DecorateInfo(
