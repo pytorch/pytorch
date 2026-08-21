@@ -1,8 +1,6 @@
 # Owner(s): ["oncall: export"]
 import json
-import os
 import re
-import subprocess
 import sys
 import tempfile
 import unittest
@@ -160,51 +158,31 @@ class TestAOTIPackageDeviceValidation(TestCase):
                 load_package("model.pt2")
 
 
-class TestAOTIPackageCudaDeviceValidation(TestCase):
-    hw_classification = HardwareClassification.CUDA
+class TestAOTIPackageCudaAvailability(TestCase):
+    hw_classification = HardwareClassification.GENERIC
 
-    def test_cpp_aoti_package_loader_validates_cuda_availability(self, device):
-        device_type = self.device_type
+    @unittest.skipIf(
+        torch.cuda.is_available(), "requires CUDA to be unavailable in this process"
+    )
+    def test_cpp_aoti_package_loader_validates_cuda_availability(self):
         with tempfile.TemporaryDirectory() as tmp:
             model_dir = Path(tmp) / "data" / "aotinductor" / "model"
             model_dir.mkdir(parents=True)
             extension = ".pyd" if sys.platform == "win32" else ".so"
             (model_dir / f"model{extension}").touch()
             (model_dir / "model_metadata.json").write_text(
-                json.dumps({"AOTI_DEVICE_KEY": device_type}), encoding="utf-8"
+                json.dumps({"AOTI_DEVICE_KEY": "cuda"}), encoding="utf-8"
             )
 
-            test_script = f"""
-import re
-import sys
-
-import torch
-
-try:
-    torch._C._aoti.AOTIModelPackageLoader({tmp!r}, "model", False, 1, -1)
-except RuntimeError as e:
-    if not re.search(
-        r"Cannot load AOTInductor package.*(CUDA|ROCm) is not available",
-        str(e),
-    ):
-        print(str(e), file=sys.stderr)
-        sys.exit(1)
-else:
-    print("expected RuntimeError", file=sys.stderr)
-    sys.exit(1)
-"""
-            subprocess.check_output(
-                [sys.executable, "-c", test_script],
-                env={**os.environ, "CUDA_VISIBLE_DEVICES": ""},
-                stderr=subprocess.STDOUT,
-            )
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "Cannot load AOTInductor package.*(CUDA|ROCm) is not available",
+            ):
+                torch._C._aoti.AOTIModelPackageLoader(str(tmp), "model", False, 1, -1)
 
 
 instantiate_device_type_tests(
     TestAOTIPackageDeviceValidation, globals(), except_for="cpu", allow_xpu=True
-)
-instantiate_device_type_tests(
-    TestAOTIPackageCudaDeviceValidation, globals(), only_for="cuda"
 )
 
 
