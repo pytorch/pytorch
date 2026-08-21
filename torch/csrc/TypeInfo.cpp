@@ -94,6 +94,15 @@ static PyObject* THPDTypeInfo_compare(
     THPDTypeInfo* a,
     THPDTypeInfo* b,
     int op) {
+  // `b` is the right-hand operand and may be any Python object, not just a
+  // finfo/iinfo. Reinterpreting it as a THPDTypeInfo* and reading b->type
+  // reads off the end of a smaller object (e.g. torch.finfo(torch.float32) ==
+  // "x"). Defer to the default comparison for anything that isn't a
+  // finfo/iinfo, which makes such comparisons safely return not-equal.
+  PyObject* b_obj = reinterpret_cast<PyObject*>(b);
+  if (!THPFInfo_Check(b_obj) && !THPIInfo_Check(b_obj)) {
+    Py_RETURN_NOTIMPLEMENTED;
+  }
   switch (op) {
     case Py_EQ:
       if (a->type == b->type) {
