@@ -49,7 +49,7 @@ from torch.testing._internal.common_device_type import dtypesIfMPS, instantiate_
     dtypesIfCUDA, precisionOverride, onlyCUDA, onlyCPU, onlyAccelerator, \
     skipCUDAIf, skipCUDAIfNoCudnn, skipCUDAIfRocm, skipMPSIf, skipMPS, \
     onlyNativeDeviceTypes, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, expectedFailureMPS, \
-    skipMeta, get_all_device_types
+    skipMeta
 from torch.testing._internal.common_modules import module_inputs_torch_nn_LinearCrossEntropyLoss
 
 from hypothesis import given
@@ -15586,7 +15586,6 @@ if __name__ == '__main__':
         m = nn.BatchNorm2d(3).half().to(device)
         thnn_output = m(input)
         thnn_output.sum().backward()
-        thnn_input_grad = input.grad.data.clone()
         self.assertEqualTypeString(thnn_output, input)
 
     @skipMPS
@@ -15659,6 +15658,7 @@ if __name__ == '__main__':
 
     @skipMPS
     @onlyAccelerator
+    @largeTensorTest("2GB")
     def test_sync_batchnorm_accuracy(self, device):
         # The target of this test is to test the functionality and accuracy of
         #   those single-device kernels used in SyncBatchNorm
@@ -16205,10 +16205,8 @@ class TestNNCUDA(NNTestCase):
     def test_RNN_dropout(self, device, p, train):
         # checking the assumption that cuDNN sticks dropout in between
         # RNN layers
-        for cuda in (True, False):
-            rnn = nn.RNN(10, 1000, 2, bias=False, dropout=p, nonlinearity='relu')
-            if cuda:
-                rnn.cuda()
+        for dev in ('cpu', device):
+            rnn = nn.RNN(10, 1000, 2, bias=False, dropout=p, nonlinearity='relu').to(dev)
 
             if train:
                 rnn.train()
@@ -16218,11 +16216,8 @@ class TestNNCUDA(NNTestCase):
             rnn.weight_hh_l0.data.fill_(1)
             rnn.weight_ih_l1.data.fill_(1)
             rnn.weight_hh_l1.data.fill_(1)
-            input = torch.ones(1, 1, 10)
-            hx = torch.zeros(2, 1, 1000)
-            if cuda:
-                input = input.cuda()
-                hx = hx.cuda()
+            input = torch.ones(1, 1, 10, device=dev)
+            hx = torch.zeros(2, 1, 1000, device=dev)
 
             output, hy = rnn(input, hx)
             self.assertEqual(output.data.min(), output.data.max())
@@ -16248,12 +16243,9 @@ class TestNNCUDA(NNTestCase):
     @parametrize_test('mode', ['RNN', 'LSTM', 'GRU'])
     def test_error_RNN_seq_len_zero(self, device, mode, bidirectional):
         # checking error message when RNN has seq_len = 0
-        for dev in get_all_device_types():
-            input = torch.ones(0, 10, 5)
-            rnn = getattr(nn, mode)(5, 6, bidirectional=bidirectional)
-            if dev == 'cuda':
-                rnn.cuda()
-                input = input.cuda()
+        for dev in ('cpu', device):
+            input = torch.ones(0, 10, 5, device=dev)
+            rnn = getattr(nn, mode)(5, 6, bidirectional=bidirectional).to(dev)
 
             with self.assertRaisesRegex(RuntimeError, "Expected sequence length to be larger than 0 in RNN"):
                 rnn(input)
@@ -16262,26 +16254,21 @@ class TestNNCUDA(NNTestCase):
     @parametrize_test('train', [True, False])
     @parametrize_test('p', [0, 0.1234])
     def test_RNN_dropout_state(self, device, p, train):
-        for cuda in (True, False):
-            rnn = nn.RNN(100, 100, 2, bias=False, dropout=p, nonlinearity='relu')
-            if cuda:
-                rnn.cuda()
+        for dev in ('cpu', device):
+            rnn = nn.RNN(100, 100, 2, bias=False, dropout=p, nonlinearity='relu').to(dev)
 
             if train:
                 rnn.train()
             else:
                 rnn.eval()
-            input = torch.rand(1, 1, 100)
-            hx = torch.rand(2, 1, 100)
-            if cuda:
-                input = input.cuda()
-                hx = hx.cuda()
+            input = torch.rand(1, 1, 100, device=dev)
+            hx = torch.rand(2, 1, 100, device=dev)
 
             output1, hy1 = rnn(input, hx)
             output2, hy2 = rnn(input, hx)
 
             buf = io.BytesIO()
-            rnn_pickle = torch.save(rnn, buf)
+            torch.save(rnn, buf)
             buf.seek(0)
             # weights_only=False as this is legacy code that saves the model
             rnn2 = torch.load(buf, weights_only=False)
@@ -16303,12 +16290,9 @@ class TestNNCUDA(NNTestCase):
     @set_default_dtype(torch.double)
     @parametrize_test('train', [True, False])
     def test_RNN_change_dropout(self, device, train):
-        for cuda in (True, False):
-            rnn = nn.RNN(100, 100, 2, dropout=0, nonlinearity='relu')
-            input = torch.rand(3, 2, 100)
-            if cuda:
-                input.data = input.data.cuda()
-                rnn.cuda()
+        for dev in ('cpu', device):
+            rnn = nn.RNN(100, 100, 2, dropout=0, nonlinearity='relu').to(dev)
+            input = torch.rand(3, 2, 100, device=dev)
 
             if train:
                 rnn.train()
@@ -16375,12 +16359,12 @@ class TestNNCUDA(NNTestCase):
     def test_batchnorm_cudnn_nhwc(self, device):
         def run_test(input, grad_output):
             c = input.size(1)
-            mod = nn.BatchNorm2d(c).cuda().float()
+            mod = nn.BatchNorm2d(c).to(device).float()
             mod.weight.data.uniform_()
             mod.bias.data.uniform_()
             ref_input = input.detach().clone().contiguous().requires_grad_(True)
             ref_grad = grad.detach().clone().contiguous()
-            ref_mod = nn.BatchNorm2d(c).cuda().float()
+            ref_mod = nn.BatchNorm2d(c).to(device).float()
             ref_mod.load_state_dict(mod.state_dict())
             out = mod(input)
             out.backward(grad_output)
@@ -16393,17 +16377,17 @@ class TestNNCUDA(NNTestCase):
             self.assertEqual(mod.bias.grad, ref_mod.bias.grad)
             self.assertEqual(input.grad, ref_input.grad)
 
-        input = torch.randint(1, 10, (4, 8, 2, 2), dtype=torch.float32, device="cuda")
+        input = torch.randint(1, 10, (4, 8, 2, 2), dtype=torch.float32, device=device)
         input = input.contiguous(memory_format=torch.channels_last).detach().requires_grad_()
 
-        grad = torch.randint(1, 10, (4, 8, 2, 2), dtype=torch.float32, device="cuda")
+        grad = torch.randint(1, 10, (4, 8, 2, 2), dtype=torch.float32, device=device)
         grad = grad.contiguous(memory_format=torch.channels_last)
         run_test(input, grad)
         # see #42588, grad is channels_last contiguous, but grad.suggest_memory_format (rightly) return "contiguous"
         # not channels_last
-        input = torch.randint(1, 10, (2, 8, 8, 1), dtype=torch.float32, device="cuda")
+        input = torch.randint(1, 10, (2, 8, 8, 1), dtype=torch.float32, device=device)
         input = input.contiguous(memory_format=torch.channels_last).detach().requires_grad_()
-        grad = torch.randint(1, 10, (2, 8, 8, 1), dtype=torch.float32, device="cuda")
+        grad = torch.randint(1, 10, (2, 8, 8, 1), dtype=torch.float32, device=device)
         grad = grad.permute(0, 2, 1, 3)
         run_test(input, grad)
 
@@ -16426,31 +16410,31 @@ class TestNNCUDA(NNTestCase):
         self.assertEqual(cudnn_output, thnn_output)
         self.assertEqual(cudnn_input_grad, thnn_input_grad, atol=1e-3, rtol=0)
 
-    def test_batch_norm_gather_stats_invalid_shapes_cuda(self, device):
+    def test_batch_norm_gather_stats_invalid_shapes(self, device):
         # Regression test for https://github.com/pytorch/pytorch/issues/189828.
         # batch_norm_reduce_statistics_kernel takes both of its loop bounds from mean, then
         # indexes invstd and counts with them, so an invstd that disagrees with mean used to
         # be read out of bounds. The op must validate the shapes instead.
-        input = torch.full((1, 3, 3, 0), 1.0, dtype=torch.float32, device='cuda')
-        mean = torch.full((2, 3), 1.15215e+25, dtype=torch.float32, device='cuda')
-        invstd = torch.full((2, 0), 1.0, dtype=torch.float32, device='cuda')
+        input = torch.full((1, 3, 3, 0), 1.0, dtype=torch.float32, device=device)
+        mean = torch.full((2, 3), 1.15215e+25, dtype=torch.float32, device=device)
+        invstd = torch.full((2, 0), 1.0, dtype=torch.float32, device=device)
         with self.assertRaisesRegex(RuntimeError, "invstd to have the same shape as mean"):
             torch.batch_norm_gather_stats(input, mean, invstd, None, None, float('-inf'), float('-inf'),
                                           -9223372036854775808)
 
         # mean must be (world_size, num_features); a 1-D mean would index past its dims
         with self.assertRaisesRegex(RuntimeError, "expected mean to be 2-dimensional"):
-            torch.batch_norm_gather_stats(input, torch.ones(3, device='cuda'), torch.ones(3, device='cuda'),
+            torch.batch_norm_gather_stats(input, torch.ones(3, device=device), torch.ones(3, device=device),
                                           None, None, 0.1, 1e-5, 2)
 
         # counts is indexed up to mean.size(0), so it must have at least that many elements
         with self.assertRaisesRegex(RuntimeError, "counts to have at least one element"):
             torch.batch_norm_gather_stats_with_counts(
-                torch.randn(1, 3, 3, 3, device='cuda'),
-                torch.ones(2, 3, device='cuda'),
-                torch.ones(2, 3, device='cuda'),
+                torch.randn(1, 3, 3, 3, device=device),
+                torch.ones(2, 3, device=device),
+                torch.ones(2, 3, device=device),
                 None, None, 0.1, 1e-5,
-                torch.ones(1, device='cuda'),
+                torch.ones(1, device=device),
             )
 
 
