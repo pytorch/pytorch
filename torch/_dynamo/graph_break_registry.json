@@ -2427,6 +2427,16 @@
       "Hints": []
     }
   ],
+  "GB8294": [
+    {
+      "Gb_type": "TMA descriptor class is not importable",
+      "Context": "descriptor_type={descriptor_type}, path={descriptor_path}",
+      "Explanation": "Triton tensor descriptor class {descriptor_type.__qualname__} must be importable as {descriptor_path} so compiled code can reconstruct it.",
+      "Hints": [
+        "Define the descriptor class at module scope and export it under its class name."
+      ]
+    }
+  ],
   "GB0157": [
     {
       "Gb_type": "Unsupported ndarray attribute access",
