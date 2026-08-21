@@ -41,10 +41,8 @@ from torch._dynamo.variables import ConstantVariable, SkipFunctionVariable
 from torch._dynamo.variables.lists import RangeVariable
 from torch.nn import functional as F
 from torch.testing._internal.common_device_type import (
-    Capability,
     instantiate_device_type_tests,
     onlyAccelerator,
-    requires_capabilities,
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -7150,7 +7148,6 @@ instantiate_device_type_tests(FunctionTensorTypeAcceleratorTests, globals(), all
 class FunctionTritonAcceleratorTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @requires_capabilities(Capability.lib.triton)
     @onlyAccelerator
     def test_wrap_triton_handled_during_tracing(self, device):
         import triton
@@ -7182,7 +7179,6 @@ class FunctionTritonAcceleratorTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(result, torch.sin(x))
 
-    @requires_capabilities(Capability.lib.triton)
     @onlyAccelerator
     def test_capture_triton_handled_during_tracing(self, device):
         import triton
