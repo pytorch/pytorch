@@ -70,6 +70,22 @@ def _zeropower_via_newtonschulz(
     return ortho_grad
 
 
+def _foreach_zeropower_via_newtonschulz(
+    grad: Tensor, a: float, b: float, c: float, ns_steps: int, eps: float
+) -> Tensor:
+    transpose = grad.size(0) > grad.size(1)
+    ortho_grad = grad.bfloat16()
+    ortho_grad = ortho_grad.T if transpose else ortho_grad
+    ortho_grad = ortho_grad / ortho_grad.norm().clamp(min=eps)
+    for _ in range(ns_steps):
+        gram_matrix = ortho_grad @ ortho_grad.T
+        gram_update = torch.addmm(
+            gram_matrix, gram_matrix, gram_matrix, beta=b, alpha=c
+        )
+        ortho_grad = torch.addmm(ortho_grad, gram_update, ortho_grad, beta=a)
+    return ortho_grad.T if transpose else ortho_grad
+
+
 def _adjust_lr(lr: float, adjust_lr_fn: str | None, param_shape: torch.Size) -> float:
     """Default learning rate adjustment used by Muon."""
     A, B = param_shape[:2]
@@ -192,6 +208,7 @@ class Muon(Optimizer):
                 params_with_grad,
                 grads,
                 muon_momentum_bufs,
+                foreach=torch.compiler.is_compiling(),
                 lr=lr,
                 weight_decay=weight_decay,
                 momentum=momentum,
@@ -351,6 +368,48 @@ def _single_tensor_muon(
         param.add_(update, alpha=-adjusted_lr)
 
 
+def _foreach_muon(
+    params: list[Tensor],
+    grads: list[Tensor],
+    muon_momentum_bufs: list[Tensor],
+    *,
+    lr: float,
+    weight_decay: float,
+    momentum: float,
+    nesterov: bool,
+    ns_coefficients: tuple[float, float, float],
+    ns_steps: int,
+    eps: float,
+    adjust_lr_fn: str | None,
+    has_complex: bool,
+) -> None:
+    from torch._higher_order_ops import foreach_map
+
+    if has_complex:
+        raise ValueError("Complex parameters are not supported")
+    lr = _to_scalar(lr)
+    torch._foreach_lerp_(muon_momentum_bufs, grads, 1 - momentum)
+    updates = (
+        torch._foreach_lerp(grads, muon_momentum_bufs, momentum)
+        if nesterov
+        else muon_momentum_bufs
+    )
+    a, b, c = ns_coefficients
+    updates = foreach_map(
+        _foreach_zeropower_via_newtonschulz,
+        updates,
+        a,
+        b,
+        c,
+        ns_steps,
+        eps,
+    )
+    for param, update in zip(params, updates):
+        adjusted_lr = _adjust_lr(lr, adjust_lr_fn, param.shape)
+        param.mul_(1 - lr * weight_decay)
+        param.add_(update, alpha=-adjusted_lr)
+
+
 @_disable_dynamo_if_unsupported(single_tensor_fn=_single_tensor_muon)
 def muon(
     params: list[Tensor],
@@ -372,10 +431,7 @@ def muon(
 
     See :class:`~torch.optim.Muon` for details.
     """
-    if foreach is not None and foreach:
-        raise RuntimeError("Foreach is not supported for Muon yet")
-
-    func = _single_tensor_muon
+    func = _foreach_muon if foreach else _single_tensor_muon
 
     func(
         params,
