@@ -658,11 +658,10 @@ class GridShardingSpec(ShardingSpec):
         raise NotImplementedError("GridShardingSpec.shard not implemented yet!")
 
 
-BACKEND = (
-    dist.get_default_backend_for_device(torch.accelerator.current_accelerator().type)
-    if torch.accelerator.is_available()
-    else "gloo"
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
 )
+backend = dist.get_default_backend_for_device(device_type)
 
 
 class TestCustomShardingSpec(ShardedTensorTestBase):
@@ -688,7 +687,7 @@ class TestCustomShardingSpec(ShardedTensorTestBase):
     @skip_but_pass_in_sandcastle_if(
         not TEST_MULTIACCELERATOR, "Multi-accelerator required"
     )
-    @with_comms(backend=BACKEND)
+    @with_comms(backend=backend)
     @skip_if_lt_x_gpu(4)
     @requires_capabilities(Capability.distributed.backend)
     def test_custom_sharding_spec_tensor_ctor(self, device):
@@ -719,7 +718,7 @@ class TestCustomShardingSpec(ShardedTensorTestBase):
     @skip_but_pass_in_sandcastle_if(
         not TEST_MULTIACCELERATOR, "Multi-accelerator required"
     )
-    @with_comms(backend=BACKEND)
+    @with_comms(backend=backend)
     @skip_if_lt_x_gpu(4)
     @requires_capabilities(Capability.distributed.backend)
     def test_custom_sharding_spec_shard_tensor(self, device):
