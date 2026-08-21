@@ -15,10 +15,10 @@ from torch._inductor.utils import run_and_get_code
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode, ShapeEnv
 from torch.testing import FileCheck
+from torch.utils._triton import has_triton
+
 from torch.testing._internal.common_device_type import (
-    Capability,
     instantiate_device_type_tests,
-    skipMPS,
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -213,12 +213,7 @@ class TestDecomposeMemMMAccelerator(_DecomposeMemMMMixin, TestCase):
 
         self.compare_pred(module, traced, input)
 
-        expected_val = (
-            1
-            if should_decompose
-            and type(self).get_capabilities().get(Capability.lib.triton, False)
-            else 0
-        )
+        expected_val = 1 if should_decompose and has_triton() else 0
         self.assertEqual(
             counters["inductor"]["decompose_bmm"],
             expected_val,
@@ -229,12 +224,7 @@ class TestDecomposeMemMMAccelerator(_DecomposeMemMMMixin, TestCase):
         self.compare_parameters(module, traced)
         self.compare_gradients(module, traced)
 
-        expected_val = (
-            3
-            if should_decompose
-            and type(self).get_capabilities().get(Capability.lib.triton, False)
-            else 0
-        )
+        expected_val = 3 if should_decompose and has_triton() else 0
         self.assertEqual(
             counters["inductor"]["decompose_bmm"],
             expected_val,
@@ -260,12 +250,7 @@ class TestDecomposeMemMMAccelerator(_DecomposeMemMMMixin, TestCase):
 
         self.compare_pred(module, traced, input)
 
-        expected_val = (
-            1
-            if should_decompose
-            and type(self).get_capabilities().get(Capability.lib.triton, False)
-            else 0
-        )
+        expected_val = 1 if should_decompose and has_triton() else 0
         if has_bias:
             self.assertEqual(
                 counters["inductor"]["decompose_addmm"],
@@ -322,12 +307,7 @@ class TestDecomposeMemMMAccelerator(_DecomposeMemMMMixin, TestCase):
 
             self.compare_pred(module, traced, input)
 
-            expected_val = (
-                1
-                if should_decompose
-                and type(self).get_capabilities().get(Capability.lib.triton, False)
-                else 0
-            )
+            expected_val = 1 if should_decompose and has_triton() else 0
             if has_bias:
                 self.assertEqual(
                     counters["inductor"]["decompose_addmm"],
@@ -372,12 +352,7 @@ class TestDecomposeMemMMAccelerator(_DecomposeMemMMMixin, TestCase):
 
         self.compare_pred(module, traced, input)
 
-        expected_val = (
-            1
-            if should_decompose
-            and type(self).get_capabilities().get(Capability.lib.triton, False)
-            else 0
-        )
+        expected_val = 1 if should_decompose and has_triton() else 0
         self.assertEqual(
             counters["inductor"]["decompose_mm"],
             expected_val,
@@ -389,12 +364,7 @@ class TestDecomposeMemMMAccelerator(_DecomposeMemMMMixin, TestCase):
         self.compare_parameters(module, traced)
         self.compare_gradients(module, traced)
 
-        expected_val = (
-            1
-            if should_decompose
-            and type(self).get_capabilities().get(Capability.lib.triton, False)
-            else 0
-        )
+        expected_val = 1 if should_decompose and has_triton() else 0
         self.assertEqual(
             counters["inductor"]["decompose_mm"] - decompose_mm_fwd,
             expected_val,
@@ -434,12 +404,7 @@ class TestDecomposeMemMMAccelerator(_DecomposeMemMMMixin, TestCase):
 
             self.compare_pred(module, traced, input)
 
-            expected_val = (
-                1
-                if should_decompose
-                and type(self).get_capabilities().get(Capability.lib.triton, False)
-                else 0
-            )
+            expected_val = 1 if should_decompose and has_triton() else 0
             self.assertEqual(
                 counters["inductor"]["decompose_mm"],
                 expected_val,
@@ -451,12 +416,7 @@ class TestDecomposeMemMMAccelerator(_DecomposeMemMMMixin, TestCase):
             self.compare_parameters(module, traced)
             self.compare_gradients(module, traced)
 
-            expected_val = (
-                1
-                if should_decompose
-                and type(self).get_capabilities().get(Capability.lib.triton, False)
-                else 0
-            )
+            expected_val = 1 if should_decompose and has_triton() else 0
             self.assertEqual(
                 counters["inductor"]["decompose_mm"] - decompose_mm_fwd,
                 expected_val,
@@ -482,12 +442,7 @@ class TestDecomposeMemMMAccelerator(_DecomposeMemMMMixin, TestCase):
 
         self.compare_pred(module, traced, input)
 
-        expected_val = (
-            1
-            if should_decompose
-            and type(self).get_capabilities().get(Capability.lib.triton, False)
-            else 0
-        )
+        expected_val = 1 if should_decompose and has_triton() else 0
         if has_bias:
             self.assertEqual(
                 counters["inductor"]["decompose_addmm"],
@@ -501,7 +456,7 @@ class TestDecomposeMemMMAccelerator(_DecomposeMemMMMixin, TestCase):
         self.compare_gradients(module, traced)
 
         expected_val = 0
-        if type(self).get_capabilities().get(Capability.lib.triton, False):
+        if has_triton():
             expected_val = 1 if has_bias else 2
 
         self.assertEqual(
@@ -510,7 +465,6 @@ class TestDecomposeMemMMAccelerator(_DecomposeMemMMMixin, TestCase):
         )
         counters.clear()
 
-    @skipMPS
     def test_realize_input(self, device):
         m = 20480
         k = 5
@@ -719,7 +673,6 @@ instantiate_device_type_tests(
     TestDecomposeMemMMAccelerator,
     globals(),
     except_for="cpu",
-    allow_mps=True,
     allow_xpu=True,
 )
 
