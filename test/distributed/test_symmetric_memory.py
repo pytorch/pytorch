@@ -7,7 +7,7 @@ import random
 import re
 import tempfile
 from contextlib import contextmanager, nullcontext
-from unittest import skip, skipIf, skipUnless
+from unittest import skipIf, skipUnless
 
 import torch
 import torch.distributed as dist
@@ -35,12 +35,7 @@ from torch.distributed._symmetric_memory._nccl import (
     register_external_nccl_comm,
 )
 from torch.distributed.distributed_c10d import _TORCHCOMM_AVAILABLE
-from torch.testing._internal.common_cuda import (
-    SM100OrLater,
-    SM89OrLater,
-    SM90OrLater,
-    xfailIfSM100OrLater,
-)
+from torch.testing._internal.common_cuda import SM100OrLater, SM89OrLater, SM90OrLater
 from torch.testing._internal.common_device_type import e4m3_type
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
@@ -63,6 +58,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TestCase,
 )
+from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
 test_contexts = [nullcontext, _test_mode]
@@ -1568,8 +1564,6 @@ class SymmMemCollectiveTest(MultiProcContinuousTest):
     @parametrize("dtype", [torch.float, torch.bfloat16])
     @parametrize("align_bytes", [4, 8, 16])
     @parametrize("size_bytes", [4, 8192, 8196])
-    # https://github.com/pytorch/pytorch/issues/164015
-    @xfailIfSM100OrLater
     def test_multimem_one_shot_all_reduce(
         self, dtype: torch.dtype, size_bytes: int, align_bytes: int
     ) -> None:
@@ -1586,16 +1580,12 @@ class SymmMemCollectiveTest(MultiProcContinuousTest):
         gathered_inps = all_gather_single(inp, 0, "0").view(self.world_size, -1)
         # Only verify that the results are close to the sum of inputs across
         # ranks (see Note [multimem_one_shot_all_reduce]).
-        torch.testing.assert_close(
-            gathered_inps.sum(dim=0), res, rtol=1e-03, atol=1e-05
-        )
+        self.assertEqual(gathered_inps.sum(dim=0), res)
 
     @skip_if_lt_x_gpu(4)
     @requires_multicast_support()
     @parametrize("dtype", [torch.float, torch.bfloat16])
     @parametrize("size_bytes", [4, 8192, 8196])
-    # https://github.com/pytorch/pytorch/issues/164015
-    @xfailIfSM100OrLater
     def test_multimem_one_shot_reduce_out(
         self, dtype: torch.dtype, size_bytes: int
     ) -> None:
@@ -1617,9 +1607,7 @@ class SymmMemCollectiveTest(MultiProcContinuousTest):
         # Only verify that the results are close to the sum of inputs across
         # ranks (see Note [multimem_one_shot_all_reduce]).
         if self.rank == root:
-            torch.testing.assert_close(
-                gathered_inps.sum(dim=0), out, rtol=1e-03, atol=1e-05
-            )
+            self.assertEqual(gathered_inps.sum(dim=0), out)
 
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
@@ -1891,7 +1879,6 @@ class LoweringTest(MultiProcContinuousTest):
     def device(self) -> torch.device:
         return torch.device(device_type, self.rank)
 
-    @skip("Fails with 'one_shot_all_reduce' not found in AOT graph, TODO: fix")
     @skip_if_rocm_multiprocess  # requires registered-buffer support
     @skip_if_lt_x_gpu(2)
     @fresh_cache()
@@ -2210,20 +2197,17 @@ class LoweringTest(MultiProcContinuousTest):
     def _run_lc_ag_pass_test(self, graph: torch.fx.Graph) -> None:
         from torch._inductor.fx_passes import low_contention_collectives as lc
 
-        old_enable_symm_mem = lc._enable_symm_mem
         old_has_multicast_support = lc._has_multicast_support
         try:
-            lc._enable_symm_mem = lambda group_name: True
             lc._has_multicast_support = lambda device_index: True
             config_patches = {
                 "aten_distributed_optimizations.low_contention_min_bytes_per_rank": 0,
                 "aten_distributed_optimizations."
                 "low_contention_all_gather_ce_multicast": True,
             }
-            with torch._inductor.config.patch(config_patches):
+            with _test_mode(), torch._inductor.config.patch(config_patches):
                 lc.replace_collectives_with_low_contention(graph)
         finally:
-            lc._enable_symm_mem = old_enable_symm_mem
             lc._has_multicast_support = old_has_multicast_support
 
     @skip_if_rocm_multiprocess
@@ -2473,6 +2457,29 @@ class SymmMemSingleProcTest(TestCase):
 
         _SymmetricMemory.memset32(t, offset=0, val=1, count=64)
         _SymmetricMemory.memset32(t, offset=63, val=1, count=1)
+
+    @requires_cuda
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    def test_is_symm_mem_enabled_for_group(self):
+        # Rendezvous no longer requires enable_symm_mem_for_group, so
+        # is_symm_mem_enabled_for_group must not require it either
+        # (https://github.com/pytorch/pytorch/issues/193027).
+        self.assertFalse(symm_mem.is_symm_mem_enabled_for_group("unregistered_group"))
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+        try:
+            group_name = dist.group.WORLD.group_name
+            self.assertTrue(symm_mem.is_symm_mem_enabled_for_group(group_name))
+            self.assertFalse(
+                symm_mem.is_symm_mem_enabled_for_group("unregistered_group")
+            )
+            with _test_mode(group_names={"mocked_group"}):
+                self.assertTrue(symm_mem.is_symm_mem_enabled_for_group("mocked_group"))
+                self.assertFalse(symm_mem.is_symm_mem_enabled_for_group(group_name))
+        finally:
+            dist.destroy_process_group()
 
 
 @instantiate_parametrized_tests
