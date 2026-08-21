@@ -7,7 +7,7 @@ import unittest
 import torch
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (parametrize, run_tests, TestCase, TEST_SCIPY,
-                                                  set_default_dtype)
+                                                  set_default_dtype, skipIfTorchDynamo)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCUDA,
@@ -347,6 +347,27 @@ $1: f32[2] = torch._ops.prims.sin.default($0)""")
 
     def test_mul_complex(self):
         prims.mul(torch.randn(2), 1 + 1j)
+
+    @skipIfTorchDynamo("tests the eager impl of the prim; dynamo/inductor take the lowering")
+    def test_inductor_force_stride_order_eager_single_copy(self):
+        import torch._inductor.inductor_prims
+        from torch.profiler import ProfilerActivity, profile
+
+        x = torch.randn(4, 8)
+        for stride in (x.stride(), (1, 4)):
+            out = torch.ops.prims.inductor_force_stride_order.default(x, stride)
+            self.assertEqual(out.stride(), stride)
+            self.assertEqual(out, x)
+            # functional op: the output may not alias the input even when strides match
+            self.assertNotEqual(out.data_ptr(), x.data_ptr())
+
+        with profile(activities=[ProfilerActivity.CPU]) as prof:
+            torch.ops.prims.inductor_force_stride_order.default(x, x.stride())
+        counts = {e.key: e.count for e in prof.key_averages()}
+        self.assertNotIn("aten::clone", counts)
+        # 2, not 1: _prim_impl runs impl_aten a second time for meta validation,
+        # so one dispatch executes the impl twice, each doing a single copy_
+        self.assertEqual(counts.get("aten::copy_", 0), 2)
 
     def test_clone_complex(self):
         with torch._dispatch.python.enable_python_dispatcher():
