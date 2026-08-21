@@ -10276,6 +10276,109 @@ def forward(self, primals_1, tangents_1):
         out.sum().backward()
 
 
+class TestPartitioningRng(TestCase):
+    @unittest.skipIf(not USE_NETWORKX, "networkx not available")
+    @torch._inductor.config.patch(fallback_random=True)
+    @parametrize("memory_budget,expected_wrappers", [(0.0, 2), (1.0, 0)])
+    def test_min_cut_partitioner_functionalizes_recomputed_rng(
+        self, device, memory_budget, expected_wrappers
+    ):
+        import torch._functorch.config as functorch_config
+
+        graphs = {}
+
+        def capture_graph(name):
+            def compiler(gm, _):
+                graphs[name] = gm
+                return make_boxed_func(gm.forward)
+
+            return compiler
+
+        def f(x):
+            x = torch.nn.functional.dropout(x, 0.5, True)
+            return torch.nn.functional.dropout(x, 0.75, True)
+
+        compiled = aot_function(
+            f,
+            fw_compiler=capture_graph("forward"),
+            bw_compiler=capture_graph("backward"),
+            partition_fn=min_cut_rematerialization_partition,
+        )
+        x = torch.ones(8, 8, device=device, requires_grad=True)
+        with functorch_config.patch(activation_memory_budget=memory_budget):
+            torch.manual_seed(42)
+            out = compiled(x)
+            out.sum().backward()
+
+        self.assertEqual(x.grad, out.detach())
+
+        fw_targets = [node.target for node in graphs["forward"].graph.nodes]
+        bw_targets = [node.target for node in graphs["backward"].graph.nodes]
+        self.assertEqual(
+            fw_targets.count(torch._prims.rng_prims.run_and_save_rng_state),
+            expected_wrappers,
+        )
+        self.assertEqual(
+            bw_targets.count(torch._prims.rng_prims.run_with_rng_state),
+            expected_wrappers,
+        )
+
+    @unittest.skipIf(not USE_NETWORKX, "networkx not available")
+    @torch._inductor.config.patch(fallback_random=True)
+    @parametrize(
+        "partition_fn",
+        [default_partition, min_cut_rematerialization_partition],
+        name_fn=lambda partition_fn: partition_fn.__name__,
+    )
+    def test_backward_only_rng_stays_in_backward(self, device, partition_fn):
+        from torch._functorch.partitioners import is_rng_op
+
+        class RandomGrad(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                (x,) = ctx.saved_tensors
+                return torch.rand_like(x)
+
+        def f(x):
+            return RandomGrad.apply(x)
+
+        def run(fn):
+            torch.manual_seed(123)
+            x = torch.ones(8, device=device, requires_grad=True)
+            out = fn(x)
+            between = torch.rand_like(x)
+            out.sum().backward()
+            return between, x.grad
+
+        graphs = {}
+
+        def capture_graph(name):
+            def compiler(gm, _):
+                graphs[name] = gm
+                return make_boxed_func(gm.forward)
+
+            return compiler
+
+        compiled = aot_function(
+            f,
+            fw_compiler=capture_graph("forward"),
+            bw_compiler=capture_graph("backward"),
+            partition_fn=partition_fn,
+        )
+        expected_between, expected_grad = run(f)
+        actual_between, actual_grad = run(compiled)
+
+        self.assertEqual(actual_between, expected_between)
+        self.assertEqual(actual_grad, expected_grad)
+        self.assertFalse(any(is_rng_op(node) for node in graphs["forward"].graph.nodes))
+        self.assertTrue(any(is_rng_op(node) for node in graphs["backward"].graph.nodes))
+
+
 class TestAOTDispatch(AOTTestCase):
     # Tests to add cases for (non-exhaustive list, mostly for my notes):
     # - subclass / mode introduced in the middle of the compiled fn
@@ -12490,6 +12593,7 @@ class TestEagerFusionModuleInfo(AOTTestCase):
 
 instantiate_parametrized_tests(TestAOTAutograd)
 instantiate_parametrized_tests(TestAOTModuleSimplified)
+instantiate_device_type_tests(TestPartitioningRng, globals(), only_for=("cpu", "cuda"))
 only_for = "cpu"
 instantiate_device_type_tests(
     TestPythonKey,

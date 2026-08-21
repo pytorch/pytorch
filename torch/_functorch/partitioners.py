@@ -754,7 +754,8 @@ def _must_be_in_backward(node: fx.Node) -> bool:
         isinstance(node.target, torch._ops.OpOverload)
         and node.target._schema.is_mutable
     )
-    return _has_tag_is_backward(node) and is_mutable
+    # DCE preserves RNG ops, so backward RNG must not enter forward extraction.
+    return _has_tag_is_backward(node) and (is_mutable or is_rng_op(node))
 
 
 def _iter_input_exprs_without_replacements(val: Any) -> Iterator[sympy.Basic]:
@@ -1662,7 +1663,6 @@ def default_partition(
         node.name for node in forward_nodes if node.op != "output"
     )
     graph_has_recomputable_ops = has_recomputable_ops(joint_module)
-    graph_has_recomputable_rng_ops = has_recomputable_rng_ops(joint_module)
     if graph_has_recomputable_ops:
         if _is_functional_graph(joint_module.graph)[0] is not None:
             # Fall-back to previous behavior to avoid bc-breaking, although can
@@ -1823,11 +1823,10 @@ def default_partition(
     fw_module.graph.eliminate_dead_code(is_impure_node=is_not_collective)
     bw_module.graph.eliminate_dead_code(is_impure_node=is_not_collective)
 
+    fw_module, bw_module = functionalize_rng_ops(
+        fw_module, bw_module, len(saved_sym_nodes)
+    )
     if graph_has_recomputable_ops:
-        if graph_has_recomputable_rng_ops:
-            fw_module, bw_module = functionalize_rng_ops(
-                joint_module, fw_module, bw_module, len(saved_sym_nodes)
-            )
         bw_module = reordering_to_mimic_autograd_engine(bw_module)
 
     # pyrefly: ignore [unbound-name]
@@ -2113,15 +2112,13 @@ def apply_graphsafe_rng_functionalization(
 
 
 def functionalize_rng_ops(
-    joint_module: fx.GraphModule,
     fw_module: fx.GraphModule,
     bw_module: fx.GraphModule,
     num_sym_nodes: int,
 ) -> tuple[fx.GraphModule, fx.GraphModule]:
-    # During user-driven activation checkpointing, we have to ensure that a rng
-    # op in fwd yields the same output as the recomputed rng op in the bwd.  To
-    # do this, we use functionalize wrappers to wrap the random ops and share
-    # rng state between the fwd and bwd graphs.
+    # When an RNG op is copied into both graphs, ensure that it yields the same
+    # output in the forward and backward. To do this, use functionalize wrappers
+    # to wrap the random ops and share RNG state between the graphs.
 
     # There are 3 main steps to do this
     # Step 1 - Construct a mapping of rng node between the fwd and its counterpart in bwd.
@@ -2176,21 +2173,16 @@ def functionalize_rng_ops(
             return fake_mode.from_tensor(torch.get_rng_state())
 
     # Step 1 - Construct a mapping of rng node between the fwd and its counterpart in bwd.
-    joint_graph_rng_ops = get_rng_ops(joint_module)
     fw_graph_rng_ops = get_rng_ops(fw_module)
     bw_graph_rng_ops = get_rng_ops(bw_module)
-    recomputable_rng_ops_map = {}
-    for node in joint_module.graph.nodes:
-        if must_recompute(node) and is_rng_op(node):
-            # Skip if the node doesn't exist in both forward and backward graphs.
-            # This can happen when the RNG op's output is not needed for gradient
-            # computation and gets eliminated by dead code elimination.
-            if node.name not in fw_graph_rng_ops or node.name not in bw_graph_rng_ops:
-                continue
-            base_node = joint_graph_rng_ops[node.name]
-            fw_node = fw_graph_rng_ops[node.name]
-            bw_node = bw_graph_rng_ops[node.name]
-            recomputable_rng_ops_map[base_node] = {"fwd": fw_node, "bwd": bw_node}
+    recomputable_rng_ops = [
+        (fw_node, bw_graph_rng_ops[name])
+        for name, fw_node in fw_graph_rng_ops.items()
+        if name in bw_graph_rng_ops
+    ]
+
+    if not recomputable_rng_ops:
+        return fw_module, bw_module
 
     run_and_save_rng = torch._prims.rng_prims.run_and_save_rng_state
     run_with_rng_state = torch._prims.rng_prims.run_with_rng_state
@@ -2210,9 +2202,7 @@ def functionalize_rng_ops(
     last_fwd_input = next(reversed(fw_module.graph.find_nodes(op="placeholder")))
     last_bwd_input = next(reversed(bw_module.graph.find_nodes(op="placeholder")))
 
-    devices = OrderedSet(
-        get_device(node_pair["fwd"]) for node_pair in recomputable_rng_ops_map.values()
-    )
+    devices = OrderedSet(get_device(fw_node) for fw_node, _ in recomputable_rng_ops)
     # pyrefly: ignore [unbound-name]
     devices.discard(torch.device("cpu"))
     # multiple graphsafe devices won't work with cudagraphs anyway,
@@ -2231,10 +2221,8 @@ def functionalize_rng_ops(
         )
     )
 
-    for rng_count, node_pair in enumerate(recomputable_rng_ops_map.values()):
+    for rng_count, (fw_node, bw_node) in enumerate(recomputable_rng_ops):
         # Step 2 - Modify the fwd pass such that
-        fw_node = node_pair["fwd"]
-        bw_node = node_pair["bwd"]
         device = get_device(fw_node)
 
         fw_graph = fw_module.graph
@@ -4209,7 +4197,6 @@ def min_cut_rematerialization_partition(
     joint_graph = joint_module.graph
 
     graph_has_recomputable_ops = has_recomputable_ops(joint_module)
-    graph_has_recomputable_rng_ops = has_recomputable_rng_ops(joint_module)
     if graph_has_recomputable_ops:
         joint_module = cleanup_recompute_tags(joint_module, is_default_partition=False)
     if not config.unsafe_allow_optimization_of_collectives:
@@ -4338,11 +4325,9 @@ def min_cut_rematerialization_partition(
         num_fwd_outputs=num_fwd_outputs,
         static_lifetime_input_nodes=node_info.static_lifetime_input_nodes,
     )
-    if graph_has_recomputable_ops:
-        if graph_has_recomputable_rng_ops:
-            fw_module, bw_module = functionalize_rng_ops(
-                joint_module, fw_module, bw_module, len(saved_sym_nodes)
-            )
+    fw_module, bw_module = functionalize_rng_ops(
+        fw_module, bw_module, len(saved_sym_nodes)
+    )
     bw_module = reordering_to_mimic_autograd_engine(bw_module)
 
     # pyrefly: ignore [unbound-name]
