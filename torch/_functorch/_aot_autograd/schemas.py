@@ -881,6 +881,47 @@ class ViewAndMutationMeta:
         )
 
 
+class BackendFwMetadata:
+    """
+    A live proxy over ViewAndMutationMeta that exposes only the fields
+    that compiler backends (in-tree Inductor and out-of-tree) may depend
+    on via TracingContext.backend_fw_metadata. Using a property-based proxy
+    (rather than a stored snapshot) ensures that later mutations to the
+    underlying metadata -- such as the bw_donated_idxs reset in
+    runtime_wrappers.py and the DDPOptimizer per-bucket fw_metadata swap --
+    are always visible to backends.
+
+    See https://github.com/pytorch/pytorch/issues/114403
+    """
+
+    def __init__(self, meta: ViewAndMutationMeta) -> None:
+        self._meta = meta
+
+    @property
+    def input_info(self) -> list[InputAliasInfo]:
+        return self._meta.input_info
+
+    @property
+    def output_info(self) -> list[OutputAliasInfo]:
+        return self._meta.output_info
+
+    @property
+    def static_input_indices(self) -> list[int]:
+        return self._meta.static_input_indices
+
+    @static_input_indices.setter
+    def static_input_indices(self, value: list[int]) -> None:
+        self._meta.static_input_indices = value
+
+    @property
+    def num_mutated_inp_runtime_indices(self) -> int:
+        return self._meta.num_mutated_inp_runtime_indices
+
+    @property
+    def bw_donated_idxs(self) -> list[int] | None:
+        return self._meta.bw_donated_idxs
+
+
 @dataclass(eq=False)
 class SubclassMeta:
     # A copy of all forward metadata, but computed on the *dense* tensor forward (after desugaring subclasses)

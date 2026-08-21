@@ -28,7 +28,7 @@ log = logging.getLogger(__name__)
 def replace_params_with_constants(
     gm: torch.fx.GraphModule,
     flat_params: list[Any],
-    fw_metadata: torch._functorch.aot_autograd.ViewAndMutationMeta,
+    fw_metadata: torch._functorch._aot_autograd.schemas.BackendFwMetadata,
 ) -> list[int]:
     """
     Replaces the parameters of a PyTorch GraphModule with constants wherever possible.
@@ -106,7 +106,7 @@ def _freeze(
     view_to_reshape(aot_autograd_gm)
 
     if tracing_context := torch._guards.TracingContext.try_get():
-        fw_metadata = tracing_context.fw_metadata
+        fw_metadata = tracing_context.backend_fw_metadata
         if tracing_context.params_flat_unwrap_subclasses is None:
             raise AssertionError(
                 "expected tracing_context.params_flat_unwrap_subclasses to be set"
