@@ -22,7 +22,6 @@ from torch._inductor.runtime.runtime_utils import get_max_y_grid, is_power_of_2
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
-from torch._utils import _is_privateuse1_backend_available
 from torch.testing._internal.common_cuda import SM100OrLater
 from torch.testing._internal.common_device_type import (
     Capability,
@@ -44,7 +43,6 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import (
     HAS_CUDA_AND_TRITON,
-    HAS_GPU,
     requires_block_ptr,
     skip_windows_ci,
     TRITON_HAS_CPU,
@@ -1802,11 +1800,13 @@ class TritonTensorDescriptorTest(BlockDescriptorTestBase):
         self._run_and_compare(fn, inp, expected_num_block_pointers=0)
 
 
-test_torchinductor.copy_tests(
-    CommonTemplate,
+test_torchinductor.instantiate_device_type_tests_from_templates(
     TritonTensorDescriptorTestCPU,
-    "cpu",
+    globals(),
+    templates=(CommonTemplate,),
     xfail_prop="_expected_failure_cpu_tensor_descriptor",
+    class_name_overrides={"cpu": "TritonTensorDescriptorTestCPU"},
+    only_for="cpu",
 )
 
 copy_device_tests(
@@ -2583,5 +2583,4 @@ instantiate_device_type_tests(
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_GPU or TRITON_HAS_CPU or _is_privateuse1_backend_available():
-        run_tests(needs="filelock")
+    run_tests(needs="filelock")
