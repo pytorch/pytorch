@@ -277,11 +277,9 @@ struct nextafter_functor {
     const ushort ut = as_type<ushort>(to);
     const ushort af = uf & kBFloatMagMask;
     const ushort at = ut & kBFloatMagMask;
-    if (af > kBFloatInf) {
-      return ushort(uf | kBFloatQuietBit); // from is NaN
-    }
-    if (at > kBFloatInf) {
-      return ushort(ut | kBFloatQuietBit); // to is NaN
+    if (af > kBFloatInf || at > kBFloatInf) {
+      // Match the CPU NaN payload; NaN is never subnormal so this is safe.
+      return as_type<ushort>(bfloat(from + to));
     }
     if (uf == ut) {
       return ut;
