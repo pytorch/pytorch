@@ -362,6 +362,21 @@ def _precompile_reads_flag(x):
     return x * getattr(x, "my_flag", 1)
 
 
+def _serialized_guard_names(code):
+    """Every guard name actually present in a shipped artifact's guard state."""
+    from torch._dynamo.package import load_guards_state
+    from torch._precompile import _read_literal
+
+    names = []
+    for frame in pickle.loads(
+        base64.b64decode(_read_literal(ast.parse(code), "_FRAMES"))
+    ):
+        for variant in frame["variants"]:
+            state = load_guards_state(variant["guards_state"])
+            names += [g.name for g in state.output_graph.guards]
+    return " ".join(names)
+
+
 def _read_risky(code):
     from torch._precompile import _read_literal
 
@@ -2866,6 +2881,12 @@ class TestPrecompile(TestCase):
                     example_inputs=[(model, x)],
                 )
             self.assertIn("_cpu_copy", str(_read_risky(code)))
+            # Recorded is not enough: the pickle is what the serving machine
+            # rebuilds from, so a dropped guard still in it fails there exactly
+            # as it failed here.
+            self.assertNotIn("_cpu_copy", _serialized_guard_names(code))
+            torch._dynamo.reset()
+            torch.compiler.precompile.load(code, cache)
             return
         with drop, torch.no_grad():
             session = precompile_capture(_precompile_call_model, backend="eager")

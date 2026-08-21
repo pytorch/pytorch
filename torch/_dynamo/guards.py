@@ -5191,13 +5191,23 @@ class CheckFunctionManager:
                     output_graph,
                     False,
                 )
-                if collect_guard_failures:
-                    failed = {id(g) for g, _ in collect_guard_failures}
-                    all_guards = [g for g in all_guards if id(g) not in failed]
+                drop_failed_guards()
                 filter_entries = [
                     make_guard_filter_entry(guard, inspection_builder)
                     for guard in all_guards
                 ]
+
+            def drop_failed_guards() -> None:
+                # A guard the caller could not rebuild must leave the SERIALIZED
+                # set, not merely be reported: the pickle is what the serving
+                # machine rebuilds from, so a guard left in it fails there
+                # exactly as it failed here. Runs after every build that can
+                # collect, because which build that is depends on whether there
+                # is a runtime filter.
+                nonlocal all_guards
+                if collect_guard_failures:
+                    failed = {id(g) for g, _ in collect_guard_failures}
+                    all_guards = [g for g in all_guards if id(g) not in failed]
 
             def apply_filter(
                 filter_fn: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]],
@@ -5245,6 +5255,7 @@ class CheckFunctionManager:
                 and save_guards
                 and serialization_guard_filter_fn is not None
             ):
+                drop_failed_guards()
                 filter_entries = [
                     make_guard_filter_entry(guard, builder) for guard in all_guards
                 ]
