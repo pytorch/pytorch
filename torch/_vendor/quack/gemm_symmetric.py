@@ -1,5 +1,3 @@
-# Copyright (c) 2025, Tri Dao.
-
 import statistics
 import threading
 
