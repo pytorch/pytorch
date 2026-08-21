@@ -46,8 +46,8 @@ def _noop_kernel(*args, **kwargs):
 
 
 def get_cache_path() -> Path:
-    if _state.CACHE_DIR is not None:
-        cache_dir = Path(_state.CACHE_DIR)
+    if (cache_dir_override := _state.get_cache_dir()) is not None:
+        cache_dir = Path(cache_dir_override)
     else:
         cache_dir = Path(tempfile.gettempdir()) / getuser() / "torch_vendor_quack_cache"
     cache_dir.mkdir(parents=True, exist_ok=True)

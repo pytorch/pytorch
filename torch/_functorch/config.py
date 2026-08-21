@@ -88,7 +88,7 @@ bypass_autograd_cache_key: bool = False
 
 # Whether or not to normalize placeholder names in graphs
 # from dynamo in AOTAutogradCache
-autograd_cache_normalize_inputs = True
+autograd_cache_normalize_inputs = not is_fbcode()
 
 # Enable debug mode at first invocation to check if custom ops are valid.
 # When enabled, this checks that custom operators don't violate aliasing constraints.
@@ -368,7 +368,6 @@ generate_fake_kernels_from_real_mismatches = False
 fake_tensor_prefer_device_type: str | None = None
 
 # CUDAGraph safe run_with_rng functionalization.
-# TODO: turn on by default
 graphsafe_rng_functionalization = True
 
 # Whether or not to eagerly compile the backward

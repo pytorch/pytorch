@@ -8,17 +8,7 @@
 #include <stdexcept>
 
 #if defined(_WIN32)
-// Keep windows.h lean and stop it from defining the min()/max() macros, which
-// would otherwise clobber std::min/std::max (and numeric_limits::max) in the
-// torch headers that include this one. Guarded so we never redefine a flag the
-// including translation unit already set.
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
+#include <torch/headeronly/util/win32-headers.h>
 #else
 #include <dlfcn.h>
 #endif

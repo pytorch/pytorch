@@ -69,7 +69,7 @@ class PartitionResult(NamedTuple):
     module_with_submodules: GraphModule
 
 
-"""Followings are some helper functions for partition manipulation"""
+"""Following are some helper functions for partition manipulation"""
 
 
 def reset_partition_device(partitions: list[Partition]) -> None:

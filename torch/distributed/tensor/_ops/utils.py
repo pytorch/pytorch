@@ -627,7 +627,14 @@ def expand_to_full_mesh_op_strategy(
                 continue
 
         output_specs: tuple[DTensorSpec | None, ...] | DTensorSpec | None
-        if input_index == 0:
+        has_container_output_meta = isinstance(
+            output_tensor_meta, Sequence
+        ) and not isinstance(output_tensor_meta, TensorMeta)
+        if op_schema.return_type_list_tensor_like() and has_container_output_meta:
+            # Tensor[] outputs must stay container-shaped even when there is
+            # only one output spec, so they are distinguishable from Tensor.
+            output_specs = tuple(spec_list[:input_index])
+        elif input_index == 0:
             # No outputs (e.g., _linalg_check_errors)
             output_specs = None
         elif input_index > 1:
@@ -678,6 +685,10 @@ def expand_to_full_mesh_op_strategy(
             f"are not supported. The input has placement {blocking_inplace_input_placements}, "
             f"but no valid strategy preserves this placement. "
             f"Please use the out-of-place version of this operation instead."
+        )
+    if not all_strategies:
+        raise RuntimeError(
+            f"{op_schema.op}: no valid sharding strategy for the input placements."
         )
 
     return OpStrategy(all_strategies)

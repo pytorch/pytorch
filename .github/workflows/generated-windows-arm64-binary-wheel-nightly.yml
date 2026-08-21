@@ -40,20 +40,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  get-label-type:
-    if: github.repository_owner == 'pytorch'
-    name: get-label-type
-    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
-    with:
-      triggering_actor: ${{ github.triggering_actor }}
-      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
-      curr_branch: ${{ github.head_ref || github.ref_name }}
-      curr_ref_type: ${{ github.ref_type }}
 
   wheel-build:
     name: ${{ matrix.build_name }}-build
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: get-label-type
     runs-on: "windows-11-arm64-preview"
     timeout-minutes: 360
     strategy:
@@ -147,7 +137,7 @@ jobs:
   wheel-test:
     name: ${{ matrix.build_name }}-test
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: [get-label-type, wheel-build]
+    needs: [wheel-build]
     runs-on: "windows-11-arm64-preview"
     timeout-minutes: 360
     strategy:
@@ -264,17 +254,20 @@ jobs:
       R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
       R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
       R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-  libtorch-cpu-shared-with-deps-release-extract:
+  libtorch-arm64-cpu-shared-with-deps-release-extract:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
       - wheel-build
-      - get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
+    runs-on: "mt-l-x86iavx512-16-128"
+    container:
+      image: python:3.11
     timeout-minutes: 60
     env:
       DESIRED_CUDA: cpu
       LIBTORCH_VARIANT: shared-with-deps
     steps:
+      - name: Configure git safe directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -290,26 +283,27 @@ jobs:
         shell: bash
         run: |
           set -eux
-          mkdir -p "${{ runner.temp }}/libtorch_output"
+          mkdir -p "${RUNNER_TEMP}/libtorch_output"
           python3 .ci/libtorch/extract_libtorch_from_wheel.py \
-            --wheel-dir "${{ runner.temp }}/wheel_artifact" \
-            --output-dir "${{ runner.temp }}/libtorch_output" \
+            --wheel-dir "${RUNNER_TEMP}/wheel_artifact" \
+            --output-dir "${RUNNER_TEMP}/libtorch_output" \
             --platform windows \
             --desired-cuda "$DESIRED_CUDA" \
-            --libtorch-variant "$LIBTORCH_VARIANT"
+            --libtorch-variant "$LIBTORCH_VARIANT" \
+            --arch arm64
       - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
-          name: libtorch-cpu-shared-with-deps-release
+          name: libtorch-arm64-cpu-shared-with-deps-release
           retention-days: 14
           if-no-files-found: error
           path: "${{ runner.temp }}/libtorch_output/"
-  libtorch-cpu-shared-with-deps-release-upload:  # Uploading
+  libtorch-arm64-cpu-shared-with-deps-release-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
       contents: read
-    needs: libtorch-cpu-shared-with-deps-release-extract
+    needs: libtorch-arm64-cpu-shared-with-deps-release-extract
     with:
       PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: libtorch
@@ -317,7 +311,7 @@ jobs:
       GPU_ARCH_TYPE: cpu
       LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
-      build_name: libtorch-cpu-shared-with-deps-release
+      build_name: libtorch-arm64-cpu-shared-with-deps-release
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}

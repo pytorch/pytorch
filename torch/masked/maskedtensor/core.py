@@ -161,7 +161,7 @@ class MaskedTensor(torch.Tensor):
             (
                 "The PyTorch API of MaskedTensors is in prototype stage "
                 "and will change in the near future. Please open a Github issue "
-                "for features requests and see our documentation on the torch.masked "
+                "for feature requests and see our documentation on the torch.masked "
                 "module for further information about the project."
             ),
             UserWarning,

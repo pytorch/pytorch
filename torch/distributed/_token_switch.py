@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import abc
+import ctypes
+import importlib.util
+import os
 from dataclasses import dataclass
 from typing import Any, TYPE_CHECKING
 
@@ -12,18 +15,87 @@ if TYPE_CHECKING:
     from torch.distributed.distributed_c10d import ProcessGroup
 
 
+# Keeps preloaded shared libraries resident for the process lifetime.
+_NCCL_EP_KEEPALIVE: list[ctypes.CDLL] = []
+
+
+def _find_pkg_dir(name: str) -> str | None:
+    # Locate an installed package's directory without importing it. find_spec
+    # raises (rather than returning None) when a dotted name's parent namespace
+    # is absent, so guard that.
+    try:
+        spec = importlib.util.find_spec(name)
+    except ModuleNotFoundError:
+        return None
+    if spec is None or not spec.submodule_search_locations:
+        return None
+    return spec.submodule_search_locations[0]
+
+
+def _prepare_nccl4py() -> None:
+    # Dynamic (USE_SYSTEM_NCCL=ON / wheel) build only: the extension NEEDED-links
+    # libnccl_ep.so, which the nccl4py wheel provides at runtime. Point nccl-ep's
+    # JIT at nccl4py's EP headers (NCCL_EP_HOME) and the nvidia.nccl wheel's NCCL
+    # headers (NCCL_HOME), and make libnccl_ep resolvable, before importing the
+    # extension (its libnccl dependency is already loaded by torch). The static
+    # build bakes all of this in and never reaches here.
+    nccl_pkg = _find_pkg_dir("nccl")
+    if nccl_pkg is None:
+        raise ImportError(
+            "TokenSwitchNCCL needs the 'nccl4py' package for this build's "
+            "libnccl_ep.so and runtime JIT headers. Install it with "
+            "`pip install nccl4py==0.3.1`."
+        )
+    ep_dir = os.path.join(nccl_pkg, "ep")
+    if "NCCL_EP_HOME" not in os.environ:
+        ep_headers = os.path.join(ep_dir, "include", "nccl_ep")
+        if not os.path.isdir(ep_headers):
+            raise ImportError(
+                f"nccl4py at {nccl_pkg} is missing the EP JIT headers expected "
+                f"at {ep_headers}; reinstall nccl4py or set NCCL_EP_HOME."
+            )
+        os.environ["NCCL_EP_HOME"] = ep_dir
+
+    # Point the JIT at NCCL headers. libnccl.so itself needs no preload here: a
+    # USE_SYSTEM_NCCL=ON torch (the only build that reaches this path) already
+    # dynamically loaded the system libnccl, so libnccl_ep.so's NEEDED
+    # libnccl.so.2 resolves to that already-loaded copy.
+    nvidia_nccl = _find_pkg_dir("nvidia.nccl")
+    if nvidia_nccl is not None and os.path.isdir(os.path.join(nvidia_nccl, "include")):
+        os.environ.setdefault("NCCL_HOME", nvidia_nccl)
+
+    # nccl4py ships libnccl_ep unversioned (libnccl_ep.so) while the extension's
+    # NEEDED entry is its SONAME libnccl_ep.so.0; load it by path to register
+    # that SONAME for the import below.
+    lib = os.path.join(ep_dir, "lib", "libnccl_ep.so")
+    if os.path.isfile(lib):
+        _NCCL_EP_KEEPALIVE.append(ctypes.CDLL(lib, mode=ctypes.RTLD_LOCAL))
+
+
 def _import_nccl_ep() -> Any:
-    # The EP bindings live in the optional torch._nccl_ep extension, built only
-    # with USE_NCCL_EP. It statically links libnccl_ep (its nccl* symbols bind to
-    # torch's own NCCL) and bakes in the JIT header paths, so it is fully
-    # self-contained -- no libnccl_ep.so to preload and no nccl4py dependency.
+    # The EP bindings live in the optional torch._nccl_ep extension (USE_NCCL_EP).
+    # A USE_SYSTEM_NCCL=OFF build links libnccl_ep statically and bakes its JIT
+    # header paths, so the extension imports directly -- self-contained, no
+    # nccl4py. A USE_SYSTEM_NCCL=ON build NEEDED-links libnccl_ep from the nccl4py
+    # wheel, so the first import fails until nccl4py is set up; fall back to that
+    # and retry.
+    try:
+        # pyrefly: ignore [missing-import]  # built only with USE_NCCL_EP
+        import torch._nccl_ep as _ep
+
+        return _ep
+    except ImportError:
+        pass
+
+    _prepare_nccl4py()
     try:
         # pyrefly: ignore [missing-import]  # built only with USE_NCCL_EP
         import torch._nccl_ep as _ep
     except ImportError as e:
         raise ImportError(
             "torch._nccl_ep is unavailable; this PyTorch was not built with "
-            "USE_NCCL_EP."
+            "USE_NCCL_EP (or, for a USE_SYSTEM_NCCL=ON build, the nccl4py wheel "
+            "is missing)."
         ) from e
 
     return _ep
