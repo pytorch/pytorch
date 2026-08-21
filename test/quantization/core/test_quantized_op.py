@@ -2180,6 +2180,21 @@ class TestQuantizedOps(TestCase):
                                  msg=lambda msg: f"{msg}\n" + (error_message.format(name + '.zero_point', scale,
                                  X_hat.q_zero_point())))
 
+    def test_adaptive_avg_pool1d_float_index_boundary(self):
+        # Float32 boundary math gives the wrong pooling window for this size.
+        # Use C > 1 so unsqueeze(-2) is not channels_last (NHWC stub).
+        input_len = 2047
+        output_len = 10413
+        x = torch.zeros(1, 2, input_len)
+        x[0, :, 1770] = 10.0
+        x[0, :, 1771] = 30.0
+        qx = torch.quantize_per_tensor(x, scale=1.0, zero_point=0, dtype=torch.qint8)
+        ref = torch.nn.functional.adaptive_avg_pool1d(
+            qx.int_repr().to(torch.double), output_len).round()
+        qy = torch.nn.functional.adaptive_avg_pool1d(qx, output_len)
+        self.assertEqual(ref, qy.int_repr(), atol=0, rtol=0, exact_dtype=False)
+        self.assertEqual(qy.int_repr()[0, 0, 9008].item(), 10)
+
     @unittest.skip("not currently working and feature isn't used")
     def test_adaptive_avg_pool(self):
 
