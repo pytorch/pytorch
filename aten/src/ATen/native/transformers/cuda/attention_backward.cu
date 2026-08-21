@@ -475,14 +475,15 @@ _efficient_attention_backward(
   int64_t K = query.size(3);
   int64_t Kv = value.size(3);
 
-  // Shared cumulative metadata proves every packed Q/K length matches without
-  // reading sequence lengths from the device.
+  // Local windows can fully mask rows. Without a window, shared cumulative
+  // metadata proves packed Q/K lengths match without reading them from device.
   const bool may_have_fully_masked_rows =
-      custom_mask_type ==
-          static_cast<int64_t>(sdp::CustomMaskType::CausalFromBottomRight) &&
-      (cu_seqlens_q.has_value()
-           ? !cu_seqlens_q->is_same(*cu_seqlens_k)
-           : max_seqlen_q > max_seqlen_k);
+      window_size.value_or(0) > 0 ||
+      (custom_mask_type ==
+           static_cast<int64_t>(sdp::CustomMaskType::CausalFromBottomRight) &&
+       (cu_seqlens_q.has_value()
+            ? !cu_seqlens_q->is_same(*cu_seqlens_k)
+            : max_seqlen_q > max_seqlen_k));
 
   at::Tensor grad_q, grad_k, grad_v, grad_bias;
   if (shared_storage_dqdkdv) {
@@ -528,10 +529,6 @@ _efficient_attention_backward(
   }
 #endif
 
-  // NOTE [Masked bias gradients]
-  // Causal and local-window kernels can skip masked dBias tiles, leaving them
-  // unwritten here. Zeroing the full [B, H, Q, K] allocation adds quadratic
-  // memory traffic, so this needs a targeted fix.
   if (bias_requires_grad) {
     TORCH_CHECK(
         bias.has_value(),

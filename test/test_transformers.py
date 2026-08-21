@@ -3451,22 +3451,19 @@ class TestSDPACudaOnly(NNTestCase):
             expected, (query, key, value), grad_out, retain_graph=True
         )
 
-        actual = torch.ops.aten._efficient_attention_forward.default(
-            query.transpose(1, 2),
-            key.transpose(1, 2),
-            value.transpose(1, 2),
-            None,
-            None,
-            None,
-            None,
-            None,
-            0.0,
-            int(CausalVariant.LOWER_RIGHT),
-            True,
-        )[0].transpose(1, 2)
-        actual_grads = torch.autograd.grad(
-            actual, (query, key, value), grad_out
-        )
+        with (
+            sdpa_kernel(SDPBackend.EFFICIENT_ATTENTION),
+            use_deterministic_algorithims(True, warn_only=False),
+        ):
+            actual = scaled_dot_product_attention(
+                query,
+                key,
+                value,
+                attn_mask=causal_lower_right(q_len, k_len),
+            )
+            actual_grads = torch.autograd.grad(
+                actual, (query, key, value), grad_out
+            )
 
         self.assertEqual(actual, expected, atol=3e-3, rtol=2e-3)
         for actual_grad, expected_grad in zip(actual_grads, expected_grads):
@@ -3487,22 +3484,25 @@ class TestSDPACudaOnly(NNTestCase):
         not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
         "Memory efficient attention is not supported on this system",
     )
-    def test_mem_efficient_bottom_right_window(self, device):
+    @parametrize(
+        "causal_variant", [CausalVariant.UPPER_LEFT, CausalVariant.LOWER_RIGHT]
+    )
+    @parametrize("head_dim", [32, 160])
+    def test_mem_efficient_causal_window(self, device, causal_variant, head_dim):
+        if head_dim > 64 and not MEM_EFF_CAPABILITY_MATCHES_SM80:
+            self.skipTest("large head dimensions require SM80 or later")
         torch.manual_seed(42)
         q_len, k_len, window_size = 96, 64, 17
-        query = torch.randn(
-            1, 2, q_len, 32, device=device, dtype=torch.float32, requires_grad=True
+        make_tensor = partial(
+            torch.randn, device=device, dtype=torch.float32, requires_grad=True
         )
-        key = torch.randn(
-            1, 2, k_len, 32, device=device, dtype=torch.float32, requires_grad=True
-        )
-        value = torch.randn(
-            1, 2, k_len, 24, device=device, dtype=torch.float32, requires_grad=True
-        )
+        query = make_tensor(1, 2, q_len, head_dim)
+        key = make_tensor(1, 2, k_len, head_dim)
+        value = make_tensor(1, 2, k_len, 24)
         grad_out = torch.randn(1, 2, q_len, 24, device=device)
         q_index = torch.arange(q_len, device=device)[:, None]
         k_index = torch.arange(k_len, device=device)[None, :]
-        diagonal = k_len - q_len
+        diagonal = k_len - q_len if causal_variant == CausalVariant.LOWER_RIGHT else 0
         mask = (k_index <= q_index + diagonal) & (
             k_index > q_index + diagonal - window_size
         )
@@ -3526,7 +3526,7 @@ class TestSDPACudaOnly(NNTestCase):
                 None,
                 None,
                 0.0,
-                int(CausalVariant.LOWER_RIGHT),
+                int(causal_variant),
                 True,
                 window_size=window_size,
             )[0].transpose(1, 2)
@@ -3601,25 +3601,25 @@ class TestSDPACudaOnly(NNTestCase):
             expected, (query, key, value), grad_out, retain_graph=True
         )
 
-        actual, logsumexp, seed, offset, max_q, max_k = (
-            torch.ops.aten._efficient_attention_forward.default(
-                query,
-                key,
-                value,
-                None,
-                cu_seqlens_q,
-                cu_seqlens_k,
-                max(q_lengths),
-                max(k_lengths),
-                0.0,
-                int(CausalVariant.LOWER_RIGHT),
-                True,
+        # Deterministic mode fills empty allocations with NaNs, exposing rows
+        # skipped by the forward or backward kernel.
+        with use_deterministic_algorithims(True, warn_only=False):
+            actual, logsumexp, seed, offset, max_q, max_k = (
+                torch.ops.aten._efficient_attention_forward.default(
+                    query,
+                    key,
+                    value,
+                    None,
+                    cu_seqlens_q,
+                    cu_seqlens_k,
+                    max(q_lengths),
+                    max(k_lengths),
+                    0.0,
+                    int(CausalVariant.LOWER_RIGHT),
+                    True,
+                )
             )
-        )
-        if shared_storage_dqdkdv:
-            # Deterministic mode fills empty allocations with NaNs, exposing
-            # query rows skipped by the backward kernel.
-            with use_deterministic_algorithims(True, warn_only=False):
+            if shared_storage_dqdkdv:
                 actual_grads = torch.ops.aten._efficient_attention_backward.default(
                     grad_out,
                     query,
@@ -3639,10 +3639,10 @@ class TestSDPACudaOnly(NNTestCase):
                     False,
                     shared_storage_dqdkdv=True,
                 )[:3]
-        else:
-            actual_grads = torch.autograd.grad(
-                actual, (query, key, value), grad_out
-            )
+            else:
+                actual_grads = torch.autograd.grad(
+                    actual, (query, key, value), grad_out
+                )
 
         self.assertEqual(actual, expected, atol=3e-3, rtol=2e-3)
         for actual_grad, expected_grad in zip(actual_grads, expected_grads):
@@ -6540,11 +6540,6 @@ class TestAttnBias(NNTestCase):
         bsz, num_heads, seq_len_q, seq_len_kv, head_dim = shape
         make_q_tensor = partial(make_tensor, SdpaShape(bsz, num_heads, seq_len_q, head_dim))
         make_kv_tensor = partial(make_tensor, SdpaShape(bsz, num_heads, seq_len_kv, head_dim))
-        if causal_variant == CausalVariant.LOWER_RIGHT and seq_len_q > seq_len_kv:
-            self.skipTest(
-                "Lower right causal mask will produce NaNs in the output when seq_len_q > seq_len_kv!"
-            )
-
         forw_tol = Tolerances(1e-3, 1e-3)
         grad_tol = Tolerances(5e-3, 5e-3)
 
@@ -6575,10 +6570,6 @@ class TestAttnBias(NNTestCase):
         bsz, num_heads, seq_len_q, seq_len_kv, head_dim = shape
         make_q_tensor = partial(make_tensor, SdpaShape(bsz, num_heads, seq_len_q, head_dim))
         make_kv_tensor = partial(make_tensor, SdpaShape(bsz, num_heads, seq_len_kv, head_dim))
-        if causal_variant == CausalVariant.LOWER_RIGHT and seq_len_q > seq_len_kv:
-            self.skipTest(
-                "Lower right causal mask will produce NaNs in the output when seq_len_q > seq_len_kv!"
-            )
         forw_tol = Tolerances(1e-3, 1e-3)
         grad_tol = Tolerances(5e-3, 5e-3)
 
