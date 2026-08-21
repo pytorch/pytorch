@@ -206,6 +206,10 @@ def _resolve_dims(dims, cfg_kwargs, constants):
             result.append(int(constants[s]))
         elif isinstance(s, str) and s in cfg_kwargs:
             result.append(int(cfg_kwargs[s]))
+        elif isinstance(s, str) and s.lstrip("-").isdigit():
+            # Template descriptors render dims via texpr(), so a literal comes
+            # through as a decimal string rather than an int.
+            result.append(int(s))
         else:
             log.debug("host-side TMA: unresolved descriptor dim %r; skipping", s)
             return None
