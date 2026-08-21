@@ -4825,6 +4825,10 @@ def _automatic_dynamic(
         #   dims that are only _dynamo_propagated_dynamic_indices, which should keep
         #     plain automatic dynamic behavior and no user constraint
         #   pure automatic dynamic, and no marking at all
+        # Until then the automatic_dynamic_shapes feature usage recorded below is skewed:
+        # a weakly marked dim with a declared range takes its own branch and records
+        # nothing, while the same dim without a range falls through and records usage,
+        # even though neither is dynamic because of automatic dynamic shapes.
         #
         # We will process constraints first, as they will imply that we
         # have a dynamic dimension
@@ -4861,16 +4865,22 @@ def _automatic_dynamic(
                     vr=_dim_range_to_value_ranges(dim_range),
                     warn_only=True,
                 )
-                # Declaring a range says nothing about strides, so keep the stride
-                # treatment this dim would have had without one. Automatic dynamic
-                # shapes is not what made the dim dynamic here, so its usage is not
-                # recorded.
-                if automatic_dynamic_stride:
+                # Strides are unrelated to the declared range, so decide them exactly as
+                # they would be for this dim if no range had been declared.
+                # TODO this is hazy, marked_static loses to a weak marking for the size
+                # yet still suppresses the stride constraint here. Maintaining existing
+                # behavior for now, the refactor above should settle it.
+                if not marked_static and automatic_dynamic_stride:
                     constraint_stride = RelaxedUnspecConstraint(warn_only=True)
             elif marked_strict_unbacked:
                 constraint_size = RelaxedUnspecConstraint(warn_only=False)
             elif not marked_static and automatic_dynamic:
-                set_feature_use("dynamo.automatic_dynamic_shapes", True)
+                if not marked_weak_dynamic:
+                    # A weakly marked dim is dynamic because it was marked, automatic
+                    # dynamic shapes only supplies its constraints, so its usage is not
+                    # recorded. Keeps the reporting independent of whether the marking
+                    # declared a range.
+                    set_feature_use("dynamo.automatic_dynamic_shapes", True)
                 if automatic_dynamic_size:
                     constraint_size = RelaxedUnspecConstraint(warn_only=True)
                 if automatic_dynamic_stride:
