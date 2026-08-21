@@ -25,9 +25,7 @@ namespace {
 PyObject* multiprocessing_init(PyObject* _unused, PyObject* noargs) {
   auto multiprocessing_module =
       THPObjectPtr(PyImport_ImportModule("torch.multiprocessing"));
-  if (!multiprocessing_module) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(multiprocessing_module);
 
   auto module = py::handle(multiprocessing_module).cast<py::module>();
 

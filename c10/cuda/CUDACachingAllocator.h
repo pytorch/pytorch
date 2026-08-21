@@ -568,6 +568,36 @@ inline void annotateMemory(const void* ptr, const std::string& metadata) {
   get()->annotateMemory(ptr, metadata);
 }
 
+// Tag (or, with an empty class, untag) a CUDA stream with an opaque reserve
+// class. Expandable segments created for a tagged stream size their virtual
+// address reservation from the per-class reserve in PYTORCH_CUDA_ALLOC_CONF
+// (see expandable_segments_reserve_by_class / expandable_segments_reserve). The
+// class string is opaque to core: downstream callers own the vocabulary. An
+// untagged stream (or the empty class) uses the full historical reserve.
+//
+// Contract: the tag is keyed by the raw cudaStream_t handle and persists until
+// overwritten or cleared. Streams from getStreamFromPool come from a shared,
+// round-robin pool, so tagging such a stream applies the class to every user of
+// that handle and to the (shared) expandable segments created on it. Tag only
+// streams whose (device, stream) identity you control for the intended
+// lifetime, and clear the tag (empty class) if the handle may later be reused
+// for an unrelated purpose.
+C10_CUDA_API void setExpandableSegmentReserveClassForStream(
+    cudaStream_t stream,
+    const std::string& reserve_class);
+C10_CUDA_API std::string getExpandableSegmentReserveClassForStream(
+    cudaStream_t stream);
+
+// Registers a code-side default reserve, expressed as a fraction of total
+// device memory, for a reserve class. Lets serving layers opt their stream
+// classes into a downsized reserve by default without depending on
+// CUDAAllocatorConfig. Explicit operator config (via PYTORCH_CUDA_ALLOC_CONF)
+// wins; see the precedence note on
+// CUDAAllocatorConfig::set_default_reserve_for_class.
+C10_CUDA_API void setDefaultExpandableSegmentReserveFractionForClass(
+    const std::string& reserve_class,
+    double fraction);
+
 } // namespace c10::cuda::CUDACachingAllocator
 
 namespace c10::cuda {

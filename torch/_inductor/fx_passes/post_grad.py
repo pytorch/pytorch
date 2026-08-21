@@ -15,6 +15,7 @@ import torch.utils._pytree as pytree
 from torch import fx
 from torch._decomp import register_decomposition
 from torch._dynamo.utils import counters
+from torch._higher_order_ops.flex_gemm import _PRESERVE_FLEX_GEMM_GEMM_OP
 from torch._inductor.custom_graph_pass import (
     CustomInferenceAwareGraphPass,
     get_custom_graph_passes,
@@ -141,25 +142,36 @@ def _chain_random_ops_for_ordering(graph: torch.fx.Graph) -> None:
     preserve_node_ordering(graph, additional_deps_map)
 
 
-def reject_current_device_nodes(graph: torch.fx.Graph) -> None:
-    """[device-as-parameter] Reject CooR coor::current_device() nodes in inductor.
+def respecialize_current_device_nodes(graph: torch.fx.Graph) -> None:
+    """[device-as-parameter] Re-specialize CooR _coor_current_device() device nodes.
 
-    Under compile_on_one_rank, make_fx rewrites a baked accelerator device operand to a
-    ``coor::current_device()`` node so the FX graph is rank-agnostic. Inductor has no
-    device-valued IR and cannot lower a device-returning op, so raise a clear, actionable
-    error instead of failing later with a cryptic lowering assertion. A follow-up adds
-    real support by stripping the node before lowering.
+    Under compile-on-one-rank, make_fx rewrites a baked accelerator device operand to a
+    ``_coor_current_device()`` node so the FX graph is rank-agnostic. Inductor has no
+    device-valued IR, so before lowering we replace each use of that node with the node's
+    own runtime value -- the concrete current device (``_coor_current_device()``), the
+    authoritative source, not the consumer's meta. Runs in post_grad, before GraphLowering,
+    so the node never reaches the call_function OpOverload assertion. ``_coor_current_device``
+    lives in core fx and only reads torch.accelerator, so this never imports
+    torch.distributed for a non-distributed compile.
     """
-    import torch.fx.experimental.proxy_tensor
+    # Importing proxy_tensor registers the coor::current_device op (core fx, no
+    # torch.distributed) and gives us its impl for the concrete value.
+    from torch.fx.experimental.proxy_tensor import _coor_current_device
 
     target = torch.ops.coor.current_device.default
-    if any(n.op == "call_function" and n.target is target for n in graph.nodes):
-        raise RuntimeError(
-            "compile_on_one_rank is not supported with the inductor backend when the "
-            "graph contains a device-derived factory or cast (it emits a "
-            "coor::current_device node that inductor cannot lower). Use a non-inductor "
-            "backend (e.g. aot_eager) or disable compile_on_one_rank."
-        )
+    nodes = graph.find_nodes(op="call_function", target=target)
+    if not nodes:
+        return
+    device = _coor_current_device()
+    for node in nodes:
+        for user in list(node.users):
+            user.args = torch.fx.map_arg(
+                user.args, lambda n: device if n is node else n
+            )
+            user.kwargs = torch.fx.map_arg(
+                user.kwargs, lambda n: device if n is node else n
+            )
+        graph.erase_node(node)
 
 
 def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
@@ -219,9 +231,10 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         _remove_profiler_ops
     )
 
-    # [device-as-parameter] Reject CooR device nodes inductor can't lower (clear error).
-    GraphTransformObserver(gm, "reject_current_device").apply_graph_pass(
-        reject_current_device_nodes
+    # [device-as-parameter] Re-specialize CooR current_device() device nodes before
+    # lowering (inductor has no device-valued IR).
+    GraphTransformObserver(gm, "respecialize_current_device").apply_graph_pass(
+        respecialize_current_device_nodes
     )
 
     if config.pattern_matcher:
@@ -739,6 +752,17 @@ def decompose_scan_to_while_loop(gm: torch.fx.GraphModule):
                 additional_inputs,
             ) = pytree.tree_unflatten(args, tree_spec)
             scan_length = xs[0].size(0)
+            if scan_length == 0:
+                empty_ys = [
+                    torch.empty(
+                        [0] + list(ys_out.shape[1:]),
+                        dtype=ys_out.dtype,
+                        device=ys_out.device,
+                    )
+                    for ys_out in ys_outputs
+                ]
+                return list(init) + empty_ys
+
             loop_idx = torch.zeros([], dtype=torch.int64, device=torch.device("cpu"))
 
             # NOTE [Pre-allocate scan's output buffer]
@@ -871,7 +895,10 @@ def reorder_for_locality(graph: torch.fx.Graph):
             # which cause hangs. Once we have SPMD mode, we can safely reorder them.
             # However, increasing the locality between a collective and its wait node
             # is generally worse for performance.
-            return node.target != torch.ops._c10d_functional.wait_tensor.default
+            return node.target not in (
+                torch.ops._c10d_functional.wait_tensor.default,
+                torch.ops._c10d_functional.wait_tensors.default,
+            )
     else:
 
         def check():
@@ -885,9 +912,16 @@ def reorder_for_locality(graph: torch.fx.Graph):
         )
 
     def visit(other_node):
+        is_wait_tensors_getitem = (
+            other_node.target is operator.getitem
+            and torch.distributed.is_available()
+            and isinstance(other_node.args[0], torch.fx.Node)
+            and other_node.args[0].target
+            is torch.ops._c10d_functional.wait_tensors.default
+        )
         if (
             other_node.op == "call_function"
-            and other_node.target != operator.getitem
+            and (other_node.target is not operator.getitem or is_wait_tensors_getitem)
             and all((n in seen_nodes) for n in other_node.users)
             and get_mutation_region_id(graph, node)
             == get_mutation_region_id(graph, other_node)
@@ -993,6 +1027,11 @@ def mm_plus_mm(match: Match, mat1, mat2, mat3, mat4):
     return inductor.kernel.mm_plus_mm.tuned_mm_plus_mm(mat1, mat2, mat3, mat4)
 
 
+def pointless_cumsum_non_scalar_check(match: Match) -> bool:
+    # Scalar cumsum is already handled directly by lowering.cumsum.
+    return len(match.kwargs["shape"]) > 0
+
+
 @register_graph_pattern(
     CallFunction(
         aten.cumsum.default,
@@ -1009,6 +1048,7 @@ def mm_plus_mm(match: Match, mat1, mat2, mat3, mat4):
         KeywordArg("dim"),
         _users=MULTIPLE,
     ),
+    extra_check=pointless_cumsum_non_scalar_check,
     # pyrefly: ignore [bad-argument-type]
     pass_dict=pass_patterns[1],
 )
@@ -1830,6 +1870,8 @@ def should_prefer_unfused_addmm(match):
     inp = match.kwargs["inp"]
     if not is_gpu(inp.meta["val"].device.type):
         return False
+    if match.output_node().meta.get(_PRESERVE_FLEX_GEMM_GEMM_OP):
+        return False
     mat1, mat2 = match.args
     inp_val = inp.meta["val"]
     mat1_val = mat1.meta["val"]
@@ -1853,6 +1895,8 @@ def should_prefer_unfused_addmm(match):
 def should_prefer_unfused_baddbmm(match):
     inp = match.kwargs["inp"]
     if not is_gpu(inp.meta["val"].device.type):
+        return False
+    if match.output_node().meta.get(_PRESERVE_FLEX_GEMM_GEMM_OP):
         return False
 
     output = match.output_node()
@@ -1953,6 +1997,12 @@ def unfuse_bias_baddbmm_to_pointwise(match: Match, mat1, mat2, *, inp, alpha, be
 
 
 def is_valid_addmm_fusion(match):
+    if any(
+        node.target is aten.mm.default and node.meta.get(_PRESERVE_FLEX_GEMM_GEMM_OP)
+        for node in match.nodes
+    ):
+        return False
+
     mat1, mat2 = match.args
     inp = match.kwargs["inp"]
 
@@ -2001,6 +2051,62 @@ def addmm(match, mat1, mat2, *, inp):
         return aten.addmm(inp, mat1, mat2)
 
     match.replace_by_example(repl, [inp, mat1, mat2])
+
+
+def _is_addcdiv_fma_eligible(match: Match) -> bool:
+    """Guards for the addcdiv FMA re-fusion pass."""
+    # aten.addcdiv requires floating-point self; check inp, not output, because
+    # aten.div promotes integers to float so the output is float even for int inp.
+    inp_val = match.kwargs["inp"].meta.get("val")
+    if not (isinstance(inp_val, torch.Tensor) and inp_val.dtype.is_floating_point):
+        return False
+    # tl.fma / div_rn are Triton GPU-only
+    out_val = match.output_node().meta.get("val")
+    if not (
+        isinstance(out_val, torch.Tensor) and out_val.device.type in ("cuda", "xpu")
+    ):
+        return False
+    # aten.addcdiv requires all tensor args to be floating-point; integer
+    # constants and SymInts can appear as t1/t2 in decomposed graphs.
+    for key in ("t1", "t2"):
+        node = match.kwargs.get(key)
+        val = node.meta.get("val") if isinstance(node, torch.fx.Node) else node
+        if not (isinstance(val, torch.Tensor) and val.dtype.is_floating_point):
+            return False
+    # aten.addcdiv requires a scalar value, not a tensor
+    return not isinstance(match.kwargs.get("value"), torch.fx.Node)
+
+
+@register_graph_pattern(
+    CallFunction(
+        aten.add.Tensor,
+        KeywordArg("inp"),
+        CallFunction(
+            aten.mul.Tensor,
+            CallFunction(aten.div.Tensor, KeywordArg("t1"), KeywordArg("t2")),
+            KeywordArg("value"),
+        ),
+    ),
+    # pyrefly: ignore [bad-argument-type]
+    pass_dict=pass_patterns[2],
+    extra_check=_is_addcdiv_fma_eligible,
+)
+def _fuse_addcdiv_to_fma(match: Match, inp, t1, t2, value) -> None:
+    """Re-fuse ``inp + (t1/t2)*value`` back into ``aten.addcdiv``.
+
+    torch.addcdiv is CompositeImplicitAutograd: it decomposes into
+    aten.div + aten.mul + aten.add before Inductor sees the graph, making the
+    FMA-aware lowering in lowering.py unreachable.  Re-inserting a single
+    aten.addcdiv node lets that lowering fire (tl.fma + triton.language.div_rn).
+    """
+
+    def repl(
+        inp: torch.Tensor, t1: torch.Tensor, t2: torch.Tensor, value
+    ) -> torch.Tensor:
+        return torch.ops.aten.addcdiv(inp, t1, t2, value=value)
+
+    counters["inductor"]["addcdiv_fma_fused"] += 1
+    match.replace_by_example(repl, [inp, t1, t2, value])
 
 
 def register_partial_reduction_pattern():

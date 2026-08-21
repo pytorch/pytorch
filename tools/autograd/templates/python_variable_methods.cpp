@@ -143,10 +143,10 @@ static PyObject * THPVariable_stride(PyObject* self, PyObject* args, PyObject* k
   // torch.Size and tuple in python
   // TODO: consider factoring this out
   THPObjectPtr tuple(PyTuple_New(static_cast<Py_ssize_t>(strides.size())));
-  if (!tuple) throw python_error();
+  TORCH_CHECK_PYTHON(tuple);
   for (size_t i = 0; i != strides.size(); i++) {
     PyObject* s = torch::toPyObject(strides[i]);
-    if (!s) throw python_error();
+    TORCH_CHECK_PYTHON(s);
     PyTuple_SET_ITEM(tuple.get(), i, s);
   }
   return tuple.release();

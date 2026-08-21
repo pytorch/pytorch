@@ -76,6 +76,14 @@ class TestFakePG(TestCase):
         # default init path leaves the backend options null).
         dist.set_timeout(timedelta(seconds=30))
 
+    def test_add_ephemeral_timeout_is_noop(self):
+        backend = FakeProcessGroup._create_internal(0, world_size=2)
+        backend._add_ephemeral_timeout(timedelta(seconds=42))
+
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+        dist.distributed_c10d._add_ephemeral_timeout_for_all_pgs(timedelta(seconds=42))
+
     def test_allgather(self):
         dist.init_process_group(backend="fake", rank=1, world_size=2)
 
@@ -454,14 +462,14 @@ class TestFakePG(TestCase):
         self.assertEqual(out_tensor, in_tensor)
 
     @parametrize("rank", [0, 1])
-    def test_alltoall_base_split_sizes_repeat(self, rank):
+    def test_alltoall_base_output_larger_than_input(self, rank):
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=rank, world_size=2, store=store)
 
-        # Slot 1 (size 6) is larger than the input buffer (size 4),
-        # so the input is repeated to fill it.
+        # out_tensor is larger than in_tensor, values are first
+        # filled with in_tensor then zeros
         in_tensor = torch.arange(4.0).reshape(4, 1)
-        out_tensor = torch.empty(8, 1)
+        out_tensor = torch.full((8, 1), -1.0)
         dist.all_to_all_single(
             out_tensor,
             in_tensor,
@@ -469,17 +477,17 @@ class TestFakePG(TestCase):
             input_split_sizes=[1, 3],
         )
         expected = torch.tensor(
-            [[0.0], [1.0], [0.0], [1.0], [2.0], [3.0], [0.0], [1.0]]
+            [[0.0], [1.0], [2.0], [3.0], [0.0], [0.0], [0.0], [0.0]]
         )
         self.assertEqual(out_tensor, expected)
 
     @parametrize("rank", [0, 1])
-    def test_alltoall_base_split_sizes_truncate(self, rank):
+    def test_alltoall_base_output_smaller_than_input(self, rank):
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=rank, world_size=2, store=store)
 
-        # Each output slot is smaller than the input buffer, so input is
-        # truncated to slot size.
+        # out_tensor is smaller than in_tensor, values are first
+        # filled with values of in_tensor.
         in_tensor = torch.arange(8.0).reshape(8, 1)
         out_tensor = torch.empty(4, 1)
         dist.all_to_all_single(
@@ -488,8 +496,67 @@ class TestFakePG(TestCase):
             output_split_sizes=[1, 3],
             input_split_sizes=[4, 4],
         )
-        expected = torch.tensor([[0.0], [0.0], [1.0], [2.0]])
+        expected = torch.tensor([[0.0], [1.0], [2.0], [3.0]])
         self.assertEqual(out_tensor, expected)
+
+    def test_alltoall_base_empty_output_split_sizes(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        in_tensor = torch.arange(4.0).reshape(4, 1)
+        out_tensor = torch.empty(4, 1)
+        dist.all_to_all_single(
+            out_tensor,
+            in_tensor,
+            output_split_sizes=[],
+            input_split_sizes=[2, 2],
+        )
+        self.assertEqual(out_tensor, in_tensor)
+
+    def test_alltoall_base_empty_input_split_sizes(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        out_tensor = torch.ones(2, 1)
+        dist.all_to_all_single(
+            out_tensor,
+            torch.empty(0, 1),
+            output_split_sizes=[0, 2],
+            input_split_sizes=[],
+        )
+        self.assertEqual(out_tensor, torch.zeros_like(out_tensor))
+
+    def test_alltoall_base_equal_split_numel_mismatch(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        in_tensor = torch.arange(8.0).reshape(4, 2)
+        out_tensor = torch.empty(4, 1)
+        dist.all_to_all_single(out_tensor, in_tensor)
+        self.assertEqual(out_tensor, torch.arange(4.0).reshape(4, 1))
+
+    def test_alltoall_base_flat_copy_equal_splits(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        in_tensor = torch.arange(4.0).reshape(4, 1)
+        out_tensor = torch.empty(2, 2)
+        dist.all_to_all_single(out_tensor, in_tensor)
+        self.assertEqual(out_tensor, in_tensor.view_as(out_tensor))
+
+    def test_alltoall_base_flat_copy_explicit_splits(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        in_tensor = torch.arange(4.0).reshape(2, 2)
+        out_tensor = torch.empty(4, 1)
+        dist.all_to_all_single(
+            out_tensor,
+            in_tensor,
+            output_split_sizes=[2, 2],
+            input_split_sizes=[1, 1],
+        )
+        self.assertEqual(out_tensor, in_tensor.view_as(out_tensor))
 
     def test_alltoall_base_split_size_validation(self):
         store = FakeStore()
@@ -520,17 +587,56 @@ class TestFakePG(TestCase):
                 input_split_sizes=[2, 2],
             )
 
-    def test_alltoall_base_empty_input_with_output(self):
+    def test_alltoall_base_zero_sized_input(self):
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
 
-        with self.assertRaisesRegex(RuntimeError, "inputBuffer is empty"):
-            dist.all_to_all_single(
-                torch.empty(2, 1),
-                torch.empty(0, 1),
-                output_split_sizes=[1, 1],
-                input_split_sizes=[0, 0],
-            )
+        out_tensor = torch.ones(2, 1)
+        dist.all_to_all_single(
+            out_tensor,
+            torch.empty(0, 1),
+            output_split_sizes=[0, 2],
+            input_split_sizes=[0, 0],
+        )
+        self.assertEqual(out_tensor, torch.zeros_like(out_tensor))
+
+    def test_alltoall_base_zero_sized_output(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        out_tensor = torch.empty(0, 1)
+        dist.all_to_all_single(
+            out_tensor,
+            torch.arange(4.0).reshape(4, 1),
+            output_split_sizes=[0, 0],
+            input_split_sizes=[0, 4],
+        )
+        self.assertEqual(out_tensor, torch.empty_like(out_tensor))
+
+    @parametrize("noncontiguous_buffer", ["input", "output"])
+    def test_alltoall_base_requires_contiguous(self, noncontiguous_buffer):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        in_tensor = torch.arange(8.0).reshape(4, 2)
+        out_tensor = torch.empty(4, 2)
+        if noncontiguous_buffer == "input":
+            in_tensor = torch.arange(8.0).reshape(2, 4).t()
+        else:
+            out_tensor = torch.empty(2, 4).t()
+
+        with self.assertRaisesRegex(RuntimeError, "tensor must be contiguous"):
+            dist.all_to_all_single(out_tensor, in_tensor)
+
+    def test_alltoall_base_channels_last(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        in_tensor = torch.arange(32.0).reshape(2, 2, 2, 4)
+        in_tensor = in_tensor.contiguous(memory_format=torch.channels_last)
+        out_tensor = torch.empty_like(in_tensor)
+        dist.all_to_all_single(out_tensor, in_tensor)
+        self.assertEqual(out_tensor, in_tensor)
 
     def test_alltoall_list_size_validation(self):
         store = FakeStore()
@@ -777,6 +883,50 @@ class TestFakePG(TestCase):
 
     @skipIfHpu
     @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
+    def test_split_group_backend_filter(self):
+        # A fake world's backend string is the bare name "fake", which
+        # BackendConfig expands to every device fake supports. split_group's
+        # filter validation used to re-expand it through
+        # Backend.default_device_backend_map -- where fake is only the default
+        # for hpu -- so every device-qualified filter was rejected as "not
+        # present in the parent" and the bare "fake" filter selected hpu alone.
+        store = FakeStore()
+        dist.init_process_group(
+            backend="fake",
+            rank=0,
+            world_size=2,
+            store=store,
+            device_id=torch.device(device_type, 0),
+        )
+        parent_pg = dist.distributed_c10d._get_default_group()
+        parent_devices = {d.type for d in parent_pg._device_types}
+        self.assertIn(device_type, parent_devices)
+
+        # A bare filter naming the parent's backend keeps every parent device.
+        full = dist.split_group(split_ranks=[[0, 1]], backend="fake")
+        self.assertEqual({d.type for d in full._device_types}, parent_devices)
+
+        # A device-qualified filter keeps exactly the named devices. The C++
+        # split additionally requires the filter to keep the parent's default
+        # backend device, which for an all-fake parent is cpu.
+        cpu_only = dist.split_group(split_ranks=[[0, 1]], backend="cpu:fake")
+        self.assertEqual({d.type for d in cpu_only._device_types}, {"cpu"})
+
+        pair = dist.split_group(
+            split_ranks=[[0, 1]], backend=f"cpu:fake,{device_type}:fake"
+        )
+        self.assertEqual({d.type for d in pair._device_types}, {"cpu", device_type})
+
+        # Filters that genuinely do not match the parent are still rejected.
+        with self.assertRaisesRegex(ValueError, "is not present in the parent"):
+            dist.split_group(split_ranks=[[0, 1]], backend="mps:fake")
+        with self.assertRaisesRegex(ValueError, "Backend mismatch"):
+            dist.split_group(split_ranks=[[0, 1]], backend="cpu:gloo")
+        with self.assertRaisesRegex(ValueError, "is not present in the parent"):
+            dist.split_group(split_ranks=[[0, 1]], backend="gloo")
+
+    @skipIfHpu
+    @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
     def test_split_group_non_member(self):
         store = FakeStore()
         dist.init_process_group(
@@ -787,9 +937,9 @@ class TestFakePG(TestCase):
             device_id=torch.device(device_type, 0),
         )
 
-        # Rank 0 is in none of the splits, so it gets None back.
+        # Rank 0 is in none of the splits, so it gets the non-member sentinel.
         new_pg = dist.split_group(split_ranks=[[1, 2, 3]])
-        self.assertIsNone(new_pg)
+        self.assertIs(new_pg, dist.GroupMember.NON_GROUP_MEMBER)
 
     @skipIfHpu
     @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
@@ -812,6 +962,68 @@ class TestFakePG(TestCase):
         new_pg = dist.split_group(split_ranks=[[0, 1]])
         self.assertIsNotNone(new_pg)
         self.assertEqual(new_pg.size(), 2)
+
+    @skipIfHpu
+    @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
+    @parametrize("rank", [0, 1, 2, 3])
+    def test_split_group_consistent_naming_after_partial_split(self, rank):
+        # Regression test for https://github.com/pytorch/pytorch/issues/190396.
+        #
+        # _hash_ranks_to_str previously used len(_world.pg_names) as the
+        # uniqueness suffix. Non-member ranks of a partial split don't register
+        # the PG, so their counter stayed lower than member ranks. Subsequent
+        # splits then computed different names for the same communicator on
+        # different ranks, causing inconsistent teardown ordering and (for NCCL)
+        # circular ncclCommFinalize waits that deadlock destroy_process_group.
+        #
+        # The fix uses _world.group_count as the salt. _process_group_name now
+        # increments group_count on BOTH paths so it advances on every rank that
+        # reaches it, including non-members, keeping it collective-consistent.
+        # This test verifies group_count advances consistently even for non-member
+        # ranks and that PG names are computed from it correctly.
+        world_size = 4
+        store = FakeStore()
+        dist.init_process_group(
+            backend="fake",
+            rank=rank,
+            world_size=world_size,
+            store=store,
+            device_id=torch.device(device_type, 0),
+        )
+        import hashlib as _hashlib
+
+        from torch.distributed import distributed_c10d
+
+        # group_count starts at 1 (the default PG consumed count 0).
+        count_after_init = distributed_c10d._world.group_count
+
+        # Partial split: ranks 0,1,2 are members; rank 3 is not.
+        partial = dist.split_group(split_ranks=[[0, 1, 2]])
+
+        # group_count must advance on ALL ranks, including non-member rank 3,
+        # because _process_group_name is called before the member check.
+        self.assertEqual(distributed_c10d._world.group_count, count_after_init + 1)
+        if rank == 3:
+            self.assertNotIsInstance(partial, dist.ProcessGroup)
+        else:
+            self.assertIsInstance(partial, dist.ProcessGroup)
+
+        # Full split: all ranks are members.
+        full = dist.split_group(split_ranks=[[0, 2], [1, 3]])
+        self.assertEqual(distributed_c10d._world.group_count, count_after_init + 2)
+        self.assertIsInstance(full, dist.ProcessGroup)
+
+        # PG name must use count_after_init+1 as the group_count salt
+        # (the value at the time of the second split_group call, before it
+        # was incremented). Co-participants of [0,2] and [1,3] each compute
+        # the same name because group_count is consistent across all ranks.
+        pg_name = distributed_c10d._world.pg_names[full]
+        my_group = [0, 2] if rank in [0, 2] else [1, 3]
+        rank_join = "_".join(map(str, my_group))
+        expected = _hashlib.sha1(
+            f"{rank_join}_{count_after_init + 1}".encode(), usedforsecurity=False
+        ).hexdigest()
+        self.assertEqual(pg_name, expected)
 
 
 instantiate_parametrized_tests(TestFakePG)

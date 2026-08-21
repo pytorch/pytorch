@@ -454,8 +454,7 @@ bool THPStorage_init(PyObject* module) {
 void THPStorage_postInit(PyObject* module) {
   THPStorageClass = reinterpret_cast<PyTypeObject*>(
       PyObject_GetAttrString(module, "UntypedStorage"));
-  if (!THPStorageClass)
-    throw python_error();
+  TORCH_CHECK_PYTHON(THPStorageClass);
 }
 
 void THPStorage_assertNotNull(THPStorage* storage) {
