@@ -8,10 +8,7 @@ import torch
 from ...codegen.flydsl import flydsl_utils
 from ...codegen.flydsl.flydsl_template import FlyDSLTemplate
 from ...virtualized import V
-from .common import (
-    infer_dense_strides,
-    load_flex_template,
-)
+from .common import infer_dense_strides, load_flex_template
 from .flex_flash_attention import is_trivial_mask_graph, is_trivial_score_graph
 from .flex_flydsl_mask import lower_flydsl_mask_graph
 
@@ -22,6 +19,17 @@ flex_flydsl_forward_template = FlyDSLTemplate(
 )
 
 _MAX_BUFFER_BYTES = 1 << 32
+_ADD_TARGETS = (
+    operator.add,
+    torch.ops.aten.add.Tensor,
+    torch.ops.aten.add.Scalar,
+)
+_ALPHA_ADD_TARGETS = (
+    torch.ops.aten.add.Tensor,
+    torch.ops.aten.add.Scalar,
+)
+_GE_TARGETS = (operator.ge, torch.ops.aten.ge.Tensor, torch.ops.aten.ge.Scalar)
+_LE_TARGETS = (operator.le, torch.ops.aten.le.Tensor, torch.ops.aten.le.Scalar)
 
 
 def is_causal_mask_graph(graph_module, q_offset: int = 0) -> bool:
@@ -35,38 +43,33 @@ def is_causal_mask_graph(graph_module, q_offset: int = 0) -> bool:
         return False
     lhs, rhs = result.args
     query = placeholders[2]
-    add_targets = {
-        operator.add,
-        torch.ops.aten.add.Tensor,
-        torch.ops.aten.add.Scalar,
-    }
 
     def is_offset_query(value) -> bool:
         if q_offset == 0 and value is query:
             return True
         if (
             not hasattr(value, "target")
-            or value.target not in add_targets
+            or value.target not in _ADD_TARGETS
             or len(value.args) < 2
         ):
             return False
         add_lhs, add_rhs = value.args[:2]
+        if value.target in _ALPHA_ADD_TARGETS and value.kwargs.get("alpha", 1) != 1:
+            return False
         return (
             add_lhs is query
             and isinstance(add_rhs, (int, float))
-            and int(add_rhs) == q_offset
+            and add_rhs == q_offset
         ) or (
             add_rhs is query
             and isinstance(add_lhs, (int, float))
-            and int(add_lhs) == q_offset
+            and add_lhs == q_offset
         )
 
-    ge_targets = {operator.ge, torch.ops.aten.ge.Tensor, torch.ops.aten.ge.Scalar}
-    le_targets = {operator.le, torch.ops.aten.le.Tensor, torch.ops.aten.le.Scalar}
     return (
-        result.target in ge_targets and is_offset_query(lhs) and rhs is placeholders[3]
+        result.target in _GE_TARGETS and is_offset_query(lhs) and rhs is placeholders[3]
     ) or (
-        result.target in le_targets and lhs is placeholders[3] and is_offset_query(rhs)
+        result.target in _LE_TARGETS and lhs is placeholders[3] and is_offset_query(rhs)
     )
 
 
@@ -104,6 +107,19 @@ def _fits_u32_buffer(node) -> bool:
         (size - 1) * stride for size, stride in zip(sizes, strides)
     )
     return storage_elements * element_size < _MAX_BUFFER_BYTES
+
+
+def _is_contiguous_shape_stride(
+    shape: tuple[int, ...], stride: tuple[int, ...]
+) -> bool:
+    if len(shape) != len(stride):
+        return False
+    expected_stride = 1
+    for size, actual_stride in reversed(tuple(zip(shape, stride))):
+        if size != 1 and actual_stride != expected_stride:
+            return False
+        expected_stride *= max(size, 1)
+    return True
 
 
 def _is_gfx950_device(device) -> bool:
@@ -175,6 +191,12 @@ def _get_flydsl_flex_attention_forward_config(
     if full_kv_num_blocks is None or full_kv_indices is None:
         return None, "requires full_kv_num_blocks/full_kv_indices metadata"
 
+    metadata_nodes = (
+        kv_num_blocks,
+        kv_indices,
+        full_kv_num_blocks,
+        full_kv_indices,
+    )
     try:
         b, hq, sq, qk_dim = [
             V.graph.sizevars.guard_int(item) for item in query.get_size()
@@ -191,6 +213,18 @@ def _get_flydsl_flex_attention_forward_config(
         index_shape = [
             V.graph.sizevars.guard_int(item) for item in kv_indices.get_size()
         ]
+        full_count_shape = [
+            V.graph.sizevars.guard_int(item) for item in full_kv_num_blocks.get_size()
+        ]
+        full_index_shape = [
+            V.graph.sizevars.guard_int(item) for item in full_kv_indices.get_size()
+        ]
+        metadata_shapes = tuple(
+            tuple(V.graph.sizevars.guard_int(item) for item in node.get_size())
+            for node in metadata_nodes
+        )
+        metadata_dtypes = tuple(node.get_dtype() for node in metadata_nodes)
+        metadata_devices = tuple(node.get_device() for node in metadata_nodes)
         sparse_q_block_size = V.graph.sizevars.guard_int(sparse_q_block_size)
         sparse_kv_block_size = V.graph.sizevars.guard_int(sparse_kv_block_size)
         full_numel = V.graph.sizevars.guard_int(full_kv_num_blocks.get_numel())
@@ -204,6 +238,28 @@ def _get_flydsl_flex_attention_forward_config(
         )
     except (AttributeError, TypeError, ValueError):
         return None, "requires statically known tensor and BlockMask dimensions"
+
+    if any(dtype != torch.int32 for dtype in metadata_dtypes):
+        return None, "requires int32 BlockMask metadata"
+    if any(device != query.get_device() for device in metadata_devices):
+        return None, "requires BlockMask metadata on the query device"
+    try:
+        metadata_strides = tuple(
+            tuple(V.graph.sizevars.guard_int(item) for item in node.get_stride())
+            for node in metadata_nodes
+        )
+    except NotImplementedError:
+        # Pointwise-created metadata is realized before template registration,
+        # where this check runs again with a concrete layout.
+        metadata_strides = None
+    except (AttributeError, TypeError, ValueError):
+        return None, "requires statically known BlockMask metadata strides"
+    if metadata_strides is not None:
+        if not all(
+            _is_contiguous_shape_stride(shape, stride)
+            for shape, stride in zip(metadata_shapes, metadata_strides)
+        ):
+            return None, "requires contiguous BlockMask metadata"
 
     causal_mask = is_causal_mask_graph(
         mask_graph.graph_module,
@@ -266,12 +322,8 @@ def _get_flydsl_flex_attention_forward_config(
     has_full_blocks = full_numel != 0
     max_full_blocks = 1
     if has_full_blocks:
-        try:
-            full_index_shape = [
-                V.graph.sizevars.guard_int(item) for item in full_kv_indices.get_size()
-            ]
-        except (AttributeError, TypeError, ValueError):
-            return None, "requires statically known full BlockMask dimensions"
+        if full_count_shape != mask_shape:
+            return None, "requires matching partial/full BlockMask count dimensions"
         if len(full_index_shape) != 4 or full_index_shape[:3] != mask_shape:
             return None, "requires matching full BlockMask count/index dimensions"
         max_full_blocks = full_index_shape[-1]

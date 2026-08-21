@@ -1,11 +1,13 @@
 # Owner(s): ["module: inductor"]
 
+import operator
 from types import SimpleNamespace
 from unittest import mock
 
 import torch
 from torch._inductor.codegen.flydsl import flydsl_utils
 from torch._inductor.kernel.flex.flex_flydsl_attention import (
+    can_use_flydsl_flex_attention_forward,
     flex_flydsl_forward_template,
     is_causal_mask_graph,
     maybe_append_flydsl_flex_attention_choice,
@@ -14,6 +16,7 @@ from torch._inductor.kernel.flex.flex_flydsl_mask import lower_flydsl_mask_graph
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
+from torch.fx.experimental.proxy_tensor import make_fx
 
 
 class _FakeNode:
@@ -55,6 +58,85 @@ def _fake_graph():
     )
 
 
+def _supported_fake_forward_inputs():
+    q_size = [1, 64, 512, 128]
+    kv_size = [1, 4, 1024, 128]
+    stats_size = [1, 64, 512]
+    mask_counts_size = [1, 1, 4]
+    mask_indices_size = [1, 1, 4, 8]
+    return {
+        "query": _FakeNode(q_size, _contiguous_stride(q_size)),
+        "key": _FakeNode(kv_size, _contiguous_stride(kv_size)),
+        "value": _FakeNode(kv_size, _contiguous_stride(kv_size)),
+        "logsumexp": _FakeNode(
+            stats_size,
+            _contiguous_stride(stats_size),
+            torch.float32,
+        ),
+        "max_scores": _FakeNode(
+            stats_size,
+            _contiguous_stride(stats_size),
+            torch.float32,
+        ),
+        "kv_num_blocks": _FakeNode(
+            mask_counts_size,
+            _contiguous_stride(mask_counts_size),
+            torch.int32,
+        ),
+        "kv_indices": _FakeNode(
+            mask_indices_size,
+            _contiguous_stride(mask_indices_size),
+            torch.int32,
+        ),
+        "full_kv_num_blocks": _FakeNode(
+            mask_counts_size,
+            _contiguous_stride(mask_counts_size),
+            torch.int32,
+        ),
+        "full_kv_indices": _FakeNode(
+            mask_indices_size,
+            _contiguous_stride(mask_indices_size),
+            torch.int32,
+        ),
+        "subgraph": SimpleNamespace(
+            graph_module=torch.fx.symbolic_trace(lambda score, b, h, q, kv: score)
+        ),
+        "mask_graph": SimpleNamespace(
+            graph_module=torch.fx.symbolic_trace(lambda b, h, q, kv: q + 512 >= kv)
+        ),
+        "score_mod_other_buffers": [],
+        "mask_mod_other_buffers": [],
+        "scale": 128**-0.5,
+        "sparse_q_block_size": 128,
+        "sparse_kv_block_size": 128,
+    }
+
+
+def _mask_graph(fn):
+    indices = tuple(torch.tensor(0, dtype=torch.int32) for _ in range(4))
+    return make_fx(fn)(*indices)
+
+
+def _evaluate_mask_program(program, b, h, q, kv):
+    values = [b, h, q, kv]
+    for instruction in program.instructions:
+        op = instruction[0]
+        if op in ("const_i32", "const_bool"):
+            values.append(instruction[1])
+            continue
+        lhs = values[instruction[1]]
+        rhs = values[instruction[2]]
+        values.append(
+            {
+                "add": operator.add,
+                "sub": operator.sub,
+                "mul": operator.mul,
+                "ge": operator.ge,
+            }[op](lhs, rhs)
+        )
+    return values[program.output]
+
+
 def _has_gfx950_flydsl():
     return (
         torch.cuda.is_available()
@@ -82,53 +164,39 @@ class TestFlyDSLFlexAttention(TestCase):
         self.assertFalse(is_causal_mask_graph(causal, 8188))
         self.assertFalse(is_causal_mask_graph(noncausal))
 
+    def test_fractional_offset_is_not_causal(self):
+        graph_module = torch.fx.symbolic_trace(lambda b, h, q, kv: q + -0.5 >= kv)
+
+        self.assertFalse(is_causal_mask_graph(graph_module))
+        program, reason = lower_flydsl_mask_graph(graph_module, ())
+        self.assertIsNone(program)
+        self.assertIn("scalar constant -0.5 is unsupported", reason)
+
+    def test_add_alpha_is_not_misclassified_as_causal(self):
+        graph_module = _mask_graph(lambda b, h, q, kv: torch.add(q, 64, alpha=2) >= kv)
+
+        self.assertFalse(is_causal_mask_graph(graph_module, 64))
+        self.assertFalse(is_causal_mask_graph(graph_module, 128))
+
+    def test_mask_lowering_preserves_add_and_sub_alpha(self):
+        cases = (
+            (lambda b, h, q, kv: torch.add(q, 64, alpha=2) >= kv, 0, 100, True),
+            (lambda b, h, q, kv: torch.sub(q, 64, alpha=2) >= kv, 200, 100, False),
+        )
+        for mask_mod, q, kv, expected in cases:
+            with self.subTest(mask_mod=mask_mod):
+                program, reason = lower_flydsl_mask_graph(
+                    _mask_graph(mask_mod),
+                    (),
+                )
+                self.assertIsNotNone(program, reason)
+                self.assertEqual(
+                    _evaluate_mask_program(program, 0, 0, q, kv),
+                    expected,
+                )
+
     def test_appends_supported_bf16_gqa_choice(self):
-        q_size = [1, 64, 512, 128]
-        kv_size = [1, 4, 1024, 128]
-        mask_counts_size = [1, 1, 4]
-        mask_indices_size = [1, 1, 4, 8]
-
-        query = _FakeNode(q_size, _contiguous_stride(q_size))
-        key = _FakeNode(kv_size, _contiguous_stride(kv_size))
-        value = _FakeNode(kv_size, _contiguous_stride(kv_size))
-        stats_size = [1, 64, 512]
-        lse = _FakeNode(
-            stats_size,
-            _contiguous_stride(stats_size),
-            torch.float32,
-        )
-        max_scores = _FakeNode(
-            stats_size,
-            _contiguous_stride(stats_size),
-            torch.float32,
-        )
-        counts = _FakeNode(
-            mask_counts_size,
-            _contiguous_stride(mask_counts_size),
-            torch.int32,
-        )
-        indices = _FakeNode(
-            mask_indices_size,
-            _contiguous_stride(mask_indices_size),
-            torch.int32,
-        )
-        full_counts = _FakeNode(
-            mask_counts_size,
-            _contiguous_stride(mask_counts_size),
-            torch.int32,
-        )
-        full_indices = _FakeNode(
-            mask_indices_size,
-            _contiguous_stride(mask_indices_size),
-            torch.int32,
-        )
-
-        score_graph = SimpleNamespace(
-            graph_module=torch.fx.symbolic_trace(lambda score, b, h, q, kv: score)
-        )
-        mask_graph = SimpleNamespace(
-            graph_module=torch.fx.symbolic_trace(lambda b, h, q, kv: q + 512 >= kv)
-        )
+        inputs = _supported_fake_forward_inputs()
         graph = _fake_graph()
         choices = []
 
@@ -144,23 +212,8 @@ class TestFlyDSLFlexAttention(TestCase):
         ):
             maybe_append_flydsl_flex_attention_choice(
                 choices,
-                query=query,
-                key=key,
-                value=value,
-                logsumexp=lse,
-                max_scores=max_scores,
-                kv_num_blocks=counts,
-                kv_indices=indices,
-                full_kv_num_blocks=full_counts,
-                full_kv_indices=full_indices,
                 layout=mock.Mock(),
-                subgraph=score_graph,
-                mask_graph=mask_graph,
-                score_mod_other_buffers=[],
-                mask_mod_other_buffers=[],
-                scale=128**-0.5,
-                sparse_q_block_size=128,
-                sparse_kv_block_size=128,
+                **inputs,
             )
 
         append.assert_called_once()
@@ -173,7 +226,43 @@ class TestFlyDSLFlexAttention(TestCase):
         self.assertEqual(kwargs["SPARSE_Q_BLOCK_SIZE"], 128)
         self.assertEqual(kwargs["SPARSE_KV_BLOCK_SIZE"], 128)
 
-    def test_appends_dsv2_qk192_v128_choice(self):
+    def test_rejects_invalid_block_mask_metadata(self):
+        cases = (
+            (
+                "full_kv_num_blocks",
+                _FakeNode([1, 1, 3], [3, 3, 1], torch.int32),
+                "count dimensions",
+            ),
+            (
+                "kv_indices",
+                _FakeNode([1, 1, 4, 8], [64, 64, 16, 1], torch.int32),
+                "contiguous",
+            ),
+            (
+                "kv_num_blocks",
+                _FakeNode([1, 1, 4], [4, 4, 1], torch.float32),
+                "int32",
+            ),
+        )
+        graph = _fake_graph()
+        for name, invalid_node, expected_reason in cases:
+            with self.subTest(name=name):
+                inputs = _supported_fake_forward_inputs()
+                inputs[name] = invalid_node
+                inputs.pop("logsumexp")
+                inputs.pop("max_scores")
+                with (
+                    V.set_graph_handler(graph),
+                    mock.patch(
+                        "torch._inductor.kernel.flex.flex_flydsl_attention._is_gfx950_device",
+                        return_value=True,
+                    ),
+                ):
+                    can_use, reason = can_use_flydsl_flex_attention_forward(**inputs)
+                self.assertFalse(can_use)
+                self.assertIn(expected_reason, reason)
+
+    def test_appends_qk192_v128_choice(self):
         q_size = [1, 16, 256, 192]
         k_size = [1, 16, 256, 192]
         v_size = [1, 16, 256, 128]
@@ -504,11 +593,11 @@ class TestFlyDSLFlexAttention(TestCase):
         ):
             self.skipTest("requires gfx950 and a built FlyDSL runtime")
 
+        import flydsl.compiler as flyc
+
         from torch._inductor.kernel.vendored_templates.flydsl.kernels.flex_attn_fwd_gfx950 import (
             build_flex_attn_fwd_module,
         )
-
-        import flydsl.compiler as flyc
 
         batch, q_heads, kv_heads, seq, head_dim = 1, 4, 2, 512, 128
         scale = head_dim**-0.5
@@ -648,7 +737,7 @@ class TestFlyDSLFlexAttention(TestCase):
         self.assertTrue(torch.isneginf(lse[:, :, 384:]).all())
         self.assertTrue(torch.isneginf(max_scores[:, :, 384:]).all())
 
-    def test_gfx950_public_api_minimax_per_kv_head_decode(self):
+    def test_gfx950_public_api_per_kv_head_decode(self):
         if not (
             torch.cuda.is_available()
             and torch.version.hip is not None
@@ -887,10 +976,7 @@ class TestFlyDSLFlexAttention(TestCase):
         if not _has_gfx950_flydsl():
             self.skipTest("requires gfx950 and a built FlyDSL runtime")
 
-        from torch.nn.attention.flex_attention import (
-            create_block_mask,
-            flex_attention,
-        )
+        from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 
         batch, heads, seq, head_dim = 1, 2, 256, 128
         torch.manual_seed(3)
@@ -953,14 +1039,129 @@ class TestFlyDSLFlexAttention(TestCase):
         self.assertFalse(torch.isnan(output).any())
         torch.testing.assert_close(output, reference, atol=0.08, rtol=0.02)
 
+    def test_gfx950_public_api_default_block_mask(self):
+        if not _has_gfx950_flydsl():
+            self.skipTest("requires gfx950 and a built FlyDSL runtime")
+
+        from torch.nn.attention.flex_attention import flex_attention
+
+        batch, heads, seq, head_dim = 2, 3, 256, 128
+        torch.manual_seed(7)
+        query, key, value = (
+            torch.randn(
+                batch,
+                heads,
+                seq,
+                head_dim,
+                device="cuda",
+                dtype=torch.bfloat16,
+            )
+            for _ in range(3)
+        )
+
+        def run(q, k, v, backend):
+            return flex_attention(
+                q,
+                k,
+                v,
+                kernel_options={"BACKEND": backend},
+            )
+
+        output, code = run_and_get_code(
+            torch.compile(
+                lambda q, k, v: run(q, k, v, "FLYDSL"),
+                fullgraph=True,
+            ),
+            query,
+            key,
+            value,
+        )
+        reference, _ = run_and_get_code(
+            torch.compile(
+                lambda q, k, v: run(q, k, v, "TRITON"),
+                fullgraph=True,
+            ),
+            query,
+            key,
+            value,
+        )
+        torch.cuda.synchronize()
+
+        self.assertIn("build_flex_attn_fwd_module", "\n".join(code))
+        torch.testing.assert_close(output, reference, atol=0.08, rtol=0.02)
+
+    def test_gfx950_public_api_general_batched_head_dependent_mask(self):
+        if not _has_gfx950_flydsl():
+            self.skipTest("requires gfx950 and a built FlyDSL runtime")
+
+        from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+
+        batch, heads, seq, head_dim = 2, 3, 512, 128
+        torch.manual_seed(8)
+        query, key, value = (
+            torch.randn(
+                batch,
+                heads,
+                seq,
+                head_dim,
+                device="cuda",
+                dtype=torch.bfloat16,
+            )
+            for _ in range(3)
+        )
+
+        def checkerboard_causal(b, h, q_idx, kv_idx):
+            del b
+            adjusted_q = torch.add(q_idx, 64, alpha=2)
+            return (adjusted_q >= kv_idx) & ((adjusted_q - kv_idx) % (2 + h) == 0)
+
+        block_mask = create_block_mask(
+            checkerboard_causal,
+            batch,
+            heads,
+            seq,
+            seq,
+            device="cuda",
+            BLOCK_SIZE=128,
+        )
+
+        def run(q, k, v, backend):
+            return flex_attention(
+                q,
+                k,
+                v,
+                block_mask=block_mask,
+                kernel_options={"BACKEND": backend},
+            )
+
+        output, code = run_and_get_code(
+            torch.compile(
+                lambda q, k, v: run(q, k, v, "FLYDSL"),
+                fullgraph=True,
+            ),
+            query,
+            key,
+            value,
+        )
+        reference, _ = run_and_get_code(
+            torch.compile(
+                lambda q, k, v: run(q, k, v, "TRITON"),
+                fullgraph=True,
+            ),
+            query,
+            key,
+            value,
+        )
+        torch.cuda.synchronize()
+
+        self.assertIn("build_flex_attn_fwd_module", "\n".join(code))
+        torch.testing.assert_close(output, reference, atol=0.08, rtol=0.02)
+
     def test_gfx950_public_api_b1_document_two_captures(self):
         if not _has_gfx950_flydsl():
             self.skipTest("requires gfx950 and a built FlyDSL runtime")
 
-        from torch.nn.attention.flex_attention import (
-            create_block_mask,
-            flex_attention,
-        )
+        from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 
         batch, heads, seq, head_dim = 1, 2, 256, 128
         torch.manual_seed(4)
@@ -1032,10 +1233,7 @@ class TestFlyDSLFlexAttention(TestCase):
         if not _has_gfx950_flydsl():
             self.skipTest("requires gfx950 and a built FlyDSL runtime")
 
-        from torch.nn.attention.flex_attention import (
-            create_block_mask,
-            flex_attention,
-        )
+        from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 
         batch, heads, seq, head_dim = 1, 1, 4096, 128
         torch.manual_seed(5)
@@ -1103,10 +1301,7 @@ class TestFlyDSLFlexAttention(TestCase):
         if not _has_gfx950_flydsl():
             self.skipTest("requires gfx950 and a built FlyDSL runtime")
 
-        from torch.nn.attention.flex_attention import (
-            create_block_mask,
-            flex_attention,
-        )
+        from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 
         batch, heads, seq, head_dim = 1, 2, 256, 128
         torch.manual_seed(6)
@@ -1157,7 +1352,7 @@ class TestFlyDSLFlexAttention(TestCase):
         self.assertFalse(torch.isnan(output).any())
         self.assertNotIn("build_flex_attn_fwd_module", "\n".join(code))
 
-    def test_gfx950_public_api_dsv2_qk192_v128_prefill(self):
+    def test_gfx950_public_api_qk192_v128_prefill(self):
         if not (
             torch.cuda.is_available()
             and torch.version.hip is not None
