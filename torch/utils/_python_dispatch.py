@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import contextlib
 import functools
+import inspect
 import warnings
 from collections import deque
 from dataclasses import dataclass
@@ -541,7 +542,14 @@ TensorWithFlatten = TraceableWrapperSubclass
 
 
 def _has_traceable_wrapper_subclass_protocol(t: object) -> bool:
-    return hasattr(t, "__tensor_flatten__") and hasattr(t, "__tensor_unflatten__")
+    # Look up on the class MRO, never the instance. Instance hasattr() is True
+    # whenever __getattr__ returns without raising, which is not the flatten
+    # protocol. getattr_static also skips metaclass __getattr__.
+    cls = t if isinstance(t, type) else type(t)
+    return (
+        inspect.getattr_static(cls, "__tensor_flatten__", None) is not None
+        and inspect.getattr_static(cls, "__tensor_unflatten__", None) is not None
+    )
 
 
 def is_traceable_wrapper_subclass(t: object) -> TypeIs[TraceableWrapperSubclass]:
