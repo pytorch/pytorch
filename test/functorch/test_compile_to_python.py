@@ -203,6 +203,86 @@ class TestAOTCompileToPython(TestCase):
                     load_from_python(src, cache)(_flat_inputs(m, x))[0], m(x)
                 )
 
+    def test_inline_backward_graph_is_not_lowered_as_inference(self):
+        # A graph that differentiates INLINE (make_fx tracing through a
+        # .backward()) has no joint, so a joint-only check would call it
+        # inference. Inductor's decide_layout_opt branches on that and can
+        # convert a conv to channels-last, which makes cuDNN serve a TF32 NHWC
+        # kernel -- a silent ~2e-4 relative difference in the gradients. The ops
+        # decide, not the graph count.
+        from torch._functorch._aot_autograd.to_standalone_python import (
+            _graph_differentiates,
+        )
+
+        conv = torch.nn.Conv2d(4, 8, 3, padding=1)
+        x = torch.randn(2, 4, 8, 8)
+
+        self.assertFalse(_graph_differentiates(_capture(conv, x)))
+
+        def train_step(*args):
+            names = [n for n, _ in conv.named_parameters()]
+            params = dict(zip(names, args[: len(names)]))
+            with stateless._reparametrize_module(conv, params):
+                conv(args[-1]).sum().backward()
+
+        flat = [t.detach().requires_grad_(True) for t in _flat_inputs(conv, x)]
+        with torch.enable_grad():
+            traced = make_fx(train_step)(*flat)
+        self.assertTrue(_graph_differentiates(traced))
+        self.assertTrue(
+            any("convolution_backward" in str(n.target) for n in traced.graph.nodes)
+        )
+
+    def test_training_graph_composes_forward_and_backward(self):
+        # grad_enabled with inputs that require grad makes AOTAutograd emit a
+        # JOINT forward+backward: two dense graphs, bridged by an autograd
+        # Function the composer emits (its forward/backward bodies are
+        # AOTAutograd's own codegen'd source). The served output must therefore
+        # carry grad_fn and its .backward() must run the compiled backward.
+        m = torch.nn.Linear(4, 3)
+        x = torch.randn(5, 4)
+        for p in m.parameters():
+            p.grad = None
+        m(x).sum().backward()
+        expected = {n: p.grad.detach().clone() for n, p in m.named_parameters()}
+
+        gm = _capture(m, x)
+        with torch.enable_grad():
+            src, _cache = compile_to_python(gm, _flat_inputs(m, x), grad_enabled=True)
+        # Both inductor modules and the backward wrappers are inlined as source.
+        self.assertIn("_inner_call_fw", src)
+        self.assertIn("_inner_call_bw", src)
+        self.assertIn("def _backward_prologue(", src)
+        self.assertIn("class _CompiledFunction(torch.autograd.Function):", src)
+        self.assertNotIn("pickle.loads", src)
+
+        out = _exec(src)(_flat_inputs(m, x))
+        out = out[0] if isinstance(out, (list, tuple)) else out
+        self.assertIsNotNone(out.grad_fn)
+        for p in m.parameters():
+            p.grad = None
+        out.sum().backward()
+        for name, param in m.named_parameters():
+            self.assertEqual(param.grad, expected[name])
+
+    def test_training_forward_and_backward_do_not_share_names(self):
+        # The two inductor modules are spliced into ONE namespace and both define
+        # call / Runner / their kernels. A module resolves those as late-bound
+        # globals when INVOKED, so without per-module renaming the forward runs
+        # the backward's kernels -- which surfaces as an arity error, or worse.
+        m = torch.nn.Linear(4, 3)
+        x = torch.randn(5, 4)
+        gm = _capture(m, x)
+        with torch.enable_grad():
+            src, _cache = compile_to_python(gm, _flat_inputs(m, x), grad_enabled=True)
+        tree = ast.parse(src)
+        names = [
+            node.name
+            for node in tree.body
+            if isinstance(node, (ast.FunctionDef, ast.ClassDef))
+        ]
+        self.assertEqual(len(names), len(set(names)), f"duplicate top-level: {names}")
+
     def test_linear_addmm_runs_like_eager(self):
         m = torch.nn.Linear(4, 3).eval()
         x = torch.randn(5, 4)
