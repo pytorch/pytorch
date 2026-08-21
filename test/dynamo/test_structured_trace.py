@@ -14,20 +14,19 @@ from contextlib import contextmanager
 from unittest import skipIf
 
 import torch
-import torch._dynamo.test_case
-import torch._dynamo.testing
 import torch._logging.structured
 import torch.distributed as dist
 import torch.fx as fx
 from torch._inductor.test_case import TestCase
 from torch._logging._internal import TorchLogsFormatter
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.testing._internal.common_utils import find_free_port
-from torch.testing._internal.inductor_utils import HAS_XPU_AND_TRITON
-from torch.testing._internal.triton_utils import requires_gpu_and_triton
-
-
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import (
+    find_free_port,
+    HardwareClassification,
+    skipIfXpu,
+)
+from torch.testing._internal.inductor_utils import HAS_TRITON
 
 
 if torch.distributed.is_available():
@@ -64,8 +63,8 @@ def inductor_error_fn(a):
     return output
 
 
-def inductor_schedule_fn(a):
-    output = a.add(torch.ones(1000, 1000, device=device_type))
+def inductor_schedule_fn(a, device):
+    output = a.add(torch.ones(1000, 1000, device=device))
     return output
 
 
@@ -221,7 +220,9 @@ def show_chrome_events(fn):
     return wrapper
 
 
-class StructuredTraceTest(TestCase):
+class _StructuredTraceTestBase(TestCase):
+    # Common base class for structured trace tests with shared setup/teardown and assertions.
+
     def setUp(self):
         super().setUp()
         torch._dynamo.reset()
@@ -307,6 +308,26 @@ class StructuredTraceTest(TestCase):
         finally:
             shutil.rmtree(out, ignore_errors=True)
 
+    @contextmanager
+    def _setup_runtime_estimates_capture(self):
+        """Helper to turn on and capture the combined 'inductor_runtime_and_tensor_meta' structured trace."""
+        payload_buffer = io.StringIO()
+        payload_handler = logging.StreamHandler(payload_buffer)
+        payload_handler.setLevel(logging.DEBUG)
+        payload_handler.setFormatter(StructuredTracePayloadFormatter())
+        payload_handler.addFilter(
+            StructuredTraceTestingFilter("inductor_runtime_and_tensor_meta")
+        )
+        trace_log.addHandler(payload_handler)
+        try:
+            yield payload_buffer
+        finally:
+            trace_log.removeHandler(payload_handler)
+
+
+class StructuredTraceTest(_StructuredTraceTestBase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_compile_id_serialization_deserialization(self):
         cid = torch._guards.CompileId(
             frame_id=1,
@@ -334,76 +355,6 @@ class StructuredTraceTest(TestCase):
         for bad_cid in ["-/-", "-/1", "1/-", "!1/2", "!1/-/-"]:
             with self.assertRaises(ValueError):
                 torch._guards.CompileId.from_string(bad_cid)
-
-    @requires_gpu_and_triton
-    def test_schedule(self):
-        fn_opt = torch.compile(inductor_schedule_fn, backend="inductor")
-        fn_opt(torch.ones(1000, 1000, device=device_type))
-        self.assertExpectedInline(
-            self.buffer.getvalue(),
-            f"""\
-{{"dynamo_start": {{"stack": "STACK"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}}
-{{"describe_storage": {{"id": 0, "describer_id": "ID", "size": 4000000}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}}
-{{"describe_tensor": {{"id": 0, "ndim": 2, "dtype": "torch.float32", "device": "device(type='{device_type}', index=0)", "size": [1000, 1000], "dynamo_hint_overrides": {{}}, "is_leaf": true, "stride": [1000, 1], "storage": 0, "view_func": "VIEW_FUNC", "describer_id": "ID"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}}
-{{"describe_source": {{"describer_id": "ID", "id": 0, "source": "L['a']"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}}
-{{"dynamo_output_graph": {{"sizes": {{"l_a_": [1000, 1000], "ones": [1000, 1000], "add": [1000, 1000]}}}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "aotautograd_cache_miss", "encoding": "json"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "before_pre_grad_graph", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "after_pre_grad_graph", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "aot_forward_graph_fw_metadata", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"aot_inference_graph": {{}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "torch._functorch.config", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "before_joint_graph", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "after_joint_graph", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "fx_graph_runnable", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "before_post_grad_graph", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "inductor_post_grad_graph", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"inductor_output_code": {{"filename": "FILENAME", "file_path": "FILENAME"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "triton_kernel_info", "encoding": "json"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "fx_graph_cache_miss", "encoding": "json"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "runtime_wrapper_orchestration", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"dynamo_cpp_guards_str": {{}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"compilation_metrics": "METRICS", "frame_id": 0, "frame_compile_id": 0, "attempt": 0}}
-{{"compilation_metrics_runtime": "METRICS", "frame_id": 0, "frame_compile_id": 0}}
-""",
-        )
-
-        self.assertParses()
-
-    @requires_gpu_and_triton
-    def test_gpugraphs(self):
-        fn_opt = torch.compile(mode="reduce-overhead")(inductor_schedule_fn)  # noqa: UNSPECIFIED_BACKEND
-        fn_opt(torch.ones(1000, 1000, device=device_type))
-        self.assertExpectedInline(
-            self.buffer.getvalue(),
-            f"""\
-{{"dynamo_start": {{"stack": "STACK"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}}
-{{"describe_storage": {{"id": 0, "describer_id": "ID", "size": 4000000}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}}
-{{"describe_tensor": {{"id": 0, "ndim": 2, "dtype": "torch.float32", "device": "device(type='{device_type}', index=0)", "size": [1000, 1000], "dynamo_hint_overrides": {{}}, "is_leaf": true, "stride": [1000, 1], "storage": 0, "view_func": "VIEW_FUNC", "describer_id": "ID"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}}
-{{"describe_source": {{"describer_id": "ID", "id": 0, "source": "L['a']"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}}
-{{"dynamo_output_graph": {{"sizes": {{"l_a_": [1000, 1000], "ones": [1000, 1000], "add": [1000, 1000]}}}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "aotautograd_cache_miss", "encoding": "json"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "before_pre_grad_graph", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "after_pre_grad_graph", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "aot_forward_graph_fw_metadata", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"aot_inference_graph": {{}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "torch._functorch.config", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "before_joint_graph", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "after_joint_graph", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "fx_graph_runnable", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "before_post_grad_graph", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "inductor_post_grad_graph", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"inductor_output_code": {{"filename": "FILENAME", "file_path": "FILENAME"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "triton_kernel_info", "encoding": "json"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "fx_graph_cache_miss", "encoding": "json"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "runtime_wrapper_orchestration", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"dynamo_cpp_guards_str": {{}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"compilation_metrics": "METRICS", "frame_id": 0, "frame_compile_id": 0, "attempt": 0}}
-{{"compilation_metrics_runtime": "METRICS", "frame_id": 0, "frame_compile_id": 0}}
-""",
-        )
-
-        self.assertParses()
 
     @requires_tlparse
     def test_recompiles(self):
@@ -673,128 +624,6 @@ class StructuredTraceTest(TestCase):
 {"artifact": {"name": "inductor_post_grad_graph", "encoding": "string"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"artifact": {"name": "dynamo_error", "encoding": "string"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"compilation_metrics": "METRICS", "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
-""",
-        )
-
-        self.assertParses()
-
-    @skipIf(HAS_XPU_AND_TRITON, "No backend type associated with device type xpu")
-    @requires_distributed()
-    @requires_gpu_and_triton
-    @unittest.skip("https://github.com/pytorch/pytorch/issues/176188")
-    def test_ddp_graphs(self):
-        import torch._dynamo.convert_frame as convert_frame
-
-        convert_frame.FRAME_COUNTER = 0
-        convert_frame.FRAME_COMPILE_COUNTER.clear()
-
-        class ToyModel(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.layers = torch.nn.Sequential(
-                    torch.nn.Linear(1024, 1024),
-                    torch.nn.Linear(1024, 1024),
-                )
-
-            def forward(self, x):
-                return self.layers(x)
-
-        # TODO: this isn't safely bracketed, will leak
-        os.environ["MASTER_ADDR"] = "localhost"
-        os.environ["MASTER_PORT"] = str(find_free_port())
-        dist.init_process_group("gloo", rank=0, world_size=1)
-
-        model = DDP(ToyModel().to(f"{device_type}:0"), device_ids=[0], bucket_cap_mb=4)
-        ddp_model = torch.compile(model, backend="inductor")
-
-        ddp_model(torch.randn(1024, 1024, device=f"{device_type}:0"))
-
-        dist.destroy_process_group()
-
-        self.assertExpectedInline(
-            self.buffer.getvalue(),
-            f"""\
-{{"dynamo_start": {{"stack": "STACK"}}, "rank": 0, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}}
-{{"artifact": {{"name": "dynamo_graph_break_reason", "encoding": "string"}}, "rank": 0, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"describe_storage": {{"id": 0, "describer_id": "ID", "size": 4194304}}, "rank": 0, "frame_id": 0, "frame_compile_id": 0, "attempt": 1}}
-{{"describe_tensor": {{"id": 0, "ndim": 2, "dtype": "torch.float32", "device": "device(type='{device_type}', index=0)", "size": [1024, 1024], "dynamo_hint_overrides": {{}}, "is_leaf": true, "stride": [1024, 1], "storage": 0, "view_func": "VIEW_FUNC", "describer_id": "ID"}}, "rank": 0, "frame_id": 0, "frame_compile_id": 0, "attempt": 1}}
-{{"describe_source": {{"describer_id": "ID", "id": 0, "source": "L['args'][0]"}}, "rank": 0, "frame_id": 0, "frame_compile_id": 0, "attempt": 1}}
-{{"dynamo_cpp_guards_str": {{}}, "rank": 0, "frame_id": 0, "frame_compile_id": 0, "attempt": 1, "has_payload": "HASH"}}
-{{"compilation_metrics": "METRICS", "rank": 0, "frame_id": 0, "frame_compile_id": 0, "attempt": 1}}
-{{"dynamo_start": {{"stack": "STACK"}}, "rank": 0, "frame_id": 1, "frame_compile_id": 0, "attempt": 0}}
-{{"artifact": {{"name": "dynamo_graph_break_reason", "encoding": "string"}}, "rank": 0, "frame_id": 1, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"dynamo_cpp_guards_str": {{}}, "rank": 0, "frame_id": 1, "frame_compile_id": 0, "attempt": 1, "has_payload": "HASH"}}
-{{"compilation_metrics": "METRICS", "rank": 0, "frame_id": 1, "frame_compile_id": 0, "attempt": 1}}
-{{"dynamo_start": {{"stack": "STACK"}}, "rank": 0, "frame_id": 2, "frame_compile_id": 0, "attempt": 0}}
-{{"artifact": {{"name": "dynamo_graph_break_reason", "encoding": "string"}}, "rank": 0, "frame_id": 2, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"dynamo_cpp_guards_str": {{}}, "rank": 0, "frame_id": 2, "frame_compile_id": 0, "attempt": 1, "has_payload": "HASH"}}
-{{"compilation_metrics": "METRICS", "rank": 0, "frame_id": 2, "frame_compile_id": 0, "attempt": 1}}
-{{"dynamo_start": {{"stack": "STACK"}}, "rank": 0, "frame_id": 3, "frame_compile_id": 0, "attempt": 0}}
-{{"artifact": {{"name": "torch_dynamo_resume_in___init___at_103_ORIGINAL_BYTECODE", "encoding": "string"}}, "frame_id": 3, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"compilation_metrics": "METRICS", "rank": 0, "frame_id": 3, "frame_compile_id": 0, "attempt": 0}}
-{{"dynamo_start": {{"stack": "STACK"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
-{{"describe_storage": {{"id": 0, "describer_id": "ID", "size": 4194304}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
-{{"describe_tensor": {{"id": 0, "ndim": 2, "dtype": "torch.float32", "device": "device(type='{device_type}', index=0)", "size": [1024, 1024], "dynamo_hint_overrides": {{}}, "is_leaf": true, "requires_grad": true, "is_parameter": true, "stride": [1024, 1], "storage": 0, "view_func": "VIEW_FUNC", "describer_id": "ID"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
-{{"describe_source": {{"describer_id": "ID", "id": 0, "source": "L['self']._modules['layers']._modules['0']._parameters['weight']"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
-{{"describe_storage": {{"id": 1, "describer_id": "ID", "size": 4096}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
-{{"describe_tensor": {{"id": 1, "ndim": 1, "dtype": "torch.float32", "device": "device(type='{device_type}', index=0)", "size": [1024], "dynamo_hint_overrides": {{}}, "is_leaf": true, "requires_grad": true, "is_parameter": true, "stride": [1], "storage": 1, "view_func": "VIEW_FUNC", "describer_id": "ID"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
-{{"describe_source": {{"describer_id": "ID", "id": 1, "source": "L['self']._modules['layers']._modules['0']._parameters['bias']"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
-{{"describe_storage": {{"id": 2, "describer_id": "ID", "size": 4194304}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
-{{"describe_tensor": {{"id": 2, "ndim": 2, "dtype": "torch.float32", "device": "device(type='{device_type}', index=0)", "size": [1024, 1024], "dynamo_hint_overrides": {{}}, "is_leaf": true, "stride": [1024, 1], "storage": 2, "view_func": "VIEW_FUNC", "describer_id": "ID"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
-{{"describe_source": {{"describer_id": "ID", "id": 2, "source": "L['x']"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
-{{"describe_storage": {{"id": 3, "describer_id": "ID", "size": 4194304}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
-{{"describe_tensor": {{"id": 8, "ndim": 2, "dtype": "torch.float32", "device": "device(type='{device_type}', index=0)", "size": [1024, 1024], "dynamo_hint_overrides": {{}}, "is_leaf": true, "requires_grad": true, "is_parameter": true, "stride": [1024, 1], "storage": 3, "view_func": "VIEW_FUNC", "describer_id": "ID"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
-{{"describe_source": {{"describer_id": "ID", "id": 8, "source": "L['self']._modules['layers']._modules['1']._parameters['weight']"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
-{{"describe_storage": {{"id": 4, "describer_id": "ID", "size": 4096}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
-{{"describe_tensor": {{"id": 9, "ndim": 1, "dtype": "torch.float32", "device": "device(type='{device_type}', index=0)", "size": [1024], "dynamo_hint_overrides": {{}}, "is_leaf": true, "requires_grad": true, "is_parameter": true, "stride": [1], "storage": 4, "view_func": "VIEW_FUNC", "describer_id": "ID"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
-{{"describe_source": {{"describer_id": "ID", "id": 9, "source": "L['self']._modules['layers']._modules['1']._parameters['bias']"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
-{{"dynamo_output_graph": {{"sizes": {{"l_self_modules_layers_modules_0_parameters_weight_": [1024, 1024], "l_self_modules_layers_modules_0_parameters_bias_": [1024], "l_x_": [1024, 1024], "l_self_modules_layers_modules_1_parameters_weight_": [1024, 1024], "l_self_modules_layers_modules_1_parameters_bias_": [1024], "input_1": [1024, 1024], "input_2": [1024, 1024]}}}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"optimize_ddp_split_graph": {{}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"optimize_ddp_split_child": {{"name": "submod_0"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"optimize_ddp_split_child": {{"name": "submod_1"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"describe_storage": {{"id": 0, "describer_id": "ID", "size": 4194304}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
-{{"describe_tensor": {{"id": 0, "ndim": 2, "dtype": "torch.float32", "device": "device(type='{device_type}', index=0)", "size": [1024, 1024], "dynamo_hint_overrides": {{}}, "is_leaf": true, "stride": [1024, 1], "storage": 0, "view_func": "VIEW_FUNC", "describer_id": "ID"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
-{{"describe_source": {{"describer_id": "ID", "id": 0, "source": "L['x']"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
-{{"describe_storage": {{"id": 1, "describer_id": "ID", "size": 4194304}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
-{{"describe_tensor": {{"id": 1, "ndim": 2, "dtype": "torch.float32", "device": "device(type='{device_type}', index=0)", "size": [1024, 1024], "dynamo_hint_overrides": {{}}, "is_leaf": true, "requires_grad": true, "is_parameter": true, "stride": [1024, 1], "storage": 1, "view_func": "VIEW_FUNC", "describer_id": "ID"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
-{{"describe_source": {{"describer_id": "ID", "id": 1, "source": "L['self']._modules['layers']._modules['0']._parameters['weight']"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
-{{"describe_storage": {{"id": 2, "describer_id": "ID", "size": 4096}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
-{{"describe_tensor": {{"id": 2, "ndim": 1, "dtype": "torch.float32", "device": "device(type='{device_type}', index=0)", "size": [1024], "dynamo_hint_overrides": {{}}, "is_leaf": true, "requires_grad": true, "is_parameter": true, "stride": [1], "storage": 2, "view_func": "VIEW_FUNC", "describer_id": "ID"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
-{{"describe_source": {{"describer_id": "ID", "id": 2, "source": "L['self']._modules['layers']._modules['0']._parameters['bias']"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
-{{"artifact": {{"name": "before_pre_grad_graph", "encoding": "string"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "after_pre_grad_graph", "encoding": "string"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "aotautograd_cache_bypass", "encoding": "json"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"aot_joint_graph": {{}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "torch._functorch.config", "encoding": "string"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "aot_forward_graph_fw_metadata", "encoding": "string"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"aot_forward_graph": {{}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"aot_backward_graph": {{}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "fx_graph_runnable", "encoding": "string"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "before_post_grad_graph", "encoding": "string"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "inductor_post_grad_graph", "encoding": "string"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"inductor_output_code": {{"filename": "FILENAME", "file_path": "FILENAME"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "fx_graph_cache_miss", "encoding": "json"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"describe_storage": {{"id": 16, "describer_id": "ID", "size": 4194304}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
-{{"describe_tensor": {{"id": 28, "ndim": 2, "dtype": "torch.float32", "device": "device(type='{device_type}', index=0)", "size": [1024, 1024], "dynamo_hint_overrides": {{}}, "is_leaf": true, "requires_grad": true, "is_parameter": true, "stride": [1024, 1], "storage": 16, "view_func": "VIEW_FUNC", "describer_id": "ID"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
-{{"describe_source": {{"describer_id": "ID", "id": 28, "source": "L['self']._modules['layers']._modules['1']._parameters['weight']"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
-{{"describe_storage": {{"id": 17, "describer_id": "ID", "size": 4096}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
-{{"describe_tensor": {{"id": 29, "ndim": 1, "dtype": "torch.float32", "device": "device(type='{device_type}', index=0)", "size": [1024], "dynamo_hint_overrides": {{}}, "is_leaf": true, "requires_grad": true, "is_parameter": true, "stride": [1], "storage": 17, "view_func": "VIEW_FUNC", "describer_id": "ID"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
-{{"describe_source": {{"describer_id": "ID", "id": 29, "source": "L['self']._modules['layers']._modules['1']._parameters['bias']"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
-{{"artifact": {{"name": "before_pre_grad_graph", "encoding": "string"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "after_pre_grad_graph", "encoding": "string"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "aotautograd_cache_bypass", "encoding": "json"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"aot_joint_graph": {{}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "torch._functorch.config", "encoding": "string"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "aot_forward_graph_fw_metadata", "encoding": "string"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"aot_forward_graph": {{}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"aot_backward_graph": {{}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "fx_graph_runnable", "encoding": "string"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "before_post_grad_graph", "encoding": "string"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "inductor_post_grad_graph", "encoding": "string"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"inductor_output_code": {{"filename": "FILENAME", "file_path": "FILENAME"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "fx_graph_cache_miss", "encoding": "json"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"dynamo_cpp_guards_str": {{}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"compilation_metrics": "METRICS", "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
 """,
         )
 
@@ -1311,186 +1140,6 @@ def forward(self, x_1: "f32[2][1]cpu"):
         finally:
             dist.destroy_process_group()
 
-    @contextmanager
-    def _setup_runtime_estimates_capture(self):
-        """Helper to turn on and capture the combined 'inductor_runtime_and_tensor_meta' structured trace."""
-        payload_buffer = io.StringIO()
-        payload_handler = logging.StreamHandler(payload_buffer)
-        payload_handler.setLevel(logging.DEBUG)
-        payload_handler.setFormatter(StructuredTracePayloadFormatter())
-        payload_handler.addFilter(
-            StructuredTraceTestingFilter("inductor_runtime_and_tensor_meta")
-        )
-        trace_log.addHandler(payload_handler)
-        try:
-            yield payload_buffer
-        finally:
-            trace_log.removeHandler(payload_handler)
-
-    @requires_tlparse
-    @requires_distributed()
-    @requires_gpu_and_triton
-    @torch._inductor.config.patch("fx_graph_cache", False)
-    @torch._inductor.config.patch("log_tlparse", True)
-    def test_runtime_estimates_simple(self):
-        """Test runtime estimates logging with simple compute and collective ops."""
-        import torch.distributed as dist
-
-        store = FakeStore()
-        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
-
-        class SimpleModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = torch.nn.Linear(4, 4)
-
-            def forward(self, x):
-                h = self.linear(x)
-                h = torch.relu(h)
-
-                h = torch.ops._c10d_functional.all_reduce.default(h, "sum", "0")
-                h = torch.ops._c10d_functional.wait_tensor.default(h)
-                return h
-
-        try:
-            with self._setup_runtime_estimates_capture() as payload_buffer:
-                torch._dynamo.reset()
-
-                mod = SimpleModule().to(device_type)
-                compiled = torch.compile(mod, backend="inductor")
-                compiled(torch.randn(4, 4, device=device_type))
-
-                # Verify runtime + tensor meta artifact was logged
-                self.assertIn(
-                    '"inductor_runtime_and_tensor_meta"', self.buffer.getvalue()
-                )
-
-                payload_content = payload_buffer.getvalue().strip()
-                if payload_content:
-                    data = json.loads(payload_content)
-                    self.assertIn("ops", data)
-                    ops = data["ops"]
-
-                    # Verify runtime estimates
-                    compute_ops = [op for op in ops if op["type"] == "compute"]
-                    collective_ops = [op for op in ops if op["type"] == "collective"]
-
-                    self.assertTrue(len(compute_ops) > 0 or len(collective_ops) > 0)
-
-                    # Just check each op has an estimated runtime value (any value, including 0)
-                    for op in ops:
-                        self.assertIn("estimated_runtime_ns", op)
-                        self.assertIsNotNone(op["estimated_runtime_ns"])
-
-                self.assertParses()
-        finally:
-            dist.destroy_process_group()
-
-    @requires_tlparse
-    @requires_distributed()
-    @requires_gpu_and_triton
-    @torch._inductor.config.patch("fx_graph_cache", False)
-    @torch._inductor.config.patch("log_tlparse", True)
-    def test_runtime_estimates_mixed(self):
-        """Test runtime estimates logging with mixed compute and collective sequence."""
-        import torch.distributed as dist
-
-        store = FakeStore()
-        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
-
-        class MixedModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.norm = torch.nn.LayerNorm(4)
-
-            def forward(self, x):
-                h = self.norm(x)
-                h = torch.nn.functional.gelu(h)
-
-                h = torch.ops._c10d_functional.all_reduce.default(h, "sum", "0")
-                h = torch.ops._c10d_functional.wait_tensor.default(h)
-
-                h = h * 0.5
-
-                gathered = torch.ops._c10d_functional.all_gather_into_tensor.default(
-                    h, 2, "0"
-                )
-                gathered = torch.ops._c10d_functional.wait_tensor.default(gathered)
-
-                return gathered.sum(dim=0)
-
-        try:
-            with self._setup_runtime_estimates_capture() as payload_buffer:
-                torch._dynamo.reset()
-
-                mod = MixedModule().to(device_type)
-                compiled = torch.compile(mod, backend="inductor")
-                compiled(torch.randn(4, 4, device=device_type))
-
-                # Verify artifact was logged
-                self.assertIn(
-                    '"inductor_runtime_and_tensor_meta"', self.buffer.getvalue()
-                )
-
-                payload_content = payload_buffer.getvalue().strip()
-                if payload_content:
-                    data = json.loads(payload_content)
-                    self.assertIn("ops", data)
-                    ops = data["ops"]
-
-                    # Should have both compute and collective ops
-                    op_types = {op["type"] for op in ops}
-                    self.assertIn("compute", op_types)
-                    self.assertIn("collective", op_types)
-
-                    # Just check each op has an estimated runtime value (any value, including 0)
-                    for op in ops:
-                        self.assertIn("estimated_runtime_ns", op)
-                        self.assertIsNotNone(op["estimated_runtime_ns"])
-
-                self.assertParses()
-        finally:
-            dist.destroy_process_group()
-
-    @requires_tlparse
-    @requires_distributed()
-    @requires_gpu_and_triton
-    @torch._inductor.config.patch("fx_graph_cache", False)
-    @torch._inductor.config.patch("log_tlparse", True)
-    def test_tensor_metadata_logging_multiple_ops(self):
-        import torch.distributed as dist
-
-        store = FakeStore()
-        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
-
-        class Mixed(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = torch.nn.Linear(4, 4)
-
-            def forward(self, x):
-                y = torch.relu(self.linear(x))
-                y = torch.ops._c10d_functional.all_reduce.default(y, "sum", "0")
-                y = torch.ops._c10d_functional.wait_tensor.default(y)
-                return y + 1
-
-        try:
-            with self._setup_runtime_estimates_capture() as payload_buffer:
-                torch._dynamo.reset()
-                mod = Mixed().to(device_type)
-                compiled = torch.compile(mod, backend="inductor")
-                compiled(torch.randn(4, 4, device=device_type))
-                payload = payload_buffer.getvalue().strip()
-                if payload:
-                    data = json.loads(payload)
-                    types = sorted({op.get("type") for op in data.get("ops", [])})
-                    self.assertExpectedInline(
-                        str(types), """['collective', 'compute']"""
-                    )
-                self.assertParses()
-        finally:
-            dist.destroy_process_group()
-
     @requires_tlparse
     @torch._inductor.config.patch("log_tlparse", True)
     def test_tensor_metadata_logging(self):
@@ -1632,6 +1281,374 @@ def forward(self, x_1: "f32[2][1]cpu"):
                 """{"graph_execution_order": [{"compile_id": "0/0"}, {"compile_id": "1/0"}]}""",
             )
             self.assertParses()
+
+
+class StructuredTraceTestDevice(_StructuredTraceTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @skipIf(not HAS_TRITON, "requires triton")
+    def test_schedule(self, device):
+        fn_opt = torch.compile(inductor_schedule_fn, backend="inductor")
+        fn_opt(torch.ones(1000, 1000, device=device), device=device)
+        self.assertExpectedInline(
+            self.buffer.getvalue(),
+            f"""\
+{{"dynamo_start": {{"stack": "STACK"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}}
+{{"describe_storage": {{"id": 0, "describer_id": "ID", "size": 4000000}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}}
+{{"describe_tensor": {{"id": 0, "ndim": 2, "dtype": "torch.float32", "device": "device(type='{device}', index=0)", "size": [1000, 1000], "dynamo_hint_overrides": {{}}, "is_leaf": true, "stride": [1000, 1], "storage": 0, "view_func": "VIEW_FUNC", "describer_id": "ID"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}}
+{{"describe_source": {{"describer_id": "ID", "id": 0, "source": "L['a']"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}}
+{{"dynamo_output_graph": {{"sizes": {{"l_a_": [1000, 1000], "ones": [1000, 1000], "add": [1000, 1000]}}}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "aotautograd_cache_miss", "encoding": "json"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "before_pre_grad_graph", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "after_pre_grad_graph", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "aot_forward_graph_fw_metadata", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"aot_inference_graph": {{}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "torch._functorch.config", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "before_joint_graph", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "after_joint_graph", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "fx_graph_runnable", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "before_post_grad_graph", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "inductor_post_grad_graph", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"inductor_output_code": {{"filename": "FILENAME", "file_path": "FILENAME"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "triton_kernel_info", "encoding": "json"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "fx_graph_cache_miss", "encoding": "json"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "runtime_wrapper_orchestration", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"dynamo_cpp_guards_str": {{}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"compilation_metrics": "METRICS", "frame_id": 0, "frame_compile_id": 0, "attempt": 0}}
+{{"compilation_metrics_runtime": "METRICS", "frame_id": 0, "frame_compile_id": 0}}
+""",
+        )
+
+        self.assertParses()
+
+    @skipIf(not HAS_TRITON, "requires triton")
+    def test_gpugraphs(self, device):
+        fn_opt = torch.compile(mode="reduce-overhead")(inductor_schedule_fn)  # noqa: UNSPECIFIED_BACKEND
+        fn_opt(torch.ones(1000, 1000, device=device), device=device)
+        self.assertExpectedInline(
+            self.buffer.getvalue(),
+            f"""\
+{{"dynamo_start": {{"stack": "STACK"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}}
+{{"describe_storage": {{"id": 0, "describer_id": "ID", "size": 4000000}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}}
+{{"describe_tensor": {{"id": 0, "ndim": 2, "dtype": "torch.float32", "device": "device(type='{device}', index=0)", "size": [1000, 1000], "dynamo_hint_overrides": {{}}, "is_leaf": true, "stride": [1000, 1], "storage": 0, "view_func": "VIEW_FUNC", "describer_id": "ID"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}}
+{{"describe_source": {{"describer_id": "ID", "id": 0, "source": "L['a']"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}}
+{{"dynamo_output_graph": {{"sizes": {{"l_a_": [1000, 1000], "ones": [1000, 1000], "add": [1000, 1000]}}}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "aotautograd_cache_miss", "encoding": "json"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "before_pre_grad_graph", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "after_pre_grad_graph", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "aot_forward_graph_fw_metadata", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"aot_inference_graph": {{}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "torch._functorch.config", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "before_joint_graph", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "after_joint_graph", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "fx_graph_runnable", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "before_post_grad_graph", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "inductor_post_grad_graph", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"inductor_output_code": {{"filename": "FILENAME", "file_path": "FILENAME"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "triton_kernel_info", "encoding": "json"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "fx_graph_cache_miss", "encoding": "json"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "runtime_wrapper_orchestration", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"dynamo_cpp_guards_str": {{}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"compilation_metrics": "METRICS", "frame_id": 0, "frame_compile_id": 0, "attempt": 0}}
+{{"compilation_metrics_runtime": "METRICS", "frame_id": 0, "frame_compile_id": 0}}
+""",
+        )
+
+        self.assertParses()
+
+    @skipIfXpu(msg="No backend type associated with device type xpu")
+    @requires_distributed()
+    @skipIf(not HAS_TRITON, "requires triton")
+    @unittest.skip("https://github.com/pytorch/pytorch/issues/176188")
+    def test_ddp_graphs(self, device):
+        import torch._dynamo.convert_frame as convert_frame
+
+        convert_frame.FRAME_COUNTER = 0
+        convert_frame.FRAME_COMPILE_COUNTER.clear()
+
+        class ToyModel(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.layers = torch.nn.Sequential(
+                    torch.nn.Linear(1024, 1024),
+                    torch.nn.Linear(1024, 1024),
+                )
+
+            def forward(self, x):
+                return self.layers(x)
+
+        # TODO: this isn't safely bracketed, will leak
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = str(find_free_port())
+        dist.init_process_group("gloo", rank=0, world_size=1)
+
+        model = DDP(ToyModel().to(f"{device}:0"), device_ids=[0], bucket_cap_mb=4)
+        ddp_model = torch.compile(model, backend="inductor")
+
+        ddp_model(torch.randn(1024, 1024, device=f"{device}:0"))
+
+        dist.destroy_process_group()
+
+        self.assertExpectedInline(
+            self.buffer.getvalue(),
+            f"""\
+{{"dynamo_start": {{"stack": "STACK"}}, "rank": 0, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}}
+{{"artifact": {{"name": "dynamo_graph_break_reason", "encoding": "string"}}, "rank": 0, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"describe_storage": {{"id": 0, "describer_id": "ID", "size": 4194304}}, "rank": 0, "frame_id": 0, "frame_compile_id": 0, "attempt": 1}}
+{{"describe_tensor": {{"id": 0, "ndim": 2, "dtype": "torch.float32", "device": "device(type='{device}', index=0)", "size": [1024, 1024], "dynamo_hint_overrides": {{}}, "is_leaf": true, "stride": [1024, 1], "storage": 0, "view_func": "VIEW_FUNC", "describer_id": "ID"}}, "rank": 0, "frame_id": 0, "frame_compile_id": 0, "attempt": 1}}
+{{"describe_source": {{"describer_id": "ID", "id": 0, "source": "L['args'][0]"}}, "rank": 0, "frame_id": 0, "frame_compile_id": 0, "attempt": 1}}
+{{"dynamo_cpp_guards_str": {{}}, "rank": 0, "frame_id": 0, "frame_compile_id": 0, "attempt": 1, "has_payload": "HASH"}}
+{{"compilation_metrics": "METRICS", "rank": 0, "frame_id": 0, "frame_compile_id": 0, "attempt": 1}}
+{{"dynamo_start": {{"stack": "STACK"}}, "rank": 0, "frame_id": 1, "frame_compile_id": 0, "attempt": 0}}
+{{"artifact": {{"name": "dynamo_graph_break_reason", "encoding": "string"}}, "rank": 0, "frame_id": 1, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"dynamo_cpp_guards_str": {{}}, "rank": 0, "frame_id": 1, "frame_compile_id": 0, "attempt": 1, "has_payload": "HASH"}}
+{{"compilation_metrics": "METRICS", "rank": 0, "frame_id": 1, "frame_compile_id": 0, "attempt": 1}}
+{{"dynamo_start": {{"stack": "STACK"}}, "rank": 0, "frame_id": 2, "frame_compile_id": 0, "attempt": 0}}
+{{"artifact": {{"name": "dynamo_graph_break_reason", "encoding": "string"}}, "rank": 0, "frame_id": 2, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"dynamo_cpp_guards_str": {{}}, "rank": 0, "frame_id": 2, "frame_compile_id": 0, "attempt": 1, "has_payload": "HASH"}}
+{{"compilation_metrics": "METRICS", "rank": 0, "frame_id": 2, "frame_compile_id": 0, "attempt": 1}}
+{{"dynamo_start": {{"stack": "STACK"}}, "rank": 0, "frame_id": 3, "frame_compile_id": 0, "attempt": 0}}
+{{"artifact": {{"name": "torch_dynamo_resume_in___init___at_103_ORIGINAL_BYTECODE", "encoding": "string"}}, "frame_id": 3, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"compilation_metrics": "METRICS", "rank": 0, "frame_id": 3, "frame_compile_id": 0, "attempt": 0}}
+{{"dynamo_start": {{"stack": "STACK"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
+{{"describe_storage": {{"id": 0, "describer_id": "ID", "size": 4194304}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
+{{"describe_tensor": {{"id": 0, "ndim": 2, "dtype": "torch.float32", "device": "device(type='{device}', index=0)", "size": [1024, 1024], "dynamo_hint_overrides": {{}}, "is_leaf": true, "requires_grad": true, "is_parameter": true, "stride": [1024, 1], "storage": 0, "view_func": "VIEW_FUNC", "describer_id": "ID"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
+{{"describe_source": {{"describer_id": "ID", "id": 0, "source": "L['self']._modules['layers']._modules['0']._parameters['weight']"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
+{{"describe_storage": {{"id": 1, "describer_id": "ID", "size": 4096}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
+{{"describe_tensor": {{"id": 1, "ndim": 1, "dtype": "torch.float32", "device": "device(type='{device}', index=0)", "size": [1024], "dynamo_hint_overrides": {{}}, "is_leaf": true, "requires_grad": true, "is_parameter": true, "stride": [1], "storage": 1, "view_func": "VIEW_FUNC", "describer_id": "ID"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
+{{"describe_source": {{"describer_id": "ID", "id": 1, "source": "L['self']._modules['layers']._modules['0']._parameters['bias']"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
+{{"describe_storage": {{"id": 2, "describer_id": "ID", "size": 4194304}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
+{{"describe_tensor": {{"id": 2, "ndim": 2, "dtype": "torch.float32", "device": "device(type='{device}', index=0)", "size": [1024, 1024], "dynamo_hint_overrides": {{}}, "is_leaf": true, "stride": [1024, 1], "storage": 2, "view_func": "VIEW_FUNC", "describer_id": "ID"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
+{{"describe_source": {{"describer_id": "ID", "id": 2, "source": "L['x']"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
+{{"describe_storage": {{"id": 3, "describer_id": "ID", "size": 4194304}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
+{{"describe_tensor": {{"id": 8, "ndim": 2, "dtype": "torch.float32", "device": "device(type='{device}', index=0)", "size": [1024, 1024], "dynamo_hint_overrides": {{}}, "is_leaf": true, "requires_grad": true, "is_parameter": true, "stride": [1024, 1], "storage": 3, "view_func": "VIEW_FUNC", "describer_id": "ID"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
+{{"describe_source": {{"describer_id": "ID", "id": 8, "source": "L['self']._modules['layers']._modules['1']._parameters['weight']"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
+{{"describe_storage": {{"id": 4, "describer_id": "ID", "size": 4096}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
+{{"describe_tensor": {{"id": 9, "ndim": 1, "dtype": "torch.float32", "device": "device(type='{device}', index=0)", "size": [1024], "dynamo_hint_overrides": {{}}, "is_leaf": true, "requires_grad": true, "is_parameter": true, "stride": [1], "storage": 4, "view_func": "VIEW_FUNC", "describer_id": "ID"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
+{{"describe_source": {{"describer_id": "ID", "id": 9, "source": "L['self']._modules['layers']._modules['1']._parameters['bias']"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
+{{"dynamo_output_graph": {{"sizes": {{"l_self_modules_layers_modules_0_parameters_weight_": [1024, 1024], "l_self_modules_layers_modules_0_parameters_bias_": [1024], "l_x_": [1024, 1024], "l_self_modules_layers_modules_1_parameters_weight_": [1024, 1024], "l_self_modules_layers_modules_1_parameters_bias_": [1024], "input_1": [1024, 1024], "input_2": [1024, 1024]}}}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"optimize_ddp_split_graph": {{}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"optimize_ddp_split_child": {{"name": "submod_0"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"optimize_ddp_split_child": {{"name": "submod_1"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"describe_storage": {{"id": 0, "describer_id": "ID", "size": 4194304}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
+{{"describe_tensor": {{"id": 0, "ndim": 2, "dtype": "torch.float32", "device": "device(type='{device}', index=0)", "size": [1024, 1024], "dynamo_hint_overrides": {{}}, "is_leaf": true, "stride": [1024, 1], "storage": 0, "view_func": "VIEW_FUNC", "describer_id": "ID"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
+{{"describe_source": {{"describer_id": "ID", "id": 0, "source": "L['x']"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
+{{"describe_storage": {{"id": 1, "describer_id": "ID", "size": 4194304}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
+{{"describe_tensor": {{"id": 1, "ndim": 2, "dtype": "torch.float32", "device": "device(type='{device}', index=0)", "size": [1024, 1024], "dynamo_hint_overrides": {{}}, "is_leaf": true, "requires_grad": true, "is_parameter": true, "stride": [1024, 1], "storage": 1, "view_func": "VIEW_FUNC", "describer_id": "ID"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
+{{"describe_source": {{"describer_id": "ID", "id": 1, "source": "L['self']._modules['layers']._modules['0']._parameters['weight']"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
+{{"describe_storage": {{"id": 2, "describer_id": "ID", "size": 4096}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
+{{"describe_tensor": {{"id": 2, "ndim": 1, "dtype": "torch.float32", "device": "device(type='{device}', index=0)", "size": [1024], "dynamo_hint_overrides": {{}}, "is_leaf": true, "requires_grad": true, "is_parameter": true, "stride": [1], "storage": 2, "view_func": "VIEW_FUNC", "describer_id": "ID"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
+{{"describe_source": {{"describer_id": "ID", "id": 2, "source": "L['self']._modules['layers']._modules['0']._parameters['bias']"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
+{{"artifact": {{"name": "before_pre_grad_graph", "encoding": "string"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "after_pre_grad_graph", "encoding": "string"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "aotautograd_cache_bypass", "encoding": "json"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"aot_joint_graph": {{}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "torch._functorch.config", "encoding": "string"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "aot_forward_graph_fw_metadata", "encoding": "string"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"aot_forward_graph": {{}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"aot_backward_graph": {{}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "fx_graph_runnable", "encoding": "string"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "before_post_grad_graph", "encoding": "string"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "inductor_post_grad_graph", "encoding": "string"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"inductor_output_code": {{"filename": "FILENAME", "file_path": "FILENAME"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "fx_graph_cache_miss", "encoding": "json"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"describe_storage": {{"id": 16, "describer_id": "ID", "size": 4194304}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
+{{"describe_tensor": {{"id": 28, "ndim": 2, "dtype": "torch.float32", "device": "device(type='{device}', index=0)", "size": [1024, 1024], "dynamo_hint_overrides": {{}}, "is_leaf": true, "requires_grad": true, "is_parameter": true, "stride": [1024, 1], "storage": 16, "view_func": "VIEW_FUNC", "describer_id": "ID"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
+{{"describe_source": {{"describer_id": "ID", "id": 28, "source": "L['self']._modules['layers']._modules['1']._parameters['weight']"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
+{{"describe_storage": {{"id": 17, "describer_id": "ID", "size": 4096}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
+{{"describe_tensor": {{"id": 29, "ndim": 1, "dtype": "torch.float32", "device": "device(type='{device}', index=0)", "size": [1024], "dynamo_hint_overrides": {{}}, "is_leaf": true, "requires_grad": true, "is_parameter": true, "stride": [1], "storage": 17, "view_func": "VIEW_FUNC", "describer_id": "ID"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
+{{"describe_source": {{"describer_id": "ID", "id": 29, "source": "L['self']._modules['layers']._modules['1']._parameters['bias']"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
+{{"artifact": {{"name": "before_pre_grad_graph", "encoding": "string"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "after_pre_grad_graph", "encoding": "string"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "aotautograd_cache_bypass", "encoding": "json"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"aot_joint_graph": {{}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "torch._functorch.config", "encoding": "string"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "aot_forward_graph_fw_metadata", "encoding": "string"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"aot_forward_graph": {{}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"aot_backward_graph": {{}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "fx_graph_runnable", "encoding": "string"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "before_post_grad_graph", "encoding": "string"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "inductor_post_grad_graph", "encoding": "string"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"inductor_output_code": {{"filename": "FILENAME", "file_path": "FILENAME"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "fx_graph_cache_miss", "encoding": "json"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"dynamo_cpp_guards_str": {{}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"compilation_metrics": "METRICS", "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
+""",
+        )
+
+        self.assertParses()
+
+    @requires_tlparse
+    @requires_distributed()
+    @skipIf(not HAS_TRITON, "requires triton")
+    @torch._inductor.config.patch("fx_graph_cache", False)
+    @torch._inductor.config.patch("log_tlparse", True)
+    def test_runtime_estimates_simple(self, device):
+        """Test runtime estimates logging with simple compute and collective ops."""
+        import torch.distributed as dist
+
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        class SimpleModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                h = self.linear(x)
+                h = torch.relu(h)
+
+                h = torch.ops._c10d_functional.all_reduce.default(h, "sum", "0")
+                h = torch.ops._c10d_functional.wait_tensor.default(h)
+                return h
+
+        try:
+            with self._setup_runtime_estimates_capture() as payload_buffer:
+                torch._dynamo.reset()
+
+                mod = SimpleModule().to(device)
+                compiled = torch.compile(mod, backend="inductor")
+                compiled(torch.randn(4, 4, device=device))
+
+                # Verify runtime + tensor meta artifact was logged
+                self.assertIn(
+                    '"inductor_runtime_and_tensor_meta"', self.buffer.getvalue()
+                )
+
+                payload_content = payload_buffer.getvalue().strip()
+                if payload_content:
+                    data = json.loads(payload_content)
+                    self.assertIn("ops", data)
+                    ops = data["ops"]
+
+                    # Verify runtime estimates
+                    compute_ops = [op for op in ops if op["type"] == "compute"]
+                    collective_ops = [op for op in ops if op["type"] == "collective"]
+
+                    self.assertTrue(len(compute_ops) > 0 or len(collective_ops) > 0)
+
+                    # Just check each op has an estimated runtime value (any value, including 0)
+                    for op in ops:
+                        self.assertIn("estimated_runtime_ns", op)
+                        self.assertIsNotNone(op["estimated_runtime_ns"])
+
+                self.assertParses()
+        finally:
+            dist.destroy_process_group()
+
+    @requires_tlparse
+    @requires_distributed()
+    @skipIf(not HAS_TRITON, "requires triton")
+    @torch._inductor.config.patch("fx_graph_cache", False)
+    @torch._inductor.config.patch("log_tlparse", True)
+    def test_runtime_estimates_mixed(self, device):
+        """Test runtime estimates logging with mixed compute and collective sequence."""
+        import torch.distributed as dist
+
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        class MixedModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.norm = torch.nn.LayerNorm(4)
+
+            def forward(self, x):
+                h = self.norm(x)
+                h = torch.nn.functional.gelu(h)
+
+                h = torch.ops._c10d_functional.all_reduce.default(h, "sum", "0")
+                h = torch.ops._c10d_functional.wait_tensor.default(h)
+
+                h = h * 0.5
+
+                gathered = torch.ops._c10d_functional.all_gather_into_tensor.default(
+                    h, 2, "0"
+                )
+                gathered = torch.ops._c10d_functional.wait_tensor.default(gathered)
+
+                return gathered.sum(dim=0)
+
+        try:
+            with self._setup_runtime_estimates_capture() as payload_buffer:
+                torch._dynamo.reset()
+
+                mod = MixedModule().to(device)
+                compiled = torch.compile(mod, backend="inductor")
+                compiled(torch.randn(4, 4, device=device))
+
+                # Verify artifact was logged
+                self.assertIn(
+                    '"inductor_runtime_and_tensor_meta"', self.buffer.getvalue()
+                )
+
+                payload_content = payload_buffer.getvalue().strip()
+                if payload_content:
+                    data = json.loads(payload_content)
+                    self.assertIn("ops", data)
+                    ops = data["ops"]
+
+                    # Should have both compute and collective ops
+                    op_types = {op["type"] for op in ops}
+                    self.assertIn("compute", op_types)
+                    self.assertIn("collective", op_types)
+
+                    # Just check each op has an estimated runtime value (any value, including 0)
+                    for op in ops:
+                        self.assertIn("estimated_runtime_ns", op)
+                        self.assertIsNotNone(op["estimated_runtime_ns"])
+
+                self.assertParses()
+        finally:
+            dist.destroy_process_group()
+
+    @requires_tlparse
+    @requires_distributed()
+    @skipIf(not HAS_TRITON, "requires triton")
+    @torch._inductor.config.patch("fx_graph_cache", False)
+    @torch._inductor.config.patch("log_tlparse", True)
+    def test_tensor_metadata_logging_multiple_ops(self, device):
+        import torch.distributed as dist
+
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        class Mixed(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                y = torch.relu(self.linear(x))
+                y = torch.ops._c10d_functional.all_reduce.default(y, "sum", "0")
+                y = torch.ops._c10d_functional.wait_tensor.default(y)
+                return y + 1
+
+        try:
+            with self._setup_runtime_estimates_capture() as payload_buffer:
+                torch._dynamo.reset()
+                mod = Mixed().to(device)
+                compiled = torch.compile(mod, backend="inductor")
+                compiled(torch.randn(4, 4, device=device))
+                payload = payload_buffer.getvalue().strip()
+                if payload:
+                    data = json.loads(payload)
+                    types = sorted({op.get("type") for op in data.get("ops", [])})
+                    self.assertExpectedInline(
+                        str(types), """['collective', 'compute']"""
+                    )
+                self.assertParses()
+        finally:
+            dist.destroy_process_group()
+
+
+instantiate_device_type_tests(
+    StructuredTraceTestDevice,
+    globals(),
+    except_for="cpu",
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":
