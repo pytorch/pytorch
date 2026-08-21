@@ -7281,19 +7281,23 @@ def sample_inputs_frexp(op_info, device, dtype, requires_grad, **kwargs):
 
     # Subnormals and signed zero. A frexp built on a float-valued library call
     # loses these wherever the backend flushes subnormals to zero, which the
-    # generated samples never exercise.
+    # generated samples never exercise. float64 is left out because gradcheck
+    # runs there, and the derivative at a float64 subnormal is 2**1074, which
+    # overflows to inf while the numerical estimate stays finite.
     bits_dtype = {
-        torch.float64: torch.int64,
         torch.float32: torch.int32,
         torch.float16: torch.int16,
         torch.bfloat16: torch.int16,
-    }[dtype]
-    # every value below is subnormal in all four formats
+    }.get(dtype)
+    if bits_dtype is None:
+        return
+    # every value below is subnormal in all three formats
     subnormals = torch.tensor([1, 2, 3, 7, 127], dtype=bits_dtype, device=device).view(dtype)
     yield SampleInput(subnormals.detach().requires_grad_(requires_grad))
 
-    specials = torch.tensor([0.0, -0.0, float('inf'), float('-inf'), float('nan')],
-                            dtype=dtype, device=device)
+    # NaN is omitted: check_alias_annotation deep-compares inputs by value to
+    # prove the op did not mutate them, and NaN never equals itself.
+    specials = torch.tensor([0.0, -0.0, float('inf'), float('-inf')], dtype=dtype, device=device)
     yield SampleInput(specials.detach().requires_grad_(requires_grad))
 
 
