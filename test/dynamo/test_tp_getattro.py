@@ -1366,7 +1366,6 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
 
-    @unittest.expectedFailure
     def test_getset_descriptor_get_explicit(self):
         # object.__class__ is a getset modeled in tp_getset, so this exercises
         # the entry.getter branch.  The value must be non-None: an attribute
