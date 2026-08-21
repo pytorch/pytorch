@@ -1317,6 +1317,23 @@ class TestSortAndSelectDevice(TestCase):
                     c = torch.isin(a, b, invert=invert, assume_unique=assume_unique)
                     self.assertEqual(c, ec)
 
+    @dtypes(*floating_types_and(torch.half, torch.bfloat16))
+    @parametrize("invert", [False, True])
+    def test_isin_nan(self, device, dtype, invert):
+        elements = torch.tensor([1.0, nan, 2.0, 5.0], device=device, dtype=dtype)
+        cases = [
+            ([nan, 1.0, 2.0], [True, False, True, False]),
+            ([nan] * 200 + [1.0, 2.0], [True, False, True, False]),
+            ([nan] * 200, [False] * 4),
+        ]
+        for test_values, expected_values in cases:
+            test_elements = torch.tensor(test_values, device=device, dtype=dtype)
+            expected = torch.tensor(expected_values, device=device)
+            if invert:
+                expected = expected.logical_not()
+            actual = torch.isin(elements, test_elements, invert=invert)
+            self.assertEqual(actual, expected)
+
     def test_isin_different_dtypes(self, device):
         supported_types = all_types() if device == "cpu" else all_types_and(torch.half)
         for mult in [1, 10]:
