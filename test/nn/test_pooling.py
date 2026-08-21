@@ -17,6 +17,7 @@ import torch.nn.functional as F
 from torch import inf, nan
 from torch.autograd import gradcheck, gradgradcheck
 from torch.testing import make_tensor
+from torch.testing._internal.common_cuda import has_device_side_assert
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
@@ -30,6 +31,8 @@ from torch.testing._internal.common_device_type import (
     onlyCPU,
     onlyCUDA,
     onlyMPS,
+    onlyNativeDeviceTypes,
+    skipXPUIf,
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.common_dtype import floating_types_and
@@ -44,7 +47,6 @@ from torch.testing._internal.common_utils import (
     parametrize as parametrize_test,
     run_tests,
     set_default_dtype,
-    skipIfTorchDynamo,
     slowTest,
     subtest,
     TEST_WITH_UBSAN,
@@ -866,15 +868,9 @@ torch.cuda.synchronize()
             error_msg = error_msgs[module_name]
 
             if should_error:
-                # CUDA shows assertion message
-                # ROCm shows launch failure or HSA_STATUS_ERROR_EXCEPTION
-                has_cuda_assert = error_msg in output
-                has_hip_error = (
-                    "launch failure" in output or "HSA_STATUS_ERROR_EXCEPTION" in output
-                )
                 self.assertTrue(
-                    has_cuda_assert or has_hip_error,
-                    f"Expected device assert error, got: {output[-500:]}",
+                    error_msg in output or has_device_side_assert(output),
+                    lambda msg: f"{msg}\nExpected device assert error, got: {output[-500:]}",
                 )
             else:
                 self.assertNotIn("Error", output, "Should not have produced an error")
@@ -1316,7 +1312,6 @@ torch.cuda.synchronize()
 
     @onlyCPU
     @dtypes(torch.float, torch.double)
-    @skipIfTorchDynamo("OOMs https://github.com/pytorch/pytorch/issues/111320")
     def test_max_pool1d(self, device, dtype):
         # FIXME For now compare against max_pool1d with indices
         def check(x, *args, **kwargs):
@@ -1448,6 +1443,7 @@ torch.cuda.synchronize()
         )
 
     @expectedFailureMPS  # TODO: Fixme
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/4731")
     @dtypes(torch.half, torch.bfloat16, torch.float, torch.double)
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @gcIfJetson
@@ -2068,6 +2064,20 @@ torch.cuda.synchronize()
                 grad_output, input, kernel_size, output_size, indices
             )
 
+    @onlyNativeDeviceTypes
+    def test_fractional_max_pool_invalid_kernel_size(self, device):
+        x = torch.randn(1, 2, 7, 7, device=device)
+        samples = x.new(1, 2, 2).uniform_()
+        for kernel_size in [(-1, 2), (0, 2)]:
+            with self.assertRaisesRegex(RuntimeError, "greater than zero"):
+                torch.ops.aten.fractional_max_pool2d(x, kernel_size, (3, 3), samples)
+
+        x = torch.randn(1, 2, 7, 7, 7, device=device)
+        samples = x.new(1, 2, 3).uniform_()
+        for kernel_size in [(-1, 2, 2), (0, 2, 2)]:
+            with self.assertRaisesRegex(RuntimeError, "greater than zero"):
+                torch.ops.aten.fractional_max_pool3d(x, kernel_size, (3, 3, 3), samples)
+
     @expectedFailureMPS  # float64
     @expectedFailureMeta  # RuntimeError: Unrecognized tensor type ID: Meta
     def test_fractional_max_pool3d(self, device):
@@ -2287,7 +2297,9 @@ torch.cuda.synchronize()
 
 
 instantiate_device_type_tests(TestAvgPoolDeviceType, globals())
-instantiate_device_type_tests(TestPoolingNNDeviceType, globals(), allow_mps=True)
+instantiate_device_type_tests(
+    TestPoolingNNDeviceType, globals(), allow_mps=True, allow_xpu=True
+)
 instantiate_parametrized_tests(TestPoolingNN)
 
 if __name__ == "__main__":

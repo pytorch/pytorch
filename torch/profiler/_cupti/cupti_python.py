@@ -15,7 +15,7 @@ import ctypes
 import logging
 from collections.abc import Iterable  # noqa: TC003
 from functools import lru_cache
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 
 logger = logging.getLogger(__name__)
@@ -36,6 +36,11 @@ except ModuleNotFoundError as exc:
         "Install cupti-python to use the experimental CUPTI monitor."
     ) from exc
 
+# Generated from the CUPTI ABI header (tools/gen_cupti_stubs.py): the
+# CUpti_ActivityAttribute selectors, so their (ABI-renumbered) ints are never hardcoded.
+from torch.profiler._cupti._cupti_stubs import ActivityAttr
+
+
 if TYPE_CHECKING:
     # Used only in pylibcupti method signatures (Any to pyrefly; cupti has no stub).
     from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
@@ -52,24 +57,11 @@ LIBCUPTI_SONAME = "libcupti.so.13"
 # are stable ABI values, so they are spelled out rather than resolved.
 CUPTI_SUCCESS = 0
 
-# CUpti_ActivityAttribute::CUPTI_ACTIVITY_ATTR_USER_DEFINED_RECORDS (not surfaced
-# by cupti-python); set on the subscription to turn on the v2 user-defined-record
-# path.
-_ATTR_USER_DEFINED_RECORDS = 11
-
-# CUPTI_ACTIVITY_ATTR_ENABLE_KERNEL_LATENCY_TIMESTAMPS -- per-subscriber toggle for the
-# kernel queued/submitted timestamps (not surfaced by cupti-python). Empirically 15 on
-# the runtime CUPTI ABI (the enum is renumbered vs the header, same reason the value
-# above is 11). Set via cuptiActivitySetAttribute_v2 on the subscriber; unlike the global
-# cuptiActivityEnableLatencyTimestamps it works post-CUDA-init under UDR and with HES.
-_ATTR_ENABLE_KERNEL_LATENCY_TIMESTAMPS = 15
-
-# CUPTI_ACTIVITY_ATTR_TIMESTAMP_CALLBACK -- per-subscriber timestamp callback (not surfaced by
-# cupti-python). 22 on the runtime CUPTI ABI (sequential from USER_DEFINED_RECORDS=11 /
-# ENABLE_KERNEL_LATENCY_TIMESTAMPS=15, both confirmed). Set via cuptiActivitySetAttribute_v2 on
-# the subscriber; unlike the global cuptiActivityRegisterTimestampCallback (NOT_COMPATIBLE under
-# UDR) this per-subscriber form coexists with UDR. Still beta: usable only sole-subscriber.
-_ATTR_TIMESTAMP_CALLBACK = 22
+# CUpti_ActivityAttribute selectors the monitor sets on its subscription
+# (ActivityAttr.USER_DEFINED_RECORDS / .ENABLE_KERNEL_LATENCY_TIMESTAMPS /
+# .TIMESTAMP_CALLBACK, ...). cupti-python does not surface this enum, so the values come
+# from the generated _cupti_stubs module (tools/gen_cupti_stubs.py, straight from the ABI
+# header) rather than hardcoded ints -- they are renumbered vs cupti-python's own enum.
 
 # Minimum libcupti the monitor supports. The v2 user-defined-record API arrived in
 # 13.2, but only 13.3 populates pBufferCompleteInfo->ppRecordLayouts (CUPTI's own
@@ -98,12 +90,6 @@ def _configure_ctypes(lib: ctypes.CDLL) -> None:
     lib.cuptiGetVersion.restype = ctypes.c_int
     lib.cuptiActivityFlushAll.argtypes = [ctypes.c_uint32]
     lib.cuptiActivityFlushAll.restype = ctypes.c_int
-    lib.cuptiActivityGetNumDroppedRecords.argtypes = [
-        ctypes.c_void_p,
-        ctypes.c_uint32,
-        ctypes.POINTER(ctypes.c_size_t),
-    ]
-    lib.cuptiActivityGetNumDroppedRecords.restype = ctypes.c_int
     lib.cuptiActivityEnableHWTrace.argtypes = [ctypes.c_uint8]
     lib.cuptiActivityEnableHWTrace.restype = ctypes.c_int
     lib.cuptiGetResultString.argtypes = [
@@ -113,6 +99,16 @@ def _configure_ctypes(lib: ctypes.CDLL) -> None:
     lib.cuptiGetResultString.restype = ctypes.c_int
     lib.cuptiFinalize.argtypes = []
     lib.cuptiFinalize.restype = ctypes.c_int
+    # Subscriber callbacks. Bound on the raw CDLL rather than taken from the cupti wheel,
+    # whose enable_callback validates the subscriber against its own registry and rejects a
+    # cuptiSubscribe_v2 handle with CUPTI_ERROR_INVALID_PARAMETER.
+    lib.cuptiEnableCallback.argtypes = [
+        ctypes.c_uint32,  # enable
+        ctypes.c_void_p,  # CUpti_SubscriberHandle subscriber
+        ctypes.c_int,  # CUpti_CallbackDomain domain
+        ctypes.c_uint32,  # CUpti_CallbackId cbid
+    ]
+    lib.cuptiEnableCallback.restype = ctypes.c_int
 
     # User-defined-record (subscription) API -- present in libcupti >= 13.2; guarded
     # so configuring against an older libcupti still succeeds (the monitor's
@@ -128,6 +124,14 @@ def _configure_ctypes(lib: ctypes.CDLL) -> None:
     if hasattr(lib, "cuptiUnsubscribe"):
         lib.cuptiUnsubscribe.argtypes = [ctypes.c_void_p]
         lib.cuptiUnsubscribe.restype = ctypes.c_int
+    if hasattr(lib, "cuptiActivityGetNumDroppedRecords_v2"):
+        lib.cuptiActivityGetNumDroppedRecords_v2.argtypes = [
+            ctypes.c_void_p,  # CUpti_SubscriberHandle subscriber
+            ctypes.c_void_p,  # CUcontext context
+            ctypes.c_uint32,  # uint32_t streamId
+            ctypes.POINTER(ctypes.c_size_t),  # size_t* dropped
+        ]
+        lib.cuptiActivityGetNumDroppedRecords_v2.restype = ctypes.c_int
     if hasattr(lib, "cuptiActivitySetAttribute_v2"):
         lib.cuptiActivitySetAttribute_v2.argtypes = [
             ctypes.c_void_p,
@@ -342,6 +346,15 @@ class _PyLibCupti:
             or 0
         )
 
+    def get_flush_fn_address(self) -> int:
+        """Raw address of ``cuptiActivityFlushAll``, for the native decode worker to
+        drive the periodic plain flush directly -- so the native module needs no
+        libcupti link either (mirrors ``get_next_record_fn_address``). Returns 0 if
+        the symbol is absent."""
+        if not hasattr(self._lib, "cuptiActivityFlushAll"):
+            return 0
+        return ctypes.cast(self._lib.cuptiActivityFlushAll, ctypes.c_void_p).value or 0
+
     def get_timestamp(self, sub_handle: int) -> int:
         """CUPTI's normalized nanosecond clock for a subscriber -- the same timebase
         as activity record START/END timestamps, so a value captured here is directly
@@ -374,7 +387,7 @@ class _PyLibCupti:
         return (
             self._lib.cuptiActivitySetAttribute_v2(
                 ctypes.c_void_p(sub_handle),
-                _ATTR_TIMESTAMP_CALLBACK,
+                ActivityAttr.TIMESTAMP_CALLBACK,
                 ctypes.byref(size),
                 ctypes.byref(val),
             )
@@ -389,7 +402,7 @@ class _PyLibCupti:
         size = ctypes.c_size_t(ctypes.sizeof(ctypes.c_void_p))
         self._lib.cuptiActivitySetAttribute_v2(
             ctypes.c_void_p(sub_handle),
-            _ATTR_TIMESTAMP_CALLBACK,
+            ActivityAttr.TIMESTAMP_CALLBACK,
             ctypes.byref(size),
             ctypes.byref(val),
         )
@@ -402,10 +415,24 @@ class _PyLibCupti:
         flush race that corrupts the HES heap and freezes the decode worker."""
         self._check(self._lib.cuptiActivityFlushAll(0), "cuptiActivityFlushAll")
 
-    def activity_get_num_dropped_records(self, ctx: int, stream_id: int) -> int:
+    def activity_get_num_dropped_records(
+        self, sub_handle: int, ctx: int, stream_id: int
+    ) -> int:
+        """Dropped-record count for the subscription.
+
+        Must use the ``_v2`` (subscriber-scoped) entry point: the monitor enables and
+        registers through the subscriber-scope API, and CUPTI refuses to mix scopes --
+        the global ``cuptiActivityGetNumDroppedRecords`` returns
+        CUPTI_ERROR_NOT_COMPATIBLE for every call once a subscriber is in use. That
+        failure is otherwise invisible (the count is best-effort, so a bad status just
+        yields 0) while CUPTI logs an internal error per call.
+        """
         dropped = ctypes.c_size_t()
-        rc = self._lib.cuptiActivityGetNumDroppedRecords(
-            ctypes.c_void_p(ctx), ctypes.c_uint32(stream_id), ctypes.byref(dropped)
+        rc = self._lib.cuptiActivityGetNumDroppedRecords_v2(
+            ctypes.c_void_p(sub_handle),
+            ctypes.c_void_p(ctx),
+            ctypes.c_uint32(stream_id),
+            ctypes.byref(dropped),
         )
         return dropped.value if rc == CUPTI_SUCCESS else 0
 
@@ -427,11 +454,18 @@ class _PyLibCupti:
 
     # --- user-defined-records (subscription API) ---------------------------
 
-    def subscribe(self, allow_multiple: bool = True) -> int:
-        """cuptiSubscribe_v2 with a no-op callback -> opaque subscriber handle
-        (the v2 activity API is subscription-scoped). ``allow_multiple`` requests
-        coexistence with another CUPTI subscriber (e.g. Kineto); CUPTI returns
-        CUPTI_ERROR_MULTIPLE_SUBSCRIBERS_NOT_SUPPORTED if it can't be honored."""
+    def subscribe(self, allow_multiple: bool = True, callback: Any = None) -> int:
+        """cuptiSubscribe_v2 -> opaque subscriber handle (the v2 activity API is
+        subscription-scoped). ``allow_multiple`` requests coexistence with another CUPTI
+        subscriber (e.g. Kineto); CUPTI returns
+        CUPTI_ERROR_MULTIPLE_SUBSCRIBERS_NOT_SUPPORTED if it can't be honored.
+
+        ``callback`` is the subscription's single ``CUpti_CallbackFunc`` -- a
+        :data:`_CB_FUNC` instance the caller must keep alive for the life of the
+        subscription. CUPTI allows exactly one per subscriber, so a consumer wanting
+        several callbacks fans out inside it. Defaults to :data:`_NOOP_CB`, read from the
+        module at call time so a consumer that swaps that global still gets its own
+        callback on subscriptions it takes itself."""
         sub = ctypes.c_void_p()
         params = _SubscriberParams(
             structSize=ctypes.sizeof(_SubscriberParams),
@@ -442,7 +476,10 @@ class _PyLibCupti:
         )
         self._check(
             self._lib.cuptiSubscribe_v2(
-                ctypes.byref(sub), _NOOP_CB, None, ctypes.byref(params)
+                ctypes.byref(sub),
+                _NOOP_CB if callback is None else callback,
+                None,
+                ctypes.byref(params),
             ),
             "cuptiSubscribe_v2",
         )
@@ -456,6 +493,19 @@ class _PyLibCupti:
             "cuptiUnsubscribe",
         )
 
+    def enable_callback(
+        self, sub_handle: int, domain: int, cbid: int, enable: bool
+    ) -> None:
+        """cuptiEnableCallback -- turn one ``(domain, cbid)`` subscriber callback on or
+        off for this subscription. Callbacks fire synchronously on the application thread
+        that made the CUDA call, unlike activity records."""
+        self._check(
+            self._lib.cuptiEnableCallback(
+                1 if enable else 0, ctypes.c_void_p(sub_handle), domain, cbid
+            ),
+            "cuptiEnableCallback",
+        )
+
     def arm_user_defined_records(
         self, sub_handle: int, request_addr: int, complete_addr: int
     ) -> None:
@@ -466,7 +516,7 @@ class _PyLibCupti:
         self._check(
             self._lib.cuptiActivitySetAttribute_v2(
                 ctypes.c_void_p(sub_handle),
-                _ATTR_USER_DEFINED_RECORDS,
+                ActivityAttr.USER_DEFINED_RECORDS,
                 ctypes.byref(size),
                 ctypes.byref(enabled),
             ),
@@ -495,7 +545,7 @@ class _PyLibCupti:
         size = ctypes.c_size_t(1)
         rc = self._lib.cuptiActivitySetAttribute_v2(
             ctypes.c_void_p(sub_handle),
-            _ATTR_USER_DEFINED_RECORDS,
+            ActivityAttr.USER_DEFINED_RECORDS,
             ctypes.byref(size),
             ctypes.byref(disabled),
         )
@@ -516,7 +566,25 @@ class _PyLibCupti:
         return (
             self._lib.cuptiActivitySetAttribute_v2(
                 ctypes.c_void_p(sub_handle),
-                _ATTR_ENABLE_KERNEL_LATENCY_TIMESTAMPS,
+                ActivityAttr.ENABLE_KERNEL_LATENCY_TIMESTAMPS,
+                ctypes.byref(size),
+                ctypes.byref(val),
+            )
+            == 0
+        )
+
+    def enable_cuda_event_device_timestamps(
+        self, sub_handle: int, enable: bool
+    ) -> bool:
+        """Toggle per-subscriber device-side timestamps on CUDA_EVENT records (the
+        ``deviceTimestamp`` field, off by default). Best-effort: returns False if CUPTI
+        rejects the attribute so the session degrades to no event timestamps."""
+        val = ctypes.c_uint8(1 if enable else 0)
+        size = ctypes.c_size_t(1)
+        return (
+            self._lib.cuptiActivitySetAttribute_v2(
+                ctypes.c_void_p(sub_handle),
+                ActivityAttr.ENABLE_CUDA_EVENT_DEVICE_TIMESTAMPS,
                 ctypes.byref(size),
                 ctypes.byref(val),
             )
@@ -544,12 +612,8 @@ class _PyLibCupti:
             ),
             "cuptiActivityEnable_v2",
         )
-        # ``kind`` is passed as a plain int (the monitor keys its selection by int), so
-        # the old ``kind.name`` check never matched and these were dead code. Compare the
-        # kind value instead. The disable is best-effort: the per-cbid runtime/driver
-        # activity filter returns CUPTI_ERROR_NOT_COMPATIBLE under the user-defined-record
-        # subscriber (a no-op on the monitor's UDR path), so the post-decode blocklist in
-        # monitor_trace is what actually keeps the noise out of the trace.
+        # ``kind`` is a plain int here, so compare by value. The per-cbid runtime/driver
+        # disable must follow the kind enable.
         from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
 
         k = int(kind)
@@ -559,10 +623,9 @@ class _PyLibCupti:
             self.disable_noisy_driver_apis(sub_handle)
 
     def disable_noisy_runtime_apis(self, sub_handle: int) -> None:
-        """Best-effort: stop CUPTI emitting RUNTIME records for the noise-only cbids
+        """Stop CUPTI emitting RUNTIME records for the noise-only cbids
         (cudaGetDevice/SetDevice/GetLastError) so they don't fill the UDR buffers, via the
-        subscriber-scoped _v2 entry (the UDR path's form). A no-op if it is absent (the
-        post-decode blocklist still keeps them out of the chrome trace)."""
+        subscriber-scoped _v2 entry (the UDR path's form). A no-op if it is absent."""
         cbids = _noisy_runtime_cbids()
         fn_v2 = getattr(self._lib, "cuptiActivityEnableRuntimeApi_v2", None)
         if not cbids or fn_v2 is None:
@@ -571,10 +634,10 @@ class _PyLibCupti:
             fn_v2(ctypes.c_void_p(sub_handle), ctypes.c_uint32(cbid), ctypes.c_uint8(0))
 
     def disable_noisy_driver_apis(self, sub_handle: int) -> None:
-        """Best-effort: stop CUPTI emitting DRIVER records for the noise-only cbids
+        """Stop CUPTI emitting DRIVER records for the noise-only cbids
         (cuKernelGetAttribute/cuDevicePrimaryCtxGetState/cuCtxGetCurrent) so they don't
         fill the UDR buffers, via the subscriber-scoped _v2 entry (the UDR path's form). A
-        no-op if it is absent (the post-decode driver allowlist still keeps them out)."""
+        no-op if it is absent."""
         cbids = _noisy_driver_cbids()
         fn_v2 = getattr(self._lib, "cuptiActivityEnableDriverApi_v2", None)
         if not cbids or fn_v2 is None:

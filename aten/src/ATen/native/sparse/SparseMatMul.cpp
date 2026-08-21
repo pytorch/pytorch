@@ -3,6 +3,7 @@
 #include <ATen/Config.h>
 #include <ATen/Dispatch.h>
 #include <ATen/SparseTensorImpl.h>
+#include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/SparseTensorUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/StridedRandomAccessor.h>
@@ -264,14 +265,9 @@ void sparse_matmul_kernel(
 Tensor sparse_sparse_matmul_cpu(const Tensor& mat1_, const Tensor& mat2_) {
   TORCH_INTERNAL_ASSERT(mat1_.is_sparse());
   TORCH_INTERNAL_ASSERT(mat2_.is_sparse());
-  TORCH_CHECK(mat1_.dim() == 2);
-  TORCH_CHECK(mat2_.dim() == 2);
+  check_mm_shapes(mat1_, mat2_, "_sparse_sparse_matmul");
   TORCH_CHECK(mat1_.dense_dim() == 0, "sparse_sparse_matmul_cpu: scalar values expected, got ", mat1_.dense_dim(), "D values");
   TORCH_CHECK(mat2_.dense_dim() == 0, "sparse_sparse_matmul_cpu: scalar values expected, got ", mat2_.dense_dim(), "D values");
-
-  TORCH_CHECK(
-      mat1_.size(1) == mat2_.size(0), "mat1 and mat2 shapes cannot be multiplied (",
-      mat1_.size(0), "x", mat1_.size(1), " and ", mat2_.size(0), "x", mat2_.size(1), ")");
 
   TORCH_CHECK(mat1_.scalar_type() == mat2_.scalar_type(),
            "mat1 dtype ", mat1_.scalar_type(), " does not match mat2 dtype ", mat2_.scalar_type());

@@ -3,6 +3,7 @@
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/ConvUtils.h>
+#include <ATen/native/RNN.h>
 #include <c10/core/Device.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/util/Exception.h>
@@ -867,6 +868,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
 
   py::str snapshot_s = "snapshot";
   py::str oom_s = "oom";
+  py::str annotate_s = "annotate";
   py::str device_free_s = "device_free";
 
   using c10::CachingDeviceAllocator::TraceEntry;
@@ -891,6 +893,8 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
         return segment_unmap_s;
       case TraceEntry::SEGMENT_MAP:
         return segment_map_s;
+      case TraceEntry::ANNOTATE:
+        return annotate_s;
     }
     TORCH_CHECK(false, "unreachable");
   };
@@ -1213,7 +1217,7 @@ static void registerCudaDeviceProperties(PyObject* module) {
                << ", pci_domain_id=" << prop.pciDomainID
                << ", L2_cache_size=" << prop.l2CacheSize / (1024ull * 1024)
                << "MB)";
-        return stream.str();
+        return std::move(stream).str();
       });
 
   m.def(
@@ -1249,12 +1253,21 @@ static void registerCudaDeviceProperties(PyObject* module) {
     return c10::cuda::CUDACachingAllocator::isHistoryEnabled();
   });
 
+  m.def("_cuda_memoryMetadataSupported", []() {
+    return c10::cuda::CUDACachingAllocator::supportsUserMetadata();
+  });
+
   m.def("_cuda_setMemoryMetadata", [](const std::string& metadata) {
     c10::cuda::CUDACachingAllocator::setUserMetadata(metadata);
   });
 
   m.def("_cuda_getMemoryMetadata", []() {
     return c10::cuda::CUDACachingAllocator::getUserMetadata();
+  });
+
+  m.def("_cuda_annotateMemory", [](size_t ptr, const std::string& metadata) {
+    c10::cuda::CUDACachingAllocator::annotateMemory(
+        reinterpret_cast<void*>(ptr), metadata);
   });
 
   m.def("_cuda_get_conv_benchmark_empty_cache", []() {
@@ -1561,7 +1574,7 @@ static void registerCudaPluggableAllocator(PyObject* module) {
         for (size_t ptr_int : stale_storages_ptr) {
           // NOLINTNEXTLINE(performance-no-int-to-ptr)
           c10::StorageImpl* ptr = (c10::StorageImpl*)ptr_int;
-          if (!ptr_set.count(ptr)) {
+          if (!ptr_set.contains(ptr)) {
             ptrs.push_back(ptr);
             ptr_set.insert(ptr);
           }
@@ -1577,7 +1590,7 @@ static void registerCudaPluggableAllocator(PyObject* module) {
         std::unordered_set<void*> freed_pointer_set;
         size_t definite_freed_count = 0;
         for (void* ptr : freed_pointers) {
-          if (!allocd_set.count(ptr)) {
+          if (!allocd_set.contains(ptr)) {
             definite_freed_count += 1;
           }
           freed_pointer_set.insert(ptr);
@@ -1631,14 +1644,11 @@ static PyObject* THCPModule_initExtension(PyObject* self, PyObject* noargs) {
   at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
 
   auto m = THPObjectPtr(PyImport_ImportModule("torch.cuda"));
-  if (!m)
-    throw python_error();
+  TORCH_CHECK_PYTHON(m);
 
   auto set_module_attr = [&](const char* name, PyObject* v) {
     // PyObject_SetAttrString doesn't steal reference. So no need to incref.
-    if (PyObject_SetAttrString(m, name, v) < 0) {
-      throw python_error();
-    }
+    TORCH_CHECK_PYTHON(PyObject_SetAttrString(m, name, v) >= 0);
   };
 
   auto num_gpus = c10::cuda::device_count();
@@ -1745,6 +1755,20 @@ static PyObject* THCPModule_resetCublasLtWorkspaceSize(
     PyObject* noargs) {
   HANDLE_TH_ERRORS
   at::cuda::resetCUDABlasLtWorkspaceSize();
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THCPModule_cudnnClearDropoutState_wrap(
+    PyObject* self,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+#if defined(USE_ROCM)
+  // On ROCm, RNNs dispatch to MIOpen, which caches per-device dropout state
+  // buffers separate from the cuDNN path.
+  at::native::_miopen_clear_dropout_state();
+#endif
+  at::native::_cudnn_clear_dropout_state();
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -1981,26 +2005,20 @@ PyObject* THCPModule_cuda_tunableop_get_results(
     result_size += kernelmap.size();
   }
   THPObjectPtr outer_tuple(PyTuple_New(static_cast<Py_ssize_t>(result_size)));
-  if (!outer_tuple)
-    throw python_error();
+  TORCH_CHECK_PYTHON(outer_tuple);
   size_t result_index = 0;
   for (const auto& [op_sig, kernelmap] : results) {
     for (const auto& [param_sig, result] : kernelmap) {
       THPObjectPtr inner_tuple(PyTuple_New(4));
-      if (!inner_tuple)
-        throw python_error();
+      TORCH_CHECK_PYTHON(inner_tuple);
       PyObject* obj_op_sig = THPUtils_packString(op_sig);
-      if (!obj_op_sig)
-        throw python_error();
+      TORCH_CHECK_PYTHON(obj_op_sig);
       PyObject* obj_param_sig = THPUtils_packString(param_sig);
-      if (!obj_param_sig)
-        throw python_error();
+      TORCH_CHECK_PYTHON(obj_param_sig);
       PyObject* obj_result_key = THPUtils_packString(result.GetKey());
-      if (!obj_result_key)
-        throw python_error();
+      TORCH_CHECK_PYTHON(obj_result_key);
       PyObject* obj_result_time = PyFloat_FromDouble(result.GetTime());
-      if (!obj_result_time)
-        throw python_error();
+      TORCH_CHECK_PYTHON(obj_result_time);
       PyTuple_SET_ITEM(inner_tuple.get(), 0, obj_op_sig);
       PyTuple_SET_ITEM(inner_tuple.get(), 1, obj_param_sig);
       PyTuple_SET_ITEM(inner_tuple.get(), 2, obj_result_key);
@@ -2022,19 +2040,15 @@ PyObject* THCPModule_cuda_tunableop_get_validators(
                         .GetAllValidators();
   THPObjectPtr outer_tuple(
       PyTuple_New(static_cast<Py_ssize_t>(validators.size())));
-  if (!outer_tuple)
-    throw python_error();
+  TORCH_CHECK_PYTHON(outer_tuple);
   size_t validator_index = 0;
   for (const auto& [key, val] : validators) {
     THPObjectPtr inner_tuple(PyTuple_New(2));
-    if (!inner_tuple)
-      throw python_error();
+    TORCH_CHECK_PYTHON(inner_tuple);
     PyObject* obj_key = THPUtils_packString(key);
-    if (!obj_key)
-      throw python_error();
+    TORCH_CHECK_PYTHON(obj_key);
     PyObject* obj_val = THPUtils_packString(val);
-    if (!obj_val)
-      throw python_error();
+    TORCH_CHECK_PYTHON(obj_val);
     PyTuple_SET_ITEM(inner_tuple.get(), 0, obj_key);
     PyTuple_SET_ITEM(inner_tuple.get(), 1, obj_val);
     PyTuple_SET_ITEM(
@@ -2241,6 +2255,10 @@ static struct PyMethodDef _THCPModule_methods[] = {
      nullptr},
     {"_cuda_resetCublasLtWorkspaceSize",
      THCPModule_resetCublasLtWorkspaceSize,
+     METH_NOARGS,
+     nullptr},
+    {"_cudnn_clear_dropout_state",
+     THCPModule_cudnnClearDropoutState_wrap,
      METH_NOARGS,
      nullptr},
     {"_cuda_isCurrentStreamCapturing",
@@ -2459,7 +2477,7 @@ void initNvtxBindings(PyObject* module);
 #if defined(USE_CUDNN) || defined(USE_ROCM)
 void initCudnnBindings(PyObject* module);
 #endif
-#if defined(USE_CUSPARSELT)
+#if defined(USE_CUSPARSELT) || defined(USE_HIPSPARSELT)
 void initCusparseltBindings(PyObject* module);
 #endif
 
@@ -2474,7 +2492,7 @@ void initModule(PyObject* module) {
 #if defined(USE_CUDNN) || defined(USE_ROCM)
   shared::initCudnnBindings(module);
 #endif
-#if defined(USE_CUSPARSELT)
+#if defined(USE_CUSPARSELT) || defined(USE_HIPSPARSELT)
   shared::initCusparseltBindings(module);
 #endif
   shared::initGdsBindings(module);

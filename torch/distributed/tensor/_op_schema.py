@@ -102,7 +102,7 @@ class OpSpec:
     DTensorSpec; when the return value is a tuple of Optional[DTensor],
     output_specs is a tuple of Optional[DTensorSpec].
 
-    note: we MUST produce an DTensorSpec for every output that is a Tensor.  None
+    note: we MUST produce a DTensorSpec for every output that is a Tensor.  None
     entries only occur for non-Tensor outputs (e.g., operators that return Optional[Tensor],
     or non-Tensor outputs.)
 

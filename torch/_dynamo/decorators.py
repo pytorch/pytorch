@@ -1737,7 +1737,7 @@ def override_cudagraphs(
     return CudagraphOverrideContextManager(fwd=fwd, bwd=bwd)
 
 
-def override_optimization_hint(x: Any, val: int) -> None:
+def override_optimization_hint(x: object, val: int) -> None:
     """Override the optimization hint for a scalar unbacked symbol.
 
     When the compiler or runtime needs a non-guarding integer hint for an

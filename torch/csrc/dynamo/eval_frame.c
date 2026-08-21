@@ -99,6 +99,9 @@ static PyObject* THPPyInterpreterFrame_f_locals(
 static PyObject* THPPyInterpreterFrame_f_executable(
     THPPyInterpreterFrame* self,
     PyObject* _noargs) {
+  if (PyStackRef_IsNull(self->frame->f_executable)) {
+    Py_RETURN_NONE;
+  }
   return PyStackRef_AsPyObjectNew(self->frame->f_executable);
 }
 #elif IS_PYTHON_3_13_PLUS
@@ -268,7 +271,11 @@ const char* get_frame_name(THP_EVAL_API_FRAME_OBJECT* frame) {
 
 #if IS_PYTHON_3_14_PLUS
 static void dup_obj(_PyStackRef* dst, _PyStackRef src) {
-  *dst = PyStackRef_DUP(src);
+  if (PyStackRef_IsNull(src)) {
+    *dst = PyStackRef_NULL;
+  } else {
+    *dst = PyStackRef_DUP(src);
+  }
 }
 #else
 static void dup_obj(PyObject** dst, PyObject* src) {
@@ -563,6 +570,8 @@ static PyTypeObject THPPyInterpreterFrameType = {
 
 #endif // !(IS_PYTHON_3_15_PLUS)
 
+#if !IS_PYTHON_3_13_PLUS
+
 void clear_old_frame_if_python_312_plus(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame) {
@@ -573,6 +582,8 @@ void clear_old_frame_if_python_312_plus(
 
 #endif
 }
+
+#endif // !IS_PYTHON_3_13_PLUS
 
 static PyObject* increment_working_threads(
     PyThreadState* tstate,

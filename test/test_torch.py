@@ -307,10 +307,12 @@ class TestTorchDeviceType(TestCase):
         self.assertTrue(
             isinstance(s, (torch.UntypedStorage, torch.TypedStorage)) and
             isinstance(s_check, type(s)),
-            (
-                's and s_check must both be one of UntypedStorage or '
-                'TypedStorage, but got'
-                f' {type(s).__name__} and {type(s_check).__name__}'))
+            lambda msg: (
+                f"{msg}\ns and s_check must both be one of UntypedStorage or "
+                "TypedStorage, but got"
+                f" {type(s).__name__} and {type(s_check).__name__}"
+            ),
+        )
 
         self.assertEqual(s.device.type, 'meta')
         self.assertEqual(s.nbytes(), s_check.nbytes())
@@ -893,6 +895,8 @@ class TestTorchDeviceType(TestCase):
             warnings.filterwarnings("ignore", "torch::jit::fuser::cuda", UserWarning)
             # ignore all deprecation warnings
             warnings.filterwarnings("ignore", category=DeprecationWarning)
+            # torch.jit.script emits a visible FutureWarning; ignore it too
+            warnings.filterwarnings("ignore", category=FutureWarning)
             scripted_cpp_warn_fn = torch.jit.script(cpp_warn_fn)
             scripted_cpp_warn_fn()
             warning = w[0]
@@ -917,6 +921,8 @@ class TestTorchDeviceType(TestCase):
             warnings.filterwarnings("ignore", "torch::jit::fuser::cuda", UserWarning)
             # ignore all deprecation warnings
             warnings.filterwarnings("ignore", category=DeprecationWarning)
+            # torch.jit.script emits a visible FutureWarning; ignore it too
+            warnings.filterwarnings("ignore", category=FutureWarning)
             scripted_warn_fn = torch.jit.script(warn_fn)
             scripted_warn_fn()
             frameinfo = inspect.getframeinfo(inspect.currentframe())
@@ -925,7 +931,7 @@ class TestTorchDeviceType(TestCase):
             self.assertTrue(re.search('Warning!', str(warning.message)) is not None)
 
             # Checks the Python features of the warning
-            self.assertEqual(frameinfo.lineno - 10, warning.lineno)
+            self.assertEqual(frameinfo.lineno - 12, warning.lineno)
             self.assertEqual(len(w), 1)
 
     # FIXME: move to test_testing
@@ -1601,6 +1607,25 @@ class TestTorchDeviceType(TestCase):
             torch.device(device).type == 'cuda')
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
+    def test_deterministic_interpolate_bicubic(self, device):
+        input = torch.randn(1, 2, 4, 4, device=device, requires_grad=True)
+        output_grad = torch.randn(1, 2, 9, 12, device=device)
+        grad = None
+        with DeterministicGuard(True):
+            for _ in range(5):
+                res = torch.nn.functional.interpolate(
+                    input,
+                    size=(9, 12),
+                    mode='bicubic',
+                    align_corners=False)
+                res.backward(output_grad)
+                if grad is None:
+                    grad = input.grad
+                else:
+                    self.assertEqual(grad, input.grad, atol=0, rtol=0)
+                input.grad = None
+
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_interpolate_trilinear(self, device):
         input = torch.randn(1, 2, 4, 4, 4, device=device, requires_grad=True)
         res = torch.nn.functional.interpolate(
@@ -2107,6 +2132,7 @@ class TestTorchDeviceType(TestCase):
                           lambda: torch.repeat_interleave(x, 2, output_size=2 * size),
                           lambda: torch.repeat_interleave(x, repeats, output_size=2 * size),
                           lambda: torch.any(y),
+                          lambda: torch.combinations(x, r=2),
                           lambda: torch.normal(x, x))
         expect_sync = (lambda: _ind_put_fn(x, mask, y),
                        lambda: _ind_put_fn(x, ind_cpu, y),
@@ -2321,7 +2347,7 @@ class TestTorchDeviceType(TestCase):
             for to_ in [-4.2, 0, 42]:
                 if to_ > from_:
                     t = torch.empty(size, dtype=dtype, device=device).uniform_(from_, to_)
-                    res = stats.kstest(t.cpu().to(torch.double), 'uniform', args=(from_, (to_ - from_)))
+                    res = stats.kstest(t.cpu().to(torch.double), stats.uniform(from_, (to_ - from_)).cdf)
                     self.assertTrue(res.statistic < 0.1)
 
     @skipIfNoSciPy
@@ -2332,7 +2358,7 @@ class TestTorchDeviceType(TestCase):
         for mean in [-10, 0, 50]:
             for std in [1, 5, 10]:
                 t = torch.empty(size, dtype=dtype, device=device).normal_(mean=mean, std=std)
-                res = stats.kstest(t.cpu().to(torch.double), 'norm', args=(mean, std))
+                res = stats.kstest(t.cpu().to(torch.double), stats.norm(mean, std).cdf)
                 self.assertTrue(res.statistic < 0.1)
 
     @skipIfNoSciPy
@@ -2342,10 +2368,10 @@ class TestTorchDeviceType(TestCase):
         size = 50000
         for std in [0.005, 0.01]:
             t = torch.empty(size, dtype=dtype, device=device).normal_(mean=0, std=std)
-            res = stats.kstest(t.cpu().to(torch.double), 'norm', args=(0, std))
+            res = stats.kstest(t.cpu().to(torch.double), stats.norm(0, std).cdf)
             self.assertTrue(
                 res.statistic < 0.01,
-                msg=f"KS statistic {res.statistic:.4f} for {dtype} std={std}",
+                msg=lambda msg: f"{msg}\nKS statistic {res.statistic:.4f} for {dtype} std={std}",
             )
 
     @skipIfNoSciPy
@@ -2358,7 +2384,7 @@ class TestTorchDeviceType(TestCase):
             kurtosis = stats.kurtosis(t.cpu().to(torch.double).numpy())
             self.assertAlmostEqual(
                 kurtosis, 0.0, delta=0.15,
-                msg=f"Excess kurtosis {kurtosis:.3f} too far from 0 for {dtype} std={std}",
+                msg=lambda msg: f"{msg}\nExcess kurtosis {kurtosis:.3f} too far from 0 for {dtype} std={std}",
             )
 
     @dtypes(torch.bfloat16)
@@ -2371,7 +2397,7 @@ class TestTorchDeviceType(TestCase):
         max_sigma = t.float().abs().max().item()
         self.assertGreater(
             max_sigma, 3.5,
-            msg=f"Max |z| = {max_sigma:.2f} sigma, expected > 3.5 (tail truncation)",
+            msg=lambda msg: f"{msg}\nMax |z| = {max_sigma:.2f} sigma, expected > 3.5 (tail truncation)",
         )
 
     @dtypes(torch.half, torch.bfloat16)
@@ -4225,6 +4251,15 @@ class TestTorchDeviceType(TestCase):
             out = torch.addcmul(a, b, c, value=-2)
             self.assertTrue(not (out.isnan() or out.isinf()))
 
+    @onlyNativeDeviceTypes
+    @dtypes(torch.float)
+    def test_addcdiv_zero_divisor(self, device, dtype):
+        input = torch.ones(17, dtype=dtype, device=device)
+        tensor1 = torch.ones(17, dtype=dtype, device=device)
+        tensor2 = torch.zeros(17, dtype=dtype, device=device)
+        expected = torch.full((17,), float("inf"), dtype=dtype, device=device)
+        self.assertEqual(torch.addcdiv(input, tensor1, tensor2), expected)
+
     def test_nullary_op_mem_overlap(self, device):
         ops = (
             ("random_", ()),
@@ -4855,7 +4890,7 @@ class TestTorchDeviceType(TestCase):
                 self.assertEqual(result, result_c, lambda msg: f"{msg}\nFailed for '{inspect.getsource(fn).strip()}'")
                 self.assertTrue(
                     result.is_contiguous(memory_format=memory_format),
-                    f"result of the '{inspect.getsource(fn).strip()}' is not in '{memory_format}' format")
+                    lambda msg: f"{msg}\nresult of the '{inspect.getsource(fn).strip()}' is not in '{memory_format}' format")
 
             for fn in bias_fns:
                 result_c = fn(x_c, b_c)
@@ -4863,7 +4898,7 @@ class TestTorchDeviceType(TestCase):
                 self.assertEqual(result, result_c, lambda msg: f"{msg}\nFailed for '{inspect.getsource(fn).strip()}'")
                 self.assertTrue(
                     result.is_contiguous(memory_format=memory_format),
-                    f"result of the '{inspect.getsource(fn).strip()}' is not in '{memory_format}' format")
+                    lambda msg: f"{msg}\nresult of the '{inspect.getsource(fn).strip()}' is not in '{memory_format}' format")
 
             for fn in return_contig_fns:
                 result_c = fn(x_c, y_c)
@@ -4871,7 +4906,7 @@ class TestTorchDeviceType(TestCase):
                 self.assertEqual(result, result_c, lambda msg: f"{msg}\nFailed for '{inspect.getsource(fn).strip()}'")
                 self.assertTrue(
                     result.is_contiguous(memory_format=torch.contiguous_format),
-                    f"result of the '{inspect.getsource(fn).strip()}' is not in '{torch.contiguous_format}' format")
+                    lambda msg: f"{msg}\nresult of the '{inspect.getsource(fn).strip()}' is not in '{torch.contiguous_format}' format")
 
         _test_helper(
             torch.randn((4, 3, 8, 8), device=device).contiguous(memory_format=torch.channels_last),
@@ -6518,6 +6553,45 @@ class TestTorchDeviceType(TestCase):
         with self.assertRaisesRegex(RuntimeError, "same nbytes"):
             x.untyped_storage()._swap_data_ptr_(y.untyped_storage())
 
+    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/193288")
+    @dtypes(
+        torch.uint8,
+        torch.int8,
+        torch.int16,
+        torch.uint16,
+        torch.int32,
+        torch.uint32,
+        torch.int64,
+        torch.uint64,
+    )
+    def test_clamp_integral_out_of_range_bounds(self, device, dtype):
+        info = torch.iinfo(dtype)
+        x = torch.tensor([info.min, 0, info.max], device=device, dtype=dtype)
+        min_bound = info.min if dtype is torch.int64 else info.min - 1
+        max_bound = info.max if dtype is torch.uint64 else info.max + 1
+
+        self.assertEqual(torch.clamp(x, min=min_bound), x)
+        self.assertEqual(torch.clamp_min(x, min_bound), x)
+        self.assertEqual(torch.clamp(x, max=max_bound), x)
+        self.assertEqual(torch.clamp_max(x, max_bound), x)
+        if dtype not in (torch.int64, torch.uint64):
+            self.assertEqual(
+                torch.nn.functional.hardtanh(x, min_bound, max_bound), x
+            )
+
+        # An upper bound below the dtype range (or a lower bound above it) would
+        # force every element to an unrepresentable value and must raise.
+        if dtype is not torch.int64:
+            with self.assertRaisesRegex(RuntimeError, "outside the representable range"):
+                torch.clamp(x, max=info.min - 1)
+            with self.assertRaisesRegex(RuntimeError, "outside the representable range"):
+                torch.clamp_max(x, info.min - 1)
+        if dtype is not torch.uint64:
+            with self.assertRaisesRegex(RuntimeError, "outside the representable range"):
+                torch.clamp(x, min=info.max + 1)
+            with self.assertRaisesRegex(RuntimeError, "outside the representable range"):
+                torch.clamp_min(x, info.max + 1)
+
 
 # Tests that compare a device's computation with the (gold-standard) CPU's.
 class TestDevicePrecision(TestCase):
@@ -7110,7 +7184,7 @@ class TestTorch(TestCase):
 
                 self.assertEqual(len(w), 1, msg=lambda msg: f'{msg}\n{warning_type} not raised')
                 warning = w[0].message
-                self.assertTrue(isinstance(warning, warning_type), msg=f'{warning_type} not raised')
+                self.assertTrue(isinstance(warning, warning_type), msg=lambda msg: f'{msg}\n{warning_type} not raised')
                 self.assertTrue(re.search(
                     message,
                     str(warning)))
@@ -7693,6 +7767,17 @@ class TestTorch(TestCase):
         maxdim = torch.quasirandom.SobolEngine.MAXDIM
         with self.assertRaises(ValueError):
             torch.quasirandom.SobolEngine(maxdim + 1)
+
+    def test_sobol_invalid_inputs(self):
+        quasi = torch.ones(2, dtype=torch.long)
+        sobolstate = torch.ones(2, 30, dtype=torch.long)
+
+        with self.assertRaisesRegex(ValueError, "dimension must match"):
+            torch._sobol_engine_ff_(quasi, 1, sobolstate, 1250999896764, 0)
+        with self.assertRaisesRegex(ValueError, "at most"):
+            torch._sobol_engine_ff_(quasi, 1, sobolstate, 2, 2**30 - 1)
+        with self.assertRaisesRegex(ValueError, "dimension must be between"):
+            torch._sobol_engine_initialize_state_(sobolstate, 1250999896764)
 
     def test_sobolengine_high_dim(self):
         engine = torch.quasirandom.SobolEngine(1111, scramble=False, seed=123456)
@@ -10004,8 +10089,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
             for common_args in [multi_dim_common, single_dim_common, factory_common_args, factory_like_common_args]:
                 for k, v in common_args.items():
-                    self.assertNotIn(v, desc, f'The argument description "{v}" in {func} can be '
-                                              f'replaced by {{{k}}}')
+                    self.assertNotIn(v, desc, lambda msg: f'{msg}\nThe argument description "{v}" in {func} can be replaced by {{{k}}}')
 
     def test_doc(self):
         checked_types = (types.MethodType, types.FunctionType,
@@ -10041,10 +10125,10 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                 full_name = ns_name + '.' + name
                 if any(r.match(name) for r in skip_regexes):
                     self.assertFalse(has_doc,
-                                     f'New docs have been added for {full_name}, please remove '
+                                     lambda msg: f'{msg}\nNew docs have been added for {full_name}, please remove '
                                      'it from the skipped list in TestTorch.test_doc')
                 else:
-                    self.assertTrue(has_doc, f'{full_name} is missing documentation')
+                    self.assertTrue(has_doc, lambda msg: f'{msg}\n{full_name} is missing documentation')
 
             # FIXME: All of the following should be marked as expected failures
             # so that it is easier to tell when missing has been added.
