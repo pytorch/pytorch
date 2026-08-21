@@ -4282,6 +4282,13 @@ class GuardsStatePickler(pickle.Pickler):
         out = pytype.__tensor_unflatten__(  # type: ignore[attr-defined]
             inner_tensors, ctx, outer_size, outer_stride
         )
+        # The outer's requires_grad is whatever the inners imply, which for a
+        # subclass whose autograd metadata is its own -- not implied by any
+        # inner -- loses the flag, and the rebuilt guard then demands
+        # requires_grad=0 from every training input. Conditional because
+        # setting it on a non-leaf raises.
+        if out.requires_grad != meta_tensor.requires_grad:
+            out.requires_grad_(meta_tensor.requires_grad)
         out.pytype = pytype
         out.dispatch_keys = torch._C.DispatchKeySet.from_raw_repr(dispatch_keys_raw)
         return out
@@ -4578,7 +4585,9 @@ class GuardsStatePickler(pickle.Pickler):
                 return (
                     type(self)._unpickle_traceable_wrapper_subclass,
                     (
-                        torch.empty_like(obj, device="meta"),
+                        torch.empty_like(
+                            obj, device="meta", requires_grad=obj.requires_grad
+                        ),
                         obj.device,
                         type(obj),
                         torch._C._dispatch_keys(obj).raw_repr(),
