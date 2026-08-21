@@ -263,6 +263,36 @@ class AttributeMutationNew(AttributeMutation):
         self.cls_source = cls_source
 
 
+class ValueAndAttributeMutationExisting(
+    ValueMutationExisting, AttributeMutationExisting
+):
+    """
+    Pre-existing objects whose class subclasses a builtin container: both the
+    builtin layout contents (value) and the instance __dict__ (attributes) can
+    mutate. Inherits both branches so isinstance-based dispatch engages the
+    value-axis machinery (is_modified) and the attribute-axis machinery
+    (store_attr_mutations) for the same object.
+    """
+
+    # The parents' cooperative __init__s conflict across the merged MRO, so
+    # initialize the base directly.
+    def __init__(self) -> None:
+        MutationType.__init__(self, SourceType.Existing)
+        self.is_modified = False
+
+
+class ValueAndAttributeMutationNew(ValueMutationNew, AttributeMutationNew):
+    """
+    Like ValueAndAttributeMutationExisting, for objects created during the
+    trace.
+    """
+
+    def __init__(self, cls_source: Source | None = None) -> None:
+        MutationType.__init__(self, SourceType.New)
+        self.is_modified = False
+        self.cls_source = cls_source
+
+
 def _is_top_level_scope(scope_id: int) -> bool:
     return scope_id == 1
 
