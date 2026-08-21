@@ -937,6 +937,7 @@ libtorch_python_core_sources = [
     "torch/csrc/DataLoader.cpp",
     "torch/csrc/DeviceAccelerator.cpp",
     "torch/csrc/Device.cpp",
+    "torch/csrc/DeviceIPCTypes.cpp",
     "torch/csrc/Dtype.cpp",
     "torch/csrc/DynamicTypes.cpp",
     "torch/csrc/Exceptions.cpp",
