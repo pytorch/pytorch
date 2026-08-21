@@ -62,6 +62,7 @@ torch::jit::Stack boxedBufferToStack(IValue* begin, IValue* end) {
       std::make_move_iterator(begin), std::make_move_iterator(end));
 }
 
+// Intentionally out of line; see the declaration in boxing.h.
 void destroyBoxedBuffer(IValue* begin, IValue* end) noexcept {
   std::destroy(begin, end);
 }
