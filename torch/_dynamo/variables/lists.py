@@ -2358,9 +2358,9 @@ class SliceVariable(VariableTracker):
 
 
 class BaseListIteratorVariable(IteratorVariable):
-    # In CPython list_iterator, tuple_iterator, and _deque_iterator are siblings,
-    # not subclasses of one another, so the concrete VTs share this base rather
-    # than each other.
+    # In CPython list_iterator, tuple_iterator, _deque_iterator, and
+    # _deque_reverse_iterator are siblings, not subclasses of one another, so
+    # the concrete VTs share this base rather than each other.
 
     _nonvar_fields = {
         "index",
@@ -2485,8 +2485,37 @@ class DequeIteratorVariable(BaseListIteratorVariable):
         return type(iter(collections.deque()))
 
 
-class DequeReverseIteratorVariable(DequeIteratorVariable):
+class DequeReverseIteratorVariable(BaseListIteratorVariable):
+    # Sibling of DequeIteratorVariable. Mutation snapshot is copied, not
+    # inherited, so isinstance(..., DequeIteratorVariable) stays false.
     _cpython_type = type(reversed(collections.deque()))
+
+    _nonvar_fields = {
+        "saved_state",
+        *BaseListIteratorVariable._nonvar_fields,
+    }
+
+    def __init__(
+        self,
+        items: list[VariableTracker],
+        source_deque: "DequeVariable",
+        saved_state: int,
+        index: int = 0,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(items, index=index, **kwargs)
+        self.source_deque = source_deque
+        self.saved_state = saved_state
+
+    def _check_mutation(self, tx: "InstructionTranslatorBase") -> None:
+        if self.source_deque.state != self.saved_state:
+            raise_observed_exception(
+                RuntimeError, tx, args=["deque mutated during iteration"]
+            )
+
+    def tp_iternext_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        self._check_mutation(tx)
+        return super().tp_iternext_impl(tx)
 
     def python_type(self) -> type:
         return type(reversed(collections.deque()))

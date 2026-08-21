@@ -183,6 +183,7 @@ from .variables.lazy import LazyVariableTracker
 from .variables.lists import (
     BaseListVariable,
     DequeIteratorVariable,
+    DequeReverseIteratorVariable,
     ListIteratorVariable,
     ListVariable,
     SliceVariable,
@@ -6558,7 +6559,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
 
     def GET_YIELD_FROM_ITER(self, inst: Instruction) -> None:
         tos = self.stack[-1]
-        iter_vts = (ListIteratorVariable, TupleIteratorVariable, DequeIteratorVariable)
+        iter_vts = (ListIteratorVariable, TupleIteratorVariable, DequeIteratorVariable, DequeReverseIteratorVariable)
         if not isinstance(tos, iter_vts):
             self.pop()
             res = VariableTracker.build(self, iter).call_function(self, [tos], {})  # type: ignore[arg-type]
