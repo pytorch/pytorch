@@ -12,6 +12,8 @@ import itertools
 import warnings
 import os
 import pickle
+import subprocess
+import sys
 import re
 import dataclasses
 from copy import deepcopy
@@ -4065,6 +4067,50 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             _train(memory_format, ref_backend, mixed, dtype)
         else:
             _inference(memory_format, ref_backend, mixed, dtype)
+
+    @unittest.skipIf(not TEST_WITH_ROCM, "ROCm only")
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_batchnorm_miopen_tuning(self):
+        # MIOpen API-based tuning is enabled for MIOpen 3.6.0 and higher.
+        miopen_version = torch._C._cudnn.getRuntimeVersion()
+        if miopen_version < (3, 6, 0):
+            raise unittest.SkipTest("MIOpen tuning requires MIOpen 3.6.0+")
+
+        test_script = """
+import os
+import torch
+import torch.nn as nn
+
+benchmark = os.getenv("TEST_BATCHNORM_MIOPEN_TUNING_ENABLED", "0") == "1"
+
+C = 8
+inp = torch.randint(1, 10, (4, C, 2, 2), dtype=torch.float32, device="cuda").requires_grad_()
+grad = torch.randint(1, 10, (4, C, 2, 2), dtype=torch.float32, device="cuda")
+
+with torch.backends.cudnn.flags(enabled=True, benchmark=benchmark):
+    mod = nn.BatchNorm2d(C).cuda().train()
+    out = mod(inp)
+    out.backward(grad)
+"""
+
+        def run_with_miopen_logging(benchmark):
+            env = os.environ.copy()
+            env["MIOPEN_ENABLE_LOGGING"] = "1"
+            env["TEST_BATCHNORM_MIOPEN_TUNING_ENABLED"] = "1" if benchmark else "0"
+            return subprocess.run(
+                [sys.executable, "-c", test_script],
+                env=env,
+                capture_output=True,
+                text=True,
+            )
+
+        result = run_with_miopen_logging(True)
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("miopenSetTuningPolicy", result.stderr)
+
+        result = run_with_miopen_logging(False)
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertNotIn("miopenSetTuningPolicy", result.stderr)
 
     def test_batchnorm_load_state_dict(self):
         bn = torch.nn.BatchNorm2d(3)

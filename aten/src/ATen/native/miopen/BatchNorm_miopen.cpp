@@ -41,6 +41,7 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm_backward(
 #include <ATen/miopen/Descriptors.h>
 #include <ATen/miopen/Types.h>
 #include <ATen/miopen/Utils.h>
+#include <ATen/miopen/miopen-wrapper.h>
 
 #include <ATen/TensorUtils.h>
 
@@ -57,6 +58,31 @@ Tensor expandScale(const Tensor& t, int64_t dim) {
 }
 
 }  // namespace
+
+#if MIOPEN_HAS_TUNING_POLICY
+struct MiopenTuningPolicyGuard {
+  miopenHandle_t handle;
+  miopenTuningPolicy_t previous_policy{};
+  bool restore_tuning_policy = false;
+
+  explicit MiopenTuningPolicyGuard(miopenHandle_t handle_) : handle(handle_) {
+    const auto tuning_policy = at::globalContext().benchmarkCuDNN()
+        ? miopenTuningPolicySearch
+        : miopenTuningPolicyNone;
+    MIOPEN_CHECK(miopenGetTuningPolicy(handle, &previous_policy));
+    if (previous_policy != tuning_policy) {
+      MIOPEN_CHECK(miopenSetTuningPolicy(handle, tuning_policy));
+      restore_tuning_policy = true;
+    }
+  }
+
+  ~MiopenTuningPolicyGuard() {
+    if (restore_tuning_policy) {
+      MIOPEN_CHECK(miopenSetTuningPolicy(handle, previous_policy));
+    }
+  }
+};
+#endif
 
 std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm(
     const Tensor& input_t, const Tensor& weight_t, const std::optional<Tensor>& bias_t_opt, const std::optional<Tensor>& running_mean_t_opt, const std::optional<Tensor>& running_var_t_opt,
@@ -114,6 +140,10 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm(
   Constant one(dataType, 1);
   Constant zero(dataType, 0);
   Tensor save_mean, save_var;
+
+#if MIOPEN_HAS_TUNING_POLICY
+  MiopenTuningPolicyGuard tuning_policy_guard(handle);
+#endif
 
   if (training) {
     int64_t num_features = input_t.size(1);
@@ -223,6 +253,9 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm_backward(
   Constant one(dataType, 1);
   Constant zero(dataType, 0);
 
+#if MIOPEN_HAS_TUNING_POLICY
+  MiopenTuningPolicyGuard tuning_policy_guard(handle);
+#endif
   MIOPEN_CHECK(miopenBatchNormalizationBackward(
     handle, mode, &one, &zero, &one, &zero,
     idesc.desc(), input->const_data_ptr(),
