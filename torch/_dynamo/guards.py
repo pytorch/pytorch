@@ -30,6 +30,7 @@ import itertools
 import logging
 import math
 import pickle
+import re
 import sys
 import textwrap
 import traceback
@@ -4098,9 +4099,30 @@ def _get_unsupported_types() -> tuple[type, ...]:
     )
     try:
         ret += (torch._C._distributed_c10d.ProcessGroup,)
+        ret += (torch._C._distributed_c10d.Backend,)
     except AttributeError:
         pass
     return ret
+
+
+def _is_interned_singleton(value: Any) -> bool:
+    """Whether id-keyed pruning could affect unrelated references."""
+    return isinstance(
+        value,
+        (
+            torch.dtype,
+            torch.device,
+            torch.layout,
+            torch.memory_format,
+            type(None),
+            bool,
+            int,
+            float,
+            complex,
+            str,
+            bytes,
+        ),
+    )
 
 
 class GuardsStatePickler(pickle.Pickler):
@@ -4143,7 +4165,7 @@ class GuardsStatePickler(pickle.Pickler):
             pytype,
             torch._C.DispatchKeySet.from_raw_repr(dispatch_keys_raw),
         )
-        ret.grad = grad
+        ret.grad = grad if isinstance(grad, torch.Tensor) else None
         return ret
 
     @classmethod
@@ -4263,9 +4285,126 @@ class GuardsStatePickler(pickle.Pickler):
         qualname: str,
         argdefs: tuple[object, ...] | None,
         closure: tuple[types.CellType, ...] | None,
+        kwdefaults: dict[str, object] | None = None,
+        name: str | None = None,
+        attributes: dict[str, object] | None = None,
+        guarded_globals: dict[str, object] | None = None,
+        snapshot_globals: bool = False,
     ) -> types.FunctionType:
-        f_globals = importlib.import_module(module).__dict__
-        return types.FunctionType(code, f_globals, qualname, argdefs, closure)
+        f_globals = (
+            dict(guarded_globals or {})
+            if snapshot_globals
+            else importlib.import_module(module).__dict__
+        )
+        fn = types.FunctionType(
+            code,
+            f_globals,
+            name if name is not None else code.co_name,
+            argdefs,
+            closure,
+        )
+        fn.__qualname__ = qualname
+        fn.__kwdefaults__ = kwdefaults
+        if attributes:
+            fn.__dict__.update(attributes)
+        return fn
+
+    def _keep(self, value: object) -> bool:
+        return id(value) in self.guard_tree_values
+
+    def _reduce_cell(self, cell: types.CellType) -> types.CellType:
+        try:
+            contents = cell.cell_contents
+        except ValueError:
+            return type(self)._unpickle_cell(_Missing("empty function closure"))
+        if self._keep(cell) or self._keep(contents):
+            return cell
+        return type(self)._unpickle_cell(_Missing("unguarded function closure"))
+
+    @staticmethod
+    def _apply_function_globals(
+        fn: types.FunctionType, guarded_globals: dict[str, object]
+    ) -> None:
+        fn.__globals__.update(guarded_globals)
+
+    def _reduce_nested_function(self, obj: types.FunctionType) -> tuple[Any, ...]:
+        snapshot_globals = id(obj.__globals__) in self.guard_tree_values
+        guarded_globals = (
+            {
+                name: (
+                    value
+                    if self._keep(value)
+                    else _Missing("unguarded function global")
+                )
+                for name, value in obj.__globals__.items()
+            }
+            if snapshot_globals
+            else None
+        )
+
+        defaults = obj.__defaults__
+        if defaults is not None:
+            keep_defaults = self._keep(defaults) or any(
+                self._keep(value) for value in defaults
+            )
+            defaults = (
+                tuple(
+                    value
+                    if self._keep(value)
+                    else _Missing("unguarded function default")
+                    for value in defaults
+                )
+                if keep_defaults
+                else None
+            )
+
+        kwdefaults = obj.__kwdefaults__
+        if kwdefaults is not None:
+            keep_kwdefaults = self._keep(kwdefaults)
+            kwdefaults = {
+                name: (
+                    value
+                    if self._keep(value)
+                    else _Missing("unguarded function keyword default")
+                )
+                for name, value in kwdefaults.items()
+                if keep_kwdefaults or self._keep(value)
+            }
+            if not kwdefaults and not keep_kwdefaults:
+                kwdefaults = None
+
+        closure = obj.__closure__
+        if closure is not None:
+            closure = tuple(self._reduce_cell(cell) for cell in closure)
+        attributes = (
+            dict(obj.__dict__)
+            if self._keep(obj.__dict__)
+            else {
+                name: value for name, value in obj.__dict__.items() if self._keep(value)
+            }
+        )
+        args = (
+            obj.__code__,
+            obj.__module__,
+            obj.__qualname__,
+            defaults,
+            closure,
+            kwdefaults,
+            obj.__name__,
+            attributes,
+            None,
+            snapshot_globals,
+        )
+        if not snapshot_globals:
+            return type(self)._unpickle_nested_function, args
+        return (
+            type(self)._unpickle_nested_function,
+            args,
+            guarded_globals,
+            None,
+            None,
+            type(self)._apply_function_globals,
+        )
 
     # pyrefly: ignore [bad-override]
     def reducer_override(
@@ -4290,11 +4429,18 @@ class GuardsStatePickler(pickle.Pickler):
             if id(obj) not in self.guard_tree_values:
                 return _Missing, ("tensor guard tree",)
 
+            with torch._C._DisableTorchDispatch():
+                meta_tensor = torch.empty_like(
+                    obj, device="meta", requires_grad=obj.requires_grad
+                )
+
             dispatch_keys = getattr(obj, "dispatch_keys", None)
             if dispatch_keys is None:
                 dispatch_keys = torch._C._dispatch_keys(obj)
 
             if is_traceable_wrapper_subclass(obj):
+                if type(obj).__qualname__ != type(obj).__name__:
+                    raise_local_type_error(type(obj))
                 # inner_data is a list of tuples of:
                 #   (inner attr name, unpickle func, tuple of func inputs)
                 # This supports traceable wrapper subclass inner tensors.
@@ -4308,7 +4454,7 @@ class GuardsStatePickler(pickle.Pickler):
                     inner_data.append((attr, inner))
 
                 return type(self)._unpickle_traceable_wrapper_subclass, (
-                    torch.empty_like(obj, device="meta"),
+                    meta_tensor,
                     obj.device,
                     type(obj),
                     dispatch_keys.raw_repr(),
@@ -4324,27 +4470,22 @@ class GuardsStatePickler(pickle.Pickler):
                 obj, torch._subclasses.FakeTensor
             ):
                 pytype = obj.pytype if obj.pytype is not None else torch.Tensor
+            if pytype.__qualname__ != pytype.__name__:
+                raise_local_type_error(pytype)
 
             return type(self)._unpickle_tensor, (
-                torch.empty_like(obj, device="meta", requires_grad=obj.requires_grad),
+                meta_tensor,
                 obj.device,
                 pytype,
                 dispatch_keys.raw_repr(),
-                obj.grad,
+                obj.grad if obj.is_leaf else None,
             )
 
         elif isinstance(obj, torch.nn.Module):
             if id(obj) not in self.guard_tree_values:
                 return _Missing, ("module guard tree",)
 
-            for attr in obj.__dict__.values():
-                if isinstance(attr, (torch.Tensor, torch.nn.Module)):
-                    continue
-                if id(attr) in self.guard_tree_values:
-                    continue
-                if callable(attr):
-                    continue
-                self.missing_values[id(attr)] = attr
+            self._prune_unguarded_attributes(obj)
 
             # DDP module is a special case because it tries to restore unneeded
             # data in custom __setstate__. We cannot skip ddp module because it
@@ -4423,19 +4564,15 @@ class GuardsStatePickler(pickle.Pickler):
 
         elif inspect.isfunction(obj):
             if "<locals>" in obj.__qualname__:
-                return type(self)._unpickle_nested_function, (
-                    obj.__code__,
-                    obj.__module__,
-                    obj.__qualname__,
-                    obj.__defaults__,
-                    obj.__closure__,
-                )
+                return self._reduce_nested_function(obj)
             if obj.__module__ in sys.modules:
                 f = sys.modules[obj.__module__]
                 for name in obj.__qualname__.split("."):
                     f = getattr(f, name, None)  # type: ignore[assignment]
                 if f is not obj:
-                    return _Missing, ("fqn mismatch",)
+                    if id(obj) not in self.guard_tree_values:
+                        return _Missing, ("fqn mismatch",)
+                    return self._reduce_nested_function(obj)
         elif inspect.ismethod(obj):
             func = obj.__func__
             method_self = obj.__self__
@@ -4446,7 +4583,21 @@ class GuardsStatePickler(pickle.Pickler):
                 return type(self)._unpickle_bound_method, (func, method_self)
 
         elif isinstance(obj, type((lambda x: lambda: x)(0).__closure__[0])):  # type: ignore[index] # noqa: PLC3002
-            return type(self)._unpickle_cell, (obj.cell_contents,)
+            try:
+                contents = obj.cell_contents
+            except ValueError:
+                contents = _Missing("empty function closure")
+            return type(self)._unpickle_cell, (contents,)
+
+        if (
+            id(obj) in self.guard_tree_values
+            and hasattr(obj, "__dict__")
+            and not inspect.isclass(obj)
+            and not inspect.ismodule(obj)
+            and not isinstance(obj, (torch.nn.Module, torch.Tensor))
+            and not type(obj).__module__.startswith("torch.")
+        ):
+            self._prune_unguarded_attributes(obj)
 
         if hasattr(torch.distributed, "distributed_c10d") and isinstance(
             obj, torch.distributed.distributed_c10d.Work
@@ -4486,6 +4637,16 @@ class GuardsStatePickler(pickle.Pickler):
 
         return NotImplemented
 
+    def _prune_unguarded_attributes(self, obj: Any) -> None:
+        for attr in vars(obj).values():
+            if isinstance(attr, (torch.Tensor, torch.nn.Module)):
+                continue
+            if id(attr) in self.guard_tree_values:
+                continue
+            if callable(attr) or _is_interned_singleton(attr):
+                continue
+            self.missing_values[id(attr)] = attr
+
 
 def make_guard_filter_entry(guard: Guard, builder: GuardBuilder) -> GuardFilterEntry:
     MISSING = object()
@@ -4504,6 +4665,23 @@ def make_guard_filter_entry(guard: Guard, builder: GuardBuilder) -> GuardFilterE
         except:  # noqa: E722
             value = MISSING
             has_value = False
+    source = guard.originating_source
+    source_root_id = None
+    source_root_is_module = False
+    source_has_unsupported_value = False
+    while source is not None:
+        try:
+            source_value = builder.get(source)
+        except Exception:
+            pass
+        else:
+            source_has_unsupported_value |= isinstance(
+                source_value, _get_unsupported_types()
+            )
+            if not isinstance(source, ChainedSource):
+                source_root_id = id(source_value)
+                source_root_is_module = isinstance(source_value, torch.nn.Module)
+        source = source.base if isinstance(source, ChainedSource) else None
     is_global = get_global_source_name(guard.originating_source) is not None
     return GuardFilterEntry(
         name=name,
@@ -4513,7 +4691,44 @@ def make_guard_filter_entry(guard: Guard, builder: GuardBuilder) -> GuardFilterE
         derived_guard_types=(tuple(guard.guard_types) if guard.guard_types else ()),
         is_global=is_global,
         orig_guard=guard,
+        source_root_id=source_root_id,
+        source_root_is_module=source_root_is_module,
+        source_has_unsupported_value=source_has_unsupported_value,
+        code=tuple(guard.code_list or ()),
     )
+
+
+def _offending_value_path(state: Any, error: Exception) -> str:
+    try:
+        wanted = re.search(r"cannot pickle '([^']+)' object", str(error))
+        if wanted is None:
+            return ""
+        target = wanted.group(1)
+        graph = state.output_graph
+        roots = [
+            (f"local_scope[{key!r}]", value)
+            for key, value in (getattr(graph, "local_scope", None) or {}).items()
+        ] + [
+            (f"global_scope[{key!r}]", value)
+            for key, value in (getattr(graph, "global_scope", None) or {}).items()
+        ]
+        seen: set[int] = set()
+        queue = collections.deque(roots)
+        while queue:
+            path, value = queue.popleft()
+            if id(value) in seen or len(seen) > 20000:
+                continue
+            seen.add(id(value))
+            if type(value).__name__ == target:
+                return f"\n  reached via: {path}"
+            for name, child in (
+                list(vars(value).items()) if hasattr(value, "__dict__") else []
+            ):
+                if not name.startswith("__"):
+                    queue.append((f"{path}.{name}", child))
+    except Exception:
+        return ""
+    return ""
 
 
 def pickle_guards_state(
@@ -4535,7 +4750,7 @@ def pickle_guards_state(
                     empty_values[id(base)] = base
                 except:  # noqa: E722
                     pass
-        elif id(leaf) not in guard_tree_values:
+        elif id(leaf) not in guard_tree_values and not _is_interned_singleton(leaf):
             # TODO See if we have lift this branch as the first one.
             # Prune more objects in pytree hierarchy.
             missing_values[id(leaf)] = leaf
@@ -4555,8 +4770,12 @@ def pickle_guards_state(
 
     try:
         pickler.dump(state)
-    except AttributeError as e:
-        raise torch._dynamo.exc.PackageError(str(e)) from e
+    except torch._dynamo.exc.PackageError:
+        raise
+    except Exception as e:
+        raise torch._dynamo.exc.PackageError(
+            f"{type(e).__name__}: {e}{_offending_value_path(state, e)}"
+        ) from e
     return buf.getvalue()
 
 
@@ -4928,14 +5147,15 @@ class CheckFunctionManager:
             for k, v in output_graph_guards_state.global_scope.items()
             if k in used_global_vars or k in self.additional_used_global_vars
         }
-        global_scope_state[builtins_dict_name] = {
-            k: v
-            # pyrefly: ignore [missing-attribute]
-            for k, v in output_graph_guards_state.global_scope[
-                builtins_dict_name
-            ].items()  # type: ignore[attr-defined]
-            if k in self.used_builtin_vars
-        }
+        if builtins_dict_name in output_graph_guards_state.global_scope:
+            global_scope_state[builtins_dict_name] = {
+                k: v
+                # pyrefly: ignore [missing-attribute]
+                for k, v in output_graph_guards_state.global_scope[
+                    builtins_dict_name
+                ].items()  # type: ignore[attr-defined]
+                if k in self.used_builtin_vars
+            }
         output_graph_guards_state = dataclasses.replace(
             output_graph_guards_state,
             local_scope={

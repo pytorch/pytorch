@@ -490,6 +490,25 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
+    def test_autocast_region_inside_the_graph_is_cacheable(self):
+        def fn(x):
+            with torch.amp.autocast("cpu", dtype=torch.bfloat16):
+                return (x @ x).sum()
+
+        a = torch.rand(8, 8)
+        compiled_fn = torch.compile(fn, backend="inductor")
+        self.assertEqual(fn(a), compiled_fn(a))
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 0)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+        self._clear_dynamo_and_codecache()
+        self.assertEqual(fn(a), compiled_fn(a))
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
     def test_basic(self):
         """
         Verify the interactions between FXGraphCache and AOTAutogradCache.
