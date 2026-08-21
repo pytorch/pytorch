@@ -471,9 +471,6 @@ These apply to every accelerator we publish binaries for -- CUDA, ROCm, XPU and 
 2. **We do not cut an RC for anything we are not planning to promote.** The release matrix is fixed before branch cut, and only those versions are built in the RC.
 3. **Promotion from Experimental to Stable needs more than green CI.** The full CI and CD matrix must be running and stable, benchmarks must show no unresolved
    regressions against the current Stable version, and downstream consumers must have tested the version and be ready to switch.
-4. **We stop shipping before we stop testing.** On deprecation, CD support is dropped first and CI second.
-
-Enablement runs CD then CI per platform rather than globally, with platforms progressing in parallel.
 
 ### Special support cases
 
