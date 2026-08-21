@@ -107,13 +107,14 @@ nvmlDevice_t get_nvml_device(c10::DeviceIndex dev) {
   return nvml_device;
 }
 
-bool isFabricSupported() {
+bool isFabricSupported(c10::DeviceIndex dev) {
   // 1. try allocating memory with FABRIC handle type
   CUmemGenericAllocationHandle handle = 0;
   CUmemAllocationProp prop = {};
   prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
   prop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_FABRIC;
   prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+  prop.location.id = dev;
 
   size_t granularity{};
   const auto driver_api = DriverAPI::get();
@@ -201,7 +202,7 @@ bool get_fabric_access(c10::DeviceIndex dev) {
     if (state) {
       fabricCliqueId_[dev] = static_cast<int>(fabricInfo.cliqueId);
       // now perform the full cycle of allocating - exporting - importing memory
-      state = isFabricSupported();
+      state = isFabricSupported(dev);
     } else {
       fabricCliqueId_[dev] = kCliqueIdUnsupported;
     }

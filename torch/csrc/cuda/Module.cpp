@@ -26,6 +26,7 @@
 #include <c10/core/StorageImpl.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAFunctions.h>
+#include <c10/cuda/PeerToPeerAccess.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
 
 #ifdef USE_NCCL
@@ -138,6 +139,18 @@ PyObject* THCPModule_canDeviceAccessPeer_wrap(PyObject* self, PyObject* args) {
   torch::utils::device_lazy_init(at::kCUDA);
   auto can_access = at::cuda::canDeviceAccessPeer(device, peer_device);
   return PyBool_FromLong(can_access);
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THCPModule_getFabricAccess_wrap(
+    PyObject* self,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(THPUtils_checkLong(arg), "invalid argument to getFabricAccess");
+  auto device = THPUtils_unpackDeviceIndex(arg);
+  torch::utils::device_lazy_init(at::kCUDA);
+  auto has_fabric = c10::cuda::get_fabric_access(device);
+  return PyBool_FromLong(has_fabric);
   END_HANDLE_TH_ERRORS
 }
 
@@ -2207,6 +2220,7 @@ static struct PyMethodDef _THCPModule_methods[] = {
      THCPModule_canDeviceAccessPeer_wrap,
      METH_VARARGS,
      nullptr},
+    {"_cuda_getFabricAccess", THCPModule_getFabricAccess_wrap, METH_O, nullptr},
     {"_cuda_getArchFlags", THCPModule_getArchFlags, METH_NOARGS, nullptr},
     {"_cuda_isInBadFork", THCPModule_isInBadFork, METH_NOARGS, nullptr},
     {"_cuda_getCurrentStream",
