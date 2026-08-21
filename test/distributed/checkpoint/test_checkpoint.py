@@ -42,6 +42,7 @@ from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
+    TestCase,
 )
 from torch.testing._internal.distributed._shard.sharded_tensor import (
     ShardedTensorTestBase,
@@ -248,45 +249,12 @@ class FaultyStorageReader(TestStorageBase, StorageReader):
         return True
 
 
-class TestDistributedFailure(ShardedTensorTestBase):
-    hw_classification = HardwareClassification.ACCELERATOR
-
-    def get_spec(self):
-        return ChunkShardingSpec(
-            dim=0,
-            placements=[
-                f"rank:{r}/{device_type}:{r}" for r in range(dist.get_world_size())
-            ],
-        )
-
-    @with_comms(init_rpc=False, backend=backend)
-    @skip_if_lt_x_gpu(2)
-    @requires_capabilities(
-        Capability.distributed.backend,
-    )
-    def test_dummy_writer_works(self, device) -> None:
-        state_dict = {
-            "sharded": sharded_tensor.rand(self.get_spec(), 20, 20),
-            "replicated": torch.rand(10, 10),
-            "bytes": [1, 2, 3, 4],
-        }
-
-        save_state_dict(state_dict, FaultyStorageWriter({}))
-
-    @with_comms(init_rpc=False, backend=backend)
-    @skip_if_lt_x_gpu(2)
-    @requires_capabilities(
-        Capability.distributed.backend,
-    )
-    def test_dummy_reader_works(self, device) -> None:
-        state_dict = {
-            "sharded": sharded_tensor.rand(self.get_spec(), 20, 20),
-            "replicated": torch.rand(10, 10),
-            "bytes": [1, 2, 3, 4],
-        }
-        metadata = _create_default_local_metadata(state_dict)
-
-        load_state_dict(state_dict, FaultyStorageReader(metadata, {}))
+class _FailureTestMixin:
+    """Drives the faulty save/load paths for both the distributed tests in
+    ``TestDistributedFailure`` and the no-dist ones in ``TestNoDistFailure``,
+    which are separate classes so that each can carry an honest
+    ``hw_classification``.
+    """
 
     def _test_dist_failure(self, callback, kwargs):
         bad_ranks = next(iter(kwargs.values())) if len(kwargs) > 0 else []
@@ -340,6 +308,47 @@ class TestDistributedFailure(ShardedTensorTestBase):
 
         self._test_dist_failure(_load, kwargs)
 
+
+class TestDistributedFailure(_FailureTestMixin, ShardedTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def get_spec(self):
+        return ChunkShardingSpec(
+            dim=0,
+            placements=[
+                f"rank:{r}/{device_type}:{r}" for r in range(dist.get_world_size())
+            ],
+        )
+
+    @with_comms(init_rpc=False, backend=backend)
+    @skip_if_lt_x_gpu(2)
+    @requires_capabilities(
+        Capability.distributed.backend,
+    )
+    def test_dummy_writer_works(self, device) -> None:
+        state_dict = {
+            "sharded": sharded_tensor.rand(self.get_spec(), 20, 20),
+            "replicated": torch.rand(10, 10),
+            "bytes": [1, 2, 3, 4],
+        }
+
+        save_state_dict(state_dict, FaultyStorageWriter({}))
+
+    @with_comms(init_rpc=False, backend=backend)
+    @skip_if_lt_x_gpu(2)
+    @requires_capabilities(
+        Capability.distributed.backend,
+    )
+    def test_dummy_reader_works(self, device) -> None:
+        state_dict = {
+            "sharded": sharded_tensor.rand(self.get_spec(), 20, 20),
+            "replicated": torch.rand(10, 10),
+            "bytes": [1, 2, 3, 4],
+        }
+        metadata = _create_default_local_metadata(state_dict)
+
+        load_state_dict(state_dict, FaultyStorageReader(metadata, {}))
+
     @with_comms(init_rpc=False, backend=backend)
     @skip_if_lt_x_gpu(4)
     @requires_capabilities(
@@ -362,19 +371,6 @@ class TestDistributedFailure(ShardedTensorTestBase):
 
         self._test_save(state_dict, coordinator=1, fail_set_up_storage_writer=[1])
         self._test_save(state_dict, coordinator=1, fail_finish=[1])
-
-    def test_save_error_handling_no_dist(self, device) -> None:
-        state_dict = {"replicated": torch.rand(10, 10), "bytes": [1, 2, 3, 4]}
-
-        self.assertFalse(dist.is_initialized())
-
-        self._test_save(state_dict, fail_set_up_storage_writer=[0])
-        self._test_save(state_dict, fail_finish=[0])
-        self._test_save(state_dict, fail_prepare_global_plan=[0])
-
-        self._test_save(state_dict, fail_prepare_local_plan=[0])
-        self._test_save(state_dict, fail_write_data=[0])
-        self._test_save(state_dict, fail_write_data_async=[0])
 
     @with_comms(init_rpc=False, backend=backend)
     @skip_if_lt_x_gpu(4)
@@ -407,7 +403,29 @@ class TestDistributedFailure(ShardedTensorTestBase):
         self._test_load(state_dict, coordinator=3, fail_read_data_async=[2])
         self._test_load(state_dict, coordinator=1, fail_prepare_global_plan=[1])
 
-    def test_load_error_handling_no_dist(self, device) -> None:
+
+class TestNoDistFailure(_FailureTestMixin, TestCase):
+    # These tests assert that no process group is initialized and reference no
+    # device at all, so they are GENERIC and stay un-instantiated. Keeping
+    # them in the ACCELERATOR class above would stop them from being
+    # generated (and run) on CPU-only hosts once ``except_for="cpu"`` filters
+    # that class out.
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_save_error_handling_no_dist(self) -> None:
+        state_dict = {"replicated": torch.rand(10, 10), "bytes": [1, 2, 3, 4]}
+
+        self.assertFalse(dist.is_initialized())
+
+        self._test_save(state_dict, fail_set_up_storage_writer=[0])
+        self._test_save(state_dict, fail_finish=[0])
+        self._test_save(state_dict, fail_prepare_global_plan=[0])
+
+        self._test_save(state_dict, fail_prepare_local_plan=[0])
+        self._test_save(state_dict, fail_write_data=[0])
+        self._test_save(state_dict, fail_write_data_async=[0])
+
+    def test_load_error_handling_no_dist(self) -> None:
         state_dict = {"replicated": torch.rand(10, 10), "bytes": [1, 2, 3, 4]}
         self._test_load(state_dict)
         self._test_load(state_dict, fail_set_up_storage_reader=[0])
