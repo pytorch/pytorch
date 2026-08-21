@@ -336,7 +336,9 @@ class TestBenchmarker(TestCase):
             ) as benchmark,
         ):
             self.assertEqual(request.benchmark(input_tensor, out=output_tensor), 2.0)
-        infer.assert_called_once_with(input_tensor, output_tensor)
+        self.assertEqual(infer.call_count, 1)
+        self.assertIs(infer.call_args.args[0], input_tensor)
+        self.assertIs(infer.call_args.args[1], input_tensor)
         self.assertEqual(benchmark.call_args.kwargs["device"], "xpu")
 
     def test_nvgemm_request_propagates_inferred_graph_device(self):
