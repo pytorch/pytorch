@@ -111,7 +111,11 @@ struct CUDAGeneratorCaptureState : public c10::intrusive_ptr_target {
   CUDAGeneratorCaptureState() = default;
 
   bool is_initialized() const { return rng_state_seed_extragraph_.defined(); }
-  void initialize(uint64_t seed);
+  void initialize(
+      uint64_t seed,
+      c10::DeviceIndex device,
+      CaptureId_t capture_id,
+      c10::MempoolId_t graph_pool_id);
   void increase(uint64_t increment);
   uint64_t finalize();
   void setup_for_replay(uint64_t seed, uint64_t philox_offset);
