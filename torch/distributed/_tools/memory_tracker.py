@@ -103,9 +103,6 @@ class MemoryTracker:
             # the memory stats tracked here may not completely accurate.
             h1 = m.register_forward_pre_hook(self._create_pre_forward_hook(name))
             h2 = m.register_forward_hook(self._create_post_forward_hook(name))
-            # it does not work well with jagged tensor somehow, the root cause is not
-            # clear and remove it for now as it does not really capture important info.
-            # h3 = m.register_backward_hook(self._create_backward_hook(name))
             self._hooks.extend([h1, h2])
         self._device_module.empty_cache()
         if getattr(self, "profile_mode", None) is not None:
@@ -193,8 +190,6 @@ class MemoryTracker:
         y_2 = [gb for (name, gb) in self.memories_active.values()]
         y_3 = [gb for (name, gb) in self.memories_reserved.values()]
         x = list(range(len(y_1)))
-        # Split figures when there is big difference between
-        # "reserved_memory" and "allocated_memory" or "active_memory".
         _plot_figure(
             x,
             [list(y_1), list(y_2), list(y_3)],
@@ -212,6 +207,9 @@ class MemoryTracker:
             "memories_reserved": self.memories_reserved,
             "markers": self._markers,
             "num_alloc_retries": self._num_alloc_retries,
+            # Persist _op_index so that summary() works correctly after a
+            # save/load round-trip (resolves #191397).
+            "op_index": self._op_index,
         }
 
         with open(path, "wb") as f:
@@ -227,6 +225,9 @@ class MemoryTracker:
         self.memories_reserved = stats["memories_reserved"]
         self._markers = stats["markers"]
         self._num_alloc_retries = stats["num_alloc_retries"]
+        # Restore _op_index. Fall back to reconstructing from the trace length
+        # so that stats files saved before this fix still work correctly.
+        self._op_index = stats.get("op_index", len(self.memories_allocated))
 
     def _create_pre_forward_hook(self, name: str) -> Callable:
         """Prefix operator name with current module and 'forward', and insert 'fw_start' marker at forward pass start."""
