@@ -2893,14 +2893,11 @@ class _PrecompileApi:
                 training=bool(training),
             )
         )
-        # Retain graphs only where they will actually be rendered. The probe
-        # above threw its lowering away, an eager "backend" is an fx graph with
-        # no source to emit, and a training graph is refused by
-        # rendered_backends because compile_to_python would drop its backward.
-        # Retaining anyway would deepcopy every compiled graph and hold it for
-        # the session, to produce nothing -- which is worst on exactly the big
-        # training captures that can least afford the memory.
-        session._session._keep_graphs = backend != "eager" and not training
+        # Retain graphs only where they will actually be rendered: the probe
+        # above threw its lowering away, and an eager "backend" is an fx graph
+        # with no source to emit. Retaining otherwise would deepcopy every
+        # compiled graph and hold it for the session to produce nothing.
+        session._session._keep_graphs = backend != "eager"
         with session:
             pass
         # The capture is finished, so hand back the artifact rather than a
