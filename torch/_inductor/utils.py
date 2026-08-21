@@ -2104,6 +2104,29 @@ def _descriptor_shape_fits_in_int32(
     )
 
 
+def _tma_descriptor_max_offset_fits_in_int32(
+    mat: IRNode, add_guards: bool = False
+) -> bool:
+    # Unlike _descriptor_shape_fits_in_int32, catches overflow in the
+    # descriptor's max addressable offset even when every per-dim size
+    # fits.
+    int32_max = torch.iinfo(torch.int32).max
+    max_offset = sum(
+        (size - 1) * stride for size, stride in zip(mat.get_size(), mat.get_stride())
+    )
+    if isinstance(max_offset, (int, sympy.Integer)):
+        return max_offset <= int32_max
+
+    from .virtualized import V
+
+    condition = sympy.Le(max_offset, int32_max)
+    return (
+        V.graph.sizevars.guard_or_false(condition)
+        if add_guards
+        else V.graph.sizevars.statically_known_true(condition)
+    )
+
+
 def use_triton_tma_template(
     *matrices: IRNode, output_layout: Layout, add_guards: bool = False
 ) -> bool:
@@ -4723,26 +4746,31 @@ def should_fallback_by_default(node: torch.fx.Node) -> bool:
         [
             torch.ops.aten._assert_scalar.default,
             torch.ops.aten.lift_fresh_copy.default,
+            # `x.size(dim)` returns a SymInt, which cannot be serialized as a generic
+            # fallback kernel; route it to its symbolic (no-kernel) handling.
             torch.ops.aten.sym_size.int,
             # `.item()` returns a Scalar, which cannot be serialized as a generic
             # fallback kernel; route it to its dedicated DynamicScalar lowering.
             torch.ops.aten._local_scalar_dense.default,
+            # `x.stride(dim)` returns a SymInt too; same symbolic handling as sym_size.
+            torch.ops.aten.sym_stride.int,
         ]
     )
 
     if target in skip_fallback_due_to_dynamic_shape:
         return False
 
-    # Most hops have registered lowering. We should follow the lowering and not fallback.
-    # However, in rare cases, hops may not register lowering, such as
-    # torch.ops.higher_order.triton_kernel_wrapper_functional. We should fallback for
-    # these hops.
-    fallback_hops = OrderedSet(
-        [torch.ops.higher_order.triton_kernel_wrapper_functional]
-    )
-
+    # HigherOrderOperators cannot be serialized by the AOT ProxyExecutor, which only
+    # supports OpOverload targets -- e.g. triton_kernel_wrapper_functional (a user-defined
+    # Triton kernel already present in the model) fails ExternKernelNode serialization with
+    # "expected OpOverload or registered extension type". Do not force HOPs to fall back;
+    # let them use their normal inductor codegen so any Triton already in the model is
+    # compiled into the AOT artifact rather than routed through the (unsupported) proxy
+    # executor. (triton_kernel_wrapper_functional has no lowering of its own; it is
+    # decomposed to its mutation form -- see the lite-mode decomposition in
+    # compile_fx._recursive_post_grad_passes -- which lowers to a UserDefinedTritonKernel.)
     if isinstance(target, torch._ops.HigherOrderOperator):
-        return target in fallback_hops
+        return False
 
     return not _needs_inductor_compile(node)
 
