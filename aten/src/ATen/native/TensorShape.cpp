@@ -1970,6 +1970,15 @@ static Tensor alias_with_sizes_and_strides(
   } else {
     self_tmp_->set_sizes_and_strides(sizes, strides, self.storage_offset());
   }
+  // also copy mode and fake device after make_tensor constructs alias and only
+  // copies key set/storage/dtype
+  if (self.is_fake()) {
+    if (auto fake_device = self.unsafeGetTensorImpl()->fake_device()) {
+      self_tmp_->set_and_normalize_fake_device(*fake_device);
+    }
+    self_tmp_->set_fake_tensor_mode(
+        self.unsafeGetTensorImpl()->fake_tensor_mode());
+  }
   return self_;
 }
 
