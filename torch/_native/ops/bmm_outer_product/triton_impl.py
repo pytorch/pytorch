@@ -1,4 +1,5 @@
 import torch
+from torch.utils._triton import HIP_MAX_GRID_THREADS
 
 from ... import triton_utils as tu
 
@@ -32,6 +33,25 @@ def _is_acc_tensor(t: torch.Tensor) -> bool:
     return acc is not None and acc.type == t.device.type
 
 
+def _is_hip_grid_safe(a: torch.Tensor, b: torch.Tensor) -> bool:
+    if torch.version.hip is None:
+        return True
+
+    from .triton_kernels import _pick_block_sizes
+
+    batch, m, _ = a.shape
+    n = b.shape[2]
+    block_m, block_n = _pick_block_sizes(m, n)
+    num_programs = (
+        batch * ((m + block_m - 1) // block_m) * ((n + block_n - 1) // block_n)
+    )
+
+    # Triton uses four warps when num_warps is not specified.
+    triton_default_num_warps = 4
+    warp_size = torch.cuda.get_device_properties(a.device).warp_size
+    return num_programs * triton_default_num_warps * warp_size <= HIP_MAX_GRID_THREADS
+
+
 def _bmm_outer_product_cond(
     a: torch.Tensor,
     b: torch.Tensor,
@@ -41,7 +61,12 @@ def _bmm_outer_product_cond(
     # a and b are read-only here: the kernel wraps them in ConstTensorWrapper and
     # reads through const_data_ptr(), so copy-on-write inputs are not
     # materialized and need not be excluded.
-    if _is_acc_tensor(a) and a.device == b.device and _is_outer_product(a, b):
+    if (
+        _is_acc_tensor(a)
+        and a.device == b.device
+        and _is_outer_product(a, b)
+        and _is_hip_grid_safe(a, b)
+    ):
         return True
     return False
 
