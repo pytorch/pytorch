@@ -1791,7 +1791,18 @@ class VariableBuilder:
             if isinstance(value, torch.amp.autocast_mode._UnmanagedAutocast):
                 return self.wrap_user_defined(value)
             else:
-                self.install_guards(GuardBuilder.ID_MATCH)
+                # Guard the four fields the trace specializes on rather than the
+                # object's address. An ID_MATCH here cannot be serialized, so a
+                # precompile drops it and a sibling instance holding a DIFFERENT
+                # autocast object silently selects this variant; these guards
+                # also catch the object being mutated in place, which id() misses.
+                self.install_guards(GuardBuilder.TYPE_MATCH)
+                for _field in ("device", "fast_dtype", "_enabled", "_cache_enabled"):
+                    install_guard(
+                        AttrSource(self.source, _field).make_guard(
+                            GuardBuilder.EQUALS_MATCH
+                        )
+                    )
                 return AutocastModeVariable(
                     target_values=[
                         value.device,
