@@ -34,6 +34,16 @@
 #define NCCL_HAS_DEVCOMM
 #endif
 
+// Device-communicator STORAGE: <nccl_device.h> (which defines the ncclDevComm
+// type) is available. True on CUDA >= 2.28 (NCCL_HAS_SYMMEM_DEVICE_SUPPORT,
+// which includes <nccl_device.h> above) and on RCCL >= 2.29.7
+// (NCCL_HAS_LSA_PEER_PTR, where consumers include <nccl_device.h> through
+// nccl_device_shims.hpp). Storing a device communicator only needs the type;
+// creating one additionally needs NCCL_HAS_DEVCOMM or NCCL_HAS_LSA_PEER_PTR.
+#if defined(NCCL_HAS_SYMMEM_DEVICE_SUPPORT) || defined(NCCL_HAS_LSA_PEER_PTR)
+#define NCCL_HAS_DEVCOMM_STORAGE
+#endif
+
 #if defined(NCCL_HAS_SYMMEM_DEVICE_SUPPORT) && \
     NCCL_VERSION_CODE >= NCCL_VERSION(2, 29, 0)
 #define NCCL_HAS_ONE_SIDED_API
