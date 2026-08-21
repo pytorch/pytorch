@@ -1938,7 +1938,6 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         res = opt_fn(x, [y, z])
         self.assertEqual(ref, res)
 
-    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3393")
     @requires_gpu_and_triton
     def test_pattern_matcher(self, device):
         # Check that the sdpa op is recomputed in the backward graph
@@ -1970,6 +1969,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         # Save the AOT graphs
         aot_graphs = []
         from torch._inductor import compile_fx
+        from torch._inductor.utils import fresh_cache
 
         def debug_compile_fx_inner(graph, example_inputs, *args, **kwargs):
             aot_graphs.append(graph)
@@ -1980,7 +1980,10 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         )
 
         opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
-        opt_fn(*args1).sum().backward()
+        # A warm FX-graph cache short-circuits inner_compile, leaving aot_graphs
+        # empty; use a fresh cache so the hook always runs.
+        with fresh_cache():
+            opt_fn(*args1).sum().backward()
 
         fwd_graph = aot_graphs[0]
         # Determine which fused attention backend is expected based on the
