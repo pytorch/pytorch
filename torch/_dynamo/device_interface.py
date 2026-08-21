@@ -131,6 +131,15 @@ class DeviceInterface:
     def get_device_properties(cls, device: torch.types.Device = None) -> Any:
         return cls.Worker.get_device_properties(device)
 
+    @classmethod
+    def get_cache_system_info(cls) -> dict[str, Any] | None:
+        """Return stable, JSON-serializable metadata for the code cache key.
+
+        Implementations should return only metadata that invalidates generated
+        or autotuned code when changed, without unnecessarily initializing hardware.
+        """
+        return None
+
     @staticmethod
     def get_compute_capability(device: torch.types.Device = None) -> Any:
         raise NotImplementedError
