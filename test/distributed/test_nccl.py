@@ -243,9 +243,12 @@ class TestNCCL(TestCase):
 @requires_cuda_p2p_access()
 class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
     hw_classification = HardwareClassification.CUDA
+    def _set_device(self, device: str) -> None:
+        self._dev = torch.device(torch.device(device).type, self.rank)
+
     @property
     def device(self) -> torch.device:
-        return torch.device("cuda", self.rank)
+        return self._dev
 
     @classmethod
     def _init_pg(cls, rank, world_size, rdvz_file):
@@ -274,6 +277,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
     def test_nccl_symmem_alloc(self, device):
         symm_mem.set_backend("NCCL")
         torch.cuda.set_device(self.rank)
+        self._set_device(device)
         # Need this all_reduce to initialize NCCL communicator. Otherwise, the
         # test will hang.  TODO: investigate how NCCLSymmetricMemory can
         # initialize NCCL communicator.
@@ -299,6 +303,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
     def test_nccl_symmem_rendezvous_many_allocations(self, device):
         symm_mem.set_backend("NCCL")
         torch.cuda.set_device(self.rank)
+        self._set_device(device)
         c10d.all_reduce(torch.ones(1, device=self.device))
         group_name = c10d.group.WORLD.group_name
 
@@ -327,6 +332,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
     @skip_if_lt_x_gpu(2)
     def test_nccl_symmem_rendezvous_world(self, device):
+        self._set_device(device)
         symm_mem.set_backend("NCCL")
         group_name = c10d.group.WORLD.group_name
 
@@ -350,6 +356,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
     def test_nccl_symmem_barrier(self, device):
         symm_mem.set_backend("NCCL")
         torch.cuda.set_device(self.rank)
+        self._set_device(device)
         c10d.all_reduce(torch.ones(1, device=self.device))
         group_name = c10d.group.WORLD.group_name
 
@@ -376,6 +383,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
     def test_nccl_symmem_barrier_channel_out_of_bounds(self, device):
         symm_mem.set_backend("NCCL")
         torch.cuda.set_device(self.rank)
+        self._set_device(device)
         c10d.all_reduce(torch.ones(1, device=self.device))
         group_name = c10d.group.WORLD.group_name
 
@@ -398,6 +406,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
     def test_nccl_symmem_signal_rank_out_of_bounds(self, device):
         symm_mem.set_backend("NCCL")
         torch.cuda.set_device(self.rank)
+        self._set_device(device)
         c10d.all_reduce(torch.ones(1, device=self.device))
         group_name = c10d.group.WORLD.group_name
 
@@ -414,6 +423,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
     @skip_if_lt_x_gpu(2)
     def test_nccl_symmem_rendezvous_subgroup(self, device):
+        self._set_device(device)
         symm_mem.set_backend("NCCL")
 
         subgroup = c10d.new_group(list(range(self.world_size)))
@@ -440,6 +450,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
     def test_nccl_symmem_collective(self, device):
         symm_mem.set_backend("NCCL")
         torch.cuda.set_device(self.rank)
+        self._set_device(device)
         # Need this all_reduce to initialize NCCL communicator. Otherwise, the
         # test will hang.  TODO: investigate how NCCLSymmetricMemory can
         # initialize NCCL communicator.
@@ -471,6 +482,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
     def test_nccl_symmem_collective_cuda_graph(self, device):
         symm_mem.set_backend("NCCL")
         torch.cuda.set_device(self.rank)
+        self._set_device(device)
         # Need this all_reduce to initialize NCCL communicator. Otherwise, the
         # test will hang.  TODO: investigate how NCCLSymmetricMemory can
         # initialize NCCL communicator.
@@ -520,6 +532,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
     def test_nccl_symmem_tensor_creation_and_collective_cuda_graph(self, device):
         symm_mem.set_backend("NCCL")
         torch.cuda.set_device(self.rank)
+        self._set_device(device)
         c10d.all_reduce(torch.ones(1, device=self.device))
         group_name = c10d.group.WORLD.group_name
 
@@ -583,6 +596,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
     def test_nccl_symmem_put(self, device):
         symm_mem.set_backend("NCCL")
         torch.cuda.set_device(self.rank)
+        self._set_device(device)
         # Need this all_reduce to initialize NCCL communicator. Otherwise, the
         # test will hang.  TODO: investigate how NCCLSymmetricMemory can
         # initialize NCCL communicator.
@@ -624,6 +638,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
     def test_nccl_symmem_handle_signal(self, device):
         symm_mem.set_backend("NCCL")
         torch.cuda.set_device(self.rank)
+        self._set_device(device)
         # need this all_reduce to initialize NCCL communicator. Otherwise, the
         # test will hang.  TODO: investigate how NCCLSymmetricMemory can
         # initialize NCCL communicator.
@@ -663,6 +678,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
     def test_nccl_symmem_get(self, device):
         symm_mem.set_backend("NCCL")
         torch.cuda.set_device(self.rank)
+        self._set_device(device)
         # Need this all_reduce to initialize NCCL communicator. Otherwise, the
         # test will hang.  TODO: investigate how NCCLSymmetricMemory can
         # initialize NCCL communicator.
@@ -697,6 +713,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
     def test_get(self, device):
         symm_mem.set_backend("NCCL")
         torch.cuda.set_device(self.rank)
+        self._set_device(device)
         c10d.all_reduce(torch.ones(1, device=self.device))
         group_name = c10d.group.WORLD.group_name
 
@@ -783,6 +800,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
         Grouped GEMM buffer is left unmodified."""
         symm_mem.set_backend("NCCL")
         torch.cuda.set_device(self.rank)
+        self._set_device(device)
         c10d.all_reduce(torch.ones(1, device=self.device))
         group_name = c10d.group.WORLD.group_name
 
@@ -860,6 +878,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
         of different sizes, verifying that out[j] shapes differ across j."""
         symm_mem.set_backend("NCCL")
         torch.cuda.set_device(self.rank)
+        self._set_device(device)
         c10d.all_reduce(torch.ones(1, device=self.device))
         group_name = c10d.group.WORLD.group_name
 
@@ -939,6 +958,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
         scatter_dim, gather_dim = scatter_gather
         symm_mem.set_backend("NCCL")
         torch.cuda.set_device(self.rank)
+        self._set_device(device)
         c10d.all_reduce(torch.ones(1, device=self.device))
         group_name = c10d.group.WORLD.group_name
 
@@ -1025,6 +1045,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
     def test_put_wait_signal(self, device):
         symm_mem.set_backend("NCCL")
         torch.cuda.set_device(self.rank)
+        self._set_device(device)
         # Use this barrier to make sure all ranks are initialized.
         c10d.barrier()
         group_name = c10d.group.WORLD.group_name
@@ -1053,6 +1074,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
     def test_mempool_tensor_factory(self, device):
         symm_mem.set_backend("NCCL")
         torch.cuda.set_device(self.rank)
+        self._set_device(device)
         # Need this all_reduce to initialize NCCL communicator. Otherwise, the
         # test will hang.  TODO: investigate how NCCLSymmetricMemory can
         # initialize NCCL communicator.
@@ -1081,6 +1103,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
     def test_mempool_compute_ops(self, device):
         symm_mem.set_backend("NCCL")
         torch.cuda.set_device(self.rank)
+        self._set_device(device)
         # Need this all_reduce to initialize NCCL communicator. Otherwise, the
         # test will hang.  TODO: investigate how NCCLSymmetricMemory can
         # initialize NCCL communicator.
@@ -1116,6 +1139,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
         # still works on the recycled region.
         symm_mem.set_backend("NCCL")
         torch.cuda.set_device(self.rank)
+        self._set_device(device)
         c10d.all_reduce(torch.ones(1, device=self.device))
         group_name = c10d.group.WORLD.group_name
         mempool = symm_mem.get_mem_pool(self.device)
@@ -1159,6 +1183,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
 
         symm_mem.set_backend("NCCL")
         torch.cuda.set_device(self.rank)
+        self._set_device(device)
         c10d.all_reduce(torch.ones(1, device=self.device))
         group_name = c10d.group.WORLD.group_name
 
@@ -1184,9 +1209,12 @@ class NCCLSymmetricMemoryNccl2Test(MultiProcContinuousTest):
 
     backend_name = "nccl2"
 
+    def _set_device(self, device: str) -> None:
+        self._dev = torch.device(torch.device(device).type, self.rank)
+
     @property
     def device(self) -> torch.device:
-        return torch.device("cuda", self.rank)
+        return self._dev
 
     @classmethod
     def _init_pg(cls, rank, world_size, rdvz_file):
@@ -1215,6 +1243,7 @@ class NCCLSymmetricMemoryNccl2Test(MultiProcContinuousTest):
     def test_nccl_symmem_rendezvous(self, device):
         symm_mem.set_backend("NCCL")
         torch.cuda.set_device(self.rank)
+        self._set_device(device)
         # Confirm the intended path: a torchcomms PG + the NCCL symm-mem backend.
         self.assertEqual(c10d.get_backend(c10d.group.WORLD), self.backend_name)
         self.assertEqual(symm_mem.get_backend(self.device), "NCCL")
