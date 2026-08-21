@@ -5657,6 +5657,107 @@ class TestSDPACudaOnly(NNTestCase):
             }
         )
 
+class TestSDPAGridOverflow(NNTestCase):
+    """Tests for CUDA grid dimension overflow when batch size or number of
+    attention heads exceeds the 65,535 limit for grid.y/grid.z."""
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+                     "Requires mem-efficient attention support")
+    @onlyCUDA
+    @parametrize("num_heads", [65534, 65535, 65536])
+    @parametrize("with_bias", [False, True])
+    def test_large_num_heads_forward(self, device, num_heads, with_bias):
+        """Forward pass should handle num_heads at and beyond the grid limit."""
+        # head_dim must be divisible by 8 for the mem-efficient kernel.
+        batch, seq_len, head_dim = 1, 4, 8
+        q = torch.randn(batch, num_heads, seq_len, head_dim,
+                        device=device, dtype=torch.float32)
+        k = torch.randn_like(q)
+        v = torch.randn_like(q)
+        attn_bias = torch.randn(batch, num_heads, seq_len, seq_len,
+                                device=device, dtype=torch.float32) if with_bias else None
+
+        with sdpa_kernel(SDPBackend.EFFICIENT_ATTENTION):
+            out = scaled_dot_product_attention(q, k, v, attn_mask=attn_bias)
+        self.assertEqual(out.shape, q.shape)
+
+        with sdpa_kernel(SDPBackend.MATH):
+            ref = scaled_dot_product_attention(q, k, v, attn_mask=attn_bias)
+        torch.testing.assert_close(out, ref, atol=1e-3, rtol=1e-3)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+                     "Requires mem-efficient attention support")
+    @onlyCUDA
+    @parametrize("num_heads", [65535, 65536])
+    @parametrize("with_bias", [False, True])
+    def test_large_num_heads_backward(self, device, num_heads, with_bias):
+        """Backward gradients should match the MATH reference."""
+        batch, seq_len, head_dim = 1, 4, 8
+        q = torch.randn(batch, num_heads, seq_len, head_dim,
+                        device=device, dtype=torch.float32)
+        k = torch.randn_like(q)
+        v = torch.randn_like(q)
+        attn_bias = torch.randn(batch, num_heads, seq_len, seq_len,
+                                device=device, dtype=torch.float32) if with_bias else None
+        grad_out = torch.randn(batch, num_heads, seq_len, head_dim,
+                               device=device, dtype=torch.float32)
+
+        q_eff = q.clone().requires_grad_(True)
+        k_eff = k.clone().requires_grad_(True)
+        v_eff = v.clone().requires_grad_(True)
+        # Use a separate bias per backend so the two backward passes do not
+        # accumulate gradients into the same tensor.
+        bias_eff = attn_bias.clone().requires_grad_(True) if with_bias else None
+        with sdpa_kernel(SDPBackend.EFFICIENT_ATTENTION):
+            out_eff = scaled_dot_product_attention(
+                q_eff, k_eff, v_eff, attn_mask=bias_eff)
+        out_eff.backward(grad_out)
+
+        q_ref = q.clone().requires_grad_(True)
+        k_ref = k.clone().requires_grad_(True)
+        v_ref = v.clone().requires_grad_(True)
+        bias_ref = attn_bias.clone().requires_grad_(True) if with_bias else None
+        with sdpa_kernel(SDPBackend.MATH):
+            out_ref = scaled_dot_product_attention(
+                q_ref, k_ref, v_ref, attn_mask=bias_ref)
+        out_ref.backward(grad_out)
+
+        torch.testing.assert_close(q_eff.grad, q_ref.grad, atol=1e-3, rtol=1e-3)
+        torch.testing.assert_close(k_eff.grad, k_ref.grad, atol=1e-3, rtol=1e-3)
+        torch.testing.assert_close(v_eff.grad, v_ref.grad, atol=1e-3, rtol=1e-3)
+        # The bias gradient is reassembled per head-chunk under head-splitting,
+        # so verify it explicitly against the MATH reference.
+        if with_bias:
+            torch.testing.assert_close(
+                bias_eff.grad, bias_ref.grad, atol=1e-3, rtol=1e-3)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+                     "Requires mem-efficient attention support")
+    @onlyCUDA
+    def test_large_num_heads_multi_batch(self, device):
+        """Head-splitting should handle num_heads beyond the grid limit when
+        the batch dimension holds more than one element, in bfloat16.
+
+        Note: this does not exercise the combined path where the batch
+        dimension also exceeds the limit, because batch=2 stays below
+        MAX_BATCH_SIZE so batch chunking never wraps head-splitting. Genuinely
+        covering that composition would require batch > 65535 and
+        num_heads > 65535 simultaneously, which is memory-prohibitive, so the
+        batch-chunking-wrapping-head-splitting path remains uncovered here.
+        """
+        batch, num_heads, seq_len, head_dim = 2, 65536, 4, 8
+        q = torch.randn(batch, num_heads, seq_len, head_dim,
+                        device=device, dtype=torch.bfloat16)
+        k = torch.randn_like(q)
+        v = torch.randn_like(q)
+
+        with sdpa_kernel(SDPBackend.EFFICIENT_ATTENTION):
+            out = scaled_dot_product_attention(q, k, v)
+        self.assertEqual(out.shape, q.shape)
+
+instantiate_device_type_tests(TestSDPAGridOverflow, globals(), only_for="cuda")
+
+
 class TestSDPAXpuOnly(NNTestCase):
     """ Used to test XPU only functionality of scaled_dot_product_attention
     Mostly migrate from TestSDPACudaOnly in test/test_transformers.py
