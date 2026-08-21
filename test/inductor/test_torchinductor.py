@@ -117,6 +117,7 @@ from torch.testing._internal.common_utils import (
     IS_X86,
     isRocmArchAnyOf,
     MACOS_VERSION,
+    MI200_ARCH,
     NAVI_ARCH,
     parametrize,
     recover_orig_fp32_precision,
@@ -6357,13 +6358,7 @@ for dtype in (torch.int32, torch.int64):
         )
 
     @skip_if_cpu
-    @config.patch(
-        {
-            "max_autotune": True,
-            "max_autotune_conv_bwd_weight_backends": "TRITON",
-            "max_autotune_conv_bwd_input_backends": "TRITON",
-        }
-    )
+    @config.patch({"max_autotune": True})
     @parametrize("dilation", (1, 2))
     @parametrize("stride", (1, 2))
     @parametrize("padding", (0, 1))
@@ -6444,18 +6439,30 @@ for dtype in (torch.int32, torch.int64):
         )
         if nhwc:
             weight = weight.to(memory_format=torch.channels_last)
-        self.common(
-            fn,
-            (
-                torch.randn([2, out_channels, output_h, output_w], dtype=dtype),
-                torch.randn([2, in_channels, input_h, input_w], dtype=dtype),
-                weight,
-            ),
-            atol=atol,
-            rtol=rtol,
-            check_lowp=False,
-            reference_in_float=not use_fp16,
+
+        # Triton conv-backward autotune compiles pathologically slowly on these
+        # ROCm arches and times out CI (see #178945), so autotune against ATEN.
+        conv_bwd_backends = (
+            "ATEN" if isRocmArchAnyOf(NAVI_ARCH + MI200_ARCH) else "TRITON"
         )
+        with config.patch(
+            {
+                "max_autotune_conv_bwd_weight_backends": conv_bwd_backends,
+                "max_autotune_conv_bwd_input_backends": conv_bwd_backends,
+            }
+        ):
+            self.common(
+                fn,
+                (
+                    torch.randn([2, out_channels, output_h, output_w], dtype=dtype),
+                    torch.randn([2, in_channels, input_h, input_w], dtype=dtype),
+                    weight,
+                ),
+                atol=atol,
+                rtol=rtol,
+                check_lowp=False,
+                reference_in_float=not use_fp16,
+            )
 
     @skip_if_cpu
     @skipIfRocm  # Triton conv backward kernels stay enabled on ROCm
