@@ -8,8 +8,6 @@ from typing import TYPE_CHECKING
 import torch
 import torch._dynamo
 import torch._functorch
-import torch._inductor
-import torch._inductor.decomposition
 from functorch.compile import (
     aot_function,
     default_decompositions,
@@ -29,13 +27,18 @@ from torch._higher_order_ops.torchbind import enable_torchbind_tracing
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.node import has_side_effect
 from torch.testing import FileCheck
-from torch.testing._internal.common_cuda import SM70OrLater, SM80OrLater
+from torch.testing._internal.common_cuda import SM80OrLater
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
+    skipCUDAIf,
+)
 from torch.testing._internal.common_quantization import skipIfNoDynamoSupport
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_WINDOWS,
     run_tests,
     skipIfTorchDynamo,
-    TEST_CUDA,
     TestCase,
     xfailIfNoAcceleratorTriton,
 )
@@ -90,6 +93,8 @@ def make_inputs_non_leaves(inps):
 
 @unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestWithEffects(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         init_torchbind_implementations()
@@ -247,7 +252,6 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         self.assertTrue(torch.allclose(res, f(*inputs)))
 
     @unittest.skipIf(IS_WINDOWS, "triton")
-    @unittest.skipIf(not SM70OrLater, "triton")
     def test_compile_inductor(self):
         def f(x):
             torch.ops.aten._print("moo")
@@ -998,11 +1002,15 @@ def forward(self, tangents_1, tangents_token):
             result = torch._from_functional_tensor(result.elem)
         self.assertEqual(result, expected)
 
+
+class TestWithEffectsDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @onlyAccelerator
     @unittest.skipIf(IS_WINDOWS, "triton")
-    @unittest.skipIf(not SM80OrLater, "triton")
-    @unittest.skipIf(not TEST_CUDA, "triton")
+    @skipCUDAIf(not SM80OrLater, "triton")
     @skipIfNoDynamoSupport
-    def test_register_effectful_custom_op(self):
+    def test_register_effectful_custom_op(self, device):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             torch._dynamo.config.capture_scalar_outputs = True
             torch._dynamo.config.capture_dynamic_output_shape_ops = True
@@ -1090,8 +1098,8 @@ def forward(self, tangents_1, tangents_token):
                         handles.append(handle)
                 return handles
 
-            x = torch.randn(10, 10, device="cuda")
-            mod = MockModule().to("cuda")
+            x = torch.randn(10, 10, device=device)
+            mod = MockModule().to(device)
 
             add_hooks(mod, my_config)
 
@@ -1108,18 +1116,18 @@ def forward(self, tangents_1, tangents_token):
             self.assertTrue("MockModule.linear:mean" in recorded_dict)
             self.assertTrue("MockModule:mean" in recorded_dict)
 
+    @onlyAccelerator
     @xfailIfNoAcceleratorTriton
-    @unittest.skipIf(not TEST_CUDA, "triton")
     @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
-    def test_export_invoke_subgraph(self):
+    def test_export_invoke_subgraph(self, device):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             recorded_list = []
 
             @torch.library.custom_op("mylib::record_memory", mutates_args=())
             def record_memory(prefix: str, module_name: str) -> None:
-                torch.cuda.synchronize()
-                mem_alloc = torch.cuda.memory_allocated() / 1024**2
-                mem_reserved = torch.cuda.memory_reserved() / 1024**2
+                torch.accelerator.synchronize()
+                mem_alloc = torch.accelerator.memory_allocated() / 1024**2
+                mem_reserved = torch.accelerator.memory_reserved() / 1024**2
                 memory_str = f"[{prefix}] {module_name}: allocated={mem_alloc:.2f} MB, reserved={mem_reserved:.2f} MB"
                 recorded_list.append(memory_str)
 
@@ -1156,10 +1164,10 @@ def forward(self, tangents_1, tangents_token):
                     torch.ops.mylib.record_memory("forward", "N")
                     return (x,)
 
-            model = M().to("cuda")
-            torch.cuda.reset_peak_memory_stats()
+            model = M().to(device)
+            torch.accelerator.reset_peak_memory_stats()
 
-            x = torch.randn(32, 1024, requires_grad=True, device="cuda")
+            x = torch.randn(32, 1024, requires_grad=True, device=device)
 
             # Test torch.export
             ep = torch.export.export(model, (x,))
@@ -1255,10 +1263,10 @@ def forward(self, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
         self.assertEqual(len(recorded_list), 4)
         self.assertTrue(torch.allclose(model(x)[0], out2[0], atol=1e-7, rtol=1e-4))
 
+    @onlyAccelerator
     @unittest.skipIf(IS_WINDOWS, "triton")
-    @unittest.skipIf(not SM80OrLater, "triton")
-    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
-    def test_effectful_op_with_flex_attention(self):
+    @skipCUDAIf(not SM80OrLater, "triton")
+    def test_effectful_op_with_flex_attention(self, device):
         """Test that effectful custom ops work with flex_attention."""
         from torch._library.effects import EffectType
         from torch.nn.attention.flex_attention import flex_attention
@@ -1289,7 +1297,7 @@ def forward(self, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
                 num_heads,
                 seq_len,
                 head_dim,
-                device="cuda",
+                device=device,
                 dtype=torch.float16,
             )
             k = torch.randn(
@@ -1297,7 +1305,7 @@ def forward(self, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
                 num_heads,
                 seq_len,
                 head_dim,
-                device="cuda",
+                device=device,
                 dtype=torch.float16,
             )
             v = torch.randn(
@@ -1305,13 +1313,16 @@ def forward(self, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
                 num_heads,
                 seq_len,
                 head_dim,
-                device="cuda",
+                device=device,
                 dtype=torch.float16,
             )
 
             compiled_fn = torch.compile(fn)
             out = compiled_fn(q, k, v)
             self.assertEqual(out.shape, (batch_size, num_heads, seq_len, head_dim))
+
+
+instantiate_device_type_tests(TestWithEffectsDevice, globals(), only_for=("cuda",))
 
 
 if __name__ == "__main__":
