@@ -42,6 +42,8 @@ from torch._subclasses.fake_tensor import (
     FakeTensor,
     in_kernel_invocation_manager,
     is_fake_tensor,
+    maybe_get_item_memo,
+    maybe_set_item_memo,
     run_fallback_kernel,
     UnsupportedOperatorException,
 )
@@ -1292,7 +1294,7 @@ def repeat_interleave_tensor(
 def local_scalar_dense(
     fake_mode: FakeTensorMode, func: OpOverload, arg: FakeTensor
 ) -> int | float | bool | torch.SymInt | torch.SymFloat | torch.SymBool:
-    if (r := arg.item_memo) is not None:
+    if (r := maybe_get_item_memo(arg)) is not None:
         return r
     if fake_mode.shape_env is None or (
         not fake_mode.shape_env.allow_scalar_outputs
@@ -1308,7 +1310,7 @@ def local_scalar_dense(
         r = fake_mode.shape_env.create_unbacked_symbool()
     else:
         raise NotImplementedError(f"local_scalar_dense/item NYI for {arg.dtype}")
-    arg.item_memo = r
+    maybe_set_item_memo(arg, r)
     return r
 
 
