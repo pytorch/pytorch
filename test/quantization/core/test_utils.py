@@ -1,13 +1,22 @@
 # Owner(s): ["oncall: quantization"]
 
 import torch
-from torch.testing._internal.common_utils import raise_on_run_directly, TestCase
-from torch.ao.quantization.utils import get_fqn_to_example_inputs
 from torch.ao.nn.quantized.modules.utils import _quantize_weight
-from torch.ao.quantization import MovingAverageMinMaxObserver, MovingAveragePerChannelMinMaxObserver
+from torch.ao.quantization import (
+    MovingAverageMinMaxObserver,
+    MovingAveragePerChannelMinMaxObserver,
+)
+from torch.ao.quantization.utils import get_fqn_to_example_inputs
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    raise_on_run_directly,
+    TestCase,
+)
 
 
 class TestUtils(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _test_get_fqn_to_example_inputs(self, M, example_inputs, expected_fqn_to_dim):
         m = M().eval()
         fqn_to_example_inputs = get_fqn_to_example_inputs(m, example_inputs)
@@ -52,14 +61,14 @@ class TestUtils(TestCase):
             "linear2": (2,),
             "sub": (2,),
             "sub.linear1": (2,),
-            "sub.linear2": (2,)
+            "sub.linear2": (2,),
         }
         example_inputs = (torch.rand(1, 5),)
         self._test_get_fqn_to_example_inputs(M, example_inputs, expected_fqn_to_dim)
 
     def test_get_fqn_to_example_inputs_default_kwargs(self):
-        """ Test that we can get example inputs for functions with default keyword arguments
-        """
+        """Test that we can get example inputs for functions with default keyword arguments"""
+
         class Sub(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -93,14 +102,14 @@ class TestUtils(TestCase):
             # third arg is `key2`, override by callsite
             "sub": (2, 1, 2),
             "sub.linear1": (2,),
-            "sub.linear2": (2,)
+            "sub.linear2": (2,),
         }
         example_inputs = (torch.rand(1, 5),)
         self._test_get_fqn_to_example_inputs(M, example_inputs, expected_fqn_to_dim)
 
     def test_get_fqn_to_example_inputs_complex_args(self):
-        """ Test that we can record complex example inputs such as lists and dicts
-        """
+        """Test that we can record complex example inputs such as lists and dicts"""
+
         class Sub(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -138,8 +147,7 @@ class TestUtils(TestCase):
             raise AssertionError("Expected '3' in fqn_to_example_inputs['sub'][2]")
 
     def test_quantize_weight_clamping_per_tensor(self):
-        """ Test quant_{min, max} from per tensor observer is honored by `_quantize_weight` method
-        """
+        """Test quant_{min, max} from per tensor observer is honored by `_quantize_weight` method"""
         fp_min, fp_max = -1000.0, 1000.0
         q8_min, q8_max = -10, 10
 
@@ -183,8 +191,7 @@ class TestUtils(TestCase):
             )
 
     def test_quantize_weight_clamping_per_channel(self):
-        """ Test quant_{min, max} from per channel observer is honored by `_quantize_weight` method
-        """
+        """Test quant_{min, max} from per channel observer is honored by `_quantize_weight` method"""
         fp_min, fp_max = -1000.0, 1000.0
         q8_min, q8_max = -10, 10
 
@@ -229,11 +236,11 @@ class TestUtils(TestCase):
             )
 
     def test_uint4_int4_dtype(self):
-
         def up_size(size):
             return (*size[:-1], size[-1] * 2)
 
         for dtype in [torch.uint4, torch.int4]:
+
             class UInt4OrInt4Tensor(torch.Tensor):
                 @staticmethod
                 def __new__(cls, elem, **kwargs):
@@ -242,7 +249,9 @@ class TestUtils(TestCase):
                     if kwargs.get("requires_grad", False):
                         raise AssertionError("Expected requires_grad to be False")
                     kwargs["requires_grad"] = False
-                    return torch.Tensor._make_wrapper_subclass(cls, up_size(elem.shape), dtype=dtype, **kwargs)
+                    return torch.Tensor._make_wrapper_subclass(
+                        cls, up_size(elem.shape), dtype=dtype, **kwargs
+                    )
 
                 def __init__(self, elem):
                     self.elem = elem
@@ -252,13 +261,19 @@ class TestUtils(TestCase):
                     pass
 
             # make sure it runs
-            x = UInt4OrInt4Tensor(torch.tensor([
-                [0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF],
-                [0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF],
-                [0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF],
-            ], dtype=torch.uint8))
+            x = UInt4OrInt4Tensor(
+                torch.tensor(
+                    [
+                        [0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF],
+                        [0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF],
+                        [0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF],
+                    ],
+                    dtype=torch.uint8,
+                )
+            )
             if x.dtype != dtype:
                 raise AssertionError(f"Expected dtype {dtype}, got {x.dtype}")
+
 
 if __name__ == "__main__":
     raise_on_run_directly("test/test_quantization.py")
