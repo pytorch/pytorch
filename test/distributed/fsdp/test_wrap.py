@@ -1,10 +1,10 @@
 # Owner(s): ["oncall: distributed"]
 
-import unittest
 import functools
 import itertools
 import os
 import tempfile
+import unittest
 from collections.abc import Callable
 from enum import auto, Enum
 
