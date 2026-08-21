@@ -3,6 +3,8 @@
 Tests for inductor lowering of functional custom ops to out-variant via ExternKernelOut.
 """
 
+import unittest
+
 import torch
 from torch._C import FileCheck
 from torch._inductor import config
@@ -10,11 +12,10 @@ from torch._inductor.codegen import common
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_device_type import (
-    Capability,
     instantiate_device_type_tests,
-    requires_capabilities,
 )
 from torch.testing._internal.common_utils import HardwareClassification
+from torch.testing._internal.inductor_utils import HAS_TRITON
 
 
 def _register_add_one_ops(lib):
@@ -73,7 +74,7 @@ class TestCustomOpOutLoweringAccelerator(InductorTestCase):
 
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     def test_add_one_lowered_to_out(self, device):
         """Test that a simple functional op gets lowered to its out-variant."""
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
@@ -92,7 +93,7 @@ class TestCustomOpOutLoweringAccelerator(InductorTestCase):
 
             FileCheck().check(".out(").check_not(".default(").run(code)
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     def test_add_one_lowered_to_out_dynamic_shape(self, device):
         """Out-variant lowering with symbolic output shape (see #185503)."""
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
@@ -112,7 +113,7 @@ class TestCustomOpOutLoweringAccelerator(InductorTestCase):
             self.assertEqual(compiled_out, eager_out)
             FileCheck().check(".out(").check_not(".default(").run(code)
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     def test_multi_output_lowered_to_out(self, device):
         """Test a two-output functional op gets lowered to its .out variant."""
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
@@ -131,7 +132,7 @@ class TestCustomOpOutLoweringAccelerator(InductorTestCase):
             self.assertEqual(compiled_out, eager_out)
             FileCheck().check(".out(").check("out0=").check("out1=").run(code)
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     def test_op_without_out_variant_falls_through(self, device):
         """Test that ops without an out-variant fall through to FallbackKernel."""
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
