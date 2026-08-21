@@ -7,6 +7,7 @@ import dataclasses
 import functools
 import gc
 import importlib
+import inspect
 import itertools
 import logging
 import math
@@ -97,6 +98,7 @@ from torch.testing._internal.common_device_type import (
     expectedFailureXPU,
     instantiate_device_type_tests,
     largeTensorTest,
+    onlyAccelerator,
     skipCUDAIf as skipCUDAIfDeviceType,
     skipXPUIf,
 )
@@ -19768,6 +19770,222 @@ def copy_tests(my_cls, other_cls, suffix, test_failures=None, xfail_prop=None):
         other_cls.is_dtype_supported = my_cls.is_dtype_supported
 
 
+class _TemplateDeviceHost:
+    def setUp(self):
+        self.device = self.get_primary_device()
+        super().setUp()
+
+
+def instantiate_device_type_tests_from_templates(
+    host_cls: type,
+    scope: dict[str, object],
+    *,
+    templates: Sequence[type],
+    test_failures: Mapping[str, TestFailure] | None = None,
+    xfail_prop: str | None = None,
+    test_decorator: Callable | None = None,
+    suffix_overrides: Mapping[str, str] | None = None,
+    class_name_overrides: Mapping[str, str] | None = None,
+    only_for=None,
+    except_for=None,
+    allow_xpu: bool = False,
+    allow_mps: bool = False,
+) -> tuple[type, ...]:
+    """Instantiates copy_tests-style templates with the device-type framework."""
+    if scope.get(host_cls.__name__) is not host_cls:
+        raise AssertionError(
+            f"{host_cls.__name__} must be defined in the supplied scope"
+        )
+    if not templates:
+        raise AssertionError("at least one test template is required")
+
+    bridge_cls = type(host_cls.__name__, (_TemplateDeviceHost, host_cls), {})
+    bridge_cls.__module__ = host_cls.__module__
+
+    def make_test(value):
+        source_params = inspect.signature(value).parameters
+
+        @functools.wraps(value)
+        def new_test(self, *args, device=None, devices=None, **kwargs):
+            if devices is not None:
+                self.devices = devices
+                self.device = devices[0]
+                if "devices" in source_params:
+                    kwargs["devices"] = devices
+            elif device is not None:
+                self.device = device
+                if "device" in source_params:
+                    kwargs["device"] = device
+            return value(self, *args, **kwargs)
+
+        new_test.__dict__ = copy.deepcopy(value.__dict__)
+        new_test.__dict__.pop("__wrapped__", None)
+        return new_test
+
+    def was_parametrized(name, value):
+        if name != value.__name__:
+            return True
+        while value is not None:
+            params = inspect.signature(value, follow_wrapped=False).parameters
+            if "param_kwargs" in params:
+                return True
+            value = getattr(value, "__wrapped__", None)
+        return False
+
+    host_test_names = set()
+    for name in dir(host_cls):
+        if not name.startswith("test"):
+            continue
+        value = getattr(host_cls, name)
+        if not callable(value):
+            continue
+        host_test_names.add(name)
+        host_test = make_test(value)
+        if was_parametrized(name, value):
+            host_test.__dict__.pop("parametrize_fn", None)
+        setattr(bridge_cls, name, host_test)
+
+    for template in templates:
+        for name, value in template.__dict__.items():
+            if not name.startswith("test_"):
+                continue
+            if name in host_test_names:
+                raise AssertionError(f"duplicate test method: {name}")
+
+            new_test = make_test(value)
+
+            already_parametrized = was_parametrized(name, value)
+            source_parametrize_fn = (
+                None
+                if already_parametrized
+                else getattr(new_test, "parametrize_fn", None)
+            )
+            new_test.__dict__.pop("parametrize_fn", None)
+
+            tf = test_failures and test_failures.get(name)
+            has_xfail_prop = xfail_prop is not None and hasattr(value, xfail_prop)
+            if source_parametrize_fn or test_decorator or tf or has_xfail_prop:
+
+                def parametrize_fn(
+                    test,
+                    generic_cls,
+                    device_cls,
+                    _source_parametrize_fn=source_parametrize_fn,
+                    _test_decorator=test_decorator,
+                    _tf=tf,
+                    _has_xfail_prop=has_xfail_prop,
+                ):
+                    if _source_parametrize_fn is None:
+                        cases = ((test, "", {}, lambda _: ()),)
+                    else:
+                        cases = _source_parametrize_fn(
+                            test, generic_cls=generic_cls, device_cls=device_cls
+                        )
+
+                    suffix = device_cls.device_type
+                    if suffix == "privateuse1":
+                        suffix = torch._C._get_privateuse1_backend_name()
+                    if suffix_overrides is not None:
+                        suffix = suffix_overrides.get(suffix, suffix)
+
+                    decorators = []
+                    if _test_decorator is not None:
+                        decorators.append(_test_decorator)
+                    if _has_xfail_prop:
+                        decorators.append(unittest.expectedFailure)
+                    if _tf is not None and suffix in _tf.suffixes:
+                        decorators.append(
+                            unittest.skip("Skipped!")
+                            if _tf.is_skip
+                            else unittest.expectedFailure
+                        )
+
+                    for test_case, test_suffix, param_kwargs, decorator_fn in cases:
+
+                        def combined_decorator_fn(
+                            params,
+                            _decorator_fn=decorator_fn,
+                            _decorators=tuple(decorators),
+                        ):
+                            return (*_decorator_fn(params), *_decorators)
+
+                        yield (
+                            test_case,
+                            test_suffix,
+                            param_kwargs,
+                            combined_decorator_fn,
+                        )
+
+                new_test.parametrize_fn = parametrize_fn
+
+            setattr(bridge_cls, name, new_test)
+
+        if hasattr(template, "is_dtype_supported"):
+            bridge_cls.is_dtype_supported = template.is_dtype_supported
+
+    scope[host_cls.__name__] = bridge_cls
+    instantiate_device_type_tests(
+        bridge_cls,
+        scope,
+        only_for=only_for,
+        except_for=except_for,
+        allow_xpu=allow_xpu,
+        allow_mps=allow_mps,
+    )
+    for name in host_test_names:
+        setattr(bridge_cls, name, None)
+
+    generated = tuple(
+        value
+        for value in scope.values()
+        if isinstance(value, type)
+        and value is not bridge_cls
+        and bridge_cls in value.__mro__
+    )
+
+    if suffix_overrides:
+        for generated_cls in generated:
+            device_suffix = generated_cls.device_type
+            if device_suffix == "privateuse1":
+                device_suffix = torch._C._get_privateuse1_backend_name()
+            suffix = suffix_overrides.get(device_suffix, device_suffix)
+            if suffix == device_suffix:
+                continue
+            marker = f"_{device_suffix}"
+            for name, value in tuple(generated_cls.__dict__.items()):
+                if not name.startswith("test") or marker not in name:
+                    continue
+                prefix, _, tail = name.rpartition(marker)
+                new_name = f"{prefix}_{suffix}{tail}"
+                if hasattr(generated_cls, new_name):
+                    raise AssertionError(f"duplicate generated test: {new_name}")
+                setattr(generated_cls, new_name, value)
+                delattr(generated_cls, name)
+
+    if class_name_overrides:
+        for generated_cls in generated:
+            device_type = generated_cls.device_type
+            privateuse1_name = torch._C._get_privateuse1_backend_name()
+            normalized_device_type = (
+                "privateuse1" if device_type == privateuse1_name else device_type
+            )
+            class_name = class_name_overrides.get(
+                device_type, class_name_overrides.get(normalized_device_type)
+            )
+            if class_name is None:
+                continue
+            old_name = generated_cls.__name__
+            existing = scope.get(class_name)
+            if existing is not None and existing is not generated_cls:
+                raise AssertionError(f"duplicate generated class: {class_name}")
+            scope.pop(old_name)
+            generated_cls.__name__ = class_name
+            generated_cls.__qualname__ = class_name
+            scope[class_name] = generated_cls
+
+    return generated
+
+
 def add_test_failures(
     test_failures: dict[str, TestFailure], added_test_failures: dict[str, TestFailure]
 ):
@@ -19830,7 +20048,13 @@ if RUN_CPU:
             _, code_vec = run_and_get_cpp_code(opt_f, x_vec)
             FileCheck().check_not(".abs()").run(code_vec)
 
-    copy_tests(CommonTemplate, CpuTests, "cpu")
+    instantiate_device_type_tests_from_templates(
+        CpuTests,
+        globals(),
+        templates=(CommonTemplate,),
+        class_name_overrides={"cpu": "CpuTests"},
+        only_for="cpu",
+    )
 
 if RUN_GPU or HAS_MPS:
 
@@ -20124,7 +20348,23 @@ if RUN_GPU or HAS_MPS:
                     ),
                 )
 
-    copy_tests(CommonTemplate, GPUTests, GPU_TYPE)
+else:
+
+    class GPUTests(TestCase):
+        hw_classification = HardwareClassification.ACCELERATOR
+        common = check_model_gpu
+
+
+_COMMON_ACCELERATOR_TEST_CLASSES = instantiate_device_type_tests_from_templates(
+    GPUTests,
+    globals(),
+    templates=(CommonTemplate,),
+    test_decorator=onlyAccelerator,
+    class_name_overrides={GPU_TYPE: "GPUTests"},
+    except_for="cpu",
+    allow_xpu=True,
+    allow_mps=True,
+)
 
 if RUN_TPU:
 
@@ -22393,5 +22633,5 @@ def _run_and_get_stripped_kernels(
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if RUN_CPU or RUN_GPU or HAS_MPS:
+    if RUN_CPU or RUN_GPU or HAS_MPS or _COMMON_ACCELERATOR_TEST_CLASSES:
         run_tests(needs="filelock")
