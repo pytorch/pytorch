@@ -315,6 +315,46 @@ class TestPartitionedScatterOpt(TestCase):
         )
         self.assertGreaterEqual(counters["inductor"]["partitioned_scatter_applied"], 3)
 
+    def test_embedding_dense_backward(self):
+        """Reaches the pass as _unsafe_masked_index_put_accumulate, not index_put."""
+        torch.manual_seed(42)
+        N, num_weights, dim, padding_idx = 8192, 24, 16, 3
+
+        def f(grad, idx):
+            return torch.ops.aten.embedding_dense_backward(
+                grad, idx, num_weights, padding_idx, False
+            )
+
+        grad = torch.randn(N, dim)
+        idx = torch.randint(0, num_weights, (N,), dtype=torch.int64)
+        idx[::2] = 0  # contention on one row
+        idx[::7] = padding_idx  # rows the mask must drop
+
+        self._check_accuracy(f, (grad, idx))
+        self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 1)
+
+    def test_scatter_reduce_sum(self):
+        """The scatter_reduce family reaches the same atomic_add through its own
+        lowering, carrying an explicit dim and a values-shaped index."""
+        torch.manual_seed(42)
+        N, n, D = 8192, 8, 4
+
+        def f(out, idx, vals):
+            return (
+                out.scatter_add(0, idx, vals),
+                out.scatter_reduce(0, idx, vals, reduce="sum"),
+                out.clone().scatter_(0, idx, vals, reduce="add"),
+                # Not an atomic_add, so it must be left alone.
+                out.scatter_reduce(0, idx, vals, reduce="amax"),
+            )
+
+        out = torch.zeros(n, D, dtype=torch.float32)
+        idx = torch.randint(0, 4, (N, D), dtype=torch.int64)
+        vals = torch.randn(N, D, dtype=torch.float32)
+
+        self._check_accuracy(f, (out, idx, vals), atol=1.0, rtol=1e-2)
+        self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 3)
+
     def test_accuracy_int32_exact(self):
         """Integer scatter-add must be bit-for-bit identical to eager (addition is associative)."""
         torch.manual_seed(4)
@@ -466,11 +506,24 @@ class TestPartitionedScatterOpt(TestCase):
         result = _compute_num_partitions(20_000_000, 1_000_000, 4, min_p=2, max_p=128)
         self.assertEqual(result, 4)
 
-    def test_compute_num_partitions_diminishing_returns_cap(self):
-        """Diminishing-returns cap limits P when memory is not the bottleneck."""
+    def test_compute_num_partitions_traffic_cap(self):
+        """P <= writes_per_slot, so the expanded buffer never moves more traffic
+        than the scatter itself. Applies when memory is not the bottleneck."""
         available = 10**12  # effectively unlimited
 
-        # writes_per_slot=64 → cap=256, min(256, max_p=128) = 128
+        # writes_per_slot=256 → cap=256, min(256, max_p=128) = 128
+        result = _compute_num_partitions(
+            available,
+            1024,
+            4,
+            min_p=2,
+            max_p=128,
+            index_size=4096,
+            scatter_dim_size=16,
+        )
+        self.assertEqual(result, 128)
+
+        # writes_per_slot=64 → cap=64
         result = _compute_num_partitions(
             available,
             1024,
@@ -480,9 +533,9 @@ class TestPartitionedScatterOpt(TestCase):
             index_size=1024,
             scatter_dim_size=16,
         )
-        self.assertEqual(result, 128)
+        self.assertEqual(result, 64)
 
-        # writes_per_slot=4 → cap=16
+        # writes_per_slot=4 → cap=4
         result = _compute_num_partitions(
             available,
             1024,
@@ -492,7 +545,7 @@ class TestPartitionedScatterOpt(TestCase):
             index_size=64,
             scatter_dim_size=16,
         )
-        self.assertEqual(result, 16)
+        self.assertEqual(result, 4)
 
         # writes_per_slot=0.5 → cap=max(2, 2)=2
         result = _compute_num_partitions(
