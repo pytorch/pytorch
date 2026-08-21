@@ -970,6 +970,118 @@ class OrderedSetTests(_SetBase, _BaseSetTests):
         self.assertEqual(list(s), [0, 1, 2, 3])
 
 
+class FrozensetHierarchyTests(_BaseSetTests):
+    """frozenset must not be a subclass of set (CPython parity). Part of #192874."""
+
+    def test_frozenset_not_a_set_variable(self):
+        from torch._dynamo.variables.sets import (
+            BaseSetVariable,
+            FrozensetVariable,
+            SetVariable,
+        )
+
+        self.assertFalse(issubclass(FrozensetVariable, SetVariable))
+        self.assertTrue(issubclass(FrozensetVariable, BaseSetVariable))
+        self.assertTrue(issubclass(SetVariable, BaseSetVariable))
+        # Matches real CPython.
+        self.assertFalse(issubclass(frozenset, set))
+
+    def test_frozenset_has_no_mutating_methods(self):
+        # Before the VT split, FrozensetVariable inherited SetVariable's
+        # named methods via the tp_methods MRO-merge, so eight of the nine
+        # below were reachable on a traced frozenset even though real
+        # frozenset doesn't have them. `update` is the exception: it already
+        # returned early on `not self.is_mutable()`, so it degraded correctly.
+        for name, args in [
+            ("add", (1,)),
+            ("pop", ()),
+            ("remove", (1,)),
+            ("discard", (1,)),
+            ("clear", ()),
+            ("update", ({1},)),
+            ("intersection_update", ({1},)),
+            ("difference_update", ({1},)),
+            ("symmetric_difference_update", ({1},)),
+        ]:
+            with self.subTest(name=name):
+                self.assertFalse(hasattr(frozenset(), name))
+
+                @torch.compile(backend="eager", fullgraph=True)
+                def fn(fs, _name=name, _args=args):
+                    return getattr(fs, _name)(*_args)
+
+                with self.assertRaises(Unsupported):
+                    fn(frozenset({1, 2, 3}))
+
+    def test_frozenset_mutating_method_graph_breaks(self):
+        # With fullgraph=False a frozenset mutation must graph break and let
+        # eager raise the real AttributeError. Before the split it surfaced an
+        # internal "mutation_type is None for FrozensetVariable() in
+        # check_allowed_side_effect" AssertionError instead.
+        @torch.compile(backend="eager")
+        def fn(fs):
+            fs.add(1)
+            return fs
+
+        with self.assertRaises(AttributeError):
+            fn(frozenset({1, 2, 3}))
+
+    @make_dynamo_test
+    def test_frozenset_inplace_operators_rebind_not_mutate(self):
+        """Not a regression test: this also passes before the split.
+
+        Real frozenset defines no __ior__/__iand__/__ixor__/__isub__, so
+        `fs |= other` rebinds the name to a new frozenset built by __or__.
+        FrozensetVariable used to inherit SetVariable's nb_inplace_* handlers,
+        but binary_iop1 gates on the real CPython type's nb slot bits (see
+        object_protocol.binary_iop1) and frozenset sets none of them, so the
+        inherited handlers were never reachable. Kept as a guard that the
+        split does not change this.
+        """
+        fs = frozenset({1, 2, 3})
+        other = frozenset({3, 4, 5})
+
+        fs_or = fs
+        fs_or |= other
+        self.assertEqual(fs_or, frozenset({1, 2, 3, 4, 5}))
+
+        fs_and = fs
+        fs_and &= other
+        self.assertEqual(fs_and, frozenset({3}))
+
+        fs_xor = fs
+        fs_xor ^= other
+        self.assertEqual(fs_xor, frozenset({1, 2, 4, 5}))
+
+    @make_dynamo_test
+    def test_frozenset_readonly_ops_still_work(self):
+        fs = frozenset({1, 2, 3})
+        other = frozenset({3, 4, 5})
+        self.assertEqual(fs | other, frozenset({1, 2, 3, 4, 5}))
+        self.assertEqual(fs & other, frozenset({3}))
+        self.assertEqual(fs - other, frozenset({1, 2}))
+        self.assertEqual(fs ^ other, frozenset({1, 2, 4, 5}))
+        self.assertEqual(fs.union(other), frozenset({1, 2, 3, 4, 5}))
+        self.assertEqual(fs.intersection(other), frozenset({3}))
+        self.assertEqual(fs.difference(other), frozenset({1, 2}))
+        self.assertEqual(fs.symmetric_difference(other), frozenset({1, 2, 4, 5}))
+        self.assertTrue(fs.isdisjoint(frozenset({7, 8})))
+        self.assertTrue(frozenset({1, 2}).issubset(fs))
+        self.assertTrue(fs.issuperset(frozenset({1, 2})))
+        self.assertEqual(fs.copy(), fs)
+        self.assertEqual(len(fs), 3)
+        self.assertTrue(3 in fs)
+
+    @make_dynamo_test
+    def test_regular_set_mutations_unaffected(self):
+        # The mutable-set path must be completely unaffected by the split.
+        s = {1, 2, 3}
+        s.add(4)
+        s.discard(1)
+        s |= {10}
+        self.assertEqual(s, {2, 3, 4, 10})
+
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
