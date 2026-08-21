@@ -19,10 +19,9 @@
  * The first pool contains only the default stream. When the default stream
  * is requested it's returned.
  *
- * The second pool is the "low priority" or "default priority" streams. In
- * HIP builds there is no distinction between streams in this pool and streams
- * in the third pool (below). There are 32 of these streams per device, and
- * when a stream is requested one of these streams is returned round-robin.
+ * The second pool is the "low priority" or "default priority" streams. There
+ * are 32 of these streams per device, and when a stream is requested one of
+ * these streams is returned round-robin.
  * That is, the first stream requested is at index 0, the second at index 1...
  * to index 31, then index 0 again.
  *

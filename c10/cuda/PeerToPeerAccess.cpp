@@ -295,7 +295,7 @@ std::string get_nvml_fabric_info([[maybe_unused]] c10::DeviceIndex dev) {
 #endif
   return std::move(oss).str();
 #else
-  return "fabric info unsupported (requires CUDA >= 12.4)";
+  return "fabric info unsupported on this platform";
 #endif
 }
 
