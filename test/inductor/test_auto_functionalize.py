@@ -14,10 +14,14 @@ from torch import Tensor
 from torch._dynamo.testing import CompileCounterWithBackend
 from torch._dynamo.utils import counters
 from torch._higher_order_ops.auto_functionalize import try_use_slice
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import HardwareClassification
 from torch.testing._internal.logging_utils import logs_to_string
 
 
 class AutoFunctionalizeTests(torch._inductor.test_case.TestCase):
+    hw_classification = HardwareClassification.CPU
+
     def test_auto_functionalize_can_with_default(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             torch.library.define(
@@ -2154,6 +2158,8 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
             got = torch.compile(f, fullgraph=True, dynamic=True)(dout, weight, 8)
             self.assertEqual(got, expected)
 
+
+instantiate_device_type_tests(AutoFunctionalizeTests, globals(), only_for="cpu")
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
