@@ -656,6 +656,7 @@ def xfailCUDAIfSM89OrLaterOnWindows(test_fn):
 # When using nvcc from the CUDA toolkit its version must be at least the one from ptxas bundled with Triton
 TRITON_PTXAS_VERSION = (12, 8)
 requires_triton_ptxas_compat = unittest.skipIf(not torch.version.xpu
+                                               and not _is_privateuse1_backend_available()
                                                and torch.version.hip is None
                                                and _get_torch_cuda_version() < TRITON_PTXAS_VERSION,
                                                "Requires CUDA {}.{} to match Tritons ptxas version".format(*TRITON_PTXAS_VERSION))
