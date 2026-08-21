@@ -222,18 +222,22 @@ def has_triton_reduction_ordering() -> bool:
 
 
 @functools.cache
-def has_triton() -> bool:
+def _devices_supporting_triton(disable_device_detection: bool) -> list[str]:
+    """Body of functionality for ``devices_supporting_triton``.
+
+    Split the function like this so that we can still cache the result per-value
+    of ``torch._inductor.config.triton_disable_device_detection``.
+    """
     if not has_triton_package():
-        return False
+        return []
 
-    from torch._inductor.config import triton_disable_device_detection
-
-    if triton_disable_device_detection:
-        return False
+    if disable_device_detection:
+        return []
 
     from torch._dynamo.device_interface import get_registered_device_interfaces
     from torch._dynamo.exc import TritonUnavailableError
 
+    res: list[str] = []
     # A device supports Triton if it is available, reports Triton capability, and
     # its Triton backend is actually built. Capability is gated first so that
     # raise_if_triton_unavailable() only surfaces missing-backend errors (and
@@ -251,8 +255,23 @@ def has_triton() -> bool:
             device_interface.raise_if_triton_unavailable()
         except TritonUnavailableError:
             continue
-        return True
-    return False
+        res.append(name)
+    return res
+
+
+def devices_supporting_triton() -> list[str]:
+    """Get the devices that support generating Triton code as a backend.
+
+    Note that returned devices may not be currently set to generate Triton, even
+    if they support it.
+    """
+    from torch._inductor.config import triton_disable_device_detection
+
+    return _devices_supporting_triton(triton_disable_device_detection)
+
+
+def has_triton() -> bool:
+    return len(devices_supporting_triton()) > 0
 
 
 @functools.cache

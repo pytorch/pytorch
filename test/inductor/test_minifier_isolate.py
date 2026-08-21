@@ -1,8 +1,8 @@
 # Owner(s): ["module: inductor"]
 import unittest
 
-import torch._inductor.config as inductor_config
 from torch._dynamo.test_minifier_common import MinifierTestBase
+from torch._inductor.utils import with_device_backend
 from torch.testing._internal.common_utils import (
     IS_JETSON,
     IS_MACOS,
@@ -10,8 +10,11 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE
-from torch.testing._internal.triton_utils import requires_gpu
+from torch.testing._internal.inductor_utils import (
+    requires_triton,
+    TRITON_TYPE,
+    try_patch_inductor_backend_config,
+)
 from torch.utils._triton import get_triton_version
 
 
@@ -38,25 +41,42 @@ inner(torch.randn(2, 2).to("{device}"))
         self._run_full_test(run_code, "aot", expected_error, isolate=True)
 
     @unittest.skipIf(IS_JETSON, "Fails on Jetson")
-    @inductor_config.patch("cpp.inject_relu_bug_TESTING_ONLY", "runtime_error")
     @skipIfWindows(
         msg="Build Failed: fatal error C1083: Cannot open include file: 'Python.h': No such file or directory"
     )
-    def test_after_aot_cpu_runtime_error(self):
-        self._test_after_aot_runtime_error("cpu", "")
+    def test_after_aot_cpp_runtime_error(self):
+        with (
+            with_device_backend("cpp", "cpu"),
+            try_patch_inductor_backend_config(
+                "cpu", "inject_relu_bug_TESTING_ONLY", "runtime_error"
+            ),
+        ):
+            self._test_after_aot_runtime_error("cpu", "")
 
     @skipIfRocmWithoutDebugAsserts
-    @requires_gpu
-    @inductor_config.patch("triton.inject_relu_bug_TESTING_ONLY", "runtime_error")
-    def test_after_aot_gpu_runtime_error(self):
+    @requires_triton()
+    def test_after_aot_triton_runtime_error(self):
         # CUDA's __assertfail surfaces through PyTorch as "device-side assert";
         # ROCm's Triton AMD lowering prints the injected assertion text before trapping.
-        expected_error = (
-            "injected assert fail"
-            if GPU_TYPE == "xpu" or TEST_WITH_ROCM
-            else "device-side assert"
-        )
-        self._test_after_aot_runtime_error(GPU_TYPE, expected_error)
+        expected_errors = {
+            "cuda": "injected assert fail"
+            if TEST_WITH_ROCM
+            else "device-side assert",
+            "xpu": "injected assert fail",
+        }
+        if TRITON_TYPE not in expected_errors:
+            raise unittest.SkipTest(
+                f"Unknown Triton runtime assert message for {TRITON_TYPE}"
+            )
+        with (
+            with_device_backend("triton", TRITON_TYPE),
+            try_patch_inductor_backend_config(
+                TRITON_TYPE, "inject_relu_bug_TESTING_ONLY", "runtime_error"
+            ),
+        ):
+            self._test_after_aot_runtime_error(
+                TRITON_TYPE, expected_errors[TRITON_TYPE]
+            )
 
 
 if __name__ == "__main__":

@@ -3821,15 +3821,30 @@ def same(
 
                 multiplier = get_multiplier()
 
+                def custom_backend_config_value(name: str, default: Any) -> Any:
+                    cfg = torch._inductor.codegen.common.get_custom_backend_config_for_device(ref.device)
+                    if cfg is None:
+                        return default
+                    return cfg.get(name, default)
+
                 passes_test = res_error <= (multiplier * ref_error + tol / 10.0)
                 if (
                     not passes_test
                     and equal_nan
                     and math.isnan(ref_error)
                     and math.isnan(res_error)
-                    # Some unit test for the accuracy minifier relies on
-                    # returning false in this case.
-                    and not torch._inductor.config.cpp.inject_relu_bug_TESTING_ONLY
+                    # Some unit tests for the accuracy minifier rely on
+                    # returning False in these cases.
+                    and not any(
+                        (
+                            torch._inductor.config.cpp.inject_relu_bug_TESTING_ONLY,
+                            torch._inductor.config.cpp.inject_log1p_bug_TESTING_ONLY,
+                            torch._inductor.config.triton.inject_relu_bug_TESTING_ONLY,
+                            torch._inductor.config.triton.inject_log1p_bug_TESTING_ONLY,
+                            custom_backend_config_value("inject_log1p_bug_TESTING_ONLY", None),
+                            custom_backend_config_value("inject_relu_bug_TESTING_ONLY", None),
+                        )
+                    )
                 ):
                     passes_test = True
                 if not passes_test:

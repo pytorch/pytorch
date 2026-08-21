@@ -6,6 +6,7 @@ from torch.testing._internal.inductor_utils import (
     HAS_CUDA_AND_TRITON,
     HAS_GPU,
     HAS_MTIA_AND_TRITON,
+    HAS_TRITON,
     HAS_XPU_AND_TRITON,
 )
 from torch.utils._triton import has_triton

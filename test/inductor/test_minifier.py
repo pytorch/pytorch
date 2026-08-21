@@ -5,10 +5,16 @@ from unittest.mock import patch
 import torch._dynamo.config as dynamo_config
 import torch._inductor.config as inductor_config
 from torch._dynamo.test_minifier_common import MinifierTestBase
-from torch._inductor import config
+from torch._inductor.utils import with_device_backend
 from torch.export import load as export_load
 from torch.testing._internal.common_utils import IS_JETSON, IS_MACOS, TEST_WITH_ASAN
-from torch.testing._internal.inductor_utils import GPU_TYPE
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    has_cpp_wrapper_for_device,
+    requires_triton,
+    TRITON_TYPE,
+    try_patch_inductor_backend_config,
+)
 from torch.testing._internal.triton_utils import requires_gpu
 
 
@@ -30,26 +36,45 @@ inner(torch.randn(20, 20).to("{device}"))
         self._run_full_test(run_code, "aot", expected_error, isolate=False)
 
     @unittest.skipIf(IS_JETSON, "Fails on Jetson")
-    @inductor_config.patch("cpp.inject_relu_bug_TESTING_ONLY", "compile_error")
-    def test_after_aot_cpu_compile_error(self):
-        self._test_after_aot("cpu", "CppCompileError")
+    def test_after_aot_cpp_compile_error(self):
+        with (
+            with_device_backend("cpp", "cpu"),
+            try_patch_inductor_backend_config(
+                "cpu", "inject_relu_bug_TESTING_ONLY", "compile_error"
+            ),
+        ):
+            self._test_after_aot("cpu", "CppCompileError")
 
     @unittest.skipIf(IS_JETSON, "Fails on Jetson")
-    @inductor_config.patch("cpp.inject_relu_bug_TESTING_ONLY", "accuracy")
-    def test_after_aot_cpu_accuracy_error(self):
-        self._test_after_aot("cpu", "AccuracyError")
+    def test_after_aot_cpp_accuracy_error(self):
+        with (
+            with_device_backend("cpp", "cpu"),
+            try_patch_inductor_backend_config(
+                "cpu", "inject_relu_bug_TESTING_ONLY", "accuracy"
+            ),
+        ):
+            self._test_after_aot("cpu", "AccuracyError")
 
-    @requires_gpu
-    @inductor_config.patch("triton.inject_relu_bug_TESTING_ONLY", "compile_error")
-    def test_after_aot_gpu_compile_error(self):
-        self._test_after_aot(GPU_TYPE, "SyntaxError")
+    @requires_triton()
+    def test_after_aot_triton_compile_error(self):
+        with (
+            with_device_backend("triton", TRITON_TYPE),
+            try_patch_inductor_backend_config(
+                TRITON_TYPE, "inject_relu_bug_TESTING_ONLY", "compile_error"
+            ),
+        ):
+            self._test_after_aot(TRITON_TYPE, "SyntaxError")
 
-    @requires_gpu
-    @inductor_config.patch("triton.inject_relu_bug_TESTING_ONLY", "accuracy")
-    def test_after_aot_gpu_accuracy_error(self):
-        self._test_after_aot(GPU_TYPE, "AccuracyError")
+    @requires_triton()
+    def test_after_aot_triton_accuracy_error(self):
+        with (
+            with_device_backend("triton", TRITON_TYPE),
+            try_patch_inductor_backend_config(
+                TRITON_TYPE, "inject_relu_bug_TESTING_ONLY", "accuracy"
+            ),
+        ):
+            self._test_after_aot(TRITON_TYPE, "AccuracyError")
 
-    @inductor_config.patch("cpp.inject_relu_bug_TESTING_ONLY", "accuracy")
     def test_constant_in_graph(self):
         run_code = """\
 @torch.compile()
@@ -58,10 +83,16 @@ def inner(x):
 
 inner(torch.randn(2))
 """
-        self._run_full_test(run_code, "aot", "AccuracyError", isolate=False)
+        with (
+            with_device_backend("cpp", "cpu"),
+            try_patch_inductor_backend_config(
+                "cpu", "inject_relu_bug_TESTING_ONLY", "accuracy"
+            ),
+        ):
+            self._run_full_test(run_code, "aot", "AccuracyError", isolate=False)
 
     @requires_gpu
-    @patch.object(config, "joint_graph_constant_folding", False)
+    @patch.object(inductor_config, "joint_graph_constant_folding", False)
     def test_rmse_improves_over_atol(self):
         # From https://twitter.com/itsclivetime/status/1651135821045719041?s=20
         run_code = """
@@ -90,8 +121,6 @@ inner(torch.tensor(655 * 100, dtype=torch.half, device='GPU_TYPE'))
         # 655 * 100 precision, and so we report no problem
         self._run_full_test(run_code, "aot", None, isolate=False)
 
-    @inductor_config.patch("cpp.inject_relu_bug_TESTING_ONLY", "accuracy")
-    @inductor_config.patch("cpp.inject_log1p_bug_TESTING_ONLY", "accuracy")
     def test_accuracy_vs_strict_accuracy(self):
         run_code = """
 @torch.compile()
@@ -107,19 +136,28 @@ def inner(x):
 inner(torch.randn(20))
 """
 
-        # Strict accuracy gets hung up on the boolean mask difference, which
-        # will localize the error to sigmoid, even though it doesn't actually
-        # matter to the end result
-        res = self._run_full_test(
-            run_code,
-            "aot",
-            "AccuracyError",
-            isolate=False,
-            minifier_args=["--strict-accuracy"],
-        )
-        self.assertExpectedInline(
-            res.repro_module(),
-            """\
+        with (
+            with_device_backend("cpp", "cpu"),
+            try_patch_inductor_backend_config(
+                "cpu", "inject_relu_bug_TESTING_ONLY", "accuracy"
+            ),
+            try_patch_inductor_backend_config(
+                "cpu", "inject_log1p_bug_TESTING_ONLY", "accuracy"
+            ),
+        ):
+            # Strict accuracy gets hung up on the boolean mask difference, which
+            # will localize the error to sigmoid, even though it doesn't actually
+            # matter to the end result
+            res = self._run_full_test(
+                run_code,
+                "aot",
+                "AccuracyError",
+                isolate=False,
+                minifier_args=["--strict-accuracy"],
+            )
+            self.assertExpectedInline(
+                res.repro_module(),
+                """\
 class Repro(torch.nn.Module):
     def __init__(self) -> None:
         super().__init__()
@@ -127,15 +165,15 @@ class Repro(torch.nn.Module):
     def forward(self, arg0_1):
         log1p = torch.ops.aten.log1p.default(arg0_1);  arg0_1 = None
         return (log1p,)""",
-        )
+            )
 
-        # FP accuracy will refuse to promote the logical_not on the outputs,
-        # and so you'll get to the relu (unless the minifier somehow tries
-        # removing entire suffix except the log1p first!)
-        res = self._run_full_test(run_code, "aot", "AccuracyError", isolate=False)
-        self.assertExpectedInline(
-            res.repro_module(),
-            """\
+            # FP accuracy will refuse to promote the logical_not on the outputs,
+            # and so you'll get to the relu (unless the minifier somehow tries
+            # removing entire suffix except the log1p first!)
+            res = self._run_full_test(run_code, "aot", "AccuracyError", isolate=False)
+            self.assertExpectedInline(
+                res.repro_module(),
+                """\
 class Repro(torch.nn.Module):
     def __init__(self) -> None:
         super().__init__()
@@ -143,9 +181,8 @@ class Repro(torch.nn.Module):
     def forward(self, arg0_1):
         relu = torch.ops.aten.relu.default(arg0_1);  arg0_1 = None
         return (relu,)""",
-        )
+            )
 
-    @inductor_config.patch("cpp.inject_relu_bug_TESTING_ONLY", "accuracy")
     def test_offload_to_disk(self):
         # Just a smoketest, this doesn't actually test that memory
         # usage went down.  Test case is carefully constructed to hit
@@ -161,16 +198,25 @@ def inner(x):
 
 inner(torch.randn(20, 20))
 """
-        self._run_full_test(
-            run_code,
-            "aot",
-            "AccuracyError",
-            isolate=False,
-            minifier_args=["--offload-to-disk"],
-        )
+        with (
+            with_device_backend("cpp", "cpu"),
+            try_patch_inductor_backend_config(
+                "cpu", "inject_relu_bug_TESTING_ONLY", "accuracy"
+            ),
+        ):
+            self._run_full_test(
+                run_code,
+                "aot",
+                "AccuracyError",
+                isolate=False,
+                minifier_args=["--offload-to-disk"],
+            )
 
     # Test that compile errors in AOTInductor can be repro'd (both CPU and CUDA)
     def _test_aoti(self, device, expected_error):
+        if not has_cpp_wrapper_for_device(device):
+            raise unittest.SkipTest(f"{device} does not support C++ wrapper")
+
         # NB: The program is intentionally quite simple, just enough to
         # trigger one minification step, no more (dedicated minifier tests
         # should exercise minifier only)
@@ -203,6 +249,9 @@ with torch.no_grad():
 
     # Test that compile errors in AOTInductor can be repro'd (both CPU and CUDA)
     def _test_aoti_unflattened_inputs(self, device, expected_error):
+        if not has_cpp_wrapper_for_device(device):
+            raise unittest.SkipTest(f"{device} does not support C++ wrapper")
+
         # NB: The program is intentionally quite simple, just enough to
         # trigger one minification step, no more (dedicated minifier tests
         # should exercise minifier only)
@@ -257,52 +306,74 @@ def forward(self, linear_default):
         )
 
     @unittest.skipIf(IS_JETSON, "Fails on Jetson")
-    @inductor_config.patch(
-        "cpp.inject_relu_bug_TESTING_ONLY",
-        "compile_error",
-    )
-    def test_aoti_cpu_compile_error(self):
-        res = self._test_aoti("cpu", "CppCompileError")
-        self._aoti_check_relu_repro(res)
+    def test_aoti_cpp_compile_error(self):
+        with (
+            with_device_backend("cpp", "cpu"),
+            try_patch_inductor_backend_config(
+                "cpu",
+                "inject_relu_bug_TESTING_ONLY",
+                "compile_error",
+            ),
+        ):
+            res = self._test_aoti("cpu", "CppCompileError")
+            self._aoti_check_relu_repro(res)
 
     @unittest.skipIf(IS_JETSON, "Fails on Jetson")
-    @inductor_config.patch(
-        "cpp.inject_relu_bug_TESTING_ONLY",
-        "compile_error",
-    )
-    def test_aoti_cpu_compile_error_unflatten(self):
-        res = self._test_aoti_unflattened_inputs("cpu", "CppCompileError")
-        self._aoti_check_relu_repro(res)
+    def test_aoti_cpp_compile_error_unflatten(self):
+        with (
+            with_device_backend("cpp", "cpu"),
+            try_patch_inductor_backend_config(
+                "cpu",
+                "inject_relu_bug_TESTING_ONLY",
+                "compile_error",
+            ),
+        ):
+            res = self._test_aoti_unflattened_inputs("cpu", "CppCompileError")
+            self._aoti_check_relu_repro(res)
 
-    @requires_gpu
-    @inductor_config.patch(
-        "triton.inject_relu_bug_TESTING_ONLY",
-        "compile_error",
-    )
-    def test_aoti_gpu_compile_error(self):
-        res = self._test_aoti(GPU_TYPE, "SyntaxError")
-        self._aoti_check_relu_repro(res)
+    @requires_triton()
+    def test_aoti_triton_compile_error(self):
+        with (
+            with_device_backend("triton", TRITON_TYPE),
+            try_patch_inductor_backend_config(
+                TRITON_TYPE, "inject_relu_bug_TESTING_ONLY", "compile_error"
+            ),
+        ):
+            res = self._test_aoti(TRITON_TYPE, "SyntaxError")
+            self._aoti_check_relu_repro(res)
 
-    @requires_gpu
-    @inductor_config.patch(
-        "triton.inject_relu_bug_TESTING_ONLY",
-        "compile_error",
-    )
-    def test_aoti_gpu_compile_error_unflatten(self):
-        res = self._test_aoti_unflattened_inputs(GPU_TYPE, "SyntaxError")
-        self._aoti_check_relu_repro(res)
+    @requires_triton()
+    def test_aoti_triton_compile_error_unflatten(self):
+        with (
+            with_device_backend("triton", TRITON_TYPE),
+            try_patch_inductor_backend_config(
+                TRITON_TYPE, "inject_relu_bug_TESTING_ONLY", "compile_error"
+            ),
+        ):
+            res = self._test_aoti_unflattened_inputs(TRITON_TYPE, "SyntaxError")
+            self._aoti_check_relu_repro(res)
 
     @unittest.skipIf(IS_JETSON, "Fails on Jetson")
-    @inductor_config.patch("cpp.inject_relu_bug_TESTING_ONLY", "accuracy")
-    def test_aoti_cpu_accuracy_error(self):
-        res = self._test_aoti("cpu", "AccuracyError")
-        self._aoti_check_relu_repro(res)
+    def test_aoti_cpp_accuracy_error(self):
+        with (
+            with_device_backend("cpp", "cpu"),
+            try_patch_inductor_backend_config(
+                "cpu", "inject_relu_bug_TESTING_ONLY", "accuracy"
+            ),
+        ):
+            res = self._test_aoti("cpu", "AccuracyError")
+            self._aoti_check_relu_repro(res)
 
-    @requires_gpu
-    @inductor_config.patch("triton.inject_relu_bug_TESTING_ONLY", "accuracy")
-    def test_aoti_gpu_accuracy_error(self):
-        res = self._test_aoti(GPU_TYPE, "AccuracyError")
-        self._aoti_check_relu_repro(res)
+    @requires_triton()
+    def test_aoti_triton_accuracy_error(self):
+        with (
+            with_device_backend("triton", TRITON_TYPE),
+            try_patch_inductor_backend_config(
+                TRITON_TYPE, "inject_relu_bug_TESTING_ONLY", "accuracy"
+            ),
+        ):
+            res = self._test_aoti(TRITON_TYPE, "AccuracyError")
+            self._aoti_check_relu_repro(res)
 
 
 if __name__ == "__main__":
