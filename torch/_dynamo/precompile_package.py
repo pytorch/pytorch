@@ -892,6 +892,23 @@ def _object_identity(value: object) -> str:
     return f"is a {type(value).__module__}.{type(value).__qualname__}"[:160]
 
 
+# Guards that pin an input's SHAPE, and are therefore never policy-dropped even
+# when they held identically across every captured variant. Dropping a guard is
+# licensed by "it discriminated nothing", but with a single example nothing CAN
+# discriminate, and what silently disappears is the check that the runtime tensor
+# looks like the captured one at all -- so an out-of-domain shape reaches a kernel
+# specialized for a different one, which crashes on inductor and can quietly
+# miscompute on eager. Shape is the axis a caller is most likely to vary and least
+# likely to expect to be unchecked, so it is always serialized.
+_SHAPE_BEARING_GUARD_TYPES = frozenset(
+    {
+        "TENSOR_MATCH",
+        "SEQUENCE_LENGTH",
+        "SYMBOL_MATCH",
+    }
+)
+
+
 # Guards whose C++ leaf compares something no fingerprint here models: subclass
 # metadata, a DTensor placement, an opaque object's guard values, a raw
 # DispatchKeySet, or process-wide state carried entirely in the leaf. Calling
@@ -1442,6 +1459,8 @@ class PrecompileSession:
                     # SHAPE_ENV is the one that matters: it carries symbolic
                     # shape constraints that no TENSOR_MATCH repeats.
                     if entry.guard_type in _UNMODELLED_GUARD_TYPES:
+                        continue
+                    if entry.guard_type in _SHAPE_BEARING_GUARD_TYPES:
                         continue
                     if (
                         decisions[i]
