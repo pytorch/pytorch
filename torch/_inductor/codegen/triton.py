@@ -4511,6 +4511,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         if not (lower or upper):
             return
 
+        self.has_indirect_indexing = True
+        self.has_device_assert = True
+
         if not isinstance(expr, sympy.Expr):
             raise AssertionError(f"expected sympy.Expr, got {type(expr)}")
         indexing = self.indexing(expr, block_ptr=False, tma_compatibility_checker=None)
@@ -5220,6 +5223,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         exit_stack.close()
 
     def device_assert_async(self, cond, msg) -> None:
+        self.has_device_assert = True
         self.compute.writeline(f"tl.device_assert({cond}, {repr(msg)})")
 
     def guard_cooperative_store(self, name, buffer):
@@ -7145,6 +7149,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         inductor_meta = {
             "backend_hash": torch.utils._triton.triton_hash_with_backend(),
             "assert_indirect_indexing": config.assert_indirect_indexing,
+            "autotune_at_compile_time": config.triton.autotune_at_compile_time,
             "autotune_local_cache": config.autotune_local_cache,
             "autotune_pointwise": config.triton.autotune_pointwise,
             "autotune_remote_cache": config.autotune_remote_cache,
@@ -7204,6 +7209,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             "num_reduction": self.num_reduction,
             # Triton will not accept an OrderedSet for autotune_hints
             "autotune_hints": set(self.autotune_hints),  # noqa: set_linter
+            "has_indirect_indexing": getattr(self, "has_indirect_indexing", False),
+            "has_device_assert": getattr(self, "has_device_assert", False),
         }
         if self.mix_order_reduction:
             out["RSPLIT_SIZE"] = self.rsplit_size

@@ -4278,19 +4278,30 @@ class PythonWrapperCodegen(CodeGen):
             # Make sure kernel launch under a device guard because models don't always run on device 0
             # The autotune block inlines the current-device expression rather than using the
             # call()-local _coor_device_idx variable, which is not in scope here.
-            guard_idx = (
-                V.graph.device_ops.current_device_idx_expr()
-                if _coor_enabled()
-                else device.index
+            is_unsafe = self.inductor_meta and (
+                self.inductor_meta.get("has_indirect_indexing")
+                or self.inductor_meta.get("has_device_assert")
             )
-            self.kernel_autotune_calls.writeline(
-                f"with {V.graph.device_ops.device_guard(guard_idx)}:"
-            )
-            self.kernel_autotune_calls.do_indent()
-            self.kernel_autotune_calls.writeline(
-                f"{kernel_name}.run({', '.join(all_args)}, stream={stream_name})"
-            )
-            self.kernel_autotune_calls.do_unindent()
+            if is_unsafe:
+                log.info(
+                    "Skipping compile-time autotuning benchmark execution for kernel %s due to indirect indexing / device assertions.",
+                    kernel_name,
+                )
+                self.kernel_autotune_calls.writeline(f"{kernel_name}.precompile()")
+            else:
+                guard_idx = (
+                    V.graph.device_ops.current_device_idx_expr()
+                    if _coor_enabled()
+                    else device.index
+                )
+                self.kernel_autotune_calls.writeline(
+                    f"with {V.graph.device_ops.device_guard(guard_idx)}:"
+                )
+                self.kernel_autotune_calls.do_indent()
+                self.kernel_autotune_calls.writeline(
+                    f"{kernel_name}.run({', '.join(all_args)}, stream={stream_name})"
+                )
+                self.kernel_autotune_calls.do_unindent()
 
             if _per_kernel and tensor_arg_strs:
                 self.kernel_autotune_calls.writeline(

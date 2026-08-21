@@ -1076,7 +1076,10 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
 
     def is_indirect_indexing(self, index: sympy.Expr) -> bool:
         # tmpX  means indirect indexing
-        return free_symbol_is_type(index, SymT.TMP)
+        res = free_symbol_is_type(index, SymT.TMP)
+        if res:
+            self.has_indirect_indexing = True
+        return res
 
     def is_broadcasted(self, index: sympy.Expr) -> bool:
         # Note. This may not be correct when there is indirect indexing
