@@ -320,7 +320,7 @@ void nccl_reduce_scatter_offset(
   const int fixed_dim_size = static_cast<int>(col_sharded ? input.size(0) : input.size(1));
   const int unroll = 4 * 16 / static_cast<int>(input.element_size());
   const int elems_per_cta = RS_THREADS_PER_CTA * unroll;
-  const size_t window_base_offset = nccl_hdl->get_offset();
+  const size_t window_base_offset = nccl_hdl->get_window_offset();
 
   // Build the per-slot info struct.
   // For dim=1: byte_offsets encodes the column-block start within the window.

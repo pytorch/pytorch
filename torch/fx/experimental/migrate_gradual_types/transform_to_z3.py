@@ -451,7 +451,7 @@ try:
             counter: variable tracking
 
         Returns: Two sets of constraints. One with a conjunction with the
-        the conditional constraint and the other with a conjunction with
+        conditional constraint and the other with a conjunction with
         its negation.
 
         """

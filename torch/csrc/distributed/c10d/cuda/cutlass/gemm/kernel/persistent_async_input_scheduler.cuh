@@ -218,7 +218,7 @@ public:
 
   CUTLASS_HOST_DEVICE
   static bool
-  can_implement(Arguments const& args) {
+  can_implement(Arguments const& args, KernelHardwareInfo const&) {
     return args.max_swizzle_size >= 1;
   }
 
