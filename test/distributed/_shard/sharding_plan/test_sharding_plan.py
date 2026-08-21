@@ -9,13 +9,11 @@ from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._shard.sharding_plan import ShardingPlan, ShardingPlanner
 from torch.distributed._shard.sharding_spec import ChunkShardingSpec
 from torch.testing._internal.common_device_type import (
+    Capability,
     instantiate_device_type_tests,
-    onlyAccelerator,
+    requires_capabilities,
 )
-from torch.testing._internal.common_distributed import (
-    requires_accelerator_dist_backend,
-    skip_if_lt_x_gpu,
-)
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -62,11 +60,11 @@ class ChunkAllShardingPlanner(ShardingPlanner):
 class TestShardingPlan(ShardedTensorTestBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @onlyAccelerator
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
-    @requires_accelerator_dist_backend(["nccl", "xccl", "privateuse1"])
+    @requires_capabilities(Capability.distributed.backend)
     def test_sharding_plan_errors(self, device):
+        device_type = torch.device(device).type
         rowwise_sharding_spec = generate_chunk_sharding_specs_for_test(1)[0]
         sharding_plan_wrong_plan = ShardingPlan(
             plan={
@@ -76,7 +74,7 @@ class TestShardingPlan(ShardedTensorTestBase):
         )
 
         megatron_lm = SimpleMegatronLM([[17, 12], [12, 29]], rank=self.rank).to(
-            torch.device(device)
+            device_type
         )
 
         with self.assertRaisesRegex(
@@ -116,16 +114,16 @@ class TestShardingPlan(ShardedTensorTestBase):
             # shard the module with the provided sharding plan
             shard_module(megatron_lm, sharding_plan_wrong_param_path)
 
-    @onlyAccelerator
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
-    @requires_accelerator_dist_backend(["nccl", "xccl", "privateuse1"])
+    @requires_capabilities(Capability.distributed.backend)
     def test_custom_sharding_planner(self, device):
+        device_type = torch.device(device).type
         megatron_lm = SimpleMegatronLM([[17, 12], [12, 29]], rank=self.rank).to(
-            torch.device(device)
+            device_type
         )
         planner = ChunkAllShardingPlanner(
-            device_count=TEST_GPU_NUM, device_type=torch.device(device).type
+            device_count=TEST_GPU_NUM, device_type=device_type
         )
         sharding_plan = planner.build_plan(megatron_lm)
 
@@ -137,24 +135,24 @@ class TestShardingPlan(ShardedTensorTestBase):
         self.assertTrue(isinstance(megatron_lm.fc1.bias, ShardedTensor))
         self.assertTrue(isinstance(megatron_lm.fc2.bias, ShardedTensor))
 
-    @onlyAccelerator
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
-    @requires_accelerator_dist_backend(["nccl", "xccl", "privateuse1"])
+    @requires_capabilities(Capability.distributed.backend)
     def test_shard_module_sub_process_group(self, device):
+        device_type = torch.device(device).type
         megatron_lm = SimpleMegatronLM([[17, 12], [12, 29]], rank=self.rank)
         colwise_sharding_spec = ChunkShardingSpec(
             dim=0,
             placements=[
-                f"rank:2/{torch.device(device).type}:2",
-                f"rank:3/{torch.device(device).type}:3",
+                f"rank:2/{device_type}:2",
+                f"rank:3/{device_type}:3",
             ],
         )
         rowwise_sharding_spec = ChunkShardingSpec(
             dim=1,
             placements=[
-                f"rank:2/{torch.device(device).type}:2",
-                f"rank:3/{torch.device(device).type}:3",
+                f"rank:2/{device_type}:2",
+                f"rank:3/{device_type}:3",
             ],
         )
         sharding_plan = ShardingPlan(
@@ -170,7 +168,9 @@ class TestShardingPlan(ShardedTensorTestBase):
             shard_module(megatron_lm, sharding_plan, process_group=pg)
 
 
-instantiate_device_type_tests(TestShardingPlan, globals())
+instantiate_device_type_tests(
+    TestShardingPlan, globals(), except_for="cpu", allow_xpu=True
+)
 
 
 if __name__ == "__main__":
