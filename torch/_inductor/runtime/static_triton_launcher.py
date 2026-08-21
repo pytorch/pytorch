@@ -23,17 +23,17 @@ def _tma_arg_helpers():
     return make_arg, TensorDescriptor
 
 
-def expand_host_tma_descriptor(
-    cache, pos, tensor, cacheable, shape, strides, block, meta
-):
-    """Build the expanded kernel params for one host-side TMA descriptor
-    ([CUtensorMap, *shape, *strides]) and cache them per descriptor position.
+def make_host_tma_expander():
+    """Bind the TMA arg helpers once, so the launcher does not resolve them per call.
 
-    Called from the generated static launcher on the hot path. On a cache hit
-    (same base address) it returns the previously-encoded CUtensorMap, skipping
-    both the TensorDescriptor construction/validation and cuTensorMapEncodeTiled.
-    The descriptor only encodes addressing (not buffer contents), so reuse is
-    safe whenever the address/shape/strides match.
+    Returns expand_host_tma_descriptor, which builds the expanded kernel params
+    ([CUtensorMap, *shape, *strides]) for one descriptor and caches them per
+    descriptor position.
+
+    On a cache hit (same base address) it returns the previously-encoded
+    CUtensorMap, skipping both the TensorDescriptor construction/validation and
+    cuTensorMapEncodeTiled. The descriptor only encodes addressing (not buffer
+    contents), so reuse is safe whenever the address/shape/strides match.
 
     `tensor` must already be TMA-aligned; the launcher calls _host_tma_aligned
     and keeps the (possibly cloned) result alive across the launch, since the
@@ -41,16 +41,22 @@ def expand_host_tma_descriptor(
     call cloned, because the clone is transient.
     """
     make_tensordesc_arg, TensorDescriptor = _tma_arg_helpers()
-    data_ptr = tensor.data_ptr()
-    if cacheable:
-        cached = cache.get(pos)
-        if cached is not None and cached[0] == data_ptr:
-            return cached[1]
-    desc = TensorDescriptor(tensor, shape, strides, block)
-    expanded = tuple(make_tensordesc_arg(desc, meta))
-    if cacheable:
-        cache[pos] = (data_ptr, expanded)
-    return expanded
+
+    def expand_host_tma_descriptor(
+        cache, pos, tensor, cacheable, shape, strides, block, meta
+    ):
+        data_ptr = tensor.data_ptr()
+        if cacheable:
+            cached = cache.get(pos)
+            if cached is not None and cached[0] == data_ptr:
+                return cached[1]
+        desc = TensorDescriptor(tensor, shape, strides, block)
+        expanded = tuple(make_tensordesc_arg(desc, meta))
+        if cacheable:
+            cache[pos] = (data_ptr, expanded)
+        return expanded
+
+    return expand_host_tma_descriptor
 
 
 class StaticallyLaunchedTritonKernel:
