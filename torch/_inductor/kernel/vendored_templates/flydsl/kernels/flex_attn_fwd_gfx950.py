@@ -277,20 +277,20 @@ def _build_flex_attn_fwd_module_mfma16(
         MaskBuffer3: fx.Tensor,
         O: fx.Tensor,
     ):
-        tid = fx.Int32(fx.thread_idx.x)
+        tid = fx.thread_idx.x
         lane = tid % fx.Int32(64)
         wave = tid // fx.Int32(64)
         lane16 = lane % fx.Int32(16)
         lane_group = lane // fx.Int32(16)
-        batch = fx.Int32(fx.block_idx.z)
-        q_chunk = fx.Int32(fx.block_idx.y)
+        batch = fx.block_idx.z
+        q_chunk = fx.block_idx.y
         q_base = q_chunk * fx.Int32(BM)
 
         if const_expr(DECODE):
-            kv_head = fx.Int32(fx.block_idx.x)
+            kv_head = fx.block_idx.x
             head = kv_head * fx.Int32(GROUP_SIZE)
         else:
-            head = fx.Int32(fx.block_idx.x)
+            head = fx.block_idx.x
             kv_head = head // fx.Int32(GROUP_SIZE)
 
         lds = fx.SharedAllocator().allocate(FwdSmem).peek()
@@ -351,7 +351,7 @@ def _build_flex_attn_fwd_module_mfma16(
         f32_atom = fx.make_copy_atom(fx.rocdl.BufferCopy32b(), fx.Float32)
 
         def load_i32(view, index):
-            return fx.Int32(load_scalar(i32_atom, view, index, fx.Int32))
+            return load_scalar(i32_atom, view, index, fx.Int32)
 
         def store_f32(view, index, value):
             store_scalar(f32_atom, view, index, value, fx.Float32)
