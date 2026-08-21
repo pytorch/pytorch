@@ -58,6 +58,13 @@ _UNARY_TARGETS = {
     torch.ops.aten.bitwise_not.default: "not",
 }
 
+_ALPHA_TARGETS = (
+    torch.ops.aten.add.Tensor,
+    torch.ops.aten.add.Scalar,
+    torch.ops.aten.sub.Tensor,
+    torch.ops.aten.sub.Scalar,
+)
+
 
 @dataclass(frozen=True)
 class FlyDSLMaskProgram:
@@ -77,6 +84,7 @@ def lower_flydsl_mask_graph(
     *,
     max_buffers: int = 4,
 ) -> tuple[FlyDSLMaskProgram | None, str]:
+    """Lower a supported mask FX graph into FlyDSL mask bytecode."""
     nodes = list(graph_module.graph.nodes)
     placeholders = [node for node in nodes if node.op == "placeholder"]
     outputs = [node for node in nodes if node.op == "output"]
@@ -98,9 +106,7 @@ def lower_flydsl_mask_graph(
             tuple(V.graph.sizevars.guard_int(value) for value in buffer.get_stride())
             for buffer in mask_mod_other_buffers
         )
-        buffer_dtypes = tuple(
-            buffer.get_dtype() for buffer in mask_mod_other_buffers
-        )
+        buffer_dtypes = tuple(buffer.get_dtype() for buffer in mask_mod_other_buffers)
     except (AttributeError, TypeError, ValueError):
         return None, "mask_mod requires static captured-buffer shapes and strides"
 
@@ -147,9 +153,7 @@ def lower_flydsl_mask_graph(
             if key not in constant_ids:
                 constant_ids[key] = append(("const_i32", value))
             return constant_ids[key]
-        raise NotImplementedError(
-            f"mask_mod scalar constant {value!r} is unsupported"
-        )
+        raise NotImplementedError(f"mask_mod scalar constant {value!r} is unsupported")
 
     try:
         for node in nodes:
@@ -182,17 +186,22 @@ def lower_flydsl_mask_graph(
                     raise NotImplementedError(
                         "mask_mod captured-buffer index rank mismatch"
                     )
-                value_ids[node] = append(
-                    ("load_i32", buffer_index, index_values)
-                )
+                value_ids[node] = append(("load_i32", buffer_index, index_values))
                 continue
 
             binary_op = _BINARY_TARGETS.get(target)
             if binary_op is not None:
                 lhs, rhs = node.args[:2]
-                value_ids[node] = append(
-                    (binary_op, value_id(lhs), value_id(rhs))
-                )
+                rhs_id = value_id(rhs)
+                if target in _ALPHA_TARGETS:
+                    alpha = node.kwargs.get("alpha", 1)
+                    if not isinstance(alpha, int):
+                        raise NotImplementedError(
+                            "mask_mod aten.add/sub supports integer alpha only"
+                        )
+                    if alpha != 1:
+                        rhs_id = append(("mul", rhs_id, value_id(int(alpha))))
+                value_ids[node] = append((binary_op, value_id(lhs), rhs_id))
                 continue
 
             unary_op = _UNARY_TARGETS.get(target)
@@ -200,9 +209,7 @@ def lower_flydsl_mask_graph(
                 value_ids[node] = append((unary_op, value_id(node.args[0])))
                 continue
 
-            raise NotImplementedError(
-                f"mask_mod operation {target!r} is unsupported"
-            )
+            raise NotImplementedError(f"mask_mod operation {target!r} is unsupported")
 
         output_value = outputs[0].args[0]
         if isinstance(output_value, (tuple, list)):

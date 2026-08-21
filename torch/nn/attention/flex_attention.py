@@ -2088,6 +2088,40 @@ def create_block_mask(
     return block_mask
 
 
+def _create_dense_block_mask(query: Tensor, key: Tensor, block_size: int) -> BlockMask:
+    """Represent dense attention using full blocks of a fixed size."""
+    device = query.device
+    q_length = query.size(-2)
+    kv_length = key.size(-2)
+    num_q_blocks = _cdiv(q_length, block_size)
+    num_kv_blocks = _cdiv(kv_length, block_size)
+    full_kv_indices = (
+        torch.arange(num_kv_blocks, dtype=torch.int32, device=device)
+        .view(1, 1, 1, num_kv_blocks)
+        .expand(1, 1, num_q_blocks, num_kv_blocks)
+        .contiguous()
+    )
+    return BlockMask.from_kv_blocks(
+        kv_num_blocks=torch.zeros(
+            [1, 1, num_q_blocks], dtype=torch.int32, device=device
+        ),
+        kv_indices=torch.zeros(
+            [1, 1, num_q_blocks, num_kv_blocks],
+            dtype=torch.int32,
+            device=device,
+        ),
+        full_kv_num_blocks=torch.full(
+            [1, 1, num_q_blocks],
+            num_kv_blocks,
+            dtype=torch.int32,
+            device=device,
+        ),
+        full_kv_indices=full_kv_indices,
+        BLOCK_SIZE=block_size,
+        seq_lengths=(q_length, kv_length),
+    )
+
+
 def _create_empty_block_mask(query: Tensor, key: Tensor) -> BlockMask:
     r"""Default block mask for flex attention.
     If users don't specify any block sparse mask info, we create this
@@ -2482,7 +2516,14 @@ def flex_attention(
         score_mod = _identity
 
     if block_mask is None:
-        block_mask = _create_empty_block_mask(query, key)
+        flydsl_requested = (
+            kernel_options is not None and kernel_options.get("BACKEND") == "FLYDSL"
+        )
+        block_mask = (
+            _create_dense_block_mask(query, key, _DEFAULT_SPARSE_BLOCK_SIZE)
+            if flydsl_requested
+            else _create_empty_block_mask(query, key)
+        )
 
     # If BlockMask was sliced, its mask_mod is intentionally replaced with an error-raising stub.
     # This guard ensures we surface the intended error message before any shape-based checks.
