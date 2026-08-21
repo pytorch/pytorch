@@ -825,7 +825,7 @@ class ProcessGroupNCCL2MemPoolTest(MultiProcContinuousTest):
         backend = self._backend()
         pool = torch.cuda.MemPool()
         tensor = self._pool_tensor(pool)
-        with self.assertRaisesRegex(RuntimeError, "invalid argument"):
+        with self.assertRaisesRegex(RuntimeError, "Failed to register segment"):
             backend.register_mem_pool(pool, symm=True)
         # register_mem_pool records the pool before it upgrades each segment.
         # Remove the plain registration left by the expected upgrade failure.
