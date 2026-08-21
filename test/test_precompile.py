@@ -3522,14 +3522,14 @@ class TestPrecompile(TestCase):
 
         holder = _Scope()
         holder.deep = _Scope()
+        # A same-typed decoy the value-blind version reported instead.
+        holder.deep.decoy = (n for n in range(3))
         holder.deep.it = (n for n in range(3))
         state = _Scope()
         state.output_graph = _Scope()
         state.output_graph.local_scope = {"p": holder}
         state.output_graph.global_scope = {}
-        path = _offending_value_path(
-            state, TypeError("cannot pickle 'generator' object")
-        )
+        path = _offending_value_path(state, holder.deep.it)
         self.assertIn("local_scope['p'].deep.it", path)
 
     def test_offending_value_path_never_masks_the_real_error(self):
@@ -3543,7 +3543,7 @@ class TestPrecompile(TestCase):
                 raise RuntimeError("boom")
 
         self.assertEqual(
-            _offending_value_path(_Exploding(), TypeError("cannot pickle 'x' object")),
+            _offending_value_path(_Exploding(), object()),
             "",
         )
 
