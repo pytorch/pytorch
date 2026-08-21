@@ -260,6 +260,15 @@ class <lambda>(torch.nn.Module):
         res = torch.compile(fn, backend="eager", fullgraph=True)(MyEvent())
         self.assertEqual(res, torch.ones(2))
 
+    def test_stream_variable_python_type_uses_wrapped_value_type(self):
+        from torch._dynamo.variables.streams import StreamVariable
+
+        class FakeStream:
+            device = torch.device("cpu")
+
+        stream_var = StreamVariable(None, FakeStream())  # type: ignore[arg-type]
+        self.assertIs(stream_var.python_type(), FakeStream)
+
     @requires_cuda
     def test_get_current_stream_return(self):
         def fn(x, s):
