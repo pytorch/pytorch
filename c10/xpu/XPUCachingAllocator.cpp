@@ -134,13 +134,11 @@ struct ExpandableSegment {
   ExpandableSegment(
       c10::DeviceIndex device,
       std::optional<sycl::queue*> queue,
-      size_t segment_size,
-      std::vector<c10::DeviceIndex> peers)
+      size_t segment_size)
       : device_(device),
         queue_(queue),
         // 2MB for small pool, 20MB for large pool
-        segment_size_(segment_size),
-        peers_(std::move(peers)) {
+        segment_size_(segment_size) {
     const auto device_total =
         c10::xpu::get_raw_device(device)
             .get_info<sycl::info::device::global_mem_size>();
@@ -200,13 +198,11 @@ struct ExpandableSegment {
       TORCH_INTERNAL_ASSERT(!handles_.at(i));
       auto& handle = handles_.at(i);
       try {
-        // Allocate physical memory for each segment. Construct the physical_mem
-        // in-place to avoid copies.
-        auto& mem = handle.emplace(
+        handle.emplace(Handle{sycl::ext::oneapi::experimental::physical_mem(
             xpu::get_raw_device(device_),
             xpu::get_device_context(),
-            segment_size_);
-        // Map the allocated physical memory into the virtual address space.
+            segment_size_)});
+        auto& mem = handle->handle;
         mem.map(
             ptr_ + i * segment_size_,
             segment_size_,
@@ -349,11 +345,11 @@ struct ExpandableSegment {
   size_t segment_size_{0};
   // Maximum number of segments that can be allocated in this segment.
   size_t max_handles_{0};
+  struct Handle {
+    sycl::ext::oneapi::experimental::physical_mem handle;
+  };
   // Physical memory handles for the segments.
-  std::vector<std::optional<sycl::ext::oneapi::experimental::physical_mem>>
-      handles_;
-  // Peer devices on which this memory could be accessible, reserved.
-  std::vector<c10::DeviceIndex> peers_;
+  std::vector<std::optional<Handle>> handles_;
 };
 
 struct AllocParams {
@@ -523,7 +519,6 @@ class DeviceCachingAllocator {
   size_t allowed_memory_maximum = 0;
   bool set_fraction = false;
   std::vector<ExpandableSegment*> expandable_segments;
-  std::vector<c10::DeviceIndex> devices_with_peer_access; // reserved
   bool record_history = false;
   std::atomic<CreateContextFn> context_recorder_;
   RecordContext record_context_ = RecordContext::NEVER;
@@ -776,8 +771,8 @@ class DeviceCachingAllocator {
     auto segment_size = pool->is_small
         ? kSmallBuffer
         : AcceleratorAllocatorConfig::large_segment_size();
-    expandable_segments.emplace_back(new ExpandableSegment(
-        device, queue, segment_size, devices_with_peer_access));
+    expandable_segments.emplace_back(
+        new ExpandableSegment(device, queue, segment_size));
 
     ExpandableSegment* es = expandable_segments.back();
     Block* candidate = new Block(device, queue, es->size(), pool, es->ptr());
