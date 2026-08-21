@@ -3307,6 +3307,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.prologue: IndentedBuffer = IndentedBuffer()
         self.post_loop_combine: IndentedBuffer = IndentedBuffer()
         self.post_loop_store: IndentedBuffer = IndentedBuffer()
+        self.auxiliary_store: IndentedBuffer = IndentedBuffer()
         self.outside_loop_vars = OrderedSet[Any]()
         self.min_elem_per_thread = min_elem_per_thread
         self.block_ptr_id = itertools.count()
@@ -3324,6 +3325,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self._load_counts: collections.Counter[str] = collections.Counter()
         self._pdl_load_index = 0
         self._pdl_has_wait = False
+        self._auxiliary_write_index = itertools.count()
+        self._auxiliary_writes: set[ir.AuxiliaryWriteRegion] = set()
         self.op_trace: list[TritonOpTraceEntry] = []
         self.op_trace_buffer_arg_names: list[str] = []
         self._op_trace_buffer_names: dict[str, str] = {}
@@ -5219,6 +5222,52 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         exit_stack.close()
 
+    def codegen_auxiliary_write(self, write: ir.AuxiliaryWriteRegion) -> None:
+        if not config.triton.enable_fuse_auxiliary_writes:
+            raise AssertionError("auxiliary write fusion is disabled")
+        if write in self._auxiliary_writes:
+            return
+        self._auxiliary_writes.add(write)
+        output = self.args.output(write.output_name)
+        suffix = next(self._auxiliary_write_index)
+        loop_var = sympy.Symbol(
+            f"auxiliary_index_{suffix}", integer=True, nonnegative=True
+        )
+        loop_offset = f"auxiliary_offset_{suffix}"
+        block_size = 256
+        replacements = {write.index_var: loop_var}
+        numel_str = self.index_to_str(self.rename_indexing(write.numel))
+        output_index_str = self.index_to_str(
+            self.rename_indexing(sympy_subs(write.output_index, replacements))
+        )
+        mask_str = " | ".join(
+            f"({self.index_to_str(self.rename_indexing(sympy_subs(mask, replacements)))})"
+            for mask in write.masks
+        ) or "True"
+        code = IndentedBuffer()
+        code.writeline(
+            "if tl.program_id(1) == 0 and tl.program_id(2) == 0:"
+        )
+        with code.indent():
+            code.writeline(
+                f"for {loop_offset} in tl.range("
+                f"tl.program_id(0) * {block_size}, {numel_str}, "
+                f"tl.num_programs(0) * {block_size}):"
+            )
+            with code.indent():
+                code.writeline(
+                    f"{loop_var} = {loop_offset} + tl.arange(0, {block_size})"
+                )
+                code.writeline(
+                    DeferredLine(
+                        write.output_name,
+                        f"tl.store({output} + {output_index_str}, "
+                        f"{constant_repr(write.value)}, "
+                        f"({loop_var} < {numel_str}) & ({mask_str}))",
+                    )
+                )
+        self.auxiliary_store.splice(code)
+
     def device_assert_async(self, cond, msg) -> None:
         self.compute.writeline(f"tl.device_assert({cond}, {repr(msg)})")
 
@@ -6740,6 +6789,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             or self.compute
             or self.post_loop_combine
             or self.post_loop_store
+            or (
+                config.triton.enable_fuse_auxiliary_writes
+                and self.auxiliary_store
+            )
         ):
             return
 
@@ -6911,12 +6964,16 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             self.cooperative_reduction_workspace_cache.on_loop_end()
         if not self.mix_order_reduction:
             self.body.splice(self.post_loop_store)
+        if config.triton.enable_fuse_auxiliary_writes:
+            self.body.splice(self.auxiliary_store)
         self.indexing_code.clear()
         self.loads.clear()
         self.compute.clear()
         self.stores.clear()
         self.post_loop_combine.clear()
         self.post_loop_store.clear()
+        if config.triton.enable_fuse_auxiliary_writes:
+            self.auxiliary_store.clear()
 
     def kernel_benchmark_extra_args(self) -> list[str]:
         args = []
@@ -8254,6 +8311,7 @@ class TritonScheduling(SIMDScheduling):
     kernel_type: type[Any] = TritonKernel
     backend_features = OrderedSet(
         [
+            BackendFeature.AUXILIARY_WRITE_REGIONS,
             BackendFeature.FOREACH,
             BackendFeature.BUCKETIZE,
             BackendFeature.INPLACE_BUFFERS,

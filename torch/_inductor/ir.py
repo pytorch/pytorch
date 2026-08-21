@@ -1101,6 +1101,13 @@ class Loops(IRNode):
     def get_pointwise_size(self) -> Sequence[_IntLike]:
         return self.ranges
 
+    def get_auxiliary_writes(
+        self,
+        output_name: str,
+        indexer: Callable[[Sequence[Expr]], Expr],
+    ) -> tuple[AuxiliaryWriteRegion, ...]:
+        return ()
+
     @classmethod
     def create(cls, *args: Any, **kwargs: Any) -> TensorBox:
         origin_node = kwargs.pop("origin_node", None)
@@ -1208,6 +1215,16 @@ class Loops(IRNode):
         raise NotImplementedError(
             f"constant_to_device() is not implemented by {type(self)}!"
         )
+
+
+@dataclasses.dataclass(frozen=True)
+class AuxiliaryWriteRegion:
+    output_name: str
+    numel: Expr
+    index_var: Symbol
+    output_index: Expr
+    masks: tuple[Expr, ...]
+    value: bool | float | int
 
 
 def nop_loader_fn(idx: Expr | Sequence[Expr], *, dtype: torch.dtype) -> OpsValue:
@@ -5754,6 +5771,13 @@ class ComputedBuffer(OperationBuffer):
                 (args if self.get_reduction_type() else args[:1]),
                 var_ranges,
                 *args,
+                auxiliary_writes=(
+                    self.data.get_auxiliary_writes(
+                        self.get_name(), self.get_layout().as_fixed().make_indexer()
+                    )
+                    if config.triton.enable_fuse_auxiliary_writes
+                    else ()
+                ),
             )
         index_vars = []
         reduce_vars: list[Any] = []

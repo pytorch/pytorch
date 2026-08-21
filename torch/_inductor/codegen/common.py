@@ -456,6 +456,7 @@ def register_backend_for_device(
 
 
 class BackendFeature(Enum):
+    AUXILIARY_WRITE_REGIONS = auto()
     FOREACH = auto()
     BUCKETIZE = auto()
     INPLACE_BUFFERS = auto()

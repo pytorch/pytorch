@@ -11,7 +11,7 @@ import sympy
 
 import torch
 import torch._inductor.config as inductor_config
-from torch._inductor import ir
+from torch._inductor import dependencies, ir
 from torch._inductor.choices import InductorChoices
 from torch._inductor.codegen import triton_utils
 from torch._inductor.codegen.common import ArgName, CSEVariable, SizeArg, TensorArg
@@ -31,6 +31,7 @@ from torch._inductor.codegen.triton import (
 from torch._inductor.codegen.wrapper import _escape_triton_kernel_source_for_wrapper
 from torch._inductor.dtype_propagation import DtypePropagationOpsHandler, promote_types
 from torch._inductor.graph import GraphLowering
+from torch._inductor.loop_body import LoopBody
 from torch._inductor.runtime.hints import DeviceProperties
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import (
@@ -152,6 +153,70 @@ class TestCodegenTriton(InductorTestCase):
                 )
             finally:
                 kernel.range_trees = saved_range_trees
+
+    @inductor_config.patch("triton.enable_fuse_auxiliary_writes", True)
+    def test_auxiliary_write_region(self):
+        auxiliary_index = sympy.Symbol(
+            "auxiliary_index", integer=True, nonnegative=True
+        )
+        write = ir.AuxiliaryWriteRegion(
+            output_name="buf0",
+            numel=sympy.Integer(1024),
+            index_var=auxiliary_index,
+            output_index=2 * auxiliary_index,
+            masks=(auxiliary_index >= 512,),
+            value=127,
+        )
+        (iter_vars, reduce_vars), var_ranges = dependencies.index_vars_no_squeeze(
+            [sympy.Integer(4)], [], prefix="d"
+        )
+        body = LoopBody(
+            lambda index: None,
+            (iter_vars,),
+            var_ranges,
+            iter_vars,
+            reduce_vars,
+            auxiliary_writes=(write,),
+        )
+        copied_body = LoopBody(
+            body,
+            (iter_vars, reduce_vars),
+            var_ranges,
+            iter_vars,
+            reduce_vars,
+            allow_same_symbol_in_index=True,
+        )
+        self.assertEqual(copied_body.auxiliary_writes, (write,))
+
+        with V.set_kernel_handler(SimpleNamespace()):
+            with self.assertRaisesRegex(
+                AssertionError,
+                "backend does not support auxiliary write regions",
+            ):
+                body([sympy.Integer(0)])
+
+        kernel = TritonKernel(
+            {"x": sympy.Integer(4)},
+            features=SIMDKernelFeatures([], sympy.Integer(4), sympy.Integer(1)),
+            override_persistent_reduction=False,
+            override_cooperative_reduction=False,
+        )
+        with patch.object(kernel.args, "output", return_value="out_ptr0"):
+            kernel.codegen_auxiliary_write(write)
+            kernel.codegen_auxiliary_write(write)
+
+        code = kernel.auxiliary_store.getvalue()
+        self.assertEqual(code.count("for auxiliary_offset_"), 1)
+        self.assertEqual(code.count("tl.store(out_ptr0"), 1)
+        self.assertIn("127", code)
+
+        with inductor_config.patch(
+            "triton.enable_fuse_auxiliary_writes", False
+        ):
+            with self.assertRaisesRegex(
+                AssertionError, "auxiliary write fusion is disabled"
+            ):
+                kernel.codegen_auxiliary_write(write)
 
     def test_escape_triton_kernel_source_for_wrapper(self):
         source = """\
