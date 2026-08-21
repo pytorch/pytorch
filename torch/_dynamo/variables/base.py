@@ -394,14 +394,28 @@ class Method:
         return self.handler(vt, tx, args, kwargs)
 
 
+Getter: TypeAlias = Callable[
+    [Any, "InstructionTranslatorBase"], "VariableTracker | None"
+]
+
+Setter: TypeAlias = (
+    Callable[
+        [Any, "InstructionTranslatorBase", "VariableTracker | None"],
+        "VariableTracker | None",
+    ]
+    | None
+)
+
+
 @dataclasses.dataclass(slots=True)
 class GetSet:
     """`tp_getset` entry, analogous to CPython's PyGetSetDef. `getter`
     `(self, tx) -> VT | None` (None declines); `setter`
-    `(self, tx, value) -> VT | None`, None for read-only."""
+    `(self, tx, value) -> VT | None` (None declines), and a `setter` of None
+    means read-only."""
 
-    getter: Callable[..., VariableTracker | None]
-    setter: Callable[..., VariableTracker | None] | None = None
+    getter: Getter
+    setter: Setter
 
 
 @dataclasses.dataclass(slots=True)
@@ -409,36 +423,46 @@ class Member:
     """`tp_members` entry, analogous to CPython's PyMemberDef. Same shape as
     GetSet; a distinct type so members and getsets never share a class."""
 
-    getter: Callable[..., VariableTracker | None]
-    setter: Callable[..., VariableTracker | None] | None = None
-
-
-def getset_read(
-    accessor: Callable[[Any], VariableTracker],
-) -> Callable[..., VariableTracker]:
-    """Getter for a GetSet/Member whose value is an already-built VT."""
-    return lambda self, tx: accessor(self)
+    getter: Getter
+    setter: Setter
 
 
 def getset_build(
     accessor: Callable[[Any], Any],
-) -> Callable[..., VariableTracker]:
+) -> Getter:
     """Getter that builds a VT from the raw value returned by `accessor`."""
     return lambda self, tx: VariableTracker.build(tx, accessor(self))
 
 
-def unsupported_attr(name: str) -> Callable[..., VariableTracker | None]:
-    def graph_break(
-        vt: VariableTracker, tx: InstructionTranslatorBase
-    ) -> VariableTracker | None:
-        unimplemented(
-            gb_type="Unsupported attribute",
-            context=f"attr_unsupported {vt} {name}",
-            explanation=f"{type(vt).__name__} does not support attribute '{name}'",
-            hints=[*graph_break_hints.DYNAMO_BUG],
-        )
+def store_attr_mutation(
+    tx: InstructionTranslatorBase,
+    item: VariableTracker,
+    name: str,
+    value: VariableTracker | None,
+) -> None:
+    """Store an attribute mutation in the side effects tracker."""
+    se = tx.output.side_effects
+    if not se.is_attribute_mutation(item):
+        se.track_attribute_mutation_new(item)
+    value_to_store = variables.DeletedVariable() if value is None else value
+    se.store_attr(item, name, value_to_store)
 
-    return graph_break
+
+def getset_load_or_build(accessor: Callable[[Any], Any], name: str) -> Getter:
+    """Getter that builds a VT from the raw value returned by `accessor`."""
+
+    def getter(self, tx: InstructionTranslatorBase) -> VariableTracker:
+        if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
+            return tx.output.side_effects.load_attr(self, name)
+        return VariableTracker.build(tx, accessor(self))
+
+    return getter
+
+
+def getset_set(name: str) -> Callable[..., None]:
+    """Setter for a GetSet/Member whose value is an already-built VT."""
+
+    return lambda self, tx, val: store_attr_mutation(tx, self, name, val)
 
 
 # This helps users of `as_python_constant` to catch unimplemented error with
@@ -1610,7 +1634,8 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                 tx,
                 self.python_type(),
                 AttrSource(self.source, "__class__") if self.source else None,
-            )
+            ),
+            setter=None,
         ),
     }
     tp_members: dict[str, Member] = {}
