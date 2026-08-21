@@ -10,7 +10,8 @@ from torch._native.ops.topk.flydsl_impl import (
     _SUPPORTED_ARCHES,
 )
 from torch.testing import make_tensor
-from torch.testing._internal.common_cuda import skipCUDAIf, TEST_CUDA
+from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.testing._internal.common_device_type import skipCUDAIf
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -33,7 +34,8 @@ def _gate_n_bounds(k: int) -> tuple[int, int]:
     if k in _REGISTER_KS:
         return _REGISTER_N_BOUNDS
     n_range = _radix_n_range(k)
-    assert n_range is not None, f"missing radix gate for K={k}"
+    if n_range is None:
+        raise AssertionError(f"missing radix gate for K={k}")
     return n_range
 
 
@@ -53,7 +55,8 @@ def _expected_kernel(k: int, n: int) -> str:
     from torch._native.ops.topk.flydsl_impl import _kernel_for
 
     kernel = _kernel_for(k, n)
-    assert kernel is not None, f"K={k} N={n} is outside the FlyDSL gate"
+    if kernel is None:
+        raise AssertionError(f"K={k} N={n} is outside the FlyDSL gate")
     return kernel
 
 

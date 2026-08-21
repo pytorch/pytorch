@@ -124,8 +124,8 @@ def _build_radix_select_topk_module(n: int, k: int, deterministic: bool, arch: s
     num_warps = block_threads // warp_size
     tile = block_threads * _VEC
     vec_iters = n // tile
-    vec_tail_start = vec_iters * tile
-    scalar_tail_iters = (n - vec_tail_start + block_threads - 1) // block_threads
+    vec_end = vec_iters * tile
+    scalar_tail_iters = (n - vec_end + block_threads - 1) // block_threads
 
     @flyc.kernel(known_block_size=[block_threads, 1, 1])
     def radix_select_topk_kernel(
@@ -253,7 +253,7 @@ def _build_radix_select_topk_module(n: int, k: int, deterministic: bool, arch: s
                         sign_bit_xor_val,
                     )
             for step in range_constexpr(scalar_tail_iters):
-                col = vec_tail_start + step * block_threads + tid
+                col = vec_end + step * block_threads + tid
                 if col < n:
                     accumulate_radix_byte_hist(
                         _f32_to_ord(row_in[col]),
@@ -342,7 +342,7 @@ def _build_radix_select_topk_module(n: int, k: int, deterministic: bool, arch: s
 
             # --- Scalar tail ---
             for step in range_constexpr(scalar_tail_iters):
-                col = vec_tail_start + step * block_threads + tid
+                col = vec_end + step * block_threads + tid
                 valid = col < n
                 packed_local = 0
                 if valid:
@@ -400,7 +400,7 @@ def _build_radix_select_topk_module(n: int, k: int, deterministic: bool, arch: s
                     idx = fx.Int32(base + vi)
                     gather_candidate(rvals[vi], idx, s_vals, s_idxs)
             for step in range_constexpr(scalar_tail_iters):
-                col = vec_tail_start + step * block_threads + tid
+                col = vec_end + step * block_threads + tid
                 if col < n:
                     gather_candidate(row_in[col], fx.Int32(col), s_vals, s_idxs)
 
