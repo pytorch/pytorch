@@ -187,11 +187,6 @@ class TestOrigami(TestCase):
             "triton.native_matmul": False,
         }
 
-    # TODO(AIPYTORCH-1024): Re-enable after resolving the ROCm 10 SIGSEGV.
-    @unittest.skipIf(
-        (torch.version.rocm or "0").split(".")[0] == "10",
-        "ROCm 10: known failure",
-    )
     def test_origami_respects_gemm_search_space(self):
         for op_name in ("mm", "addmm", "bmm"):
             with self.subTest(op_name=op_name, search_space="DEFAULT"):
@@ -210,11 +205,6 @@ class TestOrigami(TestCase):
                 )
                 self.assertEqual(exhaustive_case["topk_calls"], 0)
 
-    # TODO(AIPYTORCH-1024): Re-enable after resolving the ROCm 10 SIGSEGV.
-    @unittest.skipIf(
-        (torch.version.rocm or "0").split(".")[0] == "10",
-        "ROCm 10: known failure",
-    )
     def test_origami_reduces_compile_work_vs_regular_max_autotune(self):
         """Test that origami reduces compile work (GPU benchmarking calls) vs regular max_autotune.
 
@@ -306,11 +296,6 @@ class TestOrigami(TestCase):
                             max_autotune_runtime_ms * PERF_SLOWDOWN_TOLERANCE,
                         )
 
-    # TODO(AIPYTORCH-1024): Re-enable after resolving the ROCm 10 SIGSEGV.
-    @unittest.skipIf(
-        (torch.version.rocm or "0").split(".")[0] == "10",
-        "ROCm 10: known failure",
-    )
     def test_origami_topk_edge_cases(self):
         """Test edge cases for origami_topk parameter.
 
@@ -416,11 +401,6 @@ class TestOrigami(TestCase):
                 except Exception as e:
                     self.fail(f"Compilation failed with valid topk={topk_val}: {e}")
 
-    # TODO(AIPYTORCH-1024): Re-enable after resolving the ROCm 10 SIGSEGV.
-    @unittest.skipIf(
-        (torch.version.rocm or "0").split(".")[0] == "10",
-        "ROCm 10: known failure",
-    )
     def test_origami_configs_use_device_specific_values(self):
         """Verify that origami configs use architecture-specific num_stages and num_warps.
 
