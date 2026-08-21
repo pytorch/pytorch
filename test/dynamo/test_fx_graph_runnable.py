@@ -15,10 +15,8 @@ from torch._inductor.compile_fx import compile_fx_inner
 from torch._inductor.test_case import TestCase
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_device_type import (
-    Capability,
     instantiate_device_type_tests,
     onlyAccelerator,
-    requires_capabilities,
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -639,7 +637,7 @@ class FxGraphRunnableTest(FxGraphRunnableTestBase, TestCase):
 class FxGraphRunnableTritonCudaTest(FxGraphRunnableTestBase, TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipUnless(has_triton(), "Triton not available")
     @onlyAccelerator
     def test_user_defined_triton_kernel_autotune(self, device):
         def add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
@@ -660,7 +658,7 @@ class FxGraphRunnableTritonCudaTest(FxGraphRunnableTestBase, TestCase):
         torch.compile(add)(x, y)  # noqa: UNSPECIFIED_BACKEND
         self._exec_and_verify_payload()
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipUnless(has_triton(), "Triton not available")
     @onlyAccelerator
     def test_user_defined_triton_kernel(self, device):
         def add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
@@ -692,7 +690,7 @@ class FxGraphRunnableTritonCudaTest(FxGraphRunnableTestBase, TestCase):
         torch.compile(subtract_nested)(x, y)  # noqa: UNSPECIFIED_BACKEND
         self._exec_and_verify_payload()
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipUnless(has_triton(), "Triton not available")
     @onlyAccelerator
     def test_nested_and_autotuned_same_kernel(self, device):
         def f(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
@@ -715,7 +713,7 @@ class FxGraphRunnableTritonCudaTest(FxGraphRunnableTestBase, TestCase):
         torch.compile(f)(x, y)  # noqa: UNSPECIFIED_BACKEND
         self._exec_and_verify_payload()
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipUnless(has_triton(), "Triton not available")
     @onlyAccelerator
     def test_multi_kernel_nesting_and_global_constexpr(self, device):
         def f(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
