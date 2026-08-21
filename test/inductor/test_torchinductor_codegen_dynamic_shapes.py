@@ -8,6 +8,7 @@ import torch
 from torch._inductor import config
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_LINUX,
     MI350_ARCH,
     skipIfRocmArch,
@@ -536,6 +537,7 @@ class DynamicShapesCodegenTestCase(TestCase):
 if HAS_CPU:
 
     class DynamicShapesCodegenCpuTests(TestCase):
+        hw_classification = HardwareClassification.CPU
         maxDiff = None
         device = "cpu"
 
@@ -656,6 +658,7 @@ if HAS_CPU:
 if HAS_GPU and not TEST_WITH_ASAN:
 
     class DynamicShapesCodegenGPUTests(DynamicShapesCodegenTestCase):
+        hw_classification = HardwareClassification.CUDA
         maxDiff = None
         device = GPU_TYPE
 
