@@ -1041,7 +1041,7 @@ class _StridedShard(torch._C._distributed.StridedShard):
                 f"Sharding dim {self.dim} greater than tensor ndim {tensor.ndim}"
             )
 
-        # Essentially _StridedShard express the right-to-left sharding in the
+        # Essentially _StridedShard expresses the right-to-left sharding in the
         # reversed order. Here we perform first_split as the virtual "right" sharding,
         # and then second_split as the virtual "left" sharding, and finally assemble
         # results in the transposed left-first order.
