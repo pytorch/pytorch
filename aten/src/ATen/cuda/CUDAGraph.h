@@ -91,6 +91,7 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   void replay();
   void reset();
   MempoolId_t pool();
+  MempoolId_t pool() const;
   std::vector<MempoolId_t> pools();
   void retain_pool(MempoolId_t pool);
   void enable_debug_mode();
