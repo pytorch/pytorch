@@ -277,6 +277,28 @@ class NoChangeTestCase(TestCase):
         t = torch.randn(2, 2)
         check(f, t, 0, check_val=False)
 
+    def test_randn_like(self):
+        # aten.randn_like carries nondeterministic_seeded tag but is absent from
+        # rand_ops; the CSE guard must not merge the two distinct draws.
+        def f(x):
+            a = torch.randn_like(x)
+            b = torch.randn_like(x)
+            return a + b
+
+        t = torch.randn(2, 2)
+        check(f, t, 0, check_val=False)
+
+    def test_normal_functional(self):
+        # aten.normal_functional is the functional decomposition target for
+        # random ops and carries nondeterministic_seeded; must not be CSE'd.
+        def f(x):
+            a = torch.ops.aten.normal_functional(x)
+            b = torch.ops.aten.normal_functional(x)
+            return a + b
+
+        t = torch.randn(2, 2)
+        check(f, t, 0, check_val=False)
+
     def test_hash_with_numbers(self):
         # Test to repro issue with fx_graph_cse when
         # hash((primals_2, 1.0)) == hash((primals_2, 1))
