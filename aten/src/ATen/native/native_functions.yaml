@@ -11419,6 +11419,7 @@
   dispatch:
     CompositeExplicitAutograd: foreach_tensor_powsum_slow
     CUDA: foreach_tensor_powsum_cuda
+    XPU: foreach_tensor_powsum_xpu
   autogen: _foreach_powsum.Scalar_out
 
 - func: _foreach_pow.List(Tensor[] self, Tensor[] exponent) -> Tensor[]
@@ -14568,7 +14569,7 @@
   variants: function
   dispatch:
     CompositeExplicitAutograd: linalg__powsum_slow
-    CPU, CUDA: linalg__powsum
+    CPU, CUDA, XPU: linalg__powsum
   tags: reduction
 
 - func: linalg_matrix_norm(Tensor self, Scalar ord, int[] dim=[-2,-1], bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
