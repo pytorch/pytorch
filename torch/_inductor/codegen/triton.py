@@ -8262,6 +8262,7 @@ class TritonScheduling(SIMDScheduling):
             BackendFeature.SORT,
             BackendFeature.TRITON_TEMPLATES,
             BackendFeature.TUPLE_REDUCTION,
+            BackendFeature.RUNTIME_DEVICE_ASSERT,
         ]
     )
 
