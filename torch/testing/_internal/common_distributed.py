@@ -40,6 +40,7 @@ from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import (
     FILE_SCHEMA,
     find_free_port,
+    getRocmVersion,
     IS_SANDCASTLE,
     LazyVal,
     retry_on_connect_failures,
@@ -629,14 +630,8 @@ def skip_if_rocm_ver_lessthan_multiprocess(version=None):
     def decorator(func):
         reason = None
         if TEST_WITH_ROCM:
-            rocm_version = str(torch.version.hip)
-            rocm_version = rocm_version.split("-", maxsplit=1)[0]  # ignore git sha
-            rocm_version_tuple = tuple(int(x) for x in rocm_version.split("."))
-            if (
-                rocm_version_tuple is None
-                or version is None
-                or rocm_version_tuple < tuple(version)
-            ):
+            rocm_version_tuple = getRocmVersion()
+            if version is None or rocm_version_tuple < tuple(version):
                 reason = f"skip_if_rocm_ver_lessthan_multiprocess: ROCm {rocm_version_tuple} is available but {version} required"
 
         return unittest.skipIf(reason is not None, reason)(func)
@@ -650,9 +645,7 @@ def skip_if_rocm_ver_atleast_multiprocess(version=None):
     def decorator(func):
         reason = None
         if TEST_WITH_ROCM:
-            rocm_version = str(torch.version.hip)
-            rocm_version = rocm_version.split("-", maxsplit=1)[0]  # ignore git sha
-            rocm_version_tuple = tuple(int(x) for x in rocm_version.split("."))
+            rocm_version_tuple = getRocmVersion()
             if version is not None and rocm_version_tuple >= tuple(version):
                 reason = f"skip_if_rocm_ver_atleast_multiprocess: known failure on ROCm {rocm_version_tuple} (>= {version})"
 
