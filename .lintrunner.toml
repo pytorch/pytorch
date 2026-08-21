@@ -586,11 +586,22 @@ include_patterns = [
     '**/*.h',
 ]
 exclude_patterns = [
-    # Vendored upstream code - permanent, not debt.
+    # Permanent, not burn-down debt: we track an upstream shape here, so raw
+    # throws are upstream's call to make, not ours. Nothing may be added here
+    # that we maintain ourselves. order_preserving_flat_hash_map.h is permanent
+    # for a second, independent reason too: at()'s std::out_of_range is caught by
+    # name and turned into KeyError in torch/csrc/jit/python/python_dict.cpp, so
+    # converting it would silently break TorchScript dicts.
+    'c10/util/flat_hash_map.h',  # skarupke/flat_hash_map
+    'c10/util/order_preserving_flat_hash_map.h',  # a fork of the same
     'third_party/concurrentqueue/**',
+    # Converting these two would change the Python-visible exception type, so
+    # they need their own PR and their own discussion rather than a mechanical
+    # sweep. Nothing may be added here without that same argument.
+    'c10/util/SmallVector.cpp',  # length_error -> ValueError, bad_alloc -> MemoryError
+    'c10/util/StringUtil.cpp',  # std::range_error -> ValueError
     # Pre-existing violations; burn down over time. Nothing may be added here.
     'aten/src/**',
-    'c10/util/**',
     'test/cpp/**',
     'test/cpp_extensions/**',
     'torch/csrc/distributed/**',
