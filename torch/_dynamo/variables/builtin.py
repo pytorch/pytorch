@@ -2802,6 +2802,11 @@ class BuiltinVariable(BaseBuiltinVariable):
                 return VariableTracker.build(tx, value, source)
         if ConstantVariable.is_literal(value):
             return VariableTracker.build(tx, value, source)
+        if isinstance(value, types.MappingProxyType):
+            # e.g. `type.__dict__` on a builtin class. Model it as a real
+            # MappingProxyVariable so iteration / dict.update work, instead of a
+            # deferred GetAttrVariable.
+            return VariableTracker.build(tx, value, source)
         return variables.GetAttrVariable(self, name, py_type=type(value), source=source)
 
     def call_delattr(
