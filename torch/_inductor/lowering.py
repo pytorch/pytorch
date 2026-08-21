@@ -1031,6 +1031,14 @@ def _foreach_map(subgraph, *args, **kwargs):
     inputs = args
 
     gm = subgraph.graph_module
+    from .kernel.muon import match_muon_foreach
+
+    muon_match = match_muon_foreach(gm)
+    if muon_match is not None:
+        muon_options, input_positions = muon_match
+        return fallback_handler(
+            torch.ops.inductor.grouped_muon.default, add_to_fallback_set=False
+        )([inputs[index] for index in input_positions], *muon_options)
     pw_subgraph = PointwiseSubgraphLowering(gm, root_graph_lowering=V.graph)
     with V.set_graph_handler(pw_subgraph):  # type: ignore[arg-type]
         pw_subgraph.run(*inputs)
