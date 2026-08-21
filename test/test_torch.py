@@ -6831,6 +6831,14 @@ def disable_gc():
 class TestTorch(TestCase):
     exact_dtype = True
 
+    def test_cpu_release_unused_memory(self):
+        tensor = torch.arange(8)
+
+        supported = torch.cpu.release_unused_memory()
+        self.assertIsInstance(supported, bool)
+        self.assertEqual(tensor, torch.arange(8))
+        self.assertEqual(torch.cpu.release_unused_memory(), supported)
+
     def test_dir(self):
         dir(torch)
 

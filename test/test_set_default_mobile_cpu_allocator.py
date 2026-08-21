@@ -3,6 +3,7 @@
 import torch
 from torch.testing._internal.common_utils import TestCase, run_tests
 
+
 class TestSetDefaultMobileCPUAllocator(TestCase):
     def test_no_exception(self):
         torch._C._set_default_mobile_cpu_allocator()
@@ -25,5 +26,14 @@ class TestSetDefaultMobileCPUAllocator(TestCase):
             torch._C._unset_default_mobile_cpu_allocator()
             torch._C._unset_default_mobile_cpu_allocator()
 
-if __name__ == '__main__':
+    def test_release_unused_memory(self):
+        expected = torch.cpu.release_unused_memory()
+        torch._C._set_default_mobile_cpu_allocator()
+        try:
+            self.assertEqual(torch.cpu.release_unused_memory(), expected)
+        finally:
+            torch._C._unset_default_mobile_cpu_allocator()
+
+
+if __name__ == "__main__":
     run_tests()
