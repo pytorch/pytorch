@@ -4,7 +4,9 @@
 #include <torch/headeronly/macros/Macros.h>
 
 #include <sstream>
+#include <stdexcept>
 #include <string>
+#include <utility>
 
 namespace c10 {
 // On nvcc, C10_UNLIKELY thwarts missing return statement analysis.  In cases
