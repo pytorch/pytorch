@@ -293,42 +293,6 @@ class TestDraftExport(TestCase):
                 ):
                     torch.ops.mylib.foo8(*inp)
 
-    def test_missing_meta_kernel_guard(self):
-        with torch.library._scoped_library("mylib", "FRAGMENT"):
-
-            @torch.library.custom_op("mylib::foo4", mutates_args={})
-            def foo4_impl(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
-                return a + b
-
-            class M(torch.nn.Module):
-                def forward(self, a, b):
-                    res1 = torch.ops.mylib.foo4(a, b)
-                    return res1
-
-            inp = (
-                torch.ones(3, 4),
-                torch.ones(3, 4),
-            )
-
-            ep = draft_export(
-                M(),
-                inp,
-                dynamic_shapes={
-                    "a": {0: Dim.DYNAMIC, 1: Dim.DYNAMIC},
-                    "b": {0: Dim.DYNAMIC, 1: Dim.DYNAMIC},
-                },
-            )
-
-            inp = (torch.randn(2, 3), torch.randn(2, 3))
-            self.assertEqual(ep.module()(*inp), M()(*inp))
-            m = ep.module()
-            with self.assertRaisesRegex(RuntimeError, "Tensor dtype mismatch!"):
-                bad_dtype_inps = (
-                    torch.randn(2, 3, dtype=torch.float16),
-                    torch.randn(2, 3, dtype=torch.float16),
-                )
-                m(*bad_dtype_inps)
-
     def test_fake_infer_dense_in_memory_check(self):
         with torch.library._scoped_library("mylib", "FRAGMENT"):
 
@@ -768,17 +732,15 @@ class TestDraftExport(TestCase):
             )
 
 
-class TestDraftExportMemory(TestCase):
+class TestDraftExportDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @unittest.skipIf(
+        not torch.accelerator.is_available()
+        or torch.accelerator.get_memory_info()[1] < 2**28,
+        "Requires 16 MB accelerator memory to pass the test; setting it higher to catch violations",
+    )
     def test_memory_usage(self, device):
-        _, total_memory = torch.accelerator.get_memory_info(device)
-        if total_memory < 2**28:
-            self.skipTest(
-                "Requires 16 MB accelerator memory to pass the test; "
-                "setting it higher to catch violations"
-            )
-
         # This used to OOM
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -796,17 +758,13 @@ class TestDraftExportMemory(TestCase):
 
         # draft export peak memory usage
         draft_export(Foo(), (x,), strict=False)
-        peak_mem_usage = torch.accelerator.max_memory_allocated(device)
+        peak_mem_usage = torch.accelerator.memory_stats()["allocated_bytes.all.peak"]
 
         # right now it's actually exactly 4x;
         # I guess original tensor, 2 tensors per add op, 1 for clone stored in node.meta["val"]
         self.assertTrue((peak_mem_usage - base_usage) <= (x_usage - base_usage) * 4.0)
 
-
-class TestDraftExportDeviceGuard(TestCase):
-    hw_classification = HardwareClassification.ACCELERATOR
-
-    def test_missing_meta_kernel_device_mismatch(self, device):
+    def test_missing_meta_kernel_guard(self, device):
         with torch.library._scoped_library("mylib", "FRAGMENT"):
 
             @torch.library.custom_op("mylib::foo4", mutates_args={})
@@ -818,14 +776,22 @@ class TestDraftExportDeviceGuard(TestCase):
                     res1 = torch.ops.mylib.foo4(a, b)
                     return res1
 
+            inp = (
+                torch.ones(3, 4),
+                torch.ones(3, 4),
+            )
+
             ep = draft_export(
                 M(),
-                (torch.ones(3, 4), torch.ones(3, 4)),
+                inp,
                 dynamic_shapes={
                     "a": {0: Dim.DYNAMIC, 1: Dim.DYNAMIC},
                     "b": {0: Dim.DYNAMIC, 1: Dim.DYNAMIC},
                 },
             )
+
+            inp = (torch.randn(2, 3), torch.randn(2, 3))
+            self.assertEqual(ep.module()(*inp), M()(*inp))
             m = ep.module()
             with self.assertRaisesRegex(RuntimeError, "Tensor device mismatch!"):
                 bad_device_inps = (
@@ -834,11 +800,17 @@ class TestDraftExportDeviceGuard(TestCase):
                 )
                 m(*bad_device_inps)
 
+            with self.assertRaisesRegex(RuntimeError, "Tensor dtype mismatch!"):
+                bad_dtype_inps = (
+                    torch.randn(2, 3, dtype=torch.float16),
+                    torch.randn(2, 3, dtype=torch.float16),
+                )
+                m(*bad_dtype_inps)
+
 
 instantiate_device_type_tests(
-    TestDraftExportMemory, globals(), except_for="cpu", allow_xpu=True
+    TestDraftExportDevice, globals(), except_for="cpu", allow_xpu=True
 )
-instantiate_device_type_tests(TestDraftExportDeviceGuard, globals(), except_for="cpu")
 
 
 if __name__ == "__main__":
