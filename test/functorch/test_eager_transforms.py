@@ -5,6 +5,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+import contextlib
 import copy
 import math
 import os
@@ -78,6 +79,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
+from torch.utils.checkpoint import checkpoint
 
 
 USE_TORCHVISION = False
@@ -3874,53 +3876,149 @@ class TestComposability(TestCase):
         with self.assertRaisesRegex(RuntimeError, "must override the setup_context"):
             transform(MySin.apply)(x)
 
-    # Some of these pass, some of these don't
+    _SAVED_TENSOR_HOOKS_EAGER_ONLY = (
+        "saved-tensor hooks (save_on_cpu) with torch.func are eager only; "
+        "under torch.compile they are handled by AOTAutograd"
+    )
+
     @parametrize(
         "transform",
         [
             "grad",
             "jacrev",
             "grad_and_value",
-            "hessian",
+            "vjp",
         ],
     )
-    def test_transforms_dont_support_saved_tensor_hooks(self, device, transform):
+    @skipIfTorchDynamo(_SAVED_TENSOR_HOOKS_EAGER_ONLY)
+    def test_first_order_transforms_support_saved_tensor_hooks(self, device, transform):
+        # A single first-order reverse-mode transform supports saved-tensor
+        # hooks (e.g. save_on_cpu). Results must match the same transform with
+        # no offloading, whether the hook is set inside the function or as an
+        # enclosing context.
         def f(x):
-            return torch.sin(x).sum()
+            return (torch.sin(x) * x).sum()
 
-        def g(x):
+        def f_offload(x):
             with torch.autograd.graph.save_on_cpu():
-                return f(x)
+                return (torch.sin(x) * x).sum()
 
         x = torch.randn(3, device=device)
 
-        if transform == "functionalize":
-            transform = functorch.experimental.functionalize
-        else:
-            transform = getattr(functorch, transform)
-        with self.assertRaisesRegex(RuntimeError, "saved tensor hooks"):
-            with torch.autograd.graph.save_on_cpu():
-                transform(f)(x)
+        def apply(fn):
+            if transform == "vjp":
+                value, vjp_fn = vjp(fn, x)
+                return value, vjp_fn(torch.ones((), device=device))[0]
+            return getattr(functorch, transform)(fn)(x)
 
-        with self.assertRaisesRegex(RuntimeError, "saved tensor hooks"):
-            transform(g)(x)
+        expected = apply(f)
+        self.assertEqual(apply(f_offload), expected)
+        with torch.autograd.graph.save_on_cpu():
+            self.assertEqual(apply(f), expected)
 
-    def test_vjp_doesnt_support_saved_tensor_hooks(self, device):
+    @skipIfTorchDynamo(_SAVED_TENSOR_HOOKS_EAGER_ONLY)
+    def test_higher_order_transforms_dont_support_saved_tensor_hooks(self, device):
+        # Nested / higher-order differentiation over a saved-tensor-hooks region
+        # must raise rather than silently miscompute: the offload device
+        # round-trip severs the higher-order autograd graph.
         def f(x):
-            return torch.sin(x).sum()
+            with torch.autograd.graph.save_on_cpu():
+                return (torch.sin(x) * x).sum()
 
         def g(x):
+            return (torch.sin(x) * x).sum()
+
+        def enclosed(thunk):
             with torch.autograd.graph.save_on_cpu():
-                return f(x)
+                return thunk()
 
         x = torch.randn(3, device=device)
-        with self.assertRaisesRegex(RuntimeError, "saved tensor hooks"):
-            with torch.autograd.graph.save_on_cpu():
-                vjp(f, x)
+        t = torch.randn(3, device=device)
 
-        with self.assertRaisesRegex(RuntimeError, "saved tensor hooks"):
-            vjp(g, x)
+        # The hooks region may be inside the differentiated function or an
+        # enclosing context around the higher-order call; both must raise.
+        higher_order = [
+            lambda: grad(lambda z: grad(f)(z).sum())(x),
+            lambda: jacrev(jacrev(f))(x),
+            lambda: hessian(f)(x),
+            lambda: jvp(grad(f), (x,), (t,)),
+            lambda: grad(lambda z: vmap(grad(f))(z).sum())(x),
+            lambda: enclosed(lambda: grad(lambda z: grad(g)(z).sum())(x)),
+            lambda: enclosed(lambda: hessian(g)(x)),
+        ]
+        for call in higher_order:
+            with self.assertRaisesRegex(RuntimeError, "saved tensor hooks"):
+                call()
 
+    @skipIfTorchDynamo(_SAVED_TENSOR_HOOKS_EAGER_ONLY)
+    def test_failed_compile_does_not_leak_saved_tensor_hook_state(self, device):
+        def f(x):
+            return checkpoint(
+                lambda x: (torch.sin(x) * x).sum(), x, use_reentrant=False
+            )
+
+        x = torch.randn(5, 3, device=device)
+        expected = vmap(grad(lambda x: (torch.sin(x) * x).sum()))(x)
+        compiled = torch.compile(vmap(grad(f)), backend="aot_eager", fullgraph=True)
+
+        with self.assertRaisesRegex(RuntimeError, "saved tensor hooks.*torch.compile"):
+            compiled(x)
+
+        self.assertEqual(vmap(grad(f))(x), expected)
+
+    @parametrize(
+        "pin_memory",
+        [subtest(False, name="nopin"), subtest(True, name="pin")],
+    )
+    @skipIfTorchDynamo(_SAVED_TENSOR_HOOKS_EAGER_ONLY)
+    def test_grad_save_on_cpu_matches_no_offload(self, device, pin_memory):
+        if pin_memory and self.device_type != "cuda":
+            self.skipTest("pin_memory offloading requires CUDA")
+
+        def f(x, offload):
+            ctx = (
+                torch.autograd.graph.save_on_cpu(pin_memory=pin_memory)
+                if offload
+                else contextlib.nullcontext()
+            )
+            with ctx:
+                y = (x * x).sin()
+                z = (y * y).cos()
+            return (z * x).sum()
+
+        x = torch.randn(16, device=device, dtype=torch.double)
+        self.assertEqual(
+            grad(partial(f, offload=True))(x),
+            grad(partial(f, offload=False))(x),
+        )
+
+    @parametrize(
+        "pin_memory",
+        [subtest(False, name="nopin"), subtest(True, name="pin")],
+    )
+    @skipIfTorchDynamo(_SAVED_TENSOR_HOOKS_EAGER_ONLY)
+    def test_vmap_grad_save_on_cpu_matches_no_offload(self, device, pin_memory):
+        if pin_memory and self.device_type != "cuda":
+            self.skipTest("pin_memory offloading requires CUDA")
+
+        def f(x, offload):
+            ctx = (
+                torch.autograd.graph.save_on_cpu(pin_memory=pin_memory)
+                if offload
+                else contextlib.nullcontext()
+            )
+            with ctx:
+                y = (x * x).sin()
+                z = (y * y).cos()
+            return (z * x).sum()
+
+        x = torch.randn(5, 16, device=device, dtype=torch.double)
+        self.assertEqual(
+            vmap(grad(partial(f, offload=True)))(x),
+            vmap(grad(partial(f, offload=False)))(x),
+        )
+
+    @skipIfTorchDynamo(_SAVED_TENSOR_HOOKS_EAGER_ONLY)
     def test_jvp_supports_saved_tensor_hooks(self, device):
         def f(x):
             return torch.sin(x).sum()
