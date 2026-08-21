@@ -4346,12 +4346,15 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             if (
                 has_triton_stable_tma_api()
                 and config.triton.enable_host_side_tma
-                and not indexing.can_lift
                 and indexing.constant_offset == 0
                 and var not in self._host_tma_non_materializable
                 and self._is_host_tma_materializable(indexing, V.graph.get_dtype(name))
             ):
-                if var not in self.host_tma_descriptor_args:
+                if var in self.host_tma_descriptor_args:
+                    # A second consumer of an arg the template already described
+                    # would silently reuse the template's block shape.
+                    self._reject_if_template_host_tma(var)
+                else:
                     self.host_tma_descriptor_args[var] = indexing
                 return var, other
             # A non-zero constant offset can't be host-TMA'd: mark it
@@ -4359,7 +4362,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             elif (
                 has_triton_stable_tma_api()
                 and config.triton.enable_host_side_tma
-                and not indexing.can_lift
                 and indexing.constant_offset != 0
             ):
                 self._host_tma_non_materializable.add(var)
@@ -7100,17 +7102,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             out["host_tma_descriptor_args"] = self.resolved_host_tma_descriptor_args()
         return out
 
-    def resolved_host_tma_descriptor_args(self) -> dict[str, Any]:
-        """Resolve host_tma_descriptor_args into the launcher's dim format.
-
-        Block shapes may name an autotuned kernel arg (XBLOCK) or a block fixed
-        in the kernel body, so they resolve differently from tensor dims. Shared
-        with TritonTemplateKernel, which builds its own inductor_meta.
-        """
-        _, _, signature, _ = self.args.python_argdefs()
-        sig_arg_names = OrderedSet(
-            arg.name for arg in signature if hasattr(arg, "name")
-        )
+    def body_fixed_blocks(self, sig_arg_names: OrderedSet[str]) -> dict[str, int]:
+        """Blocks defined in the kernel body rather than passed as a kernel arg."""
         fixed_blocks: dict[str, int] = {}
         if self.persistent_reduction:
             for rt in self.range_trees:
@@ -7124,6 +7117,20 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                             fixed_blocks[block_name] = val
                         except (TypeError, ValueError):
                             pass
+        return fixed_blocks
+
+    def resolved_host_tma_descriptor_args(self) -> dict[str, Any]:
+        """Resolve host_tma_descriptor_args into the launcher's dim format.
+
+        Block shapes may name an autotuned kernel arg (XBLOCK) or a block fixed
+        in the kernel body, so they resolve differently from tensor dims. Shared
+        with TritonTemplateKernel, which builds its own inductor_meta.
+        """
+        _, _, signature, _ = self.args.python_argdefs()
+        sig_arg_names = OrderedSet(
+            arg.name for arg in signature if hasattr(arg, "name")
+        )
+        fixed_blocks = self.body_fixed_blocks(sig_arg_names)
 
         def _resolve_block_dim(s):
             s_str = str(s)
