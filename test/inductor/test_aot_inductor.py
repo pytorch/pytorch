@@ -5274,6 +5274,37 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
+    def test_proxy_executor_default_scalar_kwarg(self):
+        # An op with a defaulted Scalar kwarg (sub.Tensor's `alpha`) routed through the AOT
+        # ProxyExecutor under all-fallback. serialize_inputs omits the unprovided default,
+        # and the host prefills it statically, so codegen must not count it in the runtime
+        # int array -- otherwise num_ints disagrees with the host and the runtime raises
+        # "Mismatch between ints consumed and num_ints".
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.ops.aten.sub.Tensor(x, y)
+
+        example_args = (
+            torch.randn(64, device=self.device),
+            torch.randn(64, device=self.device),
+        )
+        self.check_model(M(), example_args, options={"fallback_by_default": True})
+
+    def test_proxy_executor_provided_scalar_kwarg(self):
+        # The other half of the predicate: the kwarg-only Scalar IS provided, so
+        # serialize_inputs emits it and the host registers it as a dynamic int. Codegen
+        # must still count it in the runtime int array -- skipping every kwarg-only arg
+        # would make the host consume one int too many.
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.ops.aten.sub.Tensor(x, y, alpha=2)
+
+        example_args = (
+            torch.randn(64, device=self.device),
+            torch.randn(64, device=self.device),
+        )
+        self.check_model(M(), example_args, options={"fallback_by_default": True})
+
     def test_proxy_executor_error_message_preserved(self):
         @torch.library.custom_op("aoti_test::validate_input", mutates_args=())
         def validate_input(x: torch.Tensor) -> torch.Tensor:
