@@ -3024,6 +3024,43 @@ class TestPrecompile(TestCase):
         for name in (b"FakeTensorMode", b"MetaTensorDescriber", b"WeakIdRef"):
             self.assertNotIn(name, blob)
 
+    def test_capture_builds_each_guard_tree_twice_not_three_times(self):
+        # A serialization-only filter used to force an extra inspection build:
+        # with no runtime filter the runtime build already sees every guard, so
+        # it IS the inspection build and its builder answers the same questions.
+        from torch._dynamo.guards import CheckFunctionManager
+
+        builds = 0
+        managers = 0
+        real_build = CheckFunctionManager.build_guards
+        real_init = CheckFunctionManager.__init__
+
+        def count_build(self, *args, **kwargs):
+            nonlocal builds
+            builds += 1
+            return real_build(self, *args, **kwargs)
+
+        def count_init(self, *args, **kwargs):
+            nonlocal managers
+            managers += 1
+            return real_init(self, *args, **kwargs)
+
+        with (
+            mock.patch.object(CheckFunctionManager, "build_guards", count_build),
+            mock.patch.object(CheckFunctionManager, "__init__", count_init),
+            torch.no_grad(),
+        ):
+            torch.compiler.precompile(
+                _precompile_call_model,
+                backend="eager",
+                dynamic=False,
+                tracer="dynamo",
+                example_inputs=[
+                    (torch.nn.Linear(8, 4).eval(), torch.randn(n, 8)) for n in (3, 5)
+                ],
+            )
+        self.assertEqual(builds, 2 * managers)
+
     def test_capture_runs_each_example_once(self):
         # Learning the guard policy from a throwaway first capture would run
         # every example twice. That is not free: the region below counts its
