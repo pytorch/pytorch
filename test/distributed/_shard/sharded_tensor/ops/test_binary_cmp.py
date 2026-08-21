@@ -57,7 +57,8 @@ class TestShardedTensorBinaryOps(ShardedTensorTestBase):
         type(self).seed += 1
         return st1, st2
 
-    def get_device_specs(self):
+    def get_device_specs(self, device):
+        device_type = torch.device(device).type
         spec = ChunkShardingSpec(
             dim=0,
             placements=[
@@ -79,8 +80,8 @@ class TestShardedTensorBinaryOps(ShardedTensorTestBase):
         )
         return spec, alt_spec
 
-    def _test_common_failures(self, cmp_op):
-        spec, alt_spec = self.get_device_specs()
+    def _test_common_failures(self, cmp_op, device):
+        spec, alt_spec = self.get_device_specs(device)
 
         st1, st2 = self.get_random_tensors(spec, spec, 10, 10)
         if self.rank == 0:
@@ -137,7 +138,7 @@ class TestShardedTensorBinaryOps(ShardedTensorTestBase):
     @skip_if_lt_x_gpu(4)
     @requires_capabilities(Capability.distributed.backend)
     def test_torch_equal_tensor_specs(self, device):
-        self._test_common_failures(torch.equal)
+        self._test_common_failures(torch.equal, device)
 
     @with_comms(init_rpc=False, backend=backend)
     @skip_if_lt_x_gpu(4)
@@ -145,7 +146,7 @@ class TestShardedTensorBinaryOps(ShardedTensorTestBase):
     def test_torch_equal(self, device):
         """Test torch.equal(ShardedTensor, ShardedTensor)"""
 
-        spec, _ = self.get_device_specs()
+        spec, _ = self.get_device_specs(device)
         st1, st2 = self.get_random_tensors(spec, spec, 10, 10)
         self.assertTrue(torch.equal(st1, st2))
 
@@ -153,7 +154,7 @@ class TestShardedTensorBinaryOps(ShardedTensorTestBase):
     @skip_if_lt_x_gpu(4)
     @requires_capabilities(Capability.distributed.backend)
     def test_torch_allclose_tensor_specs(self, device):
-        self._test_common_failures(torch.allclose)
+        self._test_common_failures(torch.allclose, device)
 
     @with_comms(init_rpc=False, backend=backend)
     @skip_if_lt_x_gpu(4)
@@ -161,7 +162,7 @@ class TestShardedTensorBinaryOps(ShardedTensorTestBase):
     def test_torch_allclose(self, device):
         """Test torch.allclose(ShardedTensor, ShardedTensor)"""
 
-        spec, _ = self.get_device_specs()
+        spec, _ = self.get_device_specs(device)
 
         st1, st2 = self.get_random_tensors(spec, spec, 10, 10)
         self.assertTrue(torch.allclose(st1, st2))
