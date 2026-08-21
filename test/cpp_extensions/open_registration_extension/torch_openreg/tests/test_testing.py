@@ -332,7 +332,7 @@ class TestCapabilityGating(TestCase):
             )
         super().tearDownClass()
 
-    @requires_capabilities(Capability.lib.triton)
+    @requires_capabilities(Capability.dtype.bf16)
     def test_capability_supported(self, device):
         type(self).executed_count += 1
         self.assertEqual(torch.device(device).type, "openreg")
@@ -361,8 +361,8 @@ class TestCapabilityGating(TestCase):
         includes an undeclared capability."""
 
         @requires_capabilities(
-            Capability.lib.triton,
             Capability.dtype.bf16,
+            Capability.dtype.fp64,
             Capability.attention.flash_attention,
         )
         def dummy(self):
@@ -378,9 +378,8 @@ class TestCapabilityGating(TestCase):
 
 def _openreg_test_capabilities(_cls):
     capabilities = PrivateUse1TestBase._capabilities()
-    capabilities[Capability.lib].update({Capability.lib.triton: lambda: True})
     capabilities[Capability.dtype] = {
-        Capability.dtype.bf16: lambda: False,
+        Capability.dtype.bf16: lambda: True,
         Capability.dtype.fp64: lambda: False,
     }
     return capabilities

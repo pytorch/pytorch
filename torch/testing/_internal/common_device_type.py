@@ -329,7 +329,7 @@ class Capability:
 
     Tests declare requirements with :func:`requires_capabilities`::
 
-        @requires_capabilities(Capability.lib.triton, Capability.dtype.fp8)
+        @requires_capabilities(Capability.dtype.fp8, Capability.distributed.backend)
         def test_foo(self, device): ...
 
     Device test bases declare what they support by overriding
@@ -344,10 +344,9 @@ class Capability:
         fp64 = "dtype.fp64"
 
     class lib:
-        """Third-party library capabilities (triton, etc.)."""
+        """Third-party library capabilities."""
 
         safetensors = "lib.safetensors"
-        triton = "lib.triton"
 
     class attention:
         """Attention backend capabilities."""
@@ -874,8 +873,6 @@ class CPUTestBase(DeviceTypeTestBase):
 
     @classmethod
     def _capabilities(cls):
-        from torch.utils._triton import has_triton
-
         capabilities = super()._capabilities()
         capabilities.update(
             {
@@ -905,9 +902,6 @@ class CPUTestBase(DeviceTypeTestBase):
                 },
             }
         )
-        capabilities[Capability.lib].update(
-            {Capability.lib.triton: lambda: has_triton()}
-        )
         return capabilities
 
 
@@ -931,7 +925,6 @@ class CUDATestBase(DeviceTypeTestBase):
             PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
             SM80OrLater,
         )
-        from torch.utils._triton import has_triton
 
         capabilities = super()._capabilities()
         capabilities.update(
@@ -967,9 +960,6 @@ class CUDATestBase(DeviceTypeTestBase):
                     ),
                 },
             }
-        )
-        capabilities[Capability.lib].update(
-            {Capability.lib.triton: lambda: has_triton()}
         )
         return capabilities
 
@@ -1059,7 +1049,6 @@ class XPUTestBase(DeviceTypeTestBase):
         from torch.testing._internal.common_xpu import (
             PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU,
         )
-        from torch.utils._triton import has_triton
 
         capabilities = super()._capabilities()
         capabilities.update(
@@ -1095,9 +1084,6 @@ class XPUTestBase(DeviceTypeTestBase):
                     ),
                 },
             }
-        )
-        capabilities[Capability.lib].update(
-            {Capability.lib.triton: lambda: has_triton()}
         )
         return capabilities
 
