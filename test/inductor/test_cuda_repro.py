@@ -40,6 +40,7 @@ from torch.testing._internal.common_cuda import (
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
     freeze_rng_state,
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_FBCODE,
     MI350_ARCH,
@@ -53,6 +54,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TEST_XPU,
+    TEST_PRIVATEUSE1,
     xfailIfROCm,
 )
 from torch.testing._internal.inductor_utils import (
@@ -70,8 +72,9 @@ if TEST_WITH_ROCM:
 DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
 
 
+TEST_MULTIPRIVATEUSE1 = TEST_PRIVATEUSE1 and torch.accelerator.device_count() >= 2
 requires_multigpu = functools.partial(
-    unittest.skipIf, not TEST_MULTIGPU, "requires multiple cuda devices"
+    unittest.skipIf, not (TEST_MULTIGPU or TEST_MULTIPRIVATEUSE1), "requires multiple cuda devices"
 )
 from torch._dynamo.utils import counters
 from torch.testing._internal.inductor_utils import skipCUDAIf
@@ -102,7 +105,7 @@ except unittest.SkipTest:
 
 TestCase = test_torchinductor.TestCase
 ToTuple = test_torchinductor.ToTuple
-check_model_cuda = test_torchinductor.check_model_cuda
+check_model_gpu = test_torchinductor.check_model_cuda
 aten = torch.ops.aten
 
 
@@ -115,8 +118,10 @@ device_type = (
 
 @instantiate_parametrized_tests
 class CudaReproTests(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     device = device_type
-    common = check_model_cuda
+    common = check_model_gpu
 
     def test_mm_out_dtype_compile(self):
         a = torch.randn(1, 3, device=device_type, dtype=torch.float16)
@@ -131,7 +136,7 @@ class CudaReproTests(TestCase):
         self.assertEqual(result.dtype, expected.dtype)
         self.assertEqual(result, expected)
 
-    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    @unittest.skipIf(not (TEST_CUDA or TEST_PRIVATEUSE1), "requires CUDA")
     def test_frexp_non_finite(self):
         def fn(x):
             return torch.frexp(x)
@@ -776,7 +781,7 @@ class CudaReproTests(TestCase):
             rand_strided(sh, st, dt, dev).requires_grad_(rg)
             for (sh, st, dt, dev, rg) in args
         ]
-        with torch.cuda.amp.autocast(enabled=False):
+        with torch.autocast(device_type=device_type, enabled=False):
             if not same_two_models(mod, opt_mod, args):
                 raise AssertionError("Dynamo failed")
 
@@ -1657,7 +1662,7 @@ class CudaReproTests(TestCase):
         self.assertEqual(ref, res)
 
     @parametrize("lowp_dtype", [torch.bfloat16, torch.float16])
-    @unittest.skipIf(not (TEST_CUDA or TEST_XPU), "requires CUDA or XPU")
+    @unittest.skipIf(not (TEST_CUDA or TEST_XPU or TEST_PRIVATEUSE1), "requires CUDA or XPU")
     @config.patch(
         emulate_precision_casts=False,
         emulate_precision_casts_on_saved_tensors=True,
@@ -1715,7 +1720,7 @@ class CudaReproTests(TestCase):
                 "(intel/intel-xpu-backend-for-triton#7491)"
             )
         torch.manual_seed(0)
-        torch.cuda.manual_seed_all(0) if TEST_CUDA else torch.xpu.manual_seed_all(0)
+        torch.get_device_module(device_type).manual_seed_all(0)
         lowp_name = str(lowp_dtype).removeprefix("torch.")
         x = torch.randn(4, 32, 32, device=device_type, dtype=torch.float32)
         w = torch.randn(32, 32, device=device_type, dtype=torch.float32)
@@ -1738,7 +1743,7 @@ class CudaReproTests(TestCase):
     @torch._inductor.config.patch(pattern_matcher=False)
     def test_emulate_precision_casts_convert_element_type(self):
         torch.manual_seed(0)
-        torch.cuda.manual_seed_all(0) if TEST_CUDA else torch.xpu.manual_seed_all(0)
+        torch.get_device_module(device_type).manual_seed_all(0)
 
         x = torch.rand(1000, device=device_type, dtype=torch.float32)
 
@@ -1753,7 +1758,7 @@ class CudaReproTests(TestCase):
         actual = opt_fn(x)
         self.assertEqual(expected, actual)
 
-    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    @unittest.skipIf(not (TEST_CUDA or TEST_PRIVATEUSE1), "requires CUDA")
     @torch._inductor.config.patch(emulate_precision_casts=True)
     def test_emulate_precision_casts_promoted_lowp_cuda(self):
         def fn(x):
@@ -1772,7 +1777,7 @@ class CudaReproTests(TestCase):
     @torch._inductor.config.patch(emulate_precision_casts=True)
     def test_emulate_precision_casts_norm_rounding(self):
         torch.manual_seed(0)
-        torch.cuda.manual_seed_all(0)
+        torch.get_device_module(device_type).manual_seed_all(0)
 
         x = torch.rand(1000, device=device_type, dtype=torch.bfloat16)
         scalar = torch.rand([], device=device_type, dtype=torch.float32)
@@ -1791,7 +1796,7 @@ class CudaReproTests(TestCase):
     @torch._inductor.config.patch(emulate_precision_casts=True)
     def test_emulate_precision_casts_min_pow_chain(self):
         torch.manual_seed(0)
-        torch.cuda.manual_seed_all(0) if TEST_CUDA else torch.xpu.manual_seed_all(0)
+        torch.get_device_module(device_type).manual_seed_all(0)
 
         with dynamo_config.patch(
             capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
@@ -1846,7 +1851,7 @@ class CudaReproTests(TestCase):
     @torch._inductor.config.patch(emulate_precision_casts=True)
     def test_emulate_precision_casts_mean_ratio_chain(self):
         torch.manual_seed(12345)
-        torch.cuda.manual_seed_all(12345)
+        torch.get_device_module(device_type).manual_seed_all(12345)
 
         with dynamo_config.patch(
             capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
@@ -2261,7 +2266,7 @@ class CudaReproTests(TestCase):
         self.assertEqual(out1, out2)
 
     def test_associative_scan_dynamic_ndim(self):
-        if device_type != "cuda":
+        if device_type != "cuda" and device_type != "privateuseone":
             raise unittest.SkipTest("associative_scan pointwise lowering requires CUDA")
 
         from torch._higher_order_ops.associative_scan import associative_scan
@@ -2327,7 +2332,7 @@ class CudaReproTests(TestCase):
         }
     )
     def test_persistent_reduction_selection_uses_tiling_scores(self):
-        if device_type != "cuda":
+        if device_type != "cuda" and device_type != "privateuseone":
             raise unittest.SkipTest("requires CUDA")
 
         def fn(x):
@@ -2368,7 +2373,7 @@ class CudaReproTests(TestCase):
     def test_persistent_reduction_cse_reindexed_epilogue(
         self, use_block_ptr, dynamic_batch
     ):
-        if device_type != "cuda":
+        if device_type != "cuda" and device_type != "privateuseone":
             raise unittest.SkipTest("requires CUDA")
 
         out_dtype = torch.float16
@@ -2906,18 +2911,18 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
     @requires_multigpu()
     def test_not_initializing_wrong_device(self):
-        device_stats = torch.cuda.memory_stats("cuda:0")
+        device_stats = torch.accelerator.memory_stats(f"{device_type}:0")
 
         @torch.compile()
         def foo(x, y):
             return x @ y
 
-        x = torch.rand([256, 256], device="cuda:1", requires_grad=True)
-        y = torch.rand([256, 256], device="cuda:1", requires_grad=True)
+        x = torch.rand([256, 256], device=f"{device_type}:1", requires_grad=True)
+        y = torch.rand([256, 256], device=f"{device_type}:1", requires_grad=True)
 
         foo(x, y).sum().backward()
 
-        device_stats2 = torch.cuda.memory_stats("cuda:0")
+        device_stats2 = torch.accelerator.memory_stats(f"{device_type}:0")
         self.assertTrue(
             device_stats2["active.all.peak"] <= device_stats["active.all.peak"]
         )
@@ -3448,7 +3453,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         x = torch.randn(1000, device=device_type, dtype=torch.float32) + 0.1
         self.common(fn, [x])
 
-    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    @unittest.skipIf(not (TEST_CUDA or TEST_PRIVATEUSER1), "requires CUDA")
     @skipIfRocm(msg="PTX atan codegen is CUDA-specific")
     @skipIfXpu(msg="PTX atan codegen is CUDA-specific")
     def test_atan_special_psi_eager_parity(self):
