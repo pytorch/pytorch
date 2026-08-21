@@ -377,26 +377,6 @@ class TestTorchbind(TestCase):
         result = optimized(*inputs)
         self.assertEqual(result, orig_res)
 
-    @onlyAccelerator
-    @torch._dynamo.config.patch("capture_dynamic_output_shape_ops", True)
-    @torch._inductor.config.patch("graph_partition", True)
-    def test_torchbind_compile_gpu_op_symint_graph_partition(self, device):
-        class M(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.attr = torch.classes._TorchScriptTesting._Foo(2, 3)
-
-            def forward(self, x):
-                a = torch.ops._TorchScriptTesting.takes_foo_tensor_return(self.attr, x)
-                a_cuda = a.to(device=device)
-                return a_cuda + 1
-
-        m = M()
-        inputs = (torch.ones(2, 3),)
-        orig_res = m(*inputs)
-        new_res = torch.compile(m, backend="inductor")(*inputs)
-        self.assertTrue(torch.allclose(orig_res, new_res))
-
     def test_torchbind_input_aot_compile(self):
         class M(torch.nn.Module):
             def __init__(self) -> None:
@@ -446,7 +426,35 @@ class TestTorchbind(TestCase):
         self.assertEqual(result, orig_res)
 
 
-instantiate_device_type_tests(TestTorchbind, globals(), allow_xpu=True)
+class TestTorchbindAccelerator(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def setUp(self):
+        super().setUp()
+        init_torchbind_implementations()
+
+    @onlyAccelerator
+    @torch._dynamo.config.patch("capture_dynamic_output_shape_ops", True)
+    @torch._inductor.config.patch("graph_partition", True)
+    def test_torchbind_compile_gpu_op_symint_graph_partition(self, device):
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.attr = torch.classes._TorchScriptTesting._Foo(2, 3)
+
+            def forward(self, x):
+                a = torch.ops._TorchScriptTesting.takes_foo_tensor_return(self.attr, x)
+                a_cuda = a.to(device=device)
+                return a_cuda + 1
+
+        m = M()
+        inputs = (torch.ones(2, 3),)
+        orig_res = m(*inputs)
+        new_res = torch.compile(m, backend="inductor")(*inputs)
+        self.assertTrue(torch.allclose(orig_res, new_res))
+
+
+instantiate_device_type_tests(TestTorchbindAccelerator, globals(), allow_xpu=True, except_for="cpu")
 
 
 if __name__ == "__main__":
