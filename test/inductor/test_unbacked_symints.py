@@ -869,7 +869,7 @@ class TestUnbackedSymints(InductorTestCase):
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     def test_standalone_compile_reuses_fallback_unbacked_binding(self, device):
         from torch._inductor import standalone_compile
-        from torch._subclasses.fake_tensor import FakeTensor
+        from torch._subclasses.fake_tensor import is_fake_tensor, maybe_get_fake_mode
         from torch.fx.experimental.proxy_tensor import make_fx
 
         def fn(counts, x):
@@ -881,9 +881,9 @@ class TestUnbackedSymints(InductorTestCase):
         torch._dynamo.mark_dynamic(counts, 0, min=1, max=8)
         gm = make_fx(fn, tracing_mode="symbolic")(counts, x)
         fake_mode = next(
-            node.meta["val"].fake_mode
+            maybe_get_fake_mode(node.meta["val"])
             for node in gm.graph.nodes
-            if isinstance(node.meta.get("val"), FakeTensor)
+            if is_fake_tensor(node.meta.get("val"))
         )
 
         with (
