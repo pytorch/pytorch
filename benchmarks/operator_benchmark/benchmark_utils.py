@@ -14,7 +14,6 @@ This module contains utilities for writing microbenchmark tests.
 
 # Here are the reserved keywords in the benchmark suite
 _reserved_keywords = {"probs", "total_samples", "tags"}
-_supported_devices = {"cpu", "cuda", "mps", "xpu"}
 
 
 def shape_to_string(shape):
@@ -112,7 +111,6 @@ def cross_product_configs(**configs):
                       ({'M': 2}, {'N' : 4}),
                       ({'M': 2}, {'N' : 5}))
     """
-    _validate(configs)
     configs_attrs_list = []
     for key, values in configs.items():
         tmp_results = [{key: value} for value in values]
@@ -123,16 +121,6 @@ def cross_product_configs(**configs):
     # while converting to a list produces everything at the same time.
     generated_configs = list(itertools.product(*configs_attrs_list))
     return generated_configs
-
-
-def _validate(configs):
-    """Validate inputs from users."""
-    if "device" in configs:
-        for v in configs["device"]:
-            if v not in _supported_devices:
-                raise AssertionError(
-                    f"Device must be one of {_supported_devices}, got {v}"
-                )
 
 
 def config_list(**configs):
@@ -167,8 +155,6 @@ def config_list(**configs):
     reserved_names = ["attrs", "attr_names", "tags"]
     if any(attr not in configs for attr in reserved_names):
         raise ValueError("Missing attrs in configs")
-
-    _validate(configs)
 
     cross_configs = None
     if "cross_product_configs" in configs:

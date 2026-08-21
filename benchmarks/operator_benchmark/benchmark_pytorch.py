@@ -175,6 +175,11 @@ class PyTorchOperatorTestCase:
         self.time_series = []
         self._jit_forward_graph = None
         self._compile_forward_graph = None
+        self.device_module = (
+            torch.get_device_module(op_bench.device.type)
+            if op_bench.device.type != "cpu"
+            else None
+        )
 
     def _generate_jit_forward_graph(self):
         """generate a graph for the forward function via scripting"""
@@ -188,19 +193,19 @@ class PyTorchOperatorTestCase:
         )
         return compiled_forward_consume
 
-    def run_jit_forward(self, num_runs, print_per_iter=False, gpu_sync=False):
+    def run_jit_forward(self, num_runs, print_per_iter=False, device_sync=False):
         """Run the forward path of an op with JIT mode"""
         if self._jit_forward_graph is None:
             self._jit_forward_graph = self._generate_jit_forward_graph()
         self._jit_forward_graph(num_runs)
 
-    def run_compile_forward(self, num_runs, print_per_iter=False, gpu_sync=False):
+    def run_compile_forward(self, num_runs, print_per_iter=False, device_sync=False):
         """Run the forward path of an op with compile mode"""
         if self._compile_forward_graph is None:
             self._compile_forward_graph = self._generate_compile_forward_graph()
         self._compile_forward_graph(num_runs)
-        if gpu_sync:
-            torch.accelerator.synchronize()
+        if device_sync:
+            self.device_module.synchronize(self.op_bench.device)
 
     def _print_per_iter(self):
         # print last 50 values
@@ -218,21 +223,21 @@ class PyTorchOperatorTestCase:
                 )
             )
 
-    def run_forward(self, num_runs, print_per_iter, gpu_sync):
+    def run_forward(self, num_runs, print_per_iter, device_sync):
         """Run the forward path of an op with eager mode"""
         if print_per_iter:
             for _ in range(num_runs):
                 start_time = time.time()
                 self.output = self.op_bench.forward_impl_eager()
-                if gpu_sync:
-                    torch.accelerator.synchronize()
+                if device_sync:
+                    self.device_module.synchronize(self.op_bench.device)
                 end_time = time.time()
                 self.time_series.append((end_time - start_time) * 1e3)
         else:
             for _ in range(num_runs):
                 self.output = self.op_bench.forward_impl_eager()
-            if gpu_sync:
-                torch.accelerator.synchronize()
+            if device_sync:
+                self.device_module.synchronize(self.op_bench.device)
 
     def _output_mean(self):
         """TODO (mingzhe): it is not necessary to sum up everything by myself,
@@ -244,13 +249,13 @@ class PyTorchOperatorTestCase:
         """
         self.mean = self.output.mean()
 
-    def run_backward(self, num_runs, print_per_iter=False, gpu_sync=False):
+    def run_backward(self, num_runs, print_per_iter=False, device_sync=False):
         """Run the backward path of an op in many iterations"""
         # TODO: can we use JIT here to reduce python overhead?
         for _ in range(num_runs):
             self.mean.backward(retain_graph=True)
-        if gpu_sync:
-            torch.accelerator.synchronize()
+        if device_sync:
+            self.device_module.synchronize(self.op_bench.device)
 
 
 def create_pytorch_op_test_case(op_bench, test_config):
