@@ -322,20 +322,10 @@ def skip_if_lt_x_gpu(x, *, allow_cpu=False):
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
-            # Use check_available=True because current_accelerator() defaults to
-            # compile-time detection. On builds compiled with an accelerator but
-            # with no runtime device available, it would still return that
-            # accelerator, causing allow_cpu=True tests to be skipped instead of
-            # taking the CPU fallback.
-            acc = torch.accelerator.current_accelerator(check_available=True)
-            if acc is not None:
-                device_type = acc.type
-                device_module = torch.get_device_module(device_type)
-                if device_module.device_count() >= x:
+            if torch.accelerator.is_available():
+                if torch.accelerator.device_count() >= x:
                     return func(*args, **kwargs)
-
-            # CPU path: allow running a degenerate version if explicitly requested
-            if allow_cpu and acc is None:
+            elif allow_cpu:
                 return func(*args, **kwargs)
 
             # NOTE: TEST_SKIPS uses "multi-gpu-{x}" naming for historical/
