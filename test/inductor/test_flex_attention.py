@@ -52,7 +52,6 @@ from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_BF16,
-    PLATFORM_SUPPORTS_FP8,
 )
 from torch.testing._internal.common_device_type import (
     Capability,
@@ -3514,8 +3513,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     @skip_on_mps  # eager fp8 mixed-dtype path; MPS lacks the dispatch
     def test_mixed_dtypes_eager(self, device):
-        dtype_high = torch.float16 if PLATFORM_SUPPORTS_FP8 else torch.float32
-        dtype_low = e4m3_type if PLATFORM_SUPPORTS_FP8 else torch.float16
+        supports_fp8 = type(self).get_capabilities().get(Capability.dtype.fp8, False)
+        dtype_high = torch.float16 if supports_fp8 else torch.float32
+        dtype_low = e4m3_type if supports_fp8 else torch.float16
         query = torch.randn((1, 1, 1024, 64), dtype=dtype_high, device=device)
         key = torch.randn((1, 1, 1024, 64), dtype=dtype_high, device=device).to(
             dtype_low
@@ -3531,7 +3531,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @expected_not_implemented_on_mps
     def test_mixed_dtypes_compiled(self, device):
         # MPS doesn't support fp8 dtype conversion; force the fp16/fp32 mix on MPS.
-        use_fp8 = PLATFORM_SUPPORTS_FP8 and not _is_mps_device(device)
+        supports_fp8 = type(self).get_capabilities().get(Capability.dtype.fp8, False)
+        use_fp8 = supports_fp8 and not _is_mps_device(device)
         dtype_high = torch.float16 if use_fp8 else torch.float32
         dtype_low = e4m3_type if use_fp8 else torch.float16
         query = torch.randn((1, 1, 1024, 64), dtype=dtype_high, device=device)
@@ -3556,7 +3557,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @skip_on_cpu
     @supported_platform
     @requires_capabilities(Capability.dtype.fp8)
-    @skip_on_mps  # requires PLATFORM_SUPPORTS_FP8
+    @skip_on_mps
     def test_mixed_dtypes_sqnr_per_tensor(self, device):
         query_ref = torch.testing.make_tensor(
             (1, 1, 1024, 64), dtype=torch.bfloat16, device=device
@@ -3587,7 +3588,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @skip_on_cpu
     @supported_platform
     @requires_capabilities(Capability.dtype.fp8)
-    @skip_on_mps  # requires PLATFORM_SUPPORTS_FP8
+    @skip_on_mps
     def test_mixed_dtypes_sqnr_per_head(self, device):
         query_ref = torch.testing.make_tensor(
             (1, 4, 1024, 64), dtype=torch.bfloat16, device=device
@@ -3623,8 +3624,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @skip_on_cpu
     @skip_on_mps  # uses .to(fp8); MPS lacks fp8 dtype
     def test_mixed_dtype_backwards_eager(self, device):
-        dtype_high = torch.float16 if PLATFORM_SUPPORTS_FP8 else torch.float32
-        dtype_low = e4m3_type if PLATFORM_SUPPORTS_FP8 else torch.float16
+        supports_fp8 = type(self).get_capabilities().get(Capability.dtype.fp8, False)
+        dtype_high = torch.float16 if supports_fp8 else torch.float32
+        dtype_low = e4m3_type if supports_fp8 else torch.float16
         q = torch.testing.make_tensor(
             (1, 1, 1024, 64),
             dtype=dtype_high,
@@ -3654,8 +3656,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @skip_on_cpu
     @skip_on_mps  # assertRaisesRegex on Triton-specific backward error
     def test_mixed_dtype_backwards_compiled(self, device):
-        dtype_high = torch.float16 if PLATFORM_SUPPORTS_FP8 else torch.float32
-        dtype_low = e4m3_type if PLATFORM_SUPPORTS_FP8 else torch.float16
+        supports_fp8 = type(self).get_capabilities().get(Capability.dtype.fp8, False)
+        dtype_high = torch.float16 if supports_fp8 else torch.float32
+        dtype_low = e4m3_type if supports_fp8 else torch.float16
         q = torch.testing.make_tensor(
             (1, 1, 1024, 64),
             dtype=dtype_high,
@@ -8095,7 +8098,6 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             flex_attention_call(*create_inputs(1024), block_mask=block_mask)
 
     @supported_platform
-    @skip_on_cpu
     @skip_on_mps
     def test_block_mask_check_does_not_specialize_backed_dynamic_length(self, device):
         def mask_mod(b, h, q_idx, kv_idx):
@@ -8188,7 +8190,6 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             self.assertIsNone(block_mask.full_kv_indices)
 
     @supported_platform
-    @skip_on_cpu
     @skip_on_mps  # asserts Triton-specific "BlockMask q_indices is None" runtime error
     def test_backward_error_with_none_q_indices(self, device):
         N_BLOCKS = 4
@@ -8227,7 +8228,6 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             flex_compile(q, k, v, block_mask=block_mask)
 
     @supported_platform
-    @skip_on_cpu
     @expected_not_implemented_on_mps  # no backwards yet
     def test_flex_attention_poisoned_rel_logits(self, device):
         B = 1
@@ -8264,7 +8264,6 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             raise AssertionError("v.grad contains non-finite values")
 
     @supported_platform
-    @skip_on_cpu
     @expected_not_implemented_on_mps  # no backwards yet
     def test_flex_attention_poison_mod_fwd(self, device):
         """Div by score should cause our edge case handiling to NaN"""
@@ -8298,7 +8297,6 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             raise AssertionError("v.grad contains non-finite values")
 
     @supported_platform
-    @skip_on_cpu
     @expected_not_implemented_on_mps
     def test_flex_attention_poison_mod_bwd(self, device):
         """log score should cause our edge case handiling for NaN in grad score"""
@@ -8332,7 +8330,6 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             raise AssertionError("v.grad contains non-finite values")
 
     @supported_platform
-    @skip_on_cpu
     def test_forward_pass_with_none_q_indices(self, device):
         N_BLOCKS = 4
         B, H, S, D = 1, 1, 128, 64
@@ -8527,7 +8524,6 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             block_mask._adjust(128, 128)
 
     @supported_platform
-    @skip_on_cpu
     def test_broadcasted_head_block_mask(self, device):
         torch.manual_seed(42)
 
@@ -10145,6 +10141,7 @@ class TestLearnableBiases(InductorTestCase):
         # checks that the compile is working
         opt_fn(sliding_window2, None, None, 1024, 1024, device=device)
 
+    @supported_platform
     def test_head_bias_req_grad(self, device):
         B, H, S, D = 1, 4, 256, 64
         bias = torch.randn(H, device=device, dtype=torch.float16, requires_grad=True)
