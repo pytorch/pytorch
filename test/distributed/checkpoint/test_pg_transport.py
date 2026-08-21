@@ -1,7 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
-import unittest
 import logging
+import unittest
 from datetime import timedelta
 from unittest.mock import MagicMock, patch
 
