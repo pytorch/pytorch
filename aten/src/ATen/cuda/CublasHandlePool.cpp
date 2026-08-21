@@ -209,6 +209,7 @@ size_t parseChosenWorkspaceSize() {
 }
 
 #define TORCH_CUBLASLT_UNIFIED_WORKSPACE "TORCH_CUBLASLT_UNIFIED_WORKSPACE"
+#define TORCH_CUBLAS_EAGER_WORKSPACE "TORCH_CUBLAS_EAGER_WORKSPACE"
 #ifndef USE_ROCM
 inline bool unified_cublas_and_lt_workspaces() {
   static auto unified_env_var = c10::utils::check_env(TORCH_CUBLASLT_UNIFIED_WORKSPACE);
@@ -220,6 +221,16 @@ inline bool unified_cublas_and_lt_workspaces() {
   return unified;
 }
 #endif
+
+inline bool use_eager_cublas_workspace() {
+#ifndef USE_ROCM
+  static bool eager =
+      c10::utils::check_env(TORCH_CUBLAS_EAGER_WORKSPACE) == true;
+  return eager;
+#else
+  return false;
+#endif
+}
 
 size_t parseCUDABlasLtWorkspaceSize() {
   auto val = c10::utils::get_env("CUBLASLT_WORKSPACE_SIZE");
@@ -312,6 +323,17 @@ at::DataPtr getNewCUDABlasLtWorkspace() {
   return c10::cuda::CUDACachingAllocator::get()->allocate(getCUDABlasLtWorkspaceSize());
 }
 
+at::DataPtr getEagerCUDABlasWorkspace(size_t size) {
+  if (use_eager_cublas_workspace()) {
+    return c10::cuda::CUDACachingAllocator::get()->allocate(size);
+  }
+  return {};
+}
+
+at::DataPtr getEagerCUDABlasWorkspace() {
+  return getEagerCUDABlasWorkspace(getChosenWorkspaceSize());
+}
+
 void setWorkspaceForHandle(cublasHandle_t handle, c10::cuda::CUDAStream stream) {
   cudaStream_t _stream = stream;
   auto key = std::make_tuple(static_cast<void *>(handle), static_cast<void *>(_stream));
@@ -400,6 +422,10 @@ void* getCUDABlasLtWorkspace() {
 }
 
 cublasHandle_t getCurrentCUDABlasHandle(bool setup) {
+  return getCurrentCUDABlasHandle(nullptr, setup);
+}
+
+cublasHandle_t getCurrentCUDABlasHandle(void* workspace, bool setup) {
   c10::DeviceIndex device = 0;
   AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
 
@@ -443,7 +469,12 @@ cublasHandle_t getCurrentCUDABlasHandle(bool setup) {
   // will allocate memory dynamically (even if they're cheap) outside
   // PyTorch's CUDA caching allocator. It's possible that CCA used up
   // all the memory and cublas's cudaMallocAsync will return OOM
-  setWorkspaceForHandle(handle, stream);
+  if (workspace != nullptr) {
+    TORCH_CUDABLAS_CHECK(
+        cublasSetWorkspace(handle, workspace, getChosenWorkspaceSize()));
+  } else {
+    setWorkspaceForHandle(handle, stream);
+  }
 
 #if !defined(USE_ROCM)
   // On CUDA >= 11, and architecture >= Ampere, cuBLAS can use TF32 to speedup

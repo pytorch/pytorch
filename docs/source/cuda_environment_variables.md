@@ -14,6 +14,7 @@ For more information on CUDA runtime environment variables, see [CUDA Environmen
 | `TORCH_CUDNN_V8_API_LRU_CACHE_LIMIT` | The cache limit for the cuDNN v8 API. This is used to limit the memory used by the cuDNN v8 API. The default value is 10000, which roughly corresponds to 2GiB assuming 200KiB per ExecutionPlan. Set to `0` for no limit or a negative value for no caching. |
 | `TORCH_CUDNN_V8_API_DISABLED` | If set to `1`, disables the cuDNN v8 API. And will fall back to the cuDNN v7 API. |
 | `TORCH_ALLOW_TF32_CUBLAS_OVERRIDE` | If set to `1`, forces TF32 enablement, overrides `set_float32_matmul_precision` setting. |
+| `TORCH_CUBLAS_EAGER_WORKSPACE` | If set to `1`, allocates cuBLAS and cuBLASLt workspaces for each operation instead of caching them per handle and stream. |
 | `TORCH_NCCL_USE_COMM_NONBLOCKING` | If set to `1`, enables non-blocking error handling in NCCL. |
 | `TORCH_NCCL_AVOID_RECORD_STREAMS` | If set to `0`, enables fallback to record streams-based synchronization behavior in NCCL. |
 | `TORCH_CUDNN_V8_API_DEBUG` | If set to `1`, sanity check whether cuDNN V8 is being used. |
