@@ -21,6 +21,7 @@ from .activation import (
     SELU,
     Sigmoid,
     SiLU,
+    SwiGLU,
     Softmax,
     Softmax2d,
     Softmin,
