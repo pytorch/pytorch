@@ -9,7 +9,7 @@ from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
     make_gemm_param_and_validate,
 )
 from torch._inductor.runtime.flydsl_cache import (
-    ensure_flydsl_cache_dir,
+    configure_flydsl_cache_dir,
     run_cached_flydsl,
 )
 
@@ -111,7 +111,7 @@ def _flydsl_grouped_mm(output, mat1, mat2, offs, stream):
         param,
         stream,
     )
-    ensure_flydsl_cache_dir()
+    configure_flydsl_cache_dir()
     if compile_only:
         flyc.compile(launch_gemm_gfx950_grouped, *compile_args)
     else:
