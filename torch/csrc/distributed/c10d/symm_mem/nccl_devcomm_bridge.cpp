@@ -19,7 +19,6 @@
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_devcomm_manager.hpp>
 
 namespace c10d::symmetric_memory {
-
 namespace {
 
 // Installed at load time (before any process group is created).
