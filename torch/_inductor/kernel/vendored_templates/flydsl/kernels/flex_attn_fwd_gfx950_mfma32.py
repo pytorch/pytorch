@@ -172,15 +172,15 @@ def build_flex_attn_fwd_mfma32_module(
         MaskBuffer3: fx.Tensor,
         O: fx.Tensor,
     ):
-        tid = fx.Int32(fx.thread_idx.x)
+        tid = fx.thread_idx.x
         lane = tid % fx.Int32(64)
         wave = tid // fx.Int32(64)
         lane_row = lane % fx.Int32(MFMA_MN)
         lane_half = lane // fx.Int32(MFMA_MN)
-        batch = fx.Int32(fx.block_idx.z)
-        head = fx.Int32(fx.block_idx.x)
+        batch = fx.block_idx.z
+        head = fx.block_idx.x
         kv_head = head // fx.Int32(GROUP_SIZE)
-        q_chunk = fx.Int32(fx.block_idx.y)
+        q_chunk = fx.block_idx.y
         q_base = q_chunk * fx.Int32(BM)
         query_pos = q_base + wave * fx.Int32(MFMA_MN) + lane_row
 
@@ -233,16 +233,11 @@ def build_flex_attn_fwd_mfma32_module(
         o64 = fx.make_copy_atom(fx.rocdl.BufferCopy64b(), fx.BFloat16)
 
         def load_i32(view, index):
-            return fx.Int32(load_scalar(i32_atom, view, index, fx.Int32))
+            return load_scalar(i32_atom, view, index, fx.Int32)
 
         def load_uniform_i32(view, index):
             value = load_i32(view, index)
-            return fx.Int32(
-                fx.rocdl.readfirstlane(
-                    fx.Int32.ir_type,
-                    value.ir_value(),
-                )
-            )
+            return fx.gpu.shuffle_idx(value, 0, 64)
 
         def store_f32(view, index, value):
             store_scalar(f32_atom, view, index, value, fx.Float32)
@@ -534,7 +529,7 @@ def build_flex_attn_fwd_mfma32_module(
         ):
             kv_base = kv_chunk * fx.Int32(BN)
             stage_k(kv_base)
-            fx.rocdl.s_waitcnt(0)
+            fx.rocdl.s_waitcnt(vmcnt=0, lgkmcnt=0, expcnt=0)
             fx.gpu.barrier()
 
             scores_lo = zero16
@@ -659,7 +654,7 @@ def build_flex_attn_fwd_mfma32_module(
 
             # V writes were issued before the register-only softmax. Synchronize
             # only when the LDS data is actually consumed.
-            fx.rocdl.s_waitcnt(0)
+            fx.rocdl.s_waitcnt(vmcnt=0, lgkmcnt=0, expcnt=0)
             fx.gpu.barrier()
             for probability_pack in fx.range_constexpr(4):
                 for d_chunk in fx.range_constexpr(D_CHUNKS):
