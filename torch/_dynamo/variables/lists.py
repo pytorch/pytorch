@@ -43,6 +43,7 @@ from ..utils import (
     cmp_name_to_op_mapping,
     get_fake_value,
     guard_if_dyn,
+    istype,
     iter_contains,
     no_keywords,
     no_positional,
@@ -64,7 +65,6 @@ from .base import (
     VariableTracker,
 )
 from .constant import ConstantVariable
-from .functions import UserFunctionVariable
 from .iter import IteratorVariable
 from .object_protocol import (
     generic_richcompare_bool,
@@ -81,6 +81,8 @@ from .object_protocol import (
 if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
+
+    from .functions import UserFunctionVariable
 
 
 def pytuple_checkexact(obj: VariableTracker) -> bool:
@@ -166,10 +168,6 @@ class BaseListVariable(VariableTracker):
     ) -> "BaseListVariable":
         return type(self)(items, **kwargs)
 
-    @property
-    def value(self) -> Any:
-        return self.as_python_constant()
-
     def debug_repr_helper(self, prefix: str, suffix: str) -> str:
         return prefix + ", ".join(i.debug_repr() for i in self.items) + suffix
 
@@ -241,7 +239,7 @@ class BaseListVariable(VariableTracker):
     def call_tree_map_branch(
         self,
         tx: "InstructionTranslatorBase",
-        tree_map_fn: UserFunctionVariable,
+        tree_map_fn: "UserFunctionVariable",
         map_fn: VariableTracker,
         rest: list[VariableTracker],
         tree_map_kwargs: dict[str, VariableTracker],
@@ -285,7 +283,7 @@ class BaseListVariable(VariableTracker):
     def call_tree_map_with_path_branch(
         self,
         tx: "InstructionTranslatorBase",
-        tree_map_fn: UserFunctionVariable,
+        tree_map_fn: "UserFunctionVariable",
         map_fn: VariableTracker,
         rest: list[VariableTracker],
         tree_map_kwargs: dict[str, VariableTracker],
@@ -372,7 +370,7 @@ class BaseListVariable(VariableTracker):
         kwargs: dict[str, Any] = {}
         if issubclass(self.python_type(), list):
             kwargs["mutation_type"] = ValueMutationNew()
-        return type(self)(new_items, **kwargs)
+        return self.modified(new_items, **kwargs)
 
     def _seq_richcompare(
         self,
@@ -534,7 +532,7 @@ class BaseListVariable(VariableTracker):
         from .user_defined import UserDefinedObjectVariable
 
         sz = len(self.items)
-        if isinstance(args[0], (ListVariable, TupleVariable)):
+        if istype(args[0], (ListVariable, TupleVariable)):
             self.items.extend(args[0].items)
         elif isinstance(args[0], UserDefinedObjectVariable):
             self.items.extend(unpack_iterable(tx, args[0]))
