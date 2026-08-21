@@ -7159,6 +7159,32 @@ class ProcessKernelResult:
     unbacked_bindings: dict[sympy.Symbol, pytree.KeyPath] | None
 
 
+def _clone_default_generator_state(device: torch.device) -> Any:
+    """Clone the default generator state backing a GeneratorState graph input.
+
+    Eligibility is gated on the graph-safe RNG registry (populated by
+    ``torch._functorch._aot_autograd.utils.register_graphsafe_rng_device_type``)
+    and the generator is resolved by the GeneratorState's own device, matching
+    the eager path in torch/_prims/rng_prims.py.
+    """
+    from torch._functorch._aot_autograd.utils import (
+        get_default_generator,
+        supports_graphsafe_rng,
+    )
+
+    if not supports_graphsafe_rng(device):
+        raise AssertionError(
+            f"Device type '{device.type}' is not registered for graph-safe RNG "
+            "(see torch._functorch._aot_autograd.utils."
+            "register_graphsafe_rng_device_type)"
+        )
+    if device.index is None:
+        raise AssertionError(
+            f"Expected a GeneratorState device with a device index, got {device}"
+        )
+    return get_default_generator(device).clone_state()
+
+
 @ir_dataclass(frozen=False)
 class ExternKernel(InputsKernel):
     """
@@ -7423,17 +7449,8 @@ class ExternKernel(InputsKernel):
                 case GeneratorState():
                     args_flat_is_tensor.append(False)
                     non_tensor_args.append(arg)
-                    device_index = arg.device.index
-                    if not (
-                        arg.device.type in ["cuda", "xpu"] and device_index is not None
-                    ):
-                        raise AssertionError(
-                            'Expected arg.device.type in ["cuda", "xpu"] and device_index is not None'
-                        )
                     real_non_tensor_args.append(
-                        torch._C._accelerator_getDefaultGenerator(
-                            device_index
-                        ).clone_state()
+                        _clone_default_generator_state(arg.device)
                     )
 
                 case OpaqueObjectState():
@@ -7512,16 +7529,7 @@ class ExternKernel(InputsKernel):
             elif isinstance(x, OpaqueMultiOutput):
                 example_args.append(x.opaque_example_value)
             elif isinstance(x, torch._inductor.ir.GeneratorState):
-                device_index = x.device.index
-                if not (x.device.type in ["cuda", "xpu"] and device_index is not None):
-                    raise AssertionError(
-                        'Expected x.device.type in ["cuda", "xpu"] and device_index is not None'
-                    )
-                example_args.append(
-                    torch._C._accelerator_getDefaultGenerator(
-                        device_index
-                    ).clone_state()
-                )
+                example_args.append(_clone_default_generator_state(x.device))
             else:
                 example_args.append(ir_node_to_tensor(x))
 
