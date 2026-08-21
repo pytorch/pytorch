@@ -49,8 +49,6 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
-    TEST_CUDA,
-    TEST_XPU,
     TestCase,
 )
 
@@ -467,7 +465,7 @@ class TestAutoWrap(TestCase):
         self.assertEqual(layer.rank, 0)
         self.assertEqual(layer.world_size, 2)
 
-    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "Test Requires CUDA or XPU")
+    @unittest.skipIf(not torch.accelerator.is_available(), "Test requires accelerator")
     def test_always_wrap(self):
         """
         Test to ensure that if `always_wrap_policy` is
@@ -732,7 +730,7 @@ class TestAutoWrap(TestCase):
         self.assertTrue(isinstance(model.module[0], nn.Linear))
         self.assertTrue(isinstance(model.module[1], nn.ModuleList))
 
-    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "Test Requires CUDA or XPU")
+    @unittest.skipIf(not torch.accelerator.is_available(), "Test requires accelerator")
     @parametrize(
         "device_init_mode", [DEVICEInitMode.DEVICE_BEFORE, DEVICEInitMode.DEVICE_AFTER]
     )
