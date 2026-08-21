@@ -152,13 +152,24 @@ class AllToAllBase:
         return sizes
 
 
+def _premul_sum_reduce(tensors, factor):
+    if isinstance(factor, torch.Tensor):
+        factor = factor.to(tensors[0].device)
+    return torch.sum(torch.stack([t * factor for t in tensors]), dim=0)
+
+
 class AllReduce:
     def __init__(self, op):
-        if op.op not in _reduce_ops:
+        if op.op == ReduceOp.PREMUL_SUM:
+            self.op = op.op
+            self.premul_factor = op.factor
+        elif op.op in _reduce_ops:
+            self.op = op.op
+            self.premul_factor = None
+        else:
             raise NotImplementedError(
                 f"AllReduce op {op.op} not supported on multithreaded pg for now."
             )
-        self.op = op.op
 
     @torch.no_grad()
     def work(self, data):
@@ -172,7 +183,10 @@ class AllReduce:
             ]
 
             # now mimic reduce across all ranks
-            res = _reduce_ops[self.op](tensors)
+            if self.premul_factor is not None:
+                res = _premul_sum_reduce(tensors, self.premul_factor)
+            else:
+                res = _reduce_ops[self.op](tensors)
 
             # copy all the reduced value to each rank
             for src_rank in range(len(data)):
