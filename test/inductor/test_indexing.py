@@ -28,18 +28,19 @@ from torch._inductor.utils import (
     run_and_get_triton_code,
 )
 from torch.testing import FileCheck
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
+)
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_MACOS,
     IS_WINDOWS,
     parametrize,
 )
-from torch.testing._internal.inductor_utils import (
-    GPU_TYPE,
-    HAS_CPU,
-    HAS_CUDA_AND_TRITON,
-    HAS_GPU,
-)
+from torch.testing._internal.inductor_utils import HAS_CPU
 from torch.utils._sympy.functions import (
     FloorDiv,
     Identity,
@@ -63,7 +64,9 @@ DENSE_X_INDEX_LOAD = r"tl\.load\([^\n]*tl\.broadcast_to\(x\d+, \[XBLOCK, R0_BLOC
 REDUCTION_DEPENDENT_LOAD = r"tl\.load\([^\n]*r0_"
 
 
-class TestIndexingSimplification(InductorTestCase):
+class TestIndexingSimplificationGeneric(InductorTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_simplify_index_in_vec_range(self):
         i = sympy.Symbol("i", integer=True, nonnegative=True)
 
@@ -471,8 +474,12 @@ class TestIndexingSimplification(InductorTestCase):
         expr = s * x + FloorDiv(y, 3)
         self.assertFalse(sizevars.expand_floor_div(expr, (x,)))
 
-    @unittest.skipUnless(HAS_GPU, "Need GPU for this test")
-    def test_int8_unpack(self):
+
+class TestIndexingSimplificationAccelerator(InductorTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @requires_capabilities(Capability.lib.triton)
+    def test_int8_unpack(self, device):
         @torch.compile
         def f(x):
             first_elements = x >> 4
@@ -482,7 +489,7 @@ class TestIndexingSimplification(InductorTestCase):
             )
             return unpacked * 2
 
-        x = torch.randint(0, 255, (2, 4096, 5504), dtype=torch.uint8, device=GPU_TYPE)
+        x = torch.randint(0, 255, (2, 4096, 5504), dtype=torch.uint8, device=device)
 
         triton_code = run_and_get_triton_code(f, x)
         # Make sure the 2 load uses simplified indexing rather than something like
@@ -492,8 +499,8 @@ class TestIndexingSimplification(InductorTestCase):
             ms = benchmarker.benchmark_gpu(lambda: f(x))
             print(f"{ms=:.03f}")
 
-    @unittest.skipUnless(HAS_GPU, "Need GPU for this test")
-    def test_int8_unpack_dynamic_shape(self):
+    @requires_capabilities(Capability.lib.triton)
+    def test_int8_unpack_dynamic_shape(self, device):
         @torch.compile(dynamic=True)
         def f(x):
             first_elements = x >> 4
@@ -503,15 +510,15 @@ class TestIndexingSimplification(InductorTestCase):
             )
             return unpacked * 2
 
-        x = torch.randint(0, 255, (2, 16, 32), dtype=torch.uint8, device=GPU_TYPE)
+        x = torch.randint(0, 255, (2, 16, 32), dtype=torch.uint8, device=device)
 
         triton_code = run_and_get_triton_code(f, x)
         # Dynamic shape coefficients should still be coalesced through the
         # pointwise-cat view instead of loading from s*x1 + x0//2.
         self.assertEqual(2, triton_code.count("tl.load(in_ptr0 + (x2 // 2),"))
 
-    @unittest.skipUnless(HAS_GPU, "Need GPU for this test")
-    def test_floordiv_div_sympy_is_integer_bug(self):
+    @requires_capabilities(Capability.lib.triton)
+    def test_floordiv_div_sympy_is_integer_bug(self, device):
         def foo(arg0, arg1, arg2, arg3, arg4, sentinel):
             t0 = arg0
             t1 = t0.reshape((28, 24, 3, 127))
@@ -531,26 +538,29 @@ class TestIndexingSimplification(InductorTestCase):
             return output
 
         arg0 = torch.rand(
-            [36, 7112, 1, 1], dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True
+            [36, 7112, 1, 1], dtype=torch.bfloat16, device=device, requires_grad=True
         )
-        arg1 = torch.randint(0, 512, [30, 24], dtype=torch.int64, device=GPU_TYPE)
+        arg1 = torch.randint(0, 512, [30, 24], dtype=torch.int64, device=device)
         arg2 = torch.rand(
-            [512, 127], dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True
+            [512, 127], dtype=torch.bfloat16, device=device, requires_grad=True
         )
         arg3 = torch.rand(
-            [30, 24, 15], dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True
+            [30, 24, 15], dtype=torch.bfloat16, device=device, requires_grad=True
         )
         arg4 = torch.rand(
-            [30, 4, 16, 127], dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True
+            [30, 4, 16, 127], dtype=torch.bfloat16, device=device, requires_grad=True
         )
         sentinel = torch.tensor(
-            0.0, dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True
+            0.0, dtype=torch.bfloat16, device=device, requires_grad=True
         )
         compiled_foo = torch.compile(foo, fullgraph=True, dynamic=True)
         out_compiled = compiled_foo(arg0, arg1, arg2, arg3, arg4, sentinel)
         out_compiled.sum().backward()
 
-    @unittest.skipUnless(HAS_CPU, "requires CPU")
+
+class TestIndexingSimplificationCpu(InductorTestCase):
+    hw_classification = HardwareClassification.CPU
+
     def test_bool_minimum_maximum_index_propagation(self):
         def foo(x):
             thresh = torch.nn.functional.threshold(x, 6.08522335982976, -0.05932757)
@@ -569,6 +579,8 @@ class TestIndexingSimplification(InductorTestCase):
 
 
 class ExprPrinterTests(InductorTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_print_pow(self):
         s1 = sympy.Symbol("foo", integer=True)
         s2 = sympy.Symbol("bar", integer=True)
@@ -795,6 +807,8 @@ class TestIndexConstOverflowInt32(InductorTestCase):
     ``SIMDKernelFeatures.any_index_expr_overflows_int32`` (index evaluated at
     the origin)."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def make_feats(self, indices):
         # Bypass __init__ (needs V.graph) and shadow scheduler_nodes().
         deps = [MemoryDep(f"buf{i}", idx, (), ()) for i, idx in enumerate(indices)]
@@ -846,6 +860,8 @@ class TestIndexExprUpperBounds(InductorTestCase):
     ``SIMDKernelFeatures.any_index_expr_overflows_int32``, which bounds the
     addressing expression over each loop variable's iteration range (catching
     fused `V * x0` terms while letting a stride on a size-1 dim drop out)."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def make_feats(self, deps):
         node = types.SimpleNamespace(
@@ -903,6 +919,8 @@ class TestIndexExprUpperBounds(InductorTestCase):
 
 
 class TestEvaluateMinMax(InductorTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_evaluate_min_multiple(self):
         """min(u0, k*u0) resolves via GCD: gcd(u0, k*u0)=u0.
         UNSOUND: if u0 < 0 (e.g. u0=-1) true min is 10*u0=-10, not -1."""
@@ -951,6 +969,8 @@ class TestEvaluateMinMax(InductorTestCase):
 
 class TestPrecomputedSizeHinting(InductorTestCase):
     """Tests for optimization_hint and guarding_hint_or_throw with PRECOMPUTED_SIZE symbols."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_optimization_hint_with_precomputed_size(self):
         """Test that optimization_hint correctly resolves PRECOMPUTED_SIZE symbols.
@@ -1024,6 +1044,8 @@ class TestPrecomputedSizeHinting(InductorTestCase):
 class TestHintDisproves(InductorTestCase):
     """Tests for hint-disproves fast-path in statically_known_true."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def test_hint_disproves_false_claim(self):
         """If the hint says the expression is False, statically_known_true
         should return False without expensive sympy reasoning."""
@@ -1061,6 +1083,8 @@ class TestHintDisproves(InductorTestCase):
 class TestWideExpressionThresholds(InductorTestCase):
     """Verify that safe_gcd / free-symbols thresholds only affect WIDE
     expressions.  Small expressions must still get full simplification."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_safe_gcd_small_expressions(self):
         from torch.utils._sympy.functions import safe_gcd
@@ -1152,6 +1176,8 @@ class TestWideExpressionThresholds(InductorTestCase):
 class TestOptimizationHintZeroDivision(InductorTestCase):
     """Test that optimization_hint handles ZeroDivisionError from ModularIndexing with zero-valued unbacked symbols."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def test_modular_indexing_with_zero_divisor(self):
         sizevars = SizeVarAllocator()
         u0 = sizevars.shape_env.create_unbacked_symint().node.expr
@@ -1192,6 +1218,8 @@ class TestOptimizationHintZeroDivision(InductorTestCase):
 
 class TestOptimizationHintWideUnbackedSubstitution(InductorTestCase):
     """Tests for bounded unbacked replacement canonicalization in optimization_hint."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_expression_replacements_still_apply_for_small_expr(self):
         sizevars = SizeVarAllocator()
@@ -1260,11 +1288,12 @@ class TestOptimizationHintWideUnbackedSubstitution(InductorTestCase):
         self.assertGreaterEqual(sizevars.optimization_hint(s0 - u0, fallback=1024), 0)
 
 
-@instantiate_parametrized_tests
 class ReductionInvariantIndexingTests(InductorTestCase):
-    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @requires_capabilities(Capability.lib.triton)
     @parametrize("persistent_reductions", [False, True])
-    def test_reduction_invariant_masked_index_load(self, persistent_reductions):
+    def test_reduction_invariant_masked_index_load(self, device, persistent_reductions):
         def fn(index, source0, source1, value0, value1):
             gathered0 = torch.index_select(source0, 0, index)
             gathered1 = torch.index_select(source1, 0, index)
@@ -1272,11 +1301,11 @@ class ReductionInvariantIndexingTests(InductorTestCase):
             return values.square().sum(dim=-1)
 
         inputs = (
-            torch.randperm(16, device=GPU_TYPE),
-            torch.randn(16, 2, 64, device=GPU_TYPE),
-            torch.randn(16, 3, 64, device=GPU_TYPE),
-            torch.randn(16, 2, 64, device=GPU_TYPE),
-            torch.randn(16, 3, 64, device=GPU_TYPE),
+            torch.randperm(16, device=device),
+            torch.randn(16, 2, 64, device=device),
+            torch.randn(16, 3, 64, device=device),
+            torch.randn(16, 2, 64, device=device),
+            torch.randn(16, 3, 64, device=device),
         )
         with config.patch(
             {
@@ -1308,23 +1337,23 @@ class ReductionInvariantIndexingTests(InductorTestCase):
                 "for r0_offset in tl.range"
             ).run(kernel)
 
-    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    @requires_capabilities(Capability.lib.triton)
     @parametrize("row_dtype", [torch.float32, torch.bfloat16, torch.bool])
-    def test_reduction_invariant_masked_load_dtypes(self, row_dtype):
+    def test_reduction_invariant_masked_load_dtypes(self, device, row_dtype):
         def fn(row, value0, value1):
             broadcast_row = row[:, None, None]
             values = torch.cat((value0 + broadcast_row, value1 + broadcast_row), dim=1)
             return values.square().sum(dim=-1)
 
         if row_dtype == torch.bool:
-            row = torch.randint(0, 2, (16,), device=GPU_TYPE, dtype=row_dtype)
+            row = torch.randint(0, 2, (16,), device=device, dtype=row_dtype)
         else:
-            row = torch.randn(16, device=GPU_TYPE, dtype=row_dtype)
+            row = torch.randn(16, device=device, dtype=row_dtype)
         value_dtype = torch.float16 if row_dtype == torch.float32 else torch.float32
         inputs = (
             row,
-            torch.randn(16, 2, 64, device=GPU_TYPE, dtype=value_dtype),
-            torch.randn(16, 3, 64, device=GPU_TYPE, dtype=value_dtype),
+            torch.randn(16, 2, 64, device=device, dtype=value_dtype),
+            torch.randn(16, 3, 64, device=device, dtype=value_dtype),
         )
         with config.patch(
             {
@@ -1343,17 +1372,17 @@ class ReductionInvariantIndexingTests(InductorTestCase):
             REDUCTION_INVARIANT_X_LOAD
         ).run(kernel)
 
-    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    @requires_capabilities(Capability.lib.triton)
     @config.patch(force_disable_caches=True)
-    def test_reduction_invariant_load_direct_reduction(self):
+    def test_reduction_invariant_load_direct_reduction(self, device):
         def fn(row0, row1):
             value0 = row0[:, :, None].expand(-1, -1, 65)
             value1 = row1[:, :, None].expand(-1, -1, 65)
             return torch.cat((value0, value1), dim=1).sum(dim=-1)
 
         inputs = (
-            torch.randn(16, 2, device=GPU_TYPE),
-            torch.randn(16, 3, device=GPU_TYPE),
+            torch.randn(16, 2, device=device),
+            torch.randn(16, 3, device=device),
         )
         actual, kernels = run_and_get_kernels(
             torch.compile(fn, fullgraph=True), *inputs, remove_quote=True
@@ -1367,9 +1396,9 @@ class ReductionInvariantIndexingTests(InductorTestCase):
             kernels[0]
         )
 
-    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    @requires_capabilities(Capability.lib.triton)
     @parametrize("persistent_reductions", [False, True])
-    def test_reduction_invariant_indirect_load(self, persistent_reductions):
+    def test_reduction_invariant_indirect_load(self, device, persistent_reductions):
         def fn(index, source, value0, value1):
             row = torch.index_select(source, 0, index)
             values = torch.cat(
@@ -1378,10 +1407,10 @@ class ReductionInvariantIndexingTests(InductorTestCase):
             return values.square().sum(dim=-1)
 
         inputs = (
-            torch.randperm(16, device=GPU_TYPE),
-            torch.randn(16, device=GPU_TYPE, dtype=torch.bfloat16),
-            torch.randn(16, 2, 64, device=GPU_TYPE),
-            torch.randn(16, 3, 64, device=GPU_TYPE),
+            torch.randperm(16, device=device),
+            torch.randn(16, device=device, dtype=torch.bfloat16),
+            torch.randn(16, 2, 64, device=device),
+            torch.randn(16, 3, 64, device=device),
         )
         with config.patch(
             {
@@ -1406,7 +1435,7 @@ class ReductionInvariantIndexingTests(InductorTestCase):
         else:
             FileCheck().check("for r0_offset in tl.range").run(kernel)
 
-    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    @requires_capabilities(Capability.lib.triton)
     @config.patch(
         {
             "force_disable_caches": True,
@@ -1414,15 +1443,15 @@ class ReductionInvariantIndexingTests(InductorTestCase):
             "triton.tile_reductions": True,
         }
     )
-    def test_partially_reduction_invariant_masked_load(self):
+    def test_partially_reduction_invariant_masked_load(self, device):
         def fn(value0, value1, row):
             values = torch.cat((value0 * row[:, None], value1), dim=0)
             return values.square().sum()
 
         inputs = (
-            torch.randn(64, 128, device=GPU_TYPE),
-            torch.randn(32, 128, device=GPU_TYPE),
-            torch.randn(64, device=GPU_TYPE, dtype=torch.float16),
+            torch.randn(64, 128, device=device),
+            torch.randn(32, 128, device=device),
+            torch.randn(64, device=device, dtype=torch.float16),
         )
         actual, kernels = run_and_get_kernels(
             torch.compile(fn, fullgraph=True), *inputs, remove_quote=True
@@ -1433,7 +1462,7 @@ class ReductionInvariantIndexingTests(InductorTestCase):
             "\n".join(kernels)
         )
 
-    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    @requires_capabilities(Capability.lib.triton)
     @parametrize("persistent_reductions", [False, True])
     @config.patch(
         {
@@ -1448,7 +1477,7 @@ class ReductionInvariantIndexingTests(InductorTestCase):
             "triton.use_block_ptr": False,
         }
     )
-    def test_reduction_invariant_pointwise_load(self, persistent_reductions):
+    def test_reduction_invariant_pointwise_load(self, device, persistent_reductions):
         def fn(row, value):
             padded = torch.cat(
                 (
@@ -1463,8 +1492,8 @@ class ReductionInvariantIndexingTests(InductorTestCase):
             return (value.float() + padded.float()[:, None, None]).square().sum(dim=-1)
 
         inputs = (
-            torch.randint(-4, 5, (13,), device=GPU_TYPE, dtype=torch.int64),
-            torch.randn(26, 65, 65, device=GPU_TYPE, dtype=torch.bfloat16),
+            torch.randint(-4, 5, (13,), device=device, dtype=torch.int64),
+            torch.randn(26, 65, 65, device=device, dtype=torch.bfloat16),
         )
         with config.patch({"triton.persistent_reductions": persistent_reductions}):
             actual, kernels = run_and_get_kernels(
@@ -1475,7 +1504,7 @@ class ReductionInvariantIndexingTests(InductorTestCase):
         self.assertEqual(1, len(kernels))
         FileCheck().check_regex(REDUCTION_INVARIANT_YX_LOAD).run(kernels[0])
 
-    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    @requires_capabilities(Capability.lib.triton)
     @config.patch(
         {
             "benchmark_combo_kernel": False,
@@ -1500,7 +1529,7 @@ class ReductionInvariantIndexingTests(InductorTestCase):
             "triton.use_block_ptr": False,
         }
     )
-    def test_combo_reduction_invariant_pointwise_load(self):
+    def test_combo_reduction_invariant_pointwise_load(self, device):
         def reduction(target, value):
             padded = torch.cat(
                 (
@@ -1518,10 +1547,10 @@ class ReductionInvariantIndexingTests(InductorTestCase):
             return reduction(target0, value0), reduction(target1, value1)
 
         inputs = (
-            torch.randint(-4, 5, (13,), device=GPU_TYPE, dtype=torch.int64),
-            torch.randn(17, 97, 64, device=GPU_TYPE, dtype=torch.bfloat16),
-            torch.randint(-4, 5, (11,), device=GPU_TYPE, dtype=torch.int64),
-            torch.randn(19, 129, 64, device=GPU_TYPE, dtype=torch.bfloat16),
+            torch.randint(-4, 5, (13,), device=device, dtype=torch.int64),
+            torch.randn(17, 97, 64, device=device, dtype=torch.bfloat16),
+            torch.randint(-4, 5, (11,), device=device, dtype=torch.int64),
+            torch.randn(19, 129, 64, device=device, dtype=torch.bfloat16),
         )
         actual, code = run_and_get_code(torch.compile(fn, fullgraph=True), *inputs)
 
@@ -1531,7 +1560,7 @@ class ReductionInvariantIndexingTests(InductorTestCase):
             REDUCTION_INVARIANT_YX_LOAD
         ).run(code[0])
 
-    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    @requires_capabilities(Capability.lib.triton)
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
     @config.patch(
         {
@@ -1555,7 +1584,7 @@ class ReductionInvariantIndexingTests(InductorTestCase):
             "triton.use_block_ptr": False,
         }
     )
-    def test_combo_reduction_invariant_zero_pointwise_extent(self):
+    def test_combo_reduction_invariant_zero_pointwise_extent(self, device):
         def reduction(mask, target, value):
             pointwise_extent = torch.nonzero(mask).numel()
             value = value[:, :pointwise_extent, :]
@@ -1575,12 +1604,12 @@ class ReductionInvariantIndexingTests(InductorTestCase):
             return reduction(mask0, target0, value0), reduction(mask1, target1, value1)
 
         inputs = (
-            torch.zeros(16, device=GPU_TYPE, dtype=torch.bool),
-            torch.randint(-4, 5, (13,), device=GPU_TYPE, dtype=torch.int64),
-            torch.randn(17, 16, 64, device=GPU_TYPE, dtype=torch.bfloat16),
-            torch.ones(16, device=GPU_TYPE, dtype=torch.bool),
-            torch.randint(-4, 5, (11,), device=GPU_TYPE, dtype=torch.int64),
-            torch.randn(19, 16, 64, device=GPU_TYPE, dtype=torch.bfloat16),
+            torch.zeros(16, device=device, dtype=torch.bool),
+            torch.randint(-4, 5, (13,), device=device, dtype=torch.int64),
+            torch.randn(17, 16, 64, device=device, dtype=torch.bfloat16),
+            torch.ones(16, device=device, dtype=torch.bool),
+            torch.randint(-4, 5, (11,), device=device, dtype=torch.int64),
+            torch.randn(19, 16, 64, device=device, dtype=torch.bfloat16),
         )
         actual, code = run_and_get_code(torch.compile(fn, fullgraph=True), *inputs)
 
@@ -1592,7 +1621,7 @@ class ReductionInvariantIndexingTests(InductorTestCase):
             REDUCTION_INVARIANT_X_LOAD
         ).check_regex(REDUCTION_INVARIANT_X_LOAD).run(code[0])
 
-    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    @requires_capabilities(Capability.lib.triton)
     @parametrize("pointwise_dependency", ["address", "predicate"])
     @config.patch(
         {
@@ -1608,7 +1637,9 @@ class ReductionInvariantIndexingTests(InductorTestCase):
             "triton.use_block_ptr": False,
         }
     )
-    def test_pointwise_dependent_load_keeps_pointwise_axis(self, pointwise_dependency):
+    def test_pointwise_dependent_load_keeps_pointwise_axis(
+        self, device, pointwise_dependency
+    ):
         if pointwise_dependency == "address":
 
             def fn(row, value0, value1):
@@ -1619,9 +1650,9 @@ class ReductionInvariantIndexingTests(InductorTestCase):
                 return values.square().sum(dim=-1)
 
             inputs = (
-                torch.randint(-4, 5, (26, 2), device=GPU_TYPE, dtype=torch.int64),
-                torch.randn(26, 2, 65, device=GPU_TYPE, dtype=torch.bfloat16),
-                torch.randn(26, 3, 65, device=GPU_TYPE, dtype=torch.bfloat16),
+                torch.randint(-4, 5, (26, 2), device=device, dtype=torch.int64),
+                torch.randn(26, 2, 65, device=device, dtype=torch.bfloat16),
+                torch.randn(26, 3, 65, device=device, dtype=torch.bfloat16),
             )
         else:
 
@@ -1640,8 +1671,8 @@ class ReductionInvariantIndexingTests(InductorTestCase):
                 return (value.float() + padded.float()[:, :, None]).square().sum(dim=-1)
 
             inputs = (
-                torch.randint(-4, 5, (26,), device=GPU_TYPE, dtype=torch.int64),
-                torch.randn(26, 65, 65, device=GPU_TYPE, dtype=torch.bfloat16),
+                torch.randint(-4, 5, (26,), device=device, dtype=torch.int64),
+                torch.randn(26, 65, 65, device=device, dtype=torch.bfloat16),
             )
 
         actual, kernels = run_and_get_kernels(
@@ -1655,18 +1686,18 @@ class ReductionInvariantIndexingTests(InductorTestCase):
             reduction_kernels[0]
         )
 
-    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    @requires_capabilities(Capability.lib.triton)
     @config.patch(force_disable_caches=True)
-    def test_reduction_dependent_pointer_keeps_masked_index_load_dense(self):
+    def test_reduction_dependent_pointer_keeps_masked_index_load_dense(self, device):
         def fn(index, source, left):
             gathered = torch.index_select(source, 2, index).float()
             values = torch.cat((left, gathered), dim=1)
             return values.square().sum(dim=-1)
 
         inputs = (
-            torch.randperm(64, device=GPU_TYPE)[:32],
-            torch.randn(16, 2, 64, device=GPU_TYPE, dtype=torch.bfloat16),
-            torch.randn(16, 1, 32, device=GPU_TYPE),
+            torch.randperm(64, device=device)[:32],
+            torch.randn(16, 2, 64, device=device, dtype=torch.bfloat16),
+            torch.randn(16, 1, 32, device=device),
         )
         actual, kernels = run_and_get_kernels(
             torch.compile(fn, fullgraph=True), *inputs, remove_quote=True
@@ -1676,18 +1707,18 @@ class ReductionInvariantIndexingTests(InductorTestCase):
         self.assertEqual(1, len(kernels))
         FileCheck().check_regex(r"tl\.load\([^\n]*r0_[^\n]*R0_BLOCK").run(kernels[0])
 
-    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    @requires_capabilities(Capability.lib.triton)
     @config.patch(force_disable_caches=True)
-    def test_reduction_dependent_mask_keeps_masked_index_load_dense(self):
+    def test_reduction_dependent_mask_keeps_masked_index_load_dense(self, device):
         def fn(index, source, value):
             gathered = torch.index_select(source, 0, index)
             values = torch.cat((gathered, value), dim=-1)
             return values.square().sum(dim=-1)
 
         inputs = (
-            torch.randperm(16, device=GPU_TYPE),
-            torch.randn(16, 2, 32, device=GPU_TYPE),
-            torch.randn(16, 2, 16, device=GPU_TYPE),
+            torch.randperm(16, device=device),
+            torch.randn(16, 2, 32, device=device),
+            torch.randn(16, 2, 16, device=device),
         )
         actual, kernels = run_and_get_kernels(
             torch.compile(fn, fullgraph=True), *inputs, remove_quote=True
@@ -1697,23 +1728,23 @@ class ReductionInvariantIndexingTests(InductorTestCase):
         self.assertEqual(1, len(kernels))
         FileCheck().check_regex(DENSE_X_INDEX_LOAD).run(kernels[0])
 
-    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    @requires_capabilities(Capability.lib.triton)
     @config.patch(
         {
             "force_disable_caches": True,
             "triton.dense_indexing": True,
         }
     )
-    def test_explicit_dense_indexing_keeps_masked_index_load_dense(self):
+    def test_explicit_dense_indexing_keeps_masked_index_load_dense(self, device):
         def fn(index, source, value):
             gathered = torch.index_select(source, 0, index)
             values = torch.cat((gathered, value), dim=1)
             return values.square().sum(dim=-1)
 
         inputs = (
-            torch.randperm(16, device=GPU_TYPE),
-            torch.randn(16, 2, 64, device=GPU_TYPE),
-            torch.randn(16, 3, 64, device=GPU_TYPE),
+            torch.randperm(16, device=device),
+            torch.randn(16, 2, 64, device=device),
+            torch.randn(16, 3, 64, device=device),
         )
         actual, kernels = run_and_get_kernels(
             torch.compile(fn, fullgraph=True), *inputs, remove_quote=True
@@ -1723,14 +1754,14 @@ class ReductionInvariantIndexingTests(InductorTestCase):
         self.assertEqual(1, len(kernels))
         FileCheck().check_regex(DENSE_X_INDEX_LOAD).run(kernels[0])
 
-    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    @requires_capabilities(Capability.lib.triton)
     @config.patch(
         {
             "force_disable_caches": True,
             "triton.persistent_reductions": False,
         }
     )
-    def test_loop_epilogue_masked_index_load_scope(self):
+    def test_loop_epilogue_masked_index_load_scope(self, device):
         def fn(index, mask, value):
             positions = torch.arange(index.numel(), device=index.device)
             masked_index = torch.ops.aten._unsafe_masked_index(
@@ -1740,9 +1771,9 @@ class ReductionInvariantIndexingTests(InductorTestCase):
             return reduced + masked_index
 
         inputs = (
-            torch.arange(16, device=GPU_TYPE, dtype=torch.int64),
-            torch.tensor([True, False] * 8, device=GPU_TYPE),
-            torch.randn(16, 64, device=GPU_TYPE),
+            torch.arange(16, device=device, dtype=torch.int64),
+            torch.tensor([True, False] * 8, device=device),
+            torch.randn(16, 64, device=device),
         )
         actual, kernels = run_and_get_kernels(
             torch.compile(fn, fullgraph=True), *inputs, remove_quote=True
@@ -1758,6 +1789,8 @@ class ReductionInvariantIndexingTests(InductorTestCase):
 
 class TestOptimizationHintIdentityExpansion(InductorTestCase):
     """Test that optimization_hint expands Identity wrappers after _sub_unbacked_exprs."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_identity_wrapped_expr_resolves_to_int(self):
         """An expression containing Identity-wrapped constants and an unbacked
@@ -1775,8 +1808,17 @@ class TestOptimizationHintIdentityExpansion(InductorTestCase):
         self.assertEqual(hint, 42)
 
 
+instantiate_device_type_tests(
+    TestIndexingSimplificationAccelerator, globals(), except_for="cpu", allow_xpu=True
+)
+instantiate_device_type_tests(TestIndexingSimplificationCpu, globals(), only_for="cpu")
+instantiate_device_type_tests(
+    ReductionInvariantIndexingTests, globals(), except_for="cpu", allow_xpu=True
+)
+
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
+    from torch.utils._triton import has_triton
 
-    if HAS_CPU or HAS_GPU:
+    if HAS_CPU or has_triton():
         run_tests("sympy")
