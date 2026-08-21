@@ -1795,7 +1795,13 @@ class VariableBuilder:
             if isinstance(value, torch.amp.autocast_mode._UnmanagedAutocast):
                 return self.wrap_user_defined(value)
             else:
-                self.install_guards(GuardBuilder.ID_MATCH)
+                self.install_guards(GuardBuilder.TYPE_MATCH)
+                for field in ("device", "fast_dtype", "_enabled", "_cache_enabled"):
+                    install_guard(
+                        AttrSource(self.source, field).make_guard(
+                            GuardBuilder.EQUALS_MATCH
+                        )
+                    )
                 return AutocastModeVariable(
                     target_values=[
                         value.device,

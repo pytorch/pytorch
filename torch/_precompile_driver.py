@@ -9,9 +9,9 @@ IDEs type-check and navigate the load-bearing driver logic that would otherwise 
 invisible inside a string (and drops the wall of ``# noqa: F821``).
 
 Keeping the driver version-frozen (its behavior is hashed via code_hash, invariant 7)
-still holds: the artifact carries the driver TEXT, it does not import it, so there is no
-torch-version skew. The emit path runs getsource in-process where torch source is
-present; load() never touches this module.
+still holds: the artifact carries the driver TEXT rather than importing it. The opaque
+Dynamo guard and code state still depends on the producing torch build, so the emitted
+driver checks both Python and torch versions before unpickling it.
 
 The names the emitted bodies read from the artifact's own namespace -- the metadata
 constants, the ``_torch`` / ``_pytree`` import aliases, and the graph's ``call`` -- are
@@ -55,9 +55,13 @@ if TYPE_CHECKING:
     USER_INPUT_DTYPES: list[str | None] = []
     USER_INPUT_DEVICES: list[str | None] = []
     USER_INPUT_BOUNDS: list[dict[int, tuple[int | None, int | None]] | None] = []
+    GRAPH_DEVICES: tuple[str, ...] = ()
+    BACKEND: str = ""
+    TRAINING: bool = False
     _DYNAMO_BACKEND_IDS: tuple[str, ...] = ()
     _DYNAMO_BACKENDS: dict[str, Callable[[list[object]], object]] = {}
     _DYNAMO_PYTHON_VERSION: tuple[int, int] = (0, 0)
+    _DYNAMO_TORCH_VERSION: str = ""
     _DYNAMO_STATE: str = ""
 
     # The compiled/captured graph's entry point, emitted before the driver.
@@ -138,6 +142,18 @@ def _check_structure(pb, names):
             )
 
 
+def _autocast_off(devices):
+    import contextlib as _contextlib
+
+    import torch as _t
+
+    stack = _contextlib.ExitStack()
+    for device in devices:
+        if _t.amp.is_autocast_available(device):
+            stack.enter_context(_t.amp.autocast(device, enabled=False))
+    return stack
+
+
 def _eager_forward(*args):
     """Run the captured ATen graph eagerly. Pass the same args the traced fn took --
     the module(s) in the same positions plus the runtime inputs. The module(s) must
@@ -207,7 +223,7 @@ def _eager_forward(*args):
             )
     pb, _names = _extract_param_buffers(mods)
     _check_structure(pb, _names)
-    with _torch.no_grad():
+    with _autocast_off(GRAPH_DEVICES), _torch.no_grad():
         out = list(call([*pb, *user_flat]))
     if GRAD_PARAM_INDICES:
         n = len(GRAD_PARAM_INDICES)
@@ -318,7 +334,8 @@ def _inductor_forward(*args):
     pb, _names = _extract_param_buffers(mods)
     _check_structure(pb, _names)
     try:
-        out = list(call([*pb, *user_flat]))
+        with _autocast_off(GRAPH_DEVICES):
+            out = list(call([*pb, *user_flat]))
     except AssertionError as _e:
         # Only relabel inductor's own assert_size_stride failure (a stride/memory-format
         # mismatch, or a size mismatch on an unbacked dim the static check above cannot
@@ -403,9 +420,58 @@ def _build_dynamo_forward():
             f"{_DYNAMO_PYTHON_VERSION[0]}.{_DYNAMO_PYTHON_VERSION[1]}, but is "
             f"being loaded on Python {sys.version_info[0]}.{sys.version_info[1]}."
         )
+    if _DYNAMO_TORCH_VERSION != torch.__version__:
+        raise ValueError(
+            "precompile artifact was produced by torch "
+            f"{_DYNAMO_TORCH_VERSION}, but is being loaded by torch "
+            f"{torch.__version__}."
+        )
 
     state = pickle.loads(base64.b64decode(_DYNAMO_STATE))
+    if (
+        state.device_type in ("cuda", "xpu")
+        and not getattr(torch, state.device_type).is_available()
+    ):
+        raise RuntimeError(
+            f"precompile artifact requires {state.device_type}, but it is unavailable"
+        )
+    if BACKEND == "inductor" and state.system_info is not None:
+        from torch._dynamo.package import SystemInfo
+
+        state.system_info.check_compatibility(SystemInfo.current(), state.device_type)
     namespace = dict(globals())
+
+    def run_entry(function, args, kwargs):
+        if not state.mutates_input_grads:
+            return function(*args, **kwargs)
+
+        tensors = {}
+        leaves, _ = _pytree.tree_flatten((args, kwargs))
+        for value in leaves:
+            if isinstance(value, torch.nn.Module):
+                for parameter in value.parameters():
+                    tensors[id(parameter)] = parameter
+            elif isinstance(value, torch.Tensor) and value.is_leaf:
+                tensors[id(value)] = value
+        saved = [(tensor, tensor.grad) for tensor in tensors.values()]
+        with torch.no_grad():
+            for tensor, _ in saved:
+                tensor.grad = None
+        try:
+            return function(*args, **kwargs)
+        finally:
+            with torch.no_grad():
+                for tensor, previous in saved:
+                    current = tensor.grad
+                    if previous is None:
+                        continue
+                    if current is None:
+                        tensor.grad = previous
+                    elif previous.is_sparse and not current.is_sparse:
+                        tensor.grad = current + previous
+                    else:
+                        previous.add_(current)
+                        tensor.grad = previous
 
     def check_input_contract(args, kwargs):
         contract = state.input_contract
@@ -600,6 +666,16 @@ def _build_dynamo_forward():
             for backend_id, function in backend_calls.items()
         }
 
+        def keep_serializable_guards(entries):
+            from torch._dynamo.guards import CheckFunctionManager
+
+            unsupported = CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
+            return [
+                entry.guard_type not in unsupported
+                and not any(kind in unsupported for kind in entry.derived_guard_types)
+                for entry in entries
+            ]
+
         def entry_function():
             code_state = state.codes[0]
             try:
@@ -632,6 +708,8 @@ def _build_dynamo_forward():
                 self.state = threading.Condition()
                 self.active_calls = 0
                 self.unloading = False
+                self.loaded = True
+                self.capture_summary = state.summary
 
             def _rebind(self, fn):
                 with self.state:
@@ -642,10 +720,33 @@ def _build_dynamo_forward():
                             "precompile: this artifact is already installed; pass "
                             "fn= to load() before the first call."
                         )
+                    entry = fn.forward if isinstance(fn, torch.nn.Module) else fn
+                    code = getattr(entry, "__code__", None)
+                    identity = (
+                        getattr(entry, "__module__", None),
+                        getattr(entry, "__qualname__", None),
+                        getattr(code, "co_name", None),
+                        getattr(code, "co_firstlineno", None),
+                    )
+                    expected = (
+                        state.entry_module,
+                        state.entry_qualname,
+                        state.entry_name,
+                        state.entry_firstlineno,
+                    )
+                    if identity != expected:
+                        from torch._precompile import PrecompileError
+
+                        raise PrecompileError(
+                            "precompile: artifact was captured from a different "
+                            f"callable ({state.entry_module}.{state.entry_qualname})."
+                        )
                     self.fn = fn
 
             def _ensure(self):
                 with self.state:
+                    if not self.loaded:
+                        raise RuntimeError("precompile artifact has been unloaded")
                     if self.unloading:
                         raise RuntimeError("precompile artifact is being unloaded")
                     if self.compiled is not None:
@@ -653,23 +754,17 @@ def _build_dynamo_forward():
                     fn = entry_function() if self.fn is None else self.fn
                     entry = fn.forward if isinstance(fn, torch.nn.Module) else fn
 
-                    def fail_backend(gm, inputs):
-                        from torch._precompile import PrecompileError
-
-                        raise PrecompileError(
-                            "precompile: no captured Dynamo variant matches this "
-                            "call. Add an example covering it and precompile again."
-                        )
-
                     package = CompilePackage(
                         entry,
                         state.package,
-                        ignore_inlined_sources=True,
+                        ignore_inlined_sources=False,
+                        serialization_guard_filter_fn=keep_serializable_guards,
                     )
                     context = torch._dynamo.optimize(
-                        fail_backend,
+                        torch._dynamo.lookup_backend(BACKEND),
                         package=package,
-                        dynamic=None,
+                        dynamic=state.dynamic,
+                        recompile_limit=state.recompile_limit,
                         isolate_recompiles=True,
                     )
                     compiled = context(fn)
@@ -701,7 +796,8 @@ def _build_dynamo_forward():
                     compiled = self.compiled
                     self.active_calls += 1
                 try:
-                    return compiled(*args, **kwargs)
+                    with torch.set_grad_enabled(TRAINING):
+                        return run_entry(compiled, args, kwargs)
                 except torch._dynamo.exc.BackendCompilerFailed as e:
                     from torch._precompile import PrecompileError
 
@@ -725,28 +821,36 @@ def _build_dynamo_forward():
                 with self.state:
                     while self.unloading:
                         self.state.wait()
-                    if self.compiled is None:
+                    if not self.loaded:
                         return
                     self.unloading = True
-                    while self.active_calls:
-                        self.state.wait()
+                    try:
+                        while self.active_calls:
+                            self.state.wait()
+                    except BaseException:
+                        self.unloading = False
+                        self.state.notify_all()
+                        raise
                     package = self.package
                     codes = self.codes
                     region = self.region
+                    self.loaded = False
                     self.compiled = None
                     self.package = None
                     self.codes = ()
                     self.region = -1
                 try:
                     try:
-                        package.uninstall()
+                        if package is not None:
+                            package.uninstall()
                     finally:
                         from torch._C._dynamo.eval_frame import (
                             _clear_cache_entries_for_region,
                         )
 
-                        for code in codes:
-                            _clear_cache_entries_for_region(code, region)
+                        if region >= 0:
+                            for code in codes:
+                                _clear_cache_entries_for_region(code, region)
                 finally:
                     with self.state:
                         self.unloading = False
@@ -822,6 +926,9 @@ def _build_dynamo_forward():
 
     def forward(*args, **kwargs):
         check_input_contract(args, kwargs)
-        return entry(*args, **kwargs)
+        with torch.set_grad_enabled(TRAINING):
+            return run_entry(entry, args, kwargs)
+
+    forward.capture_summary = state.summary
 
     return forward

@@ -46,16 +46,21 @@ you pass the model again at runtime. The optional `tracer="dynamo"` path accepts
 example calls and retains the guarded recompilations they trigger, including
 automatically dynamic graphs. Use `torch.compiler.ExampleInput(args=..., kwargs=...)`
 for a call with keyword arguments. Its serialized guard records are minimized while
-preserving how every example dispatches. Conditions removed this way are unchecked after
-loading, so changing one from all capture examples can silently miscompute. Tensor,
-scalar, Python-container, and `nn.Module` arguments are supported. Graph breaks and
+preserving how every example dispatches. The Python environment, including globals and
+context-manager state, must be semantically unchanged at runtime; guards that only check
+that promise may be omitted, while input-derived guards remain part of dispatch. Breaking
+an unchecked environment assumption can silently miscompute. Tensor, scalar,
+Python-container, and `nn.Module` arguments are supported. Graph breaks and
 closure-free `torch._dynamo.disable` functions are preserved; top-level closures and
 nested functions that capture locals are not yet supported. Captured nested frames that
 cannot be reached by a source-only dispatcher use an isolated installed artifact; it
-installs lazily, can be scoped with `with`, and exposes `unload()`. With `training=True`,
-Dynamo/Inductor graphs include readable compiled forward and backward code, so served
-outputs retain a `grad_fn` and can be passed to `backward()`. This training mode works
-across captured recompilations and graph breaks. See the
+installs lazily, can be scoped with `with`, exposes `unload()`, and may compile an
+uncovered call. A standalone artifact instead rejects calls outside its captured guard
+sets. With `training=True`, both eager and Inductor artifacts retain autograd history;
+Inductor graphs include readable compiled forward and backward code. This training mode
+works across captured recompilations and graph breaks. `PrecompileSummary` reports
+coverage and dropped guards, while the `require_*` options let callers reject incomplete
+or insufficiently guarded captures. See the
 {ref}`API reference <torch.compiler_api>` for details.
 
 :::{warning}
