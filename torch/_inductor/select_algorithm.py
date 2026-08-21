@@ -60,7 +60,6 @@ from .codegen.common import (
     IndentedBuffer,
     KernelTemplate,
     OpOverrides,
-    TensorArg,
     WorkspaceArg,
     WorkspaceZeroMode,
 )
@@ -935,51 +934,17 @@ class TritonTemplateKernel(TritonKernel):
         else:
             self.triton_meta.update(triton_meta)
 
-        # Upgrade signature for host-side TMA: pointer args that the launcher
-        # will replace with TensorDescriptors need tensordesc<> types so Triton
-        # compiles the kernel with the correct arg types.
-        if self.host_tma_descriptor_args:
-            from .codegen.triton_utils import _type_of
-
-            sig = self.triton_meta["signature"]
-            for argname, arg in zip(argdefs, signature):
-                if (
-                    isinstance(arg, TensorArg)
-                    and arg.name in self.host_tma_descriptor_args
-                ):
-                    info = self.host_tma_descriptor_args[arg.name]
-                    block_shape = (
-                        info["block_shape"]
-                        if isinstance(info, dict)
-                        else info.block_shape
-                    )
-                    dtype = V.graph.get_dtype(arg.buffer)
-                    inner = _type_of(dtype)[1:]  # strip "*": *bf16 -> bf16
-                    sig[argname.name] = f"tensordesc<{inner}{list(block_shape)}>"
-
         inductor_meta = {
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
             **self.inductor_meta_common(),
             **FixedGrid.setup_grid_as_args(),
         }
         if self.host_tma_descriptor_args:
-            # This meta is repr'd into the generated module, so every value must
-            # be a plain resolved dict. Epilogue accesses register a
-            # TensorDescriptorOptions (whose block shape is still symbolic), which
-            # only TritonKernel.inductor_meta_per_kernel knows how to resolve.
-            unsupported = [
-                inner
-                for inner, info in self.host_tma_descriptor_args.items()
-                if not isinstance(info, dict)
-            ]
-            if unsupported:
-                raise NotImplementedError(
-                    "host-side TMA for template epilogue accesses is not supported "
-                    f"(unresolved descriptors: {unsupported})"
-                )
-            inductor_meta["host_tma_descriptor_args"] = {
-                inner: info for inner, info in self.host_tma_descriptor_args.items()
-            }
+            # This meta is repr'd into the generated module, so epilogue-registered
+            # TensorDescriptorOptions must be resolved to plain dims first.
+            inductor_meta["host_tma_descriptor_args"] = (
+                self.resolved_host_tma_descriptor_args()
+            )
         if config.profile_bandwidth or config.benchmark_kernel:
             num_gb = self.estimate_kernel_num_bytes() / 1e9
             inductor_meta["kernel_num_gb"] = num_gb

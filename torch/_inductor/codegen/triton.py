@@ -7097,54 +7097,62 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             if flops is not None:
                 out["kernel_flop"] = flops
         if self.host_tma_descriptor_args:
-            _, _, signature, _ = self.args.python_argdefs()
-            sig_arg_names = OrderedSet(
-                arg.name for arg in signature if hasattr(arg, "name")
-            )
-            fixed_blocks: dict[str, int] = {}
-            if self.persistent_reduction:
-                for rt in self.range_trees:
-                    if rt.is_reduction:
-                        block_name = f"{rt.prefix.upper()}BLOCK"
-                        if block_name not in sig_arg_names:
-                            try:
-                                val = self._get_persistent_reduction_block(rt.numel)
-                                if self.is_native_matmul:
-                                    val = max(val, 16)
-                                fixed_blocks[block_name] = val
-                            except (TypeError, ValueError):
-                                pass
-
-            def _resolve_block_dim(s):
-                s_str = str(s)
-                if s_str in sig_arg_names:
-                    return s_str
-                if s_str in fixed_blocks:
-                    return fixed_blocks[s_str]
-                try:
-                    return int(s)
-                except (TypeError, ValueError):
-                    return s_str
-
-            def _resolve_tensor_dim(s):
-                try:
-                    return int(s)
-                except (TypeError, ValueError):
-                    return str(s)
-
-            resolved = {}
-            for inner, opts in self.host_tma_descriptor_args.items():
-                if isinstance(opts, dict):
-                    resolved[inner] = opts
-                    continue
-                dims = [_resolve_block_dim(s) for s in opts.block_shape]
-                resolved[inner] = {
-                    "block_shape": dims,
-                    "shape": [_resolve_tensor_dim(s) for s in opts.shape],
-                    "strides": [_resolve_tensor_dim(s) for s in opts.strides],
-                }
-            out["host_tma_descriptor_args"] = resolved
+            out["host_tma_descriptor_args"] = self.resolved_host_tma_descriptor_args()
         return out
+
+    def resolved_host_tma_descriptor_args(self) -> dict[str, Any]:
+        """Resolve host_tma_descriptor_args into the launcher's dim format.
+
+        Block shapes may name an autotuned kernel arg (XBLOCK) or a block fixed
+        in the kernel body, so they resolve differently from tensor dims. Shared
+        with TritonTemplateKernel, which builds its own inductor_meta.
+        """
+        _, _, signature, _ = self.args.python_argdefs()
+        sig_arg_names = OrderedSet(
+            arg.name for arg in signature if hasattr(arg, "name")
+        )
+        fixed_blocks: dict[str, int] = {}
+        if self.persistent_reduction:
+            for rt in self.range_trees:
+                if rt.is_reduction:
+                    block_name = f"{rt.prefix.upper()}BLOCK"
+                    if block_name not in sig_arg_names:
+                        try:
+                            val = self._get_persistent_reduction_block(rt.numel)
+                            if self.is_native_matmul:
+                                val = max(val, 16)
+                            fixed_blocks[block_name] = val
+                        except (TypeError, ValueError):
+                            pass
+
+        def _resolve_block_dim(s):
+            s_str = str(s)
+            if s_str in sig_arg_names:
+                return s_str
+            if s_str in fixed_blocks:
+                return fixed_blocks[s_str]
+            try:
+                return int(s)
+            except (TypeError, ValueError):
+                return s_str
+
+        def _resolve_tensor_dim(s):
+            try:
+                return int(s)
+            except (TypeError, ValueError):
+                return str(s)
+
+        resolved = {}
+        for inner, opts in self.host_tma_descriptor_args.items():
+            if isinstance(opts, dict):
+                resolved[inner] = opts
+                continue
+            resolved[inner] = {
+                "block_shape": [_resolve_block_dim(s) for s in opts.block_shape],
+                "shape": [_resolve_tensor_dim(s) for s in opts.shape],
+                "strides": [_resolve_tensor_dim(s) for s in opts.strides],
+            }
+        return resolved
 
     @functools.cached_property
     def add_persistent_rblock(self) -> bool:
