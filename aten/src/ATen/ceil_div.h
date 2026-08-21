@@ -3,21 +3,20 @@
 #include <type_traits>
 
 namespace at {
-
-/**
-   Computes ceil(a / b)
+/*
+computes ceil(a / b)
 */
 template <typename T, typename = std::enable_if_t<std::is_integral_v<T>>>
-C10_ALWAYS_INLINE C10_HOST_DEVICE T ceil_div(T a, T b) {
-  return (a + b - 1) / b;
+C10_ALWAYS_INLINE C10_HOST_DEVICE constexpr T ceil_div(T a, T b) {
+  return a / b + static_cast<T>(a % b != 0);
 }
 
 /**
    Computes ceil(a / b) * b; i.e., rounds up `a` to the next highest
-   multiple of b
+   multiple of b. Precondition: a >= 0, b > 0 (see ceil_div above).
 */
-template <typename T>
-C10_ALWAYS_INLINE C10_HOST_DEVICE T round_up(T a, T b) {
+template <typename T, typename = std::enable_if_t<std::is_integral_v<T>>>
+C10_ALWAYS_INLINE C10_HOST_DEVICE constexpr T round_up(T a, T b) {
   return ceil_div(a, b) * b;
 }
 
