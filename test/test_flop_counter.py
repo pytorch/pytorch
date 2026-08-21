@@ -2,10 +2,13 @@
 # ruff: noqa: F841
 import functools
 import unittest
+import warnings
 
 import torch
 import torch.nn.functional as F
 import torch.utils.flop_counter
+from torch._higher_order_ops.utils import autograd_not_implemented
+from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_CUDNN_ATTENTION,
@@ -16,6 +19,7 @@ from torch.testing._internal.common_cuda import (
 from torch.testing._internal.common_device_type import e4m3_type
 from torch.testing._internal.common_utils import (
     run_tests,
+    TEST_WITH_CROSSREF,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
     xfailIfNoAcceleratorTriton,
@@ -1519,6 +1523,226 @@ class TestFlexAttentionEstimation(TestCase):
         sparse_flops = get_flops(sparse_node)
         self.assertGreater(dense_flops, 0)
         self.assertEqual(sparse_flops, dense_flops // 2)
+
+
+class _MockHOP(HigherOrderOperator):
+    """Minimal HOP that dispatches through super().__call__() like real HOPs."""
+
+    def __init__(self, name, impl):
+        super().__init__(name)
+        self.py_impl(torch._C.DispatchKey.CPU)(impl)
+        self.py_autograd_impl(autograd_not_implemented(self, deferred_error=True))
+
+    def __call__(self, x):
+        return super().__call__(x)
+
+
+# HOPs register into a process-global registry and cannot be unregistered, so
+# they are created once at module scope to keep in-process re-runs working.
+_unregistered_hop = _MockHOP("mock_unregistered_hop_for_flop_test", lambda x: x * 2)
+_tuple_hop = _MockHOP("mock_tuple_hop_registered", lambda x: (x * 2, x.sum(), x.max()))
+_inner_mm_hop = _MockHOP("mock_inner_mm_hop", lambda x: torch.mm(x, x))
+
+
+@unittest.skipIf(
+    TEST_WITH_TORCHDYNAMO, "torchdynamo doesn't work with __torch_dispatch__ right now"
+)
+class TestSkipUnsupported(TestCase):
+    def test_custom_op_not_tracked_by_default(self):
+        """Custom ops without a formula execute and count 0 FLOPs by default."""
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("unregistered_op(Tensor x) -> Tensor")
+            lib.impl("unregistered_op", lambda x: x * 2, "CompositeExplicitAutograd")
+
+            x = torch.randn(10, 10)
+            with FlopCounterMode() as mode:
+                result = torch.ops.mylib.unregistered_op(x)
+
+            self.assertEqual(result, x * 2)
+        self.assertEqual(mode.get_total_flops(), 0)
+        self.assertEqual(len(mode.get_unsupported_ops()), 0)
+
+    def test_custom_op_not_tracked_with_skip_enabled(self):
+        """skip_unsupported only affects HOPs: regular ops without formulas
+        execute, count 0 FLOPs, and are neither tracked nor warned about."""
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("unregistered_op2(Tensor x) -> Tensor")
+            lib.impl("unregistered_op2", lambda x: x * 2, "CompositeExplicitAutograd")
+
+            x = torch.randn(10, 10)
+            with warnings.catch_warnings(record=True) as ws:
+                warnings.simplefilter("always")
+                with FlopCounterMode(skip_unsupported=True) as mode:
+                    result = torch.ops.mylib.unregistered_op2(x)
+
+            self.assertEqual(result, x * 2)
+        self.assertEqual(mode.get_total_flops(), 0)
+        self.assertEqual(len(mode.get_unsupported_ops()), 0)
+        self.assertFalse(any("FLOP formula" in str(w.message) for w in ws))
+
+    def test_skip_unsupported_unknown_hop(self):
+        """Unknown HOPs execute, warn, and are tracked when skip_unsupported=True."""
+        from torch.utils.flop_counter import flop_registry
+
+        self.assertNotIn(_unregistered_hop, flop_registry)
+
+        x = torch.randn(4, 4)
+        expected = x * 2
+
+        with self.assertWarnsRegex(
+            UserWarning, "does not have a registered FLOP formula"
+        ):
+            with FlopCounterMode(skip_unsupported=True) as mode:
+                result = _unregistered_hop(x)
+
+        self.assertEqual(result, expected)
+        self.assertEqual(mode.get_total_flops(), 0)
+        self.assertEqual(
+            mode.get_unsupported_ops()["mock_unregistered_hop_for_flop_test"], 1
+        )
+
+    def test_skip_unsupported_multiple_calls(self):
+        """The unsupported ops counter tracks each call."""
+        x = torch.randn(4, 4)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            with FlopCounterMode(skip_unsupported=True) as mode:
+                for _ in range(5):
+                    _unregistered_hop(x)
+
+        self.assertEqual(
+            mode.get_unsupported_ops()["mock_unregistered_hop_for_flop_test"], 5
+        )
+
+    def test_skip_unsupported_with_mixed_ops(self):
+        """Supported ops are counted while unknown HOPs are skipped and tracked."""
+        x = torch.randn(4, 5)
+        y = torch.randn(5, 6)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            with FlopCounterMode(skip_unsupported=True) as mode:
+                torch.mm(x, y)
+                _unregistered_hop(torch.randn(4, 4))
+
+        self.assertEqual(mode.get_total_flops(), 240)  # 4 * 6 * 2 * 5
+        self.assertEqual(
+            mode.get_unsupported_ops()["mock_unregistered_hop_for_flop_test"], 1
+        )
+
+    def test_get_unsupported_ops_returns_copy(self):
+        """Mutating the returned Counter must not affect the mode's state."""
+        x = torch.randn(4, 4)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            with FlopCounterMode(skip_unsupported=True) as mode:
+                _unregistered_hop(x)
+
+        mode.get_unsupported_ops().clear()
+        self.assertEqual(len(mode.get_unsupported_ops()), 1)
+
+    def test_skipped_hop_inner_flops_not_counted(self):
+        """FLOPs inside a skipped HOP are not counted (docstring contract).
+
+        This guards against accidentally counting inner work when a HOP is
+        skipped. The HOP's torch.mm would add FLOPs if the exclusion broke.
+        """
+        x = torch.randn(4, 5)
+        y = torch.randn(5, 6)
+        z = torch.randn(5, 5)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            with FlopCounterMode(skip_unsupported=True) as mode:
+                torch.mm(x, y)  # external: 4 * 6 * 2 * 5 = 240 FLOPs
+                _inner_mm_hop(z)  # skipped HOP with inner mm (5 * 5 * 2 * 5 = 250)
+
+        # Only external mm counted; inner mm inside skipped HOP excluded
+        self.assertEqual(mode.get_total_flops(), 240)
+        self.assertEqual(mode.get_unsupported_ops()["mock_inner_mm_hop"], 1)
+
+    @unittest.skipIf(
+        TEST_WITH_CROSSREF,
+        "NotImplemented return raises under active TorchFunctionMode",
+    )
+    def test_unknown_hop_without_skip_returns_not_implemented(self):
+        """With skip_unsupported=False (default), the mode returns NotImplemented
+        for unknown HOPs (pre-existing dispatch behavior). This is the failure
+        mode that skip_unsupported=True addresses."""
+        x = torch.randn(4, 4)
+
+        with FlopCounterMode() as mode:
+            result = _unregistered_hop(x)
+
+        self.assertIs(result, NotImplemented)
+        self.assertEqual(len(mode.get_unsupported_ops()), 0)
+
+    def test_registered_hop_counts_flops(self):
+        """flex_attention is registered and its formula matches sdpa_flop_count."""
+        from torch.utils.flop_counter import flop_registry
+
+        self.assertIn(torch.ops.higher_order.flex_attention, flop_registry)
+
+        q_shape = (2, 8, 128, 64)
+        k_shape = (2, 8, 128, 64)
+        v_shape = (2, 8, 128, 64)
+
+        q = torch.randn(*q_shape, device="meta", dtype=torch.float16)
+        k = torch.randn(*k_shape, device="meta", dtype=torch.float16)
+        v = torch.randn(*v_shape, device="meta", dtype=torch.float16)
+        out = torch.randn(*q_shape, device="meta", dtype=torch.float16)
+
+        flex_attn_flop_fn = flop_registry[torch.ops.higher_order.flex_attention]
+        flops = flex_attn_flop_fn(q, k, v, out_val=(out, None, None))
+
+        expected_flops = sdpa_flop_count(q_shape, k_shape, v_shape)
+        self.assertEqual(flops, expected_flops)
+        self.assertGreater(flops, 0)
+
+    def test_flex_attention_hop_end_to_end(self):
+        """The public flex_attention API executes under FlopCounterMode and its
+        FLOPs are counted via the registered formula. This is the exact call from
+        issue #134385."""
+        from torch.nn.attention.flex_attention import flex_attention
+
+        q = torch.randn(2, 4, 128, 64)
+        k = torch.randn(2, 4, 128, 64)
+        v = torch.randn(2, 4, 128, 64)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            with FlopCounterMode() as mode:
+                out = flex_attention(q, k, v)
+
+        self.assertEqual(out.shape, q.shape)
+        self.assertEqual(
+            mode.get_total_flops(), sdpa_flop_count(q.shape, k.shape, v.shape)
+        )
+        self.assertEqual(len(mode.get_unsupported_ops()), 0)
+
+    def test_registered_hop_returns_output_not_none(self):
+        """Registered HOPs return their actual output. Guards against the bug
+        where _handle_higher_order_ops passed None to _count_flops instead of
+        the HOP's return value, breaking tuple-returning HOPs like
+        flex_attention."""
+        from torch.utils.flop_counter import flop_registry, register_flop_formula
+
+        @register_flop_formula(_tuple_hop, get_raw=True)
+        def mock_hop_flops(*args, out_val=None, **kwargs):
+            return 100
+
+        self.addCleanup(lambda: flop_registry.pop(_tuple_hop, None))
+        self.assertIn(_tuple_hop, flop_registry)
+
+        x = torch.randn(4, 4)
+
+        with FlopCounterMode() as mode:
+            result = _tuple_hop(x)
+
+        self.assertIsInstance(result, tuple)
+        self.assertEqual(len(result), 3)
+        out, _, _ = result
+        self.assertEqual(out, x * 2)
+        self.assertEqual(mode.get_total_flops(), 100)
 
 
 if __name__ == "__main__":

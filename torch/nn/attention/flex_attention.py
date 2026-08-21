@@ -22,6 +22,7 @@ from torch._higher_order_ops.flex_attention import flex_attention as flex_attent
 from torch._higher_order_ops.utils import setup_compilation_env
 from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
 from torch.nn.attention._utils import _validate_sdpa_input
+from torch.utils._python_dispatch import is_in_torch_dispatch_mode
 from torch.utils._pytree import (
     GetAttrKey,
     tree_flatten,
@@ -2613,7 +2614,14 @@ def flex_attention(
         return flex_attention_hop(*args, **kwargs)
 
     with setup_compilation_env() as backend:
-        if _FLEX_ATTENTION_DISABLE_COMPILE_DEBUG:
+        # Skip torch.compile when a non-infra dispatch mode (e.g. FlopCounterMode)
+        # is active - dynamo cannot compile that frame anyway, and the uncompiled
+        # path is the unfused eager implementation which these modes need.
+        skip_compile = (
+            _FLEX_ATTENTION_DISABLE_COMPILE_DEBUG
+            or is_in_torch_dispatch_mode(include_infra_modes=False)
+        )
+        if skip_compile:
             flex_fn = _flex_attention_hop_wrapper
         else:
             flex_fn = torch.compile(
@@ -2635,6 +2643,5 @@ def flex_attention(
         max_scores,
         return_aux=return_aux,
         return_lse=return_lse,
-        stats_are_log2=_FLEX_ATTENTION_DISABLE_COMPILE_DEBUG
-        or kernel_options["BACKEND"] != "FLASH",
+        stats_are_log2=skip_compile or kernel_options["BACKEND"] != "FLASH",
     )
