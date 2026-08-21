@@ -15932,7 +15932,8 @@ op_db: list[OpInfo] = [
                ),
                # https://github.com/pytorch/pytorch/issues/182819
                # https://github.com/pytorch/pytorch/issues/182869
-               DecorateInfo(unittest.skip, "TestTorchFunctionRedispatchOps", "test_redispatch", device_type="cuda", dtypes=(torch.float32, torch.complex64), active_if=TEST_WITH_SLOW or IS_LINUX or IS_WINDOWS)
+               # https://github.com/pytorch/pytorch/issues/190241 (#188678, #188684, #188686)
+               DecorateInfo(unittest.expectedFailure, "TestTorchFunctionRedispatchOps", "test_redispatch", device_type="cuda", dtypes=(torch.float32, torch.complex64, torch.float16, torch.bfloat16, torch.complex32), active_if=TEST_WITH_SLOW or IS_LINUX or IS_WINDOWS)
            ),
            supports_out=False,),
     OpInfo('nn.functional.conv1d',
