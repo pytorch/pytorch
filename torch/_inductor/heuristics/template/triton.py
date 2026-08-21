@@ -38,6 +38,7 @@ from ...utils import (
     get_default_kpack,
     get_num_sms,
     get_tma_workspace_arg,
+    mfma_kdim,
     TMA_DESCRIPTOR_SIZE,
     triton_type,
     using_b200,
@@ -879,6 +880,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
     def _finalize_mm_configs(
         self,
         configs: list[BaseConfig],
+        dtype_size: int = 0,
     ) -> Generator[TritonConfig, None, None]:
         """
         Finalizes configs after scaling, applying additional constraints.
@@ -1187,7 +1189,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
 
         if config.max_autotune_gemm_search_space == "EXHAUSTIVE":
             scaled_configs = self._prune_reg_spill_configs(scaled_configs)
-        return self._finalize_mm_configs(scaled_configs)
+        return self._finalize_mm_configs(scaled_configs, dtype_size=dtype_size)
 
     def triton_config(
         self, num_stages: int, num_warps: int, **kwargs: Any
@@ -1806,25 +1808,6 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             for kpack in [1, 2]
         ]
 
-    def _prune_exhaustive_configs(
-        self,
-        configs: list[BaseConfig],
-        dtype_size: int,
-    ) -> list[BaseConfig]:
-        # these cause AMD compile to crash
-        pruned_configs = [
-            c
-            for c in configs
-            if not (
-                (
-                    getattr(c, "matrix_instr_nonkdim", 0) == 2
-                    and getattr(c, "kpack", 0) == 2
-                )
-                or (c.block_k <= 16 and getattr(c, "kpack", 0) == 2)
-            )
-        ]
-        return pruned_configs
-
     def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
         """
         ROCm specific filtering
@@ -1836,6 +1819,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
     def _finalize_mm_configs(
         self,
         configs: list[BaseConfig],
+        dtype_size: int = 0,
     ) -> Generator[TritonConfig, None, None]:
         """
         Finalizes configs after scaling, applying additional constraints.
@@ -1853,13 +1837,17 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             waves_per_eu: int = getattr(conf, "waves_per_eu", 0)
             # Use explicit kpack if set, otherwise determine optimal value based on
             # architecture and BLOCK_K
-            kpack: int = getattr(conf, "kpack", get_default_kpack(conf.block_k))
+            kpack: int = getattr(conf, "kpack", get_default_kpack())
+            kdim = mfma_kdim(dtype_size, matrix_instr_nonkdim) or matrix_instr_nonkdim
 
             if matrix_instr_nonkdim != 0 and (
                 conf.block_m % matrix_instr_nonkdim != 0
                 or conf.block_n % matrix_instr_nonkdim != 0
+                or (kpack > 1 and conf.block_k < kpack * kdim)
             ):
                 #  block_m and block_n must be a multiple of matrix_instr_nonkdim
+                #  kpack > 1 is honored only on gfx942; block_k must then supply
+                #  kpack whole MFMA K-steps (kpack * kdim) or packing miscompiles
                 continue
 
             # Construct key for finding duplicate configs

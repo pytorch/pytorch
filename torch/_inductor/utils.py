@@ -1867,12 +1867,33 @@ def get_tma_workspace_arg(
     )
 
 
-def get_default_kpack(block_k: int = 16) -> int:
+def get_default_kpack() -> int:
     if not torch.version.hip:
         return 0
-    if "gfx942" in torch.cuda.get_device_properties(0).gcnArchName and block_k <= 16:
-        return 1
-    return 2
+    # Only ROCM gfx942 supports kpack > 1, Triton Compiler takes it as 1 for other Archs
+    # Align it up here to get accurate kpack for Non-gfx942 Archs
+    if "gfx942" in torch.cuda.get_device_properties(0).gcnArchName:
+        return 2
+    return 1
+
+
+# K-extent (kdim) of the gfx942 (CDNA3) MFMA instruction, keyed by
+# (element_byte_width, matrix_instr_nonkdim).
+_MFMA_KDIM = {
+    # nonkdim == 16 : 16x16x{K}
+    (4, 16): 4,  # f32      -> 16x16x4
+    (2, 16): 16,  # f16/bf16 -> 16x16x16
+    (1, 16): 32,  # f8/i8    -> 16x16x32
+    # nonkdim == 32 : 32x32x{K}
+    (4, 32): 2,  # f32      -> 32x32x2
+    (2, 32): 8,  # f16/bf16 -> 32x32x8
+    (1, 32): 16,  # f8/i8    -> 32x32x16
+}
+
+
+def mfma_kdim(dtype_size: int, matrix_instr_nonkdim: int) -> int | None:
+    """gfx942 MFMA K-extent, None for an unknown (dtype_size, nonkdim) pair."""
+    return _MFMA_KDIM.get((dtype_size, matrix_instr_nonkdim))
 
 
 def _use_template_for_gpu(
