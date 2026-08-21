@@ -943,7 +943,7 @@ def _defaultdict_serialize(context: Context) -> DumpableContext:
     json_defaultdict = {
         "default_factory_module": default_factory.__module__,
         "default_factory_name": default_factory.__qualname__,
-        "dict_context": dict_context,
+        "dict_context": _json_escape_tuples(dict_context),
     }
     return json_defaultdict
 
@@ -971,7 +971,7 @@ def _defaultdict_deserialize(dumpable_context: DumpableContext) -> Context:
     module = importlib.import_module(default_factory_module)
     default_factory = getattr(module, default_factory_name)
 
-    dict_context = dumpable_context["dict_context"]
+    dict_context = _json_unescape_tuples(dumpable_context["dict_context"])
     return [default_factory, dict_context]
 
 
@@ -1982,6 +1982,36 @@ class _ProtocolFn(NamedTuple):
 _SUPPORTED_PROTOCOLS: dict[int, _ProtocolFn] = {}
 
 
+# JSON has no tuple type, so a tuple that appears in a serialized context -- most
+# commonly a tuple mapping key such as ``{(1, 2): ...}`` -- would be written out
+# as an array and read back as a ``list``. A ``list`` is unhashable and cannot be
+# used as a mapping key, so ``tree_unflatten`` would then fail to reconstruct an
+# otherwise valid pytree. We escape tuples with an explicit marker on the way out
+# and restore them on the way in. Contexts without tuples serialize byte-for-byte
+# as before, so previously serialized specs are unaffected.
+_TUPLE_MARKER = "__tuple__"
+
+
+def _json_escape_tuples(obj: Any) -> Any:
+    if isinstance(obj, tuple):
+        return {_TUPLE_MARKER: [_json_escape_tuples(item) for item in obj]}
+    if isinstance(obj, list):
+        return [_json_escape_tuples(item) for item in obj]
+    if isinstance(obj, dict):
+        return {key: _json_escape_tuples(value) for key, value in obj.items()}
+    return obj
+
+
+def _json_unescape_tuples(obj: Any) -> Any:
+    if isinstance(obj, dict):
+        if len(obj) == 1 and _TUPLE_MARKER in obj:
+            return tuple(_json_unescape_tuples(item) for item in obj[_TUPLE_MARKER])
+        return {key: _json_unescape_tuples(value) for key, value in obj.items()}
+    if isinstance(obj, list):
+        return [_json_unescape_tuples(item) for item in obj]
+    return obj
+
+
 def _treespec_to_json(treespec: TreeSpec) -> _TreeSpecSchema:
     if treespec.is_leaf():
         return _TreeSpecSchema(None, None, [])
@@ -2003,7 +2033,9 @@ def _treespec_to_json(treespec: TreeSpec) -> _TreeSpecSchema:
 
     if serialize_node_def.to_dumpable_context is None:
         try:
-            serialized_context = json.dumps(treespec._context, cls=EnumEncoder)
+            serialized_context = json.dumps(
+                _json_escape_tuples(treespec._context), cls=EnumEncoder
+            )
         except TypeError as e:
             raise TypeError(
                 "Unable to serialize context. "
@@ -2049,7 +2081,9 @@ def _json_to_treespec(json_schema: DumpableContext) -> TreeSpec:
 
     if serialize_node_def.from_dumpable_context is None:
         try:
-            context = json.loads(json_schema["context"], object_hook=enum_object_hook)
+            context = _json_unescape_tuples(
+                json.loads(json_schema["context"], object_hook=enum_object_hook)
+            )
         except TypeError as ex:
             raise TypeError(
                 "Unable to deserialize context. "
