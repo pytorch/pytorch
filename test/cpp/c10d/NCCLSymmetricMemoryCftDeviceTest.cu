@@ -52,8 +52,14 @@ uint32_t valueBase(int src, int dst, int size) {
 // with an unconditional `#undef NCCL_CFT_ENABLE`, so it always reads as 0 in
 // consumer code and would silently compile the put away. Replicate NCCL's
 // arch condition instead (nccl_device/impl/cft__funcs.h).
-#define CFT_DEVICE_SUPPORTED \
-  (defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 1000 && CUDART_VERSION >= 13030)
+// Not `#define CFT_DEVICE_SUPPORTED (defined(...) && ...)`: `defined` inside
+// a macro expansion is undefined behavior and clang rejects it under
+// -Werror,-Wexpansion-to-defined.
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 1000 && CUDART_VERSION >= 13030
+#define CFT_DEVICE_SUPPORTED 1
+#else
+#define CFT_DEVICE_SUPPORTED 0
+#endif
 
 __global__ void cftPutKernel(uint32_t leId, size_t leOffset, uint32_t base) {
 #if CFT_DEVICE_SUPPORTED
@@ -266,9 +272,13 @@ class NCCLSymmetricMemoryCftDeviceTest : public ::testing::Test {
     if (attr.ptxVersion >= 100) {
       return false;
     }
+    LOG(INFO) << "cftPutKernel variant compiled for sm_" << attr.ptxVersion
+              << " with CUDART " << CUDART_VERSION
+              << ", needs sm_100+ and CUDA >= 13.3; skipping test";
+#else
+    LOG(INFO) << "cftPutKernel compiled with CUDART " << CUDART_VERSION
+              << ", needs CUDA >= 13.3; skipping test";
 #endif
-    LOG(INFO) << "cftPutKernel compiled without CFT device support "
-              << "(needs sm_100+ code and CUDA >= 13.3), skipping test";
     return true;
   }
 

@@ -14,11 +14,13 @@ import threading
 import time
 import unittest
 import warnings
+from collections.abc import Callable
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from enum import auto, Enum
 from functools import wraps
 from itertools import chain, product
+from typing import ParamSpec, TypeVar
 from unittest import mock, SkipTest
 
 import torch
@@ -7682,7 +7684,11 @@ def _host_cft_unsupported_reason() -> str | None:
     return None
 
 
-def requires_cft_support():
+_P = ParamSpec("_P")
+_T = TypeVar("_T")
+
+
+def requires_cft_support() -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
     """Skip unless the GPU/driver stack can create CFT logical endpoints.
 
     Like requires_nvls in test_nvshmem.py, but evaluated lazily inside the
@@ -7690,9 +7696,9 @@ def requires_cft_support():
     not initialize a CUDA context in the main process.
     """
 
-    def decorator(func):
+    def decorator(func: Callable[_P, _T]) -> Callable[_P, _T]:
         @wraps(func)
-        def wrapper(*args, **kwargs):
+        def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _T:
             reason = _host_cft_unsupported_reason()
             if reason is not None:
                 raise SkipTest(reason)
