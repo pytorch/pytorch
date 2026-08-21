@@ -21,7 +21,8 @@ intervals - both kernels lose to aten again at large N; anything outside
 falls through.
 
 ``self`` is read through ``ConstTensorWrapper`` so a COW input dispatches
-without materialising; ``out=`` is written, so ``_out_cond`` declines COW.
+without materialising; writable ``out=`` buffers materialise through
+``data_ptr()`` before launch.
 """
 
 from __future__ import annotations
@@ -31,12 +32,7 @@ import functools
 import torch
 
 from ... import flydsl_utils as fu
-from ._common import (
-    any_cow,
-    flatten_last_dim,
-    last_dim_row_major_ok,
-    unflatten_last_dim,
-)
+from ._common import flatten_last_dim, last_dim_row_major_ok, unflatten_last_dim
 
 
 _SUPPORTED_ARCHES = ("gfx950",)
@@ -108,6 +104,7 @@ def _eligible(
     M = self.numel() // N if N else 0
     if not _fits_topk_buffer_span(M, N, k, self.element_size()):
         return False
+    # Performance gate: small row counts underutilize CUs, so fall back to ATen.
     if M < _min_rows_for_full_wave(device_index):
         return False
     return _kernel_for(k, N) is not None
@@ -136,8 +133,6 @@ def _out_cond(
     indices: torch.Tensor,
 ) -> bool:
     if not _cond(self, k, dim, largest, sorted):
-        return False
-    if any_cow(values, indices):
         return False
     expected_shape = self.shape[:-1] + (int(k),)
     if values.dtype != torch.float32 or values.shape != expected_shape:

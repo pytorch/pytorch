@@ -167,6 +167,35 @@ class TestFlyDSLTopK(TestCase):
         self.assertEqual(got_v, ref_v)
         self.assertEqual(torch.gather(x, -1, got_i), got_v)
 
+    def test_cow_out_dispatches_and_materializes(self):
+        from torch._native.ops.topk.flydsl_kernels import topk_cache_info
+
+        k = 8
+        m = _test_m()
+        n = _test_n(k)
+        x = self._make_input(shape=(m, n))
+        with pn.flydsl.disabled():
+            ref_v, _ = torch.topk(x, k, dim=-1)
+
+        values_base = torch.full((m, k), -1.0, device="cuda")
+        indices_base = torch.full((m, k), -1, dtype=torch.int64, device="cuda")
+        values = values_base._lazy_clone()
+        indices = indices_base._lazy_clone()
+        self.assertTrue(torch._C._is_cow_tensor(values))
+        self.assertTrue(torch._C._is_cow_tensor(indices))
+
+        got_v, got_i = torch.topk(x, k, dim=-1, out=(values, indices))
+
+        self.assertEqual(topk_cache_info(_expected_kernel(k, n)).misses, 1)
+        self.assertFalse(torch._C._is_cow_tensor(values))
+        self.assertFalse(torch._C._is_cow_tensor(indices))
+        self.assertEqual(values_base, torch.full_like(values_base, -1.0))
+        self.assertEqual(indices_base, torch.full_like(indices_base, -1))
+        self.assertIs(got_v, values)
+        self.assertIs(got_i, indices)
+        self.assertEqual(got_v, ref_v)
+        self.assertEqual(torch.gather(x, -1, got_i), got_v)
+
     def test_out_values_overlapping_input(self):
         k = 8
         m = 16 * _test_m()

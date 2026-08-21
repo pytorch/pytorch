@@ -2,7 +2,7 @@
 
 ``topk_radix`` - one CTA per row, ``max(sort_len, _N_HIST_BINS)``
 threads (``sort_len`` = K rounded up to a power of 2; the bin floor lets
-phase 1 zero the 256 histogram bins one per thread).
+phase 1 zero the histogram one bin per thread).
   1. Four radix byte passes (MSB to LSB) over an LDS histogram; thread 0
      scans descending, narrowing ``s_prefix``/``s_mask`` until it holds
      the K-th largest ordinal and ``s_rem_k`` the ties to keep.
@@ -233,7 +233,7 @@ def _build_radix_select_topk_module(n: int, k: int, deterministic: bool, arch: s
             shift = (_NUM_RADIX_PASSES - 1 - byte_pos) * _RADIX_BITS
             sign_bit_xor_val = _RADIX_SIGN_BIT if byte_pos == 0 else 0
 
-            # Zero the 256-bin histogram.
+            # Zero the histogram.
             if tid < fx.Int32(_N_HIST_BINS):
                 s_hist[tid] = 0
             gpu.barrier()
@@ -297,82 +297,70 @@ def _build_radix_select_topk_module(n: int, k: int, deterministic: bool, arch: s
             n_above = fx.Int32(k) - remaining_k
             above_base = 0
             eq_base = 0
-            for step in range_constexpr(vec_iters):
-                tile_base = step * tile
-                base = tile_base + tid * _VEC
-                rvals = load_vec_f32(step * block_threads + tid)
 
-                # Class encoding: 2 = above, 1 = eq, 0 = below.
-                cls_reg = fx.make_rmem_tensor(_VEC, Int32)
+            def gather_deterministic_step(elems, above_base, eq_base, vals, idxs):
+                num_elems = len(elems)
+                # Class encoding: 2 = above, 1 = equal, 0 = below.
+                cls_reg = fx.make_rmem_tensor(num_elems, Int32)
                 packed_local = 0
-                for vi in range_constexpr(_VEC):
-                    ords = _f32_to_ord(rvals[vi])
-                    if ords > threshold:
-                        cls_reg[vi] = 2
-                        packed_local = packed_local + fx.Int32(1 << 16)
-                    elif ords == threshold:
-                        cls_reg[vi] = 1
-                        packed_local = packed_local + 1
-                    else:
-                        cls_reg[vi] = 0
+                for elem_i in range_constexpr(num_elems):
+                    valid, val, _ = elems[elem_i]
+                    cls_reg[elem_i] = 0
+                    if valid:
+                        ords = _f32_to_ord(val)
+                        if ords > threshold:
+                            cls_reg[elem_i] = 2
+                            packed_local = packed_local + fx.Int32(1 << 16)
+                        elif ords == threshold:
+                            cls_reg[elem_i] = 1
+                            packed_local = packed_local + 1
 
                 packed_pfx, packed_step_total = block_excl_prefix_i32(
                     packed_local, s_scan
                 )
                 my_above = above_base + (packed_pfx >> fx.Int32(16))
                 my_eq = eq_base + (packed_pfx & fx.Int32(0xFFFF))
-                for vi in range_constexpr(_VEC):
-                    val = rvals[vi]
-                    cls = cls_reg[vi]
-                    idx = fx.Int32(base + vi)
-                    if cls == 2:
-                        s_vals[my_above] = val
-                        s_idxs[my_above] = idx
-                        my_above = my_above + 1
-                    elif cls == 1:
-                        if my_eq < remaining_k:
-                            pos = n_above + my_eq
-                            s_vals[pos] = val
-                            s_idxs[pos] = idx
-                        my_eq = my_eq + 1
+                for elem_i in range_constexpr(num_elems):
+                    valid, val, idx = elems[elem_i]
+                    cls = cls_reg[elem_i]
+                    if valid:
+                        if cls == 2:
+                            vals[my_above] = val
+                            idxs[my_above] = idx
+                            my_above = my_above + 1
+                        elif cls == 1:
+                            if my_eq < remaining_k:
+                                pos = n_above + my_eq
+                                vals[pos] = val
+                                idxs[pos] = idx
+                            my_eq = my_eq + 1
 
                 above_base = above_base + (packed_step_total >> fx.Int32(16))
                 next_eq_base = eq_base + (packed_step_total & fx.Int32(0xFFFF))
                 eq_base = (next_eq_base < remaining_k).select(next_eq_base, remaining_k)
+                return above_base, eq_base
+
+            for step in range_constexpr(vec_iters):
+                tile_base = step * tile
+                base = tile_base + tid * _VEC
+                rvals = load_vec_f32(step * block_threads + tid)
+                elems = []
+                for vi in range_constexpr(_VEC):
+                    idx = fx.Int32(base + vi)
+                    elems.append((True, rvals[vi], idx))
+                above_base, eq_base = gather_deterministic_step(
+                    elems, above_base, eq_base, s_vals, s_idxs
+                )
 
             # --- Scalar tail ---
             for step in range_constexpr(scalar_tail_iters):
                 col = vec_end + step * block_threads + tid
                 valid = col < n
-                packed_local = 0
-                if valid:
-                    ords = _f32_to_ord(row_in[col])
-                    if ords > threshold:
-                        packed_local = fx.Int32(1 << 16)
-                    elif ords == threshold:
-                        packed_local = 1
-
-                packed_pfx, packed_step_total = block_excl_prefix_i32(
-                    packed_local, s_scan
+                col_safe = valid.select(col, 0)
+                elems = [(valid, row_in[col_safe], fx.Int32(col))]
+                above_base, eq_base = gather_deterministic_step(
+                    elems, above_base, eq_base, s_vals, s_idxs
                 )
-                my_above = above_base + (packed_pfx >> fx.Int32(16))
-                my_eq = eq_base + (packed_pfx & fx.Int32(0xFFFF))
-                if valid:
-                    idx = fx.Int32(col)
-                    val = row_in[col]
-                    ords = _f32_to_ord(val)
-                    if ords > threshold:
-                        s_vals[my_above] = val
-                        s_idxs[my_above] = idx
-                    elif ords == threshold:
-                        if my_eq < remaining_k:
-                            pos = n_above + my_eq
-                            s_vals[pos] = val
-                            s_idxs[pos] = idx
-
-                above_base = above_base + (packed_step_total >> fx.Int32(16))
-                next_eq_base = eq_base + (packed_step_total & fx.Int32(0xFFFF))
-                eq_base = (next_eq_base < remaining_k).select(next_eq_base, remaining_k)
         else:
             if tid == 0:
                 s_write_ctr[0] = 0
@@ -524,7 +512,7 @@ def _build_register_topk_module(n: int, k: int, arch: str, rows_per_cta: int = 2
             fx.copy_atom_call(copy_atom_v, fx.slice(input_div, (None, idx)), r)
             return fx.memref_load_vec(r)
 
-        def compare_and_swap(arr, i: int, j: int, descending):
+        def compare_and_swap(arr, i: int, j: int, descending: bool):
             a = arr[i]
             b = arr[j]
             hi = arith.maxsi(a, b)

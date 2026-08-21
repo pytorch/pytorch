@@ -5603,9 +5603,6 @@ def _topk_dsl_skips(availability_decorator):
             "TestCommon",
             "test_multiple_devices",
         ),
-        # These are deterministic OpInfo assertion failures, not crashes.
-        # Keep them as xfails so an XPASS signals that coverage can be restored.
-        DecorateInfo(unittest.expectedFailure, "TestCommon", "test_dtypes"),
         DecorateInfo(
             unittest.skip("topk override incompatible with FakeTensor"),
             "TestFakeTensor",
@@ -5620,8 +5617,6 @@ def _topk_dsl_skips(availability_decorator):
             ),
             "TestMathBits",
         ),
-        DecorateInfo(unittest.expectedFailure, "TestCommon", "test_out"),
-        DecorateInfo(unittest.expectedFailure, "TestCommon", "test_out_warning"),
     )
 
 
@@ -23045,7 +23040,17 @@ if "cutedsl" in dsl_ops_by_dsl:
     # falls through to aten. Two variants exercise both kernel paths:
     # default (atomic gather, ord-only sort) and deterministic
     # (prefix-sum gather, lex (ord, -idx) sort).
-    _cutedsl_topk_skips = _topk_dsl_skips(skipIfNoCuteDSL)
+    _cutedsl_topk_dtype_skip = unittest.skip(
+        "torch.topk supports more dtypes than the DSL override"
+    )
+    _cutedsl_topk_out_skip = unittest.skip(
+        "torch.topk supports out= even though the DSL OpInfo does not exercise it"
+    )
+    _cutedsl_topk_skips = _topk_dsl_skips(skipIfNoCuteDSL) + (
+        DecorateInfo(_cutedsl_topk_dtype_skip, "TestCommon", "test_dtypes"),
+        DecorateInfo(_cutedsl_topk_out_skip, "TestCommon", "test_out"),
+        DecorateInfo(_cutedsl_topk_out_skip, "TestCommon", "test_out_warning"),
+    )
     _cutedsl_topk_kwargs = dict(
         dtypes=_dispatch_dtypes((torch.float32,)),
         dtypesIfCUDA=_dispatch_dtypes((torch.float32,)),
@@ -23129,7 +23134,13 @@ if "flydsl" in dsl_ops_by_dsl:
         _SUPPORTED_ARCHES as _flydsl_topk_supported_arches,
     )
 
-    _flydsl_topk_skips = _topk_dsl_skips(skipIfNoFlyDSL)
+    # These are deterministic OpInfo assertion failures, not crashes.
+    # Keep them as xfails so an XPASS signals that coverage can be restored.
+    _flydsl_topk_skips = _topk_dsl_skips(skipIfNoFlyDSL) + (
+        DecorateInfo(unittest.expectedFailure, "TestCommon", "test_dtypes"),
+        DecorateInfo(unittest.expectedFailure, "TestCommon", "test_out"),
+        DecorateInfo(unittest.expectedFailure, "TestCommon", "test_out_warning"),
+    )
     _flydsl_topk_kwargs = dict(
         dtypes=_dispatch_dtypes((torch.float32,)),
         dtypesIfCUDA=_dispatch_dtypes((torch.float32,)),
