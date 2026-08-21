@@ -18,7 +18,13 @@ import torch.library
 from torch._inductor.compile_fx import _InProcessFxCompile, FxCompile, FxCompileMode
 from torch._inductor.graph import GraphLowering
 from torch._inductor.test_case import TestCase
+from torch.testing._internal.common_device_type import (
+    Capability,
+    onlyAccelerator,
+    requires_capabilities,
+)
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_CI,
     IS_WINDOWS,
     isRocmArchAnyOf,
@@ -30,8 +36,6 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     IS_BIG_GPU,
-    requires_gpu,
-    requires_triton,
     RUN_CPU,
     RUN_GPU,
 )
@@ -113,8 +117,8 @@ class TestSubprocess(TestCase):
 
     @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/157788")
     @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/157724")
-    @requires_gpu()
-    @requires_triton()
+    @onlyAccelerator
+    @requires_capabilities(Capability.lib.triton)
     @unittest.skipIf(
         not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
     )
@@ -271,6 +275,7 @@ class TestSubprocess(TestCase):
 if RUN_CPU:
 
     class CpuTests(TestSubprocess):
+        hw_classification = HardwareClassification.CPU
         common = check_model
         device = "cpu"
 
@@ -281,6 +286,7 @@ if RUN_CPU:
 if RUN_GPU and not TEST_WITH_ASAN:
 
     class GPUTests(TestSubprocess):
+        hw_classification = HardwareClassification.ACCELERATOR
         common = check_model_gpu
         device = GPU_TYPE
 
