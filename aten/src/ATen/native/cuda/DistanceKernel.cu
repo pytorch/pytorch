@@ -100,29 +100,39 @@ struct DistReduceOp {
 };
 
 template <typename scalar_t, typename F>
-__global__ static void pdist_kernel_cuda_impl(scalar_t * result, const scalar_t * self, const int64_t n, const int64_t m, const scalar_t p,
-                                              const double n2, const double n2_squared_minus_1) {
-  const int64_t k = blockIdx.x;
+__global__ static void pdist_kernel_cuda_impl(scalar_t * result, const scalar_t * self,
+    const int64_t n, const int64_t m, const scalar_t p,
+    const double n2, const double n2_squared_minus_1, const int64_t total) {
   const int stride = blockDim.x;
 
-  // The -1 accounts for floating point truncation issues
-  int64_t i = static_cast<int64_t>((n2 - device_sqrt<double>(n2_squared_minus_1 - 2 * k)));
-  int64_t j = k - n * i + i * (i + 1) / 2 + i + 1;
+  for (int64_t k = blockIdx.x; k < total; k += gridDim.x) {
+    // Recover (i, j) from flat index k. The fp64 sqrt can land i off by one at
+    // row boundaries (a ~1-ulp ROCm-vs-NVIDIA rounding difference); correct it
+    // with exact integer arithmetic so the result is rounding-independent.
+    // row_start(i) = number of output elements before row i = n*i - i*(i+1)/2
+    int64_t i = static_cast<int64_t>((n2 - device_sqrt<double>(n2_squared_minus_1 - 2 * k)));
+    auto row_start = [n](int64_t ii) { return n * ii - ii * (ii + 1) / 2; };
+    while (row_start(i + 1) <= k) ++i;
+    while (row_start(i) > k) --i;
+    int64_t j = k - row_start(i) + i + 1;
 
-  const scalar_t * const start = self + i * m;
-  const scalar_t * const end = start + m;
-  const scalar_t * a = start + threadIdx.x;
-  const scalar_t * b = self + j * m + threadIdx.x;
-  scalar_t agg = 0.0;
-  for (; a < end; a += stride, b += stride) {
-    F::inc(agg, std::abs(*a - *b), p);
-  }
+    const scalar_t * const start = self + i * m;
+    const scalar_t * const end = start + m;
+    const scalar_t * a = start + threadIdx.x;
+    const scalar_t * b = self + j * m + threadIdx.x;
+    scalar_t agg = 0.0;
+    for (; a < end; a += stride, b += stride) {
+      F::inc(agg, std::abs(*a - *b), p);
+    }
 
-  __shared__ scalar_t agg_smem[kCUDANumThreads];
-  scalar_t agg_init{0.0};
-  agg = cuda_utils::BlockReduce(agg, DistReduceOp<scalar_t, F>{}, agg_init, agg_smem);
-  if (threadIdx.x == 0) {
-    result[k] = F::finish(agg, p);
+    __shared__ scalar_t agg_smem[kCUDANumThreads];
+    scalar_t agg_init{0.0};
+    // BlockReduce opens with __syncthreads(), which serializes agg_smem reuse
+    // across grid-stride iterations -- no extra barrier needed here.
+    agg = cuda_utils::BlockReduce(agg, DistReduceOp<scalar_t, F>{}, agg_init, agg_smem);
+    if (threadIdx.x == 0) {
+      result[k] = F::finish(agg, p);
+    }
   }
 }
 
@@ -244,7 +254,14 @@ void cdist_kernel_impl(Tensor& result, const Tensor& x1, const Tensor& x2, doubl
 }
 
 void pdist_forward_kernel_impl(Tensor& result, const Tensor& self, double p) {
-  const dim3 grid(result.numel());
+  const int64_t total = result.numel();
+  // Cap the grid at a multiple of the SM/CU count; the kernel's grid-stride
+  // loop covers all outputs. This both saturates occupancy and avoids the
+  // unreliable dispatch of extremely large 1-D grids on some architectures.
+  const auto* props = at::cuda::getCurrentDeviceProperties();
+  const int64_t blocks_per_sm = 32;  // generous; saturates NVIDIA and AMD alike
+  const int64_t cap = static_cast<int64_t>(props->multiProcessorCount) * blocks_per_sm;
+  const dim3 grid(static_cast<unsigned int>(std::min<int64_t>(total, cap)));
   const dim3 block(kCUDANumThreads);
   int64_t n = self.size(0);
   int64_t m = self.size(1);
@@ -264,7 +281,9 @@ void pdist_forward_kernel_impl(Tensor& result, const Tensor& self, double p) {
     } else if (std::isinf(p)) {
       impl_fptr = pdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::inf>;
     }
-    impl_fptr<<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(result.mutable_data_ptr<scalar_t>(), self.const_data_ptr<scalar_t>(), n, m, p, n2, n2_squared_minus_1);
+    impl_fptr<<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
+        result.mutable_data_ptr<scalar_t>(), self.const_data_ptr<scalar_t>(),
+        n, m, p, n2, n2_squared_minus_1, total);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   });
 }
