@@ -2,7 +2,6 @@
 """Defines bias subclasses that work with scaled_dot_product_attention"""
 
 from enum import auto, IntEnum
-from warnings import warn
 
 import torch
 import torch.nn.functional as F
@@ -124,8 +123,6 @@ class CausalBias(torch.Tensor):
             variant (CausalVariant): The type of causal bias to use (either UPPER_LEFT or LOWER_RIGHT).
             seq_len_q (int): The sequence length of the query tensor.
             seq_len_kv (int): The sequence length of the key/value tensor.
-
-        Raises a warning if the LOWER_RIGHT variant is used with seq_len_q > seq_len_kv, as it may produce NaNs.
         """
         if not isinstance(variant, CausalVariant):
             raise AssertionError(
@@ -135,11 +132,6 @@ class CausalBias(torch.Tensor):
         self.variant = variant
         self.seq_len_q = seq_len_q
         self.seq_len_kv = seq_len_kv
-        if seq_len_q > seq_len_kv and variant == CausalVariant.LOWER_RIGHT:
-            warn(
-                "Lower right causal bias will produce NaNs in the output when seq_len_q > seq_len_kv!",
-                stacklevel=2,
-            )
 
     def _upper_left(self, device: torch.device) -> torch.Tensor:
         """Upper left causal bias"""
