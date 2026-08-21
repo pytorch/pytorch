@@ -4699,6 +4699,12 @@ module_db: list[ModuleInfo] = [
                    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_memory_format'),
                    DecorateInfo(toleranceOverride({torch.float16: tol(atol=3e-2, rtol=1e-3)}), "TestModule",
                                 "test_forward", dtypes=[torch.float16], device_type='cpu'),
+                   # The fused MPS cross_entropy kernel accumulates in fp32 and so
+                   # diverges slightly from the reference decomposition (used for
+                   # the non-contiguous fall-through) at fp16, the same imprecision
+                   # tolerated for nn.LinearCrossEntropyLoss below.
+                   DecorateInfo(toleranceOverride({torch.float16: tol(atol=2e-3, rtol=1e-2)}), "TestModule",
+                                "test_non_contiguous_tensors", dtypes=[torch.float16], device_type='mps'),
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_cpu_gpu_parity", dtypes=[torch.float16],
                                 device_type='cuda'),
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_cpu_gpu_parity", dtypes=[torch.float16],

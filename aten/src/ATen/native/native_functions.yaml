@@ -9427,6 +9427,22 @@
   dispatch:
     CompositeImplicitAutograd: cross_entropy_loss_symint
 
+# Fused 2D cross-entropy primitives backing the MPS fast path in
+# cross_entropy_loss_symint. The forward returns the unreduced per-row
+# loss plus the saved log-sum-exp and per-row target weight; the host
+# applies the reduction with differentiable ops. Autograd is wired via
+# derivatives.yaml (no Python autograd.Function), and Meta kernels give
+# torch.compile/export and functorch a tracing path.
+- func: _fused_cross_entropy_loss_2d_forward(Tensor self, Tensor target, Tensor? weight=None, int ignore_index=-100, float label_smoothing=0.0) -> (Tensor loss, Tensor lse, Tensor weight_per_row)
+  dispatch:
+    MPS: _fused_cross_entropy_loss_2d_forward_mps
+    Meta: _fused_cross_entropy_loss_2d_forward_meta
+
+- func: _fused_cross_entropy_loss_2d_backward(Tensor grad_loss, Tensor self, Tensor target, Tensor? weight, Tensor lse, int ignore_index=-100, float label_smoothing=0.0) -> Tensor
+  dispatch:
+    MPS: _fused_cross_entropy_loss_2d_backward_mps
+    Meta: _fused_cross_entropy_loss_2d_backward_meta
+
 - func: triangular_solve.X(Tensor self, Tensor A, bool upper=True, bool transpose=False, bool unitriangular=False, *, Tensor(a!) X, Tensor(b!) M) -> (Tensor(a!) solution, Tensor(b!) cloned_coefficient)
   structured: True
   dispatch:
