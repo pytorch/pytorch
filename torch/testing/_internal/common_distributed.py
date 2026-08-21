@@ -654,6 +654,29 @@ def skip_if_rocm_ver_atleast_multiprocess(version=None):
     return decorator
 
 
+def skip_if_rocm_ver_in_multiprocess(versions: list | None = None):
+    """Skips a test for specific ROCm major.minor versions - multiprocess UTs.
+
+    Counterpart of skipIfRocmVersionIn. Use this on MultiProcessTestCase; the
+    single-process decorator is evaluated too late for spawned workers.
+    """
+    normalized = {tuple(v) for v in (versions or [])}
+
+    def decorator(func):
+        reason = None
+        if TEST_WITH_ROCM:
+            rocm_version_tuple = getRocmVersion()
+            if rocm_version_tuple in normalized:
+                reason = (
+                    "skip_if_rocm_ver_in_multiprocess: known failure on ROCm "
+                    f"{rocm_version_tuple} (in {sorted(normalized)})"
+                )
+
+        return unittest.skipIf(reason is not None, reason)(func)
+
+    return decorator
+
+
 def skip_if_win32():
     return skip_but_pass_in_sandcastle_if(
         sys.platform == "win32",
