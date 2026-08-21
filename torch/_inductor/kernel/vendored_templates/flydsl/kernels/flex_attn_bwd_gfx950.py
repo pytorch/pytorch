@@ -182,6 +182,7 @@ def _build_flex_attn_bwd_module(
     MC = S // BM  # q chunks
     NC = S // BN  # kv chunks
     CPB = SB // BM  # chunks per sparse block
+    PNT = max(64, MC)  # prologue threads: one per chunk, rounded to wave64
     MAX_PARTIAL = NB if max_partial_blocks is None else int(max_partial_blocks)
     MAX_FULL = NB if max_full_blocks is None else int(max_full_blocks)
 
@@ -275,8 +276,8 @@ def _build_flex_attn_bwd_module(
                 fx.slice(fx.logical_divide(gDl, fx.make_layout(1, 1)), (None, row)),
             )
 
-    FLAG_N = ((NB * NB + 1 + NT - 1) // NT) * NT
-    FILL_IT = (NB * NB + NT - 1) // NT
+    FLAG_N = ((NB * NB + 1 + PNT - 1) // PNT) * PNT
+    FILL_IT = (NB * NB + PNT - 1) // PNT
 
     @fx.struct
     class PSmem:
@@ -340,8 +341,8 @@ def _build_flex_attn_bwd_module(
 
         # zero flags (+1 dump slot)
         zero = fx.Int32(0)
-        for l in fx.range_constexpr(FLAG_N // NT):
-            fx.ptr_store(zero, fp + (fx.Int32(l * NT) + tid))
+        for l in fx.range_constexpr(FLAG_N // PNT):
+            fx.ptr_store(zero, fp + (fx.Int32(l * PNT) + tid))
         fx.gpu.barrier()
 
         # scatter block flags: 1 = partially masked, 2 = fully unmasked
@@ -349,7 +350,7 @@ def _build_flex_attn_bwd_module(
         two = fx.Int32(2)
         dump = fx.Int32(NB * NB)
         for l in fx.range_constexpr(FILL_IT):
-            i = fx.Int32(l * NT) + tid
+            i = fx.Int32(l * PNT) + tid
             mb_raw = i // fx.Int32(NB)
             mb = (mb_raw < fx.Int32(NB)).select(mb_raw, fx.Int32(NB - 1))
             t = i % fx.Int32(NB)
@@ -1090,7 +1091,7 @@ def _build_flex_attn_bwd_module(
         )
         prologue(
             KVN, KVI, FKVN, FKVI, CP_Q, IP_Q, CF_Q, IF_Q, CP_K, IP_K, CF_K, IF_K
-        ).launch(grid=(BH, 1, 1), block=(NT, 1, 1), stream=stream)
+        ).launch(grid=(BH, 1, 1), block=(PNT, 1, 1), stream=stream)
         dkdv_kernel(
             Q,
             K,
