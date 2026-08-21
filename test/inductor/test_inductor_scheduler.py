@@ -11,7 +11,7 @@ import torch._inductor.ir as ir
 import torch._inductor.metrics as metrics
 import torch.utils.flop_counter
 from torch._dynamo.utils import counters
-from torch._inductor.dependencies import Dep, MemoryDep, ReadWrites
+from torch._inductor.dependencies import Dep, MemoryDep, ReadWrites, StarDep, WeakDep
 from torch._inductor.ir import GraphPartitionSignature
 from torch._inductor.loop_body import MemoryEntry, MemoryUsageType
 from torch._inductor.scheduler import (
@@ -143,6 +143,36 @@ class TestScheduler(TestCase):
                 )
             )
         )
+
+    @parametrize("nested_reduction", [False, True])
+    def test_reverse_reduction_pointwise_retry_is_config_gated(self, nested_reduction):
+        consumer = self._mock_base_snode("consumer")
+        producer = self._mock_base_snode("producer")
+        consumer.used_buffer_names.return_value = OrderedSet(["buf"])
+        producer.used_buffer_names.return_value = OrderedSet(["buf"])
+        consumer.is_foreach.return_value = False
+        producer.is_foreach.return_value = False
+        consumer.ancestors = OrderedSet(["producer"])
+        producer.get_operation_names.return_value = OrderedSet(["producer"])
+        producer.is_reduction.return_value = True
+
+        scheduler = Scheduler.__new__(Scheduler)
+        scheduler.unfusable_node = Mock(return_value=False)
+        scheduler.can_fuse = Mock(
+            side_effect=lambda node1, node2, is_reorder_round: node1 is producer
+        )
+        scheduler.get_possible_fusions_with_highest_priority = Mock(
+            side_effect=lambda pairs: pairs
+        )
+        scheduler.score_fusion_key = Mock(return_value=0)
+
+        with inductor_config.patch("triton.nested_reduction", nested_reduction):
+            fusions = scheduler.get_possible_fusions(
+                [consumer, producer], is_reorder_round=False
+            )
+
+        self.assertEqual(fusions, [(producer, consumer)] if nested_reduction else [])
+        self.assertEqual(scheduler.can_fuse.call_count, 2 if nested_reduction else 1)
 
     def test_fuse_two_nodes_propagates_mempool(self):
         scheduler = object.__new__(Scheduler)
@@ -276,120 +306,177 @@ class TestScheduler(TestCase):
         self.assertEqual(args[1], 1)
         self.assertEqual(kwargs, {})
 
-    def test_fusable_read_and_write_broadcast_requires_index_equivalence(self):
+    @parametrize("loop_ordering", [False, True])
+    def test_fusable_read_and_write_requires_exact_index_match(self, loop_ordering):
         d0, d1, d2 = sympy.symbols("d0 d1 d2", integer=True, nonnegative=True)
         w0, w1 = sympy.symbols("w0 w1", integer=True, nonnegative=True)
+        s0, s1 = sympy.symbols("s0 s1", integer=True, positive=True)
+        scheduler = Scheduler.__new__(Scheduler)
+
+        # Gapped (stride 33 across a 32 wide dim) so loop merging cannot
+        # collapse these deps and hide which branch accepted them.
+        gapped = MemoryDep("buf", 33 * d0 + d1, (d0, d1), (128, 32))
+        extended = MemoryDep("buf", 33 * d0 + d1, (d0, d1, d2), (128, 32, 7))
+        narrowed = MemoryDep("buf", 33 * d0 + d1, (d0, d1), (64, 32))
+        renamed = MemoryDep("buf", 33 * w0 + w1, (w0, w1), (128, 32))
+
+        # Reads that reach the write only through index *equivalence*: a
+        # quotient broadcast, a pure broadcast, and dense loops differing only
+        # in variable naming. Exact matching must reject all three.
+        simple_write = MemoryDep("buf", w0, (w0,), (16,))
+        quotient = MemoryDep("buf", 32 * d0 + FloorDiv(d1, 128), (d0, d1), (128, 4096))
+        dense_read = MemoryDep("buf", s1 * d0 + d1, (d0, d1), (s0, s1))
+        equivalent_only = [
+            (quotient, MemoryDep("buf", 32 * w0 + w1, (w0, w1), (128, 32))),
+            (MemoryDep("buf", d1, (d0, d1), (1024, 16)), simple_write),
+            (dense_read, MemoryDep("buf", s1 * w0 + w1, (w0, w1), (s0, s1))),
+        ]
+
+        graph = Mock(sizevars=SizeVarAllocator())
+        with (
+            V.set_graph_handler(graph),
+            inductor_config.patch(loop_ordering_after_fusion=loop_ordering),
+        ):
+            # _same_index_with_prefix_size: identical index, and read sizes
+            # that cover the write sizes as a prefix.
+            self.assertTrue(scheduler.fusable_read_and_write(gapped, gapped))
+            self.assertTrue(scheduler.fusable_read_and_write(extended, gapped))
+            self.assertFalse(scheduler.fusable_read_and_write(narrowed, gapped))
+            # Normalization drops the unused d2 loop and canonicalizes symbols.
+            self.assertEqual(
+                scheduler.fusable_read_and_write(extended, renamed),
+                loop_ordering,
+            )
+            for read, write in equivalent_only:
+                self.assertFalse(scheduler.fusable_read_and_write(read, write))
+
+    @parametrize("extra_dep", [None, "star", "weak"])
+    def test_index_equivalent_names_only_relax_memory_deps(self, extra_dep):
+        read_var, write_var = sympy.symbols(
+            "read_var write_var", integer=True, nonnegative=True
+        )
+        read = MemoryDep("buf", read_var + 1, (read_var,), (4,))
+        write = MemoryDep("buf", write_var, (write_var,), (4,))
+        deps = OrderedSet([read])
+        if extra_dep == "star":
+            deps.add(StarDep("buf"))
+        elif extra_dep == "weak":
+            deps.add(WeakDep("buf", "mutated"))
+
+        producer = Mock()
+        producer.get_name.return_value = "producer"
+        producer.get_buffer_names.return_value = OrderedSet(["buf"])
+        producer.get_operation_names.return_value = OrderedSet()
+        producer.read_writes.writes = OrderedSet([write])
+        consumer = Mock()
+        consumer.get_name.return_value = "consumer"
+        consumer.unmet_dependencies = deps
+        consumer.read_writes.writes = OrderedSet()
 
         scheduler = Scheduler.__new__(Scheduler)
         scheduler.mutation_renames = {}
-        scheduler.mode_requires_synchronization = lambda mode: False
+        scheduler.fusable_weak_dep = Mock(return_value=False)
+        scheduler.name_to_buf = {}
+        scheduler.name_to_fused_node = {}
 
+        self.assertFalse(scheduler.can_fuse_vertical(producer, consumer))
+        self.assertEqual(
+            scheduler.can_fuse_vertical(
+                producer,
+                consumer,
+                index_equivalent_dep_names=OrderedSet(["buf"]),
+            ),
+            extra_dep is None,
+        )
+
+    @parametrize("write_kind", ["dense", "alias"])
+    def test_nested_index_equivalent_names_require_injective_producer(self, write_kind):
+        d0, d1 = sympy.symbols("d0 d1", integer=True, nonnegative=True)
+        index = 2 * d0 + d1 if write_kind == "dense" else d0 + d1
+        write = MemoryDep("buf", index, (d0, d1), (2, 2))
+        read = MemoryDep("buf", d0, (d0,), (4,))
+
+        producer = Mock()
+        producer.get_buffer_names.return_value = OrderedSet(["buf"])
+        producer.read_writes.writes = OrderedSet([write])
+        consumer = Mock()
+        consumer.read_writes.reads = OrderedSet([read])
+
+        scheduler = Scheduler.__new__(Scheduler)
+        scheduler.mutation_renames = {}
         graph = Mock(sizevars=SizeVarAllocator())
-        with V.set_graph_handler(graph):
-            write = MemoryDep("buf", 32 * w0 + w1, (w0, w1), (128, 32))
-            simple_write = MemoryDep("buf", w0, (w0,), (16,))
-            s0, s1 = sympy.symbols("s0 s1", integer=True, positive=True)
-            exact_gapped = MemoryDep("buf", 33 * d0 + d1, (d0, d1), (128, 32))
-            cases = [
-                (
-                    "quotient broadcast",
-                    MemoryDep(
-                        "buf",
-                        32 * d0 + FloorDiv(d1, 128),
-                        (d0, d1),
-                        (128, 4096),
-                    ),
-                    write,
-                    False,
-                    True,
-                ),
-                (
-                    "quotient tail remains",
-                    MemoryDep(
-                        "buf",
-                        32 * d0 + FloorDiv(d1, 128) + d1,
-                        (d0, d1),
-                        (128, 4096),
-                    ),
-                    write,
-                    False,
-                    False,
-                ),
-                (
-                    "pure broadcast",
-                    MemoryDep("buf", d1, (d0, d1), (1024, 16)),
-                    simple_write,
-                    False,
-                    True,
-                ),
-                (
-                    "dynamic dense",
-                    MemoryDep("buf", s1 * d0 + d1, (d0, d1), (s0, s1)),
-                    MemoryDep("buf", s1 * w0 + w1, (w0, w1), (s0, s1)),
-                    False,
-                    True,
-                ),
-                (
-                    "exact gapped",
-                    exact_gapped,
-                    exact_gapped,
-                    True,
-                    True,
-                ),
-                (
-                    "producer broadcast",
-                    MemoryDep("buf", d0, (d0, d1), (8, 4)),
-                    MemoryDep("buf", w1, (w0, w1), (8, 4)),
-                    False,
-                    False,
-                ),
-                (
-                    "producer alias",
-                    MemoryDep("buf", d0 + d1, (d0, d1), (2, 2)),
-                    MemoryDep("buf", w0 + w1, (w0, w1), (2, 2)),
-                    False,
-                    False,
-                ),
-            ]
-            for name, read, write, expected_default, expected_relaxed in cases:
-                with self.subTest(name):
-                    self.assertEqual(
-                        scheduler.fusable_read_and_write(read, write),
-                        expected_default,
-                    )
-                    self.assertEqual(
-                        scheduler.fusable_read_and_write(
-                            read,
-                            write,
-                            allow_index_equivalence=True,
-                        ),
-                        expected_relaxed,
-                    )
+        with (
+            V.set_graph_handler(graph),
+            patch.object(NestedReduction, "is_candidate", return_value=True),
+            patch.object(
+                NestedReduction,
+                "plan",
+                return_value=Mock(sub_parent_stages=()),
+            ),
+        ):
+            names = scheduler._nested_index_equivalent_dep_names(producer, consumer)
+        expected = OrderedSet(["buf"]) if write_kind == "dense" else OrderedSet()
+        self.assertEqual(names, expected)
 
-            normalized_exact_gapped_read = MemoryDep(
-                "buf", 33 * d0 + d1, (d0, d1, d2), (128, 32, 7)
-            )
-            normalized_exact_gapped_write = MemoryDep(
-                "buf", 33 * w0 + w1, (w0, w1), (128, 32)
-            )
-            with inductor_config.patch(loop_ordering_after_fusion=True):
-                self.assertTrue(
-                    scheduler.fusable_read_and_write(
-                        normalized_exact_gapped_read,
-                        normalized_exact_gapped_write,
-                    )
-                )
-                self.assertTrue(
-                    scheduler.fusable_read_and_write(
-                        normalized_exact_gapped_read,
-                        normalized_exact_gapped_write,
-                        allow_index_equivalence=True,
-                    )
-                )
+    @parametrize("read_kind", ["star", "weak"])
+    def test_nested_index_equivalent_names_require_memory_consumer(self, read_kind):
+        d0 = sympy.Symbol("d0", integer=True, nonnegative=True)
+        write = MemoryDep("buf", d0, (d0,), (4,))
+        read = StarDep("buf") if read_kind == "star" else WeakDep("buf", "mutated")
 
-    def test_nested_reduction_sub_parent_domain_preserves_group_axis(self):
+        producer = Mock()
+        producer.get_buffer_names.return_value = OrderedSet(["buf"])
+        producer.read_writes.writes = OrderedSet([write])
+        consumer = Mock()
+        consumer.read_writes.reads = OrderedSet([read])
+
+        scheduler = Scheduler.__new__(Scheduler)
+        scheduler.mutation_renames = {}
+        graph = Mock(sizevars=SizeVarAllocator())
+        with (
+            V.set_graph_handler(graph),
+            patch.object(NestedReduction, "is_candidate", return_value=True),
+            patch.object(
+                NestedReduction,
+                "plan",
+                return_value=Mock(sub_parent_stages=()),
+            ),
+        ):
+            names = scheduler._nested_index_equivalent_dep_names(producer, consumer)
+        self.assertEqual(names, OrderedSet())
+
+    @parametrize("read_kind", ["memory", "star", "weak"])
+    def test_index_equivalent_names_only_score_memory_deps(self, read_kind):
+        d0 = sympy.Symbol("d0", integer=True, nonnegative=True)
+        deps = {
+            "memory": MemoryDep("buf", d0 + 1, (d0,), (4,)),
+            "star": StarDep("buf"),
+            "weak": WeakDep("buf", "mutated"),
+        }
+
+        producer = Mock()
+        producer.get_operation_names.return_value = OrderedSet(["producer"])
+        producer.read_writes.writes = OrderedSet([MemoryDep("buf", d0, (d0,), (4,))])
+        consumer = Mock()
+        consumer.ancestors = OrderedSet(["producer"])
+        consumer.read_writes.reads = OrderedSet([deps[read_kind]])
+
+        scheduler = Scheduler.__new__(Scheduler)
+        scheduler.mutation_renames = {}
+        scheduler.dep_size_hint = Mock(return_value=1)
+        score = scheduler._score_fusion_memory_by_fusable_read_write(
+            producer,
+            consumer,
+            index_equivalent_dep_names=OrderedSet(["buf"]),
+        )
+        self.assertEqual(score, 1 if read_kind == "memory" else 0)
+
+    def test_nested_reduction_sub_parent_rate_preserves_group_axis(self):
         grouped = Mock()
         grouped.get_ranges.return_value = ([3, 6], [16])
+        sub_parent = Mock()
+        sub_parent.group = (None, (144, 1))
+        sub_parent.get_ranges.return_value = ([3, 6, 8], [])
         graph = Mock(sizevars=SizeVarAllocator())
 
         with V.set_graph_handler(graph):
@@ -411,8 +498,17 @@ class TestScheduler(TestCase):
                 parent_numel=3,
                 parent_rnumel=96,
             )
-        self.assertEqual(context.sub_parent_domain, (3, 6, 8))
-        self.assertIsNone(x_grouped_context.sub_parent_domain)
+            rate = NestedReduction._nested_sub_parent_rate(sub_parent, context)
+            sub_parent.get_ranges.return_value = ([3, 8, 6], [])
+            cross_group_rate = NestedReduction._nested_sub_parent_rate(
+                sub_parent, context
+            )
+            x_grouped_rate = NestedReduction._nested_sub_parent_rate(
+                sub_parent, x_grouped_context
+            )
+        self.assertEqual(rate, (2, 1))
+        self.assertIsNone(cross_group_rate)
+        self.assertIsNone(x_grouped_rate)
 
     def test_nested_reduction_grouped_axis_from_ranges(self):
         grouped = Mock()
