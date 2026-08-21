@@ -1154,6 +1154,19 @@ combo_kernel_uniform_dispatch_min_kernels: int = int(
     os.environ.get("TORCHINDUCTOR_COMBO_KERNEL_UNIFORM_DISPATCH_MIN_KERNELS", "32")
 )
 
+# When uniform dispatch is enabled, structurally-identical sub-kernels benefit
+# from being grouped into LARGE combo groups: uniform emits one shared body
+# indexed by a runtime pointer table, so a big group avoids the per-sub-kernel
+# code duplication / register pressure of plain combo -- the win scales with
+# arcs-per-kernel. The default node cap (combo_kernel_max_num_nodes = 8) is far
+# too small to realize this, so when uniform dispatch is on the scheduler uses
+# this (larger) cap instead. The codegen arg cap (combo_kernel_max_num_args)
+# still bounds actual per-kernel size, so this does not create oversized kernels
+# / eager fallback. Env-overridable to sweep on the perf dashboard.
+combo_kernel_uniform_dispatch_max_num_nodes: int = int(
+    os.environ.get("TORCHINDUCTOR_COMBO_KERNEL_UNIFORM_DISPATCH_MAX_NUM_NODES", "128")
+)
+
 # constant folding on the joint graph
 joint_graph_constant_folding = True
 

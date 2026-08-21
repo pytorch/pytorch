@@ -885,6 +885,14 @@ test_perf_for_dashboard() {
     export TORCHINDUCTOR_UNIFORM_DUMP_CSV="$TEST_REPORTS_DIR/uniform_groupsizes.csv"
   fi
 
+  # Uniform-dispatch node cap: when uniform dispatch is on, group structurally
+  # identical sub-kernels into large combo groups (the win scales with group
+  # size). Extracted from DASHBOARD_TAG so it can be swept from the workflow
+  # trigger; when absent the inductor config default (128) applies.
+  if [[ "$DASHBOARD_TAG" =~ uniformmaxnodes-([0-9]+) ]]; then
+    export TORCHINDUCTOR_COMBO_KERNEL_UNIFORM_DISPATCH_MAX_NUM_NODES="${BASH_REMATCH[1]}"
+  fi
+
   # TODO: All the accuracy tests can be skipped once the CI accuracy checking is stable enough
   local targets=(accuracy performance)
 

@@ -3569,7 +3569,16 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         """
         sorted_nodes = scheduler._topological_sort_nodes()
         grouped_nodes = []
-        max_num_nodes = config.combo_kernel_max_num_nodes
+        # Uniform dispatch collapses structurally-identical sub-kernels into one
+        # shared body, so it wants LARGE groups (the win grows with arcs/kernel).
+        # Raise the effective node cap when uniform dispatch is enabled; the arg
+        # cap (combo_kernel_max_num_args) still bounds actual kernel size. getattr
+        # keeps this working where config.py predates the knob.
+        max_num_nodes = (
+            getattr(config, "combo_kernel_uniform_dispatch_max_num_nodes", 128)
+            if config.combo_kernel_uniform_dispatch
+            else config.combo_kernel_max_num_nodes
+        )
 
         excluded_buffer_names: OrderedSet[str] = OrderedSet(
             [
