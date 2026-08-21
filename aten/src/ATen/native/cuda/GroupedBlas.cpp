@@ -244,16 +244,15 @@ bool should_use_scaled_cublaslt_grouped_gemm(
   std::optional<ScalingType> scaling_a,
   std::optional<ScalingType> scaling_b,
   int64_t batchCount64) {
+  // A non-cuBLASLt recipe (e.g. rowwise) is normal routing to another backend,
+  // not an anomaly, so fall back silently. The remaining guards warn because
+  // the recipe is one cuBLASLt supports and only some other condition missed.
   if (!scaling_a.has_value() || !scaling_b.has_value()) {
-    TORCH_WARN_ONCE(
-        "cuBLASLt scaled grouped GEMM is not used because scale_a and scale_b must each be tensorwise, groupwise, or blockwise MXFP8 scales; falling back to the non-cuBLASLt grouped GEMM path.");
     return false;
   }
 
   if (!is_cublaslt_grouped_scaling_type(*scaling_a) ||
       !is_cublaslt_grouped_scaling_type(*scaling_b)) {
-    TORCH_WARN_ONCE(
-        "cuBLASLt scaled grouped GEMM is not used because scale_a and scale_b recipes must each be tensorwise, groupwise, or blockwise MXFP8; falling back to the non-cuBLASLt grouped GEMM path.");
     return false;
   }
 
@@ -696,6 +695,7 @@ std::optional<c10::ScalarType> out_dtype) {
 #endif // !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13030
 }
 
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13040
 static void scaled_grouped_mm_cublaslt(
     const Tensor& mat_a,
     const Tensor& mat_b,
@@ -707,7 +707,6 @@ static void scaled_grouped_mm_cublaslt(
     ScalingType scaling_a,
     ScalingType scaling_b,
     Tensor& out) {
-#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13040
   check_cublaslt_grouped_scale_recipe(mat_a, scale_a, scaling_a, batchCount, /*is_a*/ true, "scale_a");
   check_cublaslt_grouped_scale_recipe(mat_b, scale_b, scaling_b, batchCount, /*is_a*/ false, "scale_b");
 
@@ -748,11 +747,8 @@ static void scaled_grouped_mm_cublaslt(
       args.DPtrArray, args.lddArray,
       args.batchCount, args.use_int64,
       scales);
-  return;
-#else
-  TORCH_CHECK(false, "cublasLt scaled grouped GEMM requires CUDA >= 13.4 and is not supported on ROCm. Current build does not meet these requirements.");
-#endif // !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13040
 }
+#endif // !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13040
 
 Tensor
 _scaled_grouped_mm_cuda(
