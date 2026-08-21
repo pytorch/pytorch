@@ -57,7 +57,8 @@
 [submodule "third_party/ideep"]
     ignore = dirty
     path = third_party/ideep
-    url = https://github.com/intel/ideep
+    url = https://github.com/renato-arantes/ideep.git
+    branch = onednn-kleidiai
 [submodule "third_party/gemmlowp/gemmlowp"]
     ignore = dirty
     path = third_party/gemmlowp/gemmlowp
