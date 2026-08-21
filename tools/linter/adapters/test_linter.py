@@ -22,7 +22,7 @@ The requirements for each `hw_classification` are summarized below:
   ACCELERATOR
     - Class must be used with instantiate_device_type_tests.
     - Every test method must accept device/devices parameter.
-    - Test methods must not use @only* decorators (except @onlyAccelerator).
+    - Test methods must not use device-specific @only* decorators (except @onlyAccelerator).
     - instantiate_device_type_tests must not use only_for (use except_for
       as a blacklist approach instead).
 
@@ -32,6 +32,12 @@ The requirements for each `hw_classification` are summarized below:
     - instantiate_device_type_tests must use only_for matching the device
       (e.g. only_for='cuda').
     - instantiate_device_type_tests must not use except_for.
+    - MPS classes must pass allow_mps=True and XPU classes must pass
+      allow_xpu=True
+
+The scan covers module-level statements and statements recursively nested within
+``if``, ``try``, and ``with`` bodies, so conditionally defined test classes and
+instantiation calls are linted as well.
 """
 
 from __future__ import annotations
@@ -56,7 +62,12 @@ HW_CLASSIFICATION_ATTR = "hw_classification"
 INSTANTIATE_FN_NAME = "instantiate_device_type_tests"
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
-_KWARG_UNKNOWN = object()  # sentinel: kwarg present but not a literal
+
+class _UnknownKwarg:
+    pass
+
+
+_KWARG_UNKNOWN = _UnknownKwarg()  # sentinel: kwarg present but not a literal
 
 
 # Mirrors the member names of `torch.testing._internal.common_utils.HardwareClassification`.
@@ -80,6 +91,7 @@ DEVICE_SPECIFIC_CLASSIFICATIONS = {
 
 # Files in this allowlist are temporarily excluded from test linter checks
 ALLOWLIST_PATH = Path(__file__).resolve().parent / "test_linter_allowlist.json"
+ALLOWLIST_REL_PATH = os.path.relpath(ALLOWLIST_PATH, REPO_ROOT)
 
 
 def _load_allowlist() -> set[str]:
@@ -102,7 +114,7 @@ class LintSeverity(str, Enum):
 
 class LintMessage(NamedTuple):
     path: str
-    line: int
+    line: int | None
     char: int | None
     code: str
     severity: LintSeverity
@@ -198,24 +210,75 @@ def _get_hw_classification(
     return None
 
 
-def _get_instantiation_call(tree: ast.Module, class_name: str) -> ast.Call | None:
-    """Find a top-level instantiate_device_type_tests call for a class."""
-    for stmt in tree.body:
-        if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
+class _ScannedStatementCollector(ast.NodeVisitor):
+    """Collect statements from the module and nested ``if``/``try``/``with``
+    bodies, so conditionally defined test classes and
+    ``instantiate_device_type_tests`` calls are linted too.
+    """
+
+    def __init__(self) -> None:
+        self.statements: list[ast.stmt] = []
+
+    def generic_visit(self, node: ast.AST) -> None:
+        if isinstance(node, ast.stmt):
+            self.statements.append(node)
+
+    def visit_Module(self, node: ast.Module) -> None:
+        for stmt in node.body:
+            self.visit(stmt)
+
+    def visit_If(self, node: ast.If) -> None:
+        for stmt in node.body + node.orelse:
+            self.visit(stmt)
+
+    def visit_Try(self, node: ast.Try) -> None:
+        for stmt in node.body + node.orelse + node.finalbody:
+            self.visit(stmt)
+
+    def visit_With(self, node: ast.With) -> None:
+        for stmt in node.body:
+            self.visit(stmt)
+
+
+def _scanned_statements(tree: ast.Module) -> list[ast.stmt]:
+    collector = _ScannedStatementCollector()
+    collector.visit(tree)
+    return collector.statements
+
+
+@dataclass(frozen=True)
+class ClassEntry:
+    """A test class definition and its optional instantiation call."""
+
+    class_def: ast.ClassDef
+    instantiation: ast.Call | None = None
+
+
+def _collect_test_classes(tree: ast.Module) -> dict[str, ClassEntry]:
+    """Map each test class name to its definition and instantiation call, if any."""
+    class_defs: dict[str, ast.ClassDef] = {}
+    instantiations: dict[str, ast.Call] = {}
+    for stmt in _scanned_statements(tree):
+        if isinstance(stmt, ast.ClassDef) and _is_test_class(stmt):
+            class_defs[stmt.name] = stmt
+        elif isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
             call = stmt.value
-            if isinstance(call.func, ast.Name) and call.func.id == INSTANTIATE_FN_NAME:
-                if (
-                    call.args
-                    and isinstance(call.args[0], ast.Name)
-                    and call.args[0].id == class_name
-                ):
-                    return call
-    return None
+            if (
+                isinstance(call.func, ast.Name)
+                and call.func.id == INSTANTIATE_FN_NAME
+                and call.args
+                and isinstance(call.args[0], ast.Name)
+            ):
+                instantiations[call.args[0].id] = call
+    return {
+        name: ClassEntry(class_defs[name], instantiations.get(name))
+        for name in class_defs
+    }
 
 
-def _get_call_kwarg_value(
-    call: ast.Call | None, param_name: str
-) -> list[str] | None | object:
+def _get_string_list_kwarg(
+    call: ast.Call, param_name: str
+) -> list[str] | None | _UnknownKwarg:
     """Return statically known string list value of a keyword argument.
 
     Returns:
@@ -223,9 +286,6 @@ def _get_call_kwarg_value(
         - list[str]: keyword argument is a statically known string list.
         - _KWARG_UNKNOWN: keyword argument exists but cannot be statically resolved.
     """
-    if call is None:
-        return None
-
     for kw_item in call.keywords:
         if kw_item.arg != param_name:
             continue
@@ -255,16 +315,45 @@ def _get_call_kwarg_value(
     return None
 
 
-@dataclass
+def _get_bool_kwarg(call: ast.Call, param_name: str) -> bool:
+    """Return the bool value of a keyword argument.
+
+    Defaults to False when the keyword argument is absent or cannot be
+    statically resolved.
+    """
+    for kw_item in call.keywords:
+        if kw_item.arg != param_name:
+            continue
+        node = kw_item.value
+        if isinstance(node, ast.Constant) and isinstance(node.value, bool):
+            return node.value
+        return False
+
+    return False
+
+
+@dataclass(frozen=True)
 class InstantiationContext:
     """Context for an ``instantiate_device_type_tests`` call."""
 
     call: ast.Call
-    only_for: list[str] | None | object = None
-    except_for: list[str] | None | object = None
+    only_for: list[str] | None | _UnknownKwarg
+    except_for: list[str] | None | _UnknownKwarg
+    allow_mps: bool
+    allow_xpu: bool
+
+    @classmethod
+    def from_call(cls, call: ast.Call) -> InstantiationContext:
+        return cls(
+            call=call,
+            only_for=_get_string_list_kwarg(call, "only_for"),
+            except_for=_get_string_list_kwarg(call, "except_for"),
+            allow_mps=_get_bool_kwarg(call, "allow_mps"),
+            allow_xpu=_get_bool_kwarg(call, "allow_xpu"),
+        )
 
 
-@dataclass
+@dataclass(frozen=True)
 class RuleContext:
     """Context passed to each rule function during test class linter checks."""
 
@@ -279,7 +368,7 @@ class RuleContext:
         cls,
         filename: str,
         class_node: ast.ClassDef,
-        tree: ast.Module,
+        instantiation: ast.Call | None,
         classification: HardwareClassification,
     ) -> RuleContext:
         test_methods = [
@@ -288,20 +377,17 @@ class RuleContext:
             if isinstance(stmt, ast.FunctionDef) and stmt.name.startswith("test_")
         ]
 
-        instantiation = None
-        call = _get_instantiation_call(tree, class_node.name)
-        if call is not None:
-            instantiation = InstantiationContext(
-                call=call,
-                only_for=_get_call_kwarg_value(call, "only_for"),
-                except_for=_get_call_kwarg_value(call, "except_for"),
-            )
+        inst = (
+            InstantiationContext.from_call(instantiation)
+            if instantiation is not None
+            else None
+        )
         return cls(
             filename=filename,
             class_node=class_node,
             classification=classification,
             test_methods=test_methods,
-            instantiation=instantiation,
+            instantiation=inst,
         )
 
 
@@ -375,17 +461,27 @@ def _check_instantiation(
 
 
 # ---------------------------------------------------------------------------
-# GENERIC rules
+# Instantiation and device-parameter rules
 # ---------------------------------------------------------------------------
 
 
+@_register(HardwareClassification.ACCELERATOR, *DEVICE_SPECIFIC_CLASSIFICATIONS)
+def _check_requires_instantiation(ctx: RuleContext) -> list[LintMessage]:
+    return _check_instantiation(ctx, required=True)
+
+
 @_register(HardwareClassification.GENERIC)
-def _check_must_not_be_instantiated(ctx: RuleContext) -> list[LintMessage]:
+def _check_forbids_instantiation(ctx: RuleContext) -> list[LintMessage]:
     return _check_instantiation(ctx, required=False)
 
 
+@_register(HardwareClassification.ACCELERATOR, *DEVICE_SPECIFIC_CLASSIFICATIONS)
+def _check_requires_device_param(ctx: RuleContext) -> list[LintMessage]:
+    return _check_device_param(ctx, required=True)
+
+
 @_register(HardwareClassification.GENERIC)
-def _check_no_device_param(ctx: RuleContext) -> list[LintMessage]:
+def _check_forbids_device_param(ctx: RuleContext) -> list[LintMessage]:
     return _check_device_param(ctx, required=False)
 
 
@@ -394,37 +490,43 @@ def _check_no_device_param(ctx: RuleContext) -> list[LintMessage]:
 # ---------------------------------------------------------------------------
 
 
-@_register(HardwareClassification.ACCELERATOR)
-def _check_accelerator_must_be_instantiated(ctx: RuleContext) -> list[LintMessage]:
-    return _check_instantiation(ctx, required=True)
-
-
-@_register(HardwareClassification.ACCELERATOR)
-def _check_accelerator_has_device_param(ctx: RuleContext) -> list[LintMessage]:
-    return _check_device_param(ctx, required=True)
+# Device-specific only* decorators forbidden in ACCELERATOR classes.
+_FORBIDDEN_ONLY_DECORATORS = {
+    "onlyCPU",
+    "onlyCUDA",
+    "onlyMPS",
+    "onlyXPU",
+    "onlyHPU",
+    "onlyPRIVATEUSE1",
+    "onlyOn",
+    "onlyCUDAAndPRIVATEUSE1",
+    "onlyNativeDeviceTypes",
+    "onlyNativeDeviceTypesAnd",
+}
 
 
 @_register(HardwareClassification.ACCELERATOR)
 def _check_no_only_decorators(ctx: RuleContext) -> list[LintMessage]:
-    """ACCELERATOR classes: test methods must not use only* decorators except onlyAccelerator."""
+    """ACCELERATOR classes: test methods must not use device-specific only* decorators, except onlyAccelerator."""
+
+    def get_decorator_name(dec: ast.expr) -> str | None:
+        """Extract the decorator name from forms like @foo, @obj.foo, and @foo(...)."""
+        if isinstance(dec, ast.Name):
+            return dec.id
+        if isinstance(dec, ast.Attribute):
+            return dec.attr
+        if isinstance(dec, ast.Call):
+            if isinstance(dec.func, ast.Name):
+                return dec.func.id
+            if isinstance(dec.func, ast.Attribute):
+                return dec.func.attr
+        return None
+
     messages: list[LintMessage] = []
     for stmt in ctx.test_methods:
         for dec in stmt.decorator_list:
-            name = None
-            if isinstance(dec, ast.Name):
-                name = dec.id
-            elif isinstance(dec, ast.Attribute):
-                name = dec.attr
-            elif isinstance(dec, ast.Call):
-                if isinstance(dec.func, ast.Name):
-                    name = dec.func.id
-                elif isinstance(dec.func, ast.Attribute):
-                    name = dec.func.attr
-            if (
-                name is not None
-                and name.startswith("only")
-                and name != "onlyAccelerator"
-            ):
+            name = get_decorator_name(dec)
+            if name in _FORBIDDEN_ONLY_DECORATORS:
                 messages.append(
                     error_msg(
                         name="[decorator]",
@@ -463,16 +565,6 @@ def _check_no_only_for(ctx: RuleContext) -> list[LintMessage]:
 
 
 @_register(*DEVICE_SPECIFIC_CLASSIFICATIONS)
-def _check_device_specific_must_be_instantiated(ctx: RuleContext) -> list[LintMessage]:
-    return _check_instantiation(ctx, required=True)
-
-
-@_register(*DEVICE_SPECIFIC_CLASSIFICATIONS)
-def _check_device_specific_has_device_param(ctx: RuleContext) -> list[LintMessage]:
-    return _check_device_param(ctx, required=True)
-
-
-@_register(*DEVICE_SPECIFIC_CLASSIFICATIONS)
 def _check_no_except_for(ctx: RuleContext) -> list[LintMessage]:
     """Device-specific classes: instantiate_device_type_tests must not use except_for."""
     if ctx.instantiation is not None and ctx.instantiation.except_for is not None:
@@ -486,6 +578,41 @@ def _check_no_except_for(ctx: RuleContext) -> list[LintMessage]:
             )
         ]
     return []
+
+
+# MPS and XPU are opt-in in instantiate_device_type_tests: they are only
+# included when allow_mps / allow_xpu is set. Without the corresponding flag,
+# a class targeting either device would silently generate zero tests.
+@_register(HardwareClassification.MPS)
+def _check_mps_requires_allow_mps(ctx: RuleContext) -> list[LintMessage]:
+    if ctx.instantiation is None or ctx.instantiation.allow_mps:
+        return []
+    return [
+        error_msg(
+            name="[allow_mps]",
+            path=ctx.filename,
+            line=ctx.instantiation.call.lineno,
+            description=f"{ctx.classification.value} class '{ctx.class_node.name}' "
+            f"must use allow_mps=True in instantiate_device_type_tests, "
+            f"otherwise no tests are generated.",
+        )
+    ]
+
+
+@_register(HardwareClassification.XPU)
+def _check_xpu_requires_allow_xpu(ctx: RuleContext) -> list[LintMessage]:
+    if ctx.instantiation is None or ctx.instantiation.allow_xpu:
+        return []
+    return [
+        error_msg(
+            name="[allow_xpu]",
+            path=ctx.filename,
+            line=ctx.instantiation.call.lineno,
+            description=f"{ctx.classification.value} class '{ctx.class_node.name}' "
+            f"must use allow_xpu=True in instantiate_device_type_tests, "
+            f"otherwise no tests are generated.",
+        )
+    ]
 
 
 @_register(*DEVICE_SPECIFIC_CLASSIFICATIONS)
@@ -543,16 +670,16 @@ def check_file(filename: str) -> list[LintMessage]:
             error_msg(
                 name="[parse_error]",
                 path=filename,
-                line=0,
+                line=None,
                 description=f"Failed to parse '{filename}': {e}",
             )
         ]
 
-    messages: list[LintMessage] = []
-    for node in tree.body:
-        if not isinstance(node, ast.ClassDef) or not _is_test_class(node):
-            continue
+    test_classes = _collect_test_classes(tree)
 
+    messages: list[LintMessage] = []
+    for entry in test_classes.values():
+        node = entry.class_def
         classification = _get_hw_classification(node)
         if classification is None:
             messages.append(
@@ -573,7 +700,7 @@ def check_file(filename: str) -> list[LintMessage]:
         ctx = RuleContext.from_node(
             filename=filename,
             class_node=node,
-            tree=tree,
+            instantiation=entry.instantiation,
             classification=classification,
         )
         for rule in rules.get(classification, []):
@@ -608,6 +735,7 @@ def main() -> None:
         stream=sys.stderr,
     )
 
+    found_errors = False
     with concurrent.futures.ProcessPoolExecutor(
         max_workers=_default_num_workers(),
     ) as executor:
@@ -616,6 +744,7 @@ def main() -> None:
             try:
                 for lint_message in future.result():
                     print(json.dumps(lint_message._asdict()), flush=True)
+                    found_errors = True
             except Exception:
                 logging.critical('Failed at "%s".', futures[future])
                 print(
@@ -623,12 +752,33 @@ def main() -> None:
                         error_msg(
                             name="[internal_error]",
                             path=futures[future],
-                            line=0,
+                            line=None,
                             description=f"Linter failed on '{futures[future]}'",
                         )._asdict()
                     ),
                     flush=True,
                 )
+
+    if found_errors:
+        print(
+            json.dumps(
+                LintMessage(
+                    path=ALLOWLIST_REL_PATH,
+                    line=None,
+                    char=None,
+                    code=LINTER_CODE,
+                    severity=LintSeverity.ADVICE,
+                    name="[allowlist_hint]",
+                    original=None,
+                    replacement=None,
+                    description=(
+                        "To temporarily exempt a test file from TEST_LINTER, "
+                        f"add it to {ALLOWLIST_REL_PATH}."
+                    ),
+                )._asdict()
+            ),
+            flush=True,
+        )
 
 
 if __name__ == "__main__":
