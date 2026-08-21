@@ -9,9 +9,12 @@ from torch._dynamo.testing import (
     EagerAndRecordGraphs,
     normalize_gm,
 )
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class TestInputAttrTracking(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_tensor_property_on_tensor(self):
         def fn(x):
             return x * x.y

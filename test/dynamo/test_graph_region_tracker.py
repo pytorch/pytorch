@@ -5,11 +5,16 @@ import torch
 import torch.fx
 from torch._dynamo.test_case import TestCase
 from torch._dynamo.testing import extract_graph_and_tracker
-from torch.testing._internal.common_utils import recover_orig_fp32_precision
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    recover_orig_fp32_precision,
+)
 from torch.utils._pytree import tree_map
 
 
 class GraphRegionTrackerTests(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.exit_stack = contextlib.ExitStack()
