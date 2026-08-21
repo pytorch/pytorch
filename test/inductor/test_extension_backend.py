@@ -116,7 +116,7 @@ class BaseExtensionBackendTests(TestCase):
 @unittest.skipIf(IS_FBCODE, "cpp_extension doesn't work in fbcode right now")
 @instantiate_parametrized_tests
 class ExtensionBackendTests(BaseExtensionBackendTests):
-    hw_classification = HardwareClassification.ACCELERATOR
+    hw_classification = HardwareClassification.GENERIC
 
     @skipIfWindows
     def test_open_device_registration(self):
