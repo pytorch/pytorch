@@ -20,7 +20,6 @@ import torch._dynamo as torchdynamo
 import torch._export.serde.schema as schema
 import torch.export._trace
 import torch.utils._pytree as pytree
-from torch._dynamo.device_interface import get_interface_for_device
 from torch._export.db.case import ExportCase, SupportLevel
 from torch._export.db.examples import all_examples
 from torch._export.serde.schema import ArgumentKind
@@ -55,8 +54,8 @@ from torch.testing._internal.common_utils import (
     TemporaryFileName,
     TestCase,
 )
+from torch.testing._internal.inductor_utils import HAS_TRITON
 from torch.testing._internal.torchbind_impls import init_torchbind_implementations
-from torch.utils._triton import has_triton_package
 
 
 try:
@@ -2728,20 +2727,11 @@ class TestSaveLoadAccelerator(TestCase):
         self.assertEqual(m(*inp), loaded_ep.module()(*inp))
 
 
+@unittest.skipUnless(HAS_TRITON, "requires triton")
 class TestSerializeTriton(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    def _gate_triton(self, device) -> None:
-        if not has_triton_package() or triton is None or wrap_triton is None:
-            self.skipTest("requires triton package")
-        torch_device = torch.device(device)
-        get_interface_for_device(torch_device.type).raise_if_triton_unavailable(
-            torch_device
-        )
-
     def test_triton_hop(self, device) -> None:
-        self._gate_triton(device)
-
         @triton.jit
         def add_kernel(
             in_ptr0,
@@ -2889,8 +2879,6 @@ class TestSerializeTriton(TestCase):
                 )
 
     def test_triton_constexpr_matching(self, device) -> None:
-        self._gate_triton(device)
-
         @triton.jit
         def kernel_with_constexprs(
             in_ptr,
