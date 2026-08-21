@@ -260,6 +260,78 @@ void neg_conj_kernel_cuda(TensorIteratorBase &iter) {
 
 using namespace at::cuda;
 
+namespace {
+
+constexpr int kTransposeTile = 32;
+constexpr int kTransposeRows = 8;
+
+template <typename T>
+__global__ void transpose_copy_tiled_kernel(
+    const T* __restrict__ src, T* __restrict__ dst,
+    int64_t width, int64_t height) {
+  __shared__ T tile[kTransposeTile][kTransposeTile + 1];
+
+  int64_t x = (int64_t)blockIdx.x * kTransposeTile + threadIdx.x;
+  int64_t y = (int64_t)blockIdx.y * kTransposeTile + threadIdx.y;
+
+  for (int j = 0; j < kTransposeTile; j += kTransposeRows) {
+    if (x < width && (y + j) < height) {
+      tile[threadIdx.y + j][threadIdx.x] = src[(y + j) * width + x];
+    }
+  }
+  __syncthreads();
+
+  x = (int64_t)blockIdx.y * kTransposeTile + threadIdx.x;
+  y = (int64_t)blockIdx.x * kTransposeTile + threadIdx.y;
+
+  for (int j = 0; j < kTransposeTile; j += kTransposeRows) {
+    if (x < height && (y + j) < width) {
+      dst[(y + j) * height + x] = tile[threadIdx.x][threadIdx.y + j];
+    }
+  }
+}
+
+bool maybe_tiled_transpose_copy(TensorIterator& iter) {
+  if (iter.ndim() != 2) return false;
+  const int64_t es = iter.element_size(0);
+  if (iter.element_size(1) != es) return false;
+
+  auto shape = iter.shape();
+  auto os = iter.strides(0);
+  auto is = iter.strides(1);
+  const int64_t h = shape[0];
+  const int64_t w = shape[1];
+
+  if (os[0] != es || os[1] != es * h) return false;
+  if (is[1] != es || is[0] != es * w) return false;
+
+  if (h * w < (int64_t(1) << 20)) return false;
+  if (h < 128) return false;
+
+  dim3 block(kTransposeTile, kTransposeRows);
+  dim3 grid((unsigned)((w + kTransposeTile - 1) / kTransposeTile),
+            (unsigned)((h + kTransposeTile - 1) / kTransposeTile));
+  auto stream = at::cuda::getCurrentCUDAStream();
+  const void* sp = iter.data_ptr(1);
+  void* dp = iter.data_ptr(0);
+
+  switch (es) {
+    case 1: transpose_copy_tiled_kernel<uint8_t><<<grid, block, 0, stream>>>(
+              (const uint8_t*)sp, (uint8_t*)dp, w, h); break;
+    case 2: transpose_copy_tiled_kernel<uint16_t><<<grid, block, 0, stream>>>(
+              (const uint16_t*)sp, (uint16_t*)dp, w, h); break;
+    case 4: transpose_copy_tiled_kernel<uint32_t><<<grid, block, 0, stream>>>(
+              (const uint32_t*)sp, (uint32_t*)dp, w, h); break;
+    case 8: transpose_copy_tiled_kernel<uint64_t><<<grid, block, 0, stream>>>(
+              (const uint64_t*)sp, (uint64_t*)dp, w, h); break;
+    default: return false;
+  }
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+  return true;
+}
+
+} // namespace
+
 // device-to-device copy, does type conversion
 void copy_device_to_device(TensorIterator& iter,
                            bool non_blocking,
@@ -317,7 +389,9 @@ void copy_device_to_device(TensorIterator& iter,
         size, copy_stream, p2p_enabled));
     }
   } else {
-    if (same_neg) {
+    if (same_type && same_neg && same_conj && maybe_tiled_transpose_copy(iter)) {
+      // handled by the tiled transpose kernel
+    } else if (same_neg) {
       if (!same_conj) {
         conj_kernel_cuda(iter);
       } else {
