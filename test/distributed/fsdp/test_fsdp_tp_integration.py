@@ -4,8 +4,8 @@ import sys
 from collections import OrderedDict
 
 import torch
-from torch._utils import _get_device_module
 from torch import distributed as dist
+from torch._utils import _get_device_module
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
     CPUOffload,
@@ -469,7 +469,9 @@ class TestTPFSDPIntegration(TPFSDPIntegrationTestBase):
     )
     def test_fsdp_tp_sync_module_state(self, device):
         mesh_2d = init_device_mesh(
-            self._resolved_device_type(), (self.world_size // 2, 2), mesh_dim_names=["dp", "tp"]
+            self._resolved_device_type(),
+            (self.world_size // 2, 2),
+            mesh_dim_names=["dp", "tp"],
         )
         tp_mesh = mesh_2d["tp"]
         dp_mesh = mesh_2d["dp"]
