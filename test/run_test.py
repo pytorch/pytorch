@@ -121,6 +121,15 @@ INDUCTOR_TEST_PREFIX = "inductor"
 IS_SLOW = "slow" in TEST_CONFIG or "slow" in BUILD_ENVIRONMENT
 IS_S390X = platform.machine() == "s390x"
 
+# Absolute epoch deadline for the whole shard (set by the ROCm workflow a margin
+# before the GHA step timeout). Past it, run_tests() stops launching new files and
+# exits cleanly instead of being SIGKILLed at the wall. Unset/malformed -> no-op.
+try:
+    SHARD_DEADLINE_EPOCH = float(os.environ["PYTORCH_SHARD_DEADLINE_EPOCH"])
+except (KeyError, ValueError):
+    SHARD_DEADLINE_EPOCH = None
+SHARD_DEADLINE_FAILURE_PREFIX = "TIMED OUT SHARD:"
+
 
 # Note [ROCm parallel CI testing]
 # https://github.com/pytorch/pytorch/pull/85770 added file-granularity parallel testing.
@@ -2139,14 +2148,40 @@ def run_test_module(
         return TestFailure(test.test, f"{str(test)} failed! {e}")
 
 
+def shard_deadline_exceeded() -> bool:
+    return SHARD_DEADLINE_EPOCH is not None and time.time() >= SHARD_DEADLINE_EPOCH
+
+
 def run_tests(
     selected_tests: list[ShardedTest],
     test_directory: str,
     options,
     failures: list[TestFailure],
-) -> None:
+) -> str | None:
     if len(selected_tests) == 0:
-        return
+        return None
+
+    if SHARD_DEADLINE_EPOCH is not None:
+        print_to_stderr(
+            "Shard soft deadline active: stopping new test files "
+            f"{max(0.0, (SHARD_DEADLINE_EPOCH - time.time()) / 60):.1f} min from now"
+        )
+
+    def stop_for_shard_deadline(
+        next_test: ShardedTest, not_run: list[ShardedTest]
+    ) -> str:
+        # Shard-level abort (ran out of budget), distinct from a test failure --
+        # surfaced via run_tests' return, not the failures list, so it doesn't
+        # pollute TD/stats. The prefix is load-bearing: the log classifier keys
+        # on it.
+        remaining = [str(t) for t in not_run]
+        message = (
+            f"{SHARD_DEADLINE_FAILURE_PREFIX} soft deadline reached before "
+            f"{next_test} ({len(remaining)} file(s) not run)"
+        )
+        print_to_stderr(message)
+        print_to_stderr(f"Not run due to shard deadline: {remaining}")
+        return message
 
     uses_xdist = options.pytest_xdist_workers is not None
 
@@ -2207,8 +2242,13 @@ def run_tests(
     )
 
     pool = None
+    shard_deadline_msg: str | None = None
     try:
-        for test in selected_tests_serial:
+        for i, test in enumerate(selected_tests_serial):
+            if shard_deadline_exceeded():
+                return stop_for_shard_deadline(
+                    test, selected_tests_serial[i:] + selected_tests_parallel
+                )
             options_clone = copy.deepcopy(options)
             if can_run_in_pytest(test):
                 options_clone.pytest = True
@@ -2224,7 +2264,9 @@ def run_tests(
                 raise RuntimeError(failure.message + keep_going_message)
 
         # Run tests marked as serial first
-        for test in selected_tests_parallel:
+        for i, test in enumerate(selected_tests_parallel):
+            if shard_deadline_exceeded():
+                return stop_for_shard_deadline(test, selected_tests_parallel[i:])
             options_clone = copy.deepcopy(options)
             if can_run_in_pytest(test):
                 options_clone.pytest = True
@@ -2261,7 +2303,13 @@ def run_tests(
             ):
                 pool.terminate()
 
-        for test in selected_tests_parallel:
+        for i, test in enumerate(selected_tests_parallel):
+            if shard_deadline_exceeded():
+                # Stop submitting; in-flight files drain in pool.join() below.
+                shard_deadline_msg = stop_for_shard_deadline(
+                    test, selected_tests_parallel[i:]
+                )
+                break
             options_clone = copy.deepcopy(options)
             if can_run_in_pytest(test):
                 options_clone.pytest = True
@@ -2280,7 +2328,7 @@ def run_tests(
             pool.terminate()
             pool.join()
 
-    return
+    return shard_deadline_msg
 
 
 def check_pip_packages() -> None:
@@ -2402,10 +2450,11 @@ def main():
     if not options.no_translation_validation:
         os.environ["PYTORCH_TEST_WITH_TV"] = "1"
 
+    shard_deadline_msg: str | None = None
     try:
         # Actually run the tests
         start_time = time.time()
-        run_tests(
+        shard_deadline_msg = run_tests(
             test_batch.sharded_tests, test_directory, options, test_batch.failures
         )
         elapsed_time = time.time() - start_time
@@ -2444,13 +2493,17 @@ def main():
                 [test.test_file for test, _ in all_failures]
             )
 
-    if len(all_failures):
+    if all_failures:
         for _, err in all_failures:
             print_to_stderr(err)
 
-        # A disabled test is expected to fail, so there is no need to report a failure here
-        if not RERUN_DISABLED_TESTS:
-            sys.exit(1)
+    # A shard that stopped at the soft deadline did not finish its work -> fail red.
+    if shard_deadline_msg is not None:
+        sys.exit(1)
+
+    # A disabled test is expected to fail, so there is no need to report a failure here
+    if all_failures and not RERUN_DISABLED_TESTS:
+        sys.exit(1)
 
 
 if __name__ == "__main__":
