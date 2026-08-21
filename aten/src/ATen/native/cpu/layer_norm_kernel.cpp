@@ -35,12 +35,32 @@ void LayerNormSecondPass(
   using Vec = vec::Vectorized<T>;
   const bool gamma_null = gamma_data == nullptr;
   const bool beta_null = beta_data == nullptr;
-  if (gamma_null || beta_null) {
-    for (const auto j : c10::irange(N)) {
-      const T gamma_v = gamma_null ? T(1) : gamma_data[j];
-      const T beta_v = beta_null ? T(0) : beta_data[j];
-      Y_ptr[j] = (X_ptr[j] + bias) * scale * gamma_v + beta_v;
-    }
+  if (gamma_null && beta_null) {
+    vec::map<T>(
+        [scale, bias](Vec x) {
+          return (x + Vec(bias)) * Vec(scale);
+        },
+        Y_ptr,
+        X_ptr,
+        N);
+  } else if (gamma_null) {
+    vec::map2<T>(
+        [scale, bias](Vec x, Vec beta) {
+          return (x + Vec(bias)) * Vec(scale) + beta;
+        },
+        Y_ptr,
+        X_ptr,
+        beta_data,
+        N);
+  } else if (beta_null) {
+    vec::map2<T>(
+        [scale, bias](Vec x, Vec gamma) {
+          return (x + Vec(bias)) * Vec(scale) * gamma;
+        },
+        Y_ptr,
+        X_ptr,
+        gamma_data,
+        N);
   } else {
     vec::map3<T>(
       [scale, bias](Vec x, Vec gamma, Vec beta) {
