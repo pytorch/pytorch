@@ -1,5 +1,8 @@
 # Owner(s): ["oncall: distributed"]
+import contextlib
+import io
 import os
+import pickle
 import unittest
 
 import torch
@@ -62,6 +65,52 @@ class TestMemoryTracker(TestCase):
         self.assertTrue(len(tracker._markers) == 2)
         self.assertTrue(tracker._cur_module_name != "")
         self.assertTrue(hasattr(tracker, "_num_alloc_retries"))
+
+    def _make_tracker_with_entries(self) -> MemoryTracker:
+        tracker = MemoryTracker()
+        for i, (name, mem) in enumerate([("op_a", 1.0), ("op_b", 3.0)]):
+            tracker.memories_allocated[i] = (name, mem)
+            tracker.memories_active[i] = (name, mem)
+            tracker.memories_reserved[i] = (name, mem)
+            tracker._op_index += 1
+        return tracker
+
+    def _summary_text(self, tracker: MemoryTracker) -> str:
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            tracker.summary()
+        return out.getvalue()
+
+    def test_save_load_restores_op_index(self):
+        tracker = self._make_tracker_with_entries()
+        path = "memory_op_index.trace"
+        try:
+            tracker.save_stats(path)
+            loaded = MemoryTracker()
+            loaded.load(path)
+            self.assertEqual(loaded._op_index, tracker._op_index)
+            self.assertEqual(self._summary_text(loaded), self._summary_text(tracker))
+        finally:
+            if os.path.exists(path):
+                os.remove(path)
+
+    def test_load_legacy_stats_without_op_index(self):
+        tracker = self._make_tracker_with_entries()
+        path = "memory_legacy.trace"
+        try:
+            tracker.save_stats(path)
+            with open(path, "rb") as f:
+                stats = pickle.load(f)
+            del stats["op_index"]
+            with open(path, "wb") as f:
+                pickle.dump(stats, f, pickle.HIGHEST_PROTOCOL)
+            loaded = MemoryTracker()
+            loaded.load(path)
+            self.assertEqual(loaded._op_index, tracker._op_index)
+            self.assertEqual(self._summary_text(loaded), self._summary_text(tracker))
+        finally:
+            if os.path.exists(path):
+                os.remove(path)
 
 
 if __name__ == "__main__":
