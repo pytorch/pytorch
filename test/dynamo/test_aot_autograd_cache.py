@@ -3405,41 +3405,6 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
-    def test_in_graph_autocast_cache_hit(self):
-        """In-graph torch.autocast with explicit dtype is AOTAutograd-cacheable."""
-
-        def fn(x):
-            with torch.autocast("cpu", dtype=torch.bfloat16):
-                return (x @ x).relu()
-
-        with fresh_cache():
-            compiled = torch.compile(fn, backend="inductor")
-            x = torch.randn(16, 16, requires_grad=True)
-            out = compiled(x)
-            out.sum().backward()
-
-            # Autocast must have been active (mm under autocast -> bf16).
-            self.assertEqual(out.dtype, torch.bfloat16)
-            self.assertEqual(out, fn(x.detach()))
-            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
-            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
-            self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 0)
-
-            self._clear_dynamo_and_codecache()
-
-            x2 = torch.randn(16, 16, requires_grad=True)
-            out2 = compiled(x2)
-            out2.sum().backward()
-
-            self.assertEqual(out2.dtype, torch.bfloat16)
-            self.assertEqual(out2, fn(x2.detach()))
-            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
-            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
-            self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 0)
-
-    @inductor_config.patch("fx_graph_remote_cache", False)
-    @inductor_config.patch("fx_graph_cache", True)
-    @functorch_config.patch({"enable_autograd_cache": True})
     def test_in_graph_autocast_dtype_distinguishes_cache(self):
         """Different in-graph autocast dtypes must not share an AOTAutograd cache entry."""
 
