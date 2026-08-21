@@ -3864,7 +3864,7 @@ def set_tracing_context_output_strides(
                     try:
                         return shape_env.deserialize_symexpr(e)
                     except TypeError:
-                        return shape_env.evaluate_symexpr(e)
+                        return int(shape_env.evaluate_symexpr(e))
 
                 context.output_strides.append(
                     tuple(map_expr(e) for e in exprs)  # type: ignore[misc]
