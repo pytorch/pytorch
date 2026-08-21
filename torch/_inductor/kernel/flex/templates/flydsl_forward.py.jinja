@@ -1,0 +1,314 @@
+import contextlib
+import os
+import threading
+
+import torch
+
+from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
+    build_flex_attn_fwd_module,
+)
+
+
+{{gen_defines()}}
+
+
+_launcher = None
+_launcher_lock = threading.Lock()
+_compiled_dispatchers = {}
+_compiled_dispatchers_lock = threading.Lock()
+
+
+def _get_launcher():
+    global _launcher
+    launcher = _launcher
+    if launcher is None:
+        with _launcher_lock:
+            launcher = _launcher
+            if launcher is None:
+                launcher = build_flex_attn_fwd_module(
+                    batch_size=BATCH_SIZE,
+                    num_q_heads=NUM_Q_HEADS,
+                    num_kv_heads=NUM_KV_HEADS,
+                    seq_q=SEQ_Q,
+                    seq_kv=SEQ_KV,
+                    qk_head_dim=QK_HEAD_DIM,
+                    v_head_dim=V_HEAD_DIM,
+                    block_mask_batch=BLOCK_MASK_BATCH,
+                    block_mask_heads=BLOCK_MASK_HEADS,
+                    num_q_blocks=NUM_Q_BLOCKS,
+                    max_partial_blocks=MAX_PARTIAL_BLOCKS,
+                    max_full_blocks=MAX_FULL_BLOCKS,
+                    sparse_q_block_size=SPARSE_Q_BLOCK_SIZE,
+                    sparse_kv_block_size=SPARSE_KV_BLOCK_SIZE,
+                    causal_partial_blocks=CAUSAL_PARTIAL_BLOCKS,
+                    mask_program=MASK_PROGRAM,
+                    mask_program_output=MASK_PROGRAM_OUTPUT,
+                    mask_buffer_shapes=MASK_BUFFER_SHAPES,
+                    mask_buffer_strides=MASK_BUFFER_STRIDES,
+                    q_stride=Q_STRIDE,
+                    k_stride=K_STRIDE,
+                    v_stride=V_STRIDE,
+                    o_stride=O_STRIDE,
+                    scale=float(SM_SCALE),
+                    output_stats_in_log2=True,
+                )
+                _launcher = launcher
+    return launcher
+
+
+def _inductor_tensor_arg(tensor):
+    return flyc.from_torch_tensor(tensor).mark_layout_dynamic()
+
+
+def _run_compiled(launcher, compile_args, dispatch_args):
+    device = getattr(dispatch_args[0], "device", None)
+    device_index = getattr(device, "index", None)
+    compiled = _compiled_dispatchers.get(device_index)
+    if compiled is not None:
+        compiled(*dispatch_args)
+        return
+
+    dispatch_after_wait = False
+    with _compiled_dispatchers_lock:
+        compiled = _compiled_dispatchers.get(device_index)
+        if compiled is None:
+            compiled = flyc.compile(launcher, *compile_args)
+            _compiled_dispatchers[device_index] = compiled
+        else:
+            dispatch_after_wait = True
+
+    if dispatch_after_wait:
+        compiled(*dispatch_args)
+
+
+@contextlib.contextmanager
+def _temporary_env(updates):
+    old_values = {key: os.environ.get(key) for key in updates}
+    os.environ.update(
+        {key: value for key, value in updates.items() if value is not None}
+    )
+    try:
+        yield
+    finally:
+        for key, old_value in old_values.items():
+            if old_value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = old_value
+
+
+def _run_flydsl_forward(
+    query,
+    key,
+    value,
+    logsumexp,
+    max_scores,
+    kv_num_blocks,
+    kv_indices,
+    full_kv_num_blocks,
+    full_kv_indices,
+{% if MASK_BUFFER_COUNT >= 1 %}
+    mask_buffer_0,
+{% endif %}
+{% if MASK_BUFFER_COUNT >= 2 %}
+    mask_buffer_1,
+{% endif %}
+{% if MASK_BUFFER_COUNT >= 3 %}
+    mask_buffer_2,
+{% endif %}
+{% if MASK_BUFFER_COUNT >= 4 %}
+    mask_buffer_3,
+{% endif %}
+    output,
+    stream,
+):
+    launcher = _get_launcher()
+    compile_args = (
+        _inductor_tensor_arg(query),
+        _inductor_tensor_arg(key),
+        _inductor_tensor_arg(value),
+        _inductor_tensor_arg(logsumexp),
+        _inductor_tensor_arg(max_scores),
+        _inductor_tensor_arg(kv_num_blocks),
+        _inductor_tensor_arg(kv_indices),
+        _inductor_tensor_arg(full_kv_num_blocks),
+        _inductor_tensor_arg(full_kv_indices),
+{% if MASK_BUFFER_COUNT >= 1 %}
+        _inductor_tensor_arg(mask_buffer_0),
+{% endif %}
+{% if MASK_BUFFER_COUNT >= 2 %}
+        _inductor_tensor_arg(mask_buffer_1),
+{% endif %}
+{% if MASK_BUFFER_COUNT >= 3 %}
+        _inductor_tensor_arg(mask_buffer_2),
+{% endif %}
+{% if MASK_BUFFER_COUNT >= 4 %}
+        _inductor_tensor_arg(mask_buffer_3),
+{% endif %}
+        _inductor_tensor_arg(output),
+        stream,
+    )
+    dispatch_args = (
+        query,
+        key,
+        value,
+        logsumexp,
+        max_scores,
+        kv_num_blocks,
+        kv_indices,
+        full_kv_num_blocks,
+        full_kv_indices,
+{% if MASK_BUFFER_COUNT >= 1 %}
+        mask_buffer_0,
+{% endif %}
+{% if MASK_BUFFER_COUNT >= 2 %}
+        mask_buffer_1,
+{% endif %}
+{% if MASK_BUFFER_COUNT >= 3 %}
+        mask_buffer_2,
+{% endif %}
+{% if MASK_BUFFER_COUNT >= 4 %}
+        mask_buffer_3,
+{% endif %}
+        output,
+        stream,
+    )
+    if os.environ.get("FLYDSL_COMPILE_ONLY") == "1":
+        flyc.compile(launcher, *compile_args)
+    else:
+        _run_compiled(launcher, compile_args, dispatch_args)
+    return output
+
+
+{% if MASK_BUFFER_COUNT == 1 %}
+{{def_kernel(
+    "query", "key", "value", "logsumexp", "max_scores",
+    "kv_num_blocks", "kv_indices", "full_kv_num_blocks", "full_kv_indices",
+    "mask_buffer_0",
+)}}
+{% elif MASK_BUFFER_COUNT == 2 %}
+{{def_kernel(
+    "query", "key", "value", "logsumexp", "max_scores",
+    "kv_num_blocks", "kv_indices", "full_kv_num_blocks", "full_kv_indices",
+    "mask_buffer_0", "mask_buffer_1",
+)}}
+{% elif MASK_BUFFER_COUNT == 3 %}
+{{def_kernel(
+    "query", "key", "value", "logsumexp", "max_scores",
+    "kv_num_blocks", "kv_indices", "full_kv_num_blocks", "full_kv_indices",
+    "mask_buffer_0", "mask_buffer_1", "mask_buffer_2",
+)}}
+{% elif MASK_BUFFER_COUNT == 4 %}
+{{def_kernel(
+    "query", "key", "value", "logsumexp", "max_scores",
+    "kv_num_blocks", "kv_indices", "full_kv_num_blocks", "full_kv_indices",
+    "mask_buffer_0", "mask_buffer_1", "mask_buffer_2", "mask_buffer_3",
+)}}
+{% else %}
+{{def_kernel(
+    "query", "key", "value", "logsumexp", "max_scores",
+    "kv_num_blocks", "kv_indices", "full_kv_num_blocks", "full_kv_indices",
+)}}
+{% endif %}
+    output = {{get_output()}}
+    return _run_flydsl_forward(
+        query,
+        key,
+        value,
+        logsumexp,
+        max_scores,
+        kv_num_blocks,
+        kv_indices,
+        full_kv_num_blocks,
+        full_kv_indices,
+{% if MASK_BUFFER_COUNT >= 1 %}
+        mask_buffer_0,
+{% endif %}
+{% if MASK_BUFFER_COUNT >= 2 %}
+        mask_buffer_1,
+{% endif %}
+{% if MASK_BUFFER_COUNT >= 3 %}
+        mask_buffer_2,
+{% endif %}
+{% if MASK_BUFFER_COUNT >= 4 %}
+        mask_buffer_3,
+{% endif %}
+        output,
+        stream,
+    )
+
+
+def {{kernel_name}}_precompile(
+    precompile_shapes,
+    precompile_strides,
+    precompile_dtypes,
+    device_index=0,
+    device_capability=None,
+    flydsl_gpu_arch=None,
+):
+    """Warm FlyDSL's disk cache using metadata-only fake tensors."""
+    del device_index, device_capability
+
+    def _fake_proxy(name):
+        return torch.empty_strided(
+            tuple(precompile_shapes[name]),
+            tuple(precompile_strides[name]),
+            dtype=getattr(torch, precompile_dtypes[name]),
+            device="cpu",
+        )
+
+    env_updates = {"FLYDSL_COMPILE_ONLY": "1"}
+    if flydsl_gpu_arch is not None:
+        env_updates["FLYDSL_GPU_ARCH"] = flydsl_gpu_arch
+
+    with _temporary_env(env_updates):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        with FakeTensorMode():
+            query = _fake_proxy("query")
+            key = _fake_proxy("key")
+            value = _fake_proxy("value")
+            logsumexp = _fake_proxy("logsumexp")
+            max_scores = _fake_proxy("max_scores")
+            kv_num_blocks = _fake_proxy("kv_num_blocks")
+            kv_indices = _fake_proxy("kv_indices")
+            full_kv_num_blocks = _fake_proxy("full_kv_num_blocks")
+            full_kv_indices = _fake_proxy("full_kv_indices")
+{% if MASK_BUFFER_COUNT >= 1 %}
+            mask_buffer_0 = _fake_proxy("mask_buffer_0")
+{% endif %}
+{% if MASK_BUFFER_COUNT >= 2 %}
+            mask_buffer_1 = _fake_proxy("mask_buffer_1")
+{% endif %}
+{% if MASK_BUFFER_COUNT >= 3 %}
+            mask_buffer_2 = _fake_proxy("mask_buffer_2")
+{% endif %}
+{% if MASK_BUFFER_COUNT >= 4 %}
+            mask_buffer_3 = _fake_proxy("mask_buffer_3")
+{% endif %}
+            output = _fake_proxy("output")
+            {{kernel_name}}_main(
+                query,
+                key,
+                value,
+                logsumexp,
+                max_scores,
+                kv_num_blocks,
+                kv_indices,
+                full_kv_num_blocks,
+                full_kv_indices,
+{% if MASK_BUFFER_COUNT >= 1 %}
+                mask_buffer_0,
+{% endif %}
+{% if MASK_BUFFER_COUNT >= 2 %}
+                mask_buffer_1,
+{% endif %}
+{% if MASK_BUFFER_COUNT >= 3 %}
+                mask_buffer_2,
+{% endif %}
+{% if MASK_BUFFER_COUNT >= 4 %}
+                mask_buffer_3,
+{% endif %}
+                output,
+                stream=0,
+            )

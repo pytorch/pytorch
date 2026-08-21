@@ -54,6 +54,10 @@ from .flex_flash_attention import (
     is_trivial_mask_graph,
     is_trivial_score_graph,
 )
+from .flex_flydsl_attention import (
+    can_use_flydsl_flex_attention_forward,
+    maybe_append_flydsl_flex_attention_choice,
+)
 
 
 if TYPE_CHECKING:
@@ -278,6 +282,32 @@ def flex_attention(
         sympy.Ne(query.get_size()[1], key.get_size()[1]),
     )
 
+    can_use_flydsl, flydsl_rejection_reason = (
+        can_use_flydsl_flex_attention_forward(
+            query=query,
+            key=key,
+            value=value,
+            kv_num_blocks=kv_num_blocks,
+            kv_indices=kv_indices,
+            full_kv_num_blocks=full_kv_num_blocks,
+            full_kv_indices=full_kv_indices,
+            subgraph=subgraph,
+            mask_graph=mask_graph,
+            score_mod_other_buffers=score_mod_other_buffers,
+            mask_mod_other_buffers=mask_mod_other_buffers,
+            scale=scale,
+            sparse_q_block_size=SPARSE_Q_BLOCK_SIZE,
+            sparse_kv_block_size=SPARSE_KV_BLOCK_SIZE,
+        )
+        if backend == "FLYDSL"
+        else (False, "")
+    )
+    if backend == "FLYDSL" and not can_use_flydsl:
+        raise RuntimeError(
+            "BACKEND='FLYDSL' but FlyDSL flex forward cannot be used: "
+            f"{flydsl_rejection_reason}"
+        )
+
     can_use_decode = _use_flex_decoding(
         query, kv_indices, value, kernel_options, enable_gqa
     )
@@ -431,10 +461,41 @@ def flex_attention(
 
     choices: list[Any] = []
 
+    if backend == "FLYDSL":
+        appended, reason = maybe_append_flydsl_flex_attention_choice(
+            choices,
+            query=query,
+            key=key,
+            value=value,
+            logsumexp=logsumexp,
+            max_scores=max_scores,
+            kv_num_blocks=kv_num_blocks,
+            kv_indices=kv_indices,
+            full_kv_num_blocks=full_kv_num_blocks,
+            full_kv_indices=full_kv_indices,
+            layout=layout,
+            subgraph=subgraph,
+            mask_graph=mask_graph,
+            score_mod_other_buffers=score_mod_other_buffers,
+            mask_mod_other_buffers=mask_mod_other_buffers,
+            scale=scale,
+            sparse_q_block_size=SPARSE_Q_BLOCK_SIZE,
+            sparse_kv_block_size=SPARSE_KV_BLOCK_SIZE,
+        )
+        if not appended:
+            raise RuntimeError(
+                "BACKEND='FLYDSL' but the FlyDSL flex forward candidate "
+                f"could not be registered: {reason}"
+            )
+
     dtype = query.get_dtype()
     head_dim = V.graph.sizevars.guard_int(query.get_size()[-1])
-    configs: list[FlexConfig] = V.choices.get_flex_attention_fwd_configs(
-        head_dim, seq_len_q, dtype, query.get_device().type
+    configs: list[FlexConfig] = (
+        []
+        if backend == "FLYDSL"
+        else V.choices.get_flex_attention_fwd_configs(
+            head_dim, seq_len_q, dtype, query.get_device().type
+        )
     )
 
     # Mark SPARSE_KV_BLOCK_SIZE & SPARSE_Q_BLOCK_SIZE as static shapes and add guards.
@@ -541,26 +602,27 @@ def flex_attention(
 
     # Let the active choices handler append any backend-specific flex-attention
     # template choices (e.g. TLX on Blackwell in fbcode). No-op by default.
-    choices = V.choices.append_flex_attention_choices(
-        choices,
-        configs,
-        [
-            query,
-            key,
-            value,
-            logsumexp,
-            max_scores,
-            kv_num_blocks,
-            kv_indices,
-            full_kv_num_blocks,
-            full_kv_indices,
-        ],
-        [subgraph_buffer, mask_graph_buffer],
-        layout,
-        original_kernel_options,
-        SPARSE_Q_BLOCK_SIZE,
-        SPARSE_KV_BLOCK_SIZE,
-    )
+    if backend != "FLYDSL":
+        choices = V.choices.append_flex_attention_choices(
+            choices,
+            configs,
+            [
+                query,
+                key,
+                value,
+                logsumexp,
+                max_scores,
+                kv_num_blocks,
+                kv_indices,
+                full_kv_num_blocks,
+                full_kv_indices,
+            ],
+            [subgraph_buffer, mask_graph_buffer],
+            layout,
+            original_kernel_options,
+            SPARSE_Q_BLOCK_SIZE,
+            SPARSE_KV_BLOCK_SIZE,
+        )
 
     if not choices and invalid_block_options is not None:
         raise_flex_kernel_options_error(
