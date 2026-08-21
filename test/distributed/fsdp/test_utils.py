@@ -11,7 +11,7 @@ import torch
 import torch.nn as nn
 from torch import distributed as dist
 from torch.distributed.fsdp._common_utils import _get_param_to_fqns
-from torch.distributed.utils import _apply_to_tensors, _replace_by_prefix
+from torch.distributed.utils import _apply_to_tensors, _replace_by_prefix, _to_kwargs
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
@@ -45,6 +45,15 @@ else:
 
 
 class TestUtils(TestCase):
+    def test_to_kwargs_empty_inputs_and_kwargs(self):
+        moved_inputs, moved_kwargs = _to_kwargs((), None, torch.device("cpu"), False)
+        self.assertEqual(moved_inputs, ((),))
+        self.assertEqual(moved_kwargs, ({},))
+
+        moved_inputs, moved_kwargs = _to_kwargs((), {}, torch.device("cpu"), False)
+        self.assertEqual(moved_inputs, ((),))
+        self.assertEqual(moved_kwargs, ({},))
+
     @parametrize(
         "device_list",
         [
