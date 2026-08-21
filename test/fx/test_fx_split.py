@@ -194,7 +194,7 @@ class TestSplitByTags(TestCase):
             if idx < len(tags):
                 self.assertTrue(
                     name == tags[idx],
-                    f"split_gm has an incorrect submodule named {name}",
+                    lambda msg: f"{msg}\nsplit_gm has an incorrect submodule named {name}",
                 )
 
         # Ensure each submodule has expected (ordered) call_module node(s).
@@ -209,7 +209,7 @@ class TestSplitByTags(TestCase):
                 self.assertTrue(
                     node.name == tag_node[f"{sub_name}"][node_idx],
                     # pyre-fixme[61]: `name` is undefined, or not always defined.
-                    f"{sub_name} has incorrectly include {node.name}",
+                    lambda msg: f"{msg}\n{sub_name} has incorrectly include {node.name}",
                 )
                 node_idx += 1
             sub_graph_idx += 1
