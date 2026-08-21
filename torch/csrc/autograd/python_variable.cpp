@@ -1,5 +1,6 @@
 #include <ATen/DTensorState.h>
 #include <ATen/native/Resize.h>
+#include <ATen/record_function.h>
 #include <c10/core/DeviceType.h>
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/core/impl/GPUTrace.h>
@@ -3722,6 +3723,7 @@ static int THPVariable_clear(THPVariable* self) {
 }
 
 static void THPVariable_dealloc(PyObject* self) {
+  RECORD_FUNCTION("Tensor_dealloc", {});
   PyObject_GC_UnTrack(self);
   THPVariable_clear((THPVariable*)self);
   ((THPVariable*)self)->cdata.~Variable();
