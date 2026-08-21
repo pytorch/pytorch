@@ -520,12 +520,13 @@ def randint(
 
     Example::
 
-        >>> r = torch.func._random  # doctest: +SKIP
-        >>> key = r.key(42, device="cuda")  # doctest: +SKIP
-        >>> r.randint(key, (1000,), high=10)  # [0, 10)  # doctest: +SKIP
-        >>> r.randint(key, (1000,), low=-5, high=5)  # [-5, 5)  # doctest: +SKIP
-        >>> r.randint(key, 2, 3, high=10, dtype=torch.int64)  # shape (2, 3)  # doctest: +SKIP
-        >>> r.randint(key, (1000,), low=None)  # the dtype's full range  # doctest: +SKIP
+        >>> # doctest: +SKIP
+        >>> r = torch.func._random
+        >>> key = r.key(42, device="cuda")
+        >>> r.randint(key, (1000,), high=10)  # [0, 10)
+        >>> r.randint(key, (1000,), low=-5, high=5)  # [-5, 5)
+        >>> r.randint(key, 2, 3, high=10, dtype=torch.int64)  # shape (2, 3)
+        >>> r.randint(key, (1000,), low=None)  # the dtype's full range
     """
     if len(shape) == 1 and isinstance(shape[0], Sequence):
         # pyrefly: ignore [bad-argument-type]
