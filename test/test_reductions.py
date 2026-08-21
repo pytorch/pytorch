@@ -3669,6 +3669,7 @@ class TestReductionsDevice(TestCase):
 
 class TestReductions(TestCase):
     hw_classification = HardwareClassification.GENERIC
+
     # TODO: kill map2_ (and similar) uses and update to compare with NumPy
     # only works on CPU since this uses map2_, which is only supported on CPU
     def _testCSelection(self, torchfn, mathfn):
