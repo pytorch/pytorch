@@ -4067,12 +4067,69 @@ class _Missing:
         return _Missing()
 
 
+# Attributes a TENSOR_MATCH guard bakes into its code by READING them off the
+# example value instead of by walking a source, so nothing registers them in the
+# guard tree and identity pruning cannot see them. See [Note: Dimension Marking
+# Guards].
+_TENSOR_ATTRIBUTES_TENSOR_MATCH_READS = frozenset(
+    {
+        "_dynamo_dynamic_indices",
+        "_dynamo_weak_dynamic_indices",
+        "_dynamo_unbacked_indices",
+        "_dynamo_strict_unbacked_indices",
+        "_dynamo_static_indices",
+        "_dynamo_shape_ids",
+        "_dynamo_unbacked_bounds",
+    }
+)
+
+# A reconstructed FakeTensor keeps its own bookkeeping in __dict__ alongside
+# anything the user hung there. Re-serializing one must not carry these across:
+# the reconstructor sets them itself, and carrying them would accrete a fresh
+# copy of each on every round trip.
+_FAKE_TENSOR_OWNED_ATTRIBUTES = frozenset(
+    {
+        "_fake_device",
+        "fake_mode",
+        "constant",
+        "pytype",
+        "dispatch_keys",
+        "real_tensor",
+        "_nonzero_memo",
+        "_nonzero_memo_vc",
+        "_nonzero_memo_epoch",
+        "_item_memo",
+        "_item_memo_vc",
+        "_item_memo_epoch",
+        "_unique_memo",
+        "_unique_memo_vc",
+        "_unique_memo_epoch",
+        "_unique_consecutive_memo",
+        "_unique_consecutive_memo_vc",
+        "_unique_consecutive_memo_epoch",
+        "_nested_int_memo",
+        "_nested_int_memo_vc",
+        "_nested_int_memo_epoch",
+    }
+)
+
+# The subset a reconstructed FakeTensor genuinely needs to BE one. A user
+# attribute of the same name would overwrite it, so those are refused by name
+# rather than left to fail somewhere inside the rebuild.
+_FAKE_TENSOR_RESERVED_ATTRIBUTES = frozenset(
+    {"_fake_device", "fake_mode", "pytype", "dispatch_keys"}
+)
+
+
 @functools.cache
 def _get_unsupported_types() -> tuple[type, ...]:
     # We only do ID_MATCH on C objects which is already banned from guards serialization.
     ret: tuple[type, ...] = (
         torch._C.Stream,
         weakref.ReferenceType,
+        # Generator pickles but does not unpickle: its __setstate__ raises, and
+        # the raise surfaces as a bare SystemError from deep inside load().
+        torch._C.Generator,
     )
     try:
         ret += (torch._C._distributed_c10d.ProcessGroup,)
@@ -4134,6 +4191,44 @@ class GuardsStatePickler(pickle.Pickler):
         self.guard_tree_values = guard_tree_values
         self.empty_values = empty_values
         self.missing_values = missing_values
+
+    @classmethod
+    def _restore_tensor_attributes(
+        cls, tensor: torch.Tensor, state: dict[str, Any]
+    ) -> None:
+        for name, value in state.items():
+            object.__setattr__(tensor, name, value)
+
+    def _carried_tensor_attributes(self, obj: torch.Tensor) -> dict[str, Any] | None:
+        """The plain Python attributes of ``obj`` that a guard can reach.
+
+        Reconstruction rebuilds a tensor from its metadata, so an attribute
+        assigned onto one has to be carried explicitly or a guard whose source
+        traverses it cannot be rebuilt at all. Carried pruned rather than whole:
+        an unguarded neighbour is nobody's business and may not even be
+        picklable.
+        """
+        state = getattr(obj, "__dict__", None)
+        if not state:
+            return None
+        is_fake = isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
+            obj, torch._subclasses.FakeTensor
+        )
+        carried: dict[str, Any] = {}
+        for name, value in state.items():
+            if is_fake and name in _FAKE_TENSOR_OWNED_ATTRIBUTES:
+                continue
+            if not (name in _TENSOR_ATTRIBUTES_TENSOR_MATCH_READS or self._keep(value)):
+                continue
+            if name in _FAKE_TENSOR_RESERVED_ATTRIBUTES:
+                raise torch._dynamo.exc.PackageError(
+                    f"a guard reads {name!r} off a tensor, but precompile "
+                    f"rebuilds a tensor as a FakeTensor and {name!r} is how a "
+                    f"FakeTensor stores its own state -- carrying yours would "
+                    f"overwrite it. Rename the attribute."
+                )
+            carried[name] = value
+        return carried or None
 
     @classmethod
     def _unpickle_module(cls, state: Any) -> torch.nn.Module:
@@ -4475,13 +4570,25 @@ class GuardsStatePickler(pickle.Pickler):
                         self.guard_tree_values[id(inner)] = inner
                     inner_data.append((attr, inner))
 
-                return type(self)._unpickle_traceable_wrapper_subclass, (
-                    torch.empty_like(obj, device="meta"),
-                    obj.device,
-                    type(obj),
-                    torch._C._dispatch_keys(obj).raw_repr(),
-                    ctx,
-                    inner_data,
+                carried = self._carried_tensor_attributes(obj)
+                if carried is not None:
+                    for attr in attrs:
+                        carried.pop(attr, None)
+                    carried = carried or None
+                return (
+                    type(self)._unpickle_traceable_wrapper_subclass,
+                    (
+                        torch.empty_like(obj, device="meta"),
+                        obj.device,
+                        type(obj),
+                        torch._C._dispatch_keys(obj).raw_repr(),
+                        ctx,
+                        inner_data,
+                    ),
+                    carried,
+                    None,
+                    None,
+                    type(self)._restore_tensor_attributes,
                 )
 
             # For FakeTensors, use pytype if set, otherwise default to
@@ -4509,14 +4616,27 @@ class GuardsStatePickler(pickle.Pickler):
                     obj, device="meta", requires_grad=obj.requires_grad
                 )
 
-            return type(self)._unpickle_tensor, (
-                meta,
-                obj.device,
-                pytype,
-                dispatch_keys.raw_repr(),
-                # Reading .grad off a non-leaf warns and is always None anyway;
-                # a training capture hits plenty of non-leaf tensors.
-                obj.grad if obj.is_leaf else None,
+            return (
+                type(self)._unpickle_tensor,
+                (
+                    meta,
+                    obj.device,
+                    pytype,
+                    dispatch_keys.raw_repr(),
+                    # Reading .grad off a non-leaf warns and is always None
+                    # anyway; a training capture hits plenty of non-leaf
+                    # tensors.
+                    obj.grad if obj.is_leaf else None,
+                ),
+                # Deliberately the reduce STATE slot rather than a sixth
+                # constructor argument: pickle memoizes the tensor before it
+                # saves state, so a tensor whose attribute refers back to it
+                # round-trips instead of recursing, and an artifact written
+                # before this existed still loads.
+                self._carried_tensor_attributes(obj),
+                None,
+                None,
+                type(self)._restore_tensor_attributes,
             )
 
         elif isinstance(obj, torch.nn.Module):
