@@ -4143,23 +4143,26 @@ class TestTorchDeviceType(TestCase):
         # Workaround for large memory overhead of self.assertTrue (see #84944)
         self.assertTrue(torch.allclose(expected_cpu, actual_cpu))  # ~20GB in allclose
 
-    # Regression for two ROCm pdist forward bugs that test_pdist_norm_large could
-    # not catch in CI (it requires 32 GB host RAM and was @skipIfRocm; see #168868):
-    #  (1) device_sqrt ran in fp32 on ROCm, corrupting the triangular-index
-    #      inversion once n2^2 exceeded the fp32 integer limit 2^24 (n >~ 4097);
-    #  (2) launching a 1-D grid of `numel` blocks dropped blocks past ~15M,
-    #      leaving ~40% of outputs unwritten.
-    # This test is memory-light and exercises both boundaries on any GPU.
+    # The pdist and cdist forward kernels launch one 256-thread block per output.
+    # ROCm caps a grid dimension at 2^32-1 work-items rather than blocks, so any
+    # launch past 2^24 outputs failed with hipErrorInvalidConfiguration. n=5794 is
+    # the first pdist size over that line; test_pdist_norm_large also covers it but
+    # needs 32 GB of host RAM, so it does not run in CI (see #168868).
     @onlyCUDA
-    def test_pdist_norm_index_and_grid(self, device):
-        for n in (4096, 4097, 6000, 8000, 10000):
-            x = torch.randn(n, 1, dtype=torch.float32)
-            expected = torch.pdist(x, p=2)
-            actual = torch.pdist(x.to(device), p=2).cpu()
-            self.assertFalse(torch.isnan(actual).any(),
-                             msg=f"NaN in pdist output at n={n}")
-            self.assertEqual(actual, expected, atol=1e-4, rtol=1e-4,
-                             msg=f"pdist mismatch at n={n} (numel={n * (n - 1) // 2})")
+    @parametrize("n", [5793, 5794, 8000])
+    def test_pdist_large_grid(self, device, n):
+        x = torch.randn(n, 1, dtype=torch.float32)
+        actual = torch.pdist(x.to(device), p=2).cpu()
+        self.assertEqual(actual, torch.pdist(x, p=2), atol=1e-4, rtol=1e-4)
+
+    # p != 2 keeps cdist off the matrix-multiply path and on the kernel under test.
+    @onlyCUDA
+    @parametrize("r1, r2", [(4096, 4096), (256, 65536)])
+    def test_cdist_large_grid(self, device, r1, r2):
+        x1 = torch.randn(r1, 2, dtype=torch.float32)
+        x2 = torch.randn(r2, 2, dtype=torch.float32)
+        actual = torch.cdist(x1.to(device), x2.to(device), p=3).cpu()
+        self.assertEqual(actual, torch.cdist(x1, x2, p=3), atol=1e-4, rtol=1e-4)
 
     # FIXME: move to elementwise ternary test suite
     @onlyNativeDeviceTypes
