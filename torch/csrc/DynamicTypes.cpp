@@ -53,8 +53,7 @@ PyObject* createPyObject(const at::Storage& storage) {
   // data_ptr is not allowed, through methods like
   // x.untyped_storage().data_ptr()
   PyObject* obj = THPStorage_Wrap(storage);
-  if (!obj)
-    throw python_error();
+  TORCH_CHECK_PYTHON(obj);
   return obj;
 }
 
