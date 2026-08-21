@@ -586,14 +586,24 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
             descriptor, types.MethodDescriptorType
         ):
             self.skipTest("requires a nonstandard C method descriptor")
+        descriptor_type = type(descriptor)
+        bound_method_type = type(builder.get_loc)
 
         def fn(x):
+            builder.set_loc("dynamo-test")
             builder.get_loc()
-            return x + 1
+            return (
+                x + 1,
+                isinstance(builder.get_loc, descriptor_type),
+                isinstance(builder.get_loc, bound_method_type),
+            )
 
         x = torch.ones(1)
-        result = torch.compile(fn, backend="eager")(x)
+        result, is_descriptor, is_bound_method = torch.compile(fn, backend="eager")(x)
         self.assertEqual(result, x + 1)
+        self.assertFalse(is_descriptor)
+        self.assertTrue(is_bound_method)
+        self.assertEqual(builder.get_loc().get_name(), "dynamo-test")
 
     def test_classmethod_descriptor_dict_fromkeys(self):
         """dict.fromkeys is a classmethod_descriptor."""
