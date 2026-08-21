@@ -313,6 +313,10 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         move_constructors_to_gpu
     )
 
+    GraphTransformObserver(gm, "move_scalars_to_cuda").apply_graph_pass(
+        move_scalars_to_gpu
+    )
+
     fake_tensor_updater.incremental_update()
 
     for device, custom_backend_pass in custom_backend_passes.items():
@@ -2519,3 +2523,169 @@ def move_constructors_to_gpu(graph: fx.Graph) -> None:
         allow_inputs=allow_inputs_outputs,
         allow_outputs=allow_inputs_outputs,
     )(graph)
+
+
+_SCALAR_ARITH_TO_ATEN: dict[Any, torch._ops.OpOverload] = {
+    operator.add: torch.ops.aten.add.Tensor,
+    operator.sub: torch.ops.aten.sub.Tensor,
+    operator.mul: torch.ops.aten.mul.Tensor,
+    operator.truediv: torch.ops.aten.div.Tensor,
+}
+
+
+class ScalarToDeviceTensorPass:
+    """
+    Recompute float ``.item()`` scalars as 0-d device tensors.
+
+    A float produced by ``.item()`` on a device tensor and then consumed by a
+    device op reaches the kernel as a launch argument. cudagraphs bake launch
+    arguments in when the graph is recorded, and ``cudagraphify_impl`` keys
+    re-recording on int inputs only, so a replay silently reuses the float
+    captured at record time. Mirroring the scalar expression as 0-d device
+    tensors keeps the value in memory, which every replay re-reads.
+
+    Ints are deliberately left alone: they are symbolic sizes, and the int
+    specialization key already forces a re-record when they change.
+    """
+
+    def __init__(self, target: str) -> None:
+        self.target = target
+        self.fake_mode: Any = None
+        self.mirrored: dict[fx.Node, fx.Node] = {}
+
+    def _is_float_scalar(self, node: fx.Node) -> bool:
+        return isinstance(node.meta.get("val"), (torch.SymFloat, float))
+
+    def _item_source(self, node: fx.Node) -> fx.Node | None:
+        """``.item()`` on a tensor already on the target device -> that tensor."""
+        if node.target is not torch.ops.aten._local_scalar_dense.default:
+            return None
+        src = node.args[0]
+        if not isinstance(src, fx.Node):
+            return None
+        val = src.meta.get("val")
+        if not isinstance(val, torch.Tensor) or val.device.type != self.target:
+            return None
+        return src
+
+    def _build(
+        self, graph: fx.Graph, op: Any, args: tuple[Any, ...], kwargs: Any = None
+    ) -> fx.Node:
+        node = graph.call_function(op, args, kwargs or {})
+        fake_args = pytree.tree_map_only(fx.Node, lambda n: n.meta["val"], args)
+        with self.fake_mode:
+            node.meta["val"] = op(*fake_args, **(kwargs or {}))
+        return node
+
+    def _mirror(self, node: fx.Node) -> fx.Node | None:
+        """0-d float64 device tensor holding the same value as scalar ``node``."""
+        if node in self.mirrored:
+            return self.mirrored[node]
+
+        graph = node.graph
+        src = self._item_source(node)
+        if src is not None:
+            with graph.inserting_after(node):
+                out = self._build(
+                    graph,
+                    torch.ops.prims.convert_element_type.default,
+                    (src, torch.float64),
+                )
+            self.mirrored[node] = out
+            return out
+
+        aten_op = _SCALAR_ARITH_TO_ATEN.get(node.target)
+        if aten_op is None:
+            return None
+
+        # Mirror operands first; each is placed after its own (earlier) scalar
+        # node, so it dominates this one.
+        operands: list[Any] = []
+        for arg in node.args:
+            if isinstance(arg, fx.Node):
+                sub = self._mirror(arg)
+                if sub is None:
+                    return None
+                operands.append(sub)
+            elif isinstance(arg, (int, float)) and not isinstance(arg, bool):
+                operands.append(arg)
+            else:
+                return None
+
+        # Materialize literals and then the op itself, advancing the insertion
+        # anchor so each node is defined before the one that consumes it.
+        anchor = node
+        resolved: list[fx.Node] = []
+        for operand in operands:
+            if isinstance(operand, fx.Node):
+                resolved.append(operand)
+                continue
+            with graph.inserting_after(anchor):
+                const = self._build(
+                    graph,
+                    torch.ops.aten.scalar_tensor.default,
+                    (operand,),
+                    {"dtype": torch.float64, "device": torch.device(self.target)},
+                )
+            anchor = const
+            resolved.append(const)
+
+        with graph.inserting_after(anchor):
+            out = self._build(graph, aten_op, tuple(resolved))
+        self.mirrored[node] = out
+        return out
+
+    def __call__(self, graph: fx.Graph) -> None:
+        for node in graph.nodes:
+            val = node.meta.get("val")
+            if isinstance(val, torch.Tensor) and val.device.type == self.target:
+                self.fake_mode = getattr(val, "fake_mode", None)
+                if self.fake_mode is not None:
+                    break
+        if self.fake_mode is None:
+            return
+
+        for node in list(graph.nodes):
+            if node.op != "call_function" or not isinstance(
+                node.target, torch._ops.OpOverload
+            ):
+                continue
+            val = node.meta.get("val")
+            if not isinstance(val, torch.Tensor):
+                continue
+            if val.device.type != self.target or not val.dtype.is_floating_point:
+                continue
+
+            schema_args = node.target._schema.arguments
+            for idx, arg in enumerate(node.args):
+                if not isinstance(arg, fx.Node) or not self._is_float_scalar(arg):
+                    continue
+                # Only rewrite parameters the schema actually declares as
+                # Tensor; Scalar parameters (full's fill_value, clamp's min)
+                # reject a tensor outright.
+                if idx >= len(schema_args) or str(schema_args[idx].type) != "Tensor":
+                    continue
+                mirror = self._mirror(arg)
+                if mirror is None:
+                    continue
+                # Cast to the consumer's result dtype so type promotion, and
+                # therefore the consumer's output dtype, is unchanged.
+                with graph.inserting_before(node):
+                    cast = self._build(
+                        graph,
+                        torch.ops.prims.convert_element_type.default,
+                        (mirror, val.dtype),
+                    )
+                node.update_arg(idx, cast)
+
+
+def move_scalars_to_gpu(graph: fx.Graph) -> None:
+    """
+    Recompute float ``.item()`` scalars as 0-d device tensors for cudagraphs.
+    """
+    if not (
+        torch._inductor.config.triton.cudagraphs
+        and torch._inductor.config.graph_partition
+    ):
+        return
+    ScalarToDeviceTensorPass(get_gpu_type())(graph)
