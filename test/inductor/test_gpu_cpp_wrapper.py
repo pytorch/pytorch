@@ -19,7 +19,7 @@ from torch._inductor.codegen.cpp_wrapper_gpu import (
 )
 from torch._inductor.codegen.cuda.device_op_overrides import CUDADeviceOpOverrides
 from torch._inductor.test_case import TestCase as InductorTestCase
-from torch._inductor.utils import IndentedBuffer
+from torch._inductor.utils import DualIndentedBuffer, IndentedBuffer
 from torch._inductor.virtualized import V
 from torch.testing._internal.common_utils import (
     find_library_location,
@@ -338,6 +338,111 @@ class TestGpuWrapper(InductorTestCase):
         self.assertEqual(scratch_var, "global_scratch_scratch_0")
         self.assertIn(
             "static_cast<int64_t>(256) * grid_0 * grid_1 * grid_2", scratch_def[0]
+        )
+
+    def test_cuda_launch_kernel_supports_pdl(self):
+        if GPU_TYPE != "cuda" or torch.version.hip:
+            self.skipTest("CUDA-only codegen test")
+
+        kernel_driver = CUDADeviceOpOverrides().kernel_driver()
+        self.assertIn("bool launch_pdl = false", kernel_driver)
+        self.assertIn(
+            "CU_LAUNCH_ATTRIBUTE_PROGRAMMATIC_STREAM_SERIALIZATION", kernel_driver
+        )
+        self.assertIn("programmaticStreamSerializationAllowed = 1", kernel_driver)
+        self.assertIn("cuLaunchKernelEx(&launch_config", kernel_driver)
+        self.assertNotIn("cuLaunchKernel(", kernel_driver)
+
+    def test_triton_wrapper_passes_pdl_launch_flag(self):
+        if GPU_TYPE != "cuda" or torch.version.hip:
+            self.skipTest("CUDA-only codegen test")
+
+        class FakeWrapper:
+            device = "cuda"
+
+            def generate_args_decl(
+                self,
+                prefix,
+                call_args,
+                arg_types,
+                arg_signatures,
+                is_triton_kernel=True,
+                scratch_spaces=None,
+            ):
+                return ""
+
+        prefix = IndentedBuffer()
+        params = {
+            "triton_meta": {
+                "signature": {"x": "*fp32"},
+                "constants": {},
+                "launch_pdl": True,
+            },
+            "def_args": ["x"],
+            "call_args": ["x"],
+            "num_warps": 4,
+            "shared_mem": 0,
+        }
+
+        DeferredTritonCallWrapper(
+            wrapper_name="wrapper",
+            kernel_name="kernel",
+            kernel_name_to_body={},
+            arg_types=[torch.float32],
+        ).generate_launch_kernel(prefix, FakeWrapper(), "kernel_var", params)
+
+        self.assertIn(
+            "launchKernel(kernel_var, grid_0, grid_1, grid_2, 4, 0, kernel_args_, stream_, true);",
+            prefix.getvalue(),
+        )
+
+    @config.patch({"cpp.enable_kernel_profile": True})
+    def test_lazy_triton_wrapper_profile_passes_pdl_launch_flag(self):
+        if GPU_TYPE != "cuda" or torch.version.hip:
+            self.skipTest("CUDA-only codegen test")
+
+        class FakeDeviceCodegen:
+            def cpp_device_ptr(self):
+                return "void*"
+
+        class FakeWrapper:
+            device = "cuda"
+            device_codegen = FakeDeviceCodegen()
+
+            def codegen_dtype(self, dtype):
+                return "at::ScalarType::Byte"
+
+            def codegen_device(self, device):
+                return "aoti_torch_device_type_cuda(), device_idx_"
+
+            def generate_args_decl(
+                self,
+                prefix,
+                call_args,
+                arg_types,
+                arg_signatures,
+                is_triton_kernel=True,
+                scratch_spaces=None,
+            ):
+                return ""
+
+        prefix = DualIndentedBuffer()
+        wrapper = FakeWrapper()
+        DeferredTritonCallWrapper(
+            wrapper_name="wrapper",
+            kernel_name="kernel",
+            kernel_name_to_body={},
+            arg_types=[torch.float32],
+            triton_meta={
+                "signature": {"x": "*fp32"},
+                "constants": {},
+                "launch_pdl": True,
+            },
+        )._generate_lazy_launch(prefix, wrapper, ["x"], ["x"])
+
+        self.assertIn(
+            "launchKernel(kernels_.kernel, grid_0, grid_1, grid_2, kernel_result.num_warps, kernel_result.shared_mem, kernel_args_, stream_, true);",
+            prefix.aot.getvalue(),
         )
 
     @skipIfXpu(msg="tests CUDA/ROCm CUDADeviceOpOverrides codegen")
