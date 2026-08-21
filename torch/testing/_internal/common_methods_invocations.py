@@ -22071,25 +22071,6 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         result_dtype=torch.int64,
         dtypes=all_types_and(torch.float16, torch.bfloat16),
         ref=reference_reduction_numpy(np.argmax, supports_keepdims=False),
-        skips=(
-            #DecorateInfo(
-            #    unittest.skip('Temporarily skipped on XPU'),
-            #    'TestReductionsDevice',
-            #    'test_argminmax_multiple',
-            #    device_type='xpu',
-            #    dtypes=(torch.float64, torch.int16, torch.int32, torch.int64),
-            #),
-            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
-            DecorateInfo(
-                unittest.skip('Skipped!'),
-                'TestReductionsDevice',
-                'test_ref_small_input',
-                device_type='xpu',
-                dtypes=floating_types_and(
-                    torch.int64, torch.int8, torch.int16, torch.int32, torch.float16
-                ),
-            ),
-        ),
     ),
     ReductionOpInfo(
         'argmin',
@@ -22098,25 +22079,6 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         result_dtype=torch.int64,
         dtypes=all_types_and(torch.float16, torch.bfloat16),
         ref=reference_reduction_numpy(np.argmin, supports_keepdims=False),
-        skips=(
-            DecorateInfo(
-                unittest.skip('Temporarily skipped on XPU'),
-                'TestReductionsDevice',
-                'test_argminmax_multiple',
-                device_type='xpu',
-                dtypes=(torch.float64, torch.int16, torch.int32, torch.int64),
-            ),
-            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
-            DecorateInfo(
-                unittest.skip('Skipped!'),
-                'TestReductionsDevice',
-                'test_ref_small_input',
-                device_type='xpu',
-                dtypes=floating_types_and(
-                    torch.int64, torch.int8, torch.int16, torch.int32, torch.float16
-                ),
-            ),
-        ),
     ),
     ReductionOpInfo(
         'count_nonzero',
