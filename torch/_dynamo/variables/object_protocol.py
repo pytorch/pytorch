@@ -83,8 +83,9 @@ def vt_identity_compare(
     # instances are mutable objects built during tracing, so two distinct VTs
     # (already known not to be `left is right`) are distinct Python objects.
     from .dicts import ConstDictVariable
+    from .exception import TracebackVariable
     from .lists import ListVariable
-    from .misc import ExceptionVariable, TracebackVariable
+    from .exception import ExceptionVariable
     from .sets import FrozensetVariable, SetVariable
 
     if isinstance(
