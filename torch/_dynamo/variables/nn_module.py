@@ -514,9 +514,6 @@ class NNModuleVariable(VariableTracker):
         if name == "forward":
             guard_to_detect_forward_monkeypatching(self.source, base)
 
-        if name == "__class__" and not object_member:
-            return VariableTracker.build(tx, base.__class__, source=source)
-
         if object_member:
             out = VariableTracker.build(tx, subobj, NNModuleSource(source))  # type: ignore[arg-type]
 

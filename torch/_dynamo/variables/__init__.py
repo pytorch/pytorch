@@ -129,6 +129,7 @@ from .iter import (
 from .lazy import LazyConstantVariable, LazyVariableTracker
 from .lists import (
     BaseListVariable,
+    DequeIteratorVariable,
     DequeVariable,
     ListIteratorVariable,
     ListVariable,

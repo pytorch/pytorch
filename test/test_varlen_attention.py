@@ -27,6 +27,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
     decorateIf,
+    HardwareClassification,
     parametrize,
     run_tests,
     setSdpaBackendsToDefaultFinally,
@@ -341,6 +342,17 @@ def create_variable_length_batch(
 
 
 class TestVarlenAttention(NNTestCase):
+    # NOTE: This class is currently CUDA-specific, although a significant portion of its
+    # functionality can be shared by other backends. Separating the common logic from
+    # CUDA-specific logic would require a substantial refactoring, so this is deferred
+    # for now.
+    # The planned refactoring is to introduce a Capability mechanism, allowing each backend
+    # to report its supported Flash Attention implementations (FA2/FA3/FA4) and determine
+    # whether to enable them accordingly. The cuDNN-related logic will also be separated
+    # from the current class and kept CUDA-specific, ultimately resulting in a generic
+    # Accelerator class and a CUDA-specific class.
+    hw_classification = HardwareClassification.CUDA
+
     def _test_varlen_vs_sdpa(
         self,
         device,
@@ -686,6 +698,9 @@ class TestVarlenAttention(NNTestCase):
                 shape.max_seq_len,
                 False,
                 rng_state,
+                None,
+                None,
+                False,
             ),
             test_utils=["test_schema", "test_faketensor"],
         )
@@ -827,17 +842,68 @@ class TestVarlenAttention(NNTestCase):
     @skipIfRocm
     @setSdpaBackendsToDefaultFinally
     @parametrize("dtype", [torch.bfloat16, torch.float16])
+    @parametrize("window_size", [(-1, -1), (-1, 0), [-1, 0]])
     @parametrize("_should_use_cudnn", [True])
-    def test_cudnn_attention_varlen(self, device, dtype, _should_use_cudnn):
+    def test_cudnn_attention_varlen(
+        self, device, dtype, window_size, _should_use_cudnn
+    ):
         self._test_varlen_vs_sdpa(
             device,
             dtype,
             scale=None,
-            window_size=(-1, -1),
+            window_size=window_size,
             backend="fa2",
             enable_gqa=False,
             _should_use_cudnn=_should_use_cudnn,
         )
+
+    @skipIfRocm
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
+    )
+    def test_cudnn_causal_varlen_requires_shared_cu_seq(self, device):
+        _check_cudnn_varlen_supported(device)
+        seq_len = 256
+        q = torch.randn(
+            seq_len,
+            4,
+            64,
+            device=device,
+            dtype=torch.bfloat16,
+            requires_grad=True,
+        )
+        k = torch.randn_like(q, requires_grad=True)
+        v = torch.randn_like(q, requires_grad=True)
+        cu_seq_q = torch.tensor([0, seq_len], device=device, dtype=torch.int32)
+        cu_seq_k = cu_seq_q.clone()
+
+        with (
+            _use_cudnn_varlen(True, device),
+            patch.object(
+                torch.ops.aten,
+                "_cudnn_attention_forward",
+                wraps=torch.ops.aten._cudnn_attention_forward,
+            ) as cudnn_forward,
+            patch.object(
+                torch.ops.aten,
+                "_cudnn_attention_backward",
+                wraps=torch.ops.aten._cudnn_attention_backward,
+            ) as cudnn_backward,
+        ):
+            out = varlen_attn(
+                q,
+                k,
+                v,
+                cu_seq_q,
+                cu_seq_k,
+                seq_len,
+                seq_len,
+                window_size=(-1, 0),
+            )
+            torch.autograd.grad(out, (q, k, v), torch.randn_like(out))
+
+        self.assertEqual(cudnn_forward.call_count, 0)
+        self.assertEqual(cudnn_backward.call_count, 0)
 
     @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179968")
     @unittest.skipIf(
@@ -865,8 +931,10 @@ class TestVarlenAttention(NNTestCase):
         self, device, dtype, num_splits, window_size, backend, sdpa_backend=None
     ):
         use_cudnn = backend == "cudnn"
-        if use_cudnn and (window_size != (-1, -1) or num_splits is not None):
-            self.skipTest("cuDNN does not support window_size or num_splits")
+        if use_cudnn and (
+            window_size not in ((-1, -1), (-1, 0)) or num_splits is not None
+        ):
+            self.skipTest("cuDNN does not support this window_size or num_splits")
         if TEST_WITH_ROCM:
             if num_splits is not None:
                 self.skipTest("num_splits is not supported on ROCm")
@@ -1763,9 +1831,7 @@ class TestVarlenAttention(NNTestCase):
             self.assertEqual(out_buf, out)
 
 
-device_types = ("cuda",)
-
-instantiate_device_type_tests(TestVarlenAttention, globals(), only_for=device_types)
+instantiate_device_type_tests(TestVarlenAttention, globals(), only_for=("cuda",))
 
 if __name__ == "__main__":
     run_tests()

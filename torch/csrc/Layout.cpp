@@ -10,8 +10,7 @@
 PyObject* THPLayout_New(at::Layout layout, const std::string& name) {
   auto type = &THPLayoutType;
   auto self = THPObjectPtr{type->tp_alloc(type, 0)};
-  if (!self)
-    throw python_error();
+  TORCH_CHECK_PYTHON(self);
   auto self_ = reinterpret_cast<THPLayout*>(self.get());
   self_->layout = layout;
   std::strncpy(self_->name, name.c_str(), LAYOUT_NAME_LEN);
@@ -65,7 +64,5 @@ PyTypeObject THPLayoutType = {
 };
 
 void THPLayout_init(PyObject* module) {
-  if (PyModule_AddType(module, &THPLayoutType) < 0) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(PyModule_AddType(module, &THPLayoutType) >= 0);
 }
