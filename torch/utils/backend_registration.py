@@ -239,7 +239,7 @@ def _generate_module_methods_for_privateuse1_backend(custom_backend_name: str) -
     if not hasattr(torch.Tensor, custom_backend_name):
         raise RuntimeError(
             f"Can not automatically generate {custom_backend_name}() method for torch.nn.Module."
-            f"Because torch.Tensor doesn't has the method {custom_backend_name}()."
+            f"Because torch.Tensor doesn't have the method {custom_backend_name}()."
             f"For this error, you can try setting for_tensor=True."
         )
 
@@ -278,7 +278,7 @@ def _generate_packed_sequence_methods_for_privateuse1_backend(
         raise RuntimeError(
             f"Can not automatically generate is_{custom_backend_name}() or "
             f"{custom_backend_name}() method for torch.nn.utils.rnn.PackedSequence."
-            f"Because torch.Tensor doesn't has the method is_{custom_backend_name}()"
+            f"Because torch.Tensor doesn't have the method is_{custom_backend_name}()"
             f"or {custom_backend_name}()."
             f"For this error, you can try setting for_tensor=True."
         )

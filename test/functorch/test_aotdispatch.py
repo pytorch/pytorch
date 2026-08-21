@@ -7,6 +7,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import copy
+import gc
 import itertools
 import operator
 import unittest
@@ -243,6 +244,32 @@ class AOTTestCase(TestCase):
                 actual_inner = getattr(actual, attr)
                 if isinstance(expected_inner, torch.Tensor):
                     self.assertTensorMetadataEqual(actual_inner, expected_inner)
+
+
+_pack_body_calls: list[int] = []
+
+
+@torch.fx.wrap
+def _alloc_unbacked_symint(t):
+    _pack_body_calls.append(1)
+    torch.all(torch.isfinite(t)).item()
+    return t
+
+
+# `type(c) is`, not isinstance: immutable_list / immutable_dict subclass
+# list / dict, so isinstance cannot tell them apart.
+@torch.fx.wrap
+def _unwrap_exact_list(c):
+    if type(c) is not list:
+        raise AssertionError(f"expected a plain list, got {type(c).__name__}")
+    return c[0]
+
+
+@torch.fx.wrap
+def _unwrap_exact_dict(c):
+    if type(c) is not dict:
+        raise AssertionError(f"expected a plain dict, got {type(c).__name__}")
+    return c["t"]
 
 
 class TestPythonKey(AOTTestCase):
@@ -3340,6 +3367,88 @@ def forward(self, arg0_1, arg1_1):
         mem_after = torch.cuda.memory_allocated()
         self.assertTrue(mem_after == mem_before)
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_save_input_view_for_bw_does_not_leak_memory(self):
+        def f(x):
+            return (x * x).sum()
+
+        f_compiled = aot_function(f, nop)
+
+        def run_once(check_saved_view):
+            base = torch.randn(1024, 1024, device="cuda", requires_grad=True)
+            non_leaf_base = base * 2
+            input_view = non_leaf_base[:512]
+            input_view_ref = weakref.ref(input_view)
+            non_leaf_base_ref = weakref.ref(non_leaf_base)
+            saved_view_refs = []
+            saved_base_refs = []
+
+            def pack_hook(t):
+                if t._is_view():
+                    saved_view_refs.append(weakref.ref(t))
+                    saved_base_refs.append(weakref.ref(t._base))
+                return t
+
+            if check_saved_view:
+                with torch.autograd.graph.saved_tensors_hooks(pack_hook, lambda t: t):
+                    out = f_compiled(input_view)
+            else:
+                out = f_compiled(input_view)
+
+            return (
+                out,
+                input_view,
+                non_leaf_base,
+                base,
+                input_view_ref,
+                non_leaf_base_ref,
+                saved_view_refs,
+                saved_base_refs,
+            )
+
+        warmup = run_once(check_saved_view=False)
+        del warmup
+        gc.collect()
+        torch.cuda.synchronize()
+        mem_before = torch.cuda.memory_allocated()
+
+        (
+            out,
+            input_view,
+            non_leaf_base,
+            base,
+            input_view_ref,
+            non_leaf_base_ref,
+            saved_view_refs,
+            saved_base_refs,
+        ) = run_once(check_saved_view=True)
+        out_ref = weakref.ref(out)
+        self.assertGreater(torch.cuda.memory_allocated(), mem_before)
+
+        self.assertEqual(len(saved_view_refs), 1)
+        saved_view = saved_view_refs[0]()
+        saved_base = saved_base_refs[0]()
+        self.assertIs(saved_view, input_view)
+        self.assertIs(saved_base, non_leaf_base)
+        self.assertIsNot(saved_base, out)
+        self.assertIsNot(saved_base.grad_fn, out.grad_fn)
+
+        saved_view = saved_base = None
+        del input_view, non_leaf_base, base
+        gc.collect()
+        self.assertIsNotNone(out_ref())
+        self.assertIsNotNone(input_view_ref())
+        self.assertIsNotNone(non_leaf_base_ref())
+
+        del out
+        gc.collect()
+        torch.cuda.synchronize()
+        mem_after = torch.cuda.memory_allocated()
+        self.assertEqual(mem_after, mem_before)
+        self.assertIsNone(out_ref())
+        self.assertIsNone(input_view_ref())
+        self.assertIsNone(non_leaf_base_ref())
+
     def test_output_aliases_multiple_inputs_get_correct_one(self):
         # a and b are aliased, but have different shapes
         # The first output should view off the first input, the 2nd output should view off the 2nd input
@@ -4838,6 +4947,74 @@ def forward(self, tangents_1):
             except torch._dynamo.exc.BackendCompilerFailed as e:
                 raise e.inner_exception from e
 
+    @torch._functorch.config.patch(saved_tensors_hooks_filtering_mode="no_static")
+    @parametrize("pack_out", ["tensor", "list", "dict"])
+    def test_saved_tensors_hooks_gm_data_dependent_probe(self, pack_out):
+        # Regression: pack GraphModule bodies that allocate a fresh unbacked
+        # SymInt (e.g. via `.item()` / `bool(<fake_tensor>)` / nonzero) used
+        # to leak into `pending_fresh_unbacked_symbols` because
+        # `maybe_inline_graph_saved_tensors_hooks` ran the hook without a
+        # ProxyTorchDispatchMode, leaving no tracker to bind the symbol.
+        #
+        # The list / dict variants additionally pin the immutable_list /
+        # immutable_dict -> list / dict normalization of the pack output. Their
+        # unpack hooks check `type(c) is list` / `type(c) is dict`, which is the
+        # only way the container type is observable.
+
+        def fn(x, w):
+            return torch.matmul(x, w).sin()
+
+        # `allocs_per_body` is how many times each variant's pack body calls
+        # _alloc_unbacked_symint, so the assertion below is in units of pack
+        # body executions regardless of variant.
+        if pack_out == "tensor":
+            allocs_per_body = 2
+
+            def pack(x):
+                x = _alloc_unbacked_symint(x)
+                return _alloc_unbacked_symint(x)
+
+            def unpack(packed):
+                return packed
+
+        elif pack_out == "list":
+            allocs_per_body = 1
+
+            def pack(x):
+                return [_alloc_unbacked_symint(x)]
+
+            def unpack(packed):
+                return _unwrap_exact_list(packed)
+
+        else:
+            allocs_per_body = 1
+
+            def pack(x):
+                return {"t": _alloc_unbacked_symint(x)}
+
+            def unpack(packed):
+                return _unwrap_exact_dict(packed)
+
+        pack_gm, unpack_gm = saved_tensors_hooks_to_gm(
+            pack, unpack, "pack_hash", "unpack_hash"
+        )
+        x = torch.randn(8, 16, requires_grad=True)
+        w = torch.randn(16, 16, requires_grad=True)
+        compiled = torch.compile(fn, backend="aot_eager", fullgraph=True)
+
+        _pack_body_calls.clear()
+        with torch.autograd.graph.saved_tensors_hooks(pack_gm, unpack_gm):
+            out = compiled(x, w)
+            out.sum().backward()
+
+        # `fn` saves 3 tensors, and the pack hook is now only traced -- not
+        # additionally executed to obtain an example value. Re-adding that
+        # second execution doubles this count, which is the regression this
+        # pins.
+        pack_body_runs, remainder = divmod(len(_pack_body_calls), allocs_per_body)
+        self.assertEqual(remainder, 0)
+        self.assertEqual(pack_body_runs, 3)
+
     def test_mark_activations_dynamic_with_nested(self):
         # The flattened tensors of the nested tensor aren't
         # marked as activations, but they add some offset
@@ -5798,14 +5975,14 @@ class <lambda>(torch.nn.Module):
         getitem_3: "f32[3]" = _native_batch_norm_legit_functional[3]
         getitem_4: "f32[3]" = _native_batch_norm_legit_functional[4];  _native_batch_norm_legit_functional = None
         relu: "f32[1, 3, 3, 3]" = torch.ops.aten.relu.default(getitem);  getitem = None
-        detach: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(relu);  detach = None
-        detach_1: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(relu)
+        alias: "f32[1, 3, 3, 3]" = torch.ops.aten.alias.default(relu);  alias = None
+        alias_1: "f32[1, 3, 3, 3]" = torch.ops.aten.alias.default(relu)
         sum_1: "f32[]" = torch.ops.aten.sum.default(relu)
-        detach_2: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(relu);  relu = None
+        alias_2: "f32[1, 3, 3, 3]" = torch.ops.aten.alias.default(relu);  relu = None
         ones_like: "f32[]" = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format)
         expand: "f32[1, 3, 3, 3]" = torch.ops.aten.expand.default(ones_like, [1, 3, 3, 3]);  ones_like = None
-        detach_3: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_1);  detach_1 = None
-        threshold_backward: "f32[1, 3, 3, 3]" = torch.ops.aten.threshold_backward.default(expand, detach_3, 0);  expand = detach_3 = None
+        alias_3: "f32[1, 3, 3, 3]" = torch.ops.aten.alias.default(alias_1);  alias_1 = None
+        threshold_backward: "f32[1, 3, 3, 3]" = torch.ops.aten.threshold_backward.default(expand, alias_3, 0);  expand = alias_3 = None
         native_batch_norm_backward = torch.ops.aten.native_batch_norm_backward.default(threshold_backward, convolution, arg2_1, getitem_3, getitem_4, getitem_1, getitem_2, True, 1e-05, [True, True, True]);  threshold_backward = convolution = arg2_1 = getitem_1 = getitem_2 = None
         getitem_5: "f32[1, 3, 3, 3]" = native_batch_norm_backward[0]
         getitem_6: "f32[3]" = native_batch_norm_backward[1]
@@ -5814,7 +5991,7 @@ class <lambda>(torch.nn.Module):
         getitem_8 = convolution_backward[0];  getitem_8 = None
         getitem_9: "f32[3, 1, 1, 1]" = convolution_backward[1]
         getitem_10: "f32[3]" = convolution_backward[2];  convolution_backward = None
-        return (getitem_3, getitem_4, add, sum_1, detach_2, getitem_9, getitem_10, getitem_6, getitem_7)
+        return (getitem_3, getitem_4, add, sum_1, alias_2, getitem_9, getitem_10, getitem_6, getitem_7)
 """,
         )
 
@@ -6853,23 +7030,23 @@ def forward(self, primals_1, tangents_1):
             # Both should be quantized nodes
             self.assertTrue(
                 pos_0_node.name.startswith("fp8_quant_"),
-                f"Position 0 should be quantized node, got: {pos_0_node.name}",
+                lambda msg: f"{msg}\nPosition 0 should be quantized node, got: {pos_0_node.name}",
             )
             self.assertTrue(
                 pos_2_node.name.startswith("fp8_quant_"),
-                f"Position 2 should be quantized node, got: {pos_2_node.name}",
+                lambda msg: f"{msg}\nPosition 2 should be quantized node, got: {pos_2_node.name}",
             )
 
             # The shared quantized node should have the first occurrence position in its name
             self.assertIn(
                 "_pos_0",
                 pos_0_node.name,
-                f"Shared quantized node should have '_pos_0' in name: {pos_0_node.name}",
+                lambda msg: f"{msg}\nShared quantized node should have '_pos_0' in name: {pos_0_node.name}",
             )
             self.assertIn(
                 "_pos_2",
                 pos_2_node.name,
-                f"Shared quantized node should have '_pos_2' in name: {pos_2_node.name}",
+                lambda msg: f"{msg}\nShared quantized node should have '_pos_2' in name: {pos_2_node.name}",
             )
             # Find scale nodes in the forward output
             fwd_scale_nodes = [
@@ -6994,7 +7171,7 @@ def forward(self, primals_1, tangents_1):
                 self.assertLessEqual(
                     len(direct_users),
                     1,
-                    f"Quantized placeholder {quant_placeholder.name} should have minimal direct users",
+                    lambda msg: f"{msg}\nQuantized placeholder {quant_placeholder.name} should have minimal direct users",
                 )
 
     @unittest.skipIf(not USE_NETWORKX, "networkx not available")

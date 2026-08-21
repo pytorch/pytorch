@@ -443,6 +443,7 @@ def deserialize_torch_artifact(
             "Fallback to weights_only=False succeeded. "
             "Loaded object of type %s after initial failure: %s",
             type(artifact),
+            e,
             exc_info=e,
         )
     if not isinstance(artifact, (tuple, dict)):
@@ -1416,6 +1417,16 @@ class GraphModuleSerializer(metaclass=Final):
                         return Argument.create(as_strings=[])
                     elif isinstance(elem_type, torch.TensorType):
                         return Argument.create(as_tensors=[])
+                    elif isinstance(elem_type, torch.ListType):
+                        inner_elem_type = elem_type.getElementType()
+                        if isinstance(inner_elem_type, torch.IntType):
+                            return Argument.create(as_int_lists=[])
+                        elif isinstance(inner_elem_type, torch.FloatType):
+                            return Argument.create(as_float_lists=[])
+                        else:
+                            raise SerializeError(
+                                f"Empty list with nested type {elem_type} nyi."
+                            )
                     else:
                         # I believe empty symint lists default to ints, but
                         # please file an issue if this is not the case
@@ -1543,9 +1554,10 @@ class GraphModuleSerializer(metaclass=Final):
                     as_optional_tensors=list(map(serialize_optional_tensor_args, arg))
                 )
             elif all(
-                isinstance(a, tuple) and all(type(x) is int for x in a) for a in arg
+                isinstance(a, (list, tuple)) and all(type(x) is int for x in a)
+                for a in arg
             ):
-                # list of int tuples
+                # list of int lists (List[List[int]])
                 return Argument.create(as_int_lists=[list(t) for t in arg])
             elif all(
                 isinstance(a, (list, tuple)) and all(isinstance(x, float) for x in a)
@@ -1618,7 +1630,7 @@ class GraphModuleSerializer(metaclass=Final):
         self.graph_state.sym_float_values[name] = serialize_sym_float(meta_val)
         return SymFloatArgument.create(as_name=name)
 
-    def serialize_sym_bool_output(self, name, meta_val) -> SymIntArgument:
+    def serialize_sym_bool_output(self, name, meta_val) -> SymBoolArgument:
         if name in self.graph_state.sym_bool_values:
             raise AssertionError(f"name {name!r} already in sym_bool_values")
         self.graph_state.sym_bool_values[name] = serialize_sym_bool(meta_val)
@@ -2950,10 +2962,6 @@ class GraphModuleDeserializer(metaclass=Final):
                 "Identity": torch.utils._sympy.functions.Identity,
             }
             self.symbol_name_to_symbol: dict[str, sympy.Symbol] = {}
-            self.constants = deserialize_torch_artifact(constants)
-            self.signature = self.deserialize_signature(
-                serialized_graph_module.signature
-            )
 
             # deserialization does analysis with checks on 0/1, so we create fake range constraints and
             # restore the original range constraints afterwards
@@ -2984,6 +2992,13 @@ class GraphModuleDeserializer(metaclass=Final):
                 self.shape_env.unbacked_symfloat_counter += 1
             for _ in range(count_unbacked_symint + 1):
                 self.shape_env.unbacked_symint_counter += 1
+
+            # Fake tensor constants may reconstruct symbolic sizes, which need
+            # the symbol range map initialized above.
+            self.constants = deserialize_torch_artifact(constants)
+            self.signature = self.deserialize_signature(
+                serialized_graph_module.signature
+            )
 
             if example_inputs is not None and len(example_inputs) > 0:
                 self.example_inputs = deserialize_torch_artifact(example_inputs)

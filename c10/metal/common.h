@@ -50,9 +50,18 @@ C10_METAL_CONSTEXPR unsigned ILP_PER_THREAD = 4;
 #ifdef __METAL__
 template <typename T, unsigned N>
 using array = ::metal::array<T, N>;
+template <typename T>
+using vec3 = ::metal::vec<T, 3>;
 #else
 template <typename T, unsigned N>
 using array = std::array<T, N>;
+// Host mirror of Metal's 3-component vector ABI. Metal aligns int3/uint3 to
+// 16 bytes, so alignas pads sizeof to 4 * sizeof(T) and mtl_setBytes uploads
+// the full width the shader expects.
+template <typename T>
+struct alignas(4 * sizeof(T)) vec3 {
+  T x, y, z;
+};
 #endif
 
 // Integer ceiling division: ceil(a / b). Usable from both host code and

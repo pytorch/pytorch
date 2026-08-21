@@ -1573,7 +1573,7 @@ class DistBucketizeTest(LocalDTensorTestBase):
 
                 self.assertTrue(
                     result.placements[0].is_replicate(),
-                    f"Expected Replicate output but got {result.placements[0]} "
+                    lambda msg: f"{msg}\nExpected Replicate output but got {result.placements[0]} "
                     f"for Partial({reduce_op}) input",
                 )
                 global_input = partial_input.full_tensor()
@@ -1590,7 +1590,7 @@ class DistBucketizeTest(LocalDTensorTestBase):
 
                 self.assertTrue(
                     result.placements[0].is_partial(),
-                    f"Expected Partial output but got {result.placements[0]} "
+                    lambda msg: f"{msg}\nExpected Partial output but got {result.placements[0]} "
                     f"for Partial({reduce_op}) input",
                 )
                 self.assertEqual(
@@ -1657,11 +1657,15 @@ class DistToCopyTest(LocalDTensorTestBase):
                 result = dt.to(target_dtype)
                 p = result.placements[0]
                 if expect_partial:
-                    self.assertTrue(p.is_partial(), f"{reduce_op}→{target_dtype}: {p}")
+                    self.assertTrue(
+                        p.is_partial(),
+                        lambda msg: f"{msg}\n{reduce_op}→{target_dtype}: {p}",
+                    )
                     self.assertEqual(p.reduce_op, reduce_op)
                 else:
                     self.assertTrue(
-                        p.is_replicate(), f"{reduce_op}→{target_dtype}: {p}"
+                        p.is_replicate(),
+                        lambda msg: f"{msg}\n{reduce_op}→{target_dtype}: {p}",
                     )
 
 
@@ -1997,7 +2001,7 @@ class TestNewEmptyStridedUneven(DTensorTestBase):
         self.assertIsNotNone(model._grad_placement)
         self.assertTrue(
             all(isinstance(p, Partial) for p in model._grad_placement),
-            f"Expected Partial grad placement, got {model._grad_placement}",
+            lambda msg: f"{msg}\nExpected Partial grad placement, got {model._grad_placement}",
         )
 
     @with_comms
