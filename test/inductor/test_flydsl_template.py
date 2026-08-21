@@ -295,6 +295,85 @@ class TestFlyDSLTemplate(TestCase):
         self.assertEqual(metadata["precompile_strides"], {"output": [1]})
         self.assertEqual(metadata["precompile_dtypes"], {"output": "float32"})
 
+    def test_precompile_metadata_preserves_four_input_layouts(self):
+        def fake_node(size, stride, dtype):
+            return SimpleNamespace(
+                get_size=lambda: list(size),
+                get_stride=lambda: list(stride),
+                get_dtype=lambda: dtype,
+            )
+
+        kernel = SimpleNamespace(
+            _template_signature_defined=True,
+            _template_input_args=[
+                (
+                    "arg_mat1",
+                    fake_node((64, 256), (256, 1), torch.float8_e4m3fn),
+                ),
+                (
+                    "arg_mat2",
+                    fake_node((256, 96), (1, 256), torch.float8_e4m3fn),
+                ),
+                (
+                    "arg_scale_a",
+                    fake_node((64, 8), (8, 1), torch.float8_e8m0fnu),
+                ),
+                (
+                    "arg_scale_b",
+                    fake_node((96, 8), (8, 1), torch.float8_e8m0fnu),
+                ),
+            ],
+        )
+        buffer = SimpleNamespace(
+            layout=SimpleNamespace(
+                size=[64, 96],
+                stride=[96, 1],
+                dtype=torch.bfloat16,
+                device=torch.device("cuda", 0),
+            )
+        )
+        scheduling = FlyDSLScheduling.__new__(FlyDSLScheduling)
+
+        with (
+            mock.patch("torch.cuda.is_available", return_value=False),
+            mock.patch.object(
+                FlyDSLScheduling,
+                "_build_flydsl_gpu_arch",
+                return_value="gfx950",
+            ),
+        ):
+            metadata = scheduling._build_precompile_metadata(kernel, buffer)
+
+        self.assertEqual(
+            metadata,
+            {
+                "precompile_shapes": {
+                    "mat1": [64, 256],
+                    "mat2": [256, 96],
+                    "scale_a": [64, 8],
+                    "scale_b": [96, 8],
+                    "output": [64, 96],
+                },
+                "precompile_strides": {
+                    "mat1": [256, 1],
+                    "mat2": [1, 256],
+                    "scale_a": [8, 1],
+                    "scale_b": [8, 1],
+                    "output": [96, 1],
+                },
+                "precompile_dtypes": {
+                    "mat1": "float8_e4m3fn",
+                    "mat2": "float8_e4m3fn",
+                    "scale_a": "float8_e8m0fnu",
+                    "scale_b": "float8_e8m0fnu",
+                    "output": "bfloat16",
+                },
+                "device_index": 0,
+                "device_capability": None,
+                "flydsl_gpu_arch": "gfx950",
+            },
+        )
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
