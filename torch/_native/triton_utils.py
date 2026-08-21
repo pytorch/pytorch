@@ -33,9 +33,7 @@ def _available_triton_version() -> Version | None:
     import torch
 
     distributions = (
-        ("triton-rocm", "triton")
-        if torch.version.hip is not None
-        else ("triton",)
+        ("triton-rocm", "triton") if torch.version.hip is not None else ("triton",)
     )
     for distribution in distributions:
         if version := _available_version(distribution):
