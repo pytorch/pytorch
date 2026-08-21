@@ -809,7 +809,7 @@ void AliasDb::analyzeImpl(Node* node) {
 
   if (analysis == AliasAnalysisKind::CONSERVATIVE) {
     // TODO A previous implementation of alias analysis always accessed
-    // node->schema , which cause the schema caches in the Node class to be
+    // node->schema , which caused the schema caches in the Node class to be
     // filled for the full graph. Unfortunately, our JIT passes started relying
     // on that, so we need to keep doing this. Details: in
     // caffe2/torch/onnx/utils.py, _jit_pass_onnx is called on an invalid JIT
