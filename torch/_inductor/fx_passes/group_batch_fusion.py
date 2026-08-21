@@ -1396,6 +1396,81 @@ class BatchReLuPreGradFusion(BatchPointwiseOpsPreGradFusion):
         super().__init__(torch.nn.functional.relu, **kwargs)
 
 
+@register_fusion("batch_gelu")
+class BatchGeLuPreGradFusion(BatchPointwiseOpsPreGradFusion):
+    """
+    Batch GELU activation fusion in pre grad pass.
+
+    Fuses multiple F.gelu() calls on tensors of the same shape into a single
+    stack -> gelu -> unbind sequence, improving kernel launch efficiency.
+
+    The ``approximate`` kwarg ('none' or 'tanh') is included in the group key
+    so that different GELU variants are not batched together.
+    """
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(torch.nn.functional.gelu, **kwargs)
+
+    def match(self, node: torch.fx.Node):
+        input = get_arg_value(node, 0, "input")
+        if CallFunctionVarArgs(self.op).match(node) and is_node_meta_valid(node):
+            if self.graph_search_options.get("fuse_nodes_with_same_parent", False):
+                parent = node.args[0]
+                parent = parent.target if parent is not None else ""  # type: ignore[union-attr]
+            else:
+                parent = ""
+            group_key = (
+                "batch_gelu",
+                str(input.meta["example_value"].shape),  # type: ignore[union-attr]
+                str(node.kwargs.get("approximate", "none")),
+                str(parent),
+            )
+        else:
+            group_key = None
+        return group_key
+
+    def fuse(self, graph: torch.fx.GraphModule, subset: list[torch.fx.Node]):
+        batch_nodes = []
+        batch_inputs = []
+        batch_inputs_metadata = []
+        approximate = subset[0].kwargs.get("approximate", "none")
+
+        for node in subset:
+            batch_nodes.append(node)
+            input = get_arg_value(node, 0, "input")
+            batch_inputs.append(input)
+            batch_inputs_metadata.append(input.meta["example_value"])
+
+        with graph.inserting_before(subset[0]):  # type: ignore[operator]
+            stack_inputs = graph.call_function(  # type: ignore[operator]
+                torch.stack, args=(batch_inputs,), kwargs={"dim": 0}
+            )
+            update_stack_example_value(stack_inputs, batch_inputs_metadata)
+            batch_op = graph.call_function(  # type: ignore[operator]
+                self.op,
+                args=(stack_inputs,),
+                kwargs={"approximate": approximate},
+            )
+            batch_op.meta["example_value"] = self.op(
+                stack_inputs.meta["example_value"],  # type: ignore[union-attr]
+                approximate=approximate,
+            )
+            unbind_op = graph.call_function(  # type: ignore[operator]
+                torch.unbind, args=(batch_op,), kwargs={"dim": 0}
+            )
+            unbind_op.meta["example_value"] = torch.unbind(
+                batch_op.meta["example_value"],
+                dim=0,  # type: ignore[union-attr]
+            )
+            for i, node in enumerate(batch_nodes):
+                with graph.inserting_after(unbind_op):  # type: ignore[operator]
+                    getitem = graph.call_function(operator.getitem, args=(unbind_op, i))  # type: ignore[operator]
+                node.replace_all_uses_with(getitem)
+                getitem.meta.update(node.meta)
+                graph.erase_node(node)  # type: ignore[operator]
+        counters["inductor"]["batch_gelu"] += 1
+
+
 @register_fusion("batch_detach")
 class BatchDetachPreGradFusion(BatchMathOpsPreGradFusion):
     def __init__(self, **kwargs):
@@ -1441,6 +1516,66 @@ class BatchSigmoidPostGradFusion(BatchPointwiseOpsPostGradFusion):
 class BatchReLuPostGradFusion(BatchPointwiseOpsPostGradFusion):
     def __init__(self, **kwargs) -> None:
         super().__init__(aten.relu.default, **kwargs)
+
+
+@register_fusion("batch_aten_gelu", pre_grad=False)
+class BatchGeLuPostGradFusion(BatchPointwiseOpsPostGradFusion):
+    """
+    Batch GELU activation fusion in post grad pass.
+
+    Fuses multiple aten.gelu.default calls on tensors of the same shape into a
+    single stack -> gelu -> select sequence. The ``approximate`` argument
+    (second positional arg of aten.gelu.default) is included in the group key.
+    """
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(aten.gelu.default, **kwargs)
+
+    def match(self, node: torch.fx.Node):
+        input = get_arg_value(node, 0, "input")
+        if CallFunctionVarArgs(self.op).match(node) and is_node_meta_valid(node):
+            parent = (
+                node.args[0].target  # type: ignore[union-attr]
+                if self.graph_search_options.get("fuse_nodes_with_same_parent", False)
+                else ""
+            )
+            group_key = (
+                "batch_aten_gelu",
+                str(input.meta["val"].shape),  # type: ignore[union-attr]
+                str(node.args[1] if len(node.args) > 1 else "none"),
+                str(parent),
+            )
+        else:
+            group_key = None
+        return group_key
+
+    def fuse(self, graph: torch.fx.GraphModule, subset: list[torch.fx.Node]):
+        batch_nodes = []
+        batch_inputs = []
+        batch_inputs_metadata = []
+        approximate = subset[0].args[1] if len(subset[0].args) > 1 else "none"
+
+        for node in subset:
+            batch_nodes.append(node)
+            input = get_arg_value(node, 0, "input")
+            batch_inputs.append(input)
+            batch_inputs_metadata.append(input.meta["val"])
+
+        with graph.inserting_before(subset[0]):  # type: ignore[operator]
+            stack_inputs = decompose_stack(graph, batch_inputs)
+            update_stack_example_value(stack_inputs, batch_inputs_metadata)
+            batch_op = graph.call_function(  # type: ignore[operator]
+                self.op,
+                args=(stack_inputs, approximate),
+            )
+            batch_op.meta["val"] = self.op(stack_inputs.meta["val"], approximate)
+            for i, node in enumerate(batch_nodes):
+                with graph.inserting_after(batch_op):  # type: ignore[operator]
+                    getitem = graph.call_function(aten.select, args=(batch_op, 0, i))  # type: ignore[operator]
+                node.replace_all_uses_with(getitem)
+                getitem.meta.update(node.meta)
+                graph.erase_node(node)  # type: ignore[operator]
+        counters["inductor"]["batch_aten_gelu"] += 1
 
 
 @register_fusion("batch_aten_add", pre_grad=False)
