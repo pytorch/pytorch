@@ -648,24 +648,19 @@ class profile:
         ]
         mem_records_acc = MemRecordsAcc(mem_records)
 
+        _HOST_DEVICE_TYPES = (DeviceType.CPU, DeviceType.MKLDNN, DeviceType.IDEEP)
+
         def _cpu_memory_usage(mem_record):
             return (
                 mem_record.nbytes()
-                if mem_record.device_type()
-                in [DeviceType.CPU, DeviceType.MKLDNN, DeviceType.IDEEP]
+                if mem_record.device_type() in _HOST_DEVICE_TYPES
                 else 0
             )
 
         def _device_memory_usage(mem_record):
             return (
                 mem_record.nbytes()
-                if mem_record.device_type()
-                in [
-                    DeviceType.CUDA,
-                    DeviceType.PrivateUse1,
-                    DeviceType.HIP,
-                    DeviceType.XPU,
-                ]
+                if mem_record.device_type() not in _HOST_DEVICE_TYPES
                 else 0
             )
 
@@ -787,11 +782,7 @@ class profile:
                 and fe.id in device_corr_map
             ):
                 for f_evt in device_corr_map[fe.id]:
-                    if f_evt.device_type in [
-                        DeviceType.CUDA,
-                        DeviceType.PrivateUse1,
-                        DeviceType.XPU,
-                    ]:
+                    if f_evt.device_type not in _HOST_DEVICE_TYPES:
                         fe.append_kernel(
                             f_evt.name,
                             f_evt.device_index,
