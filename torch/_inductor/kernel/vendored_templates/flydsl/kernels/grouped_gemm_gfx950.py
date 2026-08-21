@@ -53,7 +53,7 @@ def get_grouped_gemm_persistent_grid_size(
     group_count: int,
     device_properties,
 ) -> int:
-    num_cus = int(getattr(device_properties, "multi_processor_count", 1) or 1)
+    num_cus = device_properties.multi_processor_count
     if total_m <= 0 or n <= 0 or group_count <= 0:
         return 1
 
@@ -64,26 +64,17 @@ def get_grouped_gemm_persistent_grid_size(
         * param.in_data_bytes
     )
     smem_bytes = max(smem_bytes, param.block_m * param.block_n * param.out_data_bytes)
-    shared_memory_per_cu = getattr(
-        device_properties, "shared_memory_per_multiprocessor", None
+    shared_memory_per_cu = device_properties.shared_memory_per_multiprocessor
+    max_threads_per_cu = device_properties.max_threads_per_multi_processor
+    resource_blocks_per_cu = min(
+        max(shared_memory_per_cu // smem_bytes, 1),
+        max(max_threads_per_cu // param.block_threads, 1),
     )
-    max_threads_per_cu = getattr(
-        device_properties, "max_threads_per_multi_processor", None
-    )
-    if shared_memory_per_cu is None or max_threads_per_cu is None:
-        resource_blocks_per_cu = 1
-    else:
-        resource_blocks_per_cu = min(
-            max(int(shared_memory_per_cu) // smem_bytes, 1),
-            max(int(max_threads_per_cu) // param.block_threads, 1),
-        )
 
     light_tile = param.block_m <= 64 and param.block_n <= 128
     n_tiles = (n - 1) // param.block_n + 1
     if light_tile:
-        for blocks_per_cu in (8, 4, 2, 1):
-            if blocks_per_cu <= resource_blocks_per_cu:
-                break
+        blocks_per_cu = min(1 << (resource_blocks_per_cu.bit_length() - 1), 8)
         # The host only knows total M. This lower bound prevents empty CTAs
         # for uniformly small groups, even though ragged inputs have more work.
         task_floor = ((total_m - 1) // param.block_m + 1) * n_tiles
@@ -182,17 +173,9 @@ class _GroupedGemmGfx950Ctx:
     param: Any
     tid: Any
     tiled_mma: Any
-    thr_mma: Any
+    rs: _GroupedGemmGfx950Resources
     smem_a: Any
     smem_b: Any
-    a_rsrc: Any
-    b_rsrc: Any
-    out_buf: Any
-    offs_buf: Any
-    s2r_copy_atom: Any
-    r2g_copy_atom: Any
-    thr_copy_A: Any
-    thr_copy_B: Any
     a_lds_layout: Any
     b_lds_layout: Any
     b_lds_s2r_layout: Any
@@ -205,7 +188,6 @@ class _GroupedGemmGfx950Ctx:
     frag_B_retile: Any
     thr_mma_cRow: Any
     thr_mma_cCol: Any
-    b_s2r_copy_atom: Any
     thr_copy_cshuffle: Any
     thr_sC: Any
     thr_cRow: Any
@@ -291,17 +273,9 @@ def _grouped_gemm_gfx950_setup(out, a, b, offs, tiled_mma, param):
         param=param,
         tid=tid,
         tiled_mma=tiled_mma,
-        thr_mma=rs.thr_mma,
+        rs=rs,
         smem_a=smem_a,
         smem_b=smem_b,
-        a_rsrc=rs.a_rsrc,
-        b_rsrc=rs.b_rsrc,
-        out_buf=rs.out_buf,
-        offs_buf=rs.offs_buf,
-        s2r_copy_atom=rs.s2r_copy_atom,
-        r2g_copy_atom=rs.r2g_copy_atom,
-        thr_copy_A=rs.thr_copy_A,
-        thr_copy_B=rs.thr_copy_B,
         a_lds_layout=a_lds_layout,
         b_lds_layout=b_lds_layout,
         b_lds_s2r_layout=b_lds_s2r_layout,
@@ -314,7 +288,6 @@ def _grouped_gemm_gfx950_setup(out, a, b, offs, tiled_mma, param):
         frag_B_retile=frag_B_retile,
         thr_mma_cRow=thr_mma_cRow,
         thr_mma_cCol=thr_mma_cCol,
-        b_s2r_copy_atom=rs.b_s2r_copy_atom,
         thr_copy_cshuffle=thr_copy_cshuffle,
         thr_sC=thr_sC,
         thr_cRow=thr_cRow,
@@ -331,7 +304,7 @@ def _grouped_tile_init(ctx, bid_m, bid_n, m, n, row_base):
     block_n = param.block_n
     tile_base = (row_base + bid_m * block_m) * n + bid_n * block_n
     gC = fx.make_view(
-        fx.add_offset(fx.get_iter(ctx.out_buf), tile_base),
+        fx.add_offset(fx.get_iter(ctx.rs.out_buf), tile_base),
         fx.make_layout((block_m, block_n), (n, 1)),
     )
     thr_gC = ctx.thr_copy_cshuffle.partition_D(gC)
@@ -362,8 +335,8 @@ def _grouped_tile_store(ctx, thr_gC):
         ctx.sC[row, col] = frag_C_out[i]
 
     fx.gpu.barrier()
-    fx.copy(ctx.s2r_copy_atom, ctx.thr_sC, ctx.frag_C_cshuffle)
-    fx.copy(ctx.r2g_copy_atom, ctx.frag_C_cshuffle, thr_gC, pred=ctx.pred_C)
+    fx.copy(ctx.rs.s2r_copy_atom, ctx.thr_sC, ctx.frag_C_cshuffle)
+    fx.copy(ctx.rs.r2g_copy_atom, ctx.frag_C_cshuffle, thr_gC, pred=ctx.pred_C)
     fx.gpu.barrier()
 
 
@@ -381,17 +354,17 @@ def _grouped_compute_stage_from_lds(ctx, read_stage, k_tile, k):
         ctx.smem_b + read_stage * block_n * block_k,
         ctx.b_lds_s2r_layout,
     )
-    thr_sA_s2r = ctx.thr_copy_A.partition_S(sA_stage)
-    thr_sB_s2r = ctx.thr_copy_B.partition_S(sB_stage)
+    thr_sA_s2r = ctx.rs.thr_copy_A.partition_S(sA_stage)
+    thr_sB_s2r = ctx.rs.thr_copy_B.partition_S(sB_stage)
 
     def compute_k_chunk(block_k_iter):
         fx.copy(
-            ctx.b_s2r_copy_atom,
+            ctx.rs.b_s2r_copy_atom,
             thr_sB_s2r[None, None, block_k_iter],
             ctx.frag_B_retile[None, None, block_k_iter],
         )
         fx.copy(
-            ctx.s2r_copy_atom,
+            ctx.rs.s2r_copy_atom,
             thr_sA_s2r[None, None, block_k_iter],
             ctx.frag_A_retile[None, None, block_k_iter],
         )
@@ -443,7 +416,7 @@ def _grouped_load_a_tile_async(ctx, row_base, bid_m, m, k, k_tile, stage):
         else:
             safe_global_k_idx = global_k_idx
         global_offset = (safe_global_m_idx * k + safe_global_k_idx) * in_data_bytes
-        buffer_load_lds_inline(ctx.a_rsrc, lds_ptr, global_offset, async_load_bytes)
+        buffer_load_lds_inline(ctx.rs.a_rsrc, lds_ptr, global_offset, async_load_bytes)
         if i < ldg_a_iters - 1:
             lds_ptr = lds_ptr + block_threads * async_load_bytes
 
@@ -479,9 +452,36 @@ def _grouped_load_b_tile_async(ctx, bid_n, n, k, group_idx, k_tile, stage):
         global_offset = (
             group_idx * k * n + safe_global_k_idx * n + global_n_idx
         ) * in_data_bytes
-        buffer_load_lds_inline(ctx.b_rsrc, lds_ptr, global_offset, async_load_bytes)
+        buffer_load_lds_inline(ctx.rs.b_rsrc, lds_ptr, global_offset, async_load_bytes)
         if i < ldg_b_iters - 1:
             lds_ptr = lds_ptr + block_threads * async_load_bytes
+
+
+@flyc.jit
+def _for_each_grouped_tile(offs_buf, group_count, n, param, tile_body):
+    block_m = param.block_m
+    num_pid_n = (n - 1) // param.block_n + 1
+    grid = fx.Int32(fx.grid_dim.x)
+    work_idx = fx.Int32(fx.block_idx.x)
+    tiles_before = fx.Int32(0)
+    row_base = fx.Int32(0)
+    for g in range(0, group_count, 1):
+        row_end = fx.get_scalar(offs_buf[g])
+        m_g = row_end - row_base
+        num_pid_m = (m_g + block_m - 1) // block_m
+        tiles_after = tiles_before + num_pid_m * num_pid_n
+
+        for linear_tile in range(work_idx, tiles_after, grid):
+            local_tile = linear_tile - tiles_before
+            bid_m, bid_n = _grouped_swizzle_tile(
+                param, num_pid_m, num_pid_n, local_tile
+            )
+            tile_body(g, bid_m, bid_n, m_g, row_base)
+
+        remaining = (work_idx < tiles_after).select(tiles_after - work_idx, fx.Int32(0))
+        work_idx = work_idx + (remaining + grid - 1) // grid * grid
+        tiles_before = tiles_after
+        row_base = row_end
 
 
 @flyc.kernel
@@ -497,63 +497,42 @@ def gemm_gfx950_grouped_kernel(
     param: GemmGfx950Param,
 ):
     ctx = _grouped_gemm_gfx950_setup(out, a, b, offs, tiled_mma, param)
-    block_m = param.block_m
-    block_n = param.block_n
     block_k = param.block_k
     stages = param.stages
     has_k_tail = param.has_k_tail
     ldg_a_iters = param.ldg_a_iters
-    num_pid_n = (n - 1) // block_n + 1
     k_tiles = (k - 1) // block_k + 1
-    grid = fx.Int32(fx.grid_dim.x)
-    work_idx = fx.Int32(fx.block_idx.x)
-    tiles_before = fx.Int32(0)
-    row_base = fx.Int32(0)
-    for g in range(0, group_count, 1):
-        row_end = fx.get_scalar(ctx.offs_buf[g])
-        m_g = row_end - row_base
-        num_pid_m = (m_g + block_m - 1) // block_m
-        tiles_after = tiles_before + num_pid_m * num_pid_n
 
-        for linear_tile in range(work_idx, tiles_after, grid):
-            local_tile = linear_tile - tiles_before
-            bid_m, bid_n = _grouped_swizzle_tile(
-                param, num_pid_m, num_pid_n, local_tile
+    def compute_tile(g, bid_m, bid_n, m_g, row_base):
+        thr_gC = _grouped_tile_init(ctx, bid_m, bid_n, m_g, n, row_base)
+        ldg_wait_count = ldg_a_iters + param.ldg_b_iters
+        for stage in range_constexpr(stages - 1):
+            _grouped_load_b_tile_async(ctx, bid_n, n, k, g, stage, stage)
+            _grouped_load_a_tile_async(ctx, row_base, bid_m, m_g, k, stage, stage)
+        rocdl.sched_barrier(0)
+        if const_expr(has_k_tail):
+            main_loop_end = (k_tiles > stages - 1).select(k_tiles - (stages - 1), 0)
+        else:
+            main_loop_end = k_tiles - (stages - 1)
+        for k_tile in range(0, main_loop_end, 1):
+            current_stage = k_tile % stages
+            write_stage = (current_stage + stages - 1) % stages
+            __barrier((stages - 2) * ldg_wait_count)
+            _grouped_load_b_tile_async(
+                ctx, bid_n, n, k, g, k_tile + (stages - 1), write_stage
             )
-            thr_gC = _grouped_tile_init(ctx, bid_m, bid_n, m_g, n, row_base)
-            ldg_wait_count = ldg_a_iters + param.ldg_b_iters
-            for stage in range_constexpr(stages - 1):
-                _grouped_load_b_tile_async(ctx, bid_n, n, k, g, stage, stage)
-                _grouped_load_a_tile_async(ctx, row_base, bid_m, m_g, k, stage, stage)
-            rocdl.sched_barrier(0)
-            if const_expr(has_k_tail):
-                main_loop_end = (k_tiles > stages - 1).select(k_tiles - (stages - 1), 0)
-            else:
-                main_loop_end = k_tiles - (stages - 1)
-            for k_tile in range(0, main_loop_end, 1):
-                current_stage = k_tile % stages
-                write_stage = (current_stage + stages - 1) % stages
-                __barrier((stages - 2) * ldg_wait_count)
-                _grouped_load_b_tile_async(
-                    ctx, bid_n, n, k, g, k_tile + (stages - 1), write_stage
-                )
-                _grouped_load_a_tile_async(
-                    ctx, row_base, bid_m, m_g, k, k_tile + (stages - 1), write_stage
-                )
-                _grouped_compute_stage_from_lds(ctx, current_stage, k_tile, k)
-            current_stage = main_loop_end % stages
-            for s in range_constexpr(0, stages - 1):
-                __barrier((stages - 2 - s) * ldg_wait_count)
-                _grouped_compute_stage_from_lds(
-                    ctx, current_stage, main_loop_end + s, k
-                )
-                current_stage = (current_stage + 1) % stages
-            _grouped_tile_store(ctx, thr_gC)
+            _grouped_load_a_tile_async(
+                ctx, row_base, bid_m, m_g, k, k_tile + (stages - 1), write_stage
+            )
+            _grouped_compute_stage_from_lds(ctx, current_stage, k_tile, k)
+        current_stage = main_loop_end % stages
+        for s in range_constexpr(0, stages - 1):
+            __barrier((stages - 2 - s) * ldg_wait_count)
+            _grouped_compute_stage_from_lds(ctx, current_stage, main_loop_end + s, k)
+            current_stage = (current_stage + 1) % stages
+        _grouped_tile_store(ctx, thr_gC)
 
-        remaining = (work_idx < tiles_after).select(tiles_after - work_idx, fx.Int32(0))
-        work_idx = work_idx + (remaining + grid - 1) // grid * grid
-        tiles_before = tiles_after
-        row_base = row_end
+    _for_each_grouped_tile(ctx.rs.offs_buf, group_count, n, param, compute_tile)
 
 
 @flyc.kernel
@@ -584,7 +563,6 @@ def gemm_hti_gfx950_grouped_kernel(
     elem_dtype = _elem_dtype(param)
 
     tid = fx.thread_idx.x
-    num_pid_n = (n - 1) // block_n + 1
     k_tiles = (k - 1) // block_k + 1
 
     smem_a, smem_b, smem_c = _grouped_gemm_gfx950_allocate_shared_storage(
@@ -883,53 +861,36 @@ def gemm_hti_gfx950_grouped_kernel(
         consume(k_tile + 1, c11, a1, b1)
         rocdl.s_barrier()
 
-    grid = fx.Int32(fx.grid_dim.x)
-    work_idx = fx.Int32(fx.block_idx.x)
-    tiles_before = fx.Int32(0)
-    row_base = fx.Int32(0)
-    for g in range(0, group_count, 1):
-        row_end = fx.get_scalar(rs.offs_buf[g])
-        m_g = row_end - row_base
-        num_pid_m = (m_g + block_m - 1) // block_m
-        tiles_after = tiles_before + num_pid_m * num_pid_n
+    def compute_tile(g, bid_m, bid_n, m_g, row_base):
+        c00.fill(0.0)
+        c01.fill(0.0)
+        c10.fill(0.0)
+        c11.fill(0.0)
 
-        for linear_tile in range(work_idx, tiles_after, grid):
-            local_tile = linear_tile - tiles_before
-            bid_m, bid_n = _grouped_swizzle_tile(
-                param, num_pid_m, num_pid_n, local_tile
-            )
-            c00.fill(0.0)
-            c01.fill(0.0)
-            c10.fill(0.0)
-            c11.fill(0.0)
+        load_b_half(0, 0, 0, bid_n, g)
+        load_a_half(0, 0, 0, bid_m, m_g, row_base)
+        load_b_half(1, 0, 0, bid_n, g)
+        load_a_half(1, 0, 0, bid_m, m_g, row_base)
+        rocdl.sched_barrier(0)
+        rocdl.s_barrier()
+        rocdl.sched_barrier(0)
+        load_b_half(0, 1, 1, bid_n, g)
+        load_a_half(0, 1, 1, bid_m, m_g, row_base)
+        load_b_half(1, 1, 1, bid_n, g)
+        __barrier(half_ldg_b_iters + half_ldg_a_iters)
 
-            load_b_half(0, 0, 0, bid_n, g)
-            load_a_half(0, 0, 0, bid_m, m_g, row_base)
-            load_b_half(1, 0, 0, bid_n, g)
-            load_a_half(1, 0, 0, bid_m, m_g, row_base)
-            rocdl.sched_barrier(0)
-            rocdl.s_barrier()
-            rocdl.sched_barrier(0)
-            load_b_half(0, 1, 1, bid_n, g)
-            load_a_half(0, 1, 1, bid_m, m_g, row_base)
-            load_b_half(1, 1, 1, bid_n, g)
-            __barrier(half_ldg_b_iters + half_ldg_a_iters)
+        final_double_tile = ((k_tiles % 2) == 0).select(k_tiles - 2, k_tiles - 1)
+        main_loop_end = (k_tiles > 2).select(final_double_tile, 0)
+        for k_tile in range(0, main_loop_end, 2):
+            compute_double_tile(k_tile, True, bid_m, bid_n, m_g, row_base, g)
+        compute_double_tile(main_loop_end, False, bid_m, bid_n, m_g, row_base, g)
 
-            final_double_tile = ((k_tiles % 2) == 0).select(k_tiles - 2, k_tiles - 1)
-            main_loop_end = (k_tiles > 2).select(final_double_tile, 0)
-            for k_tile in range(0, main_loop_end, 2):
-                compute_double_tile(k_tile, True, bid_m, bid_n, m_g, row_base, g)
-            compute_double_tile(main_loop_end, False, bid_m, bid_n, m_g, row_base, g)
+        store_half_tile(0, 0, c00, bid_m, bid_n, m_g, row_base)
+        store_half_tile(0, 1, c01, bid_m, bid_n, m_g, row_base)
+        store_half_tile(1, 0, c10, bid_m, bid_n, m_g, row_base)
+        store_half_tile(1, 1, c11, bid_m, bid_n, m_g, row_base)
 
-            store_half_tile(0, 0, c00, bid_m, bid_n, m_g, row_base)
-            store_half_tile(0, 1, c01, bid_m, bid_n, m_g, row_base)
-            store_half_tile(1, 0, c10, bid_m, bid_n, m_g, row_base)
-            store_half_tile(1, 1, c11, bid_m, bid_n, m_g, row_base)
-
-        remaining = (work_idx < tiles_after).select(tiles_after - work_idx, fx.Int32(0))
-        work_idx = work_idx + (remaining + grid - 1) // grid * grid
-        tiles_before = tiles_after
-        row_base = row_end
+    _for_each_grouped_tile(rs.offs_buf, group_count, n, param, compute_tile)
 
 
 @flyc.jit
@@ -938,10 +899,10 @@ def launch_gemm_gfx950_grouped(
     a: fx.Tensor,
     b: fx.Tensor,
     offs: fx.Tensor,
-    group_count: int,
+    group_count: fx.Int32,
     n: fx.Int32,
     k: fx.Int32,
-    grid_size: int,
+    grid_size: fx.Int32,
     param: GemmGfx950Param,
     stream: fx.Stream = fx.Stream(None),
 ):

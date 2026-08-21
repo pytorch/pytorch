@@ -161,7 +161,6 @@ def get_flydsl_grouped_mm_template_kwargs(
     b_is_2d: bool,
     offs: TensorBox | None,
     bias: TensorBox | None,
-    scale_result: TensorBox | None,
     is_nonzero: bool,
 ) -> list[dict[str, object]]:
     """Return supported FlyDSL template configs for grouped matrix multiplication."""
@@ -173,10 +172,10 @@ def get_flydsl_grouped_mm_template_kwargs(
     if not is_nonzero or not use_flydsl_gemm_template(layout):
         return []
     # FlyDSL grouped GEMM only supports a 2D ragged A gathered by group offsets
-    # against a 3D [G, K, N] B; bias/scale fusion is not implemented.
+    # against a 3D [G, K, N] B; bias fusion is not implemented.
     if not (a_is_2d and not b_is_2d and offs is not None):
         return []
-    if bias is not None or scale_result is not None:
+    if bias is not None:
         return []
     if mat_a.get_dtype() != mat_b.get_dtype() or layout.dtype != mat_a.get_dtype():
         return []
@@ -614,7 +613,6 @@ def _tuned_grouped_mm_common(
             b_is_2d,
             offs,
             bias,
-            scale_result,
             is_nonzero,
         ):
             flydsl_grouped_mm_template.maybe_append_choice(

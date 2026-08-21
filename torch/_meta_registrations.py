@@ -8733,9 +8733,9 @@ def _meta_grouped_mm_common(
 
     if mat_a.dtype == torch.float16:
         torch._check(
-            _grouped_mm_fp16_flydsl_supported(mat_a, mat_b, offs)
+            _grouped_mm_fp16_rocm_supported(mat_a, mat_b, offs)
             or _grouped_mm_fp16_cublaslt_supported(mat_a, mat_b, offs),
-            lambda: "Float16 grouped_mm requires cuBLASLt grouped GEMM or FlyDSL support.",
+            lambda: "Float16 grouped_mm requires cuBLASLt grouped GEMM or ROCm support.",
         )
 
     torch._check(
@@ -8758,25 +8758,22 @@ def _meta_grouped_mm_common(
     return _create_grouped_mm_output_tensor(mat_a, mat_b, offs, out_dtype)
 
 
-def _grouped_mm_fp16_flydsl_supported(
+def _grouped_mm_fp16_rocm_supported(
     mat_a: Tensor, mat_b: Tensor, offs: Tensor | None
 ) -> bool:
-    if (
-        not torch.version.hip
-        or not torch.cuda.is_available()
-        or device_hint(mat_a) != "cuda"
-        or device_hint(mat_b) != "cuda"
-        or mat_a.dim() != 2
-        or mat_b.dim() != 3
-        or offs is None
-        or device_hint(offs) != "cuda"
-        or mat_a.device != mat_b.device
-        or mat_a.device != offs.device
+    # ROCm ATen implements FP16 grouped_mm via per-group mm_out fallback (and
+    # optional CK fast paths). This is unrelated to Inductor FlyDSL templates.
+    if not torch.version.hip or not torch.cuda.is_available():
+        return False
+    if device_hint(mat_a) != "cuda" or device_hint(mat_b) != "cuda":
+        return False
+    if mat_a.device != mat_b.device:
+        return False
+    if offs is not None and (
+        device_hint(offs) != "cuda" or mat_a.device != offs.device
     ):
         return False
-    device_index = mat_a.device.index if mat_a.device.index is not None else 0
-    arch = torch.cuda.get_device_properties(device_index).gcnArchName.split(":", 1)[0]
-    return arch == "gfx950"
+    return True
 
 
 def _grouped_mm_fp16_cublaslt_supported(

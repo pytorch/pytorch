@@ -228,25 +228,33 @@ def _is_grouped_gemm_layout_valid(
     use_half_tile_interleaved: bool,
 ) -> bool:
     """Return whether a config satisfies grouped B-LDS and C-shuffle layouts."""
+    from torch._inductor.kernel.vendored_templates.flydsl.kernels.gemm_gfx950 import (
+        GFX950_DMA_BYTES,
+        GFX950_WAVE_SIZE,
+    )
+
     divisor = 2 if use_half_tile_interleaved else 1
     effective_tile_m = tile_m // divisor
     effective_tile_n = tile_n // divisor
     if (
         effective_tile_m <= 0
-        or effective_tile_n < 64
-        or effective_tile_n & (effective_tile_n - 1)
+        or effective_tile_n < GFX950_WAVE_SIZE
+        or effective_tile_n & (effective_tile_n - 1) != 0
         or m_waves <= 0
         or n_waves <= 0
     ):
         return False
 
-    cshuffle_x_threads = effective_tile_n // 8
-    block_threads = m_waves * n_waves * 64
+    out_data_bytes = 2
+    cshuffle_vec_size = GFX950_DMA_BYTES // out_data_bytes
+    cshuffle_x_threads = effective_tile_n // cshuffle_vec_size
+    block_threads = m_waves * n_waves * GFX950_WAVE_SIZE
     if block_threads % cshuffle_x_threads != 0:
         return False
     return effective_tile_m % (block_threads // cshuffle_x_threads) == 0
 
 
+@functools.cache
 def get_exhaustive_grouped_gemm_configs() -> list[FlyDSLGemmConfig]:
     """Return exhaustive configs for the gfx950 FlyDSL grouped GEMM kernel."""
     return [
@@ -338,6 +346,7 @@ def is_grouped_gemm_config_valid_for_shape(
     n_waves = int(gemm_config["BLOCK_N_WARPS"])
     use_half_tile_interleaved = bool(gemm_config["USE_HALF_TILE_INTERLEAVED"])
     has_enough_k = use_half_tile_interleaved or k // tile_k >= stages
+    # Partial N tiles issue unguarded vector B loads past row boundaries.
     return (
         tile_m <= max(128, m)
         and n >= tile_n

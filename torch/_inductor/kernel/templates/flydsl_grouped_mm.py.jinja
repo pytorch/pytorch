@@ -85,13 +85,23 @@ def _flydsl_grouped_mm(output, mat1, mat2, offs, stream):
     total_m = int(total_m)
     n_int = int(n)
     k_int = int(k)
-    compile_only = bool(os.environ.get("FLYDSL_COMPILE_ONLY"))
-    if compile_only:
+    flydsl_compile_only = os.environ.get("FLYDSL_COMPILE_ONLY") == "1"
+    compile_only = os.environ.get("COMPILE_ONLY", "").lower() in (
+        "1", "true", "yes", "on"
+    )
+    if compile_only != flydsl_compile_only:
+        raise RuntimeError(
+            "COMPILE_ONLY and FLYDSL_COMPILE_ONLY must only be enabled together "
+            "by the FlyDSL precompile path"
+        )
+    if flydsl_compile_only:
         # Precompilation runs on fake tensors that have no device to query, and
         # the persistent kernel reads its grid from gridDim, so the size the disk
         # cache is warmed with does not have to match the one used at runtime.
         grid_size = 1
     else:
+        # grid_size only configures the launch grid; the kernel reads gridDim.x
+        # at runtime, so varying it does not require a separate compile cache entry.
         grid_size = get_grouped_gemm_persistent_grid_size(
             param,
             total_m,
@@ -99,20 +109,23 @@ def _flydsl_grouped_mm(output, mat1, mat2, offs, stream):
             group_count,
             torch.cuda.get_device_properties(mat1.device),
         )
+    group_count_arg = fx.Int32(group_count)
+    n_arg = fx.Int32(n_int)
+    k_arg = fx.Int32(k_int)
     compile_args = (
         _inductor_tensor_arg(output),
         _inductor_tensor_arg(mat1),
         _inductor_tensor_arg(mat2),
         _inductor_tensor_arg(offs),
-        group_count,
-        n_int,
-        k_int,
+        group_count_arg,
+        n_arg,
+        k_arg,
         grid_size,
         param,
         stream,
     )
     configure_flydsl_cache_dir()
-    if compile_only:
+    if flydsl_compile_only:
         flyc.compile(launch_gemm_gfx950_grouped, *compile_args)
     else:
         run_cached_flydsl(
@@ -125,9 +138,9 @@ def _flydsl_grouped_mm(output, mat1, mat2, offs, stream):
                 mat1,
                 mat2,
                 offs,
-                group_count,
-                n_int,
-                k_int,
+                group_count_arg,
+                n_arg,
+                k_arg,
                 grid_size,
                 param,
                 stream,
@@ -165,7 +178,7 @@ def {{kernel_name}}_precompile(
     stride_offs = tuple(precompile_strides["offs"])
     stride_output = tuple(precompile_strides["output"])
 
-    env_updates = {"FLYDSL_COMPILE_ONLY": "1"}
+    env_updates = {"COMPILE_ONLY": "1", "FLYDSL_COMPILE_ONLY": "1"}
     if flydsl_gpu_arch is not None:
         env_updates["FLYDSL_GPU_ARCH"] = flydsl_gpu_arch
 
