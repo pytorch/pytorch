@@ -299,7 +299,7 @@ class FuzzedTensor:
         tensor = raw_tensor[tuple(slices)]
 
         properties = {
-            "numel": int(tensor.numel()),
+            "numel": tensor.numel(),
             "order": order,
             "steps": steps,
             "is_contiguous": tensor.is_contiguous(),

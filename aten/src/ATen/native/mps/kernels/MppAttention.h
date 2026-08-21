@@ -1,6 +1,6 @@
 // MPP cooperative-tensor flash-attention prefill for MPS, on
 // mpp::tensor_ops::matmul2d. Adapted from MLX. Emitted only with the
-// Metal 4 SDK; runtime dispatch gates on macOS 26.0+.
+// Metal 4 SDK; runtime dispatch gates on macOS 26.2+.
 #pragma once
 
 #include <ATen/native/mps/kernels/PrefillAttention.h>

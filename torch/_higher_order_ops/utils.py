@@ -577,11 +577,24 @@ def clone_outputs_aliasing_inputs(args):
     return maybe_clone
 
 
+def query_requires_grad(t: torch.Tensor) -> bool:
+    """requires_grad of ``t``, looking through a functional wrapper.
+
+    A FunctionalTensor does not carry the autograd metadata of the tensor it
+    wraps, so asking it directly reports False for something that does require
+    grad. This matters when the joint is traced with functionalization active.
+    """
+    if torch._is_functional_tensor(t):
+        t = torch._from_functional_tensor(t)
+    return t.requires_grad
+
+
 def prepare_fw_with_masks(fn):
     def fw_with_masks(*args):
         fw_out = fn(*args)
         return fw_out, [
-            bool(isinstance(ret, torch.Tensor) and ret.requires_grad) for ret in fw_out
+            bool(isinstance(ret, torch.Tensor) and query_requires_grad(ret))
+            for ret in fw_out
         ]
 
     return fw_with_masks
@@ -603,12 +616,7 @@ def prepare_fw_with_masks_all_requires_grad(fn):
                 fw_out,
             )
 
-        def _query_requires_grad(t: torch.Tensor) -> bool:
-            if torch._is_functional_tensor(t):
-                t = torch._from_functional_tensor(t)
-            return t.requires_grad
-
-        return fw_out, pytree.tree_map_only(torch.Tensor, _query_requires_grad, fw_out)
+        return fw_out, pytree.tree_map_only(torch.Tensor, query_requires_grad, fw_out)
 
     return fw_with_masks
 
@@ -1213,34 +1221,51 @@ class SubgraphCallableWrapper:
 
 
 class FunctionalizeCtxWrapper(SubgraphCallableWrapper):
-    """
-    Wraps a subgraph with functionalization context for the AOT Dispatcher
-    metadata collection pass.
+    """Functionalizes a subgraph and optionally returns selected input updates.
+
+    Each update is a new tensor; the original input is not mutated.
     """
 
     # Prevents PYTORCH_TEST_WITH_DYNAMO=1 test failures
     @torch._disable_dynamo
-    def __init__(self, ctx, subgraph):
+    def __init__(self, ctx, subgraph, mutated_input_indices=()):
         super().__init__(subgraph, subgraph)
         self.ctx = ctx
+        self.mutated_input_indices = mutated_input_indices
 
     def __repr__(self):
         return f"FunctionalizeCtxWrapper on subgraph {self.subgraph})"
 
     def __call__(self, *args, **kwargs):
+        def append_mutated_inputs(fn):
+            if not self.mutated_input_indices:
+                return fn
+
+            def wrapped(*args, **kwargs):
+                inputs = args[0] if self._boxed_call else args
+                # Snapshot before a boxed GraphModule clears its input list.
+                mutated_inputs = tuple(inputs[i] for i in self.mutated_input_indices)
+                # Dynamo normalizes invoke_subgraph outputs to tuples.
+                return (*fn(*args, **kwargs), *mutated_inputs)
+
+            return wrapped
+
         if isinstance(self.subgraph, torch.fx.GraphModule):
             if self._boxed_call:
                 # Not all callers respect _boxed_call (e.g. reenter_make_fx).
+                functionalized = self.ctx.functionalize(
+                    append_mutated_inputs(self.subgraph)
+                )
                 if len(args) == 1 and isinstance(args[0], list):
-                    return self.ctx.functionalize(self.subgraph)(args[0])
-                return self.ctx.functionalize(self.subgraph)(list(args))
+                    return functionalized(args[0])
+                return functionalized(list(args))
             else:
                 # Running graph with interpreter is needed for propagating the stack_trace
                 with fx_traceback.preserve_node_meta():
                     return self.ctx.functionalize(
-                        torch.fx.Interpreter(self.subgraph).run
+                        append_mutated_inputs(torch.fx.Interpreter(self.subgraph).run)
                     )(*args, **kwargs)
-        functionalized = self.ctx.functionalize(self.subgraph)
+        functionalized = self.ctx.functionalize(append_mutated_inputs(self.subgraph))
         if self._boxed_call:
             if len(args) == 1 and isinstance(args[0], list):
                 return functionalized(args[0])

@@ -993,14 +993,42 @@ class TestGuardSerialization(TestGuardSerializationBase):
             ref, loaded, {"x": x, "counter": itertools.count(2, 4)}, False
         )
 
-    def test_dict_version(self):
+    def test_supported_nodes_dict_keys_match(self):
         def fn(x):
             return pytree.tree_leaves(x)[0] + 1
 
-        with self.assertRaisesRegex(
-            PackageError, "DICT_VERSION guard cannot be serialized."
-        ):
-            self._test_serialization("DICT_VERSION", fn, {"t": torch.randn(3)})
+        ref, loaded = self._test_serialization(
+            "DICT_KEYS_MATCH", fn, {"t": torch.randn(3)}
+        )
+        self._test_check_fn(ref, loaded, {"x": {"t": torch.randn(3)}}, True)
+        self._test_check_fn(ref, loaded, {"x": {}}, False)
+
+        # Sticky flag must survive pickling so load keeps keys-match instead of
+        # re-promoting SUPPORTED_NODES to DICT_VERSION.
+        guards_state = torch._dynamo.package.load_guards_state(
+            self._cached_guards_state
+        )
+        self.assertTrue(
+            any(g._force_dict_keys_match for g in guards_state.output_graph.guards)
+        )
+
+        # Loaded keys-match guard must observe SUPPORTED_NODES key changes, not
+        # only changes to the user input dict.
+        class _TmpPytreeNode:
+            def __init__(self, x):
+                self.x = x
+
+        inputs = {"x": {"t": torch.randn(3)}}
+        self.assertTrue(loaded.check(inputs))
+        try:
+            pytree.register_pytree_node(
+                _TmpPytreeNode,
+                lambda n: ([n.x], None),
+                lambda xs, _: _TmpPytreeNode(xs[0]),
+            )
+            self.assertFalse(loaded.check(inputs))
+        finally:
+            pytree._deregister_pytree_node(_TmpPytreeNode)
 
     def test_dict_contains(self):
         def fn(x):
