@@ -3399,6 +3399,44 @@ class TestTorchDeviceType(TestCase):
             dst.copy_(src.conj())
             self.assertEqual(dst, src.conj_physical())
 
+    # Exercises the tiled CUDA kernel for dense 2D transpose copies. The
+    # shapes are deliberately larger than the 4 MB dispatch threshold, and
+    # cover 1/2/4/8-byte elements plus non-multiple-of-32 extents.
+    @onlyCUDA
+    @dtypes(torch.uint8, torch.float16, torch.bfloat16,
+            torch.float32, torch.float64, torch.complex64)
+    def test_copy_transpose_tiled(self, device, dtype):
+        for h, w in ((2048, 2048), (1024, 4096), (4096, 1024), (1000, 4099)):
+            src = make_tensor((h, w), dtype=dtype, device=device)
+            out = src.t().contiguous()
+            self.assertEqual(out.shape, (w, h))
+            self.assertTrue(out.is_contiguous())
+            # bitwise-exact: a transpose copy must not perturb values
+            self.assertEqual(out, src.t(), atol=0, rtol=0)
+            self.assertEqual(out.cpu(), src.cpu().t().contiguous(), atol=0, rtol=0)
+
+    # Shapes that must NOT take the tiled path, to guard the dispatch check.
+    @onlyCUDA
+    @dtypes(torch.float32)
+    def test_copy_transpose_tiled_rejects(self, device, dtype):
+        big = make_tensor((4096, 4096), dtype=dtype, device=device)
+
+        # strided source: rows are not densely packed
+        strided = big[::2].t()
+        self.assertEqual(strided.contiguous().cpu(), strided.cpu(), atol=0, rtol=0)
+
+        # narrowed source: columns are not densely packed
+        narrowed = big[:, :2048].t()
+        self.assertEqual(narrowed.contiguous().cpu(), narrowed.cpu(), atol=0, rtol=0)
+
+        # broadcast source: zero stride
+        expanded = make_tensor((1, 4096), dtype=dtype, device=device).expand(4096, 4096)
+        self.assertEqual(expanded.contiguous().cpu(), expanded.cpu(), atol=0, rtol=0)
+
+        # dtype conversion alongside the transpose
+        casted = big.t().to(torch.float64)
+        self.assertEqual(casted.cpu(), big.cpu().t().to(torch.float64), atol=0, rtol=0)
+
     def test_clone_all_dtypes_and_devices(self, device):
         for dt in all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16):
             x = torch.tensor((1, 1), dtype=dt, device=device)

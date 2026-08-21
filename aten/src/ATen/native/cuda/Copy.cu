@@ -9,7 +9,6 @@
 #include <ATen/cuda/PeerToPeerAccess.h>
 #include <ATen/native/Copy.h>
 #include <ATen/native/TensorIterator.h>
-#include <cstdlib>
 #include <ATen/native/cuda/Loops.cuh>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -306,22 +305,13 @@ bool maybe_tiled_transpose_copy(TensorIterator& iter) {
   if (os[0] != es || os[1] != es * h) return false;
   if (is[1] != es || is[0] != es * w) return false;
 
-  // Debug override for benchmarking: 0 = never tile, 1 = always tile,
-  // unset = use heuristic. Remove before submitting.
-  static const int force_mode = [] {
-    const char* e = std::getenv("PYTORCH_TILED_TRANSPOSE");
-    return e ? std::atoi(e) : -1;
-  }();
-  if (force_mode == 0) return false;
-  if (force_mode != 1) {
-    // Below ~4 MB the tiled path and the generic strided kernel are
-    // indistinguishable above kernel-launch overhead (measured on sm_89 with
-    // L2 flushing and 3 repeats; every smaller size showed >4% run-to-run
-    // variance). Above it the tiled path was faster in every measured case
-    // except fp64 with a very short output row, where the strided kernel
-    // already reaches peak bandwidth and tiling costs ~4%.
-    if (h * w * es < (int64_t(4) << 20)) return false;
-  }
+  // Below ~4 MB the tiled path and the generic strided kernel are
+  // indistinguishable above kernel-launch overhead (measured on sm_89 with
+  // L2 flushing and 3 repeats; every smaller size showed >4% run-to-run
+  // variance). Above it the tiled path was faster in every measured case
+  // except fp64 with a very short output row, where the strided kernel
+  // already reaches peak bandwidth and tiling costs ~4%.
+  if (h * w * es < (int64_t(4) << 20)) return false;
 
   dim3 block(kTransposeTile, kTransposeRows);
   dim3 grid((unsigned)((w + kTransposeTile - 1) / kTransposeTile),
