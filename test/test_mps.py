@@ -17871,6 +17871,63 @@ class TestGraphCapture(TestCaseMPS):
         )
         g.reset()
 
+    def test_lu_factor_captured(self):
+        # linalg.lu_factor dispatches only our own Metal shaders (no MPS-framework
+        # object driving the encoder), so it must be capturable like any other
+        # raw-kernel op.
+        n, batch = 16, 4
+        A = torch.randn(batch, n, n, device="mps")
+        A2 = torch.randn(batch, n, n, device="mps")
+
+        eager_LU, eager_pivots = torch.linalg.lu_factor(A)
+
+        g = torch.mps.MetalGraph()
+        with torch.mps.metal_graph(g):
+            cap_LU, cap_pivots = torch.linalg.lu_factor(A)
+        self.assertEqual(cap_LU, eager_LU, atol=1e-4, rtol=1e-4)
+        self.assertEqual(cap_pivots, eager_pivots)
+
+        # Scribble first, so a replay that did nothing would be caught.
+        cap_LU.fill_(float("nan"))
+        A.copy_(A2)
+        g.replay()
+        expected_LU, expected_pivots = torch.linalg.lu_factor(A2)
+        self.assertEqual(cap_LU, expected_LU, atol=1e-4, rtol=1e-4)
+        self.assertEqual(cap_pivots, expected_pivots)
+        g.reset()
+
+    def test_lu_solve_captured(self):
+        # linalg.lu_solve is likewise pure own-shader dispatch and must be capturable.
+        # LU2/pivots2 are computed before capture: lu_solve's internal scratch tensors
+        # are C++ temporaries freed the moment the capture-block call returns, and an
+        # MPS allocation between capture and replay could reuse that freed memory
+        # (the documented "no private memory pool" replay hazard), which would corrupt
+        # this test's replay rather than exercise lu_solve's own capturability.
+        n, k, batch = 16, 4, 4
+        A = torch.randn(batch, n, n, device="mps")
+        B = torch.randn(batch, n, k, device="mps")
+        A2 = torch.randn(batch, n, n, device="mps")
+        B2 = torch.randn(batch, n, k, device="mps")
+        LU, pivots = torch.linalg.lu_factor(A)
+        LU2, pivots2 = torch.linalg.lu_factor(A2)
+
+        eager_out = torch.linalg.lu_solve(LU, pivots, B)
+
+        g = torch.mps.MetalGraph()
+        with torch.mps.metal_graph(g):
+            cap_out = torch.linalg.lu_solve(LU, pivots, B)
+        self.assertEqual(cap_out, eager_out, atol=1e-4, rtol=1e-4)
+
+        # Scribble first, so a replay that did nothing would be caught.
+        cap_out.fill_(float("nan"))
+        LU.copy_(LU2)
+        pivots.copy_(pivots2)
+        B.copy_(B2)
+        g.replay()
+        expected_out = torch.linalg.lu_solve(LU2, pivots2, B2)
+        self.assertEqual(cap_out, expected_out, atol=1e-4, rtol=1e-4)
+        g.reset()
+
     def test_capture_reset_and_recapture(self):
         # reset must allow a fresh capture with a different computation, and
         # must free any previously captured (but not yet freed) graphs.
