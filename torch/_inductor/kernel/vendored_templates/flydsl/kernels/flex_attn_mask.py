@@ -1,8 +1,7 @@
 # mypy: allow-untyped-defs
 
-from flydsl.expr import range_constexpr
-
 import flydsl.expr as fx
+from flydsl.expr import range_constexpr
 
 
 _CAUSAL_DOCUMENT_MASK_PROGRAM = (
