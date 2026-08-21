@@ -136,9 +136,10 @@ Tensor& _index_put_impl_quantized_cpu_(Tensor & self, const torch::List<std::opt
     value_ = value.to(self.device());
   }
   at::assert_no_overlap(self, value);
-  for (const std::optional<Tensor>& index: indices) {
-    if (index.has_value()) {
-      at::assert_no_overlap(self, *index);
+  for (const auto& element : indices) {
+    const c10::IValue& ivalue = element.get();
+    if (!ivalue.isNone()) {
+      at::assert_no_overlap(self, ivalue.toTensor());
     }
   }
 
@@ -173,10 +174,10 @@ Tensor& _index_put_impl_quantized_cuda_(Tensor & self, const torch::List<std::op
   TORCH_CHECK(value.device() == self.device(), "expected device ", self.device(), " but got device ", value.device(), " for value tensor");
 
   at::assert_no_overlap(self, value);
-  // NOLINTNEXTLINE(performance-implicit-conversion-in-loop)
-  for (const std::optional<Tensor>& index: indices) {
-    if (index.has_value()) {
-      at::assert_no_overlap(self, *index);
+  for (const auto& element : indices) {
+    const c10::IValue& ivalue = element.get();
+    if (!ivalue.isNone()) {
+      at::assert_no_overlap(self, ivalue.toTensor());
     }
   }
 

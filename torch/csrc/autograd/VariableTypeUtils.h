@@ -335,9 +335,11 @@ inline void check_no_requires_grad(
   if (!GradMode::is_enabled()) {
     return;
   }
-  for (std::optional<at::Tensor> tensor : tensors) {
-    if (tensor.has_value()) {
-      check_no_requires_grad(*tensor, name, fn_name, /*check_grad_mode*/ false);
+  for (const auto& element : tensors) {
+    const c10::IValue& ivalue = element.get();
+    if (!ivalue.isNone()) {
+      check_no_requires_grad(
+          ivalue.toTensor(), name, fn_name, /*check_grad_mode*/ false);
     }
   }
 }

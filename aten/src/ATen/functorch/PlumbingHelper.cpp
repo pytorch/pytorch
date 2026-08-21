@@ -72,9 +72,9 @@ bool isBatchedAtLevel(ITensorListRef tensors, int64_t level) {
 }
 
 bool isBatchedAtLevel(const c10::List<std::optional<Tensor>>& maybe_tensors, int64_t level) {
-  for (const auto idx : c10::irange(0, maybe_tensors.size())) {
-    const auto& maybe_tensor = maybe_tensors.get(idx);
-    if (isBatchedAtLevel(maybe_tensor, level)) {
+  for (const auto& element : maybe_tensors) {
+    const c10::IValue& ivalue = element.get();
+    if (!ivalue.isNone() && isBatchedAtLevel(ivalue.toTensor(), level)) {
       return true;
     }
   }

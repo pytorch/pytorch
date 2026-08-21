@@ -33,24 +33,25 @@ inline std::tuple<bool, Tensor> canDispatchToMaskedFill(
   int64_t num_ind = 0;
   Tensor mask;
   auto self_device = self.device();
-  for (const std::optional<Tensor>& i : indices) {
-    if (!i.has_value() || !(*i).defined()) {
+  for (const auto& element : indices) {
+    const c10::IValue& ivalue = element.get();
+    const Tensor* index = ivalue.isNone() ? nullptr : &ivalue.toTensor();
+    if (index == nullptr || !index->defined()) {
       if (!mask.defined()) {
         num_ind++;
       }
     } else {
-      const Tensor& index = *i;
-      if ((index.scalar_type() != kByte && index.scalar_type() != kBool) ||
-          index.device() != self_device || mask.defined()) {
+      if ((index->scalar_type() != kByte && index->scalar_type() != kBool) ||
+          index->device() != self_device || mask.defined()) {
         return std::make_tuple(false, Tensor());
       } else {
-        mask = index;
-        for (const auto j : c10::irange(index.dim())) {
+        mask = *index;
+        for (const auto j : c10::irange(index->dim())) {
           int64_t srcIdx = num_ind + j;
           TORCH_CHECK_INDEX(
-              index.size(j) == self.size(srcIdx),
+              index->size(j) == self.size(srcIdx),
               "The shape of the mask ",
-              index.sizes(),
+              index->sizes(),
               " at index ",
               j,
               " does not match the shape of the indexed tensor ",
