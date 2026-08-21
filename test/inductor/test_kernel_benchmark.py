@@ -16,6 +16,7 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_cache, run_and_get_code, run_and_get_kernels
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import xfailIfSM89
+from torch.testing._internal.common_utils import recover_orig_fp32_precision
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, IS_BIG_GPU
 
 
@@ -217,6 +218,7 @@ class TestKernelBenchmark(TestCase):
 
         self.verify_compiled_kernels(GB_count=1)
 
+    @recover_orig_fp32_precision
     def test_matmul_bandwidth_computation(self):
         """
         The test does a matmul and then mul. Without max-autotune, we use
@@ -375,12 +377,12 @@ class TestKernelBenchmark(TestCase):
         out = f(*inputs)
 
         compiled_module = self.get_compiled_module()
-        # torch.mm becomes an extern kernel, so we measure the nbytes
-        # for the pointwise add kernel:
-        # num_gb = x0 + 2 * size_slice_c + size_out
-        # num_gb = (1000 * 1000 + 2 * 1000 * 1000 + 1000 * 1000) * 2/ 1e9
-        #        = 0.008
-        num_gb = "0.008"
+        # torch.mm + x1 becomes an extern addmm kernel, so we measure the nbytes
+        # for the pointwise kernel adding that result to x2:
+        # num_gb = addmm_out + size_slice_c + size_out
+        # num_gb = (1000 * 1000 + 1000 * 1000 + 1000 * 1000) * 2 / 1e9
+        #        = 0.006
+        num_gb = "0.006"
         self.check_bandwidth(compiled_module, num_gb)
 
     def test_mm_slice_add_bandwidth_computation_2(self):

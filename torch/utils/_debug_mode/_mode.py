@@ -447,7 +447,7 @@ class DebugMode(TorchDispatchMode):
                 self._record_call(call)
 
         # Run pre-hooks before executing the operation to hash inputs
-        # We have to run becore the func() call in case there's any
+        # We have to run before the func() call in case there's any
         # in-place mutation
         if call:
             _run_dispatch_pre_log_hooks(call, func, types, args, kwargs)

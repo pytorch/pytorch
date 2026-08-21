@@ -11,9 +11,9 @@ from typing import Any, TypeGuard, TypeVar
 import torch
 import torch.utils._pytree as pytree
 from torch import SymInt, Tensor
+from torch._custom_class_base import CustomClassBase
 from torch._library.fake_class_registry import maybe_unwrap_fake_script_object
-from torch._library.opaque_object import is_opaque_reference_type
-from torch._opaque_base import OpaqueBase
+from torch._library.opaque_object import is_opaque_symbolic_type
 from torch._subclasses.fake_tensor import get_plain_tensors
 from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_eq
 from torch.types import IntLikeType
@@ -108,6 +108,10 @@ def _find_attr_matching_outer_metadata(
     return None
 
 
+def _symint_placeholders(lst: Iterable[IntLikeType]) -> tuple[bool, ...]:
+    return tuple(isinstance(s, SymInt) and not s.node.is_nested_int() for s in lst)
+
+
 def get_subclass_typing_container(
     tensor_subclass: torch.Tensor,
 ) -> dict[type[torch.Tensor], list[type[torch.Tensor]]]:
@@ -125,11 +129,11 @@ def get_subclass_typing_container(
             match getattr(tensor_subclass, key):
                 case torch.Tensor() as inner_value:
                     _get_types_for_subclass(inner_value)
-                case OpaqueBase():
+                case CustomClassBase():
                     pass
                 case unexpected:
                     raise AssertionError(
-                        f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                        f"expected Tensor or CustomClassBase, got {type(unexpected)}"
                     )
 
     tracker: dict[Any, list[Any]] = collections.defaultdict(list)
@@ -144,13 +148,21 @@ def create_subclass_metadata(
     with_memory_format: bool = False,
 ) -> tuple[Any, int]:
     if not is_traceable_wrapper_subclass(a):
-        idx = start_idx + 1
+        size_symbol_placeholders = (
+            _symint_placeholders(a.size()) if count_symints else ()
+        )
+        stride_symbol_placeholders = (
+            _symint_placeholders(a.stride()) if count_symints else ()
+        )
+        meta = PlainTensorMeta(
+            start_idx + 1,
+            memory_format=maybe_suggest_memory_format(a, with_memory_format),
+            size_symbol_placeholders=size_symbol_placeholders,
+            stride_symbol_placeholders=stride_symbol_placeholders,
+        )
         return (
-            PlainTensorMeta(
-                idx,
-                memory_format=maybe_suggest_memory_format(a, with_memory_format),
-            ),
-            idx,
+            meta,
+            start_idx + meta.arg_count,
         )
 
     inner_keys, metadata = a.__tensor_flatten__()
@@ -160,11 +172,11 @@ def create_subclass_metadata(
     for key in inner_keys:
         inner_value = getattr(a, key)
         match inner_value:
-            case OpaqueBase():
+            case CustomClassBase():
                 # During tracing, opaques are wrapped in FakeScriptObject;
                 # unwrap to check the real type.
                 real_type = type(maybe_unwrap_fake_script_object(inner_value))
-                if not is_opaque_reference_type(real_type):
+                if not is_opaque_symbolic_type(real_type):
                     raise RuntimeError(
                         f"{real_type.__name__!r} found in tensor attrs of "
                         f"{type(a).__name__}.__tensor_flatten__(). "
@@ -183,7 +195,7 @@ def create_subclass_metadata(
                 attrs[key] = new_subclass_meta
             case _:
                 raise AssertionError(
-                    f"expected Tensor or OpaqueBase, got {type(inner_value)}"
+                    f"expected Tensor or CustomClassBase, got {type(inner_value)}"
                 )
 
     # It *must* be because is_traceable_wrapper_subclass() - but mypy is not smart.
@@ -297,13 +309,13 @@ def unwrap_tensor_subclasses(
     def _maybe_fakeify_opaque(v: Any) -> Any:
         # Registered opaque types need to be wrapped as FakeScriptObject for
         # compile-time FX tracing (proxy slot tracking, hashability, etc.).
-        if isinstance(v, OpaqueBase):
+        if isinstance(v, CustomClassBase):
             from torch._guards import detect_fake_mode
             from torch._library.fake_class_registry import maybe_to_fake_obj
-            from torch._library.opaque_object import is_opaque_type
+            from torch._library.opaque_object import is_custom_class
 
             fake_mode = detect_fake_mode()
-            if fake_mode is not None and is_opaque_type(type(v)):
+            if fake_mode is not None and is_custom_class(type(v)):
                 return maybe_to_fake_obj(fake_mode, v)
         return v
 
@@ -318,6 +330,23 @@ def unwrap_tensor_subclasses(
         if not is_traceable_wrapper_subclass(t):
             out[0].append(_maybe_fakeify_opaque(t))
             out[1].append(desc)
+            if (
+                append_symints
+                and isinstance(t, Tensor)
+                and isinstance(
+                    desc, (SubclassGetAttrAOTInput, SubclassGetAttrAOTOutput)
+                )
+            ):
+                sizes = enumerate_filter_symints(t.size())
+                strides = enumerate_filter_symints(t.stride())
+                out[0].extend(s for _, s in sizes)
+                out[0].extend(s for _, s in strides)
+                if isinstance(desc, AOTInput):
+                    out[1].extend(SubclassSizeAOTInput(desc, i) for i, _ in sizes)
+                    out[1].extend(SubclassStrideAOTInput(desc, i) for i, _ in strides)
+                else:
+                    out[1].extend(SubclassSizeAOTOutput(desc, i) for i, _ in sizes)
+                    out[1].extend(SubclassStrideAOTOutput(desc, i) for i, _ in strides)
             return
 
         attrs, _ = t.__tensor_flatten__()
@@ -363,15 +392,44 @@ def runtime_unwrap_tensor_subclasses(
     *,
     append_symints: bool,
     subclass_metas: list[PlainTensorMeta | SubclassCreationMeta] | None = None,
-) -> list[int | Tensor | SymInt | OpaqueBase]:
+) -> list[int | Tensor | SymInt | CustomClassBase]:
     def flatten_subclass(
         x: Tensor | TraceableWrapperSubclass,
         subclass_meta: PlainTensorMeta | SubclassCreationMeta | OpaqueMeta | None,
         *,
-        out: list[OpaqueBase | SymInt | Tensor | int],
-    ) -> list[OpaqueBase | SymInt | Tensor | int]:
+        out: list[CustomClassBase | SymInt | Tensor | int],
+    ) -> list[CustomClassBase | SymInt | Tensor | int]:
+        def append_plain_tensor_symints(tensor: Tensor, meta: PlainTensorMeta) -> None:
+            size = tensor.size()
+            if len(size) != len(meta.size_symbol_placeholders):
+                raise AssertionError(
+                    f"size length mismatch: {len(size)} != {len(meta.size_symbol_placeholders)}"
+                )
+            out.extend(
+                [
+                    r
+                    for (r, is_symint) in zip(size, meta.size_symbol_placeholders)
+                    if is_symint
+                ]
+            )
+
+            stride = tensor.stride()
+            if len(stride) != len(meta.stride_symbol_placeholders):
+                raise AssertionError(
+                    f"stride length mismatch: {len(stride)} != {len(meta.stride_symbol_placeholders)}"
+                )
+            out.extend(
+                [
+                    r
+                    for (r, is_symint) in zip(stride, meta.stride_symbol_placeholders)
+                    if is_symint
+                ]
+            )
+
         if not is_traceable_wrapper_subclass(x):
             out.append(x)
+            if append_symints and isinstance(subclass_meta, PlainTensorMeta):
+                append_plain_tensor_symints(x, subclass_meta)
             return out
 
         if not isinstance(x, Tensor):
@@ -384,14 +442,14 @@ def runtime_unwrap_tensor_subclasses(
         for attr in attrs:
             inner_value = getattr(x, attr)
             match inner_value:
-                case OpaqueBase():
+                case CustomClassBase():
                     out.append(inner_value)
                 case Tensor():
                     inner_meta = subclass_meta.attrs.get(attr)
                     flatten_subclass(inner_value, inner_meta, out=out)
                 case _:
                     raise AssertionError(
-                        f"expected Tensor or OpaqueBase, got {type(inner_value)}"
+                        f"expected Tensor or CustomClassBase, got {type(inner_value)}"
                     )
 
         if append_symints:
@@ -420,7 +478,7 @@ def runtime_unwrap_tensor_subclasses(
             )
         return out
 
-    xs_inner: list[int | Tensor | SymInt | OpaqueBase] = []
+    xs_inner: list[int | Tensor | SymInt | CustomClassBase] = []
 
     if append_symints:
         if subclass_metas is None:
@@ -465,20 +523,54 @@ def unwrap_tensor_subclasses_with_indices_to_original(
 def remap_unwrapped_subclass_arg_indices(
     wrapped_args: list[Any], static_input_indices: list[int]
 ) -> list[int]:
+    def static_arg_slots(arg: Any, *, include_plain_tensor_symints: bool) -> list[bool]:
+        # Forwarded SymInts occupy flattened arg positions, but static input indices
+        # describe tensor/opaque slots whose value should not be copied.
+        if not is_traceable_wrapper_subclass(arg):
+            if include_plain_tensor_symints and isinstance(arg, Tensor):
+                num_symints = len(enumerate_filter_symints(arg.size())) + len(
+                    enumerate_filter_symints(arg.stride())
+                )
+                return [True] + [False] * num_symints
+            return [True]
+
+        slots = []
+        attrs, _ = arg.__tensor_flatten__()
+        for attr in attrs:
+            inner_value = getattr(arg, attr)
+            match inner_value:
+                case CustomClassBase():
+                    slots.append(True)
+                case Tensor():
+                    slots.extend(
+                        static_arg_slots(inner_value, include_plain_tensor_symints=True)
+                    )
+                case _:
+                    raise AssertionError(
+                        f"expected Tensor or CustomClassBase, got {type(inner_value)}"
+                    )
+
+        slots.extend(
+            [False]
+            * (
+                len(enumerate_filter_symints(arg.size()))
+                + len(enumerate_filter_symints(arg.stride()))
+            )
+        )
+        return slots
+
     static_input_indices_set = set(static_input_indices)
     new_ind = 0
     remapped_static_indices = []
     for i, arg in enumerate(wrapped_args):
-        num_indices = 1
-        if is_traceable_wrapper_subclass(arg):
-            num_indices = (
-                len(get_plain_tensors(arg, out=[]))
-                + len(enumerate_filter_symints(arg.size()))
-                + len(enumerate_filter_symints(arg.stride()))
-            )
+        slots = (
+            static_arg_slots(arg, include_plain_tensor_symints=False)
+            if is_traceable_wrapper_subclass(arg)
+            else [True]
+        )
 
-        for _ in range(num_indices):
-            if i in static_input_indices_set:
+        for is_static_arg_slot in slots:
+            if i in static_input_indices_set and is_static_arg_slot:
                 remapped_static_indices.append(new_ind)
 
             new_ind += 1
@@ -503,7 +595,7 @@ def wrap_tensor_subclasses(
     for subclass_meta in subclass_metas:
         if isinstance(subclass_meta, PlainTensorMeta):
             wrapped_args.append(unwrapped_args[subclass_meta.unwrapped_idx])
-            num_args_tallied += 1
+            num_args_tallied += subclass_meta.arg_count
         else:
             if not isinstance(subclass_meta, SubclassCreationMeta):
                 raise AssertionError(

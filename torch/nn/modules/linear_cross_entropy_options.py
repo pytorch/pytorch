@@ -1,5 +1,5 @@
 import dataclasses
-from typing import Literal, NamedTuple
+from typing import Literal
 
 import torch
 
@@ -7,22 +7,23 @@ import torch
 __all__ = ["LinearCrossEntropyOptions"]
 
 
-class _AutoDefault(NamedTuple):
-    acc_policy: str
-    chunking_method: str
+_VALID_ACC_POLICIES = ("auto", "accurate", "compact")
 
 
-# Defaults for the ``"auto"`` sentinel of ``acc_policy`` / ``chunking_method``,
-# keyed by ``(device_type, input_dtype)`` -- Pareto picks from an fp64-jacobian
-# sweep. CPU picks ``"accurate"`` (only chunked policy with fp32 weight-grad mm
-# on CPU; others hit emulated low-precision matmul, ~20-50x slower).
-_AUTO_DEFAULTS: dict[tuple[str, torch.dtype], _AutoDefault] = {
-    ("cuda", torch.bfloat16): _AutoDefault("compact", "aspect_ratio:2"),
-    ("cuda", torch.float16): _AutoDefault("compact", "aspect_ratio:2"),
-    ("cpu", torch.bfloat16): _AutoDefault("accurate", "aspect_ratio"),
-    ("cpu", torch.float16): _AutoDefault("accurate", "aspect_ratio"),
-}
-_AUTO_FALLBACK: _AutoDefault = _AutoDefault("compact", "aspect_ratio:2")
+def _auto_acc_policy(device_type: str | None, dtype: torch.dtype) -> str:
+    """Resolve the ``acc_policy`` ``"auto"`` sentinel from device and dtype.
+
+    Only CPU + low-precision input (fp16/bf16) picks ``"accurate"``: there
+    ``compact`` runs the weight-grad GEMM in the input dtype,
+    hitting CPU's emulated low-precision matmul (~20-50x slower), so
+    ``"accurate"`` keeps it in fp32. Everything else picks ``"compact"`` --
+    accelerators have hardware-native low-precision GEMMs, and for fp32/fp64
+    the GEMM is native at any policy (``"accurate"`` would only add a
+    weight-grad scratch, no benefit).
+    """
+    if device_type == "cpu" and dtype in (torch.float16, torch.bfloat16):
+        return "accurate"
+    return "compact"
 
 
 @dataclasses.dataclass(slots=True, frozen=True)
@@ -36,11 +37,9 @@ class LinearCrossEntropyOptions:
     ``in_features`` (e.g. LLM vocabulary heads). Pass ``options=None`` to
     use the reference path; pass an instance of this class to opt in.
 
-    Zero-argument ``LinearCrossEntropyOptions()`` leaves
-    :attr:`acc_policy` and :attr:`chunking_method` set to ``"auto"``,
-    resolved at call time from :data:`_AUTO_DEFAULTS` (per-(device, dtype)
-    picks measured on A100 / x86 CPU); unlisted pairs fall back to
-    ``("compact", "aspect_ratio:2")``.
+    Zero-argument ``LinearCrossEntropyOptions()`` leaves :attr:`acc_policy`
+    and :attr:`chunking_method` at ``"auto"``, resolved per (device, dtype) at
+    call time -- see the field docs below.
 
     Supports a subset of :func:`linear_cross_entropy`; unsupported
     configurations fall through to the reference path with a warning.
@@ -83,9 +82,10 @@ class LinearCrossEntropyOptions:
     chunking_method: str | None = "auto"
     """Heuristic for picking :attr:`batch_chunk_size`.
 
-    - ``"auto"`` (default) -- resolves to a per-(device, dtype) pick from
-      :data:`_AUTO_DEFAULTS` at call time; falls back to
-      ``"aspect_ratio:2"`` for unlisted pairs.
+    - ``"auto"`` (default) -- resolves to ``"aspect_ratio"`` (factor 1),
+      with the compact path additionally capped at a per-target ``B_ref``
+      in :meth:`_adjust` so the chunked peak never exceeds the unchunked
+      reference in the budget regime (``in_features >= num_classes``).
     - ``"aspect_ratio"`` -- sizes each chunk so its
       ``(batch_chunk_size, num_classes)`` logits buffer matches the
       ``(num_batches, in_features)`` input in memory:
@@ -98,7 +98,6 @@ class LinearCrossEntropyOptions:
 
     acc_policy: Literal[
         "accurate",
-        "balanced",
         "compact",
         "auto",
     ] = "auto"
@@ -106,32 +105,28 @@ class LinearCrossEntropyOptions:
     intermediates are kept in :attr:`acc_dtype` vs. the input dtype, and
     whether the per-chunk weight-gradient scratch buffer is materialized.
 
-    - ``"auto"`` (default) -- per-(device, dtype) pick from
-      :data:`_AUTO_DEFAULTS`; unlisted pairs fall back to ``"compact"``.
-      The fallback assumes a CUDA-like backend with hardware-native
-      low-precision matmul; pass ``"accurate"`` explicitly on backends
-      that emulate fp16/bf16 GEMMs via fp32 upcast.
+    - ``"auto"`` (default) -- ``"accurate"`` for CPU low-precision input
+      (fp16/bf16), ``"compact"`` otherwise (:func:`_auto_acc_policy`). Pass
+      ``"accurate"`` explicitly on any other backend that emulates fp16/bf16
+      GEMMs via fp32 upcast.
     - ``"accurate"`` -- broadest use of :attr:`acc_dtype`; noticeably
       better input-grad accuracy when chunk size is large relative to
       ``num_classes``. Highest peak memory and slowest of the chunked
       policies on CUDA. Only chunked policy whose weight-grad matmul
       runs in fp32 on CPU (other policies hit CPU's emulated
       low-precision path, ~20-50x slower).
-    - ``"balanced"`` -- :attr:`acc_dtype` only where needed for gradient
-      correctness; keeps a ``(num_classes, in_features)``
-      :attr:`acc_dtype` scratch for cross-chunk weight-grad accumulation.
-      Same precision as ``"accurate"`` in bf16, slightly looser in fp16,
-      faster than ``"accurate"`` in both.
-    - ``"compact"`` -- like ``"balanced"`` but drops the weight-grad
-      scratch and accumulates per-chunk directly via ``addmm_`` (cuBLAS
-      uses an fp32 internal accumulator, so bulk precision matches
-      ``"balanced"``). Saves ``num_classes * in_features *
-      sizeof(acc_dtype)`` -- typically several hundred MB for an LLM
-      head. On non-CUDA mixed-precision falls back to ``"balanced"``.
+    - ``"compact"`` -- :attr:`acc_dtype` only where needed for gradient
+      correctness; accumulates the weight gradient per chunk directly via
+      ``addmm_`` instead of a ``(num_classes, in_features)``
+      :attr:`acc_dtype` scratch (on CUDA cuBLAS uses an fp32 internal
+      accumulator, so bulk precision is unchanged). Saves
+      ``num_classes * in_features * sizeof(acc_dtype)`` -- typically
+      several hundred MB for an LLM head. On non-CUDA mixed-precision it
+      retains that scratch for the cross-chunk accumulation.
 
-    Policy effects (``"balanced"`` vs ``"accurate"``) are visible only
-    when :attr:`acc_dtype` differs from the input dtype; ``"compact"``
-    saves memory in both regimes.
+    The precision difference between ``"compact"`` and ``"accurate"`` is
+    visible only when :attr:`acc_dtype` differs from the input dtype;
+    ``"compact"`` saves memory in both regimes.
     """
 
     acc_dtype: torch.dtype | None = None
@@ -144,8 +139,11 @@ class LinearCrossEntropyOptions:
     """
 
     def __post_init__(self):
-        if self.acc_policy not in {"auto", "accurate", "balanced", "compact"}:
-            raise ValueError(f"invalid acc_policy: {self.acc_policy!r}")
+        if self.acc_policy not in _VALID_ACC_POLICIES:
+            raise ValueError(
+                f"invalid acc_policy: {self.acc_policy!r}; expected one of "
+                f"{', '.join(map(repr, _VALID_ACC_POLICIES))}"
+            )
         if self.chunking_method is not None and self.chunking_method != "auto":
             name, sep, factor = self.chunking_method.partition(":")
             if not sep:
@@ -227,34 +225,38 @@ class LinearCrossEntropyOptions:
         # __post_init__ validates the method, so this is unreachable.
         raise AssertionError(f"unhandled chunking_method: {method!r}")
 
-    def _adjust(self, num_batches, in_features, num_classes, dtype, device=None):
+    def _adjust(
+        self,
+        num_batches,
+        in_features,
+        num_classes,
+        dtype,
+        device=None,
+        prob_target=False,
+    ):
         """Resolve ``"auto"`` sentinels and ``None`` defaults against a
         specific call site; returns a fully concrete options instance.
 
         Internal API consumed by ``F.linear_cross_entropy``'s chunked
-        dispatch and a handful of test call sites. ``device=None``
-        forces the :data:`_AUTO_FALLBACK` pick instead of the
-        per-device one.
+        dispatch and a handful of test call sites. ``device=None`` forces the
+        ``"compact"`` fallback instead of the per-device acc_policy pick.
+        ``prob_target`` selects the per-target memory cap (``N/2`` vs
+        ``N*V/4D``).
         """
         acc_policy = self.acc_policy
         chunking_method = self.chunking_method
+        chunking_was_auto = chunking_method == "auto"
         # Honour an explicit batch_chunk_size by disabling auto chunking
         # (it would conflict with the user's size); acc_policy="auto" is
         # unaffected.
         if chunking_method == "auto" and self.batch_chunk_size is not None:
             chunking_method = None
-        if acc_policy == "auto" or chunking_method == "auto":
-            if device is not None:
-                ap, cm = _AUTO_DEFAULTS.get(
-                    (device.type, dtype),
-                    _AUTO_FALLBACK,
-                )
-            else:
-                ap, cm = _AUTO_FALLBACK
-            if acc_policy == "auto":
-                acc_policy = ap
-            if chunking_method == "auto":
-                chunking_method = cm
+        if acc_policy == "auto":
+            acc_policy = _auto_acc_policy(
+                device.type if device is not None else None, dtype
+            )
+        if chunking_method == "auto":
+            chunking_method = "aspect_ratio"
 
         if self.batch_chunk_size is None:
             batch_chunk_size = num_batches
@@ -268,6 +270,21 @@ class LinearCrossEntropyOptions:
                 num_classes,
                 chunking_method,
             )
+            # Memory cap for the auto compact path. aspect_ratio degenerates to
+            # a single chunk when in_features >= num_classes, where the chunked
+            # peak exceeds the unchunked reference. ``b_ref`` is the largest
+            # chunk staying at or below reference -- ``N*V/(4*D)`` for index
+            # targets, ``N/2`` for prob (whose reference also materializes the
+            # soft target, so the single-chunk excess clears with two chunks);
+            # both device- and dtype-independent. Floored to a power of two so
+            # the cap never lands above ``b_ref``.
+            if chunking_was_auto and acc_policy == "compact":
+                if prob_target:
+                    b_ref = num_batches // 2
+                else:
+                    b_ref = num_batches * num_classes // (4 * in_features)
+                b_ref = 1 << (b_ref.bit_length() - 1) if b_ref >= 1 else 1
+                batch_chunk_size = max(1, min(batch_chunk_size, b_ref))
             if (
                 self.batch_chunk_size is not None
                 and self.batch_chunk_size != batch_chunk_size

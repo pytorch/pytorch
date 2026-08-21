@@ -1,6 +1,6 @@
 // Original TunableOp is from onnxruntime.
 // https://github.com/microsoft/onnxruntime/blob/main/onnxruntime/core/framework/tunable.h
-// https://github.com/microsoft/onnxruntime/tree/main/onnxruntime/core/providers/rocm/tunable
+// https://github.com/microsoft/onnxruntime/tree/main/onnxruntime/core/providers/cuda/tunable
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 //
@@ -73,7 +73,7 @@ inline const char* BLASTypeName(Half v) {
   return "f16_r";
 }
 
-//https://github.com/ROCm/hipBLASLt/blob/develop/library/src/include/auxiliary.hpp#L175
+//https://github.com/ROCm/hipBLASLt/blob/develop/library/src/amd_detail/include/auxiliary.hpp
 template <>
 inline const char* BLASTypeName(Float8_e4m3fn v) {
   return "f8_r";

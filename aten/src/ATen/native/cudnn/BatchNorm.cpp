@@ -11,6 +11,13 @@
 
 #if !AT_CUDNN_ENABLED()
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/cudnn_batch_norm_backward_native.h>
+#include <ATen/ops/cudnn_batch_norm_native.h>
+#endif
+
 namespace at {
 namespace native {
 
