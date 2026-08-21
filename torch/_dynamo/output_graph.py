@@ -2586,7 +2586,7 @@ class OutputGraph(OutputGraphCommon):
                 **kwargs,
             },
         )
-        self.package.bypass_current_entry()
+        self.package.bypass_current_entry(reason)
         self.package = None
 
     def get_graph_sizes_structured(self) -> dict[str, list[int | str]]:
@@ -3545,6 +3545,8 @@ class OutputGraph(OutputGraphCommon):
             raise AssertionError(f"global '{name}' is already installed")
         self.installed_globals.add(name)
         self.cleanups.append(CleanupHook.create(self.global_scope, name, value))
+        if self.package is not None:
+            self.package.claim_region_global(self.global_scope, name, value)
 
     def install_global_by_id(self, prefix: str, value: Any) -> str:
         """
