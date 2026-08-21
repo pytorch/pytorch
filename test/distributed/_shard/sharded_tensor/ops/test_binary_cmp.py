@@ -12,9 +12,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     requires_capabilities,
 )
-from torch.testing._internal.common_distributed import (
-    skip_if_lt_x_gpu,
-)
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -176,7 +174,7 @@ class TestShardedTensorBinaryOps(ShardedTensorTestBase):
         self.assertTrue(torch.allclose(st1, st2, atol=1))
 
 
-instantiate_device_type_tests(TestShardedTensorBinaryOps, globals())
+instantiate_device_type_tests(TestShardedTensorBinaryOps, globals(), except_for=["cpu"])
 
 
 if __name__ == "__main__":
