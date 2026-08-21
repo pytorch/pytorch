@@ -28,6 +28,116 @@ def _as_int64(value: int) -> int:
     return ((value + 2**63) % 2**64) - 2**63
 
 
+class PRNGKey(torch.Tensor):
+    """Base tensor subclass for typed PRNG keys.
+
+    Uses _make_wrapper_subclass with __tensor_flatten__/__tensor_unflatten__
+    so torch.compile can decompose the key into a plain tensor for tracing.
+    __torch_dispatch__ unwraps the key for all ops, so the dispatcher always
+    sees plain tensors.
+    """
+
+    _data: torch.Tensor
+
+    __torch_function__ = torch._C._disabled_torch_function_impl
+
+    @staticmethod
+    def __new__(cls, data: torch.Tensor):
+        return torch.Tensor._make_wrapper_subclass(
+            cls,
+            data.shape,
+            dtype=data.dtype,
+            device=data.device,
+            strides=data.stride(),
+        )
+
+    def __init__(self, data: torch.Tensor):
+        self._data = data
+
+    def __tensor_flatten__(self):
+        return ["_data"], {}
+
+    @classmethod
+    def __tensor_unflatten__(cls, inner_tensors, metadata, outer_size, outer_stride):
+        return cls(inner_tensors["_data"])
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+        if kwargs is None:
+            kwargs = {}
+
+        def unwrap(x):
+            return x._data if isinstance(x, PRNGKey) else x
+
+        args = torch.utils._pytree.tree_map(unwrap, args)
+        kwargs = torch.utils._pytree.tree_map(unwrap, kwargs)
+        return func(*args, **kwargs)
+
+    def __repr__(self):
+        return f"{type(self).__name__}({self._data})"
+
+    def _unbind(
+        self, shape: tuple, splits: tuple, outputs_per_elem: int
+    ) -> "PRNGKey":
+        raise NotImplementedError
+
+    def _split(self, num: int) -> "PRNGKey":
+        raise NotImplementedError
+
+    def _fold_in(self, data: int | torch.Tensor) -> "PRNGKey":
+        raise NotImplementedError
+
+    def _uniform(
+        self, out: torch.Tensor, low: float, high: float
+    ) -> torch.Tensor:
+        raise NotImplementedError
+
+    def _normal(
+        self, out: torch.Tensor, mean: float, std: float
+    ) -> torch.Tensor:
+        raise NotImplementedError
+
+    def _randint(
+        self, out: torch.Tensor, low: int | None, high: int | None
+    ) -> torch.Tensor:
+        raise NotImplementedError
+
+
+class Philox4x32_10Key(PRNGKey):
+    """Philox 4x32-10 PRNG key. Data layout: (*batch, 2) uint64 [seed, offset]."""
+
+    @classmethod
+    def __tensor_unflatten__(cls, inner_tensors, metadata, outer_size, outer_stride):
+        return cls(inner_tensors["_data"])
+
+    def _unbind(self, shape, splits, outputs_per_elem):
+        return Philox4x32_10Key(
+            _philox_unbind(self._data, shape, splits, outputs_per_elem)
+        )
+
+    def _split(self, num):
+        return Philox4x32_10Key(torch.ops.aten._philox_key_split(self, num))
+
+    def _fold_in(self, data):
+        if isinstance(data, torch.Tensor):
+            result = torch.ops.aten._philox_key_fold_in.Tensor(self, data)
+        else:
+            result = torch.ops.aten._philox_key_fold_in(self, data)
+        return Philox4x32_10Key(result)
+
+    def _uniform(self, out, low, high):
+        return torch.ops.aten._philox_uniform_(out, self, low, high)
+
+    def _normal(self, out, mean, std):
+        return torch.ops.aten._philox_normal_(out, self, mean, std)
+
+    def _randint(self, out, low, high):
+        return torch.ops.aten._philox_randint_(out, self, low, high)
+
+
+_IMPLS: dict[str, type[PRNGKey]] = {"philox4x32-10": Philox4x32_10Key}
+
+
 def key(
     seed: int, *, device: torch.device | None = None, impl: str = "philox4x32-10"
 ) -> torch.Tensor:
@@ -58,11 +168,11 @@ def key(
 
         >>> key = torch.func._random.key(42, device="cuda")  # doctest: +SKIP
     """
-    if impl != "philox4x32-10":
+    cls = _IMPLS.get(impl)
+    if cls is None:
         raise NotImplementedError(f"key() does not support PRNG impl '{impl}'")
-
-    # (seed, offset)
-    return torch.tensor([seed, 0], dtype=torch.uint64, device=device)
+    data = torch.tensor([seed, 0], dtype=torch.uint64, device=device)
+    return cls(data)
 
 
 def split(key: torch.Tensor, num: int = 2) -> torch.Tensor:
@@ -88,6 +198,8 @@ def split(key: torch.Tensor, num: int = 2) -> torch.Tensor:
         >>> key = torch.func._random.key(42, device="cuda")  # doctest: +SKIP
         >>> k1, k2 = torch.func._random.split(key)  # doctest: +SKIP
     """
+    if isinstance(key, PRNGKey):
+        return key._split(num)
     return torch.ops.aten._philox_key_split(key, num)
 
 
@@ -144,6 +256,8 @@ def unbind(
         if s % sp != 0:
             raise ValueError(f"splits[{i}]={sp} does not evenly divide shape[{i}]={s}")
     outputs_per_elem = 2 if dtype is not None and dtype == torch.float64 else 1
+    if isinstance(key, PRNGKey):
+        return key._unbind(shape, splits, outputs_per_elem)
     return _philox_unbind(key, shape, splits, outputs_per_elem)
 
 
@@ -256,16 +370,19 @@ def fold_in(key: torch.Tensor, data: int | torch.Tensor) -> torch.Tensor:
         >>> assert torch.equal(k0, keys[0])  # doctest: +SKIP
         >>> assert torch.equal(k1, keys[1])  # doctest: +SKIP
     """
+    if not isinstance(data, torch.Tensor):
+        data = int(data)
+        if not -(1 << 63) <= data <= (1 << 64) - 1:
+            raise ValueError(
+                f"fold_in: int data must be in [-2**63, 2**64 - 1], got {data}"
+            )
+        # Reinterpret as signed int64 due to ATen op schema; kernel will cast back
+        if data >= (1 << 63):
+            data -= 1 << 64
+    if isinstance(key, PRNGKey):
+        return key._fold_in(data)
     if isinstance(data, torch.Tensor):
         return torch.ops.aten._philox_key_fold_in.Tensor(key, data)
-    data = int(data)
-    if not -(1 << 63) <= data <= (1 << 64) - 1:
-        raise ValueError(
-            f"fold_in: int data must be in [-2**63, 2**64 - 1], got {data}"
-        )
-    # Reinterpret as signed int64 due to ATen op schema; kernel will cast back
-    if data >= (1 << 63):
-        data -= 1 << 64
     return torch.ops.aten._philox_key_fold_in(key, data)
 
 
@@ -302,11 +419,13 @@ def normal_(
         >>> result = torch.empty(1000, device="cuda")  # doctest: +SKIP
         >>> torch.func._random.normal_(key, result)  # doctest: +SKIP
     """
+    if isinstance(key, PRNGKey):
+        return key._normal(result, mean, std)
     return torch.ops.aten._philox_normal_(result, key, mean, std)
 
 
 def normal(
-    key: torch.Tensor,
+    key,
     *shape: tuple[int, ...],
     mean: float = 0.0,
     std: float = 1.0,
@@ -382,11 +501,13 @@ def uniform_(
         >>> result = torch.empty(1000, device="cuda")  # doctest: +SKIP
         >>> torch.func._random.uniform_(key, result)  # doctest: +SKIP
     """
+    if isinstance(key, PRNGKey):
+        return key._uniform(result, low, high)
     return torch.ops.aten._philox_uniform_(result, key, low, high)
 
 
 def uniform(
-    key: torch.Tensor,
+    key,
     *shape: tuple[int, ...],
     low: float = 0.0,
     high: float = 1.0,
@@ -514,6 +635,8 @@ def randint_(
     dtype_range = _RANDINT_DTYPE_RANGE.get(result.dtype)
     if dtype_range is None:
         # Unsupported dtype; let the kernel report it.
+        if isinstance(key, PRNGKey):
+            return key._randint(result, None, None)
         return torch.ops.aten._philox_randint_(result, key)
     dtype_low, dtype_high = dtype_range
     lo = dtype_low if low is None else low
@@ -530,6 +653,8 @@ def randint_(
     # The dtype's exclusive upper limit is not always representable as int64, so
     # the kernel takes it as None.
     high_arg = None if hi == dtype_high else _as_int64(hi)
+    if isinstance(key, PRNGKey):
+        return key._randint(result, _as_int64(lo), high_arg)
     return torch.ops.aten._philox_randint_(result, key, _as_int64(lo), high_arg)
 
 
