@@ -45,6 +45,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
     TestCase,
 )
+from torch.utils._triton import has_triton
 
 
 if not dist.is_available():
@@ -224,7 +225,7 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
         return sharding_strategy
 
     @unittest.skipIf(
-        torch.accelerator.current_accelerator() is None,
+        torch.accelerator.current_accelerator() is None or not has_triton(),
         "Inductor+accelerator needs triton and a recent accelerator",
     )
     @skip_if_lt_x_gpu(2)
