@@ -1,5 +1,6 @@
 #include <c10/core/Allocator.h>
 #include <array>
+#include <atomic>
 
 #include <c10/util/ThreadLocalDebugInfo.h>
 
@@ -44,6 +45,21 @@ static std::array<at::Allocator*, at::COMPILE_TIME_MAX_DEVICE_TYPES>
 static std::array<uint8_t, at::COMPILE_TIME_MAX_DEVICE_TYPES>
     allocator_priority{};
 
+namespace {
+std::shared_ptr<MemoryReportingInfoBase> global_memory_reporter;
+
+std::shared_ptr<MemoryReportingInfoBase> getGlobalMemoryReportingInfo() {
+  return std::atomic_load_explicit(
+      &global_memory_reporter, std::memory_order_acquire);
+}
+} // namespace
+
+void setGlobalMemoryReportingInfo(
+    std::shared_ptr<MemoryReportingInfoBase> reporter) {
+  std::atomic_store_explicit(
+      &global_memory_reporter, std::move(reporter), std::memory_order_release);
+}
+
 void SetAllocator(at::DeviceType t, at::Allocator* alloc, uint8_t priority) {
   if (priority >= allocator_priority[static_cast<int>(t)]) {
     allocator_array[static_cast<int>(t)] = alloc;
@@ -60,7 +76,11 @@ at::Allocator* GetAllocator(const at::DeviceType& t) {
 bool memoryProfilingEnabled() {
   auto* reporter_ptr = static_cast<MemoryReportingInfoBase*>(
       ThreadLocalDebugInfo::get(DebugInfoKind::PROFILER_STATE));
-  return reporter_ptr && reporter_ptr->memoryProfilingEnabled();
+  if (reporter_ptr) {
+    return reporter_ptr->memoryProfilingEnabled();
+  }
+  auto global_reporter = getGlobalMemoryReportingInfo();
+  return global_reporter && global_reporter->memoryProfilingEnabled();
 }
 
 void reportMemoryUsageToProfiler(
@@ -74,6 +94,9 @@ void reportMemoryUsageToProfiler(
   if (reporter_ptr) {
     reporter_ptr->reportMemoryUsage(
         ptr, alloc_size, total_allocated, total_reserved, device);
+  } else if (auto global_reporter = getGlobalMemoryReportingInfo()) {
+    global_reporter->reportMemoryUsage(
+        ptr, alloc_size, total_allocated, total_reserved, device);
   }
 }
 
@@ -86,6 +109,9 @@ void reportOutOfMemoryToProfiler(
       ThreadLocalDebugInfo::get(DebugInfoKind::PROFILER_STATE));
   if (reporter_ptr) {
     reporter_ptr->reportOutOfMemory(
+        alloc_size, total_allocated, total_reserved, device);
+  } else if (auto global_reporter = getGlobalMemoryReportingInfo()) {
+    global_reporter->reportOutOfMemory(
         alloc_size, total_allocated, total_reserved, device);
   }
 }

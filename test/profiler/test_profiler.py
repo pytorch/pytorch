@@ -2897,6 +2897,65 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
             verify_events(events)
 
     @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_profile_all_threads_with_memory(self):
+        allocations = []
+
+        def allocate():
+            allocations.append(torch.empty(1_000_003, dtype=torch.float32))
+
+        experimental_config = torch._C._profiler._ExperimentalConfig(
+            profile_all_threads=True
+        )
+        with torch.profiler.profile(
+            activities=[torch.profiler.ProfilerActivity.CPU],
+            profile_memory=True,
+            experimental_config=experimental_config,
+        ) as prof:
+            allocate()
+            thread = threading.Thread(target=allocate)
+            thread.start()
+            thread.join()
+
+        allocation_size = 1_000_003 * torch.float32.itemsize
+        empty_events = [
+            event
+            for event in prof.events()
+            if event.name == "aten::empty"
+            and event.cpu_memory_usage == allocation_size
+        ]
+        self.assertEqual(len(empty_events), 2)
+        self.assertEqual(len({event.thread for event in empty_events}), 2)
+
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_profile_all_threads_with_memory_during_stop(self):
+        worker_started = threading.Event()
+        stop_worker = threading.Event()
+
+        def allocate_until_stopped():
+            worker_started.set()
+            while not stop_worker.is_set():
+                torch.empty(1024, dtype=torch.float32)
+
+        experimental_config = torch._C._profiler._ExperimentalConfig(
+            profile_all_threads=True
+        )
+        worker = None
+        try:
+            with torch.profiler.profile(
+                activities=[torch.profiler.ProfilerActivity.CPU],
+                profile_memory=True,
+                experimental_config=experimental_config,
+            ):
+                worker = threading.Thread(target=allocate_until_stopped)
+                worker.start()
+                self.assertTrue(worker_started.wait(timeout=10))
+        finally:
+            stop_worker.set()
+            if worker is not None:
+                worker.join(timeout=10)
+                self.assertFalse(worker.is_alive())
+
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_profiler(self, device):
         """Basic test for torch.profiler.profile API."""
         device_type = device.split(":")[0]
