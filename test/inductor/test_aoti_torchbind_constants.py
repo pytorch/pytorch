@@ -1,21 +1,13 @@
 # Owner(s): ["module: inductor"]
 
+import unittest
+
 import torch
-from torch._dynamo.device_interface import get_interface_for_device
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import HardwareClassification, run_tests
+from torch.testing._internal.inductor_utils import HAS_TRITON
 from torch.testing._internal.torchbind_impls import init_torchbind_implementations
-from torch.utils._triton import has_triton_package
-
-
-def _ensure_triton(test_case, device):
-    if not has_triton_package():
-        test_case.skipTest("requires triton")
-    torch_device = torch.device(device)
-    get_interface_for_device(torch_device.type).raise_if_triton_unavailable(
-        torch_device
-    )
 
 
 class _TorchbindAOTIHelpers:
@@ -138,13 +130,10 @@ class TestTorchbindAOTI(_TorchbindAOTIHelpers, TestCase):
     hw_classification = HardwareClassification.CPU
 
 
+@unittest.skipUnless(HAS_TRITON, "requires triton")
 @_expose_mixin_tests
 class TestTorchbindAOTIAccelerator(_TorchbindAOTIHelpers, TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
-
-    def setUp(self):
-        super().setUp()
-        _ensure_triton(self, self.get_primary_device())
 
 
 instantiate_device_type_tests(TestTorchbindAOTI, globals(), only_for="cpu")
