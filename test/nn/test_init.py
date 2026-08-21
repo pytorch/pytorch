@@ -11,6 +11,7 @@ import torch.nn.functional as F
 import torch.nn.init as init
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     parametrize as parametrize_test,
     run_tests,
     skipIfNoLapack,
@@ -46,6 +47,8 @@ ALL_INIT_FNS = [
 
 
 class TestNNInit(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         random.seed(123)
@@ -571,6 +574,8 @@ class TestNNInit(TestCase):
 
 
 class TestNNInitDeviceType(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @torch._dynamo.disable
     def _is_trunc_normal(self, tensor, mean, std, a, b):
         z_samples = (tensor.view(-1) - mean) / std

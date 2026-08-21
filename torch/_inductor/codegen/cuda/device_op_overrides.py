@@ -4,6 +4,7 @@ import torch
 
 from ...runtime.hints import get_warp_size
 from ..common import (
+    DeviceIdx,
     DeviceOpOverrides,
     register_device_op_overrides,
     TritonScratchWorkspace,
@@ -18,14 +19,17 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
     def import_get_raw_stream_as(self, name: str) -> str:
         return f"from torch._C import _cuda_getCurrentRawStream as {name}"
 
-    def set_device(self, device_idx: int) -> str:
+    def set_device(self, device_idx: DeviceIdx) -> str:
         return f"torch.cuda.set_device({device_idx})"
 
     def synchronize(self) -> str:
         return "torch.cuda.synchronize()"
 
-    def device_guard(self, device_idx: int) -> str:
+    def device_guard(self, device_idx: DeviceIdx) -> str:
         return f"torch.cuda._DeviceGuard({device_idx})"
+
+    def current_device_idx_expr(self) -> str:
+        return "torch.cuda.current_device()"
 
     def current_stream(self) -> str:
         return "torch.cuda.current_stream()"
