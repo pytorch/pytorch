@@ -164,6 +164,8 @@ def _sanitize_kernel_name(name: str) -> str:
     name = non_word_char_regex.sub("_", name)
     return name
 
+
+
 def _emit_triton_kernel_compile_metric(
     kernel: CachingAutotuner,
     kernel_name: str,
