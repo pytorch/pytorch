@@ -137,8 +137,6 @@ if HAS_GPU:
 
     # Module-level NamedTuple + kernel for #192288 (avoid local classes so FX
     # graph cache can pickle the cache key).
-    from typing import NamedTuple
-
     class MatrixStrides(NamedTuple):
         batch: int
         token: int
@@ -252,13 +250,9 @@ class KernelTests(torch._inductor.test_case.TestCase):
         # Triton module must define those types so triton_meta={...!r} can eval.
         # See https://github.com/pytorch/pytorch/issues/192288
         import pickle
-        from typing import NamedTuple
 
         from torch._inductor.codegen.wrapper import codegen_namedtuple_defs
         from torch._inductor.runtime.namedtuple_helpers import namedtuple_type
-        from torch._inductor.runtime.triton_heuristics import (
-            _add_namedtuple_types_to_scope,
-        )
 
         class LocalStrides(NamedTuple):
             batch: int
@@ -352,7 +346,21 @@ class KernelTests(torch._inductor.test_case.TestCase):
         self.assertNotIn("from test.", module_defs)
         self.assertNotIn("import ModuleLevelStrides", module_defs)
 
-        # Launcher scope helper binds Nested field types too.
+    def test_add_namedtuple_types_to_launcher_scope(self):
+        # Heuristics inlines constexprs via repr; Nested field types must be bound.
+        from torch._inductor.runtime.triton_heuristics import (
+            _add_namedtuple_types_to_scope,
+        )
+
+        class LocalStrides(NamedTuple):
+            batch: int
+            token: int
+
+        class Nested(NamedTuple):
+            outer: int
+            strides: LocalStrides
+
+        strides = LocalStrides(batch=8, token=1)
         scope: dict = {}
         _add_namedtuple_types_to_scope({"X": Nested(outer=2, strides=strides)}, scope)
         self.assertIs(scope["Nested"], Nested)
@@ -459,14 +467,11 @@ class KernelTests(torch._inductor.test_case.TestCase):
             compiled = torch.compile(copy_first_row, fullgraph=True)
             compiled_result, (code,) = run_and_get_code(compiled, x)
             self.assertEqual(compiled_result, expected)
-            self.assertTrue(
-                self._kernel_launched_in_code("copy_first_row_namedtuple_kernel", code)
-                or "copy_first_row_namedtuple_kernel" in code
-            )
+            kernel_name = "copy_first_row_namedtuple_kernel_0"
+            self.assertTrue(self._kernel_launched_in_code(kernel_name, code))
             # Python wrapper embeds triton_meta via !r (also present under
             # cpp_wrapper in the Python compile path). Reconstruct via the
             # pickle-safe helper, never via a user-module import.
-            self.assertIn("namedtuple_type", code)
             self.assertIn("MatrixStrides = namedtuple_type", code)
             self.assertNotIn("from test.", code)
 

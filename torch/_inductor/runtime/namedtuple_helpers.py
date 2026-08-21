@@ -9,6 +9,11 @@ returns the kernel (``TORCHINDUCTOR_WORKER_START=fork``).
 Types constructed here are registered on this importable module and reduce
 via ``namedtuple_type``, so they survive worker pickle and remote-cache
 reloads without importing the user's defining module.
+
+Generated modules import this helper by path
+(``from torch._inductor.runtime.namedtuple_helpers import namedtuple_type``)
+and call ``namedtuple_type(name, fields)``. Renaming the module or changing
+that signature is a cache compatibility break for already-generated sources.
 """
 
 from __future__ import annotations

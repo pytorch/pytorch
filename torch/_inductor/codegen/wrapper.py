@@ -383,7 +383,7 @@ def _collect_namedtuple_types(
     return result
 
 
-def codegen_namedtuple_defs(constants: dict[str, Any] | Any) -> str:
+def codegen_namedtuple_defs(constants: dict[str, Any]) -> str:
     """Emit NamedTuple defs so ``repr`` of constexpr constants can eval.
 
     Always reconstructs via ``namedtuple_helpers.namedtuple_type`` (never
@@ -391,14 +391,10 @@ def codegen_namedtuple_defs(constants: dict[str, Any] | Any) -> str:
     reloaded on another machine, and classes defined in
     ``compile_tasks.<hash>`` are not pickle-safe across compile workers.
     """
-    # Accept either the constants dict or a single value for unit tests.
-    if isinstance(constants, dict):
-        types: list[type] = []
-        seen: OrderedSet[type] = OrderedSet()
-        for value in constants.values():
-            types.extend(_collect_namedtuple_types(value, seen))
-    else:
-        types = _collect_namedtuple_types(constants)
+    types: list[type] = []
+    seen: OrderedSet[type] = OrderedSet()
+    for value in constants.values():
+        types.extend(_collect_namedtuple_types(value, seen))
 
     if not types:
         return ""
