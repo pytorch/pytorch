@@ -25,7 +25,16 @@ from ..codegen.cutlass.gemm_template import CUTLASS2xGemmTemplate, CUTLASS3xGemm
 from ..codegen.rocm.ck_tile_universal_gemm_template import CKTileGemmTemplate
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from ..codegen.subgraph import SubgraphChoiceCaller, SubgraphTemplate
-from ..ir import Buffer, ChoiceCaller, is_triton, Layout
+from ..ir import (
+    Buffer,
+    ChoiceCaller,
+    FixedLayout,
+    is_triton,
+    Layout,
+    PermuteView,
+    ReinterpretView,
+    SliceView,
+)
 from ..kernel_inputs import MMKernelInputs
 from ..lowering import (
     fallback_handler,
@@ -391,7 +400,7 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
         mat1, mat2, layout=layout, out_dtype=out_dtype
     )
 
-    if out_dtype is None and _use_small_mm_pointwise(m, k, n, layout.device.type):
+    if out_dtype is None and _use_small_mm_pointwise(m, k, n, layout):
         counters["inductor"]["decompose_mm_pointwise"] += 1
         mat1 = L.unsqueeze(mat1, -1)
         mat2 = L.unsqueeze(mat2, 0)
@@ -443,7 +452,7 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
         # Triton will ever win.
         #
         # To be conservative we increase this threshold for N/M by 2.
-        is_exhaustive = inductor_config.max_autotune_gemm_search_space == "EXHAUSTIVE"
+        is_exhaustive = inductor_config.max_autotune_gemm_search_space == "exhaustive"
         if is_exhaustive or not use_decompose_k_choice(m, n, k, threshold_multiple=2):
             templates_to_use.append(mm_template)
 
@@ -904,13 +913,13 @@ def _is_blockwise128x128_scaling(
     k_blocks_padded = ceildiv(k_blocks, 4) * 4
     sizevars = V.graph.sizevars
     # Case 1: Triton layout [out_blocks, k_blocks]
-    triton_out_ok = sizevars.statically_known_equals(sz[0], out_blocks)
-    triton_k_ok = sizevars.statically_known_equals(sz[1], k_blocks)
-    triton_ok = triton_out_ok and triton_k_ok
+    triton_ok = sizevars.statically_known_equals(
+        sz[0], out_blocks
+    ) and sizevars.statically_known_equals(sz[1], k_blocks)
     # Case 2: cuBLAS transposed layout [k_blocks_padded_to_4, out_blocks]
-    cublas_out_ok = sizevars.statically_known_equals(sz[1], out_blocks)
-    cublas_k_ok = sizevars.statically_known_equals(sz[0], k_blocks_padded)
-    cublas_ok = cublas_out_ok and cublas_k_ok
+    cublas_ok = sizevars.statically_known_equals(
+        sz[0], k_blocks_padded
+    ) and sizevars.statically_known_equals(sz[1], out_blocks)
     return triton_ok or cublas_ok
 
 
@@ -950,6 +959,50 @@ def _uses_cublas_blockwise128x128_layout(
     return sizevars.statically_known_equals(
         scale_stride[0], 1
     ) and sizevars.statically_known_equals(scale_stride[1], k_blocks_padded)
+
+
+def _normalize_blockwise_scale(
+    scale: Any,
+    mat: Any,
+    scale_option: ScalingType,
+    transpose: bool = False,
+) -> Any:
+    # Convert cuBLAS blockwise scale layouts to the layout the Triton template
+    # expects, so the template stays backend-agnostic.
+    #
+    # For BlockWise128x128, cuBLAS produces [k_blocks_padded_to_4, out_blocks]
+    # while Triton expects [out_blocks, k_blocks]. We transpose and strip the
+    # K-dim padding. BlockWise1x128 already matches Triton's layout.
+    if not _uses_cublas_blockwise128x128_layout(scale, mat, scale_option, transpose):
+        return scale
+
+    tensor_sz = mat.get_size()
+    if transpose:
+        out_blocks = ceildiv(tensor_sz[1], 128)
+        k_blocks = ceildiv(tensor_sz[0], 128)
+    else:
+        out_blocks = ceildiv(tensor_sz[0], 128)
+        k_blocks = ceildiv(tensor_sz[1], 128)
+
+    # cuBLAS layout: shape [k_blocks_padded, out_blocks], strides (1, k_blocks_padded).
+    # Triton layout: shape [out_blocks, k_blocks], strides (k_blocks_padded, 1).
+    # PermuteView.create returns a ReinterpretView with the transposed layout.
+    transposed = PermuteView.create(scale, (1, 0))
+    if isinstance(transposed, ReinterpretView):
+        # transposed: shape [out_blocks, k_blocks_padded], strides (k_blocks_padded, 1).
+        # Reinterpret as [out_blocks, k_blocks] to drop the K padding without copying.
+        old_layout = transposed.get_layout()
+        new_layout = FixedLayout(
+            old_layout.device,
+            old_layout.dtype,
+            [out_blocks, k_blocks],
+            list(old_layout.stride),
+            old_layout.offset,
+            old_layout.is_pinned,
+        )
+        return ReinterpretView(data=transposed.data, layout=new_layout)
+    # Fallback for non-storage inputs (e.g. dynamic shapes): use SliceView.
+    return SliceView.create_with_size(transposed, dim=1, start=0, size=k_blocks, step=1)
 
 
 def is_desired_scaling(
@@ -1097,20 +1150,14 @@ def tuned_scaled_mm_v2(
     name = "scaled_mm"
     check_supported_striding(mat_a, mat_b)
 
+    scale_a_real, scale_b_real = realize_inputs(scale_a[0], scale_b[0])
+
     # Note: No NVFP4 support at this point - can ignore swizzling, and take only the
     #       first scale types passed.
     scale_option_a, scale_option_b = (
         ScalingType(recipe_a[0]),
         ScalingType(recipe_b[0]),
     )
-    scale_a_uses_cublas_128x128_layout = _uses_cublas_blockwise128x128_layout(
-        scale_a[0], mat_a, scale_option_a
-    )
-    scale_b_uses_cublas_128x128_layout = _uses_cublas_blockwise128x128_layout(
-        scale_b[0], mat_b, scale_option_b, transpose=True
-    )
-
-    scale_a_real, scale_b_real = realize_inputs(scale_a[0], scale_b[0])
 
     input_nodes: list[Any]
 
@@ -1149,6 +1196,28 @@ def tuned_scaled_mm_v2(
     ):
         overriders = dict(USE_FAST_ACCUM=use_fast_accum)
 
+        # Normalize blockwise scales to the layout the Triton template expects,
+        # so the template stays backend-agnostic. The aten path (torch._scaled_mm)
+        # keeps the original cuBLAS layout.
+        scale_a_triton = _normalize_blockwise_scale(scale_a_real, mat_a, scale_option_a)
+        scale_b_triton = _normalize_blockwise_scale(
+            scale_b_real, mat_b, scale_option_b, transpose=True
+        )
+
+        if not bias:
+            triton_input_nodes = [mat_a, mat_b, scale_a_triton, scale_b_triton]
+        else:
+            triton_input_nodes = [
+                mat_a,
+                mat_b,
+                scale_a_triton,
+                scale_b_triton,
+                bias_real,
+            ]
+        triton_kernel_inputs = MMKernelInputs(
+            triton_input_nodes, mat1_idx=0, mat2_idx=1, out_dtype=out_dtype
+        )
+
         # TODO (paulzhan): There is no template that exists for bias and TMA
         # Don't run tma template currently if bias exist
         if (
@@ -1168,19 +1237,12 @@ def tuned_scaled_mm_v2(
             elif use_triton_scaling_template(
                 scale_option_a, scale_option_b, main_loop_scaling_types
             ):
-                main_loop_overriders = dict(overriders)
-                main_loop_overriders["TILE_SIZE_A"] = get_tile_size(scale_option_a)
-                main_loop_overriders["TILE_SIZE_B"] = get_tile_size(scale_option_b)
-                main_loop_overriders["SCALE_A_128X128_USES_CUBLAS_LAYOUT"] = (
-                    scale_a_uses_cublas_128x128_layout
-                )
-                main_loop_overriders["SCALE_B_128X128_USES_CUBLAS_LAYOUT"] = (
-                    scale_b_uses_cublas_128x128_layout
-                )
+                overriders["TILE_SIZE_A"] = get_tile_size(scale_option_a)
+                overriders["TILE_SIZE_B"] = get_tile_size(scale_option_b)
 
                 templates_to_use.append(scaled_mm_device_tma_main_loop_scaling_template)
                 kwarg_overrides[scaled_mm_device_tma_main_loop_scaling_template.uid] = (
-                    main_loop_overriders
+                    overriders
                 )
             else:
                 raise AssertionError(
@@ -1204,6 +1266,19 @@ def tuned_scaled_mm_v2(
         ):
             templates_to_use.append(mm_template)
             kwarg_overrides[mm_template.uid] = overriders
+
+        # Triton templates use normalized scales; aten keeps the original layout.
+        triton_templates = [t for t in templates_to_use if t is not aten__fp8_mm]
+        if triton_templates:
+            choices.extend(
+                V.choices.get_template_configs(
+                    triton_kernel_inputs,
+                    triton_templates,
+                    name,
+                    kwarg_overrides=kwarg_overrides,
+                )
+            )
+        templates_to_use = [aten__fp8_mm] if use_aten_gemm_kernels() else []
 
     # Single unified call for all templates
     choices.extend(
@@ -1332,11 +1407,27 @@ def tuned_scaled_mm(
         scale_option_a, scale_option_b = get_scaling_options(
             mat_a, mat_b, scale_a_size, scale_b_size
         )
-        scale_a_uses_cublas_128x128_layout = _uses_cublas_blockwise128x128_layout(
-            scale_a, mat_a, scale_option_a
+
+        # Normalize blockwise scales to the layout the Triton template expects,
+        # so the template stays backend-agnostic. The aten path (torch._scaled_mm)
+        # keeps the original cuBLAS layout.
+        scale_a_triton = _normalize_blockwise_scale(scale_a_real, mat_a, scale_option_a)
+        scale_b_triton = _normalize_blockwise_scale(
+            scale_b_real, mat_b, scale_option_b, transpose=True
         )
-        scale_b_uses_cublas_128x128_layout = _uses_cublas_blockwise128x128_layout(
-            scale_b, mat_b, scale_option_b, transpose=True
+
+        if not bias:
+            triton_input_nodes = [mat_a, mat_b, scale_a_triton, scale_b_triton]
+        else:
+            triton_input_nodes = [
+                mat_a,
+                mat_b,
+                scale_a_triton,
+                scale_b_triton,
+                bias_real,
+            ]
+        triton_kernel_inputs = MMKernelInputs(
+            triton_input_nodes, mat1_idx=0, mat2_idx=1, out_dtype=out_dtype
         )
 
         # TODO (paulzhan): There is no template that exists for bias and TMA
@@ -1358,19 +1449,12 @@ def tuned_scaled_mm(
             elif use_triton_scaling_template(
                 scale_option_a, scale_option_b, main_loop_scaling_types
             ):
-                main_loop_overriders = dict(overriders)
-                main_loop_overriders["TILE_SIZE_A"] = get_tile_size(scale_option_a)
-                main_loop_overriders["TILE_SIZE_B"] = get_tile_size(scale_option_b)
-                main_loop_overriders["SCALE_A_128X128_USES_CUBLAS_LAYOUT"] = (
-                    scale_a_uses_cublas_128x128_layout
-                )
-                main_loop_overriders["SCALE_B_128X128_USES_CUBLAS_LAYOUT"] = (
-                    scale_b_uses_cublas_128x128_layout
-                )
+                overriders["TILE_SIZE_A"] = get_tile_size(scale_option_a)
+                overriders["TILE_SIZE_B"] = get_tile_size(scale_option_b)
 
                 templates_to_use.append(scaled_mm_device_tma_main_loop_scaling_template)
                 kwarg_overrides[scaled_mm_device_tma_main_loop_scaling_template.uid] = (
-                    main_loop_overriders
+                    overriders
                 )
             else:
                 raise AssertionError(
@@ -1394,6 +1478,19 @@ def tuned_scaled_mm(
         ):
             templates_to_use.append(mm_template)
             kwarg_overrides[mm_template.uid] = overriders
+
+        # Triton templates use normalized scales; aten keeps the original layout.
+        triton_templates = [t for t in templates_to_use if t is not aten__fp8_mm]
+        if triton_templates:
+            choices.extend(
+                V.choices.get_template_configs(
+                    triton_kernel_inputs,
+                    triton_templates,
+                    name,
+                    kwarg_overrides=kwarg_overrides,
+                )
+            )
+        templates_to_use = [aten__fp8_mm] if use_aten_gemm_kernels() else []
 
     # Single unified call for all templates
     choices.extend(
