@@ -31,10 +31,17 @@ from torch._library.opaque_object import (
     MemberType,
     register_custom_class,
 )
-from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON, HAS_GPU
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
+)
+from torch.testing._internal.common_utils import HardwareClassification
+from torch.utils._triton import has_triton
 
 
 class GetItemTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _compile(self, fn, *args):
         return torch.compile(fn, backend="eager", fullgraph=True)(*args)
 
@@ -777,25 +784,6 @@ class GetItemTests(torch._dynamo.test_case.TestCase):
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x, c), compiled(x, c))
 
-    # --- TritonKernelVariable ---
-
-    @unittest.skipUnless(HAS_GPU and HAS_CUDA_AND_TRITON, "requires gpu and triton")
-    def test_triton_kernel_getitem_grid(self):
-        from torch.testing._internal.triton_utils import add_kernel
-
-        def fn(x, y):
-            output = torch.zeros_like(x)
-            n_elements = output.numel()
-            grid = (n_elements // 256,)
-            bound = operator.getitem(add_kernel, grid)
-            bound(x, y, output, n_elements, BLOCK_SIZE=256)
-            return output
-
-        x = torch.randn(256, device="cuda")
-        y = torch.randn(256, device="cuda")
-        compiled = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertEqual(fn(x, y), compiled(x, y))
-
     # ===================================================================
     # CPython behavioral gaps — expectedFailure until implemented
     # ===================================================================
@@ -1389,6 +1377,8 @@ class SetDelItemTests(torch._dynamo.test_case.TestCase):
     """Tests for call_setitem / call_delitem: operator.setitem / operator.delitem
     dispatch (also the STORE_SUBSCR / DELETE_SUBSCR bytecode paths)."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def _compile(self, fn, *args):
         return torch.compile(fn, backend="eager", fullgraph=True)(*args)
 
@@ -1469,6 +1459,31 @@ class SetDelItemTests(torch._dynamo.test_case.TestCase):
 
         result = self._compile(fn, torch.zeros(1))
         self.assertIn("cannot delete array elements", result)
+
+
+class GetItemAcceleratorTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @unittest.skipUnless(has_triton(), "Triton not available")
+    @onlyAccelerator
+    def test_triton_kernel_getitem_grid(self, device):
+        from torch.testing._internal.triton_utils import add_kernel
+
+        def fn(x, y):
+            output = torch.zeros_like(x)
+            n_elements = output.numel()
+            grid = (n_elements // 256,)
+            bound = operator.getitem(add_kernel, grid)
+            bound(x, y, output, n_elements, BLOCK_SIZE=256)
+            return output
+
+        x = torch.randn(256, device=device)
+        y = torch.randn(256, device=device)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x, y), compiled(x, y))
+
+
+instantiate_device_type_tests(GetItemAcceleratorTests, globals())
 
 
 if __name__ == "__main__":
