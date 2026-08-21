@@ -2,10 +2,36 @@
 
 import torch
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
 
 
 class SymmetricMMTest(TestCase):
+    @parametrize("shape", [(4096, 4096), (5120, 8192)])
+    @parametrize("dtype", [torch.bfloat16, torch.float16])
+    def test_quack_symmetric_mm(self, device, shape, dtype):
+        if torch.cuda.get_device_capability(device)[0] not in (10, 11):
+            self.skipTest("requires SM100 or SM110")
+
+        def fn(x):
+            return x @ x.T
+
+        from torch._vendor.quack.gemm_symmetric import _AUTOTUNE_CACHE
+
+        x = torch.randn(shape, device=device, dtype=dtype)
+        _AUTOTUNE_CACHE.clear()
+        torch._dynamo.reset()
+        compiled = torch.compile(fn, fullgraph=True)
+        stream = torch.cuda.Stream(device=device)
+        with torch.cuda.stream(stream):
+            actual = compiled(x)
+            expected = fn(x)
+        stream.synchronize()
+        self.assertTrue(
+            any(key[2:5] == (shape[0], shape[1], 1) for key in _AUTOTUNE_CACHE)
+        )
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual, actual.T)
+
     def test_quack_grouped_symmetric_mm(self, device):
         if torch.cuda.get_device_capability(device)[0] not in (10, 11):
             self.skipTest("requires SM100 or SM110")
