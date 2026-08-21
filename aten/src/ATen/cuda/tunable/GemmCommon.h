@@ -15,6 +15,7 @@
 #include <ATen/cuda/tunable/TunableOp.h>
 #include <ATen/cuda/tunable/Tunable.h>
 #include <ATen/cuda/CUDABlas.h>
+#include <ATen/cuda/detail/CublasLtUtils.h>
 #include <ATen/cuda/Exceptions.h>
 #include <c10/util/StringUtil.h>
 
@@ -166,9 +167,13 @@ template <>
 inline std::string ComputeTypeFor<float>() {
   if (at::globalContext().float32Precision(at::Float32Backend::CUDA, at::Float32Op::MATMUL) != at::Float32Precision::TF32) {
     return "f32_r";
-  } else {
-    return "xf32_r";
   }
+#ifdef USE_ROCM
+  if (!at::cuda::blas::detail::allowHipblasLtTF32Compute()) {
+    return "f32_r";
+  }
+#endif
+  return "xf32_r";
 }
 
 template <>
