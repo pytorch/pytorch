@@ -114,6 +114,7 @@ from .base import (
     ValueMutationNew,
     VariableTracker,
 )
+from .constant import ConstantVariable
 from .dicts import ConstDictVariable, OrderedDictVariable, pydict_check
 from .exception import ExceptionVariable
 from .hashable import HashableTracker
@@ -183,7 +184,6 @@ def _safe_c_tp_hash_funcs() -> OrderedSet[object]:
 if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
-    from torch._dynamo.variables.constant import ConstantVariable
 
 
 def is_standard_setattr(val: object) -> bool:
@@ -4461,7 +4461,7 @@ _constant_base_methods: dict[type, set[Any]] = {
 }
 
 
-class UserDefinedConstantVariable(UserDefinedObjectVariable):
+class UserDefinedConstantVariable(UserDefinedObjectVariable, ConstantVariable):
     """
     Represents user-defined objects that subclass immutable constant types
     (int, float, str).
@@ -4469,17 +4469,13 @@ class UserDefinedConstantVariable(UserDefinedObjectVariable):
     Uses a ConstantVariable as _base_vt for the underlying constant value.
     """
 
-    def __init__(self, value: object, **kwargs: Any) -> None:
-        from .constant import ConstantVariable
-
+    def __init__(self, value: Any, **kwargs: Any) -> None:
         super().__init__(value, **kwargs)
         for base in type(value).__mro__:
             if base in _CONSTANT_BASE_TYPES:
-                self._base_vt = ConstantVariable.create(base(value))
+                self._constant_base = base
                 self._base_methods = _constant_base_methods[base]
                 break
-        if self._base_vt is None:
-            raise AssertionError(f"No constant base type found in MRO of {type(value)}")
 
     def as_python_constant(self) -> Any:
         return self.value
@@ -4488,6 +4484,10 @@ class UserDefinedConstantVariable(UserDefinedObjectVariable):
         if self._base_vt is None:
             raise AssertionError("_base_vt must not be None in as_proxy")
         return self._base_vt.as_proxy()
+
+    @property
+    def _base_vt(self) -> VariableTracker:  # type: ignore[bad-override]
+        return ConstantVariable.create(self._constant_base(self.value))
 
 
 class IntWrapperVariable(UserDefinedObjectVariable):
