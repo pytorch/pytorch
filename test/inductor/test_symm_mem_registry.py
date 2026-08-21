@@ -357,7 +357,8 @@ class TestFunctionalOpCompileDevice(TestCase):
     @requires_capabilities(Capability.lib.triton)
     def test_functional_op_compiles_with_symm_mem_args(self, device):
         """Test that a functional op with registered symm_mem_args compiles and runs."""
-        lib = Library("test_func_symm", "DEF")  # noqa: SCOPED_LIBRARY
+        ns = f"test_func_symm_{device.replace(':', '_')}"
+        lib = Library(ns, "DEF")  # noqa: SCOPED_LIBRARY
         lib.define("my_functional_op(Tensor input, str group_name) -> Tensor")
         lib.register_symm_mem_args("my_functional_op", ["input"])
 
@@ -370,23 +371,23 @@ class TestFunctionalOpCompileDevice(TestCase):
             return input + 1.0
 
         def f_eager(x):
-            return torch.ops.test_func_symm.my_functional_op(x, "test_group")
+            return getattr(torch.ops, ns).my_functional_op(x, "test_group")
 
         @torch.compile(backend="inductor", fullgraph=True)
         def f_compiled(x):
-            return torch.ops.test_func_symm.my_functional_op(x, "test_group")
+            return getattr(torch.ops, ns).my_functional_op(x, "test_group")
 
         x = torch.randn(4, 4, device=device)
 
         eager_result = f_eager(x.clone())
         compiled_result = f_compiled(x.clone())
-        self.assertEqual(compiled_result, eager_result)
+        torch.testing.assert_close(compiled_result, eager_result)
 
         expected = x + 1.0
-        self.assertEqual(compiled_result, expected)
+        torch.testing.assert_close(compiled_result, expected)
 
         # Verify the registration is visible in the registry
-        entry = singleton.find("test_func_symm::my_functional_op")
+        entry = singleton.find(f"{ns}::my_functional_op")
         self.assertTrue(entry.symm_mem_args.is_registered())
         self.assertTrue(entry.symm_mem_args.is_symm_mem_arg("input"))
         self.assertFalse(entry.symm_mem_args.is_symm_mem_arg("group_name"))
@@ -394,7 +395,8 @@ class TestFunctionalOpCompileDevice(TestCase):
     @requires_capabilities(Capability.lib.triton)
     def test_functional_op_with_multiple_symm_mem_args(self, device):
         """Test that multiple symm_mem args are registered and visible during compilation."""
-        lib = Library("test_func_multi", "DEF")  # noqa: SCOPED_LIBRARY
+        ns = f"test_func_multi_{device.replace(':', '_')}"
+        lib = Library(ns, "DEF")  # noqa: SCOPED_LIBRARY
         lib.define(
             "my_multi_arg_op(Tensor input, Tensor out, str group_name) -> Tensor"
         )
@@ -410,24 +412,24 @@ class TestFunctionalOpCompileDevice(TestCase):
             return input + out
 
         def f_eager(x, y):
-            return torch.ops.test_func_multi.my_multi_arg_op(x, y, "test_group")
+            return getattr(torch.ops, ns).my_multi_arg_op(x, y, "test_group")
 
         @torch.compile(backend="inductor", fullgraph=True)
         def f_compiled(x, y):
-            return torch.ops.test_func_multi.my_multi_arg_op(x, y, "test_group")
+            return getattr(torch.ops, ns).my_multi_arg_op(x, y, "test_group")
 
         x = torch.randn(4, 4, device=device)
         y = torch.randn(4, 4, device=device)
 
         eager_result = f_eager(x.clone(), y.clone())
         compiled_result = f_compiled(x.clone(), y.clone())
-        self.assertEqual(compiled_result, eager_result)
+        torch.testing.assert_close(compiled_result, eager_result)
 
         expected = x + y
-        self.assertEqual(compiled_result, expected)
+        torch.testing.assert_close(compiled_result, expected)
 
         # Verify both args are registered
-        entry = singleton.find("test_func_multi::my_multi_arg_op")
+        entry = singleton.find(f"{ns}::my_multi_arg_op")
         self.assertTrue(entry.symm_mem_args.is_symm_mem_arg("input"))
         self.assertTrue(entry.symm_mem_args.is_symm_mem_arg("out"))
         self.assertFalse(entry.symm_mem_args.is_symm_mem_arg("group_name"))
