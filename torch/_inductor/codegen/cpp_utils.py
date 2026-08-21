@@ -80,14 +80,6 @@ DTYPE_TO_ATEN = {
     torch.float8_e8m0fnu: "at::kFloat8_e8m0fnu",
 }
 
-DEVICE_TO_ATEN = {
-    "meta": "at::kMeta",
-    "cpu": "at::kCPU",
-    "cuda": "at::kCUDA",
-    "xpu": "at::kXPU",
-    "mps": "at::kMPS",
-}
-
 LAYOUT_TO_ATEN = {
     torch.strided: "at::kStrided",
     torch._mkldnn: "at::kMkldnn",  # type: ignore[attr-defined]
@@ -98,8 +90,8 @@ DEVICE_TO_INT = {"cpu": 0, "cuda": 1}
 
 
 def device_to_aten(device_type: str) -> str:
-    if device_type in DEVICE_TO_ATEN:
-        return DEVICE_TO_ATEN[device_type]
+    if device_type == "meta":
+        return "at::kMeta"
 
     from .common import get_device_op_overrides
 
