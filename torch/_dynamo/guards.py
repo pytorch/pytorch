@@ -5243,6 +5243,12 @@ class CheckFunctionManager:
                         obj_weakref=None,
                         guarded_class_weakref=None,
                         create_fn=normalize_create_fn(guard.create_fn),
+                        # Export bookkeeping, repopulated by create_fn at load.
+                        # set_export_info EXTENDS these on every guard build and
+                        # CheckFunctionManager builds up to three times, so the
+                        # artifact otherwise ships each code part several times over.
+                        guard_types=None,
+                        code_list=None,
                     )
                     for guard in sorted_guards
                 )
