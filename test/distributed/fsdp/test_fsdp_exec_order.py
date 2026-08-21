@@ -6,9 +6,9 @@ from contextlib import nullcontext
 
 import torch
 from torch import distributed as dist
+from torch._utils import _get_device_module
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.fully_sharded_data_parallel import ShardingStrategy
-from torch._utils import _get_device_module
 from torch.testing._internal.common_device_type import (
     Capability,
     instantiate_device_type_tests,
@@ -22,6 +22,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
 )
+
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
