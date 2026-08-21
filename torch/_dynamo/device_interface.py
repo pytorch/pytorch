@@ -178,6 +178,21 @@ class DeviceInterface:
                 "This device is not capable of supporting Triton"
             )
 
+    @classmethod
+    def is_graph_capture_supported(cls, device: torch.types.Device = None) -> bool:
+        """
+        Returns True if the device supports CUDA-graph-style graph capture.
+
+        This capability bit gates the cudagraph eligibility checks in Inductor
+        and the standalone dynamo "cudagraphs" backend. It is necessary but
+        not sufficient: the capture path itself must also support the device
+        (today the in-tree capture code is still CUDA-specific, so declaring
+        True only makes a backend eligible, it does not make capture work).
+        Defaults to False so that backends which have not been adapted for
+        graph capture are safely skipped.
+        """
+        return False
+
 
 class DeviceGuard:
     """
@@ -304,6 +319,12 @@ class CudaInterface(DeviceInterface):
                 raise TritonUnavailableError("triton not built with the 'amd' backend")
         elif "nvidia" not in triton.backends.backends:
             raise TritonUnavailableError("triton not built with the 'nvidia' backend")
+
+    @classmethod
+    def is_graph_capture_supported(cls, device: torch.types.Device = None) -> bool:
+        # CUDA implements graph capture through its own torch.cuda.CUDAGraph
+        # path, so the capability is declared unconditionally here.
+        return True
 
 
 get_mtia_stream: Callable[[int], int] | None
