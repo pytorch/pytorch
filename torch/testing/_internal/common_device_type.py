@@ -343,11 +343,6 @@ class Capability:
         fp8 = "dtype.fp8"
         bf16 = "dtype.bf16"
 
-    class lib:
-        """Third-party library capabilities (triton, etc.)."""
-
-        triton = "lib.triton"
-
     class attention:
         """Attention backend capabilities."""
 
@@ -795,12 +790,9 @@ class CPUTestBase(DeviceTypeTestBase):
 
     @classmethod
     def _capabilities(cls):
-        from torch.utils._triton import has_triton
-
         return {
             Capability.dtype.fp8: lambda: True,
             Capability.dtype.bf16: lambda: True,
-            Capability.lib.triton: lambda: has_triton(),
             Capability.attention.flash_attention: lambda: True,
             Capability.attention.mem_efficient_attention: lambda: False,
             Capability.attention.flex_attention: lambda: (
@@ -835,7 +827,6 @@ class CUDATestBase(DeviceTypeTestBase):
         return {
             Capability.dtype.fp8: lambda: PLATFORM_SUPPORTS_FP8,
             Capability.dtype.bf16: lambda: SM80OrLater,
-            Capability.lib.triton: lambda: has_triton(),
             Capability.attention.flash_attention: lambda: (
                 PLATFORM_SUPPORTS_FLASH_ATTENTION
             ),
@@ -926,12 +917,9 @@ class MPSTestBase(DeviceTypeTestBase):
 
     @classmethod
     def _capabilities(cls):
-        from torch.utils._triton import has_triton
-
         return {
             Capability.dtype.fp8: lambda: False,
             Capability.dtype.bf16: lambda: True,
-            Capability.lib.triton: lambda: has_triton(),
             Capability.attention.flash_attention: lambda: False,
             Capability.attention.mem_efficient_attention: lambda: False,
             Capability.attention.flex_attention: lambda: (
@@ -955,7 +943,6 @@ class XPUTestBase(DeviceTypeTestBase):
         return {
             Capability.dtype.fp8: lambda: True,
             Capability.dtype.bf16: lambda: True,
-            Capability.lib.triton: lambda: has_triton(),
             Capability.attention.flash_attention: lambda: (
                 PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU
             ),
