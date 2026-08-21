@@ -205,6 +205,7 @@ from .user_defined import (
     UserDefinedFrozensetVariable,
     UserDefinedListVariable,
     UserDefinedObjectVariable,
+    UserDefinedOrderedDictVariable,
     UserDefinedSetVariable,
     UserDefinedTupleVariable,
     UserDefinedVariable,
