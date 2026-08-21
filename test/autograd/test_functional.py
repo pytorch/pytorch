@@ -6,10 +6,11 @@ import warnings
 
 import torch
 import torch.autograd.functional as autogradF
-from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     gradcheck,
     gradgradcheck,
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -97,7 +98,7 @@ vectorized_logging_tensor = parametrize(
 )
 
 
-class TestAutogradFunctional(TestCase):
+class _TestAutogradFunctionalBase(TestCase):
     def _assert_same_struct(self, res, base):
         # base and res should be Tensors or tuple of Tensors with the same size
         if isinstance(base, torch.Tensor):
@@ -160,6 +161,57 @@ class TestAutogradFunctional(TestCase):
                 "The bases given to `_assert_interleaved_struct` don't have"
                 " the right structure."
             )
+
+    def _test_construct_standard_basis_for(self, inputs):
+        numels = tuple(tensor.numel() for tensor in inputs)
+        results = autogradF._construct_standard_basis_for(inputs, numels)
+        for result, inp in zip(results, inputs):
+            self.assertEqual(result.dtype, inp.dtype)
+            self.assertEqual(result.device, inp.device)
+        results = torch.cat(
+            [result.to(device="cpu", dtype=torch.float) for result in results], dim=1
+        )
+        expected = torch.eye(results[0].shape[0], dtype=torch.float)
+        self.assertEqual(results, expected)
+
+    def _test_vectorize_raises_no_warnings(self, api, ctors):
+        # vmap is an experimental prototype. When someone calls torch.vmap,
+        # it raises a python warning. This test checks that
+        # autogradF.{jacobian, hessian} don't raise that experimental prototype
+        # warning; it is not nice for a public-facing API to raise a warning
+        # no matter how it is called.
+        def foo(a):
+            return (a**2).sum()
+
+        x = ctors.randn(3)
+        with warnings.catch_warnings(record=True) as wa:
+            api(foo, x, vectorize=True)
+        self.assertEqual(len(wa), 0)
+
+    def _check_jacobian_vectorize_correctness(self, f, inputs, test_forward_ad=True):
+        expected = autogradF.jacobian(f, inputs, vectorize=False)
+        result_backward_mode = autogradF.jacobian(f, inputs, vectorize=True)
+        self.assertEqual(result_backward_mode, expected)
+
+        if test_forward_ad:
+            result_forward_mode = autogradF.jacobian(
+                f, inputs, strategy="forward-mode", vectorize=True
+            )
+            self.assertEqual(result_forward_mode, expected)
+
+    def _check_hessian_vectorize_correctness(self, f, inputs):
+        expected = autogradF.hessian(f, inputs, vectorize=False)
+        result = autogradF.hessian(f, inputs, vectorize=True)
+        self.assertEqual(result, expected)
+
+        result_forward_mode = autogradF.hessian(
+            f, inputs, outer_jacobian_strategy="forward-mode", vectorize=True
+        )
+        self.assertEqual(result_forward_mode, expected)
+
+
+class TestAutogradFunctional(_TestAutogradFunctionalBase):
+    hw_classification = HardwareClassification.GENERIC
 
     @base_and_logging_tensor
     def test_vjp_err_check(self, ctors):
@@ -621,18 +673,6 @@ class TestAutogradFunctional(TestCase):
         gradcheck(foo, inputs + v)
         gradgradcheck(foo, inputs + v)
 
-    def _test_construct_standard_basis_for(self, inputs):
-        numels = tuple(tensor.numel() for tensor in inputs)
-        results = autogradF._construct_standard_basis_for(inputs, numels)
-        for result, inp in zip(results, inputs):
-            self.assertEqual(result.dtype, inp.dtype)
-            self.assertEqual(result.device, inp.device)
-        results = torch.cat(
-            [result.to(device="cpu", dtype=torch.float) for result in results], dim=1
-        )
-        expected = torch.eye(results[0].shape[0], dtype=torch.float)
-        self.assertEqual(results, expected)
-
     @base_and_logging_tensor
     def test_construct_standard_basis_for(self, ctors):
         test_cases = [
@@ -648,31 +688,6 @@ class TestAutogradFunctional(TestCase):
 
         for inputs in test_cases:
             self._test_construct_standard_basis_for(inputs)
-
-    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
-    @base_and_logging_tensor
-    def test_construct_standard_basis_for_cuda(self, ctors):
-        test_cases = [
-            (ctors.randn(2), ctors.randn(3, device="cuda")),
-            (ctors.randn(3, device="cuda"), ctors.randn(2)),
-        ]
-
-        for inputs in test_cases:
-            self._test_construct_standard_basis_for(inputs)
-
-    def _test_vectorize_raises_no_warnings(self, api, ctors):
-        # vmap is an experimental prototype. When someone calls torch.vmap,
-        # it raises a python warning. This test checks that
-        # autogradF.{jacobian, hessian} don't raise that experimental prototype
-        # warning; it is not nice for a public-facing API to raise a warning
-        # no matter how it is called.
-        def foo(a):
-            return (a**2).sum()
-
-        x = ctors.randn(3)
-        with warnings.catch_warnings(record=True) as wa:
-            api(foo, x, vectorize=True)
-        self.assertEqual(len(wa), 0)
 
     @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/153707")
     @base_and_logging_tensor
@@ -893,17 +908,6 @@ class TestAutogradFunctional(TestCase):
         gradcheck(foo, inputs)
         gradgradcheck(foo, inputs)
 
-    def _check_jacobian_vectorize_correctness(self, f, inputs, test_forward_ad=True):
-        expected = autogradF.jacobian(f, inputs, vectorize=False)
-        result_backward_mode = autogradF.jacobian(f, inputs, vectorize=True)
-        self.assertEqual(result_backward_mode, expected)
-
-        if test_forward_ad:
-            result_forward_mode = autogradF.jacobian(
-                f, inputs, strategy="forward-mode", vectorize=True
-            )
-            self.assertEqual(result_forward_mode, expected)
-
     @base_and_logging_tensor
     def test_jacobian_vectorize_correctness_simple(self, ctors):
         def f(x):
@@ -964,16 +968,6 @@ class TestAutogradFunctional(TestCase):
         y = ctors.randn(1)
         self._check_jacobian_vectorize_correctness(h, (x, y))
 
-    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
-    @base_and_logging_tensor
-    def test_jacobian_vectorize_correctness_different_devices(self, ctors):
-        def f(x, y):
-            return x * y, (x * y).cuda()
-
-        x = ctors.randn(3)
-        y = ctors.randn(3)
-        self._check_jacobian_vectorize_correctness(f, (x, y))
-
     @base_and_logging_tensor
     def test_jacobian_vectorize_correctness_different_dtype(self, ctors):
         def f(x, y):
@@ -984,16 +978,6 @@ class TestAutogradFunctional(TestCase):
         # The Jacobian computed using forward AD has the dtype of the output
         # but the Jacobian computed with reverse AD has dtype of input
         self._check_jacobian_vectorize_correctness(f, (x, y), test_forward_ad=False)
-
-    def _check_hessian_vectorize_correctness(self, f, inputs):
-        expected = autogradF.hessian(f, inputs, vectorize=False)
-        result = autogradF.hessian(f, inputs, vectorize=True)
-        self.assertEqual(result, expected)
-
-        result_forward_mode = autogradF.hessian(
-            f, inputs, outer_jacobian_strategy="forward-mode", vectorize=True
-        )
-        self.assertEqual(result_forward_mode, expected)
 
     @base_and_logging_tensor
     def test_hessian_vectorize_correctness_simple(self, ctors):
@@ -1741,6 +1725,40 @@ class TestAutogradFunctional(TestCase):
 
 
 instantiate_parametrized_tests(TestAutogradFunctional)
+
+
+class TestAutogradFunctionalDeviceType(_TestAutogradFunctionalBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @base_and_logging_tensor
+    def test_construct_standard_basis_for(self, device, ctors):
+        test_cases = [
+            (ctors.randn(2), ctors.randn(3, device=device)),
+            (ctors.randn(3, device=device), ctors.randn(2)),
+        ]
+
+        for inputs in test_cases:
+            self._test_construct_standard_basis_for(inputs)
+
+    @base_and_logging_tensor
+    def test_jacobian_vectorize_correctness_different_devices(self, device, ctors):
+        def f(x, y):
+            return x * y, (x * y).to(device)
+
+        x = ctors.randn(3)
+        y = ctors.randn(3)
+        expected = autogradF.jacobian(f, (x, y), vectorize=False)
+        result = autogradF.jacobian(f, (x, y), vectorize=True)
+        self.assertEqual(result, expected)
+        result_forward = autogradF.jacobian(
+            f, (x, y), strategy="forward-mode", vectorize=True
+        )
+        self.assertEqual(result_forward, expected)
+
+
+instantiate_device_type_tests(
+    TestAutogradFunctionalDeviceType, globals(), except_for="cpu"
+)
 
 if __name__ == "__main__":
     run_tests()
