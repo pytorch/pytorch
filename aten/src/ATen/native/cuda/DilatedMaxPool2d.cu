@@ -52,10 +52,21 @@ static inline bool can_use_int32_nhwc(
     int64_t nbatch, int64_t channels,
     int64_t height, int64_t width,
     int64_t pooled_height, int64_t pooled_width,
+    int64_t dilation_h, int64_t dilation_w,
     int64_t in_stride_n, int64_t in_stride_c,
     int64_t in_stride_h, int64_t in_stride_w)
 {
   constexpr int64_t int_max = std::numeric_limits<int>::max();
+
+  // The forward kernels form window positions by stepping `dilation` at a time from a
+  // start inside the input, and evaluate one position past the window end before
+  // stopping. Those positions are computed in the kernel's index type, so the largest
+  // one has to stay representable there even though it is never dereferenced. The ROCm
+  // prefetch path in max_pool_forward_nhwc unrolls a fixed MAXh x MAXw window, so it can
+  // reach (MAXh - 1) steps from the start; bound the worst case over both kernels.
+  constexpr int64_t max_window_steps = 2;  // MAXh - 1 == MAXw - 1
+  if ((height ? height - 1 : 0) + max_window_steps * dilation_h > int_max) return false;
+  if ((width ? width - 1 : 0) + max_window_steps * dilation_w > int_max) return false;
 
   int64_t max_intra_batch =
       (height ? (height - 1) * in_stride_h : 0) +
@@ -77,11 +88,13 @@ static inline bool can_use_int32_nhwc(
 static inline bool can_use_int32_nchw(
     int64_t nbatch, int64_t channels,
     int64_t height, int64_t width,
-    int64_t pooled_height, int64_t pooled_width) {
+    int64_t pooled_height, int64_t pooled_width,
+    int64_t dilation_h, int64_t dilation_w) {
   int64_t hw = height * width;
   return can_use_int32_nhwc(
       nbatch, channels, height, width,
       pooled_height, pooled_width,
+      dilation_h, dilation_w,
       channels * hw,  // in_stride_n
       hw, // in_stride_c
       width, // in_stride_h
@@ -121,8 +134,8 @@ __global__ void max_pool_forward_nchw(
     scalar_t maxval = at::numeric_limits<scalar_t>::lower_bound(); // -Infinity
     index_t maxidx = hstart * width + wstart;
     const scalar_t* btm_data = bottom_data + (n * channels + c) * height * width;
-    for (int h = hstart; h < hend; h += dilation_h) {
-      for (int w = wstart; w < wend; w += dilation_w) {
+    for (index_t h = hstart; h < hend; h += dilation_h) {
+      for (index_t w = wstart; w < wend; w += dilation_w) {
         scalar_t val = btm_data[h * width + w];
         if ((val > maxval) || at::_isnan(val)) {
           maxidx = h * width + w;
@@ -208,9 +221,9 @@ __global__ void max_pool_forward_nhwc(
           channels<=MAXc*(blockDim.x*kernel_stride_C)) {
         scalar_t val [MAXh][MAXw][MAXc] = {};
         for (int ih = 0; ih < MAXh; ih++) {
-          int ih_ = ih*dilation_h+hstart;
+          index_t ih_ = static_cast<index_t>(ih)*dilation_h+hstart;
           for (int iw = 0; iw < MAXw; iw++) {
-            int iw_ = iw*dilation_w+wstart;
+            index_t iw_ = static_cast<index_t>(iw)*dilation_w+wstart;
             const scalar_t *ptr_input = bottom_data + ih_ * in_stride_h + iw_ * in_stride_w;
             for(int c = 0; c < MAXc; c++) {
               int c_ = c*blockDim.x*kernel_stride_C+channel_offset;
@@ -220,9 +233,9 @@ __global__ void max_pool_forward_nhwc(
           }
         }
         for (int ih = 0; ih < MAXh; ih++) {
-          int ih_ = ih*dilation_h+hstart;
+          index_t ih_ = static_cast<index_t>(ih)*dilation_h+hstart;
           for (int iw = 0; iw < MAXw; iw++) {
-            int iw_ = iw*dilation_w+wstart;
+            index_t iw_ = static_cast<index_t>(iw)*dilation_w+wstart;
             int cached_index = threadIdx.x;
             for(int c = 0; c < MAXc; c++) {
               int c_ = c*blockDim.x*kernel_stride_C+channel_offset;
@@ -523,6 +536,7 @@ const Tensor& indices) {
           bool use_int32 = can_use_int32_nhwc(
               nbatch, nInputPlane, inputHeight, inputWidth,
               outputHeight, outputWidth,
+              dilationH, dilationW,
               in_stride_n, in_stride_c, in_stride_h, in_stride_w);
 
           int kernel_stride_C = ceil_div(
@@ -583,7 +597,8 @@ const Tensor& indices) {
               BLOCK_THREADS);
           const int64_t nthreads = output.numel();
           bool use_int32 = can_use_int32_nchw(
-              nbatch, nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth);
+              nbatch, nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth,
+              dilationH, dilationW);
           const int maxGridX = at::cuda::getCurrentDeviceProperties()->maxGridSize[0];
           const int blocks = static_cast<int>(std::min<int64_t>(
               ceil_div(nthreads, static_cast<int64_t>(threads)),
@@ -747,7 +762,8 @@ const Tensor& gradInput) {
           const int blocks_x = std::min(ceil_div(imgcount, threads), maxGridX);
           dim3 grid(blocks_x, static_cast<unsigned>(std::min<int64_t>(nbatch, maxGridY)), static_cast<unsigned>(std::min<int64_t>(nInputPlane, maxGridZ)));
           bool use_int32 = can_use_int32_nchw(
-              nbatch, nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth);
+              nbatch, nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth,
+              dilationH, dilationW);
           auto stream = at::cuda::getCurrentCUDAStream();
           if (use_int32) {
             max_pool_backward_nchw<scalar_t, accscalar_t, int32_t>

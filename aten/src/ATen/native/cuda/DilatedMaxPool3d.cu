@@ -13,6 +13,8 @@
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <c10/macros/Macros.h>
 
+#include <limits>
+
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
@@ -279,6 +281,32 @@ void max_pool3d_with_indices_backward_out_frame(
   }
 }
 
+// Unlike max_pool2d, whose CUDA kernels are templated on an index type and already
+// instantiate int64_t, the max_pool3d kernels do all of their window indexing in
+// 32-bit arithmetic and take the input extents as plain int (see the note on
+// https://github.com/pytorch/pytorch/issues/52822). Walking a window advances the
+// position by `dilation` until it passes the window end, so the position reaches one
+// dilation step past the last frame/row/column the window touches. With no 64-bit
+// instantiation to fall back to, reject the input here rather than let the kernel
+// overflow and read out of bounds.
+// Only the trailing advance needs checking: the window extent (kernel - 1) * dilation
+// is already bounded by the input size, because a larger extent makes the output size
+// non-positive and pool3d_shape_check rejects it first.
+static inline void max_pool3d_check_dilated_index_width(
+    int64_t itime, int64_t iheight, int64_t iwidth,
+    int dilationT, int dilationH, int dilationW,
+    const char* fn_name) {
+  constexpr int64_t int_max = std::numeric_limits<int>::max();
+  TORCH_CHECK(
+      (itime   ? itime   - 1 : 0) + dilationT <= int_max &&
+      (iheight ? iheight - 1 : 0) + dilationH <= int_max &&
+      (iwidth  ? iwidth  - 1 : 0) + dilationW <= int_max,
+      fn_name, ": dilation is too large for the 32-bit indexing used by the CUDA "
+      "max_pool3d kernels; each of input size - 1 + dilation must be at most ", int_max,
+      ", but got dilation (", dilationT, ", ", dilationH, ", ", dilationW,
+      ") with input size (", itime, ", ", iheight, ", ", iwidth, ")");
+}
+
 void max_pool3d_with_indices_out_cuda_template(
            Tensor& output,
            Tensor& indices,
@@ -342,6 +370,11 @@ void max_pool3d_with_indices_out_cuda_template(
     dilationT, dilationH, dilationW,
     itime, iheight, iwidth,
     otime, oheight, owidth,
+    "max_pool3d_with_indices_out_cuda_template()");
+
+  max_pool3d_check_dilated_index_width(
+    itime, iheight, iwidth,
+    dilationT, dilationH, dilationW,
     "max_pool3d_with_indices_out_cuda_template()");
 
   bool channels_last = input.ndimension() == 5 && input.suggest_memory_format() == at::MemoryFormat::ChannelsLast3d;
