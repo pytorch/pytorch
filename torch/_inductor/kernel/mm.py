@@ -862,6 +862,17 @@ epilogue_scaling_types = [ScalingType.TensorWise, ScalingType.RowWise]
 main_loop_scaling_types = [ScalingType.BlockWise1x128, ScalingType.BlockWise128x128]
 
 
+def _is_supported_tma_main_loop_scaling(
+    scale_option_a: ScalingType, scale_option_b: ScalingType, k: Any
+) -> bool:
+    if scale_option_b == ScalingType.BlockWise1x128:
+        return False
+    if ScalingType.BlockWise128x128 in (scale_option_a, scale_option_b):
+        k_scale_blocks = ceildiv(k, 128)
+        return V.graph.sizevars.statically_known_multiple_of(k_scale_blocks, 4)
+    return True
+
+
 def _is_tensorwise_scaling(sz: Any) -> bool:
     return (len(sz) == 0) or all(
         V.graph.sizevars.statically_known_equals(d, 1) for d in sz
@@ -975,6 +986,24 @@ def tuned_scaled_mm_v2(
     scaling via lists.
     """
 
+    def fallback():
+        # contraction_dim is non-optional in the schema.
+        fallback_contraction_dim = [] if contraction_dim is None else contraction_dim
+        return scaled_mm_v2_fallback(
+            mat_a,
+            mat_b,
+            scale_a,
+            recipe_a,
+            swizzle_a,
+            scale_b,
+            recipe_b,
+            swizzle_b,
+            bias,
+            out_dtype,
+            fallback_contraction_dim,
+            use_fast_accum,
+        )
+
     # Inductor only has Triton/extern lowerings for single-level, fp32-scaled,
     # non-swizzled _scaled_mm_v2 with the "supported" recipes (TensorWise,
     # RowWise, and DeepSeek BlockWise1x128/128x128). Everything else has no
@@ -1001,23 +1030,20 @@ def tuned_scaled_mm_v2(
         or not is_single_level_scale
         or scale_a[0].dtype != torch.float32
     ):
-        # contraction_dim is a non-optional int[] in the schema (default []);
-        # this lowering defaults it to None, so coerce before the eager call.
-        fallback_contraction_dim = [] if contraction_dim is None else contraction_dim
-        return scaled_mm_v2_fallback(
-            mat_a,
-            mat_b,
-            scale_a,
-            recipe_a,
-            swizzle_a,
-            scale_b,
-            recipe_b,
-            swizzle_b,
-            bias,
-            out_dtype,
-            fallback_contraction_dim,
-            use_fast_accum,
+        return fallback()
+
+    if len(scale_a) == len(recipe_a) == len(scale_b) == len(recipe_b) == 1:
+        scale_option_a, scale_option_b = (
+            ScalingType(recipe_a[0]),
+            ScalingType(recipe_b[0]),
         )
+        if use_triton_scaling_template(
+            scale_option_a, scale_option_b, main_loop_scaling_types
+        ) and not _is_supported_tma_main_loop_scaling(
+            scale_option_a, scale_option_b, mat_a.get_size()[1]
+        ):
+            return fallback()
+
     # TODO(coconutruben): integrate into MMKernelInputs when all callsites use that
     m, n, k, layout, mat_a, mat_b = mm_args(
         mat_a, mat_b, layout=layout, out_dtype=out_dtype
@@ -1101,13 +1127,18 @@ def tuned_scaled_mm_v2(
             elif use_triton_scaling_template(
                 scale_option_a, scale_option_b, main_loop_scaling_types
             ):
-                overriders["TILE_SIZE_A"] = get_tile_size(scale_option_a)
-                overriders["TILE_SIZE_B"] = get_tile_size(scale_option_b)
+                if _is_supported_tma_main_loop_scaling(
+                    scale_option_a, scale_option_b, k
+                ):
+                    overriders["TILE_SIZE_A"] = get_tile_size(scale_option_a)
+                    overriders["TILE_SIZE_B"] = get_tile_size(scale_option_b)
 
-                templates_to_use.append(scaled_mm_device_tma_main_loop_scaling_template)
-                kwarg_overrides[scaled_mm_device_tma_main_loop_scaling_template.uid] = (
-                    overriders
-                )
+                    templates_to_use.append(
+                        scaled_mm_device_tma_main_loop_scaling_template
+                    )
+                    kwarg_overrides[
+                        scaled_mm_device_tma_main_loop_scaling_template.uid
+                    ] = overriders
             else:
                 raise AssertionError(
                     "Inductor Triton does not support scaling options that are present "
@@ -1278,13 +1309,18 @@ def tuned_scaled_mm(
             elif use_triton_scaling_template(
                 scale_option_a, scale_option_b, main_loop_scaling_types
             ):
-                overriders["TILE_SIZE_A"] = get_tile_size(scale_option_a)
-                overriders["TILE_SIZE_B"] = get_tile_size(scale_option_b)
+                if _is_supported_tma_main_loop_scaling(
+                    scale_option_a, scale_option_b, k
+                ):
+                    overriders["TILE_SIZE_A"] = get_tile_size(scale_option_a)
+                    overriders["TILE_SIZE_B"] = get_tile_size(scale_option_b)
 
-                templates_to_use.append(scaled_mm_device_tma_main_loop_scaling_template)
-                kwarg_overrides[scaled_mm_device_tma_main_loop_scaling_template.uid] = (
-                    overriders
-                )
+                    templates_to_use.append(
+                        scaled_mm_device_tma_main_loop_scaling_template
+                    )
+                    kwarg_overrides[
+                        scaled_mm_device_tma_main_loop_scaling_template.uid
+                    ] = overriders
             else:
                 raise AssertionError(
                     "Inductor Triton does not support scaling options that are present "

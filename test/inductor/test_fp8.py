@@ -1149,7 +1149,15 @@ class TestFP8Lowering(TestCase):
     @xfailIf(
         torch.cuda.is_available() and torch.cuda.get_device_capability() != (9, 0)
     )  # cuBLAS 128-element blockwise scaling is only supported for CC 9.0
-    @parametrize("shape", ((16, 256, 256), (1024, 512, 1024), (32768, 4096, 4096)))
+    @parametrize(
+        "shape",
+        (
+            (16, 256, 256),
+            (16, 256, 640),
+            (1024, 512, 1024),
+            (32768, 4096, 4096),
+        ),
+    )
     @parametrize("use_fast_accum", (False, True))
     @parametrize(
         "scaling_block_sizes",
@@ -1195,14 +1203,23 @@ class TestFP8Lowering(TestCase):
         bias = None
 
         am, ak, bn, bk = scaling_block_sizes
+        tma_supported = (bn, bk) != (1, 128) and (
+            ((am, ak) != (128, 128) and (bn, bk) != (128, 128))
+            or ceil_div(K, 128) % 4 == 0
+        )
 
         # quantize weight (prior to inference)
         w_fp8, w_inverse_scale = _quantize_blockwise(
             w, dtype_float8, block_outer=bn, block_inner=bk
         )
         w_t_fp8 = w_fp8.t()
+        # cuBLAS expects RHS BlockWise1x128 scales in [N, ceil(K / 128)]
+        # order even though the corresponding weight is passed transposed.
         w_inverse_scale = _prepare_blockwise_scale(
-            w_inverse_scale, bn, bk, transposed=True
+            w_inverse_scale,
+            bn,
+            bk,
+            transposed=(bn, bk) != (1, 128),
         )
 
         # quantize input x
@@ -1271,6 +1288,19 @@ class TestFP8Lowering(TestCase):
             linear_compiled = torch.compile(
                 linear, backend="inductor", mode="max-autotune"
             )
+            if use_fast_accum and not tma_supported:
+                with self.assertRaisesRegex(
+                    RuntimeError, "scaled_gemm doesn't support fast accum"
+                ):
+                    run_and_get_code(
+                        linear_compiled,
+                        x_fp8,
+                        x_inverse_scale,
+                        w_t_fp8,
+                        w_inverse_scale,
+                        bias,
+                    )
+                return
             y_compiled, code = run_and_get_code(
                 linear_compiled,
                 x_fp8,
@@ -1279,6 +1309,13 @@ class TestFP8Lowering(TestCase):
                 w_inverse_scale,
                 bias,
             )
+
+        if not tma_supported:
+            FileCheck().check_not("triton_scaled_mm_device_tma_main_loop_scaling").run(
+                code[0]
+            )
+            self.assertEqual(y_eager, y_compiled, rtol=1e-2, atol=0.05)
+            return
 
         # Verify that Inductor chooses the correct scaling recipes
         check_scale_recipe_a = (
