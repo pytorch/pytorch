@@ -4164,6 +4164,20 @@ class TestSparse(TestSparseBase):
                 # TODO: uncomment once supported
                 # check_autograd(x, y)
 
+    @expectedFailureMPS
+    @dtypes(torch.double)
+    def test_sparse_dense_mul_broadcast_singleton(self, device, dtype):
+        # Regression test for https://github.com/pytorch/pytorch/issues/188900
+        # A size-1 sparse dimension that must broadcast up used to silently drop
+        # data: only index 0 along the broadcast dimension was populated, and the
+        # rest were left as zeros.
+        s = torch.tensor([[1., 2.], [3., 4.]], dtype=dtype, device=device).to_sparse_coo()
+        s1 = s[:, :, None]  # (2, 2, 1): trailing size-1 sparse dim
+        d = torch.ones(1, 1, 3, dtype=dtype, device=device)  # broadcasts to (2, 2, 3)
+        expected = s1.to_dense() * d
+        self.assertEqual((s1 * d).to_dense(), expected)
+        self.assertEqual((d * s1).to_dense(), expected)  # commutativity
+
     @coalescedonoff
     @expectedFailureMPS
     @dtypes(*all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16))
