@@ -6295,13 +6295,18 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         value: CSEVariable,
         reshape_shape: Sequence[sympy.Expr | int | str],
         part_names: Sequence[str],
+        permute_dims: Sequence[int] | None = None,
     ) -> None:
         """Reshape ``value`` to expose the trailing lane axis, then split it."""
         dtype = value.dtype
         if dtype is None:
             raise AssertionError("split value must have a known dtype")
         expr = self._bitcast_reshape_expr(value, reshape_shape, dtype)
-        self._emit_recursive_split(expr, part_names, reshape_shape, dtype)
+        split_shape: Sequence[sympy.Expr | int | str] = reshape_shape
+        if permute_dims is not None:
+            expr = f"tl.permute({expr}, ({', '.join(map(str, permute_dims))}))"
+            split_shape = tuple(reshape_shape[i] for i in permute_dims)
+        self._emit_recursive_split(expr, part_names, split_shape, dtype)
 
     def emit_broadcast_via_reshape(
         self,
