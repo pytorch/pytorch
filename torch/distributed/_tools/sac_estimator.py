@@ -589,6 +589,16 @@ class SACEstimator(TorchDispatchMode):
         # recomputation time to total runtime incurred.
         delta = 1e-2
         tradeoff_curve = OrderedDict()
+        if sac_runtime == 0 or sac_memory == 0:
+            return SACTradeOffStats(
+                n_segments=0,
+                slopes=[],
+                intercepts=[],
+                fit_breaks=[],
+                tradeoff_curve=tradeoff_curve,
+                sac_memory=sac_memory,
+                sac_runtime=sac_runtime,
+            )
         # 4. Initialize the trade-off curve with the stats of already chosen recomputed_ops
         tradeoff_curve[(discarded_mem / sac_memory) + delta] = (
             recomp_runtime / sac_runtime
@@ -969,5 +979,6 @@ class SACEstimator(TorchDispatchMode):
 
     def __exit__(self, *args: Any) -> None:  # type: ignore[no-untyped-def]
         self._saved_tensor_hook_ctx.__exit__()
+        self._mod_tracker.clear_user_hooks()
         self._mod_tracker.__exit__(*args)
         super().__exit__(*args)
