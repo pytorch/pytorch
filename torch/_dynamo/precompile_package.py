@@ -1111,6 +1111,23 @@ def _wont_generalize(
     return tuple(sorted(pinned))
 
 
+def _unrebuildable_guards(code_entry: Any, cause: Exception) -> PackageError:
+    """The error for a frame whose serialized guards will not rebuild.
+
+    Phrased as a property of the captured model rather than of precompile: this
+    is reached when a guard's SOURCE reaches state that reconstruction does not
+    restore, which is something the caller can act on, and the underlying
+    exception names it.
+    """
+    return PackageError(
+        f"precompile: the guards captured for {code_entry.python_code.co_name} "
+        f"cannot be rebuilt from their serialized form, so the artifact would "
+        f"fail on the machine that loads it. A guard's source reaches state "
+        f"that reconstructing its inputs does not restore: "
+        f"{type(cause).__name__}: {cause}"
+    )
+
+
 def varying_guard_slots(
     guard_sets: Mapping[tuple[str, str, int], Sequence[frozenset[_GuardFact]]],
 ) -> frozenset[tuple[str, str]]:
@@ -1452,8 +1469,11 @@ class PrecompileSession:
                         self._state.notify_all()
         self._recorded_exception_keys.clear()
         # Before the report, so that it describes the artifact actually written.
-        if self._prune_invariant_guards and exc[0] is None:
-            self._apply_guard_policy()
+        if exc[0] is None:
+            if self._prune_invariant_guards:
+                self._apply_guard_policy()
+            else:
+                self._check_guards_are_rebuildable()
         if self._invariants_path is None:
             return
         if exc[0] is None:
@@ -1469,6 +1489,39 @@ class PrecompileSession:
                 getattr(exc[0], "__name__", exc[0]),
                 self._invariants_path,
             )
+
+    def _check_guards_are_rebuildable(self) -> None:
+        """
+        Refuse an artifact whose guards cannot be rebuilt from their own pickle.
+
+        Serialization records a guard's VALUE, and rebuilding the tree walks its
+        SOURCE against the reconstructed scope -- so a source reaching state the
+        reconstruction does not restore serializes fine and then explodes on the
+        serving machine, at load or, in the installed mode, inside the first
+        served call. Rebuild each frame's guards once here and throw them away,
+        so the failure lands on the machine that can still do something about it.
+
+        _apply_guard_policy already rebuilds, so this only pays where it did not
+        run -- the capture-session API, which is also the path that has no other
+        check.
+        """
+        from torch._dynamo.package import (
+            load_guard_manager,
+            load_guards_state,
+            SerializedCode,
+        )
+
+        for code_entry in self._package.code_entries():
+            f_code = None
+            for guarded in code_entry.guarded_codes:
+                if f_code is None:
+                    f_code = SerializedCode.to_code_object(code_entry.python_code)
+                try:
+                    load_guard_manager(
+                        load_guards_state(guarded.guards_state), f_code, None
+                    )
+                except Exception as e:
+                    raise _unrebuildable_guards(code_entry, e) from e
 
     def _apply_guard_policy(self) -> None:
         """
@@ -1536,11 +1589,7 @@ class PrecompileSession:
                     if pruned is None:
                         raise AssertionError("save_guards produced no guards_state")
                 except Exception as e:
-                    raise PackageError(
-                        f"precompile: could not re-serialize the guards of "
-                        f"{code_entry.python_code.co_name} while dropping "
-                        f"invariant ones: {type(e).__name__}: {e}"
-                    ) from e
+                    raise _unrebuildable_guards(code_entry, e) from e
                 guarded.guards_state = pruned
 
         self._policy_dropped_guards |= dropped
