@@ -8,7 +8,6 @@ import unittest
 import torch
 import torch._dynamo as torchdynamo
 from torch._C._nativert import PyModelRunner
-from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.test_case import TestCase
 from torch._environment import is_fbcode
 from torch._subclasses.fake_tensor import FakeTensor
@@ -22,8 +21,8 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     parametrize,
 )
+from torch.testing._internal.inductor_utils import HAS_TRITON
 from torch.utils import _pytree as pytree
-from torch.utils._triton import has_triton_package
 
 
 try:
@@ -264,15 +263,6 @@ def _nativert_aoti_pytree_module():
 NATIVERT_AOTI_CASES = ("basic", "multi_output", "pytree")
 
 
-def _ensure_triton(test_case, device):
-    if not has_triton_package():
-        test_case.skipTest("requires triton")
-    torch_device = torch.device(device)
-    get_interface_for_device(torch_device.type).raise_if_triton_unavailable(
-        torch_device
-    )
-
-
 def _nativert_aoti_case(device, case):
     if case == "basic":
         return _nativert_aoti_basic_module().to(device), (
@@ -396,12 +386,12 @@ class TestNativeRT(TestCase):
 @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 @unittest.skipIf(not is_fbcode(), "FBcode only for now")
+@unittest.skipUnless(HAS_TRITON, "requires triton")
 class TestNativeRTAccelerator(TestNativeRT):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @parametrize("case", NATIVERT_AOTI_CASES)
     def test_aoti(self, device, case):
-        _ensure_triton(self, device)
         self._test_aoti(device, case)
 
 
