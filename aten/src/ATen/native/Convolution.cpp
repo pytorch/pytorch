@@ -510,6 +510,25 @@ struct ConvParams {
     if (input.device().is_cpu() &&
         ((input.scalar_type() == at::kBFloat16 && mkldnn_bf16_device_check()) ||
          (input.scalar_type() == at::kHalf && mkldnn_fp16_device_check()))) {
+      // oneDNN AMX bf16 Conv3d was observed to miscompute for ow==1 && sw>1.
+      // Use the reference Slow3d path for that narrow case.
+      if (input.scalar_type() == at::kBFloat16 && !transposed &&
+          input.ndimension() == 5) {
+        const auto out_sizes = conv_output_size(
+            at::symint::sizes<T>(input), at::symint::sizes<T>(weight),
+            padding, stride, dilation);
+        const bool degenerate_strided_innermost = [&]() {
+          if constexpr (std::is_same_v<T, c10::SymInt>) {
+            return TORCH_GUARD_OR_FALSE(out_sizes.back().sym_eq(1)) &&
+                TORCH_GUARD_OR_FALSE(stride.back().sym_gt(1));
+          } else {
+            return out_sizes.back() == 1 && stride.back() > 1;
+          }
+        }();
+        if (degenerate_strided_innermost) {
+          return false;
+        }
+      }
       return true;
     }
     return (input.is_mkldnn()) || // input is mkldnn Tensor
