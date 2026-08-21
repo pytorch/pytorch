@@ -361,11 +361,8 @@ ROCM_VERSION = None
 HIP_VERSION = None
 if torch.version.hip is not None:
     HIP_VERSION = tuple(int(v) for v in torch.version.hip.split('.')[:2])
-    if torch.version.rocm is None:
-        raise AssertionError(
-            "torch.version.hip is set but torch.version.rocm is not; "
-            "torch/version.py is inconsistent with this build of PyTorch")
-    ROCM_VERSION = tuple(int(v) for v in torch.version.rocm.split('.')[:2])
+    _rocm_version_str = torch.version.rocm or torch.version.hip
+    ROCM_VERSION = tuple(int(v) for v in _rocm_version_str.split('.')[:2])
 
 CUDA_HOME = _find_cuda_home() if (torch.cuda._is_compiled() and torch.version.cuda) else None
 CUDNN_HOME = os.environ.get('CUDNN_HOME') or os.environ.get('CUDNN_PATH')
@@ -2432,8 +2429,8 @@ def _jit_compile(name,
 
 def _get_hipcc_path():
     if IS_WINDOWS:
-        # mypy thinks ROCM_VERSION is None but it will never be None here
-        hipcc_exe = 'hipcc.exe' if ROCM_VERSION >= (6, 4) else 'hipcc.bat'  # type: ignore[operator]
+        # mypy thinks HIP_VERSION is None but it will never be None here
+        hipcc_exe = 'hipcc.exe' if HIP_VERSION >= (6, 4) else 'hipcc.bat'  # type: ignore[operator]
         return _join_rocm_home('bin', hipcc_exe)
     else:
         return _join_rocm_home('bin', 'hipcc')
@@ -2830,7 +2827,12 @@ def _get_build_directory(name: str, verbose: bool) -> str:
         # Note: torch.backends.cuda.is_built() returns True for both CUDA and ROCm,
         # so we need to check torch.version.hip to distinguish them
         if torch.version.hip is not None:
-            accelerator_str = f'rocm{torch.version.hip.replace(".", "")}'
+            if torch.version.rocm is not None:
+                accelerator_str = f'rocm{torch.version.rocm}_hip{torch.version.hip}'
+            else:
+                # Preserve the legacy key for wheels built before
+                # torch.version.rocm was available.
+                accelerator_str = f'rocm{torch.version.hip.replace(".", "")}'
         elif torch.version.cuda is not None:
             accelerator_str = f'cu{torch.version.cuda.replace(".", "")}'
         else:
