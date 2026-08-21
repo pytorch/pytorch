@@ -1604,6 +1604,9 @@ def _get_amdsmi_device_index(device: Device) -> int:
         return _get_amdsmi_device_index_from_hip_index(idx_map[idx])
 
 
+from .localized_tensor import localize
+
+
 def _get_amdsmi_device_memory_used(device: Device = None) -> int:
     handle = _get_amdsmi_handler(device)
     # amdsmi_get_gpu_vram_usage returns mem usage in megabytes
@@ -2252,6 +2255,7 @@ __all__ = [
     "is_tf32_supported",
     "jiterator",
     "list_gpu_processes",
+    "localize",
     "make_graphed_callables",
     "manual_seed",
     "manual_seed_all",
