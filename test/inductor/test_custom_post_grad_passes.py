@@ -251,7 +251,7 @@ class TestPostGradCustomPrePostPass(TestCustomPassBase):
             self.assertFalse(custom_pass.is_infer)
 
 
-class TestPostGradCustomPrePostPassCPU(TestCustomPassBase):
+class TestPostGradCustomPrePostPassBackend(TestCustomPassBase):
     hw_classification = HardwareClassification.CPU
 
     # mkldnn fusion's pattern_matcher
@@ -403,7 +403,7 @@ class TestPostGradCustomPrePostPassCPU(TestCustomPassBase):
 
 
 instantiate_device_type_tests(
-    TestPostGradCustomPrePostPassCPU, globals(), only_for="cpu"
+    TestPostGradCustomPrePostPassBackend, globals(), only_for="cpu"
 )
 
 if __name__ == "__main__":
