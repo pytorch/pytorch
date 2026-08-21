@@ -848,6 +848,8 @@ class SideEffects:
             variable_cls = variables.UserDefinedConstantVariable
         elif variables.InspectVariable.is_matching_class(user_cls):
             variable_cls = variables.InspectVariable
+        elif variables.SimpleNamespaceVariable.is_matching_cls(user_cls):
+            variable_cls = variables.SimpleNamespaceVariable
         if not issubclass(variable_cls, variables.UserDefinedObjectVariable):
             raise AssertionError(
                 f"Expected subclass of UserDefinedObjectVariable, got {variable_cls}"
