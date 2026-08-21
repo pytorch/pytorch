@@ -36,6 +36,7 @@
 - [Hardware / Software Support in Binary Build Matrix](#hardware--software-support-in-binary-build-matrix)
   - [Python](#python)
   - [Accelerator Software](#accelerator-software)
+    - [Release gating requirements for accelerator versions](#release-gating-requirements-for-accelerator-versions)
     - [Special support cases](#special-support-cases)
   - [Operating Systems](#operating-systems)
 - [Submitting Tutorials](#submitting-tutorials)
