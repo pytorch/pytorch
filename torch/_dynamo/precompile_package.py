@@ -134,7 +134,7 @@ from torch.compiler._precompile_types import (
 from torch.utils._pytree import tree_leaves
 
 from .exc import PackageError
-from .guards import CheckFunctionManager
+from .guards import CheckFunctionManager, record_live_guard_leaves
 from .package import (
     _BackendId,
     _defining_module_name,
@@ -1235,6 +1235,10 @@ class PrecompileSession:
         # variant of every frame. Off by default: the capture session API
         # serializes everything serializable, and precompile() turns it on.
         self._prune_invariant_guards = False
+        # The leaves every live guard build produced, to compare a rebuild
+        # against; see _report_guard_drift.
+        self._live_guard_leaves: set[tuple[str, str]] = set()
+        self._drifted_guards: set[tuple[str, str]] = set()
         # A training capture traces with grad on and lowers the backward
         # eagerly, so the artifact carries AOTAutograd's CompiledFunction and
         # calling .backward() on a served output runs precompiled code.
@@ -1358,6 +1362,7 @@ class PrecompileSession:
         # Backends must serialize into the artifact rather than into the
         # process-local inductor cache.
         stack.enter_context(_capture_config(self._training))
+        self._live_guard_leaves = stack.enter_context(record_live_guard_leaves())
         self._stack = stack
         try:
             if self._example_inputs:
@@ -1523,7 +1528,7 @@ class PrecompileSession:
                 loaded = load_guards_state(guarded.guards_state)
                 failures: list[tuple[Guard, Exception]] = []
                 try:
-                    CheckFunctionManager(
+                    probe = CheckFunctionManager(
                         f_code,
                         OutputGraphCommon(loaded.output_graph),
                         shape_code_parts=loaded.shape_code_parts,
@@ -1533,11 +1538,44 @@ class PrecompileSession:
                     )
                 except Exception as e:
                     raise _unrebuildable_guards(code_entry, e) from e
+                self._report_guard_drift(code_entry, probe.guard_manager)
                 if not failures:
                     continue
                 guarded.guards_state = self._reserialize_without(
                     code_entry, f_code, loaded, failures
                 )
+
+    def _report_guard_drift(self, code_entry: Any, rebuilt: Any) -> None:
+        """Warn when a guard rebuilds into something the live build never made.
+
+        A guard that cannot be rebuilt at all raises, and is dropped. The
+        quieter half of the same failure is a guard that rebuilds into a
+        DIFFERENT check, because reconstruction lost a value it reads -- a
+        dimension marking, a subclass's requires_grad. That serializes, loads,
+        and then never matches, so nothing downstream notices.
+
+        One-directional on purpose: the invariant-guard policy legitimately
+        drops guards, so a leaf present live and absent at load is expected. A
+        leaf the live build never produced is not.
+
+        A warning rather than a refusal. The exclusions this comparison rests on
+        were established on a handful of models, and refusing an artifact over a
+        false positive is worse than the drift it would catch.
+        """
+        if not self._live_guard_leaves:
+            return
+        extra = rebuilt.leaf_fingerprint() - self._live_guard_leaves
+        if not extra:
+            return
+        self._drifted_guards |= extra
+        log.warning(
+            "precompile: %s's guards rebuild into %d check(s) the capture never "
+            "made, so reconstruction lost something they read. They will not "
+            "match at serve time: %s",
+            code_entry.python_code.co_name,
+            len(extra),
+            sorted(f"{cls}: {payload}" for cls, payload in extra)[:5],
+        )
 
     def _record_unrebuildable(
         self, failures: list[tuple[Guard, Exception]]
@@ -1649,7 +1687,7 @@ class PrecompileSession:
                 # public path never pays for a second pass.
                 failures: list[tuple[Guard, Exception]] = []
                 try:
-                    pruned = CheckFunctionManager(
+                    manager = CheckFunctionManager(
                         f_code,
                         OutputGraphCommon(loaded.output_graph),
                         shape_code_parts=loaded.shape_code_parts,
@@ -1662,13 +1700,16 @@ class PrecompileSession:
                         serialization_guard_filter_fn=policy,
                         strict_error=True,
                         collect_guard_failures=failures,
-                    ).guards_state
+                    )
+                    rebuilt = manager.guard_manager
+                    pruned = manager.guards_state
                     if pruned is None:
                         raise AssertionError("save_guards produced no guards_state")
                 except Exception as e:
                     raise _unrebuildable_guards(code_entry, e) from e
                 if failures:
                     self._record_unrebuildable(failures)
+                self._report_guard_drift(code_entry, rebuilt)
                 guarded.guards_state = pruned
 
         self._policy_dropped_guards |= dropped
