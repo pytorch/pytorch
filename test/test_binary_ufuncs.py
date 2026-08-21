@@ -5134,7 +5134,12 @@ instantiate_device_type_tests(
     only_for=("cpu", "cuda", "xpu"),
     allow_xpu=True,
 )
-instantiate_device_type_tests(TestBinaryUfuncsDevice, globals(), allow_xpu=True)
+instantiate_device_type_tests(
+    TestBinaryUfuncsDevice,
+    globals(),
+    only_for=("cpu", "cuda", "xpu"),
+    allow_xpu=True,
+)
 instantiate_device_type_tests(TestBinaryUfuncsCUDA, globals(), only_for="cuda")
 
 if __name__ == "__main__":
