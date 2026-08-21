@@ -2221,6 +2221,32 @@ def ensure_nvmatmul_heuristics_available() -> bool:
         return False
 
 
+def use_flydsl_gemm_template(layout: Layout) -> bool:
+    if not _use_autotune_backend("FLYDSL"):
+        return False
+    if not torch.version.hip:
+        return False
+    if not (config.max_autotune or config.max_autotune_gemm):
+        return False
+    if not _use_template_for_gpu(layout, [torch.float16, torch.bfloat16]):
+        return False
+
+    from .codegen.flydsl import flydsl_utils
+
+    if not flydsl_utils.runtime_available():
+        return False
+
+    from .codegen.flydsl.flydsl_scheduling import _get_flydsl_device_arch
+
+    # The vendored FlyDSL GEMM kernel targets the gfx950 (MI350) layout; its LDS
+    # capacity and MFMA assumptions do not hold on other archs, so gate strictly
+    # on gfx950 to avoid emitting kernels that fail to compile or run there.
+    device_index = layout.device.index if layout.device.index is not None else 0
+    if _get_flydsl_device_arch(device_index) != "gfx950":
+        return False
+    return True
+
+
 def use_blackwell_cutedsl_grouped_mm(
     mat_a: Any,
     mat_b: Any,
