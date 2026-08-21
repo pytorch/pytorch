@@ -51,6 +51,7 @@ from torch.utils._pytree import GetAttrKey, is_structseq_class
 from .. import config, graph_break_hints, polyfills, variables
 from ..bytecode_transformation import create_call_function
 from ..create_parameter_op import do_not_convert_to_tracable_parameter
+from ..device_interface import get_registered_device_interfaces
 from ..exc import (
     handle_observed_exception,
     ObservedAttributeError,
@@ -393,10 +394,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
             torch.cuda.LongTensor,  # type: ignore[attr-defined]
             torch.Stream,
             torch.Event,
-            torch.cuda.Stream,
-            torch.cuda.Event,
-            torch.xpu.Stream,
-            torch.xpu.Event,
         }
         if hasattr(torch, "hpu"):
             _in_graph_class_list.update(
@@ -405,6 +402,17 @@ class UserDefinedClassVariable(UserDefinedVariable):
                     torch.hpu.Event,
                 }
             )
+
+        for _, device_interface in get_registered_device_interfaces():
+            stream_class = getattr(device_interface, "Stream", None)
+            if isinstance(stream_class, type) and issubclass(
+                stream_class, torch.Stream
+            ):
+                _in_graph_class_list.add(stream_class)
+
+            event_class = getattr(device_interface, "Event", None)
+            if isinstance(event_class, type) and issubclass(event_class, torch.Event):
+                _in_graph_class_list.add(event_class)
 
         return set(tensortype_to_dtype.keys()) | _in_graph_class_list
 
