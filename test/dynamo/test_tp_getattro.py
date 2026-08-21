@@ -1,6 +1,8 @@
 # Owner(s): ["module: dynamo"]
 """Tests for tp_getattro_impl: unified attribute access protocol in Dynamo."""
 
+import unittest
+
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
@@ -1346,6 +1348,165 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         result = torch.compile(fn, backend="eager")(torch.tensor(1))
         self.assertEqual(result, torch.tensor(2))
         self.assertFalse(hasattr(MyClass, "y"))
+
+    def test_property_get_explicit_via_class_dict(self):
+        # VariableTracker has no tp_descr_get_impl default (unlike
+        # tp_descr_set_impl), and SlotDef resolves the impl by name, so a VT
+        # without an override raises AttributeError instead of graph breaking.
+        class MyClass:
+            def __init__(self):
+                self._v = 1
+
+            @property
+            def v(self):
+                return self._v
+
+        def fn():
+            return MyClass.__dict__["v"].__get__(MyClass(), MyClass)
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
+    @unittest.expectedFailure
+    def test_getset_descriptor_get_explicit(self):
+        # object.__class__ is a getset modeled in tp_getset, so this exercises
+        # the entry.getter branch.  The value must be non-None: an attribute
+        # that is None either way cannot tell a returned value from a dropped
+        # one.
+        def fn():
+            e = ValueError("q")
+            return object.__dict__["__class__"].__get__(e, ValueError)
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
+    @unittest.expectedFailure
+    def test_member_descriptor_get_explicit(self):
+        # The slot write performed by __init__ is not visible to
+        # MemberDescriptorVariable.tp_descr_get_impl, so the read raises.
+        class MyClass:
+            __slots__ = ("x",)
+
+            def __init__(self):
+                self.x = 1
+
+        def fn():
+            return MyClass.__dict__["x"].__get__(MyClass(), MyClass)
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
+    def test_getset_descriptor_set_explicit(self):
+        # PyGetSetDescr_Type has tp_descr_set (getset_set), but
+        # GetSetDescriptorVariable has no tp_descr_set_impl.
+        def fn():
+            e = ValueError("x")
+            BaseException.__dict__["__cause__"].__set__(e, KeyError("c"))
+            return type(e.__cause__).__name__
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
+    def test_property_set_explicit_via_class_attr(self):
+        # property has tp_descr_set (property_descr_set), but PropertyVariable
+        # has no tp_descr_set_impl.
+        class MyClass:
+            def __init__(self):
+                self._v = 1
+
+            @property
+            def v(self):
+                return self._v
+
+            @v.setter
+            def v(self, val):
+                self._v = val
+
+        def fn():
+            obj = MyClass()
+            MyClass.v.__set__(obj, 11)
+            return obj.v
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
+    def test_property_set_explicit_via_class_dict(self):
+        # Same missing tp_descr_set_impl as via the class attribute; kept as a
+        # separate case because a bare property value reaches PropertyVariable
+        # through the builder rather than through descriptor resolution.
+        class MyClass:
+            def __init__(self):
+                self._v = 1
+
+            @property
+            def v(self):
+                return self._v
+
+            @v.setter
+            def v(self, val):
+                self._v = val
+
+        def fn():
+            obj = MyClass()
+            MyClass.__dict__["v"].__set__(obj, 11)
+            return obj.v
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
+    # The implicit paths (obj.x = v, del obj.x) already raise the right
+    # AttributeError; these cover the explicit dunder calls, which reach
+    # PropertyVariable.tp_descr_set_impl instead.
+
+    def test_property_set_explicit_no_setter(self):
+        # fset is None: property_descr_set raises before calling anything.
+        class MyClass:
+            @property
+            def v(self):
+                return 1
+
+        def fn():
+            try:
+                MyClass.__dict__["v"].__set__(MyClass(), 5)
+                return "no-raise"
+            except AttributeError:
+                return "AttributeError"
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
+    def test_property_delete_explicit_no_deleter(self):
+        # fdel is None on an otherwise writable property -- the common case.
+        class MyClass:
+            def __init__(self):
+                self._v = 0
+
+            @property
+            def v(self):
+                return self._v
+
+            @v.setter
+            def v(self, val):
+                self._v = val
+
+        def fn():
+            try:
+                MyClass.__dict__["v"].__delete__(MyClass())
+                return "no-raise"
+            except AttributeError:
+                return "AttributeError"
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
+    def test_getset_descriptor_set_unmodeled_attribute(self):
+        # type.__name__ is a writable getset with no tp_getset entry, so a
+        # missing entry must not be reported as read-only.
+        class Target:
+            pass
+
+        def fn():
+            type.__dict__["__name__"].__set__(Target, "Renamed")
+            return Target.__name__
+
+        try:
+            self.assertEqual(
+                torch.compile(fn, backend="eager", fullgraph=True)(), "Renamed"
+            )
+        finally:
+            Target.__name__ = "Target"
 
 
 if __name__ == "__main__":
