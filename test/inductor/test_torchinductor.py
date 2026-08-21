@@ -163,7 +163,6 @@ from torch.testing._internal.inductor_utils import (  # noqa: F401
     clone_preserve_strides_offset,
     GPU_TYPE,
     HAS_CPU,
-    HAS_GPU,
     HAS_MPS,
     HAS_MULTIGPU,
     HAS_TPU,
@@ -1260,7 +1259,12 @@ def skip_if_not_cuda(fn):
 
 
 def accelerator_device(device):
-    return GPU_TYPE if torch.device(device).type == "cpu" else device
+    if torch.device(device).type != "cpu":
+        return device
+    accelerator = torch.accelerator.current_accelerator(check_available=True)
+    if accelerator is None:
+        raise unittest.SkipTest("accelerator not available")
+    return accelerator
 
 
 def skip_if_accelerator_not_cuda(fn):
@@ -1279,13 +1283,7 @@ def skip_if_accelerator_not_cuda(fn):
 def skip_if_no_accelerator(fn):
     @functools.wraps(fn)
     def wrapper(self, *args, **kwargs):
-        device_type = torch.device(accelerator_device(self.device)).type
-        privateuse1_available = (
-            device_type not in ("cuda", "xpu", "mtia", "mps")
-            and torch.accelerator.is_available()
-        )
-        if not (HAS_GPU or HAS_MPS or privateuse1_available):
-            raise unittest.SkipTest("accelerator not available")
+        accelerator_device(self.device)
         return fn(self, *args, **kwargs)
 
     return wrapper
@@ -1295,13 +1293,6 @@ def skip_if_no_accelerator_triton(fn):
     @functools.wraps(fn)
     def wrapper(self, *args, **kwargs):
         device = accelerator_device(self.device)
-        device_type = torch.device(device).type
-        privateuse1_available = (
-            device_type not in ("cuda", "xpu", "mtia", "mps")
-            and torch.accelerator.is_available()
-        )
-        if not (HAS_GPU or privateuse1_available):
-            raise unittest.SkipTest("accelerator not available")
         if not has_triton():
             raise unittest.SkipTest(f"triton is required for {device}")
         return fn(self, *args, **kwargs)
@@ -5452,8 +5443,8 @@ for dtype in (torch.int32, torch.int64):
                 bn_modules[dim](oC),
             ).eval()
             test_memory_format = [torch.contiguous_format]
-            # TODO: GPU path doesn't support channels_last now.
-            if not HAS_GPU and dim > 1:
+            # TODO: Accelerator paths don't support channels_last now.
+            if torch.device(self.device).type == "cpu" and dim > 1:
                 channels_last = (
                     torch.channels_last if dim == 2 else torch.channels_last_3d
                 )
@@ -20071,13 +20062,6 @@ if RUN_CPU:
             _, code_vec = run_and_get_cpp_code(opt_f, x_vec)
             FileCheck().check_not(".abs()").run(code_vec)
 
-    instantiate_device_type_tests_from_templates(
-        CpuTests,
-        globals(),
-        templates=(CommonTemplate,),
-        class_name_overrides={"cpu": "CpuTests"},
-        only_for="cpu",
-    )
 
 if RUN_GPU or HAS_MPS:
 
@@ -20377,17 +20361,6 @@ else:
         hw_classification = HardwareClassification.ACCELERATOR
         common = check_model_gpu
 
-
-_COMMON_ACCELERATOR_TEST_CLASSES = instantiate_device_type_tests_from_templates(
-    GPUTests,
-    globals(),
-    templates=(CommonTemplate,),
-    test_decorator=onlyAccelerator,
-    class_name_overrides={GPU_TYPE: "GPUTests"},
-    except_for="cpu",
-    allow_xpu=True,
-    allow_mps=True,
-)
 
 if RUN_TPU:
 
@@ -22504,9 +22477,6 @@ class RNNTest(TestCase):
         model(x)
 
 
-instantiate_device_type_tests(RNNTest, globals(), except_for="cpu", allow_xpu=True)
-
-
 class NanCheckerTest(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
@@ -22548,11 +22518,6 @@ class NanCheckerTest(TestCase):
             torch.compile(f)(x)
 
 
-instantiate_device_type_tests(
-    NanCheckerTest, globals(), except_for="cpu", allow_xpu=True
-)
-
-
 @unittest.skipIf(not HAS_CPU, "requires C++ compiler")
 class CheckModelStrideSemanticsTest(TestCase):
     hw_classification = HardwareClassification.CPU
@@ -22585,9 +22550,6 @@ class CheckModelStrideSemanticsTest(TestCase):
                 torch.empty_strided((2, 2, 4), (4, 4, 1)),
                 torch.empty_strided((2, 2, 4), (8, 4, 1)),
             )
-
-
-instantiate_device_type_tests(CheckModelStrideSemanticsTest, globals(), only_for="cpu")
 
 
 @unittest.skipIf(not HAS_CPU, "requires C++ compiler")
@@ -22636,6 +22598,31 @@ class TestFull(TestCase):
             self.assertEqual(ret_opt, fn(pytype, dtype))
 
 
+if RUN_CPU:
+    instantiate_device_type_tests_from_templates(
+        CpuTests,
+        globals(),
+        templates=(CommonTemplate,),
+        class_name_overrides={"cpu": "CpuTests"},
+        only_for="cpu",
+    )
+
+_COMMON_ACCELERATOR_TEST_CLASSES = instantiate_device_type_tests_from_templates(
+    GPUTests,
+    globals(),
+    templates=(CommonTemplate,),
+    test_decorator=onlyAccelerator,
+    class_name_overrides={GPU_TYPE: "GPUTests"},
+    except_for="cpu",
+    allow_xpu=True,
+    allow_mps=True,
+)
+
+instantiate_device_type_tests(RNNTest, globals(), except_for="cpu", allow_xpu=True)
+instantiate_device_type_tests(
+    NanCheckerTest, globals(), except_for="cpu", allow_xpu=True
+)
+instantiate_device_type_tests(CheckModelStrideSemanticsTest, globals(), only_for="cpu")
 instantiate_device_type_tests(TestFull, globals(), only_for="cpu")
 
 
