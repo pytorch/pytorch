@@ -62,6 +62,7 @@ from ..utils import (
     use_triton_tma_template,
 )
 from .mm_common import (
+    _fits_int32_buffer_span,
     _is_static_problem,
     _use_small_mm_pointwise,
     load_kernel_template,
@@ -213,21 +214,6 @@ def check_supported_striding(mat_a, mat_b) -> None:
     torch._check(
         is_col_major(mat_b.get_stride()) or has_zero_dim(mat_b.get_size()),
         lambda: f"mat_b must be col_major, got stride {mat_b.get_stride()}",
-    )
-
-
-def _fits_int32_buffer_span(
-    rows: int, row_stride: int | None, cols: int, itemsize: int
-) -> bool:
-    # Descriptor fields are signed int32, but AMD buffer voffset is an unsigned
-    # 32-bit byte offset.
-    int32_max = (1 << 31) - 1
-    return (
-        0 < rows <= int32_max
-        and 0 < cols <= int32_max
-        and row_stride is not None
-        and 0 <= row_stride <= int32_max
-        and ((rows - 1) * row_stride + cols) * itemsize < 1 << 32
     )
 
 
