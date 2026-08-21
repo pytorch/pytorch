@@ -883,6 +883,72 @@ else:
             """
             return [self.get_group(i) for i in range(len(self._layout))]
 
+        def abort(self) -> None:
+            """
+            Abort all process groups associated with this DeviceMesh.
+
+            When a rank in a DeviceMesh exits prematurely, other ranks can call
+            this method to abort the mesh's process groups instead of hanging.
+
+            This method must be called on a root mesh. Calling it on a submesh
+            raises ``RuntimeError`` because the scope of a submesh abort is
+            ambiguous.
+
+            .. note:: This API is experimental. For NCCL backends, aborts are
+                performed concurrently using group semantics to avoid deadlocks.
+                For other backends, ``abort()`` is called serially on each
+                process group.
+            """
+            from torch.distributed.distributed_c10d import (
+                _cleanup_process_group_global_state,
+            )
+
+            if self._root_mesh is not None:
+                raise RuntimeError(
+                    "abort() is not supported on a submesh. "
+                    "Call abort() on the root mesh instead."
+                )
+
+            if not hasattr(self, "_dim_group_names"):
+                return
+
+            seen: set[str] = set()
+            pgs: list[ProcessGroup] = []
+            for name in self._dim_group_names:
+                if name not in seen:
+                    seen.add(name)
+                    pg = _resolve_process_group(name)
+                    if pg is not None:
+                        pgs.append(pg)
+
+            for flat_mesh in self._flatten_mapping.values():
+                if hasattr(flat_mesh, "_dim_group_names"):
+                    for name in flat_mesh._dim_group_names:
+                        if name not in seen:
+                            seen.add(name)
+                            pg = _resolve_process_group(name)
+                            if pg is not None:
+                                pgs.append(pg)
+
+            if not pgs:
+                return
+
+            device = torch.accelerator.current_accelerator() or torch.device("cpu")
+            try:
+                pgs[0]._start_coalescing(device)
+                coalescing = True
+            except RuntimeError:
+                coalescing = False
+
+            for pg in pgs:
+                pg.abort()
+
+            if coalescing:
+                pgs[0]._end_coalescing(device)
+
+            for pg in pgs:
+                _cleanup_process_group_global_state(pg)
+
         def _create_sub_mesh(
             self,
             layout: _MeshLayout,
