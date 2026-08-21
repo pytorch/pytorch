@@ -1,0 +1,130 @@
+import contextlib
+import os
+import threading
+
+from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
+    launch_mxfp8_grouped_gemm_gfx950,
+    make_mxfp8_grouped_gemm_param,
+)
+from torch._inductor.runtime.flydsl_cache import configure_flydsl_cache_dir
+
+{{gen_defines()}}
+
+
+_mxfp8_grouped_param = None
+_mxfp8_grouped_param_lock = threading.Lock()
+
+
+def _inductor_tensor_arg(tensor):
+    return flyc.from_torch_tensor(tensor).mark_layout_dynamic()
+
+
+@contextlib.contextmanager
+def _temporary_env(updates):
+    old_values = {key: os.environ.get(key) for key in updates}
+    os.environ.update(
+        {key: value for key, value in updates.items() if value is not None}
+    )
+    try:
+        yield
+    finally:
+        for key, old_value in old_values.items():
+            if old_value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = old_value
+
+
+def _flydsl_mxfp8_grouped_mm(
+    output, mat1, mat2, scale_a, scale_b, offs, stream, compile_only=False
+):
+    global _mxfp8_grouped_param
+    if output.shape[0] == 0:
+        return output
+
+    param = _mxfp8_grouped_param
+    if param is None:
+        with _mxfp8_grouped_param_lock:
+            param = _mxfp8_grouped_param
+            if param is None:
+                param = make_mxfp8_grouped_gemm_param(
+                    GEMM_K,
+                    GEMM_N,
+                    GEMM_G,
+                    block_r=BLOCK_R,
+                    block_c=BLOCK_C,
+                )
+                _mxfp8_grouped_param = param
+
+    # The kernel reads B as a stack of [N, K] row-major weight planes. The
+    # lowering already required mat2's K dim to be the contiguous one, so this
+    # permute is a free relabelling of a contiguous buffer, not a copy.
+    weight = mat2.permute(0, 2, 1)
+    # scale_b arrives as the op's flat per-group scale stack, (G, N * K // 32).
+    configure_flydsl_cache_dir()
+    launch_mxfp8_grouped_gemm_gfx950(
+        output,
+        mat1,
+        weight,
+        scale_a,
+        scale_b,
+        offs,
+        param,
+        stream,
+        tensor_arg=_inductor_tensor_arg,
+        # Passed down rather than read from the environment: cache warming and
+        # a real dispatch can share a process (autotune_in_subproc=False), and
+        # a process-global flag would let a real call skip the GEMM and return
+        # the uninitialised output buffer.
+        compile_only=compile_only,
+    )
+    return output
+
+
+{{def_kernel("mat1", "mat2", "scale_a", "scale_b", "offs")}}
+    output = {{get_output()}}
+    return _flydsl_mxfp8_grouped_mm(
+        output, mat1, mat2, scale_a, scale_b, offs, stream
+    )
+
+
+def {{kernel_name}}_precompile(
+    precompile_shapes,
+    precompile_strides,
+    precompile_dtypes,
+    device_index=0,
+    device_capability=None,
+    flydsl_gpu_arch=None,
+):
+    """Warm FlyDSL's disk cache using metadata-only fake tensors."""
+    names = ("mat1", "mat2", "scale_a", "scale_b", "offs", "output")
+
+    # FLYDSL_GPU_ARCH is read by FlyDSL itself, so it has to go through the
+    # environment; compile-only is ours and is passed as an argument instead.
+    env_updates = {}
+    if flydsl_gpu_arch is not None:
+        env_updates["FLYDSL_GPU_ARCH"] = flydsl_gpu_arch
+
+    with _temporary_env(env_updates):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        with FakeTensorMode():
+            fakes = {
+                name: torch.empty_strided(
+                    tuple(precompile_shapes[name]),
+                    tuple(precompile_strides[name]),
+                    dtype=getattr(torch, precompile_dtypes[name]),
+                    device="cpu",
+                )
+                for name in names
+            }
+            _flydsl_mxfp8_grouped_mm(
+                fakes["output"],
+                fakes["mat1"],
+                fakes["mat2"],
+                fakes["scale_a"],
+                fakes["scale_b"],
+                fakes["offs"],
+                stream=0,
+                compile_only=True,
+            )
