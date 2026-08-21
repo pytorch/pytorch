@@ -81,21 +81,6 @@ inline void check_legacy_fn_attr_access(
       "https://pytorch.org/docs/stable/autograd.html#torch.autograd.Function ");
 }
 
-// TODO: We shouldn't need to call this function because the engine
-// can already persist the errors for us. This still seems to be
-// needed for the DistEngine however.
-//
-// python test/distributed/rpc/test_tensorpipe_agent.py -k
-// test_backward_autograd_engine_error
-//
-// See Note [ Persisting PyErr state across autograd engine threads ]
-void throw_python_error() {
-  python_error err;
-  err.persist();
-  // NOLINTNEXTLINE(hicpp-exception-baseclass)
-  throw std::move(err);
-}
-
 PyObject* materialize_needs_input_grad(THPFunction* self) {
   if (self->needs_input_grad) {
     return Py_NewRef(self->needs_input_grad);
