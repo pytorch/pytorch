@@ -6785,6 +6785,99 @@ class TestCudaAllocator(TestCase):
             )
 
     @serialTest()
+    @parametrize("big_request", [False, True])
+    def test_max_split_expandable_reuses_interior_blocks(self, big_request):
+        # An expandable segment must not keep growing just because a free block
+        # inside it is larger than max_split_size. Each iteration frees a pair
+        # of blocks whose merged size exceeds max_split_size, while a small
+        # allocation made after them stays alive and keeps the merged block
+        # away from the segment's unmapped tail. If get_free_block() rejects
+        # that block, every iteration maps fresh pages instead of reusing it and
+        # reserved memory grows without bound.
+        #
+        # get_free_block() has two separate oversize rules and the sizes here
+        # pick which one the reused request hits:
+        #   big_request=False  request 24MB < max_split_size 32MB, merged block
+        #                      36MB >= max_split_size -> first rule
+        #   big_request=True   request 64MB >= max_split_size, merged block 96MB
+        #                      >= 64MB + max_non_split_rounding_size -> second rule
+        mb = 1024 * 1024
+        max_split_mb = 32
+        # Pinned rather than left at its default: the second rule's threshold is
+        # request + max_non_split_rounding_size, so a change to the default would
+        # silently stop big_request=True from reaching that rule.
+        rounding_mb = 20
+        a_mb, b_mb = (64, 32) if big_request else (24, 12)
+        merged_mb = a_mb + b_mb
+        fence_mb = 2
+        cycles = 5
+        fences = []
+        try:
+            torch.cuda.memory.empty_cache()
+            torch.cuda.memory._set_allocator_settings(
+                f"expandable_segments:True,max_split_size_mb:{max_split_mb},"
+                f"max_non_split_rounding_mb:{rounding_mb}"
+            )
+
+            def alloc(n):
+                return torch.empty(n * mb, dtype=torch.int8, device="cuda")
+
+            def cycle():
+                a = alloc(a_mb)
+                b = alloc(b_mb)  # a + b merge above max_split_size when freed
+                fences.append(alloc(fence_mb))
+                del a, b
+
+            def reserved():
+                torch.cuda.synchronize()
+                return torch.cuda.memory_reserved()
+
+            cycle()  # warm up: the first iteration has to map its pages
+
+            # Guard against silently testing the ordinary allocator: if
+            # expandable segments were not actually enabled, none of this
+            # exercises the code path under test and the assertions below could
+            # pass for the wrong reason.
+            self.assertTrue(
+                any(
+                    seg.get("is_expandable")
+                    for seg in torch.cuda.memory.memory_snapshot()
+                ),
+                "expandable segments are not active; test would not cover "
+                "get_free_block()'s expandable path",
+            )
+
+            baseline = reserved()
+            per_cycle = []
+            for _ in range(cycles):
+                before = reserved()
+                cycle()
+                per_cycle.append(reserved() - before)
+            growth = reserved() - baseline
+
+            # After the warm-up the merged block is already mapped, so a cycle
+            # that reuses it needs at most another fence. A cycle that rejects
+            # it has to map the whole merged block again, so no single cycle may
+            # grow by as much as the merged block.
+            self.assertLess(
+                max(per_cycle),
+                merged_mb * mb,
+                f"per-cycle reserved growth {per_cycle} (bytes) indicates the "
+                f"{merged_mb}MB interior block is being remapped, not reused",
+            )
+            # Over every cycle combined, the segment must still not have grown
+            # by even one merged block; only the fences are genuinely new.
+            self.assertLess(growth, merged_mb * mb)
+        finally:
+            del fences
+            # Test toggles expandable_segments internally; restore the
+            # suite's baseline so subsequent tests see consistent state.
+            torch.cuda.memory._set_allocator_settings(
+                f"expandable_segments:{EXPANDABLE_SEGMENTS}"
+            )
+            torch.cuda.memory.empty_cache()
+
+    @serialTest()
     def test_garbage_collect_expandable(self):
         try:
             orig = torch.cuda.get_per_process_memory_fraction(0)

@@ -3893,15 +3893,29 @@ class DeviceCachingAllocator {
       }
     }
 
-    // Do not return an oversized block for a large request
-    if ((p.size() < AcceleratorAllocatorConfig::max_split_size()) &&
-        ((*it)->size >= AcceleratorAllocatorConfig::max_split_size()))
-      return false;
-    // Allow oversized block size to be rounded up but within a limit
-    if ((p.size() >= AcceleratorAllocatorConfig::max_split_size()) &&
-        ((*it)->size >=
-         p.size() + AcceleratorAllocatorConfig::max_non_split_rounding_size()))
-      return false;
+    // The oversize rules below exist because splitting a standalone
+    // cudaMalloc'ed block keeps the whole block pinned until every piece of it
+    // is free again. A block inside an expandable segment is not a standalone
+    // allocation: the segment's pages are mapped and unmapped independently, so
+    // handing out part of a large free block there does not pin the rest of the
+    // segment. Applying these rules to expandable blocks only rejects memory
+    // that is reusable and forces the segment to grow instead; with
+    // max_split_size_mb set, reserved memory then climbs until the device is
+    // full while the live set stays small. should_split() already ignores
+    // max_split_size when expandable segments are active; this keeps
+    // get_free_block() consistent with it.
+    if (!(*it)->expandable_segment_) {
+      // Do not return an oversized block for a large request
+      if ((p.size() < AcceleratorAllocatorConfig::max_split_size()) &&
+          ((*it)->size >= AcceleratorAllocatorConfig::max_split_size()))
+        return false;
+      // Allow oversized block size to be rounded up but within a limit
+      if ((p.size() >= AcceleratorAllocatorConfig::max_split_size()) &&
+          ((*it)->size >=
+           p.size() +
+               AcceleratorAllocatorConfig::max_non_split_rounding_size()))
+        return false;
+    }
     p.block = *it;
     pool.erase_from_blocks(p.block);
     return true;
