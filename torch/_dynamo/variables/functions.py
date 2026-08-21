@@ -4358,7 +4358,7 @@ class WrapperDescriptorVariable(DescriptorVariable):
         return MethodWrapperVariable(self.descriptor, obj, source=self.source)
 
 
-class MethodWrapperVariable(DescriptorVariable):
+class MethodWrapperVariable(VariableTracker):
     """Bound method-wrapper (wrapper_descriptor bound to an instance).
 
     Produced by WrapperDescriptorVariable.tp_descr_get_impl, mirroring
