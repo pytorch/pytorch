@@ -1,0 +1,60 @@
+{{def_kernel("A", "B")}}
+    M = {{size("A", 0)}}
+    N = {{size("B", 1)}}
+    K = {{size("A", 1)}}
+    if M * N == 0:
+        return
+    stride_am = {{stride("A", 0)}}
+    stride_ak = {{stride("A", 1)}}
+    stride_bk = {{stride("B", 0)}}
+    stride_bn = {{stride("B", 1)}}
+
+    # ═══ BMG Decode-Optimized GEMM (M≤32, bandwidth-bound) ═══
+    #
+    # Non-persistent, 2D grid, block2D loads via tl.make_block_ptr.
+    # Optimized for small M (decode): small BLOCK_M, large BLOCK_N.
+    # Relies on Triton's num_stages for automatic software pipelining.
+
+    pid_m = tl.program_id(0).to(INDEX_DTYPE)
+    pid_n = tl.program_id(1).to(INDEX_DTYPE)
+    tl.assume(pid_m >= 0)
+    tl.assume(pid_n >= 0)
+
+    rm = pid_m * BLOCK_M
+    rn = pid_n * BLOCK_N
+
+    # Block2D pointers → hardware 2D DMA descriptors on BMG
+    a_block_ptr = tl.make_block_ptr(
+        base=A,
+        shape=(M, K),
+        strides=(stride_am, stride_ak),
+        offsets=(rm, 0),
+        block_shape=(BLOCK_M, BLOCK_K),
+        order=(1, 0),
+    )
+    b_block_ptr = tl.make_block_ptr(
+        base=B,
+        shape=(K, N),
+        strides=(stride_bk, stride_bn),
+        offsets=(0, rn),
+        block_shape=(BLOCK_K, BLOCK_N),
+        order=(0, 1),
+    )
+
+    acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
+
+    for k_idx in range(0, tl.cdiv(K, BLOCK_K)):
+        a = tl.load(a_block_ptr, boundary_check=(0, 1), padding_option="zero")
+        b = tl.load(b_block_ptr, boundary_check=(0, 1), padding_option="zero")
+        acc = tl.dot(a, b, acc, out_dtype=ACC_TYPE)
+        a_block_ptr = tl.advance(a_block_ptr, (0, BLOCK_K))
+        b_block_ptr = tl.advance(b_block_ptr, (BLOCK_K, 0))
+
+    # Store output
+    idx_m = rm + tl.arange(0, BLOCK_M)
+    idx_n = rn + tl.arange(0, BLOCK_N)
+    idx_m = idx_m[:, None]
+    idx_n = idx_n[None, :]
+    mask = (idx_m < M) & (idx_n < N)
+
+    {{store_output(("idx_m", "idx_n"), "acc", "mask", indent_width=4, val_shape=("BLOCK_M", "BLOCK_N"))}}
