@@ -1056,6 +1056,24 @@ if(USE_ROCM)
     if(HIPBLASLT_VEC_EXT)
       list(APPEND HIP_CXX_FLAGS -DHIPBLASLT_VEC_EXT)
     endif()
+    # composable_kernel has no gfx1250 support, so aten/src/ATen/CMakeLists.txt
+    # filters gfx1250 out of the ck_gemm target's HIP_ARCHITECTURES. When gfx1250
+    # is the only requested arch that list is empty and CMake fails at generate
+    # time with 'HIP_ARCHITECTURES is empty for target "ck_gemm"', so turn CK GEMM
+    # off entirely here -- before -DUSE_ROCM_CK_GEMM is added below, since the
+    # non-CK TUs guarded by that define (HIPBlas.cpp, HIPHooks.cpp, GroupedBlas.cpp)
+    # would otherwise reference symbols the unbuilt ck_gemm target never provides.
+    # Mirrors the USE_ROCM_CK_SDPA / USE_MSLK auto-disable pattern in
+    # aten/src/ATen/CMakeLists.txt. Remove once the CK submodule supports gfx1250.
+    if(USE_ROCM_CK_GEMM)
+      set(_ck_gemm_supported_arches ${PYTORCH_ROCM_ARCH})
+      list(REMOVE_ITEM _ck_gemm_supported_arches "gfx1250")
+      if(_ck_gemm_supported_arches STREQUAL "")
+        message(STATUS "USE_ROCM_CK_GEMM disabled: PYTORCH_ROCM_ARCH (${PYTORCH_ROCM_ARCH}) has no arch supported by composable_kernel")
+        caffe2_update_option(USE_ROCM_CK_GEMM OFF)
+      endif()
+      unset(_ck_gemm_supported_arches)
+    endif()
     if(USE_ROCM_CK_GEMM)
       list(APPEND HIP_CXX_FLAGS -DUSE_ROCM_CK_GEMM)
     endif()
