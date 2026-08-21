@@ -25,25 +25,30 @@ class CUDAGraphCaptureControlFlowOpDispatchMode(TorchDispatchMode):
         args=(),
         kwargs=None,
     ):
+        kwargs = {} if kwargs is None else kwargs
         if func is torch.ops.higher_order.cond:
             # Re-enter the mode to support nested conditionals
+            _check_no_cond_kwargs(kwargs)
             with self:
                 return if_else_node(*args)
-        kwargs = {} if kwargs is None else kwargs
+        if func is torch.ops.higher_order.while_loop:
+            # Re-enter the mode to support nested control flow
+            _check_no_while_loop_kwargs(kwargs)
+            with self:
+                return while_loop_node(*args)
         return func(*args, **kwargs)
 
 
 class ControlFlowOpWarmupDispatchMode(TorchDispatchMode):
-    """The purpose of this TodchDispatchMode is to "warm up" both sides of a torch.cond() statement.
+    """Warm up control-flow subgraphs before CUDA graph capture.
 
-    For data-dependent control flow code, only one side will be
-    executed. Therefore, it is not safe to stream capture a
-    torch.cond() statement naively, since we don't have a guarantee
-    that all ops will have been "warmed up". The clever workaround is
-    to use a "relaxed" stream capture whose final cuda graph we throw
-    away. This works because stream capture does not actually execute
-    any GPU code, and because true_fn and false_fn are both fxgraphs,
-    which do not have any CPU side effects.
+    Data-dependent control flow does not necessarily execute every subgraph, so
+    operations in an untaken torch.cond branch or a torch.while_loop body may
+    not have been warmed up. This mode uses a relaxed stream capture, whose
+    final CUDA graph is discarded, to warm up both cond branches and execute a
+    while_loop body once. This works because stream capture does not execute GPU
+    code and the branch and body functions are FX graphs without CPU side
+    effects.
     """
 
     @classmethod
@@ -70,11 +75,13 @@ class ControlFlowOpWarmupDispatchMode(TorchDispatchMode):
         if func is torch.ops.higher_order.cond:
             if torch.cuda.is_current_stream_capturing():
                 # This is a call to torch.cond() nested within another
-                # torch.cond() function.
+                # control-flow function.
+                _check_no_cond_kwargs(kwargs)
                 with self:
                     # We re-enter the mode in case of nested calls to torch.cond()
                     return if_else_node(*args)
             else:
+                _check_no_cond_kwargs(kwargs)
                 with (
                     torch.cuda.graph(
                         torch.cuda.CUDAGraph(),
@@ -87,8 +94,49 @@ class ControlFlowOpWarmupDispatchMode(TorchDispatchMode):
                     if_else_node(*args)
 
                 return func(*args, **kwargs)
+        elif func is torch.ops.higher_order.while_loop:
+            _check_no_while_loop_kwargs(kwargs)
+            if torch.cuda.is_current_stream_capturing():
+                # This is a call to torch.while_loop() nested within another
+                # control-flow function.
+                with self:
+                    return while_loop_node(*args)
+            else:
+                with (
+                    torch.cuda.graph(
+                        torch.cuda.CUDAGraph(),
+                        pool=None,
+                        stream=self.capture_stream,
+                        capture_error_mode="relaxed",
+                    ),
+                    self,
+                ):
+                    while_loop_node(*args)
+
+                return func(*args, **kwargs)
         else:
             return func(*args, **kwargs)
+
+
+def _check_no_cond_kwargs(kwargs) -> None:
+    if kwargs:
+        raise RuntimeError("CUDA graph conditional torch.cond does not support kwargs")
+
+
+def _check_no_while_loop_kwargs(kwargs) -> None:
+    if kwargs:
+        raise RuntimeError(
+            "CUDA graph conditional torch.while_loop does not support kwargs"
+        )
+
+
+def _is_boolean_scalar_cuda_tensor(pred: object) -> bool:
+    return (
+        isinstance(pred, torch.Tensor)
+        and pred.size() == torch.Size([])
+        and pred.dtype == torch.bool
+        and pred.is_cuda
+    )
 
 
 @contextmanager
@@ -128,3 +176,63 @@ def if_else_node(pred: torch.Tensor, true_fn, false_fn, operands):
                 ):
                     if_out.copy_(else_out)
     return outs[0]
+
+
+@contextmanager
+def _while_body(pred: torch.Tensor):
+    current_cuda_graph = torch.cuda.CUDAGraph.get_currently_capturing_graph()
+    current_cuda_graph.begin_capture_to_while_node(pred)
+    try:
+        yield current_cuda_graph
+    finally:
+        current_cuda_graph.end_capture_to_conditional_node()
+
+
+def while_loop_node(
+    cond_fn,
+    body_fn,
+    carried_inputs,
+    additional_inputs,
+):
+    flat_carried_inputs, carried_spec = pytree.tree_flatten(carried_inputs)
+    if not all(isinstance(inp, torch.Tensor) for inp in flat_carried_inputs):
+        raise RuntimeError(
+            "CUDA graph while_loop conditional nodes only support tensor carried_inputs"
+        )
+
+    loop_carried = pytree.tree_map_only(
+        torch.Tensor, lambda inp: inp.clone(), carried_inputs
+    )
+    flat_loop_carried = pytree.tree_leaves(loop_carried)
+
+    pred = cond_fn(*loop_carried, *additional_inputs)
+    if not _is_boolean_scalar_cuda_tensor(pred):
+        raise RuntimeError(
+            f"cond_fn must return a boolean scalar CUDA tensor but got {pred}"
+        )
+
+    with _while_body(pred) as current_cuda_graph:
+        body_out = body_fn(*loop_carried, *additional_inputs)
+        flat_body_out, body_out_spec = pytree.tree_flatten(body_out)
+        if body_out_spec != carried_spec:
+            raise RuntimeError(
+                "body_fn should return the same pytree structure as carried_inputs"
+            )
+        if not all(isinstance(out, torch.Tensor) for out in flat_body_out):
+            raise RuntimeError(
+                "CUDA graph while_loop conditional nodes only support tensor "
+                "body_fn outputs"
+            )
+
+        for carried, out in zip(flat_loop_carried, flat_body_out):
+            if carried.data_ptr() != out.data_ptr():
+                carried.copy_(out)
+
+        pred = cond_fn(*loop_carried, *additional_inputs)
+        if not _is_boolean_scalar_cuda_tensor(pred):
+            raise RuntimeError(
+                f"cond_fn must return a boolean scalar CUDA tensor but got {pred}"
+            )
+        current_cuda_graph.set_conditional_handle_for_current_node(pred)
+
+    return loop_carried

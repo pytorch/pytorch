@@ -102,7 +102,7 @@ class OpSpec:
     DTensorSpec; when the return value is a tuple of Optional[DTensor],
     output_specs is a tuple of Optional[DTensorSpec].
 
-    note: we MUST produce an DTensorSpec for every output that is a Tensor.  None
+    note: we MUST produce a DTensorSpec for every output that is a Tensor.  None
     entries only occur for non-Tensor outputs (e.g., operators that return Optional[Tensor],
     or non-Tensor outputs.)
 
@@ -587,9 +587,8 @@ class OpSchema:
 
     def is_out_variant_op(self) -> bool:
         # simple analysis of function schema to determine
-        # if this is an out variant, it might not
-        # be entirely correct, but it's good enough for now.
-        return "out" in self.op._schema.overload_name
+        # if this is an out variant.
+        return any(argument.is_out for argument in self.op._schema.arguments)
 
     def is_view_op(self) -> bool:
         return self.op._schema._is_view_op()

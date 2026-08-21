@@ -2,6 +2,7 @@
 #include <torch/csrc/inductor/inductor_ops.h>
 #include <torch/library.h>
 #include <tuple>
+#include <utility>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -58,7 +59,7 @@ static std::tuple<Tensor, Tensor, Tensor> inductor_reserve_rng_state_impl(
     auto intra_t =
         at::scalar_tensor(static_cast<int64_t>(st.offset_intragraph_), cpu_opts)
             .unsqueeze(0);
-    return {seed_t, off_t, intra_t};
+    return {std::move(seed_t), std::move(off_t), std::move(intra_t)};
   }
 
   auto seed_t = at::scalar_tensor(static_cast<int64_t>(st.seed_.val), dev_opts)
@@ -66,7 +67,7 @@ static std::tuple<Tensor, Tensor, Tensor> inductor_reserve_rng_state_impl(
   auto off_t = at::scalar_tensor(static_cast<int64_t>(st.offset_.val), dev_opts)
                    .unsqueeze(0);
   auto intra_t = at::zeros({1}, cpu_opts);
-  return {seed_t, off_t, intra_t};
+  return {std::move(seed_t), std::move(off_t), std::move(intra_t)};
 }
 
 TORCH_LIBRARY_IMPL(inductor_prims, BackendSelect, m) {
