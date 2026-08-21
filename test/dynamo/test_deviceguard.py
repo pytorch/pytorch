@@ -6,12 +6,15 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.device_interface import DeviceGuard, get_interface_for_device
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class TestDeviceGuard(torch._dynamo.test_case.TestCase):
     """
     Unit tests for the DeviceGuard class using a mock DeviceInterface.
     """
+
+    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         super().setUp()
@@ -49,6 +52,8 @@ class TestDeviceGuardWithInterface(torch._dynamo.test_case.TestCase):
     """
     Unit tests for the DeviceGuard class using a real DeviceInterface.
     """
+
+    hw_classification = HardwareClassification.ACCELERATOR
 
     def test_device_guard_no_index(self, device):
         device_interface = get_interface_for_device(torch.device(device).type)
