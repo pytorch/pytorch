@@ -3,6 +3,7 @@ import unittest
 
 import torch
 from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.distributed._tools.common_utils import get_allocation_granularity
 from torch.distributed._tools.sac_estimator import SACEstimator
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import run_tests, TestCase
@@ -81,6 +82,46 @@ class TestSACEstimator(TestCase):
             self.assertEqual(sac_estimator.sac_mod_stats["Foo"].rand_ops, [])
             self.assertEqual(
                 sac_estimator.sac_mod_stats["Foo"].inplace_ops, [(2, 1), (3, 1), (4, 1)]
+            )
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    def test_sac_estimation_charges_rounded_size(self):
+        """
+        Checks that the estimator charges the size the allocator rounds up to. Under
+        ``FakeTensorMode`` the storages live on meta, so this also guards against
+        reading the granularity off the storage instead of the tensor.
+        """
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = torch.nn.Linear(5, 10)
+                self.fc2 = torch.nn.Linear(10, 10)
+
+            def forward(self, x):
+                return self.fc2(torch.relu(self.fc1(x)))
+
+        dev = torch.cuda.current_device()
+        granularity = get_allocation_granularity(torch.device(dev).type)
+        with FakeTensorMode():
+            with torch.device(dev):
+                model = Foo()
+            # (10, 10) float32 activations are 400 bytes, deliberately not a multiple
+            # of any plausible granularity.
+            x = torch.rand((10, 5), device=dev)
+
+            sac_estimator = SACEstimator()
+            with sac_estimator(estimate_mode_type="operator-level-benchmark"):
+                loss = model(x).sum()
+            loss.backward()
+
+            # View-like ops and the last op are zeroed by design, so only assert on
+            # the ops that actually retain memory.
+            recorded = [m for m in sac_estimator.sac_mod_stats["Foo"].memory if m > 0]
+            self.assertTrue(recorded, "expected some operator to record memory")
+            unrounded = [m for m in recorded if m % granularity != 0]
+            self.assertEqual(
+                unrounded, [], f"operator memory not rounded to {granularity} bytes"
             )
 
 
