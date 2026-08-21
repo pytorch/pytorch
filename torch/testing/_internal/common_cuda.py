@@ -6,17 +6,7 @@ import functools
 import threading
 import torch
 import torch.cuda
-from torch.testing._internal.common_utils import (
-    _parse_rocm_version_tuple,
-    _rocm_version_string,
-    LazyVal,
-    TEST_NUMBA,
-    TEST_WITH_ROCM,
-    TEST_CUDA,
-    IS_WINDOWS,
-    IS_MACOS,
-    TEST_XPU,
-)
+from torch.testing._internal.common_utils import LazyVal, TEST_NUMBA, TEST_WITH_ROCM, TEST_CUDA, IS_WINDOWS, IS_MACOS, TEST_XPU
 from torch.utils._import_utils import _check_module_exists
 import inspect
 import contextlib
@@ -517,11 +507,21 @@ def _get_torch_cuda_version():
 def _get_torch_rocm_version():
     if not TEST_WITH_ROCM:
         return (0, 0)
-    version_str = _rocm_version_string()
-    if version_str is None:
+    rocm_version = getattr(torch.version, "rocm", None) or torch.version.hip
+    if rocm_version is None:
         return (0, 0)
-    parsed = _parse_rocm_version_tuple(version_str)
-    return parsed if parsed else (0, 0)
+    rocm_version = str(rocm_version).split("-", maxsplit=1)[0]    # ignore git sha
+    parts = []
+    for x in rocm_version.split("."):
+        digits = []
+        for c in x:
+            if not c.isdigit():
+                break
+            digits.append(c)
+        if not digits:
+            break
+        parts.append(int("".join(digits)))
+    return tuple(parts) if parts else (0, 0)
 
 def _get_torch_hipblaslt_version():
     if not TEST_WITH_ROCM:

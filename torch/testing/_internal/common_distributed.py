@@ -40,6 +40,7 @@ from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import (
     FILE_SCHEMA,
     find_free_port,
+    getRocmVersion,
     IS_SANDCASTLE,
     LazyVal,
     retry_on_connect_failures,
@@ -51,7 +52,6 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TSAN,
     TEST_XPU,
     TestCase,
-    getRocmVersion,
 )
 from torch.testing._internal.distributed.multi_threaded_pg import (
     _install_threaded_pg,

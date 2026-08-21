@@ -2551,43 +2551,10 @@ def skipIfHpu_BUGGY(fn):
             fn(*args, **kwargs)
     return wrapper
 
-def _rocm_version_string() -> str | None:
-    """Prefer torch.version.rocm (ROCm stack). Fall back to hip on older builds."""
-    rocm = getattr(torch.version, "rocm", None)
-    if rocm:
-        return str(rocm)
-    hip = getattr(torch.version, "hip", None)
-    if hip:
-        return str(hip)
-    return None
-
-
-def _parse_rocm_version_tuple(version_str: str) -> tuple[int, ...]:
-    # Ignore git sha suffixes ("7.16.26320-abc") and leading digits in
-    # date/alpha tokens ("10.1.0a20260818" -> 10.1.0).
-    version_str = version_str.split("-", maxsplit=1)[0]
-    parts: list[int] = []
-    for tok in version_str.split("."):
-        digits = []
-        for ch in tok:
-            if ch.isdigit():
-                digits.append(ch)
-            else:
-                break
-        if not digits:
-            break
-        parts.append(int("".join(digits)))
-    return tuple(parts)
-
-
 def getRocmVersion() -> tuple[int, int]:
-    version_str = _rocm_version_string()
-    if version_str is None:
-        return (0, 0)
-    parsed = _parse_rocm_version_tuple(version_str)
-    if len(parsed) < 2:
-        return (0, 0)
-    return (parsed[0], parsed[1])
+    from torch.testing._internal.common_cuda import _get_torch_rocm_version
+    rocm_version = _get_torch_rocm_version()
+    return (rocm_version[0], rocm_version[1])
 
 # Skips a test on CUDA if ROCm is available and its version is lower than requested.
 def skipIfRocmVersionLessThan(version=None):
