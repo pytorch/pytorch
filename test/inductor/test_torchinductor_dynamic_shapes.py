@@ -22,11 +22,14 @@ from torch._inductor.virtualized import V
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import IS_SM89
 from torch.testing._internal.common_device_type import (
+    Capability,
     instantiate_device_type_tests,
-    onlyCPU,
-    onlyOn,
+    onlyAccelerator,
+    requires_capabilities,
+    skipIf,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_ARM64,
     IS_FBCODE,
     MI350_ARCH,
@@ -132,6 +135,8 @@ class DynamicShapesTestCase(TestCase):
 
 
 class DynamicShapesOpTests:
+    hw_classification = HardwareClassification.GENERIC
+
     @torch._dynamo.config.patch(assume_static_by_default=False)
     def test_prod_backward_keeps_input_shape_dynamic(self):
         def fn(x):
@@ -678,7 +683,7 @@ class TestInductorDynamic(DynamicShapesTestCase):
             return torch.ops.aten.cat.default([g, g, g2])
 
         cf = torch.compile(fullgraph=True)(f)
-        arg = torch.tensor([4, 6], device=GPU_TYPE)
+        arg = torch.tensor([4, 6], device=device)
         self.assertEqual(f(arg), cf(arg))
 
     @torch._dynamo.config.patch(
@@ -727,7 +732,7 @@ class TestInductorDynamic(DynamicShapesTestCase):
         torch.compile(fullgraph=True)(f)(x, w).sum().backward()
         self.assertEqual(orig_w, w.grad)
 
-    @onlyOn(GPU_TYPE)
+    @onlyAccelerator
     @torch._dynamo.config.patch(
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
     )
@@ -851,7 +856,7 @@ class TestInductorDynamic(DynamicShapesTestCase):
         res1 = opt(x1)
         self.assertEqual(ref1, res1)
 
-    @onlyOn(GPU_TYPE)
+    @onlyAccelerator
     def test_pad_dynamic(self, device):
         def get_same_padding(x: int, k: int, s: int, d: int):
             return max((math.ceil(x / s) - 1) * s + (k - 1) * d + 1 - x, 0)
@@ -1008,7 +1013,7 @@ class TestInductorDynamic(DynamicShapesTestCase):
                 cfn = self.compile_fn(fn, fullgraph=True)
                 self.assertEqual(fn(x), cfn(x))
 
-    @onlyCPU
+    @skipIf(not HAS_CPU, "Requires CPU")
     def test_arithmetic_constant_folding(self, device):
         def test(fn):
             cfn = self.compile_fn(fn)
@@ -1031,7 +1036,7 @@ class TestInductorDynamic(DynamicShapesTestCase):
 
         test(div)
 
-    @onlyCPU
+    @skipIf(not HAS_CPU, "Requires CPU")
     def test_sub_constant_folding(self, device):
         def sub(x):
             return x - torch.zeros(3)
@@ -1218,12 +1223,12 @@ class TestInductorDynamic(DynamicShapesTestCase):
 
         f(torch.tensor([5] * 320))
 
-    def test_mark_unbacked_slice(self):
+    def test_mark_unbacked_slice(self, device):
         @torch.compile(backend="inductor", mode="reduce-overhead", fullgraph=True)
         def f(x):
             return x.sum()
 
-        x = torch.empty_strided((1, 4), (5, 1), device=GPU_TYPE)
+        x = torch.empty_strided((1, 4), (5, 1), device=device)
         torch._dynamo.decorators.mark_unbacked(x, 0)
         f(x)
 
@@ -1301,8 +1306,9 @@ class TestInductorDynamic(DynamicShapesTestCase):
         self.assertEqual(fn(x, 4.0), fn_opt(x, 4.0))
         self.assertEqual(cnt.frame_count, 2)
 
-    @onlyOn(GPU_TYPE)
-    def test_dynamic_rblock_bounds(self):
+    @onlyAccelerator
+    @requires_capabilities(Capability.lib.triton)
+    def test_dynamic_rblock_bounds(self, device):
         class ForcePersistent(InductorChoices):
             @staticmethod
             def should_use_cooperative_reduction(*args, **kwargs) -> bool:
@@ -1315,7 +1321,7 @@ class TestInductorDynamic(DynamicShapesTestCase):
         def fn(x):
             return x.sum()
 
-        x = torch.rand([31], device=GPU_TYPE)
+        x = torch.rand([31], device=device)
 
         with V.set_choices_handler(ForcePersistent()):
             torch._dynamo.mark_dynamic(x, 0, min=1, max=62)
@@ -1331,7 +1337,7 @@ class TestInductorDynamic(DynamicShapesTestCase):
             self.assertEqual(fn(x), actual)
             FileCheck().check("R0_BLOCK: tl.constexpr = 64").run(source_codes[0])
 
-    def test_non_persistent_dynamic_rblock(self):
+    def test_non_persistent_dynamic_rblock(self, device):
         def reduce_bounded(x, y):
             """Reduce over a dimension with bounded size."""
             # x shape: [batch, features, reduction_dim]
@@ -1347,12 +1353,8 @@ class TestInductorDynamic(DynamicShapesTestCase):
         features = 5536
         reduction_dim = 6  # Actual size is small
 
-        x = torch.randn(reduction_dim, batch, features, device=GPU_TYPE).permute(
-            1, 2, 0
-        )
-        y = torch.randn(reduction_dim, batch, features, device=GPU_TYPE).permute(
-            1, 2, 0
-        )
+        x = torch.randn(reduction_dim, batch, features, device=device).permute(1, 2, 0)
+        y = torch.randn(reduction_dim, batch, features, device=device).permute(1, 2, 0)
 
         torch._dynamo.mark_dynamic(x, 2, min=6, max=64)
         torch._dynamo.mark_dynamic(y, 2, min=6, max=64)
@@ -1395,7 +1397,7 @@ class TestInductorDynamic(DynamicShapesTestCase):
         self.assertEqual(cnt.frame_count, 4)
 
     def test_sort_dynamic_shape_with_check(self, device):
-        if torch.device(device).type != GPU_TYPE:
+        if not self.has_capabilities(Capability.lib.triton):
 
             def check_count(n):
                 self.assertEqual(metrics.generated_kernel_count, 0)
@@ -1470,10 +1472,10 @@ class TestInductorDynamic(DynamicShapesTestCase):
         actual = compiled_fn(arg0, arg1, arg2, arg3, arg4, arg5, arg6)
         self.assertEqual(actual, expected, atol=1e-2, rtol=1e-2)
 
-    @onlyOn(GPU_TYPE)
+    @onlyAccelerator
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
-    def test_sympy_infinity_bounds_in_persistent_reduction(self):
+    def test_sympy_infinity_bounds_in_persistent_reduction(self, device):
         """
         Regression test for sympy Infinity bounds handling in should_use_persistent_reduction.
 
@@ -1497,13 +1499,13 @@ class TestInductorDynamic(DynamicShapesTestCase):
             return t15
 
         arg0 = torch.rand(
-            [65, 1024, 10], dtype=torch.float32, device=GPU_TYPE, requires_grad=True
+            [65, 1024, 10], dtype=torch.float32, device=device, requires_grad=True
         )
         arg2 = torch.rand(
-            [134, 4, 640], dtype=torch.float32, device=GPU_TYPE, requires_grad=True
+            [134, 4, 640], dtype=torch.float32, device=device, requires_grad=True
         )
         arg3 = torch.rand(
-            [65, 67, 6], dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True
+            [65, 67, 6], dtype=torch.bfloat16, device=device, requires_grad=True
         )
 
         compiled_fn = torch.compile(fn, fullgraph=True, dynamic=True)
