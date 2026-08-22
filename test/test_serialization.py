@@ -4506,6 +4506,25 @@ class TestSerialization(TestCase, SerializationMixin):
             njt = torch.nested.nested_tensor([[1, 2, 3], [4, 5]], layout=torch.jagged)
             torch.save(njt, filename)
             filename = pathlib.Path(filename)
+            # NJTs no longer embed any ``torch._dynamo`` global: the mark_dynamic calls
+            # on the cached seqlen tensors declare no min/max, so no _DimRange is
+            # recorded and the load succeeds whether or not torch._dynamo is imported.
+            # Checkpoints written before that change still carry _DimRange and still
+            # need the import, see _weights_only_unpickler.
+            import_string = "import torch._dynamo;" if should_import else ""
+            self._attempt_load_from_subprocess(filename, import_string, None)
+
+    @parametrize("should_import", [False, True])
+    def test_load_njt_with_dim_range_weights_only(self, should_import):
+        with TemporaryFileName() as filename:
+            njt = torch.nested.nested_tensor([[1, 2, 3], [4, 5]], layout=torch.jagged)
+            # A declared min/max records a _DimRange, a torch._dynamo global, so this
+            # checkpoint does need torch._dynamo imported to load.
+            torch._dynamo.mark_dynamic(
+                njt._metadata_cache["max_seqlen"], 0, min=2, max=5
+            )
+            torch.save(njt, filename)
+            filename = pathlib.Path(filename)
             import_string = "import torch._dynamo;" if should_import else ""
             err_msg = (
                 "_pickle.UnpicklingError: Weights only load failed. ``torch.nested`` and ``torch._dynamo``"
