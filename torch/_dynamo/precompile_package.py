@@ -797,8 +797,23 @@ class _PrecompileBackend:
         # graphs away, and rendering is a second full lowering.
         self._keep_graphs = keep_graphs
         self.graphs: dict[str, tuple[torch.fx.GraphModule, list[Any]]] = {}
+        # Serving an INSTALLED artifact answers a guard miss by compiling,
+        # because a frame reachable only through the frame evaluator has no
+        # other way to run. Counted, and said out loud once per graph: an
+        # artifact that quietly compiles more of itself on every batch looks
+        # exactly like one that is serving.
+        self.serving = False
+        self.serve_time_compiles = 0
 
     def __call__(self, gm: torch.fx.GraphModule, inputs: list[torch.Tensor]) -> Any:
+        if self.serving:
+            self.serve_time_compiles += 1
+            log.warning(
+                "precompile: serving compiled a NEW graph for %s -- no captured "
+                "variant matched this call, so the artifact is serving less than "
+                "it was measured to. Recapture with an example that covers it.",
+                getattr(gm, "_orig_mod", gm).__class__.__name__,
+            )
         if self._keep_graphs:
             backend_id = gm.meta.get("backend_id") or getattr(gm, "_backend_id", None)
             if backend_id is not None and str(backend_id) not in self.graphs:
@@ -2638,8 +2653,10 @@ def serve_cache_entry(
             default_guard_filter_fn if guard_filter_fn is None else guard_filter_fn
         ),
     )
+    backend_obj = _PrecompileBackend(backend)
+    backend_obj.serving = True
     optimize_ctx = torch._dynamo.optimize(
-        _PrecompileBackend(backend),
+        backend_obj,
         package=package,
         recompile_limit=recompile_limit,
         dynamic=dynamic,
@@ -2650,7 +2667,7 @@ def serve_cache_entry(
     if not isinstance(isolate_recompiles_id, int):
         raise AssertionError("missing isolate_recompiles_id")
     package.install(cache_entry.backends, isolate_recompiles_id=isolate_recompiles_id)
-    return PrecompiledCallable(compiled, package, isolate_recompiles_id)
+    return PrecompiledCallable(compiled, package, isolate_recompiles_id, backend_obj)
 
 
 def precompile_capture(
@@ -2707,10 +2724,12 @@ class PrecompiledCallable:
         compiled: Callable[..., object],
         package: CompilePackage,
         isolate_recompiles_id: int,
+        backend: _PrecompileBackend | None = None,
     ) -> None:
         self._compiled: Callable[..., object] | None = compiled
         self._package = package
         self._isolate_recompiles_id = isolate_recompiles_id
+        self._backend = backend
         from .pgo import _new_code_state
 
         self._pgo_state = _new_code_state()
@@ -2757,6 +2776,16 @@ class PrecompiledCallable:
                 self._active_calls -= 1
                 if self._active_calls == 0:
                     self._state.notify_all()
+
+    def serve_time_compiles(self) -> int:
+        """Graphs this artifact compiled while SERVING, rather than serving.
+
+        Zero is the number that says the artifact covered every call it saw.
+        An installed artifact answers a guard miss by compiling, so this
+        climbing means it is serving less of itself than it was measured to --
+        the right thing to gate a job on.
+        """
+        return self._backend.serve_time_compiles if self._backend else 0
 
     def __enter__(self) -> Self:
         with self._state:
