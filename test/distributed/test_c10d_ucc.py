@@ -31,16 +31,19 @@ import torch.nn.functional as F
 import torch.testing._internal.common_utils as common
 from torch import nn
 from torch.nn.parallel import DistributedDataParallel
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import (
-    MultiProcessTestCase,
+    MultiProcContinuousTest,
     requires_ucc,
     skip_if_lt_x_gpu,
     verify_ddp_error_logged,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     retry_on_connect_failures,
     run_tests,
     skip_but_pass_in_sandcastle,
+    skip_but_pass_in_sandcastle_if,
     TestCase,
 )
 
@@ -115,6 +118,8 @@ def simple_reduce_tests(rank, world_size):
 
 
 class RendezvousEnvTest(TestCase):
+    hw_classification = HardwareClassification.CPU
+
     @requires_ucc()
     @retry_on_connect_failures
     def test_logging_init(self):
@@ -136,30 +141,31 @@ class RendezvousEnvTest(TestCase):
 
 
 class TimeoutTest(test_c10d_common.AbstractTimeoutTest, TestCase):
+    hw_classification = HardwareClassification.CPU
+
     @requires_ucc()
     @retry_on_connect_failures
     def test_default_store_timeout_ucc(self):
         self._test_default_store_timeout("ucc")
 
 
-class ProcessGroupUCCTest(MultiProcessTestCase):
+class ProcessGroupUCCTest(MultiProcContinuousTest):
+    hw_classification = HardwareClassification.CPU
+
+    @classmethod
+    def backend_str(cls) -> str:
+        return "ucc"
+
+    @property
+    def world_size(self):
+        return 4
+
     def _create_process_group_ucc(self):
-        store = c10d.FileStore(self.file_name, self.world_size)
+        store = c10d.FileStore(self.rdvz_file, self.world_size)
         return c10d.ProcessGroupUCC(store, self.rank, self.world_size)
 
-    def setUp(self):
-        super().setUp()
-        self._spawn_processes()
-
-    def tearDown(self):
-        super().tearDown()
-        try:
-            os.remove(self.file_name)
-        except OSError:
-            pass
-
     @requires_ucc()
-    def test_empty_tensors(self):
+    def test_empty_tensors(self, device):
         pg = self._create_process_group_ucc()
 
         xs = [torch.FloatTensor([])]
@@ -199,7 +205,7 @@ class ProcessGroupUCCTest(MultiProcessTestCase):
         self.assertEqual(torch.tensor([1.0]), result[0])
 
     @requires_ucc()
-    def test_broadcast_basics(self):
+    def test_broadcast_basics(self, device):
         self._test_broadcast_basics(lambda t: t.clone())
 
     # TODO: test_broadcast_basics_cuda times out locally
@@ -231,7 +237,7 @@ class ProcessGroupUCCTest(MultiProcessTestCase):
         )
 
     @requires_ucc()
-    def test_allreduce_basics(self):
+    def test_allreduce_basics(self, device):
         self._test_allreduce_basics(lambda t: t.clone())
 
     # TODO: test_allreduce_basics_cuda times out locally
@@ -257,7 +263,8 @@ class ProcessGroupUCCTest(MultiProcessTestCase):
                 result = [result]
             self.assertEqual(expected_output, result)
 
-    def test_allgather_basics(self):
+    @requires_ucc()
+    def test_allgather_basics(self, device):
         self._test_allgather_basics(lambda t: t.clone())
 
     def _test_reduce_basics(self, fn):
@@ -275,13 +282,13 @@ class ProcessGroupUCCTest(MultiProcessTestCase):
                     self.assertEqual(output, result[0], exact_dtype=False)
 
     @requires_ucc()
-    def test_reduce_basics(self):
+    def test_reduce_basics(self, device):
         self._test_reduce_basics(lambda t: t.clone())
 
     # TODO: test_reduce_basics_cuda times out locally
 
     @requires_ucc()
-    def test_send_recv_all_to_all(self):
+    def test_send_recv_all_to_all(self, device):
         pg = self._create_process_group_ucc()
 
         # Preallocate tensors for input/output
@@ -321,7 +328,7 @@ class ProcessGroupUCCTest(MultiProcessTestCase):
     # TODO: test_barrier_implies_wait fails with numerical mismatch, will investigate later
     @skip_but_pass_in_sandcastle("fails with numerical mismatch, skip for now")
     @requires_ucc()
-    def test_barrier_implies_wait(self):
+    def test_barrier_implies_wait(self, device):
         pg = self._create_process_group_ucc()
 
         # Kick off allreduce operations
@@ -350,19 +357,24 @@ class ProcessGroupUCCTest(MultiProcessTestCase):
         result = fut.value()
         self.assertEqual(result[0], expected_output)
 
-    def test_reduce_scatter_base_basics(self):
+    def test_reduce_scatter_base_basics(self, device):
         self._test_reduce_scatter_base_basics(lambda t: t.clone())
 
 
-class DistributedDataParallelTest(
-    test_c10d_common.CommonDistributedDataParallelTest, MultiProcessTestCase
+class _DistributedDataParallelTestBase(
+    test_c10d_common.CommonDistributedDataParallelTest, MultiProcContinuousTest
 ):
-    def setUp(self):
-        super().setUp()
-        self._spawn_processes()
+
+    @classmethod
+    def backend_str(cls) -> str:
+        return "ucc"
+
+    @property
+    def device(self) -> torch.device:
+        return self._dev
 
     def _get_process_group(self):
-        store = self._get_store()
+        store = c10d.FileStore(self.rdvz_file, self.world_size)
         c10d.init_process_group(
             "ucc", store=store, rank=self.rank, world_size=self.world_size
         )
@@ -375,52 +387,6 @@ class DistributedDataParallelTest(
         self._test_ddp_with_process_group(
             process_group, devices, device_ids, multi_device, gradient_as_bucket_view
         )
-
-    @requires_ucc()
-    def test_ucc_backend_cpu_module(self):
-        self._test_ucc_backend([torch.device("cpu")], None)
-
-    @requires_ucc()
-    def test_ucc_backend_cpu_module_grad_is_view(self):
-        self._test_ucc_backend(
-            [torch.device("cpu")], None, gradient_as_bucket_view=True
-        )
-
-    @requires_ucc()
-    @skip_if_lt_x_gpu(2)
-    def test_ucc_backend_1gpu_module_device_ids_integer_list(self):
-        int_devices = gpus_for_rank(self.world_size)[self.rank][:1]
-        devices = [torch.device("cuda:" + str(i)) for i in int_devices]
-        self._test_ucc_backend(devices, int_devices)
-
-    @requires_ucc()
-    @skip_if_lt_x_gpu(2)
-    def test_ucc_backend_1gpu_module_device_ids_torch_device_list(self):
-        int_devices = gpus_for_rank(self.world_size)[self.rank][:1]
-        devices = [torch.device("cuda:" + str(i)) for i in int_devices]
-        self._test_ucc_backend(devices, devices)
-
-    # TODO: test_ucc_backend_2gpu_module and test_ucc_backend_4gpu_module
-    # require broadcast_coalesced which is not supported by ucc currently
-    @skip_but_pass_in_sandcastle(
-        "requires broadcast coalesced, which is not supported by ucc currently"
-    )
-    @requires_ucc()
-    @skip_if_lt_x_gpu(4)
-    def test_ucc_backend_2gpu_module(self):
-        int_devices = gpus_for_rank(self.world_size)[self.rank][:2]
-        devices = [torch.device("cuda:" + str(i)) for i in int_devices]
-        self._test_ucc_backend(devices, None, multi_device=True)
-
-    @skip_but_pass_in_sandcastle(
-        "requires broadcast coalesced, which is not supported by ucc currently"
-    )
-    @requires_ucc()
-    @skip_if_lt_x_gpu(8)
-    def test_ucc_backend_4gpu_module(self):
-        int_devices = gpus_for_rank(self.world_size)[self.rank][:4]
-        devices = [torch.device("cuda:" + str(i)) for i in int_devices]
-        self._test_ucc_backend(devices, None, multi_device=True)
 
     def _test_global_local_unused_params_grad(
         self, gradient_as_bucket_view=False, static_graph=False
@@ -477,8 +443,9 @@ class DistributedDataParallelTest(
 
         # Test on GPU
         device_id = gpus_for_rank(self.world_size)[self.rank][0]
+        dev = torch.device(self.device_type, device_id)
         gpu_model = DistributedDataParallel(
-            GlobalLocalUnusedParamModule().to(device_id),
+            GlobalLocalUnusedParamModule().to(dev),
             device_ids=[device_id],
             process_group=process_group,
             find_unused_parameters=True,
@@ -487,32 +454,324 @@ class DistributedDataParallelTest(
         )
         run_and_verify_grad(gpu_model)
 
-    # TODO: times out
+    def _run_and_verify_sparse_gradients(self, vanilla_model, ddp_model):
+        mult = 2
+        batch_size = mult * self.world_size
+        criterion = nn.CrossEntropyLoss()
+        input = torch.randint(0, 10, [batch_size, 2])
+        target = torch.randint(0, 10, [batch_size])
+
+        # Run with entire batch against single process version
+        criterion(vanilla_model(input), target).backward()
+
+        # Run with partial batch against multi process version
+        partial_input = input.split(mult)[self.rank]
+        partial_target = target.split(mult)[self.rank]
+        criterion(ddp_model(partial_input), partial_target).backward()
+
+        # Check that the gradients are sparse and identical
+        vanilla_parameter = next(vanilla_model.parameters())
+        ddp_parameter = next(ddp_model.parameters())
+        self.assertEqual(
+            vanilla_parameter.grad.coalesce(), ddp_parameter.grad.coalesce()
+        )
+
+    def _test_sparse_gradients(self, gradient_as_bucket_view=False):
+        process_group = self._get_process_group()
+
+        # Ensure initialized weights and inputs are identical across processes
+        torch.manual_seed(1337)
+
+        vanilla_model = SparseGradientModule()
+        ddp_model = DistributedDataParallel(
+            copy.deepcopy(vanilla_model),
+            process_group=process_group,
+            gradient_as_bucket_view=gradient_as_bucket_view,
+        )
+
+        self._run_and_verify_sparse_gradients(vanilla_model, ddp_model)
+
+    def _gpu_model_with_ddp_comm_hook(
+        self, process_group, hook=None, gradient_as_bucket_view=False, state=None
+    ):
+        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+        dev = torch.device(self.device_type, device_id)
+        gpu_model = DistributedDataParallel(
+            ModuleForDdpCommHook().to(dev),
+            device_ids=[device_id],
+            process_group=process_group,
+            gradient_as_bucket_view=gradient_as_bucket_view,
+        )
+
+        # Register a DDP communication hook if any.
+        if hook is not None:
+            gpu_model.register_comm_hook(state, hook)
+
+        return gpu_model
+
+
+
+class DistributedDataParallelTest(_DistributedDataParallelTestBase):
+    hw_classification = HardwareClassification.CPU
+
+    @requires_ucc()
+    def test_ucc_backend_cpu_module(self, device):
+        self._dev = torch.device(device)
+        self._test_ucc_backend([torch.device("cpu")], None)
+
+    @requires_ucc()
+    def test_ucc_backend_cpu_module_grad_is_view(self, device):
+        self._dev = torch.device(device)
+        self._test_ucc_backend(
+            [torch.device("cpu")], None, gradient_as_bucket_view=True
+        )
+
+    @requires_ucc()
+    def test_ignored_output(self, device):
+        """
+        Test that the output of a model can be ignored and that there is no
+        implicit requirement that `backward` gets called.
+        """
+        self._dev = torch.device(device)
+        process_group = self._get_process_group()
+
+        class IgnoredOutput(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.fc1 = nn.Linear(2, 10, bias=False)
+                self.fc2 = nn.Linear(10, 4, bias=False)
+                self.relu = nn.ReLU()
+
+            def forward(self, x):
+                x = self.relu(self.fc1(x))
+                x = self.relu(self.fc2(x))
+                return F.softmax(x, dim=1)
+
+        model = DistributedDataParallel(
+            IgnoredOutput().float(),
+            process_group=process_group,
+        )
+
+        batch_size = 4
+        criterion = nn.CrossEntropyLoss()
+        input = torch.rand([batch_size, 2], dtype=torch.float)
+        target = torch.LongTensor([random.randrange(4) for _ in range(batch_size)])
+
+        # Run a few iterations where we ignore the output.
+        for _ in range(4):
+            output = model(input)
+            del output
+
+        # Run a few iterations where we use the output.
+        for _ in range(4):
+            output = model(input)
+            loss = criterion(output, target)
+            loss.backward()
+
+    @requires_ucc()
+    def test_ignored_output_with_unused_parameters(self, device):
+        """
+        Test that the output of a model can be ignored and that there is no
+        implicit requirement that `backward` gets called, if not all model
+        parameters participated in computing the model output.
+        """
+        self._dev = torch.device(device)
+        process_group = self._get_process_group()
+
+        class IgnoredOutputWithUnusedParameters(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.fc1 = nn.Linear(2, 10, bias=False)
+                self.fc2 = nn.Linear(10, 4, bias=False)
+                self.fc3 = nn.Linear(4, 4, bias=False)
+                self.relu = nn.ReLU()
+
+            def forward(self, x):
+                x = self.relu(self.fc1(x))
+                x = self.relu(self.fc2(x))
+                return F.softmax(x, dim=1)
+
+        model = DistributedDataParallel(
+            IgnoredOutputWithUnusedParameters().float(),
+            process_group=process_group,
+            find_unused_parameters=True,
+        )
+
+        batch_size = 4
+        criterion = nn.CrossEntropyLoss()
+        input = torch.rand([batch_size, 2], dtype=torch.float)
+        target = torch.LongTensor([random.randrange(4) for _ in range(batch_size)])
+
+        # Run a few iterations where we ignore the output.
+        for _ in range(4):
+            output = model(input)
+            del output
+
+        # Run a few iterations where we use the output.
+        for _ in range(4):
+            output = model(input)
+            loss = criterion(output, target)
+            loss.backward()
+
+    @skip_but_pass_in_sandcastle("backward pass: input tensor has to be dense")
+    @requires_ucc()
+    def test_sparse_gradients(self, device):
+        self._dev = torch.device(device)
+        self._test_sparse_gradients()
+
+    @skip_but_pass_in_sandcastle("backward pass: input tensor has to be dense")
+    @requires_ucc()
+    def test_sparse_gradients_grad_is_view(self, device):
+        self._dev = torch.device(device)
+        self._test_sparse_gradients(gradient_as_bucket_view=True)
+
+    @requires_ucc()
+    def test_ddp_comm_hook_future_passing_cpu(self, device):
+        """
+        This unit test verifies whether the Future object is passed properly.
+        The callback function creates a Future object and sets a value to it.
+        """
+        self._dev = torch.device(device)
+        process_group = self._get_process_group()
+
+        # Test on CPU
+        cpu_model = DistributedDataParallel(
+            ModuleForDdpCommHook().cpu(), process_group=process_group
+        )
+
+        # Register DDP Communication Hook
+        cpu_model.register_comm_hook(None, self._simple_hook)
+
+        # check whether the grads are equal to what then callback returns.
+        # without the comm_hook, result would be 0.25 * torch.ones(2, 2).
+        self._run_and_verify_hook(cpu_model, 8, 2 * torch.ones(2, 2))
+
+    @skip_but_pass_in_sandcastle("backward pass: input tensor has to be dense")
+    @requires_ucc()
+    def test_ddp_comm_hook_sparse_gradients(self, device):
+        """
+        Runs "test_sparse_gradients" unit test with DDP communication hook. We define a
+        simple hook that does allreduce and works with ucc backend for this test.
+        """
+        self._dev = torch.device(device)
+        process_group = self._get_process_group()
+
+        # Ensure initialized weights and inputs are identical across processes
+        torch.manual_seed(1337)
+
+        vanilla_model = SparseGradientModule()
+        ddp_model = DistributedDataParallel(
+            copy.deepcopy(vanilla_model),
+            process_group=process_group,
+        )
+
+        def allreduce_hook_ucc(
+            state: object, bucket: dist.GradBucket
+        ) -> torch.futures.Future[torch.Tensor]:
+            def div_by_world_size(fut):
+                # Divide the result by 2 * world_size.
+                return fut.wait()[0] / self.world_size
+
+            # Prepare allreduced grad bucket tensors by running an async work.
+            fut = process_group.allreduce([bucket.buffer()]).get_future()
+            return fut.then(div_by_world_size)
+
+        ddp_model.register_comm_hook(None, allreduce_hook_ucc)
+
+        self._run_and_verify_sparse_gradients(vanilla_model, ddp_model)
+
+
+
+class DistributedDataParallelCUDATest(_DistributedDataParallelTestBase):
+    hw_classification = HardwareClassification.CUDA
+
+    @requires_ucc()
+    @skip_but_pass_in_sandcastle_if(
+        torch.accelerator.device_count() < 2,
+        "test requires 2+ accelerators",
+    )
+    def test_ucc_backend_1gpu_module_device_ids_integer_list(self, device):
+        self._dev = torch.device(device)
+        int_devices = gpus_for_rank(self.world_size)[self.rank][:1]
+        devices = [torch.device(torch.device(device).type, i) for i in int_devices]
+        self._test_ucc_backend(devices, int_devices)
+
+    @requires_ucc()
+    @skip_but_pass_in_sandcastle_if(
+        torch.accelerator.device_count() < 2,
+        "test requires 2+ accelerators",
+    )
+    def test_ucc_backend_1gpu_module_device_ids_torch_device_list(self, device):
+        self._dev = torch.device(device)
+        int_devices = gpus_for_rank(self.world_size)[self.rank][:1]
+        devices = [torch.device(torch.device(device).type, i) for i in int_devices]
+        self._test_ucc_backend(devices, devices)
+
+    @skip_but_pass_in_sandcastle(
+        "requires broadcast coalesced, which is not supported by ucc currently"
+    )
+    @requires_ucc()
+    @skip_but_pass_in_sandcastle_if(
+        torch.accelerator.device_count() < 4,
+        "test requires 4+ accelerators",
+    )
+    def test_ucc_backend_2gpu_module(self, device):
+        self._dev = torch.device(device)
+        int_devices = gpus_for_rank(self.world_size)[self.rank][:2]
+        devices = [torch.device(torch.device(device).type, i) for i in int_devices]
+        self._test_ucc_backend(devices, None, multi_device=True)
+
+    @skip_but_pass_in_sandcastle(
+        "requires broadcast coalesced, which is not supported by ucc currently"
+    )
+    @requires_ucc()
+    @skip_but_pass_in_sandcastle_if(
+        torch.accelerator.device_count() < 8,
+        "test requires 8+ accelerators",
+    )
+    def test_ucc_backend_4gpu_module(self, device):
+        self._dev = torch.device(device)
+        int_devices = gpus_for_rank(self.world_size)[self.rank][:4]
+        devices = [torch.device(torch.device(device).type, i) for i in int_devices]
+        self._test_ucc_backend(devices, None, multi_device=True)
+
     @skip_but_pass_in_sandcastle("times out")
     @requires_ucc()
-    @skip_if_lt_x_gpu(2)
-    def test_global_local_unused_params_grad(self):
+    @skip_but_pass_in_sandcastle_if(
+        torch.accelerator.device_count() < 2,
+        "test requires 2+ accelerators",
+    )
+    def test_global_local_unused_params_grad(self, device):
+        self._dev = torch.device(device)
         self._test_global_local_unused_params_grad()
 
-    # TODO: times out
     @skip_but_pass_in_sandcastle("times out")
     @requires_ucc()
-    @skip_if_lt_x_gpu(2)
-    def test_global_local_unused_params_grad_with_grad_is_view(self):
+    @skip_but_pass_in_sandcastle_if(
+        torch.accelerator.device_count() < 2,
+        "test requires 2+ accelerators",
+    )
+    def test_global_local_unused_params_grad_with_grad_is_view(self, device):
+        self._dev = torch.device(device)
         self._test_global_local_unused_params_grad(gradient_as_bucket_view=True)
 
-    # TODO: times out
     @skip_but_pass_in_sandcastle("times out")
     @requires_ucc()
-    @skip_if_lt_x_gpu(2)
-    def test_global_local_unused_params_grad_with_static_graph(self):
+    @skip_but_pass_in_sandcastle_if(
+        torch.accelerator.device_count() < 2,
+        "test requires 2+ accelerators",
+    )
+    def test_global_local_unused_params_grad_with_static_graph(self, device):
+        self._dev = torch.device(device)
         self._test_global_local_unused_params_grad(static_graph=True)
 
-    # TODO: times out
     @skip_but_pass_in_sandcastle("times out")
     @requires_ucc()
-    @skip_if_lt_x_gpu(2)
-    def test_find_unused_parameters_when_unused_parameters_empty(self):
+    @skip_but_pass_in_sandcastle_if(
+        torch.accelerator.device_count() < 2,
+        "test requires 2+ accelerators",
+    )
+    def test_find_unused_parameters_when_unused_parameters_empty(self, device):
         """
         An empty unused_parameters array does not imply find_unused_parameters =
         false. This test makes sure that DDP allreduces unused parameters
@@ -520,6 +779,7 @@ class DistributedDataParallelTest(
         This unit test creates a module that uses all parameters in rank = 0, and
         has unused parameters in other ranks.
         """
+        self._dev = torch.device(device)
 
         class FindUnusedParamModule(nn.Module):
             def __init__(self) -> None:
@@ -558,8 +818,9 @@ class DistributedDataParallelTest(
 
         # Test on GPU
         device_id = gpus_for_rank(self.world_size)[self.rank][0]
+        dev = torch.device(self.device_type, device_id)
         gpu_model = DistributedDataParallel(
-            FindUnusedParamModule().to(device_id),
+            FindUnusedParamModule().to(dev),
             device_ids=[device_id],
             process_group=process_group,
             find_unused_parameters=True,
@@ -567,118 +828,15 @@ class DistributedDataParallelTest(
         run_and_verify_grad(gpu_model)
 
     @requires_ucc()
-    def test_ignored_output(self):
-        """
-        Test that the output of a model can be ignored and that there is no
-        implicit requirement that `backward` gets called.
-        """
-        process_group = self._get_process_group()
-
-        class IgnoredOutput(nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.fc1 = nn.Linear(2, 10, bias=False)
-                self.fc2 = nn.Linear(10, 4, bias=False)
-                self.relu = nn.ReLU()
-
-            def forward(self, x):
-                x = self.relu(self.fc1(x))
-                x = self.relu(self.fc2(x))
-                return F.softmax(x, dim=1)
-
-        model = DistributedDataParallel(
-            IgnoredOutput().float(),
-            process_group=process_group,
-        )
-
-        batch_size = 4
-        criterion = nn.CrossEntropyLoss()
-        input = torch.rand([batch_size, 2], dtype=torch.float)
-        target = torch.LongTensor([random.randrange(4) for _ in range(batch_size)])
-
-        # Run a few iterations where we ignore the output.
-        for _ in range(4):
-            output = model(input)
-            del output
-
-        # Run a few iterations where we use the output.
-        for _ in range(4):
-            output = model(input)
-            loss = criterion(output, target)
-            loss.backward()
-
-    @requires_ucc()
-    def test_ignored_output_with_unused_parameters(self):
-        """
-        Test that the output of a model can be ignored and that there is no
-        implicit requirement that `backward` gets called, if not all model
-        parameters participated in computing the model output.
-        """
-        process_group = self._get_process_group()
-
-        class IgnoredOutputWithUnusedParameters(nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.fc1 = nn.Linear(2, 10, bias=False)
-                self.fc2 = nn.Linear(10, 4, bias=False)
-                self.fc3 = nn.Linear(4, 4, bias=False)
-                self.relu = nn.ReLU()
-
-            def forward(self, x):
-                x = self.relu(self.fc1(x))
-                x = self.relu(self.fc2(x))
-                return F.softmax(x, dim=1)
-
-        model = DistributedDataParallel(
-            IgnoredOutputWithUnusedParameters().float(),
-            process_group=process_group,
-            find_unused_parameters=True,
-        )
-
-        batch_size = 4
-        criterion = nn.CrossEntropyLoss()
-        input = torch.rand([batch_size, 2], dtype=torch.float)
-        target = torch.LongTensor([random.randrange(4) for _ in range(batch_size)])
-
-        # Run a few iterations where we ignore the output.
-        for _ in range(4):
-            output = model(input)
-            del output
-
-        # Run a few iterations where we use the output.
-        for _ in range(4):
-            output = model(input)
-            loss = criterion(output, target)
-            loss.backward()
-
-    def _run_and_verify_sparse_gradients(self, vanilla_model, ddp_model):
-        mult = 2
-        batch_size = mult * self.world_size
-        criterion = nn.CrossEntropyLoss()
-        input = torch.randint(0, 10, [batch_size, 2])
-        target = torch.randint(0, 10, [batch_size])
-
-        # Run with entire batch against single process version
-        criterion(vanilla_model(input), target).backward()
-
-        # Run with partial batch against multi process version
-        partial_input = input.split(mult)[self.rank]
-        partial_target = target.split(mult)[self.rank]
-        criterion(ddp_model(partial_input), partial_target).backward()
-
-        # Check that the gradients are sparse and identical
-        vanilla_parameter = next(vanilla_model.parameters())
-        ddp_parameter = next(ddp_model.parameters())
-        self.assertEqual(
-            vanilla_parameter.grad.coalesce(), ddp_parameter.grad.coalesce()
-        )
-
-    @requires_ucc()
-    @skip_if_lt_x_gpu(2)
-    def test_save_load_checkpoint(self):
+    @skip_but_pass_in_sandcastle_if(
+        torch.accelerator.device_count() < 2,
+        "test requires 2+ accelerators",
+    )
+    def test_save_load_checkpoint(self, device):
+        self._dev = torch.device(device)
         dist.init_process_group(
             "ucc",
-            init_method=f"file://{self.file_name}",
+            init_method=f"file://{self.rdvz_file}",
             world_size=self.world_size,
             rank=self.rank,
         )
@@ -704,9 +862,10 @@ class DistributedDataParallelTest(
                 optimizer.step()
 
         device_id = gpus_for_rank(self.world_size)[self.rank][0]
+        dev = torch.device(torch.device(device).type, device_id)
 
-        model_withload = TestModel().float().to(device_id)
-        model_withoutload = TestModel().float().to(device_id)
+        model_withload = TestModel().float().to(dev)
+        model_withoutload = TestModel().float().to(dev)
 
         ddp_withload = DistributedDataParallel(
             model_withload,
@@ -737,9 +896,9 @@ class DistributedDataParallelTest(
         )
         optimizer_withoutload = torch.optim.SGD(ddp_withoutload.parameters(), lr=0.001)
 
-        input = torch.rand([batch_size, 2], dtype=torch.float).to(device_id)
+        input = torch.rand([batch_size, 2], dtype=torch.float).to(dev)
         target = torch.LongTensor([random.randrange(4) for _ in range(batch_size)]).to(
-            device_id
+            dev
         )
 
         # run the model for 6 iterations, with a checkpoint in the middle
@@ -751,7 +910,8 @@ class DistributedDataParallelTest(
             torch.save(ddp_withload.state_dict(), checkpoint_path)
 
         dist.barrier()
-        map_location = {"cuda:0": f"cuda:{self.rank:d}"}
+        device_type = torch.device(device).type
+        map_location = {f"{device_type}:0": f"{device_type}:{device_id}"}
         ddp_state_dict = torch.load(checkpoint_path, map_location=map_location)
 
         for model in [ddp_withload, model_withload]:
@@ -779,77 +939,17 @@ class DistributedDataParallelTest(
             self.assertEqual(p_withload, p_withoutload)
             self.assertEqual(p_non_ddp_withload, p_withoutload)
 
-    def _test_sparse_gradients(self, gradient_as_bucket_view=False):
-        process_group = self._get_process_group()
-
-        # Ensure initialized weights and inputs are identical across processes
-        torch.manual_seed(1337)
-
-        vanilla_model = SparseGradientModule()
-        ddp_model = DistributedDataParallel(
-            copy.deepcopy(vanilla_model),
-            process_group=process_group,
-            gradient_as_bucket_view=gradient_as_bucket_view,
-        )
-
-        self._run_and_verify_sparse_gradients(vanilla_model, ddp_model)
-
-    # TODO: backward pass: input tensor has to be dense
-    @skip_but_pass_in_sandcastle("backward pass: input tensor has to be dense")
     @requires_ucc()
-    def test_sparse_gradients(self):
-        self._test_sparse_gradients()
-
-    # TODO: backward pass: input tensor has to be dense
-    @skip_but_pass_in_sandcastle("backward pass: input tensor has to be dense")
-    @requires_ucc()
-    def test_sparse_gradients_grad_is_view(self):
-        self._test_sparse_gradients(gradient_as_bucket_view=True)
-
-    @requires_ucc()
-    def test_ddp_comm_hook_future_passing_cpu(self):
-        """
-        This unit test verifies whether the Future object is passed properly.
-        The callback function creates a Future object and sets a value to it.
-        """
-        process_group = self._get_process_group()
-
-        # Test on CPU
-        cpu_model = DistributedDataParallel(
-            ModuleForDdpCommHook().cpu(), process_group=process_group
-        )
-
-        # Register DDP Communication Hook
-        cpu_model.register_comm_hook(None, self._simple_hook)
-
-        # check whether the grads are equal to what then callback returns.
-        # without the comm_hook, result would be 0.25 * torch.ones(2, 2).
-        self._run_and_verify_hook(cpu_model, 8, 2 * torch.ones(2, 2))
-
-    def _gpu_model_with_ddp_comm_hook(
-        self, process_group, hook=None, gradient_as_bucket_view=False, state=None
-    ):
-        device_id = gpus_for_rank(self.world_size)[self.rank][0]
-        gpu_model = DistributedDataParallel(
-            ModuleForDdpCommHook().to(device_id),
-            device_ids=[device_id],
-            process_group=process_group,
-            gradient_as_bucket_view=gradient_as_bucket_view,
-        )
-
-        # Register a DDP communication hook if any.
-        if hook is not None:
-            gpu_model.register_comm_hook(state, hook)
-
-        return gpu_model
-
-    @requires_ucc()
-    @skip_if_lt_x_gpu(2)
-    def test_ddp_comm_hook_future_passing_gpu_ucc(self):
+    @skip_but_pass_in_sandcastle_if(
+        torch.accelerator.device_count() < 2,
+        "test requires 2+ accelerators",
+    )
+    def test_ddp_comm_hook_future_passing_gpu_ucc(self, device):
         """
         This unit test verifies whether the Future object is passed properly using ucc backend.
         The hook callback function creates a Future object and sets a value to it.
         """
+        self._dev = torch.device(device)
         process_group = self._get_process_group()
 
         # Get GPU model with simple_hook registered.
@@ -859,8 +959,28 @@ class DistributedDataParallelTest(
         # without the comm_hook, result would be 0.25 * torch.ones(2, 2).
         self._run_and_verify_hook(gpu_model, 8, 2 * torch.ones(2, 2))
 
+
+
+class DistributedDataParallelUccCommHookValidationTest(MultiProcContinuousTest):
+    hw_classification = HardwareClassification.CPU
+
+    @classmethod
+    def backend_str(cls) -> str:
+        return "ucc"
+
+    @property
+    def device(self) -> torch.device:
+        return torch.device("cpu")
+
+    def _get_process_group(self):
+        store = c10d.FileStore(self.rdvz_file, self.world_size)
+        c10d.init_process_group(
+            "ucc", store=store, rank=self.rank, world_size=self.world_size
+        )
+        return c10d.distributed_c10d._get_default_group()
+
     @requires_ucc()
-    def test_ddp_invalid_comm_hook_init(self):
+    def test_ddp_invalid_comm_hook_init(self, device):
         """
         This unit test makes sure that register_comm_hook properly checks the format
         of hook defined by user. The Python hook must be callable. This test also
@@ -887,7 +1007,7 @@ class DistributedDataParallelTest(
             model.register_comm_hook(state=None, hook=comm_hook)
 
     @requires_ucc()
-    def test_ddp_invalid_comm_hook_return_type(self):
+    def test_ddp_invalid_comm_hook_return_type(self, device):
         """
         This test checks whether return annotation checked properly if defined. It also
         checks whether an internal error is thrown if return type is incorrect and user
@@ -931,7 +1051,7 @@ class DistributedDataParallelTest(
             output.mean().backward()
 
     @requires_ucc()
-    def test_ddp_comm_hook_register_just_once(self):
+    def test_ddp_comm_hook_register_just_once(self, device):
         """
         DDP communication hook can only be registered once. This test validates whether
         the error is thrown properly when register_comm_hook is called more than once.
@@ -955,83 +1075,56 @@ class DistributedDataParallelTest(
         ):
             model.register_comm_hook(None, dummy_hook)
 
-    # TODO: backward pass: input tensor must be dense
-    @skip_but_pass_in_sandcastle("backward pass: input tensor has to be dense")
-    @requires_ucc()
-    def test_ddp_comm_hook_sparse_gradients(self):
-        """
-        Runs "test_sparse_gradients" unit test with DDP communication hook. We define a
-        simple hook that does allreduce and works with ucc backend for this test.
-        """
-        process_group = self._get_process_group()
 
-        # Ensure initialized weights and inputs are identical across processes
-        torch.manual_seed(1337)
+class CommTest(test_c10d_common.AbstractCommTest, MultiProcContinuousTest):
+    hw_classification = HardwareClassification.ACCELERATOR
 
-        vanilla_model = SparseGradientModule()
-        ddp_model = DistributedDataParallel(
-            copy.deepcopy(vanilla_model),
-            process_group=process_group,
-        )
+    @classmethod
+    def backend_str(cls) -> str:
+        return "ucc"
 
-        def allreduce_hook_ucc(
-            state: object, bucket: dist.GradBucket
-        ) -> torch.futures.Future[torch.Tensor]:
-            def div_by_world_size(fut):
-                # Divide the result by 2 * world_size.
-                return fut.wait()[0] / self.world_size
-
-            # Prepare allreduced grad bucket tensors by running an async work.
-            fut = process_group.allreduce([bucket.buffer()]).get_future()
-            return fut.then(div_by_world_size)
-
-        ddp_model.register_comm_hook(None, allreduce_hook_ucc)
-
-        self._run_and_verify_sparse_gradients(vanilla_model, ddp_model)
-
-
-class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     @property
-    def device(self):
+    def device(self) -> str:
         return "cpu"
 
-    def setUp(self):
-        super().setUp()
-        self._spawn_processes()
-
-    def tearDown(self):
-        super().tearDown()
-        try:
-            os.remove(self.file_name)
-        except OSError:
-            pass
-
     @requires_ucc()
-    @skip_if_lt_x_gpu(2)
-    def test_sequence_num_set_default_pg_ucc(self):
+    @skip_but_pass_in_sandcastle_if(
+        torch.accelerator.device_count() < 2,
+        "test requires 2+ accelerators",
+    )
+    def test_sequence_num_set_default_pg_ucc(self, device):
         self._test_sequence_num_set_default_pg(backend="ucc")
 
     @requires_ucc()
-    @skip_if_lt_x_gpu(2)
-    def test_sequence_num_set_ucc_new_group(self):
+    @skip_but_pass_in_sandcastle_if(
+        torch.accelerator.device_count() < 2,
+        "test requires 2+ accelerators",
+    )
+    def test_sequence_num_set_ucc_new_group(self, device):
         self._test_sequence_num_set_new_group(backend="ucc")
 
-    @skip_if_lt_x_gpu(2)
+    @skip_but_pass_in_sandcastle_if(
+        torch.accelerator.device_count() < 2,
+        "test requires 2+ accelerators",
+    )
     @requires_ucc()
-    def test_sequence_num_incremented_ucc_default(self):
+    def test_sequence_num_incremented_ucc_default(self, device):
         self._test_sequence_num_incremented_default_group("ucc")
 
-    @skip_if_lt_x_gpu(4)
+    @skip_but_pass_in_sandcastle_if(
+        torch.accelerator.device_count() < 4,
+        "test requires 4+ accelerators",
+    )
     @requires_ucc()
-    def test_sequence_num_incremented_ucc_subgroup(self):
+    def test_sequence_num_incremented_ucc_subgroup(self, device):
         if self.world_size < 4:
             return skip_but_pass_in_sandcastle("Test requires world_size of at least 4")
         self._test_sequence_num_incremented_subgroup("ucc")
 
     @skip_but_pass_in_sandcastle("Fails on M60")
     @requires_ucc()
-    def test_ucc_barrier_device_ids(self):
-        store = c10d.FileStore(self.file_name, self.world_size)
+    def test_ucc_barrier_device_ids(self, device):
+        store = c10d.FileStore(self.rdvz_file, self.world_size)
         c10d.init_process_group(
             backend="ucc", rank=self.rank, world_size=self.world_size, store=store
         )
@@ -1040,30 +1133,44 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
             c10d.barrier(device_ids=[self.rank])
 
     @skip_but_pass_in_sandcastle("Fails on M60")
-    @skip_if_lt_x_gpu(2)
+    @skip_but_pass_in_sandcastle_if(
+        torch.accelerator.device_count() < 2,
+        "test requires 2+ accelerators",
+    )
     @requires_ucc()
-    def test_ucc_warn_not_in_group(self):
+    def test_ucc_warn_not_in_group(self, device):
         self._test_warn_not_in_group(backend="ucc")
 
-    @skip_if_lt_x_gpu(2)
+    @skip_but_pass_in_sandcastle_if(
+        torch.accelerator.device_count() < 2,
+        "test requires 2+ accelerators",
+    )
     @requires_ucc()
-    def test_ucc_rank_membership(self):
+    def test_ucc_rank_membership(self, device):
         self._test_rank_membership(backend="ucc")
 
-    @skip_if_lt_x_gpu(2)
+    @skip_but_pass_in_sandcastle_if(
+        torch.accelerator.device_count() < 2,
+        "test requires 2+ accelerators",
+    )
     @requires_ucc()
-    def test_tensor_dtype_mismatch(self):
+    def test_tensor_dtype_mismatch(self, device):
         self._test_tensor_dtype_mismatch(backend="ucc")
 
-    @skip_if_lt_x_gpu(2)
+    @skip_but_pass_in_sandcastle_if(
+        torch.accelerator.device_count() < 2,
+        "test requires 2+ accelerators",
+    )
     @requires_ucc()
-    def test_tensor_dtype_complex(self):
+    def test_tensor_dtype_complex(self, device):
         self._test_tensor_dtype_complex(backend="ucc")
 
 
 class UccProcessGroupWithDispatchedCollectivesTests(
     test_c10d_common.ProcessGroupWithDispatchedCollectivesTests
 ):
+    hw_classification = HardwareClassification.CPU
+
     @skip_but_pass_in_sandcastle("Fails on M60")
     @requires_ucc()
     @skip_if_lt_x_gpu(1)
@@ -1082,12 +1189,42 @@ class UccProcessGroupWithDispatchedCollectivesTests(
             rank=self.rank,
             store=store,
         )
-        device = "cuda"
+        device = "cpu"
         tensor = torch.ones(10, 10, device=torch.device(device))
         output_tensor = torch.zeros(10, 10, device=torch.device(device))
         dist.all_gather_single(output_tensor, tensor)
         self.assertEqual(output_tensor, tensor)
 
+
+instantiate_device_type_tests(
+    ProcessGroupUCCTest,
+    globals(),
+    only_for=("cpu",),
+)
+
+instantiate_device_type_tests(
+    DistributedDataParallelTest,
+    globals(),
+    only_for=("cpu",),
+)
+
+instantiate_device_type_tests(
+    DistributedDataParallelCUDATest,
+    globals(),
+    only_for=("cuda",),
+)
+
+instantiate_device_type_tests(
+    DistributedDataParallelUccCommHookValidationTest,
+    globals(),
+    only_for=("cpu",),
+)
+
+instantiate_device_type_tests(
+    CommTest,
+    globals(),
+    except_for=("cpu",),
+)
 
 if __name__ == "__main__":
     if torch.cuda._initialized:
